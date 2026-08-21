@@ -1249,13 +1249,14 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
   });
 
-  test('hub and market maker prefer authenticated direct entity delivery with relay failover', () => {
+  test('hub and market maker require one authenticated direct entity route', () => {
     const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
     const hubTransport = readFileSync(join(repoRoot, 'core/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'core/network/p2p/p2p.ts'), 'utf8');
 
     expect(p2p).not.toContain('preferRelayForEntityInput');
+    expect(p2p).not.toContain('resolveTransportAttempts');
     expect(hubNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
@@ -1264,6 +1265,8 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain('preferRelayForEntityInput');
     expect(mmNode).not.toContain('preferRelayForEntityInput');
     expect(mmNode).not.toContain('allowDirectClients: false');
+    expect(hubNode).toContain('if (!directHubPeersReady(input.env, peers)) return false;');
+    expect(mmNode).toContain('if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds))');
   });
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
@@ -1402,11 +1405,14 @@ describe('production startup wiring', () => {
     const setupCustody = daemonControl.slice(setupStart, setupEnd);
     const configureIndex = setupCustody.indexOf('await configureManagedEntityP2P(client, identity, config);');
     const profileWaitIndex = setupCustody.indexOf('await waitForGossipProfiles(client, hubEntityIds);');
+    const directWaitIndex = setupCustody.indexOf('await client.waitForDirectEntityRoutes(hubEntityIds);');
     const connectivityIndex = setupCustody.indexOf('const connectivityInput = buildCustodyConnectivityInput');
     expect(configureIndex).toBeGreaterThan(0);
     expect(profileWaitIndex).toBeGreaterThan(configureIndex);
-    expect(connectivityIndex).toBeGreaterThan(profileWaitIndex);
+    expect(directWaitIndex).toBeGreaterThan(profileWaitIndex);
+    expect(connectivityIndex).toBeGreaterThan(directWaitIndex);
     expect(daemonControl).toContain('CUSTODY_HUB_PROFILES_NOT_VISIBLE');
+    expect(daemonControl).toContain('CONTROL_P2P_DIRECT_ROUTES_NOT_OPEN');
     expect(setupCustody).toContain('CUSTODY_CONNECTIVITY_ACCOUNTS_NOT_OPEN');
     expect(setupCustody).not.toContain('await enableRouting(client, config);');
   });

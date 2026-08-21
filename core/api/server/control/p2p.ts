@@ -17,6 +17,7 @@ type P2PControlDeps = {
 type P2PControlBody = {
   relayUrls?: string[];
   advertiseEntityIds?: string[];
+  directEntityIds?: string[];
   gossipPollMs?: number;
 };
 
@@ -35,7 +36,7 @@ export const decodeP2PControlBody = (value: unknown): P2PControlBody => {
   requireExactBoundaryKeys(
     body,
     [],
-    ['relayUrls', 'advertiseEntityIds', 'gossipPollMs'],
+    ['relayUrls', 'advertiseEntityIds', 'directEntityIds', 'gossipPollMs'],
     'P2P_CONTROL_FIELDS_INVALID',
   );
   const relayUrls = body['relayUrls'] === undefined
@@ -47,6 +48,12 @@ export const decodeP2PControlBody = (value: unknown): P2PControlBody => {
       body['advertiseEntityIds'],
       'P2P_CONTROL_ENTITY_IDS_INVALID',
     ).map(entityId => entityId.toLowerCase());
+  const directEntityIds = body['directEntityIds'] === undefined
+    ? undefined
+    : decodeStringList(
+      body['directEntityIds'],
+      'P2P_CONTROL_DIRECT_ENTITY_IDS_INVALID',
+    ).map(entityId => entityId.toLowerCase());
   const gossipPollMs = body['gossipPollMs'] === undefined
     ? undefined
     : requireBoundaryInteger(
@@ -57,6 +64,7 @@ export const decodeP2PControlBody = (value: unknown): P2PControlBody => {
   return {
     ...(relayUrls === undefined ? {} : { relayUrls }),
     ...(advertiseEntityIds === undefined ? {} : { advertiseEntityIds }),
+    ...(directEntityIds === undefined ? {} : { directEntityIds }),
     ...(gossipPollMs === undefined ? {} : { gossipPollMs }),
   };
 };
@@ -79,14 +87,17 @@ export const handleP2PControl = async (
       { status: getControlBodyErrorStatus(error, 400), headers },
     );
   }
-  const { relayUrls, advertiseEntityIds, gossipPollMs } = body;
+  const { relayUrls, advertiseEntityIds, directEntityIds, gossipPollMs } = body;
 
   try {
-    deps.startP2P(env, {
+    const p2p = deps.startP2P(env, {
       ...(relayUrls ? { relayUrls } : {}),
       ...(advertiseEntityIds ? { advertiseEntityIds } : {}),
       ...(gossipPollMs !== undefined ? { gossipPollMs } : {}),
     });
+    const directRoutesOpen = directEntityIds === undefined
+      ? null
+      : p2p?.prepareDirectEntityRoutes(directEntityIds) ?? false;
 
     return new Response(
       serializeTaggedJson({
@@ -94,6 +105,8 @@ export const handleP2PControl = async (
         config: {
           relayUrls: relayUrls ?? null,
           advertiseEntityIds: advertiseEntityIds ?? null,
+          directEntityIds: directEntityIds ?? null,
+          directRoutesOpen,
           gossipPollMs: gossipPollMs ?? null,
         },
       }),

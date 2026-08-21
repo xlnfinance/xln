@@ -72,7 +72,6 @@ import {
   HUB_BASELINE_TIMEOUT_MS,
   HUB_BASELINE_STALL_TIMEOUT_MS,
   HUB_BASELINE_STATUS_LOG_INTERVAL_MS,
-  HUB_DIRECT_LINK_BASELINE_GRACE_MS,
   HUB_NAMES,
   HUB_REQUIRED_TOKEN_COUNT,
   MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
@@ -2137,8 +2136,7 @@ const reportBaselineWait = (
  * peer this runtime never dialed is served over its inbound socket and never
  * appears in `directPeers`. Mesh bootstrap dials from the left side of each
  * account pair, so a fully connected mesh of n hubs settles at n*(n-1)/2 open
- * links, not n*(n-1). Counting directed edges made the requirement unreachable
- * and, under XLN_REQUIRE_DIRECT_BASELINE=1, made the baseline wait forever.
+ * links, not n*(n-1). Counting directed edges makes the requirement unreachable.
  * Count unordered pairs so the gate asks for connectivity, not for both sides
  * to have happened to dial.
  */
@@ -2150,12 +2148,9 @@ const openDirectHubPairCount = (health: AggregatedHealth): number => new Set(
 const waitForHubBaseline = async (): Promise<void> => {
   const hubCount = HUB_NAMES.length;
   const directRequired = (hubCount * Math.max(0, hubCount - 1)) / 2;
-  const requireDirectLinks = process.env['XLN_REQUIRE_DIRECT_BASELINE'] === '1';
   const baselineStartedAt = Date.now();
   let lastReportedAt = baselineStartedAt;
-  let directGraceStartedAt = 0;
   let lastStatus: Record<string, unknown> | null = null;
-  let warnedDirectGrace = false;
   let progressState: HubBaselineProgressState = {};
   while (true) {
     await pollAllHubHealth();
@@ -2177,34 +2172,16 @@ const waitForHubBaseline = async (): Promise<void> => {
       directReady,
       directOpen,
       directRequired,
-      requireDirectLinks,
       bootstrapReserves: health.bootstrapReserves.ok,
       hubsOnline: health.hubs.map(hub => ({ name: hub.name, online: hub.online, selfRelayPresence: hub.selfRelayPresence })),
       degraded: health.degraded,
     };
     lastReportedAt = reportBaselineWait(baselineStartedAt, lastReportedAt, now, lastStatus);
-    if (coreReady) {
-      if (directReady || !requireDirectLinks) {
-        if (!directReady) {
-          if (!directGraceStartedAt) directGraceStartedAt = Date.now();
-          const waitedMs = Date.now() - directGraceStartedAt;
-          if (waitedMs < HUB_DIRECT_LINK_BASELINE_GRACE_MS) {
-            await scheduler.wait(250);
-            continue;
-          }
-          if (!warnedDirectGrace) {
-            warnedDirectGrace = true;
-            console.warn(
-              `[MESH] baseline proceeding after direct-link grace: open=${directOpen}/${directRequired} graceMs=${HUB_DIRECT_LINK_BASELINE_GRACE_MS}`,
-            );
-          }
-        }
-        console.log(
-          `[MESH] baseline ready: direct=${directOpen}/${directRequired} ` +
-          `required=${String(requireDirectLinks)} elapsedMs=${Date.now() - baselineStartedAt}`,
-        );
-        return;
-      }
+    if (coreReady && directReady) {
+      console.log(
+        `[MESH] baseline ready: direct=${directOpen}/${directRequired} elapsedMs=${Date.now() - baselineStartedAt}`,
+      );
+      return;
     }
     if (progress.stalledNames.length > 0) {
       const stalled = Object.fromEntries(progress.stalledNames.map(name => [

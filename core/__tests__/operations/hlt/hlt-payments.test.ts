@@ -33,10 +33,13 @@ describe('hlt payment population', () => {
     expect(source).toContain("type: 'settlement-evidence', book: null, accounts: []");
     expect(source).not.toContain('readHubReceiverCredits');
     expect(source).not.toContain('accountsLimit: pageLimit');
-    expect(readFileSync(
+    const laneSource = readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
       'utf8',
-    )).toContain('waitForOwnReceiveReadyProfile');
+    );
+    expect(laneSource).toContain('waitForOwnReceiveReadyProfile');
+    expect(laneSource).toContain('lane.runtime.control.waitForDirectEntityRoutes([options.hubIdentity.entityId])');
+    expect(laneSource).toContain('options.hub.control.waitForDirectEntityRoutes([lane.identity.entityId])');
     expect(readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/lane-runtimes.ts'),
       'utf8',

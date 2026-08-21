@@ -94,6 +94,7 @@ import { JSON_HEADERS } from '../api/server/utils';
 import { handleKnownProfileRequest } from '../api/server/network/gossip-profiles';
 import {
   getActiveJAdapter,
+  getP2P,
   getP2PState,
   clearGossip,
   closeInfraDb,
@@ -401,15 +402,6 @@ const MESH_PRODUCER_PAUSE_TIMEOUT_MS = Math.max(
 );
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 
-/**
- * How long the mesh bootstrap waits for a direct hub-to-hub link before opening
- * accounts over the relay instead. Mirrors the baseline gate's grace so the two
- * cannot disagree about whether a direct link is mandatory.
- */
-const HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS = Math.max(
-  1_000,
-  Number(process.env['XLN_HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS'] || '15000'),
-);
 const createHubBrainVaultOwner = (): BrainVaultOwnerController => createBrainVaultOwnerController({
   path: String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || ''),
   ...(process.env['XLN_BRAINVAULT_WORKER_PATH']
@@ -1389,20 +1381,8 @@ const ensureHubBootstrapReserves = async (
   return buildAggregateReserveHealth(primaryHealth, entities);
 };
 
-const openDirectRuntimeIds = (env: RuntimeReplica): Set<string> => new Set(
-  (getP2PState(env).directPeers || [])
-    .filter(peer => peer.open === true)
-    .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
-    .filter(runtimeId => runtimeId.length > 0),
-);
-
-const directRuntimePeersReady = (env: RuntimeReplica, peers: Array<{ runtimeId: string }>): boolean => {
-  if (peers.length === 0) return true;
-  const openRuntimeIds = openDirectRuntimeIds(env);
-  return peers.every(peer => openRuntimeIds.has(peer.runtimeId));
-};
-
-const directHubPeersReady = (env: RuntimeReplica, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
+const directHubPeersReady = (env: RuntimeReplica, peers: VisibleHubProfile[]): boolean =>
+  getP2P(env)?.prepareDirectEntityRoutes(peers.map(peer => peer.entityId)) ?? false;
 
 const visibleDirectSupportPeers = (
   identities: SupportPeerIdentity[],
@@ -2281,21 +2261,11 @@ const advanceHubMeshBootstrap = async (
     profile => profile.entityId !== input.bootstrap.entityId.toLowerCase(),
   );
   input.markProgress('direct-peers');
-  // A direct link is preferred for the bootstrap burst, not required for it:
-  // account opens travel over the same direct-then-relay policy as any other
-  // output. Blocking here indefinitely contradicts the baseline gate, which
-  // proceeds after HUB_DIRECT_LINK_BASELINE_GRACE_MS unless
-  // XLN_REQUIRE_DIRECT_BASELINE=1 - so a mesh that never dials directly could
-  // never reach the gate that was willing to tolerate it.
-  if (!directHubPeersReady(input.env, peers)) {
-    const waitedMs = Date.now() - input.totalStartedAt;
-    if (waitedMs < HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS) return false;
-    // Relay is the canonical availability path after the bounded direct-link
-    // preference window. Do not log this once per hub: the owning orchestrator
-    // publishes the single mesh-wide direct-link baseline and still enforces
-    // XLN_REQUIRE_DIRECT_BASELINE when strict direct readiness is required.
-    input.markProgress('direct-peers:relayed');
-  }
+  // Never commit Account-producing bootstrap commands before their one
+  // authenticated route is open. Proceeding after a grace period used to send
+  // the same financial envelope through a different router, where an async
+  // target-not-connected rejection could disappear after the sender WAL commit.
+  if (!directHubPeersReady(input.env, peers)) return false;
   const { openInputs, creditInputs } = planMeshBootstrapInputs(
     input.env,
     input.bootstrap,

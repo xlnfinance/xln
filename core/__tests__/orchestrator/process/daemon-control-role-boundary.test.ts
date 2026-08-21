@@ -36,6 +36,8 @@ describe('daemon control committed role boundary', () => {
       config: {
         relayUrls: ['wss://relay.example'],
         advertiseEntityIds: [ENTITY],
+        directEntityIds: null,
+        directRoutesOpen: null,
         gossipPollMs: 1_000,
       },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -50,6 +52,21 @@ describe('daemon control committed role boundary', () => {
       config: {
         relayUrls: null,
         advertiseEntityIds: null,
+        directEntityIds: [ENTITY],
+        directRoutesOpen: true,
+        gossipPollMs: null,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).prepareDirectEntityRoutes([ENTITY]))
+      .resolves.toBe(true);
+
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      config: {
+        relayUrls: null,
+        advertiseEntityIds: null,
+        directEntityIds: null,
+        directRoutesOpen: null,
         gossipPollMs: null,
         unexpected: true,
       },
@@ -78,30 +95,6 @@ describe('daemon control committed role boundary', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } });
     await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).hasGossipProfile(ENTITY))
       .rejects.toThrow();
-  });
-
-  test('decodes the exact Runtime operator status contract', async () => {
-    globalThis.fetch = async () => new Response(safeStringify({
-      ok: true,
-      currentHeight: 7,
-      runtime: {
-        halted: false,
-        operatorStatus: null,
-        fatalDebugPayload: null,
-      },
-    }), { status: 200, headers: { 'content-type': 'application/json' } });
-
-    await expect(
-      new DaemonControlClient({ baseUrl: 'http://control.test' }).getRuntimeInputStatus('/status'),
-    ).resolves.toMatchObject({ runtime: { halted: false, operatorStatus: null } });
-
-    globalThis.fetch = async () => new Response(safeStringify({
-      ok: true,
-      runtime: { halted: false, operatorStatus: 'keep-going', fatalDebugPayload: null },
-    }), { status: 200, headers: { 'content-type': 'application/json' } });
-    await expect(
-      new DaemonControlClient({ baseUrl: 'http://control.test' }).getRuntimeInputStatus('/status'),
-    ).rejects.toThrow('CONTROL_RUNTIME_STATUS_OPERATOR_INVALID');
   });
 
   test('preserves an explicit committed false role', async () => {

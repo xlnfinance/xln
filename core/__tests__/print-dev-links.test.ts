@@ -137,7 +137,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(devChild).toContain('"$REPO_ROOT/frontend/node_modules/.bin/vite" dev "$@"');
   expect(devChild).not.toMatch(/\n\s+vite dev "\$@"/);
   expect(devChild).toContain('XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}"');
-  expect(devChild).toContain('XLN_REQUIRE_DIRECT_BASELINE=1');
+  expect(devChild).not.toContain('XLN_REQUIRE_DIRECT_BASELINE');
   expect(devChild).toContain('./scripts/dev/watch-runtime-build.sh');
   expect(devChild).toContain('scripts/dev/wait-dev-ready.ts');
   expect(runDev).not.toContain('bun build core/runtime.ts');

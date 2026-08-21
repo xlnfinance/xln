@@ -1024,9 +1024,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toMatch(
       /\.filter\(profile => !hasMarketMakerAccountBacklog\(input\.deps\.env, input\.context\.entityId, profile\.entityId\)\)/,
     );
-    expect(mmNode).toMatch(
-      /\): Promise<boolean> => \{\s*const localCreditInputsByEntity = new Map<string, EntityInput>\(\);/,
-    );
+    expect(mmNode).toContain('if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds))');
+    expect(mmNode).toContain('const localCreditInputsByEntity = new Map<string, EntityInput>();');
     expect(mmNode).toContain('const pushLocalConnectivityTx = (');
     expect(mmNode).toContain('const maintainSameContextQuotes = async (');
     expect(mmNode).toContain('const orderedIncompleteJobs: SameQuoteJob[] = [];');

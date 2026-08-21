@@ -316,6 +316,14 @@ const provisionLoadLanes = async (
         `PRODUCTION_SWAP_LOAD_USER_PROFILE_NOT_SEND_READY:${lane.laneKey}`,
       ),
     ]);
+    // A verified endpoint is only route metadata. Open both outbound sockets
+    // before committing the bilateral proposal: the user sends the frame and
+    // the Hub needs its own direct socket for the Account ACK. Runtime output
+    // dispatch is intentionally fail-loud and never substitutes relay/retry.
+    await Promise.all([
+      lane.runtime.control.waitForDirectEntityRoutes([options.hubIdentity.entityId]),
+      options.hub.control.waitForDirectEntityRoutes([lane.identity.entityId]),
+    ]);
     await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {
       runtimeTxs: [],
       entityInputs: buildLaneAccountInputs(

@@ -167,7 +167,6 @@ case "$role" in
       USE_ANVIL=true \
       RUNTIME_VERBOSE_LOGS="$RUNTIME_VERBOSE_LOGS" \
       XLN_LOG_LEVEL="$MESH_LOG_LEVEL" \
-      XLN_REQUIRE_DIRECT_BASELINE=1 \
       ANVIL_RPC="http://localhost:${RPC_PORT}" \
       ANVIL_RPC2="http://localhost:${RPC2_PORT}" \
       XLN_MESH_RESET_ALLOWED=1 \

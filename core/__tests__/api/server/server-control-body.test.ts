@@ -116,6 +116,8 @@ test('control request decoders reject unknown fields and implicit coercion', () 
     .toThrow('P2P_CONTROL_GOSSIP_POLL_MS_INVALID');
   expect(() => decodeP2PControlBody({ relayUrls: ['wss://relay', 7] }))
     .toThrow('P2P_CONTROL_RELAY_URLS_INVALID:index=1');
+  expect(() => decodeP2PControlBody({ directEntityIds: ['0xabcd', 7] }))
+    .toThrow('P2P_CONTROL_DIRECT_ENTITY_IDS_INVALID:index=1');
 });
 
 test('control request decoders return one canonical representation', () => {
@@ -129,10 +131,12 @@ test('control request decoders return one canonical representation', () => {
   expect(decodeP2PControlBody({
     relayUrls: [' wss://relay.example '],
     advertiseEntityIds: [' 0xABCD '],
+    directEntityIds: [' 0xDCBA '],
     gossipPollMs: 250,
   })).toEqual({
     relayUrls: ['wss://relay.example'],
     advertiseEntityIds: ['0xabcd'],
+    directEntityIds: ['0xdcba'],
     gossipPollMs: 250,
   });
 });

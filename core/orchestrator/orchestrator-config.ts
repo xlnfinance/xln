@@ -21,7 +21,6 @@ export const HUB_BASELINE_STALL_TIMEOUT_MS = Math.max(
   10_000,
   readPositiveIntegerEnv('XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
 );
-export const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntegerEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
 /**
  * The baseline wait has no deadline of its own: the stall detector is the only
  * exit, and it stays silent while hubs still report causal progress. A reset

@@ -960,6 +960,23 @@ export class RuntimeP2P {
     return this.getActiveDirectClient(runtimeId);
   }
 
+  prepareDirectRoutes(runtimeIds: readonly string[]): void {
+    for (const runtimeId of uniqueTransportValues(runtimeIds.map(normalizeRuntimeId)).sort(compareStableText)) {
+      this.ensureDirectClientForRuntime(runtimeId);
+    }
+  }
+
+  prepareDirectEntityRoutes(entityIds: readonly string[]): boolean {
+    const normalizedEntityIds = uniqueTransportValues(entityIds.map(normalizeId));
+    const resolvedRuntimeIds = normalizedEntityIds.map(entityId =>
+      normalizeRuntimeId(this.verifiedProfileRoutes.get(entityId)?.runtimeId),
+    );
+    if (resolvedRuntimeIds.some(runtimeId => runtimeId.length === 0)) return false;
+    const runtimeIds = uniqueTransportValues(resolvedRuntimeIds);
+    this.prepareDirectRoutes(runtimeIds);
+    return runtimeIds.every(runtimeId => this.getActiveDirectClient(runtimeId) !== null);
+  }
+
   private hasDirectPeerEndpoint(runtimeId: string): boolean {
     return !!this.getDirectPeerEndpoint(runtimeId);
   }

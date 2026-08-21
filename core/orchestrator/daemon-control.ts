@@ -123,22 +123,27 @@ const decodeNullableStringList = (value: unknown, code: string): void => {
   }
 };
 
-const decodeP2PControlResponse = (value: unknown): void => {
+const decodeP2PControlResponse = (value: unknown): boolean | null => {
   const response = requireBoundaryRecord(value, 'CONTROL_P2P_RESPONSE_INVALID');
   requireExactBoundaryKeys(response, ['ok', 'config'], [], 'CONTROL_P2P_RESPONSE_FIELDS_INVALID');
   if (response['ok'] !== true) throw new Error('CONTROL_P2P_RESPONSE_INVALID');
   const config = requireBoundaryRecord(response['config'], 'CONTROL_P2P_RESPONSE_CONFIG_INVALID');
   requireExactBoundaryKeys(
     config,
-    ['relayUrls', 'advertiseEntityIds', 'gossipPollMs'],
+    ['relayUrls', 'advertiseEntityIds', 'directEntityIds', 'directRoutesOpen', 'gossipPollMs'],
     [],
     'CONTROL_P2P_RESPONSE_CONFIG_FIELDS_INVALID',
   );
   decodeNullableStringList(config['relayUrls'], 'CONTROL_P2P_RESPONSE_RELAY_URLS_INVALID');
   decodeNullableStringList(config['advertiseEntityIds'], 'CONTROL_P2P_RESPONSE_ENTITY_IDS_INVALID');
+  decodeNullableStringList(config['directEntityIds'], 'CONTROL_P2P_RESPONSE_DIRECT_ENTITY_IDS_INVALID');
+  if (config['directRoutesOpen'] !== null && typeof config['directRoutesOpen'] !== 'boolean') {
+    throw new Error('CONTROL_P2P_RESPONSE_DIRECT_ROUTES_OPEN_INVALID');
+  }
   if (config['gossipPollMs'] !== null) {
     requireBoundaryInteger(config['gossipPollMs'], 'CONTROL_P2P_RESPONSE_GOSSIP_POLL_MS_INVALID', 250);
   }
+  return config['directRoutesOpen'] as boolean | null;
 };
 
 const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
@@ -472,6 +477,23 @@ export class DaemonControlClient {
     decodeP2PControlResponse(await this.post('/api/control/p2p', config));
   }
 
+  async prepareDirectEntityRoutes(entityIds: string[]): Promise<boolean> {
+    const open = decodeP2PControlResponse(await this.post('/api/control/p2p', {
+      directEntityIds: entityIds,
+    }));
+    if (open === null) throw new Error('CONTROL_P2P_DIRECT_ROUTES_RESULT_MISSING');
+    return open;
+  }
+
+  async waitForDirectEntityRoutes(entityIds: readonly string[], timeoutMs = 15_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await this.prepareDirectEntityRoutes([...entityIds])) return;
+      await sleep(250);
+    }
+    throw new Error(`CONTROL_P2P_DIRECT_ROUTES_NOT_OPEN:entities=${entityIds.join(',')}`);
+  }
+
   async exportRuntimeSnapshot(): Promise<ControlRuntimeSnapshot> {
     const response = requireBoundaryRecord(
       await this.post('/api/control/runtime/snapshot', {}),
@@ -690,6 +712,7 @@ export const setupCustody = async (
   const hubEntityIds = (config.hubEntityIds || []).map(id => id.trim().toLowerCase()).filter(Boolean);
   if (hubEntityIds.length > 0) {
     await waitForGossipProfiles(client, hubEntityIds);
+    await client.waitForDirectEntityRoutes(hubEntityIds);
     const entities = await client.listEntities();
     const custodySummary = entities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
     if (!custodySummary) throw new Error(`CUSTODY_COMMITTED_ENTITY_MISSING:${identity.entityId}`);

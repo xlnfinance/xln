@@ -11,6 +11,27 @@ import { signRuntimeEntityInputsEnvelope } from '../../../runtime/admit/entity-i
 const TARGET_RUNTIME_ID = '0x1111111111111111111111111111111111111111';
 const SOURCE_RUNTIME_ID = '0x3333333333333333333333333333333333333333';
 const SOURCE_ENTITY_ID = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const TARGET_ENTITY_ID = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+test('direct route preparation resolves verified Entity routes before any send', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let open = false;
+  let preparedRuntimeIds: string[] = [];
+  p2p.verifiedProfileRoutes = new Map([
+    [SOURCE_ENTITY_ID, { runtimeId: TARGET_RUNTIME_ID }],
+    [TARGET_ENTITY_ID, { runtimeId: TARGET_RUNTIME_ID }],
+  ]);
+  p2p.prepareDirectRoutes = (runtimeIds: string[]) => {
+    preparedRuntimeIds = runtimeIds;
+  };
+  p2p.getActiveDirectClient = () => open ? {} : null;
+
+  expect(p2p.prepareDirectEntityRoutes(['0xmissing'])).toBe(false);
+  expect(p2p.prepareDirectEntityRoutes([SOURCE_ENTITY_ID, TARGET_ENTITY_ID])).toBe(false);
+  expect(preparedRuntimeIds).toEqual([TARGET_RUNTIME_ID]);
+  open = true;
+  expect(p2p.prepareDirectEntityRoutes([SOURCE_ENTITY_ID, TARGET_ENTITY_ID])).toBe(true);
+});
 
 test('concurrent exact profile misses share one relay fetch cohort', async () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;

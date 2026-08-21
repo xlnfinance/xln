@@ -57,7 +57,7 @@ import { hasCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { registerRuntimeAdapterAuthSeed } from '../../../api/runtime-adapter/security/auth';
 import { type RuntimeAdapterSocket } from '../../../api/runtime-adapter/server';
-import { enqueueRuntimeInput } from '../../../runtime';
+import { enqueueRuntimeInput, getP2P } from '../../../runtime';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput } from '../../../entity/types';
@@ -793,6 +793,9 @@ export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = fa
         compareStableText(left.entityId, right.entityId),
     );
 };
+
+const marketMakerHubDirectRoutesOpen = (env: RuntimeReplica, hubEntityIds: string[]): boolean =>
+  getP2P(env)?.prepareDirectEntityRoutes(hubEntityIds) ?? false;
 
 const getMarketMakerLevelProfile = (
   baseTokenId: number,
@@ -1750,6 +1753,14 @@ export const ensureMarketMakerHubConnectivity = async (
   tokenIds: number[],
   budget: MarketMakerConnectivityBudget,
 ): Promise<boolean> => {
+  // Route readiness is checked before a financial command exists. Waiting for
+  // the next producer tick is not a delivery retry: no RuntimeInput was
+  // committed and no AccountInput was emitted. Once committed, an envelope is
+  // attempted exactly once on this already-open authenticated direct route.
+  if (!marketMakerHubDirectRoutesOpen(env, hubEntityIds)) {
+    await yieldMarketMakerApi();
+    return true;
+  }
   const localCreditInputsByEntity = new Map<string, EntityInput>();
   const marketMakerRole = requireCommittedMarketMakerRole(env, mmEntityId);
   const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>
