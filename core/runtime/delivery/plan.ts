@@ -6,11 +6,11 @@ import {
   copyRoutedOutputForMerge,
 } from './identity';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
+import { resolveReplayOutputRuntimeRoute } from './replay-output-route';
 import {
   isTriggerOnlyOutput,
   isTxBearingOutput,
   mergeRoutedEntityOutput,
-  reportRetryableRouteDefer,
   resolveGossipBoardSignerIds,
   toDeliverableEntityInput,
   type PlannedRemoteOutput,
@@ -21,8 +21,7 @@ const routeLog = createStructuredLogger('network.route');
 
 type PlannedEntityOutput =
   | { kind: 'local'; output: RoutedEntityInput }
-  | { kind: 'remote'; output: PlannedRemoteOutput }
-  | { kind: 'deferred'; output: RoutedEntityInput };
+  | { kind: 'remote'; output: PlannedRemoteOutput };
 
 const dedupeEntityOutputs = (
   outputs: RoutedEntityInput[],
@@ -144,6 +143,16 @@ const bindVerifiedTargetRuntime = (
   deps: RuntimeOutputRoutingDeps,
 ): { output: RoutedEntityInput; targetRuntimeId: string } => {
   const persisted = normalizeRuntimeId(String(output.runtimeId || ''));
+  const replay = resolveReplayOutputRuntimeRoute(env, output.entityId, output.signerId);
+  if (replay) {
+    if (persisted && persisted !== replay) {
+      throw new Error(`REPLAY_OUTPUT_RUNTIME_ROUTE_MISMATCH:${output.entityId}:${output.signerId}`);
+    }
+    return {
+      output: persisted ? output : { ...output, runtimeId: replay },
+      targetRuntimeId: replay,
+    };
+  }
   const resolved = deps.resolveRuntimeIdForEntity(env, output.entityId);
   const verified = normalizeRuntimeId(
     deps.getP2P(env)?.getVerifiedRuntimeRoute?.(output.entityId)?.runtimeId ?? '',
@@ -196,23 +205,18 @@ const planRemoteEntityOutput = (
   });
   if (!targetRuntimeId) {
     const txTypes = (output.entityTxs || []).map(tx => tx.type);
-    if (entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
-      env.error?.('network', 'ROUTE_TARGET_RUNTIME_UNKNOWN', {
-        entityId: output.entityId,
-        txTypes,
-        protocol: 'cross-j',
-      });
-      throw new Error(
-        'ROUTE_TARGET_RUNTIME_UNKNOWN: cross-j sibling entity=' + output.entityId +
-        ' txTypes=' + txTypes.join(','),
-      );
-    }
-    reportRetryableRouteDefer(env, deps, output, {
+    env.error?.('network', 'ROUTE_TARGET_RUNTIME_UNKNOWN', {
       entityId: output.entityId,
-      reason: 'target-runtime-unknown',
       txTypes,
+      output,
     });
-    return { kind: 'deferred', output };
+    // A committed financial output cannot be parked for an implicit retry:
+    // either routing is complete before dispatch or this Runtime halts with
+    // the exact unsent output still present in its durable outbox.
+    throw new Error(
+      'ROUTE_TARGET_RUNTIME_UNKNOWN: entity=' + output.entityId +
+      ' txTypes=' + txTypes.join(','),
+    );
   }
 
   const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
@@ -252,7 +256,6 @@ export const planEntityOutputs = (
 } => {
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
-  const deferredOutputs: RoutedEntityInput[] = [];
   for (const output of dedupeEntityOutputs(outputs, graph)) {
     const decision = resolveLocalEntityOutput(env, output, deps) ??
       planRemoteEntityOutput(env, output, deps);
@@ -262,10 +265,7 @@ export const planEntityOutputs = (
     } else if (decision.kind === 'remote') {
       graph.prepare(decision.output.output);
       remoteOutputs.push(decision.output);
-    } else {
-      graph.prepare(decision.output);
-      deferredOutputs.push(decision.output);
     }
   }
-  return { localOutputs, remoteOutputs, deferredOutputs, preparedOutputGraph: graph };
+  return { localOutputs, remoteOutputs, deferredOutputs: [], preparedOutputGraph: graph };
 };

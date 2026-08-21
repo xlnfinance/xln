@@ -1,7 +1,7 @@
 import type { RoutedEntityInput } from '../types';
 import { buildRouteOutputKey, splitRoutedOutputByDeliveryLane } from './identity';
 
-export type PreparedRoutedOutput = Readonly<{
+type PreparedRoutedOutput = Readonly<{
   output: RoutedEntityInput;
   routeKey: string;
 }>;

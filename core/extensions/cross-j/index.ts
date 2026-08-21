@@ -2,7 +2,7 @@ import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
 
 import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
-import type { AccountFrame, AccountInput, AccountTx, SwapOffer } from '../../types/account';
+import type { AccountTx, SwapOffer } from '../../types/account';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionCloseProof, CrossJurisdictionRouteDomain, CrossJurisdictionSettlementPolicy, CrossJurisdictionPendingFill, CrossJurisdictionPullBinding, CrossJurisdictionPullLeg, CrossJurisdictionSwapLeg, CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, CrossJurisdictionTimePolicy } from '../../types/cross-jurisdiction';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
@@ -1179,25 +1179,6 @@ export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
     data: {
       ...tx.data,
       crossJurisdiction: cloneCrossJurisdictionRoute(tx.data.crossJurisdiction),
-    },
-  };
-}
-
-export function cloneCrossJurisdictionAccountFrameRoute(frame: AccountFrame): AccountFrame {
-  return {
-    ...frame,
-    accountTxs: frame.accountTxs.map(cloneCrossJurisdictionAccountTxRoute),
-  };
-}
-
-export function cloneCrossJurisdictionAccountInputRoute<T extends AccountInput>(input: T): T;
-export function cloneCrossJurisdictionAccountInputRoute(input: AccountInput): AccountInput {
-  if (input.kind !== 'frame' && input.kind !== 'frame_ack') return input;
-  return {
-    ...input,
-    proposal: {
-      ...input.proposal,
-      frame: cloneCrossJurisdictionAccountFrameRoute(input.proposal.frame),
     },
   };
 }

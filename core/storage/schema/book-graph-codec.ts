@@ -201,7 +201,7 @@ const decodeChild = (value: unknown, code: string) => {
   return { slot, kind, path, edgeHash: hash(value['edgeHash'], `${code}_EDGE_HASH`) } as const;
 };
 
-export const decodeStorageBookBranch = (
+const decodeStorageBookBranch = (
   value: unknown,
   path: readonly number[],
 ): PersistentRadixBranchRecord => {

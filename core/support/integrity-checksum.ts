@@ -37,19 +37,6 @@ const integrityChecksumToHex = (bytes: Uint8Array): string => {
   return output;
 };
 
-export const integrityChecksumFromHex = (value: string): Uint8Array => {
-  const normalized = value.startsWith('0x') ? value.slice(2) : value;
-  const expectedLength = INTEGRITY_CHECKSUM_BYTES * 2;
-  if (!new RegExp(`^[0-9a-f]{${expectedLength}}$`, 'i').test(normalized)) {
-    throw new Error(`INTEGRITY_CHECKSUM_INVALID:${value}`);
-  }
-  const output = new Uint8Array(INTEGRITY_CHECKSUM_BYTES);
-  for (let index = 0; index < output.length; index += 1) {
-    output[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
-  }
-  return output;
-};
-
 export const computeIntegrityChecksum = (bytes: Uint8Array): string =>
   integrityChecksumToHex(computeIntegrityChecksumBytes(bytes));
 

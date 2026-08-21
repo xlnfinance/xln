@@ -831,14 +831,6 @@ const recoverStorageEpochRotation = async (env: RuntimeReplica): Promise<void> =
   }
 };
 
-/**
- * A completed rotation republishes the namespace, so the inherited-state
- * answer this process cached no longer describes what is on disk.
- */
-export const forgetStorageEpochRecovery = (env: RuntimeReplica): void => {
-  storageEpochRecoveryCompleted.delete(resolveStorageRotationMarkerPath(env));
-};
-
 const waitForStorageEpochRotation = async (
   env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,

@@ -7,17 +7,10 @@ import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import type { DebtEntry } from '../types/finance/debt';
 import type { FrameLogEntry } from '../types/logging';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
-import type { DurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { RadixMerkleRadix } from '../protocol/state/radix-merkle';
 import type { Covered } from '../types/hash-coverage/coverage';
 import type {
-  EntityContextPayloadHash,
-  RuntimeMachineRootHash,
-  RuntimeOutputPayloadHash,
-} from '../protocol/hashes';
-
-export type {
   EntityContextPayloadHash,
   RuntimeMachineRootHash,
   RuntimeOutputPayloadHash,
@@ -179,8 +172,6 @@ export type RuntimeFrame = {
   runtimeMachineRoot?: RuntimeMachineGraphRoot;
   /** Ordered immutable payload references; bodies live once in the outbox keyspace. */
   runtimeOutputRefs?: RuntimeOutputPayloadHash[];
-  /** Retry/backoff state for the retained transport outputs. */
-  runtimeOutputRetryState?: DurableOutputRetryState[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
@@ -208,7 +199,6 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'runtimeInput'
   | 'pendingRuntimeInput'
   | 'runtimeOutputRefs'
-  | 'runtimeOutputRetryState'
   | 'runtimeStateHash'
 > & RuntimeFramePayloads & { logs: FrameLogEntry[] };
 

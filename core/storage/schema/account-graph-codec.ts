@@ -57,7 +57,7 @@ const accountTree = (value: unknown, namespace: AccountStateMapNamespace): Accou
   return value;
 };
 
-export const accountTreeFromReplica = (
+const accountTreeFromReplica = (
   account: AccountReplica,
   namespace: AccountStateMapNamespace,
 ): AccountTree | undefined => {

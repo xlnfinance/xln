@@ -2,10 +2,6 @@ import { encodeBuffer, writeBatch } from '../codec/codec';
 import { hashCertifiedBoardNode } from '../../jurisdiction/machine/board-registry';
 import type { CertifiedBoardPatriciaNode } from '../../types/entity-board-registry';
 import type { RoutedEntityInput } from '../../runtime/types';
-import {
-  validateDurableOutputRetryState,
-  type DurableOutputRetryState,
-} from '../../runtime/delivery/durable-output-retry';
 import { hashConsumptionNode, type ConsumptionNode } from '../../entity/consumption/consumption-accumulator';
 import {
   collectReachableAccountJClaimNodes,
@@ -82,7 +78,6 @@ export type RestoredStorageBaseOptions = {
   canonicalEntityHashes: StorageFrameEntityHash[];
   runtimeMachine: Record<string, unknown>;
   runtimeOutputs: readonly RoutedEntityInput[];
-  runtimeOutputRetryState: readonly DurableOutputRetryState[];
   certifiedBoardNodes: Array<{ hash: string; node: CertifiedBoardPatriciaNode }>;
   consumptionNodes: Array<{ hash: string; node: ConsumptionNode }>;
   accountJClaimNodes: Array<{ hash: string; node: AccountJClaimNode }>;
@@ -308,9 +303,6 @@ const publishNewHistoryBase = async (
     ...(outputPayloads.refs.length > 0
       ? { runtimeOutputRefs: [...outputPayloads.refs] }
       : {}),
-    ...(options.runtimeOutputRetryState.length > 0
-      ? { runtimeOutputRetryState: [...options.runtimeOutputRetryState] }
-      : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts,
@@ -395,11 +387,6 @@ export const replaceRestoredStorageBase = async (
   }
   const liveRows = [...liveStateGraph.puts, ...bookRows];
   const replicaMetaDigest = computeStorageReplicaMetaDigest(options.replicaMetas);
-  validateDurableOutputRetryState(
-    options.runtimeOutputRetryState,
-    options.runtimeOutputs,
-    'RECOVERY_IMPORT_RUNTIME_OUTPUT_RETRY_STATE_INVALID',
-  );
   const outputPayloads = prepareRuntimeOutputPayloadRows(options.runtimeOutputs);
   const postStateHash = computeStoragePostStateHash({
     height: options.height,
@@ -409,7 +396,6 @@ export const replaceRestoredStorageBase = async (
       projectReplayVerifiableRuntimePostStateView(options.runtimeMachine),
     ),
     runtimeOutputRefs: outputPayloads.refs,
-    runtimeOutputRetryState: options.runtimeOutputRetryState,
   });
 
   const currentBody = options.currentDb.batch();

@@ -8,19 +8,6 @@ export const markLocalRuntimeAdapterCommandTx = <T extends CommandMarkerTx>(tx: 
   return tx;
 };
 
-export const copyLocalRuntimeAdapterCommandAuthorization = (
-  source: RuntimeTx,
-  target: RuntimeTx,
-): void => {
-  if (
-    source.type === 'recordRuntimeAdapterCommand'
-    && target.type === 'recordRuntimeAdapterCommand'
-    && (source as CommandMarkerTx & { [LOCAL_RUNTIME_ADAPTER_COMMAND]?: boolean })[
-      LOCAL_RUNTIME_ADAPTER_COMMAND
-    ] === true
-  ) markLocalRuntimeAdapterCommandTx(target);
-};
-
 export const markRestoredRuntimeAdapterCommandTxs = (runtimeTxs: RuntimeTx[]): void => {
   for (const tx of runtimeTxs) {
     if (tx.type === 'recordRuntimeAdapterCommand') markLocalRuntimeAdapterCommandTx(tx);

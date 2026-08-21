@@ -13,8 +13,6 @@ export type RuntimeFrameOutputPlan = {
   localOutputs: RoutedEntityInput[];
   remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
-  readyPendingOutputs: RoutedEntityInput[];
-  waitingPendingOutputs: RoutedEntityInput[];
   preparedOutputGraph: PreparedOutputGraph;
 };
 
@@ -39,8 +37,6 @@ export const planRuntimeFrameOutputs = (
   profile.metrics.localOutputs = plan.localOutputs.length;
   profile.metrics.remoteOutputs = plan.remoteOutputs.length;
   profile.metrics.deferredOutputs = plan.deferredOutputs.length;
-  profile.metrics.readyPendingOutputs = plan.readyPendingOutputs.length;
-  profile.metrics.waitingPendingOutputs = plan.waitingPendingOutputs.length;
   profile.mark('planOutputs');
   if (plan.localOutputs.length > 0 && !quietLogs) {
     runtimeLog.debug('tick.local_outputs.queued', {

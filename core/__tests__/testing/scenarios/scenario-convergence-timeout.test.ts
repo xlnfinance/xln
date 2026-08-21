@@ -2,12 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../../../runtime';
 import {
-  advanceScenarioToNextNetworkRetry,
   converge,
   convergeWithOffline,
   processWithOffline,
 } from '../../../scenarios/harness/helpers';
-import { buildRouteOutputKey } from '../../../runtime/delivery/topology/output-routing';
 import type { DeliverableEntityInput } from '../../../runtime/types';
 import type { JPrefixAttestation } from '../../../types/jurisdiction-events';
 import { htlcRouteConvergenceCycleBudget } from '../../../scenarios/payments/test-economy';
@@ -84,10 +82,10 @@ describe('scenario convergence timeout diagnostics', () => {
     expect((error as Error).message).toContain('convergeWithOffline:mixed-network: not converged after 1 cycles;');
     expect((error as Error).message).toContain('network=2');
     expect((error as Error).message).toContain(
-      'networkLanes=[trigger@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=3,runtime=0x2222222222222222222222222222222222222222,hasReplica=n;',
+      'trigger@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=3,runtime=0x2222222222222222222222222222222222222222,hasReplica=n',
     );
     expect((error as Error).message).toContain(
-      'trigger@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=4,runtime=0x2222222222222222222222222222222222222222,hasReplica=n]',
+      'trigger@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=4,runtime=0x2222222222222222222222222222222222222222,hasReplica=n',
     );
   });
 
@@ -116,22 +114,6 @@ describe('scenario convergence timeout diagnostics', () => {
       'networkLanes=[leader-timeout-vote@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=3,runtime=0x2222222222222222222222222222222222222222,hasReplica=n]',
     );
     expect((error as Error).message).not.toContain('secret-signature-must-not-leak');
-  });
-
-  test('reconnect advances to the exact durable retry boundary without mutating the envelope', () => {
-    const env = createEmptyEnv('scenario-network-reconnect:exact-retry');
-    env.scenarioMode = true;
-    env.state.timestamp = 1_999;
-    const output = networkOutput('3');
-    env.pendingNetworkOutputs = [output];
-    env.infrastructure!.deferredNetworkMeta = new Map([
-      [buildRouteOutputKey(output), { attempts: 1, nextRetryAt: 2_000 }],
-    ]);
-
-    expect(env.pendingNetworkOutputs).toEqual([output]);
-    expect(advanceScenarioToNextNetworkRetry(env)).toBe(2_000);
-    expect(env.state.timestamp).toBe(2_000);
-    expect(env.pendingNetworkOutputs).toEqual([output]);
   });
 
 });

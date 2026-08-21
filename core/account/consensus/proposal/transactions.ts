@@ -257,7 +257,10 @@ const classifyFailedTransaction = (
     return 'deferred';
   }
   throwCriticalProposalFailure(tx, result.rejection);
-  accountLog.debug('tx.skipped', { type: tx.type, error: result.rejection.message });
+  accountLog.warn('frame.validation_failed', {
+    txType: tx.type,
+    rejection: result.rejection,
+  });
   if (tx.type === 'htlc_lock') {
     effects.failedHtlcLocks.push({
       hashlock: tx.data.hashlock,

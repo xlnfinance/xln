@@ -39,8 +39,8 @@ const FORBIDDEN_CHILD_ENV = [
   ...LOCAL_TEST_LEASE_ENV_NAMES,
 ] as const;
 
-export const HLT_RUN_STATUSES = ['idle', 'running', 'green', 'red', 'aborted'] as const;
-export type HltRunStatusName = (typeof HLT_RUN_STATUSES)[number];
+const HLT_RUN_STATUSES = ['idle', 'running', 'green', 'red', 'aborted'] as const;
+type HltRunStatusName = (typeof HLT_RUN_STATUSES)[number];
 export type HltRunPhase = 'build' | 'replay';
 export type HltReplayMode = 'max' | 'fixed' | 'sweep';
 
@@ -98,10 +98,6 @@ let last: HltIsolatedRunView = idleRun();
 const assignSearchParam = (params: URLSearchParams, key: string, value: unknown): void => {
   if (value === undefined) return;
   params.set(key, typeof value === 'boolean' ? (value ? '1' : '0') : String(value));
-};
-
-export const parseHltStartConfig = (value: unknown): HltDashboardConfig => {
-  return parseHltStartRequest(value).config;
 };
 
 export const parseHltStartRequest = (value: unknown): HltStartRequest => {

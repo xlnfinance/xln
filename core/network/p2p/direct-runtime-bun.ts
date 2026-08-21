@@ -175,12 +175,12 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
   // from a positive byte count (actually sent). Treating backpressure as success
   // here permanently marks a queued-not-confirmed accountInput as ROUTE_DIRECT_DELIVERED:
   // the entity-output router's P2P failover (dispatchOutputEnvelope in
-  // core/runtime/delivery/dispatch.ts) never fires for it, and the entity-level
-  // crontab resend (maintainPendingAccounts) never retries because the transport
-  // already claimed delivery. Under sustained per-socket backpressure (observed at
+  // core/runtime/delivery/dispatch.ts) never fires for it. Under sustained
+  // per-socket backpressure (observed at
   // 1000-user scale, not at 500) that silently strands one bilateral channel forever
-  // while unrelated traffic on the same connection keeps flowing. Only a genuine
-  // byte count counts as sent; backpressure now falls through to the P2P route.
+  // while unrelated traffic on the same connection keeps flowing. There is no
+  // automatic retry path: only a genuine byte count counts as sent, otherwise
+  // dispatch falls through to P2P and then halts loudly if P2P also rejects it.
   return classifyWebSocketSendResult(result) === 'accepted' ? { sent: true } : { sent: false };
 };
 

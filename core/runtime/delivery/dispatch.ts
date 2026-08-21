@@ -13,7 +13,6 @@ import {
   isDeliveryDelivered,
   requireDeliveryDelivered,
   requireDeliveryResult,
-  shouldRetryDelivery,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
@@ -27,9 +26,6 @@ import {
   isCrossJAdmissionSourceProposal,
   mergeRoutedEntityOutput,
   pruneSettledOutputs,
-  reportRetryableRouteDefer,
-  rescheduleDeferredOutputs,
-  splitPendingOutputsByRetryWindow,
   summarizeAccountEnvelopeOutputs,
   type PlannedRemoteOutput,
   type RuntimeEntityInputRoutingResult,
@@ -37,7 +33,6 @@ import {
 } from './pending';
 import { planEntityOutputs } from './plan';
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
-import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 import { MAX_P2P_ENTITY_INPUTS } from '../../network/p2p/auth/entity-input-envelope';
 
@@ -228,19 +223,15 @@ const buildOutputEnvelopeGroups = (
 };
 
 /**
- * An unpaired cross-j Account leg must never be sent alone, and must never
- * crash the Runtime. The sibling may only be outside this ready batch (retry
- * window / next adjacent frame); permanently deleting the ready orphan here
- * used to strand MM bootstrap-cross. Keep the legs deferred, notify once via
- * security-incident telemetry, and let settled-proposal prune remove legs that
- * can no longer advance.
+ * An unpaired cross-j Account leg must never be sent alone. It is a producer
+ * invariant violation, not a transient transport condition: halt before any
+ * member of the financial unit can escape.
  */
-const deferIncompleteCrossJCohort = (
+const failIncompleteCrossJCohort = (
   env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   plannedOutputs: PlannedRemoteOutput[],
-  deferredOutputs: RoutedEntityInput[],
-): void => {
+): never => {
   const detail = {
     targetRuntimeId: group.targetRuntimeId,
     outputs: summarizeAccountEnvelopeOutputs(group.outputs),
@@ -255,35 +246,11 @@ const deferIncompleteCrossJCohort = (
     code: 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
     source: 'local-consensus',
     severity: 'critical',
-    summary:
-      'Incomplete cross-j Account cohort was ready for dispatch; legs deferred without send',
+    summary: 'Incomplete cross-j Account cohort reached transport dispatch',
     entityId: '',
   });
-  // Structured warn keeps the E2E fatal scanner quiet ([ERROR].*CROSS_J_*) while
-  // the security incident above is the canonical operator-visible notify path.
-  env.warn?.('network', 'CROSS_J_INCOMPLETE_COHORT_DROPPED', detail);
-  routeLog.warn('crossj.incomplete_cohort_deferred', detail);
-  for (const output of group.outputs) {
-    deferredOutputs.push(output);
-  }
-};
-
-const deferOutputsAfterDeliveryFailure = (
-  env: RuntimeReplica,
-  deps: RuntimeOutputRoutingDeps,
-  sendable: DeliverableEntityInput[],
-  targetRuntimeId: string,
-  details: Record<string, unknown>,
-  deferredOutputs: RoutedEntityInput[],
-): void => {
-  for (const output of sendable) {
-    reportRetryableRouteDefer(env, deps, output, {
-      entityId: output.entityId,
-      runtimeId: targetRuntimeId,
-      ...details,
-    });
-  }
-  deferredOutputs.push(...sendable);
+  env.error?.('network', 'CROSS_J_INCOMPLETE_COHORT_DROPPED', detail);
+  throw new Error(`CROSS_J_INCOMPLETE_COHORT_DROPPED:${group.targetRuntimeId}`);
 };
 
 const tryDirectOutputEnvelope = (
@@ -322,16 +289,15 @@ const dispatchP2POutputEnvelope = (
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeOutputRoutingDeps,
-  deferredOutputs: RoutedEntityInput[],
 ): void => {
   const p2p = deps.getP2P(env);
   if (!p2p) {
-    for (const output of sendable) {
-      const details = { entityId: output.entityId, runtimeId: group.targetRuntimeId };
-      env.info?.('network', 'ROUTE_DEFERRED_NO_P2P', details);
-    }
-    deferredOutputs.push(...sendable);
-    return;
+    const detail = {
+      targetRuntimeId: group.targetRuntimeId,
+      outputs: summarizeAccountEnvelopeOutputs(sendable),
+    };
+    env.error?.('network', 'ROUTE_P2P_UNAVAILABLE', detail);
+    throw new Error(`ROUTE_P2P_UNAVAILABLE:${group.targetRuntimeId}`);
   }
 
   routeLog.debug('p2p.enqueue_envelope', {
@@ -358,34 +324,11 @@ const dispatchP2POutputEnvelope = (
       });
       return;
     }
-    if (shouldRetryDelivery(delivery)) {
-      deferOutputsAfterDeliveryFailure(
-        env,
-        deps,
-        sendable,
-        group.targetRuntimeId,
-        { delivery },
-        deferredOutputs,
-      );
-      return;
-    }
     requireDeliveryDelivered(delivery, result =>
       'ROUTE_SEND_NOT_DELIVERED: runtime=' + group.targetRuntimeId +
       ' code=' + result.code + ' inputs=' + sendable.length);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const retryable = error instanceof FailureDispositionError && error.disposition === 'retry';
-    if ((delivery !== null && shouldRetryDelivery(delivery)) || retryable) {
-      deferOutputsAfterDeliveryFailure(
-        env,
-        deps,
-        sendable,
-        group.targetRuntimeId,
-        { error: message, ...(delivery ? { delivery } : {}) },
-        deferredOutputs,
-      );
-      return;
-    }
     env.error?.('network', 'ROUTE_SEND_FAILED', {
       runtimeId: group.targetRuntimeId,
       inputCount: sendable.length,
@@ -402,10 +345,9 @@ const dispatchOutputEnvelope = (
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeOutputRoutingDeps,
-  deferredOutputs: RoutedEntityInput[],
 ): void => {
   if (tryDirectOutputEnvelope(env, group, sendable, envelope, deps)) return;
-  dispatchP2POutputEnvelope(env, group, sendable, envelope, deps, deferredOutputs);
+  dispatchP2POutputEnvelope(env, group, sendable, envelope, deps);
 };
 
 export const dispatchEntityOutputs = (
@@ -413,12 +355,10 @@ export const dispatchEntityOutputs = (
   outputs: PlannedRemoteOutput[],
   deps: RuntimeOutputRoutingDeps,
   graph: PreparedOutputGraph = createPreparedOutputGraph(),
-): RoutedEntityInput[] => {
-  const deferredOutputs: RoutedEntityInput[] = [];
+): void => {
   for (const group of buildOutputEnvelopeGroups(outputs, graph)) {
     if (!group.complete) {
-      deferIncompleteCrossJCohort(env, group, outputs, deferredOutputs);
-      continue;
+      failIncompleteCrossJCohort(env, group, outputs);
     }
     const sendable = group.outputs;
     const envelope = buildRuntimeEntityInputsEnvelope(env, group.targetRuntimeId, sendable);
@@ -431,9 +371,8 @@ export const dispatchEntityOutputs = (
         outputs: summarizeAccountEnvelopeOutputs(sendable),
       });
     }
-    dispatchOutputEnvelope(env, group, sendable, envelope, deps, deferredOutputs);
+    dispatchOutputEnvelope(env, group, sendable, envelope, deps);
   }
-  return deferredOutputs.sort(compareOutputDelivery);
 };
 
 export const sendEntityInputWithRouting = (
@@ -456,41 +395,27 @@ export const sendEntityInputWithRouting = (
     ...(env.pendingNetworkOutputs ?? []),
     originatedInput,
   ]), preparedOutputGraph);
-  const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
-    env,
-    pendingBeforePlan,
-    deps,
-    preparedOutputGraph,
-  );
   const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(
     env,
-    readyPendingOutputs,
+    pendingBeforePlan,
     deps,
     preparedOutputGraph,
   );
   if (remoteOutputs.length > 0 && state.recoveryBackupBarrier) {
     throw new Error('DIRECT_NETWORK_SEND_REQUIRES_COMMITTED_RECOVERY_BACKUP');
   }
-  env.pendingNetworkOutputs = [];
+  if (deferredOutputs.length > 0) throw new Error('ROUTE_DEFERRED_OUTPUTS_FORBIDDEN');
+  dispatchEntityOutputs(env, remoteOutputs, deps, preparedOutputGraph);
   if (localOutputs.length > 0) {
     deps.enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.state.timestamp);
   }
-  const deferred = dispatchEntityOutputs(env, remoteOutputs, deps, preparedOutputGraph);
-  const remainingDeferred = [...deferredOutputs, ...deferred];
-  env.pendingNetworkOutputs = rescheduleDeferredOutputs(
-    env,
-    readyPendingOutputs,
-    remainingDeferred,
-    waitingPendingOutputs,
-    deps,
-    preparedOutputGraph,
-  );
+  env.pendingNetworkOutputs = [];
 
   return {
     delivery: buildRoutingDeliveryResult({
       remoteCount: remoteOutputs.length,
       localCount: localOutputs.length,
-      pendingCount: env.pendingNetworkOutputs.length,
+      pendingCount: 0,
     }),
   };
 };

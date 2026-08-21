@@ -12,7 +12,6 @@ import { createStructuredLogger, registerStructuredLogSink } from '../support/lo
 import { deriveSignerAddressSync } from '../account/crypto';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../support/process/child-secrets';
 import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
@@ -183,6 +182,15 @@ import {
   type OrchestratorResetOptions,
 } from './process/reset-coordinator';
 import { buildDiskSummary } from './health/disk-health';
+import {
+  buildCustodyRpcUrl,
+  buildPublicDirectWsUrl,
+  buildRuntimeImportUrl,
+  buildRuntimeNodeRpcUrl,
+  createRuntimeImportManifest,
+  type RuntimeImportCandidate,
+  type RuntimeImportManifest,
+} from './replica-import/runtime-import-manifest';
 
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
@@ -391,30 +399,7 @@ const marketMakerChild: MarketMakerChild = {
   recentStderr: [],
 };
 
-const buildPublicDirectWsUrl = (publicPort: number): string => {
-  const url = new URL(args.publicWsBaseUrl);
-  url.port = String(publicPort);
-  url.pathname = '/ws';
-  url.search = '';
-  url.hash = '';
-  return url.toString();
-};
-
 let custodySupport: CustodySupportState | null = null;
-
-type RuntimeImportManifestEntry = {
-  label: string;
-  access: 'admin';
-  wsUrl: string;
-  token: string;
-};
-
-type RuntimeImportManifest = {
-  v: 1;
-  issuedAt: number;
-  expiresAt: number;
-  entries: RuntimeImportManifestEntry[];
-};
 
 const orchestratorOperatorTokenPath = process.env['XLN_ORCHESTRATOR_OPERATOR_TOKEN_PATH']?.trim()
   || join(args.dbRoot, 'operator-token');
@@ -441,101 +426,57 @@ const isLoopbackPublicBase = /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(
   new URL(args.publicWsBaseUrl).hostname,
 );
 
-// Externally-reachable radapter /rpc URL for a hub / market-maker node.
-// Prod is fronted by nginx (publicPort -> apiPort, e.g. 8090 -> 18090); local has no proxy,
-// so the browser must hit the apiPort directly.
-const buildRuntimeNodeRpcUrl = (apiPort: number, publicPort: number): string => {
-  const url = new URL(args.publicWsBaseUrl);
-  url.port = String(isLoopbackPublicBase ? apiPort : publicPort);
-  url.pathname = '/rpc';
-  url.search = '';
-  url.hash = '';
-  return url.toString();
-};
-
-// Custody runs server.ts on a daemon port that is not nginx-fronted. On prod it must be exposed
-// via a dedicated subdomain set in XLN_CUSTODY_PUBLIC_RPC_URL (e.g. wss://custody.xln.finance/rpc).
-// Locally we hit the daemon port directly. Returns null when prod has no public route configured
-// yet, so the manifest omits an unreachable custody entry instead of advertising a broken one.
 const custodyPublicRpcUrlEnv = String(process.env['XLN_CUSTODY_PUBLIC_RPC_URL'] || '').trim();
-const buildCustodyRpcUrl = (daemonPort: number): string | null => {
-  if (custodyPublicRpcUrlEnv) return custodyPublicRpcUrlEnv;
-  if (!isLoopbackPublicBase) return null;
-  const url = new URL(args.publicWsBaseUrl);
-  url.port = String(daemonPort);
-  url.pathname = '/rpc';
-  url.search = '';
-  url.hash = '';
-  return url.toString();
-};
 
-const deriveRuntimeImportToken = (
-  seed: string,
-  audience: string,
-  keyId: string,
-  expiresAt: number,
-): string => deriveRuntimeAdapterCapabilityToken(
-  seed,
-  'full',
-  expiresAt,
-  {
-    audience,
-    keyId,
-    tokenId: `bulk-${keyId}-${expiresAt}`,
-  },
-);
-
-const buildRuntimeImportUrl = (): string => {
-  const url = new URL(args.walletUrl);
-  url.pathname = '/app';
-  url.search = '';
-  url.hash = `${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent('/api/runtime-import?access=admin')}`;
-  return url.toString();
-};
+const resolveWalletRuntimeImportUrl = (): string => buildRuntimeImportUrl(args.walletUrl);
 
 const runtimeIdFromChild = (child: HubChild | MarketMakerChild): string =>
   String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim().toLowerCase();
 
 const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
-  const issuedAt = Date.now();
-  const expiresAt = issuedAt + runtimeImportTokenTtlMs;
-  const entries: RuntimeImportManifestEntry[] = [];
-  for (const child of hubChildren) {
+  const candidates: RuntimeImportCandidate[] = hubChildren.flatMap(child => {
     const runtimeId = runtimeIdFromChild(child);
-    if (!runtimeId) continue;
-    entries.push({
+    return runtimeId ? [{
       label: child.name,
-      access: 'admin',
-      wsUrl: buildRuntimeNodeRpcUrl(child.apiPort, child.publicPort),
-      token: deriveRuntimeImportToken(child.authSeed, runtimeId, child.name.toLowerCase(), expiresAt),
-    });
-  }
+      wsUrl: buildRuntimeNodeRpcUrl(args.publicWsBaseUrl, isLoopbackPublicBase, child.apiPort, child.publicPort),
+      authSeed: child.authSeed,
+      audience: runtimeId,
+      keyId: child.name.toLowerCase(),
+    }] : [];
+  });
   const marketMakerRuntimeId = runtimeIdFromChild(marketMakerChild);
   if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId) {
-    entries.push({
+    candidates.push({
       label: marketMakerChild.name,
-      access: 'admin',
-      wsUrl: buildRuntimeNodeRpcUrl(marketMakerChild.apiPort, marketMakerChild.publicPort),
-      token: deriveRuntimeImportToken(marketMakerChild.authSeed, marketMakerRuntimeId, 'mm', expiresAt),
+      wsUrl: buildRuntimeNodeRpcUrl(
+        args.publicWsBaseUrl,
+        isLoopbackPublicBase,
+        marketMakerChild.apiPort,
+        marketMakerChild.publicPort,
+      ),
+      authSeed: marketMakerChild.authSeed,
+      audience: marketMakerRuntimeId,
+      keyId: 'mm',
     });
   }
   if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
-    const custodyWsUrl = buildCustodyRpcUrl(args.custodyDaemonPort);
+    const custodyWsUrl = buildCustodyRpcUrl(
+      custodyPublicRpcUrlEnv,
+      args.publicWsBaseUrl,
+      isLoopbackPublicBase,
+      args.custodyDaemonPort,
+    );
     if (custodyWsUrl) {
-      entries.push({
+      candidates.push({
         label: 'Custody',
-        access: 'admin',
         wsUrl: custodyWsUrl,
-        token: deriveRuntimeImportToken(
-          custodySupport.daemonAuthSeed,
-          custodySupport.daemonAuthAudience,
-          'custody',
-          expiresAt,
-        ),
+        authSeed: custodySupport.daemonAuthSeed,
+        audience: custodySupport.daemonAuthAudience,
+        keyId: 'custody',
       });
     }
   }
-  return entries.length > 0 ? { v: 1, issuedAt, expiresAt, entries } : null;
+  return createRuntimeImportManifest(candidates, runtimeImportTokenTtlMs);
 };
 
 const clearRuntimeImportManifestFile = (): void => {
@@ -556,7 +497,7 @@ const publishRuntimeImportManifest = async (): Promise<boolean> => {
     scheduleRuntimeImportManifestRefresh(null);
     return false;
   }
-  const importUrl = buildRuntimeImportUrl();
+  const importUrl = resolveWalletRuntimeImportUrl();
   mkdirSync(dirname(runtimeImportManifestPath), { recursive: true });
   writeFileSync(
     runtimeImportManifestPath,
@@ -1537,7 +1478,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     '--relay-url', relayUrl,
     '--api-host', args.host,
     '--api-port', String(child.apiPort),
-    '--direct-ws-url', buildPublicDirectWsUrl(child.publicPort),
+    '--direct-ws-url', buildPublicDirectWsUrl(args.publicWsBaseUrl, child.publicPort),
     '--rpc-url', args.rpcUrl,
     ...buildSecondaryRpcArgs(),
     '--mesh-hub-names', getHubSpecsArg(),
@@ -1584,14 +1525,8 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ENTITY_PROPOSAL_TRACE']
         ? { XLN_ENTITY_PROPOSAL_TRACE: process.env['XLN_ENTITY_PROPOSAL_TRACE'] }
         : {}),
-      ...(process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS']
-        ? { XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS: process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] }
-        : {}),
       ...(process.env['XLN_HEAVY_LOGS']
         ? { XLN_HEAVY_LOGS: process.env['XLN_HEAVY_LOGS'] }
-        : {}),
-      ...(process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS']
-        ? { XLN_ACCOUNT_PENDING_RESEND_AFTER_MS: process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS'] }
         : {}),
       ...(process.env['XLN_LOG_FORMAT']
         ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
@@ -1676,7 +1611,7 @@ const spawnMarketMaker = async (): Promise<void> => {
     '--relay-url', relayUrl,
     '--api-host', args.host,
     '--api-port', String(marketMakerChild.apiPort),
-    '--direct-ws-url', buildPublicDirectWsUrl(marketMakerChild.publicPort),
+    '--direct-ws-url', buildPublicDirectWsUrl(args.publicWsBaseUrl, marketMakerChild.publicPort),
     '--rpc-url', args.rpcUrl,
     ...buildSecondaryRpcArgs(),
     '--mesh-hub-names', getHubSpecsArg(),
@@ -2536,10 +2471,6 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     const h1 = hubChildren[0]!;
     const h23 = hubChildren.slice(1);
 
-    // Jurisdiction deployment and the shared config file are complete above;
-    // no Hub process owns another Hub's boot dependency. Start all isolated
-    // Runtimes together so the three bilateral Account opens can share one
-    // mesh wave instead of paying process startup serially.
     const spawnH1StartedAt = startTiming('reset_spawn_h1');
     const spawnH23StartedAt = startTiming('reset_spawn_h23');
     await Promise.all([
@@ -2607,9 +2538,6 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
       }
     };
 
-    // MM and custody only require online/routable Hubs. Their own Account
-    // consensus is independent of the Hub-Hub mesh, so serialize nothing here:
-    // all three branches retain their own fail-loud readiness gate.
     await Promise.all([
       waitForMesh(),
       startConfiguredMarketMaker(),
@@ -2720,7 +2648,7 @@ const handleRuntimeImportRequest = (
     refreshChildHealthForResponse,
     buildAggregatedHealthResponse,
     buildRuntimeImportManifest,
-    buildRuntimeImportUrl,
+    buildRuntimeImportUrl: resolveWalletRuntimeImportUrl,
   });
 
 const handleResetRequest = (

@@ -7,7 +7,8 @@
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data + 16 tag)
  */
 
-import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret as fastX25519SharedSecret } from './fast-x25519';
+import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast-x25519';
+export { x25519SharedSecret } from './fast-x25519';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
@@ -69,7 +70,7 @@ function encryptMessage(
   const ephemeralPub = x25519PublicKey(ephemeralPriv);
 
   // ECDH: derive shared secret
-  const sharedSecret = fastX25519SharedSecret(ephemeralPriv, recipientPubKey);
+  const sharedSecret = x25519SharedSecret(ephemeralPriv, recipientPubKey);
 
   // Use shared secret as ChaCha20-Poly1305 key (first 32 bytes)
   const key = sharedSecret.slice(0, 32);
@@ -107,7 +108,7 @@ function decryptMessage(
   const ciphertext = packed.slice(44);
 
   // ECDH: derive shared secret
-  const sharedSecret = fastX25519SharedSecret(privateKey, ephemeralPub);
+  const sharedSecret = x25519SharedSecret(privateKey, ephemeralPub);
 
   // Use shared secret as key
   const key = sharedSecret.slice(0, 32);
@@ -151,10 +152,6 @@ export function decryptJSON(
 export function generateEphemeralKeyPair(): P2PKeyPair {
   const privateKey = x25519RandomSecretKey();
   return { privateKey, publicKey: x25519PublicKey(privateKey) };
-}
-
-export function x25519SharedSecret(privateKey: Uint8Array, peerPubKey: Uint8Array): Uint8Array {
-  return fastX25519SharedSecret(privateKey, peerPubKey);
 }
 
 const sessionNonce = (seq: number): Uint8Array => {

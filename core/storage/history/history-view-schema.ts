@@ -18,7 +18,6 @@ import type {
   StoredRuntimeActivityValue,
 } from './history-view';
 import type { StorageHistoryViewHead } from '../types';
-import type { RuntimeHistoryRecord } from '../../runtime/types';
 
 const requireStringArray = (value: unknown, code: string): string[] => {
   if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string' || entry.length === 0)) {
@@ -227,80 +226,4 @@ export const validateStoredEntityFrameValue = (
     runtimeHeight: requireBoundaryInteger(record['runtimeHeight'], `${code}:runtimeHeight`, 1),
     timestamp: requireBoundaryInteger(record['timestamp'], `${code}:timestamp`),
   };
-};
-
-export const validateRuntimeHistoryRecords = (
-  value: unknown,
-  runtimeHeight: number,
-  runtimeTimestamp: number,
-): RuntimeHistoryRecord[] => {
-  if (!Array.isArray(value)) throw new Error('STORAGE_HISTORY_RECORDS_INVALID');
-  return value.map((raw, index) => {
-    const code = `STORAGE_HISTORY_RECORD_INVALID:index=${index}`;
-    const record = requireBoundaryRecord(raw, code);
-    if (record['kind'] === 'accountFrame') {
-      requireExactBoundaryKeys(
-        record,
-        ['kind', 'entityId', 'counterpartyId', 'accountHeight', 'source', 'frame', 'runtimeHeight', 'timestamp'],
-        [],
-        `${code}:fields`,
-      );
-      if (typeof record['entityId'] !== 'string' || typeof record['counterpartyId'] !== 'string') {
-        throw new Error(`${code}:identity`);
-      }
-      const accountHeight = requireBoundaryInteger(record['accountHeight'], `${code}:accountHeight`, 1);
-      const stored = validateStoredAccountFrameValue({
-        source: record['source'],
-        frame: record['frame'],
-        runtimeHeight: record['runtimeHeight'],
-        timestamp: record['timestamp'],
-      }, accountHeight);
-      if (stored.runtimeHeight !== runtimeHeight || stored.timestamp !== runtimeTimestamp) {
-        throw new Error(
-          `${code}:runtime_binding:expected=${runtimeHeight}/${runtimeTimestamp}:` +
-          `actual=${stored.runtimeHeight}/${stored.timestamp}`,
-        );
-      }
-      return {
-        kind: 'accountFrame',
-        entityId: record['entityId'],
-        counterpartyId: record['counterpartyId'],
-        accountHeight,
-        source: stored.source,
-        frame: stored.frame,
-        runtimeHeight: stored.runtimeHeight,
-        timestamp: stored.timestamp,
-      };
-    } else if (record['kind'] === 'entityFrame') {
-      requireExactBoundaryKeys(
-        record,
-        ['kind', 'entityId', 'entityHeight', 'link', 'runtimeHeight', 'timestamp'],
-        [],
-        `${code}:fields`,
-      );
-      if (typeof record['entityId'] !== 'string') throw new Error(`${code}:entityId`);
-      const entityHeight = requireBoundaryInteger(record['entityHeight'], `${code}:entityHeight`, 1);
-      const stored = validateStoredEntityFrameValue({
-        link: record['link'],
-        runtimeHeight: record['runtimeHeight'],
-        timestamp: record['timestamp'],
-      }, entityHeight);
-      if (stored.runtimeHeight !== runtimeHeight || stored.timestamp !== runtimeTimestamp) {
-        throw new Error(
-          `${code}:runtime_binding:expected=${runtimeHeight}/${runtimeTimestamp}:` +
-          `actual=${stored.runtimeHeight}/${stored.timestamp}`,
-        );
-      }
-      return {
-        kind: 'entityFrame',
-        entityId: record['entityId'],
-        entityHeight,
-        link: stored.link,
-        runtimeHeight: stored.runtimeHeight,
-        timestamp: stored.timestamp,
-      };
-    } else {
-      throw new Error(`${code}:kind`);
-    }
-  });
 };

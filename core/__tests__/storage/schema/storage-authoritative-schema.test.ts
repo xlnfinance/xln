@@ -109,7 +109,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     });
   }
 
-  test('rejects legacy runtime-machine and entity-context bodies at the frame boundary', async () => {
+  test('rejects retired runtime-machine and entity-context bodies at the frame boundary', async () => {
     const env = createEmptyEnv('storage-runtime-machine-schema');
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
     runtimeMachine['infrastructure'] = { pendingCommittedJOutbox: 'CORRUPT' };

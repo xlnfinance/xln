@@ -23,14 +23,17 @@
     "core/__tests__/fixtures/**/*.ts",
     "core/api/server/cli.ts",
     "core/qa/tools/code-fingerprint-cli.ts",
-    "core/qa/tools/runtime-state-diff-cli.ts"
+    "core/qa/tools/runtime-state-diff-cli.ts",
+    "jurisdictions/hardhat.config.ts",
+    "jurisdictions/test/**/*.{ts,mjs}"
   ],
   "project": [
     "core/**/*.ts",
     "scripts/**/*.ts",
     "tools/**/*.ts",
     "custody/**/*.ts",
-    "brainvault/**/*.ts"
+    "brainvault/**/*.ts",
+    "jurisdictions/test/**/*.{ts,mjs}"
   ],
   "ignore": [
     "frontend/**"
@@ -38,10 +41,7 @@
   "ignoreDependencies": [
     "buffer",
     "dockview",
-    "@nomicfoundation/hardhat-toolbox",
-    "@types/mocha",
     "chai-as-promised",
-    "mocha",
     "solc",
     "electron",
     "@typescript/native",

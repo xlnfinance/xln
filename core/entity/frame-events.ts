@@ -7,13 +7,6 @@ type EntityStateWithFrameEvents = EntityState & {
   [ENTITY_FRAME_EVENT_COLLECTOR]?: EntityFrameEvent[];
 };
 
-export const projectEntityStateWithoutFrameEvents = (
-  state: EntityStateWithFrameEvents,
-): EntityState => {
-  const { [ENTITY_FRAME_EVENT_COLLECTOR]: _events, ...consensusState } = state;
-  return consensusState;
-};
-
 const mutableEntityFrameEvents = (state: EntityState): EntityFrameEvent[] => {
   const transient = state as EntityStateWithFrameEvents;
   if (!transient[ENTITY_FRAME_EVENT_COLLECTOR]) {

@@ -4,9 +4,7 @@ import { createStructuredLogger } from '../../support/logger';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/gossip/local-profile-lifecycle';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import {
-  buildPendingNetworkOutputs,
   dispatchEntityOutputs,
-  rescheduleDeferredOutputs,
   type PlannedRemoteOutput,
   type RuntimeOutputRoutingDeps,
 } from '../delivery/topology/output-routing';
@@ -38,8 +36,6 @@ const hasFreshProfileWitness = (env: RuntimeReplica, entityId: string): boolean 
 export type CommittedEntityOutputPlan = {
   remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
-  readyPendingOutputs: RoutedEntityInput[];
-  waitingPendingOutputs: RoutedEntityInput[];
   preparedOutputGraph: PreparedOutputGraph;
 };
 
@@ -70,12 +66,13 @@ export const dispatchCommittedEntityOutputs = async (
       remoteOutputs: plan.remoteOutputs.length,
     });
   }
-  const dispatchDeferred = dispatchEntityOutputs(
-    env,
-    plan.remoteOutputs,
-    routing,
-    plan.preparedOutputGraph,
-  );
+  if (plan.deferredOutputs.length > 0) {
+    throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
+  }
+  dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
+  // The outbox is retained across every failure path. Clear it only after the
+  // transport synchronously accepts every envelope; there is no timer retry.
+  env.pendingNetworkOutputs = [];
   if (refreshIds.length > 0) {
     p2p?.announceProfilesForEntities(refreshIds, 'routing-profile-refresh');
   }
@@ -89,15 +86,6 @@ export const dispatchCommittedEntityOutputs = async (
     });
   }
 
-  const rescheduled = rescheduleDeferredOutputs(
-    env,
-    plan.readyPendingOutputs,
-    [...plan.deferredOutputs, ...dispatchDeferred],
-    plan.waitingPendingOutputs,
-    routing,
-    plan.preparedOutputGraph,
-  );
-  env.pendingNetworkOutputs = buildPendingNetworkOutputs(rescheduled, plan.preparedOutputGraph);
 };
 
 export const runCommittedRecoveryBarrier = async (

@@ -34,10 +34,7 @@ type RuntimeProcessProfileMetrics = {
   remoteOutputs: number;
   deferredOutputs: number;
   pendingNetworkBefore: number;
-  readyPendingOutputs: number;
-  waitingPendingOutputs: number;
   pendingNetworkAfter: number;
-  deferredNetworkMeta: number;
   jOutputs: number;
   frameAdvanced: boolean;
   cloneBytes?: number;
@@ -152,10 +149,7 @@ const createProfileMetrics = (
   remoteOutputs: 0,
   deferredOutputs: 0,
   pendingNetworkBefore: env.pendingNetworkOutputs?.length ?? 0,
-  readyPendingOutputs: 0,
-  waitingPendingOutputs: 0,
   pendingNetworkAfter: env.pendingNetworkOutputs?.length ?? 0,
-  deferredNetworkMeta: env.infrastructure?.deferredNetworkMeta?.size ?? 0,
   jOutputs: 0,
   frameAdvanced: false,
 });

@@ -407,7 +407,7 @@ const computeCertifiedEntityOutputSemanticHashFromCanonical = (
 ): string =>
   keccakTextHash(
     encodeCanonicalConsensusValue({
-      version: 'xln:certified-entity-output-semantic:v2',
+      domain: 'xln:certified-entity-output-semantic',
       sourceEntityId: sourceEntityId.toLowerCase(),
       targetEntityId: targetEntityId.toLowerCase(),
       lane,
@@ -551,7 +551,7 @@ const computeCertifiedEntityOutputHashFromCanonical = (
 ): string =>
   keccakTextHash(
     encodeCanonicalConsensusValue({
-      version: 'xln:certified-entity-output:v2',
+      domain: 'xln:certified-entity-output',
       origin,
       targetEntityId: targetEntityId.toLowerCase(),
       entityTxs: canonicalTxs,

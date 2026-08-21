@@ -9,7 +9,7 @@ const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, '.', und
 const program = ts.createProgram(parsed.fileNames, parsed.options);
 const violations: string[] = [];
 
-const LEGACY_NAMES = new Set([
+const FORBIDDEN_IDENTIFIERS = new Set([
   'bidBuckets', 'askBuckets', 'bidBucketIdsDesc', 'askBucketIdsAsc',
   'previousOrderId', 'nextOrderId', 'PriceBucketState', 'PriceLevelState',
   'getWritableBookLevel',
@@ -27,9 +27,11 @@ const report = (source: ts.SourceFile, node: ts.Node, code: string): void => {
   violations.push(`${source.fileName}:${position.line + 1}:${code}`);
 };
 
-const visitLegacy = (source: ts.SourceFile, node: ts.Node): void => {
-  if (ts.isIdentifier(node) && LEGACY_NAMES.has(node.text)) report(source, node, `legacy-${node.text}`);
-  ts.forEachChild(node, child => visitLegacy(source, child));
+const visitForbiddenIdentifiers = (source: ts.SourceFile, node: ts.Node): void => {
+  if (ts.isIdentifier(node) && FORBIDDEN_IDENTIFIERS.has(node.text)) {
+    report(source, node, `forbidden-${node.text}`);
+  }
+  ts.forEachChild(node, child => visitForbiddenIdentifiers(source, child));
 };
 
 const findFunction = (source: ts.SourceFile, name: string): ts.Node | undefined => {
@@ -81,7 +83,7 @@ const checkAuthorityPass = (source: ts.SourceFile): void => {
 for (const source of program.getSourceFiles()) {
   const path = source.fileName.replaceAll('\\', '/');
   if (!path.includes('/core/') || path.includes('/core/__tests__/')) continue;
-  if (SCOPES.some(scope => path.includes(scope))) visitLegacy(source, source);
+  if (SCOPES.some(scope => path.includes(scope))) visitForbiddenIdentifiers(source, source);
   if (path.endsWith('/core/orderbook/core.ts')) checkHotMatcher(source);
   if (
     path.endsWith('/core/entity/tx/handlers/account/orderbook/same/pass.ts') ||

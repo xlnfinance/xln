@@ -13,7 +13,7 @@ const NESTED_PROTOCOL_TXS = new Set<EntityTx['type']>([
   'scheduledWake',
 ]);
 
-export const getCertifiedOutputNestedTxs = (
+const getCertifiedOutputNestedTxs = (
   tx: EntityTx,
 ): readonly EntityTx[] | null => {
   if (tx.type !== 'consensusOutput') return null;

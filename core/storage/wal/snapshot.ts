@@ -251,7 +251,6 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'maxEntityInputsPerFrame',
   'maxEntityTxsPerFrame',
   'pendingHistoryRecords',
-  'deferredNetworkMeta',
   'runtimeAdapterCommandFrontiers',
   'pendingCommittedJOutbox',
   'pendingJurisdictionImports',
@@ -264,7 +263,6 @@ const buildDurableRuntimeStateSnapshot = (
   env: RuntimeReplica,
   options?: {
     includeCertifiedBoardNodes?: boolean;
-    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> | undefined => {
@@ -275,9 +273,6 @@ const buildDurableRuntimeStateSnapshot = (
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
     ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
       ? { pendingHistoryRecords: state.pendingHistoryRecords }
-      : {}),
-    ...(!options?.excludeDeferredNetworkMeta && hasDurableEntries(state.deferredNetworkMeta)
-      ? { deferredNetworkMeta: state.deferredNetworkMeta }
       : {}),
     ...(hasDurableEntries(state.runtimeAdapterCommandFrontiers)
       ? { runtimeAdapterCommandFrontiers: state.runtimeAdapterCommandFrontiers }
@@ -323,14 +318,12 @@ export const buildDurableRuntimeMachineSnapshot = (
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
     durableRuntimeInput?: RuntimeInput;
-    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
   const browserVMState = env.browserVMState;
   const runtimeConfig = env.runtimeConfig;
   const infrastructure = buildDurableRuntimeStateSnapshot(env, {
-    excludeDeferredNetworkMeta: options?.excludeDeferredNetworkMeta === true,
     excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
   });
   return {
@@ -353,10 +346,9 @@ export const buildDurableRuntimeMachineSnapshot = (
 };
 
 /**
- * WAL Runtime-machine projection. Transport bodies and retry route keys have
- * their own bounded frame commitments (`runtimeOutputRefs` and
- * `runtimeOutputRetryState`), so duplicating them in this Patricia graph would
- * make a valid output envelope capable of violating the graph row bound.
+ * WAL Runtime-machine projection. Transport bodies have their own bounded
+ * `runtimeOutputRefs` commitment, so duplicating them in this Patricia graph
+ * would make a valid output envelope capable of violating the graph row bound.
  */
 export const buildStorageRuntimeMachineSnapshot = (
   env: RuntimeReplica,
@@ -368,7 +360,6 @@ export const buildStorageRuntimeMachineSnapshot = (
 ): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env, {
   ...options,
   pendingNetworkOutputs: [],
-  excludeDeferredNetworkMeta: true,
 });
 
 /**
@@ -394,7 +385,6 @@ export const buildReplayVerifiableRuntimeMachineSnapshot = (
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
-    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => projectReplayVerifiableRuntimeMachine(
@@ -422,12 +412,10 @@ export const buildReplayVerifiableRuntimePostStateView = (
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
     durableRuntimeInput?: RuntimeInput;
-    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
   const infrastructure = buildDurableRuntimeStateSnapshot(env, {
-    excludeDeferredNetworkMeta: options?.excludeDeferredNetworkMeta === true,
     excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
   });
   return {

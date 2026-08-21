@@ -1,7 +1,6 @@
 import { createStructuredLogger } from '../../support/logger';
 import type { TrustedJurisdictionRpcBinding } from './j-adapter-restore';
 import type { RuntimeReplica } from '../types';
-import { markRestoredOutputsDue } from '../delivery/pending';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -40,7 +39,12 @@ export const loadLiveRuntimeFromDB = async (
 
     await deps.rehydrate(env, options?.trustedJurisdictionRpcBindings);
     deps.registerCommittedSingleSignerWallets(env);
-    markRestoredOutputsDue(env);
+    if ((env.pendingNetworkOutputs?.length ?? 0) > 0) {
+      throw new Error(
+        `RUNTIME_RESTORE_UNDISPATCHED_OUTPUTS:${env.pendingNetworkOutputs!.length}:` +
+        'automatic resend is forbidden; inspect the durable outbox and issue an explicit operator action',
+      );
+    }
     return env;
   } catch (error) {
     const message = error instanceof Error

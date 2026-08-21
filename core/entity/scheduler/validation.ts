@@ -14,7 +14,7 @@ import type {
 } from './types';
 
 const isTaskMethod = (value: unknown): value is CrontabTaskMethod =>
-  value === 'maintainPendingAccounts' || value === 'hubRebalance';
+  value === 'hubRebalance';
 
 const isHookType = (value: unknown): value is ScheduledHookType =>
   value === 'htlc_timeout' ||

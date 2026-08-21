@@ -152,7 +152,7 @@ describe('production swap load evidence', () => {
         jNonce: 0, requestedRebalance: new Map(), requestedRebalanceFeeState: new Map(),
       },
       status: 'active', mempool: [], currentFrame: {}, currentHeight: 0,
-      rollbackCount: 0, proofHeader: {}, proofBody: {},
+      rollbackCount: 0, proofHeader: {},
       pendingWithdrawals: new Map(), shadow: {},
       pendingFrame,
     };
@@ -381,9 +381,9 @@ describe('production swap load evidence', () => {
         liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
-        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
-        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
-        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
       ],
       bestBidPriceTicks: 24_999_000n,
       bestAskPriceTicks: 25_001_000n,
@@ -436,9 +436,9 @@ describe('production swap load evidence', () => {
         liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
-        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
-        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
-        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
       ],
       bestBidPriceTicks: 10n, bestAskPriceTicks: 11n,
     };

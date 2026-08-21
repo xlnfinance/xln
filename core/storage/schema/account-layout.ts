@@ -33,7 +33,7 @@ import {
   keyLiveAccountFieldPrefix,
 } from '../keys';
 
-export { STORAGE_ACCOUNT_FIELD_TAG } from './account-field-tags';
+;
 
 export const MAX_INLINE_STORAGE_VALUE_BYTES = 10_000;
 

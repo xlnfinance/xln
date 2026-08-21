@@ -9,14 +9,11 @@ import {
   dispatchEntityOutputs as dispatchEntityOutputsRaw,
   mergeRoutedEntityOutput,
   planEntityOutputs,
-  rescheduleDeferredOutputs,
   sendEntityInputWithRouting as sendEntityInputWithRoutingRaw,
-  splitPendingOutputsByRetryWindow,
 } from '../../../runtime/delivery/topology/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../../../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
 import type { EntityLeaderTimeoutVote } from '../../../entity/types';
-import { getWallClockMs } from '../../../support/time';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
 import type { Profile } from '../../../entity/profile';
 import { computeProfileRouteHash } from '../../../entity/profile/profile-signing';
@@ -149,10 +146,7 @@ const proposalOutput = (
   return { ...committed, proposedFrame };
 };
 
-const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
-  deferred: RoutedEntityInput[];
-  delivered: DeliverableEntityInput[];
-} => {
+const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): DeliverableEntityInput[] => {
   const targetRuntimeId = outputs[0]?.runtimeId;
   if (!targetRuntimeId) throw new Error('TEST_COMMIT_TARGET_RUNTIME_MISSING');
   const delivered: DeliverableEntityInput[] = [];
@@ -169,7 +163,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
       },
     },
   } as unknown as RuntimeReplica;
-  const deferred = dispatchEntityOutputs(env, outputs.map(output => ({
+  dispatchEntityOutputs(env, outputs.map(output => ({
     output: {
       ...output,
       sourceRuntimeFrame: output.sourceRuntimeFrame ?? { height: env.state.height, timestamp: env.state.timestamp },
@@ -186,15 +180,14 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
     resolveRuntimeIdForEntity: () => targetRuntimeId,
     resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
   });
-  return { deferred, delivered };
+  return delivered;
 };
 
 describe('runtime output routing', () => {
-  test('defers a certified output until the target runtime route is advertised', () => {
+  test('fails loud when a certified output has no target runtime route', () => {
     const sourceEntityId = entityId('a4');
     const targetEntityId = entityId('a5');
     const targetSignerId = runtimeId('a6');
-    const infoCodes: string[] = [];
     const output: RoutedEntityInput = {
       entityId: targetEntityId,
       signerId: targetSignerId,
@@ -223,12 +216,11 @@ describe('runtime output routing', () => {
       },
       infrastructure: {},
       gossip: { getProfiles: () => [] },
-      info: (_scope: string, code: string) => infoCodes.push(code),
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
 
-    const planned = planEntityOutputs(env, [output], {
+    expect(() => planEntityOutputs(env, [output], {
       ensureRuntimeInfrastructure: target => target.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
@@ -238,12 +230,7 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => null,
       resolveRuntimeIdForCrossJurisdictionEntity: () => null,
-    });
-
-    expect(planned.localOutputs).toEqual([]);
-    expect(planned.remoteOutputs).toEqual([]);
-    expect(planned.deferredOutputs).toEqual([output]);
-    expect(infoCodes).toContain('ROUTE_SEND_DEFERRED');
+    })).toThrow('ROUTE_TARGET_RUNTIME_UNKNOWN');
   });
 
   test('normalizes batched certified generic outputs into contiguous source sequence', () => {
@@ -342,8 +329,8 @@ describe('runtime output routing', () => {
     expect(buildPendingNetworkOutputs([second, first]).map(buildRouteOutputKey)).toEqual(
       buildPendingNetworkOutputs([first, second]).map(buildRouteOutputKey),
     );
-    const deliveredForward = dispatchFrameOutputs([first, second] as DeliverableEntityInput[]).delivered;
-    const deliveredReverse = dispatchFrameOutputs([second, first] as DeliverableEntityInput[]).delivered;
+    const deliveredForward = dispatchFrameOutputs([first, second] as DeliverableEntityInput[]);
+    const deliveredReverse = dispatchFrameOutputs([second, first] as DeliverableEntityInput[]);
     expect(deliveredForward).toHaveLength(2);
     expect(deliveredReverse.map(buildRouteOutputKey)).toEqual(deliveredForward.map(buildRouteOutputKey));
   });
@@ -376,85 +363,6 @@ describe('runtime output routing', () => {
     caseDuplicate.hashPrecommits?.set(`0x${voter.slice(2).toUpperCase()}`, ['0xsig-a']);
     expect(() => mergeRoutedEntityOutput(output('0xsig-a'), caseDuplicate))
       .toThrow('ROUTE_PRECOMMIT_DUPLICATE_SIGNER');
-  });
-
-  test('backs off retryable envelopes without treating them as fatal', () => {
-    const output = {
-      runtimeId: runtimeId('12'),
-      entityId: entityId('13'),
-      signerId: runtimeId('14'),
-      entityTxs: [],
-    } satisfies RoutedEntityInput;
-    const env = {
-      state: {
-  timestamp: 1_000,
-      },
-      pendingNetworkOutputs: [],
-      infrastructure: {},
-    } as unknown as RuntimeReplica;
-    const deps = {
-      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
-    } as any;
-
-    const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
-    expect(pending).toEqual([output]);
-    expect(splitPendingOutputsByRetryWindow(env, pending, deps)).toEqual({ ready: [], waiting: [output] });
-  });
-
-  test('uses deterministic Entity time for scenario retry scheduling and readiness', () => {
-    const output = {
-      runtimeId: runtimeId('15'),
-      entityId: entityId('16'),
-      signerId: runtimeId('17'),
-      entityTxs: [],
-    } satisfies RoutedEntityInput;
-    const env = {
-      scenarioMode: true,
-      state: {
-  timestamp: 1_000,
-      },
-      pendingNetworkOutputs: [],
-      infrastructure: {},
-    } as unknown as RuntimeReplica;
-    const deps = {
-      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
-    } as any;
-
-    const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
-    const retry = env.infrastructure?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
-    expect(retry?.nextRetryAt).toBe(2_000);
-    env.state.timestamp = 1_999;
-    expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toHaveLength(0);
-    env.state.timestamp = 2_000;
-    expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toEqual([output]);
-  });
-
-  test('uses wall clock for production retry scheduling even when Entity time is stale', () => {
-    const output = {
-      runtimeId: runtimeId('18'),
-      entityId: entityId('19'),
-      signerId: runtimeId('1a'),
-      entityTxs: [],
-    } satisfies RoutedEntityInput;
-    const env = {
-      scenarioMode: false,
-      state: {
-  timestamp: 1,
-      },
-      pendingNetworkOutputs: [],
-      infrastructure: {},
-    } as unknown as RuntimeReplica;
-    const deps = {
-      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
-    } as any;
-    const before = getWallClockMs();
-    const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
-    const after = getWallClockMs();
-    const retry = env.infrastructure?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
-
-    expect(retry?.nextRetryAt).toBeGreaterThanOrEqual(before + 1_000);
-    expect(retry?.nextRetryAt).toBeLessThanOrEqual(after + 1_000);
-    expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toHaveLength(0);
   });
 
   test('rebinds a durable output to the entity current runtime instead of creating a poison loop', () => {
@@ -621,7 +529,7 @@ describe('runtime output routing', () => {
       } as any],
     };
 
-    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
@@ -638,7 +546,6 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });
 
-    expect(deferred).toEqual([]);
     expect(p2pCalls).toHaveLength(1);
     expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
     expect(p2pCalls[0]?.envelope).toMatchObject({
@@ -673,7 +580,7 @@ describe('runtime output routing', () => {
       entityTxs: [],
     };
 
-    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
@@ -696,7 +603,6 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });
 
-    expect(deferred).toEqual([]);
     expect(p2pCalls).toHaveLength(1);
     expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
     expect(p2pCalls[0]?.ingressTimestamp).toBe(4321);
@@ -766,7 +672,7 @@ describe('runtime output routing', () => {
       entityTxs: [],
     };
 
-    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => {
@@ -783,7 +689,6 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });
 
-    expect(deferred).toEqual([]);
     expect(p2pCalls).toHaveLength(0);
   });
 
@@ -816,8 +721,7 @@ describe('runtime output routing', () => {
       expect(pending).toHaveLength(1);
       expect(carriesEntityCommitNotification(pending[0]!)).toBe(true);
 
-      const { deferred, delivered } = dispatchFrameOutputs(pending as DeliverableEntityInput[]);
-      expect(deferred).toHaveLength(0);
+      const delivered = dispatchFrameOutputs(pending as DeliverableEntityInput[]);
       expect(delivered).toHaveLength(1);
       expect(carriesEntityCommitNotification(delivered[0]!)).toBe(true);
     }
@@ -892,7 +796,7 @@ describe('runtime output routing', () => {
       entityTxs: [],
     };
 
-    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
@@ -909,7 +813,6 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });
 
-    expect(deferred).toEqual([]);
     expect(p2pCalls).toHaveLength(1);
     expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
     expect(p2pCalls[0]?.ingressTimestamp).toBe(1357);
@@ -1019,7 +922,7 @@ describe('runtime output routing', () => {
     expect(queued[0]?.entityId).toBe(localEntityId);
   });
 
-  test('defers when P2P reports a retryable transport failure', () => {
+  test('fails loud when P2P reports any transport failure', () => {
     const targetRuntimeId = runtimeId('77');
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
@@ -1032,8 +935,6 @@ describe('runtime output routing', () => {
       } as any],
     };
     const errors: Array<{ code: string; entityId?: string; runtimeId?: string; error?: string; delivery?: unknown }> = [];
-    const warnings: string[] = [];
-    const infos: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
       state: {
@@ -1042,14 +943,12 @@ describe('runtime output routing', () => {
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
-      warn: (_scope: string, code: string) => warnings.push(code),
-      info: (_scope: string, code: string) => infos.push(code),
       error: (_scope: string, code: string, payload: any) => {
         errors.push({ code, ...payload });
       },
     } as unknown as RuntimeReplica;
 
-    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
@@ -1066,39 +965,15 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    });
-
-    expect(deferred).toEqual([output]);
-    expect(errors).toHaveLength(0);
-    expect(warnings).toEqual([]);
-    expect(infos).toEqual(['ROUTE_SEND_DEFERRED']);
-
-    env.infrastructure!.deferredNetworkMeta = new Map([
-      [buildRouteOutputKey(output), { attempts: 3, nextRetryAt: env.state.timestamp }],
-    ]);
-    dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
-      getP2P: () => ({
-        enqueueEntityInputsDelivery: () => deliveryFailure({
-          category: 'TransientRace',
-          code: 'P2P_SEND_RETURNED_FALSE',
-          message: 'P2P enqueue returned false',
-          terminal: false,
-        }),
-      }),
-      enqueueRuntimeInputs: () => {},
-      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
-      hasLocalSignerForEntity: () => false,
-      hasLocalSignerForEntitySigner: () => false,
-      resolveSoleLocalSignerForEntity: () => null,
-      resolveRuntimeIdForEntity: () => targetRuntimeId,
-      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    });
-    expect(warnings).toEqual([]);
-    expect(infos).toEqual(['ROUTE_SEND_DEFERRED', 'ROUTE_SEND_DEFERRED']);
+    })).toThrow('ROUTE_SEND_NOT_DELIVERED');
+    expect(errors).toEqual([expect.objectContaining({
+      code: 'ROUTE_SEND_FAILED',
+      runtimeId: targetRuntimeId,
+      delivery: expect.objectContaining({ code: 'P2P_SEND_RETURNED_FALSE' }),
+    })]);
   });
 
-  test('defers when neither direct dispatch nor P2P is available', () => {
+  test('fails loud when neither direct dispatch nor P2P is available', () => {
     const targetRuntimeId = runtimeId('44');
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
@@ -1107,8 +982,7 @@ describe('runtime output routing', () => {
       sourceRuntimeFrame: { height: 17, timestamp: 5678 },
       entityTxs: [],
     };
-    const warnings: string[] = [];
-    const infos: string[] = [];
+    const errors: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
       state: {
@@ -1117,11 +991,10 @@ describe('runtime output routing', () => {
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
-      warn: (_scope: string, code: string) => warnings.push(code),
-      info: (_scope: string, code: string) => infos.push(code),
+      error: (_scope: string, code: string) => errors.push(code),
     } as unknown as RuntimeReplica;
 
-    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
@@ -1131,10 +1004,8 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    });
-    expect(deferred).toEqual([output]);
-    expect(warnings).toEqual([]);
-    expect(infos).toEqual(['ROUTE_DEFERRED_NO_P2P']);
+    })).toThrow(`ROUTE_P2P_UNAVAILABLE:${targetRuntimeId}`);
+    expect(errors).toEqual(['ROUTE_P2P_UNAVAILABLE']);
   });
 
   test('fails fast when P2P reports a routing contradiction', () => {

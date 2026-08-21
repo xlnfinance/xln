@@ -39,21 +39,21 @@ import type {
 } from '../types';
 import { validateDurableRuntimeMachineSnapshot } from './runtime-machine-schema';
 
-export const MAX_RUNTIME_MACHINE_GRAPH_ROW_BYTES = 10_000;
+const MAX_RUNTIME_MACHINE_GRAPH_ROW_BYTES = 10_000;
 const MAX_RUNTIME_MACHINE_GRAPH_DEPTH = 64;
 
 type PropertySegment = Readonly<{ kind: 'property'; name: string }>;
 type ArraySegment = Readonly<{ kind: 'array'; index: number }>;
 type MapSegment = Readonly<{ kind: 'map'; index: number; key: unknown }>;
 type SetSegment = Readonly<{ kind: 'set'; index: number }>;
-export type StorageValueGraphPathSegment = PropertySegment | ArraySegment | MapSegment | SetSegment;
-export type StorageValueGraphPath = readonly StorageValueGraphPathSegment[];
+type StorageValueGraphPathSegment = PropertySegment | ArraySegment | MapSegment | SetSegment;
+type StorageValueGraphPath = readonly StorageValueGraphPathSegment[];
 
-export type StorageValueGraphValue =
+type StorageValueGraphValue =
   | Readonly<{ kind: 'atom'; value: unknown }>
   | Readonly<{ kind: 'container'; container: 'object' | 'array' | 'map' | 'set' }>;
 
-export type StorageValueGraph = PersistentRadixValueMap<
+type StorageValueGraph = PersistentRadixValueMap<
   StorageValueGraphPath,
   StorageValueGraphValue
 >;
@@ -110,7 +110,7 @@ const decodeSegment = (value: unknown, code: string): StorageValueGraphPathSegme
   throw new Error(`${code}_KIND`);
 };
 
-export const decodeStorageValueGraphPath = (value: unknown, code: string): StorageValueGraphPath => {
+const decodeStorageValueGraphPath = (value: unknown, code: string): StorageValueGraphPath => {
   if (!Array.isArray(value) || value.length > MAX_RUNTIME_MACHINE_GRAPH_DEPTH) {
     throw new Error(code);
   }
@@ -118,7 +118,7 @@ export const decodeStorageValueGraphPath = (value: unknown, code: string): Stora
     Object.freeze(decodeSegment(segment, `${code}_${offset}`))));
 };
 
-export const decodeStorageValueGraphValue = (value: unknown, code: string): StorageValueGraphValue => {
+const decodeStorageValueGraphValue = (value: unknown, code: string): StorageValueGraphValue => {
   const source = record(value, code);
   if (source['kind'] === 'atom') {
     exactKeys(source, ['kind', 'value'], code);
@@ -144,10 +144,10 @@ export const decodeStorageValueGraphValue = (value: unknown, code: string): Stor
 const cloneDecoded = <T>(value: T, decoder: (raw: unknown, code: string) => T, code: string): T =>
   decoder(value, code);
 
-export const storageValueGraphPathBytes = (path: StorageValueGraphPath): Uint8Array =>
+const storageValueGraphPathBytes = (path: StorageValueGraphPath): Uint8Array =>
   encodeBuffer(path, { omitSymbolKeys: true });
 
-export const STORAGE_VALUE_GRAPH_OPTIONS = Object.freeze({
+const STORAGE_VALUE_GRAPH_OPTIONS = Object.freeze({
   radix: 16 as const,
   ownKey: (path: StorageValueGraphPath): StorageValueGraphPath =>
     cloneDecoded(path, decodeStorageValueGraphPath, 'STORAGE_VALUE_GRAPH_PATH'),
@@ -221,7 +221,7 @@ const appendGraphEntries = (
   output.push([path, { kind: 'atom', value }]);
 };
 
-export const buildStorageValueGraph = (value: unknown): StorageValueGraph => {
+const buildStorageValueGraph = (value: unknown): StorageValueGraph => {
   const entries: Array<readonly [StorageValueGraphPath, StorageValueGraphValue]> = [];
   appendGraphEntries(entries, value, []);
   return PersistentRadixValueMap.fromMap(entries, STORAGE_VALUE_GRAPH_OPTIONS);
@@ -244,18 +244,10 @@ const assertStorageRuntimeMachineProjection = (
   if (Object.hasOwn(machine, 'pendingNetworkOutputs')) {
     throw new Error('STORAGE_RUNTIME_MACHINE_PENDING_OUTPUTS_DUPLICATED');
   }
-  const infrastructure = machine['infrastructure'];
-  if (
-    infrastructure &&
-    typeof infrastructure === 'object' &&
-    Object.hasOwn(infrastructure, 'deferredNetworkMeta')
-  ) {
-    throw new Error('STORAGE_RUNTIME_MACHINE_RETRY_STATE_DUPLICATED');
-  }
 };
 
 /** Parent key already owns the common path; repeating it per child can exceed 10 KB. */
-export const storageValueGraphBranchValue = (branch: PersistentRadixBranchRecord) => ({
+const storageValueGraphBranchValue = (branch: PersistentRadixBranchRecord) => ({
   children: branch.children.map(child => ({
     slot: child.slot,
     kind: child.kind,
@@ -331,7 +323,7 @@ const decodeChild = (
   return { slot, kind, path, edgeHash: child['edgeHash'] } as const;
 };
 
-export const decodeStorageValueGraphBranch = (
+const decodeStorageValueGraphBranch = (
   value: unknown,
   path: readonly number[],
 ): PersistentRadixBranchRecord => {
@@ -386,7 +378,7 @@ const readGraphRecords = async (
 const pathId = (path: StorageValueGraphPath): string =>
   Buffer.from(storageValueGraphPathBytes(path)).toString('hex');
 
-export const rebuildStorageValueGraph = (graph: StorageValueGraph): unknown => {
+const rebuildStorageValueGraph = (graph: StorageValueGraph): unknown => {
   const values = new Map<string, Readonly<{ path: StorageValueGraphPath; value: StorageValueGraphValue }>>();
   const children = new Map<string, StorageValueGraphPath[]>();
   for (const [path, value] of graph) {

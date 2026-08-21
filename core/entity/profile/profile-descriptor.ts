@@ -101,8 +101,8 @@ const MAX_PROFILE_ROUTE_OVERHEAD_BYTES = new TextEncoder().encode(encodeCanonica
 export const MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES = LIMITS.MAX_PROFILE_BYTES - MAX_PROFILE_ROUTE_OVERHEAD_BYTES;
 
 /** Advertised profile capacities are floored to a multiple of this (privacy: no per-payment leak). */
-export const PROFILE_CAPACITY_GRANULARITY = 1000n;
-export const floorProfileCapacity = (value: bigint): bigint =>
+const PROFILE_CAPACITY_GRANULARITY = 1000n;
+const floorProfileCapacity = (value: bigint): bigint =>
   value <= 0n ? 0n : value - (value % PROFILE_CAPACITY_GRANULARITY);
 
 const rankedLiquidProfileCapacities = (

@@ -94,6 +94,7 @@ import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry'
 import type { FrameLogEntry } from '../types/logging';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
+import type { EntityContextPayloadHash, RuntimeOutputPayloadHash } from '../protocol/hashes';
 import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
 import {
   collectReachableCertifiedBoardNodes,
@@ -128,7 +129,6 @@ import {
   buildStorageRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimePostStateView,
 } from './wal/snapshot';
-import { buildDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
 import {
   verifyStorageSnapshotIntegrity,
   verifyStorageTailIntegrity,
@@ -203,10 +203,8 @@ export {
   listStorageSnapshotHeights,
   listStorageSnapshotReplicaMetas,
   listStorageReplicaMetas,
-  loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
   loadEntityStatesAtHeightFromStorage,
-  loadEntityViewPageFromStorage,
   readStorageFrameRecord,
   readStorageFramePayloads,
   readStorageHead,
@@ -699,8 +697,6 @@ export const recoverStorageDbFromHistory = async (options: {
   const shouldVerifyCurrent = headsMatch && options.verifyCurrentProjection !== false;
   let currentProjectionInvalid = false;
   if (shouldVerifyCurrent) {
-    // Verify the only authority first. A damaged WAL must halt recovery rather
-    // than being copied into the disposable current projection.
     await verifyStorageTailIntegrity(options.walDb);
     try {
       await assertCurrentProjectionIntegrity(
@@ -711,9 +707,6 @@ export const recoverStorageDbFromHistory = async (options: {
       options.onPersistenceProgress?.('recovery-current-verified');
     } catch (error) {
       currentProjectionInvalid = true;
-      // `current` is a disposable cache, never financial authority. Preserve
-      // the exact diagnostic, rebuild from verified WAL, and keep browser
-      // health warnings reserved for conditions requiring operator action.
       storageLog.info('current_projection.rebuilding_from_wal', {
         error: error instanceof Error ? error.message : String(error),
         height: currentMaterializedHeight,
@@ -728,9 +721,6 @@ export const recoverStorageDbFromHistory = async (options: {
     currentProjectionInvalid;
   let recovered = false;
   if (resetFromHistory) {
-    // Validate the authoritative base before clearing the rebuildable cache.
-    // This path is cold (fresh/current-lagging restore), so the full integrity
-    // scan does not add per-frame cost to the normal append path.
     if (historySnapshotHeight > 0) {
       await verifyStorageSnapshotIntegrity(options.walDb, walHead);
       options.onPersistenceProgress?.('recovery-snapshot-verified');
@@ -739,10 +729,6 @@ export const recoverStorageDbFromHistory = async (options: {
     options.onPersistenceProgress?.('recovery-current-cleared');
     markRecoveryStage('resetFromHistory');
     recovered = true;
-    // The authoritative DB already holds the latest materialized Patricia
-    // graph. Copy its exact physical records below; rebuilding coarse snapshot
-    // documents would reintroduce an O(all values) projection and a second
-    // representation of the same state.
   }
 
   const batch = options.db.batch();
@@ -1414,7 +1400,6 @@ const prepareStorageStateCommitments = async (
       // Output bodies are immutable rows. Per-frame replay authority commits
       // their ordered refs below instead of serializing the same envelopes.
       pendingNetworkOutputs: [],
-      excludeDeferredNetworkMeta: true,
       durableRuntimeInput: prepared.durablePendingInput,
       excludePersistedHistoryRecords: true,
     }),
@@ -1536,8 +1521,8 @@ const buildStorageRuntimeFrame = (
   commitments: PreparedStorageCommitments,
   prevFrameHash: string,
   touches: StorageFrameTouchSummary,
-  runtimeOutputRefs: readonly import('./types').RuntimeOutputPayloadHash[],
-  entityContextRefs: ReadonlyMap<string, import('./types').EntityContextPayloadHash>,
+  runtimeOutputRefs: readonly RuntimeOutputPayloadHash[],
+  entityContextRefs: ReadonlyMap<string, EntityContextPayloadHash>,
   runtimeMachineRoot: import('./types').RuntimeMachineGraphRoot | undefined,
 ): RuntimeFrame => {
   const {
@@ -1550,10 +1535,6 @@ const buildStorageRuntimeFrame = (
     durablePendingInput.runtimeTxs.length > 0 ||
     durablePendingInput.entityInputs.length > 0 ||
     (durablePendingInput.jInputs?.length ?? 0) > 0;
-  const retryState = buildDurableOutputRetryState(
-    options.env,
-    options.currentFrameOutputs ?? [],
-  );
   return {
     height: options.env.state.height,
     timestamp: options.env.state.timestamp,
@@ -1567,7 +1548,6 @@ const buildStorageRuntimeFrame = (
       replicaMetaDigest: commitments.replicaMetaCommitment.digest,
       runtimeComponentDigests: commitments.runtimeComponentDigests,
       runtimeOutputRefs,
-      runtimeOutputRetryState: retryState,
     }),
     materializedState: shouldMaterialize,
     ...(commitments.runtimeStateHashes
@@ -1591,7 +1571,6 @@ const buildStorageRuntimeFrame = (
     ...(runtimeOutputRefs.length > 0
       ? { runtimeOutputRefs: [...runtimeOutputRefs] }
       : {}),
-    ...(retryState.length > 0 ? { runtimeOutputRetryState: retryState } : {}),
     touchedEntities: touches.touchedEntities,
     touchedAccounts: touches.touchedAccounts,
     touchedBookEntities: touches.touchedBookEntities,

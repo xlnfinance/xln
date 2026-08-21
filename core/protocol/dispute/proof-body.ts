@@ -16,24 +16,6 @@ export type {
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository.ts';
 
 /**
- * Evidence objects cross Account, Entity, persistence, and RPC boundaries.
- * Give every owner its own plain object graph: retaining ABI-library objects or
- * aliases here can make one bilateral account mutate another account's proof.
- */
-export const cloneProofBodyStruct = (proofBody: ProofBodyStruct): ProofBodyStruct => ({
-  watchSeed: proofBody.watchSeed,
-  leftResponseSeconds: proofBody.leftResponseSeconds,
-  rightResponseSeconds: proofBody.rightResponseSeconds,
-  offdeltas: [...proofBody.offdeltas],
-  tokenIds: [...proofBody.tokenIds],
-  transformers: proofBody.transformers.map((transformer) => ({
-    transformerAddress: transformer.transformerAddress,
-    encodedBatch: transformer.encodedBatch,
-    allowances: transformer.allowances.map((allowance) => ({ ...allowance })),
-  })),
-});
-
-/**
  * Runtime-friendly ProofBody (uses native types, not BigNumberish)
  * Converted to ProofBodyStruct for ABI encoding
  */

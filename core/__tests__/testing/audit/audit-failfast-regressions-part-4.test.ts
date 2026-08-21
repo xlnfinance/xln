@@ -48,13 +48,7 @@ import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '.
 
 import { HTLC, LIMITS } from '../../../config/constants';
 
-import {
-  ACCOUNT_PENDING_RESEND_AFTER_MS,
-  ACCOUNT_PENDING_STALE_WARNING_MS,
-  emitCommittedPendingFrameWarnings,
-  executeCrontab,
-  initCrontab,
-} from '../../../entity/scheduler';
+import { executeCrontab, initCrontab } from '../../../entity/scheduler';
 import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
@@ -1361,58 +1355,6 @@ describe('audit fail-fast regressions', () => {
     expect(doc.pendingForwards).toEqual(accountMachine.pendingForwards);
   });
 
-  test('crontab resends bundled ACK plus pending frame after relay loss', async () => {
-    const env = createEmptyEnv('account-frame-bundled-resend');
-    env.quietRuntimeLogs = true;
-    const replica = makeReplicaMissingPrevFrameHash();
-    replica.state.timestamp = 100_000;
-    const counterpartyId = hex20('22');
-    const counterpartySignerId = hex20('23');
-    env.gossip = {
-      getProfiles: () => [
-        {
-          entityId: counterpartyId,
-          metadata: {
-            board: {
-              validators: [{ signerId: counterpartySignerId }],
-            },
-          },
-        },
-      ],
-    } as RuntimeReplica['gossip'];
-    const pendingFrame = {
-      height: 11,
-      timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
-      jHeight: 0,
-      accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
-      prevFrameHash: `0x${'ab'.repeat(32)}`,
-      accountStateRoot: `0x${'00'.repeat(32)}`,
-      deltas: [],
-      stateHash: `0x${'cd'.repeat(32)}`,
-      byLeft: true,
-    };
-    const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
-    accountMachine.pendingFrame = pendingFrame;
-    accountMachine.pendingAccountInput = {
-      kind: 'frame_ack',
-      fromEntityId: replica.entityId,
-      toEntityId: counterpartyId,
-      ack: { height: 10, frameHash: pendingFrame.prevFrameHash, frameHanko: `0x${'12'.repeat(65)}` },
-      proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
-    };
-    replica.state.accounts.set(counterpartyId, accountMachine);
-
-    const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
-      manualBroadcastInInput: false,
-      accountChanges: new Set(),
-    });
-
-    expect(outputs).toHaveLength(1);
-    expect(outputs[0]?.entityId).toBe(counterpartyId);
-    expect(outputs[0]?.signerId).toBeUndefined();
-    expect(outputs[0]?.entityTxs).toEqual([{ type: 'accountInput', data: accountMachine.pendingAccountInput }]);
-  });
-
   test('expired HTLC never rolls back its signed pending Account frame', async () => {
     const env = createEmptyEnv('pending-htlc-exact-timelock');
     env.quietRuntimeLogs = true;
@@ -1492,16 +1434,15 @@ describe('audit fail-fast regressions', () => {
     )).toBe(counterpartySignerId);
   });
 
-  test('crontab resends a restored pending frame without persisting transport routing', async () => {
+  test('restored pending frame validates its exact cached input without automatic resend', async () => {
     const env = createEmptyEnv('account-frame-restored-resend');
     env.quietRuntimeLogs = true;
     const replica = makeReplicaMissingPrevFrameHash();
     replica.state.timestamp = 100_000;
     const counterpartyId = `0x${'25'.repeat(32)}`;
-    const counterpartySignerId = hex20('26');
     const pendingFrame = {
       height: 11,
-      timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
+      timestamp: 90_000,
       jHeight: 0,
       accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
       prevFrameHash: '',
@@ -1565,46 +1506,7 @@ describe('audit fail-fast regressions', () => {
       accountChanges: new Set(),
     });
 
-    expect(outputs).toHaveLength(1);
-    expect(outputs[0]?.entityId).toBe(counterpartyId);
-    expect(outputs[0]?.signerId).toBeUndefined();
-    expect(outputs[0]?.entityTxs).toEqual([{ type: 'accountInput', data: restoredAccount.pendingAccountInput }]);
-  });
-
-  test('pending-frame liveness warning is evaluated from committed post-frame state', () => {
-    const replica = makeReplicaMissingPrevFrameHash();
-    replica.state.timestamp = 100_000;
-    const counterpartyId = hex20('24');
-    const account = makeProposalAccount([], replica.entityId, counterpartyId);
-    account.pendingFrame = {
-      height: 11,
-      timestamp: replica.state.timestamp - ACCOUNT_PENDING_STALE_WARNING_MS - 1,
-      jHeight: 0,
-      accountTxs: [{ type: 'add_delta', data: { tokenId: 1 } }],
-      prevFrameHash: `0x${'ab'.repeat(32)}`,
-      accountStateRoot: `0x${'00'.repeat(32)}`,
-      deltas: [],
-      stateHash: `0x${'cd'.repeat(32)}`,
-      byLeft: true,
-    };
-    replica.state.accounts.set(counterpartyId, account);
-    const previousState = structuredClone(replica.state);
-    const committedPending = structuredClone(replica.state);
-    committedPending.crontabState!.tasks.get('maintainPendingAccounts')!.lastRun = committedPending.timestamp;
-    const committedAcked = structuredClone(committedPending);
-    delete committedAcked.accounts.get(counterpartyId)!.pendingFrame;
-    const warning = spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    try {
-      emitCommittedPendingFrameWarnings(previousState, committedPending);
-      expect(warning).toHaveBeenCalledWith(expect.stringContaining('PENDING-FRAME-STALE'));
-      warning.mockClear();
-
-      emitCommittedPendingFrameWarnings(previousState, committedAcked);
-      expect(warning).not.toHaveBeenCalled();
-    } finally {
-      warning.mockRestore();
-    }
+    expect(outputs).toEqual([]);
   });
 
   test('applyAccountInput re-acks duplicate committed frames when the original ACK was lost', async () => {

@@ -18,12 +18,6 @@ export const requireStorageHash = (value: unknown, code: string): string => {
   return hash;
 };
 
-export const requireStorageHex = (value: unknown, code: string): string => {
-  const hex = requireStorageString(value, code);
-  if (!/^0x(?:[0-9a-f]{2})+$/.test(hex)) throw new Error(code);
-  return hex;
-};
-
 export const requireStorageBigInt = (
   value: unknown,
   code: string,
@@ -51,15 +45,6 @@ export const requireStorageBoolean = (value: unknown, code: string): boolean => 
   if (typeof value !== 'boolean') throw new Error(code);
   return value;
 };
-
-export const requireStoragePath = (
-  value: unknown,
-  radix: 16 | 256,
-  code: string,
-): number[] => requireStorageArray(value, code).map((slot) => {
-  if (!Number.isSafeInteger(slot) || Number(slot) < 0 || Number(slot) >= radix) throw new Error(code);
-  return Number(slot);
-});
 
 export const requireStringArray = (value: unknown, code: string): string[] =>
   requireStorageArray(value, code).map(entry => requireStorageString(entry, code));

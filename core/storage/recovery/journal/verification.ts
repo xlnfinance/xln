@@ -115,12 +115,10 @@ export const verifyRecoveryJournalFrame = (
     runtimeComponentDigests: computeRuntimePostStateComponentDigests(
       buildReplayVerifiableRuntimePostStateView(env, {
         pendingNetworkOutputs: [],
-        excludeDeferredNetworkMeta: true,
         excludePersistedHistoryRecords: true,
       }),
     ),
     runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
-    runtimeOutputRetryState: frame.runtimeOutputRetryState ?? [],
   });
   if (postStateHash !== frame.postStateHash) {
     throw new Error(

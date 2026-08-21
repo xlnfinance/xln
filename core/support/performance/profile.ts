@@ -107,7 +107,7 @@ const profilingLive = (): boolean => isRuntimePerfProfileEnabled(
   'XLN_RUNTIME_APPLY_PROFILE',
 );
 
-export const observePerfPhase = (name: string, durationMs: number): void => {
+const observePerfPhase = (name: string, durationMs: number): void => {
   if (!profilingLive()) return;
   let metric = phaseMetrics.get(name);
   if (!metric) {

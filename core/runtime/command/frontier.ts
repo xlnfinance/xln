@@ -55,7 +55,7 @@ export const validateRuntimeAdapterCommandMarker = (
   return { laneId, sequence, commandId, inputHash, expiresAtMs };
 };
 
-export const runtimeAdapterCommandMarkerExpired = (
+const runtimeAdapterCommandMarkerExpired = (
   data: RuntimeAdapterCommandMarkerData,
   nowMs: number,
 ): boolean => {

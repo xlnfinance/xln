@@ -165,8 +165,6 @@ import {
   buildRouteOutputKey,
   dispatchEntityOutputs,
   planEntityOutputs,
-  rescheduleDeferredOutputs,
-  splitPendingOutputsByRetryWindow,
 } from '../../../runtime/delivery/topology/output-routing';
 
 import { deliveryAccepted, deliveryDeferred } from '../../../protocol/payments/delivery-result';
@@ -200,10 +198,6 @@ import { LIMITS } from '../../../config/constants';
 import { getEffectiveEntityInputTxs } from '../../../entity/consensus/output/envelope';
 
 import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authorization';
-
-import { createDueScheduledWakeInputs } from '../../../runtime/mempool/scheduled-wake';
-
-import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../../../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   ensureRuntimeInfrastructure: current => {

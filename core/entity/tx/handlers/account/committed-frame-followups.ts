@@ -90,13 +90,10 @@ export function applyCommittedAccountFrameFollowups(
         // Scanning every route per resolve was O(routes) per payment and
         // ~30% of Hub CPU at 500 users.
         const secretHashlock = hashHtlcSecret(accountTx.data.secret);
-        const directRoute = newState.htlcRoutes.get(secretHashlock)
-          ?? newState.htlcRoutes.get(secretHashlock.toLowerCase());
-        // No route under that hashlock: fall back to the scan (legacy routes
-        // keyed differently, or lock-only bookkeeping) so behaviour is unchanged.
+        const directRoute = newState.htlcRoutes.get(secretHashlock);
         const matchedRoutes: Iterable<[string, HtlcRoute]> = directRoute
-          ? [[newState.htlcRoutes.has(secretHashlock) ? secretHashlock : secretHashlock.toLowerCase(), directRoute]]
-          : newState.htlcRoutes.entries();
+          ? [[secretHashlock, directRoute]]
+          : [];
         for (const [hashlock, route] of matchedRoutes) {
           const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
           const resolvesOriginatedOutbound =

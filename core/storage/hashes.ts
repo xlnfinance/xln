@@ -77,9 +77,6 @@ export const computeStoragePostStateHash = (input: {
   replicaMetaDigest: string;
   runtimeComponentDigests: readonly Readonly<{ key: string; valueHash: string }>[];
   runtimeOutputRefs: readonly string[];
-  runtimeOutputRetryState: ReadonlyArray<
-    NonNullable<RuntimeFrame['runtimeOutputRetryState']>[number]
-  >;
 }): string => hashStable({
   kind: STORAGE_FRAME_FORMAT.postStateDomain,
   height: input.height,
@@ -87,7 +84,6 @@ export const computeStoragePostStateHash = (input: {
   replicaMetaDigest: input.replicaMetaDigest,
   runtimeComponentDigests: input.runtimeComponentDigests,
   runtimeOutputRefs: input.runtimeOutputRefs,
-  runtimeOutputRetryState: input.runtimeOutputRetryState ?? [],
 });
 
 /** One hash per Runtime component keeps the parent commitment O(dirty). */

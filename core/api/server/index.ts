@@ -453,12 +453,7 @@ const maybeHandleControlApi = async (
     if (!env) {
       return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
     }
-    return handleGossipProfileCounterparties(
-      req,
-      env,
-      headers,
-      entityId => relayStore.gossipProfiles.get(entityId)?.profile,
-    );
+    return handleGossipProfileCounterparties(req, env, headers);
   }
 
   if (pathname === '/api/control/signers/register' && req.method === 'POST') {

@@ -55,7 +55,7 @@ export const resolveStoredDisputeStartNonce = (
   return { signedNonce, nonceSource: 'counterpartySeal' };
 };
 
-export const selectCounterDisputeProof = (
+const selectCounterDisputeProof = (
   account: AccountReplica,
   signedNonce: number,
   initialProposerIsLeft: boolean,

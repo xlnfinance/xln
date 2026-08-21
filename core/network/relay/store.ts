@@ -549,17 +549,6 @@ export const getAllGossipJurisdictions = (
   store: RelayStore,
 ): JurisdictionGossipAnnouncement[] => Array.from(store.gossipJurisdictions.values());
 
-export const getDefaultGossipProfiles = (
-  store: RelayStore,
-  limit: number = DEFAULT_GOSSIP_SYNC_LIMIT,
-): Profile[] => {
-  return selectProfileBatch(
-    getAllGossipProfiles(store),
-    { set: 'default', limit: Math.min(DEFAULT_GOSSIP_SYNC_LIMIT, Math.floor(Number(limit) || DEFAULT_GOSSIP_SYNC_LIMIT)) },
-    DEFAULT_GOSSIP_SYNC_LIMIT,
-  );
-};
-
 export const getProfileBatch = (
   store: RelayStore,
   request: GossipProfileBatchRequest = {},

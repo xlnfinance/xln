@@ -656,62 +656,6 @@ export const selectPotentialCrossJAccountInputPairs = (
   return pairs;
 };
 
-/**
- * Diagnostic only: why the structural pairing pass did or did not pair these
- * outputs. Reports each candidate's validity and, for every candidate pair,
- * which exact predicate of the pairing filter failed first. Kept beside the
- * selector so the two can never drift apart silently.
- */
-export const explainCrossJPairing = (
-  inputs: readonly RoutedEntityInput[],
-): Record<string, unknown> => {
-  const candidates = inputs.flatMap((input, inputIndex) =>
-    effectiveAccountInputs(input).flatMap(accountInput => {
-      const candidate = buildCrossJProposalFrameCandidate(input, inputIndex, accountInput);
-      return candidate ? [candidate] : [];
-    }));
-  const pairwise: Array<Record<string, unknown>> = [];
-  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
-      const left = candidates[leftIndex]!;
-      const right = candidates[rightIndex]!;
-      const failed =
-        right.inputIndex === left.inputIndex ? 'same-input'
-        : !targetsDistinctSiblingEntities(inputs, left.inputIndex, right.inputIndex) ? 'same-target-entity'
-        : normalizeRuntimeId(inputs[right.inputIndex]!.runtimeId) !==
-            normalizeRuntimeId(inputs[left.inputIndex]!.runtimeId) ? 'target-runtime-differs'
-        : admissionOriginKey(inputs[right.inputIndex]!) !== admissionOriginKey(inputs[left.inputIndex]!) ? 'origin-differs'
-        : !left.valid || !right.valid ? 'candidate-invalid'
-        : left.phase !== right.phase ? 'phase-differs'
-        : left.pairKey !== right.pairKey ? 'pair-key-differs'
-        : !pairedPullListsMatch(left.sourcePulls, right.targetPulls) ? 'pulls-left-source-vs-right-target'
-        : !pairedPullListsMatch(right.sourcePulls, left.targetPulls) ? 'pulls-right-source-vs-left-target'
-        : !pairedCloseListsMatch(left.sourceCloses, right.targetCloses) ? 'closes-left-vs-right'
-        : !pairedCloseListsMatch(right.sourceCloses, left.targetCloses) ? 'closes-right-vs-left'
-        : !pairedProgressListsMatch(left.sourceProgresses, right.targetProgresses) ? 'progress-left-vs-right'
-        : !pairedProgressListsMatch(right.sourceProgresses, left.targetProgresses) ? 'progress-right-vs-left'
-        : sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!) ? 'MATCH-same-frame'
-        : 'MATCH-cross-frame-only';
-      pairwise.push({ left: left.inputIndex, right: right.inputIndex, verdict: failed });
-    }
-  }
-  return {
-    candidates: candidates.slice(0, 8).map(candidate => ({
-      inputIndex: candidate.inputIndex,
-      entityId: inputs[candidate.inputIndex]!.entityId,
-      valid: candidate.valid,
-      invalidReasons: candidate.invalidReasons,
-      phase: candidate.phase,
-      frameHeight: candidate.frame.height,
-      sourcePulls: candidate.sourcePulls.length,
-      targetPulls: candidate.targetPulls.length,
-      closes: candidate.sourceCloses.length + candidate.targetCloses.length,
-      progresses: candidate.sourceProgresses.length + candidate.targetProgresses.length,
-    })),
-    pairwise: pairwise.slice(0, 12),
-  };
-};
-
 const collectCrossJAdmissionCandidates = (
   env: RuntimeReplica,
   inputs: readonly RoutedEntityInput[],

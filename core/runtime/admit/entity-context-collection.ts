@@ -55,7 +55,7 @@ export const describeEntityInputCommitShape = (input: EntityInputCommitShape): s
  * replica may share a Runtime frame, so the key binds the certified height as
  * well as the applying replica.
  */
-export const entityContextCommitKey = (appliedReplicaId: string, height: number): string =>
+const entityContextCommitKey = (appliedReplicaId: string, height: number): string =>
   `${appliedReplicaId.toLowerCase()}:${height}`;
 
 /** Commit one proposer-observed slice under the exact local replica and height that applied it. */

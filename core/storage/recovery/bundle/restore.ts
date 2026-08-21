@@ -1,4 +1,3 @@
-import { markRestoredOutputsDue } from '../../../runtime/delivery/pending';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { CheckpointRestoreOptions } from '../checkpoint';
 import type { PersistedFrameJournal } from '../../types';
@@ -105,6 +104,11 @@ export const restoreRuntimeFromBundles = async (
     if (options.readOnly) throw mismatch;
     await deps.failAfterCleanup(env, mismatch);
   }
-  if (!options.readOnly) markRestoredOutputsDue(env);
+  if (!options.readOnly && (env.pendingNetworkOutputs?.length ?? 0) > 0) {
+    throw new Error(
+      `RECOVERY_BUNDLE_UNDISPATCHED_OUTPUTS:${env.pendingNetworkOutputs!.length}:` +
+      'automatic resend is forbidden',
+    );
+  }
   return env;
 };

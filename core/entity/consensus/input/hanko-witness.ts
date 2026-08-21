@@ -12,9 +12,6 @@ import {
 } from '../../../account/consensus/flush';
 import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
 import {
-  accountFrameWithoutPostCommitHankos,
-} from '../../../account/settlement/witness-projection';
-import {
   requireCertifiedAccountFrameAck,
   requireCertifiedAccountFrameProposal,
 } from '../../../account/consensus/frame/phase-views';
@@ -87,31 +84,6 @@ export const normalizeProposedFrameCollectedSigs = (frame?: EntityFrame): void =
 
 export const isWitnessHashType = (type: HashType): type is HankoWitnessEntry['type'] =>
   type !== 'entityFrame' && type !== 'entityOutput';
-
-/**
- * Return the consensus payload before post-commit quorum witnesses are
- * attached. These exact Hanko fields are self-authenticating and cannot be
- * included in a digest signed by the same quorum without creating a cycle.
- */
-export const cloneAccountInputWithoutPostCommitHankos = <T extends AccountInput>(input: T): T => {
-  const unsigned = cloneIsolatedAccountInput(input);
-  const ack = accountInputAck(unsigned);
-  if (ack) {
-    delete ack.frameHanko;
-    if (ack.disputeSeal) delete ack.disputeSeal.hanko;
-  }
-  const proposal = accountInputProposal(unsigned);
-  if (proposal) {
-    proposal.frame = accountFrameWithoutPostCommitHankos(proposal.frame);
-    delete proposal.frameHanko;
-    if (proposal.disputeSeal) delete proposal.disputeSeal.hanko;
-  }
-  const disputeSeal = accountInputDisputeSeal(unsigned);
-  if (disputeSeal) delete disputeSeal.hanko;
-  const reseal = accountInputBoardReseal(unsigned);
-  if (reseal) delete reseal.frameHanko;
-  return unsigned;
-};
 
 const getTypedWitness = (
   witness: Map<string, HankoWitnessEntry>,

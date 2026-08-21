@@ -12,22 +12,6 @@ export const markLocalNumberedRegistrationTx = <T extends RegistrationRuntimeTx>
   return tx;
 };
 
-export const copyLocalNumberedRegistrationAuthorization = (
-  source: RuntimeTx,
-  target: RuntimeTx,
-): void => {
-  if (
-    (source.type === 'recordNumberedRegistrationIntent' ||
-      source.type === 'resolveNumberedRegistrationIntent') &&
-    target.type === source.type &&
-    (source as RegistrationRuntimeTx & { [LOCAL_NUMBERED_REGISTRATION]?: boolean })[
-      LOCAL_NUMBERED_REGISTRATION
-    ] === true
-  ) {
-    markLocalNumberedRegistrationTx(target as RegistrationRuntimeTx);
-  }
-};
-
 export const markRestoredNumberedRegistrationTxs = (runtimeTxs: RuntimeTx[]): void => {
   for (const tx of runtimeTxs) {
     if (tx.type === 'recordNumberedRegistrationIntent' || tx.type === 'resolveNumberedRegistrationIntent') {

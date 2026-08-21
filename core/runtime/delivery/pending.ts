@@ -1,4 +1,3 @@
-import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import type {
   DeliverableEntityInput,
@@ -6,25 +5,20 @@ import type {
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
 } from '../types';
-import { createStructuredLogger } from '../../support/logger';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
-import { getWallClockMs } from '../../support/time';
 import { validateDeliverableEntityInput } from '../delivery/topology/routing-validation';
-import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 import { computeProfileRouteHash } from '../../entity/profile/profile-signing';
 import { recoverDigestSignerAddress } from '../../account/crypto';
-import { ACCOUNT_PENDING_STALE_WARNING_MS } from '../../entity/scheduler/config/timing';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import {
   deliveryAccepted,
-  deliveryDeferred,
   deliveryQueued,
   requireDeliveryResult,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import { explainCrossJPairing, selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
+import { selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
 import {
   accountProposalSettledBySender,
   accountProposalEvidenceRank,
@@ -36,162 +30,7 @@ import {
 } from './identity';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 
-const routeLog = createStructuredLogger('network.route');
-
-const shortPairKey = (pairKey: string): string =>
-  `${keccakTextHash(pairKey).slice(0, 18)}:len=${pairKey.length}`;
-
-const summarizeAtomicUnitOutput = (
-  output: RoutedEntityInput,
-): Record<string, unknown> => {
-  const marker = output.atomicCrossJurisdictionPair;
-  const accountInputs = getEffectiveEntityInputTxs(output).flatMap(tx => {
-    if (tx.type !== 'accountInput') return [];
-    const proposal = accountInputProposal(tx.data);
-    const ack = accountInputAck(tx.data);
-    const pullOrders =
-      proposal?.frame.accountTxs.flatMap(accountTx =>
-        accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction
-          ? [`${accountTx.data.crossJurisdiction.leg}:${accountTx.data.crossJurisdiction.orderId.slice(-24)}`]
-          : [],
-      ) ?? [];
-    return [
-      {
-        kind: tx.data.kind,
-        from: tx.data.fromEntityId,
-        to: tx.data.toEntityId,
-        proposalHeight: proposal?.frame.height ?? null,
-        ackHeight: ack?.height ?? null,
-        pullOrders: pullOrders.slice(0, 6),
-        pullCount: pullOrders.length,
-      },
-    ];
-  });
-  return {
-    entityId: output.entityId,
-    targetRuntimeId: output.runtimeId,
-    entityTxTypes: [...new Set((output.entityTxs ?? []).map(tx => tx.type))],
-    sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
-    marker: marker ? { phase: marker.phase, pairKey: shortPairKey(marker.pairKey) } : null,
-    accountInputs,
-  };
-};
-
-const incompleteAtomicUnitLogAt = new Map<string, number>();
-const INCOMPLETE_ATOMIC_UNIT_LOG_INTERVAL_MS = 5_000;
-
-const completeAtomicUnitWaitingLogAt = new Map<string, number>();
-
-const logCompleteAtomicUnitWaiting = (
-  unit: { outputs: readonly RoutedEntityInput[] },
-  retryMeta: ReadonlyArray<Record<string, unknown>>,
-): void => {
-  if (!unit.outputs.some(output => isCrossJAdmissionProposal(output))) return;
-  const key = buildRouteOutputKey(unit.outputs[0]!);
-  const now = getWallClockMs();
-  if (now - (completeAtomicUnitWaitingLogAt.get(key) ?? 0) < INCOMPLETE_ATOMIC_UNIT_LOG_INTERVAL_MS) return;
-  completeAtomicUnitWaitingLogAt.set(key, now);
-  routeLog.info('crossj.atomic_complete_waiting', {
-    outputs: unit.outputs.map(summarizeAtomicUnitOutput),
-    retryMeta,
-  });
-};
-
-const logIncompleteAtomicUnitParked = (
-  env: RuntimeReplica,
-  unit: { outputs: readonly RoutedEntityInput[] },
-  allPending: readonly RoutedEntityInput[],
-): void => {
-  const marker = unit.outputs[0]?.atomicCrossJurisdictionPair;
-  const key = marker ? marker.pairKey : buildRouteOutputKey(unit.outputs[0]!);
-  const now = getWallClockMs();
-  const lastAt = incompleteAtomicUnitLogAt.get(key) ?? 0;
-  if (now - lastAt < INCOMPLETE_ATOMIC_UNIT_LOG_INTERVAL_MS) return;
-  incompleteAtomicUnitLogAt.set(key, now);
-  if (marker?.phase === 'ack') {
-    // ACK cohorts are born complete in one Runtime frame's outbox and are
-    // sent as a whole. A lone ack-marked leg
-    // therefore cannot exist under the pairwise-communication invariant; one
-    // here means a new splitter crept in upstream and this leg is wedged.
-    recordRuntimeSecurityIncident(env, {
-      domain: 'cross-j',
-      code: 'CROSS_J_ATOMIC_ACK_LEG_UNPAIRED',
-      source: 'local-consensus',
-      severity: 'critical',
-      summary: 'Atomic cross-j ACK leg observed without its sibling in the transport outbox',
-      entityId: unit.outputs[0]?.entityId ?? '',
-    });
-  }
-  const unitOutputs = new Set(unit.outputs);
-  routeLog.info('crossj.atomic_incomplete_parked', {
-    reason: marker
-      ? `explicit-${marker.phase}-group-size-${unit.outputs.length}`
-      : 'lone-cross-j-proposal',
-    outputs: unit.outputs.map(summarizeAtomicUnitOutput),
-    // The sibling this unit is waiting for should be another cross-j output in
-    // the same pending set. Listing them shows whether it is absent entirely
-    // (producer-side gap) or present with a diverging route set (pairing gap).
-    otherCrossJPending: allPending
-      .filter(output => !unitOutputs.has(output) && isCrossJAdmissionProposal(output))
-      .slice(0, 4)
-      .map(summarizeAtomicUnitOutput),
-    pairing: explainCrossJPairing(
-      allPending.filter(output => isCrossJAdmissionProposal(output)).slice(0, 6),
-    ),
-  });
-};
-
-const incompleteAtomicUnitRecoveryDeadline = (
-  unit: { outputs: readonly RoutedEntityInput[] },
-): number => {
-  const output = unit.outputs[0];
-  if (!output) return 0;
-  // A marker is assigned only after a complete pair has been formed. Seeing
-  // one marked leg alone therefore cannot be an ordinary adjacent-frame wait:
-  // a splitter, corrupt snapshot, or partial mutation destroyed an atomic
-  // transport unit. Wake immediately so the applying loop fails loud.
-  if (output.atomicCrossJurisdictionPair) return 0;
-  const timestamp = output.sourceRuntimeFrame?.timestamp;
-  if (typeof timestamp !== 'number' || !Number.isSafeInteger(timestamp) || timestamp < 0) return 0;
-  const deadline = timestamp + ACCOUNT_PENDING_STALE_WARNING_MS;
-  return Number.isSafeInteger(deadline) ? deadline : 0;
-};
-
-const assertIncompleteAtomicUnitRecoverable = (
-  env: RuntimeReplica,
-  unit: { outputs: readonly RoutedEntityInput[] },
-  nowMs: number,
-): void => {
-  const output = unit.outputs[0];
-  if (!output) throw new Error('CROSS_J_ATOMIC_COHORT_EMPTY');
-  const marker = output.atomicCrossJurisdictionPair;
-  if (marker) {
-    throw new Error(
-      `CROSS_J_ATOMIC_COHORT_ORPHANED:${marker.phase}:${shortPairKey(marker.pairKey)}`,
-    );
-  }
-  const deadline = incompleteAtomicUnitRecoveryDeadline(unit);
-  if (deadline > nowMs) return;
-  recordRuntimeSecurityIncident(env, {
-    domain: 'cross-j',
-    code: 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
-    source: 'local-consensus',
-    severity: 'critical',
-    summary: 'Incomplete cross-j proposal cohort exceeded the Account pending-frame liveness window',
-    entityId: output.entityId,
-  });
-  throw new Error(
-    `CROSS_J_ATOMIC_COHORT_RECOVERY_EXPIRED:` +
-    `sourceHeight=${String(output.sourceRuntimeFrame?.height)}:` +
-    `deadline=${deadline}:now=${nowMs}`,
-  );
-};
-
 export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
-const NETWORK_RETRY_BASE_MS = 1_000;
-// Best-effort delivery: one short exponential cap for every lane keeps
-// bilateral and Entity-consensus liveness through a normal peer restart.
-const NETWORK_RETRY_MAX_MS = 4_000;
 
 export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
   getEffectiveEntityInputTxs(output).some(tx => {
@@ -462,48 +301,6 @@ export type RuntimeOutputRoutingDeps = {
   ): string | null;
 };
 
-const getDeferredNetworkMeta = (
-  env: RuntimeReplica,
-  deps: RuntimeOutputRoutingDeps,
-): NonNullable<NonNullable<RuntimeReplica['infrastructure']>['deferredNetworkMeta']> => {
-  const state = deps.ensureRuntimeInfrastructure(env);
-  if (!state.deferredNetworkMeta) {
-    state.deferredNetworkMeta = new Map();
-  }
-  return state.deferredNetworkMeta;
-};
-
-export const reportRetryableRouteDefer = (
-  env: RuntimeReplica,
-  deps: RuntimeOutputRoutingDeps,
-  output: RoutedEntityInput,
-  details: Record<string, unknown>,
-): void => {
-  const attempts = (getDeferredNetworkMeta(env, deps).get(buildRouteOutputKey(output))?.attempts ?? 0) + 1;
-  const payload = { ...details, attempts };
-  // First defer plus power-of-two retries. Steady-state backpressure must not
-  // serialize every pending output on every Runtime frame.
-  if (attempts === 1 || (attempts & (attempts - 1)) === 0) {
-    routeLog.debug('output.deferred', {
-      ...payload,
-      entityId: output.entityId,
-      signerId: output.signerId,
-      runtimeId: output.runtimeId ?? null,
-      sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
-      txTypes: (output.entityTxs ?? []).map(tx => tx.type),
-    });
-    env.info?.('network', 'ROUTE_SEND_DEFERRED', payload);
-  }
-};
-
-const getRuntimeNowMs = (env: RuntimeReplica): number => env.state.timestamp ?? 0;
-
-// Retry metadata must stay in one clock domain. Deterministic scenarios own
-// logical time explicitly; production transport retries are wall-clock I/O.
-// Mixing Unix time into a scenario retry makes the envelope unreachable forever.
-const getNetworkRetryNowMs = (env: RuntimeReplica): number =>
-  env.scenarioMode ? getRuntimeNowMs(env) : getWallClockMs();
-
 export const toDeliverableEntityInput = (
   output: RoutedEntityInput,
   targetRuntimeId: string,
@@ -529,12 +326,7 @@ export const buildRoutingDeliveryResult = (input: {
   localCount: number;
   pendingCount: number;
 }): DeliveryResult => {
-  if (input.pendingCount > 0) {
-    return deliveryDeferred({
-      outcome: 'deferred',
-      code: 'ROUTE_DEFERRED_OUTPUTS',
-    });
-  }
+  if (input.pendingCount > 0) throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${input.pendingCount}`);
   if (input.remoteCount > 0 && input.localCount > 0) {
     return deliveryAccepted('ROUTE_REMOTE_AND_LOCAL_ACCEPTED');
   }
@@ -600,80 +392,6 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
   }
 };
 const gossipBoardSignerMemo = new Map<string, { routeHash: string; runtimeSignature: string; signerIds: string[] }>();
-
-export const splitPendingOutputsByRetryWindow = (
-  env: RuntimeReplica,
-  pending: RoutedEntityInput[],
-  deps: RuntimeOutputRoutingDeps,
-  graph: PreparedOutputGraph = createPreparedOutputGraph(),
-): { ready: RoutedEntityInput[]; waiting: RoutedEntityInput[] } => {
-  if (pending.length === 0) return { ready: [], waiting: [] };
-  const nowMs = getNetworkRetryNowMs(env);
-  const meta = getDeferredNetworkMeta(env, deps);
-  const ready: RoutedEntityInput[] = [];
-  const waiting: RoutedEntityInput[] = [];
-  const orderedPending = buildPendingNetworkOutputs(pending, graph);
-  for (const unit of groupAtomicCrossJAdmissionOutputs(orderedPending)) {
-    if (unit.atomic) {
-      if (!unit.complete) {
-        logIncompleteAtomicUnitParked(env, unit, orderedPending);
-        assertIncompleteAtomicUnitRecoverable(env, unit, nowMs);
-        waiting.push(...unit.outputs);
-        continue;
-      }
-      const due = unit.outputs.some(output => {
-        const entry = meta.get(graph.prepare(output).routeKey);
-        return !entry || entry.nextRetryAt <= nowMs;
-      });
-      if (due) {
-        ready.push(...unit.outputs);
-      } else {
-        logCompleteAtomicUnitWaiting(unit, unit.outputs.map(output => ({
-          key: graph.prepare(output).routeKey.slice(0, 160),
-          nextRetryInMs: (meta.get(graph.prepare(output).routeKey)?.nextRetryAt ?? 0) - nowMs,
-          attempts: meta.get(graph.prepare(output).routeKey)?.attempts ?? 0,
-        })));
-        waiting.push(...unit.outputs);
-      }
-      continue;
-    }
-    const output = unit.outputs[0]!;
-    const entry = meta.get(graph.prepare(output).routeKey);
-    if (!entry || entry.nextRetryAt <= nowMs) ready.push(output);
-    else waiting.push(output);
-  }
-  return { ready, waiting };
-};
-
-export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeOutputRoutingDeps): number | null => {
-  const pending = env.pendingNetworkOutputs ?? [];
-  if (pending.length === 0) return null;
-  const meta = getDeferredNetworkMeta(env, deps);
-  let nextRetryAt = Infinity;
-  const atomicUnits = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending));
-  for (const unit of atomicUnits) {
-    if (unit.atomic && !unit.complete) {
-      nextRetryAt = Math.min(nextRetryAt, incompleteAtomicUnitRecoveryDeadline(unit));
-    }
-  }
-  for (const unit of atomicUnits) {
-    if (unit.atomic && !unit.complete) continue;
-    for (const output of unit.outputs) {
-      nextRetryAt = Math.min(nextRetryAt, meta.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0);
-    }
-  }
-  return Number.isFinite(nextRetryAt) ? nextRetryAt : null;
-};
-
-export const hasReadyPendingNetworkOutputs = (
-  env: RuntimeReplica,
-  deps: RuntimeOutputRoutingDeps,
-  now = getNetworkRetryNowMs(env),
-): boolean => {
-  const nextRetryAt = getNextNetworkRetryTimestamp(env, deps);
-  const comparableNow = env.scenarioMode ? getNetworkRetryNowMs(env) : now;
-  return nextRetryAt !== null && nextRetryAt <= comparableNow;
-};
 
 const outputDeliveryPriority = (output: RoutedEntityInput): number => {
   if (output.proposedFrame) return 0;
@@ -783,48 +501,5 @@ export const buildPendingNetworkOutputs = (
  * Per leg on purpose: one settled leg left behind makes its cohort ambiguous
  * forever, and a settled leg has no successor state to reach.
  */
-/** A restarted Runtime retries every restored pending output at once. */
-export const markRestoredOutputsDue = (env: RuntimeReplica): void => {
-  for (const meta of env.infrastructure?.deferredNetworkMeta?.values() ?? []) meta.nextRetryAt = 0;
-};
-
 export const pruneSettledOutputs = (env: RuntimeReplica, outputs: RoutedEntityInput[]): RoutedEntityInput[] =>
-  outputs.filter(output => {
-    if (!accountProposalSettledBySender(env, output)) return true;
-    env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
-    return false;
-  });
-
-export const rescheduleDeferredOutputs = (
-  env: RuntimeReplica,
-  attemptedPending: RoutedEntityInput[],
-  failed: RoutedEntityInput[],
-  waiting: RoutedEntityInput[],
-  deps: RuntimeOutputRoutingDeps,
-  graph: PreparedOutputGraph = createPreparedOutputGraph(),
-): RoutedEntityInput[] => {
-  const meta = getDeferredNetworkMeta(env, deps);
-  const failedKeys = new Set(failed.map(output => graph.prepare(output).routeKey));
-
-  for (const output of attemptedPending) {
-    const key = graph.prepare(output).routeKey;
-    if (!failedKeys.has(key)) {
-      meta.delete(key);
-    }
-  }
-
-  const nowMs = getNetworkRetryNowMs(env);
-  for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed, graph))) {
-    if (!unit.complete) continue;
-    // Cross-j Account cohorts retry as one envelope. A bounded retry preserves
-    // liveness without splitting money legs or spinning every Runtime tick.
-    for (const output of unit.outputs) {
-      const key = graph.prepare(output).routeKey;
-      const attempts = (meta.get(key)?.attempts ?? 0) + 1;
-      const delayMs = Math.min(NETWORK_RETRY_MAX_MS, NETWORK_RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 5));
-      meta.set(key, { attempts, nextRetryAt: nowMs + delayMs });
-    }
-  }
-
-  return buildPendingNetworkOutputs([...failed, ...waiting], graph);
-};
+  outputs.filter(output => !accountProposalSettledBySender(env, output));

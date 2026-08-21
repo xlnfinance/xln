@@ -183,8 +183,8 @@ export type EntityInputDeliveryTransport = 'direct' | 'relay';
 export type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
 
 const normalizeProfileHeartbeatMs = (value: number | undefined, gossipSet: P2PGossipSet): number => {
-  const fallback = gossipSet === 'default' ? HUB_PROFILE_HEARTBEAT_MS : USER_PROFILE_HEARTBEAT_MS;
-  if (value === undefined || !Number.isFinite(value) || value <= 0) return fallback;
+  const defaultValue = gossipSet === 'default' ? HUB_PROFILE_HEARTBEAT_MS : USER_PROFILE_HEARTBEAT_MS;
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return defaultValue;
   return Math.max(1_000, Math.floor(value));
 };
 

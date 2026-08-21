@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 
 import {
-  ACCOUNT_PENDING_RESEND_AFTER_MS,
   HUB_REBALANCE_INTERVAL_MS,
   initCrontab,
   scheduleHook,
@@ -116,7 +115,7 @@ describe('runtime scheduled wake', () => {
     expect(state.height).toBe(0);
   });
 
-  test('a pending account frame does not activate the unrelated one-second hub rebalance task', () => {
+  test('a pending account frame schedules no automatic resend or unrelated hub wake', () => {
     const id = entityId('20');
     const proposer = signerId('30');
     const counterparty = entityId('21');
@@ -127,15 +126,8 @@ describe('runtime scheduled wake', () => {
     state.accounts.set(counterparty, account);
     const replica = makeReplica(state, proposer, true);
 
-    expect(entityNeedsPeriodicWake(replica)).toBe(true);
+    expect(entityNeedsPeriodicWake(replica)).toBe(false);
     expect(collectDueScheduledWakeJobs(state, HUB_REBALANCE_INTERVAL_MS, true)).toEqual([]);
-    expect(collectDueScheduledWakeJobs(state, ACCOUNT_PENDING_RESEND_AFTER_MS, true)).toEqual([
-      {
-        kind: 'task',
-        id: 'maintainPendingAccounts',
-        dueAt: ACCOUNT_PENDING_RESEND_AFTER_MS,
-      },
-    ]);
   });
 
   test('real rebalance demand still activates the one-second hub task', () => {

@@ -46,12 +46,7 @@ import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '.
 
 import { HTLC, LIMITS } from '../../../config/constants';
 
-import {
-  ACCOUNT_PENDING_RESEND_AFTER_MS,
-  emitCommittedPendingFrameWarnings,
-  executeCrontab,
-  initCrontab,
-} from '../../../entity/scheduler';
+import { executeCrontab, initCrontab } from '../../../entity/scheduler';
 import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';

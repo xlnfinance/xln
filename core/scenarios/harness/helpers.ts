@@ -12,7 +12,6 @@ import { getTokenInfo } from '../../account/utils';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { drainJWatcherBacklog } from '../../jurisdiction/adapter/operations/backlog-drain';
-import { buildRouteOutputKey } from '../../runtime/delivery/topology/output-routing';
 import { accountHasProposableMempool } from '../../entity/consensus/account/mempool-eligibility';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 
@@ -119,24 +118,6 @@ export const advanceScenarioTime = (env: RuntimeReplica, stepMs?: number, force:
   const step = Math.max(1, stepMs ?? getScenarioTickMs(env));
   // env.timestamp is typed as number - add step directly
   env.state.timestamp = (env.state.timestamp || 0) + step;
-};
-
-export const advanceScenarioToNextNetworkRetry = (env: RuntimeReplica): number | null => {
-  const pending = env.pendingNetworkOutputs ?? [];
-  if (pending.length === 0) return null;
-  const retryMeta = env.infrastructure?.deferredNetworkMeta;
-  if (!retryMeta) return null;
-
-  let nextRetryAt = Infinity;
-  for (const output of pending) {
-    const retry = retryMeta.get(buildRouteOutputKey(output));
-    // Missing metadata means this envelope is ready now; do not jump past it.
-    if (!retry) return null;
-    nextRetryAt = Math.min(nextRetryAt, retry.nextRetryAt);
-  }
-  if (!Number.isFinite(nextRetryAt)) return null;
-  env.state.timestamp = Math.max(env.state.timestamp ?? 0, nextRetryAt);
-  return nextRetryAt;
 };
 
 export async function waitScenario(env: RuntimeReplica, ms: number): Promise<void> {
@@ -530,9 +511,6 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
-    // Retained reliable outputs release on a retry deadline, not on more ticks.
-    // Jump every cycle that still has network backlog: waiting for inputs/
-    // inbox to clear first deadlocks catch-up after offline restore.
     for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus)
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
@@ -553,9 +531,6 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     // just converged. Advancing after the terminal cycle leaves live state
     // ahead of its WAL and makes an immediate restart appear divergent.
     advanceScenarioTime(env);
-    if (pendingNetwork > 0) {
-      advanceScenarioToNextNetworkRetry(env);
-    }
   }
   throwScenarioConvergenceTimeout(env, 'converge', maxCycles);
 }
@@ -635,9 +610,6 @@ export async function convergeWithOffline(
     }
     if (!hasWork) return;
     advanceScenarioTime(env);
-    if (pendingNetwork > 0) {
-      advanceScenarioToNextNetworkRetry(env);
-    }
   }
   throwScenarioConvergenceTimeout(env, `convergeWithOffline:${reason}`, maxCycles);
 }
@@ -779,13 +751,6 @@ export function assertBilateralSync(
 export async function processJEvents(env: RuntimeReplica): Promise<void> {
   const process = await getProcess();
   await drainJWatcherBacklog(env, async currentEnv => {
-    // Scenario time is deterministic and does not advance while the drain is
-    // waiting inside one sync step. A validator that reconnects with durable
-    // reliable outputs in backoff would otherwise be retried forever at the
-    // same timestamp and falsely reported as a consensus stall. Advance only
-    // to the exact persisted retry boundary; production runtimes continue to
-    // use wall-clock/tick scheduling and no envelope or retry state is changed.
-    advanceScenarioToNextNetworkRetry(currentEnv);
     return process(currentEnv);
   });
 }

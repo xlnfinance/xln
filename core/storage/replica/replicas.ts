@@ -78,7 +78,7 @@ export const buildReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup =>
  * full validation; ordinary WAL frames bind only already-certified heads and
  * are replayed from that checkpoint after a crash.
  */
-export const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
+const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
   const lookup: StorageReplicaLookup = new Map();
   for (const [replicaKey, replica] of [...env.state.eReplicas.entries()].sort(([left], [right]) => (
     compareStableText(String(left).toLowerCase(), String(right).toLowerCase())

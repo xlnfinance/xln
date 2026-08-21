@@ -81,8 +81,8 @@ export const HLT_ECONOMY_FLAGS = [
   '--payment-amount-min', '--payment-amount-max',
 ] as const;
 
-const parsePositiveBigint = (raw: string | undefined, fallback: bigint, code: string): bigint => {
-  if (raw === undefined) return fallback;
+const parsePositiveBigint = (raw: string | undefined, defaultValue: bigint, code: string): bigint => {
+  if (raw === undefined) return defaultValue;
   try {
     const value = BigInt(raw);
     if (value <= 0n) throw new Error('non-positive');

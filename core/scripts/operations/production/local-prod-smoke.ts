@@ -158,8 +158,6 @@ const PROFILING_ENV_KEYS = [
   'XLN_STORAGE_VERBOSE', 'XLN_RUNTIME_OP_COUNTERS',
   'XLN_LOG_LEVEL', 'XLN_LOG_SCOPES',
   'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE', 'XLN_HEAVY_LOGS',
-  'XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS',
-  'XLN_ACCOUNT_PENDING_RESEND_AFTER_MS',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -241,8 +239,7 @@ type RestartProcessIds = Readonly<{ before: number; after: number }>;
 
 /**
  * Population flags for HLT. When `XLN_HLT_USERS` is set the run is described as
- * an economy and every derived quantity comes from it; the raw lane spelling is
- * left for the legacy schedule ladder and the cross-j single-swap workloads.
+ * an economy and every derived quantity comes from it.
  */
 const hltEconomyArgs = (): string[] => {
   const users = process.env['XLN_HLT_USERS'];

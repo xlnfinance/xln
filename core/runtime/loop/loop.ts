@@ -143,7 +143,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     waitForRuntimeProcessingIdle: deps.waitForRuntimeProcessingIdle,
     hasRuntimeWork,
     getNextWallClockWakeTimestamp: env =>
-      resolveNextWallClockWakeTimestamp(env, workDeps),
+      resolveNextWallClockWakeTimestamp(env),
   });
 
   const closeRuntimeDb = createRuntimeDbCloser(lifecycle, routing);

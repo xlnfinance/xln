@@ -29,21 +29,16 @@ export type RadixMerkleResult = {
   root: string;
 };
 
-export type RadixMerkleRootKind = 'empty' | 'branch' | 'leaf';
+type RadixMerkleRootKind = 'empty' | 'branch' | 'leaf';
 
-export type RadixMerkleRootRef = {
-  kind: RadixMerkleRootKind;
-  path: number[];
-};
-
-export type RadixMerkleMaterializedLeaf = {
+type RadixMerkleMaterializedLeaf = {
   path: number[];
   key: string;
   valueHash: string;
   hash: string;
 };
 
-export type RadixMerkleMaterializedBranch = {
+type RadixMerkleMaterializedBranch = {
   path: number[];
   hash: string;
   children: Array<{
@@ -146,10 +141,7 @@ const hexToBytes = (hex: string): Uint8Array => {
   return output;
 };
 
-export const isRadixMerkleRadix = (value: unknown): value is RadixMerkleRadix =>
-  RADIX_MERKLE_RADICES.some(radix => radix === value);
-
-export const radixMerkleBitsPerSlot = (radix: RadixMerkleRadix): number =>
+const radixMerkleBitsPerSlot = (radix: RadixMerkleRadix): number =>
   Math.log2(radix);
 
 const radixTag = (radix: RadixMerkleRadix): number => radix === 256 ? 0xff : radix;
@@ -213,12 +205,6 @@ const branchHash = (
   children.sort((left, right) => left[0] - right[0]),
   hashAlgorithm,
 );
-
-export const computeRadixMerkleBranchHash = (
-  radix: RadixMerkleRadix,
-  children: Array<[number, string]>,
-  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
-): string => branchHash(radix, children, hashAlgorithm);
 
 /** Dense slot form used by the persistent Patricia hot path; no sort is needed. */
 export const computeRadixMerkleBranchHashFromSlots = (
@@ -309,7 +295,7 @@ export const computeRadixMerkleEdgeHash = (
     : childNodeHash;
 };
 
-export const computeRadixMerkleRootHash = (
+const computeRadixMerkleRootHash = (
   radix: RadixMerkleRadix,
   rootKind: RadixMerkleRootKind,
   rootPath: number[],
@@ -656,19 +642,6 @@ export const buildHexKeyedMerkle = (
   options?: RadixMerkleOptions,
 ): RadixMerkleResult => {
   return buildRadixMerkle(
-    leaves.map((leaf) => ({
-      key: hexToBytes(leaf.hexKey),
-      value: leaf.value,
-    })),
-    options,
-  );
-};
-
-export const buildHexKeyedMerkleMaterialized = (
-  leaves: Array<{ hexKey: string; value: Uint8Array }>,
-  options?: RadixMerkleOptions,
-): RadixMerkleMaterializedResult => {
-  return buildRadixMerkleMaterialized(
     leaves.map((leaf) => ({
       key: hexToBytes(leaf.hexKey),
       value: leaf.value,

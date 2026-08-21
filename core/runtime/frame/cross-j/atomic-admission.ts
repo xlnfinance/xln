@@ -78,14 +78,6 @@ const coalesceExactAtomicProposalRetries = (
   return inputs.filter((_input, index) => !dropped.has(index));
 };
 
-export const selectPotentialAtomicCrossJInputIndexes = (
-  inputs: readonly RoutedEntityInput[],
-): Set<number> =>
-  new Set(
-    selectPotentialCrossJAccountInputPairs(inputs)
-      .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
-  );
-
 const applyAtomicCrossJPairMarkers = (
   inputs: readonly RoutedEntityInput[],
   markers: ReadonlyMap<number, AtomicCrossJPairMarker>,

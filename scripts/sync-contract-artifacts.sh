@@ -71,7 +71,7 @@ choose_supported_node() {
     "$(command -v node || true)"
   )
 
-  local candidate major newest_bin="" newest_major=0
+  local candidate major
   for candidate in "${candidates[@]}"; do
     if [[ -z "$candidate" || ! -x "$candidate" ]]; then
       continue
@@ -84,19 +84,7 @@ choose_supported_node() {
       echo "$candidate"
       return 0
     fi
-    # Remember the newest untested-but-recent runtime as a fallback, so a box
-    # that only ships Node 25/26 still builds contracts.
-    if (( major > newest_major )); then
-      newest_major="$major"
-      newest_bin="$candidate"
-    fi
   done
-
-  if [[ -n "$newest_bin" ]]; then
-    echo "[contracts-sync] no Node $(echo "$KNOWN_GOOD_NODE_MAJORS" | tr ' ' '/') found; using Node $newest_major at $newest_bin" >&2
-    echo "$newest_bin"
-    return 0
-  fi
 
   echo "[contracts-sync] ERROR: Hardhat needs Node $MIN_NODE_MAJOR or newer. Current node: $(node -v 2>/dev/null || echo missing). Set XLN_NODE_BIN to a supported node binary." >&2
   return 1

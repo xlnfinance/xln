@@ -11,17 +11,6 @@ export const markLocalEntityProviderActionRuntimeTx = <T extends RetryActionTx |
   return tx;
 };
 
-export const copyLocalEntityProviderActionRuntimeTxAuthorization = (
-  source: RuntimeTx,
-  target: RuntimeTx,
-): void => {
-  if (
-    (source.type === 'retryEntityProviderAction' || source.type === 'recordEntityProviderActionSubmitResult') &&
-    source.type === target.type &&
-    (source as RuntimeTx & { [LOCAL_ACTION_SUBMIT_RUNTIME_TX]?: boolean })[LOCAL_ACTION_SUBMIT_RUNTIME_TX]
-  ) markLocalEntityProviderActionRuntimeTx(target as RetryActionTx | RecordActionResultTx);
-};
-
 export const markRestoredEntityProviderActionRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
   for (const runtimeTx of runtimeTxs) {
     if (

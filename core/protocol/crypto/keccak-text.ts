@@ -46,12 +46,6 @@ export const keccakTextHash = (text: string): string => {
   return toHexDigest(keccak256Bytes(bytes));
 };
 
-/** Lowercase `0x`-prefixed keccak256 of raw bytes. */
-export const keccakBytesHash = (bytes: Uint8Array): string => {
-  countOp('keccak.bytes', bytes.length);
-  return toHexDigest(keccak256Bytes(bytes));
-};
-
 const HEX_NIBBLE = new Int8Array(128).fill(-1);
 for (let value = 0; value < 16; value += 1) {
   HEX_NIBBLE['0123456789abcdef'.charCodeAt(value)] = value;
@@ -59,7 +53,7 @@ for (let value = 0; value < 16; value += 1) {
 }
 
 /** Bytes of a `0x`-prefixed even-length hex string; throws like ethers.getBytes on malformed input. */
-export const hexToBytes = (hex: string): Uint8Array => {
+const hexToBytes = (hex: string): Uint8Array => {
   if (typeof hex !== 'string' || hex.length % 2 !== 0 || hex.charCodeAt(0) !== 0x30 || (hex.charCodeAt(1) | 0x20) !== 0x78) {
     throw new Error('HEX_BYTES_INVALID');
   }

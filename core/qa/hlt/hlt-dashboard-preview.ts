@@ -141,8 +141,8 @@ const requireMax = (value: number, maximum: number, code: string): number => {
   return value;
 };
 
-const parsePositiveBigintParam = (raw: string | null, fallback: bigint, code: string): bigint => {
-  if (raw === null) return fallback;
+const parsePositiveBigintParam = (raw: string | null, defaultValue: bigint, code: string): bigint => {
+  if (raw === null) return defaultValue;
   let value: bigint;
   try {
     value = BigInt(raw);

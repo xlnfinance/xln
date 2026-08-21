@@ -71,6 +71,13 @@ const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRunti
   }],
 };
 
+// This exact declaration lives in owner-frozen protocol source. Removing its
+// export requires an explicit frozen-core cutover; no broader file allowance
+// is permitted, and the stale check below forces deletion after that cutover.
+const FROZEN_CORE_SURFACE = new Set([
+  'core/types/jurisdiction-events.ts::type:JBlockFinalized',
+]);
+
 type NamedBinding = { localName: string; reexport: boolean };
 
 export const findNamedBinding = (source: string, specifier: string, symbol: string): NamedBinding | null => {
@@ -173,7 +180,10 @@ const run = (): void => {
     for (const index of indexes) provenEntries.add(`${file}[${index}]`);
     return indexes.length > 0;
   });
-  const runtimeDebt = runtimeActual.filter(key => !externalRuntime.includes(key));
+  const frozenSurface = runtimeActual.filter(key => FROZEN_CORE_SURFACE.has(key));
+  const runtimeDebt = runtimeActual.filter(
+    key => !externalRuntime.includes(key) && !FROZEN_CORE_SURFACE.has(key),
+  );
   const nonRuntimeActual = actual.filter(key => !key.startsWith('core/'));
   const errors = [
     ...runtimeDebt.map(key => `UNUSED_RUNTIME_SURFACE:${key}`),
@@ -183,6 +193,9 @@ const run = (): void => {
         return provenEntries.has(entry) ? [] : [`STALE_EXTERNAL_RUNTIME_PROOF:${entry}`];
       }),
     ),
+    ...[...FROZEN_CORE_SURFACE]
+      .filter(key => !frozenSurface.includes(key))
+      .map(key => `STALE_FROZEN_CORE_SURFACE:${key}`),
     ...nonRuntimeActual.map(key => `UNUSED_NON_RUNTIME_SURFACE:${key}`),
   ];
   if (errors.length > 0) {

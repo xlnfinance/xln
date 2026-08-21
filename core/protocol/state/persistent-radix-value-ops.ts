@@ -59,7 +59,7 @@ export const radixBytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
   return true;
 };
 
-export const radixCommonPrefixLength = (left: readonly number[], right: readonly number[]): number => {
+const radixCommonPrefixLength = (left: readonly number[], right: readonly number[]): number => {
   const limit = Math.min(left.length, right.length);
   let index = 0;
   while (index < limit && left[index] === right[index]) index += 1;

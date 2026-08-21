@@ -136,6 +136,3 @@ export const x25519PublicKey = (privateKey: Uint8Array): Uint8Array => {
 
 /** Fresh random X25519 private scalar (clamping happens inside the ladder). */
 export const x25519RandomSecretKey = (): Uint8Array => x25519.utils.randomSecretKey();
-
-/** Exposed for tests: which backend is active. */
-export const x25519Backend = (): 'node' | 'noble' => (nodeCrypto ? 'node' : 'noble');

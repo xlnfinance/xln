@@ -5,7 +5,6 @@
  */
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
-import { restoreDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
   authorizeRestoredRuntimeInput,
@@ -103,11 +102,6 @@ const installRestoredRuntimeFrame = async (
     ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
     : { runtimeTxs: [], entityInputs: [] };
   env.pendingNetworkOutputs = payloads.runtimeOutputs ?? [];
-  restoreDurableOutputRetryState(
-    env,
-    frame.runtimeOutputRetryState ?? [],
-    payloads.runtimeOutputs ?? [],
-  );
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
   if (payloads.runtimeMachine) {
     await assertCertifiedRegistrationEvidenceStore(env);

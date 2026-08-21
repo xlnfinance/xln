@@ -160,7 +160,6 @@ const runtimeEvidence = (
   runtimeEntityInputs: response.queues.runtimeEntityInputs.count,
   runtimeTxs: response.queues.runtimeTxs.count,
   runtimeJInputs: response.queues.runtimeJInputs.count,
-  retryEntries: response.queues.retryEntries.count,
   pendingAccountFrames: response.queues.pendingAccountFrames.count,
 });
 

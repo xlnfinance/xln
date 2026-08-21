@@ -637,10 +637,6 @@ interface RuntimeInfrastructure {
     deferredCount: number;
     escalated: boolean;
   }>;
-  deferredNetworkMeta?: Map<string, {
-    attempts: number;
-    nextRetryAt: number;
-  }>;
   verifiedProfileRoutes?: Map<string, {
     runtimeId: string;
     runtimeSignerId: string;

@@ -59,7 +59,7 @@ const inboundSettlementWitnesses = (txs: unknown): Array<Record<string, unknown>
   return witnesses;
 };
 
-export const canonicalAccountFrameCommitment = (
+const canonicalAccountFrameCommitment = (
   value: unknown,
 ): Record<string, unknown> => {
   const frame = toRecord(value);

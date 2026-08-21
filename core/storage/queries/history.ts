@@ -50,9 +50,6 @@ export const buildRecoveryJournalFromStorageFrame = (
   ...(frame.runtimeOutputRefs?.length
     ? { runtimeOutputRefs: [...frame.runtimeOutputRefs] }
     : {}),
-  ...(frame.runtimeOutputRetryState?.length
-    ? { runtimeOutputRetryState: structuredClone(frame.runtimeOutputRetryState) }
-    : {}),
   ...(payloads.runtimeMachine
     ? { runtimeMachine: payloads.runtimeMachine }
     : {}),
@@ -130,7 +127,7 @@ export type PersistedAccountSwapHistoryPage = Readonly<{
   nextCursor: Readonly<{ height: number; offerId: string }> | null;
 }>;
 
-export type PersistedAccountSwapLifecycle = Readonly<{
+type PersistedAccountSwapLifecycle = Readonly<{
   offerId: string;
   giveTokenId: number;
   wantTokenId: number;
@@ -146,7 +143,7 @@ export type PersistedAccountSwapLifecycle = Readonly<{
   resolves: readonly PersistedAccountSwapResolve[];
 }>;
 
-export type PersistedAccountSwapResolve = Readonly<{
+type PersistedAccountSwapResolve = Readonly<{
   fillRatio: number;
   cancelRemainder: boolean;
   height: number;
@@ -292,7 +289,7 @@ export const readAccountFrameHistory = async (
  * map: if the account history is larger than the safe inspection window, it
  * fails loudly until a caller uses an indexed archival reader.
  */
-export const readAccountSwapHistoryPage = async (
+const readAccountSwapHistoryPage = async (
   deps: CertifiedHistoryReadDeps,
   env: RuntimeReplica,
   entityId: string,

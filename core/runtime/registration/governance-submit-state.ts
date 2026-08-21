@@ -235,14 +235,6 @@ export const markLocalGovernanceResultRuntimeTx = <T extends GovernanceResultTx>
   return tx;
 };
 
-export const copyLocalGovernanceResultAuthorization = (source: RuntimeTx, target: RuntimeTx): void => {
-  if (
-    source.type === 'recordGovernanceJSubmitResult' &&
-    target.type === source.type &&
-    (source as RuntimeTx & { [LOCAL_GOVERNANCE_RESULT]?: boolean })[LOCAL_GOVERNANCE_RESULT]
-  ) markLocalGovernanceResultRuntimeTx(target);
-};
-
 export const markRestoredGovernanceResultRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
   for (const tx of runtimeTxs) {
     if (tx.type === 'recordGovernanceJSubmitResult') markLocalGovernanceResultRuntimeTx(tx);

@@ -57,12 +57,8 @@ import {
   validateStorageFrameRecordValue,
 } from '../../../storage/schema/authoritative-schema';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
-import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { buildRouteOutputKey } from '../../../runtime/delivery/topology/output-routing';
-import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import type { StorageEntityCoreDoc, RuntimeFrame } from '../../../storage/types';
-import type { DeliverableEntityInput } from '../../../runtime/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import {
@@ -989,7 +985,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('restores the bounded transport outbox from the latest committed frame', async () => {
+  test('persists the bounded transport outbox and refuses automatic restore delivery', async () => {
     const seed = `storage-transport-outbox ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -1028,69 +1024,50 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    const pendingOutput = {
-      runtimeId: `0x${'71'.repeat(20)}`,
-      entityId: `0x${'72'.repeat(32)}`,
-      signerId: `0x${'73'.repeat(20)}`,
-      sourceRuntimeFrame: { height: env.state.height, timestamp: env.state.timestamp },
-      proposedFrame: {
-        height: 22,
-        parentFrameHash: `0x${'74'.repeat(32)}`,
-        stateRoot: `0x${'75'.repeat(32)}`,
-        authorityRoot: `0x${'76'.repeat(32)}`,
-        timestamp: 22,
-        hash: `0x${'77'.repeat(32)}`,
-        txs: [],
-        events: [],
-        entityContext: {
-          version: 1,
-          proposerReplicaId: `0x${'72'.repeat(32)}:0x${'73'.repeat(20)}`,
-          entityId: `0x${'72'.repeat(32)}`,
-          proposerSignerId: `0x${'73'.repeat(20)}`,
-          parentFrameHash: `0x${'74'.repeat(32)}`,
-          height: 22,
-          gossipProfiles: [],
-          peerAssertions: [],
-          htlc: { version: 1, entries: [], originated: [] },
-        },
-        leader: { proposerSignerId: `0x${'73'.repeat(20)}`, view: 0 },
-        hashesToSign: buildEntityHashesToSign(
-          `0x${'72'.repeat(32)}`,
-          22,
-          `0x${'77'.repeat(32)}`,
-        ),
-        collectedSigs: new Map(),
-      },
-    } satisfies DeliverableEntityInput;
-    const retryKey = buildRouteOutputKey(pendingOutput);
-    const persistedFutureRetryAt = 8_000_000_000_000;
-    env.pendingNetworkOutputs = [pendingOutput];
-    env.infrastructure ??= {};
-    env.infrastructure.deferredNetworkMeta = new Map([[
-      retryKey,
-      { attempts: 6, nextRetryAt: persistedFutureRetryAt },
-    ]]);
-    const secondSigner = deriveSignerAddressSync(seed, '2').toLowerCase();
-    registerSignerKey(env, secondSigner, deriveSignerKeySync(seed, '2'));
-    const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
-        entityId: secondEntityId,
-        signerId: secondSigner,
-        data: {
-          isProposer: true,
-          config: {
-            mode: 'proposer-based',
-            threshold: 1n,
-            validators: [secondSigner],
-            shares: { [secondSigner]: 1n },
-            jurisdiction,
-          },
-        },
-      })],
-      entityInputs: [],
+    const remoteEntityId = deriveSingleSignerFixtureEntityId(seed, '2');
+    const remoteRuntimeId = deriveSignerAddressSync(seed, '2').toLowerCase();
+    const remoteProfile = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
+      entityId: remoteEntityId,
+      signingSeed: seed,
+      signerId: '2',
+      runtimeId: remoteRuntimeId,
+      name: 'Remote outbox target',
+      lastUpdated: env.state.timestamp,
+    }), seed, '2');
+    env.gossip.profiles.set(remoteEntityId, remoteProfile);
+    const routeVerification = await verifyProfileSignature(remoteProfile);
+    if (!routeVerification.valid || !routeVerification.signerId) {
+      throw new Error(`TEST_REMOTE_PROFILE_ROUTE_INVALID:${routeVerification.reason ?? 'unknown'}`);
+    }
+    env.infrastructure!.verifiedProfileRoutes ??= new Map();
+    env.infrastructure!.verifiedProfileRoutes.set(remoteEntityId, {
+      runtimeId: remoteRuntimeId,
+      runtimeSignerId: routeVerification.signerId,
+      runtimeEncPubKey: remoteProfile.runtimeEncPubKey,
+      lastUpdated: remoteProfile.lastUpdated,
     });
-    await processRuntime(env, []);
+    enqueueRuntimeInput(env, {
+      timestamp: env.state.timestamp,
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: localEntityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'openAccount',
+          data: {
+            targetEntityId: remoteEntityId,
+            disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            creditAmount: 1_000n,
+            tokenId: 1,
+          },
+        }],
+      }],
+    });
+    await expect(processRuntime(env, [])).rejects.toThrow(
+      `ROUTE_P2P_UNAVAILABLE:${remoteRuntimeId}`,
+    );
+    expect(env.pendingNetworkOutputs).toHaveLength(1);
+    const pendingOutput = env.pendingNetworkOutputs![0]!;
     const journal = await readPersistedFrameJournal(env, env.state.height);
     expect(journal?.runtimeOutputs).toEqual([pendingOutput]);
     const rawFrameBytes = await getRuntimeWalDb(env).get(keyFrame(env.state.height));
@@ -1110,25 +1087,14 @@ describe('storage frame journal retention', () => {
     }
     expect(journal?.runtimeMachine).toBeUndefined();
     expect(journal?.runtimeStateHash).toBeUndefined();
-    const liveCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
     const verification = await verifyRuntimeChain(runtimeId, seed);
     expect(verification.ok).toBe(true);
-    const restored = await loadEnvFromDB(runtimeId, seed);
-    expect(restored?.pendingNetworkOutputs).toEqual([pendingOutput]);
-    // A restarted Runtime retries restored outputs at once.
-    expect(restored?.infrastructure?.deferredNetworkMeta?.get(retryKey)).toEqual({ attempts: 6, nextRetryAt: 0 });
-    if (restored) {
-      expect(computeCanonicalStateHashFromEnv(restored)).toBe(liveCanonicalStateHash);
-      await processRuntime(restored, []);
-      expect(restored.infrastructure?.deferredNetworkMeta?.get(retryKey)?.attempts).toBe(7);
-      expect(restored.infrastructure?.deferredNetworkMeta?.get(retryKey)?.nextRetryAt)
-        .toBeLessThan(persistedFutureRetryAt);
-      await closeRuntimeDb(restored);
-      await closeInfraDb(restored);
-    }
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
+      'RUNTIME_RESTORE_UNDISPATCHED_OUTPUTS:1',
+    );
   });
 
   test('production refuses storage safety override flags', async () => {

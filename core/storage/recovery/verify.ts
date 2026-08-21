@@ -49,12 +49,10 @@ export const verifyPersistedFrameState = (
     runtimeComponentDigests: computeRuntimePostStateComponentDigests(
       buildReplayVerifiableRuntimePostStateView(env, {
         pendingNetworkOutputs: [],
-        excludeDeferredNetworkMeta: true,
         excludePersistedHistoryRecords: true,
       }),
     ),
     runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
-    runtimeOutputRetryState: frame.runtimeOutputRetryState ?? [],
   });
   const expectedCanonicalStateHash = String(frame.canonicalStateHash || '');
   const actualCanonicalStateHash = expectedCanonicalStateHash

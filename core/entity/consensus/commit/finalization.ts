@@ -4,7 +4,6 @@ import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multis
 import type { EntityFrame, EntityCandidate } from '../../types';
 import type { HankoString } from '../../../types/hanko';
 import { commitEntityFrameCandidateState } from '../../state-clone';
-import { emitCommittedPendingFrameWarnings } from '../../scheduler';
 import {
   verifyHashPrecommitSignatures,
 } from '../leader/certificates';
@@ -204,7 +203,6 @@ const installCommittedState = (
   );
   context.consumptionNodeChanges = execution.consumptionNodeChanges;
   context.accountJClaimNodeChanges = execution.accountJClaimNodeChanges;
-  emitCommittedPendingFrameWarnings(previousState, committedState);
   workingReplica.state = committedState;
   storageChanges.push(
     ...execution.storageChanges,

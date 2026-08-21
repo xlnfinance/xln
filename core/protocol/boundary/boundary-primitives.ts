@@ -51,11 +51,6 @@ export const requireMap = (value: unknown, code: string): Map<unknown, unknown> 
   return value;
 };
 
-export const requireSet = (value: unknown, code: string): Set<unknown> => {
-  if (!(value instanceof Set)) throw new Error(code);
-  return value;
-};
-
 export const requireStringArray = (value: unknown, code: string): string[] =>
   requireArray(value, code).map((entry, index) => requireString(entry, `${code}_${index}`));
 

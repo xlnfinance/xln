@@ -8,11 +8,7 @@ import {
   isFrozenBaseJPrefixRollAuthorized,
 } from '../../jurisdiction/machine/history/j-prefix-consensus.ts';
 import { getWallClockMs } from '../../support/time.ts';
-import {
-  getNextNetworkRetryTimestamp,
-  hasReadyPendingNetworkOutputs,
-  type RuntimeOutputRoutingDeps,
-} from '../delivery/topology/output-routing.ts';
+import type { RuntimeOutputRoutingDeps } from '../delivery/topology/output-routing.ts';
 import {
   generateHookPingsWithDeps,
   getEarliestWallClockDueTimestampWithDeps,
@@ -162,11 +158,6 @@ export const resolveRuntimeWorkReason = (
   }
   if (env.pendingOutputs?.length) return 'pending-output';
   if (env.networkInbox?.length) return 'network-inbox';
-  if (
-    hasReadyPendingNetworkOutputs(env, deps.getOutputRoutingDeps(), getWallClockMs())
-  ) {
-    return 'network-retry';
-  }
   const replicaWakes = collectReplicaMempoolWakeInputs(env);
   if (replicaWakes.entityInputs.length > 0) return 'entity-mempool';
   if (replicaWakes.accountInputs.length > 0) return 'account-mempool';
@@ -304,13 +295,9 @@ export const applyEntityTxFrameCap = (
 
 export const resolveNextWallClockWakeTimestamp = (
   env: RuntimeReplica,
-  deps: RuntimeWorkDeps,
 ): number | null => {
   const entityDueAt = getNextWallClockWakeTimestampWithDeps(env, runtimeWakeDeps);
-  const networkDueAt = getNextNetworkRetryTimestamp(env, deps.getOutputRoutingDeps());
-  if (entityDueAt === null) return networkDueAt;
-  if (networkDueAt === null) return entityDueAt;
-  return Math.min(entityDueAt, networkDueAt);
+  return entityDueAt;
 };
 
 export const generateHookPings = (

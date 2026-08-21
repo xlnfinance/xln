@@ -4,15 +4,10 @@ import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protoc
 import { serializeTaggedJson } from '../../../protocol/serialization';
 import { parseTaggedControlBody, requireDaemonControlAuth } from './auth';
 
-type GossipProfile = RuntimeReplica['gossip']['profiles'] extends Map<string, infer Profile>
-  ? Profile
-  : never;
-
 export const handleGossipProfileCounterparties = async (
   request: Request,
   env: RuntimeReplica,
   headers: HeadersInit,
-  resolveFallback?: (entityId: string) => GossipProfile | undefined,
 ): Promise<Response> => {
   const authError = requireDaemonControlAuth(request, env);
   if (authError) return authError;
@@ -37,7 +32,7 @@ export const handleGossipProfileCounterparties = async (
   const missing = entityIds.filter(entityId => !env.gossip.profiles.has(entityId));
   if (missing.length > 0) await ensureGossipProfiles(env, missing);
   const counterparties = Object.fromEntries(entityIds.map(entityId => {
-    const profile = env.gossip.profiles.get(entityId) ?? resolveFallback?.(entityId);
+    const profile = env.gossip.profiles.get(entityId);
     return [
       entityId,
       profile ? profile.accounts.map(account => account.counterpartyId.toLowerCase()) : null,

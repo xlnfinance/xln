@@ -709,7 +709,7 @@ const routeDeliveryDetails = (context: RelayRouteContext): Record<string, unknow
  *  core/network/p2p/direct-runtime-bun.ts's noteSendOutcome. Count alone is
  *  wrong at 1000-user mixed load: four 10 MB Hub frames in one burst are
  *  queued, not wedged; closing the Hub socket drops in-flight Account ACKs. */
-export const RELAY_STUCK_BACKPRESSURE_THRESHOLD = 4;
+const RELAY_STUCK_BACKPRESSURE_THRESHOLD = 4;
 export const RELAY_STUCK_BACKPRESSURE_MS = 10_000;
 
 const forwardToRemoteRuntime = (

@@ -37,7 +37,7 @@ import {
   parseHltStartRequest,
   readHltIsolatedRun,
   startHltIsolatedRun,
-  type SpawnFn as HltSpawnFn,
+  type SpawnFn,
 } from './hlt/hlt-run';
 
 type JsonHeaders = Record<string, string>;
@@ -79,7 +79,7 @@ type QaRestartIntent = {
 type QaApiDeps = {
   computeRestartFingerprint?: () => QaCodeFingerprint;
   spawnRestart?: typeof spawn;
-  spawnHlt?: HltSpawnFn;
+  spawnHlt?: SpawnFn;
   operatorAuthorized?: boolean;
 };
 

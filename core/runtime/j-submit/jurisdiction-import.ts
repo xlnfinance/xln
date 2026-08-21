@@ -245,17 +245,6 @@ const markLocalJImportResultRuntimeTx = <T extends CompleteImportJRuntimeTx>(tx:
   return tx;
 };
 
-export const copyLocalJImportResultRuntimeTxAuthorization = (
-  source: RuntimeTx,
-  target: RuntimeTx,
-): void => {
-  if (
-    source.type === 'completeImportJ' &&
-    target.type === 'completeImportJ' &&
-    (source as RuntimeTx & { [LOCAL_J_IMPORT_RESULT]?: boolean })[LOCAL_J_IMPORT_RESULT]
-  ) markLocalJImportResultRuntimeTx(target);
-};
-
 export const markRestoredJImportResultRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
   for (const runtimeTx of runtimeTxs) {
     if (runtimeTx.type === 'completeImportJ') markLocalJImportResultRuntimeTx(runtimeTx);

@@ -13,7 +13,6 @@ import {
 } from '../../jurisdiction/machine/local-history';
 import { ensureRuntimeInfrastructure } from '../../runtime/envelope/replica-envelope';
 import type { RuntimeReplica } from '../../runtime/types';
-import { buildDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import { clearDatabase } from '../database/clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { buildCertifiedEntityLineagePlan } from '../replica/entity-lineage';
@@ -121,7 +120,6 @@ const persistRestoredRuntimeStateUnlocked = async (
     getLiveAccountJClaimAccumulatorStates(env),
   );
   const runtimeOutputs = env.pendingNetworkOutputs ?? [];
-  const runtimeOutputRetryState = buildDurableOutputRetryState(env, runtimeOutputs);
   const runtimeMachine = buildStorageRuntimeMachineSnapshot(env);
   const canonicalStateHash = computeCanonicalRuntimeStateHash(
     coordinates.height,
@@ -155,7 +153,6 @@ const persistRestoredRuntimeStateUnlocked = async (
     canonicalStateHash,
     runtimeMachine,
     runtimeOutputs,
-    runtimeOutputRetryState,
     certifiedBoardNodes: Array.from(boardNodes, ([hash, node]) => ({ hash, node })),
     consumptionNodes: Array.from(consumptionNodes, ([hash, node]) => ({ hash, node })),
     accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),

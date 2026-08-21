@@ -30,7 +30,7 @@ export const ACCOUNT_STATE_MAP_NAMESPACES = [
 
 export type AccountStateMapNamespace = (typeof ACCOUNT_STATE_MAP_NAMESPACES)[number];
 export type AccountStateMapKey = number | string;
-export type AccountStateRadixKey = Uint8Array & {
+type AccountStateRadixKey = Uint8Array & {
   readonly __accountStateRadixKey: 'AccountStateRadixKey';
 };
 
@@ -43,7 +43,7 @@ export interface AccountStateCollection<K extends AccountStateMapKey, V> extends
 }
 
 /** Financial handlers can read this committed view but cannot mutate it. */
-export interface ReadonlyAccountStateMap<K extends AccountStateMapKey, V>
+interface ReadonlyAccountStateMap<K extends AccountStateMapKey, V>
   extends AccountStateCollection<K, V> {
   readonly [READONLY_ACCOUNT_STATE_MAP]: true;
   readonly namespace: AccountStateMapNamespace;
@@ -70,7 +70,7 @@ const tokenKeyBytes = (tokenId: number): Uint8Array => {
 };
 
 /** Prefix-free raw key bytes: uint256 tokens or length-prefixed UTF-8 IDs. */
-export const encodeAccountStateRadixKey = <N extends AccountStateMapNamespace>(
+const encodeAccountStateRadixKey = <N extends AccountStateMapNamespace>(
   _namespace: N,
   key: AccountStateMapKey,
 ): AccountStateRadixKey => {

@@ -20,7 +20,6 @@ import {
 } from '../../../storage/wal/snapshot';
 import { createEmptyEnv } from '../../../runtime';
 import { encodeBuffer } from '../../../storage/codec/codec';
-import { buildRouteOutputKey } from '../../../runtime/delivery/topology/output-routing';
 
 const ENTITY_ID = `0x${'11'.repeat(32)}`;
 const SIGNER_ID = `0x${'22'.repeat(20)}`;
@@ -308,12 +307,6 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     };
     const env = createEmptyEnv('runtime-machine-bounded-outbox');
     env.pendingNetworkOutputs = [largeOutput];
-    env.infrastructure = {
-      deferredNetworkMeta: new Map([[
-        buildRouteOutputKey(largeOutput),
-        { attempts: 7, nextRetryAt: 9_000_000_000_000 },
-      ]]),
-    };
 
     expect(() => prepareRuntimeMachineGraphRows(
       8,
@@ -322,8 +315,6 @@ describe('Patricia-addressed Runtime checkpoints', () => {
 
     const machine = buildStorageRuntimeMachineSnapshot(env);
     expect(machine['pendingNetworkOutputs']).toBeUndefined();
-    expect((machine['infrastructure'] as Record<string, unknown> | undefined)?.['deferredNetworkMeta'])
-      .toBeUndefined();
     expect(prepareRuntimeMachineGraphRows(8, machine).rows.every(
       row => row.value.byteLength < 10_000,
     )).toBe(true);

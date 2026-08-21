@@ -41,7 +41,7 @@ export type ControlEntitySummary = {
   accountEntityIds: string[];
 };
 
-export type ControlQueueResponse = {
+type ControlQueueResponse = {
   ok: boolean;
   accepted?: {
     runtimeTxs: number;

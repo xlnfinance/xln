@@ -11,7 +11,6 @@ import {
   dropPendingHistoryRecords,
   peekPendingHistoryRecords,
 } from '../../../runtime/observability/env-events';
-import { restoreDurableOutputRetryState } from '../../../runtime/delivery/durable-output-retry';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
@@ -21,6 +20,10 @@ import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
 } from '../../../runtime/delivery/entity-output-signer';
+import {
+  clearReplayOutputRuntimeRoutes,
+  installReplayOutputRuntimeRoutes,
+} from '../../../runtime/delivery/replay-output-route';
 import type {
   RuntimeInput,
   RuntimeReplica,
@@ -124,6 +127,7 @@ const replayOneFrame = async (
     `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${height}`,
   );
   installReplayOutputSignerHints(env, collectOutputSignerHints(frame, height));
+  installReplayOutputRuntimeRoutes(env, frame.runtimeOutputs ?? []);
   if (!env.infrastructure) throw new Error('RECOVERY_RUNTIME_INFRASTRUCTURE_REQUIRED');
   env.infrastructure.replayEntityContexts = new Map(
     [...(frame.entityContexts ?? new Map())].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
@@ -169,16 +173,12 @@ const replayOneFrame = async (
       ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
       : { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];
-    restoreDurableOutputRetryState(
-      env,
-      frame.runtimeOutputRetryState ?? [],
-      frame.runtimeOutputs ?? [],
-    );
     dropPendingHistoryRecords(env, history.length);
     verifyRecoveryJournalFrame(env, frame, height, result);
   } finally {
     if (env.infrastructure) delete env.infrastructure.replayEntityContexts;
     clearReplayOutputSignerHints(env);
+    clearReplayOutputRuntimeRoutes(env);
     writeRuntimeMetadata(env, APPLY_ALLOWED, false);
   }
 };

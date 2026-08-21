@@ -76,7 +76,6 @@ import {
 } from '../schema/authoritative-schema';
 import { readSnapshotBookGraph, readStorageBookGraph } from './book-graph';
 import { readRuntimeOutputPayloads } from '../wal/outbox-payload';
-import { validateDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import { readEntityContextPayloads } from '../wal/entity-context-payload';
 import { readRuntimeMachineGraph } from '../wal/runtime-machine-graph';
 import type {
@@ -272,13 +271,6 @@ export const readStorageFramePayloads = async (
     ...(runtimeOutputs.length > 0 ? { runtimeOutputs } : {}),
     ...(runtimeMachine ? { runtimeMachine } : {}),
   };
-  if (frame?.runtimeOutputRetryState) {
-    validateDurableOutputRetryState(
-      frame.runtimeOutputRetryState,
-      runtimeOutputs,
-      `STORAGE_FRAME_INVALID_RUNTIME_OUTPUT_RETRY_STATE:${targetHeight}`,
-    );
-  }
   return payloads;
 };
 

@@ -58,7 +58,6 @@ export type GossipProfileBatchRequest = {
 };
 
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
-export const MAX_GOSSIP_REQUEST_IDS = DEFAULT_GOSSIP_BATCH_LIMIT;
 export const MAX_GOSSIP_IDS_DEPTH = 3;
 export const DEFAULT_GOSSIP_PREFIX_LIMIT = 100;
 const MIN_GOSSIP_PREFIX_CHARS = 4;
@@ -122,7 +121,7 @@ export type RouteGraphCache = {
  * stable array between announcements) so a busy responder answers many
  * lookups per rebuild.
  */
-export const selectRouteProfiles = (
+const selectRouteProfiles = (
   profiles: readonly Profile[],
   routeTo: GossipRouteToRequest,
   graphCache?: RouteGraphCache,
@@ -181,7 +180,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   const ids = request['ids'];
   if (ids !== undefined && (
     !Array.isArray(ids) ||
-    ids.length > MAX_GOSSIP_REQUEST_IDS ||
+    ids.length > DEFAULT_GOSSIP_BATCH_LIMIT ||
     ids.some(id => typeof id !== 'string' || id.length > 128)
   )) throw new Error('P2P_GOSSIP_REQUEST_IDS_INVALID');
   const set = request['set'];

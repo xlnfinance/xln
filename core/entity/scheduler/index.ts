@@ -47,7 +47,6 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type { AccountInput } from '../../types/account';
 import type { EntityOutput, EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type {
@@ -59,23 +58,10 @@ import type {
   ScheduledHook,
 } from './types';
 import { TIMING } from '../../config/constants';
-import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 import { createStructuredLogger, shortId } from '../../support/logger';
-import { accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { hubRebalanceHandler } from './rebalance';
 import { processDueHooks } from './due-hooks';
-import {
-  getPendingAccountIds,
-  getRebalanceAccountIds,
-} from '../consensus/account/work-index';
-import {
-  ACCOUNT_MAINTENANCE_INTERVAL_MS,
-  ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS,
-  ACCOUNT_PENDING_RESEND_AFTER_MS,
-  ACCOUNT_PENDING_STALE_WARNING_MS,
-} from './config/timing';
-import { countOp } from '../../support/performance/op-counters';
-import { safeStringify } from '../../protocol/serialization';
+import { getRebalanceAccountIds } from '../consensus/account/work-index';
 
 export {
   HUB_PENDING_BROADCAST_STALE_MS,
@@ -84,59 +70,9 @@ export {
   cancelHook,
   scheduleHook,
 } from './hook-state';
-export {
-  ACCOUNT_MAINTENANCE_INTERVAL_MS,
-  ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS,
-  ACCOUNT_PENDING_RESEND_AFTER_MS,
-  ACCOUNT_PENDING_STALE_WARNING_MS,
-} from './config/timing';
-
 const crontabLog = createStructuredLogger('entity.crontab');
 
 export const HUB_REBALANCE_INTERVAL_MS = TIMING.CRONTAB_INTERVAL_MS; // Keep hub rebalance aligned with the canonical 1s runtime cadence.
-
-const accountInputProposedFrameHeight = (input: AccountInput): number => {
-  const candidate = accountInputProposal(input)?.frame.height ?? accountInputReferenceHeight(input) ?? 0;
-  const height = Number(candidate);
-  return Number.isFinite(height) ? Math.max(0, Math.floor(height)) : 0;
-};
-
-/** Emit liveness diagnostics only from the canonical post-frame state. */
-export const emitCommittedPendingFrameWarnings = (
-  previousState: EntityState,
-  committedState: EntityState,
-): void => {
-  const previousRun = previousState.crontabState?.tasks.get('maintainPendingAccounts')?.lastRun;
-  const committedRun = committedState.crontabState?.tasks.get('maintainPendingAccounts')?.lastRun;
-  if (
-    committedRun === undefined ||
-    committedRun !== committedState.timestamp ||
-    committedRun === previousRun
-  ) return;
-
-  const stale: Array<{ counterpartyId: string; height: number; ageSeconds: number }> = [];
-  for (const counterpartyId of getPendingAccountIds(committedState)) {
-    const account = committedState.accounts.get(counterpartyId);
-    if (!account) throw new Error(`PENDING_ACCOUNT_INDEX_STALE:${counterpartyId}`);
-    const pending = account.pendingFrame;
-    if (!pending) throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
-    const frameAge = committedState.timestamp - pending.timestamp;
-    if (frameAge > ACCOUNT_PENDING_STALE_WARNING_MS) {
-      stale.push({
-        counterpartyId,
-        height: pending.height,
-        ageSeconds: Math.floor(frameAge / 1000),
-      });
-    }
-  }
-  if (stale.length > 0) {
-    console.warn(
-      `PENDING-FRAME-STALE: count=${stale.length} ` +
-      `oldest=${Math.max(...stale.map(entry => entry.ageSeconds))}s ` +
-      `sample=${safeStringify(stale.slice(0, 8))}`,
-    );
-  }
-};
 
 type CrontabTaskHandler = (
   env: EntityRuntimeContext,
@@ -157,18 +93,9 @@ const createTaskState = (
   params,
 });
 
-/**
- * Pending-account resend must run on the resend clock, not the 10s generic
- * maintenance slot. A 3s ACK halt with an 8s first-resend never retried.
- */
-export const crontabTaskIntervalMs = (
-  task: Pick<CrontabTaskState, 'method' | 'intervalMs'>,
-): number =>
-  task.method === 'maintainPendingAccounts' ? ACCOUNT_PENDING_RESEND_AFTER_MS : task.intervalMs;
-
 export const crontabTaskDueAt = (
   task: Pick<CrontabTaskState, 'method' | 'intervalMs' | 'lastRun'>,
-): number => task.lastRun + crontabTaskIntervalMs(task);
+): number => task.lastRun + task.intervalMs;
 
 /**
  * Initialize crontab state for an entity
@@ -176,29 +103,24 @@ export const crontabTaskDueAt = (
 export function initCrontab(): CrontabState {
   return {
     tasks: new Map<CrontabTaskMethod, CrontabTaskState>([
-      ['maintainPendingAccounts', createTaskState('maintainPendingAccounts', ACCOUNT_MAINTENANCE_INTERVAL_MS)],
       ['hubRebalance', createTaskState('hubRebalance', HUB_REBALANCE_INTERVAL_MS)],
     ]),
     hooks: new Map(),
   };
 }
 
-const accountNeedsMaintenance = (state: EntityState): boolean =>
-  getPendingAccountIds(state).size > 0;
-
 /** Only schedule periodic consensus work when its handler can change state or emit output. */
 export const crontabTaskHasPendingWork = (
   state: EntityState,
   method: CrontabTaskMethod,
 ): boolean => {
-  if (method === 'maintainPendingAccounts') return accountNeedsMaintenance(state);
+  void method;
   if (!state.hubRebalanceConfig) return false;
   if (state.jBatchState?.sentBatch) return true;
   return getRebalanceAccountIds(state).size > 0;
 };
 
 const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
-  maintainPendingAccounts: maintainPendingAccounts,
   hubRebalance: hubRebalanceHandler,
 };
 
@@ -244,7 +166,7 @@ export async function executeCrontab(
     if (!task.enabled) continue;
     const timeSinceLastRun = now - task.lastRun;
 
-    if (timeSinceLastRun >= crontabTaskIntervalMs(task)) {
+    if (timeSinceLastRun >= task.intervalMs) {
       const handler = CRONTAB_TASK_HANDLERS[task.method];
       if (!handler) throw new Error(`Unknown crontab task method: ${task.method}`);
       const outputs = await handler(env, replica, task, context);
@@ -257,76 +179,4 @@ export async function executeCrontab(
   }
 
   return allOutputs;
-}
-
-/**
- * Resend the exact signed proposal; a Hanko-backed Account frame never expires.
- *
- * Do not add a local timeout rollback here. Once the signature leaves this
- * replica, the peer may accept or submit it later. Liveness comes from exact
- * resend and, ultimately, the dispute protocol. Same-height collision rollback
- * belongs exclusively to Account consensus, where the fixed LEFT winner does
- * not depend on arrival time. Depository separately enforces canonical pair
- * identity and strictly increasing dispute nonces.
- */
-async function maintainPendingAccounts(
-  _env: EntityRuntimeContext,
-  replica: EntityTransitionContext,
-  _task: CrontabTaskState,
-  _context: CrontabExecutionContext,
-): Promise<EntityOutput[]> {
-  const outputs: EntityOutput[] = [];
-  const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
-
-  for (const counterpartyId of getPendingAccountIds(replica.state)) {
-    const account = replica.state.accounts.get(counterpartyId);
-    if (!account) throw new Error(`PENDING_ACCOUNT_INDEX_STALE:${counterpartyId}`);
-    if (!account.pendingFrame) {
-      throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
-    }
-    const frameAge = now - account.pendingFrame.timestamp;
-    // Bilateral frames ack in milliseconds on a healthy mesh. Transport owns
-    // exact-byte retry until the peer proves WAL durability. This later
-    // Account-level replay covers a peer that durably consumed the frame but
-    // whose ACK was lost; certified-output idempotence must pass that exact
-    // AccountInput to the native duplicate re-ACK transition.
-    const strictAckTimeoutMs = ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS;
-    if (strictAckTimeoutMs > 0 && frameAge > strictAckTimeoutMs) {
-      throw haltRuntimeFailure(
-        'ACCOUNT_ACK_TIMEOUT',
-        `ACCOUNT_ACK_TIMEOUT:counterparty=${counterpartyId}` +
-          `:height=${account.pendingFrame.height}` +
-          `:ageMs=${frameAge}` +
-          `:resendCachedHeight=${account.pendingAccountInput
-            ? accountInputProposedFrameHeight(account.pendingAccountInput)
-            : 0}`,
-      );
-    }
-    if (!account.pendingAccountInput) {
-      throw new Error(
-        `PENDING_ACCOUNT_RESEND_CACHE_MISSING:${counterpartyId}:h${account.pendingFrame.height}`,
-      );
-    }
-    const cachedInputHeight = accountInputProposedFrameHeight(account.pendingAccountInput);
-    if (cachedInputHeight !== account.pendingFrame.height) {
-      throw new Error(
-        `PENDING_ACCOUNT_RESEND_HEIGHT_MISMATCH:${counterpartyId}` +
-          `:pending=${account.pendingFrame.height}` +
-          `:cached=${cachedInputHeight}`,
-      );
-    }
-    if (frameAge < ACCOUNT_PENDING_RESEND_AFTER_MS) continue;
-    outputs.push({
-      entityId: account.pendingAccountInput.toEntityId,
-      entityTxs: [{ type: 'accountInput', data: account.pendingAccountInput }],
-    });
-    countOp('account.pendingFrameResend');
-    crontabLog.debug('pending_frame.resend', {
-      account: shortId(counterpartyId, 12),
-      height: account.pendingFrame.height,
-      ageSeconds: Math.floor(frameAge / 1000),
-    });
-  }
-
-  return outputs;
 }

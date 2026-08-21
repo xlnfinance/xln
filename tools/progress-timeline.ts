@@ -68,28 +68,7 @@ const readEntries = (): ProgressEntry[] => {
     return readFileSync(OUTPUT_PATH, 'utf8')
       .split('\n')
       .filter(Boolean)
-      .flatMap((line, index) => {
-        if (!line.trimStart().startsWith('{')) return [];
-        const parsed: unknown = JSON.parse(line);
-        if (
-          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
-          Object.keys(parsed).sort().join(',') === 'at,progress,status'
-        ) return [];
-        if (
-          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
-          Object.keys(parsed).sort().join(',') === 'blocker,focus,next,progress,time'
-        ) {
-          const legacy = parsed as Record<string, unknown>;
-          return [parseEntry({
-            at: legacy['time'],
-            percent: legacy['progress'],
-            focus: legacy['focus'],
-            blocker: legacy['blocker'],
-            next: legacy['next'],
-          }, index)];
-        }
-        return [parseEntry(parsed, index)];
-      });
+      .map((line, index) => parseEntry(JSON.parse(line) as unknown, index));
   } catch (error) {
     const code = error instanceof Error && 'code' in error
       ? String((error as NodeJS.ErrnoException).code ?? '')

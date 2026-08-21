@@ -61,7 +61,6 @@ export type SettlementEvidenceResponse = Readonly<{
     runtimeEntityInputs: QueueEvidence;
     runtimeTxs: QueueEvidence;
     runtimeJInputs: QueueEvidence;
-    retryEntries: QueueEvidence;
     pendingAccountFrames: QueueEvidence;
   }>;
   pendingAccountSample: readonly PendingAccountSample[];
@@ -238,7 +237,6 @@ export const buildSettlementEvidence = async (
       runtimeEntityInputs: countedQueue(mempool.entityInputs.length),
       runtimeTxs: countedQueue(mempool.runtimeTxs.length),
       runtimeJInputs: countedQueue(mempool.jInputs?.length ?? 0),
-      retryEntries: countedQueue(infrastructure?.deferredNetworkMeta?.size ?? 0),
       pendingAccountFrames: countedQueue(pending.count),
     },
     pendingAccountSample: pending.sample,
@@ -318,7 +316,7 @@ export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvid
   const response = requireBoundaryRecord(value, 'RADAPTER_SETTLEMENT_RESPONSE_INVALID');
   requireExactBoundaryKeys(response, ['runtimeHeight', 'book', 'queues', 'accounts', 'pendingAccountSample'], [], 'RADAPTER_SETTLEMENT_RESPONSE_FIELDS_INVALID');
   const queues = requireBoundaryRecord(response['queues'], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUES_INVALID');
-  const queueKeys = ['processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox', 'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'retryEntries', 'pendingAccountFrames'] as const;
+  const queueKeys = ['processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox', 'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'pendingAccountFrames'] as const;
   requireExactBoundaryKeys(queues, queueKeys, [], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUE_FIELDS_INVALID');
   if (!Array.isArray(response['accounts'])) throw new Error('RADAPTER_SETTLEMENT_RESPONSE_ACCOUNTS_INVALID');
   const decodedQueues = (key: typeof queueKeys[number]): QueueEvidence =>
@@ -334,7 +332,6 @@ export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvid
       runtimeEntityInputs: decodedQueues('runtimeEntityInputs'),
       runtimeTxs: decodedQueues('runtimeTxs'),
       runtimeJInputs: decodedQueues('runtimeJInputs'),
-      retryEntries: decodedQueues('retryEntries'),
       pendingAccountFrames: decodedQueues('pendingAccountFrames'),
     },
     pendingAccountSample: decodePendingAccountSample(response['pendingAccountSample']),

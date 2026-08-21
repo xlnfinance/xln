@@ -12,7 +12,7 @@
  */
 import { nodeProcess } from '../process/runtime-process';
 
-export type OpCounter = { calls: number; bytes: number };
+type OpCounter = { calls: number; bytes: number };
 export type OpCounterSnapshot = Record<string, OpCounter>;
 
 export const OP_COUNTERS_ENABLED: boolean = nodeProcess?.env?.['XLN_RUNTIME_OP_COUNTERS'] === '1';

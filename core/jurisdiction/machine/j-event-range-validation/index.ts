@@ -116,69 +116,6 @@ export const normalizeStrictJEventBlock = (
   };
 };
 
-export type UnsignedJurisdictionEventData = Omit<
-  JurisdictionEventData,
-  'signature' | 'observedAt'
->;
-
-/** Decode the exact unsigned J-range embedded in a reliable-delivery identity. */
-export const decodeUnsignedJEventRange = (
-  value: unknown,
-): UnsignedJurisdictionEventData => {
-  const raw = requireBoundaryRecord(value, 'J_RANGE_UNSIGNED_INVALID');
-  requireExactBoundaryKeys(
-    raw,
-    [
-      'from',
-      'jurisdictionRef',
-      'baseHeight',
-      'scannedThroughHeight',
-      'tipBlockHash',
-      'eventHistoryRoot',
-      'rangeHash',
-      'blocks',
-    ],
-    [],
-    'J_RANGE_UNSIGNED_FIELDS_INVALID',
-  );
-  const from = text(raw['from']);
-  const jurisdictionRef = text(raw['jurisdictionRef']);
-  if (!from || !jurisdictionRef) throw new Error('J_RANGE_UNSIGNED_IDENTITY_INVALID');
-  const baseHeight = height(raw['baseHeight'], 'J_RANGE_BASE_HEIGHT_INVALID');
-  const scannedThroughHeight = height(
-    raw['scannedThroughHeight'],
-    'J_RANGE_SCANNED_HEIGHT_INVALID',
-  );
-  if (scannedThroughHeight <= baseHeight) {
-    throw new Error('J_RANGE_HEIGHT_INVALID');
-  }
-  if (!Array.isArray(raw['blocks'])) throw new Error('J_RANGE_BLOCKS_INVALID');
-  let previousHeight = baseHeight;
-  const blocks = raw['blocks'].map(block => {
-    const normalized = normalizeStrictJEventBlock(
-      block,
-      previousHeight,
-      scannedThroughHeight,
-    );
-    previousHeight = normalized.blockNumber;
-    return normalized;
-  });
-  const rangeHash = canonicalJEventRangeHash(jurisdictionRef, blocks);
-  if (hash(raw['rangeHash'], 'J_RANGE_BODY_HASH_INVALID') !== rangeHash) {
-    throw new Error('J_RANGE_BODY_HASH_MISMATCH');
-  }
-  return {
-    from,
-    jurisdictionRef,
-    baseHeight,
-    scannedThroughHeight,
-    tipBlockHash: hash(raw['tipBlockHash'], 'J_RANGE_TIP_HASH_INVALID'),
-    eventHistoryRoot: hash(raw['eventHistoryRoot'], 'J_RANGE_HISTORY_ROOT_INVALID'),
-    rangeHash,
-    blocks,
-  };
-};
-
 export const validateJEventRangeEnvelope = (input: {
   entityId: string;
   expectedJurisdictionRef: string;

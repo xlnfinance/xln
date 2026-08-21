@@ -72,9 +72,9 @@ export const KEY_FRAME = 0x10;
 export const KEY_DIFF = 0x11;
 export const KEY_SNAPSHOT_MANIFEST = 0x12;
 /** Immutable routed-output bytes addressed by their full SHA-256 digest. */
-export const KEY_RUNTIME_OUTPUT_PAYLOAD = 0x13;
+const KEY_RUNTIME_OUTPUT_PAYLOAD = 0x13;
 /** Immutable Entity infrastructure context addressed by full SHA-256 digest. */
-export const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
+const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
 /** Runtime checkpoint Patricia branch, scoped by the materialized frame height. */
 export const KEY_RUNTIME_MACHINE_BRANCH = 0x15;
 /** Runtime checkpoint Patricia leaf, scoped by the materialized frame height. */
@@ -150,11 +150,6 @@ export const decodeHeight = (buffer: Buffer, offset = 1): number => {
   const raw = buffer.readBigUInt64BE(offset);
   if (raw > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`STORAGE_HEIGHT_KEY_UNSAFE:${raw.toString()}`);
   return Number(raw);
-};
-
-export const decodeTaggedStorageHeight = (key: Buffer, tag: number, code: string): RuntimeHeight => {
-  if (key.length !== 9 || key[0] !== tag) throw new Error(`${code}:${key.toString('hex')}`);
-  return toRuntimeHeight(decodeHeight(key));
 };
 
 export const textBytes = (value: string): Buffer => {

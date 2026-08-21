@@ -209,7 +209,6 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
       infrastructure: { pendingCommittedJOutbox: new Map([['a', 1]]) },
     }),
     runtimeOutputRefs: [],
-    runtimeOutputRetryState: [],
   };
   const hash = computeStoragePostStateHash(base);
 
@@ -222,14 +221,6 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
   expect(computeStoragePostStateHash({
     ...base,
     runtimeOutputRefs: [`0x${'24'.repeat(32)}`],
-  })).not.toBe(hash);
-  expect(computeStoragePostStateHash({
-    ...base,
-    runtimeOutputRetryState: [{
-      outputHash: `xln.durable-output-retry.v1:0x${'25'.repeat(32)}`,
-      attempts: 2,
-      retryAt: 1236,
-    }],
   })).not.toBe(hash);
   expect(computeStoragePostStateHash({
     ...base,

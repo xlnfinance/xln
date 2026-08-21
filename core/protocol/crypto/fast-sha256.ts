@@ -49,7 +49,7 @@ export const hmacSha256 = (key: Uint8Array, data: Uint8Array): Uint8Array => {
 
 let installation: Promise<boolean> | null = null;
 
-export const installFastSha256 = (): Promise<boolean> => {
+const installFastSha256 = (): Promise<boolean> => {
   if (installation) return installation;
   installation = (async () => {
     try {

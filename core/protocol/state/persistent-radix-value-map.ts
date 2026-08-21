@@ -48,7 +48,7 @@ export type PersistentRadixBranchRecord = Readonly<{
   }>[];
 }>;
 
-export type PersistentRadixLeafRecord<K, V> = Readonly<{
+type PersistentRadixLeafRecord<K, V> = Readonly<{
   kind: 'leaf';
   path: readonly number[];
   key: K;
@@ -60,7 +60,7 @@ export type PersistentRadixNodeRecord<K, V> =
   | PersistentRadixBranchRecord
   | PersistentRadixLeafRecord<K, V>;
 
-export type PersistentRadixNodeRef =
+type PersistentRadixNodeRef =
   | Readonly<{ kind: 'branch'; path: readonly number[] }>
   | Readonly<{ kind: 'leaf'; path: readonly number[]; keyBytes: Uint8Array }>;
 

@@ -3,16 +3,16 @@
  * Inclusive any-frame counts overlap and must never be quoted as "% of CPU".
  */
 
-export type SamplingFrame = Readonly<{
+type SamplingFrame = Readonly<{
   name?: string;
   sourceURL?: string;
   sourceID?: number;
   line?: number;
 }>;
 
-export type SamplingTrace = Readonly<{ frames?: readonly SamplingFrame[] }>;
+type SamplingTrace = Readonly<{ frames?: readonly SamplingFrame[] }>;
 
-export type SamplingSource = Readonly<{ sourceID?: number; url?: string }>;
+type SamplingSource = Readonly<{ sourceID?: number; url?: string }>;
 
 export type SamplingDump = Readonly<{
   traces?: readonly SamplingTrace[];
@@ -21,7 +21,7 @@ export type SamplingDump = Readonly<{
   sources?: readonly SamplingSource[];
 }>;
 
-export type ExclusiveBucket = Readonly<{ label: string; count: number; percent: number }>;
+type ExclusiveBucket = Readonly<{ label: string; count: number; percent: number }>;
 
 export type ExclusiveSamplingSummary = Readonly<{
   samples: number;

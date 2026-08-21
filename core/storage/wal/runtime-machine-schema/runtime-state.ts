@@ -43,7 +43,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
     'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents', 'pendingHistoryRecords', 'deferredNetworkMeta',
+    'pendingAuditEvents', 'pendingHistoryRecords',
     'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
     'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
     'entityEncryptionSeeds',
@@ -71,12 +71,6 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     }
   }
   if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => assertAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
-  if (state['deferredNetworkMeta'] !== undefined) validateStringMap(state['deferredNetworkMeta'], `${code}_DEFERRED_NETWORK`, (entry, entryCode) => {
-    const meta = requireBoundaryRecord(entry, entryCode);
-    requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], [], `${entryCode}_FIELDS`);
-    requireBoundaryInteger(meta['attempts'], `${entryCode}_ATTEMPTS`);
-    requireBoundaryInteger(meta['nextRetryAt'], `${entryCode}_NEXT_RETRY`);
-  });
   if (state['runtimeAdapterCommandFrontiers'] !== undefined) validateStringMap(state['runtimeAdapterCommandFrontiers'], `${code}_COMMAND_FRONTIERS`, (entry, entryCode) => {
     const frontier = requireBoundaryRecord(entry, entryCode);
     requireExactBoundaryKeys(frontier, ['lastContiguousSequence', 'lastInputHash', 'lastCommandId', 'observedHeight', 'expiresAtMs'], [], `${entryCode}_FIELDS`);

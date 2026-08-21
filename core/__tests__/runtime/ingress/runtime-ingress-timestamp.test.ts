@@ -736,7 +736,7 @@ describe('runtime ingress timestamp', () => {
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:idle-loop-due-after-wall-clock')).toBe(false);
   });
 
-  test('non-hub pending account frames keep the runtime wakeable for ACK resend', () => {
+  test('non-hub pending account frames do not create an automatic wake', () => {
     const entityId = `0x${'99'.repeat(32)}`;
     const counterpartyId = `0x${'aa'.repeat(32)}`;
     const replica = makeReplica(entityId, Date.now());
@@ -750,7 +750,7 @@ describe('runtime ingress timestamp', () => {
       },
     } as AccountState);
 
-    expect(entityNeedsPeriodicWake(replica)).toBe(true);
+    expect(entityNeedsPeriodicWake(replica)).toBe(false);
   });
 
   test('default runtime cadence commits consecutive queued frames without a delay gate', async () => {

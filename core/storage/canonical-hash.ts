@@ -148,7 +148,7 @@ export const computeCanonicalRuntimeStateHash = (
     ...(runtimeMachine ? { runtimeMachine: canonicalizeStorageAuditValue(runtimeMachine) } : {}),
   });
 
-export const computeCanonicalStateHashFromRuntimeMachine = (
+const computeCanonicalStateHashFromRuntimeMachine = (
   env: RuntimeReplica,
   runtimeMachine: Record<string, unknown>,
 ): string =>

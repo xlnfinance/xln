@@ -20,7 +20,6 @@ import type {
 export type {
   ConsumptionAccumulatorState,
   ConsumptionApplyResult,
-  ConsumptionFrontierValue,
   ConsumptionNode,
   ConsumptionNodeEntry,
   ConsumptionNodeStore,

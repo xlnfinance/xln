@@ -44,6 +44,3 @@ export const cachedChecksumAddress = (value: string): string => {
   if (checksummed === null) return getAddress(value);
   return checksummed;
 };
-
-export const isAddressCached = (value: unknown): value is string =>
-  typeof value === 'string' && toLowerAddressOrNull(value) !== null;

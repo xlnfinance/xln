@@ -43,7 +43,6 @@ type RuntimeSettlementEvidence = Readonly<{
   runtimeEntityInputs: number;
   runtimeTxs: number;
   runtimeJInputs: number;
-  retryEntries: number;
   pendingAccountFrames: number;
 }>;
 
@@ -91,7 +90,7 @@ const decodeRuntimeEvidence = (value: unknown, index: number): RuntimeSettlement
   const runtime = requireBoundaryRecord(value, `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_INVALID:${index}`);
   requireExactBoundaryKeys(runtime, [
     'role', 'processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox',
-    'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'retryEntries',
+    'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs',
     'pendingAccountFrames',
   ], [], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_FIELDS_INVALID:${index}`);
   const role = runtime['role'];
@@ -107,7 +106,6 @@ const decodeRuntimeEvidence = (value: unknown, index: number): RuntimeSettlement
     runtimeEntityInputs: requireBoundaryInteger(runtime['runtimeEntityInputs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_ENTITY_INPUTS_INVALID:${index}`),
     runtimeTxs: requireBoundaryInteger(runtime['runtimeTxs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_TXS_INVALID:${index}`),
     runtimeJInputs: requireBoundaryInteger(runtime['runtimeJInputs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_J_INPUTS_INVALID:${index}`),
-    retryEntries: requireBoundaryInteger(runtime['retryEntries'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_RETRIES_INVALID:${index}`),
     pendingAccountFrames: requireBoundaryInteger(runtime['pendingAccountFrames'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_PENDING_FRAMES_INVALID:${index}`),
   };
 };
@@ -175,7 +173,7 @@ export const assertProductionSwapFullySettled = (
   for (const runtime of evidence.runtimes) {
     const pending = runtime.processing + runtime.pendingOutputs + runtime.pendingNetworkOutputs +
       runtime.networkInbox + runtime.runtimeEntityInputs + runtime.runtimeTxs +
-      runtime.runtimeJInputs + runtime.retryEntries;
+      runtime.runtimeJInputs;
     if (pending !== 0) throw new Error(`PRODUCTION_SWAP_SETTLEMENT_RUNTIME_NOT_DRAINED:${runtime.role}`);
   }
   if (evidence.bestBidPriceTicks !== null && evidence.bestAskPriceTicks !== null &&

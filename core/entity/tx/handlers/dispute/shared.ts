@@ -37,7 +37,7 @@ export const reportOptionalArgumentWarnings = (
   }
 };
 
-export const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
+const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
   return (
@@ -47,7 +47,7 @@ export const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   );
 };
 
-export const requireProofBodyStruct = (
+const requireProofBodyStruct = (
   value: unknown,
   entityId: string,
   counterpartyEntityId: string,

@@ -5,7 +5,6 @@ import {
   buildPendingNetworkOutputs,
   planEntityOutputs,
   pruneSettledOutputs,
-  splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
 } from '../delivery/topology/output-routing';
 import { createPreparedOutputGraph } from './prepared-output';
@@ -40,8 +39,10 @@ export const applyRecoveryRuntimeOutputPlan = (
     pruneSettledOutputs(env, [...(env.pendingNetworkOutputs ?? []), ...originated]),
     preparedOutputGraph,
   );
-  const { ready, waiting } = splitPendingOutputsByRetryWindow(env, pending, routing, preparedOutputGraph);
-  const plan = planEntityOutputs(env, ready, routing, preparedOutputGraph);
+  const plan = planEntityOutputs(env, pending, routing, preparedOutputGraph);
+  if (plan.deferredOutputs.length > 0) {
+    throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
+  }
   enqueueRuntimeContinuation(
     env,
     plan.localOutputs.map(({ sourceRuntimeFrame: _sourceRuntimeFrame, ...output }) => output),
@@ -49,14 +50,9 @@ export const applyRecoveryRuntimeOutputPlan = (
     undefined,
     env.state.timestamp,
   );
-  env.pendingNetworkOutputs = buildPendingNetworkOutputs([
-    ...waiting,
-    ...plan.deferredOutputs,
-    ...plan.remoteOutputs.map(({ output }) => output),
-  ], preparedOutputGraph);
-  return {
-    ...plan,
-    readyPendingOutputs: ready,
-    waitingPendingOutputs: waiting,
-  };
+  env.pendingNetworkOutputs = buildPendingNetworkOutputs(
+    plan.remoteOutputs.map(({ output }) => output),
+    preparedOutputGraph,
+  );
+  return plan;
 };

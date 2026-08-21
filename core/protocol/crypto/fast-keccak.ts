@@ -10,7 +10,7 @@
  * point is not observable to consensus.
  */
 import { keccak_256 } from '@noble/hashes/sha3.js';
-import { keccak256 as ethersKeccak256 } from 'ethers';
+import { keccak256 } from 'ethers';
 
 type WasmHasher = {
   init(): unknown;
@@ -59,7 +59,7 @@ export const installFastKeccak = (): Promise<boolean> => {
       return false;
     }
     try {
-      ethersKeccak256.register(keccak256Bytes);
+      keccak256.register(keccak256Bytes);
     } catch {
       // Registry locked: ethers callers keep the JS backend, direct callers use WASM.
     }

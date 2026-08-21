@@ -10,7 +10,7 @@ export type EntityTransitionContext = {
   state: EntityState;
 };
 
-export type CrontabTaskMethod = 'maintainPendingAccounts' | 'hubRebalance';
+export type CrontabTaskMethod = 'hubRebalance';
 
 type CrontabTaskParam = string | number | boolean;
 

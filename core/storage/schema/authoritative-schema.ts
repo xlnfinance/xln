@@ -25,7 +25,6 @@ import {
   validateStorageAccountDocValue,
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
-import { decodeDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import { decodeRuntimeOutputPayloadRefs } from '../wal/outbox-payload';
 import { decodeEntityContextPayloadRefs } from '../wal/entity-context-payload';
 import { decodeRuntimeMachineGraphRoot } from '../wal/runtime-machine-graph';
@@ -81,7 +80,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     'replicaMetaStateMode', 'postStateHash', 'materializedState', 'runtimeInput',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs', 'runtimeOutputRetryState'], `${code}_FIELDS`);
+  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -135,12 +134,6 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   validateTouchedAccounts(frame['touchedAccounts'], `${code}_TOUCHED_ACCOUNTS`);
   requireStringArray(frame['touchedBookEntities'], `${code}_TOUCHED_BOOK_ENTITIES`);
   validateOptionalFrameFields(frame, code);
-  if (frame['runtimeOutputRetryState'] !== undefined) {
-    frame['runtimeOutputRetryState'] = decodeDurableOutputRetryState(
-      frame['runtimeOutputRetryState'],
-      `${code}_RUNTIME_OUTPUT_RETRY_STATE`,
-    );
-  }
   return frame as RuntimeFrame;
 };
 
