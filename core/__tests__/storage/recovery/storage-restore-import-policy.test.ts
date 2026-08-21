@@ -10,6 +10,7 @@ import {
   loadEnvFromDB,
   persistRestoredEnvToDB,
   processRuntime,
+  readPersistedRuntimeActivityJournal,
   registerSignerKey,
 } from '../../../runtime';
 import {
@@ -28,7 +29,7 @@ type RecoveryEnv = { env: RuntimeReplica; entityId: string; signerId: string; re
 const cleanupPaths: string[] = [];
 
 const cleanup = (base: string): void => {
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-history-views', '-events', '-infra']) {
     rmSync(`${base}${suffix}`, { recursive: true, force: true });
   }
 };
@@ -149,6 +150,7 @@ describe('restored checkpoint conflict policy', () => {
     base.env.state.timestamp = 1_000;
     base.replica.lastConsensusProgressAt = 1_111;
     await persistRestoredEnvToDB(base.env);
+    expect(await readPersistedRuntimeActivityJournal(base.env, 1)).not.toBeNull();
     await closeRecoveryEnv(base.env);
 
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -175,6 +177,8 @@ describe('restored checkpoint conflict policy', () => {
     if (!advancedReplica) throw new Error('restore advance replica missing');
     advancedReplica.lastConsensusProgressAt = 2_222;
     await persistRestoredEnvToDB(restored);
+    expect(await readPersistedRuntimeActivityJournal(restored, 1)).toBeNull();
+    expect(await readPersistedRuntimeActivityJournal(restored, 2)).not.toBeNull();
     await closeRecoveryEnv(restored);
 
     await assertFreshState(seed, { height: 2, progress: 2_222, profileName: 'advanced-base' });

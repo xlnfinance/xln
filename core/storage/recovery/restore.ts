@@ -37,8 +37,10 @@ export type RuntimeRecoveryDeps = Pick<
   createEmptyEnv: RuntimeModule['createEmptyEnv'];
   getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
   getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
+  getHistoryViewDb(env: RuntimeReplica): Level<Buffer, Buffer>;
   tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
   tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
+  tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
   enqueueRuntimeContinuation(
     env: RuntimeReplica,
     inputs?: import('../../entity/types').EntityInput[],
@@ -58,8 +60,10 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     createEmptyEnv,
     getStorageDb,
     getRuntimeWalDb,
+    getHistoryViewDb,
     tryOpenStorageDb,
     tryOpenRuntimeWalDb,
+    tryOpenHistoryViewDb,
     closeRuntimeDb,
     closeInfraDb,
     enqueueRuntimeContinuation,
@@ -134,7 +138,14 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     env: RuntimeReplica,
     options: PersistRestoredRuntimeOptions = {},
   ): Promise<void> =>
-    persistRestoredRuntimeState({ getStorageDb, getRuntimeWalDb, tryOpenStorageDb, tryOpenRuntimeWalDb }, env, options);
+    persistRestoredRuntimeState({
+      getStorageDb,
+      getRuntimeWalDb,
+      getHistoryViewDb,
+      tryOpenStorageDb,
+      tryOpenRuntimeWalDb,
+      tryOpenHistoryViewDb,
+    }, env, options);
 
   const reconcileCommittedRuntimeInfraEffects = (env: RuntimeReplica, runtimeTxs: readonly RuntimeTx[]) =>
     reconcileRecoveryInfraEffects(env, runtimeTxs, startJurisdictionWatchers);

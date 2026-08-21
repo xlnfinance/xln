@@ -67,6 +67,7 @@ export type StoragePersistenceBoundary =
   | 'after-restore-current-clear-batch'
   | 'after-restore-current-body'
   | 'after-restore-authoritative-swap'
+  | 'after-restore-history-view-clear'
   | 'after-restore-current-head';
 
 export type StoragePersistenceBoundaryHook = (

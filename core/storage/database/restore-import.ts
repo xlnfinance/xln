@@ -388,7 +388,7 @@ const publishNewHistoryBase = async (
  */
 export const replaceRestoredStorageBase = async (
   options: RestoredStorageBaseOptions,
-): Promise<void> => {
+): Promise<'idempotent' | 'replaced'> => {
   assertUniqueReplicaMetas(options.replicaMetas);
   const nodes = prepareCertifiedNodes(options);
   const existing = await decideExistingHistory(options);
@@ -456,7 +456,7 @@ export const replaceRestoredStorageBase = async (
     currentHead.put(KEY_HEAD, encodeBuffer(existing.head));
     await writeBatch(currentHead);
     await options.onPersistenceBoundary?.('after-restore-current-head');
-    return;
+    return 'idempotent';
   }
 
   await publishNewHistoryBase(
@@ -467,5 +467,6 @@ export const replaceRestoredStorageBase = async (
     replicaMetaDigest,
     postStateHash,
   );
+  return 'replaced';
 };
 import { Buffer } from '../../support/platform-crypto';
