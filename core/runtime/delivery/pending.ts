@@ -586,8 +586,17 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
     const signerIds = signerId ? [signerId] : [];
     gossipBoardSignerMemo.set(targetEntityId, { routeHash, runtimeSignature: profile.runtimeSignature, signerIds });
     return signerIds;
-  } catch {
-    return [];
+  } catch (error) {
+    const dump = safeStringify({ entityId: targetEntityId, profile });
+    env.error?.('network', 'ROUTE_PROFILE_SIGNATURE_INVALID', {
+      entityId: targetEntityId,
+      error: error instanceof Error ? error.message : String(error),
+      dump,
+    }, targetEntityId);
+    throw new Error(
+      `ROUTE_PROFILE_SIGNATURE_INVALID:${targetEntityId}:` +
+        `${error instanceof Error ? error.message : String(error)}:dump=${dump}`,
+    );
   }
 };
 const gossipBoardSignerMemo = new Map<string, { routeHash: string; runtimeSignature: string; signerIds: string[] }>();

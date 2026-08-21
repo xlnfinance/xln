@@ -35,6 +35,7 @@ import { findExactSignedProofBodyPull } from '../../../account/pull-registry-set
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
+import { buildCurrentDisputeArgumentPlan } from '../../../protocol/dispute/arguments';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
@@ -633,10 +634,9 @@ function findCrossJurisdictionRoutesForTargetDispute(
     });
 }
 
-const targetUserSnapshotPullIds = (
+const targetUserFrozenPullIds = (
   state: EntityState,
   account: AccountReplica,
-  proofbodyHashes: readonly string[],
 ): string[] => {
   const self = String(state.entityId || '').toLowerCase();
   const side = self === String(account.state.leftEntity || '').toLowerCase()
@@ -647,19 +647,12 @@ const targetUserSnapshotPullIds = (
   if (!side) throw haltRuntimeFailure("CROSS_J_TARGET_ACCOUNT_ROLE_MISMATCH", `CROSS_J_TARGET_ACCOUNT_ROLE_MISMATCH:${state.entityId}`);
   const pullIds: string[] = [];
   const seen = new Set<string>();
-  for (const proofbodyHash of proofbodyHashes) {
-    const snapshot = account.disputeArgumentSnapshotsByHash?.[proofbodyHash];
-    if (!snapshot) {
-      throw haltRuntimeFailure("CROSS_J_TARGET_SIGNED_SNAPSHOT_MISSING", `CROSS_J_TARGET_SIGNED_SNAPSHOT_MISSING:${proofbodyHash || 'missing'}`);
-    }
-    const sidePullIds = side === 'left'
-      ? snapshot.plan.leftPullIds
-      : snapshot.plan.rightPullIds;
-    for (const pullId of sidePullIds) {
-      if (!seen.has(pullId)) {
-        seen.add(pullId);
-        pullIds.push(pullId);
-      }
+  const plan = buildCurrentDisputeArgumentPlan(account);
+  const sidePullIds = side === 'left' ? plan.leftPullIds : plan.rightPullIds;
+  for (const pullId of sidePullIds) {
+    if (!seen.has(pullId)) {
+      seen.add(pullId);
+      pullIds.push(pullId);
     }
   }
   return pullIds;
@@ -674,29 +667,26 @@ const selectTargetRecoveryRoutes = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  proofbodyHashes: readonly string[],
-): { routes: CrossJurisdictionSwapRoute[]; snapshotPullIds: string[] } => {
+): { routes: CrossJurisdictionSwapRoute[]; frozenPullIds: string[] } => {
   const candidates = findCrossJurisdictionRoutesForTargetDispute(state, counterpartyId);
-  if (candidates.length === 0) return { routes: [], snapshotPullIds: [] };
-  const snapshotPullIds = targetUserSnapshotPullIds(state, account, proofbodyHashes);
-  const snapshotSet = new Set(snapshotPullIds);
+  if (candidates.length === 0) return { routes: [], frozenPullIds: [] };
+  const frozenPullIds = targetUserFrozenPullIds(state, account);
+  const frozenSet = new Set(frozenPullIds);
   const routes = candidates
-    .filter((route) => snapshotSet.has(route.targetPull!.pullId));
-  return { routes, snapshotPullIds };
+    .filter((route) => frozenSet.has(route.targetPull!.pullId));
+  return { routes, frozenPullIds };
 };
 
 export function planCrossJurisdictionTargetRecovery(
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  proofbodyHashes: readonly string[],
   suppliedResults: Readonly<Record<string, string>>,
 ): CrossJurisdictionTargetRecoveryPlan | null {
-  const { routes, snapshotPullIds } = selectTargetRecoveryRoutes(
+  const { routes, frozenPullIds } = selectTargetRecoveryRoutes(
     state,
     account,
     counterpartyId,
-    proofbodyHashes,
   );
   if (routes.length === 0) return null;
   const requiredSet = new Set(routes.map((route) => route.targetPull!.pullId));
@@ -717,7 +707,7 @@ export function planCrossJurisdictionTargetRecovery(
   return {
     representativeRouteId: routes[0]!.orderId,
     recovery: {
-      requiredPullIds: snapshotPullIds.filter((pullId) => requiredSet.has(pullId)),
+      requiredPullIds: frozenPullIds.filter((pullId) => requiredSet.has(pullId)),
       resultsByPullId,
     },
   };
@@ -866,14 +856,12 @@ export function refreshCrossJurisdictionTargetRecovery(
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  proofbodyHashes: readonly string[],
   current: CrossJurisdictionDisputeRecovery,
 ): CrossJurisdictionTargetRecoveryPlan | null {
   const { routes } = selectTargetRecoveryRoutes(
     state,
     account,
     counterpartyId,
-    proofbodyHashes,
   );
   const required = new Set(routes.map((route) => route.targetPull!.pullId));
   const retainedResults = Object.fromEntries(
@@ -884,7 +872,6 @@ export function refreshCrossJurisdictionTargetRecovery(
     state,
     account,
     counterpartyId,
-    proofbodyHashes,
     retainedResults,
   );
 }

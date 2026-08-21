@@ -16,10 +16,6 @@ import {
 } from '../../../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromJurisdictions, getAccountStateDomain } from '../../../consensus/helpers';
 import type { AccountConsensusContext } from '../../../consensus/context';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../../protocol/dispute/arguments';
 import { projectSettlementDeltaOverrides } from '../../../settlement/settlement-projection';
 import { ACCOUNT_TX_REJECTION_CODES } from '../../apply-types';
 import type {
@@ -368,7 +364,7 @@ const prepareSettlementSeal = (
     diffs,
     forgiveTokenIds,
   );
-  const { proofBodyHash, proofBodyStruct } = buildAccountProofBodyFromJurisdictions(
+  const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(
     context,
     draft,
     projectedDeltas,
@@ -408,7 +404,6 @@ const prepareSettlementSeal = (
     diffs,
     forgiveTokenIds,
     proofBodyHash,
-    proofBodyStruct,
     postNonce,
     expectedSettlementHash,
     expectedDisputeHash,
@@ -495,7 +490,6 @@ const commitSettlementSeal = (
     diffs,
     forgiveTokenIds,
     proofBodyHash,
-    proofBodyStruct,
     postNonce,
     expectedSettlementHash,
     expectedDisputeHash,
@@ -552,27 +546,6 @@ const commitSettlementSeal = (
   nextWorkspace.lastUpdatedAt = timestamp;
 
   draft.state.settlementWorkspace = nextWorkspace;
-  draft.disputeProofBodiesByHash = {
-    ...(draft.disputeProofBodiesByHash ?? {}),
-    [proofBodyHash]: proofBodyStruct,
-  };
-  draft.disputeProofNoncesByHash = {
-    ...(draft.disputeProofNoncesByHash ?? {}),
-    [proofBodyHash]: postNonce,
-  };
-  draft.disputeArgumentSnapshotsByHash = {
-    ...(draft.disputeArgumentSnapshotsByHash ?? {}),
-  };
-  storeDisputeArgumentSnapshot(
-    draft,
-    captureDisputeArgumentSnapshot(
-      draft,
-      proofBodyHash,
-      postNonce,
-      prepared.proposerIsLeft,
-      proofBodyStruct,
-    ),
-  );
 };
 
 const applySettlementSeal = async (

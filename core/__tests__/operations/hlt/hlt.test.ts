@@ -46,19 +46,20 @@ import {
 import { prepareSwapOfferAmounts } from '../../../account/tx/handlers/swap/offer/quantization';
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
 import {
-  connectedRuntimeHttpBase,
   deriveLoadLaneIdentities,
   CONTROL_CONCURRENCY,
   partitionLoadControlBatches,
   partitionLoadProvisioningBatches,
-  runtimeHttpBaseFromWsUrl,
 } from '../../../scripts/operations/hlt/lanes/worker-lanes';
 import { parseSameLoadSchedule } from '../../../scripts/operations/hlt/workload/load-schedule';
 import {
   buildIndependentMakerTakerPlan,
   buildParallelLaneOfferPlan,
 } from '../../../scripts/operations/hlt/workload/worker-same-plan';
-import { buildLaneRoundOfferInputs } from '../../../scripts/operations/hlt/workload/worker-same-lanes';
+import {
+  buildLaneRoundOfferInputs,
+  resolveLoadBatchRounds,
+} from '../../../scripts/operations/hlt/workload/worker-same-lanes';
 import {
   deriveSameOrderbookPriceBandBounds,
   evaluateSameOrderbookPriceBand,
@@ -151,7 +152,7 @@ describe('production swap load evidence', () => {
         jNonce: 0, requestedRebalance: new Map(), requestedRebalanceFeeState: new Map(),
       },
       status: 'active', mempool: [], currentFrame: {}, currentHeight: 0,
-      pendingSignatures: [], rollbackCount: 0, proofHeader: {}, proofBody: {},
+      rollbackCount: 0, proofHeader: {}, proofBody: {},
       pendingWithdrawals: new Map(), shadow: {},
       pendingFrame,
     };
@@ -213,11 +214,6 @@ describe('production swap load evidence', () => {
     expect(new Set(identities.map(identity => identity.signerId)).size).toBe(3);
     expect(new Set([...identities, ...makers].map(identity => identity.entityId)).size).toBe(6);
     expect(new Set([...identities, ...next].map(identity => identity.entityId)).size).toBe(6);
-    expect(runtimeHttpBaseFromWsUrl('ws://127.0.0.1:20008/rpc')).toBe('http://127.0.0.1:20008');
-    expect(connectedRuntimeHttpBase({ wsUrl: 'ws://127.0.0.1:20008/rpc' }))
-      .toBe('http://127.0.0.1:20008');
-    expect(() => runtimeHttpBaseFromWsUrl('http://127.0.0.1:20008/rpc'))
-      .toThrow('PRODUCTION_SWAP_LOAD_CONTROL_URL_INVALID');
   });
 
   test('user provisioning stays below the authenticated Runtime API burst', () => {
@@ -234,7 +230,7 @@ describe('production swap load evidence', () => {
     expect(provisioning.every(batch => batch.length <= 16)).toBe(true);
   });
 
-  test('parallel lane plan emits exact marketable offers without exceeding five per Account frame', () => {
+  test('parallel lane plan emits exact marketable offers', () => {
     const midpoint = 25_000_000n;
     const { maxAllowed } = deriveSameOrderbookPriceBandBounds(midpoint);
     const plans = buildParallelLaneOfferPlan(`0x${'11'.repeat(32)}`, 'test-load', 30, 3, 10_000_000n, maxAllowed);
@@ -302,6 +298,36 @@ describe('production swap load evidence', () => {
     expect(new Set(round.map(input => input.entityTxs[0]!.data.offerId)).size).toBe(3);
   });
 
+  test('mixed input batches stay at one-to-three swaps and never leave a paymentless tail', () => {
+    const plans = buildIndependentMakerTakerPlan(
+      `0x${'11'.repeat(32)}`,
+      'mixed-frame-test',
+      6,
+      1,
+      10_000_000n,
+      25_000_000n,
+    );
+    const identity = {
+      entityId: `0x${'22'.repeat(32)}`,
+      signerId: `0x${'33'.repeat(20)}`,
+    };
+    const first = buildLaneRoundOfferInputs([identity], plans.takerPlans, 0, 3);
+    const second = buildLaneRoundOfferInputs([identity], plans.takerPlans, 3, 3);
+    expect(first[0]?.entityTxs).toHaveLength(3);
+    expect(second[0]?.entityTxs).toHaveLength(3);
+    expect(first[0]?.entityTxs.every(tx => tx.type === 'placeSwapOffer')).toBe(true);
+    expect(second[0]?.entityTxs.every(tx => tx.type === 'placeSwapOffer')).toBe(true);
+    const batches: number[][] = [];
+    for (let firstRound = 0; firstRound < 40;) {
+      const batchRounds = resolveLoadBatchRounds(40 - firstRound, 3);
+      batches.push(Array.from({ length: batchRounds }, (_, offset) => firstRound + offset));
+      firstRound += batchRounds;
+    }
+    expect(batches.every(batch => batch.length >= 1 && batch.length <= 3)).toBe(true);
+    expect(batches.every(batch => batch.some(round => round % 2 === 0))).toBe(true);
+    expect(batches.flat()).toEqual(Array.from({ length: 40 }, (_, round) => round));
+  });
+
   test('same-j submitter can fold extra EntityTxs into the round command', () => {
     const source = readFileSync(new URL(
       '../../../scripts/operations/hlt/workload/worker-same-lanes.ts',
@@ -309,6 +335,12 @@ describe('production swap load evidence', () => {
     ), 'utf8');
     expect(source).toContain('extraEntityTxs');
     expect(source).toContain('withRoundExtraTxs');
+    expect(source).toContain('collectRoundExtraTxs(options.extraEntityTxs');
+    expect(source).toContain('queueLaneRuntimeInputWave(waveIndex');
+    expect(source).not.toContain('lane.runtime.control.queueRuntimeInput');
+    expect(source).toContain('[load] stream dispatched');
+    expect(source).not.toContain('sendEnqueued(');
+    expect(source).not.toContain('hub-pipeline window');
   });
 
   test('hub identity selector excludes cohosted secondary and remote gossip hubs', () => {

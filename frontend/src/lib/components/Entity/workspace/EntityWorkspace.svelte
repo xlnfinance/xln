@@ -172,7 +172,7 @@
 	      <span
 	        class={`command-pill ${$runtimeCommandLatestReceipt.status}`}
 	        data-testid="runtime-command-receipt"
-	        title={$runtimeCommandLatestReceipt.error || $runtimeCommandLatestReceipt.upstreamReceiptId || $runtimeCommandLatestReceipt.statusUrl || $runtimeCommandLatestReceipt.receiptId}
+	        title={$runtimeCommandLatestReceipt.error || $runtimeCommandLatestReceipt.receiptId}
       >
         {$runtimeCommandLatestReceipt.status}
         {#if $runtimeCommandLatestReceipt.failureKind}

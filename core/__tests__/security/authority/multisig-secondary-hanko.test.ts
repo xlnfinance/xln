@@ -19,7 +19,6 @@ import {
 } from '../../../entity/consensus';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import {
-  assertCertifiedEntityOutputWitnesses,
   assignCertifiedOutputIdentities,
   buildCertifiedEntityOutputHashes,
   hashCertifiedEntityOutput,
@@ -99,9 +98,7 @@ const buildGenericOrigin = (
   frameHash: string,
   outputIndex: number,
 ): ConsensusOutputOrigin => {
-  const lane = entityTxs.some(tx => tx.type === 'accountInput' && tx.data.kind === 'dispute')
-    ? 'account-dispute'
-    : 'generic';
+  const lane = 'generic' as const;
   return {
     sourceEntityId,
     lane,
@@ -220,10 +217,8 @@ const createMultisigAccountState = (
       byLeft: entityId === leftEntity,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: { rebalance: {
       policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
@@ -471,7 +466,7 @@ describe('multisig secondary Hanko production', () => {
     )).rejects.toThrow('BUILD_QUORUM_HANKO_INSUFFICIENT_QUORUM');
   });
 
-  test('single-signer certifies the exact cross-Entity Account output before target replay', async () => {
+  test('single-signer routes the exact Hanko-sealed Account output before target replay', async () => {
     const source = createMultisigAccountState(validators[0], {
       validators: [validators[0]!],
       threshold: 1n,
@@ -497,44 +492,30 @@ describe('multisig secondary Hanko production', () => {
       output.entityId === source.counterpartyId && output.entityTxs?.length,
     );
     if (!outbound) throw new Error('TEST_SINGLE_SIGNER_ACCOUNT_OUTPUT_MISSING');
-    const certifiedTx = outbound.entityTxs?.[0];
-    if (certifiedTx?.type !== 'consensusOutput') {
-      throw new Error(`TEST_SINGLE_SIGNER_OUTPUT_NOT_CERTIFIED:${certifiedTx?.type ?? 'missing'}`);
+    const accountTx = outbound.entityTxs?.[0];
+    if (accountTx?.type !== 'accountInput') {
+      throw new Error(`TEST_SINGLE_SIGNER_OUTPUT_NOT_ACCOUNT_INPUT:${accountTx?.type ?? 'missing'}`);
     }
-    expect(certifiedTx.data.consumptionProof).toBeUndefined();
-    expect(certifiedTx.data.targetEntityId).toBe(source.counterpartyId);
-    const exactOutputHash = hashCertifiedEntityOutput(
-      certifiedTx.data.origin,
-      certifiedTx.data.targetEntityId,
-      certifiedTx.data.entityTxs,
-    );
+    expect(accountTx.data.toEntityId).toBe(source.counterpartyId);
+    const proposal = accountInputProposal(accountTx.data);
+    if (!proposal?.frameHanko) throw new Error('TEST_SINGLE_SIGNER_FRAME_HANKO_MISSING');
     expect((await verifyHankoForHash(
-      certifiedTx.data.outputHanko,
-      exactOutputHash,
+      proposal.frameHanko,
+      proposal.frame.stateHash,
       source.entityId,
       source.env,
     )).valid).toBe(true);
-    const [targetPrepared] = attachTargetConsumptionProofs(source.env, target.state, [certifiedTx]);
-    if (targetPrepared?.type !== 'consensusOutput') throw new Error('TEST_TARGET_PROOF_MISSING');
-    expect(certifiedTx.data.consumptionProof).toBeUndefined();
-    expect(targetPrepared).not.toBe(certifiedTx);
-    expect(targetPrepared.data.consumptionProof).toBeDefined();
-    expect(hashCertifiedEntityOutput(
-      targetPrepared.data.origin,
-      targetPrepared.data.targetEntityId,
-      targetPrepared.data.entityTxs,
-    )).toBe(exactOutputHash);
     expect(getConsumptionNodeStore(source.env).size).toBe(0);
 
     registerOnly(source.env, counterpartySigner);
     const accepted = await applyEntityInput(source.env, target, structuredClone(outbound));
     expect(accepted.outcome.kind).toBe('committed');
-    expect(accepted.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
-    cacheCommittedConsumptionNodeChanges(source.env, accepted.consumptionNodeChanges);
-    expect(getConsumptionNodeStore(source.env).size).toBe(1);
+    expect(accepted.workingReplica.state.accounts.get(source.entityId)?.currentHeight).toBe(1);
+    expect(accepted.workingReplica.state.consumptionAccumulator?.count ?? 0n).toBe(0n);
+    expect(getConsumptionNodeStore(source.env).size).toBe(0);
   });
 
-  test('applies a source-certified heightless dispute through the target Entity frame', async () => {
+  test('applies a raw Hanko-sealed heightless dispute through the target Entity frame', async () => {
     const source = createMultisigAccountState(validators[0]);
     const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
@@ -578,39 +559,10 @@ describe('multisig secondary Hanko production', () => {
         },
       },
     }];
-    const origin = buildGenericOrigin(
-      source.entityId,
-      source.counterpartyId,
-      entityTxs,
-      1n,
-      1,
-      digest('d'),
-      0,
-    );
-    const outputHash = hashCertifiedEntityOutput(
-      origin,
-      source.counterpartyId,
-      entityTxs,
-    );
-    const [certifiedOutput] = attachTargetConsumptionProofs(
-      source.env,
-      target.state,
-      [{
-        type: 'consensusOutput',
-        data: {
-          origin,
-          outputHanko: await buildExactQuorumHanko(source, outputHash),
-          targetEntityId: source.counterpartyId,
-          entityTxs,
-        },
-      }],
-    );
-    if (!certifiedOutput) throw new Error('TEST_CERTIFIED_DISPUTE_OUTPUT_MISSING');
-
     const applied = await applyEntityFrameWithMaterializedTestInfraContext(
       source.env,
       target.state,
-      [certifiedOutput],
+      entityTxs,
       source.env.state.timestamp + 1,
     );
     const appliedAccount = applied.newState.accounts.get(source.entityId);
@@ -772,7 +724,7 @@ describe('multisig secondary Hanko production', () => {
       1,
       digest('f'),
       [mixedReliable],
-    )).toThrow('CONSENSUS_OUTPUT_RELIABLE_PAYLOAD_MUST_BE_ATOMIC');
+    )).toThrow('ACCOUNT_OUTPUT_MUST_BE_ONE_RAW_ACCOUNT_INPUT');
 
     const realTrigger = handleExtendCreditEntityTx(setup.state, {
       type: 'extendCredit',
@@ -795,7 +747,9 @@ describe('multisig secondary Hanko production', () => {
       certifiedOutputSequences: new Map(frontierEntries),
     };
     const existingTarget = frontierEntries[0]![0];
-    const existingPayload = [buildUnverifiedBoardResealTx(setup.entityId, existingTarget)];
+    const existingPayload: EntityTx[] = [{
+      type: 'chat', data: { from: setup.entityId, message: 'advance-frontier' },
+    }];
     const advancedOutputs: EntityInput[] = [{
       entityId: existingTarget,
       signerId: validators[0]!,
@@ -809,7 +763,7 @@ describe('multisig secondary Hanko production', () => {
     const newRelationshipOutputs: EntityInput[] = [{
       entityId: newTarget,
       signerId: validators[0]!,
-      entityTxs: [buildUnverifiedBoardResealTx(setup.entityId, newTarget)],
+      entityTxs: [{ type: 'chat', data: { from: setup.entityId, message: 'new-frontier' } }],
     }];
     const expanded = assignCertifiedOutputIdentities(fullState, newRelationshipOutputs);
     expect(expanded.certifiedOutputSequences?.size).toBe(relationshipCount + 1);
@@ -907,7 +861,6 @@ describe('multisig secondary Hanko production', () => {
     expect(proposalManifest.slice(1).map(({ type }) => type).sort()).toEqual([
       'accountFrame',
       'dispute',
-      'entityOutput',
       'profile',
     ]);
     const secondaryHashes = proposalManifest.slice(1).map(({ hash }) => hash);
@@ -941,7 +894,6 @@ describe('multisig secondary Hanko production', () => {
 
     const outbound = leader.outputs
       .flatMap(output => output.entityTxs ?? [])
-      .flatMap(tx => tx.type === 'consensusOutput' ? tx.data.entityTxs : [tx])
       .find(tx => tx.type === 'accountInput');
     const sealedProposal = outbound?.type === 'accountInput' ? accountInputProposal(outbound.data) : undefined;
     if (!sealedProposal?.frameHanko || !sealedProposal.disputeSeal?.hanko) {
@@ -1001,7 +953,7 @@ describe('multisig secondary Hanko production', () => {
     expect(followerCommit.workingReplica.state.height).toBe(1);
     const followerSideEffect = followerCommit.outputs.find(output => output.entityTxs?.length);
     if (!followerSideEffect) throw new Error('TEST_FOLLOWER_SIDE_EFFECT_MISSING');
-    expect(followerSideEffect.entityTxs?.[0]?.type).toBe('consensusOutput');
+    expect(followerSideEffect.entityTxs?.[0]?.type).toBe('accountInput');
     const noticeForProposer = followerCommit.outputs.find(output =>
       output.signerId === validators[0] && output.proposedFrame?.hankos?.length,
     );
@@ -1020,41 +972,8 @@ describe('multisig secondary Hanko production', () => {
     if (!proposerSideEffect) throw new Error('TEST_PROPOSER_SIDE_EFFECT_MISSING');
     expect(safeStringify(proposerSideEffect.entityTxs)).toBe(safeStringify(followerSideEffect.entityTxs));
 
-    const emittedCertifiedTx = followerSideEffect.entityTxs?.[0];
-    if (emittedCertifiedTx?.type !== 'consensusOutput') {
-      throw new Error('TEST_EMITTED_CERTIFIED_OUTPUT_MISSING');
-    }
-    const emittedOutputHash = hashCertifiedEntityOutput(
-      emittedCertifiedTx.data.origin,
-      emittedCertifiedTx.data.targetEntityId,
-      emittedCertifiedTx.data.entityTxs,
-    );
-    expect((await verifyHankoForHash(
-      emittedCertifiedTx.data.outputHanko,
-      emittedOutputHash,
-      proposer.entityId,
-      proposer.env,
-    )).valid).toBe(true);
-    const witnessTamperedTxs = structuredClone(emittedCertifiedTx.data.entityTxs);
-    const witnessInput = witnessTamperedTxs.find(tx => tx.type === 'accountInput');
-    const witnessProposal = witnessInput?.type === 'accountInput'
-      ? accountInputProposal(witnessInput.data)
-      : undefined;
-    if (!witnessProposal?.frameHanko) throw new Error('TEST_OUTPUT_WITNESS_MISSING');
-    witnessProposal.frameHanko = mutateHexTail(witnessProposal.frameHanko);
-    expect(hashCertifiedEntityOutput(
-      emittedCertifiedTx.data.origin,
-      emittedCertifiedTx.data.targetEntityId,
-      witnessTamperedTxs,
-    )).toBe(emittedOutputHash);
     const dedupTarget = proposer.env.state.eReplicas.get(`${proposer.counterpartyId}:${counterpartySigner}`);
     if (!dedupTarget) throw new Error('TEST_DEDUP_TARGET_MISSING');
-    await expect(assertCertifiedEntityOutputWitnesses(
-      witnessTamperedTxs,
-      proposer.entityId,
-      proposer.env,
-      dedupTarget.state,
-    )).rejects.toThrow(/CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID/);
 
     const dedupEntityTxs: EntityTx[] = [await buildCertifiedCrossJTx(
       proposer,
@@ -1407,7 +1326,7 @@ describe('multisig secondary Hanko production', () => {
       type: 'consensusOutput',
       data: { origin, outputHanko, targetEntityId: source.counterpartyId, entityTxs },
     }], source.env.state.timestamp + 1)).rejects.toThrow(
-      `CONSENSUS_OUTPUT_SEMANTIC_SOURCE_MISMATCH:accountInput:${source.entityId}`,
+      'CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN',
     );
     expect(targetReplica.state.height).toBe(0);
     expect(targetReplica.state.accounts.size).toBe(0);

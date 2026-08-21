@@ -69,7 +69,7 @@ const makeEnv = (): RuntimeReplica => ({
 } as unknown as RuntimeReplica);
 
 describe('credit request ingress', () => {
-  test('queues hub credit extension through runtime admission and returns receipt status metadata', async () => {
+  test('queues hub credit extension through runtime admission without transport receipts', async () => {
     const env = makeEnv();
     let enqueued: RuntimeInput | null = null;
     let validated: RuntimeInput | null = null;
@@ -94,18 +94,7 @@ describe('credit request ingress', () => {
       enqueueRuntimeInput: (_env, runtimeInput) => {
         enqueued = runtimeInput;
       },
-      registerReceipt: (receipt) => ({
-        id: receipt.id ?? 'receipt-1',
-        kind: receipt.kind,
-        status: 'pending',
-        counts: receipt.counts,
-        enqueuedAt: 1,
-        enqueuedHeight: receipt.enqueuedHeight,
-        expiresAt: 10_001,
-        ...(receipt.note ? { note: receipt.note } : {}),
-      }),
       getCurrentRuntimeHeight: (targetEnv) => Number(targetEnv?.state.height ?? 0),
-      buildRuntimeInputStatusUrl: (id) => `/api/runtime-input/${id}`,
     });
     const body = await response.json();
 
@@ -115,14 +104,6 @@ describe('credit request ingress', () => {
     expect(String(body.requestId)).toMatch(/^credit_/);
     expect(body.runtimeId).toBe(RUNTIME_ID);
     expect(body.currentHeight).toBe(9);
-    expect(body.receipt).toMatchObject({
-      id: body.requestId,
-      kind: 'credit-request',
-      status: 'pending',
-      counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-      enqueuedHeight: 9,
-    });
-    expect(body.statusUrl).toBe(`/api/runtime-input/${body.requestId}`);
     expect(validated).toBe(enqueued);
     expect(enqueued?.entityInputs).toHaveLength(1);
     expect(enqueued?.entityInputs?.[0]).toMatchObject({

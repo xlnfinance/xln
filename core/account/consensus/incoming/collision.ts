@@ -6,6 +6,7 @@ import { accountInputAck, accountInputProposal } from '../flush';
 import { prependUniqueMempoolTxs } from '../helpers';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
+import { countOp } from '../../../support/performance/op-counters';
 
 const collisionLog = createStructuredLogger('account.collision');
 
@@ -168,7 +169,8 @@ export const resolveSameHeightIncomingFrame = (
   }
   if (localIsLeft) {
     events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} ` + `(waiting for their ACK)`);
-    collisionLog.warn('frame.left_wins_ignored', {
+    countOp('account.collision.leftWins');
+    collisionLog.debug('frame.left_wins_ignored', {
       from: shortId(account.proofHeader.fromEntity),
       to: shortId(account.proofHeader.toEntity),
       height: receivedFrame.height,

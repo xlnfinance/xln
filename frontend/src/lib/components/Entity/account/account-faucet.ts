@@ -10,19 +10,6 @@ export type FaucetApiResult = {
   code?: string;
   details?: unknown;
   requestId?: string;
-  statusUrl?: string;
-  receipt?: {
-    id?: string | null;
-    status?: string;
-    counts?: {
-      runtimeTxs?: number;
-      entityInputs?: number;
-      jInputs?: number;
-    };
-    enqueuedHeight?: number | null;
-    observedHeight?: number | null;
-    note?: string | null;
-  };
   accountReady?: boolean;
   serverDurationMs?: number;
   events?: Array<{
@@ -47,21 +34,6 @@ export type ReserveFaucetCompletion = {
   currentBalance: bigint;
 };
 
-const isFaucetReceipt = (value: unknown): value is NonNullable<FaucetApiResult['receipt']> => {
-  // The server embeds the full RuntimeIngressReceipt (kind, enqueuedAt,
-  // expiresAt, inputHash, inputFingerprints, ...) here; this client only
-  // reads the fields below, so unknown extra fields must not fail decoding.
-  if (!isRecord(value)) return false;
-  if (value['id'] !== undefined && value['id'] !== null && typeof value['id'] !== 'string') return false;
-  if (value['status'] !== undefined && typeof value['status'] !== 'string') return false;
-  if (value['enqueuedHeight'] !== undefined && value['enqueuedHeight'] !== null && (typeof value['enqueuedHeight'] !== 'number' || !Number.isFinite(value['enqueuedHeight']))) return false;
-  if (value['observedHeight'] !== undefined && value['observedHeight'] !== null && (typeof value['observedHeight'] !== 'number' || !Number.isFinite(value['observedHeight']))) return false;
-  if (value['note'] !== undefined && value['note'] !== null && typeof value['note'] !== 'string') return false;
-  const counts = value['counts'];
-  return counts === undefined || (isRecord(counts) &&
-    Object.values(counts).every((count) => typeof count === 'number' && Number.isFinite(count)));
-};
-
 export const isFaucetApiResult = (value: unknown): value is FaucetApiResult => {
   // Server responses (success and failure bodies) carry additional diagnostic
   // fields (type, amount, tokenId, from, to, accountState, senderOutCapacity,
@@ -70,10 +42,9 @@ export const isFaucetApiResult = (value: unknown): value is FaucetApiResult => {
   // on unknown extra keys, or every server-side field addition breaks this.
   if (!isRecord(value)) return false;
   if (value['success'] !== undefined && typeof value['success'] !== 'boolean') return false;
-  for (const field of ['status', 'error', 'code', 'requestId', 'statusUrl'] as const) if (value[field] !== undefined && typeof value[field] !== 'string') return false;
+  for (const field of ['status', 'error', 'code', 'requestId'] as const) if (value[field] !== undefined && typeof value[field] !== 'string') return false;
   if (value['accountReady'] !== undefined && typeof value['accountReady'] !== 'boolean') return false;
   if (value['serverDurationMs'] !== undefined && (typeof value['serverDurationMs'] !== 'number' || !Number.isFinite(value['serverDurationMs']))) return false;
-  if (value['receipt'] !== undefined && !isFaucetReceipt(value['receipt'])) return false;
   if (!Array.isArray(value['events']) && value['events'] !== undefined) return false;
   return value['events'] === undefined || value['events'].every((event) => isRecord(event) && hasOnlyKeys(event, ['name', 'args', 'blockNumber', 'blockHash', 'transactionHash']) &&
     typeof event['name'] === 'string' && isRecord(event['args']) && typeof event['blockNumber'] === 'number' && Number.isFinite(event['blockNumber']) &&

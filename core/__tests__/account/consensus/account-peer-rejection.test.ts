@@ -12,8 +12,6 @@ import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixture';
 import { applyMergedEntityInputs } from '../../../runtime/mempool/entity-inputs';
-import { buildSignedEntityCommand } from '../../../entity/command';
-import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { LIMITS, TOKENS } from '../../../config/constants';
 import { createDefaultDelta } from '../../../account/state/delta';
@@ -65,14 +63,12 @@ const createAccount = (localEntity = leftEntity, peerEntity = rightEntity): Acco
       byLeft: localEntity < peerEntity,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: {
       fromEntity: localEntity,
       toEntity: peerEntity,
       nextProofNonce: 1,
     },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: {
       rebalance: {
@@ -452,7 +448,7 @@ describe('typed Account peer rejection', () => {
   });
 });
 
-test('authenticated Runtime Account poison is consumed and the next honest Entity input commits', async () => {
+test('authenticated Runtime Account poison halts loudly without mutating the live replica', async () => {
   const fixture = createEntityProposalFixture('account-peer-runtime-continuation', 1n);
   const target = fixture.createValidator('1');
   const peerEntity = `0x${'77'.repeat(32)}`;
@@ -475,49 +471,23 @@ test('authenticated Runtime Account poison is consumed and the next honest Entit
     getP2P: () => null,
   };
 
-  const poisoned = await applyMergedEntityInputs(
+  await expect(applyMergedEntityInputs(
     target.env,
-    [
-      {
-        from: `0x${'99'.repeat(20)}`,
-        sourceRuntimeFrame: { height: 1, timestamp: 1 },
-        entityId: fixture.entityId,
-        signerId: target.signerId,
-        entityTxs: [{ type: 'accountInput', data: poison }],
-      },
-    ],
+    [{
+      from: `0x${'99'.repeat(20)}`,
+      sourceRuntimeFrame: { height: 1, timestamp: 1 },
+      entityId: fixture.entityId,
+      signerId: target.signerId,
+      entityTxs: [{ type: 'accountInput', data: poison }],
+    }],
     [],
     { isReplay: false, routingDeps },
+  )).rejects.toThrow(
+    'ACCOUNT_PEER_EVIDENCE_REJECTED:ACCOUNT_PEER_WATCH_SEED_INVALID',
   );
-  expect(poisoned.inputOutcomes[0]?.outcome.kind).toBe('committed');
   expect(
     target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.accounts.get(peerEntity)
       ?.currentHeight,
   ).toBe(0);
-  const heightAfterPoison =
-    target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.height ?? -1;
-
-  const committedReplica = target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`);
-  if (!committedReplica) throw new Error('TEST_COMMITTED_ENTITY_REPLICA_MISSING');
-  const command = buildSignedEntityCommand(target.env, committedReplica.state, target.signerId, [
-    { type: 'chat', data: { from: target.signerId, message: 'runtime-still-progresses' } },
-  ]);
-
-  const honest = await applyMergedEntityInputs(
-    target.env,
-    [
-      {
-        entityId: fixture.entityId,
-        signerId: target.signerId,
-        entityTxs: [signedEntityCommandTx(command)],
-      },
-    ],
-    [],
-    { isReplay: false, routingDeps },
-  );
-  expect(honest.inputOutcomes[0]?.outcome.kind).toBe('committed');
-  expect(honest.inputOutcomes[0]?.entityFrameCommitted).toBe(true);
-  expect(target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.height).toBe(
-    heightAfterPoison + 1,
-  );
+  expect(target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.height).toBe(0);
 });

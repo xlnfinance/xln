@@ -16,12 +16,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('hlt payment population', () => {
-  test('payment route and balance readers stay bounded per daemon', () => {
+  test('payment routing stays bounded and settlement uses committed metrics', () => {
     const source = readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/workload/worker-payments.ts'),
       'utf8',
     );
-    expect(source).toContain('laneDaemons(senders)');
+    expect(source).toContain('receiverIdsBySender');
     expect(source).toContain('READ_CONCURRENCY');
     expect(source).toContain('forEachLimited');
     expect(source).toContain('pendingReads');
@@ -29,11 +29,10 @@ describe('hlt payment population', () => {
     expect(source).toContain('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
     expect(source).toContain('sendEnqueued');
     expect(source).toContain('waitForHubSettlement');
-    expect(source).toContain('requireQuoteDelta');
-    expect(source).toContain('accountsLimit: pageLimit');
-    expect(source).toContain('HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 1');
-    expect(source).toContain('runtime adapter response too large');
-    expect(source).toContain('Skip the fat /accounts dump');
+    expect(source).toContain('core.completedPayments - completedPaymentsBefore');
+    expect(source).toContain("type: 'settlement-evidence', book: null, accounts: []");
+    expect(source).not.toContain('readHubReceiverCredits');
+    expect(source).not.toContain('accountsLimit: pageLimit');
     expect(readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
       'utf8',
@@ -101,7 +100,7 @@ describe('hlt payment population', () => {
     expect(() => paymentAmountFor(0, 0, { min: 5n, max: 1n })).toThrow('HLT_PAYMENT_AMOUNT_RANGE_INVALID');
   });
 
-  test('payments mode derives its population from the payment half of the mix', () => {
+  test('payments mode uses every sovereign user as sender and receiver', () => {
     const args = parseWorkerArgs([
       '--work-dir', '/tmp/xln-load',
       '--port-base', '20000',
@@ -111,10 +110,10 @@ describe('hlt payment population', () => {
       '--duration-s', '10',
       '--mix', '0:1',
     ]);
-    expect(args.lanes).toBe(32);
+    expect(args.lanes).toBe(64);
     expect(args.rounds).toBe(20);
     expect(args.cadenceMs).toBe(500);
-    expect(args.plan?.paymentLanes).toBe(32);
+    expect(args.plan?.paymentLanes).toBe(64);
   });
 
   test('a mix that leaves the mode no users is rejected', () => {
@@ -168,7 +167,7 @@ describe('hlt payment population', () => {
     expect(plan.offeredSwapRatePerSecond).toBe(1000);
   });
 
-  test('payments-only mix still partitions; swap-only does not invent payments', () => {
+  test('payments-only uses the full population; swap-only does not invent payments', () => {
     const payments = buildHltPlan({
       users: 8,
       ratePerUserPerSecond: 1,
@@ -179,8 +178,8 @@ describe('hlt payment population', () => {
       hubLabels: ['H1'],
       marketMakerLabels: ['MM'],
     });
-    expect(payments.paymentLanes).toBe(4);
-    expect(payments.offeredPaymentRatePerSecond).toBe(4);
+    expect(payments.paymentLanes).toBe(8);
+    expect(payments.offeredPaymentRatePerSecond).toBe(8);
     expect(payments.offeredSwapRatePerSecond).toBe(0);
     const swaps = buildHltPlan({
       users: 8,
@@ -243,7 +242,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('extraEntityTxs');
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
     expect(source).toContain('round % swapMatches !== 0');
-    expect(source).toContain('expectedPayments,\n      false');
+    expect(source).toContain('hubCountersBefore.completedPayments,\n      submittedPayments');
     expect(source).toContain('additive: true');
     expect(source).not.toContain('readHubReceiverCredits');
     expect(source).not.toContain('hlt-mixed-swap-${tick + 1}');
@@ -256,12 +255,13 @@ describe('hlt payment report boundary', () => {
   const report = {
     schema: 'xln-hlt-payment-load-v1',
     mode: 'payments',
-    completionAuthority: 'committed_receiver_balances_and_bilateral_quiescence',
+    completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
     configuredUsers: 64, configuredRounds: 10, cadenceMs: 1_000,
     senders: 32, receivers: 32, tokenId: 1, amount: '1000',
     offeredPaymentRate: 32, submittedPayments: 320, deliveredPayments: 320,
     enqueueAckElapsedMs: 10, commandObservedElapsedMs: 20, deliveredElapsedMs: 30,
     deliveredTps: 10.5, roundSubmissionLagMs: [1, 2, 3],
+    hubCompletedPaymentsBefore: 12, hubCompletedPaymentsAfter: 332,
     walBytesBefore: 100, walBytesAfter: 200,
     hubDurableBefore: frame, hubDurableAfter: { ...frame, height: 40 },
   };

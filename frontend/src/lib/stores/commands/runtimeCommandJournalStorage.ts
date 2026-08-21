@@ -1,12 +1,9 @@
 import type { RuntimeInput } from '@xln/core/api/public/runtime-module';
 import { safeParse, safeStringify } from '@xln/core/protocol/serialization';
 import {
-  MAX_RECEIPT_ID_BYTES,
   MAX_RUNTIME_INPUT_BYTES,
-  MAX_STATUS_URL_BYTES,
   MAX_UNRESOLVED_REMOTE_INTENTS,
   canonicalRuntimeInput,
-  normalizeBoundedText,
   normalizeRuntimeCommandId,
   normalizeRuntimeId,
   normalizeRuntimeServerFingerprint,
@@ -41,7 +38,7 @@ export type PersistedRemoteRuntimeCommandIntent = {
 
 type EncryptedIntentPayload = Pick<
   RemoteRuntimeCommandIntent,
-  'commandSequence' | 'inputHash' | 'input' | 'status' | 'createdAt' | 'upstreamReceiptId' | 'statusUrl'
+  'commandSequence' | 'inputHash' | 'input' | 'status' | 'createdAt'
 >;
 
 const HASH_PATTERN = /^0x[0-9a-f]{64}$/;
@@ -106,6 +103,11 @@ const validatedPayload = (value: unknown): EncryptedIntentPayload => {
     throw new Error('RUNTIME_COMMAND_INTENT_STORAGE_CORRUPT: payload');
   }
   const payload = value as Record<string, unknown>;
+  const keys = Object.keys(payload).sort();
+  const expectedKeys = ['commandSequence', 'createdAt', 'input', 'inputHash', 'status'];
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+    throw new Error('RUNTIME_COMMAND_INTENT_STORAGE_FIELDS_INVALID');
+  }
   const input = payload['input'] as RuntimeInput;
   const canonical = canonicalRuntimeInput(input);
   const commandSequence = Number(payload['commandSequence']);
@@ -121,13 +123,7 @@ const validatedPayload = (value: unknown): EncryptedIntentPayload => {
   if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
     throw new Error('RUNTIME_COMMAND_INTENT_STORAGE_CORRUPT: createdAt');
   }
-  const upstreamReceiptId = payload['upstreamReceiptId'] === null
-    ? null
-    : normalizeBoundedText(payload['upstreamReceiptId'], 'RECEIPT_ID', MAX_RECEIPT_ID_BYTES);
-  const statusUrl = payload['statusUrl'] === null
-    ? null
-    : normalizeBoundedText(payload['statusUrl'], 'STATUS_URL', MAX_STATUS_URL_BYTES);
-  return { commandSequence, inputHash, input: canonical.input, status, createdAt, upstreamReceiptId, statusUrl };
+  return { commandSequence, inputHash, input: canonical.input, status, createdAt };
 };
 
 export const encryptProtectedRemoteRuntimeCommandIntentRecord = async (
@@ -147,8 +143,6 @@ export const encryptProtectedRemoteRuntimeCommandIntentRecord = async (
     input: canonical.input,
     status: intent.status,
     createdAt: intent.createdAt,
-    upstreamReceiptId: intent.upstreamReceiptId,
-    statusUrl: intent.statusUrl,
   });
   const plaintext = encoder.encode(safeStringify(payload));
   if (plaintext.byteLength > MAX_ENCRYPTED_INTENT_BYTES) {

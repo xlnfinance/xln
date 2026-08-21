@@ -51,6 +51,7 @@ export type RuntimeInboundEntityInputResult =
 
 export type RuntimeInboundEntityInputsResult = {
   kind: 'queued' | 'ignored';
+  queuedInputs: RoutedEntityInput[];
 };
 
 type RuntimeInboundEntityInputValidation =
@@ -1498,6 +1499,16 @@ const validateInboundEntityCommands = (
 ): void => {
   let commandState = findInboundTargetReplica(env, input)?.state;
   for (const tx of input.entityTxs ?? []) {
+    if (tx.type === 'accountInput') {
+      // AccountInput is the raw cross-runtime protocol input. Runtime routing
+      // may batch many independent Account lanes for one target Entity/Runtime;
+      // each frame/ACK Hanko is still verified independently by
+      // applyAccountInput inside the one target Entity frame.
+      if (normalizeEntityKey(tx.data.toEntityId) === normalizeEntityKey(input.entityId)) continue;
+      throw new Error(
+        `INBOUND_ACCOUNT_TARGET_MISMATCH:route=${input.entityId}:claimed=${tx.data.toEntityId}`,
+      );
+    }
     if (tx.type === 'consensusOutput') continue;
     if (tx.type === 'runtimeOutput') {
       throw new Error(`INBOUND_RUNTIME_OUTPUT_FORBIDDEN:entity=${input.entityId}:from=${from}`);
@@ -1773,7 +1784,10 @@ export const routeInboundP2PEntityInputs = (
       inputCount: inputs.length,
     });
   }
-  return { kind: inputs.length > 0 ? 'queued' : 'ignored' };
+  return {
+    kind: inputs.length > 0 ? 'queued' : 'ignored',
+    queuedInputs: inputs,
+  };
 };
 
 export const createRuntimeOutputRoutingDeps = (

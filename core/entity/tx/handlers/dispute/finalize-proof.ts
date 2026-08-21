@@ -16,14 +16,13 @@ import {
 } from '../../../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromJurisdictions } from '../../../../account/consensus/helpers';
 import {
-  buildDisputeArgumentsForSnapshot,
+  buildDisputeArgumentsForCurrentState,
   type DisputeArgumentSide,
 } from '../../../dispute-arguments';
-import { shortHash, shortId } from '../../../../support/logger';
+import { shortId } from '../../../../support/logger';
 import {
   canonicalizeProofBodyStruct,
   disputeLog,
-  isProofBodyStruct,
   reportOptionalArgumentWarnings,
   resolveDepositoryHankoDomain,
 } from './shared';
@@ -61,7 +60,6 @@ type CounterProofCandidate = Readonly<{
   proposerIsLeft?: boolean;
   hash?: string;
   hanko?: string;
-  body?: ProofBodyStruct;
 }>;
 
 const resolveCounterProofCandidate = (
@@ -73,11 +71,9 @@ const resolveCounterProofCandidate = (
   if (selectedNonce !== undefined) {
     const hash = active.selectedCounterProofbodyHash;
     const proposerIsLeft = active.selectedCounterProposerIsLeft;
-    const rawBody = hash ? account.disputeProofBodiesByHash?.[hash] : undefined;
     const usable =
       typeof proposerIsLeft === 'boolean' &&
-      Boolean(hash) &&
-      isProofBodyStruct(rawBody);
+      Boolean(hash);
     if (!usable) {
       addMessage(state, `⏳ Selected counter-proof N${selectedNonce} body is not locally available yet`);
     }
@@ -88,14 +84,12 @@ const resolveCounterProofCandidate = (
       ...(typeof proposerIsLeft === 'boolean' ? { proposerIsLeft } : {}),
       ...(hash ? { hash } : {}),
       hanko: '0x',
-      ...(isProofBodyStruct(rawBody) ? { body: rawBody } : {}),
     };
   }
   const nonce = account.counterpartyDisputeProofNonce;
   const proposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
   const hash = account.counterpartyDisputeProofBodyHash;
   const hanko = account.counterpartyDisputeProofHanko;
-  const rawBody = hash ? account.disputeProofBodiesByHash?.[hash] : undefined;
   const callerIsStarter = (account.state.leftEntity === state.entityId) === active.startedByLeft;
   const usable =
     !callerIsStarter &&
@@ -105,8 +99,7 @@ const resolveCounterProofCandidate = (
     (nonce > active.initialNonce || (
       nonce === active.initialNonce && proposerIsLeft && !active.initialProposerIsLeft
     )) &&
-    Boolean(hash) &&
-    isProofBodyStruct(rawBody);
+    Boolean(hash);
   return {
     usable,
     blocked: false,
@@ -114,7 +107,6 @@ const resolveCounterProofCandidate = (
     ...(typeof proposerIsLeft === 'boolean' ? { proposerIsLeft } : {}),
     ...(hash ? { hash } : {}),
     ...(hanko ? { hanko } : {}),
-    ...(isProofBodyStruct(rawBody) ? { body: rawBody } : {}),
   };
 };
 
@@ -145,45 +137,27 @@ export const selectFinalProof = (
     });
     return null;
   }
-  const storedBodyRaw = activeDispute.initialProofbodyHash
-    ? account.disputeProofBodiesByHash?.[activeDispute.initialProofbodyHash]
-    : undefined;
   const currentBody = canonicalizeProofBodyStruct(
     currentProof.proofBodyStruct,
     sourceState.entityId,
     counterpartyId,
     'current',
   );
-  const storedBody = isProofBodyStruct(storedBodyRaw)
-    ? canonicalizeProofBodyStruct(storedBodyRaw, sourceState.entityId, counterpartyId, 'stored')
-    : null;
-  const counterBody = counter.usable
-    ? canonicalizeProofBodyStruct(
-        counter.body!,
-        sourceState.entityId,
-        counterpartyId,
-        'counter',
-      )
-    : null;
-  const shouldUseCounterProof = counterBody !== null && counter.hash !== undefined;
-  if (!shouldUseCounterProof && currentProof.proofBodyHash !== activeDispute.initialProofbodyHash) {
-    disputeLog.warn('finalize.proof_body_hash_mismatch', {
-      counterparty: shortId(counterpartyId),
-      current: shortHash(currentProof.proofBodyHash),
-      initial: shortHash(activeDispute.initialProofbodyHash),
-    });
-    if (!storedBody) {
-      throw new Error('disputeFinalize: missing stored proofBody for unilateral finalize');
-    }
+  const finalProofbodyHash = counter.usable ? counter.hash! : activeDispute.initialProofbodyHash;
+  if (currentProof.proofBodyHash.toLowerCase() !== finalProofbodyHash.toLowerCase()) {
+    throw haltRuntimeFailure(
+      'DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH',
+      `DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${counterpartyId}:` +
+      `${finalProofbodyHash}:${currentProof.proofBodyHash}`,
+    );
   }
+  const shouldUseCounterProof = counter.usable;
   return {
     finalNonce,
     finalNonceSource,
     finalizeSig: counter.usable ? counter.hanko! : '0x',
-    finalProofbody: (shouldUseCounterProof ? counterBody : storedBody ?? currentBody)!,
-    finalProofbodyHash: shouldUseCounterProof
-      ? counter.hash!
-      : activeDispute.initialProofbodyHash,
+    finalProofbody: currentBody,
+    finalProofbodyHash,
     shouldUseCounterProof,
     proposerIsLeft,
     callerSide: account.state.leftEntity === state.entityId ? 'left' : 'right',
@@ -224,9 +198,10 @@ export const buildFinalProofPayload = (
     (activeDispute.startedByLeft ? 'left' : 'right');
   const builtArguments = callerIsStarter
     ? { leftArguments: '0x', rightArguments: '0x', warnings: [] }
-    : buildDisputeArgumentsForSnapshot(
+    : buildDisputeArgumentsForCurrentState(
         account,
         state,
+        env.state,
         counterpartyId,
         selection.finalProofbodyHash,
         { secretsSide: selection.callerSide },

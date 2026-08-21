@@ -194,10 +194,8 @@ const makeEnv = (): RuntimeReplica =>
                       deltas: [],
                     },
                     currentHeight: 1,
-                    pendingSignatures: [],
                     rollbackCount: 0,
                     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
-                    proofBody: { tokenIds: [], deltas: [] },
                     pendingWithdrawals: new Map(),
                     swapOrderHistory: new Map(),
                     swapClosedOrders: new Map(),
@@ -645,7 +643,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     type: 'memo',
     data: { index, note: 'm'.repeat(200) },
   }));
-  account.pendingSignatures = Array.from({ length: 500 }, (_, index) => `sig-${index}-${'s'.repeat(200)}`);
   account.currentFrame = {
     ...account.currentFrame,
     accountTxs: Array.from({ length: 500 }, (_, index) => ({
@@ -717,7 +714,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   const liveAccount = await resolveRuntimeAdapterRead<{
     watchSeed: string;
     mempool: unknown[];
-    pendingSignatures: string[];
     currentFrame: { accountTxs: unknown[]; deltas: unknown[] };
     disputeProofBodiesByHash?: unknown;
     disputeArgumentSnapshotsByHash?: unknown;
@@ -769,7 +765,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   for (const doc of [liveAccount, historicalAccount]) {
     expect(doc.state.watchSeed).toBe('');
     expect(doc.mempool).toHaveLength(0);
-    expect(doc.pendingSignatures).toHaveLength(0);
     expect(doc.currentFrame.accountTxs.length).toBeLessThanOrEqual(20);
     expect(doc.currentFrame.deltas.length).toBeLessThanOrEqual(100);
     expect(doc.disputeProofBodiesByHash).toBeUndefined();
@@ -981,7 +976,6 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
     'watchSeed',
     'locks',
     'swapOffers',
-    'pendingSignatures',
     'proofBody',
     'pendingWithdrawals',
     'rebalancePolicy',
@@ -1675,33 +1669,6 @@ test('runtime adapter timeline-index reports an empty timeline before the first 
     'timeline-index',
     { beforeHeight: 1 },
   )).rejects.toThrow('beforeHeight must be an integer greater than 1');
-});
-
-test('runtime adapter receipt read returns ingress receipt status over websocket protocol', async () => {
-  const env = makeEnv();
-  const receipt = await resolveRuntimeAdapterRead<Record<string, unknown>>(
-    {
-      env,
-      readReceipt: id =>
-        id === 'receipt-1'
-          ? {
-              id,
-              kind: 'radapter-runtime-input',
-              status: 'observed',
-              counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-              enqueuedHeight: 7,
-              observedHeight: 8,
-              enqueuedAt: 1,
-              expiresAt: 2,
-            }
-          : null,
-    },
-    'receipt/receipt-1',
-  );
-
-  expect(receipt.id).toBe('receipt-1');
-  expect(receipt.status).toBe('observed');
-  expect(receipt.observedHeight).toBe(8);
 });
 
 test('runtime adapter recovery bundle read is gated by seed-derived lookup key', async () => {

@@ -143,10 +143,8 @@ function makeAccountMachine(offer: SwapOffer): AccountReplica {
       byLeft: true,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: 'maker', toEntity: 'hub', nextProofNonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };

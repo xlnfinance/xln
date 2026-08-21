@@ -6,6 +6,7 @@
  */
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
@@ -15,6 +16,7 @@ import {
   keySnapshotBookPrefix,
   keySnapshotGraphPrefix,
   parseLiveAccountBranchKey,
+  parseLiveAccountFieldKey,
   parseLiveAccountLeafKey,
   parseLiveBookBranchKey,
   parseLiveBookLeafKey,
@@ -25,7 +27,6 @@ import {
 import { decodeValidatedBuffer } from '../codec/codec';
 import { iterateKeys } from '../database/level';
 import { ACCOUNT_TREE_NAMESPACE_TAG } from '../schema/account-graph-codec';
-import { ACCOUNT_ENVELOPE_NAMESPACE_TAG } from '../schema/account-envelope-graph';
 import { decodeAccountGraphManifest } from '../schema/account-layout';
 import { decodeStorageBookHeader } from '../schema/book-graph-codec';
 import type { RuntimeDbLike } from '../types';
@@ -33,7 +34,7 @@ import type { RuntimeDbLike } from '../types';
 const ownerKey = (key: Buffer): string => key.toString('hex');
 
 type SnapshotGraphOwner = Readonly<
-  | { kind: 'account'; namespaceTags: ReadonlySet<number> }
+  | { kind: 'account'; namespaceTags: ReadonlySet<number>; fieldTags: ReadonlySet<number> }
   | { kind: 'book' }
 >;
 
@@ -48,10 +49,10 @@ const collectSnapshotOwners = async (
     const manifest = decodeAccountGraphManifest(await db.get(key));
     owners.set(ownerKey(key), {
       kind: 'account',
-      namespaceTags: new Set([
-        ACCOUNT_ENVELOPE_NAMESPACE_TAG,
-        ...manifest.trees.map(tree => ACCOUNT_TREE_NAMESPACE_TAG[tree.namespace]),
-      ]),
+      namespaceTags: new Set(
+        manifest.trees.map(tree => ACCOUNT_TREE_NAMESPACE_TAG[tree.namespace]),
+      ),
+      fieldTags: new Set(manifest.fields.map(field => field.tag)),
     });
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(height) })) {
@@ -65,8 +66,15 @@ const collectSnapshotOwners = async (
 const graphOwner = (
   height: number,
   liveKey: Buffer,
-): Readonly<{ key: Buffer; namespaceTag?: number }> => {
+): Readonly<{ key: Buffer; namespaceTag?: number; fieldTag?: number }> => {
   switch (liveKey[0]) {
+    case KEY_LIVE_ACCOUNT_FIELD: {
+      const owner = parseLiveAccountFieldKey(liveKey);
+      return {
+        key: keySnapshotAccount(height, owner.entityId, owner.counterpartyId),
+        fieldTag: owner.fieldTag,
+      };
+    }
     case KEY_LIVE_ACCOUNT_BRANCH: {
       const owner = parseLiveAccountBranchKey(liveKey);
       return {
@@ -109,7 +117,14 @@ export const inspectSnapshotGraphRows = async (
     if (!owner) {
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING:${ownership.key.toString('hex')}`);
     }
-    if (ownership.namespaceTag !== undefined) {
+    if (ownership.fieldTag !== undefined) {
+      if (owner.kind !== 'account' || !owner.fieldTags.has(ownership.fieldTag)) {
+        throw new Error(
+          `STORAGE_SNAPSHOT_GRAPH_ACCOUNT_FIELD_UNDECLARED:` +
+          `owner=${ownership.key.toString('hex')}:field=${ownership.fieldTag}`,
+        );
+      }
+    } else if (ownership.namespaceTag !== undefined) {
       if (owner.kind !== 'account') {
         throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_KIND_INVALID:${ownership.key.toString('hex')}`);
       }

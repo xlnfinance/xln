@@ -51,6 +51,16 @@ export interface RuntimeInput {
   queuedAt?: number | undefined; // When first queued into runtime mempool (ms)
 }
 
+/**
+ * Post-WAL operational counters derived only from committed Runtime events.
+ * They are observability, never consensus State or replay authority.
+ */
+export type RuntimeEntityMetricStats = Readonly<{
+  completedPayments: number;
+  matchedSwaps: number;
+  updatedAtRuntimeHeight: number;
+}>;
+
 import type { JInput } from '../jurisdiction/machine/input';
 
 export type JurisdictionImportRequest = {
@@ -605,6 +615,8 @@ interface RuntimeInfrastructure {
    * the buffer is cleared immediately after durable publication.
    */
   frameEvents?: FrameLogEntry[];
+  /** Process-local aggregate of exact committed Entity events. */
+  entityMetricStats?: Map<string, RuntimeEntityMetricStats>;
   /** Exact frame-local event set keyed by canonical bytes; preserves insertion order. */
   pendingAuditEvents?: Map<string, Record<string, unknown>>;
   /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */

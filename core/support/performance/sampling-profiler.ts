@@ -33,13 +33,11 @@ export const startRuntimeSamplingProfiler = async (label: string): Promise<boole
   let jsc: SamplingProfilerModule;
   try {
     const imported = await import('bun:jsc');
-    if (typeof imported.startSamplingProfiler !== 'function' || typeof imported.samplingProfilerStackTraces !== 'function') {
+    const candidate = imported as unknown as Partial<SamplingProfilerModule>;
+    if (typeof candidate.startSamplingProfiler !== 'function' || typeof candidate.samplingProfilerStackTraces !== 'function') {
       throw new Error('SAMPLING_PROFILER_API_MISSING');
     }
-    jsc = {
-      startSamplingProfiler: imported.startSamplingProfiler,
-      samplingProfilerStackTraces: imported.samplingProfilerStackTraces,
-    };
+    jsc = candidate as SamplingProfilerModule;
   } catch (error) {
     profilerLog.warn('sampling.unavailable', {
       label,

@@ -26,6 +26,7 @@ export type ApplyEntityTxsInOrderContext = {
   allOutputs: EntityOutput[];
   allJOutputs: JInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
+  collectedHashManifest: Map<string, { type: HashType; context: string }>;
   proposableAccounts: Set<string>;
   requiredAccountResponses: Map<string, AccountPeerInput>;
   allSwapOffersCreated: SwapOfferEvent[];

@@ -294,10 +294,8 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => 
       byLeft: true,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: { rebalance: {
       policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),

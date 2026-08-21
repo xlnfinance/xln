@@ -27,6 +27,33 @@ import {
   listRecoveryRuntimeMachineMismatchFields,
 } from '../machine';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { prepareRuntimeOutputPayloadRows } from '../../wal/outbox-payload';
+import type { RoutedEntityInput } from '../../../runtime/types';
+
+export const assertRecoveryOutboxMatches = (
+  expectedOutputs: readonly RoutedEntityInput[],
+  actualOutputs: readonly RoutedEntityInput[],
+  expectedRefs: readonly string[],
+  height: number,
+): void => {
+  const canonicalExpectedRefs = expectedRefs.length > 0
+    ? [...expectedRefs]
+    : prepareRuntimeOutputPayloadRows(expectedOutputs).refs;
+  const actualRefs = prepareRuntimeOutputPayloadRows(actualOutputs).refs;
+  if (
+    canonicalExpectedRefs.length === actualRefs.length &&
+    canonicalExpectedRefs.every((hash, index) => hash === actualRefs[index])
+  ) return;
+  throw new Error(
+    `RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=${height}:` +
+    safeStringify({
+      expectedRefs: canonicalExpectedRefs,
+      actualRefs,
+      expectedOutputs,
+      actualOutputs,
+    }),
+  );
+};
 
 export const verifyRecoveryJournalFrame = (
   env: RuntimeReplica,

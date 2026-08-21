@@ -10,7 +10,6 @@ import { resolveEntityProposerId } from '../../../runtime/delivery/entity-output
 import { getErrorMessage, isEntityId32 } from '../utils';
 import { getAccountReplica, getEntityOutCapacity, getEntityReplicaById, hasAccount } from '../entities/lookup';
 import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../../runtime/mempool/ingress-receipts';
 import {
   describeOffchainFaucetAccountState,
   shouldRejectOffchainFaucetForSettledCapacity,
@@ -28,9 +27,7 @@ type OffchainFaucetHandlerInput = {
   relayStore: RelayStore;
   enqueueRuntimeInput: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
   validateRuntimeInputAdmission: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
-  registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
   getCurrentRuntimeHeight: (env: RuntimeReplica | null) => number;
-  buildRuntimeInputStatusUrl: (id: string) => string;
 };
 
 type FaucetRequest = {
@@ -295,23 +292,12 @@ const buildFaucetRuntimeInput = (
 
 const enqueueFaucetPayment = (
   input: OffchainFaucetHandlerInput & { env: RuntimeReplica },
-  request: FaucetRequest,
   runtimeInput: RuntimeInput,
-): FaucetPhase<RuntimeIngressReceipt> => {
+): FaucetPhase<void> => {
   try {
     input.validateRuntimeInputAdmission(input.env, runtimeInput);
     input.enqueueRuntimeInput(input.env, runtimeInput);
-    return {
-      ok: true,
-      value: input.registerReceipt({
-        id: request.requestId,
-        kind: 'faucet-offchain',
-        counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-        enqueuedHeight: input.getCurrentRuntimeHeight(input.env),
-        runtimeInput,
-        note: 'Faucet payment was accepted into the runtime queue; poll statusUrl and account state for settlement.',
-      }),
-    };
+    return { ok: true, value: undefined };
   } catch (error) {
     return fail(input.headers, 503, {
       error: 'Failed to admit faucet payment into runtime',
@@ -326,7 +312,6 @@ const successResponse = (
   request: FaucetRequest,
   hub: FaucetHub,
   admission: FaucetAccountAdmission,
-  receipt: RuntimeIngressReceipt,
   requestStartedAt: number,
 ): Response => {
   const serverDurationMs = Date.now() - requestStartedAt;
@@ -336,8 +321,6 @@ const successResponse = (
     type: 'offchain',
     status: 'queued',
     requestId: request.requestId,
-    receipt,
-    statusUrl: input.buildRuntimeInputStatusUrl(request.requestId),
     amount: request.amount,
     tokenId: request.tokenId,
     from: `${hub.entityId.slice(0, 16)}...`,
@@ -380,18 +363,16 @@ export const handleOffchainFaucet = async (
         hub.value,
         account.value.amountWei,
       );
-      const receipt = enqueueFaucetPayment(
+      const queued = enqueueFaucetPayment(
         initializedInput,
-        request,
         runtimeInput,
       );
-      if (!receipt.ok) return receipt.response;
+      if (!queued.ok) return queued.response;
       return successResponse(
         input,
         request,
         hub.value,
         account.value,
-        receipt.value,
         requestStartedAt,
       );
     });

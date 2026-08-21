@@ -177,7 +177,6 @@ const makeCanonicalAccountFixture = () => ({
     deltas: [],
   },
   currentHeight: 0,
-  pendingSignatures: [],
   rollbackCount: 0,
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
   proofBody: { tokenIds: [1], deltas: [0n] },

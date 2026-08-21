@@ -132,8 +132,6 @@ export const decodeSettlementEvidenceRequest = (value: unknown): SettlementEvide
 const digest = (value: unknown): string => keccak256(toUtf8Bytes(safeStringify(value)));
 const queue = (values: readonly unknown[]): QueueEvidence => ({ count: values.length, digest: digest(values) });
 const countedQueue = (count: number): QueueEvidence => ({ count, digest: digest(count) });
-const mapEntries = (value: ReadonlyMap<string, unknown> | undefined): readonly unknown[] =>
-  Array.from(value?.entries() ?? []).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
 
 /** RAM-only; drain must not walk Account history to learn Hub ACK backlog. */
 const pendingAccountFrameSnapshot = (
@@ -228,14 +226,19 @@ export const buildSettlementEvidence = async (
     runtimeHeight: env.state.height,
     book: request.book === null ? null : buildSettlementBookEvidence(env, request.book),
     queues: {
-      processing: queue(infrastructure?.processingPromise ? ['processing'] : []),
-      pendingOutputs: queue(env.pendingOutputs ?? []),
-      pendingNetworkOutputs: queue(env.pendingNetworkOutputs ?? []),
-      networkInbox: queue(env.networkInbox ?? []),
-      runtimeEntityInputs: queue(mempool.entityInputs),
-      runtimeTxs: queue(mempool.runtimeTxs),
-      runtimeJInputs: queue(mempool.jInputs ?? []),
-      retryEntries: queue(mapEntries(infrastructure?.deferredNetworkMeta)),
+      // Drain authority is queue emptiness. Hashing full signed Account
+      // envelopes here used to serialize megabytes while holding the Runtime
+      // committed-read lease, starving the WAL writer that must empty them.
+      // Count digests retain stable operator evidence without making a
+      // diagnostic poll execute the financial payload path a second time.
+      processing: countedQueue(infrastructure?.processingPromise ? 1 : 0),
+      pendingOutputs: countedQueue(env.pendingOutputs?.length ?? 0),
+      pendingNetworkOutputs: countedQueue(env.pendingNetworkOutputs?.length ?? 0),
+      networkInbox: countedQueue(env.networkInbox?.length ?? 0),
+      runtimeEntityInputs: countedQueue(mempool.entityInputs.length),
+      runtimeTxs: countedQueue(mempool.runtimeTxs.length),
+      runtimeJInputs: countedQueue(mempool.jInputs?.length ?? 0),
+      retryEntries: countedQueue(infrastructure?.deferredNetworkMeta?.size ?? 0),
       pendingAccountFrames: countedQueue(pending.count),
     },
     pendingAccountSample: pending.sample,

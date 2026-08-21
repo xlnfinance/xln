@@ -30,7 +30,6 @@ export type CommandReceipt = {
   commandId: string;
   commandSequence: number | null;
   serverFingerprint: string | null;
-  upstreamReceiptId: string | null;
   status: RuntimeCommandStatus;
   runtimeId: string;
   mode: 'embedded' | 'remote';
@@ -42,29 +41,15 @@ export type CommandReceipt = {
   };
   acceptedAtHeight: number | null;
   committedAtHeight: number | null;
-  statusUrl: string | null;
   error: string | null;
   failureKind: RuntimeFailureKind | null;
   failureRetryable: boolean;
 };
 
 export type RuntimeCommandProgress = {
-  accepted: (height?: number | null, upstream?: { receiptId?: string | null; statusUrl?: string | null }) => Promise<void>;
+  accepted: (height?: number | null) => Promise<void>;
   committed: (height?: number | null) => Promise<void>;
   observed: (height?: number | null) => Promise<void>;
-};
-
-export type RuntimeIngressReceiptLike = {
-  id?: string | null;
-  status?: 'pending' | 'observed' | 'expired' | string;
-  counts?: {
-    runtimeTxs?: number;
-    entityInputs?: number;
-    jInputs?: number;
-  } | null;
-  enqueuedHeight?: number | null;
-  observedHeight?: number | null;
-  note?: string | null;
 };
 
 type RuntimeCommandSubmitOptions = RuntimeCommandExecutionOptions & {
@@ -123,14 +108,12 @@ export const createRuntimeCommandReceipt = async (options: RuntimeCommandSubmitO
   commandId: remoteIntent?.commandId ?? normalizeRuntimeCommandId(options.commandId ?? createRuntimeCommandId()),
   commandSequence: remoteIntent?.commandSequence ?? oneShotSequence,
   serverFingerprint: options.mode === 'remote' ? options.serverFingerprint ?? null : null,
-  upstreamReceiptId: null,
   status: 'pending',
   runtimeId: options.runtimeId || 'embedded',
   mode: options.mode,
   inputSummary: summarizeRuntimeInput(options.input),
   acceptedAtHeight: normalizeHeight(options.initialHeight),
   committedAtHeight: null,
-  statusUrl: null,
   error: null,
   failureKind: null,
   failureRetryable: false,
@@ -164,15 +147,13 @@ export const submitRuntimeCommand = async <T>(
   publishReceipt(receipt);
 
   const progress: RuntimeCommandProgress = {
-    accepted: async (height, upstream) => {
+    accepted: async (height) => {
       receipt = updateReceipt(receipt, {
         status: 'accepted',
         acceptedAtHeight: normalizeHeight(height) ?? receipt.acceptedAtHeight,
-        upstreamReceiptId: upstream?.receiptId ?? receipt.upstreamReceiptId,
-        statusUrl: upstream?.statusUrl ?? receipt.statusUrl,
       });
       if (durableRemoteIntent) {
-        await markRemoteRuntimeCommandIntentAccepted(receipt.commandId, upstream ?? {});
+        await markRemoteRuntimeCommandIntentAccepted(receipt.commandId);
       }
     },
     committed: async (height) => {
@@ -235,47 +216,6 @@ export const replayRuntimeCommandIntentsInOrder = async <T>(
     }
   }
   return completed;
-};
-
-export const recordRuntimeIngressReceipt = (options: {
-  runtimeId: string;
-  mode: 'embedded' | 'remote';
-  receipt: RuntimeIngressReceiptLike;
-  statusUrl?: string | null;
-}): CommandReceipt => {
-  const counts = options.receipt.counts ?? {};
-  const upstreamStatus = String(options.receipt.status || 'pending');
-  const expiredFailure = upstreamStatus === 'expired'
-    ? classifyRuntimeFailure(options.receipt.note || 'Runtime ingress receipt expired')
-    : null;
-  const status: RuntimeCommandStatus =
-    upstreamStatus === 'observed' ? 'observed' :
-    upstreamStatus === 'expired' ? 'error' :
-    'accepted';
-  const receipt: CommandReceipt = {
-    receiptId: `runtime-command-${++receiptSequence}`,
-    commandId: createRuntimeCommandId(),
-    commandSequence: null,
-    serverFingerprint: null,
-    upstreamReceiptId: options.receipt.id ?? null,
-    status,
-    runtimeId: options.runtimeId || 'remote',
-    mode: options.mode,
-    inputSummary: {
-      runtimeTxs: Math.max(0, Math.floor(Number(counts.runtimeTxs ?? 0))),
-      jInputs: Math.max(0, Math.floor(Number(counts.jInputs ?? 0))),
-      entityInputs: Math.max(0, Math.floor(Number(counts.entityInputs ?? 0))),
-      entityTxs: 0,
-    },
-    acceptedAtHeight: normalizeHeight(options.receipt.enqueuedHeight),
-    committedAtHeight: normalizeHeight(options.receipt.observedHeight),
-    statusUrl: options.statusUrl ?? null,
-    error: expiredFailure?.message ?? null,
-    failureKind: expiredFailure?.kind ?? null,
-    failureRetryable: expiredFailure?.retryable ?? false,
-  };
-  publishReceipt(receipt);
-  return receipt;
 };
 
 export const clearRuntimeCommandReceipts = (): void => {

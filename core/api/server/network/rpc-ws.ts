@@ -25,13 +25,9 @@ import type {
 import type { RuntimeAdapterRequest } from '../../runtime-adapter/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { RelaySocket } from './relay-direct';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../../runtime/mempool/ingress-receipts';
 
 type ServerRpcHandlerDeps = {
   validateRuntimeInputAdmission?: (env: RuntimeReplica, input: Parameters<typeof enqueueRuntimeInput>[1]) => void;
-  registerRuntimeInputReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
-  readRuntimeInputReceipt?: (id: string) => RuntimeIngressReceipt | null;
-  buildRuntimeInputStatusUrl?: (id: string) => string;
   deriveBrainVault?: RuntimeAdapterServerDeps['deriveBrainVault'];
   revealBrainVaultMnemonic?: RuntimeAdapterServerDeps['revealBrainVaultMnemonic'];
 };
@@ -140,9 +136,6 @@ const findPaymentRoutes = async (
 
 export const createServerRpcMessageHandler = ({
   validateRuntimeInputAdmission,
-  registerRuntimeInputReceipt,
-  readRuntimeInputReceipt,
-  buildRuntimeInputStatusUrl,
   deriveBrainVault,
   revealBrainVaultMnemonic,
 }: ServerRpcHandlerDeps) =>
@@ -154,9 +147,6 @@ export const createServerRpcMessageHandler = ({
       },
       controlRuntime: resolveRuntimeAdminControl,
       ...(validateRuntimeInputAdmission ? { validateRuntimeInputAdmission } : {}),
-      ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),
-      ...(readRuntimeInputReceipt ? { readReceipt: readRuntimeInputReceipt } : {}),
-      ...(buildRuntimeInputStatusUrl ? { buildRuntimeInputStatusUrl } : {}),
       ...(deriveBrainVault ? { deriveBrainVault } : {}),
       ...(revealBrainVaultMnemonic ? { revealBrainVaultMnemonic } : {}),
       readHead: targetEnv => readPersistedStorageHead(targetEnv),

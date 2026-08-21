@@ -2,7 +2,8 @@ import { projectBookDepth, type BookState } from '../../orderbook';
 import { projectBookPricePageTree, type BookPricePage } from '../../orderbook/pages/page';
 import type { AccountTx } from '../../types/account';
 import type { EntityReplica, EntityState, ExternalWalletState } from '../../entity/types';
-import type { RuntimeReplica } from '../../runtime/types';
+import type { RuntimeEntityMetricStats, RuntimeReplica } from '../../runtime/types';
+import { readRuntimeEntityMetricStats } from '../../runtime/observability/entity-metrics';
 import type { JBatch, JBatchState, SentJBatch } from '../../jurisdiction/machine/batch';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -56,12 +57,10 @@ type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   htlcNotes?: EntityReplica['htlcNotes'];
   /** View-only: full lockBook size. The compact map is a tail sample. */
   lockBookOpen?: number;
+  /** View-only counters derived after WAL commit; never part of EntityState. */
+  metrics?: RuntimeEntityMetricStats;
 };
 import type { Profile } from '../../entity/profile';
-import {
-  projectRuntimeIngressReceiptForWire,
-  type RuntimeIngressReceipt,
-} from '../../runtime/mempool/ingress-receipts';
 import { calculateSolvency } from '../../runtime/swap-cmd/solvency';
 import { acquireRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
@@ -97,7 +96,6 @@ export type RuntimeAdapterResolveContext = {
       cursor?: Readonly<{ height: number; offerId: string }>;
     }>,
   ) => Promise<RuntimeAdapterSwapHistoryPage>;
-  readReceipt?: (id: string) => Promise<RuntimeIngressReceipt | null> | RuntimeIngressReceipt | null;
   readFrameReceipts?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
   findPaymentRoutes?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
 };
@@ -928,11 +926,6 @@ const compactMapHead = <K, V>(value: ReadonlyMap<K, V> | undefined, limit = 20):
 const compactMapTail = <K, V>(value: ReadonlyMap<K, V> | undefined, limit = 20): Map<K, V> | undefined =>
   value === undefined ? undefined : new Map(Array.from(value.entries()).slice(-limit));
 
-const compactRecordTail = <V>(value: Record<string, V> | undefined, limit = 20): Record<string, V> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  return Object.fromEntries(Object.entries(value).slice(-limit));
-};
-
 const compactAccountFrameForView = (
   frame: StorageAccountDoc['currentFrame'],
   txLimit = 20,
@@ -947,12 +940,6 @@ const compactAccountFrameForView = (
   stateHash: frame.stateHash,
   byLeft: frame.byLeft,
   deltas: Array.isArray(frame.deltas) ? frame.deltas.slice(0, deltaLimit) : [],
-});
-
-const compactAccountProofBodyForView = (proofBody: StorageAccountDoc['proofBody']): StorageAccountDoc['proofBody'] => ({
-  tokenIds: proofBody.tokenIds.slice(0, 100),
-  deltas: proofBody.deltas.slice(0, 100),
-  ...withDefinedProp('htlcLocks', compactArrayTail(proofBody.htlcLocks, 20)),
 });
 
 const compactAccountDocForView = (
@@ -991,10 +978,8 @@ const compactAccountDocForView = (
     mempool: [],
     currentFrame: compactAccountFrameForView(doc.currentFrame),
     currentHeight: doc.currentHeight,
-    pendingSignatures: [],
     rollbackCount: doc.rollbackCount,
     proofHeader: doc.proofHeader,
-    proofBody: compactAccountProofBodyForView(doc.proofBody),
     pendingWithdrawals: compactMapTail(doc.pendingWithdrawals, 20) ?? new Map(),
     shadow: {
       rebalance: {
@@ -1020,7 +1005,6 @@ const compactAccountDocForView = (
   if (doc.pendingFrame) compact.pendingFrame = compactAccountFrameForView(doc.pendingFrame);
   if (doc.lastOutboundFrameAck) compact.lastOutboundFrameAck = doc.lastOutboundFrameAck;
   if (doc.pendingForwards) compact.pendingForwards = doc.pendingForwards;
-  if (doc.hankoSignature) compact.hankoSignature = doc.hankoSignature;
   if (doc.lastRollbackFrameHash) compact.lastRollbackFrameHash = doc.lastRollbackFrameHash;
   if (doc.currentFrameHanko) compact.currentFrameHanko = doc.currentFrameHanko;
   if (doc.counterpartyFrameHanko) compact.counterpartyFrameHanko = doc.counterpartyFrameHanko;
@@ -1034,8 +1018,6 @@ const compactAccountDocForView = (
   if (doc.counterpartyDisputeProofBodyHash) compact.counterpartyDisputeProofBodyHash = doc.counterpartyDisputeProofBodyHash;
   if (doc.counterpartyDisputeHash) compact.counterpartyDisputeHash = doc.counterpartyDisputeHash;
   if (doc.counterpartySettlementHanko) compact.counterpartySettlementHanko = doc.counterpartySettlementHanko;
-  const disputeProofNoncesByHash = compactRecordTail(doc.disputeProofNoncesByHash, 20);
-  if (disputeProofNoncesByHash) compact.disputeProofNoncesByHash = disputeProofNoncesByHash;
   return compact;
 };
 
@@ -1199,6 +1181,7 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
     htlcFeesEarned: core.htlcFeesEarned,
     lockBook: new Map(Array.from(core.lockBook.entries()).slice(-20)),
     lockBookOpen: core.lockBook.size,
+    ...withDefinedProp('metrics', core.metrics),
   };
 
   if (core.prevFrameHash) compact.prevFrameHash = core.prevFrameHash;
@@ -2021,9 +2004,12 @@ const resolveScopedRuntimeAdapterRead = async <T>(
 
     const { state, replica } = await resolveEntityState(ctx, entityId, query);
     if (parts.length === 2) {
-      const core = replica
+      const projected = replica
         ? projectEntityReplicaCoreView(state, replica)
         : projectEntityCoreDoc(state);
+      const core: RuntimeAdapterEntityCoreDoc = replica
+        ? { ...projected, metrics: readRuntimeEntityMetricStats(ctx.env, entityId) }
+        : projected;
       return compactEntityCoreForRemote(core) as RuntimeAdapterEntityCoreDoc as T;
     }
   }
@@ -2115,14 +2101,6 @@ const resolveRuntimeAdapterReadFromCommittedState = async <T = unknown>(
     return await buildPeerRecoveryBundleRead(ctx, lookupKey) as T;
   }
 
-  if (parts[0] === 'receipt' && parts.length === 2) {
-    if (!ctx.readReceipt) throw new RuntimeAdapterError('E_BAD_QUERY', 'receipt reads are unavailable for this adapter');
-    const receiptId = decodeURIComponent(parts[1] || '').trim();
-    if (!receiptId) throw new RuntimeAdapterError('E_BAD_PATH', 'receipt id is required');
-    const receipt = await ctx.readReceipt(receiptId);
-    if (!receipt) throw new RuntimeAdapterError('E_NOT_FOUND', `receipt not found: ${receiptId}`);
-    return projectRuntimeIngressReceiptForWire(receipt) as T;
-  }
   return resolveScopedRuntimeAdapterRead<T>(ctx, parts, query);
 };
 

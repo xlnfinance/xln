@@ -6,7 +6,7 @@
 import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
-import { getAccountFrameBoundsError } from '../frame/hash';
+import { getAccountFrameStructuralError } from '../frame/hash';
 import { accountInputProposal } from '../flush';
 import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { resolveSameHeightIncomingFrame } from './collision';
@@ -139,7 +139,7 @@ const validateIncomingFrameChain = (
   securityContext: AccountInputSecurityContext,
   events: string[],
 ): HandleAccountInputResult | undefined => {
-  const structureError = getAccountFrameBoundsError(receivedFrame, securityContext.entityTimestamp);
+  const structureError = getAccountFrameStructuralError(receivedFrame, securityContext.entityTimestamp);
   if (structureError) {
     return rejectAccountPeerInput(
       'ACCOUNT_PEER_FRAME_STRUCTURE_INVALID',

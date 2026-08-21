@@ -4,7 +4,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
 } from '../../../account/state/candidate-overlay';
 import {
   computeAccountStateRoot,
@@ -151,7 +150,7 @@ describe('State and Replica boundary characterization', () => {
 
     const bilateralTransition = beginAccountTransition(
       account,
-      createAccountTransitionKey(account, ['boundary', 'bilateral']),
+      ['boundary', 'bilateral'],
     );
     accountTransitionView(bilateralTransition).state.deltas.put(1, createDefaultDelta(1));
     const bilateralChange = commitAccountTransition(bilateralTransition).account;
@@ -161,7 +160,7 @@ describe('State and Replica boundary characterization', () => {
 
     const envelopeTransition = beginAccountTransition(
       account,
-      createAccountTransitionKey(account, ['boundary', 'envelope']),
+      ['boundary', 'envelope'],
     );
     accountTransitionView(envelopeTransition).mempool.push({
       type: 'direct_payment',
@@ -172,7 +171,7 @@ describe('State and Replica boundary characterization', () => {
 
     const witnessTransition = beginAccountTransition(
       account,
-      createAccountTransitionKey(account, ['boundary', 'witness']),
+      ['boundary', 'witness'],
     );
     accountTransitionView(witnessTransition).currentFrameHanko = hex('91', 65);
     const localWitnessChange = commitAccountTransition(witnessTransition).account;

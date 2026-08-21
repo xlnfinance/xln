@@ -203,7 +203,7 @@ export const handleDisputeStart = async (
   const account = admitDisputeStart(newState, counterpartyId);
   if (!account) return { newState, outputs };
   const proof = applyStartEvidenceBoundary(
-    () => loadStartProof(entityState, newState, account, counterpartyId),
+    () => loadStartProof(entityState, newState, account, counterpartyId, env.state),
   );
   if (!proof) return { newState, outputs };
   if (entityTx.data.crossJurisdictionRouteId) {

@@ -33,7 +33,10 @@ import {
   authorizeRestoredRuntimeInput,
 } from '../../wal/snapshot';
 import { createStructuredLogger } from '../../../support/logger';
-import { verifyRecoveryJournalFrame } from './verification';
+import {
+  assertRecoveryOutboxMatches,
+  verifyRecoveryJournalFrame,
+} from './verification';
 import { assertCrossJLocalCohorts } from '../../../runtime/delivery/topology/cross-j-topology';
 
 const APPLY_ALLOWED = Symbol.for('xln.runtime.env.apply.allowed');
@@ -89,12 +92,9 @@ const collectOutputSignerHints = (
 ): Map<string, string> => {
   const hints = new Map<string, string>();
   for (const output of frame.runtimeOutputs ?? []) {
-    const carriesAccountInput = (output.entityTxs ?? []).some(
-      tx =>
-        tx.type === 'accountInput' ||
-        (tx.type === 'consensusOutput' &&
-          tx.data.entityTxs.some(inner => inner.type === 'accountInput')),
-    );
+    // Account delivery has one persisted shape: a raw atomic AccountInput.
+    // A nested consensusOutput is invalid protocol data, never a recovery alias.
+    const carriesAccountInput = (output.entityTxs ?? []).some(tx => tx.type === 'accountInput');
     if (!carriesAccountInput) continue;
     const entityId = String(output.entityId || '').trim().toLowerCase();
     const signerId = String(output.signerId || '').trim().toLowerCase();
@@ -155,6 +155,12 @@ const replayOneFrame = async (
       env,
       result.entityOutbox,
       deps.getRuntimeOutputRoutingDeps(),
+    );
+    assertRecoveryOutboxMatches(
+      frame.runtimeOutputs ?? [],
+      env.pendingNetworkOutputs ?? [],
+      frame.runtimeOutputRefs ?? [],
+      height,
     );
     deps.generateHookPings(env);
     const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);

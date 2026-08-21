@@ -160,7 +160,6 @@ const PROFILING_ENV_KEYS = [
   'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE', 'XLN_HEAVY_LOGS',
   'XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS',
   'XLN_ACCOUNT_PENDING_RESEND_AFTER_MS',
-  'XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -881,15 +880,8 @@ const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
     );
 };
 
-const smokeSwapLoadMode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || '';
-const smokeRequiresCrossMarketMaker =
-  process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1' ||
-  smokeSwapLoadMode === 'cross';
-
 const marketMakerDepthReadyForSmoke = (health: HealthPayload): boolean =>
-  smokeRequiresCrossMarketMaker
-    ? marketMakerFullDepthReady(health)
-    : marketMakerSameChainReady(health);
+  marketMakerFullDepthReady(health);
 
 const healthReady = (health: HealthPayload): boolean => {
   return health.coreOk === true &&
@@ -1214,23 +1206,12 @@ const main = async (): Promise<void> => {
     XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250',
     MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:
       process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000',
-    MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '5',
-    MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000',
-    MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8',
-    MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '8',
-    MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:
-      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1',
     XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? {
       XLN_MARKET_MAKER_DISABLE_RESTORE:
         process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] || '0',
     } : {}),
-    ...(!smokeRequiresCrossMarketMaker ? { XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: '1' } : {}),
   });
   recordStage('server:started', { apiPort, marketMakerApiPort });
 

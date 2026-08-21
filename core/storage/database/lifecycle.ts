@@ -6,6 +6,7 @@ import {
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
   KEY_LIVE_BOOK_BRANCH,
@@ -130,6 +131,7 @@ export const seedFreshStorageEpoch = async (options: {
   const livePrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
+    Buffer.from([KEY_LIVE_ACCOUNT_FIELD]),
     Buffer.from([KEY_LIVE_ACCOUNT_BRANCH]),
     Buffer.from([KEY_LIVE_ACCOUNT_LEAF]),
     Buffer.from([KEY_LIVE_BOOK]),
@@ -309,6 +311,7 @@ export const createSnapshot = async (
   for (const graphTag of [
     KEY_LIVE_BOOK_BRANCH,
     KEY_LIVE_BOOK_LEAF,
+    KEY_LIVE_ACCOUNT_FIELD,
     KEY_LIVE_ACCOUNT_BRANCH,
     KEY_LIVE_ACCOUNT_LEAF,
   ] as const) {

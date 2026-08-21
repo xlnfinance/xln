@@ -11,7 +11,6 @@ import type { AccountDraftReplica } from '../state/account-state-draft';
 import {
   accountTransitionView,
   beginAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountTransition,
 } from '../state/candidate-overlay';
@@ -68,7 +67,7 @@ export async function applyAccountTxToMutableReplica(
 ): Promise<ApplyAccountTxResult> {
   const owner = beginAccountTransition(
     account,
-    createAccountTransitionKey(account, { purpose: 'account-tx', type: accountTx.type }),
+    { purpose: 'account-tx', type: accountTx.type },
   );
   try {
     const result = await applyAccountTx(

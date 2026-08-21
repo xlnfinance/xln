@@ -16,6 +16,7 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
+  isDeliveryDelivered,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import {
@@ -428,7 +429,7 @@ export const pushDebugEvent = (
   // Drain investigations live on these events: a stuck bilateral ACK leaves
   // no other trace. Surface non-delivered outcomes at warn (rate-limited per
   // reason) so one HLT run's log answers "where did the ACK die".
-  if (storedEvent.event === 'delivery') {
+  if (storedEvent.event === 'delivery' && delivery && !isDeliveryDelivered(delivery)) {
     const reason = String((storedEvent as { reason?: unknown }).reason ?? 'unknown');
     const now = Date.now();
     const lastAt = relayDeliveryWarnAt.get(reason) ?? 0;

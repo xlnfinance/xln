@@ -11,7 +11,7 @@ import {
   J_BATCH_CONTRACT_LIMITS,
 } from '../../../../jurisdiction/machine/batch';
 import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
-import { collectKnownDisputeSecretsForSnapshot } from '../../../dispute-arguments';
+import { collectKnownDisputeSecretsForState } from '../../../dispute-arguments';
 import { isUsableContractAddress } from '../../../../jurisdiction/machine/contract-address';
 import { shortId } from '../../../../support/logger';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
@@ -46,15 +46,13 @@ const collectRegistryPublication = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  finalProofbodyHash: string,
   env: EntityRuntimeContext,
 ): { secrets: string[]; transformerAddress: string } => {
   const secrets = tx.data.useOnchainRegistry
-    ? collectKnownDisputeSecretsForSnapshot(
+    ? collectKnownDisputeSecretsForState(
         account,
         state,
         counterpartyId,
-        finalProofbodyHash,
       )
     : [];
   const transformerAddress = secrets.length > 0
@@ -170,7 +168,6 @@ const selectedCrossJurisdictionRecoveryIsReady = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  finalProofbodyHash: string,
 ): boolean => {
   const active = account.activeDispute!;
   const current = active.crossJurisdictionRecovery;
@@ -179,7 +176,6 @@ const selectedCrossJurisdictionRecoveryIsReady = (
     state,
     account,
     counterpartyId,
-    [finalProofbodyHash],
     current,
   );
   if (!plan) {
@@ -283,7 +279,6 @@ export const handleDisputeFinalize = async (
     newState,
     account,
     counterpartyId,
-    selection.finalProofbodyHash,
   )) {
     return { newState, outputs };
   }
@@ -300,7 +295,6 @@ export const handleDisputeFinalize = async (
     newState,
     account,
     counterpartyId,
-    selection.finalProofbodyHash,
     env,
   );
   disputeLog.debug('finalize.proof_selected', {

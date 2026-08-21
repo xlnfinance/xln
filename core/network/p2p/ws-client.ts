@@ -758,11 +758,8 @@ export class RuntimeWsClient {
   }
 
   private async handleApplicationMessage(msg: RuntimeWsMessage): Promise<boolean> {
-    // A relay answers `entity_inputs` delivery ASYNCHRONOUSLY: sendRaw already
-    // returned true when the bytes hit our socket, so this error is the only
-    // witness that the envelope never reached the target runtime. Swallowing
-    // it made cross-relay sends (target not a client of this relay) vanish
-    // with no retry — the exact loss behind stuck bilateral ACKs.
+    // Relay errors are diagnostics/routing hints only. Account ACK and its
+    // resend loop own financial liveness; transport must never grow receipts.
     if (msg.type === 'error' && typeof msg.inReplyTo === 'string') {
       const reason = typeof msg.error === 'string' ? msg.error : String(msg.error ?? 'unknown');
       this.sendDebugEvent({
@@ -843,7 +840,11 @@ export class RuntimeWsClient {
     await this.handleRecoveryMessage(msg);
   }
 
-  sendEntityInputsRaw(to: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): boolean {
+  sendEntityInputsRaw(
+    to: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    ingressTimestamp?: number,
+  ): boolean {
     // Encryption is mandatory for the complete per-R-frame envelope.
     if (!this.options.getTargetEncryptionKey || !this.options.encryptionKeyPair) {
       throw new Error('P2P_NO_ENCRYPTION: Encryption not configured');

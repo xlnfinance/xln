@@ -2,10 +2,14 @@ import { ethers } from 'ethers';
 
 import type { AccountReplica } from '../types/account';
 import {
-  buildDisputeArgumentsFromSnapshot,
-  requireDisputeArgumentSnapshot,
+  buildCurrentDisputeArgumentPlan,
+  buildDisputeArgumentsFromState,
   type DisputeArgumentSide,
 } from '../protocol/dispute/arguments';
+import {
+  buildAccountProofBodyFromJurisdictions,
+  type AccountJurisdictionView,
+} from '../account/consensus/helpers';
 import type { EntityState } from './types';
 
 export type { DisputeArgumentSide } from '../protocol/dispute/arguments';
@@ -14,22 +18,21 @@ const hashHtlcSecret = (secret: string): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [secret])).toLowerCase();
 
 /**
- * Return only preimages committed by the exact signed ProofBody snapshot.
+ * Return only preimages committed by the exact frozen AccountState.
  *
  * Counterexample: publishing every secret ever learned from one counterparty
  * lets unrelated completed routes exhaust the jurisdiction batch cap and
- * prevent an otherwise valid dispute from closing. The signed snapshot is the
+ * prevent an otherwise valid dispute from closing. Frozen AccountState is the
  * authority; live Entity routes are only optional evidence for its hashlocks.
  */
-export const collectKnownDisputeSecretsForSnapshot = (
+export const collectKnownDisputeSecretsForState = (
   account: AccountReplica,
   entityState: EntityState,
   counterpartyEntityId: string,
-  proofbodyHash: string,
 ): string[] => {
-  const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'secrets');
-  if (!entityState.htlcRoutes?.size || snapshot.plan.paymentHashlocks.length === 0) return [];
-  const required = new Set(snapshot.plan.paymentHashlocks.map(hashlock => hashlock.toLowerCase()));
+  const plan = buildCurrentDisputeArgumentPlan(account);
+  if (!entityState.htlcRoutes?.size || plan.paymentHashlocks.length === 0) return [];
+  const required = new Set(plan.paymentHashlocks.map(hashlock => hashlock.toLowerCase()));
   const seen = new Set<string>();
   const secrets: string[] = [];
   for (const route of entityState.htlcRoutes.values()) {
@@ -44,21 +47,27 @@ export const collectKnownDisputeSecretsForSnapshot = (
   return secrets;
 };
 
-export const buildDisputeArgumentsForSnapshot = (
+export const buildDisputeArgumentsForCurrentState = (
   account: AccountReplica,
   entityState: EntityState,
+  jurisdictions: AccountJurisdictionView,
   counterpartyEntityId: string,
   proofbodyHash: string,
   options: { secretsSide: DisputeArgumentSide | 'none' },
-): ReturnType<typeof buildDisputeArgumentsFromSnapshot> =>
-  buildDisputeArgumentsFromSnapshot(
+): ReturnType<typeof buildDisputeArgumentsFromState> => {
+  const currentProof = buildAccountProofBodyFromJurisdictions(jurisdictions, account);
+  if (currentProof.proofBodyHash.toLowerCase() !== proofbodyHash.toLowerCase()) {
+    throw new Error(
+      `DISPUTE_FROZEN_STATE_PROOF_MISMATCH:${proofbodyHash}:${currentProof.proofBodyHash}`,
+    );
+  }
+  return buildDisputeArgumentsFromState(
     account,
-    proofbodyHash,
     options,
-    collectKnownDisputeSecretsForSnapshot(
+    collectKnownDisputeSecretsForState(
       account,
       entityState,
       counterpartyEntityId,
-      proofbodyHash,
     ),
   );
+};

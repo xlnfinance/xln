@@ -80,7 +80,6 @@ export const verifyStartHanko = async (
     currentHeight: account.currentHeight,
     lockCount: account.state.locks?.size ?? 0,
     swapOfferCount: account.state.swapOffers?.size ?? 0,
-    knownDisputeProofHashes: Object.keys(account.disputeProofNoncesByHash ?? {}),
     disputeHashSource: evidence.storedDisputeHash ? 'stored+recomputed' : 'recomputed',
     disputeHash,
     depositoryAddress: domain.depositoryAddress,

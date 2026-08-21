@@ -108,8 +108,6 @@ test('runtime command journal exposes only a keyed input identity and authentica
     input: canonical.input,
     status: 'accepted' as const,
     createdAt: 7,
-    upstreamReceiptId: 'secret-receipt',
-    statusUrl: '/secret/status',
   };
 
   const record = await encryptProtectedRemoteRuntimeCommandIntentRecord(intent, canonical.encoded);
@@ -193,7 +191,7 @@ test('remote command lifecycle preserves timeout retries and deletes terminal in
     serverFingerprint,
     commandId: firstCommandId,
   }, async (progress, receipt) => {
-    await progress.accepted(7, { receiptId: 'receipt-7', statusUrl: '/status/receipt-7' });
+    await progress.accepted(7);
     await progress.observed(8);
     return receipt.commandId;
   });

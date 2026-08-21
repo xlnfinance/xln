@@ -11,7 +11,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   countAccountTransitionNodeChanges,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountTransition,
 } from '../../../state/candidate-overlay';
@@ -148,8 +147,6 @@ const activatePostSettlementProof = (
     Number(account.counterpartyDisputeProofNonce ?? 0) + 1,
     finalizedNonce + 1,
   );
-  account.disputeProofNoncesByHash ??= {};
-  account.disputeProofNoncesByHash[proof.proofBodyHash] = proof.nonce;
   clearFinalizedSettlementWorkspace(account);
 };
 
@@ -220,11 +217,11 @@ export const applyFinalizedAccountJEvents = (
   // reserves changed while the workspace/proof transition is rejected.
   const overlay = beginAccountTransition(
     account,
-    createAccountTransitionKey(account, {
+    {
       purpose: 'j-event-finality',
       events: collected.settledEvents,
       finalizedNonce: collected.finalizedNonce,
-    }),
+    },
   );
   try {
     applySettledEventsOnView(

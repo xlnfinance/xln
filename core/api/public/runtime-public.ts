@@ -94,7 +94,7 @@ export {
 } from '../../storage/recovery/bundle/crypto';
 export { buildSingleSignerHanko } from '../../hanko/batch';
 export { buildCrossJurisdictionPullReveal, getCrossJurisdictionPrivateSeed } from '../../extensions/cross-j/index';
-export { buildDisputeArgumentsForSnapshot } from '../../entity/dispute-arguments';
+export { buildDisputeArgumentsForCurrentState } from '../../entity/dispute-arguments';
 export {
   buildMppChallengeHeader,
   buildMppCredentialHeader,

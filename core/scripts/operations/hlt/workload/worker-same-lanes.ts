@@ -3,9 +3,12 @@
 import type { RuntimeInput } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { LoadBookSnapshot } from '../boundary/worker-book-boundary';
-import type { LoadFrame, LoadIdentity } from '../boundary/worker-boundary';
+import type { LoadIdentity } from '../boundary/worker-boundary';
 import { setupParallelLoadLanes } from '../lanes/worker-lanes';
-import type { LaneRuntime } from '../lanes/lane-runtimes';
+import {
+  queueLaneRuntimeInputWave,
+  type LaneRuntime,
+} from '../lanes/lane-runtimes';
 import {
   buildIndependentMakerTakerPlan,
   LOAD_BASE_TOKEN_ID,
@@ -13,8 +16,6 @@ import {
 } from './worker-same-plan';
 import { deriveSameOrderbookPriceBandBounds } from '../../../../entity/tx/handlers/account/orderbook/helpers';
 import {
-  readLoadBook,
-  sendObserved,
   waitForTradeCount,
   type ConnectedRuntime,
 } from '../worker-runtime';
@@ -48,6 +49,18 @@ export type ParallelLoadRoundExtraTxs = (args: {
   round: number;
 }) => readonly EntityTx[];
 
+const collectRoundExtraTxs = (
+  build: ParallelLoadRoundExtraTxs | undefined,
+  lane: LaneRuntime,
+  identity: LoadIdentity,
+  firstRound: number,
+  batchRounds: number,
+): EntityTx[] => {
+  if (!build) return [];
+  return Array.from({ length: batchRounds }, (_, offset) =>
+    build({ lane, identity, round: firstRound + offset })).flat();
+};
+
 export const buildLaneRoundOfferInputs = (
   identities: readonly LoadIdentity[],
   plans: IndependentLanePlans,
@@ -62,6 +75,19 @@ export const buildLaneRoundOfferInputs = (
     entityTxs: offers,
   };
 });
+
+/** Keep a mixed tail from becoming a swap-only one-action RuntimeInput. */
+export const resolveLoadBatchRounds = (
+  remainingRounds: number,
+  actionsPerFrame: 1 | 2 | 3,
+): number => {
+  if (!Number.isSafeInteger(remainingRounds) || remainingRounds < 1) {
+    throw new Error(`PRODUCTION_SWAP_LOAD_BATCH_REMAINDER_INVALID:${remainingRounds}`);
+  }
+  return actionsPerFrame === 3 && remainingRounds === 4
+    ? 2
+    : Math.min(actionsPerFrame, remainingRounds);
+};
 
 const settlementPairs = (
   hubEntityId: string,
@@ -161,74 +187,55 @@ const withRoundExtraTxs = (
 ): RuntimeInput['entityInputs'] => {
   if (extra.length === 0) return inputs;
   const input = inputs[0];
-  if (!input || inputs.length !== 1) throw new Error('PRODUCTION_SWAP_LOAD_ROUND_INPUT_CARDINALITY');
-  return [{ ...input, entityTxs: [...input.entityTxs, ...extra] }];
+  const entityTxs = input?.entityTxs;
+  if (!input || inputs.length !== 1 || !entityTxs) {
+    throw new Error('PRODUCTION_SWAP_LOAD_ROUND_INPUT_CARDINALITY');
+  }
+  return [{ ...input, entityTxs: [...entityTxs, ...extra] }];
 };
 
 export const submitPreparedParallelSameLoad = async (options: {
   hub: ConnectedRuntime;
   hubIdentity: LoadIdentity;
   initialBook: LoadBookSnapshot;
-  initialFrame: LoadFrame;
   swapsPerRound: number;
   rounds: number;
   cadenceMs: number;
+  actionsPerFrame?: 1 | 2 | 3;
   prepared: PreparedParallelSameLoad;
   extraEntityTxs?: ParallelLoadRoundExtraTxs;
 }): Promise<ParallelLaneSubmission> => {
   const startedAt = performance.now();
-  let enqueueAckElapsedMs = 0;
-  let commandObservedElapsedMs = 0;
   const roundSubmissionLagMs: number[] = [];
-  // Every Account admits at most LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS open
-  // same-j offers; a user whose queue outruns settlement gets its surplus
-  // offers rejected at proposal time. Keep each user's outstanding rounds
-  // under that limit: round r may start only when the Hub has already traded
-  // all but `windowRounds` of the rounds sent so far.
-  const windowRounds = Number(process.env['XLN_LOAD_WINDOW_ROUNDS'] || 12);
-  // A user may carry several orders in one signed Account frame (a quoting
-  // market maker does); `offersPerRound` rounds go out in one user input.
-  const offersPerRound = Math.max(1, Number(process.env['XLN_LOAD_OFFERS_PER_ROUND'] || 1));
-  if (windowRounds < offersPerRound) throw new Error('PRODUCTION_SWAP_LOAD_WINDOW_BELOW_BATCH');
-  const logHubPipeline = (phase: string, round: number, book: LoadBookSnapshot, submittedSwaps: number): void => {
-    const matched = book.tradeCount - options.initialBook.tradeCount;
-    const inFlight = Math.max(0, submittedSwaps - matched);
-    console.log(
-      `[load] hub-pipeline ${phase} round=${round} submitted=${submittedSwaps} ` +
-      `matched=${matched} inFlight=${inFlight} ` +
-      `visibleBids=${book.visibleBidOrders} visibleAsks=${book.visibleAskOrders} ` +
-      `bestBid=${book.bestBidPriceTicks ?? 'none'} bestAsk=${book.bestAskPriceTicks}`,
-    );
-  };
-  for (let round = 0; round < options.rounds; round += offersPerRound) {
-    const dueAt = startedAt + round * options.cadenceMs;
+  const actionsPerFrame = options.actionsPerFrame ?? 1;
+  // Offered load is a stream, not a closed-loop benchmark. One RuntimeInput
+  // carries at most three adjacent user actions, the production-realistic
+  // Account frame range selected by the owner. Batches remain open-loop: they
+  // never wait for Hub progress, Runtime commit, or an earlier Account ACK.
+  const pendingWaves: Array<Promise<Readonly<{ elapsedMs: number; error: unknown | null }>>> = [];
+  let streamFailure: unknown | null = null;
+  let waveIndex = 0;
+  for (let firstRound = 0; firstRound < options.rounds;) {
+    const batchRounds = resolveLoadBatchRounds(options.rounds - firstRound, actionsPerFrame);
+    const dueAt = startedAt + firstRound * options.cadenceMs;
     const remainingMs = dueAt - performance.now();
     if (remainingMs > 0) await new Promise(resolve => setTimeout(resolve, remainingMs));
-    let lastWindowMatched = -1;
-    while (true) {
-      const book = await readLoadBook(options.hub, options.hubIdentity.entityId);
-      const tradedRounds = Math.floor((book.tradeCount - options.initialBook.tradeCount) / options.swapsPerRound);
-      const submittedSwaps = round * options.swapsPerRound;
-      const matched = book.tradeCount - options.initialBook.tradeCount;
-      if (matched !== lastWindowMatched) {
-        logHubPipeline('window', round, book, submittedSwaps);
-        lastWindowMatched = matched;
-      }
-      if (round + offersPerRound - tradedRounds <= windowRounds) break;
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    if (streamFailure !== null) throw streamFailure;
     const lagMs = Math.max(0, Math.ceil(performance.now() - dueAt));
-    for (let k = 0; k < Math.min(offersPerRound, options.rounds - round); k += 1) roundSubmissionLagMs.push(lagMs);
-    // Every user submits from its own Runtime process concurrently; the round
-    // is observed when the slowest user Runtime has committed its own frame.
+    roundSubmissionLagMs.push(lagMs);
     const laneInputs = [
       ...options.prepared.makerRuntimes.map((lane, index) => {
         const identity = options.prepared.makerIdentities[index]!;
         return {
           lane,
           inputs: withRoundExtraTxs(
-            buildLaneRoundOfferInputs([identity], [options.prepared.makerPlans[index]!], round, Math.min(offersPerRound, options.rounds - round)),
-            options.extraEntityTxs?.({ lane, identity, round }) ?? [],
+            buildLaneRoundOfferInputs(
+              [identity],
+              [options.prepared.makerPlans[index]!],
+              firstRound,
+              batchRounds,
+            ),
+            collectRoundExtraTxs(options.extraEntityTxs, lane, identity, firstRound, batchRounds),
           ),
         };
       }),
@@ -237,27 +244,43 @@ export const submitPreparedParallelSameLoad = async (options: {
         return {
           lane,
           inputs: withRoundExtraTxs(
-            buildLaneRoundOfferInputs([identity], [options.prepared.takerPlans[index]!], round, Math.min(offersPerRound, options.rounds - round)),
-            options.extraEntityTxs?.({ lane, identity, round }) ?? [],
+            buildLaneRoundOfferInputs(
+              [identity],
+              [options.prepared.takerPlans[index]!],
+              firstRound,
+              batchRounds,
+            ),
+            collectRoundExtraTxs(options.extraEntityTxs, lane, identity, firstRound, batchRounds),
           ),
         };
       }),
     ];
-    const observed = await Promise.all(laneInputs.map(({ lane, inputs }) =>
-      sendObserved(lane.runtime, `prod-load-round-${options.initialFrame.height}-${round + 1}-${lane.laneKey}`, {
+    const waveStartedAt = performance.now();
+    const wave = queueLaneRuntimeInputWave(waveIndex, laneInputs.map(({ lane, inputs }) => ({
+      lane,
+      input: {
         runtimeTxs: [],
         entityInputs: inputs,
-      })));
-    enqueueAckElapsedMs += Math.max(...observed.map(entry => entry.enqueueAckElapsedMs));
-    commandObservedElapsedMs += Math.max(...observed.map(entry => entry.commandObservedElapsedMs));
-    const batchOffers = Math.min(offersPerRound, options.rounds - round);
-    logHubPipeline(
-      'submitted',
-      round,
-      await readLoadBook(options.hub, options.hubIdentity.entityId),
-      (round + batchOffers) * options.swapsPerRound,
+      },
+    })));
+    pendingWaves.push(wave.then(
+      () => ({ elapsedMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error: null }),
+      error => {
+        streamFailure ??= error;
+        return { elapsedMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error };
+      },
+    ));
+    console.log(
+      `[load] stream dispatched wave=${waveIndex} rounds=${firstRound}-${firstRound + batchRounds - 1} ` +
+      `submitted=${(firstRound + batchRounds) * options.swapsPerRound} lagMs=${lagMs}`,
     );
+    waveIndex += 1;
+    firstRound += batchRounds;
   }
+  const waveResults = await Promise.all(pendingWaves);
+  const failedWave = waveResults.find(result => result.error !== null);
+  if (failedWave) throw failedWave.error;
+  const ingressAcceptedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
   const finalBook = await waitForTradeCount(
     options.hub,
     options.hubIdentity.entityId,
@@ -265,10 +288,10 @@ export const submitPreparedParallelSameLoad = async (options: {
   );
   return {
     finalBook,
-    runtimeInputBatches: Math.ceil(options.rounds / offersPerRound),
-    offersPerRound,
-    enqueueAckElapsedMs,
-    commandObservedElapsedMs,
+    runtimeInputBatches: Math.ceil(options.rounds / actionsPerFrame),
+    offersPerRound: actionsPerFrame,
+    enqueueAckElapsedMs: ingressAcceptedElapsedMs,
+    commandObservedElapsedMs: ingressAcceptedElapsedMs,
     economicCompletionElapsedMs: Math.max(1, Math.ceil(performance.now() - startedAt)),
     roundSubmissionLagMs,
     settlementPairs: [

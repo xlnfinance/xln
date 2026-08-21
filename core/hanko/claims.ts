@@ -44,6 +44,21 @@ type ResolvedClaim = VerifiedHankoClaim & {
   readonly usedIndexes: readonly number[];
 };
 
+// Structural/cryptographic verification depends only on the exact digest and
+// Hanko bytes. Board authority and expected target depend on the caller's
+// observer state and are intentionally checked after every cache lookup.
+const VERIFIED_HANKO_MEMO_MAX = 16_384;
+const verifiedHankoMemo = new Map<string, VerifiedHanko>();
+
+const rememberVerifiedHanko = (key: string, verified: VerifiedHanko): VerifiedHanko => {
+  if (verifiedHankoMemo.size >= VERIFIED_HANKO_MEMO_MAX) {
+    const oldest = verifiedHankoMemo.keys().next();
+    if (!oldest.done) verifiedHankoMemo.delete(oldest.value);
+  }
+  verifiedHankoMemo.set(key, verified);
+  return verified;
+};
+
 export const resolveHankoBoardDelays = (
   input?: Partial<HankoBoardDelays>,
 ): HankoBoardDelays => {
@@ -208,8 +223,31 @@ export const verifyCanonicalHanko = (input: Readonly<{
   validateBoardAuthority?: HankoBoardAuthorityValidator;
 }>): VerifiedHanko => {
   countOpWithSite('hanko.verifyCanonical', input.hanko.length, 1);
-  const digest = asHankoBytes32(input.digest, 'DIGEST');
-  const envelope = decodeHankoEnvelope(input.hanko);
+  const memoKey = `${input.digest}|${input.hanko}`;
+  const memoized = verifiedHankoMemo.get(memoKey);
+  const verified = memoized ?? rememberVerifiedHanko(
+    memoKey,
+    verifyCanonicalHankoStructure(input.digest, input.hanko),
+  );
+  if (memoized) countOpWithSite('hanko.verifyCanonical.cacheHit', input.hanko.length, 1);
+  for (const [index, claim] of verified.claims.entries()) {
+    assertAuthority(claim as ResolvedClaim, index, input.validateBoardAuthority);
+  }
+  if (
+    input.expectedTargetEntityId &&
+    verified.targetEntityId !== asHankoBytes32(input.expectedTargetEntityId, 'TARGET')
+  ) {
+    invalidHanko(`HANKO_TARGET_MISMATCH:${verified.targetEntityId}`);
+  }
+  return verified;
+};
+
+const verifyCanonicalHankoStructure = (
+  digestInput: string,
+  hanko: HankoString,
+): VerifiedHanko => {
+  const digest = asHankoBytes32(digestInput, 'DIGEST');
+  const envelope = decodeHankoEnvelope(hanko);
   if (envelope.claims.length === 0) invalidHanko('HANKO_CLAIM_REQUIRED');
   assertUnique(envelope.placeholders, 'HANKO_DUPLICATE_PLACEHOLDER');
   assertUnique(envelope.claims.map((claim) => claim.entityId), 'HANKO_DUPLICATE_CLAIM_ENTITY');
@@ -221,15 +259,11 @@ export const verifyCanonicalHanko = (input: Readonly<{
   });
   const claims = envelope.claims.map((_, index) => resolveClaim(envelope, signatures, index));
   claims.forEach((claim, index) => {
-    assertAuthority(claim, index, input.validateBoardAuthority);
     if (claim.votingPower < claim.threshold) {
       invalidHanko(`HANKO_QUORUM_INSUFFICIENT:${index}:${claim.votingPower}:${claim.threshold}`);
     }
   });
   assertMinimalReachability(envelope, signatures, claims);
   const target = claims[claims.length - 1]!.entityId;
-  if (input.expectedTargetEntityId && target !== asHankoBytes32(input.expectedTargetEntityId, 'TARGET')) {
-    invalidHanko(`HANKO_TARGET_MISMATCH:${target}`);
-  }
   return { targetEntityId: target, envelope, signatures, claims };
 };

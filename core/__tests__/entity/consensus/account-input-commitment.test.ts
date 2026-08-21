@@ -2,16 +2,10 @@ import { expect, test } from 'bun:test';
 
 import { assertAccountFrameHash, createFrameHash } from '../../../account/consensus/frame/hash';
 import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
+import { canonicalAccountInputCommitment } from '../../../entity/consensus/frame/account-input-commitment';
 import {
-  canonicalAccountInputCommitment,
-  canonicalConsensusOutputForEntityFrameHash,
-  ENTITY_FRAME_ACCOUNT_INPUT_MODE,
-  CERTIFIED_OUTPUT_ACCOUNT_INPUT_MODE,
-} from '../../../entity/consensus/frame/account-input-commitment';
-import {
-  assertCertifiedNestedAccountFrames,
-  hashCertifiedEntityOutput,
-  hashCertifiedEntityOutputSemantic,
+  assertCertifiedOutputSemanticIdentity,
+  getRawAccountOutputTx,
 } from '../../../entity/consensus/output/certification';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import type { AccountFrame } from '../../../types/account';
@@ -100,9 +94,9 @@ const entityHash = (txs: EntityTx[]): string =>
     entityContext(),
   );
 
-const origin = (semanticHash: string): ConsensusOutputOrigin => ({
+const genericOrigin = (semanticHash: string): ConsensusOutputOrigin => ({
   sourceEntityId: PEER,
-  lane: 'account-frame',
+  lane: 'generic',
   sequence: 7n,
   semanticHash,
   height: 4,
@@ -157,33 +151,6 @@ test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle 
   expect(entityHash([frameInput(changed)])).not.toBe(entityHash([frameInput(frame)]));
 });
 
-test('certified output digest ignores nested offer bodies and envelope Hankos', async () => {
-  const frame = await makeFrame('offer-a');
-  const left = [frameInput(frame, '0xhanko-a')];
-  const bodyTampered = structuredClone(frame);
-  bodyTampered.accountTxs = [fatOffer('offer-b') as AccountFrame['accountTxs'][number]];
-  const right = [frameInput(bodyTampered, '0xhanko-b')];
-  const leftHash = hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, left);
-  const rightHash = hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, right);
-  expect(leftHash).toBe(rightHash);
-  const outputLeft = hashCertifiedEntityOutput(origin(leftHash), ENTITY, left);
-  const outputRight = hashCertifiedEntityOutput(origin(rightHash), ENTITY, right);
-  expect(outputLeft).toBe(outputRight);
-});
-
-test('certified output digest still binds routing and claimed Account height', async () => {
-  const frame = await makeFrame('offer-a');
-  const base = [frameInput(frame)];
-  const routed = structuredClone(base);
-  if (routed[0]?.type !== 'accountInput') throw new Error('ACCOUNT_INPUT_FIXTURE_INVALID');
-  routed[0].data.fromEntityId = ENTITY;
-  expect(
-    hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, routed),
-  ).not.toBe(
-    hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, base),
-  );
-});
-
 test('local kind:txs bodies remain in the Entity frame digest', () => {
   const tx = (amount: bigint): EntityTx => ({
     type: 'accountInput',
@@ -207,45 +174,22 @@ test('commitment encoding of 100 fat frames stays off the nested offer bytes', a
   const elapsedMs = performance.now() - started;
   expect(hash.startsWith('0x')).toBe(true);
   const encoded = encodeCanonicalConsensusValue(
-    txs.map(tx => canonicalAccountInputCommitment(tx.data, ENTITY_FRAME_ACCOUNT_INPUT_MODE)),
+    txs.map(tx => canonicalAccountInputCommitment(tx.data)),
   );
   expect(encoded.includes('offer-0')).toBe(false);
   expect(encoded.includes('x'.repeat(64))).toBe(false);
-  const certified = encodeCanonicalConsensusValue(
-    txs.map(tx => canonicalAccountInputCommitment(tx.data, CERTIFIED_OUTPUT_ACCOUNT_INPUT_MODE)),
-  );
-  expect(certified.includes('0xframe')).toBe(false);
+  expect(encoded.includes('0xframe')).toBe(true);
   expect(elapsedMs).toBeLessThan(50);
 });
 
-test('stolen Account body fails closed before certified consume', async () => {
-  const honest = await makeFrame('offer-a');
-  const stolen = structuredClone(honest);
-  stolen.accountTxs = [fatOffer('offer-b') as AccountFrame['accountTxs'][number]];
-  const honestTxs = [frameInput(honest)];
-  const stolenTxs = [frameInput(stolen)];
-  expect(
-    hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, stolenTxs),
-  ).toBe(
-    hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, honestTxs),
-  );
-  expect(() => assertCertifiedNestedAccountFrames(honestTxs)).not.toThrow();
-  expect(() => assertCertifiedNestedAccountFrames(stolenTxs)).toThrow('CONSENSUS_OUTPUT_ACCOUNT_FRAME_HASH_MISMATCH');
-});
-
-test('Entity frame hash of consensusOutput omits nested offer bytes', async () => {
-  const frame = await makeFrame('offer-wrapped');
-  const nested = [frameInput(frame)];
-  const wrapper: EntityTx = {
-    type: 'consensusOutput',
-    data: {
-      targetEntityId: ENTITY,
-      entityTxs: nested,
-      origin: origin(hashCertifiedEntityOutputSemantic(PEER, ENTITY, 'account-frame', 7n, nested)),
-      outputHanko: '0xoutput',
-    },
-  } as EntityTx;
-  const encoded = encodeCanonicalConsensusValue(canonicalConsensusOutputForEntityFrameHash(wrapper.data));
-  expect(encoded.includes('offer-wrapped')).toBe(false);
-  expect(entityHash([wrapper]).startsWith('0x')).toBe(true);
+test('AccountInput is raw-only and can never regain an outer certified envelope', async () => {
+  const tx = frameInput(await makeFrame('raw-only'));
+  const output = { entityId: ENTITY, signerId: '0xsigner', entityTxs: [tx] };
+  expect(getRawAccountOutputTx(PEER, output, 0)).toEqual(tx);
+  expect(() => getRawAccountOutputTx(ENTITY, output, 0)).toThrow('ACCOUNT_OUTPUT_SOURCE_MISMATCH');
+  expect(() => assertCertifiedOutputSemanticIdentity(
+    genericOrigin(HASH_B),
+    ENTITY,
+    [tx],
+  )).toThrow('CONSENSUS_OUTPUT_ACCOUNT_INPUT_FORBIDDEN');
 });

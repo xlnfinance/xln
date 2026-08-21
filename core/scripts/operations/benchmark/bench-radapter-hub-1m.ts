@@ -271,10 +271,8 @@ const makeAccount = async (
       deltas: [],
     },
     currentHeight: height,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: firstEntity, toEntity: secondEntity, nextProofNonce: height },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: { rebalance: {
       policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),

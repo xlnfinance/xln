@@ -67,10 +67,9 @@ export const runCommittedRuntimeEffects = async (
   }
 
   await dispatchCommittedEntityOutputs(env, effects.changedEntityIds, effects.outputPlan, effects.routing);
-  profile.mark('profileAnnounce');
+  profile.mark('dispatchOutputs');
   profile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs?.length ?? 0;
   profile.metrics.deferredNetworkMeta = state.deferredNetworkMeta?.size ?? 0;
-  profile.mark('dispatchOutputs');
 
   await submitRuntimeJOutbox(env, effects.jOutbox, {
     enqueueRuntimeInputs: deps.enqueueRuntimeInputs,

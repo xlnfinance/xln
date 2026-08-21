@@ -4,10 +4,6 @@ import { getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import {
-  decodeRuntimeIngressReceipt,
-  type RuntimeIngressReceipt,
-} from '../runtime/mempool/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
 import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
@@ -23,7 +19,6 @@ import { parseProfile, type DecodedProfile } from '../entity/profile';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
-export const CONTROL_RUNTIME_INPUT_OBSERVATION_TIMEOUT_MS = 60_000;
 const DEFAULT_ROUTING_FEE_PPM = 1;
 const DEFAULT_ROUTING_BASE_FEE = 0n;
 const DEFAULT_SWAP_TAKER_FEE_BPS = 1;
@@ -53,10 +48,14 @@ export type ControlQueueResponse = {
     entityInputs: number;
     jInputs: number;
   };
-  receipt?: RuntimeIngressReceipt;
-  statusUrl?: string;
   error?: string;
 };
+
+export type ControlRuntimeSnapshot = Readonly<{
+  runtimeId: string;
+  height: number;
+  checkpointHash: string;
+}>;
 
 const decodeControlEntitySummary = (value: unknown): ControlEntitySummary => {
   const summary = requireBoundaryRecord(value, 'CONTROL_ENTITY_SUMMARY_INVALID');
@@ -98,18 +97,6 @@ const decodeControlEntitySummary = (value: unknown): ControlEntitySummary => {
     publicAccountCount: requireBoundaryInteger(summary['publicAccountCount'], 'CONTROL_ENTITY_SUMMARY_PUBLIC_ACCOUNT_COUNT_INVALID'),
     accountEntityIds: accountEntityIds.map(value => value.trim().toLowerCase()),
   };
-};
-
-type ControlRuntimeStatusResponse = {
-  ok: boolean;
-  receipt?: RuntimeIngressReceipt | null;
-  currentHeight?: number;
-  runtime?: {
-    halted?: boolean;
-    operatorStatus?: 'HALTED_REQUIRES_OPERATOR' | null;
-    fatalDebugPayload?: unknown;
-  } | null;
-  error?: string;
 };
 
 type GossipProfileResponse = {
@@ -159,7 +146,7 @@ const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
   requireExactBoundaryKeys(
     response,
     ['ok'],
-    ['accepted', 'receipt', 'statusUrl', 'error'],
+    ['accepted', 'error'],
     'CONTROL_RUNTIME_INPUT_RESPONSE_FIELDS_INVALID',
   );
   if (typeof response['ok'] !== 'boolean') throw new Error('CONTROL_RUNTIME_INPUT_RESPONSE_OK_INVALID');
@@ -174,17 +161,12 @@ const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
       jInputs: requireBoundaryInteger(raw['jInputs'], 'CONTROL_RUNTIME_INPUT_ACCEPTED_J_INPUTS_INVALID'),
     };
   }
-  if (response['statusUrl'] !== undefined && typeof response['statusUrl'] !== 'string') {
-    throw new Error('CONTROL_RUNTIME_INPUT_STATUS_URL_INVALID');
-  }
   if (response['error'] !== undefined && typeof response['error'] !== 'string') {
     throw new Error('CONTROL_RUNTIME_INPUT_ERROR_INVALID');
   }
   return {
     ok: response['ok'],
     ...(accepted === undefined ? {} : { accepted }),
-    ...(response['receipt'] === undefined ? {} : { receipt: decodeRuntimeIngressReceipt(response['receipt']) }),
-    ...(response['statusUrl'] === undefined ? {} : { statusUrl: response['statusUrl'] }),
     ...(response['error'] === undefined ? {} : { error: response['error'] }),
   };
 };
@@ -216,58 +198,6 @@ const decodeGossipProfileResponse = (value: unknown): GossipProfileResponse => {
     ok: response['ok'],
     found: response['found'],
     profile: decodedProfile,
-  };
-};
-
-const decodeControlRuntimeStatusResponse = (value: unknown): ControlRuntimeStatusResponse => {
-  const response = requireBoundaryRecord(value, 'CONTROL_RUNTIME_STATUS_RESPONSE_INVALID');
-  requireExactBoundaryKeys(
-    response,
-    ['ok'],
-    ['receipt', 'currentHeight', 'runtime', 'error'],
-    'CONTROL_RUNTIME_STATUS_RESPONSE_FIELDS_INVALID',
-  );
-  if (typeof response['ok'] !== 'boolean') throw new Error('CONTROL_RUNTIME_STATUS_RESPONSE_OK_INVALID');
-  const currentHeight = response['currentHeight'];
-  if (currentHeight !== undefined) requireBoundaryInteger(currentHeight, 'CONTROL_RUNTIME_STATUS_CURRENT_HEIGHT_INVALID');
-  const runtime = response['runtime'];
-  if (runtime !== undefined && runtime !== null) {
-    const record = requireBoundaryRecord(runtime, 'CONTROL_RUNTIME_STATUS_RUNTIME_INVALID');
-    requireExactBoundaryKeys(record, [], ['halted', 'operatorStatus', 'fatalDebugPayload'], 'CONTROL_RUNTIME_STATUS_RUNTIME_FIELDS_INVALID');
-    if (record['halted'] !== undefined && typeof record['halted'] !== 'boolean') {
-      throw new Error('CONTROL_RUNTIME_STATUS_HALTED_INVALID');
-    }
-    if (record['operatorStatus'] !== undefined && record['operatorStatus'] !== null &&
-        record['operatorStatus'] !== 'HALTED_REQUIRES_OPERATOR') {
-      throw new Error('CONTROL_RUNTIME_STATUS_OPERATOR_INVALID');
-    }
-  }
-  let decodedRuntime: ControlRuntimeStatusResponse['runtime'] | undefined;
-  if (runtime === null) {
-    decodedRuntime = null;
-  } else if (runtime !== undefined) {
-    const record = requireBoundaryRecord(runtime, 'CONTROL_RUNTIME_STATUS_RUNTIME_INVALID');
-    decodedRuntime = {
-      ...(record['halted'] === undefined ? {} : { halted: record['halted'] as boolean }),
-      ...(record['operatorStatus'] === undefined
-        ? {}
-        : { operatorStatus: record['operatorStatus'] as 'HALTED_REQUIRES_OPERATOR' | null }),
-      ...(record['fatalDebugPayload'] === undefined ? {} : { fatalDebugPayload: record['fatalDebugPayload'] }),
-    };
-  }
-  if (response['error'] !== undefined && typeof response['error'] !== 'string') {
-    throw new Error('CONTROL_RUNTIME_STATUS_ERROR_INVALID');
-  }
-  return {
-    ok: response['ok'],
-    ...(response['receipt'] === undefined
-      ? {}
-      : { receipt: response['receipt'] === null ? null : decodeRuntimeIngressReceipt(response['receipt']) }),
-    ...(currentHeight === undefined ? {} : {
-      currentHeight: requireBoundaryInteger(currentHeight, 'CONTROL_RUNTIME_STATUS_CURRENT_HEIGHT_INVALID'),
-    }),
-    ...(decodedRuntime === undefined ? {} : { runtime: decodedRuntime }),
-    ...(response['error'] === undefined ? {} : { error: response['error'] }),
   };
 };
 
@@ -458,15 +388,11 @@ export class DaemonControlClient {
     }
   }
 
-  async queueRuntimeInput(input: RuntimeInput): Promise<ControlQueueResponse> {
+  async queueRuntimeInput(input: RuntimeInput): Promise<void> {
     const response = decodeControlQueueResponse(await this.post('/api/control/runtime-input', input));
     if (response.ok !== true) {
       throw new Error(response.error || 'CONTROL_RUNTIME_INPUT_REJECTED');
     }
-    if (!response.receipt || !response.statusUrl) {
-      throw new Error(`CONTROL_RUNTIME_INPUT_NO_RECEIPT: ${serializeTaggedJson(response)}`);
-    }
-    return response;
   }
 
   async hasGossipProfile(entityId: string): Promise<boolean> {
@@ -506,6 +432,38 @@ export class DaemonControlClient {
     return response.profile.accounts.map(account => account.counterpartyId.toLowerCase());
   }
 
+  async gossipProfilesCounterparties(entityIds: readonly string[]): Promise<Map<string, string[] | null>> {
+    const response = requireBoundaryRecord(
+      await this.post('/api/control/gossip-profile-counterparties', { entityIds }),
+      'CONTROL_GOSSIP_COUNTERPARTIES_RESPONSE_INVALID',
+    );
+    requireExactBoundaryKeys(
+      response,
+      ['ok', 'counterparties'],
+      [],
+      'CONTROL_GOSSIP_COUNTERPARTIES_RESPONSE_FIELDS_INVALID',
+    );
+    if (response['ok'] !== true) throw new Error('CONTROL_GOSSIP_COUNTERPARTIES_RESPONSE_NOT_OK');
+    const raw = requireBoundaryRecord(
+      response['counterparties'],
+      'CONTROL_GOSSIP_COUNTERPARTIES_MAP_INVALID',
+    );
+    const counterparties = new Map<string, string[] | null>();
+    for (const entityId of entityIds) {
+      const key = entityId.toLowerCase();
+      const value = raw[key];
+      if (value === null) {
+        counterparties.set(key, null);
+        continue;
+      }
+      if (!Array.isArray(value) || value.some(counterparty => typeof counterparty !== 'string')) {
+        throw new Error(`CONTROL_GOSSIP_COUNTERPARTIES_ENTRY_INVALID:entityId=${key}`);
+      }
+      counterparties.set(key, value.map(counterparty => counterparty.toLowerCase()));
+    }
+    return counterparties;
+  }
+
   async configureP2P(config: {
     relayUrls?: string[];
     advertiseEntityIds?: string[];
@@ -514,13 +472,30 @@ export class DaemonControlClient {
     decodeP2PControlResponse(await this.post('/api/control/p2p', config));
   }
 
-  async getRuntimeInputStatus(statusUrl: string): Promise<ControlRuntimeStatusResponse> {
-    const path = statusUrl.startsWith('/') ? statusUrl : `/${statusUrl}`;
-    const response = decodeControlRuntimeStatusResponse(await this.get(path));
-    if (response.ok !== true) {
-      throw new Error(response.error || 'CONTROL_RUNTIME_INPUT_STATUS_FAILED');
+  async exportRuntimeSnapshot(): Promise<ControlRuntimeSnapshot> {
+    const response = requireBoundaryRecord(
+      await this.post('/api/control/runtime/snapshot', {}),
+      'CONTROL_RUNTIME_SNAPSHOT_RESPONSE_INVALID',
+    );
+    requireExactBoundaryKeys(
+      response,
+      ['ok', 'runtimeId', 'height', 'checkpointHash'],
+      [],
+      'CONTROL_RUNTIME_SNAPSHOT_RESPONSE_FIELDS_INVALID',
+    );
+    const runtimeId = String(response['runtimeId'] || '').toLowerCase();
+    const checkpointHash = String(response['checkpointHash'] || '').toLowerCase();
+    if (response['ok'] !== true || !/^0x[0-9a-f]{40}$/.test(runtimeId)) {
+      throw new Error('CONTROL_RUNTIME_SNAPSHOT_IDENTITY_INVALID');
     }
-    return response;
+    if (!/^0x[0-9a-f]{64}$/.test(checkpointHash)) {
+      throw new Error('CONTROL_RUNTIME_SNAPSHOT_HASH_INVALID');
+    }
+    return {
+      runtimeId,
+      height: requireBoundaryInteger(response['height'], 'CONTROL_RUNTIME_SNAPSHOT_HEIGHT_INVALID'),
+      checkpointHash,
+    };
   }
 
   async waitForEntity(entityId: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<ControlEntitySummary> {
@@ -535,63 +510,6 @@ export class DaemonControlClient {
     throw new Error(`Timed out waiting for entity ${entityId}`);
   }
 }
-
-const summarizeRuntimeInputStatus = (status: ControlRuntimeStatusResponse): string =>
-  serializeTaggedJson({
-    receipt: status.receipt
-      ? {
-          id: status.receipt.id,
-          status: status.receipt.status,
-          enqueuedHeight: status.receipt.enqueuedHeight,
-          observedHeight: status.receipt.observedHeight ?? null,
-          fingerprintProgress: status.receipt.requiredFingerprintCount === undefined
-            ? null
-            : {
-                observed: status.receipt.observedFingerprintCount ?? 0,
-                required: status.receipt.requiredFingerprintCount,
-              },
-          counts: status.receipt.counts,
-          note: status.receipt.note ?? null,
-        }
-      : null,
-    currentHeight: status.currentHeight ?? null,
-    runtime: status.runtime ?? null,
-  });
-
-const waitForQueuedRuntimeInputObserved = async (
-  client: DaemonControlClient,
-  response: ControlQueueResponse,
-  label: string,
-  timeoutMs = CONTROL_RUNTIME_INPUT_OBSERVATION_TIMEOUT_MS,
-): Promise<void> => {
-  const statusUrl = response.statusUrl;
-  if (!statusUrl) {
-    throw new Error(`CONTROL_RUNTIME_INPUT_NO_STATUS_URL: ${label}`);
-  }
-  const deadline = Date.now() + timeoutMs;
-  let lastStatus: ControlRuntimeStatusResponse | null = null;
-  while (Date.now() < deadline) {
-    const status = await client.getRuntimeInputStatus(statusUrl);
-    lastStatus = status;
-    const runtime = status.runtime;
-    if (runtime?.halted === true) {
-      throw new Error(
-        `CONTROL_RUNTIME_INPUT_FAILED: ${label} status=${summarizeRuntimeInputStatus(status)}`,
-      );
-    }
-    if (status.receipt?.status === 'observed') return;
-    if (status.receipt?.status === 'expired') {
-      throw new Error(
-        `CONTROL_RUNTIME_INPUT_EXPIRED: ${label} status=${summarizeRuntimeInputStatus(status)}`,
-      );
-    }
-    await sleep(WAIT_POLL_MS);
-  }
-  throw new Error(
-    `CONTROL_RUNTIME_INPUT_NOT_OBSERVED: ${label} ` +
-    `status=${lastStatus ? summarizeRuntimeInputStatus(lastStatus) : 'none'}`,
-  );
-};
 
 const buildImportReplicaInput = (identity: ManagedEntityIdentity): RuntimeInput => ({
   runtimeTxs: [
@@ -710,8 +628,7 @@ const ensureManagedEntity = async (
   const existing = await client.listEntities();
   const alreadyPresent = existing.some(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
   if (!alreadyPresent) {
-    const response = await client.queueRuntimeInput(buildImportReplicaInput(identity));
-    await waitForQueuedRuntimeInputObserved(client, response, `importReplica:${identity.entityId}`);
+    await client.queueRuntimeInput(buildImportReplicaInput(identity));
   }
   await client.waitForEntity(identity.entityId);
   return identity;
@@ -722,11 +639,11 @@ export const enableRouting = async (
   config: EnableRoutingConfig,
 ): Promise<ManagedEntityIdentity> => {
   const identity = await ensureManagedEntity(client, config);
-  const response = await client.queueRuntimeInput({
+  await client.queueRuntimeInput({
     runtimeTxs: [],
     entityInputs: [buildEnableRoutingEntityInput(identity, config)],
   });
-  await waitForQueuedRuntimeInputObserved(client, response, `enableRouting:${identity.entityId}`);
+  await client.waitForEntity(identity.entityId);
   await configureManagedEntityP2P(client, identity, config);
   return identity;
 };
@@ -795,8 +712,7 @@ export const setupCustody = async (
       committedRoles,
     );
     if (connectivityInput) {
-      const response = await client.queueRuntimeInput(connectivityInput);
-      await waitForQueuedRuntimeInputObserved(client, response, `custodyConnectivity:${identity.entityId}`);
+      await client.queueRuntimeInput(connectivityInput);
       if (missingHubEntityIds.length > 0) {
         let latestAccountEntityIds = existingAccountEntityIds;
         const deadline = Date.now() + 15_000;
@@ -829,14 +745,14 @@ export const setupCustody = async (
     if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
       throw new Error('CUSTODY_USD_QUOTE_AUTHORITY_ENTITY_ID_REQUIRED');
     }
-    const response = await client.queueRuntimeInput({
+    await client.queueRuntimeInput({
       runtimeTxs: [],
       entityInputs: [buildEnableRoutingEntityInput(identity, {
         ...config,
         usdQuoteAuthorityEntityId,
       })],
     });
-    await waitForQueuedRuntimeInputObserved(client, response, `custodyRouting:${identity.entityId}`);
+    await client.waitForEntity(identity.entityId);
   }
   return identity;
 };

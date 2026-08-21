@@ -5,7 +5,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import { computeAccountStateRootCold } from '../../../account/commitment/state-root';
@@ -54,8 +53,7 @@ describe('Account transition overlay', () => {
   test('seals a dirty key while preserving the committed Patricia root', () => {
     const base = makePersistentAccount();
     const baseRoot = computeAccountStateRootCold(base.state);
-    const key = createAccountTransitionKey(base, ['one']);
-    const transition = beginAccountTransition(base, key);
+    const transition = beginAccountTransition(base, ['one']);
     const view = accountTransitionView(transition);
     const delta = view.state.deltas.get(1);
     if (!delta) throw new Error('TEST_DELTA_MISSING');
@@ -76,7 +74,7 @@ describe('Account transition overlay', () => {
   test('discard preserves the exact committed root', () => {
     const base = makePersistentAccount();
     const before = computeAccountStateRootCold(base.state);
-    const transition = beginAccountTransition(base, createAccountTransitionKey(base, ['reject']));
+    const transition = beginAccountTransition(base, ['reject']);
     accountTransitionView(transition).state.locks.reset();
     discardAccountTransition(transition);
     expect(computeAccountStateRootCold(base.state)).toBe(before);
@@ -85,7 +83,7 @@ describe('Account transition overlay', () => {
 
   test('retains nested writes below a newly assigned optional record', () => {
     const base = makePersistentAccount();
-    const transition = beginAccountTransition(base, createAccountTransitionKey(base, ['optional-record']));
+    const transition = beginAccountTransition(base, ['optional-record']);
     const view = accountTransitionView(transition);
     view.disputeProofBodiesByHash ??= {};
     view.disputeProofBodiesByHash['proof'] = { tokenIds: [], deltas: [], encodedBatch: '0x' };
@@ -102,10 +100,7 @@ describe('Account transition overlay', () => {
   test('late collection failure preserves its cause and leaves the base untouched', () => {
     const base = makePersistentAccount();
     const before = computeAccountStateRootCold(base.state);
-    const transition = beginAccountTransition(
-      base,
-      createAccountTransitionKey(base, ['late-prepare-failure']),
-    );
+    const transition = beginAccountTransition(base, ['late-prepare-failure']);
     const view = accountTransitionView(transition);
     view.state.deltas.edit(1, previous => ({ ...previous, offdelta: 1n }));
     view.state.locks.put('oversized', {

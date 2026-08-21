@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { validateProposedEntityFrame, assertEstimatedSealedEntityFrameWire } from '../../../entity/consensus/frame/validation';
-import { assertEntityFrameTotalByteBudget, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
+import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
 
 const entityId = `0x${'01'.repeat(32)}`;
@@ -77,6 +77,24 @@ test('Entity frame wire selector defers the tail instead of overflowing', () => 
   expect(two).toBeGreaterThan(one);
   const selected = selectEntityFrameTxPrefixForWireBudget(txs, rest, Math.floor((one + two) / 2));
   expect(selected).toEqual([txs[0]]);
+});
+
+test('Entity frame wire prefix meter is byte-exact for every prefix', () => {
+  const txs = [
+    { type: 'chat' as const, data: { from: signerId, message: 'α'.repeat(37) } },
+    { type: 'chat' as const, data: { from: signerId, message: 'b'.repeat(91) } },
+  ];
+  const rest = {
+    prevFrameHash: 'genesis', height: 1, timestamp: 1, events: [] as const, entityId,
+    stateRoot: `0x${'11'.repeat(32)}`, authorityRoot: `0x${'22'.repeat(32)}`,
+    entityContext: { ...emptyContext, gossipProfiles: [{ pad: 'x'.repeat(257) }] },
+  };
+  const measurePrefix = createEntityFrameWirePrefixMeter(txs);
+  for (let count = 0; count <= txs.length; count += 1) {
+    expect(measurePrefix(rest, count)).toBe(
+      measureEntityFrameWireBytes({ ...rest, txs: txs.slice(0, count) }),
+    );
+  }
 });
 
 test('proposed Entity frames require the exact signed-hash manifest', () => {

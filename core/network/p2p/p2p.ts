@@ -35,6 +35,7 @@ import {
   type GossipProfileBatchRequest,
 } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../support/logger';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import { HEAVY_LOGS } from '../../support/debug-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
@@ -49,7 +50,7 @@ import {
   isDeliveryDelivered,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import { isRetryableIngressBackpressure } from './ingress-backpressure';
+import { isRetryableIngressBackpressure, RETRYABLE_INGRESS_BACKPRESSURE } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/admit/entity-input-envelope-auth.ts';
 import { retryFailure } from '../../protocol/errors/failure-taxonomy';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
@@ -144,7 +145,7 @@ type RuntimeP2POptions = {
     envelope: RuntimeEntityInputsEnvelope,
     timestamp?: number,
     options?: InboundEntityInputsOptions,
-  ) => void;
+  ) => Promise<void> | void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
   onGossipJurisdictions?: (from: string, announcements: JurisdictionGossipAnnouncement[]) => void;
   officialFoundationSignerId?: string;
@@ -363,7 +364,7 @@ export class RuntimeP2P {
     envelope: RuntimeEntityInputsEnvelope,
     timestamp?: number,
     options?: InboundEntityInputsOptions,
-  ) => void;
+  ) => Promise<void> | void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private onGossipJurisdictions: (from: string, announcements: JurisdictionGossipAnnouncement[]) => void;
   private officialFoundationSignerId: string | undefined;
@@ -526,12 +527,8 @@ export class RuntimeP2P {
         },
         onError: error => {
           reportRelayClientError(this.env, url, error);
-          // An async relay rejection means an envelope this runtime already
-          // handed off was dropped: the target is not reachable through THIS
-          // relay. Without transport recovery the 8s bilateral resend keeps
-          // hitting the same dead path forever (stuck pending frames). Re-
-          // resolve the world: fresh gossip for direct endpoints, then a
-          // clean reconnect cycle.
+          // Transport is deliberately best-effort. Only bilateral Account ACK
+          // advances/removes financial work; never reintroduce P2P receipts.
           if (
             error.message.includes('TARGET_NOT_CONNECTED') ||
             error.message.includes('TARGET_OFFLINE') ||
@@ -1078,7 +1075,7 @@ export class RuntimeP2P {
     if (input.entityId) entitiesToCheck.add(input.entityId);
 
     if (input.entityTxs) {
-      for (const tx of input.entityTxs) {
+      for (const tx of getEffectiveEntityInputTxs(input)) {
         if (tx.type === 'accountInput' && tx.data) {
           const accountInput = tx.data as { fromEntityId?: string; toEntityId?: string };
           if (accountInput.fromEntityId) entitiesToCheck.add(accountInput.fromEntityId);
@@ -1116,7 +1113,9 @@ export class RuntimeP2P {
     envelope: RuntimeEntityInputsEnvelope,
     timestamp: number | undefined,
   ): Promise<void> {
-    if (this.closing || this.closed) return;
+    if (this.closing || this.closed) {
+      throw new Error(`${RETRYABLE_INGRESS_BACKPRESSURE}p2p-closing-before-admission`);
+    }
     // Drain witness: the last trace of an inbound bilateral ACK before the
     // deterministic intake. One debug line per envelope, scoped so an HLT run
     // can answer "did the lost ACK reach this runtime's transport at all".
@@ -1132,8 +1131,10 @@ export class RuntimeP2P {
         this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
       });
     }
-    if (this.closing || this.closed) return;
-    this.onEntityInputs(from, envelope, timestamp, {
+    if (this.closing || this.closed) {
+      throw new Error(`${RETRYABLE_INGRESS_BACKPRESSURE}p2p-closing-before-runtime-intake`);
+    }
+    await this.onEntityInputs(from, envelope, timestamp, {
       envelopeSourceVerified: true,
       entityInputsValidated: true,
     });

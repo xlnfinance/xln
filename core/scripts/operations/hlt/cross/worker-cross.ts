@@ -31,6 +31,7 @@ import {
   connectRuntime,
   directoryBytes,
   entryByLabel,
+  exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readLoadAccount,
   resolveWalPath,
@@ -173,6 +174,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     const sourceAccount = await readLoadAccount(load, cohort.source.entityId, sourceHub.entityId);
     const targetAccount = await readLoadAccount(load, cohort.target.entityId, targetHub.entityId);
     if (!sourceAccount || !targetAccount) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ACCOUNT_MISSING');
+    await exportReplayBaseSnapshotIfConfigured(hub);
     const hubBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const loadBefore = decodeLoadFrame(await load.adapter.read<unknown>('frame/latest'));
     const loadOrderId = `prod-cross-${hubBefore.height}-${marketMakerRoute.orderId}`;

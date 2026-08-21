@@ -722,7 +722,7 @@ const forwardToRemoteRuntime = (
   const attempt = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
   const delivery = attempt.delivery;
   if (type === 'entity_inputs' && HEAVY_LOGS) {
-    console.debug(
+    relayLog(
       `[RELAY-REMOTE] entity_inputs from=${String(from || '').slice(-8)} to=${String(to || '').slice(-8)} outcome=${delivery.outcome}:${delivery.code}`,
     );
   }
@@ -794,7 +794,7 @@ const deliverToLocalRuntime = async (
   try {
     await config.localDeliver(from, msg);
     if (HEAVY_LOGS) {
-      console.debug(`[RELAY-FORWARD] entity_inputs from=${String(from || '').slice(-8)} to=${String(to || '').slice(-8)}`);
+      relayLog(`[RELAY-FORWARD] entity_inputs from=${String(from || '').slice(-8)} to=${String(to || '').slice(-8)}`);
     }
     return 'delivered';
   } catch (error) {
@@ -878,7 +878,11 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
       reason: 'Missing target runtimeId',
       details: { traceId },
     });
-    config.send(ws, serializeWsMessage({ type: 'error', error: 'Missing target runtimeId' }));
+    config.send(ws, serializeWsMessage({
+      type: 'error',
+      error: 'Missing target runtimeId',
+      ...(context.id ? { inReplyTo: context.id } : {}),
+    }));
     return true;
   }
   if (type === 'entity_inputs' && (msg.encrypted !== true || typeof payload !== 'string')) {
@@ -892,7 +896,12 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
       delivery: relayDeliveryMetadata('rejected', 'ENTITY_INPUT_MUST_BE_ENCRYPTED'),
       details: { traceId },
     });
-    config.send(ws, serializeWsMessage({ type: 'error', error: 'entity_inputs must be encrypted' }));
+    config.send(ws, serializeWsMessage({
+      type: 'error',
+      error: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+      ...(context.id ? { inReplyTo: context.id } : {}),
+      ...(to ? { to } : {}),
+    }));
     return true;
   }
   if (

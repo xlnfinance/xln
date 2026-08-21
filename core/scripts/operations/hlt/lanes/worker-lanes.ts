@@ -1,4 +1,4 @@
-/** Deterministic setup of real user Entity/Account lanes, one isolated Runtime process per lane. */
+/** Deterministic setup of real user Entity/Account lanes, one sovereign Runtime per user. */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import {
   type ManagedEntityIdentity,
 } from '../../../../orchestrator/daemon-control';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
-import { laneDaemons, spawnLaneRuntimes, stopLaneRuntimes, type LaneRuntime } from './lane-runtimes';
+import { spawnLaneRuntimes, stopLaneRuntimes, type LaneRuntime } from './lane-runtimes';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { importEntity } from '../../../../runtime/registration/entity-creation';
 import type { RuntimeInput } from '../../../../runtime/types';
@@ -42,20 +42,6 @@ const PROVISIONING_ACCOUNTS_PER_FRAME = 16;
 const VISIBILITY_TIMEOUT_MS = 60_000;
 const PER_ENTITY_VISIBILITY_BUDGET_MS = 500;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
-export const runtimeHttpBaseFromWsUrl = (raw: string): string => {
-  const url = new URL(raw);
-  if ((url.protocol !== 'ws:' && url.protocol !== 'wss:') || url.username || url.password || url.search || url.hash) {
-    throw new Error('PRODUCTION_SWAP_LOAD_CONTROL_URL_INVALID');
-  }
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
-  url.pathname = '';
-  return url.toString().replace(/\/$/, '');
-};
-
-export const connectedRuntimeHttpBase = (
-  runtime: Pick<ConnectedRuntime, 'wsUrl'>,
-): string => runtimeHttpBaseFromWsUrl(runtime.wsUrl);
 
 export const deriveLoadLaneSeeds = (
   meshRootSeed: string,
@@ -161,7 +147,7 @@ const waitForHubProfile = async (
 ): Promise<void> => {
   const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await lane.control.hubProfileSendReady(hubEntityId, hubRuntimeId)) return;
+    if (await lane.runtime.control.hubProfileSendReady(hubEntityId, hubRuntimeId)) return;
     await sleep(100);
   }
   // `found` alone is not send-ready: the profile must bind this exact hub
@@ -178,7 +164,7 @@ const waitForOwnReceiveReadyProfile = async (lane: LaneRuntime, hubEntityId: str
   const hubId = hubEntityId.toLowerCase();
   const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const counterparties = await lane.control.gossipProfileCounterparties(selfId);
+    const counterparties = await lane.runtime.control.gossipProfileCounterparties(selfId);
     if (counterparties?.includes(hubId)) return;
     await sleep(100);
   }
@@ -248,7 +234,8 @@ export const setupParallelLoadLanes = async (options: {
   ) {
     throw new Error('PRODUCTION_SWAP_LOAD_LANE_CREDIT_CARDINALITY_INVALID');
   }
-  // Every lane is its own process: makers occupy [0, lanes), takers [lanes, 2*lanes).
+  // Every lane is a sovereign Runtime. Hosts only share an OS process in
+  // bounded groups (200 by default, operator-selectable up to 1000).
   const runtimes = await spawnLaneRuntimes({
     workDir: options.workDir,
     portBase: options.portBase,
@@ -272,8 +259,8 @@ const provisionLoadLanes = async (
   runtimes: LaneRuntime[],
 ): Promise<{ identities: LoadIdentity[]; runtimes: LaneRuntime[] }> => {
   await runInBatches(runtimes, async lane => {
-    await lane.control.registerSigner(lane.identity.signerId, lane.identity.privateKeyHex);
-    const existing = new Set((await lane.control.listEntities()).map(entity => entity.entityId));
+    await lane.runtime.control.registerSigner(lane.identity.signerId, lane.identity.privateKeyHex);
+    const existing = new Set((await lane.runtime.control.listEntities()).map(entity => entity.entityId));
     if (!existing.has(lane.identity.entityId)) {
       await sendObserved(lane.runtime, `prod-load-import-${options.role}-${lane.laneKey}`, {
         runtimeTxs: buildLaneImports([lane.identity]), entityInputs: [],
@@ -281,11 +268,10 @@ const provisionLoadLanes = async (
     }
     await waitForVisibleEntities(lane.runtime, [lane.identity.entityId], 'PRODUCTION_SWAP_LOAD_LANES_NOT_IMPORTED');
   });
-  // P2P config is per daemon and replaces the advertised set, so a daemon that
-  // hosts several users advertises all of them at once, after every import.
-  await runInBatches(laneDaemons(runtimes), lane => lane.control.configureP2P({
+  // P2P state is sovereign even when several replicas share one OS process.
+  await runInBatches(runtimes, lane => lane.runtime.control.configureP2P({
     relayUrls: [lane.relayUrl],
-    advertiseEntityIds: [...lane.hostedEntityIds],
+    advertiseEntityIds: [lane.identity.entityId],
     gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
   }));
   // The Hub does not pin users. Each user must still publish a receive-ready
@@ -343,9 +329,9 @@ const provisionLoadLanes = async (
   await runInBatches(runtimes, lane => waitForOwnReceiveReadyProfile(lane, options.hubIdentity.entityId));
   // Fast polling only served setup; a real user Runtime does not ask the Hub
   // for gossip four times a second while trading.
-  await runInBatches(laneDaemons(runtimes), lane => lane.control.configureP2P({
+  await runInBatches(runtimes, lane => lane.runtime.control.configureP2P({
     relayUrls: [lane.relayUrl],
-    advertiseEntityIds: [...lane.hostedEntityIds],
+    advertiseEntityIds: [lane.identity.entityId],
     gossipPollMs: LOAD_LANE_GOSSIP_POLL_MS,
   }));
   return {

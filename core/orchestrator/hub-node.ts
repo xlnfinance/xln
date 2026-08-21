@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import { createExternalWalletApi } from '../api/public/external-wallet-api';
 import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/ownership/brainvault';
 import { hasCliFlag, readCliOption } from '../config/cli';
@@ -47,7 +47,7 @@ import { quiesceNodeRuntime } from './process/node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
-import { safeStringify } from '../protocol/serialization';
+import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../protocol/boundary-validation';
 import { writeDurableFile } from '../storage/fs-durability';
 import { createStructuredLogger } from '../support/logger';
@@ -89,9 +89,7 @@ import { handleRuntimeActivityRequest } from '../api/server/health/activity';
 import { handleReserveFaucet } from '../api/server/faucet/reserve';
 import { handleOffchainFaucet } from '../api/server/faucet/offchain';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
-import { createRuntimeIngressReceiptStore } from '../runtime/mempool/ingress-receipts';
 import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/security-incidents';
-import { handleRuntimeInputStatus } from '../api/server/control/runtime-input';
 import { createStackManagerController, type StackManagerController } from '../api/server/control/stack-manager';
 import { hasDaemonControlAuth, parseTaggedControlBody } from '../api/server/control/auth';
 import { JSON_HEADERS } from '../api/server/utils';
@@ -110,7 +108,9 @@ import {
   getEntityJAdapter,
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
+  buildRuntimeRecoveryBundle,
 } from '../runtime.ts';
+import { withRuntimeCommittedRead } from '../runtime/frame/lifecycle/writer-lock';
 import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import type { EntityInput } from '../entity/types';
@@ -133,7 +133,6 @@ import {
   hasPendingRuntimeWork,
   hasQueuedOpenAccount,
   hasPairMutualCredits,
-  isCanonicalAccountOpener,
   serializeAccountDelta,
   settleRuntimeFor,
   sleep,
@@ -151,7 +150,6 @@ import {
 import {
   createHubDirectRuntimeRoute,
   createHubRadapterMessageHandler,
-  runtimeInputStatusUrl,
   type DirectEntityInputDebug,
   type DirectInputDebugState,
   type HubServerSocket,
@@ -1656,12 +1654,28 @@ const planHubPeerInputs = (
     bootstrap.entityId,
     ownerReplica.state.profile.isHub === true,
   );
+  const configuredOwnerIndex = resolvedArgs.meshHubNames.findIndex(
+    name => name.trim().toLowerCase() === resolvedArgs.name.trim().toLowerCase(),
+  );
+  if (configuredOwnerIndex < 0) {
+    throw new Error(`HUB_MESH_OWNER_NAME_UNCONFIGURED:${resolvedArgs.name}`);
+  }
   for (const peer of peers) {
+    const peerName = String(peer.hubName || peer.name || '').trim().split(/\s+/)[0]!.toLowerCase();
+    const configuredPeerIndex = resolvedArgs.meshHubNames.findIndex(
+      name => name.trim().toLowerCase() === peerName,
+    );
+    if (configuredPeerIndex < 0 || configuredPeerIndex === configuredOwnerIndex) {
+      throw new Error(`HUB_MESH_PEER_NAME_UNCONFIGURED:${peerName || peer.entityId}`);
+    }
     const account = getAccountReplica(env, bootstrap.entityId, peer.entityId);
     const canWrite =
       !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
     if (
-      isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
+      // One named topology owns every genesis: H2/H3 open toward H1 and H3
+      // opens toward H2. H3 may propose both independent Accounts in one
+      // Entity/Runtime frame; only reciprocal credit waits for their ACKs.
+      configuredOwnerIndex > configuredPeerIndex &&
       !hasAccount(env, bootstrap.entityId, peer.entityId) &&
       !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
       canWrite
@@ -2089,6 +2103,39 @@ const createHubControlRequestHandler = (dependencies: {
 }): ((request: Request, url: URL) => Promise<Response | null>) =>
   async (request, url) => {
     if (request.method !== 'POST') return null;
+    if (url.pathname === '/api/control/runtime/snapshot') {
+      const outputPath = String(process.env['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] || '').trim();
+      if (!outputPath || !isAbsolute(outputPath)) {
+        return new Response(
+          safeStringify({ ok: false, error: 'RUNTIME_SNAPSHOT_EXPORT_PATH_NOT_CONFIGURED' }),
+          { status: 409, headers: JSON_HEADERS },
+        );
+      }
+      try {
+        const bundle = await withRuntimeCommittedRead(dependencies.state, () =>
+          buildRuntimeRecoveryBundle(dependencies.state, {
+            kind: 'snapshot',
+            signers: [{
+              index: 1,
+              address: String(dependencies.state.runtimeId || '').toLowerCase(),
+              name: `${dependencies.nodeName} Runtime`,
+            }],
+          }));
+        await writeDurableFile(outputPath, `${serializeTaggedJson(bundle)}\n`);
+        return new Response(safeStringify({
+          ok: true,
+          runtimeId: bundle.runtimeId,
+          height: bundle.runtimeHeight,
+          checkpointHash: bundle.checkpointHash,
+        }), { headers: JSON_HEADERS });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return new Response(
+          safeStringify({ ok: false, error: message }),
+          { status: 503, headers: JSON_HEADERS },
+        );
+      }
+    }
     const stopP2P = url.pathname === '/api/control/p2p/stop';
     const quiesceRuntime =
       url.pathname === '/api/control/core/quiesce';
@@ -2145,9 +2192,6 @@ type HubHttpContext = {
   hubBootstraps: HubBootstrapEntry[];
   externalWalletApi: ReturnType<typeof createExternalWalletApi>;
   faucetRelayStore: ReturnType<typeof createRelayStore>;
-  runtimeIngressReceipts: ReturnType<
-    typeof createRuntimeIngressReceiptStore
-  >;
   getBootstrap: () => { entityId: string; signerId: string } | null;
   getJAdapter: () => JAdapter | null;
   ensureTokenCatalog: () => Promise<JTokenInfo[]>;
@@ -2268,25 +2312,8 @@ const handleHubHttpRequest = async (
       relayStore: context.faucetRelayStore,
       enqueueRuntimeInput,
       validateRuntimeInputAdmission,
-      registerReceipt: receipt =>
-        context.runtimeIngressReceipts.register(receipt),
       getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
-  }
-  const statusMatch = url.pathname.match(
-    /^\/api\/control\/runtime-input\/([^/]+)\/status$/,
-  );
-  if (statusMatch && request.method === 'GET') {
-    return handleRuntimeInputStatus(
-      decodeURIComponent(statusMatch[1] || ''),
-      JSON_HEADERS,
-      context.env,
-      {
-        receipts: context.runtimeIngressReceipts,
-        getCurrentRuntimeHeight: currentRuntimeHeight,
-      },
-    );
   }
   const debugReserveResponse = await handleDebugReserveRequest(
     context.env,
@@ -2583,7 +2610,6 @@ type HubHttpSurface = {
 
 const startHubHttpSurface = (
   live: HubNodeLiveContext,
-  runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>,
   faucetRelayStore: ReturnType<typeof createRelayStore>,
   brainVaultOwner: BrainVaultOwnerController,
   pauseBootstrap: () => Promise<void>,
@@ -2599,7 +2625,6 @@ const startHubHttpSurface = (
   );
   const handleRadapterWsMessage = createHubRadapterMessageHandler(
     live.env,
-    runtimeIngressReceipts,
     () => live.externalIngressReady,
     brainVaultOwner,
     () => live.brainVaultReady,
@@ -2622,7 +2647,6 @@ const startHubHttpSurface = (
     hubBootstraps: live.hubBootstraps,
     externalWalletApi,
     faucetRelayStore,
-    runtimeIngressReceipts,
     getBootstrap: () => live.bootstrap,
     getJAdapter: () => live.activeJAdapter,
     ensureTokenCatalog: () => requireHubTokenCatalog(live),
@@ -2868,11 +2892,7 @@ const run = async (): Promise<void> => {
     await clearGossip(env, { runtimeId: String(env.runtimeId || '') });
     nodeLog.info('gossip.relocated_route_cache_cleared', { wsUrl: directWsUrl });
   }
-  const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
   const faucetRelayStore = createRelayStore(`${resolvedArgs.name}-faucet`);
-  registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
-    runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
-  });
   configureHubRuntimeLogging(env);
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
@@ -2896,7 +2916,6 @@ const run = async (): Promise<void> => {
   const meshController = createHubMeshBootstrapController(live, bootstrapClockMs);
   const httpSurface = startHubHttpSurface(
     live,
-    runtimeIngressReceipts,
     faucetRelayStore,
     brainVaultOwner,
     meshController.pauseAndWait,

@@ -3,6 +3,9 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { compareStableText } from '../../../protocol/serialization';
 
 const NESTED_PROTOCOL_TXS = new Set<EntityTx['type']>([
+  // AccountInput is routed raw after source Entity + Runtime WAL commit. It
+  // must never regain an outer consensusOutput/runtimeOutput envelope.
+  'accountInput',
   'entityCommand',
   'consensusOutput',
   'runtimeOutput',
@@ -41,6 +44,19 @@ export const getEffectiveEntityInputTxs = (
 ): EntityTx[] => (input.entityTxs ?? []).flatMap((tx) =>
   getCertifiedOutputNestedTxs(tx) ?? getRuntimeOutputNestedTxs(tx) ?? [tx]);
 
+export const getAccountOnlyEntityTx = (
+  txs: readonly EntityTx[] | undefined,
+): Extract<EntityTx, { type: 'accountInput' }> | null => {
+  const accountTxs = (txs ?? []).filter(
+    (tx): tx is Extract<EntityTx, { type: 'accountInput' }> => tx.type === 'accountInput',
+  );
+  if (accountTxs.length === 0) return null;
+  if (accountTxs.length !== 1 || txs?.length !== 1) {
+    throw new Error('ACCOUNT_OUTPUT_MUST_BE_ONE_RAW_ACCOUNT_INPUT');
+  }
+  return accountTxs[0]!;
+};
+
 /**
  * A target consumption frontier is contiguous per source/target/lane. Network
  * batching may combine independently certified outputs in any arrival order,
@@ -74,16 +90,12 @@ export const orderCertifiedOutputsBySequence = (txs: readonly EntityTx[]): Entit
   return result;
 };
 
-const isReliableCertifiedPayloadTx = (tx: EntityTx): boolean =>
-  tx.type === 'j_event' || (
-    tx.type === 'accountInput' &&
-    (tx.data.kind === 'ack' || tx.data.kind === 'frame_ack' || tx.data.kind === 'board_reseal')
-  );
+const isAtomicCertifiedPayloadTx = (tx: EntityTx): boolean => tx.type === 'j_event';
 
-export const assertReliableCertifiedPayloadIsAtomic = (
+export const assertCertifiedJEventIsAtomic = (
   txs: readonly EntityTx[],
 ): void => {
-  if (txs.some(isReliableCertifiedPayloadTx) && txs.length !== 1) {
+  if (txs.some(isAtomicCertifiedPayloadTx) && txs.length !== 1) {
     throw new Error('CONSENSUS_OUTPUT_RELIABLE_PAYLOAD_MUST_BE_ATOMIC');
   }
 };

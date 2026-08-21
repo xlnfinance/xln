@@ -13,10 +13,10 @@ import { getConsumptionNodeStore } from '../../consumption/consumption-store';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityOutput, EntityState, HashToSign, EntityFrame } from '../../types';
 import {
-  assertCertifiedOutputSemanticIdentity,
   buildCertifiedEntityOutputHashes,
   buildConsensusOutputOriginForState,
-  hashCertifiedEntityOutput,
+  getRawAccountOutputTx,
+  hashCertifiedEntityOutputAndAssertSemantic,
   isLocalRuntimeProtocolOutput,
   isNonMutatingEntityWakeOutput,
   normalizeConsensusOutputOrigin,
@@ -70,8 +70,11 @@ export const attachTargetConsumptionProofs = (
     const targetEntityId = String(tx.data.targetEntityId ?? '')
       .trim()
       .toLowerCase();
-    const outputHash = hashCertifiedEntityOutput(origin, targetEntityId, tx.data.entityTxs);
-    assertCertifiedOutputSemanticIdentity(origin, targetEntityId, tx.data.entityTxs);
+    const outputHash = hashCertifiedEntityOutputAndAssertSemantic(
+      origin,
+      targetEntityId,
+      tx.data.entityTxs,
+    );
     const identity = buildConsumptionOutputIdentity(origin, targetEntityId, outputHash, tx.data.outputHanko);
     const key = getConsumptionKey(identity);
     const proof = createConsumptionProof(overlay, accumulator.root, key);
@@ -105,8 +108,7 @@ export const attachTargetConsumptionProofs = (
     for (const { hash, node } of applied.newNodes) overlay.set(hash, node);
     for (const hash of applied.replacedNodeHashes) overlay.delete(hash);
     accumulator = applied.state;
-    // Nested Account frames are immutable certified evidence. Copy the
-    // consensusOutput envelope to attach the proof; do not walk offer bodies.
+    // Generic certified outputs alone use the target consumption frontier.
     selected.push({
       ...tx,
       data: { ...tx.data, consumptionProof: proof },
@@ -152,6 +154,17 @@ export const wrapCertifiedEntityOutputs = (
             entityTxs: cloneIsolatedEntityTxs(output.entityTxs),
           },
         }],
+      }];
+    }
+    if (getRawAccountOutputTx(sourceState.entityId, output, outputIndex)) {
+      const targetEntityId = output.entityId.trim().toLowerCase();
+      const entityTxs = output.entityTxs;
+      if (!entityTxs) throw new Error(`ACCOUNT_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
+      const { certifiedOutputIdentity: _certifiedOutputIdentity, entityTxs: _entityTxs, ...route } = output;
+      return [{
+        ...route,
+        entityId: targetEntityId,
+        entityTxs: cloneIsolatedEntityTxs(entityTxs),
       }];
     }
     const outputHash = outputHashes.find(

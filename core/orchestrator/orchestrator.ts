@@ -1593,9 +1593,6 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS']
         ? { XLN_ACCOUNT_PENDING_RESEND_AFTER_MS: process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS'] }
         : {}),
-      ...(process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP']
-        ? { XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP'] }
-        : {}),
       ...(process.env['XLN_LOG_FORMAT']
         ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
         : {}),
@@ -1706,9 +1703,6 @@ const spawnMarketMaker = async (): Promise<void> => {
         process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ??
         join(marketMakerChild.dbPath, 'bootstrap-events.jsonl'),
       XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
-      ...(process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP']
-        ? { XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP'] }
-        : {}),
     }),
   });
   marketMakerChild.proc = proc;
@@ -2542,42 +2536,35 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     const h1 = hubChildren[0]!;
     const h23 = hubChildren.slice(1);
 
+    // Jurisdiction deployment and the shared config file are complete above;
+    // no Hub process owns another Hub's boot dependency. Start all isolated
+    // Runtimes together so the three bilateral Account opens can share one
+    // mesh wave instead of paying process startup serially.
     const spawnH1StartedAt = startTiming('reset_spawn_h1');
-    await spawnHub(h1);
-    // A preserved snapshot already contains the validated shared jurisdiction
-    // config, so no hub owns a provisioning dependency. Start every isolated
-    // Runtime immediately; serial restore replay would make healthy node costs
-    // additive and violate the mesh SLO by construction.
-    if (preserveState) await Promise.all(h23.map(child => spawnHub(child)));
-    finishTiming('reset_spawn_h1', spawnH1StartedAt);
+    const spawnH23StartedAt = startTiming('reset_spawn_h23');
+    await Promise.all([
+      spawnHub(h1).finally(() => finishTiming('reset_spawn_h1', spawnH1StartedAt)),
+      Promise.all(h23.map(child => spawnHub(child)))
+        .finally(() => finishTiming('reset_spawn_h23', spawnH23StartedAt)),
+    ]);
 
     const waitH1StartedAt = startTiming('reset_wait_h1');
-    if (preserveState) {
-      await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));
-    } else {
-      await waitForHubSelfReady(h1);
-    }
+    await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));
     finishTiming('reset_wait_h1', waitH1StartedAt);
     await waitForShardJurisdictions(h1);
 
-    const spawnH23StartedAt = startTiming('reset_spawn_h23');
-    // H2 and H3 have isolated ports and storage. Starting them serially makes
-    // fresh boot cost additive. H1 is the ordered prerequisite only in fresh
-    // mode because it proves the newly provisioned jurisdiction config.
-    if (!preserveState) {
-      await Promise.all(h23.map(async child => {
-        await spawnHub(child);
-        await waitForHubSelfReady(child);
-      }));
-    }
-    finishTiming('reset_spawn_h23', spawnH23StartedAt);
-
-    const waitStartedAt = startTiming('reset_wait_hubs');
-    await waitForHubBaseline();
-    finishTiming('reset_wait_hubs', waitStartedAt);
+    const waitForMesh = async (): Promise<void> => {
+      const waitStartedAt = startTiming('reset_wait_hubs');
+      try {
+        await waitForHubBaseline();
+      } finally {
+        finishTiming('reset_wait_hubs', waitStartedAt);
+      }
+    };
 
     const shouldStartMarketMaker = args.mmEnabled && options.enableMarketMaker;
-    if (shouldStartMarketMaker) {
+    const startConfiguredMarketMaker = async (): Promise<void> => {
+      if (!shouldStartMarketMaker) return;
       const marketMakerStartedAt = startTiming('reset_market_maker');
       try {
         await spawnMarketMaker();
@@ -2585,9 +2572,10 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
       } finally {
         finishTiming('reset_market_maker', marketMakerStartedAt);
       }
-    }
+    };
 
-    if (args.custodyEnabled && options.enableCustody) {
+    const startConfiguredCustody = async (): Promise<void> => {
+      if (!args.custodyEnabled || !options.enableCustody) return;
       const custodyStartedAt = startTiming('reset_custody');
       try {
         const primaryJurisdiction = resolvePrimaryHubJurisdiction(jurisdictionsConfig);
@@ -2617,7 +2605,16 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
       } finally {
         finishTiming('reset_custody', custodyStartedAt);
       }
-    }
+    };
+
+    // MM and custody only require online/routable Hubs. Their own Account
+    // consensus is independent of the Hub-Hub mesh, so serialize nothing here:
+    // all three branches retain their own fail-loud readiness gate.
+    await Promise.all([
+      waitForMesh(),
+      startConfiguredMarketMaker(),
+      startConfiguredCustody(),
+    ]);
 
     activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);
     finishTiming('reset_total', resetTotalStartedAt);

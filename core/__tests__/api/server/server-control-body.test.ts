@@ -37,14 +37,6 @@ test('runtime input control rejects oversized payloads without enqueueing runtim
         validateCalled = true;
       },
       parseTaggedControlBody,
-      receipts: {
-        register: () => {
-          throw new Error('receipt must not be registered');
-        },
-        get: () => undefined,
-      } as never,
-      getCurrentRuntimeHeight: () => 0,
-      buildStatusUrl: (id: string) => `/api/control/runtime-input/${id}/status`,
     },
   );
 
@@ -71,12 +63,6 @@ test('runtime input control still accepts normal tagged payloads', async () => {
       },
       validateRuntimeInputAdmission: () => undefined,
       parseTaggedControlBody,
-      receipts: {
-        register: () => ({ id: 'receipt-1' }),
-        get: () => undefined,
-      } as never,
-      getCurrentRuntimeHeight: () => 7,
-      buildStatusUrl: (id: string) => `/api/control/runtime-input/${id}/status`,
     },
   );
 
@@ -105,14 +91,6 @@ test('runtime input control rejects malformed Runtime transactions before enqueu
         throw new Error('admission must not receive malformed RuntimeTx');
       },
       parseTaggedControlBody,
-      receipts: {
-        register: () => {
-          throw new Error('receipt must not be registered');
-        },
-        get: () => undefined,
-      } as never,
-      getCurrentRuntimeHeight: () => 0,
-      buildStatusUrl: id => `/api/control/runtime-input/${id}/status`,
     },
   );
 

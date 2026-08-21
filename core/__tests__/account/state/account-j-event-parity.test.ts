@@ -57,10 +57,8 @@ const machine = (): AccountReplica => ({
   mempool: [],
   currentFrame: {} as never,
   currentHeight: 0,
-  pendingSignatures: [],
   rollbackCount: 0,
   proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
-  proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 } as AccountState);

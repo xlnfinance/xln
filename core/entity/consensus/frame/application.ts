@@ -16,6 +16,7 @@ import {
 import { markCrossJurisdictionBookAdmissionResolving } from '../../../extensions/cross-j/orderbook';
 import { logError, shortHash, shortId, shortOrder } from '../../../support/logger';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
+import { countOp } from '../../../support/performance/op-counters';
 import { assertEntityFrameJRangeBudget } from '../../../jurisdiction/machine/range-budget';
 import { replaceOrderbookPair, type OrderbookExtState } from '../../../orderbook';
 import {
@@ -174,7 +175,12 @@ const applyCertifiedConsensusOutput = async (
     identity,
     tx.data.consumptionProof,
   );
-  if (consumption.status === 'idempotent' || consumption.status === 'stale') return currentEntityState;
+  if (consumption.status === 'idempotent') {
+    return currentEntityState;
+  }
+  if (consumption.status === 'stale') {
+    return currentEntityState;
+  }
   if (consumption.status === 'gap') {
     throw new Error(
       `CONSENSUS_OUTPUT_SEQUENCE_GAP:source=${origin.sourceEntityId}:lane=${origin.lane}:` +
@@ -211,10 +217,7 @@ const applyCertifiedConsensusOutput = async (
     ...context,
     entityTxs,
     currentEntityState,
-    // Nested Account bodies are bound by stateHash; verifyCertifiedEntityOutput
-    // recomputes that merkle before consumption. Requiring a target user's
-    // EntityCommand as well would let the target rewrite or block an
-    // already-certified cross-Entity effect.
+    // The outer source certificate authorizes generic cross-Entity effects.
     authorizedCertifiedOutput: true,
   });
   return { ...applied, consumptionAccumulator: consumption.state };
@@ -314,7 +317,26 @@ const collectEntityTxResult = (
   ));
   if (result.jOutputs) context.allJOutputs.push(...result.jOutputs);
   if (result.hashesToSign?.length) {
-    context.collectedHashes.push(...result.hashesToSign);
+    for (const hashInfo of result.hashesToSign) {
+      const existing = context.collectedHashManifest.get(hashInfo.hash);
+      if (existing?.type === hashInfo.type && existing.context === hashInfo.context) {
+        // At-least-once transport plus Account-level resend may place several
+        // certified copies of one already-committed frame in the same Entity
+        // candidate. The final response map already emits one response per
+        // bilateral lane; request its exact witness once as well. A same hash
+        // under any other type/context is retained and rejected later by the
+        // manifest collision guard.
+        countOp('entity.hash.exactDuplicateCollapsed');
+        continue;
+      }
+      context.collectedHashes.push(hashInfo);
+      if (!existing) {
+        context.collectedHashManifest.set(hashInfo.hash, {
+          type: hashInfo.type,
+          context: hashInfo.context,
+        });
+      }
+    }
   }
 };
 
@@ -640,6 +662,43 @@ const assertRequiredAccountResponsePreserved = (
   }
 };
 
+const liveRequiredAccountResponse = (
+  account: AccountReplica,
+  required: AccountPeerInput | undefined,
+): AccountPeerInput | undefined => {
+  if (!required) return undefined;
+  const ack = accountInputAck(required);
+  const proposal = accountInputProposal(required);
+  if (!ack && !proposal) return required;
+
+  // Several ordered peer inputs may advance one Account inside a single
+  // Entity frame. An ACK required by an early duplicate becomes redundant if
+  // a later authenticated frame advances beyond it: that later frame could
+  // only exist after the peer consumed the ACK. Likewise, a response proposal
+  // is live only while it is still this replica's exact pending frame. Keeping
+  // stale halves here made the final flush demand an impossible older ACK and
+  // halted a healthy Runtime under batched resend load.
+  const keepAck = Boolean(ack && Number(ack.height) >= Number(account.currentHeight));
+  const pendingFrame = account.pendingFrame;
+  const keepProposal = Boolean(proposal && (
+    pendingFrame
+      ? Number(pendingFrame.height) === Number(proposal.frame.height) &&
+        pendingFrame.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase()
+      : Number(proposal.frame.height) > Number(account.currentHeight)
+  ));
+  if (keepAck && keepProposal) return required;
+  const shared = {
+    fromEntityId: required.fromEntityId,
+    toEntityId: required.toEntityId,
+    domain: required.domain,
+    disputeConfig: required.disputeConfig,
+    ...(required.watchSeed === undefined ? {} : { watchSeed: required.watchSeed }),
+  };
+  if (keepAck && ack) return { ...shared, kind: 'ack', ack };
+  if (keepProposal && proposal) return { ...shared, kind: 'frame', proposal };
+  return undefined;
+};
+
 const routeFinalAccountInput = (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
@@ -648,6 +707,20 @@ const routeFinalAccountInput = (
   proposal: AccountFrameProposal | undefined,
 ): void => {
   const { env, currentEntityState: state, allOutputs } = context;
+  const sourceEntityId = state.entityId.trim().toLowerCase();
+  const inputSourceEntityId = input.fromEntityId.trim().toLowerCase();
+  if (inputSourceEntityId !== sourceEntityId) {
+    throw haltRuntimeFailure(
+      'ACCOUNT_OUTPUT_SOURCE_ENTITY_MISMATCH',
+      `ACCOUNT_OUTPUT_SOURCE_ENTITY_MISMATCH:${safeStringify({
+        sourceEntityId,
+        inputSourceEntityId,
+        targetEntityId: input.toEntityId,
+        accountKey,
+        input,
+      })}`,
+    );
+  }
   // Entity consensus commits the destination Entity and exact Account payload.
   // It deliberately does not choose a validator replica: validator topology,
   // local keys and recovery hints belong to the parent Runtime. Runtime binds
@@ -703,7 +776,10 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       continue;
     }
 
-    const requiredResponse = requiredAccountResponses.get(accountKey.toLowerCase());
+    const requiredResponse = liveRequiredAccountResponse(
+      account,
+      requiredAccountResponses.get(accountKey.toLowerCase()),
+    );
 
     const proposal = await proposeAccountFrameCandidate(
       context,
@@ -894,7 +970,7 @@ const commitOrderbookMatchResult = (
   context: ApplyOrderbookMatchingContext,
   result: OrderbookMatchResult,
 ): void => {
-  const { env, currentEntityState: state, storageChanges } = context;
+  const { env, currentEntityState: state, storageChanges, candidateEffects } = context;
   if (result.debugProjectionRejects.length > 0) {
     const detail = result.debugProjectionRejects
       .map(({ accountId, offerId, reason }) => `${accountId.slice(-8)}:${offerId.slice(-8)}:${reason}`)
@@ -914,9 +990,26 @@ const commitOrderbookMatchResult = (
     }
   }
   const ext = state.orderbookExt as OrderbookExtState;
+  const previousTradeCounts = new Map<string, number>();
+  let matchedSwaps = 0;
   for (const { pairId, book } of result.bookUpdates) {
+    const previousTradeCount = previousTradeCounts.get(pairId) ?? ext.books.get(pairId)?.tradeCount ?? 0;
+    if (book.tradeCount < previousTradeCount) {
+      throw new Error(
+        `ORDERBOOK_TRADE_COUNT_REGRESSION:pair=${pairId}:previous=${previousTradeCount}:next=${book.tradeCount}`,
+      );
+    }
+    matchedSwaps += book.tradeCount - previousTradeCount;
+    previousTradeCounts.set(pairId, book.tradeCount);
     replaceOrderbookPair(ext, pairId, book);
     recordFrameBookChange(storageChanges, state.entityId, pairId);
+  }
+  if (matchedSwaps > 0) {
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'SwapMatched',
+      data: { entityId: state.entityId, count: matchedSwaps },
+    });
   }
 };
 
@@ -1127,6 +1220,7 @@ const createEntityFrameApplyContext = (
     allOutputs: [],
     allJOutputs: [],
     collectedHashes: [],
+    collectedHashManifest: new Map(),
     proposableAccounts: new Set(),
     requiredAccountResponses: new Map(),
     allSwapOffersCreated: [],

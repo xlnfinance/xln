@@ -40,11 +40,9 @@ const account = (): AccountReplica => ({
     submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
   } },
   mempool: [],
-  pendingSignatures: [],
   currentFrame: {} as never,
   currentHeight: 0,
   proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
-  proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
 });
 
@@ -164,11 +162,10 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(base.state)).toBe(afterWorkspace);
   });
 
-  test('excludes mempool, signatures, pending frames, and proof caches', () => {
+  test('excludes mempool, pending frames, and proof caches', () => {
     const base = account();
     const root = computeAccountStateRoot(base.state);
     base.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 5n } });
-    base.pendingSignatures.push('0x1234');
     base.pendingFrame = { stateHash: '0xdead' } as never;
     base.currentDisputeProofHanko = '0xbeef';
     base.disputeProofBodiesByHash = { '0x01': { local: true } };

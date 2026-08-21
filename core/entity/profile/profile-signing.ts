@@ -49,14 +49,16 @@ const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e735
 
 export const computeProfileHash = (profile: Profile): string => {
   const canonicalProfile = canonicalizeProfile(profile);
-  return computeEntityProfileDescriptorHash(profileToEntityProfileDescriptor(canonicalProfile));
+  return computeCanonicalProfileHash(canonicalProfile);
 };
 
-export const computeProfileRouteHash = (profile: Profile): string => {
-  const canonicalProfile = canonicalizeProfile(profile);
+const computeCanonicalProfileHash = (canonicalProfile: Profile): string =>
+  computeEntityProfileDescriptorHash(profileToEntityProfileDescriptor(canonicalProfile));
+
+const computeCanonicalProfileRouteHash = (canonicalProfile: Profile): string => {
   const route = {
     domain: PROFILE_ROUTE_DOMAIN,
-    profileHash: computeProfileHash(canonicalProfile),
+    profileHash: computeCanonicalProfileHash(canonicalProfile),
     entityId: canonicalProfile.entityId,
     runtimeId: canonicalProfile.runtimeId,
     runtimeEncPubKey: canonicalProfile.runtimeEncPubKey,
@@ -66,6 +68,11 @@ export const computeProfileRouteHash = (profile: Profile): string => {
     mirrors: canonicalProfile.metadata.mirrors ?? [],
   };
   return keccak256(new TextEncoder().encode(serializeTaggedJson(route)));
+};
+
+export const computeProfileRouteHash = (profile: Profile): string => {
+  const canonicalProfile = canonicalizeProfile(profile);
+  return computeCanonicalProfileRouteHash(canonicalProfile);
 };
 
 const resolveProfileCertifiedBoardHash = (
@@ -115,7 +122,7 @@ const assertEntityCertification = async (env: EntityRuntimeContext, profile: Pro
   const hanko = profile.metadata.profileHanko as HankoString | undefined;
   if (!hanko) throw new Error(`PROFILE_ENTITY_CERTIFICATION_REQUIRED: entity=${profile.entityId}`);
   const registeredBoardHash = resolveProfileCertifiedBoardHash(env, profile);
-  const profileHash = computeProfileHash(profile);
+  const profileHash = computeCanonicalProfileHash(profile);
   return resolveHankoDefaultProposerSignerId(hanko, profileHash, profile.entityId, env, {
     ...(registeredBoardHash ? { registeredBoardHash } : {}),
     allowPreviousBoard: false,
@@ -159,7 +166,7 @@ const hasCanonicalRouteSignature = (signature: string): boolean => {
 const verifyRuntimeRouteSignature = (profile: Profile, signerId: string): ProfileVerifyResult => {
   const signature = String(profile.runtimeSignature || '').trim().toLowerCase();
   if (!hasCanonicalRouteSignature(signature)) return { valid: false, reason: 'runtime_signature_non_canonical', signerId };
-  const hash = computeProfileRouteHash(profile);
+  const hash = computeCanonicalProfileRouteHash(profile);
   if (recoverDigestSignerAddress(hash, signature) !== signerId) {
     return { valid: false, reason: 'runtime_signature_invalid', hash, signerId };
   }
@@ -195,7 +202,10 @@ export async function verifyProfileSignature(
 ): Promise<ProfileVerifyResult> {
   countOp('profile.verifySignature');
   const canonicalProfile = canonicalizeProfile(profile);
-  const hash = computeProfileHash(canonicalProfile);
+  // From this line down every helper consumes the exact canonical object.
+  // Re-entering public normalization here used to parse/encode the same signed
+  // profile up to five times during one authority check.
+  const hash = computeCanonicalProfileHash(canonicalProfile);
   const hanko = canonicalProfile.metadata.profileHanko as HankoString | undefined;
   if (!hanko) return { valid: false, reason: 'entity_certification_missing', hash };
   let registeredBoardHash: string | null = null;

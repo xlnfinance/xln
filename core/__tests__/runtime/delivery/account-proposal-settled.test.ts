@@ -92,6 +92,26 @@ describe('account proposal outbox settlement', () => {
     expect(accountProposalSettledBySender(env, output)).toBe(true);
     expect(pruneSettledOutputs(env, [output])).toEqual([]);
   });
+
+  test('fails loudly instead of pruning a proposal whose source Account vanished', () => {
+    const live = makeAccount(FROM, TO);
+    const proposal = accountFrame(12, `0x${'12'.repeat(32)}`);
+    const output = routedAccountInput(live, {
+      kind: 'frame',
+      fromEntityId: FROM,
+      toEntityId: TO,
+      domain: { ...live.state.domain },
+      disputeConfig: { ...live.state.disputeConfig },
+      proposal: { frame: proposal, frameHanko: `0x${'bb'.repeat(65)}` },
+    });
+
+    expect(() => pruneSettledOutputs({
+      runtimeId: 'missing-source-account',
+      state: { eReplicas: new Map() },
+    } as unknown as RuntimeReplica, [output])).toThrow(
+      'ACCOUNT_PROPOSAL_OUTBOX_SOURCE_ACCOUNT_MISSING',
+    );
+  });
 });
 
 describe('pending Account resend cache', () => {

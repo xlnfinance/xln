@@ -38,6 +38,93 @@
   align-items: center;
 }
 
+.hlt-tabs {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.3rem;
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.hlt-tabs button,
+.phase-grid button {
+  color: #a9a395;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hlt-tabs button {
+  padding: 0.55rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hlt-tabs button.active,
+.phase-grid button.active {
+  color: #fff4d8;
+  border-color: rgba(196, 155, 71, 0.42);
+  background: rgba(196, 155, 71, 0.12);
+}
+
+.phase-grid,
+.replay-trials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.7rem;
+}
+
+.phase-grid button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 0.2rem 0.55rem;
+  padding: 0.8rem;
+  text-align: left;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.phase-grid button > span {
+  grid-row: span 2;
+  color: #c49b47;
+  font-size: 1.25rem;
+}
+
+.phase-grid button > strong {
+  color: #f1efe7;
+}
+
+.phase-grid button > small,
+.replay-trials small,
+.replay-trials p {
+  color: #958e80;
+  line-height: 1.4;
+}
+
+.replay-controls {
+  margin-top: 0.9rem;
+}
+
+.text-input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: #f1efe7;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.replay-trials {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
 .hlt-start,
 .hlt-stop {
   min-height: 44px;
@@ -303,6 +390,7 @@ select {
 
 @media (max-width: 960px) {
   .controls,
+  .phase-grid,
   .metric-row,
   .result-grid {
     grid-template-columns: 1fr 1fr;

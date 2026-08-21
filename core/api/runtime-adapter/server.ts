@@ -10,12 +10,6 @@ import {
 } from './codec';
 import type { RuntimeFrame, StorageHead } from '../../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../../storage';
-import {
-  fingerprintRuntimeIngressInput,
-  projectRuntimeIngressReceiptForWire,
-  type RegisterReceiptOptions,
-  type RuntimeIngressReceipt,
-} from '../../runtime/mempool/ingress-receipts';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './security/rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
@@ -78,6 +72,7 @@ export type RuntimeAdapterSocket = {
 };
 
 type AdapterClientState = {
+  env: RuntimeReplica | null;
   authLevel: RuntimeAdapterAuthLevel | null;
   authExpiresAtMs: number | null;
   commandLaneId: string | null;
@@ -124,11 +119,8 @@ export type RuntimeAdapterServerDeps = {
 	  submitCrossJurisdictionIntent?: (env: RuntimeReplica, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
 	  controlRuntime?: (env: RuntimeReplica, action: RuntimeAdapterControlAction) => Promise<unknown>;
 	  validateRuntimeInputAdmission?: (env: RuntimeReplica, input: RuntimeInput) => void;
-	  registerReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
-	  readReceipt?: (id: string) => RuntimeIngressReceipt | null;
 	  readFrameReceipts?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
 	  findPaymentRoutes?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
-	  buildRuntimeInputStatusUrl?: (id: string) => string;
 	  isMutatingIngressReady?: () => boolean;
 	  deriveBrainVault?: (
 	    env: RuntimeReplica,
@@ -143,8 +135,7 @@ export type RuntimeAdapterServerDeps = {
 
 const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
 const brainVaultJobs = new Map<RuntimeAdapterSocket, ActiveBrainVaultJob>();
-let attachedEnv: RuntimeReplica | null = null;
-let detachEnvChange: (() => void) | null = null;
+const attachedEnvChanges = new Map<RuntimeReplica, () => void>();
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 const RUNTIME_ADAPTER_PENDING_READ_LOG_MS = 1_000;
 const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
@@ -167,8 +158,6 @@ type PendingRuntimeAdapterCommand = {
     height: number;
     status: 'pending';
     commandSequence: number;
-    receipt?: RuntimeIngressReceipt;
-    statusUrl?: string;
   };
 };
 
@@ -285,12 +274,6 @@ const encodedByteLengthForLog = (value: unknown): number | null => {
   }
 };
 
-const countRuntimeInput = (input: RuntimeInput): RegisterReceiptOptions['counts'] => ({
-  runtimeTxs: Array.isArray(input.runtimeTxs) ? input.runtimeTxs.length : 0,
-  entityInputs: Array.isArray(input.entityInputs) ? input.entityInputs.length : 0,
-  jInputs: Array.isArray(input.jInputs) ? input.jInputs.length : 0,
-});
-
 const recordOf = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
@@ -343,10 +326,14 @@ const emitRuntimeAdapterResponseTooLarge = (
   runtimeAdapterLog.warn('response_too_large', event);
 };
 
-const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {
+const getClientState = (
+  ws: RuntimeAdapterSocket,
+  env: RuntimeReplica | null,
+): AdapterClientState => {
   let state = clients.get(ws);
   if (!state) {
     state = {
+      env,
       authLevel: null,
       authExpiresAtMs: null,
       commandLaneId: null,
@@ -357,6 +344,10 @@ const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {
       sendBucket: createConfiguredBucket('SEND', 10, 5),
     };
     clients.set(ws, state);
+  } else if (state.env === null) {
+    state.env = env;
+  } else if (env !== null && state.env !== env) {
+    throw new Error('RADAPTER_SOCKET_RUNTIME_REBIND_FORBIDDEN');
   }
   return state;
 };
@@ -498,6 +489,7 @@ export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {
   });
   const now = Date.now();
   for (const [ws, state] of clients.entries()) {
+    if (state.env !== env) continue;
     if (state.authExpiresAtMs !== null && state.authExpiresAtMs <= now) {
       state.authLevel = null;
       state.authExpiresAtMs = null;
@@ -519,11 +511,11 @@ export const attachRuntimeAdapterTicker = (
   env: RuntimeReplica,
   registerEnvChangeCallback: (env: RuntimeReplica, cb: (env: RuntimeReplica) => void) => (() => void),
 ): void => {
-  if (attachedEnv === env) return;
-  detachEnvChange?.();
-  if (attachedEnv) pendingRuntimeAdapterCommands.delete(attachedEnv);
-  attachedEnv = env;
-  detachEnvChange = registerEnvChangeCallback(env, broadcastRuntimeAdapterTick);
+  if (attachedEnvChanges.has(env)) return;
+  attachedEnvChanges.set(
+    env,
+    registerEnvChangeCallback(env, broadcastRuntimeAdapterTick),
+  );
 };
 
 type RuntimeAdapterRequestByOp<Op extends RuntimeAdapterRequest['op']> =
@@ -703,9 +695,6 @@ const buildRuntimeAdapterReadContext = (
         ) => deps.readAccountSwapHistoryPage?.(env, entityId, counterpartyId, options)
           ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'account swap-history reader did not return')),
       }
-    : {}),
-  ...(deps.readReceipt
-    ? { readReceipt: (id: string) => deps.readReceipt?.(id) ?? null }
     : {}),
   ...(deps.readFrameReceipts
     ? {
@@ -1048,30 +1037,10 @@ const enqueueRuntimeAdapterCommand = (
   deps.validateRuntimeInputAdmission?.(env, markedInput);
   const acceptedHeight = Math.max(0, Math.floor(Number(env.state.height ?? 0)));
   deps.enqueueRuntimeInput(env, markedInput);
-  // The marker shares the exact Runtime frame with the command. It is the
-  // durable idempotency authority even when an Entity reducer canonicalizes
-  // or replaces the original financial input before commit.
-  const registeredReceipt = deps.registerReceipt?.({
-    kind: 'radapter-runtime-input',
-    counts: countRuntimeInput(markedInput),
-    enqueuedHeight: acceptedHeight,
-    inputFingerprints: fingerprintRuntimeIngressInput({
-      runtimeTxs: [commandMarker],
-      entityInputs: [],
-    }),
-    note: 'Runtime adapter command accepted into the runtime queue; poll account/entity projections for semantic commit details.',
-  });
-  const receipt = registeredReceipt
-    ? projectRuntimeIngressReceiptForWire(registeredReceipt)
-    : undefined;
   const result = {
     height: acceptedHeight,
     status: 'pending' as const,
     commandSequence,
-    ...(receipt ? { receipt } : {}),
-    ...(receipt && deps.buildRuntimeInputStatusUrl
-      ? { statusUrl: deps.buildRuntimeInputStatusUrl(receipt.id) }
-      : {}),
   };
   pendingCommandsFor(env).set(laneId, {
     sequence: commandSequence,
@@ -1170,7 +1139,7 @@ export const handleRuntimeAdapterMessage = async (
   env: RuntimeReplica | null,
   deps: RuntimeAdapterServerDeps,
 ): Promise<boolean> => {
-  const state = getClientState(ws);
+  const state = getClientState(ws, env);
   const diagnostic = (): RuntimeAdapterResponseDiagnostic => {
     const info: RuntimeAdapterResponseDiagnostic = {
       env,

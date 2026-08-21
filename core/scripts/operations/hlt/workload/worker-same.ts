@@ -26,6 +26,7 @@ import {
   connectRuntime,
   directoryBytes,
   entryByLabel,
+  exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readLoadBook,
   resolveWalPath,
@@ -71,6 +72,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
     const laneRuntimes = [...preparedParallel.makerRuntimes, ...preparedParallel.takerRuntimes];
     const readLaneFrames = async () => Promise.all(laneRuntimes.map(async lane =>
       decodeLoadFrame(await lane.runtime.adapter.read<unknown>('frame/latest'))));
+    await exportReplayBaseSnapshotIfConfigured(hub);
     const initialFrame = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const laneInitialFrames = await readLaneFrames();
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
@@ -78,7 +80,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
     const driverRssBefore = process.memoryUsage().rss;
     const startedAt = performance.now();
     const submitted = await submitPreparedParallelSameLoad({
-      hub, hubIdentity, initialBook, initialFrame,
+      hub, hubIdentity, initialBook,
       swapsPerRound: args.swaps, rounds: args.rounds, cadenceMs: args.cadenceMs,
       prepared: preparedParallel,
     });

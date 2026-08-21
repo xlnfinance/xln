@@ -1,4 +1,4 @@
-import type { AccountDisputeSeal, AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
+import type { AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, AccountReplica } from '../../../types/account';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import {
   copyAccountDisputeConfig,
@@ -117,7 +117,7 @@ const sameAccountStateHash = (left: string | undefined, right: string | undefine
 const duplicateAckHashesToSign = (
   input: AccountInput,
   receivedFrame: AccountFrame,
-  response: AccountInput,
+  response: AccountPeerInput,
 ): AccountConsensusHashToSign[] | undefined => {
   if (accountInputAck(response)?.frameHanko) return undefined;
   return [{
@@ -130,7 +130,7 @@ const duplicateAckHashesToSign = (
 const applyDuplicateAck = (
   input: AccountInput,
   receivedFrame: AccountFrame,
-  response: AccountInput,
+  response: AccountPeerInput,
   events: string[],
 ): HandleAccountInputResult => {
   const hashesToSign = duplicateAckHashesToSign(input, receivedFrame, response);
@@ -217,7 +217,7 @@ export const buildDuplicateCommittedFrameAck = (
     && pendingResponse.toEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
   ) {
     events.push(`↩️ Re-sent cached response for duplicate committed frame ${receivedHeight}`);
-    replayLog.warn('input.duplicate_ack_cached_pending', {
+    replayLog.debug('input.duplicate_ack_cached_pending', {
       height: receivedHeight,
       from: shortId(input.fromEntityId),
       currentHeight: account.currentHeight,
@@ -231,7 +231,7 @@ export const buildDuplicateCommittedFrameAck = (
     && cachedAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
   ) {
     events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
-    replayLog.warn('input.duplicate_ack_cached', {
+    replayLog.debug('input.duplicate_ack_cached', {
       height: receivedHeight,
       from: shortId(input.fromEntityId),
       currentHeight: account.currentHeight,
@@ -271,7 +271,7 @@ export const handleReplayOrObsoleteAccountInput = (
     replay.ackIsStale
     && (replay.newFrameHeight === undefined || replay.frameIsStale)
   ) {
-    replayLog.warn('input.stale_ack_ignored', {
+    replayLog.debug('input.stale_ack_ignored', {
       currentHeight: replay.currentHeight,
       pendingHeight: replay.pendingHeight,
       inputHeight: replay.inputHeight,

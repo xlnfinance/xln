@@ -3,7 +3,6 @@ import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
 import type { PaymentDeliveryMode } from './finance/payment';
 import type { LendingTermId } from './finance/lending';
-import type { DisputeArgumentSnapshot } from '../protocol/dispute/argument-snapshot';
 import type {
   AccountRebalanceShadowState,
   BilateralRebalanceFeePolicy,
@@ -231,7 +230,6 @@ export interface AccountReplica {
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
-  pendingSignatures: string[];
   pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>; // Cached outbound frame input for resend/nudge
   lastOutboundFrameAck?: {
     height: number;
@@ -262,24 +260,8 @@ export interface AccountReplica {
     toEntity: string; // Counterparty entity ID
     nextProofNonce: number; // Next nonce reserved for a fresh dispute proof.
   };
-  // Simple proofBody for internal use (computed on demand from deltas/locks/swapOffers)
-  proofBody: {
-    tokenIds: number[];
-    deltas: bigint[];
-    // HTLC transformers (like 2024 subcontracts - sorted by deltaIndex)
-    htlcLocks?: Array<{
-      deltaIndex: number;       // Index in tokenIds array
-      amount: bigint;
-      revealedUntilTimestamp: number; // Unix-second deadline
-      hash: string;             // hashlock
-    }>;
-  };
-  // ABI-encoded proofBody for on-chain disputes (built by proof-builder.ts)
-  abiProofBody?: {
-    encodedProofBody: string;   // ABI-encoded bytes for contract call
-    proofBodyHash: string;      // keccak256(encodedProofBody) - signed for disputes
-    lastUpdatedHeight: number;  // Frame height when last computed
-  };
+  // ProofBody is never cached. It is a deterministic projection of the frozen
+  // AccountState and is rebuilt at the signing/submission boundary.
   // HANKO SYSTEM: Frame consensus + Dispute proofs
   currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
   counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
@@ -303,9 +285,11 @@ export interface AccountReplica {
   counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
   counterpartyDisputeHash?: string;                    // Exact dispute hash signed in counterpartyDisputeProofHanko
   counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
-  disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → nonce (local + counterparty)
-  disputeProofBodiesByHash?: Record<string, unknown>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
-  disputeArgumentSnapshotsByHash?: Record<string, DisputeArgumentSnapshot>; // ProofBodyHash → stable argument plan
+  // Do not add ProofBody/nonce/argument caches here. A dispute freezes this
+  // Account before submission, so its exact proof is deterministically rebuilt
+  // from the one live AccountState and checked against the two stored Hankos.
+  // Caching historical positions creates a second authority and can finalize a
+  // body that no longer corresponds to the live bilateral state.
   disputePrepare?: {
     // Local-only cooldown before an on-chain dispute is queued.
     //
@@ -352,8 +336,6 @@ export interface AccountReplica {
     /** Target-user (nonstarter) recovery after a target-hub initiated dispute. */
     crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
   };
-
-  hankoSignature?: string; // Latest generated account proof hanko.
 
   // Payment routing: locally derived follow-ups for every routed payment in a
   // committed Account frame. This must remain an ordered list: byte-identical

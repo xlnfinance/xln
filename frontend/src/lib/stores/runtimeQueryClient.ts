@@ -32,13 +32,6 @@ type RuntimeReadState<T> = {
   height: number;
 };
 
-export type RuntimeReceiptStatus = {
-  status?: string | null;
-  enqueuedHeight?: number | null;
-  observedHeight?: number | null;
-  note?: string | null;
-};
-
 export type RuntimePeerRecoveryBundleResponse = {
   ok: true;
   runtimeId: string;
@@ -198,12 +191,6 @@ export class RuntimeQueryClient {
     return this.cachedRead<Array<{ height?: number }>>('checkpoints');
   }
 
-  async readReceiptStatus(receiptId: string): Promise<RuntimeReceiptStatus> {
-    const id = String(receiptId || '').trim();
-    if (!id) throw new Error('REMOTE_RUNTIME_RECEIPT_ID_MISSING');
-    return this.read<RuntimeReceiptStatus>(`receipt/${encodeURIComponent(id)}`);
-  }
-
   async readRecoveryBundles(lookupKey: string): Promise<RuntimePeerRecoveryBundleResponse> {
     const key = String(lookupKey || '').trim();
     if (!key) throw new Error('REMOTE_RUNTIME_RECOVERY_LOOKUP_KEY_MISSING');
@@ -227,7 +214,6 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
       activity: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readActivity(query),
       solvencySummary: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readSolvencySummary(query),
       checkpoints: async () => runtimeQueryClient.readCheckpoints(),
-      receiptStatus: async (receiptId: string) => runtimeQueryClient.readReceiptStatus(receiptId),
     },
     status: () => {
       const adapter = getRuntimeControllerAdapter();

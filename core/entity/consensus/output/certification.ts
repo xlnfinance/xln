@@ -2,32 +2,18 @@ import { countOp } from '../../../support/performance/op-counters';
 import { keccakTextHash } from '../../../protocol/crypto/keccak-text';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 
-import { assertAccountFrameHash } from '../../../account/consensus/frame/hash';
-import type { AccountPeerInput } from '../../../types/account';
 import type { CertifiedBoardAuthorityBinding, CertifiedBoardRecord } from '../../../types/entity-board-registry';
 import type { ConsensusOutputOrigin, EntityTx } from '../../../types/entity-tx';
 import type { EntityInput, EntityOutput, EntityState, HashToSign } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
-import {
-  canonicalAccountInputCommitment,
-  CERTIFIED_OUTPUT_ACCOUNT_INPUT_MODE,
-} from '../frame/account-input-commitment';
-
-import {
-  accountInputAck,
-  accountInputBoardReseal,
-  accountInputDisputeSeal,
-  accountInputProposal,
-} from '../../../account/consensus/flush';
 import { verifyHankoForHash } from '../../../hanko/signing';
 import {
   createCertifiedBoardAuthorityBinding,
   getCertifiedBoardNodeStore,
   getCertifiedBoardStackKey,
-  resolveObserverCertifiedBoardHash,
   resolveObserverCertifiedBoardRecord,
 } from '../../../jurisdiction/machine/board-registry';
-import { assertReliableCertifiedPayloadIsAtomic } from './envelope';
+import { assertCertifiedJEventIsAtomic, getAccountOnlyEntityTx } from './envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../../auth/authorization';
 import { haltRuntimeFailure, rejectFailure, retryFailure } from '../../../protocol/errors/failure-taxonomy';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
@@ -53,8 +39,57 @@ const assertCertifiableOutput = (output: EntityOutput, outputIndex: number): Ent
   ) {
     throw new Error(`CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:index=${outputIndex}`);
   }
-  assertReliableCertifiedPayloadIsAtomic(output.entityTxs);
+  if (getAccountOnlyEntityTx(output.entityTxs)) {
+    throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_INPUT_FORBIDDEN:index=${outputIndex}`);
+  }
+  assertCertifiedJEventIsAtomic(output.entityTxs);
   return output.entityTxs;
+};
+
+/**
+ * AccountInput already carries the bilateral Account Hankos that authorize its
+ * only financial transition. It is committed by the source Entity frame,
+ * released only after Runtime WAL commit, and committed verbatim by the target
+ * Entity frame before `applyAccountInput`. Never reintroduce an outer output
+ * certificate, sequence, receipt, or consumption proof for this path.
+ */
+export const getRawAccountOutputTx = (
+  sourceEntityId: string,
+  output: EntityOutput,
+  outputIndex: number,
+): Extract<EntityTx, { type: 'accountInput' }> | null => {
+  const tx = getAccountOnlyEntityTx(output.entityTxs);
+  if (!tx) return null;
+  if (
+    output.proposedFrame ||
+    output.hashPrecommits ||
+    output.hashPrecommitFrame ||
+    output.leaderTimeoutVote ||
+    output.localRuntimeProtocol
+  ) {
+    throw new Error(`ACCOUNT_OUTPUT_PROTOCOL_FIELDS_FORBIDDEN:index=${outputIndex}`);
+  }
+  if (output.certifiedOutputIdentity) {
+    throw new Error(`ACCOUNT_OUTPUT_CERTIFIED_IDENTITY_FORBIDDEN:index=${outputIndex}`);
+  }
+  const source = sourceEntityId.trim().toLowerCase();
+  const claimedSource = tx.data.fromEntityId.trim().toLowerCase();
+  const target = output.entityId.trim().toLowerCase();
+  const claimedTarget = tx.data.toEntityId.trim().toLowerCase();
+  if (claimedSource !== source) {
+    throw haltRuntimeFailure(
+      'ACCOUNT_OUTPUT_SOURCE_MISMATCH',
+      `ACCOUNT_OUTPUT_SOURCE_MISMATCH:index=${outputIndex}:` +
+        `source=${source}:claimed=${claimedSource}:target=${claimedTarget}`,
+    );
+  }
+  if (!target || claimedTarget !== target) {
+    throw haltRuntimeFailure(
+      'ACCOUNT_OUTPUT_TARGET_MISMATCH',
+      `ACCOUNT_OUTPUT_TARGET_MISMATCH:index=${outputIndex}:route=${target || 'missing'}:claimed=${claimedTarget}`,
+    );
+  }
+  return tx;
 };
 
 export const isLocalRuntimeProtocolOutput = (
@@ -210,7 +245,7 @@ export const normalizeConsensusOutputOrigin = (value: unknown): ConsensusOutputO
     .toLowerCase();
   const outputIndex = Number(origin['outputIndex']);
   if (!sourceEntityId) throw new Error('CONSENSUS_OUTPUT_SOURCE_ENTITY_MISSING');
-  if (lane !== 'generic' && lane !== 'account-frame' && lane !== 'account-ack' && lane !== 'account-dispute') {
+  if (lane !== 'generic') {
     throw new Error(`CONSENSUS_OUTPUT_LANE_INVALID:${lane || 'missing'}`);
   }
   if (typeof sequence !== 'bigint' || sequence < 0n || sequence > (1n << 64n) - 1n) {
@@ -344,69 +379,9 @@ export const resolveConsensusOutputBoardAuthority = (
   return { kind: 'registered', record: latestRecord };
 };
 
-/**
- * Quorum Hankos are produced from the same signature manifest as the output
- * certificate, so including them in this digest would be circular. Nested
- * Account bodies are bound by `frame.stateHash` / `ack.frameHash`; the Account
- * machine recomputes that merkle on apply. Encoding the offer array here again
- * is not extra safety — it is the hub's certified-output hot path.
- */
 const canonicalCertifiedEntityTxs = (entityTxs: EntityTx[]): unknown[] => {
   countOp('certified.canonicalCertifiedEntityTxs');
-  return entityTxs.map(tx =>
-    tx.type === 'accountInput'
-      ? { type: tx.type, data: canonicalAccountInputCommitment(tx.data, CERTIFIED_OUTPUT_ACCOUNT_INPUT_MODE) }
-      : structuredClone(tx),
-  );
-};
-
-const accountInputLaneAndSequence = (input: AccountPeerInput): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> => {
-  const proposal = accountInputProposal(input);
-  const ack = accountInputAck(input);
-  if (proposal) {
-    const sequence = BigInt(proposal.frame.height);
-    if (sequence < 1n) throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_FRAME_SEQUENCE_INVALID:${sequence}`);
-    return { lane: 'account-frame', sequence };
-  }
-  if (ack) {
-    const sequence = BigInt(ack.height);
-    if (sequence < 1n) throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_ACK_SEQUENCE_INVALID:${sequence}`);
-    // A simultaneous bilateral race can make one Entity emit proposal H and,
-    // after losing that race, ACK H for the peer's frame. They are distinct
-    // certified effects even though the native Account height is identical.
-    // Keeping ACK-only traffic in its own sparse lane preserves the useful
-    // Account-height sequence without falsely classifying the pair as source
-    // equivocation. A batched ACK + proposal belongs to the proposal lane;
-    // the full payload remains bound by semanticHash.
-    return { lane: 'account-ack', sequence };
-  }
-  if (input.kind === 'dispute') {
-    const sequence = BigInt(input.disputeSeal.proofNonce);
-    if (sequence < 0n) throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_DISPUTE_SEQUENCE_INVALID:${sequence}`);
-    return { lane: 'account-dispute', sequence };
-  }
-  throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_LANE_INVALID:${String((input as { kind?: unknown }).kind)}`);
-};
-
-export const assertCertifiedNestedAccountFrames = (entityTxs: EntityTx[]): void => {
-  for (const tx of entityTxs) {
-    if (tx.type !== 'accountInput') continue;
-    const proposal = accountInputProposal(tx.data);
-    if (!proposal) continue;
-    assertAccountFrameHash(proposal.frame, 'CONSENSUS_OUTPUT_ACCOUNT_FRAME_HASH_MISMATCH');
-  }
-};
-
-const nativeOutputIdentity = (entityTxs: EntityTx[]): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> | null => {
-  const native = entityTxs.flatMap(tx =>
-    tx.type === 'accountInput' && tx.data.kind !== 'board_reseal' ? [accountInputLaneAndSequence(tx.data)] : [],
-  );
-  if (native.length === 0) return null;
-  const first = native[0]!;
-  if (native.some(entry => entry.lane !== first.lane || entry.sequence !== first.sequence)) {
-    throw new Error('CONSENSUS_OUTPUT_ACCOUNT_SEQUENCE_AMBIGUOUS');
-  }
-  return first;
+  return structuredClone(entityTxs);
 };
 
 const computeCertifiedEntityOutputSemanticHash = (
@@ -459,16 +434,10 @@ export const assertCertifiedOutputSemanticIdentity = (
   precomputedCanonicalTxs?: unknown[],
 ): string => {
   countOp('certified.assertCertifiedOutputSemanticIdentity');
-  const native = nativeOutputIdentity(entityTxs);
-  if (native) {
-    if (origin.lane !== native.lane || origin.sequence !== native.sequence) {
-      throw rejectFailure(
-        'CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH',
-        `CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH:${origin.lane}:${origin.sequence}:` +
-          `${native.lane}:${native.sequence}`,
-      );
-    }
-  } else if (origin.lane !== 'generic') {
+  if (getAccountOnlyEntityTx(entityTxs)) {
+    throw rejectFailure('CONSENSUS_OUTPUT_ACCOUNT_INPUT_FORBIDDEN');
+  }
+  if (origin.lane !== 'generic') {
     throw rejectFailure(
       'CONSENSUS_OUTPUT_GENERIC_LANE_INVALID',
       `CONSENSUS_OUTPUT_GENERIC_LANE_INVALID:${origin.lane}`,
@@ -499,8 +468,8 @@ export const assertCertifiedOutputSemanticIdentity = (
 };
 
 /**
- * Allocate only generic source counters. Account lanes reuse their native
- * frame/proof nonce and therefore never create a parallel counter.
+ * Allocate generic source counters. AccountInput bypasses this entire outer
+ * certification layer and relies on native Account consensus.
  * A pre-tagged generic output is a governance reissue and must match the exact
  * bounded last-issued source frontier.
  */
@@ -517,40 +486,22 @@ export const assignCertifiedOutputIdentities = (sourceState: EntityState, output
       }
       continue;
     }
+    if (getRawAccountOutputTx(sourceEntityId, output, outputIndex)) continue;
     const entityTxs = assertCertifiableOutput(output, outputIndex);
     const targetEntityId = output.entityId.toLowerCase();
-    const native = nativeOutputIdentity(entityTxs);
     const supplied = output.certifiedOutputIdentity;
-    if (native) {
-      const semanticHash = hashCertifiedEntityOutputSemantic(
-        sourceEntityId,
-        targetEntityId,
-        native.lane,
-        native.sequence,
-        entityTxs,
-      );
-      if (
-        supplied &&
-        (supplied.lane !== native.lane ||
-          supplied.sequence !== native.sequence ||
-          supplied.semanticHash.toLowerCase() !== semanticHash)
-      ) {
-        throw new Error(`CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH:index=${outputIndex}`);
-      }
-      output.certifiedOutputIdentity = { ...native, semanticHash };
-      continue;
-    }
-
     if (supplied) {
       if (supplied.lane !== 'generic') {
         throw new Error(`CONSENSUS_OUTPUT_GENERIC_LANE_INVALID:index=${outputIndex}:${supplied.lane}`);
       }
-      const semanticHash = hashCertifiedEntityOutputSemantic(
+      const canonicalTxs = canonicalCertifiedEntityTxs(entityTxs);
+      countOp('certified.hashCertifiedEntityOutputSemantic');
+      const semanticHash = computeCertifiedEntityOutputSemanticHashFromCanonical(
         sourceEntityId,
         targetEntityId,
         supplied.lane,
         supplied.sequence,
-        entityTxs,
+        canonicalTxs,
       );
       const frontier = sequences.get(targetEntityId);
       if (!frontier) throw new Error(`CONSENSUS_OUTPUT_REISSUE_FRONTIER_MISSING:${targetEntityId}`);
@@ -567,85 +518,20 @@ export const assignCertifiedOutputIdentities = (sourceState: EntityState, output
 
     const previous = sequences.get(targetEntityId);
     const sequence = (previous?.lastSequence ?? 0n) + 1n;
-    const semanticHash = hashCertifiedEntityOutputSemantic(
+    const canonicalTxs = canonicalCertifiedEntityTxs(entityTxs);
+    countOp('certified.hashCertifiedEntityOutputSemantic');
+    const semanticHash = computeCertifiedEntityOutputSemanticHashFromCanonical(
       sourceEntityId,
       targetEntityId,
       'generic',
       sequence,
-      entityTxs,
+      canonicalTxs,
     );
     output.certifiedOutputIdentity = { lane: 'generic', sequence, semanticHash };
     sequences.set(targetEntityId, { lastSequence: sequence, lastSemanticHash: semanticHash });
     sequenceStateChanged = true;
   }
   return sequenceStateChanged ? { ...sourceState, certifiedOutputSequences: sequences } : sourceState;
-};
-
-type OutputWitness = { context: string; hash: string; hanko: string };
-
-const requiredWitness = (context: string, hash: string | undefined, hanko: string | undefined): OutputWitness => {
-  if (!hash) throw new Error(`CONSENSUS_OUTPUT_WITNESS_HASH_MISSING:${context}`);
-  if (!hanko) throw new Error(`CONSENSUS_OUTPUT_WITNESS_HANKO_MISSING:${context}:${hash}`);
-  return { context, hash, hanko };
-};
-
-const collectAccountInputWitnesses = (input: AccountPeerInput): OutputWitness[] => {
-  const witnesses: OutputWitness[] = [];
-  const ack = accountInputAck(input);
-  if (ack) witnesses.push(requiredWitness('ack-frame', ack.frameHash, ack.frameHanko));
-  const reseal = accountInputBoardReseal(input);
-  if (reseal) witnesses.push(requiredWitness('board-reseal-frame', reseal.frameHash, reseal.frameHanko));
-  const proposal = accountInputProposal(input);
-  if (proposal) witnesses.push(requiredWitness('proposal-frame', proposal.frame.stateHash, proposal.frameHanko));
-  for (const [context, seal] of [
-    ['ack-dispute', ack?.disputeSeal],
-    ['proposal-dispute', proposal?.disputeSeal],
-    ['direct-dispute', accountInputDisputeSeal(input)],
-  ] as const) {
-    if (seal) witnesses.push(requiredWitness(context, seal.hash, seal.hanko));
-  }
-  return witnesses;
-};
-
-export const assertCertifiedEntityOutputWitnesses = async (
-  entityTxs: EntityTx[],
-  sourceEntityId: string,
-  env: EntityRuntimeContext,
-  observerState: EntityState,
-  authorityBoardHash?: string,
-): Promise<void> => {
-  countOp('certified.assertCertifiedEntityOutputWitnesses');
-  let registeredBoardHash = authorityBoardHash;
-  if (registeredBoardHash === undefined) {
-    try {
-      registeredBoardHash = resolveObserverCertifiedBoardHash(
-        observerState,
-        getCertifiedBoardNodeStore(env),
-        sourceEntityId,
-      ) ?? undefined;
-    } catch (error) {
-      throw haltRuntimeFailure('CONSENSUS_OUTPUT_BOARD_RESOLUTION_FAILED', undefined, error);
-    }
-  }
-  const witnesses = entityTxs.flatMap(tx => (tx.type === 'accountInput' ? collectAccountInputWitnesses(tx.data) : []));
-  for (const witness of witnesses) {
-    const verified = await verifyHankoForHash(
-      witness.hanko,
-      witness.hash,
-      sourceEntityId,
-      env,
-      {
-        ...(registeredBoardHash ? { registeredBoardHash } : {}),
-        observerState,
-      },
-    );
-    if (!verified.valid) {
-      throw rejectFailure(
-        'CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID',
-        `CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID:${witness.context}:${witness.hash}`,
-      );
-    }
-  }
 };
 
 const computeCertifiedEntityOutputHash = (
@@ -681,6 +567,19 @@ export const hashCertifiedEntityOutput = (
   return computeCertifiedEntityOutputHash(origin, targetEntityId, entityTxs);
 };
 
+/** Validate generic semantic identity and derive the outer certificate hash. */
+export const hashCertifiedEntityOutputAndAssertSemantic = (
+  origin: ConsensusOutputOrigin,
+  targetEntityId: string,
+  entityTxs: EntityTx[],
+): string => {
+  const canonicalTxs = canonicalCertifiedEntityTxs(entityTxs);
+  countOp('certified.hashCertifiedEntityOutputSemantic');
+  assertCertifiedOutputSemanticIdentity(origin, targetEntityId, entityTxs, canonicalTxs);
+  countOp('certified.hashCertifiedEntityOutput');
+  return computeCertifiedEntityOutputHashFromCanonical(origin, targetEntityId, canonicalTxs);
+};
+
 export type VerifiedCertifiedEntityOutput = {
   origin: ConsensusOutputOrigin;
   targetEntityId: string;
@@ -689,10 +588,8 @@ export type VerifiedCertifiedEntityOutput = {
 };
 
 /**
- * Verify the immutable source certificate before any target-local hook reads
- * its nested Account ACK. Proposer enrichment and deterministic frame replay
- * deliberately share this boundary so neither path can trust transport bytes
- * that the other validators would later reject.
+ * Verify a generic immutable source certificate. AccountInput is forbidden in
+ * this envelope because native Account consensus is its sole authority.
  */
 export const verifyCertifiedEntityOutput = async (
   env: EntityRuntimeContext,
@@ -727,7 +624,11 @@ const verifyCertifiedEntityOutputUnchecked = async (
   }
   if (
     tx.data.entityTxs.some(
-      nested => nested.type === 'entityCommand' || nested.type === 'consensusOutput' || nested.type === 'scheduledWake',
+      nested =>
+        nested.type === 'accountInput' ||
+        nested.type === 'entityCommand' ||
+        nested.type === 'consensusOutput' ||
+        nested.type === 'scheduledWake',
     )
   ) {
     throw rejectFailure('CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
@@ -739,17 +640,6 @@ const verifyCertifiedEntityOutputUnchecked = async (
   countOp('certified.hashCertifiedEntityOutput');
   const outputHash = computeCertifiedEntityOutputHashFromCanonical(origin, targetEntityId, canonicalTxs);
   assertCertifiedOutputSemanticIdentity(origin, targetEntityId, entityTxs, canonicalTxs);
-  try {
-    assertCertifiedNestedAccountFrames(entityTxs);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw rejectFailure(
-      'CONSENSUS_OUTPUT_ACCOUNT_FRAME_HASH_MISMATCH',
-      message.startsWith('CONSENSUS_OUTPUT_ACCOUNT_FRAME_HASH_MISMATCH')
-        ? message
-        : `CONSENSUS_OUTPUT_ACCOUNT_FRAME_HASH_MISMATCH:${message}`,
-    );
-  }
   const authority = resolveConsensusOutputBoardAuthority(origin, observerState, env);
   if (authority.kind === 'defer') {
     throw retryFailure('CONSENSUS_OUTPUT_AUTHORITY_PREFIX_BEHIND',
@@ -774,7 +664,6 @@ const verifyCertifiedEntityOutputUnchecked = async (
       `CONSENSUS_OUTPUT_HANKO_INVALID:${origin.sourceEntityId}:${origin.height}:${origin.outputIndex}`,
     );
   }
-  await assertCertifiedEntityOutputWitnesses(entityTxs, origin.sourceEntityId, env, observerState, registeredBoardHash);
   return { origin, targetEntityId, entityTxs, outputHash };
 };
 
@@ -789,15 +678,19 @@ export const buildCertifiedEntityOutputHashes = (
   countOp('certified.buildCertifiedEntityOutputHashes');
     if (isNonMutatingEntityWakeOutput(output)) return [];
     if (isLocalRuntimeProtocolOutput(output)) return [];
+    if (getRawAccountOutputTx(sourceState.entityId, output, outputIndex)) return [];
     const entityTxs = assertCertifiableOutput(output, outputIndex);
     const semanticIdentity = output.certifiedOutputIdentity;
     if (!semanticIdentity) throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_IDENTITY_MISSING:index=${outputIndex}`);
-    const semanticHash = hashCertifiedEntityOutputSemantic(
+    // The semantic and certificate digests bind the same generic payload.
+    const canonicalTxs = canonicalCertifiedEntityTxs(entityTxs);
+    countOp('certified.hashCertifiedEntityOutputSemantic');
+    const semanticHash = computeCertifiedEntityOutputSemanticHashFromCanonical(
       sourceState.entityId,
       output.entityId,
       semanticIdentity.lane,
       semanticIdentity.sequence,
-      entityTxs,
+      canonicalTxs,
     );
     if (semanticHash !== semanticIdentity.semanticHash.toLowerCase()) {
       throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH:index=${outputIndex}`);
@@ -810,9 +703,15 @@ export const buildCertifiedEntityOutputHashes = (
       outputIndex,
       semanticIdentity,
     );
+    countOp('certified.hashCertifiedEntityOutput');
+    const outputHash = computeCertifiedEntityOutputHashFromCanonical(
+      origin,
+      output.entityId,
+      canonicalTxs,
+    );
     return [
       {
-        hash: hashCertifiedEntityOutput(origin, output.entityId, entityTxs),
+        hash: outputHash,
         type: 'entityOutput',
         context: `entity-output:${height}:${outputIndex}`,
       },

@@ -22,7 +22,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountOverlay,
 } from '../state/candidate-overlay';
@@ -50,7 +49,6 @@ import {
 } from '../settlement/j-finality';
 import { applyLocalAccountInput } from '../input/local-tx-admission';
 import { getAccountInputEnvelopeError } from '../input';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import type {
   AccountCommittedFrame,
   AccountConsensusHashToSign,
@@ -339,11 +337,11 @@ async function validateIncomingFrameOnDraft(
 
   const transition = beginAccountTransition(
     account,
-    createAccountTransitionKey(account, {
+    {
       purpose: 'incoming-frame-validation',
       height: receivedFrame.height,
       stateHash: receivedFrame.stateHash,
-    }),
+    },
   );
   const clonedMachine = accountTransitionView(transition);
   let sealed = false;
@@ -561,32 +559,6 @@ type IncomingFrameAckMaterial = {
 type IncomingFrameAckMaterialResult =
   { kind: 'continue'; material: IncomingFrameAckMaterial } | { kind: 'return'; result: HandleAccountInputResult };
 
-const storeAckProofSnapshot = (
-  account: AccountReplica,
-  proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
-  signedNonce: number,
-  proposerIsLeft: boolean,
-): void => {
-  account.disputeProofNoncesByHash = {
-    ...(account.disputeProofNoncesByHash ?? {}),
-    [proofResult.proofBodyHash]: signedNonce,
-  };
-  account.disputeProofBodiesByHash = {
-    ...(account.disputeProofBodiesByHash ?? {}),
-    [proofResult.proofBodyHash]: proofResult.proofBodyStruct,
-  };
-  storeDisputeArgumentSnapshot(
-    account,
-    captureDisputeArgumentSnapshot(
-      account,
-      proofResult.proofBodyHash,
-      signedNonce,
-      proposerIsLeft,
-      proofResult.proofBodyStruct,
-    ),
-  );
-};
-
 const selectAckDisputeSeal = (
   account: AccountReplica,
   proofBodyHash: string,
@@ -651,7 +623,6 @@ async function buildIncomingFrameAckMaterial(
     if (!ackDisputeHash) {
       return { kind: 'return', result: accountInputValidationRejected('Failed to build ACK dispute hanko', events) };
     }
-    storeAckProofSnapshot(account, ackProofResult, ackSignedNonce, receivedFrame.byLeft);
   }
 
   const ackDisputeSeal = selectAckDisputeSeal(

@@ -72,27 +72,6 @@ const proxyFailureBody = (input: {
   };
 };
 
-const rewriteHubRuntimeInputStatusUrl = (value: unknown, hubEntityId: string): string | null => {
-  const statusUrl = String(value || '').trim();
-  const match = statusUrl.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
-  if (!match) return null;
-  const receiptId = match[1] || '';
-  if (!receiptId || !hubEntityId) return null;
-  return `/api/hub/runtime-input/${receiptId}/status?hubEntityId=${encodeURIComponent(hubEntityId)}`;
-};
-
-const rewriteProxiedHubJsonBody = (text: string, hubEntityId: string): string => {
-  if (!text || !hubEntityId) return text;
-  try {
-    const parsed = requireBoundaryRecord(JSON.parse(text), 'HUB_PROXY_RESPONSE_INVALID');
-    const rewrittenStatusUrl = rewriteHubRuntimeInputStatusUrl(parsed['statusUrl'], hubEntityId);
-    if (!rewrittenStatusUrl) return text;
-    return safeStringify({ ...parsed, statusUrl: rewrittenStatusUrl });
-  } catch {
-    return text;
-  }
-};
-
 const readHubApiProxyTimeoutMs = (endpointWithQuery = ''): number => {
   const defaultTimeoutMs = readPositiveIntegerEnv(
     'XLN_HUB_API_PROXY_TIMEOUT_MS',
@@ -254,8 +233,7 @@ const proxyHubApi = async (
         },
         body: bodyText,
       }, timeoutMs);
-      const responseText = rewriteProxiedHubJsonBody(text, requestedHubId);
-      return new Response(responseText, {
+      return new Response(text, {
         status: response.status,
         headers: proxyHeaders({
           'content-type': response.headers.get('content-type') || 'application/json',

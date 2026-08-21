@@ -180,14 +180,12 @@ const createInboundAccountState = (
       byLeft: state.entityId === leftEntity,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: {
       fromEntity: state.entityId,
       toEntity: counterpartyId,
       nextProofNonce: 1,
     },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: {
       rebalance: {

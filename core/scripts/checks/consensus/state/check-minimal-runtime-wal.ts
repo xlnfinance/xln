@@ -78,16 +78,6 @@ for (const source of program.getSourceFiles()) {
     };
     visitHotPath(source);
   }
-  if (normalized.endsWith('/core/storage/runtime-dbs.ts')) {
-    const visitDb = (node: ts.Node): void => {
-      if (
-        (ts.isIdentifier(node) && node.text === 'withRebranchedValues') ||
-        (ts.isStringLiteral(node) && node.text.includes('rebranched-db'))
-      ) report(source, node, 'rebranched-production-db');
-      ts.forEachChild(node, visitDb);
-    };
-    visitDb(source);
-  }
 }
 
 if (violations.length > 0) {

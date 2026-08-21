@@ -9,7 +9,7 @@ import {
 export type LoadPaymentReport = Readonly<{
   schema: 'xln-hlt-payment-load-v1';
   mode: 'payments';
-  completionAuthority: 'committed_receiver_balances_and_bilateral_quiescence';
+  completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence';
   configuredUsers: number;
   configuredRounds: number;
   cadenceMs: number;
@@ -24,6 +24,8 @@ export type LoadPaymentReport = Readonly<{
   commandObservedElapsedMs: number;
   deliveredElapsedMs: number;
   deliveredTps: number;
+  hubCompletedPaymentsBefore: number;
+  hubCompletedPaymentsAfter: number;
   roundSubmissionLagMs: readonly number[];
   walBytesBefore: number;
   walBytesAfter: number;
@@ -56,11 +58,12 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     'senders', 'receivers', 'tokenId', 'amount', 'offeredPaymentRate',
     'submittedPayments', 'deliveredPayments',
     'enqueueAckElapsedMs', 'commandObservedElapsedMs', 'deliveredElapsedMs', 'deliveredTps',
+    'hubCompletedPaymentsBefore', 'hubCompletedPaymentsAfter',
     'roundSubmissionLagMs', 'walBytesBefore', 'walBytesAfter', 'hubDurableBefore', 'hubDurableAfter',
   ], [], 'HLT_PAYMENT_REPORT_FIELDS_INVALID');
   if (record['schema'] !== 'xln-hlt-payment-load-v1') throw new Error('HLT_PAYMENT_REPORT_SCHEMA_INVALID');
   if (record['mode'] !== 'payments') throw new Error('HLT_PAYMENT_REPORT_MODE_INVALID');
-  if (record['completionAuthority'] !== 'committed_receiver_balances_and_bilateral_quiescence') {
+  if (record['completionAuthority'] !== 'committed_entity_metrics_and_bilateral_runtime_quiescence') {
     throw new Error('HLT_PAYMENT_REPORT_COMPLETION_AUTHORITY_INVALID');
   }
   const amount = record['amount'];
@@ -81,12 +84,25 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     0,
   );
   const deliveredElapsedMs = requireBoundaryInteger(record['deliveredElapsedMs'], 'HLT_PAYMENT_REPORT_ELAPSED_INVALID', 1);
+  const hubCompletedPaymentsBefore = requireBoundaryInteger(
+    record['hubCompletedPaymentsBefore'],
+    'HLT_PAYMENT_REPORT_METRIC_BEFORE_INVALID',
+    0,
+  );
+  const hubCompletedPaymentsAfter = requireBoundaryInteger(
+    record['hubCompletedPaymentsAfter'],
+    'HLT_PAYMENT_REPORT_METRIC_AFTER_INVALID',
+    0,
+  );
+  if (hubCompletedPaymentsAfter - hubCompletedPaymentsBefore !== delivered) {
+    throw new Error('HLT_PAYMENT_REPORT_METRIC_DELTA_INVALID');
+  }
   if (commandObservedElapsedMs < enqueueAckElapsedMs) throw new Error('HLT_PAYMENT_REPORT_TIMING_INVALID');
   if (deliveredElapsedMs < commandObservedElapsedMs) throw new Error('HLT_PAYMENT_REPORT_TIMING_INVALID');
   return {
     schema: 'xln-hlt-payment-load-v1',
     mode: 'payments',
-    completionAuthority: 'committed_receiver_balances_and_bilateral_quiescence',
+    completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
     configuredUsers: requireBoundaryInteger(record['configuredUsers'], 'HLT_PAYMENT_REPORT_USERS_INVALID', 2),
     configuredRounds: requireBoundaryInteger(record['configuredRounds'], 'HLT_PAYMENT_REPORT_ROUNDS_INVALID', 1),
     cadenceMs: requireBoundaryInteger(record['cadenceMs'], 'HLT_PAYMENT_REPORT_CADENCE_INVALID', 1),
@@ -101,6 +117,8 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     commandObservedElapsedMs,
     deliveredElapsedMs,
     deliveredTps,
+    hubCompletedPaymentsBefore,
+    hubCompletedPaymentsAfter,
     roundSubmissionLagMs: lags.map((lag, index) =>
       requireBoundaryInteger(lag, `HLT_PAYMENT_REPORT_LAG_INVALID:${index}`, 0)),
     walBytesBefore: requireBoundaryInteger(record['walBytesBefore'], 'HLT_PAYMENT_REPORT_WAL_BEFORE_INVALID', 0),

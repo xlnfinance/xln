@@ -13,7 +13,6 @@ import { settings } from "../../../../stores/settingsStore";
 import { runtimes } from "../../../../stores/runtimeStore";
 import { activeRuntime } from "$lib/stores/vault/vaultStore";
 import { submitEntityInputs, submitRuntimeInput, xlnFunctions } from "../../../../stores/xlnStore";
-import { recordRuntimeIngressReceipt } from "../../../../stores/commands/runtimeCommandBus";
 import { runtimeControllerHandle } from "../../../../stores/runtimeControllerStore";
 import { toasts } from "../../../../stores/ui/toastStore";
 import { errorLog } from "../../../../stores/errorLogStore";
@@ -566,15 +565,6 @@ function toErrorMessage(error: unknown, defaultMessage: string): string {
 }
 function logEntityPanelDiagnostic(message: string, details?: unknown): void {
   errorLog.log(message, "Entity Panel", details);
-}
-function recordServerIngressReceipt(result: Pick<FaucetApiResult, "receipt" | "statusUrl"> & { runtimeId?: string | null }): void {
-  if (!result.receipt) return;
-  recordRuntimeIngressReceipt({
-    runtimeId: result.runtimeId || $runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id || "remote",
-    mode: "remote",
-    receipt: result.receipt,
-    statusUrl: result.statusUrl ?? null,
-  });
 }
 function notifyUserActionError(context: string, message: string): void {
   logEntityPanelDiagnostic(message, { context });
@@ -1281,7 +1271,6 @@ async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
     if (!response.ok || !result?.success) {
       throw new Error(result?.error || `Faucet failed (${response.status})`);
     }
-    recordServerIngressReceipt(result);
     // The HTTP response is an acknowledgement, not trusted J-chain evidence.
     // The locally configured watcher observes the reserve log from its bound
     // stack and is the only path allowed to advance Entity J-history.

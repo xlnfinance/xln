@@ -16,7 +16,7 @@ export type HltDashboardMode = (typeof HLT_DASHBOARD_MODES)[number];
 
 export type HltDashboardConfig = Readonly<{
   users: number;
-  usersPerRuntime: number;
+  runtimesPerProcess: number;
   ratePerUserPerSecond: number;
   durationSeconds: number;
   mix: string;
@@ -31,7 +31,7 @@ export type HltDashboardConfig = Readonly<{
 
 export const HLT_DASHBOARD_DEFAULTS: HltDashboardConfig = {
   users: 200,
-  usersPerRuntime: 40,
+  runtimesPerProcess: 200,
   ratePerUserPerSecond: 1,
   durationSeconds: 10,
   mix: '0:1',
@@ -113,6 +113,29 @@ export type HltHubPerfCard = Readonly<{
   cpuTps: number | null;
 }>;
 
+export type HltReplayTrialCard = Readonly<{
+  offeredTps: number | null;
+  frames: number;
+  accountInputs: number;
+  accountTxs: number;
+  outboxEnvelopes: number;
+  elapsedMs: number;
+  cpuMs: number;
+  accountInputTps: number;
+  accountTxTps: number;
+  cpuAccountTxTps: number;
+  finalHeight: number;
+  finalPendingOutbox: number;
+  equivalent: true;
+}>;
+
+export type HltReplayCard = Readonly<{
+  createdAt: number;
+  recordingManifestHash: string;
+  mode: 'max' | 'fixed' | 'sweep';
+  trials: readonly HltReplayTrialCard[];
+}>;
+
 const requireMax = (value: number, maximum: number, code: string): number => {
   if (value > maximum) throw new Error(`${code}:${value}:${maximum}`);
   return value;
@@ -149,14 +172,14 @@ export const parseHltDashboardConfig = (params: URLSearchParams): HltDashboardCo
     4_096,
     'HLT_DASHBOARD_USERS_TOO_HIGH',
   );
-  const usersPerRuntime = requireMax(
+  const runtimesPerProcess = requireMax(
     requireBoundaryInteger(
-      Number(params.get('usersPerRuntime') ?? defaults.usersPerRuntime),
-      'HLT_DASHBOARD_USERS_PER_RUNTIME_INVALID',
+      Number(params.get('runtimesPerProcess') ?? defaults.runtimesPerProcess),
+      'HLT_DASHBOARD_RUNTIMES_PER_PROCESS_INVALID',
       1,
     ),
-    4_096,
-    'HLT_DASHBOARD_USERS_PER_RUNTIME_TOO_HIGH',
+    1_000,
+    'HLT_DASHBOARD_RUNTIMES_PER_PROCESS_TOO_HIGH',
   );
   const ratePerUserPerSecond = requireMax(
     requireBoundaryInteger(
@@ -187,7 +210,7 @@ export const parseHltDashboardConfig = (params: URLSearchParams): HltDashboardCo
   }
   return {
     users,
-    usersPerRuntime,
+    runtimesPerProcess,
     ratePerUserPerSecond,
     durationSeconds,
     mix: params.get('mix') ?? defaults.mix,
@@ -230,7 +253,7 @@ const isolatedCommand = (config: HltDashboardConfig): string => {
   return [
     `XLN_LOCAL_PROD_SMOKE_DIR=/tmp/xln-hlt-${config.users}`,
     `XLN_HLT_USERS=${config.users}`,
-    `XLN_HLT_USERS_PER_RUNTIME=${config.usersPerRuntime}`,
+    `XLN_HLT_RUNTIMES_PER_PROCESS=${config.runtimesPerProcess}`,
     `XLN_HLT_MIX=${mix}`,
     `XLN_HLT_RATE_PER_USER=${config.ratePerUserPerSecond}`,
     `XLN_HLT_DURATION_S=${config.durationSeconds}`,
@@ -241,7 +264,7 @@ const isolatedCommand = (config: HltDashboardConfig): string => {
     'XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE=1',
     `XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE=${config.mode}`,
     ...profileVars,
-    'bun core/scripts/operations/production/local-prod-smoke.ts',
+    'bun core/scripts/operations/hlt/build-chains.ts',
   ].join(' \\\n');
 };
 
@@ -260,7 +283,7 @@ export const previewHltDashboard = (config: HltDashboardConfig): HltDashboardPre
   });
   return {
     config: { ...config, mix },
-    daemons: Math.ceil(config.users / config.usersPerRuntime),
+    daemons: Math.ceil(config.users / config.runtimesPerProcess),
     rounds: plan.rounds,
     cadenceMs: plan.cadenceMs,
     paymentLanes: plan.paymentLanes,

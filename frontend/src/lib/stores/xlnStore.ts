@@ -39,7 +39,7 @@ import {
   runtimeHistoryFrameFromViewFrame,
   upsertRuntimeHistoryFrame,
 } from './runtimeHistoryStore';
-import { clearRuntimeQueryCache, runtimeQueryClient, type RuntimeReceiptStatus } from './runtimeQueryClient';
+import { clearRuntimeQueryCache } from './runtimeQueryClient';
 import {
   assertRuntimeViewIsLive,
   runtimeView,
@@ -1418,55 +1418,16 @@ const waitForRemoteRuntimeProjectionAtHeight = async (
   throw new Error(`REMOTE_RUNTIME_PROJECTION_TIMEOUT: target=${target} latest=${latestHeight}`);
 };
 
-const readRemoteRuntimeReceiptStatus = async (
-  receiptId: string | null | undefined,
-): Promise<RuntimeReceiptStatus> => {
-  const id = String(receiptId || '').trim();
-  if (!id) throw new Error('REMOTE_RUNTIME_RECEIPT_ID_MISSING');
-  const adapter = getRuntimeControllerAdapter();
-  if (!adapter || adapter.mode !== 'remote') throw new Error('REMOTE_RUNTIME_RECEIPT_ADAPTER_MISSING');
-  const receipt = await runtimeQueryClient.readReceiptStatus(id);
-  if (!receipt || typeof receipt !== 'object') {
-    throw new Error('REMOTE_RUNTIME_RECEIPT_STATUS_INVALID');
-  }
-  return receipt;
-};
-
-const waitForRemoteRuntimeReceiptObserved = async (
-  receiptId: string | null | undefined,
-): Promise<RuntimeReceiptStatus | null> => {
-  if (!receiptId) throw new Error('REMOTE_RUNTIME_RECEIPT_ID_MISSING');
-  const startedAt = Date.now();
-  let latest: RuntimeReceiptStatus | null = null;
-  while (Date.now() - startedAt <= REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS) {
-    latest = await readRemoteRuntimeReceiptStatus(receiptId);
-    const status = String(latest.status || '').toLowerCase();
-    if (status === 'observed') return latest;
-    if (status === 'expired') {
-      throw new Error(`REMOTE_RUNTIME_RECEIPT_EXPIRED: ${latest.note || 'receipt expired'}`);
-    }
-    await sleep(REMOTE_RUNTIME_PROJECTION_WAIT_POLL_MS);
-  }
-  throw new Error(`REMOTE_RUNTIME_RECEIPT_STATUS_TIMEOUT: status=${String(latest?.status || 'unknown')}`);
-};
-
 const observeRemoteRuntimeCommand = async (
   accepted: Awaited<ReturnType<typeof runtimeAdapterSend>>,
   progress: RuntimeCommandProgress,
 ): Promise<void> => {
-  await progress.accepted(accepted.height, {
-    receiptId: accepted.receipt?.id ?? null,
-    statusUrl: accepted.statusUrl ?? null,
-  });
-  if (accepted.status === 'observed') {
-    const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height);
-    await progress.observed(projectedHeight);
-    return;
-  }
-  const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);
-  const observedHeight = Number(observed?.observedHeight ?? accepted.height);
-  const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);
-  await progress.observed(Number(observed?.observedHeight ?? projectedHeight));
+  await progress.accepted(accepted.height);
+  // The server returns the committed head before queueing. The command can
+  // first affect H+1; observe that real Runtime projection, never a transport
+  // receipt that merely says bytes reached an ingress queue.
+  const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1);
+  await progress.observed(projectedHeight);
 };
 
 const routeRemoteRuntimeInput = async (

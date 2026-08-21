@@ -6,11 +6,15 @@ import { encodeBuffer } from '../../../storage/codec/codec';
 import { createSnapshot, readSnapshotDocs } from '../../../storage/database/lifecycle';
 import {
   KEY_HEAD,
+  KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_LEAF,
   KEY_SNAPSHOT_GRAPH,
   STORAGE_SCHEMA_VERSION,
   keyLiveAccount,
+  keyLiveAccountBranch,
   keySnapshotAccount,
   keySnapshotGraph,
+  parseSnapshotGraphKey,
 } from '../../../storage/keys';
 import { inspectSnapshotGraphRows } from '../../../storage/read/snapshot-graph-integrity';
 import {
@@ -97,8 +101,11 @@ test('snapshot graph verification rejects an orphan row', async () => {
   await headBatch.write();
   await createSnapshot(source, snapshot, 1, 1_000);
 
-  const graphHex = [...snapshot.rows.keys()].find(key =>
-    Number.parseInt(key.slice(0, 2), 16) === KEY_SNAPSHOT_GRAPH);
+  const graphHex = [...snapshot.rows.keys()].find(key => {
+    if (Number.parseInt(key.slice(0, 2), 16) !== KEY_SNAPSHOT_GRAPH) return false;
+    const liveTag = parseSnapshotGraphKey(Buffer.from(key, 'hex')).liveKey[0];
+    return liveTag === KEY_LIVE_ACCOUNT_BRANCH || liveTag === KEY_LIVE_ACCOUNT_LEAF;
+  });
   if (!graphHex) throw new Error('TEST_SNAPSHOT_ACCOUNT_GRAPH_MISSING');
   const graphKey = Buffer.from(graphHex, 'hex');
   const orphanLiveKey = Buffer.from(graphKey.subarray(9));
@@ -133,16 +140,16 @@ test('snapshot graph verification rejects an Account namespace absent from its h
   await headBatch.write();
   await createSnapshot(source, snapshot, 1, 1_000);
 
-  const graphHex = [...snapshot.rows.keys()].find(key =>
-    Number.parseInt(key.slice(0, 2), 16) === KEY_SNAPSHOT_GRAPH);
-  if (!graphHex) throw new Error('TEST_SNAPSHOT_ACCOUNT_GRAPH_MISSING');
-  const graphKey = Buffer.from(graphHex, 'hex');
-  const unknownNamespaceLiveKey = Buffer.from(graphKey.subarray(9));
-  unknownNamespaceLiveKey[65] = 0xfe;
+  const unknownNamespaceLiveKey = keyLiveAccountBranch(
+    entityId,
+    counterpartyId,
+    0xfe,
+    [0],
+  );
   const batch = snapshot.batch();
   batch.put(
     keySnapshotGraph(1, unknownNamespaceLiveKey),
-    Buffer.from(snapshot.rows.get(graphHex)!),
+    encodeBuffer({ children: [] }),
   );
   await batch.write();
 

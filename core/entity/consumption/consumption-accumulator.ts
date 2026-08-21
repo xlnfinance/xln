@@ -44,9 +44,6 @@ const MAX_CONSUMPTION_HANKO_BYTES = HANKO_MAX_BYTES;
 const UINT64_MAX = (1n << 64n) - 1n;
 const CONSUMPTION_LANES = new Set<ConsumptionOutputIdentity['lane']>([
   'generic',
-  'account-frame',
-  'account-ack',
-  'account-dispute',
 ]);
 
 const record = (value: unknown, label: string): Record<string, unknown> => {
@@ -158,7 +155,7 @@ const normalizeIdentity = (value: ConsumptionOutputIdentity): ConsumptionOutputI
   if (typeof lane !== 'string' || !CONSUMPTION_LANES.has(lane as ConsumptionOutputIdentity['lane'])) {
     throw new Error(`CONSUMPTION_LANE_INVALID:${String(lane)}`);
   }
-  if ((lane === 'generic' || lane === 'account-frame' || lane === 'account-ack') && sequence < 1n) {
+  if (sequence < 1n) {
     throw new Error(`CONSUMPTION_SEQUENCE_INVALID:${sequence}`);
   }
   return Object.freeze({
@@ -415,26 +412,6 @@ const unchanged = (
   replacedNodeHashes: Object.freeze([]),
 });
 
-// Account nonces belong to their native bilateral/proof state machines, not to
-// one source→target output stream. Account frame heights alternate between the
-// two sides, so one source can legitimately emit 1 then 3 while the peer emits
-// 2. Requiring +1 here invents a missing output and wedges the account; the
-// nested Account verifier still enforces exact height + prevFrameHash before
-// this accumulator transition can commit.
-const isSparseNativeLane = (lane: ConsumptionOutputIdentity['lane']): boolean =>
-  lane === 'account-frame' ||
-  lane === 'account-ack' ||
-  lane === 'account-dispute';
-
-const isValidInitialSequence = (identity: ConsumptionOutputIdentity, sequence: bigint): boolean => {
-  if (identity.lane === 'generic') return sequence === 1n;
-  // A restored/imported Account can already be above genesis. Its own state
-  // machine validates the exact native frame/proof nonce; this
-  // accumulator must not invent a second base counter.
-  if (identity.lane === 'account-frame' || identity.lane === 'account-ack') return sequence >= 1n;
-  return sequence >= 0n;
-};
-
 const getUnchangedConsumptionResult = (
   state: ConsumptionAccumulatorState,
   identity: ConsumptionOutputIdentity,
@@ -445,13 +422,13 @@ const getUnchangedConsumptionResult = (
     const frontier = inspected.result.value;
     if (frontier.quarantine) return unchanged('quarantined', state);
     if (sequence < frontier.lastContiguousSeq) return unchanged('stale', state);
-    if (sequence > frontier.lastContiguousSeq + 1n && !isSparseNativeLane(identity.lane)) {
+    if (sequence > frontier.lastContiguousSeq + 1n) {
       return unchanged('gap', state);
     }
     if (sequence === frontier.lastContiguousSeq && identity.semanticHash === frontier.lastSemanticHash) {
       return unchanged('idempotent', state);
     }
-  } else if (!isValidInitialSequence(identity, sequence)) {
+  } else if (sequence !== 1n) {
     return unchanged('gap', state);
   }
   return null;

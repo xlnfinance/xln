@@ -29,8 +29,8 @@ import {
   encryptRuntimeRecoveryBundle,
 } from '../../../storage/recovery/bundle/crypto';
 import type { TowerAppointmentV1 } from '../../../storage/recovery/bundle/types';
+import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal';
-import { computePersistedEnvStateHash } from '../../../storage/wal/hash';
 import { createWatchtowerStore } from '../../../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../../../watchtower/http';
 import type { JurisdictionConfig } from '../../../entity/types';
@@ -237,8 +237,8 @@ describe('runtime recovery tower', () => {
       runtimeId,
     }));
 
-    const originalPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
-    const restoredPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(restoredEnv));
+    const originalPersistedHash = computeCanonicalStateHashFromEnv(env);
+    const restoredPersistedHash = computeCanonicalStateHashFromEnv(restoredEnv);
 
     expect(decrypted.checkpointHash).toBe(bundle.checkpointHash);
     expect(restoredPersistedHash).toBe(originalPersistedHash);
@@ -460,8 +460,8 @@ describe('runtime recovery tower', () => {
       runtimeId,
     }));
 
-    const originalPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
-    const restoredPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(restoredEnv));
+    const originalPersistedHash = computeCanonicalStateHashFromEnv(env);
+    const restoredPersistedHash = computeCanonicalStateHashFromEnv(restoredEnv);
 
     expect(tailBundle.baseRuntimeHeight).toBe(baseHeight);
     expect(tailBundle.baseCheckpointHash).toBe(baseHash);
@@ -477,7 +477,7 @@ describe('runtime recovery tower', () => {
     expect(baseProjection.state.height).toBe(baseHeight);
     const targetProjection = await detached.readAtHeight(env.state.height);
     expect(targetProjection.state.height).toBe(env.state.height);
-    expect(computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(targetProjection)))
+    expect(computeCanonicalStateHashFromEnv(targetProjection))
       .toBe(originalPersistedHash);
     await detached.close();
     await expect(detached.readAtHeight(baseHeight)).rejects.toThrow('RUNTIME_RECORDING_ADAPTER_CLOSED');

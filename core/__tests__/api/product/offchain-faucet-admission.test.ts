@@ -122,18 +122,7 @@ const callFaucet = async (
       enqueued = runtimeInput;
     },
     validateRuntimeInputAdmission: () => {},
-    registerReceipt: (receipt) => ({
-      id: receipt.id ?? 'receipt-1',
-      kind: receipt.kind,
-      status: 'pending',
-      counts: receipt.counts,
-      enqueuedAt: 1,
-      enqueuedHeight: receipt.enqueuedHeight,
-      expiresAt: 10_001,
-      ...(receipt.note ? { note: receipt.note } : {}),
-    }),
     getCurrentRuntimeHeight: () => 7,
-    buildRuntimeInputStatusUrl: (id) => `/api/runtime-input/${id}`,
   });
   return {
     response,
@@ -157,7 +146,6 @@ describe('offchain faucet admission', () => {
     expect(body.success).toBe(true);
     expect(body.status).toBe('queued');
     expect(String(body.requestId)).toMatch(/^offchain_/);
-    expect(body.statusUrl).toBe(`/api/runtime-input/${body.requestId}`);
     expect(body.accountReady).toBe(false);
     expect(body.accountState).toMatchObject({
       currentHeight: 0,

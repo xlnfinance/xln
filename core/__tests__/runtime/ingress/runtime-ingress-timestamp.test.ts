@@ -9,7 +9,6 @@ import {
   provisionTestEntityEncryptionKey,
 } from '../../../qa/entity-creation-fixture';
 import { processEventBatch } from '../../../jurisdiction/adapter/watcher';
-import { createRuntimeIngressReceiptStore } from '../../../runtime/mempool/ingress-receipts';
 import { buildJEventRangeData } from '../../helpers/j-history';
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import {
@@ -372,17 +371,6 @@ describe('runtime ingress timestamp', () => {
       runtimeTxs: [],
       entityInputs: [{ entityId, signerId, entityTxs: txs }],
     };
-    const receipts = createRuntimeIngressReceiptStore({ now: () => 1_000 });
-    receipts.register({
-      id: 'capped-runtime-input',
-      kind: 'test',
-      counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-      enqueuedHeight: env.state.height,
-      runtimeInput: acceptedInput,
-    });
-    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
-      receipts.observeRuntimeInput(height, runtimeInput);
-    });
     enqueueRuntimeInput(env, acceptedInput);
 
     await processRuntime(env);
@@ -390,13 +378,6 @@ describe('runtime ingress timestamp', () => {
       .flatMap(input => input.entityTxs ?? [])
       .filter(tx => tx.type === 'profile-update');
     expect(deferredProfileUpdates).toHaveLength(0);
-    expect(receipts.get('capped-runtime-input')).toMatchObject({
-      status: 'observed',
-      observedHeight: 1,
-      observedFingerprintCount: 5,
-      requiredFingerprintCount: 5,
-    });
-    expect(receipts.get('capped-runtime-input')?.observedHeight).toBe(1);
   });
 
   test('runtime frame cap preserves watcher j_event priority across queued entity inputs', async () => {
@@ -1013,7 +994,7 @@ describe('runtime ingress timestamp', () => {
     }
   });
 
-  test('watcher-fed receipts wake idle runtime but remain local observations before J-prefix quorum', async () => {
+  test('watcher-fed events wake idle runtime but remain local observations before J-prefix quorum', async () => {
     const seed = uniqueSeed('runtime-watcher-wake-seed');
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;

@@ -23,7 +23,9 @@ import {
   clearPendingAuditEvents,
   clearRuntimeFrameEvents,
   flushPendingAuditEvents,
+  readRuntimeFrameEvents,
 } from '../observability/env-events';
+import { recordCommittedRuntimeEntityMetrics } from '../observability/entity-metrics';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './intake/execution-state';
 import {
@@ -304,8 +306,10 @@ const publishCommittedRuntimeFrame = (
   frame.commitDisposition = 'committed';
   profile.mark('save');
   flushPendingAuditEvents(candidateEnv);
+  const committedEvents = readRuntimeFrameEvents(candidateEnv);
   clearRuntimeFrameEvents(candidateEnv);
   const env = publishRuntimeFrameTransaction(frame.transaction);
+  recordCommittedRuntimeEntityMetrics(env, env.state.height, committedEvents);
   const state = ensureRuntimeInfrastructure(env);
   if (frame.pendingTraceSnapshot) {
     recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);

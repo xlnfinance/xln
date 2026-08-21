@@ -1617,6 +1617,42 @@ describe('runtime output routing', () => {
     expect(enqueued).toHaveLength(0);
   });
 
+  test('admits a batched raw AccountInput lane for one target Entity', () => {
+    const localEntityId = entityId('74');
+    const signerId = runtimeId('75');
+    const sourceRuntimeId = runtimeId('76');
+    const enqueued: RoutedEntityInput[] = [];
+    const entityTxs = [entityId('77'), entityId('78')].map(fromEntityId => ({
+      type: 'accountInput' as const,
+      data: {
+        kind: 'ack' as const,
+        fromEntityId,
+        toEntityId: localEntityId,
+        ack: { height: 1, frameHash: `0x${'79'.repeat(32)}`, frameHanko: '0x01' },
+      },
+    }));
+    const env = {
+      runtimeId: runtimeId('11'),
+      state: {
+        eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      },
+      infrastructure: { entityRuntimeHints: new Map() },
+      warn: () => {}, info: () => {}, error: () => {},
+    } as unknown as RuntimeReplica;
+    const input = { entityId: localEntityId, signerId, entityTxs };
+
+    expect(routeInboundP2PEntityInput(env, sourceRuntimeId, input, {
+      ensureRuntimeInfrastructure: target => target.infrastructure!,
+      enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
+      extractEntityId: key => String(key).split(':')[0] || '',
+      hasLocalSignerForEntity: () => true,
+      hasLocalSignerForEntitySigner: () => true,
+      resolveSoleLocalSignerForEntity: () => signerId,
+      getP2P: () => null,
+    })).toEqual({ kind: 'queued' });
+    expect(enqueued).toEqual([{ ...input, from: sourceRuntimeId }]);
+  });
+
   test('rejects a certified cross-j intent whose user siblings resolve to different Runtimes', () => {
     const localRuntimeId = runtimeId('11');
     const authenticatedUserRuntimeId = runtimeId('12');

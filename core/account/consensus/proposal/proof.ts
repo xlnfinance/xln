@@ -11,10 +11,6 @@ import {
   isEntityId32,
   type AccountJurisdictionView,
 } from '../helpers';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
 import type { ProposeAccountFrameResult } from '../types';
 import { proposeAccountFrameRejected } from '../result';
 import { replaceLocalDisputeDraft } from '../dispute/seal';
@@ -89,14 +85,6 @@ const persistProofRecords = (
     proofBodyHash,
     proposerIsLeft: projection.proposerIsLeft,
   });
-  target.disputeProofNoncesByHash = {
-    ...(target.disputeProofNoncesByHash ?? {}),
-    [proofBodyHash]: projection.nonce,
-  };
-  target.disputeProofBodiesByHash = {
-    ...(target.disputeProofBodiesByHash ?? {}),
-    [proofBodyHash]: projection.proof.proofBodyStruct,
-  };
 };
 
 const persistDisputeProjection = (
@@ -107,15 +95,6 @@ const persistDisputeProjection = (
   if (!projection.hash) return;
   persistProofRecords(account, projection);
   persistProofRecords(candidate, projection);
-  const snapshot = captureDisputeArgumentSnapshot(
-    candidate,
-    projection.proof.proofBodyHash,
-    projection.nonce,
-    projection.proposerIsLeft,
-    projection.proof.proofBodyStruct,
-  );
-  storeDisputeArgumentSnapshot(account, snapshot);
-  storeDisputeArgumentSnapshot(candidate, snapshot);
 };
 
 export const prepareProposalProof = async (

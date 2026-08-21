@@ -115,13 +115,9 @@ describe('relay direct entity delivery', () => {
       entityId: `0x${'ab'.repeat(32)}`,
       signerId: targetRuntimeId,
       entityTxs: [{
-        type: 'accountInput',
-        data: {
-          fromEntityId: `0x${'cd'.repeat(32)}`,
-          toEntityId: `0x${'ab'.repeat(32)}`,
-          height: 1,
-        },
-      }],
+        type: 'entityCommand',
+        data: {},
+      } as never],
     };
     const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 7, 12345, [input]);
 
@@ -182,6 +178,50 @@ describe('relay direct entity delivery', () => {
         txs: 1,
       },
     });
+  });
+
+  test('delivers raw AccountInput through the canonical direct relay path', () => {
+    const sourceSeed = 'relay-direct-account-source';
+    const targetSeed = 'relay-direct-account-target';
+    const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
+    const targetRuntimeId = deriveSignerAddressSync(targetSeed, '1').toLowerCase();
+    const store = createRelayStore(sourceRuntimeId);
+    const targetSocket = makeSocket();
+
+    cacheEncryptionKey(store, sourceRuntimeId, pubKeyToHex(deriveEncryptionKeyPair(sourceSeed).publicKey));
+    cacheEncryptionKey(store, targetRuntimeId, pubKeyToHex(deriveEncryptionKeyPair(targetSeed).publicKey));
+    expect(registerClient(store, targetRuntimeId, targetSocket.ws)).toBe(true);
+
+    const input: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: `0x${'ab'.repeat(32)}`,
+      signerId: targetRuntimeId,
+      entityTxs: [{
+        type: 'accountInput',
+        data: {},
+      } as never],
+    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 7, 12345, [input]);
+
+    expect(sendEntityInputDirectViaRelaySocketDelivery(
+      store,
+      { runtimeId: sourceRuntimeId } as RuntimeReplica,
+      targetRuntimeId,
+      envelope,
+      () => undefined,
+      12345,
+    )).toMatchObject({
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_DELIVERED',
+      retryable: false,
+      terminal: true,
+    });
+    expect(targetSocket.sent).toHaveLength(1);
+    const decrypted = decryptJSON<RuntimeEntityInputsEnvelope>(
+      String(targetSocket.sent[0]?.payload || ''),
+      deriveEncryptionKeyPair(targetSeed).privateKey,
+    );
+    expect(decrypted).toEqual(envelope);
   });
 
   test('fails over instead of claiming delivery for a stale relay client socket', () => {

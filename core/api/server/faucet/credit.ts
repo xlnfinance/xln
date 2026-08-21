@@ -6,7 +6,6 @@ import { getAccountReplica, getEntityOutCapacity, hasAccount } from '../entities
 import { getFaucetHubProfiles } from './hubs';
 import { getRequestCreditCap } from '../health/hub';
 import { isEntityId32 } from '../utils';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../../runtime/mempool/ingress-receipts';
 import { withRuntimeCommittedRead } from '../../../runtime/frame/lifecycle/writer-lock';
 
 type CreditRequestInput = {
@@ -16,9 +15,7 @@ type CreditRequestInput = {
   activeHubEntityIds: string[];
   enqueueRuntimeInput: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
   validateRuntimeInputAdmission: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
-  registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
   getCurrentRuntimeHeight: (env: RuntimeReplica | null) => number;
-  buildRuntimeInputStatusUrl: (id: string) => string;
 };
 
 type ParsedCreditRequest = {
@@ -150,18 +147,9 @@ const queueCreditRequest = (
   runtimeInput: RuntimeInput,
 ): Response => {
   const requestId = `credit_${globalThis.crypto.randomUUID()}`;
-  let receipt: RuntimeIngressReceipt;
   try {
     input.validateRuntimeInputAdmission(env, runtimeInput);
     input.enqueueRuntimeInput(env, runtimeInput);
-    receipt = input.registerReceipt({
-      id: requestId,
-      kind: 'credit-request',
-      counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-      enqueuedHeight: input.getCurrentRuntimeHeight(env),
-      runtimeInput,
-      note: 'Credit request was accepted into the hub runtime queue; poll statusUrl and account state for settlement.',
-    });
   } catch (error) {
     return json(input.headers, {
       error: 'Failed to admit credit request into runtime',
@@ -173,8 +161,6 @@ const queueCreditRequest = (
     success: true,
     status: 'queued',
     requestId,
-    receipt,
-    statusUrl: input.buildRuntimeInputStatusUrl(receipt.id),
     runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
     currentHeight: input.getCurrentRuntimeHeight(env),
     hubEntityId: request.hubEntityId,

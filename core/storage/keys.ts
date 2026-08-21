@@ -15,7 +15,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/integrity-checksum';
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 3;
+export const STORAGE_SCHEMA_VERSION = 4;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -82,6 +82,7 @@ export const KEY_RUNTIME_MACHINE_LEAF = 0x16;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;
 export const KEY_LIVE_BOOK = 0x23;
+/** One bounded Account envelope field at its permanent owner + field-tag key. */
 export const KEY_LIVE_ACCOUNT_FIELD = 0x24;
 export const KEY_LIVE_REPLICA_META = 0x26;
 export const KEY_CERTIFIED_BOARD_NODE = 0x2a;
@@ -97,8 +98,6 @@ export const KEY_SNAPSHOT_BOOK = 0x33;
 export const KEY_SNAPSHOT_REPLICA_META = 0x34;
 /** Snapshot namespace wrapping one unchanged live enum-keyed graph record. */
 export const KEY_SNAPSHOT_GRAPH = 0x35;
-/** Physical mutable rebranch nodes; hidden by the logical DB adapter. */
-export const KEY_REBRANCH_NODE = 0x7e;
 
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 
@@ -268,6 +267,13 @@ export const keyLiveAccount = (entityId: string, counterpartyId: string): Buffer
 export const keyLiveAccountPrefix = (entityId?: string): Buffer =>
   entityId ? Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT]), hexBytes(entityId)]) : Buffer.from([KEY_LIVE_ACCOUNT]);
 
+const liveAccountFieldOwnerKey = (entityId: string, counterpartyId: string): Buffer =>
+  Buffer.concat([
+    Buffer.from([KEY_LIVE_ACCOUNT_FIELD]),
+    hexBytes(entityId),
+    hexBytes(counterpartyId),
+  ]);
+
 export const keyLiveAccountField = (
   entityId: string,
   counterpartyId: string,
@@ -277,11 +283,27 @@ export const keyLiveAccountField = (
     throw new Error(`STORAGE_ACCOUNT_FIELD_TAG_INVALID:${String(fieldTag)}`);
   }
   return Buffer.concat([
-    Buffer.from([KEY_LIVE_ACCOUNT_FIELD]),
-    hexBytes(entityId),
-    hexBytes(counterpartyId),
+    liveAccountFieldOwnerKey(entityId, counterpartyId),
     Buffer.from([fieldTag]),
   ]);
+};
+
+export const keyLiveAccountFieldPrefix = (
+  entityId: string,
+  counterpartyId: string,
+): Buffer => liveAccountFieldOwnerKey(entityId, counterpartyId);
+
+export const parseLiveAccountFieldKey = (key: Buffer) => {
+  if (key.byteLength !== 66 || key[0] !== KEY_LIVE_ACCOUNT_FIELD) {
+    throw new Error(`STORAGE_ACCOUNT_FIELD_KEY_INVALID:${key.toString('hex')}`);
+  }
+  const fieldTag = key[65];
+  if (fieldTag === undefined || fieldTag === 0) throw new Error('STORAGE_ACCOUNT_FIELD_TAG_INVALID');
+  return {
+    entityId: decodeEntityId(key.subarray(1, 33)),
+    counterpartyId: decodeEntityId(key.subarray(33, 65)),
+    fieldTag,
+  };
 };
 
 const accountTreeOwnerKey = (

@@ -8,7 +8,6 @@ import {
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
 } from '../../api/runtime-adapter/server';
-import type { createRuntimeIngressReceiptStore } from '../../runtime/mempool/ingress-receipts';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/admit/entity-input-envelope-auth.ts';
 import {
   enqueueRuntimeInput,
@@ -44,9 +43,6 @@ export type DirectInputDebugState = {
   lastSeen: DirectEntityInputDebug | null;
   lastError: DirectEntityInputDebug | null;
 };
-
-export const runtimeInputStatusUrl = (id: string): string =>
-  `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
 export const createHubDirectRuntimeRoute = (
   env: RuntimeReplica,
@@ -112,7 +108,6 @@ export const createHubDirectRuntimeRoute = (
 
 export const createHubRadapterMessageHandler = (
   env: RuntimeReplica,
-  receipts: ReturnType<typeof createRuntimeIngressReceiptStore>,
   isIngressReady: () => boolean,
   brainVaultOwner: BrainVaultOwnerController,
   isBrainVaultReady: () => boolean,
@@ -135,9 +130,6 @@ export const createHubRadapterMessageHandler = (
           await submitCrossJurisdictionIntent(targetEnv, route);
         },
         validateRuntimeInputAdmission,
-        registerReceipt: receipt => receipts.register(receipt),
-        readReceipt: id => receipts.get(id),
-        buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
         controlRuntime: resolveRuntimeAdminControl,
         isMutatingIngressReady: isIngressReady,
         deriveBrainVault: async (targetEnv, input, options) => {

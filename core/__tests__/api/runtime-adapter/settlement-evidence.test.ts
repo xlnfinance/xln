@@ -123,6 +123,27 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
   })).toThrow('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_COUNT_INVALID');
 });
 
+test('settlement queue counters never traverse signed payload bodies', async () => {
+  const env = makeSettlementEnv();
+  const poison = new Proxy({}, {
+    ownKeys: () => { throw new Error('SETTLEMENT_QUEUE_PAYLOAD_TRAVERSED'); },
+    getOwnPropertyDescriptor: () => { throw new Error('SETTLEMENT_QUEUE_PAYLOAD_TRAVERSED'); },
+  });
+  env.pendingOutputs = [poison as never];
+  env.pendingNetworkOutputs = [poison as never];
+  env.networkInbox = [poison as never];
+  env.runtimeMempool.entityInputs = [poison as never];
+  const response = await buildSettlementEvidence(
+    env,
+    { type: 'settlement-evidence', book: null, accounts: [] },
+    async () => [],
+  );
+  expect(response.queues.pendingOutputs.count).toBe(1);
+  expect(response.queues.pendingNetworkOutputs.count).toBe(1);
+  expect(response.queues.networkInbox.count).toBe(1);
+  expect(response.queues.runtimeEntityInputs.count).toBe(1);
+});
+
 test('settlement evidence control is admin-authenticated and exact on the wire', async () => {
   expect(() => validateRuntimeAdapterWireMessage({
     v: 1, id: 'settlement-invalid', op: 'control',

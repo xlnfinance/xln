@@ -198,14 +198,11 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'currentFrame',
   'currentHeight',
   'pendingFrame',
-  'pendingSignatures',
   'pendingAccountInput',
   'lastOutboundFrameAck',
   'rollbackCount',
   'lastRollbackFrameHash',
   'proofHeader',
-  'proofBody',
-  'abiProofBody',
   'boardResealMigration',
   'counterpartyBoardReseal',
   'counterpartyFrameHanko',
@@ -219,9 +216,6 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeProofBodyHash',
   'counterpartyDisputeHash',
-  'disputeProofNoncesByHash',
-  'disputeProofBodiesByHash',
-  'disputeArgumentSnapshotsByHash',
   'disputePrepare',
   'activeDispute',
   'pendingForwards',
@@ -235,7 +229,6 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
  * honest validators or create a circular commitment.
  */
 const ACCOUNT_ENTITY_LOCAL_FIELDS = [
-  'hankoSignature',
   'currentFrameHanko',
   'currentDisputeProofHanko',
 ] as const satisfies readonly (keyof AccountReplica)[];
@@ -260,8 +253,6 @@ const ACCOUNT_LEAF_BODY_FIELDS = [
   'pendingFrame',
   'pendingAccountInput',
   'lastOutboundFrameAck',
-  'abiProofBody',
-  'disputeProofBodiesByHash',
   'pendingWithdrawals',
   'shadow',
 ] as const satisfies readonly (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number][];
@@ -365,16 +356,6 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
       counterpartyEntityId: account.lastOutboundFrameAck.counterpartyEntityId.toLowerCase(),
       response: compactAccountInputBinding(account.lastOutboundFrameAck.response),
     };
-  }
-  if (account.abiProofBody) {
-    projected['abiProofBody'] = {
-      proofBodyHash: account.abiProofBody.proofBodyHash,
-      lastUpdatedHeight: account.abiProofBody.lastUpdatedHeight,
-    };
-  }
-  if (account.disputeProofBodiesByHash) {
-    projected['disputeProofBodiesByHash'] = Object.keys(account.disputeProofBodiesByHash)
-      .sort(compareStableText);
   }
   return projected;
 };

@@ -1,24 +1,20 @@
-import { haltRuntimeFailure } from "../errors/failure-taxonomy";
-
 import { ethers } from 'ethers';
 import type { AccountReplica } from '../../types/account';
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository';
 import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
 import {
   sanitizeOptionalDisputeArgument,
   type OptionalDisputeArgumentWarning,
 } from '../../jurisdiction/machine/batch';
-import {
-  cloneDisputeArgumentSnapshot,
-  type DisputeArgumentSide,
-  type DisputeArgumentSnapshot,
-} from './argument-snapshot';
+export type DisputeArgumentSide = 'left' | 'right';
 
-export type {
-  DisputeArgumentSide,
-  DisputeArgumentSnapshot,
-} from './argument-snapshot';
+export type DisputeArgumentPlan = Readonly<{
+  paymentHashlocks: readonly string[];
+  leftSwapOfferIds: readonly string[];
+  rightSwapOfferIds: readonly string[];
+  leftPullIds: readonly string[];
+  rightPullIds: readonly string[];
+}>;
 
 const MAX_FILL_RATIO = 0xffff;
 
@@ -60,11 +56,11 @@ const wrapTransformerArgs = (args: string, canonicalArgumentClauseCount: number)
 
 const buildPendingSwapFillRatios = (
   account: AccountReplica,
-  snapshot: DisputeArgumentSnapshot,
+  plan: DisputeArgumentPlan,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
   const planned = new Set(
-    [...snapshot.plan.leftSwapOfferIds, ...snapshot.plan.rightSwapOfferIds].map(asOfferId),
+    [...plan.leftSwapOfferIds, ...plan.rightSwapOfferIds].map(asOfferId),
   );
   // A resolve can arrive after this side has already built an optimistic frame.
   // Therefore the Account machine itself is the durable evidence source: first
@@ -86,23 +82,19 @@ const hasArgumentData = (fillRatios: number[], secrets: string[]): boolean => {
   return fillRatios.some((ratio) => ratio > 0) || secrets.length > 0;
 };
 
-export function captureDisputeArgumentSnapshot(
+export function buildCurrentDisputeArgumentPlan(
   account: AccountReplica,
-  proofbodyHash: string,
-  nonce: number,
-  proposerIsLeft: boolean,
-  proofBodyStruct: ProofBodyStruct,
-): DisputeArgumentSnapshot {
-  // Capture the positional argument plan at the same moment the proof body is
-  // signed. Later dispute code must follow this plan; current account maps may
-  // have deleted or reordered swaps/pulls by then.
+): DisputeArgumentPlan {
+  // Dispute preparation freezes the Account before submission. Therefore the
+  // one live AccountState is the positional authority until finality. Retaining
+  // a historical plan here would create a second, potentially divergent state.
   //
-  // We keep runtime IDs only in this off-chain snapshot. Solidity receives
+  // We keep runtime IDs only in this derived off-chain plan. Solidity receives
   // compact positional arrays because pushing offerId/pullId strings into the
   // jurisdiction would burn gas and freeze runtime bookkeeping into the ABI.
   //
   // Cross-j offers are intentionally excluded here: their safety is represented
-  // by pull hash-ladders and route-level receipts, not same-j swap fill ratios.
+  // by pull hash-ladders, not same-j swap fill ratios.
   const paymentHashlocks = sortTransformerEntries((account.state.locks ?? new Map()).entries())
     .map(([, lock]) => String(lock.hashlock));
   const leftSwapOfferIds: string[] = [];
@@ -118,39 +110,11 @@ export function captureDisputeArgumentSnapshot(
     if (pull.amount >= 0n) leftPullIds.push(pullId);
     else rightPullIds.push(pullId);
   }
-  return {
-    proofbodyHash,
-    nonce,
-    proposerIsLeft,
-    side: account.state.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
-    proofBodyStruct,
-    plan: { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds },
-  };
+  return { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds };
 }
 
-export function storeDisputeArgumentSnapshot(
+export function buildDisputeArgumentsFromState(
   account: AccountReplica,
-  snapshot: DisputeArgumentSnapshot,
-): void {
-  account.disputeArgumentSnapshotsByHash = {
-    ...(account.disputeArgumentSnapshotsByHash ?? {}),
-    [snapshot.proofbodyHash]: cloneDisputeArgumentSnapshot(snapshot),
-  };
-}
-
-export function requireDisputeArgumentSnapshot(
-  account: AccountReplica,
-  proofbodyHash: string,
-  context: string,
-): DisputeArgumentSnapshot {
-  const snapshot = account.disputeArgumentSnapshotsByHash?.[proofbodyHash];
-  if (!snapshot) throw haltRuntimeFailure("DISPUTE_ARGUMENT_SNAPSHOT_MISSING", `DISPUTE_ARGUMENT_SNAPSHOT_MISSING:${context}:${proofbodyHash}`);
-  return snapshot;
-}
-
-export function buildDisputeArgumentsFromSnapshot(
-  account: AccountReplica,
-  proofbodyHash: string,
   options: { secretsSide: DisputeArgumentSide | 'none' },
   secrets: readonly string[],
 ): {
@@ -158,17 +122,10 @@ export function buildDisputeArgumentsFromSnapshot(
   rightArguments: string;
   warnings: readonly OptionalDisputeArgumentWarning[];
 } {
-  // Fail closed when the exact signed proof body has no argument snapshot. A
-  // live rebuild would be a rehydration bug and can pair wrong positional
-  // swap/pull arguments with an old proof body.
-  //
-  // This fail-fast rule is runtime-local. Once bytes reach Solidity, malformed
-  // dynamic wrappers become empty evidence. The signed transformer still
-  // decides whether empty evidence satisfies the parties' dispute program.
-  const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
-  const fillRatios = buildPendingSwapFillRatios(account, snapshot);
-  const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
-  const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
+  const plan = buildCurrentDisputeArgumentPlan(account);
+  const fillRatios = buildPendingSwapFillRatios(account, plan);
+  const leftFillRatios = plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
+  const rightFillRatios = plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const leftSecrets = options.secretsSide === 'left' ? [...secrets] : [];
   const rightSecrets = options.secretsSide === 'right' ? [...secrets] : [];
   const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets);
@@ -176,22 +133,22 @@ export function buildDisputeArgumentsFromSnapshot(
   // The signed builder emits a dense payment→swap prefix and then the pull
   // clause. Both non-pull clauses consume the same compact Arguments tuple but
   // ignore the irrelevant half (payments ignore ratios; swaps ignore secrets).
-  // Derive arity from the signed snapshot plan, never mutable live Account
-  // maps. Pulls and user subcontracts receive no trailing argument slots.
+  // Derive arity from the frozen AccountState plan. Pulls and user
+  // subcontracts receive no trailing argument slots.
   const canonicalArgumentClauseCount =
-    Number(snapshot.plan.paymentHashlocks.length > 0)
-    + Number(snapshot.plan.leftSwapOfferIds.length + snapshot.plan.rightSwapOfferIds.length > 0);
+    Number(plan.paymentHashlocks.length > 0)
+    + Number(plan.leftSwapOfferIds.length + plan.rightSwapOfferIds.length > 0);
   const left = sanitizeOptionalDisputeArgument(
     hasArgumentData(leftFillRatios, leftSecrets)
       ? wrapTransformerArgs(leftArgs, canonicalArgumentClauseCount)
       : '0x',
-    'dispute.snapshot.left',
+    'dispute.state.left',
   );
   const right = sanitizeOptionalDisputeArgument(
     hasArgumentData(rightFillRatios, rightSecrets)
       ? wrapTransformerArgs(rightArgs, canonicalArgumentClauseCount)
       : '0x',
-    'dispute.snapshot.right',
+    'dispute.state.right',
   );
   return {
     leftArguments: left.value,

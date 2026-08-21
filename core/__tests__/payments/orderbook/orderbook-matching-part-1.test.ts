@@ -31,7 +31,6 @@ import { PersistentAccountStateMap } from '../../../account/state/persistent-sta
 import {
   accountTransitionView,
   beginAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
@@ -165,14 +164,12 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
       byLeft: true,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: {
       fromEntity: firstOffer?.fromEntity ?? HUB_ENTITY,
       toEntity: firstOffer?.toEntity ?? FIXTURE_PEER,
       nextProofNonce: 0,
     },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: {
       rebalance: {
@@ -192,10 +189,10 @@ const applyFixtureSwapResolve = async (
 ) => {
   const owner = beginAccountTransition(
     account,
-    createAccountTransitionKey(account, {
+    {
       purpose: 'orderbook-matching-fixture',
       offerId: tx.data.offerId,
-    }),
+    },
   );
   try {
     const result = await handleSwapResolve(accountTransitionView(owner), tx, byLeft, 1);

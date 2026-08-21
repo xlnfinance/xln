@@ -8,6 +8,7 @@ import { Buffer } from '../../support/platform-crypto';
 import {
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_SNAPSHOT_ACCOUNT,
   encodeHeight,
@@ -28,7 +29,9 @@ const snapshotAccountKey = (height: number, liveKey: Buffer): Buffer => {
 };
 
 const isAccountGraphKey = (key: Buffer): boolean =>
-  key[0] === KEY_LIVE_ACCOUNT_BRANCH || key[0] === KEY_LIVE_ACCOUNT_LEAF;
+  key[0] === KEY_LIVE_ACCOUNT_FIELD ||
+  key[0] === KEY_LIVE_ACCOUNT_BRANCH ||
+  key[0] === KEY_LIVE_ACCOUNT_LEAF;
 
 const snapshotKey = (height: number, liveKey: Buffer): Buffer =>
   liveKey[0] === KEY_LIVE_ACCOUNT

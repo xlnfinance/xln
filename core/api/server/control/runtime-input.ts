@@ -1,7 +1,6 @@
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
-import type { createRuntimeIngressReceiptStore } from '../../../runtime/mempool/ingress-receipts';
 import type { parseTaggedControlBody } from './auth';
 import type { enqueueRuntimeInput } from '../../../runtime';
 import { decodeRuntimeInput } from '../../../runtime/decode';
@@ -10,9 +9,6 @@ type RuntimeInputControlDeps = {
   enqueueRuntimeInput: typeof enqueueRuntimeInput;
   validateRuntimeInputAdmission(env: RuntimeReplica, runtimeInput: RuntimeInput): void;
   parseTaggedControlBody: typeof parseTaggedControlBody;
-  receipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
-  getCurrentRuntimeHeight(env: RuntimeReplica | null): number;
-  buildStatusUrl(id: string): string;
 };
 
 export const handleRuntimeInputControl = async (
@@ -36,16 +32,9 @@ export const handleRuntimeInputControl = async (
     }
     deps.validateRuntimeInputAdmission(env, runtimeInput);
     deps.enqueueRuntimeInput(env, runtimeInput);
-    const receipt = deps.receipts.register({
-      kind: 'control-runtime-input',
-      counts: {
-        runtimeTxs: runtimeTxs.length,
-        entityInputs: entityInputs.length,
-        jInputs: jInputs.length,
-      },
-      enqueuedHeight: deps.getCurrentRuntimeHeight(env),
-      runtimeInput,
-    });
+    // Queue admission is intentionally best-effort. Financial completion is
+    // proven only by the resulting Entity/Account state and bilateral ACK;
+    // never reintroduce transport receipts or a parallel delivery protocol.
     return new Response(
       serializeTaggedJson({
         ok: true,
@@ -54,8 +43,6 @@ export const handleRuntimeInputControl = async (
           entityInputs: entityInputs.length,
           jInputs: jInputs.length,
         },
-        receipt,
-        statusUrl: deps.buildStatusUrl(receipt.id),
       }),
       { headers },
     );
@@ -65,34 +52,4 @@ export const handleRuntimeInputControl = async (
       { status: getControlBodyErrorStatus(error, 400), headers },
     );
   }
-};
-
-export const handleRuntimeInputStatus = (
-  receiptId: string,
-  headers: HeadersInit,
-  env: RuntimeReplica | null,
-  deps: Pick<RuntimeInputControlDeps, 'receipts' | 'getCurrentRuntimeHeight'>,
-): Response => {
-  const receipt = deps.receipts.get(receiptId);
-  if (!receipt) {
-    return new Response(
-      serializeTaggedJson({ ok: false, error: 'Runtime input receipt not found' }),
-      { status: 404, headers },
-    );
-  }
-  return new Response(
-    serializeTaggedJson({
-      ok: true,
-      receipt,
-      currentHeight: deps.getCurrentRuntimeHeight(env),
-      runtime: env?.infrastructure
-          ? {
-            halted: env.infrastructure.halted === true,
-            operatorStatus: env.infrastructure.operatorStatus ?? null,
-            fatalDebugPayload: env.infrastructure.fatalDebugPayload ?? null,
-          }
-        : null,
-    }),
-    { headers },
-  );
 };

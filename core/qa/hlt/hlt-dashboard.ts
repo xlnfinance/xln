@@ -10,6 +10,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   readSync,
   renameSync,
   statSync,
@@ -30,6 +31,8 @@ import type {
   HltHubPerfCard,
   HltLedgerRun,
   HltPaymentCard,
+  HltReplayCard,
+  HltReplayTrialCard,
   HltSwapCard,
 } from './hlt-dashboard-preview';
 
@@ -57,6 +60,15 @@ const writeJsonAtomic = (path: string, value: unknown): void => {
 const readJsonFile = (path: string): unknown => {
   if (!existsSync(path)) return null;
   return safeParse(readFileSync(path, 'utf8'));
+};
+
+const readLatestJsonFile = (directory: string): unknown => {
+  if (!existsSync(directory)) return null;
+  const latest = readdirSync(directory)
+    .filter(name => name.endsWith('.json'))
+    .map(name => ({ path: join(directory, name), modifiedAt: statSync(join(directory, name)).mtimeMs }))
+    .sort((left, right) => right.modifiedAt - left.modifiedAt)[0];
+  return latest ? readJsonFile(latest.path) : null;
 };
 
 const decodeLedgerRun = (value: unknown, index: number): HltLedgerRun => {
@@ -170,6 +182,55 @@ const decodeHltPerfSummary = (value: unknown): RuntimePerfSummary => {
   };
 };
 
+const decodeReplayTrial = (value: unknown, index: number): HltReplayTrialCard => {
+  const record = requireBoundaryRecord(value, `HLT_REPLAY_TRIAL_INVALID:${index}`);
+  const numeric = (key: string): number => {
+    const raw = record[key];
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+      throw new Error(`HLT_REPLAY_TRIAL_${key.toUpperCase()}_INVALID:${index}`);
+    }
+    return raw;
+  };
+  const offeredTps = record['offeredTps'];
+  if (offeredTps !== null && (typeof offeredTps !== 'number' || !Number.isFinite(offeredTps) || offeredTps < 1)) {
+    throw new Error(`HLT_REPLAY_TRIAL_OFFERED_INVALID:${index}`);
+  }
+  if (record['equivalent'] !== true) throw new Error(`HLT_REPLAY_TRIAL_NOT_EQUIVALENT:${index}`);
+  return {
+    offeredTps,
+    frames: numeric('frames'),
+    accountInputs: numeric('accountInputs'),
+    accountTxs: numeric('accountTxs'),
+    outboxEnvelopes: numeric('outboxEnvelopes'),
+    elapsedMs: numeric('elapsedMs'),
+    cpuMs: numeric('cpuMs'),
+    accountInputTps: numeric('accountInputTps'),
+    accountTxTps: numeric('accountTxTps'),
+    cpuAccountTxTps: numeric('cpuAccountTxTps'),
+    finalHeight: numeric('finalHeight'),
+    finalPendingOutbox: numeric('finalPendingOutbox'),
+    equivalent: true,
+  };
+};
+
+const decodeReplayCard = (value: unknown): HltReplayCard => {
+  const record = requireBoundaryRecord(value, 'HLT_REPLAY_REPORT_INVALID');
+  if (record['schema'] !== 'xln-hlt-hub-replay-report-v1') throw new Error('HLT_REPLAY_REPORT_SCHEMA_INVALID');
+  const mode = record['mode'];
+  if (mode !== 'max' && mode !== 'fixed' && mode !== 'sweep') throw new Error('HLT_REPLAY_REPORT_MODE_INVALID');
+  const trials = record['trials'];
+  if (!Array.isArray(trials) || trials.length < 1) throw new Error('HLT_REPLAY_REPORT_TRIALS_INVALID');
+  const createdAt = record['createdAt'];
+  const recordingManifestHash = record['recordingManifestHash'];
+  if (typeof createdAt !== 'number' || !Number.isSafeInteger(createdAt) || createdAt < 0) {
+    throw new Error('HLT_REPLAY_REPORT_CREATED_AT_INVALID');
+  }
+  if (typeof recordingManifestHash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(recordingManifestHash)) {
+    throw new Error('HLT_REPLAY_REPORT_MANIFEST_INVALID');
+  }
+  return { createdAt, recordingManifestHash, mode, trials: trials.map(decodeReplayTrial) };
+};
+
 const hubPerfFromRows = (
   rows: readonly RuntimePerfRow[],
   deliveredPayments: number | null,
@@ -235,6 +296,7 @@ type HltDashboardSnapshot = Readonly<{
   swap: HltSwapCard | null;
   perf: RuntimePerfSummary;
   hubPerf: readonly HltHubPerfCard[];
+  replay: HltReplayCard | null;
 }>;
 
 export const readHltDashboardSnapshot = (root = process.cwd()): HltDashboardSnapshot => {
@@ -242,6 +304,7 @@ export const readHltDashboardSnapshot = (root = process.cwd()): HltDashboardSnap
   const paymentRaw = readJsonFile(join(directory, 'latest-payment.json'));
   const swapRaw = readJsonFile(join(directory, 'latest-swap.json'));
   const perfRaw = readJsonFile(join(directory, 'latest-perf.json'));
+  const replayRaw = readLatestJsonFile(join(directory, 'replays'));
   const payment = paymentRaw === null ? null : paymentCardFromReport(paymentRaw);
   const swap = swapRaw === null ? null : swapCardFromReport(swapRaw);
   const perf = perfRaw === null
@@ -253,5 +316,6 @@ export const readHltDashboardSnapshot = (root = process.cwd()): HltDashboardSnap
     swap,
     perf,
     hubPerf: hubPerfFromRows(perf.rows, payment?.deliveredPayments ?? null),
+    replay: replayRaw === null ? null : decodeReplayCard(replayRaw),
   };
 };

@@ -6,7 +6,6 @@ import { ethers } from 'ethers';
 import { applyEntityTx } from '../../../entity/tx/apply';
 
 import { applyAccountTx } from '../../../account/tx/apply';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -828,7 +827,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route, status: 'resting' },
     });
-    recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     addReplica(env, state, signer);
     const replica = env.state.eReplicas.get(`${state.entityId}:${signer}`)!;
 
@@ -1330,7 +1328,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdHeight: 0,
         crossJurisdiction: { ...route, status: 'resting' },
       });
-      recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     }
 
     addReplica(env, sourceUserState, sourceUserSigner);
@@ -1364,20 +1361,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     const accountInputOutput = hubResult.outputs.find(
       output =>
         output.entityId === sourceUser &&
-        output.entityTxs?.some(
-          tx => tx.type === 'consensusOutput' && tx.data.entityTxs.some(nested => nested.type === 'accountInput'),
-        ),
+        output.entityTxs?.some(tx => tx.type === 'accountInput'),
     );
-    const certifiedAccountInput = accountInputOutput?.entityTxs?.[0];
-    expect(certifiedAccountInput?.type).toBe('consensusOutput');
-    expect(
-      certifiedAccountInput?.type === 'consensusOutput' ? certifiedAccountInput.data.entityTxs[0]?.type : undefined,
-    ).toBe('accountInput');
-    expect(
-      certifiedAccountInput?.type === 'consensusOutput'
-        ? (certifiedAccountInput.data.entityTxs[0]?.data as any)?.toEntityId
-        : undefined,
-    ).toBe(sourceUser);
+    const rawAccountInput = accountInputOutput?.entityTxs?.[0];
+    expect(rawAccountInput?.type).toBe('accountInput');
+    expect(rawAccountInput?.type === 'accountInput' ? rawAccountInput.data.toEntityId : undefined)
+      .toBe(sourceUser);
 
     const userReplica = env.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)!;
     const userResult = await applyEntityInput(env, userReplica, {
@@ -1393,9 +1382,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       userResult.outputs.some(
         output =>
           output.entityId === sourceHub &&
-          output.entityTxs?.some(
-            tx => tx.type === 'consensusOutput' && tx.data.entityTxs.some(nested => nested.type === 'accountInput'),
-          ),
+          output.entityTxs?.some(tx => tx.type === 'accountInput'),
       ),
     ).toBe(true);
   });
@@ -1472,7 +1459,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdHeight: 0,
         crossJurisdiction: { ...route, status: 'resting' },
       });
-      recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     }
 
     addReplica(env, sourceUserState, sourceUserSigner);
@@ -1505,15 +1491,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     const accountInputOutput = hubResult.outputs.find(
       output =>
         output.entityId === sourceUser &&
-        output.entityTxs?.some(
-          tx => tx.type === 'consensusOutput' && tx.data.entityTxs.some(nested => nested.type === 'accountInput'),
-        ),
+        output.entityTxs?.some(tx => tx.type === 'accountInput'),
     );
-    const certifiedAccountInput = accountInputOutput?.entityTxs?.[0];
-    expect(certifiedAccountInput?.type).toBe('consensusOutput');
-    expect(
-      certifiedAccountInput?.type === 'consensusOutput' ? certifiedAccountInput.data.entityTxs[0]?.type : undefined,
-    ).toBe('accountInput');
+    const rawAccountInput = accountInputOutput?.entityTxs?.[0];
+    expect(rawAccountInput?.type).toBe('accountInput');
 
     const userReplica = env.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)!;
     const userResult = await applyEntityInput(env, userReplica, {
@@ -1598,7 +1579,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route },
     });
-    recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     account.state.pulls = new Map([
       [
         route.sourcePull!.pullId,

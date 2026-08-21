@@ -24,6 +24,8 @@ import {
   type AccountHandlerResult,
 } from './lifecycle/result';
 import { addMessage } from '../../../frame-events';
+import { safeStringify } from '../../../../protocol/serialization';
+import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 
 export {
   canProcessFrozenAccountInput,
@@ -112,13 +114,23 @@ const applyAccountInputPhases = async (
     );
   } catch (error) {
     if (!(error instanceof AccountPeerEvidenceError)) throw error;
-    accountHandlerLog.warn('input.rejected', {
+    const dump = safeStringify({
+      input,
+      entityId: state.entityId,
+      entityHeight: state.height,
+      rejection: { code: error.code, message: error.message },
+    });
+    accountHandlerLog.error('input.peer_evidence_rejected', {
       code: error.code,
       from: shortId(input.fromEntityId),
       error: error.message,
+      dump,
     });
-    addMessage(state, `⚠️ Rejected account input: ${error.message}`);
-    return buildAccountHandlerResult(state, effects);
+    addMessage(state, `❌ Rejected account input: ${error.message}`);
+    throw haltRuntimeFailure(
+      'FRAME_CONSENSUS_FAILED',
+      `ACCOUNT_PEER_EVIDENCE_REJECTED:${error.code}:${error.message}:dump=${dump}`,
+    );
   }
   const { account, counterpartyId, createdAccount } = resolution;
   checkpointProfile('accountResolve');

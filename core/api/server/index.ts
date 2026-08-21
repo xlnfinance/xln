@@ -41,7 +41,6 @@ import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth 
 import { resolveSocketPeerAddress } from './health/redaction';
 import { listLocalControlEntities } from './control/entities';
 import { getAccountReplica, getEntityReplicaById } from './entities/lookup';
-import { createRuntimeIngressReceiptStore } from '../../runtime/mempool/ingress-receipts';
 import { createRelayStore, pushDebugEvent, removeClient } from '../../network/relay/store';
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
@@ -109,7 +108,8 @@ import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health/api'
 import { handleRuntimeRpcProxy } from './rpc/proxy';
 import { requiresLocalNodeOperator } from './control/node-http-access';
 import { handleP2PControl } from './control/p2p';
-import { handleRuntimeInputControl, handleRuntimeInputStatus } from './control/runtime-input';
+import { handleGossipProfileCounterparties } from './control/gossip-counterparties';
+import { handleRuntimeInputControl } from './control/runtime-input';
 import { handleSignerRegistration } from './control/signer';
 import { createStackManagerController } from './control/stack-manager';
 import { getConfiguredOfficialFoundationSignerId } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
@@ -140,7 +140,6 @@ let cachedHealthResponse: RuntimeHealthCacheEntry | null = null;
 let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | null = null;
 
 let processGuardsInstalled = false;
-const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 const serverLog = createStructuredLogger('server');
 const assistantProxy = createAssistantProxyFromEnv(serverLog);
 const localPairingController = createLocalPairingController({
@@ -200,8 +199,6 @@ const logOneShot = (key: string, message: string, fields: Record<string, unknown
 };
 
 const currentRuntimeHeight = (env: RuntimeReplica | null): number => Math.max(0, Math.floor(Number(env?.state.height ?? 0)));
-
-const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
 const SERVER_RUNTIME_SEED = (() => {
   const seed = process.env['XLN_RUNTIME_SEED']?.trim();
@@ -415,9 +412,6 @@ const cleanupRpcMarketSubscription = (ws: RelaySocket): void => marketSubscripti
 
 const handleRpcMessage = createServerRpcMessageHandler({
   validateRuntimeInputAdmission,
-  registerRuntimeInputReceipt: receipt => runtimeIngressReceipts.register(receipt),
-  readRuntimeInputReceipt: id => runtimeIngressReceipts.get(id),
-  buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
   deriveBrainVault: (env, input, options) => brainVaultOwnerController.deriveAndInstall(env, input, options),
   revealBrainVaultMnemonic: () => brainVaultOwnerController.revealMnemonic(),
 });
@@ -455,6 +449,18 @@ const maybeHandleControlApi = async (
     );
   }
 
+  if (pathname === '/api/control/gossip-profile-counterparties' && req.method === 'POST') {
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    return handleGossipProfileCounterparties(
+      req,
+      env,
+      headers,
+      entityId => relayStore.gossipProfiles.get(entityId)?.profile,
+    );
+  }
+
   if (pathname === '/api/control/signers/register' && req.method === 'POST') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
@@ -472,33 +478,12 @@ const maybeHandleControlApi = async (
         enqueueRuntimeInput,
         validateRuntimeInputAdmission,
         parseTaggedControlBody,
-        receipts: runtimeIngressReceipts,
-        getCurrentRuntimeHeight: currentRuntimeHeight,
-        buildStatusUrl: runtimeInputStatusUrl,
       });
     }
-    // The response records enqueuedHeight. Holding a committed-read lease
-    // prevents an in-place H+1 candidate from leaking through that metadata;
-    // enqueue itself is synchronous and cannot deadlock the Runtime writer.
-    return withRuntimeCommittedRead(env, () =>
-      handleRuntimeInputControl(req, headers, env, {
-        enqueueRuntimeInput,
-        validateRuntimeInputAdmission,
-        parseTaggedControlBody,
-        receipts: runtimeIngressReceipts,
-        getCurrentRuntimeHeight: currentRuntimeHeight,
-        buildStatusUrl: runtimeInputStatusUrl,
-      }));
-  }
-
-  const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
-  if (runtimeInputStatusMatch && req.method === 'GET') {
-    const authError = requireDaemonControlAuth(req, env);
-    if (authError) return authError;
-    const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
-    return handleRuntimeInputStatus(receiptId, headers, env, {
-      receipts: runtimeIngressReceipts,
-      getCurrentRuntimeHeight: currentRuntimeHeight,
+    return handleRuntimeInputControl(req, headers, env, {
+      enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
+      parseTaggedControlBody,
     });
   }
 
@@ -859,9 +844,7 @@ const maybeHandleFinancialApi = (
       relayStore,
       enqueueRuntimeInput,
       validateRuntimeInputAdmission,
-      registerReceipt: receipt => runtimeIngressReceipts.register(receipt),
       getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
   }
   if (pathname === '/api/credit/request' && req.method === 'POST') {
@@ -872,9 +855,7 @@ const maybeHandleFinancialApi = (
       activeHubEntityIds: relayStore.activeHubEntityIds,
       enqueueRuntimeInput,
       validateRuntimeInputAdmission,
-      registerReceipt: receipt => runtimeIngressReceipts.register(receipt),
       getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
   }
   if (pathname === '/api/lending/state' && req.method === 'GET') {
@@ -1558,9 +1539,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     });
     serverEnv = env;
     bound.session.env = env;
-    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
-      runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
-    });
     serverLog.info('runtime.init.ready', { runtimeId: shortId(env.runtimeId, 10) });
     const runtimeEnv = env;
     const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');

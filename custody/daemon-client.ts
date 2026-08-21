@@ -261,13 +261,6 @@ export class DaemonRpcClient {
     let cursor = accepted.status === 'observed' ? acceptedHeight : acceptedHeight + 1;
     const deadline = Date.now() + COMMIT_WAIT_MS;
     while (Date.now() < deadline) {
-      if (accepted.receipt?.id) {
-        const receipt = await this.withAdapter(false, adapter =>
-          adapter.read<{ status: string }>(`receipt/${encodeURIComponent(accepted.receipt!.id)}`));
-        if (receipt.status === 'expired') {
-          throw new RuntimeAdapterError('E_INTERNAL', 'custody payment command expired before durable commit');
-        }
-      }
       const page = await this.getFrameReceipts({
         fromHeight: cursor,
         limit: 100,
@@ -358,7 +351,6 @@ export class DaemonRpcClient {
       commandId,
       commandSequence: accepted.commandSequence,
       status: accepted.result.status ?? 'pending',
-      requestId: accepted.result.receipt?.id,
     });
 
     const committed = mode === 'instant' || mode === 'async'

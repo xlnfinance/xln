@@ -30,7 +30,10 @@ const parseProfileLines = (logPath: string): Map<string, EventAgg> => {
   for (const line of lines) {
     const m = line.match(/\[(INFO|DEBUG)\]\[([^\]]+)\] ([\w.]+) (\{.*\})/);
     if (!m) continue;
-    const [, , scope, message, jsonRaw] = m;
+    const scope = m[2];
+    const message = m[3];
+    const jsonRaw = m[4];
+    if (!scope || !message || !jsonRaw) continue;
     if (!message.endsWith('.profile')) continue;
     let f: Record<string, unknown>;
     try { f = JSON.parse(jsonRaw); } catch { continue; }

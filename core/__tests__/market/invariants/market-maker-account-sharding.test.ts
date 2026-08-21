@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK,
   MARKET_MAKER_LEVELS_PER_SIDE,
   buildMarketMakerOfferSpecs,
+  mergeMarketMakerQuoteEntityInputs,
   shouldInitiateMarketMakerAccountOpen,
 } from '../../../orchestrator/market-maker/node/mm-node-core';
 import { planMarketMakerIdentityLabels } from '../../../orchestrator/mesh/mesh-common';
@@ -49,8 +49,27 @@ describe('market-maker Account sharding', () => {
       .toBe(pairs.length * MARKET_MAKER_LEVELS_PER_SIDE * 2);
   });
 
-  test('admits at most five quote transactions per Account frame', () => {
-    expect(MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK).toBe(5);
+  test('merges all bootstrap books into one Entity input per MM Entity', () => {
+    const tx = (offerId: string) => ({
+      type: 'placeSwapOffer' as const,
+      data: {
+        counterpartyEntityId: HUB,
+        offerId,
+        giveTokenId: 1,
+        giveTokenDecimals: 18,
+        giveAmount: 1n,
+        wantTokenId: 2,
+        wantTokenDecimals: 18,
+        wantAmount: 1n,
+        maxFee: 0n,
+        minNetReceive: 1n,
+      },
+    });
+    const [merged] = mergeMarketMakerQuoteEntityInputs([
+      [{ entityId: entity('11'), signerId: SIGNER, entityTxs: [tx('one')] }],
+      [{ entityId: entity('11'), signerId: SIGNER, entityTxs: [tx('two')] }],
+    ]);
+    expect(merged?.entityTxs?.map(item => item.data.offerId)).toEqual(['one', 'two']);
   });
 
   test('pair shard initiates its requested Account regardless of id ordering', () => {

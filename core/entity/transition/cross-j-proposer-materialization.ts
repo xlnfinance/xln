@@ -42,8 +42,7 @@ export const entityTxContainsAccountTransition = (tx: EntityTx): boolean =>
   nestedTxs(tx).some(
     nested =>
       nested.type === 'crossJurisdictionFillNotice' ||
-      nested.type === 'accountInput' ||
-      (nested.type === 'consensusOutput' && nested.data.entityTxs.some(outputTx => outputTx.type === 'accountInput')),
+      nested.type === 'accountInput',
   );
 
 export const entityTxContainsCrossJMaterialization = (tx: EntityTx): boolean =>

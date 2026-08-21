@@ -292,7 +292,6 @@ const describeAccount = (account: AccountReplica | undefined) => {
     pendingFrameHeight: account.pendingFrame?.height ?? null,
     pendingFrameTxs: summarizeTxs(account.pendingFrame?.accountTxs),
     mempoolTxs: summarizeTxs(account.mempool),
-    pendingSignatures: account.pendingSignatures?.length ?? 0,
     locks: Array.from(account.state.locks.values()).map(lock => ({
       hashlock: lock.hashlock.slice(0, 10),
       amount: lock.amount.toString(),

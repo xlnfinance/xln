@@ -61,37 +61,53 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
     assertRuntimeCommandReady(env);
     if (routes.length === 0) throw new Error('CROSS_J_INTENT_BATCH_EMPTY');
     const prepared = routes.map(route => prepareCrossJurisdictionIntent(dependencies, env, route));
-    const target = prepared.at(0);
-    if (!target) throw new Error('CROSS_J_INTENT_BATCH_EMPTY');
-    const sourceEntityId = target.route.source.entityId;
-    const targetEntityId = target.route.target.counterpartyEntityId;
-    if (prepared.some(intent =>
-      intent.route.source.entityId !== sourceEntityId ||
-      intent.route.target.counterpartyEntityId !== targetEntityId ||
-      intent.sourceSignerId !== target.sourceSignerId ||
-      intent.targetSignerId !== target.targetSignerId
-    )) throw new Error('CROSS_J_INTENT_BATCH_OWNER_MISMATCH');
-    // One RuntimeInput durably binds the full quote batch across both user
-    // siblings. Target authorization remains first; no source Account money
-    // can move until both exact route arrays commit.
-    dependencies.enqueueRuntimeInputs(env, [
-      {
-        entityId: targetEntityId,
-        signerId: target.targetSignerId,
-        entityTxs: prepared.map(intent => ({
+    const groups = new Map<string, PreparedCrossJurisdictionIntent[]>();
+    for (const intent of prepared) {
+      const key = [
+        intent.route.source.entityId,
+        intent.route.target.counterpartyEntityId,
+        intent.sourceSignerId,
+        intent.targetSignerId,
+      ].join(':');
+      const group = groups.get(key) ?? [];
+      group.push(intent);
+      groups.set(key, group);
+    }
+    // One RuntimeInput durably binds every cross-J book. Each owner cohort is
+    // kept as an adjacent target/source pair because Runtime admission promotes
+    // that pair atomically; different cohorts may share the same R-frame. Never
+    // loop `submit -> wait` per route/book: every Entity first admits its whole
+    // route array, then its end-of-input Account flush proposes once per Account.
+    const compareText = (left: string, right: string): number =>
+      left < right ? -1 : left > right ? 1 : 0;
+    const entityInputs = [...groups.entries()]
+      .sort(([left], [right]) => compareText(left, right))
+      .flatMap(([, unsorted]) => {
+        const intents = [...unsorted].sort((left, right) =>
+          compareText(left.route.orderId, right.route.orderId));
+        const target = intents[0];
+        if (!target) throw new Error('CROSS_J_INTENT_BATCH_GROUP_EMPTY');
+        const txs = intents.map(intent => ({
           type: 'prepareCrossJurisdictionSwap' as const,
           data: { route: structuredClone(intent.route) },
-        })),
-      },
-      {
-        entityId: sourceEntityId,
-        signerId: target.sourceSignerId,
-        entityTxs: prepared.map(intent => ({
-          type: 'prepareCrossJurisdictionSwap' as const,
-          data: { route: structuredClone(intent.route) },
-        })),
-      },
-    ], undefined, undefined, env.state.timestamp);
+        }));
+        return [{
+          entityId: target.route.target.counterpartyEntityId,
+          signerId: target.targetSignerId,
+          entityTxs: txs.map(tx => structuredClone(tx)),
+        }, {
+          entityId: target.route.source.entityId,
+          signerId: target.sourceSignerId,
+          entityTxs: txs,
+        }];
+      });
+    dependencies.enqueueRuntimeInputs(
+      env,
+      entityInputs,
+      undefined,
+      undefined,
+      env.state.timestamp,
+    );
     return prepared.map(intent => ({ route: intent.route }));
   };
 

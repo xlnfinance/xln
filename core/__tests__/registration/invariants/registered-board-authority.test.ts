@@ -17,7 +17,6 @@ import {
 import { applyEntityTx } from '../../../entity/tx/apply';
 import {
   buildConsensusOutputOriginForState,
-  assertCertifiedEntityOutputWitnesses,
   hashCertifiedEntityOutputSemantic,
   normalizeConsensusOutputBoardAuthority,
   resolveConsensusOutputBoardAuthority,
@@ -1275,21 +1274,13 @@ describe('registered Entity certified board authority', () => {
       issuedFrameHeight: 7,
       issuedFrameHash: certifiedFrameHash,
     });
-    const certifiedResealOutput = resealCommitted.outputs.find(output => output.entityTxs?.some(tx =>
-      tx.type === 'consensusOutput' && tx.data.entityTxs.some(nested =>
-        nested.type === 'accountInput' && nested.data.kind === 'board_reseal')));
-    const certifiedReseal = certifiedResealOutput?.entityTxs?.find(tx =>
-      tx.type === 'consensusOutput' && tx.data.entityTxs.some(nested =>
-        nested.type === 'accountInput' && nested.data.kind === 'board_reseal'));
-    if (!certifiedReseal || certifiedReseal.type !== 'consensusOutput') {
-      throw new Error('TEST_BOARD_ROTATION_CERTIFIED_RESEAL_MISSING');
-    }
-    const nestedReseal = certifiedReseal.data.entityTxs.find(tx =>
-      tx.type === 'accountInput' && tx.data.kind === 'board_reseal');
-    if (!nestedReseal || nestedReseal.type !== 'accountInput' || nestedReseal.data.kind !== 'board_reseal') {
+    const rawReseal = resealCommitted.outputs
+      .flatMap(output => output.entityTxs ?? [])
+      .find(tx => tx.type === 'accountInput' && tx.data.kind === 'board_reseal');
+    if (!rawReseal || rawReseal.type !== 'accountInput' || rawReseal.data.kind !== 'board_reseal') {
       throw new Error('TEST_BOARD_ROTATION_RESEAL_INPUT_MISSING');
     }
-    expect(nestedReseal.data.reseal).toEqual(expect.objectContaining({
+    expect(rawReseal.data.reseal).toEqual(expect.objectContaining({
       boardActivationJHeight: 3,
       boardActivationLogIndex: 0,
       height: 7,
@@ -1302,20 +1293,20 @@ describe('registered Entity certified board authority', () => {
         hanko: expect.any(String),
       }),
     }));
-    expect(resealedAccount.currentFrameHanko).toBe(nestedReseal.data.reseal.frameHanko);
+    expect(resealedAccount.currentFrameHanko).toBe(rawReseal.data.reseal.frameHanko);
     expect(resealedAccount.currentDisputeProofHanko).toBe(
-      nestedReseal.data.reseal.disputeSeal!.hanko,
+      rawReseal.data.reseal.disputeSeal!.hanko,
     );
     env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, resealCommitted.workingReplica);
     expect((await verifyHankoForHash(
-      nestedReseal.data.reseal.frameHanko!,
+      rawReseal.data.reseal.frameHanko!,
       certifiedFrameHash,
       registeredEntityId,
       env,
       { registeredBoardHash: newBoard, allowPreviousBoard: false },
     )).valid).toBe(true);
     expect((await verifyHankoForHash(
-      nestedReseal.data.reseal.disputeSeal!.hanko!,
+      rawReseal.data.reseal.disputeSeal!.hanko!,
       certifiedDisputeHash,
       registeredEntityId,
       env,
@@ -1761,45 +1752,7 @@ describe('registered Entity certified board authority', () => {
       { allowPreviousBoard: false, observerState: state },
     )).valid).toBe(false);
 
-    const observerBoundWitnesses: EntityTx[] = [{
-      type: 'accountInput',
-      data: {
-        kind: 'frame',
-        fromEntityId: registeredEntityId,
-        toEntityId: staleObserverState.entityId,
-        domain: { chainId: jurisdiction.chainId, depositoryAddress },
-        disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 },
-        proposal: {
-          frame: {
-            height: 1,
-            timestamp: staleObserverState.timestamp,
-            jHeight: 0,
-            accountTxs: [],
-            prevFrameHash: blockHash('00'),
-            accountStateRoot: blockHash('01'),
-            stateHash: profileHash,
-            byLeft: true,
-            deltas: [],
-          },
-          frameHanko: hanko,
-        },
-      },
-    }];
     state.timestamp = previousBoardValidUntil * 1_000;
-    await expect(assertCertifiedEntityOutputWitnesses(
-      observerBoundWitnesses,
-      registeredEntityId,
-      localEnv,
-      staleObserverState,
-      previousBoardHash,
-    )).resolves.toBeUndefined();
-    await expect(assertCertifiedEntityOutputWitnesses(
-      observerBoundWitnesses,
-      registeredEntityId,
-      localEnv,
-      state,
-      currentBoardHash,
-    )).rejects.toThrow('CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID');
 
     const corruptObserver = createEntityFrameCandidateState(staleObserverState);
     corruptObserver.certifiedBoardState = {

@@ -31,6 +31,11 @@ import {
   type DepositoryHankoDomain,
 } from '../../hanko/onchain-domain.ts';
 import { keccakHexHash } from '../crypto/keccak-text';
+import type {
+  ProofBodyStruct,
+  TransformerClauseStruct,
+} from '../../../jurisdictions/typechain-types/Depository.sol/Depository';
+import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/DeltaTransformer.sol/DeltaTransformer';
 
 export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 

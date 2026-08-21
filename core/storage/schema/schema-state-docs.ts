@@ -146,20 +146,19 @@ const validateStorageOrderbookPairDimensions = (value: unknown, code: string): v
 
 const ACCOUNT_REPLICA_REQUIRED = [
   'state', 'status', 'mempool', 'currentFrame', 'currentHeight',
-  'pendingSignatures', 'rollbackCount', 'proofHeader', 'proofBody',
+  'rollbackCount', 'proofHeader',
   'pendingWithdrawals', 'shadow',
 ] as const;
 
 const ACCOUNT_REPLICA_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput',
-  'lastOutboundFrameAck', 'pendingForwards', 'hankoSignature', 'lastRollbackFrameHash',
-  'abiProofBody', 'currentFrameHanko', 'counterpartyFrameHanko', 'boardResealMigration',
+  'lastOutboundFrameAck', 'pendingForwards', 'lastRollbackFrameHash',
+  'currentFrameHanko', 'counterpartyFrameHanko', 'boardResealMigration',
   'counterpartyBoardReseal', 'currentDisputeProofHanko', 'currentDisputeProofNonce',
   'currentDisputeProofBodyHash', 'currentDisputeHash', 'counterpartyDisputeProofHanko',
   'counterpartyDisputeProofNonce', 'counterpartyDisputeProofBodyHash',
   'currentDisputeProofProposerIsLeft', 'counterpartyDisputeProofProposerIsLeft',
-  'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputeProofNoncesByHash',
-  'disputeProofBodiesByHash', 'disputeArgumentSnapshotsByHash', 'disputePrepare',
+  'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputePrepare',
   'activeDispute', 'publicPinned',
 ] as const;
 const ACCOUNT_STATE_REQUIRED = [
@@ -294,15 +293,6 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   const header = requireBoundaryRecord(doc['proofHeader'], `${code}_PROOF_HEADER`);
   requireExactBoundaryKeys(header, ['fromEntity', 'toEntity', 'nextProofNonce'], [], `${code}_PROOF_HEADER_FIELDS`);
   requireBoundaryInteger(header['nextProofNonce'], `${code}_PROOF_NONCE`);
-  const body = requireBoundaryRecord(doc['proofBody'], `${code}_PROOF_BODY`);
-  requireExactBoundaryKeys(body, ['tokenIds', 'deltas'], ['htlcLocks'], `${code}_PROOF_BODY_FIELDS`);
-  const tokenIds = requireStorageArray(body['tokenIds'], `${code}_PROOF_TOKENS`);
-  const deltas = requireStorageArray(body['deltas'], `${code}_PROOF_DELTAS`);
-  if (tokenIds.length !== deltas.length) throw new Error(`${code}_PROOF_LENGTH`);
-  tokenIds.forEach((tokenId, index) => {
-    requireBoundaryInteger(tokenId, `${code}_PROOF_TOKEN_${index}`);
-    requireStorageBigInt(deltas[index], `${code}_PROOF_DELTA_${index}`, INT256_MIN, INT256_MAX);
-  });
   for (const withdrawal of requireStorageMap(doc['pendingWithdrawals'], `${code}_WITHDRAWALS`).values()) {
     requireStorageBigInt(requireBoundaryRecord(withdrawal, `${code}_WITHDRAWAL`)['amount'], `${code}_WITHDRAWAL_AMOUNT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
   }

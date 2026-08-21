@@ -97,7 +97,7 @@ const counterpartyForOwner = (account: AccountReplica, owner: EntityId): EntityI
   throw new Error(`ACCOUNT_TRANSITION_OWNER_MISMATCH:${owner}:${left}:${right}`);
 };
 
-export const createAccountTransitionKey = (
+const createAccountTransitionKey = (
   account: AccountReplica,
   orderedInputPrefix: unknown,
 ): AccountTransitionKey => {
@@ -117,28 +117,15 @@ const requireActive = (overlay: AccountTransitionOverlay): void => {
   }
 };
 
-const requireExactBase = (base: AccountReplica, key: AccountTransitionKey): void => {
-  const owner = toEntityId(base.proofHeader.fromEntity.toLowerCase());
-  const counterparty = counterpartyForOwner(base, owner);
-  const accountId = createAccountPairKey(owner, counterparty);
-  if (owner !== key.entityId || accountId !== key.accountId) {
-    throw new Error(`ACCOUNT_TRANSITION_IDENTITY_MISMATCH:${key.entityId}:${key.accountId}`);
-  }
-  const actualRoot = toStateHash(computeAccountStateRoot(base.state));
-  if (actualRoot !== key.baseRoot) {
-    throw new Error(`ACCOUNT_TRANSITION_BASE_ROOT_MISMATCH:${key.baseRoot}:${actualRoot}`);
-  }
-};
-
 const overlayLog = createStructuredLogger('account.overlay');
 
 export const beginAccountTransition = (
   base: AccountReplica,
-  key: AccountTransitionKey,
-): AccountTransitionOverlay => {
-  requireExactBase(base, key);
-  return new AccountTransitionOverlay(base, key);
-};
+  orderedInputPrefix: unknown,
+): AccountTransitionOverlay => new AccountTransitionOverlay(
+  base,
+  createAccountTransitionKey(base, orderedInputPrefix),
+);
 
 export const accountTransitionView = (overlay: AccountTransitionOverlay): AccountDraftReplica => {
   requireActive(overlay);
@@ -174,7 +161,6 @@ const ACCOUNT_LIVE_ENVELOPE = new Set<keyof AccountReplica>([
   'currentFrame',
   'currentHeight',
   'pendingFrame',
-  'pendingSignatures',
   'pendingAccountInput',
   'lastOutboundFrameAck',
   'currentFrameHanko',
@@ -198,7 +184,7 @@ export const publishAccountOverlay = (
     if (ACCOUNT_LIVE_ENVELOPE.has(key)) continue;
     const value = prepared[key];
     if (value === undefined) delete live[key];
-    else (live as Record<string, unknown>)[key] = value;
+    else (live as unknown as Record<string, unknown>)[key] = value;
   }
   overlayLog.debug('overlay.folded', {
     from: live.proofHeader.fromEntity.slice(-8),

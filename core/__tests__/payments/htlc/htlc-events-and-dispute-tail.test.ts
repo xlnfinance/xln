@@ -62,10 +62,8 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       byLeft: true,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: { rebalance: {
       policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),

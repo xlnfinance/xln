@@ -2,7 +2,6 @@ import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityReplica } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
-import { canonicalizeProfile } from '../../profile';
 import { compareStableText } from '../../../protocol/serialization';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { getPrevFrameHash } from '../frame/lineage';
@@ -85,8 +84,10 @@ export const materializeEntityInfraContext = async (
   const needsHtlcInfra = htlcTxs.length > 0;
   const getProfiles = (env as ProposerInfraContext).gossip?.getProfiles;
   if (needsHtlcInfra && !getProfiles) throw new Error('ENTITY_INFRA_GOSSIP_UNAVAILABLE');
-  // Gossip already stores canonicalizeProfile() outputs. This call is identity
-  // on cache hit; a miss means a freshly built (not yet ingested) object.
+  // Gossip admission already stores canonicalizeProfile() outputs. Re-running
+  // canonicalize + parse here encoded every profile twice per fit attempt; at
+  // 1000 users that made proposal sizing walk the whole mesh repeatedly.
+  // Validators still parse every profile committed into the frame context.
   const profiles = needsHtlcInfra ? getProfiles!() : [];
   const routeEntityIds = new Set(htlcTxs.flatMap(tx =>
     tx.type === 'htlcPayment' ? tx.data.route.map(value => String(value).toLowerCase()) : []));
@@ -98,8 +99,7 @@ export const materializeEntityInfraContext = async (
   // unrouted payment falls back to the full set.
   const originatedPeerIds = new Set<string>([entityId, ...routeEntityIds]);
   const canonicalProfiles = profiles
-    .filter(profile => needsRouteResolution || originatedPeerIds.has(String(profile.entityId).toLowerCase()))
-    .map(profile => canonicalizeProfile(profile));
+    .filter(profile => needsRouteResolution || originatedPeerIds.has(String(profile.entityId).toLowerCase()));
   const observeOnlineEntityIds = env.infrastructure?.observeOnlineEntityIds;
   if (needsHtlcInfra && !observeOnlineEntityIds) throw new Error('ENTITY_INFRA_LIVENESS_OBSERVER_UNAVAILABLE');
   const observedOnline = new Map<string, boolean>();

@@ -2,7 +2,6 @@ import { isLeftEntity } from '../../protocol/identity/entity-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import {
   FinancialDataCorruptionError,
-  validateArray,
   validateObject,
   validateString,
 } from '../../protocol/boundary/validation-primitives';
@@ -68,18 +67,6 @@ const validateLendingIntents = (value: unknown, context: string): void => {
       });
     }
   }
-};
-
-const validatePendingSignatures = (
-  account: Record<string, unknown>,
-  context: string,
-): void => {
-  const signatures = validateArray(
-    account['pendingSignatures'],
-    `${context}.pendingSignatures`,
-  );
-  signatures.forEach((signature, index) =>
-    validateString(signature, `${context}.pendingSignatures[${index}]`));
 };
 
 const validateRebalanceState = (
@@ -166,7 +153,6 @@ function assertAccountReplica(
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountResend(account, context);
-  validatePendingSignatures(account, context);
   requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);
   assertAccountJClaimAccumulatorState(
     state['leftPendingJClaims'] as AccountReplica['state']['leftPendingJClaims'],

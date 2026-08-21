@@ -296,108 +296,12 @@ export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
-// Bootstrap is full readiness: every configured same-chain and cross route level
-// must be committed before offers-ready, so tests do not race background fills.
-// Keep same-chain bootstrap throughput high; correctness is enforced by
-// committed-depth health, not by slowly dripping orders into the producer.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 5;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 1000;
-export const MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE'] || '1'),
-);
-export const MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
-  2,
-  Number(
-    process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] ||
-      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK),
-  ),
-);
-export const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
-  4,
-  Number(
-    process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] ||
-      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
-  ),
-);
-// One bilateral Account may have only one proposal lane in flight. Submitting
-// many cross-j intents for the same source hub before its ACK is observable
-// races retries against a still-pending frame and can starve the MM event loop.
-// Even independent Accounts share one Runtime event loop, so bootstrap admits
-// one bounded cross-j batch globally per tick and waits for the next tick.
-// Cross-j intent materialization is substantially heavier than an ordinary
-// quote: every route is prepared by both sibling Entities and then persisted.
-// Keep the production wave bounded so storage rotation cannot monopolize the
-// MM event loop while preserving the exact two-sibling RuntimeInput boundary.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 8;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 8;
-export const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
-  1,
-  Number(
-    process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] ||
-      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK),
-  ),
-);
-export const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
-  1,
-  Number(
-    process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] ||
-      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK),
-  ),
-);
-export const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'),
-);
-// A cross-j offerId is stable for one MARKET_MAKER_CROSS_EXPIRY_MS generation
-// (default 24h): the same (hub, pair, level) reproduces the exact same offerId
-// on every later wave within that window. Excluding an attempted offerId must
-// therefore expire — otherwise one transient Account/atomic-cohort rejection
-// (races, stale nonces, a fat-frame cohort that failed to pair) permanently
-// starves that book slot for the rest of the run, since `hasCrossSpecBootstrapProgress`
-// alone cannot resurrect it once nothing durable was ever recorded. The TTL only
-// needs to outlast one submit -> Runtime-process -> progress-visible round trip.
-export const MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS = Math.max(
-  1000,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS'] || '5000'),
-);
-/** Pure so the expiry rule is unit-testable without a RuntimeReplica fixture. */
-export const isBootstrapIntentAttemptExpired = (
-  attemptedAtMs: number,
-  nowMs: number = Date.now(),
-  retryMs: number = MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS,
-): boolean => nowMs - attemptedAtMs >= retryMs;
-
-/**
- * Returns true while `offerId` must still be excluded from candidate
- * selection. Prunes the entry once it expires so a spec whose earlier attempt
- * never produced durable progress (rejected cohort, dropped race, stale
- * nonce) is retried instead of starved for the rest of the bootstrap run.
- */
-export const consumeExpiredBootstrapIntentAttempt = (
-  attemptedBootstrapIntentOrderIds: Map<string, number>,
-  offerId: string,
-  nowMs: number = Date.now(),
-): boolean => {
-  const attemptedAt = attemptedBootstrapIntentOrderIds.get(offerId);
-  if (attemptedAt === undefined) return false;
-  if (!isBootstrapIntentAttemptExpired(attemptedAt, nowMs)) return true;
-  attemptedBootstrapIntentOrderIds.delete(offerId);
-  return false;
-};
-
-/**
- * A source Account has one bilateral proposal lane. Keep that lane single-file
- * while any submitted cross-j intent for the Account is still inside its retry
- * window. The route is registered before the bilateral swap_offer exists, so
- * looking only at offers cannot prevent a second intent from racing the first.
- */
-export const hasPendingBootstrapIntentAttempt = (
-  attemptedBootstrapIntentOrderIds: Map<string, number>,
-  offerIds: readonly string[],
-  nowMs: number = Date.now(),
-): boolean => offerIds.some(offerId =>
-  consumeExpiredBootstrapIntentAttempt(attemptedBootstrapIntentOrderIds, offerId, nowMs));
+// Steady quote maintenance is paced. Bootstrap is intentionally not: it plans
+// all books first and commits one same-J batch followed by one cross-J batch.
+// Account consensus supplies the only proposal lane and ACK backpressure.
+// Bootstrap submits each cross-J quote exactly once. Account consensus owns
+// proposal/ACK retry; regenerating EntityTxs on a wall-clock TTL creates a
+// second authority path, inflates WAL, and races an already pending frame.
 export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'),
@@ -422,8 +326,6 @@ export const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
 ).trim();
 export const MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG = process.env['XLN_MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG'] === '1';
-/** Same-j HLT (payments/same/mixed) must not wait on unused cross-j MM routes. */
-export const MARKET_MAKER_SKIP_CROSS_BOOTSTRAP = process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP'] === '1';
 
 export const emitMarketMakerBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
   if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
@@ -1727,28 +1629,11 @@ export const hasCrossSpecBootstrapProgress = (
   env: RuntimeReplica,
   spec: MarketMakerOfferSpec,
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
-  attemptedBootstrapIntentOrderIds?: Map<string, number>,
-  nowMs: number = Date.now(),
 ): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasCommittedSourceAccountCrossOffer(env, route)) return true;
-  if (hasPendingSourceAccountCrossOffer(env, route)) {
-    // A pending swap_offer left in the account mempool/pendingFrame after a
-    // rejected atomic cohort (CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED) is never
-    // pruned by consensus — it just sits there forever. Counting it as
-    // progress unconditionally made the spec permanently ineligible: once
-    // stuck, `depthReady` could never recover. Treat it as progress only
-    // while its bootstrap-intent attempt is still inside
-    // MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS, matching the window
-    // `hasPendingBootstrapIntentAttempt` already uses to stop excluding the
-    // spec from candidate selection — once that window expires, both checks
-    // must agree the attempt is stale, or the pending tx blocks retry
-    // forever while callers believe the spec is eligible again.
-    if (!attemptedBootstrapIntentOrderIds) return true;
-    const attemptedAt = attemptedBootstrapIntentOrderIds.get(spec.offerId);
-    if (attemptedAt === undefined || !isBootstrapIntentAttemptExpired(attemptedAt, nowMs)) return true;
-  }
+  if (hasPendingSourceAccountCrossOffer(env, route)) return true;
   // A committed `crossJurisdictionAuthorizations` entry is deliberately NOT
   // progress. It proves only that this MM signed the intent, never that the
   // route advanced, and nothing prunes it when the route dies — its one
@@ -1761,10 +1646,9 @@ export const hasCrossSpecBootstrapProgress = (
   // populated on hub Entities only, so the `hasCrossRouteRegistered` check
   // below can never observe MM's own submission, and a remote source hub's
   // replica is usually absent from this MM's `env`. True, but the cost of a
-  // premature "in flight" verdict is a permanent stall, while the cost of an
-  // extra resend is one wasted wave slot. Retry pressure comes from
-  // MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS instead, and progress must be proven
-  // by an actual account offer, a hub registration, or a pending request.
+  // premature "in flight" verdict is a stall. The bootstrap controller never
+  // resubmits it: a missing Account transition is a loud consensus failure,
+  // not permission to manufacture another EntityTx.
   if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
   if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
   // Same rule for the pending-request view, which reads the very same map.
@@ -1980,7 +1864,16 @@ const isMarketMakerConnectivityReady = (
     );
   });
 
-export const maintainMarketMakerQuotes = async (
+/**
+ * Build quote commands without scheduling Runtime work.
+ *
+ * Bootstrap owns the scheduling boundary: it combines every MM Entity into
+ * one RuntimeInput, so all `placeSwapOffer` commands first fill their Account
+ * mempools and the Entity end-of-input flush proposes every touched Account
+ * exactly once. Never reintroduce per-Hub enqueue/wait loops here; they turn a
+ * deterministic batch into hundreds of Runtime/Entity frames.
+ */
+export const planMarketMakerQuoteEntityInputs = (
   env: RuntimeReplica,
   mmEntityId: string,
   mmSignerId: string,
@@ -1988,20 +1881,14 @@ export const maintainMarketMakerQuotes = async (
   tokenIds: number[],
   maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
   maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
-  connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
-  shouldContinue: () => boolean = () => true,
   samePairIndex?: number,
-): Promise<boolean> => {
-  if (hubEntityIds.length === 0 || tokenIds.length < 3) return false;
-  if (!shouldContinue()) return false;
-  if (await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, tokenIds, connectivityBudget))
-    return true;
-  if (!shouldContinue()) return false;
+): EntityInput[] => {
+  if (hubEntityIds.length === 0 || tokenIds.length < 3) return [];
   const quoteReadyHubEntityIds = hubEntityIds.filter(hubEntityId =>
     isMarketMakerConnectivityReady(env, mmEntityId, [hubEntityId], tokenIds),
   );
   if (quoteReadyHubEntityIds.length === 0) {
-    return false;
+    return [];
   }
   const desiredOffers = buildMarketMakerOfferSpecs(
     quoteReadyHubEntityIds,
@@ -2024,8 +1911,6 @@ export const maintainMarketMakerQuotes = async (
   );
 
   for (const [hubEntityId, specs] of groupedEntries) {
-    await yieldMarketMakerApi();
-    if (!shouldContinue()) return false;
     if (remainingNewOffers <= 0) break;
     const account = getAccountReplica(env, mmEntityId, hubEntityId);
     if (!account) continue;
@@ -2080,7 +1965,62 @@ export const maintainMarketMakerQuotes = async (
     remainingNewOffers -= missing.length;
   }
 
-  const entityInputs = Array.from(entityInputsByEntitySigner.values());
+  return Array.from(entityInputsByEntitySigner.values()).sort(
+    (left, right) =>
+      compareStableText(left.entityId, right.entityId) ||
+      compareStableText(String(left.signerId || ''), String(right.signerId || '')),
+  );
+};
+
+export const mergeMarketMakerQuoteEntityInputs = (
+  batches: readonly (readonly EntityInput[])[],
+): EntityInput[] => {
+  const merged = new Map<string, EntityInput>();
+  for (const input of batches.flat()) {
+    const key = `${normalizeEntityRef(input.entityId)}:${normalizeEntityRef(String(input.signerId || ''))}`;
+    const target = merged.get(key) ?? {
+      entityId: input.entityId,
+      signerId: input.signerId,
+      entityTxs: [],
+    };
+    target.entityTxs!.push(...(input.entityTxs ?? []));
+    merged.set(key, target);
+  }
+  return [...merged.values()].sort(
+    (left, right) =>
+      compareStableText(left.entityId, right.entityId) ||
+      compareStableText(String(left.signerId || ''), String(right.signerId || '')),
+  );
+};
+
+export const maintainMarketMakerQuotes = async (
+  env: RuntimeReplica,
+  mmEntityId: string,
+  mmSignerId: string,
+  hubEntityIds: string[],
+  tokenIds: number[],
+  maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+  maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+  connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
+  shouldContinue: () => boolean = () => true,
+  samePairIndex?: number,
+): Promise<boolean> => {
+  if (hubEntityIds.length === 0 || tokenIds.length < 3) return false;
+  if (!shouldContinue()) return false;
+  if (await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, tokenIds, connectivityBudget)) {
+    return true;
+  }
+  if (!shouldContinue()) return false;
+  const entityInputs = planMarketMakerQuoteEntityInputs(
+    env,
+    mmEntityId,
+    mmSignerId,
+    hubEntityIds,
+    tokenIds,
+    maxOffersPerAccount,
+    maxNewOffersTotal,
+    samePairIndex,
+  );
   if (entityInputs.length > 0) {
     if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {

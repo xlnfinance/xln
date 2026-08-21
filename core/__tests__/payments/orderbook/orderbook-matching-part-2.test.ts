@@ -136,14 +136,12 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
       byLeft: true,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: {
       fromEntity: firstOffer?.fromEntity ?? HUB_ENTITY,
       toEntity: firstOffer?.toEntity ?? FIXTURE_PEER,
       nextProofNonce: 0,
     },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };

@@ -17,7 +17,6 @@ import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
 } from '../../../runtime/command/frontier-auth';
-import { projectRuntimeIngressReceiptForWire } from '../../../runtime/mempool/ingress-receipts';
 import { encodeBinaryPayload } from '../../../storage/codec/binary-codec';
 import type { RuntimeTx } from '../../../runtime/types';
 import type { RuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
@@ -38,7 +37,7 @@ describe('WebSocket trusted decode boundary', () => {
       hello: { type: 'hello', from: 'a', fromEncryptionPubKey: 'k', timestamp: 1 },
       hello_challenge: { type: 'hello_challenge', challenge: 'c', audience: 'xln-runtime:test' },
       hello_ack: { type: 'hello_ack', to: 'a' },
-      entity_inputs: { type: 'entity_inputs', from: 'a', to: 'b', payload: 'cipher', encrypted: true },
+      entity_inputs: { type: 'entity_inputs', id: 'entity-1', from: 'a', to: 'b', payload: 'cipher', encrypted: true },
       debug_event: { type: 'debug_event', payload: { level: 'info' } },
       gossip_request: { type: 'gossip_request', from: 'a', payload: {} },
       gossip_response: { type: 'gossip_response', from: 'a', payload: {} },
@@ -54,7 +53,7 @@ describe('WebSocket trusted decode boundary', () => {
       hello: '0x423cfb7fbf1b9cf067bd5d3f89afbeb3c6f19c03e8f9410bae38b3d43e2529cb',
       hello_challenge: '0xc10b5010baae570e9d9b22524042a6611c572ef98203a454a05186e69b058b74',
       hello_ack: '0x01c85fe2130cce80700f27ad3a4b9c5ce3f03c044b0502b7903d0d21558ee2ad',
-      entity_inputs: '0x449d22e5c7ccfcdc8c4d93b1437c45b608fa6e88deba3d45f22d0d39fafb3702',
+      entity_inputs: '0xf382b8fdf6a9f88c517ee3e8ca2b8d2dbf1e356b5bd0101e86bfbcb8df69ea5d',
       debug_event: '0x7cd307e43d877b5741a93f7ca02fdcddd13a91489798f133b65be0cbb0dfc897',
       gossip_request: '0xf1126cf381505dc8dd42ecda121c95d4675e4a8a5176928e8fac42c473b7b3bf',
       gossip_response: '0xa8de6f8857c4490cce9289bd2829403604caebf22d841dc6cc864b8fe1d6cad0',
@@ -223,7 +222,7 @@ describe('rAdapter trusted decode boundary', () => {
       .toThrow('RADAPTER_MESSAGE_TOO_LARGE: bytes=5 max=4');
   });
 
-  test('wire receipts strip local command authority and decoding cannot recreate it', () => {
+  test('wire decoding cannot recreate local command authority', () => {
     const authorized = markLocalRuntimeAdapterCommandTx({
       type: 'recordRuntimeAdapterCommand',
       data: {
@@ -234,27 +233,16 @@ describe('rAdapter trusted decode boundary', () => {
         expiresAtMs: null,
       },
     });
-    const projected = projectRuntimeIngressReceiptForWire({
-      id: 'receipt-1',
-      kind: 'radapter-runtime-input',
-      status: 'pending',
-      counts: { runtimeTxs: 1, entityInputs: 0, jInputs: 0 },
-      enqueuedAt: 1,
-      enqueuedHeight: 1,
-      expiresAt: 2,
-      runtimeInput: { runtimeTxs: [authorized], entityInputs: [] },
-    } as Parameters<typeof projectRuntimeIngressReceiptForWire>[0]);
     const plainMarker = { ...authorized } as RuntimeTx;
     const decoded = decodeRuntimeAdapterMessage<{
-      payload: { receipt: Record<string, unknown>; attemptedMarker: RuntimeTx };
+      payload: { attemptedMarker: RuntimeTx };
     }>(encodeRuntimeAdapterMessage({
       v: 1,
       inReplyTo: 'send-1',
       ok: true,
-      payload: { receipt: projected, attemptedMarker: plainMarker },
+      payload: { attemptedMarker: plainMarker },
     }));
 
-    expect(decoded.payload.receipt['runtimeInput']).toBeUndefined();
     expect(Object.getOwnPropertySymbols(decoded.payload.attemptedMarker)).toHaveLength(0);
     expect(() => assertRuntimeAdapterCommandTxAuthorized(decoded.payload.attemptedMarker, false))
       .toThrow('RADAPTER_COMMAND_RUNTIME_TX_UNAUTHORIZED');

@@ -15,6 +15,7 @@ import { deriveDelta, isLeftEntity } from '../../../account/utils';
 import { RuntimeAdapterError } from '../../../api/runtime-adapter/errors';
 import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
 import type { RuntimeAdapterSendResult } from '../../../api/runtime-adapter/types';
+import { DaemonControlClient } from '../../../orchestrator/daemon-control';
 import { canonicalPair } from '../../../orderbook';
 import { safeParse, safeStringify } from '../../../protocol/serialization';
 import {
@@ -54,6 +55,7 @@ export type WorkerArgs = Readonly<{
 }>;
 export type ConnectedRuntime = Readonly<{
   adapter: RemoteRuntimeAdapter;
+  control: DaemonControlClient;
   entry: LoadRuntimeEntry;
   wsUrl: string;
 }>;
@@ -267,7 +269,36 @@ export const connectRuntime = async (
     adapter.disconnect();
     throw new Error(`PRODUCTION_SWAP_LOAD_RUNTIME_NOT_COMMAND_READY:${entry.label}`);
   }
-  return { adapter, entry, wsUrl };
+  const url = new URL(wsUrl);
+  if ((url.protocol !== 'ws:' && url.protocol !== 'wss:') || url.username || url.password || url.search || url.hash) {
+    adapter.disconnect();
+    throw new Error('PRODUCTION_SWAP_LOAD_CONTROL_URL_INVALID');
+  }
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+  url.pathname = '';
+  const baseUrl = url.toString().replace(/\/$/, '');
+  return {
+    adapter,
+    control: new DaemonControlClient({ baseUrl, authKey: entry.token, timeoutMs: 30_000 }),
+    entry,
+    wsUrl,
+  };
+};
+
+export const exportReplayBaseSnapshotIfConfigured = async (
+  runtime: ConnectedRuntime,
+): Promise<void> => {
+  if (!String(process.env['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] || '').trim()) return;
+  const snapshot = await runtime.control.exportRuntimeSnapshot();
+  if (snapshot.runtimeId !== runtime.adapter.runtimeId.toLowerCase()) {
+    throw new Error(
+      `HLT_REPLAY_SNAPSHOT_RUNTIME_MISMATCH:adapter=${runtime.adapter.runtimeId}:snapshot=${snapshot.runtimeId}`,
+    );
+  }
+  console.log(
+    `HLT_REPLAY_BASE_SNAPSHOT runtime=${snapshot.runtimeId} ` +
+    `height=${snapshot.height} checkpoint=${snapshot.checkpointHash}`,
+  );
 };
 
 const COMMAND_OBSERVATION_TIMEOUT_MS = 120_000;

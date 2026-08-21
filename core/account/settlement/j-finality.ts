@@ -147,9 +147,6 @@ const clearFinalizedCollections = (account: AccountReplica): void => {
   if (account.state.pulls && account.state.pulls.size > 0) {
     account.state.pulls = requirePersistentAccountStateMap(account.state.pulls, 'pulls').emptied();
   }
-  delete account.disputeProofBodiesByHash;
-  delete account.disputeProofNoncesByHash;
-  delete account.disputeArgumentSnapshotsByHash;
 };
 
 /**

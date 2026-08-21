@@ -48,7 +48,7 @@ export type ConsumptionProof = Readonly<{ version: 1; nodes: readonly Consumptio
 export type ConsumptionOutputIdentity = Readonly<{
   targetEntityId: string;
   sourceEntityId: string;
-  lane: 'generic' | 'account-frame' | 'account-ack' | 'account-dispute';
+  lane: 'generic';
   sequence: number | bigint;
   semanticHash: string;
   outputHash: string;

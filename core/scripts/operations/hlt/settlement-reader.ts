@@ -298,20 +298,22 @@ const dumpStuckCounterpartyState = async (
       continue;
     }
     try {
-      const page = await group.runtime.adapter.read<unknown>(
-        `entity/${entry.counterpartyEntityId}/accounts`,
-        { accountId: entry.entityId, accountsLimit: 1 },
+      const pair = group.pairs.find(candidate =>
+        candidate.hubEntityId === entry.entityId && candidate.loadEntityId === entry.counterpartyEntityId);
+      if (!pair) throw new Error('PRODUCTION_SWAP_SETTLEMENT_STUCK_PAIR_MISSING');
+      const response = await readEvidence(
+        group.runtime,
+        requestFor([pair], 'load', entry.entityId),
       );
-      const account = (page as { items?: unknown[] })['items']?.[0] as
-        | { currentHeight?: number; pendingFrame?: { height?: number }; lastOutboundFrameAck?: { height?: number } }
-        | undefined;
+      const account = response?.accounts[0];
       console.error(JSON.stringify({
         stuckDump: 'counterparty-view',
         counterparty: entry.counterpartyEntityId.slice(-8),
         hubPendingHeight: entry.height,
-        userCurrentHeight: account?.['currentHeight'] ?? null,
-        userPendingHeight: account?.['pendingFrame']?.['height'] ?? null,
-        userLastAckHeight: account?.['lastOutboundFrameAck']?.['height'] ?? null,
+        userCurrentHeight: account?.currentHeight ?? null,
+        userCurrentStateHash: account?.currentStateHash ?? null,
+        userPendingFrame: account?.pendingFrame ?? null,
+        userPendingProposal: account?.pendingProposal ?? null,
       }));
     } catch (error) {
       console.error(JSON.stringify({

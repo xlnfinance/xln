@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
   decodeEntitySummaries,
+  decodeHubSettlementCounters,
   decodeHubMinTradeSize,
   decodeLoadSustainedReport,
   decodeLoadFrame,
@@ -33,6 +34,7 @@ import {
   connectRuntime,
   directoryBytes,
   entryByLabel,
+  exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readLoadBook,
   resolveWalPath,
@@ -111,36 +113,41 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     await waitForRoutableReceivers(
       users,
       hubIdentity.entityId,
-      users.map(lane => lane.identity.entityId.toLowerCase()),
+      users.map((_lane, senderIndex) => Array.from(
+        { length: args.rounds },
+        (_, round) => users[paymentReceiverIndexSamePopulation(senderIndex, round, users.length)]!.identity.entityId,
+      )),
     );
 
     const initialBook = await readLoadBook(hub, hubIdentity.entityId);
     if (initialBook.tradeCount !== setupBook.tradeCount) {
       throw new Error('PRODUCTION_SWAP_LOAD_SETUP_CONCURRENT_TRADES');
     }
+    await exportReplayBaseSnapshotIfConfigured(hub);
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const hubDurableBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
+    const hubCountersBefore = decodeHubSettlementCounters(
+      await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}`),
+    );
     const driverRssBefore = process.memoryUsage().rss;
-    const receiverIds = users.map(lane => lane.identity.entityId.toLowerCase());
-    const expectedPayments = new Map(receiverIds.map((id, index) => [id, perReceiver[index]! / CREDIT_HEADROOM_MULTIPLE]));
     const expectedSwaps = args.lanes * args.rounds * swapMatches;
     const senderIndexByLaneKey = new Map(users.map((lane, index) => [lane.laneKey, index]));
     const offerCadenceMs = Math.max(1, Math.floor(args.cadenceMs / swapMatches));
 
     const startedAt = performance.now();
-    // Same-only 8u is green on 1-offer frames + hub-pipeline window. Mixed's
-    // fire-all 2-offer ticks stalled even with swap-only payloads, so reuse
-    // that submitter. Keep 1:1 by placing one offer every cadence/swapMatches
-    // and folding a payment into every swapMatches-th command (one EntityInput).
+    // Open-loop stream: three adjacent swap actions share one RuntimeInput.
+    // With swapMatches=2 this folds alternating 2/1 payments into each input,
+    // staying inside the owner-approved 1-3 swaps + 1-3 payments per frame.
+    // Nothing waits for Hub progress or a previous Runtime commit.
     const submitted = await submitPreparedParallelSameLoad({
       hub,
       hubIdentity,
       initialBook,
-      initialFrame: hubDurableBefore,
       swapsPerRound: args.lanes,
       rounds: args.rounds * swapMatches,
       cadenceMs: offerCadenceMs,
+      actionsPerFrame: 3,
       prepared,
       extraEntityTxs: ({ lane, identity, round }) => {
         if (round % swapMatches !== 0) return [];
@@ -155,7 +162,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           senderIndex,
           tick,
           amountRange,
-        ).entityTxs;
+        ).entityTxs ?? [];
       },
     });
     const submittedPayments = users.length * args.rounds;
@@ -176,16 +183,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       startedAt,
     });
     const rates = assertProductionSwapFullySettled(settlementEvidence);
-    // Swaps also move the quote token, so receiver inCapacity cannot authorize
-    // mixed payment delivery. Bilateral swap quiescence plus an empty Hub
-    // lockBook is the mixed completion signal; payments-only still uses deltas.
-    await waitForHubSettlement(
+    const hubCountersAfter = await waitForHubSettlement(
       hub,
       hubIdentity.entityId,
-      receiverIds,
-      new Map(),
-      expectedPayments,
-      false,
+      hubCountersBefore.completedPayments,
+      submittedPayments,
     );
     const deliveredElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const hubDurableAfter = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
@@ -193,7 +195,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const paymentReport = decodeLoadPaymentReport({
       schema: 'xln-hlt-payment-load-v1',
       mode: 'payments',
-      completionAuthority: 'committed_receiver_balances_and_bilateral_quiescence',
+      completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
       configuredUsers: users.length,
       configuredRounds: args.rounds,
       cadenceMs: args.cadenceMs,
@@ -208,6 +210,8 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       deliveredElapsedMs,
       deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
+      hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
+      hubCompletedPaymentsAfter: hubCountersAfter.completedPayments,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),

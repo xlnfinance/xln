@@ -2,6 +2,7 @@ import { createStructuredLogger } from '../../../support/logger';
 import type { RoutedEntityInput, RuntimeInput, RuntimeReplica } from '../../types';
 import { RuntimeEntityInputApplyError } from '../../mempool/entity-inputs';
 import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../../loop/loop-environment.ts';
+import { safeStringify } from '../../../protocol/serialization';
 
 const discardLog = createStructuredLogger('runtime.input_discard');
 
@@ -59,8 +60,9 @@ export const discardRejectedEntityInput = (
     discardedInputs: rejected.length,
     txTypes: rejected.flatMap(candidate => candidate.entityTxs?.map(tx => tx.type) ?? []),
     cause: error.cause instanceof Error ? error.cause.message : String(error.cause),
+    rejectedInputsDump: safeStringify(rejected),
   };
-  if (!quietLogs) discardLog.info('entity_input.discarded', payload);
+  if (!quietLogs) discardLog.error('entity_input.discarded', payload);
   return remaining;
 };
 

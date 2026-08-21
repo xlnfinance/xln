@@ -121,10 +121,7 @@ export const resolveEntityProposerId = (env: RuntimeReplica, entityId: string, c
 const nestedAccountInputs = (txs: readonly EntityTx[]): AccountPeerInput[] =>
   txs.flatMap((tx): AccountPeerInput[] => {
     if (tx.type === 'accountInput') return [tx.data];
-    if (tx.type !== 'consensusOutput') return [];
-    return tx.data.entityTxs.flatMap(nested =>
-      nested.type === 'accountInput' ? [nested.data] : [],
-    );
+    return [];
   });
 
 const entityOutputAccountInput = (output: EntityOutput): AccountPeerInput | null => {

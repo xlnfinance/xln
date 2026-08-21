@@ -119,6 +119,20 @@ describe('mergeEntityInputs', () => {
     expect(merged[1]?.entityTxs?.map((tx) => (tx.data as { name: string }).name)).toEqual(['a', 'b']);
   });
 
+  test('collapses an exact authenticated transport replay instead of applying its txs twice', () => {
+    const original: RoutedEntityInput = {
+      ...inputFor('2'),
+      from: '0x1111111111111111111111111111111111111111',
+      runtimeId: '0x2222222222222222222222222222222222222222',
+      sourceRuntimeFrame: { height: 7, timestamp: 700 },
+    };
+
+    const merged = mergeEntityInputs([original, structuredClone(original)]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.entityTxs).toEqual(original.entityTxs);
+  });
+
   test('never merges distinct certified output identities or local protocol lanes', () => {
     const certified = (sequence: bigint): RoutedEntityInput => ({
       ...inputFor('2'),

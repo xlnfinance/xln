@@ -24,6 +24,7 @@ import {
   stageExternalEntityInput,
   type StagedEntityInput,
 } from './entity-input-staging.ts';
+import { safeStringify } from '../../protocol/serialization';
 
 export const atomicPairInputsMatch = (
   first: RoutedEntityInput,
@@ -94,6 +95,36 @@ const stagedAtomicLegCommitted = (staged: StagedEntityInput): boolean => {
     frame.height === expected.height &&
     frame.stateHash === expected.stateHash,
   );
+};
+
+const describeStagedAtomicLeg = (staged: StagedEntityInput): Record<string, unknown> => {
+  const expected = expectedAtomicAccountFrame(staged.input);
+  const account = expected
+    ? staged.result.nextReplica.state.accounts.get(expected.counterpartyEntityId)
+    : undefined;
+  return {
+    entityId: staged.input.entityId,
+    signerId: staged.input.signerId,
+    sourceRuntimeFrame: staged.input.sourceRuntimeFrame ?? null,
+    marker: staged.input.atomicCrossJurisdictionPair ?? null,
+    expected,
+    outcome: staged.result.outcome,
+    entityFrameCommitted: staged.result.entityFrameCommitted,
+    entityHeight: staged.result.nextReplica.state.height,
+    account: account
+      ? {
+          currentHeight: account.currentFrame.height,
+          currentHash: account.currentFrame.stateHash,
+          pendingHeight: account.pendingFrame?.height ?? null,
+          pendingHash: account.pendingFrame?.stateHash ?? null,
+          mempoolTxs: account.mempool.length,
+        }
+      : null,
+    committedAccountFrames: collectCommittedAccountFrames(
+      staged.input,
+      staged.result.nextReplica,
+    ),
+  };
 };
 
 const atomicPairProtocolRejection = (
@@ -212,7 +243,10 @@ export const applyAtomicEntityInputPair = async (
       context,
       indexes,
       'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
-      'One or both signed Account legs were stale or rejected',
+      safeStringify({
+        reason: 'One or both signed Account legs were stale or rejected',
+        legs: staged.map(describeStagedAtomicLeg),
+      }),
       entityIds,
     );
     await applyRetainedNonAtomicInputs(env, pair, indexes, options, context);

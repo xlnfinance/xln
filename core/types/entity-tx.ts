@@ -87,7 +87,7 @@ export type PendingSettlementContinuation = SettlementContinuationPlan & {
 
 export type ConsensusOutputOrigin = {
   sourceEntityId: string;
-  lane: 'generic' | 'account-frame' | 'account-ack' | 'account-dispute';
+  lane: 'generic';
   /** Lifetime-monotonic for this exact source→target relationship. */
   sequence: bigint;
   /** Stable payload commitment preserved across a current-board reissue. */

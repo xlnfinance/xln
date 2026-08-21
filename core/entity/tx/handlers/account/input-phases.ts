@@ -24,6 +24,7 @@ import { verifyHankoForHash } from '../../../../hanko/signing';
 import type { AccountJClaimNodeChanges } from '../../../../types/finance/account-j-claims';
 import type { ApplyEntityTxOptions } from '../../apply';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
+import { safeStringify } from '../../../../protocol/serialization';
 import {
   applySuccessfulAccountInput,
   type CommittedAccountEffects,
@@ -141,15 +142,27 @@ const finishRejectedAccountInput = (
   context: AccountInputPhaseContext,
   result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { disposition: 'rejected' }>,
 ): AccountConsensusOutcome => {
-  const { state, input, effects } = context;
+  const { state, input } = context;
   if (result.rejection.kind === 'peer') {
-    accountHandlerLog.warn('frame.rejected', {
+    const dump = safeStringify({
+      input,
+      account: context.account,
+      entityId: state.entityId,
+      entityHeight: state.height,
+      rejection: result.rejection,
+    });
+    accountHandlerLog.error('frame.peer_rejected', {
       from: shortId(input.fromEntityId),
       code: accountInputPeerRejectionCode(result),
       error: result.rejection.message,
+      dump,
     });
-    addMessage(state, `⚠️ Rejected account frame: ${result.rejection.message}`);
-    return { terminalResult: buildAccountHandlerResult(state, effects, undefined, undefined) };
+    addMessage(state, `❌ Rejected account frame: ${result.rejection.message}`);
+    throw haltRuntimeFailure(
+      'FRAME_CONSENSUS_FAILED',
+      `ACCOUNT_PEER_INPUT_REJECTED:${result.rejection.code}:` +
+        `${result.rejection.message}:dump=${dump}`,
+    );
   }
   if (result.rejection.kind === 'tx' || result.rejection.kind === 'validation') {
     const failureMessage = accountInputFailureMessage(result);

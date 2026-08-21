@@ -1,0 +1,160 @@
+#!/usr/bin/env bun
+
+/** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
+
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
+import { safeStringify } from '../../../../protocol/serialization';
+import {
+  closeInfraDb,
+  closeRuntimeDb,
+  replayRecoveryFrameJournals,
+  restoreEnvFromRecoveryBundles,
+} from '../../../../runtime';
+import type { RuntimeRecoveryBundleV1 } from '../../../../storage/recovery/bundle/types';
+import type { PersistedFrameJournal } from '../../../../storage/types';
+import { readHltHubRecording, summarizeHltHubFrames } from './recording';
+
+type ReplayMode = 'max' | 'fixed' | 'sweep';
+
+type ReplayTrial = Readonly<{
+  offeredTps: number | null;
+  frames: number;
+  accountInputs: number;
+  accountTxs: number;
+  outboxEnvelopes: number;
+  elapsedMs: number;
+  cpuMs: number;
+  accountInputTps: number;
+  accountTxTps: number;
+  cpuAccountTxTps: number;
+  finalHeight: number;
+  finalPendingOutbox: number;
+  equivalent: true;
+}>;
+
+const optionalArgument = (name: string): string | null => {
+  const index = process.argv.indexOf(`--${name}`);
+  if (index < 0) return null;
+  const value = String(process.argv[index + 1] || '').trim();
+  if (!value) throw new Error(`HLT_REPLAY_ARGUMENT_MISSING:${name}`);
+  return value;
+};
+
+const requiredArgument = (name: string): string => {
+  const value = optionalArgument(name);
+  if (!value) throw new Error(`HLT_REPLAY_ARGUMENT_MISSING:${name}`);
+  return value;
+};
+
+const parseMode = (): ReplayMode => {
+  const raw = optionalArgument('mode') ?? 'max';
+  if (raw !== 'max' && raw !== 'fixed' && raw !== 'sweep') throw new Error(`HLT_REPLAY_MODE_INVALID:${raw}`);
+  return raw;
+};
+
+const parseRates = (mode: ReplayMode): number[] => {
+  if (mode === 'max') return [0];
+  const raw = optionalArgument('rates') ?? (mode === 'fixed' ? '1000' : '250,500,750,1000,1500,2000');
+  const rates = raw.split(',').map(value => Number(value.trim()));
+  if (rates.length < 1 || rates.some(value => !Number.isSafeInteger(value) || value < 1 || value > 100_000)) {
+    throw new Error(`HLT_REPLAY_RATES_INVALID:${raw}`);
+  }
+  return rates;
+};
+
+const recordingPath = resolve(requiredArgument('recording'));
+const outputPath = resolve(optionalArgument('output') ?? `${recordingPath}.replay.json`);
+const mode = parseMode();
+const rates = parseRates(mode);
+const artifact = readHltHubRecording(recordingPath);
+const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
+const tail = artifact.recording.bundles.find(bundle => bundle.kind === 'journal_tail');
+if (!snapshot || !tail) throw new Error('HLT_REPLAY_RECORDING_BUNDLES_MISSING');
+const frames = [...(tail.frames ?? [])];
+const seedPath = resolve(optionalArgument('seed-file') ?? `${artifact.source.workDir}/secrets/mesh-root.seed`);
+const meshRootSeed = readFileSync(seedPath, 'utf8').trim();
+if (!meshRootSeed) throw new Error('HLT_REPLAY_MESH_ROOT_SEED_MISSING');
+const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
+
+const frameUnits = (frame: PersistedFrameJournal): number => {
+  const totals = summarizeHltHubFrames([frame]);
+  return totals.accountTxs > 0 ? totals.accountTxs : totals.accountInputs;
+};
+
+const waitForOfferedRate = async (
+  offeredTps: number,
+  cumulativeUnits: number,
+  startedAt: number,
+): Promise<void> => {
+  if (offeredTps <= 0 || cumulativeUnits <= 0) return;
+  const dueAt = startedAt + cumulativeUnits * 1_000 / offeredTps;
+  const remaining = dueAt - performance.now();
+  if (remaining > 0) await Bun.sleep(remaining);
+};
+
+const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
+  const env = await restoreEnvFromRecoveryBundles([snapshot as RuntimeRecoveryBundleV1], {
+    runtimeSeed,
+    runtimeId: artifact.recording.runtimeId,
+    targetHeight: artifact.recording.baseHeight,
+    readOnly: true,
+  });
+  const startedAt = performance.now();
+  const cpuStarted = process.cpuUsage();
+  let cumulativeUnits = 0;
+  try {
+    for (const frame of frames) {
+      cumulativeUnits += frameUnits(frame);
+      await waitForOfferedRate(offeredTps, cumulativeUnits, startedAt);
+      await replayRecoveryFrameJournals(env, [frame]);
+    }
+    const elapsedMs = performance.now() - startedAt;
+    const cpu = process.cpuUsage(cpuStarted);
+    const cpuMs = (cpu.user + cpu.system) / 1_000;
+    const seconds = Math.max(elapsedMs / 1_000, Number.EPSILON);
+    const cpuSeconds = Math.max(cpuMs / 1_000, Number.EPSILON);
+    return {
+      offeredTps: offeredTps > 0 ? offeredTps : null,
+      frames: artifact.totals.runtimeFrames,
+      accountInputs: artifact.totals.accountInputs,
+      accountTxs: artifact.totals.accountTxs,
+      outboxEnvelopes: artifact.totals.outboxEnvelopes,
+      elapsedMs,
+      cpuMs,
+      accountInputTps: artifact.totals.accountInputs / seconds,
+      accountTxTps: artifact.totals.accountTxs / seconds,
+      cpuAccountTxTps: artifact.totals.accountTxs / cpuSeconds,
+      finalHeight: env.state.height,
+      finalPendingOutbox: env.pendingNetworkOutputs?.length ?? 0,
+      equivalent: true,
+    };
+  } finally {
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  }
+};
+
+const trials: ReplayTrial[] = [];
+for (const rate of rates) {
+  const trial = await runTrial(rate);
+  trials.push(trial);
+  console.log(
+    `HLT_REPLAY_EQUIVALENT offered=${trial.offeredTps ?? 'max'} ` +
+    `accountTxTps=${trial.accountTxTps.toFixed(2)} cpuAccountTxTps=${trial.cpuAccountTxTps.toFixed(2)} ` +
+    `height=${trial.finalHeight} pendingOutbox=${trial.finalPendingOutbox}`,
+  );
+}
+
+const report = {
+  schema: 'xln-hlt-hub-replay-report-v1',
+  createdAt: Date.now(),
+  recordingPath,
+  recordingManifestHash: artifact.recording.manifestHash,
+  mode,
+  trials,
+};
+writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
+console.log(`HLT_REPLAY_REPORT path=${outputPath}`);

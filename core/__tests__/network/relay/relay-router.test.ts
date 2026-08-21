@@ -23,6 +23,7 @@ import {
   deriveSingleSignerFixtureEntityId,
 } from '../../helpers/cryptographic-profile';
 import { createJurisdictionGossipAnnouncement } from '../../../jurisdiction/gossip/announcement';
+import { rejectFailure } from '../../../protocol/errors/failure-taxonomy';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'relay-router-test-seed-a';
@@ -1168,7 +1169,9 @@ describe('relay-router gossip fanout', () => {
 
     expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
       type: 'error',
-      error: 'entity_inputs must be encrypted',
+      error: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+      inReplyTo: 'plaintext-entity-input',
+      to: RUNTIME_B,
     });
     expect(store.debugEvents.some(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')).toBe(true);
     expect(store.debugEvents.find(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')?.delivery).toMatchObject({
@@ -1191,7 +1194,7 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {
-        throw new Error('NO_LOCAL_REPLICA: entityId=0xabc');
+        throw rejectFailure('NO_LOCAL_REPLICA', 'NO_LOCAL_REPLICA: entityId=0xabc');
       },
       send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];

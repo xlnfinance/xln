@@ -16,8 +16,11 @@
     active: false,
     status: 'idle',
     pid: null,
+    phase: null,
     workDir: null,
     logPath: null,
+    recordingPath: null,
+    reportPath: null,
     startedAt: null,
     finishedAt: null,
     exitCode: null,
@@ -26,7 +29,7 @@
   };
 
   let users = $state(HLT_DASHBOARD_DEFAULTS.users);
-  let usersPerRuntime = $state(HLT_DASHBOARD_DEFAULTS.usersPerRuntime);
+  let runtimesPerProcess = $state(HLT_DASHBOARD_DEFAULTS.runtimesPerProcess);
   let ratePerUserPerSecond = $state(HLT_DASHBOARD_DEFAULTS.ratePerUserPerSecond);
   let durationSeconds = $state(HLT_DASHBOARD_DEFAULTS.durationSeconds);
   let hubs = $state(HLT_DASHBOARD_DEFAULTS.hubs);
@@ -42,10 +45,14 @@
   let loadError = $state<string | null>(null);
   let snapshot = $state<HltDashboardPayload | null>(null);
   let actionBusy = $state(false);
+  let activeTab = $state<'control' | 'progress'>('control');
+  let phase = $state<'build' | 'replay'>('build');
+  let replayMode = $state<'max' | 'fixed' | 'sweep'>('max');
+  let replayRates = $state('250,500,750,1000,1500,2000');
 
   const config = $derived<HltDashboardConfig>({
     users,
-    usersPerRuntime,
+    runtimesPerProcess,
     ratePerUserPerSecond,
     durationSeconds,
     mix: mode === 'same' ? '1:0' : '0:1',
@@ -81,7 +88,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           users,
-          usersPerRuntime,
+          runtimesPerProcess,
           rate: ratePerUserPerSecond,
           duration: durationSeconds,
           hubs,
@@ -89,6 +96,9 @@
           profile,
           paymentMin: String(paymentAmountMin),
           paymentMax: String(paymentAmountMax),
+          phase,
+          replayMode,
+          replayRates,
         }),
       });
       if (!response.ok) throw new Error(await readErrorMessage(response));
@@ -163,7 +173,7 @@
           disabled={actionBusy}
           onclick={() => void startIsolated()}
         >
-          {actionBusy ? 'Starting…' : 'Start isolated shard'}
+          {actionBusy ? 'Starting…' : phase === 'build' ? 'Build frame chains' : 'Replay H1'}
         </button>
       {/if}
       <a class="mini-action" href="/qa">QA cockpit</a>
@@ -177,10 +187,16 @@
     <div class="error-banner" data-testid="hlt-error">{loadError}</div>
   {/if}
 
+  {#if snapshot?.snapshotError}
+    <div class="error-banner" data-testid="hlt-snapshot-error">
+      Historical HLT artifact rejected: {snapshot.snapshotError}
+    </div>
+  {/if}
+
   {#if run.status !== 'idle'}
     <section class="run-banner" data-testid="hlt-run" data-status={run.status}>
       <div>
-        <span>Isolated shard</span>
+        <span>{run.phase === 'replay' ? 'Hub replay' : 'Build chains'}</span>
         <strong data-testid="hlt-run-status">{run.status}{run.pid === null ? '' : ` · pid ${run.pid}`}</strong>
         {#if run.workDir}
           <p class="run-meta" data-testid="hlt-run-workdir">{run.workDir}</p>
@@ -188,12 +204,49 @@
         {#if run.error}
           <p class="run-meta">{run.error}</p>
         {/if}
+        {#if run.recordingPath}
+          <p class="run-meta">recording · {run.recordingPath}</p>
+        {/if}
       </div>
       {#if run.logTail}
         <pre class="run-log" data-testid="hlt-run-log">{run.logTail}</pre>
       {/if}
     </section>
   {/if}
+
+  <nav class="hlt-tabs" aria-label="HLT views">
+    <button class:active={activeTab === 'control'} type="button" onclick={() => activeTab = 'control'}>Control</button>
+    <button class:active={activeTab === 'progress'} type="button" onclick={() => activeTab = 'progress'}>HLT Progress</button>
+  </nav>
+
+  {#if activeTab === 'control'}
+    <section class="panel phase-panel" data-testid="hlt-phases">
+      <h2>Two-phase HLT</h2>
+      <div class="phase-grid">
+        <button class:active={phase === 'build'} type="button" onclick={() => phase = 'build'}>
+          <span>1</span><strong>Build chains</strong><small>Real sovereign users, faucet, traffic, ACK drain, sealed H1 WAL.</small>
+        </button>
+        <button class:active={phase === 'replay'} type="button" onclick={() => phase = 'replay'}>
+          <span>2</span><strong>Hub replay</strong><small>Checkpoint restore, exact input replay, state + ordered outbox hash equality.</small>
+        </button>
+      </div>
+      {#if phase === 'replay'}
+        <div class="controls replay-controls">
+          <label>
+            Replay mode
+            <select bind:value={replayMode} data-testid="hlt-replay-mode">
+              <option value="max">Max throughput</option>
+              <option value="fixed">Fixed 1000 TPS</option>
+              <option value="sweep">Saturation sweep</option>
+            </select>
+          </label>
+          <label>
+            Offered TPS points
+            <input class="text-input" bind:value={replayRates} data-testid="hlt-replay-rates" />
+          </label>
+        </div>
+      {/if}
+    </section>
 
   <section class="panel">
     <h2>Population</h2>
@@ -203,8 +256,8 @@
         <input type="range" min="2" max="1000" step="2" bind:value={users} data-testid="hlt-users-input" />
       </label>
       <label>
-        Users / process <strong data-testid="hlt-users-per-process">{usersPerRuntime}</strong>
-        <input type="range" min="1" max="200" step="1" bind:value={usersPerRuntime} data-testid="hlt-users-per-process-input" />
+        Sovereign runtimes / process <strong data-testid="hlt-users-per-process">{runtimesPerProcess}</strong>
+        <input type="range" min="1" max="200" step="1" bind:value={runtimesPerProcess} data-testid="hlt-users-per-process-input" />
       </label>
       <label>
         Actions / user / s <strong>{ratePerUserPerSecond}</strong>
@@ -264,6 +317,24 @@
       <strong>{preview.rounds}</strong>
     </article>
   </section>
+  {/if}
+
+  {#if activeTab === 'progress'}
+    {#if snapshot?.replay}
+      <section class="panel" data-testid="hlt-replay-result">
+        <h2>Exact H1 replay</h2>
+        <div class="replay-trials">
+          {#each snapshot.replay.trials as trial}
+            <article class="result-card">
+              <span>{trial.offeredTps === null ? 'Max throughput' : `Offered ${trial.offeredTps}/s`}</span>
+              <strong>{formatTps(trial.accountTxTps)}</strong>
+              <p>{trial.frames} frames · {trial.outboxEnvelopes} outbox · pending {trial.finalPendingOutbox}</p>
+              <small>state + ordered outbox hashes identical</small>
+            </article>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
   {#if snapshot?.payment}
     <section class="result-grid" data-testid="hlt-payment-result">
@@ -337,7 +408,9 @@
       {/if}
     </section>
   {/if}
+  {/if}
 
+  {#if activeTab === 'control'}
   <section class="panel">
     <h2>Hub split</h2>
     <div class="share-row">
@@ -352,8 +425,9 @@
   </section>
 
   <pre class="command-box" data-testid="hlt-command">{preview.isolatedCommand}</pre>
+  {/if}
 
-  {#if snapshot}
+  {#if activeTab === 'progress' && snapshot}
     <section class="panel" data-testid="hlt-ledger">
       <h2>Progress to 1000/s</h2>
       <svg class="chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img">

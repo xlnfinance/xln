@@ -1,14 +1,20 @@
 /**
- * Canonical Account graph layout. The Account header is a bounded manifest;
- * scalar fields and Patricia nodes are separate typed LevelDB records. No
- * Account blob is encoded first, and recovery relinks the stored graph.
+ * Canonical Account storage node. The root commits permanent field rows plus
+ * the roots of the real in-memory Patricia maps. Never recursively graphify
+ * the envelope: that creates a second tree and makes checkpoints O(Account).
+ * Static field keys are intentional: a checkpoint overwrites exactly the
+ * changed values instead of accumulating content-addressed live-state nodes.
  */
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { readRawOrNull } from '../database/level';
 import type { RuntimeDbLike, StorageAccountDoc } from '../types';
 import type { AccountReplica, AccountState } from '../../types/account';
-import { STORAGE_ACCOUNT_FIELD_TAG, type StorageAccountField } from './account-field-tags';
+import {
+  STORAGE_ACCOUNT_FIELD_BY_TAG,
+  STORAGE_ACCOUNT_FIELD_TAG,
+  type StorageAccountField,
+} from './account-field-tags';
 import {
   ACCOUNT_STATE_MAP_NAMESPACES,
   type AccountStateMapNamespace,
@@ -22,20 +28,32 @@ import {
 } from './account-graph-codec';
 import { validateStorageAccountDocValue } from './schema-state-docs';
 import {
-  projectAccountEnvelopeGraph,
-  projectAccountEnvelopeGraphChanges,
-  readAccountEnvelopeGraph,
-  type StorageAccountEnvelopeDescriptor,
-} from './account-envelope-graph';
+  keyLiveAccountField,
+  keyLiveAccountFieldPrefix,
+} from '../keys';
+import { iterateKeys } from '../database/level';
 
 export { STORAGE_ACCOUNT_FIELD_TAG } from './account-field-tags';
 
 export const MAX_INLINE_STORAGE_VALUE_BYTES = 10_000;
 
 type AccountGraphManifest = Readonly<{
-  version: 1;
-  envelope: StorageAccountEnvelopeDescriptor;
+  version: 3;
+  fields: readonly StorageAccountFieldDescriptor[];
   trees: readonly StorageAccountTreeDescriptor[];
+}>;
+
+type StorageAccountFieldDescriptor = Readonly<{
+  tag: number;
+  valueHash: string;
+}>;
+
+type EncodedAccountField = Readonly<{
+  field: StorageAccountField;
+  tag: number;
+  key: Buffer;
+  value: Buffer;
+  valueHash: string;
 }>;
 
 export type AccountStorageLayout = Readonly<{
@@ -90,26 +108,36 @@ const assertKnownFields = (doc: StorageAccountDoc): void => {
   }
 };
 
-const accountEnvelopeValue = (doc: StorageAccountDoc): Record<string, unknown> => {
+const encodedAccountFields = (
+  entityId: string,
+  counterpartyId: string,
+  doc: StorageAccountDoc,
+): EncodedAccountField[] => {
   assertKnownFields(doc);
-  const state: Record<string, unknown> = {};
-  const replica: Record<string, unknown> = {};
-  for (const field of Object.keys(STORAGE_ACCOUNT_FIELD_TAG) as StorageAccountField[]) {
-    if (TREE_FIELDS.has(field) || !hasAccountField(doc, field)) continue;
-    const value = accountFieldValue(doc, field);
-    if (isStateField(field)) state[stateFieldName(field)] = value;
-    else replica[field] = value;
-  }
-  return { ...replica, state };
+  return (Object.keys(STORAGE_ACCOUNT_FIELD_TAG) as StorageAccountField[]).flatMap(field => {
+    if (TREE_FIELDS.has(field) || !hasAccountField(doc, field)) return [];
+    const tag = STORAGE_ACCOUNT_FIELD_TAG[field];
+    const value = encodeBuffer(accountFieldValue(doc, field));
+    if (value.byteLength >= MAX_INLINE_STORAGE_VALUE_BYTES) {
+      throw new Error(`STORAGE_ACCOUNT_FIELD_TOO_LARGE:${field}:${value.byteLength}`);
+    }
+    return [{
+      field,
+      tag,
+      key: keyLiveAccountField(entityId, counterpartyId, tag),
+      value,
+      valueHash: computeIntegrityDigest(value),
+    }];
+  }).sort((left, right) => left.tag - right.tag);
 };
 
 const manifestValue = (
-  envelope: StorageAccountEnvelopeDescriptor,
+  fields: readonly StorageAccountFieldDescriptor[],
   trees: readonly StorageAccountTreeDescriptor[],
 ): Buffer => {
   const value = encodeBuffer({
-    version: 1,
-    envelope,
+    version: 3,
+    fields,
     trees,
   } satisfies AccountGraphManifest);
   if (value.byteLength >= MAX_INLINE_STORAGE_VALUE_BYTES) {
@@ -118,13 +146,14 @@ const manifestValue = (
   return value;
 };
 
-const accountEnvelopeGraph = (doc: StorageAccountDoc): ReturnType<typeof projectAccountEnvelopeGraph> =>
-  projectAccountEnvelopeGraph(accountEnvelopeValue(doc));
+const fieldDescriptors = (
+  fields: readonly EncodedAccountField[],
+): StorageAccountFieldDescriptor[] => fields.map(({ tag, valueHash }) => ({ tag, valueHash }));
 
 /** Bounded Account root record used by storage hashing and physical writes. */
 export const projectAccountStorageRootValue = (doc: StorageAccountDoc): Buffer =>
   manifestValue(
-    accountEnvelopeGraph(doc).descriptor,
+    fieldDescriptors(encodedAccountFields(doc.state.leftEntity, doc.state.rightEntity, doc)),
     projectAccountTreeDescriptors(doc),
   );
 
@@ -164,27 +193,38 @@ const decodeTreeDescriptor = (value: unknown, index: number): StorageAccountTree
   };
 };
 
+const decodeFieldDescriptor = (value: unknown, index: number): StorageAccountFieldDescriptor => {
+  const field = record(value, `STORAGE_ACCOUNT_MANIFEST_FIELD_${index}`);
+  exactKeys(field, ['tag', 'valueHash'], `STORAGE_ACCOUNT_MANIFEST_FIELD_${index}`);
+  const tag = field['tag'];
+  if (!Number.isSafeInteger(tag) || Number(tag) < 1 || Number(tag) > 0xff) {
+    throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_TAG:${String(tag)}`);
+  }
+  if (!STORAGE_ACCOUNT_FIELD_BY_TAG.has(Number(tag))) {
+    throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_UNKNOWN:${String(tag)}`);
+  }
+  return {
+    tag: Number(tag),
+    valueHash: decodeHash(field['valueHash'], 'STORAGE_ACCOUNT_MANIFEST_FIELD_HASH'),
+  };
+};
+
 /** Strict boundary decoder shared by recovery and snapshot graph verification. */
 export const decodeAccountGraphManifest = (value: Buffer): AccountGraphManifest => {
   const manifest = record(decodeBuffer(value), 'STORAGE_ACCOUNT_MANIFEST_INVALID');
-  exactKeys(manifest, ['version', 'envelope', 'trees'], 'STORAGE_ACCOUNT_MANIFEST');
-  if (manifest['version'] !== 1 || !Array.isArray(manifest['trees'])) {
+  exactKeys(manifest, ['version', 'fields', 'trees'], 'STORAGE_ACCOUNT_MANIFEST');
+  if (manifest['version'] !== 3 || !Array.isArray(manifest['fields']) || !Array.isArray(manifest['trees'])) {
     throw new Error('STORAGE_ACCOUNT_MANIFEST_VERSION');
   }
-  const envelope = record(manifest['envelope'], 'STORAGE_ACCOUNT_MANIFEST_ENVELOPE');
-  exactKeys(envelope, ['rootHash', 'leafCount'], 'STORAGE_ACCOUNT_MANIFEST_ENVELOPE');
-  const leafCount = envelope['leafCount'];
-  if (!Number.isSafeInteger(leafCount) || Number(leafCount) < 0) {
-    throw new Error('STORAGE_ACCOUNT_MANIFEST_ENVELOPE_COUNT');
+  const fields = manifest['fields'].map((raw, index) => decodeFieldDescriptor(raw, index));
+  if (fields.some((field, index) => index > 0 && fields[index - 1]!.tag >= field.tag)) {
+    throw new Error('STORAGE_ACCOUNT_MANIFEST_FIELD_ORDER');
   }
   const trees = manifest['trees'].map((raw, index) => decodeTreeDescriptor(raw, index));
   if (new Set(trees.map(tree => tree.namespace)).size !== trees.length) throw new Error('STORAGE_ACCOUNT_MANIFEST_TREE_DUPLICATE');
   return {
-    version: 1,
-    envelope: {
-      rootHash: decodeHash(envelope['rootHash'], 'STORAGE_ACCOUNT_MANIFEST_ENVELOPE_ROOT'),
-      leafCount: Number(leafCount),
-    },
+    version: 3,
+    fields,
     trees,
   };
 };
@@ -197,14 +237,12 @@ export const prepareAccountStorageLayout = async (
   doc: StorageAccountDoc,
   previous?: StorageAccountDoc,
 ): Promise<AccountStorageLayout> => {
+  const fields = encodedAccountFields(entityId, counterpartyId, doc);
+  const priorFields = previous ? encodedAccountFields(entityId, counterpartyId, previous) : [];
+  const priorByTag = new Map(priorFields.map(field => [field.tag, field]));
+  const nextTags = new Set(fields.map(field => field.tag));
   const trees = projectAccountTreeDescriptors(doc);
-  const envelope = projectAccountEnvelopeGraphChanges(
-    entityId,
-    counterpartyId,
-    accountEnvelopeGraph(doc),
-    previous ? accountEnvelopeGraph(previous) : undefined,
-  );
-  const rootValue = manifestValue(envelope.descriptor, trees);
+  const rootValue = manifestValue(fieldDescriptors(fields), trees);
   const graph = projectAccountTreeChanges(entityId, counterpartyId, doc, previous);
   return {
     representation: 'graph',
@@ -213,11 +251,11 @@ export const prepareAccountStorageLayout = async (
     rootValue,
     puts: [
       { key: rootKey, value: rootValue },
-      ...envelope.puts,
+      ...fields.filter(field => priorByTag.get(field.tag)?.valueHash !== field.valueHash),
       ...graph.puts,
     ],
     dels: [
-      ...envelope.dels,
+      ...priorFields.filter(field => !nextTags.has(field.tag)).map(field => field.key),
       ...graph.dels,
     ],
   };
@@ -234,6 +272,13 @@ export const prepareAccountStorageDelete = async (
   decodeAccountGraphManifest(root);
   return [
     rootKey,
+    ...await (async (): Promise<Buffer[]> => {
+      const keys: Buffer[] = [];
+      for await (const key of iterateKeys(db, { prefix: keyLiveAccountFieldPrefix(entityId, counterpartyId) })) {
+        keys.push(key);
+      }
+      return keys;
+    })(),
     ...await accountTreeStorageKeys(db, entityId, counterpartyId),
   ];
 };
@@ -272,11 +317,22 @@ export const readAccountStorageLayout = async (
   const root = await readRawOrNull(db, rootKey);
   if (!root) return null;
   const manifest = decodeAccountGraphManifest(root);
-  const replica = record(
-    await readAccountEnvelopeGraph(db, entityId, counterpartyId, manifest.envelope),
-    'STORAGE_ACCOUNT_ENVELOPE_INVALID',
-  );
-  const state = record(replica['state'], 'STORAGE_ACCOUNT_ENVELOPE_STATE_INVALID');
+  const replica: Record<string, unknown> = {};
+  const state: Record<string, unknown> = {};
+  for (const descriptor of manifest.fields) {
+    const field = STORAGE_ACCOUNT_FIELD_BY_TAG.get(descriptor.tag);
+    if (!field) throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_UNKNOWN:${descriptor.tag}`);
+    const value = await readRawOrNull(db, keyLiveAccountField(entityId, counterpartyId, descriptor.tag));
+    if (!value) throw new Error(`STORAGE_ACCOUNT_FIELD_MISSING:${field}`);
+    const actualHash = computeIntegrityDigest(value);
+    if (actualHash !== descriptor.valueHash) {
+      throw new Error(`STORAGE_ACCOUNT_FIELD_HASH_MISMATCH:${field}:${descriptor.valueHash}:${actualHash}`);
+    }
+    const decoded = decodeBuffer(value);
+    if (isStateField(field)) state[stateFieldName(field)] = decoded;
+    else replica[field] = decoded;
+  }
+  replica['state'] = state;
   const trees = await hydrateAccountTrees(db, entityId, counterpartyId, manifest.trees);
   for (const [namespace, tree] of trees) installTree(state, replica, namespace, tree);
   const doc = validateStorageAccountDocValue({ ...replica, state });

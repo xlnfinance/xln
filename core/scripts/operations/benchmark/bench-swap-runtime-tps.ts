@@ -2,7 +2,6 @@ import { applyAccountTx } from '../../../account/tx/apply';
 import {
   accountTransitionView,
   beginAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
@@ -102,10 +101,8 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
     byLeft: true,
   },
   currentHeight: 1,
-  pendingSignatures: [],
   rollbackCount: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
-  proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
   shadow: { rebalance: {
     policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
@@ -302,7 +299,7 @@ const applyAccountFrame = async (
 ): Promise<void> => {
   const owner = beginAccountTransition(
     account,
-    createAccountTransitionKey(account, { purpose: 'benchmark-frame', txs }),
+    { purpose: 'benchmark-frame', txs },
   );
   try {
     const draft = accountTransitionView(owner);

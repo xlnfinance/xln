@@ -84,27 +84,8 @@ const requireMix = (mix: HltWorkloadMix): HltWorkloadMix => {
   return { swap, payment };
 };
 
-/**
- * Split the population between workloads by mix weight, keeping both halves
- * even so each remains pairable into lanes.
- */
-const splitUsersByMix = (
-  users: number,
-  mix: HltWorkloadMix,
-): Readonly<{ swapUsers: number; paymentUsers: number }> => {
-  const total = mix.swap + mix.payment;
-  const rawSwapUsers = Math.round((users * mix.swap) / total);
-  const swapUsers = rawSwapUsers - (rawSwapUsers % 2);
-  const paymentUsers = users - swapUsers;
-  if (paymentUsers % 2 !== 0) throw new Error(`HLT_MIX_SPLIT_NOT_PAIRABLE:${swapUsers}:${paymentUsers}`);
-  if (mix.swap > 0 && swapUsers === 0) throw new Error('HLT_MIX_SWAP_POPULATION_EMPTY');
-  if (mix.payment > 0 && paymentUsers === 0) throw new Error('HLT_MIX_PAYMENT_POPULATION_EMPTY');
-  return { swapUsers, paymentUsers };
-};
-
 export const buildHltPlan = (economy: HltEconomy): HltPlan => {
   const users = requireBoundaryInteger(economy.users, 'HLT_USERS_INVALID', 2);
-  requirePairableUsers(users, 'HLT_USERS_NOT_PAIRABLE');
   const ratePerUserPerSecond = requireBoundaryInteger(
     economy.ratePerUserPerSecond,
     'HLT_RATE_PER_USER_INVALID',
@@ -112,6 +93,7 @@ export const buildHltPlan = (economy: HltEconomy): HltPlan => {
   );
   const durationSeconds = requireBoundaryInteger(economy.durationSeconds, 'HLT_DURATION_INVALID', 1);
   const mix = requireMix(economy.mix);
+  if (mix.swap > 0) requirePairableUsers(users, 'HLT_USERS_NOT_PAIRABLE');
   if (economy.hubLabels.length === 0) throw new Error('HLT_HUB_LABELS_EMPTY');
   if (economy.baseTokenId === economy.quoteTokenId) throw new Error('HLT_TOKENS_NOT_DISTINCT');
   const paymentAmountRange = economy.paymentAmountRange ?? HLT_DEFAULT_PAYMENT_AMOUNT_RANGE;
@@ -125,11 +107,8 @@ export const buildHltPlan = (economy: HltEconomy): HltPlan => {
   // scheduler, not the Hub, the thing under test.
   if (ratePerUserPerSecond > 1_000) throw new Error(`HLT_RATE_PER_USER_TOO_HIGH:${ratePerUserPerSecond}`);
   const bothWorkloads = mix.swap > 0 && mix.payment > 0;
-  const { swapUsers, paymentUsers } = bothWorkloads
-    ? { swapUsers: users, paymentUsers: users }
-    : splitUsersByMix(users, mix);
-  const swapLanes = swapUsers / 2;
-  const paymentLanes = bothWorkloads ? users : paymentUsers / 2;
+  const swapLanes = mix.swap > 0 ? users / 2 : 0;
+  const paymentLanes = mix.payment > 0 ? users : 0;
   const swapMatchesPerLaneRound = bothWorkloads ? 2 : 1;
   const rounds = durationSeconds * ratePerUserPerSecond;
   const offeredSwapRatePerSecond = swapLanes * ratePerUserPerSecond * swapMatchesPerLaneRound;

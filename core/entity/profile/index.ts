@@ -664,7 +664,7 @@ export const parseProfile = (raw: unknown): DecodedProfile => {
     metadata,
     accounts: parseProfileAccounts(raw['accounts'], entityId),
   };
-  return result;
+  return rememberCanonicalProfile(result, result) as DecodedProfile;
 };
 
 const canonicalizeProfileMetadata = (
@@ -712,13 +712,39 @@ const canonicalizeProfileAccounts = (
   tokenCapacities: parseProfileTokenCapacities(account.tokenCapacities, entityId, account.counterpartyId),
 }));
 
+const CANONICAL_PROFILE_CACHE_MAX = 4_096;
+const canonicalProfileCache = new Map<Profile, { encoded: string; canonical: Profile }>();
+
+const rememberCanonicalProfile = (profile: Profile, canonical: Profile): Profile => {
+  if (canonicalProfileCache.size >= CANONICAL_PROFILE_CACHE_MAX) {
+    const oldest = canonicalProfileCache.keys().next();
+    if (!oldest.done) canonicalProfileCache.delete(oldest.value);
+  }
+  canonicalProfileCache.set(profile, {
+    // The fingerprint is strict: symbols, accessors and unsupported values
+    // cannot collide with a previously validated financial profile.
+    encoded: encodeCanonicalConsensusValue(profile),
+    canonical,
+  });
+  return canonical;
+};
+
 export const canonicalizeProfile = (
   profile: Profile,
   _options: { existing?: Profile | null; now?: number } = {},
 ): Profile =>
   timePerfPhase('profile.canonicalize', () => {
     observePerfCount('profile.canonicalize');
-    return canonicalizeProfileUncached(profile);
+    const cached = canonicalProfileCache.get(profile);
+    if (cached && encodeCanonicalConsensusValue(profile) === cached.encoded) {
+      return cached.canonical;
+    }
+    if (cached) canonicalProfileCache.delete(profile);
+    const canonical = canonicalizeProfileUncached(profile);
+    // Cache both the caller and the canonical result. Gossip retains the
+    // latter, so steady-state hash/authority checks return it by identity.
+    rememberCanonicalProfile(profile, canonical);
+    return canonical;
   });
 
 const canonicalizeProfileUncached = (profile: Profile): Profile => {

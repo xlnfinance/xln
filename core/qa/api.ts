@@ -34,7 +34,7 @@ import { parseHltDashboardConfig, previewHltDashboard } from './hlt/hlt-dashboar
 import { readHltDashboardSnapshot } from './hlt/hlt-dashboard';
 import {
   abortHltIsolatedRun,
-  parseHltStartConfig,
+  parseHltStartRequest,
   readHltIsolatedRun,
   startHltIsolatedRun,
   type SpawnFn as HltSpawnFn,
@@ -928,16 +928,31 @@ export async function maybeHandleQaRequest(
     try {
       const url = new URL(request.url);
       const preview = previewHltDashboard(parseHltDashboardConfig(url.searchParams));
-      const snapshot = readHltDashboardSnapshot();
+      let snapshot: ReturnType<typeof readHltDashboardSnapshot>;
+      let snapshotError: string | null = null;
+      try {
+        snapshot = readHltDashboardSnapshot();
+      } catch (error) {
+        // Historical QA artifacts are not Runtime authority. Keep the control
+        // plane usable, but expose the exact rejected schema instead of
+        // silently interpreting it through a compatibility reader.
+        snapshotError = error instanceof Error ? error.message : String(error);
+        snapshot = {
+          ledger: [], payment: null, swap: null, replay: null,
+          perf: { parsedProfiles: 0, rows: [] }, hubPerf: [],
+        };
+      }
       return jsonResponse({
         ok: true,
         qaAuth: authInfo,
         preview,
+        snapshotError,
         ledger: snapshot.ledger,
         payment: snapshot.payment,
         swap: snapshot.swap,
         perf: snapshot.perf,
         hubPerf: snapshot.hubPerf,
+        replay: snapshot.replay,
         run: readHltIsolatedRun(),
       }, 200, headers);
     } catch (error) {
@@ -950,8 +965,12 @@ export async function maybeHandleQaRequest(
   if (pathname === '/api/qa/hlt/start' && request.method === 'POST') {
     try {
       const body = await request.json().catch(() => null);
+      const start = parseHltStartRequest(body);
       const run = startHltIsolatedRun({
-        config: parseHltStartConfig(body),
+        config: start.config,
+        phase: start.phase,
+        replayMode: start.replayMode,
+        replayRates: start.replayRates,
         ...(deps.spawnHlt ? { spawn: deps.spawnHlt } : {}),
       });
       return jsonResponse({ ok: true, qaAuth: authInfo, run }, 202, headers);

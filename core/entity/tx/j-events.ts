@@ -31,6 +31,7 @@ import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import {
   buildAccountProofBodyFromJurisdictions,
   requireAccountDeltaTransformerAddress,
+  type AccountJurisdictionView,
 } from '../../account/consensus/helpers';
 import {
   assertDisputeProofBodyWithinContractLimits,
@@ -487,30 +488,24 @@ const normalizeFinalProofbodyHash = (value: unknown, counterpartyId: string): st
   return hash;
 };
 
-const requireFinalizedProofBodyEvidence = (
+const requireOnchainProofBodyEvidence = (
   account: AccountReplica,
+  rawProofbody: ProofBodyStruct,
   finalProofbodyHashRaw: unknown,
   counterpartyId: string,
+  context: string,
 ): { finalProofbodyHash: string; proofbody: ProofBodyStruct; tokenIds: number[] } => {
   const finalProofbodyHash = normalizeFinalProofbodyHash(finalProofbodyHashRaw, counterpartyId);
-  const matches = Object.entries(account.disputeProofBodiesByHash ?? {})
-    .filter(([proofbodyHash]) => proofbodyHash.toLowerCase() === finalProofbodyHash);
-  if (matches.length === 0) {
-    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING", `J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING:${counterpartyId}:${finalProofbodyHash}`);
-  }
-  if (matches.length !== 1) {
-    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_AMBIGUOUS", `J_EVENT_DISPUTE_FINAL_PROOFBODY_AMBIGUOUS:${counterpartyId}:${finalProofbodyHash}`);
-  }
   let proofbody: ProofBodyStruct;
   let computedHash: string;
   try {
     proofbody = canonicalizeProofBodyStruct(
-      matches[0]![1] as ProofBodyStruct,
+      rawProofbody,
       account.state.leftEntity,
       account.state.rightEntity,
-      'jEvent.disputeFinalized',
+      context,
     );
-    assertDisputeProofBodyWithinContractLimits(proofbody, 'jEvent.disputeFinalized');
+    assertDisputeProofBodyWithinContractLimits(proofbody, context);
     computedHash = hashProofBodyStruct(proofbody).toLowerCase();
   } catch (error) {
     if (error instanceof FailureDispositionError) throw error;
@@ -529,31 +524,30 @@ const requireFinalizedProofBodyEvidence = (
   return { finalProofbodyHash, proofbody, tokenIds };
 };
 
-const installOnchainDisputeProofBody = (
+const requireFrozenAccountProofBody = (
+  jurisdictions: AccountJurisdictionView,
   account: AccountReplica,
   rawProofbody: ProofBodyStruct,
   expectedHashRaw: unknown,
   counterpartyId: string,
   context: string,
 ): ProofBodyStruct => {
-  const expectedHash = normalizeFinalProofbodyHash(expectedHashRaw, counterpartyId);
-  const proofbody = canonicalizeProofBodyStruct(
+  const evidence = requireOnchainProofBodyEvidence(
+    account,
     rawProofbody,
-    account.state.leftEntity,
-    account.state.rightEntity,
+    expectedHashRaw,
+    counterpartyId,
     context,
   );
-  assertDisputeProofBodyWithinContractLimits(proofbody, context);
-  const computedHash = hashProofBodyStruct(proofbody).toLowerCase();
-  if (computedHash !== expectedHash) {
-    throw haltRuntimeFailure("J_EVENT_DISPUTE_PROOFBODY_SIDECAR_HASH_MISMATCH", `J_EVENT_DISPUTE_PROOFBODY_SIDECAR_HASH_MISMATCH:` +
-      `${counterpartyId}:${expectedHash}:${computedHash}`);
+  const current = buildAccountProofBodyFromJurisdictions(jurisdictions, account);
+  if (current.proofBodyHash.toLowerCase() !== evidence.finalProofbodyHash) {
+    throw haltRuntimeFailure(
+      'DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH',
+      `DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:${context}:${counterpartyId}:` +
+      `${evidence.finalProofbodyHash}:${current.proofBodyHash}`,
+    );
   }
-  account.disputeProofBodiesByHash = {
-    ...(account.disputeProofBodiesByHash ?? {}),
-    [expectedHash]: proofbody,
-  };
-  return proofbody;
+  return evidence.proofbody;
 };
 
 type DisputeStartedEventData = {
@@ -806,7 +800,8 @@ const initializeStartedDispute = async (
     return null;
   }
 
-  installOnchainDisputeProofBody(
+  const initialProofbody = requireFrozenAccountProofBody(
+    env.state,
     account,
     data.initialProofbody,
     data.proofbodyHash,
@@ -850,23 +845,6 @@ const initializeStartedDispute = async (
     queueLocalJBatchBroadcast(newState, context.outputs);
   }
   dirtyAccounts.add(counterpartyId.toLowerCase());
-  const localProof = buildAccountProofBodyFromJurisdictions(env.state, account);
-  const onChainProofHash = String(activeDispute.initialProofbodyHash || '').toLowerCase();
-  const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
-    .some((hash) => hash.toLowerCase() === onChainProofHash);
-  if (localProof.proofBodyHash.toLowerCase() !== onChainProofHash) {
-    jEventLog.debug('dispute.proof_hash_not_current', {
-      counterparty: shortId(counterpartyId),
-      local: shortHash(localProof.proofBodyHash),
-      onChain: shortHash(activeDispute.initialProofbodyHash),
-      storedProofKnown,
-    });
-  }
-  const initialProofbody = requireFinalizedProofBodyEvidence(
-    account,
-    activeDispute.initialProofbodyHash,
-    counterpartyId,
-  ).proofbody;
   return {
     counterpartyId,
     senderStr,
@@ -925,7 +903,6 @@ const applyStartedDisputeFollowups = (
       newState,
       visible,
       counterpartyId,
-      [visibleActive.initialProofbodyHash],
       visibleActive.crossJurisdictionRecovery?.resultsByPullId ?? {},
     );
     if (plan) {
@@ -1013,7 +990,8 @@ const selectObservedCounterDispute = (
   if (!account?.activeDispute) {
     throw new Error(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${resolved.candidateCounterpartyId}`);
   }
-  installOnchainDisputeProofBody(
+  const selectedProofbody = requireFrozenAccountProofBody(
+    context.env.state,
     account,
     data.counterProofbody,
     proofbodyHash,
@@ -1052,25 +1030,18 @@ const selectObservedCounterDispute = (
   active.selectedCounterNonce = nonce;
   active.selectedCounterProofbodyHash = proofbodyHash;
   active.selectedCounterProposerIsLeft = data.proposerIsLeft;
-  const selectedProofbody = requireFinalizedProofBodyEvidence(
-    account,
-    proofbodyHash,
-    resolved.counterpartyId,
-  ).proofbody;
   const currentRecovery = active.crossJurisdictionRecovery;
   const recoveryPlan = currentRecovery
     ? refreshCrossJurisdictionTargetRecovery(
         context.newState,
         account,
         resolved.counterpartyId,
-        [proofbodyHash],
         currentRecovery,
       )
     : planCrossJurisdictionTargetRecovery(
         context.newState,
         account,
         resolved.counterpartyId,
-        [proofbodyHash],
         {},
       );
   if (recoveryPlan) active.crossJurisdictionRecovery = recoveryPlan.recovery;
@@ -1326,7 +1297,8 @@ async function applyDisputeFinalizedJEvent(
     });
     return;
   }
-  installOnchainDisputeProofBody(
+  const finalProofbody = requireFrozenAccountProofBody(
+    context.env.state,
     account,
     data.finalProofbody,
     data.finalProofbodyHash,
@@ -1334,10 +1306,12 @@ async function applyDisputeFinalizedJEvent(
     'jEvent.disputeFinalized',
   );
   // Depository settles only tokenIds from this exact locally signed body.
-  const finalizedProof = requireFinalizedProofBodyEvidence(
+  const finalizedProof = requireOnchainProofBodyEvidence(
     account,
+    finalProofbody,
     data.finalProofbodyHash,
     counterpartyId,
+    'jEvent.disputeFinalized',
   );
   const resolved = resolveFinalizationEvidence(
     account,
@@ -1375,7 +1349,7 @@ const applyResolvedDisputeFinality = async (
   senderStr: string,
   entityIdNorm: string,
   batchNonce: number | undefined,
-  finalizedProof: ReturnType<typeof requireFinalizedProofBodyEvidence>,
+  finalizedProof: ReturnType<typeof requireOnchainProofBodyEvidence>,
   resolved: ReturnType<typeof resolveFinalizationEvidence>,
 ): Promise<void> => {
   const { accountConsensusContext, newState, dirtyAccounts } = context;

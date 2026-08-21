@@ -257,7 +257,7 @@ const runtimeRecoveryApi = createRuntimeRecoveryApi({
 export const restoreEnvFromCheckpointSnapshot = runtimeRecoveryApi.restoreEnvFromCheckpointSnapshot;
 export const restoreEnvFromRecoveryBundles = runtimeRecoveryApi.restoreEnvFromRecoveryBundles;
 export const persistRestoredEnvToDB = runtimeRecoveryApi.persistRestoredEnvToDB;
-const replayRecoveryFrameJournals = runtimeRecoveryApi.replayRecoveryFrameJournals;
+export const replayRecoveryFrameJournals = runtimeRecoveryApi.replayRecoveryFrameJournals;
 const assertPersistedContractConfigReady = runtimeRecoveryApi.assertPersistedContractConfigReady;
 const registerCommittedSingleSignerWallets = runtimeRecoveryApi.registerCommittedSingleSignerWallets;
 

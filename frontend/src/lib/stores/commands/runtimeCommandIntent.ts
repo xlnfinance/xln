@@ -1,11 +1,8 @@
 import type { RuntimeInput } from '@xln/core/api/public/runtime-module';
 import {
-  MAX_RECEIPT_ID_BYTES,
-  MAX_STATUS_URL_BYTES,
   MAX_UNRESOLVED_REMOTE_INTENTS,
   canonicalRuntimeInput,
   createRuntimeCommandId,
-  normalizeBoundedText,
   normalizeRuntimeCommandId,
   normalizeRuntimeCommandSequence,
   normalizeRuntimeId,
@@ -138,7 +135,7 @@ export const resolveRemoteRuntimeCommandIntent = async (options: {
   );
   const intent: RemoteRuntimeCommandIntent = {
     commandId: createRuntimeCommandId(), commandSequence, runtimeId, serverFingerprint, inputHash: canonical.hash,
-    input: canonical.input, status: 'pending', createdAt: Date.now(), upstreamReceiptId: null, statusUrl: null,
+    input: canonical.input, status: 'pending', createdAt: Date.now(),
   };
   if (!isBrowserCommandJournal()) memoryIntents.set(intent.commandId, cloneIntent(intent));
   else {
@@ -163,7 +160,6 @@ export const resolveRemoteRuntimeCommandId = async (options: Parameters<
 
 export const markRemoteRuntimeCommandIntentAccepted = async (
   commandId: string,
-  upstream: { receiptId?: string | null; statusUrl?: string | null },
 ): Promise<void> => serializeJournalMutation(async () => {
   const normalizedCommandId = normalizeRuntimeCommandId(commandId);
   const existing = isBrowserCommandJournal()
@@ -173,10 +169,6 @@ export const markRemoteRuntimeCommandIntentAccepted = async (
   const updated: RemoteRuntimeCommandIntent = {
     ...existing,
     status: 'accepted',
-    upstreamReceiptId: upstream.receiptId === undefined
-      ? existing.upstreamReceiptId : normalizeBoundedText(upstream.receiptId, 'RECEIPT_ID', MAX_RECEIPT_ID_BYTES) || null,
-    statusUrl: upstream.statusUrl === undefined
-      ? existing.statusUrl : normalizeBoundedText(upstream.statusUrl, 'STATUS_URL', MAX_STATUS_URL_BYTES) || null,
   };
   if (!isBrowserCommandJournal()) memoryIntents.set(normalizedCommandId, cloneIntent(updated));
   else await writeProtectedRemoteRuntimeCommandIntent(updated, canonicalRuntimeInput(updated.input).encoded);

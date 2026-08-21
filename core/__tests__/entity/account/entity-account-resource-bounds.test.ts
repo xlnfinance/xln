@@ -79,10 +79,8 @@ const makeAccount = (mempool: AccountTx[] = []): AccountReplica => ({
     byLeft: true,
   },
   currentHeight: 0,
-  pendingSignatures: [],
   rollbackCount: 0,
   proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 1 },
-  proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   swapOrderHistory: new Map(),
@@ -354,11 +352,6 @@ test('Account validation and storage hydration reject an undrainable mempool', (
 });
 
 test('Account state decoding never repairs missing or malformed replica fields', () => {
-  const missingSignatures = makeAccount();
-  delete (missingSignatures as Partial<typeof missingSignatures>).pendingSignatures;
-  expect(() => validateAccountReplica(missingSignatures, 'missingSignatures'))
-    .toThrow('missingSignatures.pendingSignatures');
-
   const malformedTx = makeAccount([{
     type: 'direct_payment',
     data: { tokenId: 1, amount: 1n, extra: true },

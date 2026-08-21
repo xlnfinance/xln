@@ -323,7 +323,6 @@ describe('runtime websocket recovery requests', () => {
       () => receiverErrors.some(message => message.startsWith(RETRYABLE_INGRESS_BACKPRESSURE)),
       'retryable rejection reported',
     );
-
     expect(received).toBe(1);
     expect(receiver.isOpen()).toBe(true);
     expect(

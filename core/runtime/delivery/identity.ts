@@ -136,8 +136,18 @@ export const accountProposalSettledBySender = (env: RuntimeReplica, output: Rout
   if (proposals.some(part => part.ack)) return false;
   return proposals.every(({ accountInput, proposal }) => {
     const account = senderAccountForProposal(env, accountInput.fromEntityId, accountInput.toEntityId);
-    // An account the sender no longer hosts cannot advance this proposal either.
-    if (!account) return true;
+    if (!account) {
+      throw new Error(
+        `ACCOUNT_PROPOSAL_OUTBOX_SOURCE_ACCOUNT_MISSING:${safeStringify({
+          runtimeId: env.runtimeId,
+          fromEntityId: accountInput.fromEntityId,
+          toEntityId: accountInput.toEntityId,
+          proposalHeight: proposal.frame.height,
+          proposalStateHash: proposal.frame.stateHash,
+          output,
+        })}`,
+      );
+    }
     const pending = account.pendingFrame;
     return !(
       pending?.height === proposal.frame.height &&

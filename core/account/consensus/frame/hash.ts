@@ -35,6 +35,33 @@ export function getAccountFrameBoundsError(
   frame: AccountFrame,
   currentTimestamp?: number,
 ): string {
+  const structuralError = getAccountFrameStructuralError(frame, currentTimestamp);
+  if (structuralError) return structuralError;
+  const frameSizeBytes = getCanonicalAccountFrameSizeBytes(frame);
+  if (frameSizeBytes > MAX_FRAME_SIZE_BYTES) {
+    return `frame size ${frameSizeBytes} bytes > ${MAX_FRAME_SIZE_BYTES}`;
+  }
+  try {
+    assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
+  } catch (error) {
+    return `delta integrity failed: ${(error as Error).message}`;
+  }
+  return '';
+}
+
+/**
+ * Cheap shape checks used by inbound Account consensus before signature work.
+ *
+ * The containing Entity frame has already canonicalized and capped all txs at
+ * 5 MB, which is stricter than the 10 MB Account-frame cap. Re-serializing the
+ * same nested Account frame here only to rediscover that bound doubled the hot
+ * inbound canonicalization cost. Delta integrity remains part of the one
+ * authoritative `assertAccountFrameHash` pass before replay.
+ */
+export function getAccountFrameStructuralError(
+  frame: AccountFrame,
+  currentTimestamp?: number,
+): string {
   if (!Number.isSafeInteger(frame.height) || frame.height < 0) return `height ${frame.height} is invalid`;
   if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0) {
     return `jHeight ${String(frame.jHeight)} is invalid`;
@@ -45,17 +72,8 @@ export function getAccountFrameBoundsError(
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) {
     return `tx count ${frame.accountTxs.length} > ${MAX_ACCOUNT_FRAME_TXS}`;
   }
-  const frameSizeBytes = getCanonicalAccountFrameSizeBytes(frame);
-  if (frameSizeBytes > MAX_FRAME_SIZE_BYTES) {
-    return `frame size ${frameSizeBytes} bytes > ${MAX_FRAME_SIZE_BYTES}`;
-  }
   if (!ethers.isHexString(frame.accountStateRoot, 32)) {
     return `accountStateRoot ${String(frame.accountStateRoot)} is invalid`;
-  }
-  try {
-    assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
-  } catch (error) {
-    return `delta integrity failed: ${(error as Error).message}`;
   }
 
   if (currentTimestamp !== undefined) {

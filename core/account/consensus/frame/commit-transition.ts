@@ -14,7 +14,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountOverlay,
 } from '../../state/candidate-overlay';
@@ -52,11 +51,11 @@ export const commitAccountFrameTransition = async (
   const { account, frame } = options;
   const owner = beginAccountTransition(
     account,
-    createAccountTransitionKey(account, {
+    {
       purpose: 'committed-account-frame',
       role: options.role,
       stateHash: frame.stateHash,
-    }),
+    },
   );
   const draft = accountTransitionView(owner);
   const candidateEffects: AccountOutput[] = [];

@@ -5,7 +5,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import type { JPrefixCertificate } from '../../../types/jurisdiction-events';
 import {
   ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
-  measureEntityFrameWireBytes,
+  createEntityFrameWirePrefixMeter,
 } from '../frame';
 import { LIMITS } from '../../../config/constants';
 import { getPrevFrameHash } from '../frame/lineage';
@@ -44,15 +44,14 @@ const proposalWireTemplate = (
 
 const fitTxPrefixToMeasuredBytes = (
   allTxs: EntityTx[],
-  measure: (slice: EntityTx[]) => number,
+  measure: (count: number) => number,
   initialCandidate: number,
 ): EntityTx[] => {
   const maxBytes = proposalWireMaxBytes();
   let candidate = Math.min(allTxs.length, Math.max(1, initialCandidate));
   for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
-    const slice = allTxs.slice(0, candidate);
-    const bytes = measure(slice);
-    if (bytes <= maxBytes) return slice;
+    const bytes = measure(candidate);
+    if (bytes <= maxBytes) return allTxs.slice(0, candidate);
     const scaled = Math.floor(candidate * 0.9 * maxBytes / bytes);
     const next = Math.min(candidate - 1, scaled);
     if (next < 1) {
@@ -66,6 +65,22 @@ const fitTxPrefixToMeasuredBytes = (
 const fitHintKeyFor = (replica: EntityReplica): string =>
   `${replica.entityId.trim().toLowerCase()}:${replica.signerId.trim().toLowerCase()}`;
 
+export const selectInitialEntityWireFitCount = (
+  txCount: number,
+  fitHint: number | undefined,
+): number => {
+  if (!Number.isSafeInteger(txCount) || txCount < 0) {
+    throw new Error(`ENTITY_WIRE_FIT_TX_COUNT_INVALID:${txCount}`);
+  }
+  if (fitHint !== undefined && (!Number.isSafeInteger(fitHint) || fitHint < 0)) {
+    throw new Error(`ENTITY_WIRE_FIT_HINT_INVALID:${fitHint}`);
+  }
+  if (txCount === 0) return 0;
+  return fitHint !== undefined
+    ? Math.max(1, Math.min(txCount, Math.ceil(fitHint * 1.15)))
+    : txCount;
+};
+
 const initialFitCandidate = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
@@ -73,8 +88,9 @@ const initialFitCandidate = (
 ): number => {
   const fitHint = env.infrastructure?.wireBudgetFitHints?.get(fitHintKeyFor(replica));
   // Hint is the last *sealed* tx count, not the empty-events fit. It only
-  // ever narrows the first attempt, never widens it.
-  return fitHint !== undefined ? Math.min(allTxs.length, Math.ceil(fitHint * 1.15)) : allTxs.length;
+  // ever narrows the first attempt, never widens it. Empty frames may record
+  // zero; that must not starve the first later Account ACK forever.
+  return selectInitialEntityWireFitCount(allTxs.length, fitHint);
 };
 
 /** Last sealed Entity-frame tx count. Empty-events fit must not write this. */
@@ -97,10 +113,12 @@ const fitTxsToPersistedWireContext = (
 ): EntityTx[] => {
   if (allTxs.length === 0) return allTxs;
   const wire = proposalWireTemplate(env, replica, entityContext, jPrefixCertificate);
+  const measurePrefix = createEntityFrameWirePrefixMeter(allTxs);
+  const measureBoundPrefix = measurePrefix.forRest(wire);
   const fitted = timePerfPhase('entity.wireFit.measure', () =>
     fitTxPrefixToMeasuredBytes(
       allTxs,
-      slice => measureEntityFrameWireBytes({ ...wire, txs: slice }),
+      measureBoundPrefix,
       initialFitCandidate(env, replica, allTxs),
     ),
   );
@@ -177,6 +195,7 @@ export const fitEntityProposalToWireBudget = async (params: {
     // collectedSigs and hankos (~5-10% at 350 account inputs), so keep another
     // tenth in reserve — a post-apply overflow costs a full re-apply.
     const maxBytes = proposalWireMaxBytes();
+    const measurePrefix = createEntityFrameWirePrefixMeter(allTxs);
     let candidate = initialFitCandidate(env, replica, allTxs);
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
@@ -190,7 +209,8 @@ export const fitEntityProposalToWireBudget = async (params: {
       // by the measured ratio instead of binary-searching against a context
       // built for the whole slice.
       const wire = rest(materialized.entityContext);
-      const bytes = timePerfPhase('entity.wireFit.measure', () => measureEntityFrameWireBytes({ ...wire, txs: slice }));
+      const measureBoundPrefix = timePerfPhase('entity.wireFit.measure', () => measurePrefix.forRest(wire));
+      const bytes = measureBoundPrefix(candidate);
       if (bytes <= maxBytes) {
         if (slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {
@@ -198,7 +218,7 @@ export const fitEntityProposalToWireBudget = async (params: {
             txs: slice.length,
             deferred: allTxs.length - slice.length,
             bytes,
-            contextBytes: measureEntityFrameWireBytes({ ...wire, txs: [] }),
+            contextBytes: measureBoundPrefix(0),
             htlcEntries: materialized.entityContext.htlc.entries.length,
             originated: materialized.entityContext.htlc.originated.length,
             profiles: materialized.entityContext.gossipProfiles.length,

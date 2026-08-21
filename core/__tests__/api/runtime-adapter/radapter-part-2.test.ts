@@ -42,7 +42,11 @@ import {
 
 import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../../../storage/recovery/bundle/crypto';
 
-import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
+import {
+  broadcastRuntimeAdapterTick,
+  forgetRuntimeAdapterClient,
+  handleRuntimeAdapterMessage,
+} from '../../../api/runtime-adapter/server';
 
 import {
   applyRuntimeAdapterCommandMarker,
@@ -203,10 +207,8 @@ const makeEnv = (): RuntimeReplica =>
                       byLeft: true,
                     },
                     currentHeight: 1,
-                    pendingSignatures: [],
                     rollbackCount: 0,
                     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
-                    proofBody: { tokenIds: [], deltas: [] },
                     pendingWithdrawals: new Map(),
                     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
                   },
@@ -514,7 +516,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
     type: 'queued_memo',
     data: { index, note: 'z'.repeat(160) },
   }));
-  account.pendingSignatures = Array.from({ length: 30_000 }, (_, index) => `sig-${index}-${'a'.repeat(80)}`);
   account.abiProofBody = {
     encodedProofBody: `0x${'ab'.repeat(500_000)}`,
     proofBodyHash: `0x${'cd'.repeat(32)}`,
@@ -541,7 +542,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
         items: Array<{
           watchSeed: string;
           mempool: unknown[];
-          pendingSignatures: string[];
           currentFrame: { accountTxs: unknown[]; deltas: unknown[] };
           pendingFrame?: { accountTxs: unknown[]; deltas: unknown[] };
           abiProofBody?: unknown;
@@ -567,7 +567,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(encoded.byteLength).toBeLessThan(1_048_576);
   expect(compact?.state.watchSeed).toBe('');
   expect(compact?.mempool).toHaveLength(0);
-  expect(compact?.pendingSignatures).toHaveLength(0);
   expect(compact?.currentFrame.accountTxs.length ?? 0).toBeLessThanOrEqual(20);
   expect(compact?.currentFrame.deltas.length ?? 0).toBeLessThanOrEqual(100);
   expect(compact?.pendingFrame?.accountTxs.length ?? 0).toBeLessThanOrEqual(20);
@@ -1962,6 +1961,41 @@ test('runtime adapter ticks only go to authenticated clients', async () => {
   expect(tick.height).toBe(7);
 });
 
+test('runtime adapter ticks stay isolated across Runtime replicas in one process', async () => {
+  const firstEnv = makeEnv();
+  const secondEnv = makeEnv();
+  firstEnv.state.height = 11;
+  secondEnv.state.height = 22;
+  const firstMessages: unknown[] = [];
+  const secondMessages: unknown[] = [];
+  const firstSocket = { send: (message: unknown) => firstMessages.push(message) };
+  const secondSocket = { send: (message: unknown) => secondMessages.push(message) };
+  try {
+    await handleRuntimeAdapterMessage(
+      firstSocket,
+      { v: 1, id: 'auth-first-runtime', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+      firstEnv,
+      { enqueueRuntimeInput: () => {} },
+    );
+    await handleRuntimeAdapterMessage(
+      secondSocket,
+      { v: 1, id: 'auth-second-runtime', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+      secondEnv,
+      { enqueueRuntimeInput: () => {} },
+    );
+    firstMessages.length = 0;
+    secondMessages.length = 0;
+    broadcastRuntimeAdapterTick(firstEnv);
+    expect(firstMessages).toHaveLength(1);
+    expect(secondMessages).toHaveLength(0);
+    const tick = decodeTestRuntimeAdapterMessage<{ height: number }>(firstMessages[0]);
+    expect(tick.height).toBe(11);
+  } finally {
+    forgetRuntimeAdapterClient(firstSocket);
+    forgetRuntimeAdapterClient(secondSocket);
+  }
+});
+
 test('runtime adapter drops expired clients before broadcasting ticks', async () => {
   const env = makeEnv();
   const messages: unknown[] = [];
@@ -2263,7 +2297,6 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     audience: runtimeId,
   });
   const enqueued: RuntimeInput[] = [];
-  const receipts: unknown[] = [];
   let constructed = 0;
 
   class HubRpcWebSocket {
@@ -2311,18 +2344,6 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
           runtimeId: targetEnv.runtimeId,
           verifiedHeight: targetEnv.state.height,
         }),
-        registerReceipt: receipt => {
-          const registered = {
-            ...receipt,
-            id: `receipt-${receipts.length + 1}`,
-            status: 'pending' as const,
-            enqueuedAt: 1,
-            expiresAt: 2,
-          };
-          receipts.push(registered);
-          return registered;
-        },
-        buildRuntimeInputStatusUrl: id => `/api/control/runtime-input/${id}/status`,
         loadEntityViewPage: async () => ({
           core: projectEntityReplicaCoreView(replica.state, replica),
           accounts: {
@@ -2419,10 +2440,7 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     expect(enqueued[0]?.entityInputs).toEqual(input.entityInputs);
     expect(enqueued[0]?.runtimeTxs.map(tx => tx.type)).toEqual(['recordRuntimeAdapterCommand']);
     expect(sent.height).toBe(7);
-    expect(sent.receipt?.id).toBe('receipt-1');
-    expect(sent.receipt?.kind).toBe('radapter-runtime-input');
-    expect(sent.receipt?.enqueuedHeight).toBe(7);
-    expect(sent.statusUrl).toBe('/api/control/runtime-input/receipt-1/status');
+    expect(sent).toEqual({ height: 7, status: 'pending', commandSequence: 1 });
 
     broadcastRuntimeAdapterTick(env);
     await new Promise(resolve => setTimeout(resolve, 0));

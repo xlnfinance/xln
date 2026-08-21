@@ -265,21 +265,21 @@ const mergePrecommitBundles = (
   return merged;
 };
 
-const isExactAtomicTransactionReplay = (
+const isExactTransactionReplay = (
   existing: EntityConsensusInput,
   incoming: EntityConsensusInput,
 ): boolean => {
   const existingAtomic = existing.atomicCrossJurisdictionPair;
   const incomingAtomic = incoming.atomicCrossJurisdictionPair;
-  if (!existingAtomic || !incomingAtomic) return false;
-  if (
+  if (Boolean(existingAtomic) !== Boolean(incomingAtomic)) return false;
+  if (existingAtomic && incomingAtomic && (
     existingAtomic.phase !== incomingAtomic.phase ||
     existingAtomic.pairKey !== incomingAtomic.pairKey
-  ) return false;
-  // The merge key already binds Entity, signer and source Runtime frame. Keep
-  // the provenance checks explicit here: only a canonical-identical retry from the
-  // same authenticated Runtime may collapse. Any changed transaction bytes or
-  // sender still flow into strict atomic admission and fail on ambiguity.
+  )) return false;
+  // Exact at-least-once delivery is one input, not two transactions. Keep the
+  // authenticated provenance and source Runtime frame in the identity so two
+  // independently certified effects can never collapse merely because their
+  // nested transaction bytes happen to match.
   return String(existing.from || '').trim().toLowerCase() ===
       String(incoming.from || '').trim().toLowerCase() &&
     String(existing.runtimeId || '').trim().toLowerCase() ===
@@ -387,7 +387,7 @@ export const mergeEntityInputs = (
       }
 
       if (input.entityTxs) {
-        if (!isExactAtomicTransactionReplay(existing, input)) {
+        if (!isExactTransactionReplay(existing, input)) {
           existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
           if (existing.entityTxs) {
             existing.entityTxs = mergeJEventTxs(existing.entityTxs);

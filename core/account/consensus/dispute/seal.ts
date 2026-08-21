@@ -145,10 +145,6 @@ export const storeCounterpartyDisputeSeal = (
   account.counterpartyDisputeProofProposerIsLeft = seal.proposerIsLeft;
   account.counterpartyDisputeHash = seal.hash;
   account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
-  account.disputeProofNoncesByHash = {
-    ...(account.disputeProofNoncesByHash ?? {}),
-    [seal.proofBodyHash]: seal.nonce,
-  };
 };
 
 export const getDisputeSealRequirementError = (

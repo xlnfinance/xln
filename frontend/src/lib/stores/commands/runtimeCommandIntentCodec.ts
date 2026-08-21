@@ -14,15 +14,11 @@ export type RemoteRuntimeCommandIntent = {
   input: RuntimeInput;
   status: RemoteRuntimeCommandIntentStatus;
   createdAt: number;
-  upstreamReceiptId: string | null;
-  statusUrl: string | null;
 };
 
 export const MAX_UNRESOLVED_REMOTE_INTENTS = 100;
 export const MAX_RUNTIME_INPUT_BYTES = 16 * 1024 * 1024;
 export const MAX_RUNTIME_ID_BYTES = 512;
-export const MAX_RECEIPT_ID_BYTES = 512;
-export const MAX_STATUS_URL_BYTES = 4 * 1024;
 
 const SAFE_COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/;
 const SAFE_FINGERPRINT = /^0x[0-9a-f]{64}$/;

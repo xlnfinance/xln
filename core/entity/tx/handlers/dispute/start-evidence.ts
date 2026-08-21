@@ -10,17 +10,15 @@ import {
   sanitizeOptionalDisputeStarterArgumentPair,
 } from '../../../../jurisdiction/machine/batch';
 import { hashProofBodyStruct } from '../../../../protocol/dispute/proof-builder';
-import {
-  requireDisputeArgumentSnapshot,
-  type DisputeArgumentSide,
-} from '../../../../protocol/dispute/arguments';
-import { buildDisputeArgumentsForSnapshot } from '../../../dispute-arguments';
+import type { DisputeArgumentSide } from '../../../../protocol/dispute/arguments';
+import { buildDisputeArgumentsForCurrentState } from '../../../dispute-arguments';
+import { buildAccountProofBodyFromJurisdictions } from '../../../../account/consensus/helpers';
+import type { AccountJurisdictionView } from '../../../../account/consensus/helpers';
 import { shortHash, shortId } from '../../../../support/logger';
 import {
   canonicalizeProofBodyStruct,
   disputeLog,
   reportOptionalArgumentWarnings,
-  requireProofBodyStruct,
 } from './shared';
 
 export type StartEvidence = {
@@ -51,19 +49,16 @@ export const resolveStoredDisputeStartNonce = (
   if (!Number.isSafeInteger(signedNonce) || signedNonce === undefined || signedNonce <= 0) {
     throw new Error(`DISPUTE_START_SEAL_NONCE_INVALID:${String(signedNonce)}`);
   }
-  // The hash map can contain a newer local signature for the same ProofBody.
   // A Hanko is bound to the nonce stored alongside that exact counterparty
   // seal; mixing the local nonce with the peer Hanko makes valid evidence
   // unverifiable and can halt dispute preparation.
   return { signedNonce, nonceSource: 'counterpartySeal' };
 };
 
-export const selectCounterDisputeSnapshots = (
+export const selectCounterDisputeProof = (
   account: AccountReplica,
-  starterSide: DisputeArgumentSide,
   signedNonce: number,
   initialProposerIsLeft: boolean,
-  counterpartyId: string,
 ) => {
   const counterHash = account.currentDisputeProofBodyHash;
   const counterNonce = account.currentDisputeProofNonce;
@@ -81,18 +76,11 @@ export const selectCounterDisputeSnapshots = (
       !initialProposerIsLeft
     );
   if (!outranksInitial) return [];
-  const snapshot = account.disputeArgumentSnapshotsByHash?.[counterHash];
-  if (!snapshot) {
-    throw new Error(`DISPUTE_START_COUNTER_ARGUMENT_SNAPSHOT_MISSING:${counterpartyId}:${counterHash}`);
-  }
-  if (
-    snapshot.side !== starterSide ||
-    snapshot.nonce !== counterNonce ||
-    snapshot.proposerIsLeft !== counterProposerIsLeft
-  ) {
-    throw new Error(`DISPUTE_START_COUNTER_ARGUMENT_SNAPSHOT_MISMATCH:${counterpartyId}:${counterHash}`);
-  }
-  return [snapshot];
+  return [{
+    proofbodyHash: counterHash,
+    nonce: counterNonce,
+    proposerIsLeft: counterProposerIsLeft,
+  }];
 };
 
 export const loadStartProof = (
@@ -100,6 +88,7 @@ export const loadStartProof = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
+  jurisdictions: AccountJurisdictionView,
 ): Omit<
   StartEvidence,
   | 'signedNonce'
@@ -134,13 +123,9 @@ export const loadStartProof = (
     disputeLog.error('start.proof_body_hash_missing', { counterparty: shortId(counterpartyId) });
     return null;
   }
+  const currentProof = buildAccountProofBodyFromJurisdictions(jurisdictions, account);
   const initialProofbody = canonicalizeProofBodyStruct(
-    requireProofBodyStruct(
-      account.disputeProofBodiesByHash?.[proofBodyHash],
-      sourceState.entityId,
-      counterpartyId,
-      'disputeStart.initial',
-    ),
+    currentProof.proofBodyStruct,
     sourceState.entityId,
     counterpartyId,
     'disputeStart.initial',
@@ -152,7 +137,6 @@ export const loadStartProof = (
       `DISPUTE_START_PROOFBODY_HASH_MISMATCH:${counterpartyId}:${proofBodyHash}:${revealedHash}`,
     );
   }
-  requireDisputeArgumentSnapshot(account, proofBodyHash, 'disputeStart.initial');
   return {
     initialProofbody,
     proofBodyHash,
@@ -218,9 +202,10 @@ export const buildStarterArguments = (
 > => {
   const starterIsLeft = account.state.leftEntity === state.entityId;
   const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';
-  const initial = buildDisputeArgumentsForSnapshot(
+  const initial = buildDisputeArgumentsForCurrentState(
     account,
     state,
+    env.state,
     counterpartyId,
     proofBodyHash,
     { secretsSide: starterSide },
@@ -235,21 +220,20 @@ export const buildStarterArguments = (
   if (typeof initialProposerIsLeft !== 'boolean') {
     throw new Error(`DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyId}`);
   }
-  const candidates = selectCounterDisputeSnapshots(
+  const candidates = selectCounterDisputeProof(
     account,
-    starterSide,
     signedNonce,
     initialProposerIsLeft,
-    counterpartyId,
   );
   const warnings = [...initial.warnings];
   let rawCounter = '0x';
   let starterCounterProofCommitment = ethers.ZeroHash;
   if (candidates.length === 1) {
     const candidate = candidates[0]!;
-    const counter = buildDisputeArgumentsForSnapshot(
+    const counter = buildDisputeArgumentsForCurrentState(
       account,
       state,
+      env.state,
       counterpartyId,
       candidate.proofbodyHash,
       { secretsSide: starterSide },

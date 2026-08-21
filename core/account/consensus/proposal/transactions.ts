@@ -7,7 +7,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
 } from '../../state/candidate-overlay';
 import { isLeftEntity } from '../../utils';
@@ -276,13 +275,13 @@ const validateOptimisticBatch = async (
   if (!shouldUseOptimisticProposalBatch(context.proposalWindow)) return null;
   const transition = beginAccountTransition(
     context.account,
-    createAccountTransitionKey(context.account, {
+    {
       purpose: 'proposal-optimistic-batch',
       frameTimestamp: context.frameTimestamp,
       frameJHeight: context.frameJHeight,
       txCount: context.proposalWindow.length,
       txTypes: context.proposalWindow.map(tx => tx.type),
-    }),
+    },
   );
   const machine = accountTransitionView(transition);
   const applied: AppliedProposalTx[] = [];
@@ -342,12 +341,12 @@ export const validateProposalTransactions = async (
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
     const transition = beginAccountTransition(
       clonedMachine,
-      createAccountTransitionKey(clonedMachine, {
+      {
         purpose: 'proposal-transaction',
         type: tx.type,
         frameTimestamp: context.frameTimestamp,
         frameJHeight: context.frameJHeight,
-      }),
+      },
     );
     const txMachine = accountTransitionView(transition);
     let applied: AppliedProposalTx;

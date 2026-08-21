@@ -2,77 +2,82 @@
 /* tslint:disable */
 /* eslint-disable */
 
-  import { Contract, Interface, type ContractRunner } from "ethers";
-  import type { IEntityProvider, IEntityProviderInterface } from "../IEntityProvider.js";
+import { Contract, Interface, type ContractRunner } from "ethers";
+import type {
+  IEntityProvider,
+  IEntityProviderInterface,
+} from "../IEntityProvider";
 
-  const _abi = [
+const _abi = [
   {
-    "inputs": [
+    inputs: [
       {
-        "internalType": "bytes",
-        "name": "hankoData",
-        "type": "bytes"
+        internalType: "bytes",
+        name: "hankoData",
+        type: "bytes",
       },
       {
-        "internalType": "bytes32",
-        "name": "hash",
-        "type": "bytes32"
-      }
+        internalType: "bytes32",
+        name: "hash",
+        type: "bytes32",
+      },
     ],
-    "name": "verifyCurrentHankoSignature",
-    "outputs": [
+    name: "verifyCurrentHankoSignature",
+    outputs: [
       {
-        "internalType": "bytes32",
-        "name": "entityId",
-        "type": "bytes32"
+        internalType: "bytes32",
+        name: "entityId",
+        type: "bytes32",
       },
       {
-        "internalType": "bool",
-        "name": "success",
-        "type": "bool"
-      }
+        internalType: "bool",
+        name: "success",
+        type: "bool",
+      },
     ],
-    "stateMutability": "view",
-    "type": "function"
+    stateMutability: "view",
+    type: "function",
   },
   {
-    "inputs": [
+    inputs: [
       {
-        "internalType": "bytes",
-        "name": "hankoData",
-        "type": "bytes"
+        internalType: "bytes",
+        name: "hankoData",
+        type: "bytes",
       },
       {
-        "internalType": "bytes32",
-        "name": "hash",
-        "type": "bytes32"
-      }
+        internalType: "bytes32",
+        name: "hash",
+        type: "bytes32",
+      },
     ],
-    "name": "verifyHankoSignature",
-    "outputs": [
+    name: "verifyHankoSignature",
+    outputs: [
       {
-        "internalType": "bytes32",
-        "name": "entityId",
-        "type": "bytes32"
+        internalType: "bytes32",
+        name: "entityId",
+        type: "bytes32",
       },
       {
-        "internalType": "bool",
-        "name": "success",
-        "type": "bool"
-      }
+        internalType: "bool",
+        name: "success",
+        type: "bool",
+      },
     ],
-    "stateMutability": "view",
-    "type": "function"
-  }
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
-  export class IEntityProvider__factory {
-    static readonly abi = _abi;
-    static createInterface(): IEntityProviderInterface {
-      return new Interface(_abi) as IEntityProviderInterface;
-    }
-    static connect(address: string, runner?: ContractRunner | null): IEntityProvider {
-      return new Contract(address, _abi, runner) as unknown as IEntityProvider;
-    }
+export class IEntityProvider__factory {
+  static readonly abi = _abi;
+  static createInterface(): IEntityProviderInterface {
+    return new Interface(_abi) as IEntityProviderInterface;
   }
-  
+  static connect(
+    address: string,
+    runner?: ContractRunner | null
+  ): IEntityProvider {
+    return new Contract(address, _abi, runner) as unknown as IEntityProvider;
+  }
+}

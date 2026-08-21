@@ -74,6 +74,8 @@ import {
   ACCOUNT_PENDING_RESEND_AFTER_MS,
   ACCOUNT_PENDING_STALE_WARNING_MS,
 } from './config/timing';
+import { countOp } from '../../support/performance/op-counters';
+import { safeStringify } from '../../protocol/serialization';
 
 export {
   HUB_PENDING_BROADCAST_STALE_MS,
@@ -112,6 +114,7 @@ export const emitCommittedPendingFrameWarnings = (
     committedRun === previousRun
   ) return;
 
+  const stale: Array<{ counterpartyId: string; height: number; ageSeconds: number }> = [];
   for (const counterpartyId of getPendingAccountIds(committedState)) {
     const account = committedState.accounts.get(counterpartyId);
     if (!account) throw new Error(`PENDING_ACCOUNT_INDEX_STALE:${counterpartyId}`);
@@ -119,11 +122,19 @@ export const emitCommittedPendingFrameWarnings = (
     if (!pending) throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
     const frameAge = committedState.timestamp - pending.timestamp;
     if (frameAge > ACCOUNT_PENDING_STALE_WARNING_MS) {
-      console.warn(
-        // 12 chars: 4 collides too often across 1000+ concurrent accounts to trace one stuck pair.
-        `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-12)} h${pending.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
-      );
+      stale.push({
+        counterpartyId,
+        height: pending.height,
+        ageSeconds: Math.floor(frameAge / 1000),
+      });
     }
+  }
+  if (stale.length > 0) {
+    console.warn(
+      `PENDING-FRAME-STALE: count=${stale.length} ` +
+      `oldest=${Math.max(...stale.map(entry => entry.ageSeconds))}s ` +
+      `sample=${safeStringify(stale.slice(0, 8))}`,
+    );
   }
 };
 
@@ -274,11 +285,11 @@ async function maintainPendingAccounts(
       throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
     }
     const frameAge = now - account.pendingFrame.timestamp;
-    // Bilateral frames ack in milliseconds on a healthy mesh. An operator may
-    // set a strict ceiling that MUST exceed ACCOUNT_PENDING_RESEND_AFTER_MS
-    // (timing.ts throws at boot otherwise). Exceeding it is not retried away —
-    // the runtime halts with full account identity so the delivery fault is
-    // investigated, not absorbed.
+    // Bilateral frames ack in milliseconds on a healthy mesh. Transport owns
+    // exact-byte retry until the peer proves WAL durability. This later
+    // Account-level replay covers a peer that durably consumed the frame but
+    // whose ACK was lost; certified-output idempotence must pass that exact
+    // AccountInput to the native duplicate re-ACK transition.
     const strictAckTimeoutMs = ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS;
     if (strictAckTimeoutMs > 0 && frameAge > strictAckTimeoutMs) {
       throw haltRuntimeFailure(
@@ -305,12 +316,12 @@ async function maintainPendingAccounts(
       );
     }
     if (frameAge < ACCOUNT_PENDING_RESEND_AFTER_MS) continue;
-
     outputs.push({
       entityId: account.pendingAccountInput.toEntityId,
       entityTxs: [{ type: 'accountInput', data: account.pendingAccountInput }],
     });
-    crontabLog.warn('pending_frame.resend', {
+    countOp('account.pendingFrameResend');
+    crontabLog.debug('pending_frame.resend', {
       account: shortId(counterpartyId, 12),
       height: account.pendingFrame.height,
       ageSeconds: Math.floor(frameAge / 1000),

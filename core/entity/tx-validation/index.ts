@@ -34,7 +34,7 @@ const validateOrigin = (value: unknown, code: string): void => {
   for (const field of ['sourceEntityId', 'semanticHash', 'frameHash']) {
     requireString(origin[field], `${code}_${field.toUpperCase()}`);
   }
-  if (!['generic', 'account-frame', 'account-ack', 'account-dispute'].includes(String(origin['lane']))) {
+  if (origin['lane'] !== 'generic') {
     throw new Error(`${code}_LANE`);
   }
   requireBigInt(origin['sequence'], `${code}_SEQUENCE`, 0n);

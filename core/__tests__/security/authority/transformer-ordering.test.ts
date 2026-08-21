@@ -64,10 +64,8 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountRepl
       byLeft: true,
     },
     currentHeight: 0,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };

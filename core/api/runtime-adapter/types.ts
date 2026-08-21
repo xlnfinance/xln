@@ -3,7 +3,6 @@ import type { PersistedAccountSwapHistoryPage } from '../../storage/queries/hist
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeInput } from '../../runtime/types';
 import type { XlnProtocolVersion } from '../../protocol/version';
-import type { RuntimeIngressReceipt } from '../../runtime/mempool/ingress-receipts';
 import type { SettlementEvidenceRequest } from './control/settlement-evidence';
 import type {
   NumberedRegistrationCommand,
@@ -174,8 +173,6 @@ export type RuntimeAdapterSendResult = {
   height: number;
   status?: 'pending' | 'observed';
   commandSequence?: number;
-  receipt?: RuntimeIngressReceipt;
-  statusUrl?: string;
 };
 
 export type RuntimeAdapterSendOptions = { commandId?: string; commandSequence?: number };

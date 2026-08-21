@@ -11,7 +11,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
   publishAccountOverlay,
 } from '../../../account/state/candidate-overlay';
@@ -64,7 +63,7 @@ const applyOnDraft = <T extends AccountTx>(
 ): ReturnType<typeof handleRebalanceRefund> => {
   const transition = beginAccountTransition(
     replica,
-    createAccountTransitionKey(replica, { purpose: 'rebalance-financial-test', tx }),
+    { purpose: 'rebalance-financial-test', tx },
   );
   const result = apply(accountTransitionView(transition));
   if (!result.ok) {

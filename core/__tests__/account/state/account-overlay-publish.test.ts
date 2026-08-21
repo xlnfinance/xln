@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   accountTransitionView,
   beginAccountTransition,
-  createAccountTransitionKey,
   publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import { entity, makeAccount } from '../../helpers/cross-j';
@@ -21,10 +20,7 @@ describe('account overlay publish', () => {
     const pendingFrame = live.pendingFrame;
     const liveHanko = live.currentFrameHanko;
 
-    const overlay = beginAccountTransition(
-      live,
-      createAccountTransitionKey(live, { purpose: 'publish-test' }),
-    );
+    const overlay = beginAccountTransition(live, { purpose: 'publish-test' });
     const draft = accountTransitionView(overlay);
     draft.currentHeight = 99;
     draft.currentFrameHanko = '0xdraft-frame-hanko';
@@ -46,10 +42,7 @@ describe('account overlay publish', () => {
   test('does not un-pin a live Account when the draft omits publicPinned', () => {
     const live = makeAccount(entity('11'), entity('22'));
     live.publicPinned = true;
-    const overlay = beginAccountTransition(
-      live,
-      createAccountTransitionKey(live, { purpose: 'publish-pin' }),
-    );
+    const overlay = beginAccountTransition(live, { purpose: 'publish-pin' });
     const draft = accountTransitionView(overlay);
     delete (draft as { publicPinned?: boolean }).publicPinned;
     publishAccountTransition(live, overlay);

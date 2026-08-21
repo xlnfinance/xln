@@ -53,6 +53,12 @@ const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
 };
 const utf8Encoder = new TextEncoder();
 
+/**
+ * Transport is intentionally best-effort. Do not add entity-input delivery
+ * receipts or rejections here: bilateral Account ACK plus Account resend is
+ * the only financial delivery/completion protocol. A second acknowledgement
+ * layer creates conflicting liveness state and must never prune Runtime outbox.
+ */
 type RuntimeWsMessageType =
   | 'hello'
   | 'hello_challenge'
@@ -170,8 +176,8 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
     case 'entity_inputs':
       requiredFields(
         message,
-        ['from', 'to', 'payload', 'encrypted'],
-        ['id', 'fromEncryptionPubKey', 'timestamp', 'entityId', 'txs', 'encSeq'],
+        ['id', 'from', 'to', 'payload', 'encrypted'],
+        ['fromEncryptionPubKey', 'timestamp', 'entityId', 'txs', 'encSeq'],
       );
       if (typeof message['encrypted'] !== 'boolean' || typeof message['payload'] !== 'string') {
         throw new Error('WS_MESSAGE_ENTITY_INPUTS_ENCRYPTION_INVALID');

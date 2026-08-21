@@ -82,7 +82,6 @@ const individualTxTypes = new Set<EntityTx['type']>([
 ]);
 
 const crossEntityCertifiedTxTypes = new Set<EntityTx['type']>([
-  'accountInput',
   'prepareCrossJurisdictionSwap',
 ]);
 
@@ -473,10 +472,6 @@ const assertCertifiedOutputSemanticAuthority = (
   if (assertCertifiedBookLifecycleAuthority(source, target, tx, currentState)) return;
   if (assertCertifiedCrossJRecoveryAuthority(source, target, tx, currentState)) return;
   switch (tx.type) {
-    case 'accountInput':
-      assertSemanticSource(tx.type, source, [tx.data.fromEntityId]);
-      assertSemanticTarget(tx.type, target, tx.data.toEntityId);
-      return;
     case 'prepareCrossJurisdictionSwap':
       assertSemanticSource(tx.type, source, [tx.data.route.source.entityId]);
       assertSemanticTarget(tx.type, target, tx.data.route.source.counterpartyEntityId);

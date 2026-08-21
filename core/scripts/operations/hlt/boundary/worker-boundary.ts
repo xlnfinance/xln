@@ -174,7 +174,7 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
     'inDebtsByToken', 'swapTradingPairs', 'crossJurisdictionSwaps',
     'pendingCrossJurisdictionFillAcks', 'crossJurisdictionBookAdmissions',
     'orderbookReferrals', 'orderbookHubProfile', 'hubRebalanceConfig',
-    'lockBookOpen',
+    'lockBookOpen', 'metrics',
   ], 'PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
   return core;
 };
@@ -217,19 +217,18 @@ export const decodePageItems = (value: unknown, code: string): unknown[] => {
 
 const ACCOUNT_VIEW_REQUIRED = [
   'state', 'status', 'mempool', 'currentFrame', 'currentHeight',
-  'pendingSignatures', 'rollbackCount', 'proofHeader', 'proofBody',
+  'rollbackCount', 'proofHeader',
   'pendingWithdrawals', 'shadow',
 ] as const;
 const ACCOUNT_VIEW_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput', 'lastOutboundFrameAck', 'pendingForwards',
-  'hankoSignature', 'lastRollbackFrameHash', 'abiProofBody', 'currentFrameHanko',
+  'lastRollbackFrameHash', 'currentFrameHanko',
   'counterpartyFrameHanko', 'boardResealMigration', 'counterpartyBoardReseal',
   'currentDisputeProofHanko', 'currentDisputeProofNonce', 'currentDisputeProofBodyHash',
   'currentDisputeHash', 'counterpartyDisputeProofHanko', 'counterpartyDisputeProofNonce',
   'counterpartyDisputeProofBodyHash', 'currentDisputeProofProposerIsLeft',
   'counterpartyDisputeProofProposerIsLeft', 'counterpartyDisputeHash',
-  'counterpartySettlementHanko', 'disputeProofNoncesByHash', 'disputeProofBodiesByHash',
-  'disputeArgumentSnapshotsByHash', 'disputePrepare', 'activeDispute',
+  'counterpartySettlementHanko', 'disputePrepare', 'activeDispute',
 ] as const;
 const ACCOUNT_VIEW_STATE_REQUIRED = [
   'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
@@ -333,6 +332,9 @@ export type HubSettlementCounters = Readonly<{
   height: number;
   lockBookOpen: number;
   htlcFeesEarned: bigint;
+  completedPayments: number;
+  matchedSwaps: number;
+  metricsRuntimeHeight: number;
 }>;
 
 export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounters => {
@@ -343,10 +345,32 @@ export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounte
   }
   const fees = core['htlcFeesEarned'];
   if (typeof fees !== 'bigint' || fees < 0n) throw new Error('PRODUCTION_SWAP_LOAD_HUB_HTLC_FEES_INVALID');
+  const metrics = requireBoundaryRecord(core['metrics'], 'PRODUCTION_SWAP_LOAD_HUB_METRICS_INVALID');
+  requireExactBoundaryKeys(
+    metrics,
+    ['completedPayments', 'matchedSwaps', 'updatedAtRuntimeHeight'],
+    [],
+    'PRODUCTION_SWAP_LOAD_HUB_METRICS_FIELDS_INVALID',
+  );
   return {
     height: requireBoundaryInteger(core['height'], 'PRODUCTION_SWAP_LOAD_HUB_HEIGHT_INVALID', 0),
     lockBookOpen: Number(lockBookOpen),
     htlcFeesEarned: fees,
+    completedPayments: requireBoundaryInteger(
+      metrics['completedPayments'],
+      'PRODUCTION_SWAP_LOAD_HUB_COMPLETED_PAYMENTS_INVALID',
+      0,
+    ),
+    matchedSwaps: requireBoundaryInteger(
+      metrics['matchedSwaps'],
+      'PRODUCTION_SWAP_LOAD_HUB_MATCHED_SWAPS_INVALID',
+      0,
+    ),
+    metricsRuntimeHeight: requireBoundaryInteger(
+      metrics['updatedAtRuntimeHeight'],
+      'PRODUCTION_SWAP_LOAD_HUB_METRICS_HEIGHT_INVALID',
+      0,
+    ),
   };
 };
 
@@ -443,7 +467,10 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
   if (report['offeredOrderRate'] !== expectedOrderRate || report['offeredEconomicSwapRate'] !== expectedEconomicRate) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_OFFERED_RATE_INVALID');
   }
-  if (!Array.isArray(report['roundSubmissionLagMs']) || report['roundSubmissionLagMs'].length !== rounds) {
+  if (
+    !Array.isArray(report['roundSubmissionLagMs']) ||
+    report['roundSubmissionLagMs'].length !== Number(report['runtimeInputBatches'])
+  ) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ROUND_LAG_INVALID');
   }
   const roundSubmissionLagMs = report['roundSubmissionLagMs'].map((entry, index) =>

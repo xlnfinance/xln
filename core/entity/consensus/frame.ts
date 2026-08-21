@@ -8,11 +8,7 @@ import { HEAVY_LOGS } from '../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
 import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/events/event-normalization';
-import {
-  canonicalAccountInputCommitment,
-  canonicalConsensusOutputForEntityFrameHash,
-  ENTITY_FRAME_ACCOUNT_INPUT_MODE,
-} from './frame/account-input-commitment';
+import { canonicalAccountInputCommitment } from './frame/account-input-commitment';
 import {
   computeCanonicalEntityConsensusStateHash,
   buildEntityFrameAuthority,
@@ -121,10 +117,7 @@ const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> =>
     return { type: tx.type, data: canonicalJEventDataForFrameHash(tx.data) };
   }
   if (tx.type === 'accountInput') {
-    return { type: tx.type, data: canonicalAccountInputCommitment(tx.data, ENTITY_FRAME_ACCOUNT_INPUT_MODE) };
-  }
-  if (tx.type === 'consensusOutput') {
-    return { type: tx.type, data: canonicalConsensusOutputForEntityFrameHash(tx.data) };
+    return { type: tx.type, data: canonicalAccountInputCommitment(tx.data) };
   }
   return {
     type: tx.type,
@@ -144,6 +137,30 @@ const canonicalEntityTxsForFrameHash = (txs: EntityTx[]): unknown[] =>
 const getEntityFrameTxByteLengthFromCanonical = (canonicalTxs: unknown[]): number =>
   utf8ByteLength(encodeEntityFrameTxsPayload(canonicalTxs));
 
+const buildCanonicalArrayPayloadPrefixBytes = (canonicalTxs: unknown[]): number[] => {
+  const prefixBytes = [0];
+  for (const [index, tx] of canonicalTxs.entries()) {
+    const bytes = utf8ByteLength(encodeCanonicalConsensusValue(tx));
+    prefixBytes.push(prefixBytes[index]! + bytes + (index === 0 ? 0 : 1));
+  }
+  return prefixBytes;
+};
+
+const buildEntityFrameTxPrefixBytes = (
+  canonicalTxs: unknown[],
+  fullBytes: number,
+): number[] => {
+  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(canonicalTxs);
+  const framingBytes = fullBytes
+    - payloadPrefixBytes.at(-1)!;
+  if (framingBytes < 0) throw new Error('ENTITY_FRAME_TX_PREFIX_BYTE_ACCOUNTING_INVALID');
+  const prefixBytes = payloadPrefixBytes.map(bytes => framingBytes + bytes);
+  if (prefixBytes.at(-1) !== fullBytes) {
+    throw new Error(`ENTITY_FRAME_TX_PREFIX_BYTE_ACCOUNTING_DIVERGED:${prefixBytes.at(-1)}:${fullBytes}`);
+  }
+  return prefixBytes;
+};
+
 const getEntityFrameTxByteLength = (txs: EntityTx[]): number =>
   getEntityFrameTxByteLengthFromCanonical(canonicalEntityTxsForFrameHash(txs));
 
@@ -156,12 +173,17 @@ export const assertEntityFrameTxByteBudget = (txs: EntityTx[]): void => {
 
 export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   const canonical = canonicalEntityTxsForFrameHash(txs);
-  if (getEntityFrameTxByteLengthFromCanonical(canonical) <= MAX_ENTITY_FRAME_TX_BYTES) return txs;
+  const fullBytes = getEntityFrameTxByteLengthFromCanonical(canonical);
+  if (fullBytes <= MAX_ENTITY_FRAME_TX_BYTES) return txs;
+  // Canonical arrays have one comma between exact child encodings. Build the
+  // prefix byte table once: the old binary search re-encoded every large
+  // AccountInput body O(log n) times after already encoding the full frame.
+  const prefixBytes = buildEntityFrameTxPrefixBytes(canonical, fullBytes);
   let low = 0;
   let high = txs.length;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (getEntityFrameTxByteLengthFromCanonical(canonical.slice(0, mid)) <= MAX_ENTITY_FRAME_TX_BYTES) {
+    if (prefixBytes[mid]! <= MAX_ENTITY_FRAME_TX_BYTES) {
       low = mid;
     } else {
       high = mid - 1;
@@ -169,7 +191,7 @@ export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   }
   if (low === 0 && txs.length > 0) {
     throw new Error(
-      `ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${getEntityFrameTxByteLengthFromCanonical(canonical.slice(0, 1))}:${MAX_ENTITY_FRAME_TX_BYTES}`,
+      `ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${prefixBytes[1]}:${MAX_ENTITY_FRAME_TX_BYTES}`,
     );
   }
   return txs.slice(0, low);
@@ -194,12 +216,60 @@ export type EntityFrameWireBudgetInput = {
 };
 
 export const measureEntityFrameWireBytes = (input: EntityFrameWireBudgetInput): number =>
+  measureEntityFrameWireBytesFromCanonical(
+    canonicalEntityTxsForFrameHash(input.txs),
+    input,
+  );
+
+const measureEntityFrameWireBytesFromCanonical = (
+  canonicalTxs: unknown[],
+  input: Omit<EntityFrameWireBudgetInput, 'txs'>,
+): number =>
   utf8ByteLength(encodeCanonicalConsensusValue({
     domain: 'xln:entity-frame',
     ...input,
-    txs: canonicalEntityTxsForFrameHash(input.txs),
+    txs: canonicalTxs,
     jPrefixCertificate: input.jPrefixCertificate ?? null,
   }));
+
+/** Reuses exact canonical AccountInput child bytes while tx-dependent infra
+ *  context is rematerialized during proposal fitting. */
+export type EntityFrameWirePrefixMeter = ((
+  rest: Omit<EntityFrameWireBudgetInput, 'txs'>,
+  count: number,
+) => number) & {
+  /** Bind one immutable proposal context and encode its fixed bytes once. */
+  forRest: (rest: Omit<EntityFrameWireBudgetInput, 'txs'>) => (count: number) => number;
+};
+
+export const createEntityFrameWirePrefixMeter = (txs: EntityTx[]): EntityFrameWirePrefixMeter => {
+  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(
+    canonicalEntityTxsForFrameHash(txs),
+  );
+  const assertCount = (count: number): void => {
+    if (!Number.isSafeInteger(count) || count < 0 || count >= payloadPrefixBytes.length) {
+      throw new Error('ENTITY_FRAME_WIRE_PREFIX_COUNT_INVALID:' + count + ':' + txs.length);
+    }
+  };
+  const meter = ((
+    rest: Omit<EntityFrameWireBudgetInput, 'txs'>,
+    count: number,
+  ): number => {
+    assertCount(count);
+    return measureEntityFrameWireBytesFromCanonical([], rest) + payloadPrefixBytes[count]!;
+  }) as EntityFrameWirePrefixMeter;
+  meter.forRest = (rest) => {
+    // The exact proposal template is immutable for one fit attempt. Measuring
+    // its multi-megabyte HTLC/profile context per candidate was pure duplicate
+    // work because only the tx-array prefix changes.
+    const fixedBytes = measureEntityFrameWireBytesFromCanonical([], rest);
+    return (count: number): number => {
+      assertCount(count);
+      return fixedBytes + payloadPrefixBytes[count]!;
+    };
+  };
+  return meter;
+};
 
 export const selectEntityFrameTxPrefixForWireBudget = (
   txs: EntityTx[],
@@ -207,12 +277,15 @@ export const selectEntityFrameTxPrefixForWireBudget = (
   maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
 ): EntityTx[] => {
   if (txs.length === 0) return txs;
-  if (measureEntityFrameWireBytes({ ...rest, txs }) <= maxBytes) return txs;
+  const canonical = canonicalEntityTxsForFrameHash(txs);
+  const fullBytes = measureEntityFrameWireBytesFromCanonical(canonical, rest);
+  if (fullBytes <= maxBytes) return txs;
+  const prefixBytes = buildEntityFrameTxPrefixBytes(canonical, fullBytes);
   let low = 0;
   let high = txs.length;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (measureEntityFrameWireBytes({ ...rest, txs: txs.slice(0, mid) }) <= maxBytes) {
+    if (prefixBytes[mid]! <= maxBytes) {
       low = mid;
     } else {
       high = mid - 1;
@@ -220,7 +293,7 @@ export const selectEntityFrameTxPrefixForWireBudget = (
   }
   if (low === 0) {
     throw new Error(
-      `ENTITY_FRAME_HEAD_WIRE_LIMIT_EXCEEDED:${measureEntityFrameWireBytes({ ...rest, txs: txs.slice(0, 1) })}:${maxBytes}`,
+      `ENTITY_FRAME_HEAD_WIRE_LIMIT_EXCEEDED:${prefixBytes[1]}:${maxBytes}`,
     );
   }
   return txs.slice(0, low);

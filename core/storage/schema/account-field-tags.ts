@@ -15,18 +15,24 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   'state.deltas': 8, 'state.locks': 9, 'state.swapOffers': 10,
   'state.pulls': 11, 'state.subcontracts': 12, 'state.lendingIntents': 13,
   // Tag 14 belonged to retired cross-token credit state. Never reuse persisted tags.
-  currentHeight: 15, pendingFrame: 16, pendingSignatures: 17,
+  currentHeight: 15, pendingFrame: 16,
+  // Tag 17 belonged to retired pendingSignatures. Never reuse persisted tags.
   pendingAccountInput: 18, lastOutboundFrameAck: 20,
-  pendingForwards: 21, hankoSignature: 22, rollbackCount: 23, lastRollbackFrameHash: 24,
+  pendingForwards: 21,
+  // Tag 22 belonged to a never-used generic Account Hanko cache.
+  rollbackCount: 23, lastRollbackFrameHash: 24,
   'state.leftPendingJClaims': 25, 'state.rightPendingJClaims': 26,
   'state.lastFinalizedJHeight': 27,
-  proofHeader: 28, proofBody: 29, abiProofBody: 30, 'state.disputeConfig': 31,
+  proofHeader: 28,
+  // Tags 29-30 belonged to derived ProofBody caches. Never reuse persisted tags.
+  'state.disputeConfig': 31,
   currentFrameHanko: 32, counterpartyFrameHanko: 33, boardResealMigration: 34,
   counterpartyBoardReseal: 35, currentDisputeProofHanko: 36, currentDisputeProofNonce: 37,
   currentDisputeProofBodyHash: 38, currentDisputeHash: 39, counterpartyDisputeProofHanko: 40,
   counterpartyDisputeProofNonce: 41, counterpartyDisputeProofBodyHash: 42,
-  counterpartyDisputeHash: 43, counterpartySettlementHanko: 44, disputeProofNoncesByHash: 45,
-  disputeProofBodiesByHash: 46, disputeArgumentSnapshotsByHash: 47, disputePrepare: 48,
+  counterpartyDisputeHash: 43, counterpartySettlementHanko: 44,
+  // Tags 45-47 belonged to retired dispute caches. Never reuse persisted tags.
+  disputePrepare: 48,
   'state.jNonce': 49, 'state.settlementWorkspace': 50, activeDispute: 51,
   // Tags 52-53 belonged to retired live swap history; never reuse them.
   pendingWithdrawals: 54,

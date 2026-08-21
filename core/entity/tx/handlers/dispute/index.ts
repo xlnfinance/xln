@@ -31,10 +31,6 @@ import { crossJurisdictionRouteSignerHint } from '../../j-events-htlc/cross-j-ou
 import { collectDisputeEvidenceReadinessIssues } from './shared';
 import { handleDisputeStart } from './start';
 import { planCrossJurisdictionTargetRecovery } from '../../j-events-htlc';
-import {
-  resolveStoredDisputeStartNonce,
-  selectCounterDisputeSnapshots,
-} from './start-evidence';
 
 export { canonicalizeProofBodyStruct } from './shared';
 export { handleDisputeFinalize } from './finalize';
@@ -173,29 +169,6 @@ const buildDisputeStartIntent = (
   };
 };
 
-const targetStartSnapshotHashes = (
-  state: EntityState,
-  account: AccountReplica,
-  counterpartyEntityId: string,
-): string[] => {
-  const initialHash = account.counterpartyDisputeProofBodyHash ?? '';
-  if (!initialHash) return [];
-  const starterSide = account.state.leftEntity === state.entityId ? 'left' : 'right';
-  const { signedNonce } = resolveStoredDisputeStartNonce(account, initialHash);
-  const initialProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
-  if (typeof initialProposerIsLeft !== 'boolean') {
-    throw haltRuntimeFailure("DISPUTE_START_PROPOSER_ROLE_MISSING", `DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyEntityId}`);
-  }
-  const counter = selectCounterDisputeSnapshots(
-    account,
-    starterSide,
-    signedNonce,
-    initialProposerIsLeft,
-    counterpartyEntityId,
-  );
-  return [initialHash, ...counter.map((snapshot) => snapshot.proofbodyHash)];
-};
-
 export const draftPreparedDisputeStartIfReady = async (
   entityState: EntityState,
   counterpartyEntityId: string,
@@ -330,7 +303,6 @@ export const handlePrepareDispute = async (
     newState,
     account,
     counterpartyEntityId,
-    targetStartSnapshotHashes(newState, account, counterpartyEntityId),
     suppliedCrossJurisdictionResults,
   );
   const recovery = recoveryPlan?.recovery ?? null;

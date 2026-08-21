@@ -8,17 +8,20 @@ import { decodeValidatedBuffer } from '../codec/codec';
 import { iterateKeys, readRawOrNull } from '../database/level';
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_ENTITY,
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
   decodeEntityId,
   keyLiveAccount,
+  keyLiveAccountField,
   keyLiveAccountPrefix,
   keyLiveBook,
   keyLiveBookPrefix,
   keyLiveEntity,
   parseLiveAccountBranchKey,
+  parseLiveAccountFieldKey,
   parseLiveAccountKey,
   parseLiveAccountLeafKey,
   parseLiveBookBranchKey,
@@ -94,6 +97,19 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       if (!accountOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
         throw new Error(`STORAGE_ACCOUNT_GRAPH_OWNER_MISSING:${owner}`);
       }
+    }
+  }
+
+  for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ACCOUNT_FIELD]) })) {
+    const parsed = parseLiveAccountFieldKey(key);
+    assertExactKey(
+      key,
+      keyLiveAccountField(parsed.entityId, parsed.counterpartyId, parsed.fieldTag),
+      'STORAGE_LIVE_ACCOUNT_FIELD_KEY_MISMATCH',
+    );
+    const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);
+    if (!accountOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+      throw new Error(`STORAGE_ACCOUNT_FIELD_OWNER_MISSING:${owner}`);
     }
   }
 

@@ -74,7 +74,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import {
@@ -149,7 +148,7 @@ const applyEntityAccountTx = async (
   if (!base) throw new Error(`TEST_ACCOUNT_MISSING:${counterpartyId}`);
   const owner = beginAccountTransition(
     base,
-    createAccountTransitionKey(base, { purpose: 'test-account-tx', accountTx }),
+    { purpose: 'test-account-tx', accountTx },
   );
   const result = await applyAccountTx(
     accountTransitionView(owner),

@@ -25,6 +25,7 @@ import {
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
   KEY_LIVE_BOOK_BRANCH,
@@ -102,6 +103,7 @@ const snapshotKeyForLiveRow = (height: number, key: Buffer): Buffer => {
     return Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
   }
   if (
+    key[0] === KEY_LIVE_ACCOUNT_FIELD ||
     key[0] === KEY_LIVE_ACCOUNT_BRANCH || key[0] === KEY_LIVE_ACCOUNT_LEAF ||
     key[0] === KEY_LIVE_BOOK_BRANCH || key[0] === KEY_LIVE_BOOK_LEAF
   ) return keySnapshotGraph(height, key);

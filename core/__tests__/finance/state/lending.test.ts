@@ -14,7 +14,6 @@ import {
   accountTransitionView,
   beginAccountTransition,
   commitAccountTransition,
-  createAccountTransitionKey,
   discardAccountTransition,
 } from '../../../account/state/candidate-overlay';
 
@@ -89,10 +88,8 @@ const makeAccount = (counterparty: string): AccountReplica => {
       byLeft: true,
     },
     currentHeight: 1,
-    pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: HUB, toEntity: counterparty, nextProofNonce: 1 },
-    proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
@@ -120,7 +117,7 @@ const commit = async (
   const base = state.accounts.get(counterparty)!;
   const transition = beginAccountTransition(
     base,
-    createAccountTransitionKey(base, { purpose: 'lending-test', tx, timestamp }),
+    { purpose: 'lending-test', tx, timestamp },
   );
   const result = await applyAccountTx(
     accountTransitionView(transition),
@@ -147,7 +144,7 @@ const applyOnly = async (
   const base = state.accounts.get(counterparty)!;
   const transition = beginAccountTransition(
     base,
-    createAccountTransitionKey(base, { purpose: 'lending-test-apply', tx, timestamp }),
+    { purpose: 'lending-test-apply', tx, timestamp },
   );
   const result = await applyAccountTx(accountTransitionView(transition), tx, byLeft, timestamp);
   if (!result.ok) {

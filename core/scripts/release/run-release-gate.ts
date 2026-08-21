@@ -78,7 +78,6 @@ const RUNTIME_CORE_TESTS = [
   'core/__tests__/network/p2p/p2p-direct-policy.test.ts',
   'core/__tests__/security/dispute/proof-builder.test.ts',
   'core/__tests__/security/authority/transformer-ordering.test.ts',
-  'core/__tests__/network/server/server-ingress-receipts.test.ts',
   'core/__tests__/orchestrator/health/orchestrator-health-model.test.ts',
   'core/__tests__/orchestrator/recovery/orchestrator-reset-guard.test.ts',
   'core/__tests__/jurisdiction/history/jreplica-state-root.test.ts',

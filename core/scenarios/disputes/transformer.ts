@@ -15,6 +15,7 @@ import { deriveDisputeTokenFinalization } from '../../protocol/dispute/finalizat
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 import { getStaticSwapTokenDimensions } from '../../orderbook';
 import { safeStringify } from '../../protocol/serialization';
+import { buildCurrentDisputeArgumentPlan } from '../../protocol/dispute/arguments';
 import { bootScenario, fundEntities, registerEntities } from '../harness/boot';
 import {
   assert,
@@ -89,12 +90,10 @@ const accountEvidenceSummary = (account: AccountReplica | undefined) => ({
 });
 
 const findAccountAck = (txs: readonly EntityTx[] | undefined): AccountAckInput | undefined => {
+  // AccountInput is a raw top-level Runtime outbox item. Never restore readers
+  // for the retired consensusOutput/runtimeOutput nesting shape.
   for (const tx of txs ?? []) {
     if (tx.type === 'accountInput' && tx.data.kind === 'ack') return structuredClone(tx.data);
-    if (tx.type === 'consensusOutput' || tx.type === 'runtimeOutput') {
-      const nested = findAccountAck(tx.data.entityTxs);
-      if (nested) return nested;
-    }
   }
   return undefined;
 };
@@ -112,10 +111,6 @@ const findSwapProposal = (
         accountTx.type === 'swap_offer' && accountTx.data.offerId === offerId
       );
       if (matchesParticipants && containsOffer) return structuredClone(tx.data);
-    }
-    if (tx.type === 'consensusOutput' || tx.type === 'runtimeOutput') {
-      const nested = findSwapProposal(tx.data.entityTxs, fromEntityId, toEntityId, offerId);
-      if (nested) return nested;
     }
   }
   return undefined;
@@ -205,10 +200,6 @@ const containsPartitionedAccountInput = (
       const participants = new Set([tx.data.fromEntityId, tx.data.toEntityId]);
       if (participants.size === 2 && participants.has(leftEntityId) && participants.has(rightEntityId)) return true;
     }
-    if (
-      (tx.type === 'consensusOutput' || tx.type === 'runtimeOutput')
-      && containsPartitionedAccountInput(tx.data.entityTxs, leftEntityId, rightEntityId)
-    ) return true;
   }
   return false;
 };
@@ -666,12 +657,9 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     if (!start) throw new Error('DISPUTE_TRANSFORMER_START_NOT_DRAFTED');
     assert(start.proofbodyHash === baseProofHash, 'Dispute start did not use the last mutually signed ProofBody', env);
     const starter = decodeArguments(start.starterInitialArguments, 'starter.initial');
-    const signedSnapshot = prepared.disputeArgumentSnapshotsByHash?.[start.proofbodyHash];
     console.log(`[DISPUTE_DEBUG:start] ${safeStringify({
       nonce: start.nonce,
       proofbodyHash: start.proofbodyHash,
-      proofBodyStruct: signedSnapshot?.proofBodyStruct,
-      argumentPlan: signedSnapshot?.plan,
       starterInitialArguments: start.starterInitialArguments,
       starterCounterArguments: start.starterCounterArguments,
       decoded: starter,
@@ -739,6 +727,8 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
 
     const aliceBeforeFinalizeState = findReplica(env, alice.id)[1].state;
     const aliceBeforeFinalize = aliceBeforeFinalizeState.accounts.get(hub.id);
+    if (!aliceBeforeFinalize) throw new Error('DISPUTE_TRANSFORMER_FROZEN_ACCOUNT_MISSING');
+    const frozenArgumentPlan = buildCurrentDisputeArgumentPlan(aliceBeforeFinalize);
     console.log(`[DISPUTE_DEBUG:finalizer-account] ${safeStringify({
       ...accountEvidenceSummary(aliceBeforeFinalize),
       readyAfter: aliceBeforeFinalize?.disputePrepare?.readyAfter,
@@ -818,10 +808,10 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     // including HTLC payments that never became a bilateral frame.
     const finalProofbody = finalization.finalProofbody;
     const expectedCanonicalClauses = Number(
-      (signedSnapshot?.plan.paymentHashlocks.length ?? 0) > 0,
+      frozenArgumentPlan.paymentHashlocks.length > 0,
     ) + Number(
-      (signedSnapshot?.plan.leftSwapOfferIds.length ?? 0) > 0
-      || (signedSnapshot?.plan.rightSwapOfferIds.length ?? 0) > 0,
+      frozenArgumentPlan.leftSwapOfferIds.length > 0
+      || frozenArgumentPlan.rightSwapOfferIds.length > 0,
     );
     if (finalProofbody.transformers.length !== expectedCanonicalClauses) {
       throw new Error(

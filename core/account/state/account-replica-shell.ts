@@ -117,14 +117,7 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
     state: forkAccountStateShell(base.state),
     mempool: base.mempool.map(cloneIsolatedAccountTx),
     currentFrame: copyFrame(base.currentFrame),
-    pendingSignatures: copyArray(base.pendingSignatures),
     proofHeader: copyRecord(base.proofHeader),
-    proofBody: {
-      ...base.proofBody,
-      tokenIds: copyArray(base.proofBody.tokenIds),
-      deltas: copyArray(base.proofBody.deltas),
-      ...(base.proofBody.htlcLocks === undefined ? {} : { htlcLocks: copyArray(base.proofBody.htlcLocks) }),
-    },
     pendingWithdrawals: base.pendingWithdrawals,
     shadow: forkShadow(base.shadow),
   };
@@ -136,14 +129,8 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
       response: cloneIsolatedAccountInput(base.lastOutboundFrameAck.response),
     };
   }
-  if (base.abiProofBody) shell.abiProofBody = copyRecord(base.abiProofBody);
   if (base.boardResealMigration) shell.boardResealMigration = copyRecord(base.boardResealMigration);
   if (base.counterpartyBoardReseal) shell.counterpartyBoardReseal = copyRecord(base.counterpartyBoardReseal);
-  if (base.disputeProofNoncesByHash) shell.disputeProofNoncesByHash = copyRecord(base.disputeProofNoncesByHash);
-  if (base.disputeProofBodiesByHash) shell.disputeProofBodiesByHash = copyRecord(base.disputeProofBodiesByHash);
-  if (base.disputeArgumentSnapshotsByHash) {
-    shell.disputeArgumentSnapshotsByHash = copyRecord(base.disputeArgumentSnapshotsByHash);
-  }
   if (base.disputePrepare) {
     shell.disputePrepare = {
       ...base.disputePrepare,

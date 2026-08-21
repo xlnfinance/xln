@@ -25,7 +25,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const SAMPLE_PAYMENT = {
   schema: 'xln-hlt-payment-load-v1',
   mode: 'payments',
-  completionAuthority: 'committed_receiver_balances_and_bilateral_quiescence',
+  completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
   configuredUsers: 200,
   configuredRounds: 10,
   cadenceMs: 1000,
@@ -40,6 +40,8 @@ const SAMPLE_PAYMENT = {
   commandObservedElapsedMs: 70,
   deliveredElapsedMs: 6699,
   deliveredTps: 149.27601134497687,
+  hubCompletedPaymentsBefore: 50,
+  hubCompletedPaymentsAfter: 1050,
   roundSubmissionLagMs: [74],
   walBytesBefore: 13268608,
   walBytesAfter: 29856693,
@@ -54,10 +56,10 @@ const SAMPLE_PAYMENT = {
 };
 
 describe('hlt dashboard preview', () => {
-  test('200 users at 40 per process offer 100 pay/s on one hub', () => {
+  test('200 sovereign users all offer one payment per second on one hub', () => {
     const preview = previewHltDashboard(parseHltDashboardConfig(new URLSearchParams({
       users: '200',
-      usersPerRuntime: '40',
+      runtimesPerProcess: '40',
       rate: '1',
       duration: '10',
       mix: '1:1',
@@ -65,19 +67,19 @@ describe('hlt dashboard preview', () => {
       mode: 'payments',
     })));
     expect(preview.daemons).toBe(5);
-    expect(preview.offeredPayPerSecond).toBe(100);
+    expect(preview.offeredPayPerSecond).toBe(200);
     expect(preview.offeredSwapPerSecond).toBe(0);
     expect(preview.config.mix).toBe('0:1');
     expect(preview.hubShare.workerSingleHubPct).toBe(100);
     expect(preview.hubShare.workerMultiHubPct).toBe(0);
-    expect(preview.isolatedCommand).toContain('XLN_HLT_USERS_PER_RUNTIME=40');
+    expect(preview.isolatedCommand).toContain('XLN_HLT_RUNTIMES_PER_PROCESS=40');
     expect(preview.warning).toContain('8082');
   });
 
   test('mixed 1000 users at 1 action/s offer 1000 pay/s and 1000 swap/s', () => {
     const preview = previewHltDashboard(parseHltDashboardConfig(new URLSearchParams({
       users: '1000',
-      usersPerRuntime: '40',
+      runtimesPerProcess: '40',
       rate: '1',
       duration: '1',
       mix: '0:1',
@@ -95,7 +97,7 @@ describe('hlt dashboard preview', () => {
   test('cross-j on two hubs is 100% multi-hub path', () => {
     const preview = previewHltDashboard(parseHltDashboardConfig(new URLSearchParams({
       users: '8',
-      usersPerRuntime: '2',
+      runtimesPerProcess: '2',
       hubs: 'H1,H2',
       mode: 'cross',
     })));
@@ -142,7 +144,7 @@ test('summarizeRuntimePerfLines is isolated from later calls', () => {
 
 test('GET /api/qa/hlt returns a payments preview', async () => {
   const response = await maybeHandleQaRequest(
-    new Request('http://127.0.0.1:8080/api/qa/hlt?users=64&usersPerRuntime=16&mode=payments'),
+    new Request('http://127.0.0.1:8080/api/qa/hlt?users=64&runtimesPerProcess=16&mode=payments'),
     '/api/qa/hlt',
     JSON_HEADERS,
   );
@@ -154,13 +156,16 @@ test('GET /api/qa/hlt returns a payments preview', async () => {
   };
   expect(payload.ok).toBe(true);
   expect(payload.preview?.daemons).toBe(4);
-  expect(payload.preview?.offeredPayPerSecond).toBe(32);
+  expect(payload.preview?.offeredPayPerSecond).toBe(64);
   expect(payload.run).toEqual({
     active: false,
     status: 'idle',
     pid: null,
+    phase: null,
     workDir: null,
     logPath: null,
+    recordingPath: null,
+    reportPath: null,
     startedAt: null,
     finishedAt: null,
     exitCode: null,
@@ -188,7 +193,7 @@ afterEach(() => {
 
 test('isolated HLT env keeps PATH and drops live mesh ports', () => {
   const env = buildHltIsolatedEnv(
-    parseHltDashboardConfig(new URLSearchParams({ users: '8', usersPerRuntime: '2', mode: 'payments' })),
+    parseHltDashboardConfig(new URLSearchParams({ users: '8', runtimesPerProcess: '2', mode: 'payments' })),
     '/tmp/xln-hlt-dash-test',
     {
       PATH: '/usr/bin',
@@ -216,7 +221,9 @@ test('POST /api/qa/hlt/start is single-flight and abortable', async () => {
   delete process.env['XLN_QA_ADMIN_TOKEN'];
   try {
     let spawnedEnv: NodeJS.ProcessEnv | undefined;
-    const spawnHlt = ((_cmd: string, _args: readonly string[], options?: SpawnOptions) => {
+    let spawnedArgs: readonly string[] = [];
+    const spawnHlt = ((_cmd: string, args: readonly string[], options?: SpawnOptions) => {
+      spawnedArgs = args;
       spawnedEnv = options?.env as NodeJS.ProcessEnv;
       return mockHltChild();
     }) as typeof import('node:child_process').spawn;
@@ -225,7 +232,7 @@ test('POST /api/qa/hlt/start is single-flight and abortable', async () => {
       new Request('http://127.0.0.1:8080/api/qa/hlt/start', {
         method: 'POST',
         headers: JSON_HEADERS,
-        body: JSON.stringify({ users: 8, usersPerRuntime: 2, mode: 'payments', duration: 4 }),
+        body: JSON.stringify({ users: 8, runtimesPerProcess: 2, mode: 'payments', duration: 4 }),
       }),
       '/api/qa/hlt/start',
       JSON_HEADERS,
@@ -237,6 +244,7 @@ test('POST /api/qa/hlt/start is single-flight and abortable', async () => {
     expect(started.run?.status).toBe('running');
     expect(started.run?.pid).toBe(4242);
     expect(spawnedEnv?.['XLN_HLT_USERS']).toBe('8');
+    expect(spawnedArgs).toEqual(['core/scripts/operations/hlt/build-chains.ts']);
     expect(spawnedEnv?.['XLN_PORT_BASE']).toBeUndefined();
     expect(spawnedEnv?.['ANVIL_RPC']).toBeUndefined();
 
@@ -244,7 +252,7 @@ test('POST /api/qa/hlt/start is single-flight and abortable', async () => {
       new Request('http://127.0.0.1:8080/api/qa/hlt/start', {
         method: 'POST',
         headers: JSON_HEADERS,
-        body: JSON.stringify({ users: 8, usersPerRuntime: 2, mode: 'payments' }),
+        body: JSON.stringify({ users: 8, runtimesPerProcess: 2, mode: 'payments' }),
       }),
       '/api/qa/hlt/start',
       JSON_HEADERS,
@@ -284,7 +292,7 @@ test('POST /api/qa/hlt/start rejects one-hub cross-j', async () => {
       new Request('http://127.0.0.1:8080/api/qa/hlt/start', {
         method: 'POST',
         headers: JSON_HEADERS,
-        body: JSON.stringify({ users: 8, usersPerRuntime: 2, mode: 'cross', hubs: 'H1' }),
+        body: JSON.stringify({ users: 8, runtimesPerProcess: 2, mode: 'cross', hubs: 'H1' }),
       }),
       '/api/qa/hlt/start',
       JSON_HEADERS,

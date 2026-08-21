@@ -12,7 +12,6 @@ import { addMessages } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { scheduleHook } from '../../../scheduler';
 import { putEntityAccountCandidate } from '../../../state/persistent-account-map';
-import { pruneUnreachableDisputeEvidence } from '../../../../account/dispute/evidence-retention';
 import type { ApplyEntityTxOptions } from '../../apply';
 import { buildHubRebalancePolicyTx } from './lifecycle/admin';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../account-cross-j-followups';
@@ -292,9 +291,6 @@ export const applySuccessfulAccountInput = async (
   await applyCommittedFrameTransactions(context);
   queueInitialHubPolicies(context, committedInboundGenesis);
   applyCommittedHtlcFollowups(context);
-  if (committedFrames.length > 0) {
-    pruneUnreachableDisputeEvidence(account, state.jBatchState);
-  }
   context.checkpointProfile('committedFollowups');
   logCommittedSwapEffects(effects);
 

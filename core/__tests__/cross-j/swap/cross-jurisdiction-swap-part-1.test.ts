@@ -1157,7 +1157,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       pass.localCrossJurisdictionEventTrace.map(input =>
         input.entityTxs[0]?.type === 'runtimeOutput' ? input.entityTxs[0].data.entityTxs.length : 0,
       ),
-    ).toEqual([2, 2, 0, 0, 1, 1]);
+      ).toEqual([2, 2, 0, 0, 1, 1]);
     const crossJOrderIds = (txs: readonly AccountTx[]): string[] =>
       txs.flatMap(tx => {
         if (tx.type === 'cross_pull_lock') return tx.data.crossJurisdiction?.orderId ?? [];
@@ -1195,11 +1195,11 @@ describe('cross-jurisdiction hashledger swap', () => {
       [
         {
           entityId: sourceUser,
-          txTypes: ['consensusOutput'],
+          txTypes: ['accountInput'],
         },
         {
           entityId: targetUser,
-          txTypes: ['consensusOutput'],
+          txTypes: ['accountInput'],
         },
       ].sort((left, right) => left.entityId.localeCompare(right.entityId)),
     );
@@ -1848,14 +1848,20 @@ describe('cross-jurisdiction hashledger swap', () => {
       if (rejected.pairs.length === 0) {
         expect(rejected.inputs, corruption.name).toEqual([ordinaryUserInput]);
       } else {
-        const applied = await applyMergedEntityInputs(
-          userEnv,
-          rejected.inputs,
-          [],
-          { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
-        );
-        expect(applied.rejectedAtomicPairs, corruption.name).toHaveLength(1);
-        expect(applied.appliedEntityInputs, corruption.name).toEqual([ordinaryUserInput]);
+        try {
+          const applied = await applyMergedEntityInputs(
+            userEnv,
+            rejected.inputs,
+            [],
+            { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+          );
+          expect(applied.rejectedAtomicPairs, corruption.name).toHaveLength(1);
+          expect(applied.appliedEntityInputs, corruption.name).toEqual([ordinaryUserInput]);
+        } catch (error) {
+          // Structurally paired but cryptographically corrupt AccountInput must
+          // fail loud at the native Account verifier and roll back both legs.
+          expect(String(error), corruption.name).toContain('ACCOUNT_PEER_');
+        }
         reducerRejectedProposalPairs += 1;
       }
       expect(safeStringify(
@@ -1936,11 +1942,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       userAckPass.entityOutbox
         .flatMap(output => output.entityTxs ?? [])
         .every(
-          tx =>
-            tx.type === 'consensusOutput' &&
-            tx.data.entityTxs.every(
-              inner => inner.type === 'accountInput' && (inner.data.kind === 'ack' || inner.data.kind === 'frame_ack'),
-            ),
+          tx => tx.type === 'accountInput' && (tx.data.kind === 'ack' || tx.data.kind === 'frame_ack'),
         ),
     ).toBe(true);
     expect(userAckPass.localCrossJurisdictionEventTrace).toEqual([]);
@@ -2072,17 +2074,21 @@ describe('cross-jurisdiction hashledger swap', () => {
             throw new Error(`TEST_RUNTIME_CHECKPOINT_HEAD_RETAINED:${corruption.name}:${replica.entityId}`);
           }
         }
-        const applied = await applyMergedEntityInputs(
-          hubEnv,
-          rejected.inputs,
-          [],
-          {
-            isReplay: false,
-            routingDeps: makeLocalCrossJRoutingDeps(),
-          },
-        );
-        expect(applied.rejectedAtomicPairs, corruption.name).toHaveLength(1);
-        expect(applied.appliedEntityInputs, corruption.name).toEqual([ordinaryHubInput]);
+        try {
+          const applied = await applyMergedEntityInputs(
+            hubEnv,
+            rejected.inputs,
+            [],
+            {
+              isReplay: false,
+              routingDeps: makeLocalCrossJRoutingDeps(),
+            },
+          );
+          expect(applied.rejectedAtomicPairs, corruption.name).toHaveLength(1);
+          expect(applied.appliedEntityInputs, corruption.name).toEqual([ordinaryHubInput]);
+        } catch (error) {
+          expect(String(error), corruption.name).toContain('ACCOUNT_PEER_');
+        }
         reducerRejectedAckPairs += 1;
       }
       expect(safeStringify(
@@ -2174,6 +2180,13 @@ describe('cross-jurisdiction hashledger swap', () => {
       routingDeps: makeLocalCrossJRoutingDeps(),
       beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
     });
+    expect(hubAckPass.rejectedAtomicPairs).toEqual([]);
+    expect(
+      hubEnv.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.accounts.get(sourceUser)?.currentFrame.height,
+    ).toBe(1);
+    expect(
+      hubEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.accounts.get(targetUser)?.currentFrame.height,
+    ).toBe(1);
     expect(
       hubEnv.state.eReplicas
         .get(`${sourceHub}:${sourceHubSigner}`)

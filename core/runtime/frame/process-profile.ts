@@ -92,7 +92,6 @@ const bumpKind = (counts: Record<string, number>, key: string): void => {
 const nestedConsensusOutputKind = (tx: Extract<EntityTx, { type: 'consensusOutput' }>): string => {
   const inner = tx.data.entityTxs[0];
   if (!inner) return 'consensusOutput:empty';
-  if (inner.type === 'accountInput') return `consensusOutput:accountInput:${inner.data.kind}`;
   return `consensusOutput:${inner.type}`;
 };
 
