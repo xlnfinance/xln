@@ -607,6 +607,10 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
   }
   if (!profile) return root;
   const profileProjected = projectEntityConsensusState(state);
+  const topSectionBytes = sections
+    .map(({ field, encodedBytes }) => ({ field, bytes: encodedBytes }))
+    .sort((left, right) => right.bytes - left.bytes)
+    .slice(0, 8);
   const topLevelBytes = Object.entries(profileProjected)
     .map(([field, value]) => ({
       field,
@@ -632,13 +636,31 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
           .sort((left, right) => right.bytes - left.bytes)
           .slice(0, 10)
       : [];
+  const hookTypes: Record<string, number> = {};
+  let earliestHookAt: number | null = null;
+  let latestHookAt: number | null = null;
+  for (const hook of state.crontabState?.hooks.values() ?? []) {
+    hookTypes[hook.type] = (hookTypes[hook.type] ?? 0) + 1;
+    earliestHookAt = earliestHookAt === null ? hook.triggerAt : Math.min(earliestHookAt, hook.triggerAt);
+    latestHookAt = latestHookAt === null ? hook.triggerAt : Math.max(latestHookAt, hook.triggerAt);
+  }
+  const proposalStatuses = { pending: 0, executed: 0, rejected: 0 };
+  for (const proposal of state.proposals.values()) proposalStatuses[proposal.status] += 1;
   entityRootLog.info('profile', {
     entity: state.entityId.slice(-8),
     height: state.height,
     accounts: state.accounts.size,
     encodedBytes: sections.reduce((total, section) => total + section.encodedBytes, 0),
     rootInputBytes: sections.length * 32,
+    topSectionBytes,
     topLevelBytes,
+    proposals: { total: state.proposals.size, statuses: proposalStatuses },
+    hooks: {
+      total: state.crontabState?.hooks.size ?? 0,
+      types: hookTypes,
+      earliestTriggerAt: earliestHookAt,
+      latestTriggerAt: latestHookAt,
+    },
     ...(largestAccount
       ? {
           largestAccount: {

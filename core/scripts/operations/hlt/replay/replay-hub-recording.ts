@@ -9,6 +9,10 @@ import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../accoun
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
+  dumpOpCounters,
+  installGlobalOpCounters,
+} from '../../../../support/performance/op-counters';
+import {
   closeInfraDb,
   closeRuntimeDb,
   replayRecoveryFrameJournals,
@@ -70,6 +74,7 @@ const recordingPath = resolve(requiredArgument('recording'));
 const outputPath = resolve(optionalArgument('output') ?? `${recordingPath}.replay.json`);
 const mode = parseMode();
 const rates = parseRates(mode);
+await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
 const tail = artifact.recording.bundles.find(bundle => bundle.kind === 'journal_tail');
@@ -207,3 +212,5 @@ const report = {
 };
 writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
 console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
+const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
+if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);
