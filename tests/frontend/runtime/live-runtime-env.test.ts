@@ -17,7 +17,6 @@ function makeLiveEnv() {
       timestamp: 1,
     },
     runtimeMempool: { runtimeTxs: [], entityInputs: [], jInputs: [] },
-    history: [],
     gossip: {
       profiles,
       jurisdictions: new Map(),
@@ -26,7 +25,6 @@ function makeLiveEnv() {
       getHubs: () => [],
       getNetworkGraph: () => ({ findPaths: async () => [] }),
     },
-    frameLogs: [],
     log: () => undefined,
     info: () => undefined,
     warn: () => undefined,
@@ -142,7 +140,6 @@ describe('live runtime env helpers', () => {
 
     expect(detached.infrastructure).toBeUndefined();
     expect(detached.runtimeMempool).not.toBe(liveEnv.runtimeMempool);
-    expect(detached.history).not.toBe(liveEnv.history);
     expect(detached.gossip.profiles).not.toBe(liveEnv.gossip.profiles);
 
     detached.runtimeConfig = { storage: { enabled: false } };

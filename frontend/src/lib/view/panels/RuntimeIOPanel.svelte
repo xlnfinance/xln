@@ -8,18 +8,19 @@
    */
 
   import type { Writable } from 'svelte/store';
+  import type { EnvSnapshot } from '@xln/core/api/public/runtime-module';
   import { shortAddress } from '$lib/utils/format';
   import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
 
   type DeltaLike = { collateral?: unknown };
   type AccountLike = {
-    state: { deltas?: Map<unknown, DeltaLike> | Record<string, DeltaLike> };
+    state: { deltas?: ReadonlyMap<unknown, DeltaLike> | Record<string, DeltaLike> };
   };
   type EntityStateLike = {
     height?: number;
     lastFinalizedJHeight?: number;
-    reserves?: Map<unknown, unknown> | Record<string, unknown>;
-    accounts?: Map<string, AccountLike> | Record<string, AccountLike>;
+    reserves?: ReadonlyMap<unknown, unknown> | Record<string, unknown>;
+    accounts?: ReadonlyMap<string, AccountLike> | Record<string, AccountLike>;
     debts?: unknown[];
   };
   type ReplicaLike = {
@@ -30,22 +31,10 @@
   };
   type JMachineLike = { blockNumber?: number; entities?: unknown[] };
   type XlnomyLike = { name: string; jMachine?: JMachineLike };
-  type RuntimeFrameLike = {
-    state: {
-      height?: number;
-      eReplicas?: Map<string, ReplicaLike>;
-      jReplicas?: Map<string, XlnomyLike>;
-    };
-    logs?: FrameLogEntry[];
-    gossip?: { profiles?: unknown[] };
-    runtimeInput?: unknown;
-    runtimeOutputs?: unknown;
-  };
-  type RuntimeEnvLike = { history?: RuntimeFrameLike[] };
+  type RuntimeFrameLike = EnvSnapshot;
 
   // Receive isolated env as prop (passed from View.svelte)
-  export let runtimeFrameEnv: Writable<RuntimeEnvLike | null>;
-  export let runtimeFrameHistory: Writable<RuntimeFrameLike[]> | null = null;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]> | null = null;
   export let runtimeFrameTimeIndex: Writable<number> | null = null;
 
   // Expandable sections
@@ -134,16 +123,24 @@
   }
 
   // Convert Map to array for display
-  function mapToArray<T>(map: Map<unknown, T> | Record<string, T> | undefined): Array<[string, T]> {
+  function isReadonlyMap<K, V>(
+    value: ReadonlyMap<K, V> | Record<string, V>,
+  ): value is ReadonlyMap<K, V> {
+    return typeof Reflect.get(value, 'entries') === 'function'
+      && typeof Reflect.get(value, 'values') === 'function'
+      && typeof Reflect.get(value, 'get') === 'function';
+  }
+
+  function mapToArray<T>(map: ReadonlyMap<unknown, T> | Record<string, T> | undefined): Array<[string, T]> {
     if (!map) return [];
-    if (map instanceof Map) return Array.from(map.entries()).map(([key, value]) => [String(key), value]);
+    if (isReadonlyMap(map)) return Array.from(map.entries()).map(([key, value]) => [String(key), value]);
     if (typeof map === 'object') return Object.entries(map) as Array<[string, T]>;
     return [];
   }
 
-  function valuesOf<T>(source: Map<unknown, T> | Record<string, T> | undefined): T[] {
+  function valuesOf<T>(source: ReadonlyMap<unknown, T> | Record<string, T> | undefined): T[] {
     if (!source) return [];
-    if (source instanceof Map) return Array.from(source.values());
+    if (isReadonlyMap(source)) return Array.from(source.values());
     return Object.values(source);
   }
 
@@ -381,7 +378,6 @@
                 {#each replicasArray as [entityId, replica]}
                   {@const reserves = mapToArray(replica.state?.reserves)}
                   {@const accounts = mapToArray(replica.state?.accounts)}
-                  {@const debts = replica.state?.debts ?? []}
                   {@const mempool = replica.mempool ?? []}
                   <div class="replica-card">
                     <button class="replica-header" on:click={() => toggleReplica(entityId)}>
@@ -438,14 +434,6 @@
                         {/if}
                       </div>
 
-
-                      <!-- Debts -->
-                      {#if debts.length > 0}
-                        <div class="replica-section">
-                          <h5>💳 Debts</h5>
-                          <div class="data-row"><span>Entries:</span> {debts.length}</div>
-                        </div>
-                      {/if}
 
                       <!-- Mempool -->
                       {#if mempool.length > 0}

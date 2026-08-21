@@ -291,7 +291,7 @@
         } else if (options.name === 'runtime-io') {
           component = mount(RuntimeIOPanel, {
             target: div,
-            props: { runtimeFrameEnv, runtimeFrameHistory, runtimeFrameTimeIndex },
+            props: { runtimeFrameHistory, runtimeFrameTimeIndex },
           });
         } else if (options.name === 'settings') {
           component = mount(SettingsPanel, {

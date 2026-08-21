@@ -1,5 +1,6 @@
 import type {
   AccountReplica,
+  Delta,
   EntityReplica,
   PaymentRoute,
   Profile as GossipProfile,
@@ -41,13 +42,21 @@ export const emptyPaymentPanelView = (): PaymentPanelView => ({
   networkGraph: null,
 });
 
-type PaymentAccountSource = Pick<AccountReplica, 'state' | 'activeDispute' | 'status'>;
+type PaymentAccountSource = {
+  state: {
+    leftEntity: string;
+    rightEntity: string;
+    deltas: ReadonlyMap<number, Delta>;
+  };
+  activeDispute?: AccountReplica['activeDispute'];
+  status?: AccountReplica['status'];
+};
 
 function clonePaymentAccount(account: PaymentAccountSource): LocalAccountLike {
   return {
     leftEntity: account.state.leftEntity,
     rightEntity: account.state.rightEntity,
-    deltas: account.state.deltas instanceof Map ? new Map(account.state.deltas) : new Map(),
+    deltas: new Map(account.state.deltas),
   };
 }
 

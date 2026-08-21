@@ -211,7 +211,7 @@ type SnapshotAccount = {
   state?: {
     leftEntity?: unknown;
     rightEntity?: unknown;
-    deltas?: Map<number, unknown>;
+    deltas?: ReadonlyMap<number, unknown>;
   };
   status?: unknown;
   mempool?: unknown[];
@@ -254,7 +254,7 @@ const graphAccountFromSnapshot = (
     mempoolCount: mempool.length,
     ...(account.currentFrame ? { currentFrame: account.currentFrame } : {}),
     ...(account.pendingFrame ? { pendingFrame: account.pendingFrame } : {}),
-    deltas: account.state?.deltas instanceof Map ? new Map(account.state.deltas) : new Map(),
+    deltas: new Map(account.state?.deltas ?? []),
     currentHeight: integer(account.currentHeight),
     rollbackCount: integer(account.rollbackCount),
     ...(account.lastRollbackFrameHash ? { lastRollbackFrameHash: account.lastRollbackFrameHash } : {}),

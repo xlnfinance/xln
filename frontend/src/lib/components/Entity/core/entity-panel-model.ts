@@ -1,11 +1,17 @@
 import type {
   AccountReplica,
+  EntityState,
   RuntimeReplica,
   EnvSnapshot,
   Profile as GossipProfile,
   RuntimeAdapterEntitySummary,
   RuntimeAdapterViewFrame,
 } from '@xln/core/api/public/runtime-module';
+import { PersistentAccountStateMap } from '@xln/core/account/state/persistent-state-map';
+import {
+  EntityAccountCandidateMap,
+  PersistentEntityAccountMap,
+} from '@xln/core/entity/state/persistent-account-map';
 import type { EntityReplica } from '$lib/types/ui';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
 
@@ -21,12 +27,7 @@ export function materializeAccountView(candidate: AccountReplica | null | undefi
   if (!candidate) return null;
   const materialized: AccountReplica = {
     ...candidate,
-    state: {
-      ...candidate.state,
-      deltas: candidate.state.deltas instanceof Map
-        ? new Map(candidate.state.deltas)
-        : candidate.state.deltas,
-    },
+    state: { ...candidate.state },
   };
   if (candidate.state.settlementWorkspace) {
     materialized.state.settlementWorkspace = { ...candidate.state.settlementWorkspace };
@@ -89,7 +90,6 @@ export type EntityPanelView = {
 
 type RuntimeProjectionActiveEntity = NonNullable<RuntimeAdapterViewFrame['activeEntity']>;
 type RuntimeProjectionAccountDoc = RuntimeProjectionActiveEntity['accounts']['items'][number];
-type RuntimeProjectionBookDoc = RuntimeProjectionActiveEntity['books']['items'][number];
 
 function normalizeEntityId(value: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -129,24 +129,6 @@ function summaryProfile(summary: RuntimeAdapterEntitySummary | null | undefined)
   } as GossipProfile;
 }
 
-function summaryReplica(summary: RuntimeAdapterEntitySummary): EntityReplica {
-  const entityId = normalizeEntityId(summary.entityId);
-  return {
-    entityId,
-    signerId: String(summary.signerId || ''),
-    state: {
-      entityId,
-      height: Math.max(0, Math.floor(Number(summary.height || 0))),
-      profile: {
-        name: String(summary.label || entityId),
-        isHub: summary.isHub,
-      },
-      config: summary.jurisdiction ? { jurisdiction: summary.jurisdiction } : {},
-      accounts: new Map(),
-    },
-  } as EntityReplica;
-}
-
 function runtimeProjectionAccountKey(entityId: string, account: RuntimeProjectionAccountDoc): string {
   const owner = normalizeEntityId(entityId);
   const left = normalizeEntityId(account.state.leftEntity);
@@ -156,53 +138,135 @@ function runtimeProjectionAccountKey(entityId: string, account: RuntimeProjectio
   return right || left;
 }
 
-function runtimeProjectionBooksMap(items: RuntimeProjectionBookDoc[] | undefined): Map<string, unknown> {
-  const books = new Map<string, unknown>();
-  for (const item of items ?? []) {
-    const record = item as { pairId?: unknown; book?: unknown };
-    const pairId = String(record.pairId || '').trim();
-    if (pairId) books.set(pairId, record.book ?? item);
-  }
-  return books;
-}
+const projectedAccountRootForbidden = (): never => {
+  throw new Error('UI_PROJECTED_ACCOUNT_ROOT_FORBIDDEN');
+};
+
+const projectionAccount = (doc: RuntimeProjectionAccountDoc): AccountReplica => {
+  const {
+    deltas,
+    locks,
+    swapOffers,
+    pulls,
+    subcontracts,
+    lendingIntents,
+    requestedRebalance,
+    requestedRebalanceFeeState,
+    rebalanceFeePolicies,
+    ...boundedState
+  } = doc.state;
+  return {
+    ...doc,
+    state: {
+      ...boundedState,
+      deltas: PersistentAccountStateMap.fromEntries('deltas', deltas),
+      locks: PersistentAccountStateMap.fromEntries('locks', locks),
+      swapOffers: PersistentAccountStateMap.fromEntries('swapOffers', swapOffers),
+      ...(pulls
+      ? { pulls: PersistentAccountStateMap.fromEntries('pulls', pulls) }
+      : {}),
+      ...(subcontracts
+      ? { subcontracts: PersistentAccountStateMap.fromEntries('subcontracts', subcontracts) }
+      : {}),
+      ...(lendingIntents
+      ? { lendingIntents: PersistentAccountStateMap.fromEntries('lendingIntents', lendingIntents) }
+      : {}),
+      requestedRebalance: PersistentAccountStateMap.fromEntries(
+      'requestedRebalance',
+        requestedRebalance,
+      ),
+      requestedRebalanceFeeState: PersistentAccountStateMap.fromEntries(
+      'requestedRebalanceFeeState',
+        requestedRebalanceFeeState,
+      ),
+      ...(rebalanceFeePolicies
+      ? {
+          rebalanceFeePolicies: PersistentAccountStateMap.fromEntries(
+            'rebalanceFeePolicies',
+            rebalanceFeePolicies,
+          ),
+        }
+      : {}),
+    },
+    pendingWithdrawals: PersistentAccountStateMap.fromEntries(
+    'pendingWithdrawals',
+    doc.pendingWithdrawals,
+    ),
+    shadow: {
+      ...doc.shadow,
+      rebalance: {
+        ...doc.shadow.rebalance,
+        policy: PersistentAccountStateMap.fromEntries(
+        'rebalanceShadowPolicy',
+        doc.shadow.rebalance.policy,
+        ),
+        submittedAtByToken: PersistentAccountStateMap.fromEntries(
+        'rebalanceShadowSubmitted',
+        doc.shadow.rebalance.submittedAtByToken,
+        ),
+      },
+    },
+  };
+};
 
 function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEntity): EntityReplica {
   const entityId = normalizeEntityId(activeEntity.core.entityId || activeEntity.summary.entityId);
-  const accounts = new Map<string, AccountReplica>();
+  // A compact adapter page is deliberately not a committed Entity Account
+  // root. The ephemeral candidate supplies the exact read API while its empty
+  // base hash callback makes any accidental consensus-root use fail loudly.
+  const accounts = new EntityAccountCandidateMap(
+    PersistentEntityAccountMap.empty(entityId, projectedAccountRootForbidden),
+  );
   for (const item of activeEntity.accounts.items ?? []) {
     const key = runtimeProjectionAccountKey(entityId, item);
     if (!key) continue;
-    const account = materializeAccountView(item as AccountReplica) ?? (item as AccountReplica);
-    accounts.set(key, account);
+    accounts.set(key, projectionAccount(item));
   }
-  const books = runtimeProjectionBooksMap(activeEntity.books.items);
-  const state = {
-    ...activeEntity.core,
+  const core = activeEntity.core;
+  const state: EntityState = {
     entityId,
-    height: Math.max(0, Math.floor(Number(activeEntity.core.height ?? activeEntity.summary.height ?? 0))),
-    profile: activeEntity.core.profile ?? {
-      name: activeEntity.summary.label || entityId,
-      isHub: activeEntity.summary.isHub,
-    },
-    config: activeEntity.core.config ?? (
-      activeEntity.summary.jurisdiction ? { jurisdiction: activeEntity.summary.jurisdiction } : {}
-    ),
+    height: Math.max(0, Math.floor(Number(core.height ?? activeEntity.summary.height ?? 0))),
+    timestamp: core.timestamp,
+    nonces: core.nonces,
+    proposals: core.proposals,
+    config: core.config,
+    entityEncryptionPublicKey: core.entityEncryptionPublicKey,
+    reserves: core.reserves,
     accounts,
-    ...(books.size > 0 || activeEntity.core.orderbookHubProfile ? {
-      orderbookExt: {
-        books,
-        orderPairs: new Map(),
-        referrals: activeEntity.core.orderbookReferrals ?? new Map(),
-        ...(activeEntity.core.orderbookHubProfile ? { hubProfile: activeEntity.core.orderbookHubProfile } : {}),
-      },
-    } : {}),
+    lastFinalizedJHeight: core.lastFinalizedJHeight,
+    profile: core.profile,
+    htlcRoutes: core.htlcRoutes,
+    htlcFeesEarned: core.htlcFeesEarned,
+    lockBook: core.lockBook,
+    ...(core.entityCommandNonces === undefined ? {} : { entityCommandNonces: core.entityCommandNonces }),
+    ...(core.prevFrameHash === undefined ? {} : { prevFrameHash: core.prevFrameHash }),
+    ...(core.externalWallet === undefined ? {} : { externalWallet: core.externalWallet }),
+    ...(core.deferredAccountProposals === undefined
+      ? {}
+      : { deferredAccountProposals: core.deferredAccountProposals }),
+    ...(core.jBatchState === undefined ? {} : { jBatchState: core.jBatchState }),
+    ...(core.outDebtsByToken === undefined ? {} : { outDebtsByToken: core.outDebtsByToken }),
+    ...(core.inDebtsByToken === undefined ? {} : { inDebtsByToken: core.inDebtsByToken }),
+    ...(core.swapTradingPairs === undefined ? {} : { swapTradingPairs: core.swapTradingPairs }),
+    ...(core.crossJurisdictionSwaps === undefined
+      ? {}
+      : { crossJurisdictionSwaps: core.crossJurisdictionSwaps }),
+    ...(core.pendingCrossJurisdictionFillAcks === undefined
+      ? {}
+      : { pendingCrossJurisdictionFillAcks: core.pendingCrossJurisdictionFillAcks }),
+    ...(core.crossJurisdictionBookAdmissions === undefined
+      ? {}
+      : { crossJurisdictionBookAdmissions: core.crossJurisdictionBookAdmissions }),
+    ...(core.hubRebalanceConfig === undefined ? {} : { hubRebalanceConfig: core.hubRebalanceConfig }),
   };
   return {
     entityId,
     signerId: String(activeEntity.core.signerId || activeEntity.summary.signerId || ''),
-    isProposer: activeEntity.core.isProposer,
+    isProposer: activeEntity.core.isProposer === true,
+    mempool: [],
     state,
-  } as EntityReplica;
+    ...(core.htlcNotes === undefined ? {} : { htlcNotes: core.htlcNotes }),
+  };
 }
 
 function collectRuntimeProjectionJurisdictions(
@@ -235,11 +299,6 @@ function buildEntityPanelViewFromRuntimeProjection(
   if (requestedEntityId && activeEntityId && requestedEntityId !== activeEntityId) return null;
 
   const replicas = new Map<string, EntityReplica>();
-  for (const summary of frame.entities ?? []) {
-    const replica = summaryReplica(summary);
-    const key = `${replica.entityId}:${normalizeEntityId(replica.signerId || '')}`;
-    replicas.set(key, replica);
-  }
   const activeReplica = activeEntityProjectionReplica(frame.activeEntity);
   const activeKey = `${activeReplica.entityId}:${normalizeEntityId(activeReplica.signerId || signerId)}`;
   replicas.set(activeKey, activeReplica);
@@ -475,7 +534,7 @@ export function resolveAccountCounterparty(entityId: string, account: AccountRep
 
 export function findLocalAccountByCounterparty(
   entityId: string,
-  accounts: Map<string, AccountReplica> | undefined,
+  accounts: ReadonlyMap<string, AccountReplica> | undefined,
   counterpartyId: string | undefined,
 ): AccountReplica | null {
   if (!counterpartyId || !accounts) return null;

@@ -182,7 +182,7 @@ export const buildEntityConsensusSettingsView = (
     lockedFrameHash: replica.lockedFrame?.hash ?? null,
     leaderVoteCount: replica.leaderVotes?.size ?? 0,
     leaderCertificateVoteCount: certificateVoteCount(replica),
-    certifiedLineageLength: replica.certifiedFrameLineage?.length ?? 0,
+    certifiedLineageLength: replica.certifiedFrameHead ? 1 : 0,
     certifiedAnchorHeight: replica.certifiedFrameAnchor?.height ?? null,
     certifiedAnchorHash: replica.certifiedFrameAnchor?.frameHash ?? null,
     hankoWitnessCount: replica.hankoWitness?.size ?? 0,

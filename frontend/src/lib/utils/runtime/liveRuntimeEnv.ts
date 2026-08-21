@@ -74,10 +74,20 @@ const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip']
   const getProfiles = (): Profile[] => Array.from(profiles.values());
   const jurisdictions = new Map(structuredClone(Array.from(liveEnv.gossip.jurisdictions.entries())));
   const hubProfiles = structuredClone(liveEnv.gossip.getHubs());
+  const encryptionKeyForRuntime = (runtimeId: string): string | null => {
+    const normalizedRuntimeId = runtimeId.trim().toLowerCase();
+    for (const profile of profiles.values()) {
+      if (String(profile.runtimeId || '').trim().toLowerCase() !== normalizedRuntimeId) continue;
+      const key = String(profile.runtimeEncPubKey || '');
+      return /^0x[0-9a-f]{64}$/.test(key) ? key : null;
+    }
+    return null;
+  };
   return {
     profiles,
     jurisdictions,
     announce: detachedMutation,
+    encryptionKeyForRuntime,
     announceJurisdiction: detachedMutation,
     setProfiles: detachedMutation,
     getProfiles,
@@ -127,7 +137,6 @@ export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeRe
     // add work to headless hubs or to the consensus transition.
     state: cloneForRuntimeView(liveEnv.state, new Map()) as RuntimeReplica['state'],
     runtimeMempool: structuredClone(liveEnv.runtimeMempool),
-    history: structuredClone(liveEnv.history),
     gossip: createDetachedGossip(liveEnv),
     ...(liveEnv.overlay ? { overlay: structuredClone(liveEnv.overlay) } : {}),
     ...(liveEnv.runtimeConfig ? { runtimeConfig: structuredClone(liveEnv.runtimeConfig) } : {}),

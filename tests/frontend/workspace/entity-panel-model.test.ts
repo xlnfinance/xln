@@ -150,10 +150,10 @@ describe('entity panel model helpers', () => {
   });
 
   test('projects remote runtime view accounts into the entity account list model', () => {
-    const entityId = '0xaaa';
+    const entityId = `0x${'aa'.repeat(32)}`;
     const signerId = '0xsigner';
-    const hubOne = '0xh1';
-    const hubTwo = '0xh2';
+    const hubOne = `0x${'11'.repeat(32)}`;
+    const hubTwo = `0x${'22'.repeat(32)}`;
     const frame = {
       height: 77,
       head: { latestHeight: 77 },
@@ -188,15 +188,14 @@ describe('entity panel model helpers', () => {
                 lastFinalizedJHeight: 3,
                 requestedRebalance: new Map(),
                 requestedRebalanceFeeState: new Map(),
-                rebalancePolicy: new Map(),
               },
               status: 'open',
               currentHeight: 5,
               currentFrame: { height: 5, timestamp: 1000, outcome: [], accountTxs: [] },
               mempool: [],
-              pendingSignatures: [],
               rollbackCount: 0,
               pendingWithdrawals: new Map(),
+              shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
             },
             {
               state: {
@@ -208,15 +207,14 @@ describe('entity panel model helpers', () => {
                 lastFinalizedJHeight: 2,
                 requestedRebalance: new Map(),
                 requestedRebalanceFeeState: new Map(),
-                rebalancePolicy: new Map(),
               },
               status: 'open',
               currentHeight: 4,
               currentFrame: { height: 4, timestamp: 900, outcome: [], accountTxs: [] },
               mempool: [],
-              pendingSignatures: [],
               rollbackCount: 0,
               pendingWithdrawals: new Map(),
+              shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
             },
           ],
           nextCursor: null,
@@ -243,6 +241,7 @@ describe('entity panel model helpers', () => {
     expect(view.replica?.state?.accounts?.size).toBe(2);
     expect(view.replica?.state?.accounts?.get(hubOne)?.state.deltas.get(1)?.offdelta).toBe(10n);
     expect(view.replica?.state?.accounts?.get(hubTwo)?.state.deltas.get(1)?.offdelta).toBe(-2n);
+    expect(() => view.replica?.state.accounts.rootHash()).toThrow();
     expect(view.entityNames.get(hubOne)).toBe('H1');
     expect(view.jurisdictions).toEqual([{ name: 'Testnet', chainId: 31337 }]);
     expect(view.isDevnet).toBe(true);

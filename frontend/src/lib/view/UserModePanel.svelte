@@ -144,7 +144,7 @@
       String(accountCount),
       String(accountHeightTotal),
       String(pendingFrameCount),
-      String('frameLogs' in frame ? frame.frameLogs?.length || 0 : 0),
+      String('logs' in frame ? frame.logs?.length || 0 : 0),
     ].join(':');
   }
 

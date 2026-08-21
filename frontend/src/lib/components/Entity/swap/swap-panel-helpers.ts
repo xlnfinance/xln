@@ -118,7 +118,6 @@ function materializeSwapReplica(candidate: EntityReplica): EntityReplica {
   const replica: EntityReplica = { ...candidate };
   if (candidate.state) {
     replica.state = { ...candidate.state };
-    if (candidate.state.accounts instanceof Map) replica.state.accounts = new Map(candidate.state.accounts);
     const orderbookExt = candidate.state.orderbookExt;
     const books = orderbookExt?.books;
     if (orderbookExt && books instanceof Map) {
