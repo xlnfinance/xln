@@ -106,6 +106,45 @@ describe('independent frame history retention', () => {
     await db.close();
   });
 
+  test('prunes activity below the authoritative WAL floor even with unlimited local retention', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-frame-wal-floor-retention-'));
+    roots.push(root);
+    const db = new Level<Buffer, Buffer>(root, {
+      keyEncoding: 'buffer',
+      valueEncoding: 'buffer',
+    });
+    await db.batch()
+      .put(keyHistoryViewRuntimeActivity(1), encodeBuffer('one'))
+      .put(keyHistoryViewRuntimeActivity(2), encodeBuffer('two'))
+      .put(keyHistoryViewRuntimeActivity(3), encodeBuffer('three'))
+      .write();
+
+    const result = await pruneHistoryViewRetention({
+      db,
+      height: 3,
+      head: {
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        latestHeight: 3,
+        latestPrunedRuntimeHeight: 0,
+        retainedBytes: 100,
+        maxBytes: Number.MAX_SAFE_INTEGER,
+        retainFrames: Number.MAX_SAFE_INTEGER,
+      },
+      config: {
+        ...config,
+        historyViewMaxBytes: Number.MAX_SAFE_INTEGER,
+        historyViewRetainFrames: Number.MAX_SAFE_INTEGER,
+      },
+      firstWalHeight: 3,
+    });
+
+    expect(result.latestPrunedRuntimeHeight).toBe(2);
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toBeNull();
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(2))).toBeNull();
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(3))).toEqual(encodeBuffer('three'));
+    await db.close();
+  });
+
   test('Runtime compaction removes activity indexes but preserves Entity and Account frame bodies', async () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-frame-history-retention-'));
     roots.push(root);

@@ -40,6 +40,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     `${namespacePath}-storage-previous`,
     `${namespacePath}-wal`,
     `${namespacePath}-infra`,
+    `${namespacePath}-history-views`,
   ]) rmSync(path, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
 
@@ -52,6 +53,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     storage: {
       ...(env.runtimeConfig?.storage || {}),
       snapshotPeriodFrames: 5,
+      retainSnapshots: 1,
       materializePeriodFrames: 1,
     },
   };
@@ -187,9 +189,18 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
       amount: '7',
     });
 
-    await getHistoryViewDb(env).put(keyHistoryViewRuntimeActivity(3), Buffer.from([0xc1]));
-    await expect(readPersistedRuntimeActivityJournal(env, 3))
-      .rejects.toThrow('STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=3');
+    env.state.height = 6;
+    env.state.timestamp = 1_700_000_000_006;
+    replaceRuntimeFrameEvents(env, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+
+    expect(await readPersistedFrameJournal(env, 3)).toBeNull();
+    expect(await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 3)).toBeNull();
+    expect(await readPersistedRuntimeActivityJournal(env, 3)).toBeNull();
+
+    await getHistoryViewDb(env).put(keyHistoryViewRuntimeActivity(6), Buffer.from([0xc1]));
+    await expect(readPersistedRuntimeActivityJournal(env, 6))
+      .rejects.toThrow('STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=6');
   } finally {
     await closeRuntimeDb(env);
     await closeInfraDb(env);

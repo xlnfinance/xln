@@ -268,7 +268,7 @@ export const putHistoryViewCommit = (batch: RuntimeHistoryViewBatch, plan: Histo
 
 export const reconcileHistoryViews = async (options: {
   viewDb: RuntimeDbLike;
-  /** Lowest retained WAL height; only consulted when the view is behind. */
+  /** Lowest retained WAL height; older activity rows have no authoritative input. */
   firstWalHeight: number | (() => Promise<number>);
   latestWalHeight: number;
   /** Puts already built for `latestWalHeight` by the frame that just committed. */
@@ -306,6 +306,20 @@ export const reconcileHistoryViews = async (options: {
     throw new Error(
       `HISTORY_VIEW_WAL_RANGE_INVALID:first=${firstWalHeight}:latest=${latestWalHeight}`,
     );
+  }
+  const floorPrune = await pruneHistoryViewRetention({
+    db: options.viewDb,
+    height: latestWalHeight,
+    head,
+    config: options.config,
+    firstWalHeight,
+  });
+  if (floorPrune.latestPrunedRuntimeHeight > head.latestPrunedRuntimeHeight) {
+    head = {
+      ...head,
+      latestPrunedRuntimeHeight: floorPrune.latestPrunedRuntimeHeight,
+      retainedBytes: floorPrune.retainedBytes,
+    };
   }
   if (head.latestHeight + 1 < firstWalHeight) {
     // A checkpoint import or WAL compaction may intentionally replace the
@@ -394,6 +408,7 @@ export const pruneHistoryViewRetention = async (options: {
   height: number;
   head: StorageHistoryViewHead;
   config: Required<StorageRuntimeConfig>;
+  firstWalHeight?: number;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
 }): Promise<{
   prunedBytes: number;
@@ -407,7 +422,10 @@ export const pruneHistoryViewRetention = async (options: {
   const countCutoff = retainFrames === Number.MAX_SAFE_INTEGER
     ? 0
     : Math.max(0, height - retainFrames);
-  const countLimitExceeded = countCutoff > nextHead.latestPrunedRuntimeHeight;
+  const walCutoff = options.firstWalHeight === undefined
+    ? 0
+    : Math.max(0, Math.floor(Number(options.firstWalHeight)) - 1);
+  const countLimitExceeded = Math.max(countCutoff, walCutoff) > nextHead.latestPrunedRuntimeHeight;
   const byteLimitExceeded = nextHead.retainedBytes > options.config.historyViewMaxBytes;
   if (!countLimitExceeded && !byteLimitExceeded) {
     return {
@@ -424,7 +442,7 @@ export const pruneHistoryViewRetention = async (options: {
   // rebuildable prefix in one bounded range operation. The authoritative WAL
   // is untouched, so this local view can always be recreated.
   const byteCutoff = byteLimitExceeded ? height - 1 : 0;
-  const cutoff = Math.max(countCutoff, byteCutoff);
+  const cutoff = Math.max(countCutoff, byteCutoff, walCutoff);
   const pruned = await pruneHistoryViewBeforeRuntimeHeight(
     options.db,
     cutoff,

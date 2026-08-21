@@ -957,6 +957,20 @@ const runStorageSnapshotLifecycle = async (
       config.retainSnapshots,
       options.onPersistenceBoundary,
     );
+    const firstWalHeight = (await listSnapshotHeights(walDb))[0] ?? latestSnapshotHeight;
+    if (!(await options.tryOpenHistoryViewDb(options.env))) {
+      throw new Error(`HISTORY_VIEW_DB_OPEN_FAILED:wal-floor=${firstWalHeight}`);
+    }
+    await pruneHistoryViewRetention({
+      db: options.getHistoryViewDb(options.env),
+      height: options.env.state.height,
+      head: await readHistoryViewHead(options.getHistoryViewDb(options.env), config),
+      config,
+      firstWalHeight,
+      ...(options.onPersistenceBoundary
+        ? { onPersistenceBoundary: options.onPersistenceBoundary }
+        : {}),
+    });
     snapshotMs = options.getPerfMs() - startedAt;
     options.onPersistenceProgress?.('snapshot-done');
   }
