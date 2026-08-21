@@ -8,6 +8,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
 import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,
@@ -438,15 +439,15 @@ const buildGenesisReplica = (
         bio: '',
         website: '',
       },
-      htlcRoutes: new Map(),
+      htlcRoutes: PersistentEntityCollectionMap.empty(),
       htlcFeesEarned: 0n,
-      lockBook: new Map(),
+      lockBook: PersistentEntityCollectionMap.empty(),
       crontabState: initCrontab(),
       swapTradingPairs: buildDefaultEntitySwapPairs(
         getTokenIdsForJurisdiction(config.jurisdiction),
       ),
-      pendingCrossJurisdictionFillAcks: new Map(),
-      crossJurisdictionBookAdmissions: new Map(),
+      pendingCrossJurisdictionFillAcks: PersistentEntityCollectionMap.empty(),
+      crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.empty(),
     },
   };
   normalizeEntitySwapTradingPairs(replica.state);

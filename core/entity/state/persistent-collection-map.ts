@@ -5,6 +5,8 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 import { encodeRawRadixTextKey } from '../../protocol/state/radix-merkle';
 import {
   PersistentRadixValueMap,
+  type PersistentRadixNodeChanges,
+  type PersistentRadixNodeRecord,
   type PersistentRadixValueMapOptions,
   type RadixFoldMutation,
 } from '../../protocol/state/persistent-radix-value-map';
@@ -68,6 +70,15 @@ export class PersistentEntityCollectionMap<Value> implements Map<string, Value> 
     );
   }
 
+  /** Cold storage boundary: relink the persisted graph without rebuilding it. */
+  static fromNodeRecords<Value>(
+    records: Iterable<PersistentRadixNodeRecord<string, Value>>,
+  ): PersistentEntityCollectionMap<Value> {
+    return new PersistentEntityCollectionMap<Value>(
+      PersistentRadixValueMap.fromNodeRecords(records, options<Value>()),
+    );
+  }
+
   updated(key: string, value: Value): PersistentEntityCollectionMap<Value> {
     return new PersistentEntityCollectionMap(this.#values.updated(key, value));
   }
@@ -84,6 +95,18 @@ export class PersistentEntityCollectionMap<Value> implements Map<string, Value> 
   }
 
   rootHash(): string { return this.#values.rootHash(); }
+
+  /** Full traversal is reserved for a first checkpoint or cold snapshot. */
+  nodeRecords(): Generator<PersistentRadixNodeRecord<string, Value>> {
+    return this.#values.nodeRecords();
+  }
+
+  /** Exact dirty Patricia paths since the previously materialized root. */
+  nodeChangesSince(
+    previous: PersistentEntityCollectionMap<Value>,
+  ): PersistentRadixNodeChanges<string, Value> {
+    return this.#values.nodeChangesSince(previous.#values);
+  }
   get size(): number { return this.#values.size; }
   get(key: string): Value | undefined { return this.#values.get(key); }
   has(key: string): boolean { return this.#values.has(key); }
@@ -107,6 +130,11 @@ export class PersistentEntityCollectionMap<Value> implements Map<string, Value> 
     throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE');
   }
 }
+
+export const isPersistentEntityCollectionMap = (
+  value: unknown,
+): value is PersistentEntityCollectionMap<unknown> =>
+  value instanceof PersistentEntityCollectionMap;
 
 /** RAM-only dirty-key overlay. Rejection drops it; certification path-copies only changed branches. */
 export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {

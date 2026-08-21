@@ -5,13 +5,15 @@
  * Key checks: typed graph ownership, branch roots, leaves, and static references.
  * Human-audit importance: 100/100 — corrupt recovery bytes must fail closed.
  */
-import { decodeValidatedBuffer } from '../../codec/codec';
 import { iterateKeys, readRawOrNull } from '../../database/level';
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
   decodeEntityId,
@@ -22,6 +24,8 @@ import {
   keyLiveBook,
   keyLiveBookPrefix,
   keyLiveEntity,
+  keyLiveEntityField,
+  keyLiveEntityFieldChunk,
   parseLiveAccountBranchKey,
   parseLiveAccountFieldKey,
   parseLiveAccountKey,
@@ -29,13 +33,18 @@ import {
   parseLiveBookBranchKey,
   parseLiveBookKey,
   parseLiveBookLeafKey,
+  parseLiveEntityBranchKey,
+  parseLiveEntityFieldKey,
+  parseLiveEntityLeafKey,
 } from '../../keys';
-import { readAccountStorageLayout } from '../../schema/account-layout';
+import { decodeAccountGraphManifest, readAccountStorageLayout } from '../../schema/account-layout';
+import { decodeEntityGraphManifest, readEntityStorageLayout } from '../../schema/entity/layout';
+import { ACCOUNT_TREE_NAMESPACE_TAG } from '../../schema/account-graph-codec';
+import { ENTITY_COLLECTION_NAMESPACE_TAG } from '../../schema/entity/graph-codec';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
   validateStorageAccountDocValue,
-  validateStorageEntityCoreDocValue,
 } from '../../schema/authoritative-schema';
 import type { RuntimeDbLike } from '../../types';
 import { readStorageBookGraph } from '../book-graph';
@@ -54,18 +63,34 @@ const bookOwnerKey = (entityId: string, pairId: string): string =>
 
 /** Verify all roots first, then reject every graph row without a typed root. */
 export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<void> => {
+  const entityOwners = new Map<string, Readonly<{
+    fieldTags: ReadonlySet<number>;
+    namespaceTags: ReadonlySet<number>;
+  }>>();
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
     if (key.length !== 33) throw new Error(`STORAGE_LIVE_ENTITY_KEY_INVALID:${key.toString('hex')}`);
     const entityId = decodeEntityId(key.subarray(1));
     assertExactKey(key, keyLiveEntity(entityId), 'STORAGE_LIVE_ENTITY_KEY_MISMATCH');
+    const stored = await readEntityStorageLayout(db, entityId, key);
+    if (!stored) throw new Error(`STORAGE_LIVE_ENTITY_MISSING:${key.toString('hex')}`);
     assertStorageEntityDocBinding(
-      decodeValidatedBuffer(await db.get(key), validateStorageEntityCoreDocValue),
+      stored.doc,
       entityId,
       'startup-integrity',
     );
+    const manifest = decodeEntityGraphManifest(stored.rootValue);
+    entityOwners.set(key.toString('hex'), {
+      fieldTags: new Set(manifest.fields.map(field => field.tag)),
+      namespaceTags: new Set(
+        manifest.trees.map(tree => ENTITY_COLLECTION_NAMESPACE_TAG[tree.namespace]),
+      ),
+    });
   }
 
-  const accountOwners = new Set<string>();
+  const accountOwners = new Map<string, Readonly<{
+    fieldTags: ReadonlySet<number>;
+    namespaceTags: ReadonlySet<number>;
+  }>>();
   for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix() })) {
     const parsed = parseLiveAccountKey(key);
     assertExactKey(key, keyLiveAccount(parsed.entityId, parsed.counterpartyId), 'STORAGE_LIVE_ACCOUNT_KEY_MISMATCH');
@@ -77,7 +102,13 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       parsed.counterpartyId,
       'startup-integrity',
     );
-    accountOwners.add(accountOwnerKey(parsed.entityId, parsed.counterpartyId));
+    const manifest = decodeAccountGraphManifest(stored.logicalValue);
+    accountOwners.set(accountOwnerKey(parsed.entityId, parsed.counterpartyId), {
+      fieldTags: new Set(manifest.fields.map(field => field.tag)),
+      namespaceTags: new Set(
+        manifest.trees.map(tree => ACCOUNT_TREE_NAMESPACE_TAG[tree.namespace]),
+      ),
+    });
   }
 
   const bookOwners = new Set<string>();
@@ -96,9 +127,39 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
         ? parseLiveAccountBranchKey(key)
         : parseLiveAccountLeafKey(key);
       const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);
-      if (!accountOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+      if (!accountOwners.get(owner)?.namespaceTags.has(parsed.namespaceTag) ||
+          !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
         throw new Error(`STORAGE_ACCOUNT_GRAPH_OWNER_MISSING:${owner}`);
       }
+    }
+  }
+
+  for (const tag of [KEY_LIVE_ENTITY_BRANCH, KEY_LIVE_ENTITY_LEAF] as const) {
+    for await (const key of iterateKeys(db, { prefix: Buffer.from([tag]) })) {
+      const parsed = tag === KEY_LIVE_ENTITY_BRANCH
+        ? parseLiveEntityBranchKey(key)
+        : parseLiveEntityLeafKey(key);
+      const owner = keyLiveEntity(parsed.entityId).toString('hex');
+      if (!entityOwners.get(owner)?.namespaceTags.has(parsed.namespaceTag) ||
+          !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+        throw new Error(`STORAGE_ENTITY_GRAPH_OWNER_MISSING:${owner}`);
+      }
+    }
+  }
+
+  for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY_FIELD]) })) {
+    const parsed = parseLiveEntityFieldKey(key);
+    assertExactKey(
+      key,
+      parsed.chunkIndex === undefined
+        ? keyLiveEntityField(parsed.entityId, parsed.fieldTag)
+        : keyLiveEntityFieldChunk(parsed.entityId, parsed.fieldTag, parsed.chunkIndex),
+      'STORAGE_LIVE_ENTITY_FIELD_KEY_MISMATCH',
+    );
+    const owner = keyLiveEntity(parsed.entityId).toString('hex');
+    if (!entityOwners.get(owner)?.fieldTags.has(parsed.fieldTag) ||
+        !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+      throw new Error(`STORAGE_ENTITY_FIELD_OWNER_MISSING:${owner}`);
     }
   }
 
@@ -117,7 +178,8 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       'STORAGE_LIVE_ACCOUNT_FIELD_KEY_MISMATCH',
     );
     const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);
-    if (!accountOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+    if (!accountOwners.get(owner)?.fieldTags.has(parsed.fieldTag) ||
+        !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
       throw new Error(`STORAGE_ACCOUNT_FIELD_OWNER_MISSING:${owner}`);
     }
   }

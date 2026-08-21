@@ -34,7 +34,7 @@ import {
 } from '../../../storage/keys';
 import { inspectStorage } from '../../../storage/read/inspect';
 import { createSnapshot, seedFreshStorageEpoch } from '../../../storage/database/lifecycle';
-import { projectEntityCoreDoc } from '../../../storage/read/projections';
+import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../storage/read/projections';
 import { deriveRuntimeIdFromSeed } from '../../../storage/runtime-dbs';
 import {
   listStorageLiveEntityIds,
@@ -390,9 +390,21 @@ const writeDocs = async (
   docs: StorageDoc[],
   headHeight: number,
 ): Promise<void> => {
+  const entityStates = docs
+    .filter((doc): doc is Extract<StorageDoc, { family: 'entity' }> => doc.family === 'entity')
+    .map(entity => hydrateEntityStateFromStorage({
+      core: entity.value,
+      accounts: new Map(docs.flatMap(doc => doc.family === 'account' && doc.entityId === entity.entityId
+        ? [[doc.counterpartyId, doc.value] as const]
+        : [])),
+      books: new Map(docs.flatMap(doc => doc.family === 'book' && doc.entityId === entity.entityId
+        ? [[doc.pairId, doc.value] as const]
+        : [])),
+    }));
   const prepared = await prepareLiveStateGraph({
     db,
-    puts: docs,
+    puts: docs.filter(doc => doc.family !== 'entity'),
+    entityStates,
     dels: [],
   });
   const bookWrites = await Promise.all(

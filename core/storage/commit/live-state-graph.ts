@@ -1,11 +1,12 @@
 /**
  * Plans the physical live-state graph without inventing a second Merkle tree.
  * Account manifests own their typed child roots; Book headers own page roots;
- * Entity documents remain the bounded parent projection committed by the WAL.
+ * Entity manifests own bounded fields plus exact persistent collection roots.
  * Human-audit importance: 100/100 — these rows are the recovery checkpoint.
  */
-import { encodeBuffer } from '../codec/codec';
+import type { EntityState } from '../../entity/types';
 import { prepareAccountStorageDelete, prepareAccountStorageLayout } from '../schema/account-layout';
+import { prepareEntityStorageDelete, prepareEntityStorageLayout } from '../schema/entity/layout';
 import { liveKeyForDoc, liveKeyForRef } from '../schema/doc-refs';
 import type {
   RuntimeDbLike,
@@ -19,6 +20,8 @@ export type PreparedLiveStateGraph = Readonly<{
   dels: readonly Buffer[];
   accountCachePuts: readonly (readonly [string, StorageAccountDoc])[];
   accountCacheDels: readonly string[];
+  entityCachePuts: readonly (readonly [string, EntityState])[];
+  entityCacheDels: readonly string[];
 }>;
 
 const accountCacheKey = (entityId: string, counterpartyId: string): string =>
@@ -32,8 +35,10 @@ const accountCacheKey = (entityId: string, counterpartyId: string): string =>
 export const prepareLiveStateGraph = async (options: {
   db: RuntimeDbLike;
   puts: readonly StorageDoc[];
+  entityStates: readonly EntityState[];
   dels: readonly StorageDocRef[];
   previousAccounts?: ReadonlyMap<string, StorageAccountDoc>;
+  previousEntities?: ReadonlyMap<string, EntityState>;
 }): Promise<PreparedLiveStateGraph> => {
   const effectivePuts = new Map<string, StorageDoc>();
   for (const doc of options.puts) {
@@ -50,12 +55,26 @@ export const prepareLiveStateGraph = async (options: {
   const dels: Buffer[] = [];
   const accountCachePuts: Array<readonly [string, StorageAccountDoc]> = [];
   const accountCacheDels: string[] = [];
+  const entityCachePuts: Array<readonly [string, EntityState]> = [];
+  const entityCacheDels: string[] = [];
+
+  for (const state of options.entityStates) {
+    const entityId = state.entityId.trim().toLowerCase();
+    const layout = prepareEntityStorageLayout(
+      entityId,
+      liveKeyForRef({ family: 'entity', entityId }),
+      state,
+      options.previousEntities?.get(entityId),
+    );
+    puts.push(...layout.puts);
+    dels.push(...layout.dels);
+    entityCachePuts.push([entityId, state]);
+  }
 
   for (const doc of effectivePuts.values()) {
     if (doc.family === 'book') continue;
     if (doc.family === 'entity') {
-      puts.push({ key: liveKeyForDoc(doc), value: encodeBuffer(doc.value) });
-      continue;
+      throw new Error(`STORAGE_ENTITY_DOC_BLOB_FORBIDDEN:${doc.entityId}`);
     }
     const cacheKey = accountCacheKey(doc.entityId, doc.counterpartyId);
     const layout = await prepareAccountStorageLayout(
@@ -74,7 +93,12 @@ export const prepareLiveStateGraph = async (options: {
   for (const ref of effectiveDels.values()) {
     if (ref.family === 'book') continue;
     if (ref.family === 'entity') {
-      dels.push(liveKeyForRef(ref));
+      entityCacheDels.push(ref.entityId.trim().toLowerCase());
+      dels.push(...await prepareEntityStorageDelete(
+        options.db,
+        ref.entityId,
+        liveKeyForRef(ref),
+      ));
       continue;
     }
     const cacheKey = accountCacheKey(ref.entityId, ref.counterpartyId);
@@ -87,5 +111,12 @@ export const prepareLiveStateGraph = async (options: {
     ));
   }
 
-  return { puts, dels, accountCachePuts, accountCacheDels };
+  return {
+    puts,
+    dels,
+    accountCachePuts,
+    accountCacheDels,
+    entityCachePuts,
+    entityCacheDels,
+  };
 };

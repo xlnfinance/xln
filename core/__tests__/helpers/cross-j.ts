@@ -23,6 +23,7 @@ import {
   PersistentEntityAccountMap,
 } from '../../entity/state/persistent-account-map';
 import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
+import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 export const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -175,10 +176,10 @@ export const makeState = (
     accounts,
     lastFinalizedJHeight: 0,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
+    htlcRoutes: PersistentEntityCollectionMap.empty(),
     htlcFeesEarned: 0n,
-    lockBook: new Map(),
-    crossJurisdictionSwaps: new Map(),
+    lockBook: PersistentEntityCollectionMap.empty(),
+    crossJurisdictionSwaps: PersistentEntityCollectionMap.empty(),
     swapTradingPairs: [],
   };
 };

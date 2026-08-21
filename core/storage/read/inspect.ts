@@ -10,6 +10,9 @@ import {
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
   KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
@@ -48,6 +51,7 @@ export const inspectStorage = async (options: {
     snapshotReplicaMetaStats,
     snapshotHeights,
     liveEntityStats,
+    liveEntityFieldStats,
     liveAccountStats,
     liveAccountFieldStats,
     liveBookStats,
@@ -56,6 +60,8 @@ export const inspectStorage = async (options: {
     accountGraphLeafStats,
     bookGraphBranchStats,
     bookGraphLeafStats,
+    entityGraphBranchStats,
+    entityGraphLeafStats,
     certifiedBoardNodeStats,
     consumptionNodeStats,
     accountJClaimNodeStats,
@@ -69,6 +75,7 @@ export const inspectStorage = async (options: {
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_REPLICA_META])),
     listSnapshotHeights(db),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY_FIELD])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT_FIELD])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK])),
@@ -77,6 +84,8 @@ export const inspectStorage = async (options: {
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT_LEAF])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK_BRANCH])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK_LEAF])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY_BRANCH])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY_LEAF])),
     measurePrefixBytes(db, Buffer.from([KEY_CERTIFIED_BOARD_NODE])),
     measurePrefixBytes(db, Buffer.from([KEY_CONSUMPTION_NODE])),
     measurePrefixBytes(db, Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE])),
@@ -90,6 +99,7 @@ export const inspectStorage = async (options: {
     snapshotReplicaMetaStats.bytes;
   const liveBytes =
     liveEntityStats.bytes +
+    liveEntityFieldStats.bytes +
     liveAccountStats.bytes +
     liveAccountFieldStats.bytes +
     liveBookStats.bytes +
@@ -98,6 +108,8 @@ export const inspectStorage = async (options: {
     accountGraphLeafStats.bytes +
     bookGraphBranchStats.bytes +
     bookGraphLeafStats.bytes +
+    entityGraphBranchStats.bytes +
+    entityGraphLeafStats.bytes +
     certifiedBoardNodeStats.bytes +
     consumptionNodeStats.bytes +
     accountJClaimNodeStats.bytes;
@@ -110,6 +122,8 @@ export const inspectStorage = async (options: {
     diffCount: diffStats.count,
     snapshotHeights,
     liveEntityCount: liveEntityStats.count,
+    liveEntityFieldCount: liveEntityFieldStats.count,
+    liveEntityFieldBytes: liveEntityFieldStats.bytes,
     liveAccountCount: liveAccountStats.count,
     liveAccountFieldCount: liveAccountFieldStats.count,
     liveAccountFieldBytes: liveAccountFieldStats.bytes,
@@ -118,6 +132,8 @@ export const inspectStorage = async (options: {
     accountGraphLeafCount: accountGraphLeafStats.count,
     bookGraphBranchCount: bookGraphBranchStats.count,
     bookGraphLeafCount: bookGraphLeafStats.count,
+    entityGraphBranchCount: entityGraphBranchStats.count,
+    entityGraphLeafCount: entityGraphLeafStats.count,
     certifiedBoardNodeCount: certifiedBoardNodeStats.count,
     consumptionNodeCount: consumptionNodeStats.count,
     accountJClaimNodeCount: accountJClaimNodeStats.count,

@@ -24,6 +24,7 @@ import type {
   ConsensusConfig,
   EntityInput,
   EntityReplica,
+  EntityState,
 } from '../entity/types';
 /**
  * Runtime machine State, Input, Tx, routing envelopes, and local infrastructure.
@@ -561,6 +562,8 @@ interface RuntimeInfrastructure {
    * replicas; the cache itself changes only after the atomic storage batch.
    */
   storagePersistedAccounts?: Map<string, AccountReplica>;
+  /** Last materialized Entity roots; retained only to emit O(dirty-path) graph deltas. */
+  storagePersistedEntities?: Map<string, EntityState>;
   /** Content-addressed board nodes. Authority is the root in EntityState. */
   certifiedBoardNodes?: CertifiedBoardNodeStore;
   /** Newly created immutable nodes awaiting the same atomic batch as a root. */

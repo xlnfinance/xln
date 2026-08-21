@@ -266,6 +266,8 @@ export type StorageDebugStats = {
   diffCount: number;
   snapshotHeights: number[];
   liveEntityCount: number;
+  liveEntityFieldCount?: number;
+  liveEntityFieldBytes?: number;
   liveAccountCount: number;
   liveAccountFieldCount?: number;
   liveAccountFieldBytes?: number;
@@ -274,6 +276,8 @@ export type StorageDebugStats = {
   accountGraphLeafCount?: number;
   bookGraphBranchCount?: number;
   bookGraphLeafCount?: number;
+  entityGraphBranchCount?: number;
+  entityGraphLeafCount?: number;
   certifiedBoardNodeCount?: number;
   consumptionNodeCount?: number;
   accountJClaimNodeCount?: number;

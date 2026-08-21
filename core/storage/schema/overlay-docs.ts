@@ -5,7 +5,8 @@ import { keyDiff, normalizeEntityId } from '../keys';
 import { readValidatedOrNull } from '../database/level';
 import { validateStorageDiffRecordValue } from './authoritative-schema';
 import { mergeStorageOverlayRecords, storageOverlayRecordKey } from '../../protocol/state/overlay';
-import { projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
+import { projectAccountDoc } from '../read/projections';
+import type { EntityState } from '../../entity/types';
 import { buildReplicaLookup, findReplicaForEntity } from '../replica/replicas';
 import type {
   RuntimeDbLike,
@@ -150,16 +151,6 @@ export const buildDocPuts = (
 ): StorageDoc[] => {
   const puts: StorageDoc[] = [];
 
-  for (const entityId of touched.touchedEntities) {
-    const replica = findReplicaForEntity(env, entityId, replicaLookup);
-    if (!replica) continue;
-    puts.push({
-      family: 'entity',
-      entityId,
-      value: projectEntityCoreDoc(replica.state),
-    });
-  }
-
   for (const ref of touched.touchedAccounts.values()) {
     const replica = findReplicaForEntity(env, ref.entityId, replicaLookup);
     const account = replica?.state.accounts.get(ref.counterpartyId);
@@ -181,3 +172,12 @@ export const buildDocPuts = (
 
   return puts;
 };
+
+/** Live Entity checkpoints consume the exact RAM roots, never a flat document clone. */
+export const buildEntityStatePuts = (
+  env: RuntimeReplica,
+  touched: StorageOverlayRefs,
+  replicaLookup = buildReplicaLookup(env),
+): EntityState[] => [...touched.touchedEntities]
+  .map(entityId => findReplicaForEntity(env, entityId, replicaLookup)?.state)
+  .filter((state): state is EntityState => state !== undefined);

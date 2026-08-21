@@ -219,6 +219,16 @@ const seedPersistedAccountRoots = (env: RuntimeReplica): void => {
   env.infrastructure.storagePersistedAccounts = roots;
 };
 
+const seedPersistedEntityRoots = (env: RuntimeReplica): void => {
+  env.infrastructure ??= {};
+  const roots = new Map<string, EntityState>();
+  for (const replica of env.state.eReplicas.values()) {
+    const entityId = replica.entityId.toLowerCase();
+    if (!roots.has(entityId)) roots.set(entityId, replica.state);
+  }
+  env.infrastructure.storagePersistedEntities = roots;
+};
+
 const verifyRestoredEntityLineage = (
   env: RuntimeReplica,
   restoredStates: Map<string, EntityState>,
@@ -271,6 +281,7 @@ export const restorePersistedEntityGraph = async (
   // the first update look like an O(all pages) rewrite.
   seedPersistedBookRoots(env);
   seedPersistedAccountRoots(env);
+  seedPersistedEntityRoots(env);
   assertPersistedJurisdictionsAvailable(env);
   await assertCertifiedRegistrationEvidenceStore(env);
   if (targetHeight === latestHeight) {

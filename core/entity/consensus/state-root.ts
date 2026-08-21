@@ -530,17 +530,7 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
     'integrity',
   );
 
-// Same-height root memo. Proposal and WAL storage projection hash the same
-// committed object twice in one frame (~36k canonical encodes per 500-payment
-// HLT run). Keyed by height + accounts radix root so replacing the Account map
-// or folding a dirty leaf cannot return a stale parent hash. Non-enumerable so
-// `{...state}` test/shell copies cannot inherit a stale memo. Crontab lastRun
-// still happens inside frame apply before the first root of that height.
-const ENTITY_ROOT_MEMO = Symbol.for('xln.entity.state-root.memo');
-type EntityRootMemo = { height: number; accountsRoot: string; root: string };
-
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
-  delete (state as { [ENTITY_ROOT_MEMO]?: EntityRootMemo })[ENTITY_ROOT_MEMO];
   if (state.accounts instanceof EntityAccountCandidateMap) {
     state.accounts.dropCachedProjection();
     return;
@@ -593,9 +583,12 @@ const computeEntityRootFromSections = (sections: readonly EntitySectionCommitmen
   );
 
 export const computeCanonicalEntityConsensusStateHash = (state: EntityState): string => {
-  const accountsRoot = state.accounts.rootHash();
-  const memo = (state as { [ENTITY_ROOT_MEMO]?: EntityRootMemo })[ENTITY_ROOT_MEMO];
-  if (memo && memo.height === state.height && memo.accountsRoot === accountsRoot) return memo.root;
+  // EntityState is intentionally plain deterministic data, not an observable
+  // mutation wrapper. Caching this parent root on object identity is therefore
+  // unsafe: profile/config/orderbook fields may change at the same height and
+  // an Account-root-only key would silently certify the previous state. The
+  // large Account subtree remains incrementally cached by its Patricia map;
+  // this small parent commitment must always bind the scalar sections now.
   // Opt-in only: the audit recomputes the cold root and the byte breakdown
   // re-encodes the whole projection; either would distort a frame-level
   // process profile that enabled it implicitly.
@@ -608,12 +601,6 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
   const sectionsAt = getPerfMs();
   const root = computeEntityRootFromSections(sections);
   const endedAt = getPerfMs();
-  Object.defineProperty(state, ENTITY_ROOT_MEMO, {
-    value: { height: state.height, accountsRoot, root },
-    enumerable: false,
-    writable: true,
-    configurable: true,
-  });
   if (audit) {
     const cold = computeCanonicalEntityConsensusStateHashCold(state);
     if (root !== cold) throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${root}:cold=${cold}`);

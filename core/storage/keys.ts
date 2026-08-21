@@ -15,7 +15,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/integrity-checksum';
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 5;
+export const STORAGE_SCHEMA_VERSION = 6;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -98,6 +98,12 @@ export const KEY_SNAPSHOT_BOOK = 0x33;
 export const KEY_SNAPSHOT_REPLICA_META = 0x34;
 /** Snapshot namespace wrapping one unchanged live enum-keyed graph record. */
 export const KEY_SNAPSHOT_GRAPH = 0x35;
+/** Bounded Entity envelope field at its permanent entity + field-tag key. */
+export const KEY_LIVE_ENTITY_FIELD = 0x36;
+/** Exact branch nodes of Entity-owned persistent collections. */
+export const KEY_LIVE_ENTITY_BRANCH = 0x37;
+/** Exact leaf nodes of Entity-owned persistent collections. */
+export const KEY_LIVE_ENTITY_LEAF = 0x38;
 
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 
@@ -256,6 +262,107 @@ export const parseSnapshotGraphKey = (key: Buffer): Readonly<{ height: RuntimeHe
 };
 
 export const keyLiveEntity = (entityId: string): Buffer => Buffer.concat([Buffer.from([KEY_LIVE_ENTITY]), hexBytes(entityId)]);
+
+const liveEntityFieldOwnerKey = (entityId: string): Buffer =>
+  Buffer.concat([Buffer.from([KEY_LIVE_ENTITY_FIELD]), hexBytes(entityId)]);
+
+export const keyLiveEntityField = (entityId: string, fieldTag: number): Buffer => {
+  if (!Number.isSafeInteger(fieldTag) || fieldTag < 1 || fieldTag > 0xff) {
+    throw new Error(`STORAGE_ENTITY_FIELD_TAG_INVALID:${String(fieldTag)}`);
+  }
+  return Buffer.concat([liveEntityFieldOwnerKey(entityId), Buffer.from([fieldTag])]);
+};
+
+export const keyLiveEntityFieldChunk = (
+  entityId: string,
+  fieldTag: number,
+  chunkIndex: number,
+): Buffer => {
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > 0xffff_ffff) {
+    throw new Error(`STORAGE_ENTITY_FIELD_CHUNK_INDEX_INVALID:${String(chunkIndex)}`);
+  }
+  const index = Buffer.allocUnsafe(4);
+  index.writeUInt32BE(chunkIndex);
+  return Buffer.concat([keyLiveEntityField(entityId, fieldTag), index]);
+};
+
+export const keyLiveEntityFieldPrefix = (entityId: string): Buffer =>
+  liveEntityFieldOwnerKey(entityId);
+
+export const parseLiveEntityFieldKey = (key: Buffer) => {
+  if ((key.byteLength !== 34 && key.byteLength !== 38) || key[0] !== KEY_LIVE_ENTITY_FIELD) {
+    throw new Error(`STORAGE_ENTITY_FIELD_KEY_INVALID:${key.toString('hex')}`);
+  }
+  const fieldTag = key[33];
+  if (fieldTag === undefined || fieldTag === 0) throw new Error('STORAGE_ENTITY_FIELD_TAG_INVALID');
+  return {
+    entityId: decodeEntityId(key.subarray(1, 33)),
+    fieldTag,
+    ...(key.byteLength === 38 ? { chunkIndex: key.readUInt32BE(34) } : {}),
+  };
+};
+
+const entityTreeOwnerKey = (
+  tag: number,
+  entityId: string,
+  namespaceTag: number,
+): Buffer => {
+  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 0xff) {
+    throw new Error(`STORAGE_ENTITY_TREE_NAMESPACE_INVALID:${String(namespaceTag)}`);
+  }
+  return Buffer.concat([
+    Buffer.from([tag]),
+    hexBytes(entityId),
+    Buffer.from([namespaceTag]),
+  ]);
+};
+
+export const keyLiveEntityBranch = (
+  entityId: string,
+  namespaceTag: number,
+  path: readonly number[],
+): Buffer => Buffer.concat([
+  entityTreeOwnerKey(KEY_LIVE_ENTITY_BRANCH, entityId, namespaceTag),
+  Buffer.from(packRadixMerklePath(16, [...path])),
+]);
+
+export const keyLiveEntityLeaf = (
+  entityId: string,
+  namespaceTag: number,
+  keyBytes: Uint8Array,
+): Buffer => Buffer.concat([
+  entityTreeOwnerKey(KEY_LIVE_ENTITY_LEAF, entityId, namespaceTag),
+  Buffer.from(keyBytes),
+]);
+
+export const keyLiveEntityTreePrefix = (
+  tag: typeof KEY_LIVE_ENTITY_BRANCH | typeof KEY_LIVE_ENTITY_LEAF,
+  entityId: string,
+  namespaceTag?: number,
+): Buffer => namespaceTag === undefined
+  ? Buffer.concat([Buffer.from([tag]), hexBytes(entityId)])
+  : entityTreeOwnerKey(tag, entityId, namespaceTag);
+
+const parseEntityTreeOwner = (key: Buffer, tag: number, code: string) => {
+  if (key.byteLength < 36 || key[0] !== tag) throw new Error(`${code}_KEY_INVALID`);
+  const namespaceTag = key[33];
+  if (namespaceTag === undefined || namespaceTag === 0) throw new Error(`${code}_NAMESPACE_INVALID`);
+  const payload = key.subarray(34);
+  if (payload.byteLength === 0) throw new Error(`${code}_PAYLOAD_EMPTY`);
+  return {
+    entityId: decodeEntityId(key.subarray(1, 33)),
+    namespaceTag,
+    payload,
+  };
+};
+
+export const parseLiveEntityBranchKey = (key: Buffer) => {
+  const parsed = parseEntityTreeOwner(key, KEY_LIVE_ENTITY_BRANCH, 'STORAGE_ENTITY_BRANCH');
+  return { ...parsed, path: unpackRadixMerklePath(16, parsed.payload) };
+};
+
+export const parseLiveEntityLeafKey = (key: Buffer) =>
+  parseEntityTreeOwner(key, KEY_LIVE_ENTITY_LEAF, 'STORAGE_ENTITY_LEAF');
 
 export const keyLiveAccount = (entityId: string, counterpartyId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT]), hexBytes(entityId), hexBytes(counterpartyId)]);

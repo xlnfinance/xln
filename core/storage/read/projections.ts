@@ -23,9 +23,21 @@ const projectCrossJurisdictionRoutes = (
 ): Map<string, import('../../types/cross-jurisdiction').CrossJurisdictionSwapRoute> =>
   new Map([...source].map(([orderId, route]) => [orderId, cloneCrossJurisdictionRoute(route)]));
 
-export const projectEntityCoreDoc = (
-  state: EntityState,
-): StorageEntityCoreDoc => ({
+export type EntityStorageTreeField =
+  | 'htlcRoutes'
+  | 'lockBook'
+  | 'crossJurisdictionSwaps'
+  | 'crossJurisdictionAuthorizations'
+  | 'pendingCrossJurisdictionFillAcks'
+  | 'crossJurisdictionBookAdmissions';
+
+export type StorageEntityScalarDoc = Omit<StorageEntityCoreDoc, EntityStorageTreeField>;
+
+/**
+ * Static Entity envelope only. Growing collections are the authoritative RAM
+ * Patricia roots and are projected separately by the storage graph codec.
+ */
+export const projectEntityScalarDoc = (state: EntityState): StorageEntityScalarDoc => ({
   entityId: state.entityId,
   height: state.height,
   timestamp: state.timestamp,
@@ -40,9 +52,7 @@ export const projectEntityCoreDoc = (
   ...withDefinedProperty('jHistoryFinality', state.jHistoryFinality),
   ...withDefinedProperty('certifiedBoardState', state.certifiedBoardState),
   profile: state.profile,
-  htlcRoutes: projectStorageMap(state.htlcRoutes),
   htlcFeesEarned: state.htlcFeesEarned,
-  lockBook: projectStorageMap(state.lockBook),
   ...withDefinedProperty('prevFrameHash', state.prevFrameHash),
   ...withDefinedProperty('leaderState', state.leaderState),
   ...withDefinedProperty('deferredAccountProposals', state.deferredAccountProposals),
@@ -55,6 +65,25 @@ export const projectEntityCoreDoc = (
   ...withDefinedProperty('outDebtsByToken', state.outDebtsByToken),
   ...withDefinedProperty('inDebtsByToken', state.inDebtsByToken),
   ...withDefinedProperty('swapTradingPairs', state.swapTradingPairs),
+  ...withDefinedProperty('hubRebalanceConfig', state.hubRebalanceConfig),
+  ...withDefinedProperty('orderbookHubProfile', state.orderbookExt?.hubProfile),
+  ...withDefinedProperty(
+    'orderbookReferrals',
+    state.orderbookExt && projectStorageMap(state.orderbookExt.referrals),
+  ),
+  ...withDefinedProperty(
+    'orderbookPairDimensions',
+    state.orderbookExt && projectStorageMap(state.orderbookExt.pairDimensions),
+  ),
+  ...withDefinedProperty('lending', state.lending),
+});
+
+export const projectEntityCoreDoc = (
+  state: EntityState,
+): StorageEntityCoreDoc => ({
+  ...projectEntityScalarDoc(state),
+  htlcRoutes: projectStorageMap(state.htlcRoutes),
+  lockBook: projectStorageMap(state.lockBook),
   ...withDefinedProperty(
     'crossJurisdictionSwaps',
     state.crossJurisdictionSwaps && projectCrossJurisdictionRoutes(state.crossJurisdictionSwaps),
@@ -71,17 +100,6 @@ export const projectEntityCoreDoc = (
     'crossJurisdictionBookAdmissions',
     state.crossJurisdictionBookAdmissions && projectStorageMap(state.crossJurisdictionBookAdmissions),
   ),
-  ...withDefinedProperty('hubRebalanceConfig', state.hubRebalanceConfig),
-  ...withDefinedProperty('orderbookHubProfile', state.orderbookExt?.hubProfile),
-  ...withDefinedProperty(
-    'orderbookReferrals',
-    state.orderbookExt && projectStorageMap(state.orderbookExt.referrals),
-  ),
-  ...withDefinedProperty(
-    'orderbookPairDimensions',
-    state.orderbookExt && projectStorageMap(state.orderbookExt.pairDimensions),
-  ),
-  ...withDefinedProperty('lending', state.lending),
 });
 
 export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {

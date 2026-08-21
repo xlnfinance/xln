@@ -34,6 +34,7 @@ import {
 import {
   buildBookDeletionsFromOverlay,
   buildDocPuts,
+  buildEntityStatePuts,
   mergeOverlayRecordsIntoEnv,
   storageRefsFromOverlay,
 } from './schema/overlay-docs';
@@ -56,6 +57,9 @@ import {
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
@@ -79,8 +83,10 @@ import {
   HISTORY_VIEW_ACCOUNT_SWAP_EVENT,
   HISTORY_VIEW_ACCOUNT_SWAP_RECENCY,
   decodeHeight,
+  decodeEntityId,
 } from './keys';
 import { readAccountStorageLayout } from './schema/account-layout';
+import { readEntityStorageLayout } from './schema/entity/layout';
 import {
   areStorageCheckpointReplicasQuiescent,
   buildLiveReplicaMetaPlan,
@@ -139,7 +145,6 @@ import {
   validateCertifiedBoardNodeValue,
   validateConsumptionNodeValue,
   validateStorageAccountDocValue,
-  validateStorageEntityCoreDocValue,
 } from './schema/authoritative-schema';
 import {
   validateStoredAccountFrameValue,
@@ -265,6 +270,9 @@ const materializedHeightOf = (head: StorageHead): number =>
 
 const CURRENT_RECOVERY_PREFIXES = [
   KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -294,6 +302,9 @@ const synchronizeLiveStateProjection = async (
   let changed = false;
   for (const tag of [
     KEY_LIVE_ENTITY,
+    KEY_LIVE_ENTITY_FIELD,
+    KEY_LIVE_ENTITY_BRANCH,
+    KEY_LIVE_ENTITY_LEAF,
     KEY_LIVE_ACCOUNT,
     KEY_LIVE_ACCOUNT_BRANCH,
     KEY_LIVE_ACCOUNT_FIELD,
@@ -371,7 +382,10 @@ const synchronizeConsumptionNodes = async (
 ): Promise<boolean> => {
   const states: ConsumptionAccumulatorState[] = [];
   for await (const key of iterateKeys(stateDb, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
-    const doc = decodeValidatedBuffer(await stateDb.get(key), validateStorageEntityCoreDocValue);
+    const entityId = decodeEntityId(key.subarray(1));
+    const stored = await readEntityStorageLayout(stateDb, entityId, key);
+    if (!stored) throw new Error(`STORAGE_ENTITY_GRAPH_MISSING:${entityId}`);
+    const doc = stored.doc;
     if (doc.consumptionAccumulator) states.push(doc.consumptionAccumulator);
   }
   const authoritative = new Map<string, ConsumptionNode>();
@@ -1364,6 +1378,9 @@ const prepareStorageStateCommitments = async (
   const materializedPuts = materializedTouched
     ? buildDocPuts(options.env, materializedTouched, replicaLookup)
     : [];
+  const materializedEntityStates = materializedTouched
+    ? buildEntityStatePuts(options.env, materializedTouched, replicaLookup)
+    : [];
   const materializedDels = shouldMaterialize
     ? buildBookDeletionsFromOverlay(overlayRecords)
     : [];
@@ -1371,9 +1388,13 @@ const prepareStorageStateCommitments = async (
     ? await prepareLiveStateGraph({
         db,
         puts: materializedPuts,
+        entityStates: materializedEntityStates,
         dels: materializedDels,
         ...(state.storagePersistedAccounts instanceof Map
           ? { previousAccounts: state.storagePersistedAccounts }
+          : {}),
+        ...(state.storagePersistedEntities instanceof Map
+          ? { previousEntities: state.storagePersistedEntities }
           : {}),
       })
     : null;
@@ -1942,6 +1963,14 @@ const commitStorageFrame = async (
       accountCache.set(key, account);
     }
     options.env.infrastructure.storagePersistedAccounts = accountCache;
+    const entityCache = options.env.infrastructure.storagePersistedEntities instanceof Map
+      ? options.env.infrastructure.storagePersistedEntities
+      : new Map();
+    for (const key of commitments.liveStateGraph?.entityCacheDels ?? []) entityCache.delete(key);
+    for (const [key, entity] of commitments.liveStateGraph?.entityCachePuts ?? []) {
+      entityCache.set(key, entity);
+    }
+    options.env.infrastructure.storagePersistedEntities = entityCache;
   }
   options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');

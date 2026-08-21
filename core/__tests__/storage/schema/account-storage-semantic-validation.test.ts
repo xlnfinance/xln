@@ -5,6 +5,7 @@ import { computeAccountStateRoot } from '../../../account/commitment/state-root'
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../../../account/utils';
 import { validateDelta } from '../../../account/validation/delta-validation';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { FINANCIAL, LIMITS, TOKENS } from '../../../config/constants';
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../../../storage/read/projections';
@@ -32,12 +33,43 @@ type Mutation = {
   mutate: (value: ValidationContext) => void | Promise<void>;
 };
 
+const mutableMap = <Key, Value>(source: ReadonlyMap<Key, Value>): Map<Key, Value> =>
+  new Map([...source].map(([key, value]) => [key, structuredClone(value)]));
+
+/** Isolated schema-fuzz value; production persistence consumes the Patricia roots directly. */
+const mutableAccountDoc = (account: StorageAccountDoc): StorageAccountDoc => ({
+  ...account,
+  state: {
+    ...account.state,
+    deltas: mutableMap(account.state.deltas),
+    locks: mutableMap(account.state.locks),
+    swapOffers: mutableMap(account.state.swapOffers),
+    ...(account.state.pulls ? { pulls: mutableMap(account.state.pulls) } : {}),
+    ...(account.state.subcontracts ? { subcontracts: mutableMap(account.state.subcontracts) } : {}),
+    ...(account.state.lendingIntents ? { lendingIntents: mutableMap(account.state.lendingIntents) } : {}),
+    requestedRebalance: mutableMap(account.state.requestedRebalance),
+    requestedRebalanceFeeState: mutableMap(account.state.requestedRebalanceFeeState),
+    ...(account.state.rebalanceFeePolicies
+      ? { rebalanceFeePolicies: mutableMap(account.state.rebalanceFeePolicies) }
+      : {}),
+  },
+  pendingWithdrawals: mutableMap(account.pendingWithdrawals),
+  shadow: {
+    ...account.shadow,
+    rebalance: {
+      ...account.shadow.rebalance,
+      policy: mutableMap(account.shadow.rebalance.policy),
+      submittedAtByToken: mutableMap(account.shadow.rebalance.submittedAtByToken),
+    },
+  },
+});
+
 const makeFixture = async (): Promise<ValidationContext> => {
   const owner = entity('11');
   const counterparty = entity('22');
   const account = makeAccount(owner, counterparty);
   const delta = account.state.deltas.get(1)!;
-  account.state.locks.set(TEST_LOCK_ID, {
+  account.state.locks = account.state.locks.updated(TEST_LOCK_ID, {
     lockId: TEST_LOCK_ID,
     hashlock: digest('31'),
     timelock: 2_000n,
@@ -48,7 +80,7 @@ const makeFixture = async (): Promise<ValidationContext> => {
     createdHeight: 1,
     createdTimestamp: 1_000,
   });
-  account.state.pulls = new Map([['pull-1', {
+  account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [['pull-1', {
     pullId: 'pull-1',
     tokenId: 1,
     amount: 5n,
@@ -63,7 +95,7 @@ const makeFixture = async (): Promise<ValidationContext> => {
       status: 'resting',
     },
   }]]);
-  account.state.swapOffers.set('offer-1', {
+  account.state.swapOffers = account.state.swapOffers.updated('offer-1', {
     offerId: 'offer-1',
     giveTokenId: 1,
     giveTokenDecimals: 6,
@@ -80,7 +112,7 @@ const makeFixture = async (): Promise<ValidationContext> => {
     quantizedGive: 5n,
     quantizedWant: 10n,
   });
-  account.state.subcontracts = new Map([['transformer-1', {
+  account.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [['transformer-1', {
     transformerAddress: `0x${'44'.repeat(20)}`,
     encodedBatch: '0x1234',
     allowances: [{ deltaIndex: 0, rightAllowance: 1n, leftAllowance: 2n }],
@@ -99,23 +131,14 @@ const makeFixture = async (): Promise<ValidationContext> => {
     ...workspace,
     workspaceHash: createSettlementWorkspaceHash(account.state, workspace),
   };
-  account.pendingWithdrawals.set('withdraw-1', {
+  account.pendingWithdrawals = PersistentAccountStateMap.fromEntries('pendingWithdrawals', [['withdraw-1', {
     requestId: 'withdraw-1',
     tokenId: 1,
     amount: 3n,
     requestedAt: 1_000,
     direction: 'outgoing',
     status: 'pending',
-  });
-  account.proofBody = {
-    tokenIds: [1],
-    deltas: [delta.offdelta],
-    htlcLocks: [{
-      deltaIndex: 0,
-      amount: 7n,
-      hash: digest('31'),
-    }],
-  };
+  }]]);
   account.proofHeader.nextProofNonce = 1;
   account.currentHeight = 1;
   account.currentFrame = {
@@ -130,7 +153,7 @@ const makeFixture = async (): Promise<ValidationContext> => {
     deltas: [{ ...delta }],
   };
   account.currentFrame.stateHash = await createFrameHash(account.currentFrame);
-  return { doc: projectAccountDoc(account), owner, counterparty };
+  return { doc: mutableAccountDoc(projectAccountDoc(account)), owner, counterparty };
 };
 
 const admit = (value: ValidationContext) => hydrateAccountDocFromStorage(
@@ -341,11 +364,6 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { doc.state.disputeConfig.leftResponseSeconds = 365 * 24 * 60 * 60 + 1; },
   },
   {
-    name: 'proofBody token/delta length mismatch',
-    expected: 'reject',
-    mutate: ({ doc }) => { doc.proofBody.deltas.pop(); },
-  },
-  {
     name: 'negative proof nonce',
     expected: 'reject',
     mutate: ({ doc }) => { doc.proofHeader.nextProofNonce = -1; },
@@ -421,9 +439,9 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 39 rejects plus 1 design-valid accept', () => {
-    expect(mutations).toHaveLength(40);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(39);
+  test('the audited matrix remains 38 rejects plus 1 design-valid accept', () => {
+    expect(mutations).toHaveLength(39);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(38);
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(1);
   });
 

@@ -23,7 +23,6 @@ import {
   keyLiveReplicaMetaPrefix,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
-  keySnapshotEntity,
   keySnapshotEntityPrefix,
   keySnapshotReplicaMeta,
   keySnapshotReplicaMetaPrefix,
@@ -36,6 +35,11 @@ import {
   textBytes,
 } from '../keys';
 import { readAccountStorageLayout } from '../schema/account-layout';
+import { readEntityStorageLayout } from '../schema/entity/layout';
+import {
+  createSnapshotAccountGraphView,
+  createSnapshotEntityGraphView,
+} from '../database/snapshot-graph-view';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
 import { compareAscii } from '../../support/sorted-map-index';
@@ -70,7 +74,6 @@ import {
   validateConsumptionNodeValue,
   validateStorageAccountDocValue,
   validateStorageDiffRecordValue,
-  validateStorageEntityCoreDocValue,
   validateStorageFrameRecordValue,
   validateStorageHeadValue,
 } from '../schema/authoritative-schema';
@@ -560,11 +563,16 @@ const resolveTargetStorageHeight = (
 const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: number, entityId: string): Promise<Map<string, StorageDoc>> => {
   const docs = new Map<string, StorageDoc>();
 
-  const entityBuffer = assertEntityDocKeyBinding(await readValidatedOrNull(
-    db,
-    keySnapshotEntity(snapshotHeight, entityId),
-    validateStorageEntityCoreDocValue,
-  ), entityId, `snapshot:${snapshotHeight}`);
+  const entityStored = await readEntityStorageLayout(
+    createSnapshotEntityGraphView(db, snapshotHeight),
+    entityId,
+    keyLiveEntity(entityId),
+  );
+  const entityBuffer = assertEntityDocKeyBinding(
+    entityStored?.doc ?? null,
+    entityId,
+    `snapshot:${snapshotHeight}`,
+  );
   if (entityBuffer) {
     docs.set(`e:${normalizeEntityId(entityId)}`, { family: 'entity', entityId: normalizeEntityId(entityId), value: entityBuffer });
   }
@@ -572,8 +580,15 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(snapshotHeight, entityId) })) {
     const { height: keyHeight, entityId: entity, counterpartyId: counterparty } = parseSnapshotAccountKey(key);
     if (keyHeight !== snapshotHeight) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_HEIGHT_MISMATCH:${keyHeight}:${snapshotHeight}`);
+    const stored = await readAccountStorageLayout(
+      createSnapshotAccountGraphView(db, snapshotHeight),
+      entity,
+      counterparty,
+      keyLiveAccount(entity, counterparty),
+    );
+    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_GRAPH_MISSING:${snapshotHeight}:${entity}:${counterparty}`);
     const value = assertStorageAccountDocBinding(
-      decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
+      stored.doc,
       entity,
       counterparty,
       `snapshot:${snapshotHeight}`,
@@ -611,8 +626,14 @@ const loadSnapshotDocsAtHeight = async (
   for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(snapshotHeight) })) {
     const { height: keyHeight, entityId } = parseSnapshotEntityKey(key);
     if (keyHeight !== snapshotHeight) throw new Error(`STORAGE_SNAPSHOT_ENTITY_HEIGHT_MISMATCH:${keyHeight}:${snapshotHeight}`);
+    const stored = await readEntityStorageLayout(
+      createSnapshotEntityGraphView(db, snapshotHeight),
+      entityId,
+      keyLiveEntity(entityId),
+    );
+    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ENTITY_GRAPH_MISSING:${snapshotHeight}:${entityId}`);
     const value = assertStorageEntityDocBinding(
-      decodeValidatedBuffer(await db.get(key), validateStorageEntityCoreDocValue),
+      stored.doc,
       entityId,
       `snapshot:${snapshotHeight}`,
     );
@@ -620,8 +641,15 @@ const loadSnapshotDocsAtHeight = async (
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(snapshotHeight) })) {
     const { entityId, counterpartyId } = parseSnapshotAccountKey(key);
+    const stored = await readAccountStorageLayout(
+      createSnapshotAccountGraphView(db, snapshotHeight),
+      entityId,
+      counterpartyId,
+      keyLiveAccount(entityId, counterpartyId),
+    );
+    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_GRAPH_MISSING:${snapshotHeight}:${entityId}:${counterpartyId}`);
     const value = assertStorageAccountDocBinding(
-      decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
+      stored.doc,
       entityId,
       counterpartyId,
       `snapshot:${snapshotHeight}`,
@@ -689,21 +717,23 @@ const loadEntityCoreDocAtHeight = async (
 ): Promise<StorageEntityCoreDoc | null> => {
   const normalized = normalizeEntityId(entityId);
   if (liveStateReadable && targetHeight === latestMaterializedHeight) {
+    const stored = await readEntityStorageLayout(db, normalized, keyLiveEntity(normalized));
     return assertEntityDocKeyBinding(
-      await readValidatedOrNull(db, keyLiveEntity(normalized), validateStorageEntityCoreDocValue),
+      stored?.doc ?? null,
       normalized,
       'live',
     );
   }
 
   const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  let core = baseSnapshotHeight > 0
-    ? await readValidatedOrNull(
-        db,
-        keySnapshotEntity(baseSnapshotHeight, normalized),
-        validateStorageEntityCoreDocValue,
+  const snapshotStored = baseSnapshotHeight > 0
+    ? await readEntityStorageLayout(
+        createSnapshotEntityGraphView(db, baseSnapshotHeight),
+        normalized,
+        keyLiveEntity(normalized),
       )
     : null;
+  let core = snapshotStored?.doc ?? null;
   core = assertEntityDocKeyBinding(core, normalized, `snapshot:${baseSnapshotHeight}`);
   for (let cursor = baseSnapshotHeight + 1; cursor <= targetHeight; cursor += 1) {
     const diff = await readRequiredDiff(db, cursor, `entity:${normalized}`);
@@ -1121,10 +1151,10 @@ export const loadEntityStateFromStorage = async (options: {
   );
 
   if (options.liveStateReadable !== false && targetHeight === latestMaterializedHeight) {
-    const entityRaw = await readRawOrNull(db, keyLiveEntity(entityId));
-    if (!entityRaw) return null;
+    const entityStored = await readEntityStorageLayout(db, entityId, keyLiveEntity(entityId));
+    if (!entityStored) return null;
     const entityCore = assertStorageEntityDocBinding(
-      decodeValidatedBuffer(entityRaw, validateStorageEntityCoreDocValue),
+      entityStored.doc,
       entityId,
       'live-state',
     );

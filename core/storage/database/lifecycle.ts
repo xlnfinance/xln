@@ -1,4 +1,4 @@
-import { decodeValidatedBuffer, encodeBuffer, writeBatch } from '../codec/codec';
+import { encodeBuffer, writeBatch } from '../codec/codec';
 import { copyKeyRange, deleteKeyRange, deleteKeys, iterateKeys, readValidatedOrNull } from './level';
 import {
   KEY_DIFF,
@@ -12,6 +12,9 @@ import {
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
   KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
@@ -39,7 +42,8 @@ import {
 } from '../keys';
 import { readSnapshotBookGraph } from '../read/book-graph';
 import { readAccountStorageLayout } from '../schema/account-layout';
-import { createSnapshotAccountGraphView } from './snapshot-graph-view';
+import { readEntityStorageLayout } from '../schema/entity/layout';
+import { createSnapshotAccountGraphView, createSnapshotEntityGraphView } from './snapshot-graph-view';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -52,7 +56,6 @@ import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
   validateStorageAccountDocValue,
-  validateStorageEntityCoreDocValue,
   validateStorageHeadValue,
   validateStorageSnapshotManifestValue,
 } from '../schema/authoritative-schema';
@@ -65,11 +68,17 @@ export const readSnapshotDocs = async (
   for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(height) })) {
     const { height: keyHeight, entityId } = parseSnapshotEntityKey(key);
     if (keyHeight !== height) throw new Error(`STORAGE_SNAPSHOT_ENTITY_HEIGHT_MISMATCH:${keyHeight}:${height}`);
+    const stored = await readEntityStorageLayout(
+      createSnapshotEntityGraphView(db, height),
+      entityId,
+      Buffer.concat([Buffer.from([KEY_LIVE_ENTITY]), key.subarray(9)]),
+    );
+    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ENTITY_GRAPH_MISSING:${height}:${entityId}`);
     docs.push({
       family: 'entity',
       entityId,
       value: assertStorageEntityDocBinding(
-        decodeValidatedBuffer(await db.get(key), validateStorageEntityCoreDocValue),
+        stored.doc,
         entityId,
         `snapshot:${height}`,
       ),
@@ -130,6 +139,9 @@ export const seedFreshStorageEpoch = async (options: {
   // the epoch boundary. The old epoch stays immutable for audit/history.
   const livePrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
+    Buffer.from([KEY_LIVE_ENTITY_FIELD]),
+    Buffer.from([KEY_LIVE_ENTITY_BRANCH]),
+    Buffer.from([KEY_LIVE_ENTITY_LEAF]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
     Buffer.from([KEY_LIVE_ACCOUNT_FIELD]),
     Buffer.from([KEY_LIVE_ACCOUNT_BRANCH]),
@@ -309,6 +321,9 @@ export const createSnapshot = async (
     bytes += copied.bytes;
   }
   for (const graphTag of [
+    KEY_LIVE_ENTITY_FIELD,
+    KEY_LIVE_ENTITY_BRANCH,
+    KEY_LIVE_ENTITY_LEAF,
     KEY_LIVE_BOOK_BRANCH,
     KEY_LIVE_BOOK_LEAF,
     KEY_LIVE_ACCOUNT_FIELD,

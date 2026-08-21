@@ -10,7 +10,12 @@ import {
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
+  KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_SNAPSHOT_ACCOUNT,
+  KEY_SNAPSHOT_ENTITY,
   encodeHeight,
   keySnapshotGraph,
   parseSnapshotGraphKey,
@@ -28,10 +33,26 @@ const snapshotAccountKey = (height: number, liveKey: Buffer): Buffer => {
   ]);
 };
 
+const snapshotEntityKey = (height: number, liveKey: Buffer): Buffer => {
+  if (liveKey[0] !== KEY_LIVE_ENTITY || liveKey.byteLength !== 33) {
+    throw new Error(`STORAGE_SNAPSHOT_ENTITY_LIVE_KEY_INVALID:${liveKey.toString('hex')}`);
+  }
+  return Buffer.concat([
+    Buffer.from([KEY_SNAPSHOT_ENTITY]),
+    encodeHeight(height),
+    liveKey.subarray(1),
+  ]);
+};
+
 const isAccountGraphKey = (key: Buffer): boolean =>
   key[0] === KEY_LIVE_ACCOUNT_FIELD ||
   key[0] === KEY_LIVE_ACCOUNT_BRANCH ||
   key[0] === KEY_LIVE_ACCOUNT_LEAF;
+
+const isEntityGraphKey = (key: Buffer): boolean =>
+  key[0] === KEY_LIVE_ENTITY_FIELD ||
+  key[0] === KEY_LIVE_ENTITY_BRANCH ||
+  key[0] === KEY_LIVE_ENTITY_LEAF;
 
 const snapshotKey = (height: number, liveKey: Buffer): Buffer =>
   liveKey[0] === KEY_LIVE_ACCOUNT
@@ -68,6 +89,39 @@ export const createSnapshotAccountGraphView = (
       const parsed = parseSnapshotGraphKey(key);
       if (parsed.height !== height || !isAccountGraphKey(parsed.liveKey)) {
         throw new Error('STORAGE_SNAPSHOT_GRAPH_RANGE_KEY_INVALID');
+      }
+      yield parsed.liveKey;
+    }
+  },
+});
+
+/** Entity equivalent: the manifest and all owned graph rows share one decoder. */
+export const createSnapshotEntityGraphView = (
+  db: RuntimeDbLike,
+  height: number,
+): RuntimeDbLike => ({
+  get: (key: Buffer) => db.get(
+    key[0] === KEY_LIVE_ENTITY
+      ? snapshotEntityKey(height, key)
+      : isEntityGraphKey(key)
+        ? keySnapshotGraph(height, key)
+        : (() => { throw new Error(`STORAGE_SNAPSHOT_ENTITY_GRAPH_KEY_UNSUPPORTED:${key.toString('hex')}`); })(),
+  ),
+  batch: () => { throw new Error('STORAGE_SNAPSHOT_GRAPH_VIEW_READ_ONLY'); },
+  keys: async function* (options) {
+    const gte = options?.gte;
+    const lt = options?.lt;
+    if (!gte || !isEntityGraphKey(gte)) throw new Error('STORAGE_SNAPSHOT_ENTITY_GRAPH_RANGE_INVALID');
+    const range = {
+      gte: keySnapshotGraph(height, gte),
+      ...(lt ? { lt: keySnapshotGraph(height, lt) } : {}),
+      ...(options?.reverse ? { reverse: true } : {}),
+    };
+    if (typeof db.keys !== 'function') return;
+    for await (const rawKey of db.keys(range)) {
+      const parsed = parseSnapshotGraphKey(Buffer.isBuffer(rawKey) ? rawKey : Buffer.from(rawKey));
+      if (parsed.height !== height || !isEntityGraphKey(parsed.liveKey)) {
+        throw new Error('STORAGE_SNAPSHOT_ENTITY_GRAPH_RANGE_KEY_INVALID');
       }
       yield parsed.liveKey;
     }

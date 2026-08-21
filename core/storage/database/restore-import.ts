@@ -15,6 +15,7 @@ import {
 } from '../hashes';
 import { prepareLiveStateGraph } from '../commit/live-state-graph';
 import { prepareStorageBookGraphWrite } from '../commit/book-graph';
+import { hydrateEntityStateFromStorage } from '../read/projections';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
 import { deleteKeyRange, iterateKeys } from './level';
 import {
@@ -27,6 +28,9 @@ import {
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
   KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
@@ -85,6 +89,24 @@ export type RestoredStorageBaseOptions = {
 };
 
 type PhysicalRow = Readonly<{ key: Buffer; value: Buffer }>;
+type RestoredAccountDoc = Extract<StorageDoc, { family: 'account' }>['value'];
+type RestoredBookState = Extract<StorageDoc, { family: 'book' }>['value'];
+
+const collectRestoredAccounts = (docs: readonly StorageDoc[], entityId: string): Map<string, RestoredAccountDoc> => {
+  const accounts = new Map<string, RestoredAccountDoc>();
+  for (const doc of docs) {
+    if (doc.family === 'account' && doc.entityId === entityId) accounts.set(doc.counterpartyId, doc.value);
+  }
+  return accounts;
+};
+
+const collectRestoredBooks = (docs: readonly StorageDoc[], entityId: string): Map<string, RestoredBookState> => {
+  const books = new Map<string, RestoredBookState>();
+  for (const doc of docs) {
+    if (doc.family === 'book' && doc.entityId === entityId) books.set(doc.pairId, doc.value);
+  }
+  return books;
+};
 
 const snapshotKeyForLiveRow = (height: number, key: Buffer): Buffer => {
   if (key[0] === KEY_LIVE_ENTITY) {
@@ -98,6 +120,8 @@ const snapshotKeyForLiveRow = (height: number, key: Buffer): Buffer => {
   }
   if (
     key[0] === KEY_LIVE_ACCOUNT_FIELD ||
+    key[0] === KEY_LIVE_ENTITY_FIELD ||
+    key[0] === KEY_LIVE_ENTITY_BRANCH || key[0] === KEY_LIVE_ENTITY_LEAF ||
     key[0] === KEY_LIVE_ACCOUNT_BRANCH || key[0] === KEY_LIVE_ACCOUNT_LEAF ||
     key[0] === KEY_LIVE_BOOK_BRANCH || key[0] === KEY_LIVE_BOOK_LEAF
   ) return keySnapshotGraph(height, key);
@@ -368,9 +392,17 @@ export const replaceRestoredStorageBase = async (
   const nodes = prepareCertifiedNodes(options);
   const existing = await decideExistingHistory(options);
   await invalidateCurrentCache(options.currentDb, options.onPersistenceBoundary);
+  const entityStates = options.docs
+    .filter((doc): doc is Extract<StorageDoc, { family: 'entity' }> => doc.family === 'entity')
+    .map(entity => hydrateEntityStateFromStorage({
+      core: entity.value,
+      accounts: collectRestoredAccounts(options.docs, entity.entityId),
+      books: collectRestoredBooks(options.docs, entity.entityId),
+    }));
   const liveStateGraph = await prepareLiveStateGraph({
     db: options.currentDb,
-    puts: options.docs,
+    puts: options.docs.filter(doc => doc.family !== 'entity'),
+    entityStates,
     dels: [],
   });
   const bookRows: PhysicalRow[] = [];
