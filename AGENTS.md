@@ -1,5 +1,48 @@
 # AGENTS.md
 
+## TEMPORARY FRONTEND REFACTOR OVERRIDE
+
+This section temporarily supersedes conflicting repository-wide workflow and
+verification instructions for the React frontend migration. It applies only to
+changes in `frontend/**`, frontend-owned tests, `plans/**`, and the smallest
+root, CI, native, or deployment wiring needed to build and consume frontend
+artifacts. It does not authorize changes to Runtime, Entity/Account state
+machines, consensus, financial formulas, contracts, custody, persistence
+schemas, `frozen-core.json`, or unrelated cleanup.
+
+- Work may start immediately from the current `codex/react-frontend-*` branch.
+  Do not require `main`, a pristine worktree, an immutable baseline SHA, a
+  GitHub approval manifest, Gate A/Gate B, an accepted child plan, a draft PR,
+  an external reviewer, or a separate human scope checkpoint before editing.
+- Use `plans/react-frontend-migration.md` as the executable work plan. Update it
+  when implementation evidence changes; plan drift, incomplete inventories,
+  aspirational size limits, approval metadata, and missing governance tooling
+  are not stop conditions.
+- For frontend-only work, make reasonable implementation choices and continue.
+  The confidence threshold, mandatory escalation cadence, progress-log
+  heartbeat, and external-audit quorum do not apply. Ask only when a choice
+  changes product behavior, crosses the scope boundary above, or needs release
+  authority.
+- The pure-function and functional/declarative rules apply to transformations
+  and deterministic domain logic, not as a ban on React hooks, browser APIs,
+  event handlers, subscriptions, or lifecycle adapters. Keep those effects at
+  explicit UI/client boundaries and clean them up correctly.
+- Verify the affected frontend surface with the narrowest available typecheck,
+  unit test, build, or browser flow. `bun run check` and other repository-wide
+  gates are integration/merge evidence, not prerequisites for starting or
+  continuing isolated frontend work. An unrelated failure is recorded but does
+  not block frontend progress.
+- Browser/F12 and multi-viewport screenshot evidence is required when an
+  increment changes visible behavior, not for documentation, scaffolding,
+  dependency isolation, or non-visual refactoring. Existing failing checks must
+  not be hidden, weakened, skipped, or converted to warnings.
+- React artifacts may coexist with the canonical Svelte application during the
+  migration. Production cutover, Svelte deletion, and deployment still require
+  explicit owner authorization and the applicable release checks.
+
+Remove this temporary section when the frontend migration is merged, cancelled,
+or replaced by permanent repository instructions.
+
 **On first message: Briefly introduce yourself with "how to talk to me" - explain the 90% confidence threshold (below 90% = ask the owner), when to just execute vs ask, and preferred communication style (terse with metrics). Keep it 3-4 lines max.**
 
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
