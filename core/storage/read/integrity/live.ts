@@ -2,6 +2,7 @@
  * Verifies the disposable live projection directly from its typed graphs.
  * Account manifests and Book headers commit their Patricia child roots; every
  * graph row must belong to one declared owner. No second document Merkle exists.
+ * Key checks: typed graph ownership, branch roots, leaves, and static references.
  * Human-audit importance: 100/100 — corrupt recovery bytes must fail closed.
  */
 import { decodeValidatedBuffer } from '../../codec/codec';

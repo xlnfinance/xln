@@ -1,6 +1,7 @@
 /**
  * Commits every deterministic Entity field plus Account replica leaves.
  * Account leaves bind child Merkle roots and frame hashes, never frame bodies.
+ * Key projections: bounded Entity fields and nested Account/Book Patricia roots.
  * Human-audit importance: 100/100 — this root is the Entity quorum's signed state.
  */
 import { keccakTextHash } from '../../protocol/crypto/keccak-text';

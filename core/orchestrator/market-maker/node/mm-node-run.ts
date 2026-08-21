@@ -1751,7 +1751,6 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
 
 type MarketMakerQuoteEngineState = {
   inFlight: boolean;
-  bootstrapCrossCursor: number;
   steadyCrossCursor: number;
   bootstrapCrossBatchSubmitted: boolean;
 };
@@ -1815,7 +1814,7 @@ const selectQuoteEngineCrossJobs = (
   mode: MarketMakerQuoteMode,
   jobs: CrossQuoteJob[],
 ): Array<{ index: number; job: CrossQuoteJob }> => {
-  const cursor = mode === 'bootstrap' ? state.bootstrapCrossCursor : state.steadyCrossCursor;
+  const cursor = mode === 'bootstrap' ? 0 : state.steadyCrossCursor;
   const limit =
     mode === 'bootstrap' ? jobs.length : Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, jobs.length);
   const selection = selectMarketMakerCrossQuoteJobs(jobs, cursor, limit);
@@ -2229,7 +2228,6 @@ const createMarketMakerQuoteLifecycle = (
   });
   const quoteEngineState: MarketMakerQuoteEngineState = {
     inFlight: false,
-    bootstrapCrossCursor: 0,
     steadyCrossCursor: 0,
     bootstrapCrossBatchSubmitted: false,
   };

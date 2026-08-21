@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { discoverHubIds } from '../../../orchestrator/bootstrap/custody-bootstrap';
 import { createOrchestratorProxyHandlers } from '../../../orchestrator/proxy';
 import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../../../api/public/external-wallet/http';
+import { safeStringify } from '../../../protocol/serialization';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
 import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-parallel-isolated';
 
@@ -572,7 +573,7 @@ describe('production startup wiring', () => {
       'await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });',
     );
     expect(mmNode).toContain("state.phase = 'bootstrap-same-chain';\n    health.publishBootstrap();");
-    expect(mmNode).toContain('} else if (state.bootstrapCrossStarted) {');
+    expect(mmNode).toContain('if (state.bootstrapCrossStarted) {');
     expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&');
     expect(mmNode).toContain('isMarketMakerSameDepthComplete(currentHealth)');
     expect(mmNode).not.toContain('bootstrapCrossStarted || isMarketMakerSameReady(health)');
@@ -680,9 +681,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '20000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain('spawnH1StartedAt: health.timings?.reset_spawn_h1?.startedAt');
-    expect(orchestrator).toContain('if (preserveState) await Promise.all(h23.map(child => spawnHub(child)));');
+    expect(orchestrator).toContain('spawnHub(h1).finally(() => finishTiming');
+    expect(orchestrator).toContain('Promise.all(h23.map(child => spawnHub(child)))');
     expect(orchestrator).toContain('await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));');
-    expect(orchestrator).toContain('await Promise.all(h23.map(async child => {');
     expect(orchestrator).not.toContain('for (const child of h23) {');
     expect(smoke).not.toContain("const serverStartedAt = stageElapsed('server:started') ?? 0;");
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
@@ -733,7 +734,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).not.toContain("direction: 'bootstrap-batch'");
     expect(mmNode).not.toContain('deferredBootstrapCrossLastIndex');
-    expect(mmNode).toContain('input.state.bootstrapCrossCursor = nextCursor;');
+    expect(mmNode).not.toContain('bootstrapCrossCursor');
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     const bootstrapCrossStart = mmNode.indexOf('if (!deps.bootstrapCross.isStarted()) {');
     expect(bootstrapCrossStart).toBeGreaterThan(0);
@@ -1179,7 +1180,9 @@ describe('production startup wiring', () => {
     expect(quotePipeline).toContain('const enqueued = await maintainMarketMakerCrossQuotes(');
     expect(quotePipeline).toContain('job.sourceHubs,');
     expect(quotePipeline).toContain('job.targetHubs,');
-    expect(quotePipeline).toContain("if (input.mode === 'steady') return true;");
+    expect(quotePipeline).toContain("if (input.mode === 'bootstrap') {");
+    expect(quotePipeline).toContain('await submitCrossJurisdictionIntents(input.deps.env, routes);');
+    expect(quotePipeline).toContain('input.state.bootstrapCrossBatchSubmitted = true;');
     expect(meshCommon).toContain(
       'const queuedEntityTxsFor = (env: RuntimeReplica, targetEntityId: string): EntityTx[] => {',
     );
@@ -1275,9 +1278,10 @@ describe('production startup wiring', () => {
     expect(planHubStart).toBeGreaterThan(planSupportStart);
     const planSupportPeerInputs = hubNode.slice(planSupportStart, planHubStart);
     expect(planSupportPeerInputs).toContain('const tokenIds = tokenIdsForHubJurisdiction(owner);');
-    expect(planSupportPeerInputs).toContain('const [openTokenId = HUB_MESH_TOKEN_ID, ...extraTokenIds] = tokenIds;');
-    expect(planSupportPeerInputs).toContain('...extraTokenIds.map(tokenId => ({');
+    expect(planSupportPeerInputs).toContain('if (!account || !canWrite) continue;');
     expect(planSupportPeerInputs).toContain('const missingTokenIds = tokenIds.filter(');
+    expect(planSupportPeerInputs).toContain('entityTxs: missingTokenIds.map(tokenId => ({');
+    expect(planSupportPeerInputs).toContain('return { openInputs: [], creditInputs };');
     expect(planSupportPeerInputs).not.toContain('DEFAULT_ACCOUNT_TOKEN_IDS');
 
     const reserveStart = hubNode.indexOf('const getReserveHealth = (');
@@ -1446,7 +1450,7 @@ describe('production startup wiring', () => {
     });
     globalThis.fetch = (async () =>
       new Response(
-        JSON.stringify({
+        safeStringify({
           entities: [
             debugHub('0x' + 'a'.repeat(64), 'Tron', 31338, '0x2222222222222222222222222222222222222222'),
             debugHub('0x' + 'b'.repeat(64), 'Tron', 31338, '0x2222222222222222222222222222222222222222'),
@@ -1542,7 +1546,7 @@ describe('production startup wiring', () => {
       upstreamUrl = url instanceof Request ? url.url : String(url);
       upstreamBody = String(init?.body || '');
       return new Response(
-        JSON.stringify({
+        safeStringify({
           success: true,
           serverDurationMs: 0,
           requestId: 'offchain_1',
@@ -1564,7 +1568,7 @@ describe('production startup wiring', () => {
         getHubChildByEntityId: (entityId: string) => (entityId === hubEntityId ? ({ apiPort: 19301 } as any) : null),
         getHealthyHub: () => null,
       });
-      const body = JSON.stringify({ hubEntityId, userEntityId: `0x${'cd'.repeat(32)}` });
+      const body = safeStringify({ hubEntityId, userEntityId: `0x${'cd'.repeat(32)}` });
       const response = await handlers.proxyHubApi(
         new Request('http://xln.local/api/faucet/offchain', {
           method: 'POST',
@@ -1590,7 +1594,7 @@ describe('production startup wiring', () => {
     const hubEntityId = `0x${'ef'.repeat(32)}`;
     let pollCalls = 0;
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ success: true }), {
+      new Response(safeStringify({ success: true }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })) as typeof fetch;
@@ -1608,7 +1612,7 @@ describe('production startup wiring', () => {
         new Request('http://xln.local/api/faucet/offchain', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ hubEntityId }),
+          body: safeStringify({ hubEntityId }),
         }),
         '/api/faucet/offchain',
       );
@@ -1643,7 +1647,7 @@ describe('production startup wiring', () => {
       new Request('http://xln.local/api/external-wallet/snapshot', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ entityId }),
+        body: safeStringify({ entityId }),
       }),
       '/api/external-wallet/snapshot',
     );
@@ -1710,7 +1714,7 @@ describe('production startup wiring', () => {
         new Request('http://xln.local/api/external-wallet/snapshot', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ padding: 'x'.repeat(MAX_WALLET_SNAPSHOT_BODY_BYTES) }),
+          body: safeStringify({ padding: 'x'.repeat(MAX_WALLET_SNAPSHOT_BODY_BYTES) }),
         }),
         '/api/external-wallet/snapshot',
       );
@@ -1754,7 +1758,7 @@ describe('production startup wiring', () => {
         new Request('http://xln.local/api/external-wallet/snapshot', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ entityId: suppliedEntityId }),
+          body: safeStringify({ entityId: suppliedEntityId }),
         }),
         '/api/external-wallet/snapshot',
       );
@@ -1817,7 +1821,7 @@ describe('production startup wiring', () => {
         new Request('http://127.0.0.1/rpc', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'eth_chainId', params: [] }),
+          body: safeStringify({ id: 1, jsonrpc: '2.0', method: 'eth_chainId', params: [] }),
         }),
       );
       const body = (await response.json()) as {

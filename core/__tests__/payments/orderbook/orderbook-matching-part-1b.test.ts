@@ -39,6 +39,10 @@ import {
 } from '../../../account/tx/apply-result';
 import type { EntityState } from '../../../entity/types';
 import { initCrontab } from '../../../entity/scheduler';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
 
 const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
 
@@ -97,6 +101,19 @@ const processCommittedOrderbookSwaps = (
   offers.map(offer => markWorkingOrderbookOffer(withZeroFeeTestAuthorization(offer))),
   options,
 );
+
+/** Direct matcher tests that mutate Entity projections must own a real frame overlay. */
+const createOrderbookFrameCandidate = (source: EntityState): EntityState =>
+  createEntityFrameCandidateState({
+    ...source,
+    accounts: PersistentEntityAccountMap.fromMap(
+      source.accounts,
+      source.entityId,
+      computeEntityAccountValueHash,
+    ),
+    htlcRoutes: PersistentEntityCollectionMap.from(source.htlcRoutes ?? new Map()),
+    lockBook: PersistentEntityCollectionMap.from(source.lockBook ?? new Map()),
+  });
 
 function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
   const offers = (Array.isArray(input) ? input : [input]).map(withZeroFeeTestAuthorization).map(offer =>
@@ -1641,7 +1658,7 @@ describe('orderbook matching execution mapping', () => {
   test('removes non-working cross-j committed routes before matching new takers', () => {
     const lot = SWAP_LOT_SCALE;
     const pairId = CROSS_WETH_USDC_PAIR;
-    const staleOrderId = 'old-maker:old-cross';
+    const staleOrderId = `${MAKER_ENTITY}:old-cross`;
     let book = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
@@ -1649,7 +1666,7 @@ describe('orderbook matching execution mapping', () => {
     });
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'old-maker',
+      ownerId: MAKER_ENTITY,
       orderId: staleOrderId,
       side: 1,
       tif: 0,
@@ -1662,18 +1679,18 @@ describe('orderbook matching execution mapping', () => {
       orderId: 'old-cross',
       bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
-      makerEntityId: 'old-maker',
+      makerEntityId: MAKER_ENTITY,
       hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'old-maker',
+        entityId: MAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
       },
       target: {
         jurisdiction: TRON_STACK,
-        entityId: 'old-maker',
+        entityId: MAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
@@ -1681,21 +1698,23 @@ describe('orderbook matching execution mapping', () => {
       status: 'clearing',
       createdAt: 1,
       updatedAt: 2,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     };
     const takerRoute = {
       ...staleRoute,
       orderId: 'new-taker',
-      makerEntityId: 'new-taker',
+      makerEntityId: TAKER_ENTITY,
       source: {
         jurisdiction: TRON_STACK,
-        entityId: 'new-taker',
+        entityId: TAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'new-taker',
+        entityId: TAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
@@ -1706,7 +1725,7 @@ describe('orderbook matching execution mapping', () => {
       offerId: 'new-taker',
       makerIsLeft: false,
       fromEntity: HUB_ENTITY,
-      toEntity: 'new-taker',
+      toEntity: TAKER_ENTITY,
       accountId: NEW_TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
@@ -1725,11 +1744,11 @@ describe('orderbook matching execution mapping', () => {
       crossJurisdictionSwaps: new Map([['old-cross', staleRoute]]),
       crossJurisdictionBookAdmissions: new Map([
         [
-          'old-maker:old-cross',
+          staleOrderId,
           {
             orderId: 'old-cross',
             routeHash: 'hash',
-            sourceEntityId: 'old-maker',
+            sourceEntityId: MAKER_ENTITY,
             bookOwnerEntityId: HUB_ENTITY,
             status: 'admitted',
             route: { ...staleRoute, status: 'resting' },
@@ -1759,7 +1778,10 @@ describe('orderbook matching execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(
+      createOrderbookFrameCandidate(entityState),
+      [takerOffer] as any,
+    );
 
     expect(result.crossJurisdictionFills).toEqual([]);
     expect(result.accountTxs).toEqual([]);
@@ -1772,7 +1794,7 @@ describe('orderbook matching execution mapping', () => {
   test('removes terminal admitted cross-j rows even when stale mirrors still look resting', () => {
     const lot = SWAP_LOT_SCALE;
     const pairId = CROSS_WETH_USDC_PAIR;
-    const staleOrderId = 'old-maker:old-cross';
+    const staleOrderId = `${MAKER_ENTITY}:old-cross`;
     let book = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
@@ -1780,7 +1802,7 @@ describe('orderbook matching execution mapping', () => {
     });
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'old-maker',
+      ownerId: MAKER_ENTITY,
       orderId: staleOrderId,
       side: 1,
       tif: 0,
@@ -1793,18 +1815,18 @@ describe('orderbook matching execution mapping', () => {
       orderId: 'old-cross',
       bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
-      makerEntityId: 'old-maker',
+      makerEntityId: MAKER_ENTITY,
       hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'old-maker',
+        entityId: MAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
       },
       target: {
         jurisdiction: TRON_STACK,
-        entityId: 'old-maker',
+        entityId: MAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
@@ -1812,13 +1834,15 @@ describe('orderbook matching execution mapping', () => {
       status: 'resting',
       createdAt: 1,
       updatedAt: 2,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     };
     const makerOffer = {
       offerId: 'old-cross',
       makerIsLeft: false,
       fromEntity: HUB_ENTITY,
-      toEntity: 'old-maker',
-      accountId: 'old-maker',
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ENTITY,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: lot,
@@ -1833,17 +1857,17 @@ describe('orderbook matching execution mapping', () => {
     const takerRoute = {
       ...staleRoute,
       orderId: 'new-taker',
-      makerEntityId: 'new-taker',
+      makerEntityId: TAKER_ENTITY,
       source: {
         jurisdiction: TRON_STACK,
-        entityId: 'new-taker',
+        entityId: TAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'new-taker',
+        entityId: TAKER_ENTITY,
         counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
@@ -1853,7 +1877,7 @@ describe('orderbook matching execution mapping', () => {
       offerId: 'new-taker',
       makerIsLeft: false,
       fromEntity: HUB_ENTITY,
-      toEntity: 'new-taker',
+      toEntity: TAKER_ENTITY,
       accountId: NEW_TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
@@ -1869,17 +1893,17 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        ['old-maker', makeAccountMachine([makerOffer])],
+        [MAKER_ENTITY, makeAccountMachine([makerOffer])],
         [NEW_TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       crossJurisdictionSwaps: new Map([['old-cross', staleRoute]]),
       crossJurisdictionBookAdmissions: new Map([
         [
-          'old-maker:old-cross',
+          staleOrderId,
           {
             orderId: 'old-cross',
             routeHash: 'hash',
-            sourceEntityId: 'old-maker',
+            sourceEntityId: MAKER_ENTITY,
             bookOwnerEntityId: HUB_ENTITY,
             status: 'closed',
             route: staleRoute,
@@ -1909,7 +1933,10 @@ describe('orderbook matching execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(
+      createOrderbookFrameCandidate(entityState),
+      [takerOffer] as any,
+    );
 
     expect(result.crossJurisdictionFills).toEqual([]);
     expect(result.accountTxs).toEqual([]);

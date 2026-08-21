@@ -232,7 +232,7 @@ describe('production startup wiring', () => {
     const process = readFileSync(join(repoRoot, 'core/runtime/frame/process.ts'), 'utf8');
     const recoveryOutput = readFileSync(join(repoRoot, 'core/runtime/delivery/recovery-output.ts'), 'utf8');
     const postCommit = readFileSync(join(repoRoot, 'core/runtime/frame/lifecycle/post-commit.ts'), 'utf8');
-    const durableOutbox = recoveryOutput.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
+    const durableOutbox = recoveryOutput.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs(');
     const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
     const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
     const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);
@@ -936,9 +936,9 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK');
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
-    expect(mmNode).toContain('await submitCrossJurisdictionIntents(env, routes);');
+    expect(mmNode).toContain('await submitCrossJurisdictionIntents(input.deps.env, routes);');
     expect(mmNode).toContain('planMarketMakerBootstrapCrossQuoteRoutes(');
-    expect(mmNode).toContain('const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
+    expect(mmNode).toContain('export const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
     expect(mmNode).not.toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR']");
@@ -1064,7 +1064,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('remainingOffersTotal: MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
     expect(mmNode).toContain('route.source.counterpartyEntityId');
     expect(mmNode).not.toContain('coverageOnly');
-    expect(mmNode).toContain('bootstrapCrossCursor');
+    expect(mmNode).not.toContain('bootstrapCrossCursor');
     expect(mmNode).toContain('steadyCrossCursor');
     expect(mmNode).toContain('const selected = selectQuoteEngineCrossJobs(state, mode, jobs);');
     expect(mmNode).toContain('const nextCursor = (index + 1) % input.jobs.length;');
@@ -1077,7 +1077,7 @@ describe('production startup wiring', () => {
     const crossJobPlanning = mmNode.slice(crossJobPlanningStart, crossSelectionStart);
     expect(crossJobPlanning).not.toContain('buildMarketMakerCrossOfferSpecs(');
     expect(crossJobPlanning).toContain('jobs.push({');
-    expect(mmNode).toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-connectivity'");
+    expect(mmNode).toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub'");
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
     expect(mmNode).toContain('bootstrapCrossStarted: false,');
@@ -1087,15 +1087,15 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (state.phase === previousPhase) return;');
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
     expect(mmNode).toContain("state.phase = 'bootstrap-cross';");
-    expect(mmNode).toContain("if (input.mode === 'steady') return true;");
-    expect(mmNode).toContain('input.state.bootstrapCrossCursor = nextCursor;');
+    expect(mmNode).toContain('input.state.bootstrapCrossBatchSubmitted = true;');
+    expect(mmNode).not.toContain('bootstrapCrossCursor');
     expect(mmNode).toContain("if (mode === 'steady') state.steadyCrossCursor = selection.nextCursor;");
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).toContain('sourceHubs,');
     expect(mmNode).toContain('targetHubs,');
-    expect(mmNode).toContain("if (input.mode === 'steady') return true;");
-    expect(mmNode).toContain(
-      'allSameDepthReady(readVisibleHubProfiles(deps.env, true)) && isMarketMakerDepthComplete(health)',
+    expect(mmNode).toContain("if (input.mode === 'bootstrap') {");
+    expect(mmNode.replace(/\s+/g, '')).toContain(
+      'allSameDepthReady(readVisibleHubProfiles(deps.env,true))&&isMarketMakerDepthComplete(health)',
     );
     expect(mmNode).toContain("scope: 'same-chain-all-contexts-depth'");
     expect(mmNode).not.toContain("if (mode !== 'bootstrap') return;");
@@ -1114,13 +1114,13 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('(finalizedByPair.get(spec.pairId) || 0) === 0');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
     expect(mmNode).not.toContain('if (selectedPairs.has(spec.pairId)) continue;');
-    expect(mmNode).toContain('await submitCrossJurisdictionIntents(env, routes);');
+    expect(mmNode).toContain('await submitCrossJurisdictionIntents(input.deps.env, routes);');
     expect(mmNode).toContain('cross.routes.every((route) => route.depthReady)');
     expect(mmNode).toContain('ok: hubsDepthReady && crossDepthReady');
-    expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId)');
-    expect(mmNode).toContain('countCommittedMarketMakerOffersForHubPair(env, mmEntityId, hubEntityId, pair)');
-    expect(mmNode).toContain('blockers: blocker ? [blocker] : []');
-    expect(mmNode).toContain('accountReady && expectedHubOffers > 0');
+    expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, context.entityId, hubEntityId)');
+    expect(mmNode).toContain('countCommittedMarketMakerOffersForHubPair(env, context.entityId, hubEntityId, pair)');
+    expect(mmNode).toContain('return blocker ? [blocker] : [];');
+    expect(mmNode).toContain('accountReady && expectedPairOffers > 0');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_INCOMPLETE');
     expect(mmNode).toContain("nodeLog.info('bootstrap.ready_hash'");
     expect(mmNode).toContain('const health = assertMarketMakerBootstrapFinalized(');
@@ -1172,10 +1172,12 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('crossOverride: buildNeutralMarketMakerCrossHealth()');
     expect(mmNode).not.toContain('Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)');
     expect(mmNode).toMatch(/const quoteReadyHubEntityIds = hubEntityIds\.filter\(\(?hubEntityId\)? =>/);
-    expect(mmNode).toContain('const desiredOffers = buildMarketMakerOfferSpecs(quoteReadyHubEntityIds, tokenIds);');
+    expect(mmNode.replace(/\s+/g, '')).toContain(
+      'constdesiredOffers=buildMarketMakerOfferSpecs(quoteReadyHubEntityIds,tokenIds,samePairIndex,);',
+    );
     const sameChainQuotes = mmNode.slice(
-      mmNode.indexOf('const maintainMarketMakerQuotes = async ('),
-      mmNode.indexOf('const hasCrossRouteRegistered = ('),
+      mmNode.indexOf('export const planMarketMakerQuoteEntityInputs = ('),
+      mmNode.indexOf('export const maintainMarketMakerQuotes = async ('),
     );
     expect(sameChainQuotes).toContain('countMarketMakerOffersForHub(env, mmEntityId, left[0])');
     expect(sameChainQuotes).toContain('countMarketMakerOffersForHub(env, mmEntityId, right[0])');

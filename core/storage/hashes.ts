@@ -2,6 +2,7 @@
  * Canonical Runtime WAL commitments over typed child roots and durable state.
  * Entity roots already commit Account and Book Patricia graphs, so this file
  * must never rebuild a second Merkle tree from storage documents.
+ * Key functions: canonical Runtime, Entity, WAL, and outbox commitment hashes.
  * Human-audit importance: 100/100 — these hashes identify crash replay state.
  */
 import { computeIntegrityDigest } from '../support/integrity-checksum';
