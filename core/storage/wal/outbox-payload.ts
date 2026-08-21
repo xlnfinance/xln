@@ -125,7 +125,7 @@ const prepareRow = (
       { cause: error },
     );
   }
-  if (value.byteLength > MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES) {
+  if (value.byteLength >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES) {
     throw new Error(
       `STORAGE_RUNTIME_OUTPUT_PAYLOAD_TOO_LARGE:${value.byteLength}:` +
       `max=${MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES}:${payloadBudgetLabel(payload)}`,
@@ -383,7 +383,7 @@ const readPayloadBytes = async (
   } catch (error) {
     throw new Error(`STORAGE_RUNTIME_OUTPUT_PAYLOAD_MISSING:${index}:${ref}`, { cause: error });
   }
-  if (value.byteLength > MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES) {
+  if (value.byteLength >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES) {
     throw new Error(`STORAGE_RUNTIME_OUTPUT_PAYLOAD_TOO_LARGE:${value.byteLength}`);
   }
   const actual = hashPayload(value);

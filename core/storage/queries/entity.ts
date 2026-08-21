@@ -79,11 +79,21 @@ const inspectRuntimeStorage = async (
     liveAccountFieldBytes: current?.liveAccountFieldBytes ?? 0,
     liveBookCount: current?.liveBookCount ?? 0,
     frameBytes: history?.frameBytes ?? 0,
+    boundedValueCount: history?.boundedValueCount ?? 0,
+    boundedValueBytes: history?.boundedValueBytes ?? 0,
+    historyViewBytes: history?.historyViewBytes ?? 0,
     snapshotBytes: history?.snapshotBytes ?? 0,
     liveBytes: current?.liveBytes ?? 0,
     historyBytes: history?.historyBytes ?? 0,
-    totalBytes: (current?.liveBytes ?? 0) + (history?.historyBytes ?? 0),
+    totalBytes:
+      (current?.liveBytes ?? 0) +
+      (history?.historyBytes ?? 0) +
+      (history?.historyViewBytes ?? 0),
     maxFrameBytes: history?.maxFrameBytes ?? 0,
+    maxPhysicalValueBytes: Math.max(
+      current?.maxPhysicalValueBytes ?? 0,
+      history?.maxPhysicalValueBytes ?? 0,
+    ),
     maxSnapshotBytes: history?.maxSnapshotBytes ?? 0,
     epochDbs,
   };

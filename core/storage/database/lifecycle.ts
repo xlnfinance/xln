@@ -1,5 +1,6 @@
 import { encodeBuffer, writeBatch } from '../codec/codec';
 import { copyKeyRange, deleteKeyRange, deleteKeys, iterateKeys, readValidatedOrNull } from './level';
+import { deleteBoundedStorageValue } from '../codec/bounded-value';
 import {
   KEY_FRAME,
   KEY_HEAD,
@@ -413,15 +414,14 @@ export const pruneHistoryBeforeHeight = async (
   const onPruneBatch = async (): Promise<void> => {
     await onPersistenceBoundary?.('after-replay-prune');
   };
-  const frames = await deleteKeyRange(
-    db,
-    {
-      gte: Buffer.from([KEY_FRAME]),
-      lt: Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(cutoff + 1)]),
-    },
-    key => !retainedSnapshots.has(decodeHeight(key)),
-    onPruneBatch,
-  );
-  return frames.removedBytes;
+  let removedBytes = 0;
+  for await (const key of iterateKeys(db, {
+    gte: Buffer.from([KEY_FRAME]),
+    lt: Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(cutoff + 1)]),
+  })) {
+    if (retainedSnapshots.has(decodeHeight(key))) continue;
+    removedBytes += (await deleteBoundedStorageValue(db, key, onPruneBatch)).removedBytes;
+  }
+  return removedBytes;
 };
 import { Buffer } from '../../support/platform-crypto';

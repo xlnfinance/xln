@@ -88,16 +88,12 @@ const readRuntimeActivityJournal = async (
   try {
     const activity = await readHistoryViewRuntimeActivity(deps.getHistoryViewDb(env), targetHeight);
     if (!activity) return null;
+    const frame = await deps.readPersistedStorageFrameRecord(env, targetHeight);
+    if (!frame) throw new Error(`STORAGE_ACTIVITY_RUNTIME_FRAME_MISSING:height=${targetHeight}`);
     return {
       height: targetHeight,
       timestamp: activity.timestamp,
-      runtimeInput: {
-        runtimeTxs: [],
-        entityInputs: activity.runtimeInput.entityInputs,
-        ...(activity.runtimeInput.jInputs
-          ? { jInputs: activity.runtimeInput.jInputs }
-          : {}),
-      },
+      runtimeInput: frame.runtimeInput,
       logs: activity.logs.map((entry) => ({ ...entry })),
     };
   } catch (error) {

@@ -51,6 +51,7 @@ import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
 import { prepareRuntimeOutputPayloadRows } from '../wal/outbox-payload';
 import { buildHistoryViewPuts } from '../history/history-view';
+import { prepareBoundedStorageValueRows } from '../codec/bounded-value';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -333,23 +334,23 @@ const publishNewHistoryBase = async (
     touchedBookEntities,
   };
   const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
-  const frameEntry = { key: keyFrame(options.height), value: encodeBuffer(frame) };
+  const frameRows = prepareBoundedStorageValueRows(keyFrame(options.height), encodeBuffer(frame));
   const [activityEntry] = buildHistoryViewPuts({
     height: options.height,
     timestamp: options.timestamp,
-    runtimeInput: frame.runtimeInput,
     logs: [],
     touchedEntities: frame.touchedEntities,
     touchedAccounts,
     touchedBookEntities,
   });
   if (!activityEntry) throw new Error('RESTORE_RUNTIME_ACTIVITY_ENTRY_MISSING');
+  const activityRows = prepareBoundedStorageValueRows(activityEntry.key, activityEntry.value);
   const durableRows = [
     ...snapshotEntries,
     ...snapshotReplicaMetaEntries,
     manifestEntry,
-    frameEntry,
-    activityEntry,
+    ...frameRows,
+    ...activityRows,
     ...options.replicaMetas,
     ...nodes.certifiedBoardNodes,
     ...nodes.consumptionNodes,

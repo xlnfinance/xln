@@ -26,10 +26,14 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
 import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
-import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../../../storage';
+import {
+  loadEntityStateFromStorage,
+  recoverStorageDbFromHistory,
+  saveRuntimeFrameToStorage,
+} from '../../../storage';
 import { decodeBuffer } from '../../../storage/codec/codec';
-import { KEY_HEAD, keyConsumptionNode, keyFrame, keyLiveEntity } from '../../../storage/keys';
-import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../../../storage/types';
+import { KEY_HEAD, keyConsumptionNode, keyFrame } from '../../../storage/keys';
+import type { RuntimeDbLike, StorageHead } from '../../../storage/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../../../entity/types';
 import { getPerfMs } from '../../../support/time';
@@ -200,8 +204,13 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   // Frame 1 is also the mandatory recovery snapshot anchor. The atomic write
   // above proves the root-bearing Runtime frame and witness node crossed the durable
   // boundary together; the materialized cache proves the published value.
-  const persistedEntity = decodeBuffer<StorageEntityCoreDoc>(await currentDb.get(keyLiveEntity(entityId)));
-  expect(persistedEntity.consumptionAccumulator).toEqual(applied.state);
+  const persistedEntity = await loadEntityStateFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => currentDb,
+    entityId,
+  });
+  expect(persistedEntity?.consumptionAccumulator).toEqual(applied.state);
 
   const rebuiltCurrent = makeAtomicMemoryDb();
   await recoverStorageDbFromHistory({

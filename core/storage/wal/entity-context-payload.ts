@@ -174,7 +174,7 @@ const prepareRow = (
   rowsByHash: Map<EntityContextPayloadHash, PayloadRow>,
 ): EntityContextPayloadHash => {
   const value = encodeBuffer(payload, { omitSymbolKeys: true });
-  if (value.byteLength > MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
+  if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
     throw new Error(
       `STORAGE_ENTITY_CONTEXT_PAYLOAD_TOO_LARGE:${value.byteLength}:` +
       `max=${MAX_ENTITY_CONTEXT_PAYLOAD_BYTES}:${payloadBudgetLabel(payload)}`,
@@ -276,7 +276,7 @@ const readVerifiedPayload = async (
       cause: error,
     });
   }
-  if (value.byteLength > MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
+  if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_PAYLOAD_TOO_LARGE:${replicaId}`);
   }
   const actual = hashContext(value);

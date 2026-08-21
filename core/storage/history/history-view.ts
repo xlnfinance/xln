@@ -1,11 +1,14 @@
-import type { EntityTx } from '../../types/entity-tx';
 import type { FrameLogEntry } from '../../types/logging';
-import type { JInput } from '../../jurisdiction/machine/input';
-import type { RuntimeHistoryRecord, RuntimeInput } from '../../runtime/types';
+import type { RuntimeHistoryRecord } from '../../runtime/types';
 import type { AccountTx } from '../../types/account';
-import { cloneIsolatedEntityTxs } from '../../entity/state/input-clone';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from '../codec/codec';
-import { deleteKeyRange, iterateKeys, readRawOrNull } from '../database/level';
+import { iterateKeys, readRawOrNull } from '../database/level';
+import {
+  boundedStorageRowsBytes,
+  deleteBoundedStorageValue,
+  prepareBoundedStorageValueRows,
+  readBoundedValidatedValue,
+} from '../codec/bounded-value';
 import {
   HISTORY_VIEW_RUNTIME_ACTIVITY,
   KEY_HISTORY_VIEW_HEAD,
@@ -79,10 +82,6 @@ export type StoredEntityFrameValue = {
 
 export type StoredRuntimeActivityValue = {
   timestamp: number;
-  runtimeInput: {
-    entityInputs: Array<{ entityId: string; entityTxs?: EntityTx[] }>;
-    jInputs?: JInput[];
-  };
   logs: FrameLogEntry[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
@@ -182,25 +181,14 @@ export const buildCertifiedFramePuts = (options: {
 export const buildHistoryViewPuts = (options: {
   height: number;
   timestamp: number;
-  runtimeInput: RuntimeInput;
   logs: FrameLogEntry[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
 }): HistoryViewPut[] => {
   const puts: HistoryViewPut[] = [];
-  const runtimeInput: StoredRuntimeActivityValue['runtimeInput'] = {
-    entityInputs: options.runtimeInput.entityInputs.map((input) => ({
-      entityId: input.entityId,
-      ...(input.entityTxs ? { entityTxs: cloneIsolatedEntityTxs(input.entityTxs) } : {}),
-    })),
-    ...(options.runtimeInput.jInputs
-      ? { jInputs: options.runtimeInput.jInputs.map(input => structuredClone(input)) }
-      : {}),
-  };
   const runtimeActivity: StoredRuntimeActivityValue = {
     timestamp: options.timestamp,
-    runtimeInput,
     logs: options.logs,
     touchedEntities: options.touchedEntities,
     touchedAccounts: options.touchedAccounts,
@@ -253,7 +241,8 @@ export const prepareHistoryViewCommit = async (options: {
 }): Promise<HistoryViewCommitPlan> => {
   const height = Math.max(1, Math.floor(Number(options.height)));
   const head = await readHistoryViewHead(options.db, options.config);
-  const writtenBytes = options.puts.reduce((sum, item) => sum + item.key.byteLength + item.value.byteLength, 0);
+  const puts = options.puts.flatMap(item => prepareBoundedStorageValueRows(item.key, item.value));
+  const writtenBytes = boundedStorageRowsBytes(puts);
   const appendBytes = head.latestHeight >= height ? 0 : writtenBytes;
   const nextHead: StorageHistoryViewHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -265,7 +254,7 @@ export const prepareHistoryViewCommit = async (options: {
   };
 
   return {
-    puts: options.puts,
+    puts,
     writtenBytes,
     nextHead,
   };
@@ -344,7 +333,6 @@ export const reconcileHistoryViews = async (options: {
     const puts = buildHistoryViewPuts({
       height: frame.height,
       timestamp: activity.timestamp,
-      runtimeInput: frame.runtimeInput,
       logs: activity.logs,
       touchedEntities: activity.touchedEntities,
       touchedAccounts: activity.touchedAccounts,
@@ -380,17 +368,14 @@ const pruneHistoryViewBeforeRuntimeHeight = async (
   const onPruneBatch = async (): Promise<void> => {
     await onPersistenceBoundary?.('after-history-view-prune');
   };
-  const runtimeActivityPruned = await deleteKeyRange(
-    db,
-    {
-      gte: Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]),
-      lt: Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
-    },
-    () => true,
-    onPruneBatch,
-  );
-  removedBytes += runtimeActivityPruned.removedBytes;
-  removedKeys += runtimeActivityPruned.removedKeys;
+  for await (const key of iterateKeys(db, {
+    gte: Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]),
+    lt: Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
+  })) {
+    const pruned = await deleteBoundedStorageValue(db, key, onPruneBatch);
+    removedBytes += pruned.removedBytes;
+    removedKeys += pruned.removedKeys;
+  }
 
   return { removedBytes, removedKeys };
 };
@@ -456,23 +441,16 @@ export const readHistoryViewRuntimeActivity = async (
 ): Promise<StoredRuntimeActivityRecord | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
-  const raw = await readRawOrNull(db, keyHistoryViewRuntimeActivity(targetHeight));
-  if (!raw) return null;
-  const value = decodeValidatedBuffer(raw, decoded =>
-    validateStoredRuntimeActivityValue(decoded, targetHeight));
+  const value = await readBoundedValidatedValue(
+    db,
+    keyHistoryViewRuntimeActivity(targetHeight),
+    decoded => validateStoredRuntimeActivityValue(decoded, targetHeight),
+  );
+  if (!value) return null;
   return {
     kind: 'runtimeActivity',
     height: targetHeight,
     timestamp: value.timestamp,
-    runtimeInput: {
-      entityInputs: value.runtimeInput.entityInputs.map(input => ({
-        entityId: input.entityId,
-        ...(input.entityTxs ? { entityTxs: cloneIsolatedEntityTxs(input.entityTxs) } : {}),
-      })),
-      ...(value.runtimeInput.jInputs
-        ? { jInputs: value.runtimeInput.jInputs.map(input => structuredClone(input)) }
-        : {}),
-    },
     logs: value.logs,
     touchedEntities: value.touchedEntities,
     touchedAccounts: value.touchedAccounts,
@@ -509,8 +487,12 @@ export const readHistoryViewAccountFrames = async (
     const parsed = parseHistoryViewAccountFrameKey(key);
     const accountHeight = parsed.accountHeight;
     if (accountHeight > maxAccountHeight) continue;
-    const record = decodeValidatedBuffer(await db.get(key), decoded =>
-      validateStoredAccountFrameValue(decoded, accountHeight));
+    const record = await readBoundedValidatedValue(
+      db,
+      key,
+      decoded => validateStoredAccountFrameValue(decoded, accountHeight),
+    );
+    if (!record) throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_MISSING:${key.toString('hex')}`);
     if (record.runtimeHeight > maxRuntimeHeight) continue;
     const frameHeight = record.frame.height;
     if (frameHeight !== accountHeight) {
@@ -542,10 +524,12 @@ export const readHistoryViewAccountSwapEvents = async (
   const events: StoredAccountSwapEventValue[] = [];
   for await (const key of iterateKeys(db, { prefix })) {
     const accountHeight = decodeHeight(key, key.byteLength - 8);
-    const event = decodeValidatedBuffer(
-      await db.get(key),
+    const event = await readBoundedValidatedValue(
+      db,
+      key,
       decoded => validateStoredAccountSwapEventValue(decoded, accountHeight),
     );
+    if (!event) throw new Error(`HISTORY_VIEW_ACCOUNT_SWAP_EVENT_MISSING:${key.toString('hex')}`);
     if (event.runtimeHeight <= maxRuntimeHeight) events.push(event);
   }
   return events.sort((left, right) => left.accountHeight - right.accountHeight);
@@ -562,10 +546,12 @@ export const readHistoryViewAccountSwapRecency = async (
   const events: Array<StoredAccountSwapEventValue & { offerId: string }> = [];
   for await (const key of iterateKeys(db, { prefix, reverse: true })) {
     const { accountHeight, offerId } = parseHistoryViewAccountSwapRecencyKey(key);
-    const event = decodeValidatedBuffer(
-      await db.get(key),
+    const event = await readBoundedValidatedValue(
+      db,
+      key,
       decoded => validateStoredAccountSwapEventValue(decoded, accountHeight),
     );
+    if (!event) throw new Error(`HISTORY_VIEW_ACCOUNT_SWAP_RECENCY_MISSING:${key.toString('hex')}`);
     if (event.runtimeHeight <= maxRuntimeHeight) events.push({ ...event, offerId });
   }
   return events;
@@ -601,8 +587,12 @@ export const readHistoryViewEntityFrames = async (
     }
     const entityHeight = parsed.entityHeight;
     if (entityHeight > maxEntityHeight) continue;
-    const value = decodeValidatedBuffer(await db.get(key), decoded =>
-      validateStoredEntityFrameValue(decoded, entityHeight));
+    const value = await readBoundedValidatedValue(
+      db,
+      key,
+      decoded => validateStoredEntityFrameValue(decoded, entityHeight),
+    );
+    if (!value) throw new Error(`HISTORY_VIEW_ENTITY_FRAME_MISSING:${key.toString('hex')}`);
     if (value.runtimeHeight > maxRuntimeHeight) continue;
     records.push({
       kind: 'entityFrame',

@@ -6,6 +6,11 @@
 import { getPerfMs } from '../support/time';
 import { decodeValidatedBuffer, encodeBuffer, encodeBufferPrepared, writeBatch } from './codec/codec';
 import {
+  boundedStorageRowsBytes,
+  prepareBoundedStorageValueRows,
+  readBoundedEncodedValue,
+} from './codec/bounded-value';
+import {
   deleteKeyRange,
   iterateKeys,
   readRawOrNull,
@@ -1637,14 +1642,14 @@ const buildStorageFrameRecordPlan = (
   mark('frameEncode.frameHash');
   const frameKey = keyFrame(options.env.state.height);
   const frameBuffer = encodeBuffer(frameRecord, { omitSymbolKeys: true });
+  const frameRows = prepareBoundedStorageValueRows(frameKey, frameBuffer);
   mark('frameEncode.frameBuffer');
   const nodeBytes =
     pendingNodes.boardHistoryBytes +
     pendingNodes.consumptionHistoryBytes +
     pendingNodes.accountJClaimHistoryBytes;
-  const frameBytes =
-    frameKey.byteLength +
-    frameBuffer.byteLength +
+  const authoritativeBaseBytes =
+    boundedStorageRowsBytes(frameRows) +
     nodeBytes +
     outputPayloads.rows.reduce(
       (total, row) => total + row.key.byteLength + row.value.byteLength,
@@ -1662,6 +1667,7 @@ const buildStorageFrameRecordPlan = (
     frameKey,
     frameHash: frameRecord.frameHash,
     frameBuffer,
+    frameRows,
     outputPayloadRows: outputPayloads.rows,
     entityContextPayloadRows: entityContextPayloads.rows,
     runtimeMachineGraphRows: runtimeMachineGraph.rows,
@@ -1681,7 +1687,6 @@ const buildStorageFrameRecordPlan = (
     historyViewPuts: buildHistoryViewPuts({
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,
-      runtimeInput: prepared.appliedRuntimeInput,
       logs: touches.frameLogs,
       touchedEntities: touches.touchedEntities,
       touchedAccounts: touches.touchedAccounts,
@@ -1696,8 +1701,7 @@ const buildStorageFrameRecordPlan = (
         'JEventReceived',
         'JBatchQueued',
       ].includes(message)),
-    projectedReplayBytes: prepared.head.retainedHistoryBytes + frameBytes,
-    projectedEpochReplayBytes: prepared.head.epochReplayBytes + frameBytes,
+    authoritativeBaseBytes,
   };
 };
 
@@ -1753,7 +1757,7 @@ const prepareCertifiedHistoryPuts = async (
   const seen = new Map<string, Buffer>();
   // Existence probes are independent point reads; issue them together instead
   // of one awaited round trip per certified frame.
-  const persisted = await Promise.all(planned.map(put => readRawOrNull(walDb, put.key)));
+  const persisted = await Promise.all(planned.map(put => readBoundedEncodedValue(walDb, put.key)));
   for (const [index, put] of planned.entries()) {
     const keyHex = put.key.toString('hex');
     const existing = seen.get(keyHex) ?? persisted[index];
@@ -1778,6 +1782,10 @@ const buildStorageCommitBatches = (
   certifiedHistoryPuts: HistoryViewPut[],
 ) => {
   const walBatch = prepared.walDb.batch();
+  const certifiedHistoryRows = certifiedHistoryPuts.flatMap(put =>
+    prepareBoundedStorageValueRows(put.key, put.value));
+  const activityHistoryRows = frame.historyViewPuts.flatMap(put =>
+    prepareBoundedStorageValueRows(put.key, put.value));
   for (const key of commitments.staleReplicaMetaKeys) walBatch.del(key);
   for (const entry of pendingNodes.boardEntries) {
     walBatch.put(entry.key, entry.value);
@@ -1788,7 +1796,7 @@ const buildStorageCommitBatches = (
   for (const [hash, node] of pendingNodes.accountJClaimNodes) {
     walBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
   }
-  walBatch.put(frame.frameKey, frame.frameBuffer);
+  for (const row of frame.frameRows) walBatch.put(row.key, row.value);
   for (const row of frame.outputPayloadRows) {
     walBatch.put(row.key, row.value);
   }
@@ -1812,8 +1820,8 @@ const buildStorageCommitBatches = (
       walBatch.put(row.key, row.value);
     }
   }
-  for (const put of certifiedHistoryPuts) walBatch.put(put.key, put.value);
-  for (const put of frame.historyViewPuts) walBatch.put(put.key, put.value);
+  for (const row of certifiedHistoryRows) walBatch.put(row.key, row.value);
+  for (const row of activityHistoryRows) walBatch.put(row.key, row.value);
   for (const entry of commitments.replicaMetaEntries) {
     // Recovery metadata shares the authoritative batch with frame and HEAD.
     walBatch.put(entry.key, entry.value);
@@ -1849,6 +1857,10 @@ const buildStorageCommitBatches = (
   for (const key of commitments.bookGraphWrites.dels) currentBatch.del(key);
   for (const row of commitments.bookGraphWrites.puts) currentBatch.put(row.key, row.value);
 
+  // Certified/activity rows are rebuildable indexes with their own retention
+  // budget. Only the chained frame, immutable payloads and checkpoint graph
+  // count toward the authoritative WAL epoch budget.
+  const committedHistoryBytes = frame.authoritativeBaseBytes;
   const nextHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: options.env.state.height,
@@ -1863,8 +1875,8 @@ const buildStorageCommitBatches = (
     retainSnapshots: prepared.config.retainSnapshots,
     epochMaxBytes: prepared.config.epochMaxBytes,
     accountMerkleRadix: prepared.config.accountMerkleRadix,
-    epochReplayBytes: frame.projectedEpochReplayBytes,
-    retainedHistoryBytes: frame.projectedReplayBytes,
+    epochReplayBytes: prepared.head.epochReplayBytes + committedHistoryBytes,
+    retainedHistoryBytes: prepared.head.retainedHistoryBytes + committedHistoryBytes,
   };
   const encodedHead = encodeBuffer(nextHead);
   walBatch.put(KEY_HEAD, encodedHead);

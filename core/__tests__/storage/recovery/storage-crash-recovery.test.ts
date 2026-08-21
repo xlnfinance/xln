@@ -199,7 +199,6 @@ describe('storage crash recovery', () => {
     const puts = buildHistoryViewPuts({
       height: 7,
       timestamp: 700,
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       logs: [{ id: 1, category: 'system', level: 'info', message: 'durable', timestamp: 700 }],
       touchedEntities: [entityId],
       touchedAccounts: [],

@@ -278,11 +278,15 @@ export type StorageDebugStats = {
   consumptionNodeBytes?: number;
   accountJClaimNodeBytes?: number;
   frameBytes: number;
+  boundedValueCount?: number;
+  boundedValueBytes?: number;
+  historyViewBytes?: number;
   snapshotBytes: number;
   liveBytes: number;
   historyBytes: number;
   totalBytes: number;
   maxFrameBytes: number;
+  maxPhysicalValueBytes?: number;
   maxSnapshotBytes: number;
   epochDbs?: Array<{
     role: 'current' | 'history';

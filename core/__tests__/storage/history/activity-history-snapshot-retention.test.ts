@@ -140,24 +140,10 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
 
     expect(await readPersistedFrameJournal(env, 3)).not.toBeNull();
     const compactActivity = await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 3);
-    expect(compactActivity?.runtimeInput.entityInputs).toEqual([{
-      entityId,
-      entityTxs: [{
-        type: 'directPayment',
-        data: {
-          targetEntityId: recipientId,
-          tokenId: 1,
-          amount: 7n,
-          route: [entityId, hubId, recipientId],
-          deliveryMode: 'trusted',
-          trustedGatewayEntityId: hubId,
-        },
-      }],
-    }]);
-    expect('runtimeTxs' in (compactActivity?.runtimeInput ?? {})).toBe(false);
-    expect('signerId' in (compactActivity?.runtimeInput.entityInputs[0] ?? {})).toBe(false);
+    expect(compactActivity).not.toHaveProperty('runtimeInput');
     const rawJournal = await readPersistedRuntimeActivityJournal(env, 3);
     expect(rawJournal?.runtimeInput?.runtimeTxs).toEqual([]);
+    expect(rawJournal?.runtimeInput?.entityInputs[0]?.entityTxs?.[0]?.type).toBe('directPayment');
     expect(rawJournal?.logs?.[0]?.message).toBe('HtlcReceived');
 
     const receiptPage = await readFrameReceipts(env, {

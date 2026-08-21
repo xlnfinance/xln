@@ -2,8 +2,6 @@ import { validateConsensusConfig } from '../../entity/consensus/config-validatio
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
 import { decodeAccountFrame } from '../../account/validation/frame-validation';
 import { decodeAccountTxs } from '../../account/tx-validation';
-import { validateEntityTxs } from '../../entity/tx-validation';
-import { validateJInputs } from '../wal/runtime-machine-schema/j';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -48,36 +46,6 @@ export const validateHistoryViewHeadValue = (value: unknown): StorageHistoryView
   };
 };
 
-const validateCompactRuntimeInput = (
-  value: unknown,
-  height: number,
-): StoredRuntimeActivityValue['runtimeInput'] => {
-  const code = `HISTORY_VIEW_RUNTIME_ACTIVITY_INPUT_INVALID:height=${height}`;
-  const input = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(input, ['entityInputs'], ['jInputs'], `${code}:fields`);
-  if (!Array.isArray(input['entityInputs'])) throw new Error(code);
-  const entityInputs = input['entityInputs'].map((rawEntry, index) => {
-    const entryCode = `HISTORY_VIEW_RUNTIME_ACTIVITY_ENTITY_INPUT_INVALID:height=${height}:index=${index}`;
-    const entry = requireBoundaryRecord(rawEntry, entryCode);
-    requireExactBoundaryKeys(entry, ['entityId'], ['entityTxs'], `${entryCode}:fields`);
-    if (typeof entry['entityId'] !== 'string' || entry['entityId'].length === 0) throw new Error(entryCode);
-    const entityTxs = entry['entityTxs'] === undefined
-      ? undefined
-      : validateEntityTxs(entry['entityTxs'], `${entryCode}:entityTxs`);
-    return {
-      entityId: entry['entityId'],
-      ...(entityTxs === undefined ? {} : { entityTxs }),
-    };
-  });
-  const jInputs = input['jInputs'] === undefined
-    ? undefined
-    : validateJInputs(input['jInputs'], `${code}:jInputs`);
-  return {
-    entityInputs,
-    ...(jInputs === undefined ? {} : { jInputs }),
-  };
-};
-
 export const validateStoredRuntimeActivityValue = (
   value: unknown,
   height: number,
@@ -85,7 +53,7 @@ export const validateStoredRuntimeActivityValue = (
   const activity = requireBoundaryRecord(value, `HISTORY_VIEW_RUNTIME_ACTIVITY_INVALID:height=${height}`);
   requireExactBoundaryKeys(
     activity,
-    ['timestamp', 'runtimeInput', 'logs', 'touchedEntities', 'touchedAccounts', 'touchedBookEntities'],
+    ['timestamp', 'logs', 'touchedEntities', 'touchedAccounts', 'touchedBookEntities'],
     [],
     `HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID:height=${height}`,
   );
@@ -112,7 +80,6 @@ export const validateStoredRuntimeActivityValue = (
       activity['timestamp'],
       `HISTORY_VIEW_RUNTIME_ACTIVITY_TIMESTAMP_INVALID:height=${height}`,
     ),
-    runtimeInput: validateCompactRuntimeInput(activity['runtimeInput'], height),
     logs: validateFrameLogEntries(
       activity['logs'],
       `HISTORY_VIEW_RUNTIME_ACTIVITY_LOGS_INVALID:height=${height}`,

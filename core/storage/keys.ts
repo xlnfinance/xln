@@ -15,7 +15,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/integrity-checksum';
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 6;
+export const STORAGE_SCHEMA_VERSION = 7;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -69,6 +69,8 @@ export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
 export const KEY_HEAD = Buffer.from([0x20]);
 export const KEY_FRAME = 0x10;
+/** Static continuation rows for any oversized WAL/history value. */
+export const KEY_BOUNDED_VALUE_CHUNK = 0x11;
 export const KEY_SNAPSHOT_MANIFEST = 0x12;
 /** Immutable routed-output bytes addressed by their full SHA-256 digest. */
 export const KEY_RUNTIME_OUTPUT_PAYLOAD = 0x13;
@@ -174,6 +176,47 @@ const readText = (buffer: Buffer, offset: number): { value: string; nextOffset: 
 };
 
 export const keyFrame = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(height)]);
+
+/**
+ * A continuation is addressed only by its permanent owner key and page index.
+ * Content digests verify bytes in the owner manifest; they never address rows.
+ * The explicit owner-key length makes prefixes unambiguous for variable keys.
+ */
+const keyBoundedValueChunkPrefix = (ownerKey: Buffer): Buffer => {
+  if (ownerKey.byteLength < 1 || ownerKey.byteLength > 0xffff) {
+    throw new Error(`STORAGE_BOUNDED_OWNER_KEY_BYTES_INVALID:${ownerKey.byteLength}`);
+  }
+  const length = Buffer.allocUnsafe(2);
+  length.writeUInt16BE(ownerKey.byteLength);
+  return Buffer.concat([Buffer.from([KEY_BOUNDED_VALUE_CHUNK]), length, ownerKey]);
+};
+
+export const keyBoundedValueChunk = (ownerKey: Buffer, chunkIndex: number): Buffer => {
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > 0xffff_ffff) {
+    throw new Error(`STORAGE_BOUNDED_CHUNK_INDEX_INVALID:${String(chunkIndex)}`);
+  }
+  const index = Buffer.allocUnsafe(4);
+  index.writeUInt32BE(chunkIndex);
+  return Buffer.concat([keyBoundedValueChunkPrefix(ownerKey), index]);
+};
+
+export const parseBoundedValueChunkKey = (
+  key: Buffer,
+): Readonly<{ ownerKey: Buffer; chunkIndex: number }> => {
+  if (key.byteLength < 8 || key[0] !== KEY_BOUNDED_VALUE_CHUNK) {
+    throw new Error(`STORAGE_BOUNDED_CHUNK_KEY_INVALID:${key.toString('hex')}`);
+  }
+  const ownerLength = key.readUInt16BE(1);
+  const expectedLength = 3 + ownerLength + 4;
+  if (ownerLength < 1 || key.byteLength !== expectedLength) {
+    throw new Error(`STORAGE_BOUNDED_CHUNK_KEY_LENGTH_INVALID:${key.byteLength}:${expectedLength}`);
+  }
+  return {
+    ownerKey: Buffer.from(key.subarray(3, 3 + ownerLength)),
+    chunkIndex: key.readUInt32BE(3 + ownerLength),
+  };
+};
+
 export const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
 
 export const keyRuntimeOutputPayload = (hash: string): Buffer =>

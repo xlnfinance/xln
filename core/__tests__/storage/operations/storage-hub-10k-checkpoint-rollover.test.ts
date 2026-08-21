@@ -144,8 +144,8 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
       const durationMs = performance.now() - startedAt;
       frameDurations.push(durationMs);
       peakRssBytes = Math.max(peakRssBytes, process.memoryUsage.rss());
-      if (env.state.height % SNAPSHOT_PERIOD === 0) snapshotDurations.push(durationMs);
-      else if (env.state.height % MATERIALIZE_PERIOD === 0) materializeDurations.push(durationMs);
+      if ((env.state.height - 1) % SNAPSHOT_PERIOD === 0) snapshotDurations.push(durationMs);
+      else if ((env.state.height - 1) % MATERIALIZE_PERIOD === 0) materializeDurations.push(durationMs);
       else sparseDurations.push(durationMs);
       if (env.state.height % 1_000 === 0) {
         const now = performance.now();
@@ -164,28 +164,28 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
       .toBe(FINAL_HEIGHT - 1);
 
     const db = getRuntimeWalDb(env);
-    const frame19_900 = await readStorageFrameRecord(db, 19_900);
     const frame19_901 = await readStorageFrameRecord(db, 19_901);
-    const frame20_000 = await readStorageFrameRecord(db, 20_000);
+    const frame19_902 = await readStorageFrameRecord(db, 19_902);
     const frame20_001 = await readStorageFrameRecord(db, 20_001);
+    const frame20_002 = await readStorageFrameRecord(db, 20_002);
     const frame20_050 = await readStorageFrameRecord(db, 20_050);
-    expect(frame19_900?.materializedState).not.toBe(false);
-    expect(frame19_900?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(frame19_901?.materializedState).toBe(false);
-    expect(frame19_901?.runtimeStateHash).toBeUndefined();
-    expect(frame19_901?.prevFrameHash).toBe(frame19_900?.frameHash);
-    expect(frame20_000?.materializedState).not.toBe(false);
-    expect(frame20_000?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(frame20_001?.materializedState).toBe(false);
-    expect(frame20_001?.prevFrameHash).toBe(frame20_000?.frameHash);
+    expect(frame19_901?.materializedState).not.toBe(false);
+    expect(frame19_901?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(frame19_902?.materializedState).toBe(false);
+    expect(frame19_902?.runtimeStateHash).toBeUndefined();
+    expect(frame19_902?.prevFrameHash).toBe(frame19_901?.frameHash);
+    expect(frame20_001?.materializedState).not.toBe(false);
+    expect(frame20_001?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(frame20_002?.materializedState).toBe(false);
+    expect(frame20_002?.prevFrameHash).toBe(frame20_001?.frameHash);
     expect(frame20_050?.materializedState).toBe(false);
     expect(frame20_050?.runtimeStateHash).toBeUndefined();
 
     const head = await readPersistedStorageHead(env);
     expect(head?.latestHeight).toBe(FINAL_HEIGHT);
-    expect(head?.latestMaterializedHeight).toBe(20_000);
-    expect(head?.latestSnapshotHeight).toBe(20_000);
-    expect(await listPersistedCheckpointHeights(env)).toEqual([10_000, 20_000]);
+    expect(head?.latestMaterializedHeight).toBe(20_001);
+    expect(head?.latestSnapshotHeight).toBe(20_001);
+    expect(await listPersistedCheckpointHeights(env)).toEqual([10_001, 20_001]);
     const tail = await verifyStorageTailIntegrity(db);
     expect(tail.latestHeight).toBe(FINAL_HEIGHT);
 
@@ -220,20 +220,20 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
     await closeInfraDb(restored!);
     restored = null;
 
-    console.log('[HUB_10K_STAGE]', { stage: 'replay-newest-snapshot', height: 20_000 });
-    const replay = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 20_000 });
+    console.log('[HUB_10K_STAGE]', { stage: 'replay-newest-snapshot', height: 20_001 });
+    const replay = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 20_001 });
     expect(replay).toMatchObject({
       ok: true,
       latestHeight: FINAL_HEIGHT,
-      selectedSnapshotHeight: 20_000,
+      selectedSnapshotHeight: 20_001,
       restoredHeight: FINAL_HEIGHT,
     });
-    console.log('[HUB_10K_STAGE]', { stage: 'replay-oldest-retained-snapshot', height: 10_000 });
-    const retainedReplay = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 10_000 });
+    console.log('[HUB_10K_STAGE]', { stage: 'replay-oldest-retained-snapshot', height: 10_001 });
+    const retainedReplay = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 10_001 });
     expect(retainedReplay).toMatchObject({
       ok: true,
       latestHeight: FINAL_HEIGHT,
-      selectedSnapshotHeight: 10_000,
+      selectedSnapshotHeight: 10_001,
       restoredHeight: FINAL_HEIGHT,
     });
   } finally {

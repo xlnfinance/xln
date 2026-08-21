@@ -189,7 +189,6 @@ describe('history-view compact values', () => {
     const puts = buildHistoryViewPuts({
       height: 12,
       timestamp: 789,
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       logs: [{ id: 1, category: 'consensus', level: 'info', message: 'ok', timestamp: 789, entityId }],
       touchedEntities: [entityId],
       touchedAccounts: [{ entityId, counterpartyId }],
@@ -201,6 +200,7 @@ describe('history-view compact values', () => {
     const stored = decodeBuffer<Record<string, unknown>>(activityPut!.value);
     expect(stored['kind']).toBeUndefined();
     expect(stored['height']).toBeUndefined();
+    expect(stored['runtimeInput']).toBeUndefined();
     expect(stored['timestamp']).toBe(789);
     expect(stored['touchedEntities']).toEqual([entityId]);
     expect(stored['touchedAccounts']).toEqual([{ entityId, counterpartyId }]);
@@ -212,22 +212,17 @@ describe('history-view compact values', () => {
     expect(activity?.touchedBookEntities).toEqual([entityId]);
 
     const corrupted = decodeBuffer<Record<string, unknown>>(activityPut!.value);
-    delete corrupted['runtimeInput'];
+    delete corrupted['logs'];
     await expect(readHistoryViewRuntimeActivity(
       makeMemoryDb([[activityPut!.key, encodeBuffer(corrupted)]]),
       12,
     )).rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID:height=12');
 
     const malformedTx = decodeBuffer<Record<string, unknown>>(activityPut!.value);
-    malformedTx['runtimeInput'] = {
-      entityInputs: [{
-        entityId,
-        entityTxs: [{ type: 'chat', data: { validatorId: entityId } }],
-      }],
-    };
+    malformedTx['runtimeInput'] = { entityInputs: [] };
     await expect(readHistoryViewRuntimeActivity(
       makeMemoryDb([[activityPut!.key, encodeBuffer(malformedTx)]]),
       12,
-    )).rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_ENTITY_INPUT_INVALID');
+    )).rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID');
   });
 });

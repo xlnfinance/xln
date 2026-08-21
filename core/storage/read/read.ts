@@ -2,6 +2,7 @@ import type { BookState } from '../../orderbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { decodeBuffer, decodeValidatedBuffer } from '../codec/codec';
+import { readBoundedValidatedValue } from '../codec/bounded-value';
 import {
   KEY_LIVE_ACCOUNT,
   KEY_HEAD,
@@ -233,7 +234,11 @@ export const readStorageFrameRecord = async (
 ): Promise<RuntimeFrame | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
-  const frame = await readValidatedOrNull(db, keyFrame(targetHeight), validateStorageFrameRecordValue);
+  const frame = await readBoundedValidatedValue(
+    db,
+    keyFrame(targetHeight),
+    validateStorageFrameRecordValue,
+  );
   if (frame && frame.height !== targetHeight) {
     throw new Error(`STORAGE_FRAME_KEY_HEIGHT_MISMATCH:key=${targetHeight}:value=${frame.height}`);
   }

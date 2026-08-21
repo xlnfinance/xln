@@ -97,7 +97,7 @@ describe('content-addressed Runtime outbox payloads', () => {
 
     expect(prepared.refs).toHaveLength(1);
     expect(prepared.rows).toHaveLength(36);
-    expect(prepared.rows.every(row => row.value.byteLength <= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES)).toBe(true);
     const [restored] = await readRuntimeOutputPayloads(memoryReader(prepared.rows), prepared.refs);
     expect(restored).toEqual(large);
   });
@@ -144,7 +144,7 @@ describe('content-addressed Runtime outbox payloads', () => {
     const prepared = prepareRuntimeOutputPayloadRows([large]);
 
     expect(prepared.rows).toHaveLength(207);
-    expect(prepared.rows.every(row => row.value.byteLength <= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES)).toBe(true);
     const [restored] = await readRuntimeOutputPayloads(memoryReader(prepared.rows), prepared.refs);
     expect(restored).toEqual(large);
   });
@@ -177,7 +177,7 @@ describe('content-addressed Entity replay contexts', () => {
     // An empty context is the manifest alone: prepared HTLCs are stored one
     // leaf each, so a frame that prepared none writes no HTLC rows.
     expect(prepared.rows).toHaveLength(1);
-    expect(prepared.rows.every(row => row.value.byteLength <= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows),
       prepared.refs,
@@ -218,7 +218,7 @@ describe('content-addressed Entity replay contexts', () => {
     const prepared = prepareEntityContextPayloadRows(new Map([[replicaId, context]]));
     // One leaf per entry, two reference pages holding their hashes, one manifest.
     expect(prepared.rows).toHaveLength(entries.length + 3);
-    expect(prepared.rows.every(row => row.value.byteLength <= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(memoryReader(prepared.rows), prepared.refs);
     expect(restored.get(replicaId)).toEqual(context);
   });

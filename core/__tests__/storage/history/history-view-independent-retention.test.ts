@@ -12,6 +12,7 @@ import {
   STORAGE_SCHEMA_VERSION,
 } from '../../../storage/keys';
 import { readRawOrNull } from '../../../storage/database/level';
+import { encodeBuffer } from '../../../storage/codec/codec';
 import type { StorageRuntimeConfig } from '../../../storage/types';
 
 const roots: string[] = [];
@@ -43,9 +44,9 @@ describe('independent frame history retention', () => {
       valueEncoding: 'buffer',
     });
     await db.batch()
-      .put(keyHistoryViewRuntimeActivity(1), Buffer.from('one'))
-      .put(keyHistoryViewRuntimeActivity(2), Buffer.from('two'))
-      .put(keyHistoryViewRuntimeActivity(3), Buffer.from('three'))
+      .put(keyHistoryViewRuntimeActivity(1), encodeBuffer('one'))
+      .put(keyHistoryViewRuntimeActivity(2), encodeBuffer('two'))
+      .put(keyHistoryViewRuntimeActivity(3), encodeBuffer('three'))
       .write();
 
     const result = await pruneHistoryViewRetention({
@@ -68,8 +69,8 @@ describe('independent frame history retention', () => {
 
     expect(result.latestPrunedRuntimeHeight).toBe(1);
     expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toBeNull();
-    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(2))).toEqual(Buffer.from('two'));
-    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(3))).toEqual(Buffer.from('three'));
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(2))).toEqual(encodeBuffer('two'));
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(3))).toEqual(encodeBuffer('three'));
     await db.close();
   });
 
@@ -80,7 +81,7 @@ describe('independent frame history retention', () => {
       keyEncoding: 'buffer',
       valueEncoding: 'buffer',
     });
-    await db.put(keyHistoryViewRuntimeActivity(1), Buffer.from('one'));
+    await db.put(keyHistoryViewRuntimeActivity(1), encodeBuffer('one'));
 
     const result = await pruneHistoryViewRetention({
       db,
@@ -101,7 +102,7 @@ describe('independent frame history retention', () => {
     });
 
     expect(result.prunedKeys).toBe(0);
-    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toEqual(Buffer.from('one'));
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toEqual(encodeBuffer('one'));
     await db.close();
   });
 
@@ -115,9 +116,9 @@ describe('independent frame history retention', () => {
     const accountFrameKey = keyHistoryViewAccountFrame(entityId, counterpartyId, 1);
     const entityFrameKey = keyHistoryViewEntityFrame(entityId, 1);
     await db.batch()
-      .put(keyHistoryViewRuntimeActivity(1), Buffer.from('runtime-activity'))
-      .put(accountFrameKey, Buffer.from('account-frame'))
-      .put(entityFrameKey, Buffer.from('entity-frame'))
+      .put(keyHistoryViewRuntimeActivity(1), encodeBuffer('runtime-activity'))
+      .put(accountFrameKey, encodeBuffer('account-frame'))
+      .put(entityFrameKey, encodeBuffer('entity-frame'))
       .write();
 
     await pruneHistoryViewRetention({
@@ -135,8 +136,8 @@ describe('independent frame history retention', () => {
     });
 
     expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toBeNull();
-    expect(await readRawOrNull(db, accountFrameKey)).toEqual(Buffer.from('account-frame'));
-    expect(await readRawOrNull(db, entityFrameKey)).toEqual(Buffer.from('entity-frame'));
+    expect(await readRawOrNull(db, accountFrameKey)).toEqual(encodeBuffer('account-frame'));
+    expect(await readRawOrNull(db, entityFrameKey)).toEqual(encodeBuffer('entity-frame'));
     await db.close();
   });
 });
