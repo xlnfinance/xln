@@ -2,7 +2,12 @@
  * P2P is a dumb encrypted transport. Replay protection and tx validity belong
  * to entity/account consensus; this layer only authenticates runtime sockets,
  * verifies signed gossip profiles, and hands envelopes to an open transport.
- * Durable retry ownership belongs to the runtime outbox, never this adapter.
+ * Delivery is attempted exactly once through the route selected from the
+ * authenticated profile. This adapter never retries an Account envelope and
+ * never sends the same bytes through a second transport: an asynchronous
+ * reject on the first route would otherwise turn route substitution into silent loss
+ * or a duplicate financial input. Bilateral Account consensus is the only
+ * delivery-completion protocol.
  */
 
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../runtime/types';
@@ -52,7 +57,6 @@ import {
 } from '../../protocol/payments/delivery-result';
 import { isRetryableIngressBackpressure, RETRYABLE_INGRESS_BACKPRESSURE } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/admit/entity-input-envelope-auth.ts';
-import { retryFailure } from '../../protocol/errors/failure-taxonomy';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 import {
   decodeJurisdictionGossipAnnouncement,
@@ -67,16 +71,16 @@ const SLOW_BROWSER_TIMER_MS = 32;
 const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const ENTITY_INPUT_RATE_LIMITED = 'ENTITY_INPUT_RATE_LIMITED';
 export const reportRelayClientError = (env: RuntimeReplica, relay: string, error: Error): void => {
-  if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
-    env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
+  if (error.message.includes(ENTITY_INPUT_TARGET_OFFLINE)) {
+    env.error?.('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
     return;
   }
-  if (error.message === ENTITY_INPUT_RATE_LIMITED) {
-    env.info('network', 'ENTITY_INPUT_RATE_LIMITED', { relay, error: error.message });
+  if (error.message.includes(ENTITY_INPUT_RATE_LIMITED)) {
+    env.error?.('network', 'ENTITY_INPUT_RATE_LIMITED', { relay, error: error.message });
     return;
   }
   if (isRetryableIngressBackpressure(error)) {
-    env.info('network', 'WS_CLIENT_RETRYABLE_BACKPRESSURE', { relay, error: error.message });
+    env.error?.('network', 'WS_CLIENT_INGRESS_REJECTED', { relay, error: error.message });
     return;
   }
   env.warn('network', 'WS_CLIENT_ERROR', { relay, error: error.message });
@@ -87,15 +91,7 @@ export const reportDirectClientError = (
   endpoint: string,
   targetRuntimeId: string,
   error: Error,
-): 'retryable-backpressure' | 'transport-error' => {
-  if (isRetryableIngressBackpressure(error)) {
-    env.info('network', 'WS_DIRECT_RETRYABLE_BACKPRESSURE', {
-      endpoint,
-      targetRuntimeId,
-      error: error.message,
-    });
-    return 'retryable-backpressure';
-  }
+): 'transport-error' => {
   env.warn('network', 'WS_DIRECT_ERROR', {
     endpoint,
     targetRuntimeId,
@@ -268,10 +264,10 @@ const p2pDeliveryResult = (
 const p2pSendFalseDelivery = (transport: EntityInputDeliveryTransport): EntityInputDeliveryResult =>
   p2pDeliveryResult(
     deliveryFailure({
-      category: 'TransientRace',
+      category: 'Contradiction',
       code: 'P2P_SEND_RETURNED_FALSE',
       message: 'Transport send returned false',
-      terminal: false,
+      terminal: true,
     }),
     transport,
   );
@@ -279,10 +275,10 @@ const p2pSendFalseDelivery = (transport: EntityInputDeliveryTransport): EntityIn
 const p2pNotDeliveredResult = (transport: EntityInputDeliveryTransport, message: string): EntityInputDeliveryResult =>
   p2pDeliveryResult(
     deliveryFailure({
-      category: 'TransientRace',
+      category: 'Contradiction',
       code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
       message,
-      terminal: false,
+      terminal: true,
     }),
     transport,
   );
@@ -291,10 +287,10 @@ const p2pSendThrowResult = (transport: EntityInputDeliveryTransport, message: st
   const code = message.includes('P2P_NO_PUBKEY') ? 'P2P_NO_PUBKEY' : 'P2P_SEND_THROW';
   return p2pDeliveryResult(
     deliveryFailure({
-      category: code === 'P2P_NO_PUBKEY' ? 'TransientRace' : 'Contradiction',
+      category: 'Contradiction',
       code,
       message,
-      terminal: code !== 'P2P_NO_PUBKEY',
+      terminal: true,
     }),
     transport,
   );
@@ -833,14 +829,13 @@ export class RuntimeP2P {
       targetRuntimeId,
     });
     const primary = this.resolveTransportClient(normalizedTargetRuntimeId);
-    const attempts = this.resolveTransportAttempts(primary);
     let transport = primary.transport;
     let delivery: EntityInputDeliveryResult | null = null;
-    for (const [attemptIndex, attempt] of attempts.entries()) {
-      transport = attempt.transport;
+    const client = primary.client?.isOpen() ? primary.client : null;
+    if (client) {
       try {
         delivery = this.deliverEntityInputs(
-          attempt.client,
+          client,
           normalizedTargetRuntimeId,
           envelope,
           ingressTimestamp,
@@ -868,15 +863,7 @@ export class RuntimeP2P {
         if (p2pShouldRefreshGossip(delivery)) {
           this.refreshGossip();
         }
-        if (transport === 'direct' && attemptIndex + 1 < attempts.length) {
-          this.env.warn('network', 'P2P_DIRECT_PRE_SEND_FAILED', {
-            targetRuntimeId: normalizedTargetRuntimeId,
-            transport,
-            delivery,
-          });
-          continue;
-        }
-        throw retryFailure('P2P_ENTITY_INPUTS_SEND_THROW',
+        throw new Error(
           `P2P_ENTITY_INPUTS_SEND_THROW: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
             `transport=${transport} error=${message}`,
         );
@@ -896,7 +883,7 @@ export class RuntimeP2P {
       directPeers: this.getDirectPeerState(),
       delivery: finalDelivery,
     });
-    throw retryFailure('P2P_ENTITY_INPUTS_NOT_DELIVERED',
+    throw new Error(
       `P2P_ENTITY_INPUTS_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
         `transport=${transport}`,
     );
@@ -985,33 +972,16 @@ export class RuntimeP2P {
     if (hasDirectEndpoint) {
       this.ensureDirectClientForRuntime(runtimeId);
       const directClient = this.getDirectClientForRuntime(runtimeId);
-      if (directClient) {
-        return {
-          client: directClient,
-          transport: 'direct',
-        };
-      }
+      // A signed profile with a direct endpoint selects one unambiguous route.
+      // Never substitute a relay while that socket handshakes or reconnects:
+      // relay admission is asynchronous and may reject after this Runtime has
+      // already retired its committed outbox bytes.
+      return { client: directClient, transport: 'direct' };
     }
     return {
       client: this.getActiveClient(),
       transport: 'relay',
     };
-  }
-
-  private resolveTransportAttempts(
-    primary: { client: RuntimeWsClient | null; transport: 'direct' | 'relay' },
-  ): Array<{
-    client: RuntimeWsClient;
-    transport: 'direct' | 'relay';
-  }> {
-    const attempts = primary.client?.isOpen()
-      ? [primary as { client: RuntimeWsClient; transport: 'direct' | 'relay' }]
-      : [];
-    if (primary.transport === 'direct') {
-      const relay = this.getActiveClient();
-      if (relay?.isOpen()) attempts.push({ client: relay, transport: 'relay' });
-    }
-    return attempts;
   }
 
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
@@ -1859,11 +1829,7 @@ export class RuntimeP2P {
           this.closing || this.closed ||
           this.directClients.get(normalizedTargetRuntimeId) !== client
         ) return;
-        if (
-          reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, error) === 'retryable-backpressure'
-        ) {
-          return;
-        }
+        reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, error);
         this.directClientErrors.set(normalizedTargetRuntimeId, {
           at: Date.now(),
           error: error.message,

@@ -54,6 +54,7 @@ type DirectRuntimeWsOptions = {
 export type DirectWebSocket = {
   readyState?: number;
   send(data: string | Uint8Array): WebSocketSendResult;
+  getBufferedAmount?(): number;
   close(code?: number, reason?: string): unknown;
 };
 
@@ -79,11 +80,11 @@ type DirectWsSession = {
   sessionKeys: RuntimeWsSessionKeys | null;
   outboundEncSeq: number;
   lastSeen: number;
-  /** Consecutive sendEntityInputsDelivery attempts that returned sent:false
-   *  while the socket still reported open (dropped-while-open or
-   *  backpressured-while-open — trySend collapses both to sent:false).
-   *  Reset on any attempt that returns sent:true. See STUCK_SEND_THRESHOLD. */
-  consecutiveFailedSendsWhileOpen: number;
+  /** `send() === -1` means queued by Bun, not dropped. Retain the streak only
+   *  for observability and a time-bounded stuck-socket watchdog; never send the
+   *  same financial envelope through a second route after Bun accepted it. */
+  consecutiveBackpressuredSends: number;
+  backpressureStartedAt: number;
 };
 
 type DirectRuntimeWsContext = {
@@ -159,7 +160,7 @@ const sendSession = (
 ): void => send(session.ws, signSessionFrame(context, session, msg));
 
 type DirectSendAttempt =
-  | { sent: true }
+  | { sent: true; backpressured: boolean }
   | { sent: false; error?: string };
 
 const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt => {
@@ -170,18 +171,9 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
   } catch (error) {
     return { sent: false, error: error instanceof Error ? error.message : String(error) };
   }
-  // Bun's send() returns -1 ("backpressured") when the payload was NOT written to
-  // the socket, only queued against uWebSockets' own backpressure limit — distinct
-  // from a positive byte count (actually sent). Treating backpressure as success
-  // here permanently marks a queued-not-confirmed accountInput as ROUTE_DIRECT_DELIVERED:
-  // the entity-output router's P2P failover (dispatchOutputEnvelope in
-  // core/runtime/delivery/dispatch.ts) never fires for it. Under sustained
-  // per-socket backpressure (observed at
-  // 1000-user scale, not at 500) that silently strands one bilateral channel forever
-  // while unrelated traffic on the same connection keeps flowing. There is no
-  // automatic retry path: only a genuine byte count counts as sent, otherwise
-  // dispatch falls through to P2P and then halts loudly if P2P also rejects it.
-  return classifyWebSocketSendResult(result) === 'accepted' ? { sent: true } : { sent: false };
+  const disposition = classifyWebSocketSendResult(result);
+  if (disposition === 'dropped') return { sent: false };
+  return { sent: true, backpressured: disposition === 'backpressured' };
 };
 
 const readRecoveryLookupKey = (payload: unknown): string => {
@@ -205,7 +197,8 @@ const ensureSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): Di
     sessionKeys: null,
     outboundEncSeq: 0,
     lastSeen: Date.now(),
-    consecutiveFailedSendsWhileOpen: 0,
+    consecutiveBackpressuredSends: 0,
+    backpressureStartedAt: 0,
   };
   context.sessions.set(ws, created);
   return created;
@@ -303,41 +296,42 @@ const forgetIfDisconnected = (context: DirectRuntimeWsContext, ws: DirectWebSock
   if (!isSocketOpen(ws)) forgetSession(context, ws);
 };
 
-// trySend now correctly reports sent:false for a single dropped/backpressured
-// write, so retries are no longer masked as false-positive deliveries. But a
-// correctly-classified retry still does nothing if it keeps landing on the
-// SAME wedged pipe: Bun's ServerWebSocket has a documented failure mode where
-// a socket reports failed writes indefinitely while readyState keeps reading
-// OPEN (github.com/oven-sh/bun#9368) — a live-looking socket that never
-// actually drains again. Observed empirically at 1000-user scale: a hub's
-// resend of one pending account frame failed repeatedly over minutes to the
-// same peer while unrelated traffic on other sessions kept flowing.
-// A single failed-while-open send must stay retryable and must not forget
-// the session (see forgetIfDisconnected / the "still-open socket" test) —
-// but once MANY consecutive sends to one session fail while it keeps
-// reporting open, treat the connection as genuinely wedged and force it
-// closed so the peer's own reconnect logic re-establishes a fresh socket +
-// write queue.
-const STUCK_SEND_THRESHOLD = 4;
+const STUCK_BACKPRESSURE_THRESHOLD = 4;
+export const DIRECT_STUCK_BACKPRESSURE_MS = 10_000;
+
+const resetBackpressure = (session: DirectWsSession): void => {
+  session.consecutiveBackpressuredSends = 0;
+  session.backpressureStartedAt = 0;
+};
 
 const noteSendOutcome = (
   context: DirectRuntimeWsContext,
   session: DirectWsSession,
-  sent: boolean,
+  attempt: DirectSendAttempt,
 ): void => {
-  if (sent) {
-    session.consecutiveFailedSendsWhileOpen = 0;
+  if (!attempt.sent || !attempt.backpressured) {
+    if (attempt.sent) resetBackpressure(session);
     return;
   }
-  if (!isSocketOpen(session.ws)) return; // already dead; forgetIfDisconnected already handles this.
-  session.consecutiveFailedSendsWhileOpen += 1;
-  if (session.consecutiveFailedSendsWhileOpen < STUCK_SEND_THRESHOLD) return;
-  session.consecutiveFailedSendsWhileOpen = 0;
+  const now = Date.now();
+  session.consecutiveBackpressuredSends += 1;
+  if (session.backpressureStartedAt === 0) session.backpressureStartedAt = now;
+  directWsLog.info('entity_inputs.backpressured', {
+    runtimeId: session.runtimeId,
+    consecutive: session.consecutiveBackpressuredSends,
+    ageMs: now - session.backpressureStartedAt,
+    bufferedAmount: session.ws.getBufferedAmount?.() ?? null,
+  });
+  if (
+    session.consecutiveBackpressuredSends < STUCK_BACKPRESSURE_THRESHOLD ||
+    now - session.backpressureStartedAt < DIRECT_STUCK_BACKPRESSURE_MS
+  ) return;
+  resetBackpressure(session);
+  directWsLog.warn('entity_inputs.stuck_backpressure_closed', {
+    runtimeId: session.runtimeId,
+    bufferedAmount: session.ws.getBufferedAmount?.() ?? null,
+  });
   session.ws.close(4010, 'stuck-backpressure');
-  // The 'close' websocket handler runs the same forgetSession cleanup, but do
-  // it here too rather than depend on that callback's timing: the next
-  // resend must see a clean slate (missingCode failover), not a
-  // still-registered-but-now-closed session.
   forgetSession(context, session.ws);
 };
 
@@ -389,13 +383,14 @@ const sendEntityInputsDelivery = (
   }
   const attempt = trySend(target.session.ws, signSessionFrame(context, target.session, msg));
   if (!attempt.sent) forgetIfDisconnected(context, target.session.ws);
-  noteSendOutcome(context, target.session, attempt.sent);
+  noteSendOutcome(context, target.session, attempt);
   directWsLog.debug('entity_inputs.send_attempt', {
     id: msg.id,
     to: targetRuntimeId,
     encSeq: msg.encSeq ?? null,
     entities: envelope.entityInputs.length,
     sent: attempt.sent,
+    backpressured: attempt.sent ? attempt.backpressured : false,
   });
   return resultFromSendAttempt(attempt, 'ROUTE_DIRECT_DELIVERED', 'ROUTE_DIRECT_SEND_FAILED');
 };
@@ -494,6 +489,22 @@ const handleHandshake = (
 const sessionRuntimeId = (session: DirectWsSession): string =>
   normalizeRuntimeId(session.runtimeId || '');
 
+const rejectDirectMessage = (
+  context: DirectRuntimeWsContext,
+  session: DirectWsSession,
+  msg: RuntimeWsMessage,
+  error: string,
+): void => {
+  const to = sessionRuntimeId(session);
+  sendSession(context, session, {
+    type: 'error',
+    id: makeMessageId(),
+    error,
+    ...(msg.id ? { inReplyTo: msg.id } : {}),
+    ...(to ? { to } : {}),
+  });
+};
+
 const validateMessageRoute = (
   context: DirectRuntimeWsContext,
   session: DirectWsSession,
@@ -502,15 +513,15 @@ const validateMessageRoute = (
 ): string | null => {
   const fromRuntimeId = sessionRuntimeId(session);
   if (!fromRuntimeId) {
-    sendSession(context, session, { type: 'error', error: 'Missing source runtimeId' });
+    rejectDirectMessage(context, session, msg, 'Missing source runtimeId');
     return null;
   }
   if (msg.from && normalizeRuntimeId(msg.from) !== fromRuntimeId) {
-    sendSession(context, session, { type: 'error', error: `${prefix} source runtimeId mismatch` });
+    rejectDirectMessage(context, session, msg, `${prefix} source runtimeId mismatch`);
     return null;
   }
   if (normalizeRuntimeId(msg.to || '') !== context.serverRuntimeId) {
-    sendSession(context, session, { type: 'error', error: `${prefix} target runtimeId mismatch` });
+    rejectDirectMessage(context, session, msg, `${prefix} target runtimeId mismatch`);
     return null;
   }
   return fromRuntimeId;
@@ -561,15 +572,15 @@ const handleEntityInputs = async (
   msg: RuntimeWsMessage,
 ): Promise<void> => {
   if (msg.type !== 'entity_inputs') {
-    sendSession(context, session, { type: 'error', error: 'Unsupported direct ws message type' });
+    rejectDirectMessage(context, session, msg, 'Unsupported direct ws message type');
     return;
   }
   if (normalizeRuntimeId(msg.to || '') !== context.serverRuntimeId) {
-    sendSession(context, session, { type: 'error', error: 'Direct target runtimeId mismatch' });
+    rejectDirectMessage(context, session, msg, 'Direct target runtimeId mismatch');
     return;
   }
   if (!msg.encrypted || typeof msg.payload !== 'string') {
-    sendSession(context, session, { type: 'error', error: 'Direct entity_inputs must be encrypted' });
+    rejectDirectMessage(context, session, msg, 'Direct entity_inputs must be encrypted');
     return;
   }
   const fromRuntimeId = validateMessageRoute(context, session, msg, 'Direct');
@@ -600,7 +611,12 @@ const handleEntityInputs = async (
       encSeq: msg.encSeq ?? null,
       error: error instanceof Error ? error.message : String(error),
     });
-    sendSession(context, session, { type: 'error', error: `Direct delivery failed: ${(error as Error).message}` });
+    rejectDirectMessage(
+      context,
+      session,
+      msg,
+      `Direct delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 };
 
@@ -610,7 +626,13 @@ const handleDirectMessage = async (
   raw: string | Buffer | ArrayBuffer,
 ): Promise<void> => {
   const session = ensureSession(context, ws);
-  if (session.duplicateClosing) return;
+  if (session.duplicateClosing) {
+    directWsLog.warn('wire_message.rejected_replaced_session', {
+      runtimeId: session.runtimeId,
+      bytes: typeof raw === 'string' ? raw.length : raw.byteLength,
+    });
+    return;
+  }
   let msg: RuntimeWsMessage;
   try {
     msg = deserializeWsMessage(raw);
@@ -636,7 +658,7 @@ const handleDirectMessage = async (
         session.sessionKeys?.c2s,
       );
   if (verifiedError) {
-    sendSession(context, session, { type: 'error', error: verifiedError });
+    rejectDirectMessage(context, session, msg, verifiedError);
     ws.close(4003, 'session-auth-invalid');
     return;
   }
@@ -671,12 +693,24 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   };
   return {
     path: context.routePath,
-    getSessionState: (): Array<{ runtimeId: string; open: boolean; lastSeen: number }> =>
+    getSessionState: (): Array<{
+      runtimeId: string;
+      open: boolean;
+      lastSeen: number;
+      consecutiveBackpressuredSends: number;
+      backpressureAgeMs: number;
+      bufferedAmount: number | null;
+    }> =>
       Array.from(context.sessionsByRuntime.values())
         .map(session => ({
           runtimeId: session.runtimeId || '',
           open: isSocketOpen(session.ws),
           lastSeen: session.lastSeen,
+          consecutiveBackpressuredSends: session.consecutiveBackpressuredSends,
+          backpressureAgeMs: session.backpressureStartedAt === 0
+            ? 0
+            : Math.max(0, Date.now() - session.backpressureStartedAt),
+          bufferedAmount: session.ws.getBufferedAmount?.() ?? null,
         }))
         .filter(session => session.runtimeId.length > 0)
         .sort((left, right) => compareCanonicalText(left.runtimeId, right.runtimeId)),
@@ -703,6 +737,10 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
       },
       message: (ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer): Promise<void> =>
         handleDirectMessage(context, ws, raw),
+      drain(ws: DirectWebSocket): void {
+        const session = context.sessions.get(ws);
+        if (session) resetBackpressure(session);
+      },
       close(ws: DirectWebSocket): void {
         forgetSession(context, ws);
       },

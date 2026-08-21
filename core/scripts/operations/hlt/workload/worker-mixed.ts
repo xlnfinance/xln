@@ -166,8 +166,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       },
     });
     const submittedPayments = users.length * args.rounds;
-    const finalBook = submitted.finalBook;
-    const matchedElapsedMs = submitted.economicCompletionElapsedMs;
     const settlementEvidence = await waitForFullySettledEvidence({
       hub,
       load: users.map(lane => ({
@@ -179,10 +177,10 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       pairs: submitted.settlementPairs,
       tradeCountBefore: initialBook.tradeCount,
       expectedSwaps,
-      matchedElapsedMs,
       startedAt,
     });
     const rates = assertProductionSwapFullySettled(settlementEvidence);
+    const matchedElapsedMs = settlementEvidence.matchedElapsedMs;
     const hubCountersAfter = await waitForHubSettlement(
       hub,
       hubIdentity.entityId,
@@ -237,7 +235,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       runtimeInputBatches: submitted.runtimeInputBatches,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
-      matchedEconomicSwaps: finalBook.tradeCount - initialBook.tradeCount,
+      matchedEconomicSwaps: settlementEvidence.tradeCountAfter - initialBook.tradeCount,
       fullySettledEconomicSwaps: settlementEvidence.expectedSwaps,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
@@ -246,7 +244,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       matchedTps: rates.matchedTps,
       fullySettledTps: rates.fullySettledTps,
       tradeCountBefore: initialBook.tradeCount,
-      tradeCountAfter: finalBook.tradeCount,
+      tradeCountAfter: settlementEvidence.tradeCountAfter,
       submittedEconomicSwaps: expectedSwaps,
       uncompletedEconomicSwapsAfterRun: 0,
       driverRssBefore,

@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
-import { createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute } from '../../../network/p2p/direct-runtime-bun';
+import {
+  createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute,
+  DIRECT_STUCK_BACKPRESSURE_MS,
+} from '../../../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../../../network/p2p/auth/hello-auth';
@@ -516,6 +519,8 @@ describe('direct runtime websocket route', () => {
 
     expect(sent.at(-1)).toMatchObject({
       type: 'error',
+      inReplyTo: 'malformed-encrypted-envelope',
+      to: clientRuntimeId,
       error: 'Direct delivery failed: P2P_ENTITY_INPUTS_ENVELOPE_EMPTY',
     });
     expect(received).toBe(0);
@@ -719,7 +724,7 @@ describe('direct runtime websocket route', () => {
     });
   });
 
-  test('defers on Bun backpressure/ambiguous-zero sends but keeps a still-open socket', async () => {
+  test('accepts Bun queued backpressure, but defers an ambiguous zero-byte drop', async () => {
     const serverSeed = 'direct-route-server-send-contract';
     const clientSeed = 'direct-route-client-send-contract';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -745,24 +750,22 @@ describe('direct runtime websocket route', () => {
       }],
     };
 
-    // -1 means Bun only queued the write against its own backpressure limit; it did
-    // NOT confirm the bytes reached the peer. Treating that as delivered stranded a
-    // resent accountInput forever at 1000-user scale: the entity-output router's P2P
-    // failover only fires when direct reports non-delivered, so a -1 that never
-    // actually flushes must still be retryable, not a terminal success. The socket
-    // itself must still survive (asserted below) since readyState reads OPEN.
+    // -1 means Bun accepted the exact bytes into its ordered socket queue. Sending
+    // the same financial envelope through relay at this point can double-deliver it.
     ws.send = (raw) => {
       sent.push(deserializeWsMessage(raw));
       return -1;
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
-      outcome: 'deferred',
-      code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: true,
-      terminal: false,
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_DELIVERED',
     });
     expect(route.getSessionState()).toEqual([
-      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+      expect.objectContaining({
+        runtimeId: clientRuntimeId,
+        open: true,
+        consecutiveBackpressuredSends: 1,
+      }),
     ]);
 
     ws.send = (raw) => {
@@ -889,13 +892,7 @@ describe('direct runtime websocket route', () => {
     expect(received).toEqual([inboundEnvelope]);
   });
 
-  test('force-closes a session after 4 consecutive failed-while-open sends', async () => {
-    // A correctly-classified retry (see the two tests above) still does
-    // nothing if it keeps landing on the SAME wedged pipe (oven-sh/bun#9368:
-    // a socket that reports failed writes indefinitely while readyState
-    // keeps reading OPEN). After STUCK_SEND_THRESHOLD consecutive
-    // failed-while-open sends to one session, the route must force-close it
-    // so the peer's own reconnect logic re-establishes a fresh socket.
+  test('force-closes only sustained queued backpressure, never a four-message burst', async () => {
     const serverSeed = 'direct-route-server-stuck-backpressure';
     const clientSeed = 'direct-route-client-stuck-backpressure';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -915,32 +912,41 @@ describe('direct runtime websocket route', () => {
       sourceRuntimeTimestamp: 1,
       entityInputs: [],
     };
-    ws.send = (raw) => {
-      sent.push(deserializeWsMessage(raw));
-      return -1; // Bun backpressure: always classified as failed-while-open.
-    };
+    const now = spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      ws.send = (raw) => {
+        sent.push(deserializeWsMessage(raw));
+        return -1;
+      };
 
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
-        outcome: 'deferred',
-        code: 'ROUTE_DIRECT_SEND_FAILED',
-      });
-      expect(closed).toEqual([]);
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+          outcome: 'delivered',
+          code: 'ROUTE_DIRECT_DELIVERED',
+        });
+        expect(closed).toEqual([]);
+      }
       expect(route.getSessionState()).toEqual([
-        expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+        expect.objectContaining({
+          runtimeId: clientRuntimeId,
+          open: true,
+          consecutiveBackpressuredSends: 3,
+        }),
       ]);
-    }
 
-    // 4th consecutive failure trips the watchdog.
-    expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
-      outcome: 'deferred',
-      code: 'ROUTE_DIRECT_SEND_FAILED',
-    });
-    expect(closed).toEqual([{ code: 4010, reason: 'stuck-backpressure' }]);
-    expect(route.getSessionState()).toEqual([]);
+      now.mockReturnValue(1_000 + DIRECT_STUCK_BACKPRESSURE_MS + 1);
+      expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+        outcome: 'delivered',
+        code: 'ROUTE_DIRECT_DELIVERED',
+      });
+      expect(closed).toEqual([{ code: 4010, reason: 'stuck-backpressure' }]);
+      expect(route.getSessionState()).toEqual([]);
+    } finally {
+      now.mockRestore();
+    }
   });
 
-  test('an accepted send resets the failed-while-open streak', async () => {
+  test('an accepted send resets the queued-backpressure streak', async () => {
     const serverSeed = 'direct-route-server-streak-reset';
     const clientSeed = 'direct-route-client-streak-reset';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -961,7 +967,7 @@ describe('direct runtime websocket route', () => {
       entityInputs: [],
     };
 
-    // 3 failures, then a genuine success, then 3 more failures: the streak
+    // 3 queued sends, then a direct write, then 3 queued sends: the streak
     // must never accumulate across the successful send.
     ws.send = (raw) => {
       sent.push(deserializeWsMessage(raw));

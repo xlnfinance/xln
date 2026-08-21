@@ -84,11 +84,6 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       swapsPerRound: args.swaps, rounds: args.rounds, cadenceMs: args.cadenceMs,
       prepared: preparedParallel,
     });
-    const matchedElapsedMs = submitted.economicCompletionElapsedMs;
-    const finalFrame = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
-    const laneFinalFrames = await readLaneFrames();
-    const crossedBookAfterRun = submitted.finalBook.bestBidPriceTicks !== null &&
-      submitted.finalBook.bestBidPriceTicks >= submitted.finalBook.bestAskPriceTicks;
     const settlementEvidence = await waitForFullySettledEvidence({
       hub,
       load: laneRuntimes.map(lane => ({
@@ -100,10 +95,15 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       pairs: submitted.settlementPairs,
       tradeCountBefore: initialBook.tradeCount,
       expectedSwaps: args.swaps * args.rounds,
-      matchedElapsedMs,
       startedAt,
     });
     const rates = assertProductionSwapFullySettled(settlementEvidence);
+    const matchedElapsedMs = settlementEvidence.matchedElapsedMs;
+    const finalFrame = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
+    const laneFinalFrames = await readLaneFrames();
+    const crossedBookAfterRun = settlementEvidence.bestBidPriceTicks !== null &&
+      settlementEvidence.bestAskPriceTicks !== null &&
+      settlementEvidence.bestBidPriceTicks >= settlementEvidence.bestAskPriceTicks;
     const leftoverAccounts = settlementEvidence.accounts.filter(account =>
       account.pendingFrame || account.pendingProposal || account.mempoolTxs > 0 || account.liveOfferIds.length > 0);
     console.log(
@@ -129,7 +129,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       runtimeInputBatches: submitted.runtimeInputBatches,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
-      matchedEconomicSwaps: submitted.finalBook.tradeCount - initialBook.tradeCount,
+      matchedEconomicSwaps: settlementEvidence.tradeCountAfter - initialBook.tradeCount,
       fullySettledEconomicSwaps: settlementEvidence.expectedSwaps,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
@@ -138,7 +138,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       matchedTps: rates.matchedTps,
       fullySettledTps: rates.fullySettledTps,
       tradeCountBefore: initialBook.tradeCount,
-      tradeCountAfter: submitted.finalBook.tradeCount,
+      tradeCountAfter: settlementEvidence.tradeCountAfter,
       submittedEconomicSwaps: args.swaps * args.rounds,
       uncompletedEconomicSwapsAfterRun: 0,
       driverRssBefore,

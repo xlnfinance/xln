@@ -885,6 +885,9 @@ const createMarketMakerWebSocketHandler = (
     }
     return directRuntimeWs.websocket.message(ws, raw);
   },
+  drain(ws: MarketMakerServerSocket) {
+    if (ws.data?.type !== 'rpc') directRuntimeWs.websocket.drain(ws);
+  },
   close(ws: MarketMakerServerSocket) {
     if (ws.data?.type === 'rpc') {
       forgetRuntimeAdapterClient(ws);

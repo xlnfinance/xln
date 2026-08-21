@@ -48,7 +48,8 @@ interface BrowserWebSocket {
 interface NodeWebSocket {
   binaryType?: string;
   readyState?: number;
-  send(data: string | Buffer | Uint8Array): void;
+  bufferedAmount?: number;
+  send(data: string | Buffer | Uint8Array, cb?: (error?: Error) => void): void;
   close(): void;
   on(event: 'open', cb: () => void): void;
   on(event: 'message', cb: (data: Buffer) => void): void;
@@ -551,8 +552,8 @@ export class RuntimeWsClient {
       // Socket event emitters do not await async listeners. Letting a rejected
       // application callback escape here becomes an unhandled rejection and
       // kills Bun. Report it loudly at the transport boundary instead. A
-      // reliable entity sender receives no ACK and therefore retries the exact
-      // same delivery after a quiescing receiver resumes.
+      // Bilateral Account ACK is the sole delivery-completion signal. Keep the
+      // rejected transport event visible; never invent an implicit resend here.
       this.sendDebugEvent({
         level: 'error',
         code: 'WS_MESSAGE_HANDLER_REJECTED',
@@ -768,7 +769,9 @@ export class RuntimeWsClient {
         message: reason,
         inReplyTo: msg.inReplyTo,
       });
-      this.options.onError?.(new Error(`P2P_RELAY_SEND_REJECTED: ${reason}`));
+      this.options.onError?.(new Error(
+        `P2P_REMOTE_REJECTED:id=${msg.inReplyTo}:to=${String(msg.from || msg.to || '')}:reason=${reason}`,
+      ));
       return true;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
@@ -1069,7 +1072,22 @@ export class RuntimeWsClient {
     const payload = serializeWsMessage(outboundMsg);
     countOp(`ws.send.${outboundMsg.type}`, payload.length);
     try {
-      this.ws.send(payload);
+      if (isNodeWebSocket(this.ws)) {
+        const messageId = String(outboundMsg.id || '');
+        const messageType = String(outboundMsg.type || '');
+        const targetRuntimeId = String(outboundMsg.to || '');
+        this.ws.send(payload, error => {
+          if (!error) return;
+          this.options.onError?.(new Error(
+            `WS_ASYNC_SEND_FAILED:type=${messageType}:id=${messageId}:to=${targetRuntimeId}:` +
+            `bytes=${payload.length}:buffered=${Number(this.ws && isNodeWebSocket(this.ws) ? this.ws.bufferedAmount ?? 0 : 0)}:` +
+            `error=${error.message}`,
+            { cause: error },
+          ));
+        });
+      } else {
+        this.ws.send(payload);
+      }
       return true;
     } catch (error) {
       this.options.onError?.(error as Error);

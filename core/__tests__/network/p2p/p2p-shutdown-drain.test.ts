@@ -10,19 +10,21 @@ import { canonicalizeRuntimeWsAudience } from '../../../network/p2p/ws-protocol'
 
 const RUNTIME_ID = `0x${'11'.repeat(20)}`;
 
-test('offline target is an explicit info-level retry race', () => {
+test('offline target and ingress rejection are loud transport failures', () => {
   const env = createEmptyEnv('p2p-receipt-target-offline-severity');
   const info: string[] = [];
+  const errors: string[] = [];
   const warnings: string[] = [];
   env.info = (_category, message) => { info.push(message); };
+  env.error = (_category, message) => { errors.push(message); };
   env.warn = (_category, message) => { warnings.push(message); };
 
   reportRelayClientError(env, 'ws://relay', new Error('ENTITY_INPUT_TARGET_NOT_CONNECTED'));
-  expect(info).toEqual(['ENTITY_INPUT_TARGET_OFFLINE']);
+  expect(errors).toEqual(['ENTITY_INPUT_TARGET_OFFLINE']);
   expect(warnings).toEqual([]);
 
   reportRelayClientError(env, 'ws://relay', new Error('ENTITY_INPUT_RATE_LIMITED'));
-  expect(info).toEqual([
+  expect(errors).toEqual([
     'ENTITY_INPUT_TARGET_OFFLINE',
     'ENTITY_INPUT_RATE_LIMITED',
   ]);
@@ -31,10 +33,10 @@ test('offline target is an explicit info-level retry race', () => {
   reportRelayClientError(env, 'ws://relay', new Error(
     'INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput',
   ));
-  expect(info).toEqual([
+  expect(errors).toEqual([
     'ENTITY_INPUT_TARGET_OFFLINE',
     'ENTITY_INPUT_RATE_LIMITED',
-    'WS_CLIENT_RETRYABLE_BACKPRESSURE',
+    'WS_CLIENT_INGRESS_REJECTED',
   ]);
   expect(warnings).toEqual([]);
 
@@ -42,7 +44,7 @@ test('offline target is an explicit info-level retry race', () => {
   expect(warnings).toEqual(['WS_CLIENT_ERROR']);
 });
 
-test('direct runtime quiesce is info-level backpressure, not a transport warning', () => {
+test('direct runtime rejection is a visible transport error, never a retry hint', () => {
   const env = createEmptyEnv('p2p-direct-quiesce-severity');
   const info: string[] = [];
   const warnings: string[] = [];
@@ -54,13 +56,51 @@ test('direct runtime quiesce is info-level backpressure, not a transport warning
     'ws://peer/ws',
     `0x${'22'.repeat(20)}`,
     new Error('INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput'),
-  )).toBe('retryable-backpressure');
-  expect(info).toEqual(['WS_DIRECT_RETRYABLE_BACKPRESSURE']);
-  expect(warnings).toEqual([]);
+  )).toBe('transport-error');
+  expect(info).toEqual([]);
+  expect(warnings).toEqual(['WS_DIRECT_ERROR']);
 
   expect(reportDirectClientError(env, 'ws://peer/ws', `0x${'22'.repeat(20)}`, new Error('socket failed')))
     .toBe('transport-error');
-  expect(warnings).toEqual(['WS_DIRECT_ERROR']);
+  expect(warnings).toEqual(['WS_DIRECT_ERROR', 'WS_DIRECT_ERROR']);
+});
+
+test('node websocket async send failures retain exact envelope correlation', () => {
+  const errors: string[] = [];
+  const client = new RuntimeWsClient({
+    url: 'ws://127.0.0.1:1/relay',
+    runtimeId: RUNTIME_ID,
+    helloAudience: RUNTIME_ID,
+    signerId: '1',
+    seed: 'node-ws-async-send-failure',
+    encryptionKeyPair: deriveEncryptionKeyPair('node-ws-async-send-failure'),
+    onError: error => errors.push(error.message),
+  });
+  const socket = {
+    readyState: 1,
+    bufferedAmount: 77,
+    on: () => undefined,
+    send: (_payload: string, callback?: (error?: Error) => void) => {
+      callback?.(new Error('kernel flush failed'));
+    },
+    close: () => undefined,
+  };
+  const internals = client as unknown as {
+    ws: typeof socket;
+    helloAcknowledged: boolean;
+    helloAudience: string;
+    helloNonce: string;
+  };
+  internals.ws = socket;
+  internals.helloAcknowledged = true;
+  internals.helloAudience = RUNTIME_ID;
+  internals.helloNonce = 'node-ws-send-nonce';
+
+  expect(client.sendDebugEvent({ code: 'CORRELATED_SEND' })).toBe(true);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toContain('WS_ASYNC_SEND_FAILED:type=debug_event:id=');
+  expect(errors[0]).toContain(':bytes=');
+  expect(errors[0]).toContain(':buffered=77:error=kernel flush failed');
 });
 
 test('an unauthenticated duplicate-runtime close cannot permanently stop a headless client', () => {

@@ -2552,6 +2552,9 @@ const startHubHttpSurface = (
         }
         return directRuntimeWs.websocket.message(ws, raw);
       },
+      drain(ws: HubServerSocket) {
+        if (ws.data?.type !== 'rpc') directRuntimeWs.websocket.drain(ws);
+      },
       close(ws: HubServerSocket) {
         if (ws.data?.type === 'rpc') {
           forgetRuntimeAdapterClient(ws);

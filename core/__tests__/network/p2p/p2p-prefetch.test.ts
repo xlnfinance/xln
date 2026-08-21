@@ -186,12 +186,12 @@ test('enqueueEntityInputsDelivery reports typed delivery result when no transpor
     delivery: {
       outcome: 'failed',
       code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
-      retryable: true,
-      fatal: false,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
       transport: 'relay',
       failure: {
-        category: 'TransientRace',
+        category: 'Contradiction',
       },
     },
   });
@@ -233,9 +233,9 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
     delivery: {
       outcome: 'failed',
       code: 'P2P_SEND_RETURNED_FALSE',
-      retryable: true,
-      fatal: false,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
       transport: 'relay',
     },
   });
@@ -243,9 +243,9 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
     code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
     delivery: {
       code: 'P2P_SEND_RETURNED_FALSE',
-      retryable: true,
-      fatal: false,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
       transport: 'relay',
     },
   });
@@ -296,14 +296,14 @@ test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery
     delivery: {
       outcome: 'failed',
       code: 'P2P_NO_PUBKEY',
-      retryable: true,
-      fatal: false,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
     },
   });
 });
 
-test('enqueueEntityInputsDelivery uses official relay when advertised hub direct endpoint is not open', () => {
+test('enqueueEntityInputsDelivery fails loud while an advertised direct endpoint is not open', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const debugEvents: unknown[] = [];
@@ -346,20 +346,14 @@ test('enqueueEntityInputsDelivery uses official relay when advertised hub direct
     }],
   };
 
-  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 1234)).toMatchObject({
-    outcome: 'delivered',
-    code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
-    transport: 'relay',
-  });
-
-  expect(sent).toHaveLength(1);
-  expect(sent[0]?.to).toBe(TARGET_RUNTIME_ID);
-  expect(sent[0]?.timestamp).toBe(1234);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 1234))
+    .toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
+  expect(sent).toHaveLength(0);
   expect(debugEvents.some((event) =>
     typeof event === 'object' &&
     event !== null &&
     (event as { code?: string }).code === 'P2P_ENTITY_INPUT_NOT_DELIVERED',
-  )).toBe(false);
+  )).toBe(true);
 });
 
 test('enqueueEntityInputsDelivery returns typed success with transport', () => {
@@ -483,7 +477,7 @@ test('enqueueEntityInputsDelivery prefers open direct transport over relay', () 
   expect(relaySent).toHaveLength(0);
 });
 
-test('enqueueEntityInputsDelivery uses relay when direct accepts zero bytes', () => {
+test('enqueueEntityInputsDelivery never reroutes after direct accepts zero bytes', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   let directAttempts = 0;
   let relayAttempts = 0;
@@ -515,14 +509,12 @@ test('enqueueEntityInputsDelivery uses relay when direct accepts zero bytes', ()
     signerId: '0x2222222222222222222222222222222222222222',
     entityTxs: [],
   };
-  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
-    outcome: 'delivered',
-    transport: 'relay',
-  });
-  expect({ directAttempts, relayAttempts }).toEqual({ directAttempts: 1, relayAttempts: 1 });
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input)))
+    .toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
+  expect({ directAttempts, relayAttempts }).toEqual({ directAttempts: 1, relayAttempts: 0 });
 });
 
-test('enqueueEntityInputsDelivery uses relay after a direct pre-send encryption error', () => {
+test('enqueueEntityInputsDelivery never reroutes after a direct pre-send encryption error', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   let relayAttempts = 0;
   const directClient = {
@@ -553,14 +545,12 @@ test('enqueueEntityInputsDelivery uses relay after a direct pre-send encryption 
     signerId: '0x2222222222222222222222222222222222222222',
     entityTxs: [],
   };
-  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
-    outcome: 'delivered',
-    transport: 'relay',
-  });
-  expect(relayAttempts).toBe(1);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input)))
+    .toThrow(/P2P_ENTITY_INPUTS_SEND_THROW/);
+  expect(relayAttempts).toBe(0);
 });
 
-test('enqueueEntityInputsDelivery uses relay while the known direct socket is unavailable', () => {
+test('enqueueEntityInputsDelivery never substitutes relay while the known direct socket is unavailable', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const relaySent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const directSent: unknown[] = [];
@@ -605,14 +595,9 @@ test('enqueueEntityInputsDelivery uses relay while the known direct socket is un
     }],
   };
 
-  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 6789)).toMatchObject({
-    outcome: 'delivered',
-    code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
-    transport: 'relay',
-  });
-  expect(relaySent).toHaveLength(1);
-  expect(relaySent[0]?.to).toBe(TARGET_RUNTIME_ID);
-  expect(relaySent[0]?.timestamp).toBe(6789);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 6789))
+    .toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
+  expect(relaySent).toHaveLength(0);
   expect(directSent).toHaveLength(0);
 });
 

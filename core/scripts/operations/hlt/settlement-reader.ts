@@ -335,7 +335,6 @@ export const waitForFullySettledEvidence = async (options: {
   pairs: readonly SettlementAccountPair[];
   tradeCountBefore: number;
   expectedSwaps: number;
-  matchedElapsedMs: number;
   startedAt: number;
   timeoutMs?: number;
 }): Promise<ProductionSwapSettlementEvidence> => {
@@ -349,6 +348,8 @@ export const waitForFullySettledEvidence = async (options: {
     accounts: [],
   };
   let lastProgressAt = 0;
+  let lastTradeCount = options.tradeCountBefore;
+  let matchedElapsedMs: number | null = null;
   let hubLiteLastSample: SettlementEvidenceResponse['pendingAccountSample'] = [];
   while (performance.now() <= deadline) {
     const [hubLite, loadLite, marketMakerLite] = await Promise.all([
@@ -356,6 +357,25 @@ export const waitForFullySettledEvidence = async (options: {
       readLoadLite(options.load),
       readEvidence(options.marketMaker, EMPTY_ACCOUNTS_REQUEST),
     ]);
+    const liteBook = hubLite?.book;
+    if (liteBook) {
+      const targetTradeCount = options.tradeCountBefore + options.expectedSwaps;
+      if (liteBook.tradeCount > targetTradeCount) {
+        throw new Error(
+          `PRODUCTION_SWAP_LOAD_UNEXPECTED_CONCURRENT_TRADES:${liteBook.tradeCount}:${targetTradeCount}`,
+        );
+      }
+      if (liteBook.tradeCount !== lastTradeCount) {
+        lastTradeCount = liteBook.tradeCount;
+        console.log(
+          `[load] trades ${liteBook.tradeCount}/${targetTradeCount} ` +
+          `liveOrders=${liteBook.liveOrderCount}`,
+        );
+      }
+      if (liteBook.tradeCount === targetTradeCount && matchedElapsedMs === null) {
+        matchedElapsedMs = Math.max(1, Math.ceil(performance.now() - options.startedAt));
+      }
+    }
     if (hubLite === null || loadLite === null || marketMakerLite === null) {
       const now = performance.now();
       if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
@@ -435,11 +455,17 @@ export const waitForFullySettledEvidence = async (options: {
     if (!book || book.entityId !== options.hubBookEntityId || book.pairId !== PRODUCTION_SWAP_LOAD_PAIR_ID) {
       throw new Error('PRODUCTION_SWAP_SETTLEMENT_BOOK_EVIDENCE_MISSING');
     }
+    if (matchedElapsedMs === null) {
+      throw new Error(
+        `PRODUCTION_SWAP_LOAD_TRADE_NOT_COMMITTED:` +
+        `${options.tradeCountBefore + options.expectedSwaps}:reached=${book.tradeCount}`,
+      );
+    }
     const evidence: ProductionSwapSettlementEvidence = {
       expectedSwaps: options.expectedSwaps,
       tradeCountBefore: options.tradeCountBefore,
       tradeCountAfter: book.tradeCount,
-      matchedElapsedMs: options.matchedElapsedMs,
+      matchedElapsedMs,
       fullySettledElapsedMs: Math.max(1, Math.ceil(performance.now() - options.startedAt)),
       createdOfferIds: options.pairs.flatMap(pair => pair.offerIds),
       accounts,

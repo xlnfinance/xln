@@ -16,19 +16,14 @@ import {
   LOAD_QUOTE_TOKEN_ID,
 } from './worker-same-plan';
 import { deriveSameOrderbookPriceBandBounds } from '../../../../entity/tx/handlers/account/orderbook/helpers';
-import {
-  waitForTradeCount,
-  type ConnectedRuntime,
-} from '../worker-runtime';
+import type { ConnectedRuntime } from '../worker-runtime';
 import type { SettlementAccountPair } from '../settlement-reader';
 
 export type ParallelLaneSubmission = Readonly<{
-  finalBook: LoadBookSnapshot;
   runtimeInputBatches: number;
   offersPerRound: number;
   enqueueAckElapsedMs: number;
   commandObservedElapsedMs: number;
-  economicCompletionElapsedMs: number;
   roundSubmissionLagMs: readonly number[];
   settlementPairs: readonly SettlementAccountPair[];
 }>;
@@ -301,18 +296,11 @@ export const submitPreparedParallelSameLoad = async (options: {
   const failedWave = waveResults.find(result => result.error !== null);
   if (failedWave) throw failedWave.error;
   const ingressAcceptedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
-  const finalBook = await waitForTradeCount(
-    options.hub,
-    options.hubIdentity.entityId,
-    options.initialBook.tradeCount + options.swapsPerRound * options.rounds,
-  );
   return {
-    finalBook,
     runtimeInputBatches: Math.ceil(options.rounds / actionsPerFrame),
     offersPerRound: actionsPerFrame,
     enqueueAckElapsedMs: ingressAcceptedElapsedMs,
     commandObservedElapsedMs: ingressAcceptedElapsedMs,
-    economicCompletionElapsedMs: Math.max(1, Math.ceil(performance.now() - startedAt)),
     roundSubmissionLagMs,
     settlementPairs: [
       ...settlementPairs(options.hubIdentity.entityId, options.prepared.makerIdentities, options.prepared.makerPlans),
