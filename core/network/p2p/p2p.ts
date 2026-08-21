@@ -154,11 +154,18 @@ type RuntimeP2POptions = {
 type GossipResponsePayload = {
   profiles: Profile[];
   jurisdictions: JurisdictionGossipAnnouncement[];
+  cursor?: number;
+  hasMore?: boolean;
 };
 
-const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; jurisdictions: unknown[]; cursor?: number }> => {
+const decodeGossipPayload = (value: unknown): Readonly<{
+  profiles: unknown[];
+  jurisdictions: unknown[];
+  cursor?: number;
+  hasMore?: boolean;
+}> => {
   const response = requireBoundaryRecord(value, 'P2P_GOSSIP_RESPONSE_INVALID');
-  requireExactBoundaryKeys(response, ['profiles', 'jurisdictions'], ['cursor'], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
+  requireExactBoundaryKeys(response, ['profiles', 'jurisdictions'], ['cursor', 'hasMore'], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
   const cursor = response['cursor'];
   if (cursor !== undefined && (!Number.isSafeInteger(cursor) || Number(cursor) < 0)) {
     throw new Error('P2P_GOSSIP_RESPONSE_CURSOR_INVALID');
@@ -171,10 +178,15 @@ const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; ju
   if (response['jurisdictions'].length > MAX_JURISDICTION_GOSSIP_BATCH_RECORDS) {
     throw new Error('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
   }
+  const hasMore = response['hasMore'];
+  if (hasMore !== undefined && (typeof hasMore !== 'boolean' || cursor === undefined)) {
+    throw new Error('P2P_GOSSIP_RESPONSE_HAS_MORE_INVALID');
+  }
   return {
     profiles: response['profiles'],
     jurisdictions: response['jurisdictions'],
     ...(cursor === undefined ? {} : { cursor: Number(cursor) }),
+    ...(hasMore === undefined ? {} : { hasMore }),
   };
 };
 
@@ -1005,12 +1017,11 @@ export class RuntimeP2P {
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
     const client = this.getActiveClient();
     if (!client) return;
-    const cursor = mode === 'incremental' ? client.gossipCursor : undefined;
-    const updatedSince = mode === 'incremental' && cursor === undefined ? this.getLatestKnownRemoteProfileTimestamp() : 0;
+    const cursor = mode === 'incremental' ? client.gossipCursor ?? 0 : 0;
     const request: GossipProfileBatchRequest = {
       set: this.gossipSet,
       limit: DEFAULT_GOSSIP_BATCH_LIMIT,
-      ...(cursor !== undefined ? { sinceSeq: cursor } : updatedSince > 0 ? { updatedSince } : {}),
+      sinceSeq: cursor,
     };
     client.sendGossipRequest(this.runtimeId, request);
   }
@@ -1230,20 +1241,6 @@ export class RuntimeP2P {
   // Check if we have a profile for an entity in local gossip cache
   private hasProfileForEntity(entityId: string): boolean {
     return this.getProfileByEntity(entityId) !== null;
-  }
-
-  private getLatestKnownRemoteProfileTimestamp(): number {
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    let latest = 0;
-    for (const profile of profiles) {
-      const profileRuntimeId = normalizeRuntimeId(profile.runtimeId || '');
-      if (profileRuntimeId && profileRuntimeId === this.runtimeId) {
-        continue;
-      }
-      const ts = profile.lastUpdated;
-      if (ts > latest) latest = ts;
-    }
-    return latest;
   }
 
   private waitForActiveDelay(delayMs: number): Promise<boolean> {
@@ -1547,11 +1544,16 @@ export class RuntimeP2P {
 
   private handleGossipResponse(from: string, payload: unknown, client?: RuntimeWsClient) {
     const decoded = decodeGossipPayload(payload);
-    if (decoded.cursor !== undefined && client) client.gossipCursor = decoded.cursor;
     this.applyIncomingJurisdictions(from, decoded.jurisdictions);
-    this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
-      this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
-    });
+    this.applyIncomingProfiles(from, decoded.profiles)
+      .then(() => {
+        if (decoded.cursor === undefined || !client || this.closing || this.closed) return;
+        client.gossipCursor = Math.max(client.gossipCursor ?? 0, decoded.cursor);
+        if (decoded.hasMore === true) this.requestSeedGossip('incremental');
+      })
+      .catch(err => {
+        this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
+      });
   }
 
   private handleGossipAnnounce(from: string, payload: unknown) {

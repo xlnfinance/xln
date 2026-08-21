@@ -98,7 +98,6 @@ type RuntimeIngressDecision =
 const collectRuntimeIngress = async (
   env: RuntimeReplica,
   inputs: EntityInput[] | undefined,
-  state: RuntimeLifecycleState,
   runtimeDelay: number,
   profile: RuntimeProcessProfile,
   deps: RuntimeProcessDeps,
@@ -127,8 +126,6 @@ const collectRuntimeIngress = async (
   });
   profile.mark('jurisdictionImports');
 
-  state.pendingProfileCertificationEntityIds = new Set();
-  profile.mark('profileCertification');
   profile.mark('enqueue');
 
   if (!loop.hasRuntimeWork(env)) return { ready: false, outcome: 'no-work' };
@@ -557,8 +554,8 @@ const processRuntimeFrameOnce = async (
       profile,
       {
         attachEventEmitters: deps.attachEventEmitters,
-        collectIngress: (target, queued, state, delay, processProfile) =>
-          collectRuntimeIngress(target, queued, state, delay, processProfile, deps),
+        collectIngress: (target, queued, _state, delay, processProfile) =>
+          collectRuntimeIngress(target, queued, delay, processProfile, deps),
       },
     );
     if (!started.ready) return env;

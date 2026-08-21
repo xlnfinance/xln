@@ -500,7 +500,6 @@ describe('relay-router gossip fanout', () => {
       payload: {
         ids: [ENTITY_A],
         set: 'hubs',
-        updatedSince: 150,
       },
     });
 

@@ -1,13 +1,14 @@
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { Profile } from '../../../entity/profile';
 import { normalizeRuntimeKey, type RelayStore } from '../../../network/relay/store';
+import { safeStringify } from '../../../protocol/serialization';
 
 const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-export const buildKnownProfileBundle = (
+const buildKnownProfileBundle = (
   input: {
     env: RuntimeReplica | null;
-    relayStore: RelayStore;
+    relayStore: RelayStore | null;
     entityId: string;
   },
 ): { profile: Profile | null; peers: Profile[] } => {
@@ -19,7 +20,9 @@ export const buildKnownProfileBundle = (
   // CPU under the load driver's route polling.
   const localProfiles = input.env?.gossip?.getProfiles?.() || [];
   const lookup = (wanted: string): Profile | null => {
-    let found: Profile | null = input.relayStore.gossipProfiles.get(wanted)?.profile ?? null;
+    let found: Profile | null = input.relayStore === null
+      ? null
+      : input.relayStore.gossipProfiles.get(wanted)?.profile ?? null;
     // Local Runtime profiles override relay copies (same precedence as before).
     for (const profile of localProfiles) {
       if (normalizeEntityId(profile?.entityId) === wanted) found = profile;
@@ -47,6 +50,39 @@ export const buildKnownProfileBundle = (
     if (peer) peers.push(peer);
   }
   return { profile, peers };
+};
+
+export const gossipProfileEntityId = (request: Request): string => {
+  const entityId = normalizeEntityId(new URL(request.url).searchParams.get('entityId'));
+  return /^0x[0-9a-f]{64}$/.test(entityId) ? entityId : '';
+};
+
+/** One profile inspection contract for API, Hub, and multiplexed Runtime. */
+export const handleKnownProfileRequest = (input: {
+  request: Request;
+  env: RuntimeReplica | null;
+  relayStore: RelayStore | null;
+  headers: HeadersInit;
+}): Response => {
+  const entityId = gossipProfileEntityId(input.request);
+  if (!entityId) {
+    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), {
+      status: 400,
+      headers: input.headers,
+    });
+  }
+  const bundle = buildKnownProfileBundle({
+    env: input.env,
+    relayStore: input.relayStore,
+    entityId,
+  });
+  return new Response(safeStringify({
+    ok: true,
+    entityId,
+    found: bundle.profile !== null,
+    profile: bundle.profile,
+    peers: bundle.peers,
+  }), { headers: input.headers });
 };
 
 export const buildDebugEntitiesPayload = (input: {

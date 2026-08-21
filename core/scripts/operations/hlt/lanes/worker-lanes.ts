@@ -140,21 +140,21 @@ const waitForVisibleEntities = async (
   throw new Error(`${code}:missing=${lastMissing}:of=${required.size}`);
 };
 
-const waitForHubProfile = async (
-  lane: LaneRuntime,
-  hubEntityId: string,
-  hubRuntimeId: string,
+const waitForSendReadyProfile = async (
+  runtime: ConnectedRuntime,
+  entityId: string,
+  targetRuntimeId: string,
+  code: string,
 ): Promise<void> => {
   const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await lane.runtime.control.hubProfileSendReady(hubEntityId, hubRuntimeId)) return;
+    if (await runtime.control.hubProfileSendReady(entityId, targetRuntimeId)) return;
     await sleep(100);
   }
-  // `found` alone is not send-ready: the profile must bind this exact hub
+  // `found` alone is not send-ready: the profile must bind this exact target
   // runtime and carry its X25519 key, or every encrypted send will miss.
   throw new Error(
-    `PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_SEND_READY:${lane.laneKey}` +
-      `:entityId=${hubEntityId.slice(-8)}:runtimeId=${hubRuntimeId.slice(-8)}`,
+    `${code}:entityId=${entityId.slice(-8)}:runtimeId=${targetRuntimeId.slice(-8)}`,
   );
 };
 
@@ -263,7 +263,30 @@ const provisionLoadLanes = async (
     const existing = new Set((await lane.runtime.control.listEntities()).map(entity => entity.entityId));
     if (!existing.has(lane.identity.entityId)) {
       await sendObserved(lane.runtime, `prod-load-import-${options.role}-${lane.laneKey}`, {
-        runtimeTxs: buildLaneImports([lane.identity]), entityInputs: [],
+        runtimeTxs: buildLaneImports([lane.identity]),
+        entityInputs: [],
+      });
+      // A child cannot consume an EntityInput until importReplica is committed
+      // by its parent Runtime. Combining both in one RuntimeInput leaves Entity
+      // height zero because admission uses the pre-frame child set. Empty
+      // EntityInputs intentionally create no heights, so certify the initial
+      // public descriptor with the canonical profile transaction instead of a
+      // synthetic chat or a special bootstrap-only state-machine path.
+      await sendObserved(lane.runtime, `prod-load-genesis-${options.role}-${lane.laneKey}`, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: lane.identity.entityId,
+          signerId: lane.identity.signerId,
+          entityTxs: [{
+            type: 'profile-update',
+            data: {
+              profile: {
+                entityId: lane.identity.entityId,
+                name: lane.identity.name,
+              },
+            },
+          }],
+        }],
       });
     }
     await waitForVisibleEntities(lane.runtime, [lane.identity.entityId], 'PRODUCTION_SWAP_LOAD_LANES_NOT_IMPORTED');
@@ -277,7 +300,22 @@ const provisionLoadLanes = async (
   // The Hub does not pin users. Each user must still publish a receive-ready
   // profile (Hub counterparty in accounts) before any peer can quote a route.
   await runInBatches(runtimes, async (lane, index) => {
-    await waitForHubProfile(lane, options.hubIdentity.entityId, options.hub.adapter.runtimeId);
+    // Account opening is bilateral. Both encrypted return paths must exist
+    // before the first frame; observing only user -> Hub races the Hub's ACK.
+    await Promise.all([
+      waitForSendReadyProfile(
+        lane.runtime,
+        options.hubIdentity.entityId,
+        options.hub.adapter.runtimeId,
+        `PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_SEND_READY:${lane.laneKey}`,
+      ),
+      waitForSendReadyProfile(
+        options.hub,
+        lane.identity.entityId,
+        lane.runtime.adapter.runtimeId,
+        `PRODUCTION_SWAP_LOAD_USER_PROFILE_NOT_SEND_READY:${lane.laneKey}`,
+      ),
+    ]);
     await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {
       runtimeTxs: [],
       entityInputs: buildLaneAccountInputs(

@@ -38,6 +38,7 @@ import {
   projectPortableAccountDoc,
 } from '../read/projections';
 import { projectPortableBook } from '../schema/book/portable';
+import { decodeBrowserVmSerializedState } from '../../jurisdiction/adapter/browservm/browservm-state';
 
 const projectPortableEntityState = (state: EntityState): Record<string, unknown> => {
   const accounts = new Map<string, ReturnType<typeof projectPortableAccountDoc>>();
@@ -634,6 +635,12 @@ export const buildCanonicalEnvSnapshot = (
   for (const [replicaKey, replica] of core.eReplicas) eReplicas.set(replicaKey, replica);
   const jReplicas = new Map<string, JReplica>();
   for (const [replicaKey, replica] of core.jReplicas) jReplicas.set(replicaKey, replica);
+  // EnvSnapshot is a detached history value, never a live BrowserVM view.
+  // Reuse the boundary decoder: it validates and path-copies the trie/receipt
+  // arrays once, preventing later VM writes from mutating recorded history.
+  const browserVMState = core.browserVMState
+    ? decodeBrowserVmSerializedState(core.browserVMState)
+    : undefined;
   return {
     state: {
       height: core.height,
@@ -642,7 +649,7 @@ export const buildCanonicalEnvSnapshot = (
       jReplicas,
     },
     ...(core.runtimeId ? { runtimeId: core.runtimeId } : {}),
-    ...(core.browserVMState ? { browserVMState: core.browserVMState } : {}),
+    ...(browserVMState ? { browserVMState } : {}),
     runtimeInput: projectRuntimeInput(options.runtimeInput),
     runtimeOutputs: projectRuntimeOutputs(options.runtimeOutputs),
     description: options.description,

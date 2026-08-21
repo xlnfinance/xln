@@ -91,6 +91,7 @@ import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/s
 import { createStackManagerController, type StackManagerController } from '../api/server/control/stack-manager';
 import { hasDaemonControlAuth, parseTaggedControlBody } from '../api/server/control/auth';
 import { JSON_HEADERS } from '../api/server/utils';
+import { handleKnownProfileRequest } from '../api/server/network/gossip-profiles';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -2068,6 +2069,16 @@ const handleHubHttpRequest = async (
   if (faucetPolicyResponse) return faucetPolicyResponse;
   const statusResponse = context.handleStatus(url, operatorAuthorized);
   if (statusResponse) return statusResponse;
+  if (url.pathname === '/api/gossip/profile' && request.method === 'GET') {
+    // Expose this Hub Runtime's admitted profile view. HLT and operators must
+    // verify the encrypted return route before opening a bilateral Account.
+    return handleKnownProfileRequest({
+      request,
+      env: context.env,
+      relayStore: null,
+      headers: JSON_HEADERS,
+    });
+  }
   if (url.pathname === '/api/stack-manager/status' && request.method === 'GET') {
     return context.stackManagerController.status(request, context.env);
   }

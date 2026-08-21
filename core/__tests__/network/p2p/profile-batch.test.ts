@@ -90,17 +90,43 @@ test('routeTo decodes from the wire with a decimal amount and rejects unknown ke
 });
 
 test('relay sinceSeq cursor returns exactly what was stored after the cursor, regardless of profile clocks', async () => {
-  const { createRelayStore, getProfileBatch, storeVerifiedGossipProfile } = await import('../../../network/relay/store');
+  const { createRelayStore, getProfileBatchPage, storeVerifiedGossipProfile } = await import('../../../network/relay/store');
   const store = createRelayStore('0x' + '1'.repeat(40));
   const older = { ...routedProfile(ALICE, false, [H1]), lastUpdated: 10 };
   const newer = { ...routedProfile(BOB, false, [H1]), lastUpdated: 1_000 };
   storeVerifiedGossipProfile(store, newer);
   const cursorAfterNewer = store.gossipSeq;
   storeVerifiedGossipProfile(store, older);
-  // updatedSince watermark (1000) would hide ALICE forever; the cursor does not.
-  expect(getProfileBatch(store, { set: 'default', updatedSince: 1_000 }).map(p => p.entityId)).toEqual([]);
-  expect(getProfileBatch(store, { set: 'default', sinceSeq: cursorAfterNewer }).map(p => p.entityId)).toEqual([ALICE]);
-  expect(getProfileBatch(store, { set: 'default', sinceSeq: store.gossipSeq })).toEqual([]);
+  expect(getProfileBatchPage(store, { set: 'default', sinceSeq: cursorAfterNewer }).profiles.map(p => p.entityId)).toEqual([ALICE]);
+  expect(getProfileBatchPage(store, { set: 'default', sinceSeq: store.gossipSeq })).toEqual({
+    profiles: [], cursor: store.gossipSeq, hasMore: false,
+  });
+});
+
+test('relay sequence pages cannot skip profiles beyond one batch', async () => {
+  const { createRelayStore, getProfileBatchPage, storeVerifiedGossipProfile } = await import('../../../network/relay/store');
+  const store = createRelayStore('0x' + '1'.repeat(40));
+  const count = 1_005;
+  for (let index = 0; index < count; index += 1) {
+    const entityId = `0x${index.toString(16).padStart(64, '0')}`;
+    storeVerifiedGossipProfile(store, { ...routedProfile(entityId, false, []), lastUpdated: index + 1 });
+  }
+  const first = getProfileBatchPage(store, { set: 'default', sinceSeq: 0 });
+  if (first.cursor === undefined) throw new Error('TEST_GOSSIP_CURSOR_MISSING');
+  const second = getProfileBatchPage(store, { set: 'default', sinceSeq: first.cursor });
+  expect(first.profiles).toHaveLength(1_000);
+  expect(first.hasMore).toBe(true);
+  expect(second.profiles).toHaveLength(5);
+  expect(second.cursor).toBe(store.gossipSeq);
+  expect(second.hasMore).toBe(false);
+  expect(new Set([...first.profiles, ...second.profiles].map(item => item.entityId)).size).toBe(count);
+});
+
+test('explicit gossip lookup never advances the directory cursor', async () => {
+  const { createRelayStore, getProfileBatchPage, storeVerifiedGossipProfile } = await import('../../../network/relay/store');
+  const store = createRelayStore('0x' + '1'.repeat(40));
+  storeVerifiedGossipProfile(store, routedProfile(ALICE, false, []));
+  expect(getProfileBatchPage(store, { ids: [ALICE] })).toEqual({ profiles: [expect.objectContaining({ entityId: ALICE })] });
 });
 
 test('ids with depth pulls the neighbourhood along publicAccounts, bounded by depth', () => {

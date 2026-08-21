@@ -1491,12 +1491,10 @@ describe('production startup wiring', () => {
     expect(paymentPanel).toContain('refreshPaymentRuntimeGossip');
     expect(xlnStore).toContain('/api/gossip/profile?entityId=');
     expect(xlnStore).toContain('export async function refreshPaymentRuntimeGossip');
-    expect(debugApi).toContain("import { buildKnownProfileBundle } from '../api/server/network/gossip-profiles';");
+    expect(debugApi).toContain("import { handleKnownProfileRequest } from '../api/server/network/gossip-profiles';");
     expect(debugApi).toContain("if (deps.pathname === '/api/gossip/profile')");
-    expect(debugApi).toContain('const bundle = buildKnownProfileBundle({');
+    expect(debugApi).toContain('return handleKnownProfileRequest({');
     expect(debugApi).toContain('relayStore: deps.relayStore');
-    expect(debugApi).toContain('found: !!bundle.profile');
-    expect(debugApi).toContain("safeStringify({ ok: false, error: 'entityId is required' })");
   });
 
   test('fresh deploy stops runtime processes before deleting runtime state', () => {

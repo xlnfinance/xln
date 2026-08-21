@@ -103,8 +103,7 @@ export const publishRuntimeFrameTransaction = (
   state.stateMutationInFlight = false;
   state.wakeRequested =
     state.wakeRequested === true ||
-    runtimeInputHasQueuedWork(mergedMempool) ||
-    (state.pendingProfileCertificationEntityIds?.size ?? 0) > 0;
+    runtimeInputHasQueuedWork(mergedMempool);
   rebuildScheduledWakeIndex(liveEnv);
   for (const { adapter } of getLiveJAdapterEntries(liveEnv)) {
     adapter.setBlockTimestamp?.(liveEnv.state.timestamp);

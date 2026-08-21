@@ -31,7 +31,6 @@ export type GossipRouteToRequest = {
 export type GossipProfileBatchRequest = {
   ids?: string[];
   set?: 'default' | 'hubs';
-  updatedSince?: number;
   limit?: number;
   includeJurisdictions?: boolean;
   routeTo?: GossipRouteToRequest;
@@ -49,10 +48,10 @@ export type GossipProfileBatchRequest = {
   prefix?: string;
   after?: string;
   /**
-   * Relay receipt cursor: only profiles the responder stored after this
-   * sequence are returned. Unlike `updatedSince` (a profile-clock watermark
-   * that silently drops profiles from slower clocks) it is exact, so pull-only
-   * polling misses nothing. The response carries the new `cursor`.
+   * Relay sequence cursor: only profiles the responder stored after this
+   * sequence are returned. A profile-clock watermark is deliberately not a
+   * sync primitive: independent Runtime clocks can otherwise hide a valid
+   * profile forever. The response carries the exact next cursor.
    */
   sinceSeq?: number;
 };
@@ -173,7 +172,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   requireExactBoundaryKeys(
     request,
     [],
-    ['ids', 'set', 'updatedSince', 'limit', 'includeJurisdictions', 'routeTo', 'sinceSeq', 'depth', 'prefix', 'after'],
+    ['ids', 'set', 'limit', 'includeJurisdictions', 'routeTo', 'sinceSeq', 'depth', 'prefix', 'after'],
     'P2P_GOSSIP_REQUEST_FIELDS_INVALID',
   );
   const routeTo = request['routeTo'] === undefined ? undefined : decodeRouteTo(request['routeTo']);
@@ -200,7 +199,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   if (after !== undefined && (typeof after !== 'string' || after.length > 128)) {
     throw new Error('P2P_GOSSIP_REQUEST_AFTER_INVALID');
   }
-  for (const field of ['updatedSince', 'limit', 'sinceSeq'] as const) {
+  for (const field of ['limit', 'sinceSeq'] as const) {
     const candidate = request[field];
     if (candidate !== undefined && (!Number.isSafeInteger(candidate) || Number(candidate) < 0)) {
       throw new Error(`P2P_GOSSIP_REQUEST_${field.toUpperCase()}_INVALID`);
@@ -210,10 +209,12 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   if (includeJurisdictions !== undefined && typeof includeJurisdictions !== 'boolean') {
     throw new Error('P2P_GOSSIP_REQUEST_INCLUDE_JURISDICTIONS_INVALID');
   }
+  if (request['sinceSeq'] !== undefined && (ids !== undefined || routeTo !== undefined || prefix !== undefined)) {
+    throw new Error('P2P_GOSSIP_REQUEST_CURSOR_SCOPE_INVALID');
+  }
   return {
     ...(ids === undefined ? {} : { ids: [...ids] }),
     ...(set === undefined ? {} : { set }),
-    ...(request['updatedSince'] === undefined ? {} : { updatedSince: Number(request['updatedSince']) }),
     ...(request['limit'] === undefined ? {} : { limit: Number(request['limit']) }),
     ...(request['sinceSeq'] === undefined ? {} : { sinceSeq: Number(request['sinceSeq']) }),
     ...(depth === undefined ? {} : { depth: Number(depth) }),
@@ -257,9 +258,6 @@ export const selectProfileBatch = (
   const routeTo = request.routeTo;
   const prefix = request.prefix;
   const set = request.set ?? (ids.length === 0 && routeTo === undefined && prefix === undefined ? 'default' : undefined);
-  const updatedSince = typeof request.updatedSince === 'number' && Number.isFinite(request.updatedSince)
-    ? request.updatedSince
-    : null;
   const boundedLimit = typeof request.limit === 'number' && Number.isFinite(request.limit)
     ? Math.min(maxBatchSize, Math.max(1, Math.floor(request.limit)))
     : maxBatchSize;
@@ -321,9 +319,6 @@ export const selectProfileBatch = (
 
   for (const profile of setProfiles) {
     const normalizedEntityId = normalizeEntityId(profile.entityId);
-    if (updatedSince !== null && profile.lastUpdated <= updatedSince) {
-      continue;
-    }
     setMatches.set(normalizedEntityId, profile);
   }
 

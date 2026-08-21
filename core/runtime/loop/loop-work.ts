@@ -143,9 +143,6 @@ export const resolveRuntimeWorkReason = (
   deps: RuntimeWorkDeps,
 ): string | null => {
   const mempool = requireRuntimeMempool(env);
-  if ((env.infrastructure?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) {
-    return 'profile-certification';
-  }
   if (hasReadyCommittedJOutbox(env, getWallClockMs())) return 'committed-j-outbox';
   if ((env.infrastructure?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';

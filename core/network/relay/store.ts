@@ -549,24 +549,51 @@ export const getAllGossipJurisdictions = (
   store: RelayStore,
 ): JurisdictionGossipAnnouncement[] => Array.from(store.gossipJurisdictions.values());
 
-export const getProfileBatch = (
+export type GossipProfileBatchPage = Readonly<{
+  profiles: Profile[];
+  cursor?: number;
+  hasMore?: boolean;
+}>;
+
+/**
+ * Default/hub directory sync is an exact relay-sequence page. Explicit
+ * ids/route/prefix lookups never move that cursor: otherwise one targeted
+ * lookup could skip unrelated profiles that the Runtime has not received.
+ */
+export const getProfileBatchPage = (
   store: RelayStore,
   request: GossipProfileBatchRequest = {},
-): Profile[] => {
-  if (request.sinceSeq === undefined) {
-    return selectProfileBatch(getAllGossipProfiles(store), request, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
+): GossipProfileBatchPage => {
+  const explicitLookup = request.ids !== undefined || request.routeTo !== undefined || request.prefix !== undefined;
+  if (explicitLookup) {
+    return {
+      profiles: selectProfileBatch(
+        getAllGossipProfiles(store),
+        request,
+        DEFAULT_GOSSIP_SYNC_LIMIT,
+        store.routeGraphCache,
+      ),
+    };
   }
-  // Exact receipt cursor: set/updatedSince selection runs over what changed
-  // since the caller's cursor; ids/routeTo still resolve over everything.
-  const { sinceSeq, set: _set, updatedSince: _updatedSince, ...rest } = request;
-  const changed: Profile[] = [];
-  for (const entry of store.gossipProfiles.values()) if (entry.seq > sinceSeq) changed.push(entry.profile);
-  const selectedSet = selectProfileBatch(changed, { set: request.set ?? 'default', ...(rest.limit === undefined ? {} : { limit: rest.limit }) }, DEFAULT_GOSSIP_SYNC_LIMIT);
-  if (rest.ids === undefined && rest.routeTo === undefined && rest.prefix === undefined) return selectedSet;
-  const explicit = selectProfileBatch(getAllGossipProfiles(store), rest, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
-  const merged = new Map<string, Profile>();
-  for (const profile of [...selectedSet, ...explicit]) merged.set(profile.entityId.toLowerCase(), profile);
-  return Array.from(merged.values()).slice(0, DEFAULT_GOSSIP_SYNC_LIMIT);
+
+  const sinceSeq = Math.min(request.sinceSeq ?? 0, store.gossipSeq);
+  const limit = Math.min(
+    DEFAULT_GOSSIP_SYNC_LIMIT,
+    Math.max(1, Math.floor(request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT)),
+  );
+  const hubsOnly = request.set === 'hubs';
+  const profiles: Profile[] = [];
+  let cursor = sinceSeq;
+  const entries = Array.from(store.gossipProfiles.values())
+    .filter(entry => entry.seq > sinceSeq)
+    .sort((left, right) => left.seq - right.seq);
+  for (const entry of entries) {
+    cursor = entry.seq;
+    if (!hubsOnly || entry.profile.metadata.isHub === true) profiles.push(entry.profile);
+    if (profiles.length >= limit) break;
+  }
+  if (cursor < store.gossipSeq && profiles.length < limit) cursor = store.gossipSeq;
+  return { profiles, cursor, hasMore: cursor < store.gossipSeq };
 };
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,10 @@ import { handleGossipProfileCounterparties } from '../../../../api/server/contro
 import { resolveRuntimeAdminControl } from '../../../../api/server/control/runtime-admin';
 import { handleSignerRegistration } from '../../../../api/server/control/signer';
 import { handleRuntimeInputControl } from '../../../../api/server/control/runtime-input';
+import {
+  gossipProfileEntityId,
+  handleKnownProfileRequest,
+} from '../../../../api/server/network/gossip-profiles';
 import { decodeRuntimeAdapterRequest, runtimeAdapterMaxMessageBytes } from '../../../../api/runtime-adapter/codec';
 import {
   attachRuntimeAdapterTicker,
@@ -231,11 +235,10 @@ const handleHostRuntimeInputBatch = async (
 };
 
 const profileResponse = async (request: Request, env: RuntimeReplica): Promise<Response> => {
-  const entityId = String(new URL(request.url).searchParams.get('entityId') || '').trim().toLowerCase();
+  const entityId = gossipProfileEntityId(request);
   if (!/^0x[0-9a-f]{64}$/.test(entityId)) return response({ ok: false, error: 'entityId is required' }, 400);
   if (!env.gossip.profiles.has(entityId)) await ensureGossipProfiles(env, [entityId]);
-  const profile = env.gossip.profiles.get(entityId) ?? null;
-  return response({ ok: true, entityId, found: profile !== null, profile, peers: [] });
+  return handleKnownProfileRequest({ request, env, relayStore: null, headers: JSON_HEADERS });
 };
 
 const handleControl = async (request: Request, env: RuntimeReplica, suffix: string): Promise<Response> => {

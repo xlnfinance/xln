@@ -96,7 +96,11 @@ import {
 } from './catalog/jurisdictions';
 import { createTokenCatalogController } from './catalog/tokens';
 import { buildHubDiscoveryPayload } from './network/hub-discovery';
-import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './network/gossip-profiles';
+import {
+  buildDebugEntitiesPayload,
+  gossipProfileEntityId,
+  handleKnownProfileRequest,
+} from './network/gossip-profiles';
 import { attachLiveJAdapter } from '../../runtime/j-submit/live-jadapters';
 import { maybeHandleDebugDumpsRequest } from './health/debug-dumps';
 import { handleCreditRequest } from './faucet/credit';
@@ -575,11 +579,6 @@ const GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS = 300;
 const gossipProfileLookupAt = new Map<string, number>();
 let gossipProfileLookupBatch: { entityIds: Set<string>; done: Promise<void>; touch: () => void } | null = null;
 
-const gossipProfileEntityId = (req: Request): string => {
-  const entityId = String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
-  return /^0x[0-9a-f]{64}$/.test(entityId) ? entityId : '';
-};
-
 /**
  * Coalesce concurrent misses into one relay request and remember when each
  * entity was last asked for, so a caller polling for a profile that has not
@@ -659,21 +658,7 @@ const handleGossipProfileApi = (
   env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Response => {
-  const targetEntityId = gossipProfileEntityId(req);
-  if (!targetEntityId) {
-    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
-  }
-  const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
-  return new Response(
-    safeStringify({
-      ok: true,
-      entityId: targetEntityId,
-      found: !!bundle.profile,
-      profile: bundle.profile,
-      peers: bundle.peers,
-    }),
-    { headers },
-  );
+  return handleKnownProfileRequest({ request: req, env, relayStore, headers });
 };
 
 const handleJurisdictionsApi = async (env: RuntimeReplica | null, headers: typeof JSON_HEADERS): Promise<Response> => {

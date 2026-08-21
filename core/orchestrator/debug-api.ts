@@ -2,7 +2,7 @@ import { compareStableText, safeStringify } from '../protocol/serialization';
 import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { maybeHandleRelayDebugRequest } from '../network/relay/debug-http';
 import type { RelayStore } from '../network/relay/store';
-import { buildKnownProfileBundle } from '../api/server/network/gossip-profiles';
+import { handleKnownProfileRequest } from '../api/server/network/gossip-profiles';
 import { getDebugEntityEntries } from './hub/public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';
 
@@ -66,29 +66,12 @@ const handleDebugEntities = async (deps: OrchestratorDebugApiDeps): Promise<Resp
 };
 
 const handleGossipProfile = (deps: OrchestratorDebugApiDeps): Response => {
-  const targetEntityId = String(deps.url.searchParams.get('entityId') || '').trim().toLowerCase();
-  if (!targetEntityId) {
-    return new Response(
-      safeStringify({ ok: false, error: 'entityId is required' }),
-      { status: 400, headers: deps.headers },
-    );
-  }
-
-  const bundle = buildKnownProfileBundle({
+  return handleKnownProfileRequest({
+    request: deps.request,
     env: null,
     relayStore: deps.relayStore,
-    entityId: targetEntityId,
+    headers: deps.headers,
   });
-  return new Response(
-    safeStringify({
-      ok: true,
-      entityId: targetEntityId,
-      found: !!bundle.profile,
-      profile: bundle.profile,
-      peers: bundle.peers,
-    }),
-    { headers: deps.headers },
-  );
 };
 
 const handleDebugRelay = (deps: OrchestratorDebugApiDeps): Response =>

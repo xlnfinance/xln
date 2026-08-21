@@ -17,7 +17,7 @@ import {
   nextWsTimestamp,
   pushDebugEvent,
   storeVerifiedGossipProfile,
-  getProfileBatch,
+  getProfileBatchPage,
   getAllGossipJurisdictions,
   storeVerifiedJurisdictionAnnouncement,
   DEFAULT_GOSSIP_SYNC_LIMIT,
@@ -615,7 +615,8 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       }));
       return true;
     }
-    const profiles = getProfileBatch(config.store, request);
+    const page = getProfileBatchPage(config.store, request);
+    const { profiles } = page;
     const jurisdictions = request.includeJurisdictions === true
       ? getAllGossipJurisdictions(config.store)
       : [];
@@ -630,7 +631,6 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
         idCount: Array.isArray(request.ids) ? request.ids.length : 0,
         set: request.set ?? (request.routeTo || (request.ids?.length ?? 0) > 0 ? null : 'default'),
         routeTo: request.routeTo ? { source: request.routeTo.source, target: request.routeTo.target } : null,
-        updatedSince: request.updatedSince ?? null,
         limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
         traceId,
       },
@@ -641,7 +641,14 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       from: config.store.serverId,
       ...(from ? { to: from } : {}),
       timestamp: Date.now(),
-      payload: { profiles, jurisdictions, cursor: config.store.gossipSeq },
+      payload: {
+        profiles,
+        jurisdictions,
+        ...(page.cursor === undefined ? {} : {
+          cursor: page.cursor,
+          hasMore: page.hasMore ?? false,
+        }),
+      },
       ...(id ? { inReplyTo: id } : {}),
     }));
     return true;
