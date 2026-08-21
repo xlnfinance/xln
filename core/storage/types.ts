@@ -248,22 +248,15 @@ type PersistenceCoverage =
     keyof StorageReplicaMeta | ReplicaPersistenceSplitKeys
   >>;
 
-export type StorageDiffRecord = Covered<{
-  height: number;
-  puts: StorageDoc[];
-  dels: StorageDocRef[];
-}, PersistenceCoverage>;
-
-export type StorageSnapshotManifest = {
+export type StorageSnapshotManifest = Covered<{
   height: number;
   createdAt: number;
   docCount: number;
-};
+}, PersistenceCoverage>;
 
 export type StorageDebugStats = {
   head: StorageHead | null;
   frameCount: number;
-  diffCount: number;
   snapshotHeights: number[];
   liveEntityCount: number;
   liveEntityFieldCount?: number;
@@ -285,13 +278,11 @@ export type StorageDebugStats = {
   consumptionNodeBytes?: number;
   accountJClaimNodeBytes?: number;
   frameBytes: number;
-  diffBytes: number;
   snapshotBytes: number;
   liveBytes: number;
   historyBytes: number;
   totalBytes: number;
   maxFrameBytes: number;
-  maxDiffBytes: number;
   maxSnapshotBytes: number;
   epochDbs?: Array<{
     role: 'current' | 'history';
@@ -299,7 +290,6 @@ export type StorageDebugStats = {
     latestHeight: number;
     latestSnapshotHeight: number;
     frameCount: number;
-    diffCount: number;
     snapshotCount: number;
     liveBytes: number;
     historyBytes: number;

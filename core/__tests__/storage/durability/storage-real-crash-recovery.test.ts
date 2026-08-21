@@ -40,20 +40,21 @@ import {
 } from '../../../storage';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { createSnapshot } from '../../../storage/database/lifecycle';
+import { createSnapshotEntityGraphView } from '../../../storage/database/snapshot-graph-view';
 import { iterateKeys, readRawOrNull } from '../../../storage/database/level';
+import { readEntityStorageLayout } from '../../../storage/schema/entity/layout';
 import {
   KEY_HEAD,
   keyCertifiedBoardNode,
+  keyLiveEntity,
   keyLiveReplicaMeta,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
-  keySnapshotEntity,
   keySnapshotEntityPrefix,
   keySnapshotManifest,
   keySnapshotReplicaMetaPrefix,
 } from '../../../storage/keys';
 import type {
-  StorageEntityCoreDoc,
   StorageReplicaMeta,
   StorageRuntimeConfig,
 } from '../../../storage/types';
@@ -565,7 +566,13 @@ describe('real process storage crash recovery', () => {
       probe.dbNamespace = runtimeId;
       const historyDb = getRuntimeWalDb(probe);
       await historyDb.open();
-      const core = decodeBuffer<StorageEntityCoreDoc>(await historyDb.get(keySnapshotEntity(2, entityId)));
+      const stored = await readEntityStorageLayout(
+        createSnapshotEntityGraphView(historyDb, 2),
+        entityId,
+        keyLiveEntity(entityId),
+      );
+      if (!stored) throw new Error('certified-board corruption Entity graph missing');
+      const core = stored.doc;
       const root = core.certifiedBoardState?.boardRegistryRoot;
       if (!root) throw new Error('certified-board corruption fixture root missing');
       const rootKey = keyCertifiedBoardNode(root);

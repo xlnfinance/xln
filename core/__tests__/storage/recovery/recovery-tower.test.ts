@@ -294,7 +294,9 @@ describe('runtime recovery tower', () => {
     const replicaKey = `${entityId}:${runtimeId}`;
     const replica = env.state.eReplicas.get(replicaKey);
     expect(replica, 'test replica must exist').toBeTruthy();
-    const bloatedState = structuredClone(replica!.state);
+    // Entity graphs are persistent values; a same-root shell is the only valid
+    // test mutation workspace. structuredClone would erase private Patricia nodes.
+    const bloatedState = { ...replica!.state };
     bloatedState.messages = Array.from({ length: 100 }, (_, index) => `transient-${index}-${'x'.repeat(512)}`);
     const pendingHeight = Number(replica!.state.height || 0) + 1;
     const pendingHash = `0x${'a1'.repeat(32)}`;

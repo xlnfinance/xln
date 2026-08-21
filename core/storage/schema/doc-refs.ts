@@ -7,12 +7,6 @@ export const docRefKey = (ref: StorageDocRef): string => {
   return `b:${normalizeEntityId(ref.entityId)}:${ref.pairId}`;
 };
 
-export const docValueKey = (doc: StorageDoc): string => {
-  if (doc.family === 'entity') return `e:${normalizeEntityId(doc.entityId)}`;
-  if (doc.family === 'account') return `a:${normalizeEntityId(doc.entityId)}:${normalizeEntityId(doc.counterpartyId)}`;
-  return `b:${normalizeEntityId(doc.entityId)}:${doc.pairId}`;
-};
-
 export const liveKeyForDoc = (doc: StorageDoc): Buffer => {
   if (doc.family === 'entity') return keyLiveEntity(doc.entityId);
   if (doc.family === 'account') return keyLiveAccount(doc.entityId, doc.counterpartyId);

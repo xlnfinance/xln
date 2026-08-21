@@ -1018,7 +1018,6 @@ async function main() {
               role: string;
               latestHeight: number;
               frameCount: number;
-              diffCount: number;
               snapshotCount: number;
               totalBytes: number;
             }>;
@@ -1032,37 +1031,36 @@ async function main() {
       );
       console.log(
         `Storage totals: epochs=${epochRows.length} rFrames=${storageStats.frameCount} ` +
-          `diffs=${storageStats.diffCount} snapshots=${storageStats.snapshotHeights.length}`,
+          `snapshots=${storageStats.snapshotHeights.length}`,
       );
       console.log(
-        `Storage counts: frames=${storageStats.frameCount} diffs=${storageStats.diffCount} ` +
+        `Storage counts: frames=${storageStats.frameCount} ` +
           `snapshots=${storageStats.snapshotHeights.join(',') || 'none'} ` +
           `liveEntities=${storageStats.liveEntityCount} liveAccounts=${storageStats.liveAccountCount} liveBooks=${storageStats.liveBookCount}`,
       );
       console.log(
         `Storage bytes: live=${formatBytes(storageStats.liveBytes)} history=${formatBytes(storageStats.historyBytes)} ` +
-          `frames=${formatBytes(storageStats.frameBytes)} diffs=${formatBytes(storageStats.diffBytes)} ` +
+          `frames=${formatBytes(storageStats.frameBytes)} ` +
           `snapshots=${formatBytes(storageStats.snapshotBytes)} ` +
           `total=${formatBytes(storageStats.totalBytes)}`,
       );
       console.log(
         `Storage max values: frame=${formatBytes(storageStats.maxFrameBytes)} ` +
-          `diff=${formatBytes(storageStats.maxDiffBytes)} ` +
           `snapshot=${formatBytes(storageStats.maxSnapshotBytes)}`,
       );
       if (epochRows.length > 0) {
         console.log('Storage epochs:');
-        console.log('+----------+--------+------+------+------+----------+');
-        console.log('| role     | latest |  r   |  d   |  s   | total    |');
-        console.log('+----------+--------+------+------+------+----------+');
+        console.log('+----------+--------+------+------+----------+');
+        console.log('| role     | latest |  r   |  s   | total    |');
+        console.log('+----------+--------+------+------+----------+');
         for (const row of epochRows) {
           console.log(
             `| ${row.role.padEnd(8)} | ${String(row.latestHeight).padStart(6)} | ` +
-              `${String(row.frameCount).padStart(4)} | ${String(row.diffCount).padStart(4)} | ` +
-              `${String(row.snapshotCount).padStart(4)} | ${formatBytes(row.totalBytes).padStart(8)} |`,
+              `${String(row.frameCount).padStart(4)} | ${String(row.snapshotCount).padStart(4)} | ` +
+              `${formatBytes(row.totalBytes).padStart(8)} |`,
           );
         }
-        console.log('+----------+--------+------+------+------+----------+');
+        console.log('+----------+--------+------+------+----------+');
       }
     }
     if (crashRecover) {

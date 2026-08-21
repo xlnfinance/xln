@@ -40,6 +40,8 @@ import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../../enti
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and restore boundary are required');
@@ -102,7 +104,7 @@ const replica = Array.from(env.state.eReplicas.values())[0];
 if (!replica) throw new Error('restore import crash replica missing');
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 const [leftEntity, rightEntity] = [entityId, counterpartyId].sort() as [string, string];
-const oversizedAccount: AccountReplica = {
+const restoredAccount: AccountReplica = {
   state: {
     leftEntity,
     rightEntity,
@@ -115,18 +117,22 @@ const oversizedAccount: AccountReplica = {
       entityId,
       counterpartyId,
     }),
-    deltas: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS }, (_, tokenId) => {
+    deltas: PersistentAccountStateMap.fromEntries('deltas', Array.from(
+      { length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS },
+      (_, index) => {
+      const tokenId = index + 1;
       const delta = createDefaultDelta(tokenId);
       delta.offdelta = BigInt(tokenId);
       return [tokenId, delta];
-    })),
-    locks: new Map(),
-    swapOffers: new Map(),
-    pulls: new Map(),
+      },
+    )),
+    locks: PersistentAccountStateMap.empty('locks'),
+    swapOffers: PersistentAccountStateMap.empty('swapOffers'),
+    pulls: PersistentAccountStateMap.empty('pulls'),
     disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
     jNonce: 0,
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
+    requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+    requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
@@ -147,12 +153,16 @@ const oversizedAccount: AccountReplica = {
   currentHeight: 0,
   rollbackCount: 0,
   proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
-  pendingWithdrawals: new Map(),
-  swapOrderHistory: new Map(),
-  swapClosedOrders: new Map(),
-  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+  shadow: { rebalance: {
+    policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+    submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+  } },
 };
-replica.state.accounts.set(counterpartyId, oversizedAccount);
+if (!(replica.state.accounts instanceof PersistentEntityAccountMap)) {
+  throw new Error('restore import fixture requires committed Account graph');
+}
+replica.state.accounts = replica.state.accounts.updated(counterpartyId, restoredAccount);
 const consumptionIdentity = (height: number) => ({
   targetEntityId: entityId,
   sourceEntityId: `0x${'22'.repeat(32)}`,

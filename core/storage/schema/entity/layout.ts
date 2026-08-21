@@ -279,11 +279,8 @@ export const readEntityStorageLayout = async (
     raw[field] = decodeBuffer(await readEntityField(db, entityId, descriptor));
   }
   const trees = await hydrateEntityTrees(db, entityId, manifest.trees);
-  for (const [namespace, tree] of trees) raw[namespace] = new Map(tree);
+  for (const [namespace, tree] of trees) raw[namespace] = tree;
   const validated = validateStorageEntityCoreDocValue(raw);
-  for (const [namespace, tree] of trees) {
-    (validated as Record<string, unknown>)[namespace] = tree;
-  }
   return { doc: validated, rootValue };
 };
 

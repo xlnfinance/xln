@@ -35,10 +35,11 @@ const hasRebalanceWork = (
   for (const [tokenId, delta] of account.state.deltas) {
     if ((account.state.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
     const derived = deriveDelta(delta, ownerIsLeft);
-    if (
-      derived.outCollateral - derived.outTotalHold >
-      getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit
-    ) return true;
+    const availableCollateral = derived.outCollateral - derived.outTotalHold;
+    // Most Account rows have no withdrawable collateral. Avoid both registry
+    // lookup and policy construction for that overwhelmingly common hot path.
+    if (availableCollateral <= 0n) continue;
+    if (availableCollateral > getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit) return true;
   }
   return false;
 };

@@ -20,9 +20,9 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
-import { keyAccountJClaimNode, keyDiff } from '../../../storage/keys';
+import { keyAccountJClaimNode, keyLiveAccount } from '../../../storage/keys';
 import { hydrateAccountJClaimRootNodesFromStorage } from '../../../storage/read/read';
-import type { StorageDiffRecord } from '../../../storage/types';
+import { readAccountStorageLayout } from '../../../storage/schema/account-layout';
 import type { AccountJClaimNode, AccountJClaimRecord } from '../../../types/finance/account-j-claims';
 
 const fixture = join(import.meta.dir, '../../fixtures/storage/account-j-claim-storage-crash-child.ts');
@@ -116,15 +116,18 @@ describe('Account J-claim real storage crash recovery', () => {
 
         const historyDb = getRuntimeWalDb(restored);
         const persistedNode = decodeBuffer<AccountJClaimNode>(await historyDb.get(keyAccountJClaimNode(state.root)));
-        const diff = decodeBuffer<StorageDiffRecord>(await historyDb.get(keyDiff(restored.state.height)));
-        const accountDoc = diff.puts.find((doc) => (
-          doc.family === 'account' && doc.entityId === entityId && doc.counterpartyId === counterpartyId
-        ));
-        expect(accountDoc?.family === 'account' && (
+        const accountDoc = await readAccountStorageLayout(
+          historyDb,
+          entityId,
+          counterpartyId,
+          keyLiveAccount(entityId, counterpartyId),
+        );
+        if (!accountDoc) throw new Error('ACCOUNT_J_CRASH_PERSISTED_ACCOUNT_MISSING');
+        expect(
           side === 'left'
-            ? accountDoc.value.state.leftPendingJClaims
-            : accountDoc.value.state.rightPendingJClaims
-        )).toEqual(state);
+            ? accountDoc.doc.state.leftPendingJClaims
+            : accountDoc.doc.state.rightPendingJClaims,
+        ).toEqual(state);
         expect(persistedNode).toEqual(getAccountJClaimNodeStore(restored).get(state.root));
 
         if (boundary === 'after-current-cache-commit') {

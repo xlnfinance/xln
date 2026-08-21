@@ -15,7 +15,11 @@ import { ensureRuntimeInfrastructure } from '../../runtime/envelope/replica-enve
 import type { RuntimeReplica } from '../../runtime/types';
 import { clearDatabase } from '../database/clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
-import { buildCertifiedEntityLineagePlan } from '../replica/entity-lineage';
+import {
+  applyCertifiedEntityLineagePlan,
+  buildCertifiedEntityLineagePlan,
+  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
+} from '../replica/entity-lineage';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -103,7 +107,10 @@ const persistRestoredRuntimeStateUnlocked = async (
     assertCertifiedJHistoryIntegrity(replica.state);
     assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
   }
-  const lineagePlan = buildCertifiedEntityLineagePlan(env);
+  const lineagePlan = rebaseCertifiedEntityLineageAtRuntimeCheckpoint(
+    env,
+    buildCertifiedEntityLineagePlan(env),
+  );
   const materialized = collectCertifiedStorageDocs(lineagePlan);
   const boardNodes = collectReachableCertifiedBoardNodes(
     getCertifiedBoardNodeStore(env),
@@ -158,6 +165,10 @@ const persistRestoredRuntimeStateUnlocked = async (
     accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),
     ...(options.onPersistenceBoundary ? { onPersistenceBoundary: options.onPersistenceBoundary } : {}),
   });
+  // The durable checkpoint is now the new lineage anchor. Publish the same
+  // anchor in RAM only after the atomic storage swap succeeds; otherwise a
+  // second checkpoint would require a pruned intermediate frame we no longer keep.
+  applyCertifiedEntityLineagePlan(env, lineagePlan);
   if (await deps.tryOpenStorageDb(env, 'previous')) {
     await clearDatabase(deps.getStorageDb(env, 'previous'));
   }

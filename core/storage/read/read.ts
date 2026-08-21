@@ -2,14 +2,12 @@ import type { BookState } from '../../orderbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { decodeBuffer, decodeValidatedBuffer } from '../codec/codec';
-import { docRefKey, docValueKey } from '../schema/doc-refs';
 import {
   KEY_LIVE_ACCOUNT,
   KEY_HEAD,
   KEY_LIVE_ENTITY,
   decodeEntityId,
   hexBytes,
-  keyDiff,
   keyCertifiedBoardNode,
   keyConsumptionNode,
   keyAccountJClaimNode,
@@ -73,7 +71,6 @@ import {
   validateCertifiedBoardNodeValue,
   validateConsumptionNodeValue,
   validateStorageAccountDocValue,
-  validateStorageDiffRecordValue,
   validateStorageFrameRecordValue,
   validateStorageHeadValue,
 } from '../schema/authoritative-schema';
@@ -86,9 +83,7 @@ import type {
   RuntimeFrame,
   RuntimeFramePayloads,
   StorageAccountDoc,
-  StorageDiffRecord,
   StorageDoc,
-  StorageDocRef,
   StorageEntityCoreDoc,
   StorageHead,
   StorageReplicaMeta,
@@ -438,6 +433,7 @@ const listAccountPageFromKeyspace = async (options: {
   limit: number;
   direction: 'asc' | 'desc';
   overlay?: Map<string, StorageAccountDoc | null>;
+  snapshotHeight?: number;
 }): Promise<StorageAccountDocPage | null> => {
   const { db, prefix, parseKey, cursor, limit, direction, overlay } = options;
   if (typeof db.keys !== 'function') return null;
@@ -462,9 +458,19 @@ const listAccountPageFromKeyspace = async (options: {
     if (overlay?.has(normalized)) continue;
     const stored = key[0] === KEY_LIVE_ACCOUNT
       ? await readAccountStorageLayout(db, options.entityId, counterpartyId, key)
-      : null;
+      : options.snapshotHeight !== undefined
+        ? await readAccountStorageLayout(
+            createSnapshotAccountGraphView(db, options.snapshotHeight),
+            options.entityId,
+            counterpartyId,
+            keyLiveAccount(options.entityId, counterpartyId),
+          )
+        : null;
+    if (!stored) {
+      throw new Error(`STORAGE_ACCOUNT_GRAPH_MISSING:${options.entityId}:${counterpartyId}`);
+    }
     const doc = assertStorageAccountDocBinding(
-      stored ? validateStorageAccountDocValue(stored.doc) : decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
+      validateStorageAccountDocValue(stored.doc),
       options.entityId,
       counterpartyId,
       'page',
@@ -509,38 +515,6 @@ export const listStorageSnapshotEntityIds = async (
   return ids;
 };
 
-const applyDocs = (
-  target: Map<string, StorageDoc>,
-  puts: StorageDoc[],
-  dels: StorageDocRef[],
-  entityId?: string,
-): void => {
-  const filterEntity = entityId ? normalizeEntityId(entityId) : null;
-  for (const ref of dels) {
-    if (filterEntity && normalizeEntityId(ref.entityId) !== filterEntity) continue;
-    target.delete(docRefKey(ref));
-  }
-  for (const doc of puts) {
-    if (filterEntity && normalizeEntityId(doc.entityId) !== filterEntity) continue;
-    target.set(docValueKey(doc), doc);
-  }
-};
-
-const readRequiredDiff = async (
-  db: RuntimeDbLike,
-  height: number,
-  scope: string,
-): Promise<StorageDiffRecord> => {
-  const diff = await readValidatedOrNull(db, keyDiff(height), validateStorageDiffRecordValue);
-  if (!diff) {
-    throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=${scope}`);
-  }
-  if (diff.height !== height) {
-    throw new Error(`STORAGE_DIFF_KEY_HEIGHT_MISMATCH:key=${height}:value=${diff.height}:scope=${scope}`);
-  }
-  return diff;
-};
-
 const resolveTargetStorageHeight = (
   head: StorageHead,
   requestedHeight: number | undefined,
@@ -558,6 +532,30 @@ const resolveTargetStorageHeight = (
     throw new Error(`STORAGE_HEIGHT_UNAVAILABLE: scope=${scope} requested=${targetHeight} latest=${latestHeight}`);
   }
   return targetHeight;
+};
+
+/**
+ * A graph keyspace contains exactly two authoritative shapes: the current
+ * materialized graph and immutable checkpoint graphs. Arbitrary historical
+ * heights are reconstructed only by deterministic Runtime WAL replay. Keeping
+ * a second document-diff reducer here previously duplicated consensus logic
+ * and depended on a retired record family that was no longer written.
+ */
+const requireDirectGraphSource = async (
+  db: RuntimeDbLike,
+  targetHeight: number,
+  latestMaterializedHeight: number,
+  liveStateReadable: boolean,
+  scope: string,
+): Promise<'live' | 'snapshot'> => {
+  if (liveStateReadable && targetHeight === latestMaterializedHeight) return 'live';
+  const snapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
+  if (snapshotHeight === targetHeight) return 'snapshot';
+  throw new Error(
+    `STORAGE_DIRECT_HISTORICAL_READ_FORBIDDEN:scope=${scope}:` +
+    `requested=${targetHeight}:materialized=${latestMaterializedHeight}:` +
+    `checkpoint=${snapshotHeight};use=runtime-wal-replay`,
+  );
 };
 
 const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: number, entityId: string): Promise<Map<string, StorageDoc>> => {
@@ -716,7 +714,14 @@ const loadEntityCoreDocAtHeight = async (
   liveStateReadable = true,
 ): Promise<StorageEntityCoreDoc | null> => {
   const normalized = normalizeEntityId(entityId);
-  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
+  const source = await requireDirectGraphSource(
+    db,
+    targetHeight,
+    latestMaterializedHeight,
+    liveStateReadable,
+    `entity:${normalized}`,
+  );
+  if (source === 'live') {
     const stored = await readEntityStorageLayout(db, normalized, keyLiveEntity(normalized));
     return assertEntityDocKeyBinding(
       stored?.doc ?? null,
@@ -724,51 +729,16 @@ const loadEntityCoreDocAtHeight = async (
       'live',
     );
   }
-
-  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  const snapshotStored = baseSnapshotHeight > 0
-    ? await readEntityStorageLayout(
-        createSnapshotEntityGraphView(db, baseSnapshotHeight),
-        normalized,
-        keyLiveEntity(normalized),
-      )
-    : null;
-  let core = snapshotStored?.doc ?? null;
-  core = assertEntityDocKeyBinding(core, normalized, `snapshot:${baseSnapshotHeight}`);
-  for (let cursor = baseSnapshotHeight + 1; cursor <= targetHeight; cursor += 1) {
-    const diff = await readRequiredDiff(db, cursor, `entity:${normalized}`);
-    for (const ref of diff.dels) {
-      if (ref.family === 'entity' && normalizeEntityId(ref.entityId) === normalized) core = null;
-    }
-    for (const doc of diff.puts) {
-      if (doc.family === 'entity' && normalizeEntityId(doc.entityId) === normalized) core = doc.value;
-    }
-  }
-  return core;
-};
-
-const collectHistoricalAccountOverlay = async (
-  db: RuntimeDbLike,
-  entityId: string,
-  fromHeightExclusive: number,
-  toHeight: number,
-): Promise<Map<string, StorageAccountDoc | null>> => {
-  const normalized = normalizeEntityId(entityId);
-  const overlay = new Map<string, StorageAccountDoc | null>();
-  for (let height = fromHeightExclusive + 1; height <= toHeight; height += 1) {
-    const diff = await readRequiredDiff(db, height, `accounts:${normalized}`);
-    for (const ref of diff.dels) {
-      if (ref.family === 'account' && normalizeEntityId(ref.entityId) === normalized) {
-        overlay.set(normalizeEntityId(ref.counterpartyId), null);
-      }
-    }
-    for (const doc of diff.puts) {
-      if (doc.family === 'account' && normalizeEntityId(doc.entityId) === normalized) {
-        overlay.set(normalizeEntityId(doc.counterpartyId), doc.value);
-      }
-    }
-  }
-  return overlay;
+  const snapshotStored = await readEntityStorageLayout(
+    createSnapshotEntityGraphView(db, targetHeight),
+    normalized,
+    keyLiveEntity(normalized),
+  );
+  return assertEntityDocKeyBinding(
+    snapshotStored?.doc ?? null,
+    normalized,
+    `snapshot:${targetHeight}`,
+  );
 };
 
 const loadAccountDocPageAtHeight = async (
@@ -784,7 +754,14 @@ const loadAccountDocPageAtHeight = async (
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
   const cursor = readAccountCursor(query);
 
-  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
+  const source = await requireDirectGraphSource(
+    db,
+    targetHeight,
+    latestMaterializedHeight,
+    liveStateReadable,
+    `accounts:${normalized}`,
+  );
+  if (source === 'live') {
     const prefix = keyLiveAccountPrefix(normalized);
     return listAccountPageFromKeyspace({
       db,
@@ -797,29 +774,17 @@ const loadAccountDocPageAtHeight = async (
       direction,
     });
   }
-
-  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  const overlay = await collectHistoricalAccountOverlay(db, normalized, baseSnapshotHeight, targetHeight);
-  if (baseSnapshotHeight <= 0) {
-    const candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }> = [];
-    const seen = new Set<string>();
-    for (const [counterpartyId, doc] of overlay.entries()) {
-      if (!doc || !isAfterAccountCursor(counterpartyId, cursor, direction)) continue;
-      pushAccountCandidate(candidates, seen, counterpartyId, doc, limit, direction);
-    }
-    return accountPageFromCandidates(candidates, limit);
-  }
-  const prefix = keySnapshotAccountPrefix(baseSnapshotHeight, normalized);
+  const prefix = keySnapshotAccountPrefix(targetHeight, normalized);
   return listAccountPageFromKeyspace({
     db,
     entityId: normalized,
     prefix,
-    cursorKey: cursor ? keySnapshotAccountCursor(baseSnapshotHeight, normalized, cursor) : undefined,
+    cursorKey: cursor ? keySnapshotAccountCursor(targetHeight, normalized, cursor) : undefined,
     parseKey: parseSnapshotAccountKey,
     cursor,
     limit,
     direction,
-    overlay,
+    snapshotHeight: targetHeight,
   });
 };
 
@@ -834,7 +799,14 @@ const loadAccountDocAtHeight = async (
   const normalized = normalizeEntityId(entityId);
   const counterparty = normalizeEntityId(counterpartyId);
 
-  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
+  const source = await requireDirectGraphSource(
+    db,
+    targetHeight,
+    latestMaterializedHeight,
+    liveStateReadable,
+    `account:${normalized}:${counterparty}`,
+  );
+  if (source === 'live') {
     const stored = await readAccountStorageLayout(
       db,
       normalized,
@@ -849,40 +821,20 @@ const loadAccountDocAtHeight = async (
       'live',
     );
   }
-
-  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  let doc = baseSnapshotHeight > 0
-    ? await readValidatedOrNull(
-        db,
-        keySnapshotAccountCursor(baseSnapshotHeight, normalized, counterparty),
-        validateStorageAccountDocValue,
+  const stored = await readAccountStorageLayout(
+    createSnapshotAccountGraphView(db, targetHeight),
+    normalized,
+    counterparty,
+    keyLiveAccount(normalized, counterparty),
+  );
+  return stored
+    ? assertStorageAccountDocBinding(
+        validateStorageAccountDocValue(stored.doc),
+        normalized,
+        counterparty,
+        `snapshot:${targetHeight}`,
       )
     : null;
-  if (doc) {
-    doc = assertStorageAccountDocBinding(doc, normalized, counterparty, `snapshot:${baseSnapshotHeight}`);
-  }
-  for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
-    const diff = await readRequiredDiff(db, height, `account:${normalized}:${counterparty}`);
-    for (const ref of diff.dels) {
-      if (
-        ref.family === 'account' &&
-        normalizeEntityId(ref.entityId) === normalized &&
-        normalizeEntityId(ref.counterpartyId) === counterparty
-      ) {
-        doc = null;
-      }
-    }
-    for (const item of diff.puts) {
-      if (
-        item.family === 'account' &&
-        normalizeEntityId(item.entityId) === normalized &&
-        normalizeEntityId(item.counterpartyId) === counterparty
-      ) {
-        doc = item.value;
-      }
-    }
-  }
-  return doc;
 };
 
 const readBookCursor = (query?: StoragePageQuery): string =>
@@ -996,7 +948,14 @@ const loadBookDocPageAtHeight = async (
   const cursor = readBookCursor(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
 
-  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
+  const source = await requireDirectGraphSource(
+    db,
+    targetHeight,
+    latestMaterializedHeight,
+    liveStateReadable,
+    `books:${normalized}`,
+  );
+  if (source === 'live') {
     const page = await listBookPageFromKeyspace({
       db,
       prefix: keyLiveBookPrefix(normalized),
@@ -1010,40 +969,17 @@ const loadBookDocPageAtHeight = async (
     if (page) return page;
   }
 
-  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  const overlay = new Map<string, BookState | null>();
-  for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
-    const diff = await readRequiredDiff(db, height, `books:${normalized}`);
-    for (const ref of diff.dels) {
-      if (ref.family === 'book' && normalizeEntityId(ref.entityId) === normalized) overlay.set(ref.pairId, null);
-    }
-    for (const doc of diff.puts) {
-      if (doc.family === 'book' && normalizeEntityId(doc.entityId) === normalized) overlay.set(doc.pairId, doc.value);
-    }
-  }
-
-  if (baseSnapshotHeight > 0) {
-    const page = await listBookPageFromKeyspace({
-      db,
-      prefix: keySnapshotBookPrefix(baseSnapshotHeight, normalized),
-      cursorKey: cursor ? keySnapshotBookCursor(baseSnapshotHeight, normalized, cursor) : undefined,
-      parseKey: (key) => parseLiveBookKey(key, 9),
-      cursor,
-      limit,
-      direction,
-      overlay,
-      readBook: pairId => readSnapshotBookGraph(db, baseSnapshotHeight, normalized, pairId),
-    });
-    if (page) return page;
-  }
-
-  const candidates: Array<{ pairId: string; book: BookState }> = [];
-  const seen = new Set<string>();
-  for (const [pairId, book] of overlay.entries()) {
-    if (!book || !isAfterBookCursor(pairId, cursor, direction)) continue;
-    pushBookCandidate(candidates, seen, pairId, book, limit, direction);
-  }
-  return bookPageFromCandidates(candidates, limit);
+  const page = await listBookPageFromKeyspace({
+    db,
+    prefix: keySnapshotBookPrefix(targetHeight, normalized),
+    cursorKey: cursor ? keySnapshotBookCursor(targetHeight, normalized, cursor) : undefined,
+    parseKey: (key) => parseLiveBookKey(key, 9),
+    cursor,
+    limit,
+    direction,
+    readBook: pairId => readSnapshotBookGraph(db, targetHeight, normalized, pairId),
+  });
+  return page ?? { items: [], nextCursor: null };
 };
 
 export const loadEntityViewPageFromStorage = async (options: {
@@ -1187,17 +1123,14 @@ export const loadEntityStateFromStorage = async (options: {
     return hydrateEntityWithCertifiedBoardNodes(options.env, db, entityCore, accounts, books);
   }
 
-  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  const docs = baseSnapshotHeight > 0
-    ? await loadSnapshotDocsForEntity(db, baseSnapshotHeight, entityId)
-    : new Map<string, StorageDoc>();
-
-  let cursor = baseSnapshotHeight + 1;
-  while (cursor <= targetHeight) {
-    const diff = await readRequiredDiff(db, cursor, `entity-state:${entityId}`);
-    applyDocs(docs, diff.puts, diff.dels, entityId);
-    cursor += 1;
-  }
+  await requireDirectGraphSource(
+    db,
+    targetHeight,
+    latestMaterializedHeight,
+    options.liveStateReadable !== false,
+    `entity-state:${entityId}`,
+  );
+  const docs = await loadSnapshotDocsForEntity(db, targetHeight, entityId);
 
   const core = docs.get(`e:${entityId}`) as Extract<StorageDoc, { family: 'entity' }> | undefined;
   if (!core) return null;
@@ -1251,12 +1184,14 @@ export const loadEntityStatesAtHeightFromStorage = async (options: {
     return states;
   }
 
-  const snapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  const docs = await loadSnapshotDocsAtHeight(db, snapshotHeight);
-  for (let height = snapshotHeight + 1; height <= targetHeight; height += 1) {
-    const diff = await readRequiredDiff(db, height, 'entity-states');
-    applyDocs(docs, diff.puts, diff.dels);
-  }
+  await requireDirectGraphSource(
+    db,
+    targetHeight,
+    latestMaterializedHeight,
+    false,
+    'entity-states',
+  );
+  const docs = await loadSnapshotDocsAtHeight(db, targetHeight);
   return hydrateEntityStatesFromDocs(options.env, db, docs);
 };
 import { Buffer } from '../../support/platform-crypto';

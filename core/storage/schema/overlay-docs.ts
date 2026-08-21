@@ -1,15 +1,12 @@
 import { type RuntimeOverlayRecord } from '../../types/account';
 import { type RuntimeReplica } from '../../runtime/types';
 import { docRefKey } from './doc-refs';
-import { keyDiff, normalizeEntityId } from '../keys';
-import { readValidatedOrNull } from '../database/level';
-import { validateStorageDiffRecordValue } from './authoritative-schema';
-import { mergeStorageOverlayRecords, storageOverlayRecordKey } from '../../protocol/state/overlay';
+import { normalizeEntityId } from '../keys';
+import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { projectAccountDoc } from '../read/projections';
 import type { EntityState } from '../../entity/types';
 import { buildReplicaLookup, findReplicaForEntity } from '../replica/replicas';
 import type {
-  RuntimeDbLike,
   StorageAccountRef,
   StorageBookRef,
   StorageDoc,
@@ -43,52 +40,6 @@ export const mergeOverlayRecordsIntoEnv = (
   for (const record of records) overlay.set(storageOverlayRecordKey(record), { ...record });
   env.overlay = overlay;
   return Array.from(overlay.values(), record => ({ ...record }));
-};
-
-const overlayRecordsFromDocs = (
-  puts: readonly StorageDoc[] | undefined,
-  dels: readonly StorageDocRef[] | undefined,
-): RuntimeOverlayRecord[] => {
-  const records = new Map<string, RuntimeOverlayRecord>();
-  for (const doc of puts ?? []) {
-    const entityId = normalizeEntityId(doc.entityId);
-    if (!entityId) continue;
-    const record: RuntimeOverlayRecord = doc.family === 'account'
-      ? { family: 'account', entityId, counterpartyId: normalizeEntityId(doc.counterpartyId) }
-      : doc.family === 'book'
-        ? { family: 'book', entityId, pairId: String(doc.pairId || '').trim() }
-        : { family: 'entity', entityId };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  for (const ref of dels ?? []) {
-    if (ref.family !== 'book') {
-      throw new Error(`STORAGE_OVERLAY_DELETE_UNSUPPORTED: family=${ref.family}`);
-    }
-    const entityId = normalizeEntityId(ref.entityId);
-    if (!entityId) continue;
-    const record: RuntimeOverlayRecord = { family: 'book', entityId, pairId: String(ref.pairId || '').trim(), deleted: true };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  return Array.from(records.values());
-};
-
-export const readStorageOverlayRecordsFromDiffs = async (
-  db: RuntimeDbLike,
-  startHeight: number,
-  targetHeight: number,
-): Promise<RuntimeOverlayRecord[]> => {
-  let records: RuntimeOverlayRecord[] = [];
-  const start = Math.max(1, Math.floor(startHeight));
-  const end = Math.floor(targetHeight);
-  for (let height = start; height <= end; height += 1) {
-    const diff = await readValidatedOrNull(db, keyDiff(height), validateStorageDiffRecordValue);
-    if (!diff) throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=overlay`);
-    if (diff.height !== height) {
-      throw new Error(`STORAGE_DIFF_KEY_HEIGHT_MISMATCH:key=${height}:value=${diff.height}:scope=overlay`);
-    }
-    records = mergeStorageOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
-  }
-  return records;
 };
 
 export const buildBookDeletionsFromOverlay = (

@@ -777,7 +777,9 @@ export interface RuntimeReplica {
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
   networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
-  pendingNetworkOutputs?: RoutedEntityInput[]; // Durable, bounded at-least-once transport outbox.
+  // Durable forensic outbox only. Recovery must fail loud on entries here;
+  // automatic transport retries are deliberately absent until a later protocol.
+  pendingNetworkOutputs?: RoutedEntityInput[];
 
   // Event emission methods (EVM-style - like Ethereum block logs)
   log: (message: string) => void;

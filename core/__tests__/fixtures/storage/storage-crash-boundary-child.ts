@@ -73,6 +73,7 @@ import type { CertifiedRegistrationEvidence, JReplica } from '../../../types/jur
 import type { CertifiedEntityFrameLink, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
+import { commitEntityFrameCandidateState } from '../../../entity/state-clone';
 import {
   installCanonicalRegisteredBoardAuthority,
   installCanonicalRegistrationEvidence,
@@ -234,7 +235,7 @@ const certifyNextFrame = async (
     applied.collectedHashes ?? [],
   );
   return {
-    state: { ...postStateWithoutHead, prevFrameHash: hash },
+    state: commitEntityFrameCandidateState({ ...postStateWithoutHead, prevFrameHash: hash }),
     link: {
       frame: {
         parentFrameHash,

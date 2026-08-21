@@ -12,7 +12,6 @@ import { hydrateAccountDocFromStorage, projectAccountDoc } from '../../../storag
 import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
-  validateStorageDiffRecordValue,
 } from '../../../storage/schema/authoritative-schema';
 import type { StorageAccountDoc } from '../../../storage/types';
 import { entity, makeAccount } from '../.././helpers/cross-j';
@@ -445,23 +444,13 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(1);
   });
 
-  test('authoritative WAL diff binds an Account put to its owner/proof orientation', async () => {
+  test('authoritative Account graph binds its owner/proof orientation', async () => {
     const fixture = await makeFixture();
     [fixture.doc.proofHeader.fromEntity, fixture.doc.proofHeader.toEntity] = [
       fixture.doc.proofHeader.toEntity,
       fixture.doc.proofHeader.fromEntity,
     ];
-    const diff = {
-      height: 1,
-      puts: [{
-        family: 'account',
-        entityId: fixture.owner,
-        counterpartyId: fixture.counterparty,
-        value: fixture.doc,
-      }],
-      dels: [],
-    };
-    expect(() => decodeValidatedBuffer(encodeBuffer(diff), validateStorageDiffRecordValue))
+    expect(() => admit(fixture))
       .toThrow('STORAGE_ACCOUNT_DOC_OWNER_MISMATCH');
   });
 });

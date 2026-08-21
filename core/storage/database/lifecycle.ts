@@ -1,7 +1,6 @@
 import { encodeBuffer, writeBatch } from '../codec/codec';
 import { copyKeyRange, deleteKeyRange, deleteKeys, iterateKeys, readValidatedOrNull } from './level';
 import {
-  KEY_DIFF,
   KEY_FRAME,
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
@@ -423,15 +422,6 @@ export const pruneHistoryBeforeHeight = async (
     key => !retainedSnapshots.has(decodeHeight(key)),
     onPruneBatch,
   );
-  const diffs = await deleteKeyRange(
-    db,
-    {
-      gte: Buffer.from([KEY_DIFF]),
-      lt: Buffer.concat([Buffer.from([KEY_DIFF]), encodeHeight(cutoff + 1)]),
-    },
-    () => true,
-    onPruneBatch,
-  );
-  return frames.removedBytes + diffs.removedBytes;
+  return frames.removedBytes;
 };
 import { Buffer } from '../../support/platform-crypto';

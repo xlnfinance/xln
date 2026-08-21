@@ -47,7 +47,6 @@ const inspectRuntimeStorage = async (
           latestHeight: current.head?.latestHeight ?? 0,
           latestSnapshotHeight: current.head?.latestSnapshotHeight ?? 0,
           frameCount: current.frameCount,
-          diffCount: current.diffCount,
           snapshotCount: current.snapshotHeights.length,
           liveBytes: current.liveBytes,
           historyBytes: current.historyBytes,
@@ -61,7 +60,6 @@ const inspectRuntimeStorage = async (
           latestHeight: history.head?.latestHeight ?? 0,
           latestSnapshotHeight: history.head?.latestSnapshotHeight ?? 0,
           frameCount: history.frameCount,
-          diffCount: history.diffCount,
           snapshotCount: history.snapshotHeights.length,
           liveBytes: history.liveBytes,
           historyBytes: history.historyBytes,
@@ -73,7 +71,6 @@ const inspectRuntimeStorage = async (
   return {
     head: history?.head ?? current?.head ?? null,
     frameCount: history?.frameCount ?? 0,
-    diffCount: history?.diffCount ?? 0,
     snapshotHeights: Array.from(new Set(history?.snapshotHeights ?? []))
       .sort((left, right) => left - right),
     liveEntityCount: current?.liveEntityCount ?? 0,
@@ -82,13 +79,11 @@ const inspectRuntimeStorage = async (
     liveAccountFieldBytes: current?.liveAccountFieldBytes ?? 0,
     liveBookCount: current?.liveBookCount ?? 0,
     frameBytes: history?.frameBytes ?? 0,
-    diffBytes: history?.diffBytes ?? 0,
     snapshotBytes: history?.snapshotBytes ?? 0,
     liveBytes: current?.liveBytes ?? 0,
     historyBytes: history?.historyBytes ?? 0,
     totalBytes: (current?.liveBytes ?? 0) + (history?.historyBytes ?? 0),
     maxFrameBytes: history?.maxFrameBytes ?? 0,
-    maxDiffBytes: history?.maxDiffBytes ?? 0,
     maxSnapshotBytes: history?.maxSnapshotBytes ?? 0,
     epochDbs,
   };
@@ -105,8 +100,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   ): Promise<T | null> => {
     return deps.withStorageConsistentRead(env, async () => {
       // Opening the source handle is part of the borrow contract even when a
-      // caller supplies an exact historical height. Hash-cut WAL frames no
-      // longer store KEY_DIFF docs; inspection rebuilds State from the journal.
+      // caller supplies an exact historical height. Historical inspection has
+      // exactly one path: replay the authoritative Runtime input journal.
       const latestHeight = await deps.resolvePersistedLatestHeight(env);
       const restored = await deps.loadEnvFromStorageByReplay(
         env.runtimeId,

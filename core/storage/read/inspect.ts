@@ -1,7 +1,10 @@
 import type { RuntimeReplica } from '../../runtime/types';
 import {
-  KEY_DIFF,
   KEY_FRAME,
+  KEY_RUNTIME_OUTPUT_PAYLOAD,
+  KEY_ENTITY_CONTEXT_PAYLOAD,
+  KEY_RUNTIME_MACHINE_BRANCH,
+  KEY_RUNTIME_MACHINE_LEAF,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -22,6 +25,7 @@ import {
   KEY_SNAPSHOT_ENTITY,
   KEY_SNAPSHOT_MANIFEST,
   KEY_SNAPSHOT_REPLICA_META,
+  KEY_SNAPSHOT_GRAPH,
 } from '../keys';
 import { measurePrefixBytes } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
@@ -43,12 +47,16 @@ export const inspectStorage = async (options: {
   const head = await readStorageHead(db);
   const [
     frameStats,
-    diffStats,
+    runtimeOutputPayloadStats,
+    entityContextPayloadStats,
+    runtimeMachineBranchStats,
+    runtimeMachineLeafStats,
     snapshotManifestStats,
     snapshotEntityStats,
     snapshotAccountStats,
     snapshotBookStats,
     snapshotReplicaMetaStats,
+    snapshotGraphStats,
     snapshotHeights,
     liveEntityStats,
     liveEntityFieldStats,
@@ -67,12 +75,16 @@ export const inspectStorage = async (options: {
     accountJClaimNodeStats,
   ] = await Promise.all([
     measurePrefixBytes(db, Buffer.from([KEY_FRAME])),
-    measurePrefixBytes(db, Buffer.from([KEY_DIFF])),
+    measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_OUTPUT_PAYLOAD])),
+    measurePrefixBytes(db, Buffer.from([KEY_ENTITY_CONTEXT_PAYLOAD])),
+    measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_MACHINE_BRANCH])),
+    measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_MACHINE_LEAF])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_MANIFEST])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_ENTITY])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_ACCOUNT])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_BOOK])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_REPLICA_META])),
+    measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_GRAPH])),
     listSnapshotHeights(db),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY_FIELD])),
@@ -96,7 +108,8 @@ export const inspectStorage = async (options: {
     snapshotEntityStats.bytes +
     snapshotAccountStats.bytes +
     snapshotBookStats.bytes +
-    snapshotReplicaMetaStats.bytes;
+    snapshotReplicaMetaStats.bytes +
+    snapshotGraphStats.bytes;
   const liveBytes =
     liveEntityStats.bytes +
     liveEntityFieldStats.bytes +
@@ -109,17 +122,21 @@ export const inspectStorage = async (options: {
     bookGraphBranchStats.bytes +
     bookGraphLeafStats.bytes +
     entityGraphBranchStats.bytes +
-    entityGraphLeafStats.bytes +
+    entityGraphLeafStats.bytes;
+  const immutableBytes =
+    runtimeOutputPayloadStats.bytes +
+    entityContextPayloadStats.bytes +
+    runtimeMachineBranchStats.bytes +
+    runtimeMachineLeafStats.bytes +
     certifiedBoardNodeStats.bytes +
     consumptionNodeStats.bytes +
     accountJClaimNodeStats.bytes;
-  const historyBytes = frameStats.bytes + diffStats.bytes + snapshotBytes;
+  const historyBytes = frameStats.bytes + snapshotBytes + immutableBytes;
   const totalBytes = historyBytes + liveBytes;
 
   return {
     head,
     frameCount: frameStats.count,
-    diffCount: diffStats.count,
     snapshotHeights,
     liveEntityCount: liveEntityStats.count,
     liveEntityFieldCount: liveEntityFieldStats.count,
@@ -141,19 +158,18 @@ export const inspectStorage = async (options: {
     consumptionNodeBytes: consumptionNodeStats.bytes,
     accountJClaimNodeBytes: accountJClaimNodeStats.bytes,
     frameBytes: frameStats.bytes,
-    diffBytes: diffStats.bytes,
     snapshotBytes,
     liveBytes,
     historyBytes,
     totalBytes,
     maxFrameBytes: frameStats.maxValueBytes,
-    maxDiffBytes: diffStats.maxValueBytes,
     maxSnapshotBytes: Math.max(
       snapshotManifestStats.maxValueBytes,
       snapshotEntityStats.maxValueBytes,
       snapshotAccountStats.maxValueBytes,
       snapshotBookStats.maxValueBytes,
       snapshotReplicaMetaStats.maxValueBytes,
+      snapshotGraphStats.maxValueBytes,
     ),
   };
 };

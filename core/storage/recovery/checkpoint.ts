@@ -17,6 +17,11 @@ import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-sc
 import { validateJReplicas } from '../wal/runtime-machine-schema/j';
 import { assertCrossJLocalCohorts } from '../../runtime/delivery/topology/cross-j-topology';
 import { restoreAndAssertLocalEntityCryptoKeys } from './machine';
+import type { EntityState } from '../../entity/types';
+import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
+import { hydrateAccountDocFromStorage } from '../read/projections';
 
 type RuntimeModule = typeof import('../../runtime');
 
@@ -34,6 +39,32 @@ export type DecodedCheckpointSnapshot = {
   env: RuntimeReplica;
   gossipProfiles: Profile[];
 };
+
+const hydrateCheckpointEntityState = (state: EntityState): EntityState => ({
+  ...state,
+  accounts: PersistentEntityAccountMap.fromEntries(
+    Array.from(state.accounts, ([counterpartyId, account]) => [
+      counterpartyId,
+      hydrateAccountDocFromStorage(account),
+    ] as const),
+    state.entityId,
+    computeEntityAccountValueHash,
+  ),
+  htlcRoutes: PersistentEntityCollectionMap.from(state.htlcRoutes),
+  lockBook: PersistentEntityCollectionMap.from(state.lockBook),
+  ...(state.crossJurisdictionSwaps
+    ? { crossJurisdictionSwaps: PersistentEntityCollectionMap.from(state.crossJurisdictionSwaps) }
+    : {}),
+  ...(state.crossJurisdictionAuthorizations
+    ? { crossJurisdictionAuthorizations: PersistentEntityCollectionMap.from(state.crossJurisdictionAuthorizations) }
+    : {}),
+  ...(state.pendingCrossJurisdictionFillAcks
+    ? { pendingCrossJurisdictionFillAcks: PersistentEntityCollectionMap.from(state.pendingCrossJurisdictionFillAcks) }
+    : {}),
+  ...(state.crossJurisdictionBookAdmissions
+    ? { crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.from(state.crossJurisdictionBookAdmissions) }
+    : {}),
+});
 
 const requireCheckpointEntries = (
   raw: unknown,
@@ -87,10 +118,9 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
   restoreDurableRuntimeSnapshot(env, validatedRuntimeMachine);
   env.state.eReplicas = new Map();
   for (const [index, [key, replica]] of entityEntries.entries()) {
-    env.state.eReplicas.set(
-      key,
-      validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`),
-    );
+    const validated = validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`);
+    validated.state = hydrateCheckpointEntityState(validated.state);
+    env.state.eReplicas.set(key, validated);
   }
   env.state.jReplicas = new Map();
   for (const [key, replica] of validateJReplicas(
@@ -127,17 +157,20 @@ export const decodeCheckpointSnapshot = async (
   options: CheckpointRestoreOptions = {},
 ): Promise<DecodedCheckpointSnapshot> => {
   if (!snapshot || typeof snapshot !== 'object') throw new Error('RECOVERY_CHECKPOINT_INVALID');
+  // Validation/hydration owns and normalizes its input. Never mutate the
+  // signed bundle object: callers may verify or export those exact bytes again.
+  const checkpoint = structuredClone(snapshot);
 
-  const snapshotSeed = typeof snapshot['runtimeSeed'] === 'string' ? snapshot['runtimeSeed'] : null;
+  const snapshotSeed = typeof checkpoint['runtimeSeed'] === 'string' ? checkpoint['runtimeSeed'] : null;
   const env = deps.createEmptyEnv(options.runtimeSeed === undefined ? snapshotSeed : options.runtimeSeed);
   const runtimeId = normalizeRuntimeId(
-    options.runtimeId ?? String(snapshot['runtimeId'] || env.runtimeId || ''),
+    options.runtimeId ?? String(checkpoint['runtimeId'] || env.runtimeId || ''),
   );
   if (!runtimeId) throw new Error('RECOVERY_CHECKPOINT_RUNTIME_ID_REQUIRED');
   env.runtimeId = runtimeId;
   env.dbNamespace = normalizeDbNamespace(runtimeId);
 
-  const gossipProfiles = restoreCheckpointState(env, snapshot);
+  const gossipProfiles = restoreCheckpointState(env, checkpoint);
   restoreAndAssertLocalEntityCryptoKeys(env);
   assertCrossJLocalCohorts(env);
   await assertCheckpointCommitments(env);

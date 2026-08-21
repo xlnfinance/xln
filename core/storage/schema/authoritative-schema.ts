@@ -1,9 +1,6 @@
 import { decodeRuntimeInput } from '../../runtime/decode';
 import { assertStorageSchemaVersion } from '../keys';
 import type {
-  StorageDiffRecord,
-  StorageDoc,
-  StorageDocRef,
   StorageFrameEntityHash,
   RuntimeFrame,
   StorageHead,
@@ -20,11 +17,6 @@ import {
   requireStorageString,
   requireStringArray,
 } from './schema-primitives';
-import {
-  assertStorageAccountDocBinding,
-  validateStorageAccountDocValue,
-  validateStorageEntityCoreDocValue,
-} from './schema-state-docs';
 import { decodeRuntimeOutputPayloadRefs } from '../wal/outbox-payload';
 import { decodeEntityContextPayloadRefs } from '../wal/entity-context-payload';
 import { decodeRuntimeMachineGraphRoot } from '../wal/runtime-machine-graph';
@@ -173,44 +165,4 @@ export const validateStorageSnapshotManifestValue = (value: unknown): StorageSna
   requireBoundaryInteger(manifest['createdAt'], `${code}_CREATED_AT`);
   requireBoundaryInteger(manifest['docCount'], `${code}_DOC_COUNT`);
   return manifest as StorageSnapshotManifest;
-};
-
-const validateStorageDoc = (value: unknown, code: string): StorageDoc => {
-  const doc = requireBoundaryRecord(value, code);
-  if (doc['family'] === 'entity') {
-    requireExactBoundaryKeys(doc, ['family', 'entityId', 'value'], [], `${code}_FIELDS`);
-    requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
-    const core = validateStorageEntityCoreDocValue(doc['value']);
-    if (core.entityId !== doc['entityId']) throw new Error(`${code}_ENTITY_VALUE_ID_MISMATCH`);
-  } else if (doc['family'] === 'account') {
-    requireExactBoundaryKeys(doc, ['family', 'entityId', 'counterpartyId', 'value'], [], `${code}_FIELDS`);
-    requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
-    requireStorageString(doc['counterpartyId'], `${code}_COUNTERPARTY_ID`);
-    assertStorageAccountDocBinding(validateStorageAccountDocValue(doc['value']), String(doc['entityId']), String(doc['counterpartyId']), code);
-  } else if (doc['family'] === 'book') {
-    throw new Error(`${code}_BOOK_GRAPH_IN_DIFF_FORBIDDEN`);
-  } else throw new Error(`${code}_FAMILY`);
-  return doc as StorageDoc;
-};
-
-const validateStorageDocRef = (value: unknown, code: string): StorageDocRef => {
-  const ref = requireBoundaryRecord(value, code);
-  if (ref['family'] === 'entity') requireExactBoundaryKeys(ref, ['family', 'entityId'], [], `${code}_FIELDS`);
-  else if (ref['family'] === 'account') requireExactBoundaryKeys(ref, ['family', 'entityId', 'counterpartyId'], [], `${code}_FIELDS`);
-  else if (ref['family'] === 'book') requireExactBoundaryKeys(ref, ['family', 'entityId', 'pairId'], [], `${code}_FIELDS`);
-  else throw new Error(`${code}_FAMILY`);
-  requireStorageString(ref['entityId'], `${code}_ENTITY_ID`);
-  if (ref['family'] === 'account') requireStorageString(ref['counterpartyId'], `${code}_COUNTERPARTY_ID`);
-  if (ref['family'] === 'book') requireStorageString(ref['pairId'], `${code}_PAIR_ID`);
-  return ref as StorageDocRef;
-};
-
-export const validateStorageDiffRecordValue = (value: unknown): StorageDiffRecord => {
-  const code = 'STORAGE_DIFF_INVALID';
-  const diff = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(diff, ['height', 'puts', 'dels'], [], `${code}_FIELDS`);
-  requireBoundaryInteger(diff['height'], `${code}_HEIGHT`, 1);
-  const puts = requireStorageArray(diff['puts'], `${code}_PUTS`).map((doc, index) => validateStorageDoc(doc, `${code}_PUT_${index}`));
-  const dels = requireStorageArray(diff['dels'], `${code}_DELS`).map((ref, index) => validateStorageDocRef(ref, `${code}_DEL_${index}`));
-  return { height: Number(diff['height']), puts, dels };
 };

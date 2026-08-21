@@ -3,7 +3,7 @@
  * Key builders: canonical checkpoints that exclude proposals, handles, and transport state.
  * Human-audit importance: 99/100 — projection coverage defines recoverable authority.
  */
-import type { EntityReplica } from '../../entity/types';
+import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
 import type { JReplica } from '../../types/jurisdiction-runtime';
@@ -33,6 +33,32 @@ import {
 } from '../../entity/account/account-j-claim-node-store';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/tx/internal-tx-auth';
 import { decodeRuntimeConfig } from './runtime-machine-schema';
+import { projectPortableAccountDoc, projectStorageMap } from '../read/projections';
+
+const projectPortableEntityState = (state: EntityState): Record<string, unknown> => {
+  const accounts = new Map<string, ReturnType<typeof projectPortableAccountDoc>>();
+  for (const [counterpartyId, account] of state.accounts) {
+    accounts.set(counterpartyId, projectPortableAccountDoc(account));
+  }
+  return {
+    ...state,
+    accounts,
+    htlcRoutes: projectStorageMap(state.htlcRoutes),
+    lockBook: projectStorageMap(state.lockBook),
+    ...(state.crossJurisdictionSwaps
+      ? { crossJurisdictionSwaps: projectStorageMap(state.crossJurisdictionSwaps) }
+      : {}),
+    ...(state.crossJurisdictionAuthorizations
+      ? { crossJurisdictionAuthorizations: projectStorageMap(state.crossJurisdictionAuthorizations) }
+      : {}),
+    ...(state.pendingCrossJurisdictionFillAcks
+      ? { pendingCrossJurisdictionFillAcks: projectStorageMap(state.pendingCrossJurisdictionFillAcks) }
+      : {}),
+    ...(state.crossJurisdictionBookAdmissions
+      ? { crossJurisdictionBookAdmissions: projectStorageMap(state.crossJurisdictionBookAdmissions) }
+      : {}),
+  };
+};
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
   markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);
@@ -480,6 +506,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
     browserVMState?: RuntimeReplica['browserVMState'];
     compactTransient?: boolean;
     includeCertifiedBoardNodes?: boolean;
+    portableCollections?: boolean;
   },
 ): Record<string, unknown> => {
   const infrastructure = buildDurableRuntimeStateSnapshot(env, {
@@ -499,13 +526,18 @@ export const buildCanonicalRuntimeStateSnapshot = (
     ...(env.pendingOutputs ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
     ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: projectRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
-    eReplicas: Array.from(env.state.eReplicas.entries()).map(([replicaKey, replica]) => [
-      replicaKey,
-      buildCanonicalEntityReplicaSnapshot(
+    eReplicas: Array.from(env.state.eReplicas.entries()).map(([replicaKey, replica]) => {
+      const snapshot = buildCanonicalEntityReplicaSnapshot(
         replica,
         options?.compactTransient ? { compactTransient: true } : undefined,
-      ),
-    ]),
+      );
+      return [
+        replicaKey,
+        options?.portableCollections
+          ? { ...snapshot, state: projectPortableEntityState(replica.state) }
+          : snapshot,
+      ];
+    }),
     jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([replicaKey, jr]) => [
       replicaKey,
       buildCanonicalJReplicaSnapshot(jr),
@@ -518,7 +550,10 @@ export const buildRuntimeCheckpointSnapshot = (env: RuntimeReplica): Record<stri
 };
 
 export const buildRuntimeRecoveryCheckpointSnapshot = (env: RuntimeReplica): Record<string, unknown> => {
-  const snapshot = buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
+  const snapshot = buildCanonicalRuntimeStateSnapshot(env, {
+    includeCertifiedBoardNodes: true,
+    portableCollections: true,
+  });
   const gossipProfiles = projectProfiles(env.gossip?.getProfiles?.());
   return {
     ...snapshot,

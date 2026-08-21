@@ -2,6 +2,7 @@ import {
   writeDurableFile,
   type StorageDurabilityBoundary,
 } from '../../../storage/fs-durability';
+import { safeStringify } from '../../../protocol/serialization';
 
 const markerPath = String(process.argv[2] || '');
 const requestedBoundary = String(process.argv[3] || '') as StorageDurabilityBoundary;
@@ -12,7 +13,7 @@ if (!markerPath || !requestedBoundary) {
 
 await writeDurableFile(
   markerPath,
-  `${JSON.stringify({ snapshotHeight: 7, generation: 'durable-marker-v1' })}\n`,
+  `${safeStringify({ snapshotHeight: 7, generation: 'durable-marker-v1' })}\n`,
   {
     onBoundary: (boundary) => {
       if (boundary !== requestedBoundary) return;

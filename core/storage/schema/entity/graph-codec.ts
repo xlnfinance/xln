@@ -61,7 +61,7 @@ const entityTree = (value: unknown, namespace: EntityCollectionNamespace): Entit
   return value;
 };
 
-export const entityTreeFromState = (
+const entityTreeFromState = (
   state: EntityState,
   namespace: EntityCollectionNamespace,
 ): EntityTree | undefined => {

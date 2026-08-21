@@ -78,9 +78,9 @@ describe('restored checkpoint atomic publication', () => {
         expect(replica?.state.consumptionAccumulator?.count).toBe(1n);
         const oversizedAccount = replica?.state.accounts.get(`0x${'ff'.repeat(32)}`);
         expect(oversizedAccount?.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
-        expect(oversizedAccount?.state.deltas.get(0)?.offdelta).toBe(0n);
-        expect(oversizedAccount?.state.deltas.get(LIMITS.MAX_ACCOUNT_TOKEN_ROWS - 1)?.offdelta)
-          .toBe(BigInt(LIMITS.MAX_ACCOUNT_TOKEN_ROWS - 1));
+        expect(oversizedAccount?.state.deltas.get(1)?.offdelta).toBe(1n);
+        expect(oversizedAccount?.state.deltas.get(LIMITS.MAX_ACCOUNT_TOKEN_ROWS)?.offdelta)
+          .toBe(BigInt(LIMITS.MAX_ACCOUNT_TOKEN_ROWS));
         const firstIdentity = {
           targetEntityId: entityId,
           sourceEntityId: `0x${'22'.repeat(32)}`,

@@ -273,7 +273,9 @@ export const buildRuntimeRecoveryBundle = (
     });
   }
 
-  const checkpoint = buildRuntimeRecoveryCheckpointSnapshot(env);
+  // Portable projection contains only structured-clone-native values. Detach
+  // it before signing so later Runtime frames cannot mutate a signed backup.
+  const checkpoint = structuredClone(buildRuntimeRecoveryCheckpointSnapshot(env));
   return signRuntimeRecoveryBundle(env, {
     ...base,
     kind: 'snapshot',

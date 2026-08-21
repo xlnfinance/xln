@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { createEmptyEnv, processRuntime, registerRecoveryBackupBarrier, sendEntityInput } from '../../../runtime.ts';
 import { deliveryAccepted } from '../../../protocol/payments/delivery-result';
 
-test('persisted pending network outputs retry after backup recovery', async () => {
+test('persisted pending network outputs never auto-retry after backup recovery', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');
   env.dbNamespace = `recovery-barrier-${Date.now()}`;
   env.quietRuntimeLogs = true;
@@ -32,8 +32,8 @@ test('persisted pending network outputs retry after backup recovery', async () =
   registerRecoveryBackupBarrier(env, async () => {});
 
   await processRuntime(env);
-  expect(dispatchCount).toBe(1);
-  expect(env.pendingNetworkOutputs.length).toBe(0);
+  expect(dispatchCount).toBe(0);
+  expect(env.pendingNetworkOutputs.length).toBe(1);
 });
 
 test('direct remote sends fail closed while recovery backup barrier is active', () => {

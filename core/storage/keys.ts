@@ -69,12 +69,11 @@ export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
 export const KEY_HEAD = Buffer.from([0x20]);
 export const KEY_FRAME = 0x10;
-export const KEY_DIFF = 0x11;
 export const KEY_SNAPSHOT_MANIFEST = 0x12;
 /** Immutable routed-output bytes addressed by their full SHA-256 digest. */
-const KEY_RUNTIME_OUTPUT_PAYLOAD = 0x13;
+export const KEY_RUNTIME_OUTPUT_PAYLOAD = 0x13;
 /** Immutable Entity infrastructure context addressed by full SHA-256 digest. */
-const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
+export const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
 /** Runtime checkpoint Patricia branch, scoped by the materialized frame height. */
 export const KEY_RUNTIME_MACHINE_BRANCH = 0x15;
 /** Runtime checkpoint Patricia leaf, scoped by the materialized frame height. */
@@ -175,7 +174,6 @@ const readText = (buffer: Buffer, offset: number): { value: string; nextOffset: 
 };
 
 export const keyFrame = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(height)]);
-export const keyDiff = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_DIFF]), encodeHeight(height)]);
 export const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
 
 export const keyRuntimeOutputPayload = (hash: string): Buffer =>

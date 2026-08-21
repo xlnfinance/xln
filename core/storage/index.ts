@@ -194,9 +194,6 @@ export {
   computeStoragePostStateHash,
 } from './hashes';
 export {
-  readStorageOverlayRecordsFromDiffs,
-} from './schema/overlay-docs';
-export {
   verifyStorageSnapshotAtHeight,
 } from './read/verify';
 export {
@@ -1818,7 +1815,7 @@ const buildStorageCommitBatches = (
   for (const put of certifiedHistoryPuts) walBatch.put(put.key, put.value);
   for (const put of frame.historyViewPuts) walBatch.put(put.key, put.value);
   for (const entry of commitments.replicaMetaEntries) {
-    // Recovery metadata shares the authoritative batch with frame, diff, HEAD.
+    // Recovery metadata shares the authoritative batch with frame and HEAD.
     walBatch.put(entry.key, entry.value);
   }
 
@@ -2072,7 +2069,6 @@ const finishStorageFrameSave = (
         record => record.family === 'book' && record.deleted === true,
       ).length,
       frameBytes: frame.frameBuffer.byteLength,
-      diffBytes: 0,
       historyViewBytes: committed.historyViewBytes,
       historyViewRetainedBytes: committed.historyViewRetainedBytes,
       historyViewPrunedBytes: committed.historyViewPrunedBytes,

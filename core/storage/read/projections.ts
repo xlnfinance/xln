@@ -15,7 +15,7 @@ export {
 } from './hydration';
 
 /** Storage codecs accept boundary-native maps, never live overlay containers. */
-const projectStorageMap = <Key, Value>(source: ReadonlyMap<Key, Value>): Map<Key, Value> =>
+export const projectStorageMap = <Key, Value>(source: ReadonlyMap<Key, Value>): Map<Key, Value> =>
   new Map(source.entries());
 
 const projectCrossJurisdictionRoutes = (
@@ -193,5 +193,32 @@ export const encodeReplicaMeta = (
   options,
 ), { omitSymbolKeys: true });
 
-export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc =>
-  account;
+export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc => account;
+
+/** Portable bundle projection only; live checkpoints persist exact Patricia nodes. */
+export const projectPortableAccountDoc = (account: AccountReplica): Record<string, unknown> => ({
+  ...account,
+  state: {
+    ...account.state,
+    deltas: projectStorageMap(account.state.deltas),
+    locks: projectStorageMap(account.state.locks),
+    swapOffers: projectStorageMap(account.state.swapOffers),
+    ...(account.state.pulls ? { pulls: projectStorageMap(account.state.pulls) } : {}),
+    ...(account.state.subcontracts ? { subcontracts: projectStorageMap(account.state.subcontracts) } : {}),
+    ...(account.state.lendingIntents ? { lendingIntents: projectStorageMap(account.state.lendingIntents) } : {}),
+    requestedRebalance: projectStorageMap(account.state.requestedRebalance),
+    requestedRebalanceFeeState: projectStorageMap(account.state.requestedRebalanceFeeState),
+    ...(account.state.rebalanceFeePolicies
+      ? { rebalanceFeePolicies: projectStorageMap(account.state.rebalanceFeePolicies) }
+      : {}),
+  },
+  pendingWithdrawals: projectStorageMap(account.pendingWithdrawals),
+  shadow: {
+    ...account.shadow,
+    rebalance: {
+      ...account.shadow.rebalance,
+      policy: projectStorageMap(account.shadow.rebalance.policy),
+      submittedAtByToken: projectStorageMap(account.shadow.rebalance.submittedAtByToken),
+    },
+  },
+});

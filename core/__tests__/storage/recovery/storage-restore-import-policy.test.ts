@@ -225,7 +225,9 @@ describe('restored checkpoint conflict policy', () => {
 
     const fork = await createRecoveryEnv(seed, false, 'validator-conflict', 'validator-fork');
     cleanupPaths.push(resolveDbPath(fork.env, 'core'));
-    const conflicting = structuredClone(fork.replica);
+    // Preserve the exact persistent graph roots; only validator-local identity
+    // differs for this divergence fixture.
+    const conflicting = { ...fork.replica };
     conflicting.signerId = deriveSignerAddressSync(seed, '2').toLowerCase();
     base.env.state.eReplicas.set(`${base.entityId}:${conflicting.signerId}`, conflicting);
     await expect(persistRestoredEnvToDB(base.env))

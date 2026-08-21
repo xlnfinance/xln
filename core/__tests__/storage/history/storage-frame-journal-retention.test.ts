@@ -29,11 +29,11 @@ import {
 import { replaceRuntimeFrameEvents } from '../../../runtime/observability/env-events';
 import {
   computeStorageFrameHash,
+  inspectStorage,
   readHistoryViewRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
   listStorageSnapshotReplicaMetas,
-  readStorageOverlayRecordsFromDiffs,
   saveRuntimeFrameToStorage,
   verifyStorageTailIntegrity,
 } from '../../../storage';
@@ -42,31 +42,32 @@ import { decodeBuffer, decodeValidatedBuffer, encodeBuffer, writeBatch } from '.
 import { readRawOrNull } from '../../../storage/database/level';
 import {
   KEY_HEAD,
-  keyDiff,
   keyFrame,
   keyRuntimeOutputPayload,
   keyEntityContextPayload,
   keyLiveEntity,
+  keyLiveEntityField,
   keyLiveReplicaMeta,
+  keySnapshotGraph,
   keySnapshotEntity,
   keySnapshotManifest,
   keySnapshotReplicaMeta,
 } from '../../../storage/keys';
-import {
-  validateStorageEntityCoreDocValue,
-  validateStorageFrameRecordValue,
-} from '../../../storage/schema/authoritative-schema';
+import { validateStorageFrameRecordValue } from '../../../storage/schema/authoritative-schema';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
-import type { StorageEntityCoreDoc, RuntimeFrame } from '../../../storage/types';
+import type { RuntimeFrame } from '../../../storage/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import {
   resolveRuntimeWalDbPath,
   resolveStorageWriterLockPath,
+  releaseRetainedStorageWriterLock,
   STORAGE_WRITER_LOCK_TTL_MS,
   withStorageWriterLock,
 } from '../../../storage/runtime-dbs';
+import { readEntityStorageLayout } from '../../../storage/schema/entity/layout';
+import { STORAGE_ENTITY_FIELD_TAG } from '../../../storage/schema/entity/field-tags';
 import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
 import {
   buildCryptographicProfileFixture,
@@ -188,23 +189,22 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('accounts full authoritative frame journals in retained history bytes', async () => {
+  test('accounts authoritative frame journals in retained history bytes', async () => {
     const env = await createSavedEmptyEnv('frame-byte-accounting');
     const db = getRuntimeWalDb(env);
     const frameKey = keyFrame(1);
-    const diffKey = keyDiff(1);
     const manifestKey = keySnapshotManifest(1);
     const frame = await readRawOrNull(db, frameKey);
-    const diff = await readRawOrNull(db, diffKey);
     const manifest = await readRawOrNull(db, manifestKey);
     const head = await readStorageHead(db);
-    if (!frame || !diff || !manifest || !head) throw new Error('TEST_STORAGE_RECORD_MISSING');
-
-    expect(head.retainedHistoryBytes).toBe(
-      frameKey.byteLength + frame.byteLength +
-      diffKey.byteLength + diff.byteLength +
-      manifestKey.byteLength + manifest.byteLength,
-    );
+    if (!frame || !manifest || !head) throw new Error('TEST_STORAGE_RECORD_MISSING');
+    const stats = await inspectStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => db,
+    });
+    expect(stats).toBeTruthy();
+    expect(head.retainedHistoryBytes).toBe(stats!.historyBytes);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -310,11 +310,11 @@ describe('storage frame journal retention', () => {
 
     expect(await readPersistedFrameJournal(env, prunedHeight)).toBeNull();
 
-    await closeRuntimeDb(env);
-    await closeInfraDb(env);
-
     expect(await readPersistedCheckpointSnapshot(env, prunedHeight)).toBeNull();
     expect(await readPersistedCheckpointSnapshot(env, retainedHeight)).toBeTruthy();
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
 
     const restored = await loadEnvFromDB(runtimeId, seed);
     if (!restored) throw new Error('PRUNED_ENTITY_SEED_RESTORE_MISSING');
@@ -324,7 +324,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(restored);
   });
 
-  test('retained snapshots keep every replay diff after the oldest retained base', async () => {
+  test('retained snapshots keep every replay frame after the oldest retained base', async () => {
     const seed = `retained-snapshot-replay-window ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -487,7 +487,9 @@ describe('storage frame journal retention', () => {
         }],
       }],
     });
-    await processRuntime(env, []);
+    await expect(processRuntime(env, [])).rejects.toThrow(
+      `ROUTE_P2P_UNAVAILABLE:${remoteSignerId}`,
+    );
 
     expect(await listPersistedEntityIdsAtHeight(env, env.state.height)).toEqual([localEntityId]);
 
@@ -581,8 +583,6 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
     expect(env.state.height).toBeGreaterThan(checkpointHeight);
 
-    await closeRuntimeDb(env);
-    await closeInfraDb(env);
     const checkpoint = await readPersistedCheckpointSnapshot(env, checkpointHeight);
     expect(checkpoint).toBeTruthy();
     const replicas = checkpoint?.['eReplicas'];
@@ -591,6 +591,9 @@ describe('storage frame journal retention', () => {
       ([key]) => key.toLowerCase() === `${entityId}:${signer.toLowerCase()}`,
     )?.[1];
     expect(restoredReplica?.certifiedFrameAnchor).toBeTruthy();
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
 
     const historyDb = new Level(resolveRuntimeWalDbPath(env), {
       valueEncoding: 'buffer',
@@ -604,9 +607,14 @@ describe('storage frame journal retention', () => {
     await historyDb.put(snapshotMetaKey, encodeBuffer(corruptedMeta));
     await historyDb.close();
 
-    await expect(readPersistedCheckpointSnapshot(env, checkpointHeight)).rejects.toThrow(
+    const queryEnv = createEmptyEnv(seed);
+    queryEnv.runtimeId = runtimeId;
+    queryEnv.dbNamespace = runtimeId;
+    await expect(readPersistedCheckpointSnapshot(queryEnv, checkpointHeight)).rejects.toThrow(
       'STORAGE_VERIFY_SNAPSHOT_REPLICA_META_DIGEST_MISMATCH',
     );
+    await closeRuntimeDb(queryEnv);
+    await closeInfraDb(queryEnv);
   });
 
   test('preserves both the frame write failure and authoritative probe failure', async () => {
@@ -843,6 +851,7 @@ describe('storage frame journal retention', () => {
 
   test('server writer fencing rejects an already held namespace lock before appending', async () => {
     const env = await createSavedEmptyEnv('storage-writer-lock-held');
+    await releaseRetainedStorageWriterLock(env);
     const lockPath = resolveStorageWriterLockPath(env);
     writeFileSync(lockPath, `${JSON.stringify({
       owner: 'test-writer',
@@ -870,6 +879,7 @@ describe('storage frame journal retention', () => {
 
   test('server writer fencing does not steal an expired lock while its pid is still alive', async () => {
     const env = await createSavedEmptyEnv('storage-writer-live-expired-lock');
+    await releaseRetainedStorageWriterLock(env);
     const lockPath = resolveStorageWriterLockPath(env);
     writeFileSync(lockPath, `${JSON.stringify({
       owner: 'test-live-writer',
@@ -971,15 +981,13 @@ describe('storage frame journal retention', () => {
     await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH');
   });
 
-  test('stores minimal replay frames without state-document diffs', async () => {
+  test('stores one minimal Runtime replay journal', async () => {
     const env = await createSavedEmptyEnv('storage-history-db-split');
     const currentDb = getRuntimeStorageDb(env);
     const historyDb = getRuntimeWalDb(env);
 
     expect(await readRawOrNull(currentDb, keyFrame(1))).toBeNull();
-    expect(await readRawOrNull(currentDb, keyDiff(1))).toBeNull();
     expect(await readRawOrNull(historyDb, keyFrame(1))).toBeTruthy();
-    expect(await readRawOrNull(historyDb, keyDiff(1))).toBeNull();
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -1158,10 +1166,9 @@ describe('storage frame journal retention', () => {
 
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
       const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
-      expect(frame?.stateHash).toMatch(/^0x[0-9a-f]{64}$/);
       expect(frame?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(frame?.canonicalStateHash).toBeUndefined();
-      expect(frame?.canonicalEntityHashes).toBeUndefined();
+      expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(frame?.canonicalEntityHashes).toEqual([]);
     } finally {
       await closeRuntimeDb(env);
       await closeInfraDb(env);
@@ -1237,116 +1244,19 @@ describe('storage frame journal retention', () => {
     const frame = await readStorageFrameRecord(getRuntimeWalDb(env), latestHeight);
     expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
 
-    const snapshotKey = keySnapshotEntity(latestHeight, entityId);
+    const snapshotKey = keySnapshotGraph(
+      latestHeight,
+      keyLiveEntityField(entityId, STORAGE_ENTITY_FIELD_TAG.profile),
+    );
     const raw = await getRuntimeWalDb(env).get(snapshotKey);
-    const corrupted = decodeBuffer<StorageEntityCoreDoc>(raw);
-    corrupted.profile = { ...corrupted.profile, name: 'corrupted snapshot body' };
+    const corrupted = decodeBuffer<Record<string, unknown>>(raw);
+    corrupted['name'] = 'corrupted snapshot body';
     await getRuntimeWalDb(env).put(snapshotKey, encodeBuffer(corrupted));
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_ENTITY_HASH_MISMATCH');
-  });
-
-  test('fails closed when a replay diff is missing after the latest snapshot', async () => {
-    const seed = `storage-missing-replay-diff ${Date.now()} alpha beta gamma`;
-    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
-    const namespacePath = join(dbRoot, runtimeId);
-
-    rmSync(namespacePath, { recursive: true, force: true });
-    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
-    mkdirSync(dbRoot, { recursive: true });
-
-    const env = createEmptyEnv(seed);
-    env.runtimeId = runtimeId;
-    env.dbNamespace = runtimeId;
-    env.quietRuntimeLogs = true;
-    env.runtimeConfig = {
-      ...(env.runtimeConfig || {}),
-      storage: {
-        ...(env.runtimeConfig?.storage || {}),
-        materializePeriodFrames: 100,
-        snapshotPeriodFrames: 100,
-      },
-    };
-
-    const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
-    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
-    const jurisdiction = {
-      name: 'storage-missing-replay-diff-test',
-      address: 'browservm://storage-missing-replay-diff-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dead',
-      entityProviderAddress: '0x000000000000000000000000000000000000beef',
-      chainId: 31337,
-    };
-    installTestJurisdiction(env, jurisdiction);
-
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
-        entityId,
-        signerId: signer,
-        data: {
-          isProposer: true,
-          config: {
-            mode: 'proposer-based',
-            threshold: 1n,
-            validators: [signer],
-            shares: { [signer]: 1n },
-            jurisdiction,
-          },
-        },
-      })],
-      entityInputs: [],
-    });
-    await processRuntime(env, []);
-
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId: signer,
-        entityTxs: [{
-          type: 'profile-update',
-          data: { profile: { entityId, name: 'requires replay diff' } },
-        }],
-      }],
-    });
-    await processRuntime(env, []);
-    expect(env.state.height).toBe(2);
-
-    const historyDb = getRuntimeWalDb(env);
-    expect(await readRawOrNull(historyDb, keyDiff(2))).toBeTruthy();
-    const batch = historyDb.batch();
-    batch.del?.(keyDiff(2));
-    await batch.write({ sync: true });
-
-    await closeRuntimeDb(env);
-    await closeInfraDb(env);
-
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_DIFF_MISSING: height=2');
-  });
-
-  test('fails closed when overlay replay diff is missing', async () => {
-    const env = await createSavedEmptyEnv('storage-missing-overlay-diff');
-    const historyView = getRuntimeWalDb(env);
-
-    expect(await readRawOrNull(historyView, keyDiff(1))).toBeTruthy();
-    const batch = historyView.batch();
-    batch.del?.(keyDiff(1));
-    await batch.write({ sync: true });
-
-    await expect(readStorageOverlayRecordsFromDiffs(historyView, 1, 1))
-      .rejects.toThrow('STORAGE_DIFF_MISSING: height=1 scope=overlay');
-
-    await closeRuntimeDb(env);
-    await closeInfraDb(env);
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_ENTITY_FIELD_BYTES_MISMATCH');
   });
 
   test('rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable', async () => {
@@ -1455,7 +1365,6 @@ describe('storage frame journal retention', () => {
     expect(historyHead?.retainedHistoryBytes ?? 0).toBeGreaterThan(0);
     expect(await readRawOrNull(getRuntimeWalDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
     expect(await readRawOrNull(getRuntimeWalDb(env), keyFrame(snapshotHeight))).toBeTruthy();
-    expect(await readRawOrNull(getRuntimeWalDb(env), keyDiff(snapshotHeight))).toBeNull();
     expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
 
     enqueueRuntimeInput(env, {
@@ -1880,10 +1789,10 @@ describe('storage frame journal retention', () => {
 
     await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING');
 
+    await expect(readPersistedCheckpointSnapshot(env, 1))
+      .rejects.toThrow('STORAGE_RESTORE_FRAME_MISSING');
     await closeRuntimeDb(env);
     await closeInfraDb(env);
-    await expect(readPersistedCheckpointSnapshot(env, 1))
-      .rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING');
   });
 
   test('rejects a snapshot manifest when the frame was not materialized', async () => {
@@ -1999,13 +1908,15 @@ describe('storage frame journal retention', () => {
 
     await db.put(snapshotMetaKey, validMeta);
 
-    const snapshotEntityKey = keySnapshotEntity(snapshotHeight, entityId);
+    const snapshotEntityKey = keySnapshotGraph(
+      snapshotHeight,
+      keyLiveEntityField(entityId, STORAGE_ENTITY_FIELD_TAG.timestamp),
+    );
     const validEntity = await db.get(snapshotEntityKey);
-    const corruptedEntity = decodeBuffer<Record<string, unknown>>(validEntity);
-    corruptedEntity['timestamp'] = Number(corruptedEntity['timestamp'] ?? 0) + 1;
+    const corruptedEntity = decodeBuffer<number>(validEntity) + 1;
     await db.put(snapshotEntityKey, encodeBuffer(corruptedEntity));
     await expect(verifyStorageTailIntegrity(db)).rejects.toThrow(
-      'STORAGE_ENTITY_HASH_MISMATCH',
+      'STORAGE_ENTITY_FIELD_HASH_MISMATCH',
     );
     await db.put(snapshotEntityKey, validEntity);
 
@@ -2091,11 +2002,13 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
     expect(env.state.height).toBe(2);
     expect(env.overlay?.size ?? 0).toBeGreaterThan(0);
-    const beforeCadence = decodeValidatedBuffer(
-      await getRuntimeStorageDb(env).get(keyLiveEntity(entityId)),
-      validateStorageEntityCoreDocValue,
+    const beforeCadence = await readEntityStorageLayout(
+      getRuntimeStorageDb(env),
+      entityId,
+      keyLiveEntity(entityId),
     );
-    expect(beforeCadence.profile.name).not.toBe('non-materialized-message');
+    if (!beforeCadence) throw new Error('TEST_LIVE_ENTITY_GRAPH_MISSING');
+    expect(beforeCadence.doc.profile.name).not.toBe('non-materialized-message');
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -2129,20 +2042,37 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(restoredAtTwo, []);
     expect(restoredAtTwo.state.height).toBe(3);
+    if ((restoredAtTwo.overlay?.size ?? 0) > 0) {
+      restoredAtTwo.state.height = 4;
+      restoredAtTwo.state.timestamp += 1;
+      await saveEnvToDB(
+        restoredAtTwo,
+        { runtimeTxs: [], entityInputs: [] },
+        [],
+        undefined,
+        new Map(),
+      );
+    }
+    expect(restoredAtTwo.state.height).toBe(4);
     expect(restoredAtTwo.overlay?.size ?? 0).toBe(0);
-    const atCadence = decodeValidatedBuffer(
-      await getRuntimeStorageDb(restoredAtTwo).get(keyLiveEntity(entityId)),
-      validateStorageEntityCoreDocValue,
+    const atCadence = await readEntityStorageLayout(
+      getRuntimeStorageDb(restoredAtTwo),
+      entityId,
+      keyLiveEntity(entityId),
     );
-    expect(atCadence.profile.name).toBe('non-materialized-message');
-    const materializedFrame = await readStorageFrameRecord(getRuntimeWalDb(restoredAtTwo), 3);
+    if (!atCadence) throw new Error('TEST_MATERIALIZED_ENTITY_GRAPH_MISSING');
+    expect(atCadence.doc.profile.name).toBe('non-materialized-message');
+    const materializedFrame = await readStorageFrameRecord(
+      getRuntimeWalDb(restoredAtTwo),
+      restoredAtTwo.state.height,
+    );
     expect(materializedFrame?.replicaMetaStateMode).toBe('shared-entity-state');
     const compactMeta = decodeBuffer<Record<string, unknown>>(
       await getRuntimeWalDb(restoredAtTwo).get(keyLiveReplicaMeta(entityId, signer)),
     );
     expect(compactMeta['state']).toBeUndefined();
     expect(compactMeta['htlcNotes']).toBeUndefined();
-    expect((await verifyStorageTailIntegrity(getRuntimeWalDb(restoredAtTwo))).checkedFrames).toBe(3);
+    expect((await verifyStorageTailIntegrity(getRuntimeWalDb(restoredAtTwo))).checkedFrames).toBe(4);
 
     await closeRuntimeDb(restoredAtTwo);
     await closeInfraDb(restoredAtTwo);
@@ -2150,7 +2080,7 @@ describe('storage frame journal retention', () => {
     const restoredAfterMaterialize = await loadEnvFromDB(runtimeId, seed);
     const materializedReplica = Array.from(restoredAfterMaterialize?.state.eReplicas.values() ?? [])
       .find((item) => item.entityId === entityId);
-    expect(restoredAfterMaterialize?.state.height).toBe(3);
+    expect(restoredAfterMaterialize?.state.height).toBe(4);
     expect(materializedReplica?.state.profile.name).toBe('non-materialized-message');
     if (restoredAfterMaterialize) {
       await closeRuntimeDb(restoredAfterMaterialize);

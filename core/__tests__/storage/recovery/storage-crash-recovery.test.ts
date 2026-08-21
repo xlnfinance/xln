@@ -18,13 +18,9 @@ import {
   STORAGE_SCHEMA_VERSION,
   keyCertifiedBoardNode,
   keyConsumptionNode,
-  keyDiff,
 } from '../../../storage/keys';
 import type {
   RuntimeDbLike,
-  StorageDiffRecord,
-  StorageDoc,
-  StorageEntityCoreDoc,
   StorageHead,
   StorageRuntimeConfig,
 } from '../../../storage/types';
@@ -91,38 +87,6 @@ const makeMemoryDb = (entries: Array<[Buffer, Buffer]> = []): RuntimeDbLike => {
       }
     },
   };
-};
-
-const entityDoc = (height: number): StorageEntityCoreDoc => ({
-  entityId,
-  entityEncryptionPublicKey: `0x${'12'.repeat(32)}`,
-  height,
-  timestamp: height,
-  nonces: new Map(),
-  proposals: new Map(),
-  config: {
-    mode: 'proposer-based',
-    threshold: 1n,
-    validators: [entityId],
-    shares: { [entityId]: 1n },
-  },
-  reserves: new Map([[1, BigInt(height)]]),
-  lastFinalizedJHeight: 0,
-  profile: {
-    name: `entity-${height}`,
-    isHub: false,
-    avatar: '',
-    bio: '',
-    website: '',
-  },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
-});
-
-const entityDiff = (height: number): StorageDiffRecord => {
-  const doc: StorageDoc = { family: 'entity', entityId, value: entityDoc(height) };
-  return { height, puts: [doc], dels: [] };
 };
 
 const head = (latestHeight: number, latestMaterializedHeight: number): StorageHead => ({

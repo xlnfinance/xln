@@ -30,6 +30,39 @@ export type DetachedRuntimeRecordingAdapter = {
 
 const MAX_RUNTIME_RECORDING_JOURNAL_FRAMES = 10_000;
 
+const readCheckpointSnapshot = async (
+  deps: PersistenceQueryDeps,
+  env: RuntimeReplica,
+  height: number,
+): Promise<Record<string, unknown> | null> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) return null;
+  return deps.withStorageConsistentRead(env, async () => {
+    // Replay borrows the caller's one open LevelDB handle. Open it inside the
+    // consistent-read lease before constructing the detached Runtime.
+    if (!(await deps.tryOpenRuntimeWalDb(env))) return null;
+    const restored = await deps.loadEnvFromStorageByReplay(
+      env.runtimeId,
+      env.runtimeSeed,
+      targetHeight,
+      {
+        prunedTargetReturnsNull: true,
+        borrowRuntimeWalFrom: env,
+        readOnly: true,
+      },
+    );
+    if (!restored || restored.env.state.height !== targetHeight) {
+      if (restored?.env) await deps.closeRuntimeDb(restored.env);
+      return null;
+    }
+    try {
+      return buildRuntimeCheckpointSnapshot(restored.env);
+    } finally {
+      await deps.closeRuntimeDb(restored.env);
+    }
+  });
+};
+
 export const createPersistenceRecordingQueries = (
   deps: PersistenceQueryDeps,
   entityQueries: EntityQueries,
@@ -38,31 +71,7 @@ export const createPersistenceRecordingQueries = (
   const readPersistedCheckpointSnapshot = async (
     env: RuntimeReplica,
     height: number,
-  ): Promise<Record<string, unknown> | null> => {
-    const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
-    if (targetHeight <= 0) return null;
-    return deps.withStorageConsistentRead(env, async () => {
-      const restored = await deps.loadEnvFromStorageByReplay(
-        env.runtimeId,
-        env.runtimeSeed,
-        targetHeight,
-        {
-          prunedTargetReturnsNull: true,
-          borrowRuntimeWalFrom: env,
-          readOnly: true,
-        },
-      );
-      if (!restored || restored.env.state.height !== targetHeight) {
-        if (restored?.env) await deps.closeRuntimeDb(restored.env);
-        return null;
-      }
-      try {
-        return buildRuntimeCheckpointSnapshot(restored.env);
-      } finally {
-        await deps.closeRuntimeDb(restored.env);
-      }
-    });
-  };
+  ): Promise<Record<string, unknown> | null> => readCheckpointSnapshot(deps, env, height);
 
   const buildPersistedRuntimeRecording = async (
     env: RuntimeReplica,

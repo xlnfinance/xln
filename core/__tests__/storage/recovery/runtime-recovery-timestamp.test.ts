@@ -25,7 +25,7 @@ test('recovery rejects missing or malformed replica collections', async () => {
   await expect(restoreEnvFromCheckpointSnapshot({
     ...snapshot,
     eReplicas: [['only-a-key']],
-  })).rejects.toThrow('RUNTIME_SNAPSHOT_EREPLICAS_ENTRY_INVALID:0');
+  })).rejects.toThrow('RECOVERY_CHECKPOINT_ENTITY_REPLICAS_INVALID:entry=0');
   await expect(restoreEnvFromCheckpointSnapshot({
     ...snapshot,
     jReplicas: [['duplicate', {}], ['duplicate', {}]],

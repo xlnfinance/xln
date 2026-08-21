@@ -187,7 +187,7 @@ test('concurrent processes cannot both reclaim the same expired writer lock', as
 
   const workerSource = `
     import { existsSync, readdirSync, rmSync, writeFileSync } from 'fs';
-    import { withStorageWriterLock } from './runtime/storage/runtime-dbs.ts';
+    import { withStorageWriterLock } from './core/storage/runtime-dbs.ts';
     const env = ${JSON.stringify(env)};
     const readyPath = ${JSON.stringify(readyPath)};
     const activePath = ${JSON.stringify(activePath)};

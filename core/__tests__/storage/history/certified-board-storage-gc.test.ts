@@ -25,13 +25,19 @@ import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../ru
 import { inspectStorage, saveRuntimeFrameToStorage } from '../../../storage';
 import {
   KEY_CERTIFIED_BOARD_NODE,
-  KEY_DIFF,
-  KEY_FRAME,
-  KEY_SNAPSHOT_ACCOUNT,
-  KEY_SNAPSHOT_BOOK,
-  KEY_SNAPSHOT_ENTITY,
-  KEY_SNAPSHOT_MANIFEST,
-  KEY_SNAPSHOT_REPLICA_META,
+  KEY_HEAD,
+  KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
+  KEY_LIVE_ACCOUNT_LEAF,
+  KEY_LIVE_BOOK,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
+  KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_BRANCH,
+  KEY_LIVE_ENTITY_FIELD,
+  KEY_LIVE_ENTITY_LEAF,
+  KEY_LIVE_REPLICA_META,
   keyCertifiedBoardNode,
 } from '../../../storage/keys';
 import { measurePrefixBytes } from '../../../storage/database/level';
@@ -148,20 +154,29 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
     });
     const roots: string[] = [];
     const records: CertifiedBoardRecord[] = [];
-    const trackedPrefixes = [
-      KEY_FRAME,
-      KEY_DIFF,
-      KEY_SNAPSHOT_MANIFEST,
-      KEY_SNAPSHOT_ENTITY,
-      KEY_SNAPSHOT_ACCOUNT,
-      KEY_SNAPSHOT_BOOK,
-      KEY_SNAPSHOT_REPLICA_META,
-      KEY_CERTIFIED_BOARD_NODE,
-    ];
+    const livePrefixes = new Set([
+      KEY_LIVE_ENTITY,
+      KEY_LIVE_ENTITY_FIELD,
+      KEY_LIVE_ENTITY_BRANCH,
+      KEY_LIVE_ENTITY_LEAF,
+      KEY_LIVE_ACCOUNT,
+      KEY_LIVE_ACCOUNT_FIELD,
+      KEY_LIVE_ACCOUNT_BRANCH,
+      KEY_LIVE_ACCOUNT_LEAF,
+      KEY_LIVE_BOOK,
+      KEY_LIVE_BOOK_BRANCH,
+      KEY_LIVE_BOOK_LEAF,
+      KEY_LIVE_REPLICA_META,
+    ]);
     const measureRetainedBytes = async (): Promise<number> => {
       let total = 0;
-      for (const prefix of trackedPrefixes) {
-        total += (await measurePrefixBytes(historyDb, Buffer.from([prefix]))).bytes;
+      for await (const [key, value] of historyDb.iterator()) {
+        if (Buffer.compare(key, KEY_HEAD) === 0) continue;
+        // Rebuildable history-view indexes use the 0x01..0x05 namespace and
+        // are deliberately outside the authoritative retained-byte budget.
+        if (key[0] !== undefined && key[0] <= 0x05) continue;
+        if (livePrefixes.has(key[0]!)) continue;
+        total += key.byteLength + value.byteLength;
       }
       return total;
     };

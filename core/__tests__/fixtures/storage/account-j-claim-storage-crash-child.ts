@@ -30,6 +30,11 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
+import {
+  commitEntityFrameCandidateState,
+  createEntityFrameCandidateState,
+} from '../../../entity/state-clone';
+import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { handleOpenAccountEntityTx } from '../../../entity/tx/handlers/account/lifecycle/open-account';
 import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
@@ -42,6 +47,7 @@ import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { getPerfMs } from '../../../support/time';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   accountInputFailureMessage,
@@ -140,7 +146,7 @@ const opened = await handleOpenAccountEntityTx(replica.state, {
     watchSeed: `0x${'33'.repeat(32)}`,
   },
 }, createAccountConsensusContext(env));
-replica.state = opened.newState;
+replica.state = commitEntityFrameCandidateState(opened.newState);
 const counterpartyReplica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === counterpartyId
 ));
@@ -154,7 +160,7 @@ const counterpartyOpened = await handleOpenAccountEntityTx(counterpartyReplica.s
     watchSeed: `0x${'33'.repeat(32)}`,
   },
 }, createAccountConsensusContext(env));
-counterpartyReplica.state = counterpartyOpened.newState;
+counterpartyReplica.state = commitEntityFrameCandidateState(counterpartyOpened.newState);
 env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: true, ...storageConfig } };
 
 const refreshGenesisAnchor = (target: EntityReplica): void => {
@@ -169,9 +175,11 @@ const refreshGenesisAnchor = (target: EntityReplica): void => {
 
 refreshGenesisAnchor(replica);
 refreshGenesisAnchor(counterpartyReplica);
-const account = replica.state.accounts.get(counterpartyId);
+replica.state = createEntityFrameCandidateState(replica.state);
+counterpartyReplica.state = createEntityFrameCandidateState(counterpartyReplica.state);
+const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId);
 if (!account) throw new Error('ACCOUNT_J_CRASH_ACCOUNT_MISSING');
-const counterpartyAccount = counterpartyReplica.state.accounts.get(entityId);
+const counterpartyAccount = getEntityAccountForWrite(counterpartyReplica.state.accounts, entityId);
 if (!counterpartyAccount) throw new Error('ACCOUNT_J_CRASH_COUNTERPARTY_ACCOUNT_MISSING');
 account.mempool = [{
   type: 'j_event_claim',
@@ -209,7 +217,7 @@ account.currentFrameHanko = sealedProposal.proposal.frameHanko;
 account.currentDisputeProofHanko = sealedProposal.proposal.disputeSeal?.hanko;
 const peerValidation = await applyAccountInput(
   createAccountConsensusContext(env, new Map()),
-  structuredClone(counterpartyAccount),
+  forkAccountReplicaShell(counterpartyAccount),
   sealedProposal,
   { entityTimestamp: env.state.timestamp, finalizedJHeight: 7 },
 );
@@ -225,6 +233,8 @@ const claimAck = await sealAccountDraftAsEntity(
     hashesToSign: peerValidation.hashesToSign,
   },
 );
+replica.state = commitEntityFrameCandidateState(replica.state);
+counterpartyReplica.state = commitEntityFrameCandidateState(counterpartyReplica.state);
 applyRuntimeStorageChanges(env, [
   { family: 'account', entityId, counterpartyId },
   { family: 'account', entityId: counterpartyId, counterpartyId: entityId },
