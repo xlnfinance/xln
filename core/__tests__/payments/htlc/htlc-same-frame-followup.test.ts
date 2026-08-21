@@ -63,12 +63,14 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides =
       ? { kind: 'final' as const, secret: id('7') }
       : { kind: 'reject' as const, reason: 'next_hop_offline' as const };
   const consumedPreparedHtlcBindings = new Set<string>();
+  const preparedEntry = { binding, outcome };
   const context = {
     env: {}, state, newState: state,
     input: { fromEntityId: from, toEntityId: to, domain },
     account: { state: { locks: new Map([[lockId, lock]]) } }, outputs: [], accountTxs,
     candidateEffects: [], consumedPreparedHtlcBindings,
-    infraContext: { htlc: { entries: [{ binding, outcome }] } },
+    infraContext: { htlc: { entries: [preparedEntry] } },
+    preparedHtlcEntriesByBinding: new Map([[`${frameHash}:${lockId}`, preparedEntry]]),
   };
   return { context, tx, frame, accountTxs, state, from, next, lockId, hashlock };
 };

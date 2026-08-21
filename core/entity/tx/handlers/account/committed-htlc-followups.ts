@@ -34,6 +34,7 @@ type HtlcFollowupContext = {
   accountTxs: AccountTxTarget[];
   candidateEffects: EntityCandidateEffect[];
   infraContext?: EntityInfraContext;
+  preparedHtlcEntriesByBinding?: ReadonlyMap<string, PreparedHtlcEntry>;
   consumedPreparedHtlcBindings?: Set<string>;
 };
 
@@ -46,29 +47,16 @@ type HtlcSecretFollowupContext = Pick<
 const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): string =>
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
-const preparedEntryLookupKey = (accountFrameHash: string, lockId: string, envelopeHash: string): string =>
-  `${accountFrameHash}|${lockId}|${envelopeHash}`;
-
-const preparedEntryIndex = (entries: readonly PreparedHtlcEntry[]): Map<string, PreparedHtlcEntry> => {
-  const index = new Map<string, PreparedHtlcEntry>();
-  for (const entry of entries) {
-    const key = preparedEntryLookupKey(entry.binding.accountFrameHash, entry.binding.lockId, entry.binding.envelopeHash);
-    if (!index.has(key)) index.set(key, entry);
-  }
-  return index;
-};
-
 const requirePreparedHtlcEntry = (
   ctx: HtlcFollowupContext,
   lock: HtlcLock,
   committedFrame: AccountFrame,
 ): PreparedHtlcEntry => {
-  const prepared = ctx.infraContext && lock.envelopeHash !== undefined
-    ? preparedEntryIndex(ctx.infraContext.htlc.entries).get(preparedEntryLookupKey(
-        committedFrame.stateHash.toLowerCase(),
-        lock.lockId.toLowerCase(),
-        lock.envelopeHash.toLowerCase(),
-      ))
+  const envelopeHash = lock.envelopeHash?.toLowerCase();
+  const prepared = ctx.infraContext && envelopeHash !== undefined
+    ? ctx.preparedHtlcEntriesByBinding?.get(
+        `${committedFrame.stateHash.toLowerCase()}:${lock.lockId.toLowerCase()}`,
+      )
     : undefined;
   if (!prepared) throw new Error(`HTLC_PREPARED_CONTEXT_REQUIRED:${lock.lockId}`);
   const key = preparedHtlcBindingKey(prepared.binding);
@@ -80,6 +68,7 @@ const requirePreparedHtlcEntry = (
     binding.fromEntityId !== ctx.input.fromEntityId.toLowerCase()
     || binding.toEntityId !== ctx.input.toEntityId.toLowerCase()
     || binding.accountHeight !== committedFrame.height
+    || binding.envelopeHash !== envelopeHash
     || !sameAccountStateDomain(binding.domain, ctx.input.domain)
     || binding.hashlock !== lock.hashlock.toLowerCase()
     || binding.tokenId !== lock.tokenId

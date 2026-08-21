@@ -127,6 +127,7 @@ import {
   dirtyAccountIdsFromState,
 } from '../account/touched-accounts';
 import { createCanonicalAccountWorklist } from '../account/canonical-worklist';
+import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -350,6 +351,7 @@ const applyRegularEntityTx = async (
   const txProfileStartMs = getPerfMs();
   const result = await applyEntityTx(context.env, state, tx, {
     infraContext: context.entityContext,
+    preparedHtlcEntriesByBinding: context.preparedHtlcEntriesByBinding,
     mutableFrameState: true,
     manualBroadcastInInput,
     accountJClaimNodeStore: context.accountJClaimNodeStore,
@@ -1214,6 +1216,13 @@ const createEntityFrameApplyContext = (
   return {
     env,
     entityContext,
+    // `validateEntityInfraContext` proves canonical ordering and uniqueness.
+    // Build this once per Entity frame: rebuilding it for every committed
+    // Account HTLC made a 500-entry batch quadratic.
+    preparedHtlcEntriesByBinding: new Map(entityContext.htlc.entries.map(entry => [
+      preparedHtlcBindingKey(entry.binding),
+      entry,
+    ])),
     accountConsensusContext: createAccountConsensusContext(env, accountJClaimNodeStore, currentEntityState),
     entityTxs,
     currentEntityState,

@@ -116,8 +116,21 @@ const keccakLabelDigest = (label: string): string => ethers.keccak256(ethers.toU
 const integrityMerkleKey = (namespace: string, path: string): string =>
   integrityLabelDigest(`xln.${namespace}.${path}`);
 
-const stateLeaf = (path: string, value: unknown): { hexKey: string; value: Uint8Array } => ({
-  hexKey: integrityMerkleKey('account.state', path),
+const ACCOUNT_STATE_LEAF_KEYS = Object.freeze({
+  identity: integrityMerkleKey('account.state', 'identity'),
+  financial: integrityMerkleKey('account.state', 'financial'),
+  commitments: integrityMerkleKey('account.state', 'commitments'),
+  jurisdiction: integrityMerkleKey('account.state', 'jurisdiction'),
+  rebalance: integrityMerkleKey('account.state', 'rebalance'),
+});
+
+type AccountStateLeafPath = keyof typeof ACCOUNT_STATE_LEAF_KEYS;
+
+const stateLeaf = (path: AccountStateLeafPath, value: unknown): { hexKey: string; value: Uint8Array } => ({
+  // AccountState has exactly five fixed sections. Precompute their keys once;
+  // an ambient cache for arbitrary entity/account IDs would violate the pure
+  // transition model and retain attacker-controlled labels.
+  hexKey: ACCOUNT_STATE_LEAF_KEYS[path],
   value: encodeAccountStateValue(value),
 });
 
@@ -137,7 +150,7 @@ const accountStateRootEntries = (
   cold = false,
   mapTimings?: Record<string, number>,
   mapStatuses?: Record<string, AccountMapCommitmentTiming>,
-): ReadonlyArray<readonly [path: string, value: unknown]> => {
+): ReadonlyArray<readonly [path: AccountStateLeafPath, value: unknown]> => {
   const domain = normalizeAccountStateDomain(account.domain);
   const mapRoot = <K extends AccountStateMapKey, V>(
     namespace: AccountStateMapNamespace,
@@ -192,7 +205,7 @@ const accountStateRootEntries = (
     requestedRebalanceFeeStateRoot: mapRoot('requestedRebalanceFeeState', account.requestedRebalanceFeeState),
     rebalanceFeePoliciesRoot: mapRoot('rebalanceFeePolicies', account.rebalanceFeePolicies),
     }],
-  ] as const satisfies ReadonlyArray<readonly [path: string, value: unknown]>;
+  ] as const satisfies ReadonlyArray<readonly [path: AccountStateLeafPath, value: unknown]>;
 };
 
 export const computeAccountStateSectionHashes = (

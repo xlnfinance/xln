@@ -39,7 +39,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
 import { fitEntityProposalToWireBudget, recordEntityWireBudgetFitHint } from './wire-budget';
-import { assertEstimatedSealedEntityFrameWire, validateProposedEntityFrame } from '../frame/validation';
+import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases, timePerfPhase } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
@@ -425,7 +425,12 @@ const sealEntityProposal = async (
     collectedSigs: new Map([[workingReplica.signerId.toLowerCase(), selfSigs]]),
     ...(hankos ? { hankos } : {}),
   };
-  validateProposedEntityFrame(frame, sealedContext);
+  // This is the owning constructor, not an untrusted wire boundary. The body
+  // was already canonically encoded and bounded by createEntityFrameHash*, and
+  // the conservative sealed-size template above includes every fixed-size
+  // signature and a larger-than-canonical single-signer Hanko. Re-decoding the
+  // object here encoded the multi-megabyte frame twice more per proposal.
+  // Remote/recovered frames still use validateProposedEntityFrame at ingress.
   recordEntityWireBudgetFitHint(env, workingReplica, frame.txs.length);
   storeCandidate(workingReplica, applied, state, frameHash, hashesToSign, authority);
   return frame;

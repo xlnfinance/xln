@@ -16,10 +16,13 @@ import type {
 } from '../../tx/handlers/account';
 import type { VerifiedCertifiedEntityOutput } from '../output/certification';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
+import type { PreparedHtlcEntry } from '../../../types/entity/htlc-infra-context';
 
 export type ApplyEntityTxsInOrderContext = {
   env: EntityRuntimeContext;
   entityContext: EntityInfraContext;
+  /** Frame-local O(1) view over the already validated HTLC infra entries. */
+  preparedHtlcEntriesByBinding: ReadonlyMap<string, PreparedHtlcEntry>;
   accountConsensusContext: AccountConsensusContext;
   entityTxs: EntityTx[];
   currentEntityState: EntityState;

@@ -6,6 +6,7 @@ import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore , AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
+import type { PreparedHtlcEntry } from '../../types/entity/htlc-infra-context';
 import { createAccountConsensusContext } from '../account/account-consensus-context';
 import {
   applyAccountInputToEntity,
@@ -125,6 +126,8 @@ export interface ApplyEntityTxResult {
 export interface ApplyEntityTxOptions {
   /** Exact proposer-observed facts committed by the enclosing EntityFrame. */
   infraContext?: EntityInfraContext;
+  /** Ephemeral index derived once from `infraContext`; never hashed or persisted. */
+  preparedHtlcEntriesByBinding?: ReadonlyMap<string, PreparedHtlcEntry>;
   accountConsensusContext?: AccountConsensusContext;
   mutableFrameState?: boolean;
   manualBroadcastInInput?: boolean;

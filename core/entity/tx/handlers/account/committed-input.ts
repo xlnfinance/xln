@@ -189,6 +189,9 @@ const applyCommittedFrameTransactions = async (
             accountTxs: effects.accountTxs,
             candidateEffects: effects.candidateEffects,
             ...(options?.infraContext ? { infraContext: options.infraContext } : {}),
+            ...(options?.preparedHtlcEntriesByBinding
+              ? { preparedHtlcEntriesByBinding: options.preparedHtlcEntriesByBinding }
+              : {}),
             consumedPreparedHtlcBindings,
           },
           accountTx,
