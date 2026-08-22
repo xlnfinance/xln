@@ -435,10 +435,24 @@ export const assertEstimatedSealedEntityFrameWire = (
   }, context);
 };
 
+/**
+ * Frames this process certified itself (commitment, hash, signatures and wire
+ * budget all verified by the transition that produced them). Storage re-ran
+ * the full structural + byte-budget validator on every one of them before put;
+ * data read back from disk or received from peers never enters this set.
+ */
+const locallyCertifiedFrames = new WeakSet<object>();
+export const trustLocallyCertifiedEntityFrame = (frame: EntityFrame): void => {
+  locallyCertifiedFrames.add(frame);
+};
+
 export const validateProposedEntityFrame = (
   value: unknown,
   context: string,
 ): DecodedEntityFrame => {
+  if (value !== null && typeof value === 'object' && locallyCertifiedFrames.has(value)) {
+    return value as DecodedEntityFrame;
+  }
   const frame = validateObject(value, context);
   assertProposedEntityFrame(frame, context);
   try {

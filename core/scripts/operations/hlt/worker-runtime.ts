@@ -419,10 +419,21 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   };
 };
 
+// LevelDB compacts while we measure: a file listed by readdir can be gone by
+// stat. Missing entries count as zero instead of failing the whole load run.
+const fileBytesOrZero = (path: string): number => {
+  try {
+    return statSync(path).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
+};
+
 export const directoryBytes = (path: string): number => readdirSync(path, { withFileTypes: true })
   .reduce((total, entry) => {
     const child = join(path, entry.name);
-    return total + (entry.isDirectory() ? directoryBytes(child) : statSync(child).size);
+    return total + (entry.isDirectory() ? directoryBytes(child) : fileBytesOrZero(child));
   }, 0);
 
 export const resolveWalPath = (runtimeDir: string): string => {

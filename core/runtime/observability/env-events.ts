@@ -424,11 +424,14 @@ const recordEntityFrameHistory = (
       );
     }
     if (encodeCanonicalConsensusValue(record.link) < encodeCanonicalConsensusValue(existing.link)) {
-      existing.link = structuredClone(record.link);
+      existing.link = record.link;
     }
     return;
   }
-  const link = structuredClone(record.link);
+  // `record.link` is the isolated clone produced by buildCertifiedEntityFrameLink
+  // and is never mutated afterwards (lineage replaces links wholesale). Cloning
+  // it again copied every multi-megabyte hub frame a second time per R-frame.
+  const link = record.link;
   pending.push({ kind: 'entityFrame', entityId, entityHeight, link });
   applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 };

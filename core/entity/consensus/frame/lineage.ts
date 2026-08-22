@@ -9,6 +9,7 @@ import type {
   EntityFrame,
 } from '../../types';
 import { createEntityFrameHashFromStateRoot } from '../frame';
+import { trustLocallyCertifiedEntityFrame } from './validation';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
@@ -99,6 +100,7 @@ export const buildCertifiedEntityFrameLink = (
     throw new Error(`ENTITY_CERTIFIED_LINK_FRAME_MANIFEST_INVALID:${frame.height}:${frame.hash}`);
   }
   const cloned = cloneIsolatedProposedEntityFrame(frame);
+  trustLocallyCertifiedEntityFrame(cloned);
   return { frame: cloned, postAuthority };
 };
 

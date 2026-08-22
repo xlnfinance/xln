@@ -141,7 +141,9 @@ const recordCommittedFrames = (
       counterpartyId: input.fromEntityId,
       accountHeight: frame.height,
       source: committedViaNewFrame ? 'peerCommit' : 'ackCommit',
-      frame: structuredClone(frame),
+      // The committed frame is sealed (deep-frozen) with the Account on
+      // commit; history keeps the same immutable value instead of a copy.
+      frame,
     });
   }
 };

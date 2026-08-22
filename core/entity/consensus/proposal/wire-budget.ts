@@ -200,6 +200,9 @@ type EntityProposalWireBudgetParams = {
   requiredPrefixCount?: number;
 };
 
+/** Last sealed wire bytes / tx bytes per Entity; a prediction, never a bound. */
+const lastWireToTxByteRatio = new Map<string, number>();
+
 const fitLiveEntityProposal = async (
   params: EntityProposalWireBudgetParams,
   requiredPrefixCount: number,
@@ -225,7 +228,23 @@ const fitLiveEntityProposal = async (
     // only authority on what fits. A "last sealed count" hint once capped the
     // first attempt at 1.15x the previous frame, which turned every lull into
     // a 30-frame slow start while hundreds of inputs waited (2026-08-22).
+    // Each extra attempt re-materializes the whole HTLC context. The measured
+    // wire/tx byte ratio of this Entity's last sealed frame predicts where the
+    // first attempt will land; tx bytes are exact from the prefix meter and the
+    // loop below remains the only authority, so this is never a cap.
     let candidate = allTxs.length;
+    const lastRatio = lastWireToTxByteRatio.get(replica.state.entityId);
+    if (lastRatio !== undefined && measurePrefix.txBytes(allTxs.length) * lastRatio > maxBytes) {
+      let low = Math.max(1, requiredPrefixCount);
+      let high = allTxs.length;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        const txBytes = measurePrefix.txBytes(mid);
+        if (txBytes * lastRatio <= maxBytes && txBytes <= MAX_ENTITY_FRAME_TX_BYTES) low = mid;
+        else high = mid - 1;
+      }
+      candidate = low;
+    }
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
       countOp('entity.wireFit.attempt', slice.length);
@@ -244,6 +263,9 @@ const fitLiveEntityProposal = async (
       const bytes = measureBoundPrefix(candidate);
       const txBytes = measurePrefix.txBytes(candidate);
       if (bytes <= maxBytes && txBytes <= MAX_ENTITY_FRAME_TX_BYTES) {
+        if (txBytes > 0 && candidate >= 16) {
+          lastWireToTxByteRatio.set(replica.state.entityId, bytes / txBytes);
+        }
         if (requiredPrefixCount > 0 || slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {
             entityId: replica.state.entityId,

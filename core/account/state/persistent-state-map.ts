@@ -101,18 +101,27 @@ const commitmentValue = (
   return unsigned;
 };
 
-const assertAccountStateLeafSize = (
-  namespace: AccountStateMapNamespace,
-  value: unknown,
-): void => {
+// One encode per leaf: the put-time size bound and the seal-time leaf hash
+// are derived from the same bytes. Sealed leaf values are immutable objects,
+// so the digest memo is exact by identity.
+const leafDigests = new WeakMap<object, string>();
+const encodeLeafForCommit = (namespace: AccountStateMapNamespace, value: unknown): string => {
   const encoded = encodeAccountStateValue(commitmentValue(namespace, value));
   if (encoded.byteLength > MAX_ACCOUNT_STATE_LEAF_BYTES) {
     throw new Error(`ACCOUNT_STATE_LEAF_TOO_LARGE:${encoded.byteLength}:${MAX_ACCOUNT_STATE_LEAF_BYTES}`);
   }
+  return computeIntegrityDigest(encoded);
 };
-
-const valueHash = (namespace: AccountStateMapNamespace, value: unknown): string =>
-  computeIntegrityDigest(encodeAccountStateValue(commitmentValue(namespace, value)));
+const valueHash = (namespace: AccountStateMapNamespace, value: unknown): string => {
+  if (value !== null && typeof value === 'object') {
+    const memoized = leafDigests.get(value);
+    if (memoized !== undefined) return memoized;
+    const digest = encodeLeafForCommit(namespace, value);
+    leafDigests.set(value, digest);
+    return digest;
+  }
+  return encodeLeafForCommit(namespace, value);
+};
 
 const namespaceOptions = <K extends AccountStateMapKey, V>(
   namespace: AccountStateMapNamespace,
@@ -123,7 +132,8 @@ const namespaceOptions = <K extends AccountStateMapKey, V>(
   valueHash: (value: V): string => valueHash(namespace, value),
   ownValue: (value: V): V => {
     const sealed = sealValue(value);
-    assertAccountStateLeafSize(namespace, sealed);
+    // Size bound at put time; the digest is reused when the leaf is sealed.
+    valueHash(namespace, sealed);
     return sealed;
   },
 });

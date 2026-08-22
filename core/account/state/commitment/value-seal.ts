@@ -29,12 +29,18 @@ const requirePersistentCollections = (state: AccountState): void => {
  * already immutable; raw Maps are a loud, separately tracked migration seam
  * and must never be traversed on the frame hot path.
  */
+// Subtrees this module already sealed (post-order, so membership means the
+// whole subtree is frozen). A committed Account keeps most of its graph from
+// the previous commit; re-walking it on every put was ~40 us per Account.
+const sealedGraphs = new WeakSet<object>();
+
 const sealBoundedGraph = (
   value: unknown,
   ancestors: readonly object[] = [],
   path = 'account',
 ): void => {
   if (value === null || typeof value !== 'object') return;
+  if (sealedGraphs.has(value)) return;
   if (isPersistentAccountStateMap(value)) return;
   if (value instanceof Map || value instanceof Set) {
     throw new Error(`ACCOUNT_VALUE_SEAL_RAW_COLLECTION_FORBIDDEN:${path}`);
@@ -45,6 +51,7 @@ const sealBoundedGraph = (
     sealBoundedGraph(Reflect.get(value, field), nextAncestors, `${path}.${field}`);
   }
   Object.freeze(value);
+  sealedGraphs.add(value);
 };
 
 /**
