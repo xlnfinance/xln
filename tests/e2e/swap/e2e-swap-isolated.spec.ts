@@ -41,6 +41,30 @@ const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
 };
 
 type SwapRuntimeWindow = typeof window & {
+  __xln?: {
+    instance?: {
+      readPersistedAccountSwapHistoryPage?: (
+        env: unknown,
+        entityId: string,
+        counterpartyId: string,
+        options?: { limit?: number },
+      ) => Promise<{
+        items?: Array<{
+          offerId?: string;
+          closed?: boolean;
+          resolves?: Array<{
+            fillRatio?: number;
+            fillNumerator?: bigint;
+            fillDenominator?: bigint;
+            cancelRemainder?: boolean;
+            executionGiveAmount?: bigint;
+            executionWantAmount?: bigint;
+            comment?: string;
+          }>;
+        }>;
+      }>;
+    };
+  };
   isolatedEnv?: {
     runtimeId?: string;
     state: {
@@ -353,46 +377,7 @@ async function readSwapResolveCount(
   entityId: string,
   counterpartyId: string,
 ): Promise<number> {
-  return await page.evaluate(({ counterpartyId, entityId }) => {
-    const view = window as SwapRuntimeWindow;
-    if (!view.isolatedEnv?.state?.eReplicas) return 0;
-
-    const findAccount = (
-      accounts: Map<string, {
-        swapOrderHistory?: Map<string, { resolves?: unknown[] }>;
-      }> | undefined,
-      ownerId: string,
-      cpId: string,
-    ) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(cpId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const left = typeof (account as { leftEntity?: unknown }).leftEntity === 'string'
-          ? String((account as { leftEntity?: string }).leftEntity).toLowerCase()
-          : '';
-        const right = typeof (account as { rightEntity?: unknown }).rightEntity === 'string'
-          ? String((account as { rightEntity?: string }).rightEntity).toLowerCase()
-          : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    for (const [replicaKey, replica] of view.isolatedEnv.state.eReplicas.entries()) {
-      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
-      const account = findAccount(replica.state?.accounts, entityId, counterpartyId);
-      if (!account) return 0;
-      let count = 0;
-      for (const entry of account.swapOrderHistory?.values?.() || []) {
-        count += Array.isArray(entry?.resolves) ? entry.resolves.length : 0;
-      }
-      return count;
-    }
-
-    return 0;
-  }, { counterpartyId, entityId });
+  return (await readSwapResolveSnapshots(page, entityId, counterpartyId)).length;
 }
 
 async function waitForSwapResolveCountAtLeast(
@@ -722,52 +707,27 @@ async function readSwapResolveSnapshotsFrom(
   counterpartyId: string,
   historyField: 'swapOrderHistory' | 'swapClosedOrders',
 ): Promise<SwapResolveSnapshot[]> {
-  return await page.evaluate(({ entityId, counterpartyId, historyField }) => {
+  return await page.evaluate(async ({ entityId, counterpartyId, historyField }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    const recordOf = (value: unknown): Record<string, unknown> =>
-      value && typeof value === 'object' ? value as Record<string, unknown> : {};
-    const owner = String(entityId || '').toLowerCase();
-    const cp = String(counterpartyId || '').toLowerCase();
+    const reader = view.__xln?.instance?.readPersistedAccountSwapHistoryPage;
+    if (!env) throw new Error('SWAP_HISTORY_RUNTIME_ENV_UNAVAILABLE');
+    if (!reader) throw new Error('SWAP_HISTORY_PERSISTED_READER_UNAVAILABLE');
     const out: SwapResolveSnapshot[] = [];
-
-    const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
-      const account = recordOf(rawAccount);
-      const left = typeof account.state.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
-      const right = typeof account.state.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
-      const canonicalCp = typeof account.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
-      return accountKey.toLowerCase() === cp ||
-        canonicalCp === cp ||
-        Boolean(left && right && ((left === owner && right === cp) || (right === owner && left === cp)));
-    };
-
-    for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
-      if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
-      const state = recordOf(recordOf(replica).state);
-      const accounts = state.accounts;
-      if (!(accounts instanceof Map)) continue;
-      for (const [accountKey, rawAccount] of accounts.entries()) {
-        if (!accountMatches(String(accountKey || ''), rawAccount)) continue;
-        const history = recordOf(rawAccount)[historyField];
-        if (!(history instanceof Map)) return out;
-        for (const [offerId, rawLifecycle] of history.entries()) {
-          const resolves = recordOf(rawLifecycle).resolves;
-          if (!Array.isArray(resolves)) continue;
-          for (const rawResolve of resolves) {
-            const resolve = recordOf(rawResolve);
-            out.push({
-              offerId: String(offerId || ''),
-              fillRatio: Number(resolve.fillRatio || 0),
-              fillNumerator: String(resolve.fillNumerator ?? '0'),
-              fillDenominator: String(resolve.fillDenominator ?? '0'),
-              cancelRemainder: Boolean(resolve.cancelRemainder),
-              executionGiveAmount: String(resolve.executionGiveAmount ?? '0'),
-              executionWantAmount: String(resolve.executionWantAmount ?? '0'),
-              comment: String(resolve.comment || ''),
-            });
-          }
-        }
-        return out;
+    const page = await reader(env, entityId, counterpartyId, { limit: 100 });
+    for (const lifecycle of page.items ?? []) {
+      if (historyField === 'swapClosedOrders' && lifecycle.closed !== true) continue;
+      for (const resolve of lifecycle.resolves ?? []) {
+        out.push({
+          offerId: String(lifecycle.offerId || ''),
+          fillRatio: Number(resolve.fillRatio || 0),
+          fillNumerator: String(resolve.fillNumerator ?? '0'),
+          fillDenominator: String(resolve.fillDenominator ?? '0'),
+          cancelRemainder: Boolean(resolve.cancelRemainder),
+          executionGiveAmount: String(resolve.executionGiveAmount ?? '0'),
+          executionWantAmount: String(resolve.executionWantAmount ?? '0'),
+          comment: String(resolve.comment || ''),
+        });
       }
     }
     return out;

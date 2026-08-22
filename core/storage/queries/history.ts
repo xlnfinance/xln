@@ -141,6 +141,8 @@ type PersistedAccountSwapLifecycle = Readonly<{
 
 type PersistedAccountSwapResolve = Readonly<{
   fillRatio: number;
+  fillNumerator: bigint | null;
+  fillDenominator: bigint | null;
   cancelRemainder: boolean;
   height: number;
   executionGiveAmount: bigint | null;
@@ -216,6 +218,8 @@ const appendSwapHistoryTx = (
     lifecycle.priceTicks = tx.data.restingPriceTicks ?? lifecycle.priceTicks;
     lifecycle.resolves.push({
       fillRatio: tx.data.fillRatio,
+      fillNumerator: tx.data.fillNumerator ?? null,
+      fillDenominator: tx.data.fillDenominator ?? null,
       cancelRemainder: tx.data.cancelRemainder,
       height,
       executionGiveAmount: tx.data.executionGiveAmount ?? null,
@@ -229,6 +233,8 @@ const appendSwapHistoryTx = (
   lifecycle.priceTicks = tx.data.priceTicks ?? lifecycle.priceTicks;
   lifecycle.resolves.push({
     fillRatio: tx.data.cumulativeFillRatio,
+    fillNumerator: tx.data.fillNumerator ?? null,
+    fillDenominator: tx.data.fillDenominator ?? null,
     cancelRemainder: tx.data.cancelRemainder ?? tx.data.ackKind === 'cancel',
     height,
     executionGiveAmount: tx.data.executionSourceAmount ?? null,
@@ -366,10 +372,14 @@ const createFrameHistoryQueries = (deps: PersistenceQueryDeps) => {
   const readPersistedFrameJournal = async (
     env: RuntimeReplica,
     height: number,
+    options?: { includeRuntimeMachine?: boolean },
   ): Promise<PersistedFrameJournal | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
     if (!frame) return null;
-    const payloads = await deps.readPersistedStorageFramePayloads(env, frame);
+    if (options?.includeRuntimeMachine === false && !frame.postStateHash) {
+      throw new Error(`RUNTIME_JOURNAL_COMPACT_POST_STATE_HASH_MISSING:${frame.height}`);
+    }
+    const payloads = await deps.readPersistedStorageFramePayloads(env, frame, options);
     const activity = await readRuntimeActivityJournal(deps, env, height);
     return buildRecoveryJournalFromStorageFrame(frame, payloads, activity?.logs ?? []);
   };
@@ -435,9 +445,10 @@ const readPersistedFrameJournals = async (
   readPersistedFrameJournal: (
     env: RuntimeReplica,
     height: number,
+    options?: { includeRuntimeMachine?: boolean },
   ) => Promise<PersistedFrameJournal | null>,
   env: RuntimeReplica,
-  opts?: { fromHeight?: number; toHeight?: number; limit?: number },
+  opts?: { fromHeight?: number; toHeight?: number; limit?: number; includeRuntimeMachine?: boolean },
 ): Promise<PersistedFrameJournal[]> => {
   const latestHeight = await deps.resolvePersistedLatestHeight(env);
   if (latestHeight <= 0) return [];
@@ -452,8 +463,20 @@ const readPersistedFrameJournals = async (
   );
   const receipts: PersistedFrameJournal[] = [];
   for (let height = fromHeight; height <= pageToHeight; height += 1) {
-    const receipt = await readPersistedFrameJournal(env, height);
-    if (receipt) receipts.push(receipt);
+    const receipt = await readPersistedFrameJournal(env, height, {
+      includeRuntimeMachine: opts?.includeRuntimeMachine !== false,
+    });
+    if (receipt) {
+      if (opts?.includeRuntimeMachine === false && receipt.runtimeMachine) {
+        if (!receipt.postStateHash) {
+          throw new Error(`RUNTIME_JOURNAL_COMPACT_POST_STATE_HASH_MISSING:${receipt.height}`);
+        }
+        const { runtimeMachine: _runtimeMachine, ...compact } = receipt;
+        receipts.push(compact);
+      } else {
+        receipts.push(receipt);
+      }
+    }
   }
   return receipts;
 };
@@ -546,7 +569,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     ) => readPersistedEntityFrameHistory(deps, env, entityId, limit, opts),
     readPersistedFrameJournals: (
       env: RuntimeReplica,
-      opts?: { fromHeight?: number; toHeight?: number; limit?: number },
+      opts?: { fromHeight?: number; toHeight?: number; limit?: number; includeRuntimeMachine?: boolean },
     ) => readPersistedFrameJournals(deps, frameQueries.readPersistedFrameJournal, env, opts),
     readPersistedRuntimeActivityPage: (
       env: RuntimeReplica,
