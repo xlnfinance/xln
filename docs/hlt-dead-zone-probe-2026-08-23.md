@@ -165,13 +165,24 @@ sig verification" hypothesis is disproved. The real costs are:
 
 ### Revised levers
 
-- **Lever 5 (state root amortization):** Incremental Merkle updates
-  instead of full recompute. 65ms → ~5ms target. Highest single-phase
-  win.
-- **Lever 6 (canonical encode cache):** Per-frame memo for repeated
-  account state encodings. 190K → ~95K target. Touches serialization.
-- **Lever 7 (structuredClone reduction):** Copy-on-write or dirty
-  tracking instead of full account clone per tx. 45K → ~10K target.
+- **Lever 5 (state root amortization):** DEAD END. State root is already
+  incrementally cached via Patricia maps + account root memo. 67% of
+  account root calls are <0.05ms (cache hits). Entity root: 0.15-0.55ms
+  per call. The 65ms "stateRoot" phase in frame profiles was misleading
+  — it included profiling overhead.
+- **Lever 6 (entity root memoization):** DONE. Memoized
+  `computeCanonicalEntityConsensusStateHash` on field identity (same
+  pattern as `ACCOUNT_STATE_ROOT_MEMO`). Reduced `canonical.encode` by
+  42% (322K → 187K calls). TPS impact within run-to-run variance (194-221
+  TPS both with and without). The remaining bottleneck is NOT encoding.
+- **Lever 6a (account value hash memo):** NO HELP. The radix map already
+  caches leaf node hashes; `valueHash` is only called once per leaf. The
+  memo added overhead without benefit.
+- **Lever 7 (structuredClone reduction):** NEXT TARGET. 43K clones/run
+  (~100/frame). Top callers: `cloneIsolatedEntityInput` (8K, per-tx
+  isolation), observability `queuePendingAuditEvent` (11K, event
+  cloning), `recordCommittedFrames` (4K, frame history). The
+  observability cloning (24% of total) is a potential quick win.
 - **Lever 2 (batch sig verify):** DEPRIORITIZED. Only 4% of ops; max
   ~7ms/frame savings even with perfect batching.
 
@@ -181,3 +192,4 @@ sig verification" hypothesis is disproved. The real costs are:
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `c9ec6ddca` | `XLN_RUNTIME_FRAME_LOG` forwarded smoke → orchestrator → hub child; `XLN_ACCOUNT_PROPOSAL_PROFILE`/`XLN_ENTITY_FRAME_PROFILE` forwarded to lane daemons; `XLN_HLT_SUBMIT_RAMP_MS` staggered submission ramp |
 | `efea96a42` | Fat-frame gate: `minFrameMempoolDepth`/`maxFrameDelayMs` config + `decodeRuntimeConfig` schema update                                                                                                       |
+| `fc55888f8` | Entity state root memo on field identity (Lever 6). `canonical.encode` -42% (322K → 187K)                                                                                                                   |
