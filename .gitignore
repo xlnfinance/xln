@@ -2,6 +2,7 @@
 node_modules
 
 # OS/editor noise
+.idea
 .DS_Store
 **/._*
 *.log
