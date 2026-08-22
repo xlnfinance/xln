@@ -77,9 +77,11 @@ Daemons are fast (0.6ms per proposal); the hub is slow (191ms per frame).
 
 The dead zone fix is NOT daemon-side. Two paths:
 
-1. **Reduce hub per-frame processing time** — Lever 2 (batch sig verification).
-   The `apply` phase (193–376ms) is dominated by per-ACK ECDSA recovery.
-   Batch verification would reduce per-frame cost directly.
+1. **Reduce hub per-frame processing time** — originally hypothesised as
+   Lever 2 (batch sig verification). Op-counter profiling (§9) disproved
+   this: ECDSA recovery is only ~4% of total ops. The real bottlenecks
+   are `canonical.encode` (190K calls), `stateRoot` (65ms/frame), and
+   `structuredClone` (45K calls). See §9 for the revised levers.
 
 2. **Increase hub frame batching** — Lever 4 (frame-cut bistability).
    Fat frames amortize per-frame fixed costs over more ACKs. If the hub
@@ -115,9 +117,65 @@ in 418ms (1.7ms/input) vs h=220 92 inputs in 479ms (5.2ms/input).
 Gate and ramp are NOT additive — both smooth the ACK burst; combining
 over-smooths. maxDelay=100ms is too high — adds latency without
 proportional batching benefit. Dead zone floor is ~6.5s; hub per-frame
-processing (400–500ms) is the remaining bottleneck (Lever 2).
+processing (400–500ms) is the remaining bottleneck.
 
-## 8. Instrumentation committed
+## 8. Op-counter profile: the real bottleneck
+
+Run with `XLN_RUNTIME_OP_COUNTERS=1` + `XLN_ENTITY_FRAME_PROFILE=1`
+(fat-frame gate 50/25ms enabled). Op counters dumped on hub shutdown.
+
+### Per-frame phase averages (21 frames, >50 txs each)
+
+| Phase              | Avg ms/frame | Share |
+| ------------------ | ------------ | ----- |
+| frameApply         | 175          | 64%   |
+| stateRoot          | 65           | 24%   |
+| wireFit            | 12           | 4%    |
+| hankoEncoding      | 9            | 3%    |
+| manifestSignatures | 7            | 3%    |
+| commit             | 4            | 1%    |
+| **Total**          | **272**      |       |
+
+### Cumulative op counters (H1, whole run)
+
+| Operation             | Calls   | Notes                        |
+| --------------------- | ------- | ---------------------------- |
+| canonical.encode      | 190,436 | #1 — serialization           |
+| keccak.ethers         | 106,778 | #2 — hashing (stateRoot)     |
+| structuredClone       | 44,817  | #3 — account state cloning   |
+| ecdsa.sign            | 20,891  | #4 — signing > recovery!     |
+| ecdsa.recover         | 14,618  | #5 — only 4% of total ops    |
+| hanko.verifyCanonical | 13,117  | 34% cache hit rate           |
+| address.cache.hit     | 288,149 | address resolution is cached |
+
+### Conclusion
+
+**ECDSA recovery is NOT the bottleneck.** The original "Lever 2: batch
+sig verification" hypothesis is disproved. The real costs are:
+
+1. **`frameApply` (175ms/frame, 64%)** — dominated by `canonical.encode`
+   (190K calls, ~3,600/frame) and `structuredClone` (45K calls). Each
+   account input triggers full state serialization + clone.
+
+2. **`stateRoot` (65ms/frame, 24%)** — full Merkle root recomputation via
+   `keccak.ethers` (107K calls). No incremental/dirty tracking.
+
+3. **`ecdsa.sign` (20,891)** — signing is 43% more calls than recovery.
+   Manifest signatures and hanko encoding add 16ms/frame combined.
+
+### Revised levers
+
+- **Lever 5 (state root amortization):** Incremental Merkle updates
+  instead of full recompute. 65ms → ~5ms target. Highest single-phase
+  win.
+- **Lever 6 (canonical encode cache):** Per-frame memo for repeated
+  account state encodings. 190K → ~95K target. Touches serialization.
+- **Lever 7 (structuredClone reduction):** Copy-on-write or dirty
+  tracking instead of full account clone per tx. 45K → ~10K target.
+- **Lever 2 (batch sig verify):** DEPRIORITIZED. Only 4% of ops; max
+  ~7ms/frame savings even with perfect batching.
+
+## 9. Instrumentation committed
 
 | Commit      | Content                                                                                                                                                                                                     |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
