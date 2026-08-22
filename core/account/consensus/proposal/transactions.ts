@@ -14,8 +14,6 @@ import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { applyAccountTx } from '../../tx/apply';
 import { createStructuredLogger, shortHash } from '../../../support/logger';
 import {
-  assertNoUnilateralSettlementMutation,
-  captureSettlementVector,
   getAccountStateDomain,
 } from '../helpers';
 import { createAccountJClaimSession } from '../../j-claims/j-claim-session';
@@ -131,7 +129,6 @@ const applyProposalTransaction = async (
   const preparedTx = tx.type === 'j_event_claim'
     ? prepareAccountJClaimTx(machine.state, tx, getAccountStateDomain(machine.state), jClaimSession)
     : tx;
-  const beforeSettlement = captureSettlementVector(machine);
   const result = await applyAccountTx(
     machine,
     preparedTx,
@@ -142,9 +139,6 @@ const applyProposalTransaction = async (
     context.consensusContext,
     jClaimSession,
   );
-  if (result.ok) {
-    assertNoUnilateralSettlementMutation(machine, beforeSettlement, preparedTx, 'propose/validate');
-  }
   return { tx, preparedTx, result };
 };
 

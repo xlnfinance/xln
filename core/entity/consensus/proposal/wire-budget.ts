@@ -25,8 +25,6 @@ import {
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
 const MAX_FIT_ATTEMPTS = 16;
 
-const isInfraByteLimit = (error: unknown): boolean =>
-  error instanceof Error && error.message.startsWith('ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED');
 
 const proposalWireMaxBytes = (): number =>
   LIMITS.MAX_FRAME_SIZE_BYTES
@@ -164,31 +162,6 @@ const fitTxsToCertifiedReplayOracle = (
   return txs;
 };
 
-const materializeOrHalve = async (
-  env: EntityRuntimeContext,
-  replica: EntityReplica,
-  txs: EntityTx[],
-  requiredPrefixCount: number,
-): Promise<{ txs: EntityTx[]; entityContext: EntityInfraContext } | { txs: EntityTx[] }> => {
-  try {
-    return {
-      txs,
-      entityContext: await materializeEntityInfraContext(env, replica, txs, {
-        usePersistedReplayContext: false,
-      }),
-    };
-  } catch (error) {
-    if (!isInfraByteLimit(error) || txs.length <= 1) throw error;
-    const nextCount = Math.max(1, Math.floor(txs.length / 2));
-    if (nextCount < requiredPrefixCount) {
-      throw new Error(
-        `ENTITY_REQUIRED_TX_PREFIX_UNFITTABLE:${requiredPrefixCount}:infra-context`,
-      );
-    }
-    return { txs: txs.slice(0, nextCount) };
-  }
-};
-
 type EntityProposalWireBudgetParams = {
   env: EntityRuntimeContext;
   replica: EntityReplica;
@@ -248,17 +221,13 @@ const fitLiveEntityProposal = async (
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
       countOp('entity.wireFit.attempt', slice.length);
-      const materialized = await timePerfPhase(
+      const entityContext = await timePerfPhase(
         'entity.wireFit.materialize',
-        () => materializeOrHalve(env, replica, slice, requiredPrefixCount),
+        () => materializeEntityInfraContext(env, replica, slice, { usePersistedReplayContext: false }),
       );
-      if (!('entityContext' in materialized)) {
-        candidate = materialized.txs.length;
-        continue;
-      }
       const measureBoundPrefix = timePerfPhase(
         'entity.wireFit.measure',
-        () => measurePrefix.forRest(rest(materialized.entityContext)),
+        () => measurePrefix.forRest(rest(entityContext)),
       );
       const bytes = measureBoundPrefix(candidate);
       const txBytes = measurePrefix.txBytes(candidate);
@@ -274,12 +243,12 @@ const fitLiveEntityProposal = async (
             requiredPrefixCount,
             bytes,
             contextBytes: measureBoundPrefix(0),
-            htlcEntries: materialized.entityContext.htlc.entries.length,
-            originated: materialized.entityContext.htlc.originated.length,
-            profiles: materialized.entityContext.gossipProfiles.length,
+            htlcEntries: entityContext.htlc.entries.length,
+            originated: entityContext.htlc.originated.length,
+            profiles: entityContext.gossipProfiles.length,
           });
         }
-        return { txs: slice, entityContext: materialized.entityContext, replayed: false };
+        return { txs: slice, entityContext, replayed: false };
       }
       const ratio = Math.min(maxBytes / bytes, MAX_ENTITY_FRAME_TX_BYTES / txBytes);
       const next = Math.min(candidate - 1, Math.floor(candidate * 0.9 * ratio));

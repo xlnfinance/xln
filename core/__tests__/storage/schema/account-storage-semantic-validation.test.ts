@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createFrameHash } from '../../../account/consensus/frame/hash';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../../../account/utils';
@@ -151,7 +151,7 @@ const makeFixture = async (): Promise<ValidationContext> => {
     byLeft: true,
     deltas: [{ ...delta }],
   };
-  account.currentFrame.stateHash = await createFrameHash(account.currentFrame);
+  account.currentFrame.stateHash = computeFrameHash(account.currentFrame);
   return { doc: mutableAccountDoc(projectAccountDoc(account)), owner, counterparty };
 };
 
@@ -214,7 +214,7 @@ const mutations: Mutation[] = [
     expected: 'accept',
     mutate: async ({ doc }) => {
       doc.currentFrame.accountStateRoot = digest('94');
-      doc.currentFrame.stateHash = await createFrameHash(doc.currentFrame);
+      doc.currentFrame.stateHash = computeFrameHash(doc.currentFrame);
     },
   },
   {
@@ -391,7 +391,7 @@ const mutations: Mutation[] = [
         { length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1 },
         (_, tokenId) => ({ ...delta, tokenId }),
       );
-      doc.currentFrame.stateHash = await createFrameHash(doc.currentFrame);
+      doc.currentFrame.stateHash = computeFrameHash(doc.currentFrame);
     },
   },
 ];

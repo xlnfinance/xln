@@ -2,9 +2,7 @@ import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/acc
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger } from '../../../support/logger';
 import {
-  createFrameHash,
-  getCanonicalAccountFrameSizeBytes,
-  MAX_FRAME_SIZE_BYTES,
+  computeFrameHash,
 } from '../frame/hash';
 import { isLeftEntity } from '../../utils';
 import { shouldIncludeToken } from '../helpers';
@@ -67,7 +65,7 @@ const buildFrameData = async (
     byLeft: isLeftEntity(account.proofHeader.fromEntity, account.proofHeader.toEntity),
     deltas: collectFrameDeltas(candidate),
   };
-  frame.stateHash = await createFrameHash(frame);
+  frame.stateHash = computeFrameHash(frame);
   return frame;
 };
 
@@ -119,22 +117,8 @@ export const buildProposalFrame = async (
   }
 
   // frameData is assembled in-module from already-decoded mempool txs and a
-  // typed deltas projection; re-decoding it through the adversarial-input
-  // boundary re-validated every transaction a second time (validate at source,
-  // trust at use). The wire-size guard below stays: it is the proposer's own
-  // output budget check.
-  const frame = frameData;
-  const frameSize = getCanonicalAccountFrameSizeBytes(frame);
-  if (frameSize > MAX_FRAME_SIZE_BYTES) {
-    accountLog.warn('frame.too_large', { frameSize, limit: MAX_FRAME_SIZE_BYTES });
-    return {
-      ok: false,
-      result: proposeAccountFrameRejected(
-        `Frame exceeds ${MAX_FRAME_SIZE_BYTES} byte limit: ${frameSize} bytes`,
-        events,
-      ),
-    };
-  }
+  // typed deltas projection (validate at source, trust at use). Its size is
+  // bounded by the Account mempool limit; the Entity wire fit bounds the frame.
   checkpointProfile('frameValidation');
-  return { ok: true, frame, stateRootTiming: stateRootTiming ?? {} };
+  return { ok: true, frame: frameData, stateRootTiming: stateRootTiming ?? {} };
 };

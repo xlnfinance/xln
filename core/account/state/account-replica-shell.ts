@@ -61,15 +61,6 @@ const copyWorkspace = (workspace: SettlementWorkspace): SettlementWorkspace => (
     : { postSettlementDisputeProof: copyRecord(workspace.postSettlementDisputeProof) }),
 });
 
-const rejectUnexpectedMaps = (host: object, path: string): void => {
-  for (const key of Object.getOwnPropertyNames(host)) {
-    const value = Reflect.get(host, key);
-    if (!(value instanceof Map)) continue;
-    if (isPersistentAccountStateMap(value)) continue;
-    throw new Error(`ACCOUNT_ENVELOPE_MAP_UNMIGRATED:${path}.${key}`);
-  }
-};
-
 const requireSharedCollection = (state: AccountState, field: (typeof ACCOUNT_STATE_COLLECTIONS)[number]): void => {
   const value = state[field];
   if (value === undefined) return;
@@ -80,7 +71,6 @@ const requireSharedCollection = (state: AccountState, field: (typeof ACCOUNT_STA
 
 const forkAccountStateShell = (state: AccountState): AccountState => {
   for (const field of ACCOUNT_STATE_COLLECTIONS) requireSharedCollection(state, field);
-  rejectUnexpectedMaps(state, 'state');
   const shell: AccountState = {
     ...state,
     domain: copyRecord(state.domain),
@@ -99,7 +89,6 @@ const forkAccountStateShell = (state: AccountState): AccountState => {
 };
 
 const forkShadow = (shadow: AccountReplica['shadow']): AccountReplica['shadow'] => {
-  rejectUnexpectedMaps(shadow.rebalance, 'shadow.rebalance');
   return {
     rebalance: {
       policy: shadow.rebalance.policy,
@@ -125,7 +114,6 @@ const forkShadow = (shadow: AccountReplica['shadow']): AccountReplica['shadow'] 
 /** Entity-frame write shell. Patricia Account collections remain structurally shared. */
 export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica => {
   if (!base.state || typeof base.state !== 'object') return { ...base };
-  rejectUnexpectedMaps(base, 'account');
   if (!isPersistentAccountStateMap(base.pendingWithdrawals)) {
     throw new Error('ACCOUNT_ENVELOPE_COLLECTION_NOT_PERSISTENT:pendingWithdrawals');
   }

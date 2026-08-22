@@ -1,6 +1,4 @@
-import { LIMITS } from '../../../config/constants';
 import { timePerfPhase } from '../../../support/performance/profile';
-import { utf8ByteLength } from '../../../protocol/crypto/keccak-text';
 import { parseProfile, type DecodedProfile } from '../../profile';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { validateHtlcPreparedInfraContext } from '../../htlc/prepared-context-validation';
@@ -116,15 +114,13 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
   ) {
     throw new Error('ENTITY_INFRA_PROFILE_SET_NOT_EXACT');
   }
-  const context: DecodedEntityInfraContext = {
+  // Byte bounds are enforced once on the whole frame (wire fit on the
+  // proposer, the total-frame budget on every validator); the context is a
+  // part of that frame, not a second budget.
+  return {
     version: 1, proposerReplicaId, entityId, proposerSignerId, parentFrameHash,
     height: entityHeight, gossipProfiles, peerAssertions, htlc,
   };
-  const bytes = timePerfPhase('entity.infraValidate.encode', () => utf8ByteLength(encodeCanonicalConsensusValue(context)));
-  if (bytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
-    throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${bytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
-  }
-  return context;
 };
 
 /** Authenticate every committed Profile before any key/domain/capacity is trusted. */

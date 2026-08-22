@@ -13,7 +13,7 @@ import type {
   Delta,
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
-import { cloneAccountFrame } from '../state/state-clone';
+import { cloneIsolatedAccountFrame as cloneAccountFrame } from '../../protocol/state/account-input-clone';
 import {
   copyAccountDisputeConfig,
   copyAccountStateDomain,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createFrameHash } from '../../../account/consensus/frame/hash';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
 import {
   createEntityFrameHashFromStateRoot,
 } from '../../../entity/consensus/frame';
@@ -94,7 +94,7 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
 
 describe('frame hash golden fixtures', () => {
   test('account frame hash stays byte-for-byte stable', async () => {
-    await expect(createFrameHash(makeAccountFrameFixture())).resolves.toBe(ACCOUNT_FRAME_GOLDEN_HASH);
+    expect(computeFrameHash(makeAccountFrameFixture())).toBe(ACCOUNT_FRAME_GOLDEN_HASH);
   });
 
   test('account frame hash binds settlement authority target but not quorum subset bytes', async () => {
@@ -125,10 +125,10 @@ describe('frame hash golden fixtures', () => {
     }
     secondSeal.data.settlementHanko = '0xsecond-quorum';
     secondSeal.data.postProof.hanko = '0xsecond-proof-quorum';
-    expect(await createFrameHash(second)).toBe(await createFrameHash(first));
+    expect(computeFrameHash(second)).toBe(computeFrameHash(first));
 
     secondSeal.data.settlementHash = `0x${'65'.repeat(32)}`;
-    expect(await createFrameHash(second)).not.toBe(await createFrameHash(first));
+    expect(computeFrameHash(second)).not.toBe(computeFrameHash(first));
   });
 
   test('receiving Entity frame commits exact external settlement Hanko bytes in one round', async () => {
@@ -151,7 +151,7 @@ describe('frame hash golden fixtures', () => {
         },
       },
     }];
-    peerFrame.stateHash = await createFrameHash(peerFrame);
+    peerFrame.stateHash = computeFrameHash(peerFrame);
     const txs: EntityTx[] = [{
       type: 'accountInput',
       data: {
@@ -187,7 +187,7 @@ describe('frame hash golden fixtures', () => {
 
   test('entity frame hash stays byte-for-byte stable', async () => {
     const accountFrame = makeAccountFrameFixture();
-    const accountHash = await createFrameHash(accountFrame);
+    const accountHash = computeFrameHash(accountFrame);
     accountFrame.stateHash = accountHash;
     const entityTxs: EntityTx[] = [{
       type: 'accountInput',

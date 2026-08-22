@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { applyAccountInput } from '../../../account/consensus';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
-import { createFrameHash } from '../../../account/consensus/frame/hash';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
@@ -232,7 +232,7 @@ describe('typed Account peer rejection', () => {
       stateHash: '',
       byLeft: false,
     };
-    frame.stateHash = await createFrameHash(frame);
+    frame.stateHash = computeFrameHash(frame);
     const input: Extract<AccountInput, { kind: 'frame' }> = {
       kind: 'frame',
       fromEntityId: account.proofHeader.toEntity,
@@ -268,7 +268,7 @@ describe('typed Account peer rejection', () => {
       stateHash: '',
       byLeft: false,
     };
-    frame.stateHash = await createFrameHash(frame);
+    frame.stateHash = computeFrameHash(frame);
     frame.accountTxs = [{ type: 'set_credit_limit', data: { tokenId: 1, amount: 1n } }];
     const input: Extract<AccountInput, { kind: 'frame' }> = {
       kind: 'frame',
@@ -308,7 +308,7 @@ describe('typed Account peer rejection', () => {
       stateHash: '',
       byLeft: false,
     };
-    frame.stateHash = await createFrameHash(frame);
+    frame.stateHash = computeFrameHash(frame);
     const input: Extract<AccountInput, { kind: 'frame' }> = {
       kind: 'frame',
       fromEntityId: account.proofHeader.toEntity,
@@ -376,7 +376,7 @@ describe('typed Account peer rejection', () => {
         stateHash: '',
         byLeft: false,
       };
-      frame.stateHash = await createFrameHash(frame);
+      frame.stateHash = computeFrameHash(frame);
       const input: Extract<AccountInput, { kind: 'frame' }> = {
         kind: 'frame',
         fromEntityId: candidate.account.proofHeader.toEntity,
@@ -419,7 +419,7 @@ describe('typed Account peer rejection', () => {
       stateHash: '',
       byLeft: false,
     };
-    frame.stateHash = await createFrameHash(frame);
+    frame.stateHash = computeFrameHash(frame);
     const proofBodyHash = `0x${'aa'.repeat(32)}`;
     const input: Extract<AccountInput, { kind: 'frame' }> = {
       kind: 'frame',

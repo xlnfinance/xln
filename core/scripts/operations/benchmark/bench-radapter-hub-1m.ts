@@ -7,7 +7,7 @@ import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { createFrameHash } from '../../../account/consensus/frame/hash';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
 import { transitionRuntimeLifecycle } from '../../../runtime/replica/lifecycle';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
@@ -282,7 +282,7 @@ const makeAccount = async (
   // Storage admission validates the same canonical frame commitment used by
   // live Account consensus. Bench fixtures must never invent placeholder or
   // SHA-256 hashes, because that benchmarks an impossible persisted state.
-  account.currentFrame.stateHash = await createFrameHash(account.currentFrame);
+  account.currentFrame.stateHash = computeFrameHash(account.currentFrame);
   return account;
 };
 

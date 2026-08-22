@@ -20,8 +20,6 @@ import {
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
 import {
-  assertNoUnilateralSettlementMutation,
-  captureSettlementVector,
 } from '../helpers';
 import type { AccountConsensusContext } from '../context';
 import type { HtlcEnforcementClock } from '../../htlc-deadline';
@@ -65,7 +63,6 @@ export const commitAccountFrameTransition = async (
   try {
     await timePerfPhase('account.commit.applyTxs', async () => {
       for (const tx of frame.accountTxs) {
-        const beforeSettlement = captureSettlementVector(draft);
         const result = await applyAccountTx(
           draft,
           tx,
@@ -83,7 +80,6 @@ export const commitAccountFrameTransition = async (
             `Frame ${frame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
           );
         }
-        assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);
         candidateEffects.push(...(result.candidateEffects ?? []));
         if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
       }

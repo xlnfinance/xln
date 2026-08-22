@@ -504,8 +504,7 @@ const buildEntityProposal = async (
 const isFrameByteLimitError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes('ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED') ||
-    message.includes('wire byte limit exceeded') ||
-    message.includes('ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED');
+    message.includes('wire byte limit exceeded');
 };
 
 /**

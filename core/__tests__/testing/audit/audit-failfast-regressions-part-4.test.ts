@@ -42,7 +42,7 @@ import { checkAutoRebalance, handleRequestCollateral } from '../../../account/tx
 
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer/index';
 
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
+import { computeFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
 
 import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '../../../account/consensus/helpers';
 
@@ -1461,9 +1461,9 @@ describe('audit fail-fast regressions', () => {
       stateHash: '',
       byLeft: true,
     };
-    committedFrame.stateHash = await createFrameHash(committedFrame);
+    committedFrame.stateHash = computeFrameHash(committedFrame);
     pendingFrame.prevFrameHash = committedFrame.stateHash;
-    pendingFrame.stateHash = await createFrameHash(pendingFrame);
+    pendingFrame.stateHash = computeFrameHash(pendingFrame);
     accountMachine.currentFrame = committedFrame;
     accountMachine.pendingFrame = pendingFrame;
     accountMachine.pendingAccountInput = {
@@ -1885,7 +1885,7 @@ describe('audit fail-fast regressions', () => {
         },
       ],
     };
-    maliciousFrame.stateHash = await createFrameHash(maliciousFrame);
+    maliciousFrame.stateHash = computeFrameHash(maliciousFrame);
     const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [maliciousFrame.stateHash]);
 
     const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, {
@@ -1945,7 +1945,7 @@ describe('audit fail-fast regressions', () => {
         },
       ],
     };
-    frame.stateHash = await createFrameHash(frame);
+    frame.stateHash = computeFrameHash(frame);
     const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [frame.stateHash]);
     const poisonedHash = `0x${'ab'.repeat(32)}`;
     const [newDisputeHanko] = await signEntityHashes(env, left.entityId, left.signerId, [poisonedHash]);
@@ -2234,7 +2234,7 @@ describe('audit fail-fast regressions', () => {
       byLeft: true,
       deltas: [],
     };
-    frame.stateHash = await createFrameHash(frame);
+    frame.stateHash = computeFrameHash(frame);
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [frame.stateHash]);
     const rejected = await applyAccountInput(
       createAccountConsensusContext(env),

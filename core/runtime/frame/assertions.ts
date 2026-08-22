@@ -15,7 +15,7 @@ const assertFrameHash = async (frame: AccountFrame, label: string): Promise<void
   if (!frame.stateHash) {
     throw new Error(`[STRICT] ${label}: missing stateHash`);
   }
-  const recomputed = await computeFrameHash(frame);
+  const recomputed = computeFrameHash(frame);
   if (recomputed !== frame.stateHash) {
     throw new Error(`[STRICT] ${label}: stateHash mismatch (recomputed=${recomputed}, stored=${frame.stateHash})`);
   }

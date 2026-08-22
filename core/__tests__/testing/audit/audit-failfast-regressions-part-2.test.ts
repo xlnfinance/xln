@@ -12,7 +12,7 @@ import {
   proposeAccountFrame,
 } from '../../../account/consensus/index';
 import {
-  createFrameHash,
+  computeFrameHash,
   getAccountFrameStructuralError,
   MAX_ACCOUNT_FRAME_TXS,
 } from '../../../account/consensus/frame/hash';
@@ -1050,7 +1050,7 @@ describe('audit fail-fast regressions', () => {
       0,
     );
     invalidFrame.prevFrameHash = 'genesis';
-    invalidFrame.stateHash = await createFrameHash(invalidFrame);
+    invalidFrame.stateHash = computeFrameHash(invalidFrame);
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [invalidFrame.stateHash]);
     if (!frameHanko) throw new Error('SIGNED_INVALID_FRAME_HANKO_MISSING');
     const accountInput: AccountInput = {
@@ -1144,7 +1144,7 @@ describe('audit fail-fast regressions', () => {
     };
     const staleFrame = makeIncomingAccountFrame(receiver, staleSeal, true, env.state.timestamp, 0);
     staleFrame.prevFrameHash = 'genesis';
-    staleFrame.stateHash = await createFrameHash(staleFrame);
+    staleFrame.stateHash = computeFrameHash(staleFrame);
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [staleFrame.stateHash]);
     if (!frameHanko) throw new Error('SIGNED_STALE_SETTLEMENT_FRAME_HANKO_MISSING');
     const accountInput: AccountInput = {

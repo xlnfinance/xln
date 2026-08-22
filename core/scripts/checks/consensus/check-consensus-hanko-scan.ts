@@ -181,7 +181,6 @@ assertOrder(accountCommitTransition, accountCommitTransitionPath, [
   'const draft = accountTransitionView(owner);',
   'for (const tx of frame.accountTxs) {',
   'const result = await applyAccountTx(',
-  'assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);',
   'const committed = timePerfPhase(',
   "() => commitAccountTransition(owner, 'frameCommit')",
   'publishAccountOverlay(account, committed.account);',

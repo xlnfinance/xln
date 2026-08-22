@@ -465,10 +465,10 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     return this.#hashProjection.rootHash();
   }
 
-  /** Isolated (forked, sealed) view for a nested candidate base. */
+  /** Sealed fold of the live shells for a nested candidate base. */
   snapshotCandidate(): PersistentEntityAccountMap {
     this.#requireActive();
-    this.#projection ??= this.#project('fork');
+    this.#projection ??= this.#project('final');
     return this.#projection;
   }
 
@@ -554,18 +554,14 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     };
   }
 
-  #project(mode: 'hash' | 'fork' | 'final'): PersistentEntityAccountMap {
+  #project(mode: 'hash' | 'final'): PersistentEntityAccountMap {
     this.#requireActive();
     const mutations: EntityAccountDirtyMutation[] = [...this.#deleted]
       .sort()
       .map(entityId => ({ kind: 'delete', key: entityId }));
     for (const [entityId, account] of [...this.#shells].sort(([left], [right]) =>
       left < right ? -1 : left > right ? 1 : 0)) {
-      mutations.push({
-        kind: 'put',
-        key: entityId,
-        value: mode === 'fork' ? forkAccountReplicaShell(account) : account,
-      });
+      mutations.push({ kind: 'put', key: entityId, value: account });
     }
     observePerfCount('entity.accountProjection.calls');
     observePerfCount('entity.accountProjection.mutations', mutations.length);

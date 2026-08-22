@@ -44,21 +44,6 @@ type ResolvedClaim = VerifiedHankoClaim & {
   readonly usedIndexes: readonly number[];
 };
 
-// Structural/cryptographic verification depends only on the exact digest and
-// Hanko bytes. Board authority and expected target depend on the caller's
-// observer state and are intentionally checked after every cache lookup.
-const VERIFIED_HANKO_MEMO_MAX = 16_384;
-const verifiedHankoMemo = new Map<string, VerifiedHanko>();
-
-const rememberVerifiedHanko = (key: string, verified: VerifiedHanko): VerifiedHanko => {
-  if (verifiedHankoMemo.size >= VERIFIED_HANKO_MEMO_MAX) {
-    const oldest = verifiedHankoMemo.keys().next();
-    if (!oldest.done) verifiedHankoMemo.delete(oldest.value);
-  }
-  verifiedHankoMemo.set(key, verified);
-  return verified;
-};
-
 export const resolveHankoBoardDelays = (
   input?: Partial<HankoBoardDelays>,
 ): HankoBoardDelays => {
@@ -223,13 +208,9 @@ export const verifyCanonicalHanko = (input: Readonly<{
   validateBoardAuthority?: HankoBoardAuthorityValidator;
 }>): VerifiedHanko => {
   countOpWithSite('hanko.verifyCanonical', input.hanko.length, 1);
-  const memoKey = `${input.digest}|${input.hanko}`;
-  const memoized = verifiedHankoMemo.get(memoKey);
-  const verified = memoized ?? rememberVerifiedHanko(
-    memoKey,
-    verifyCanonicalHankoStructure(input.digest, input.hanko),
-  );
-  if (memoized) countOpWithSite('hanko.verifyCanonical.cacheHit', input.hanko.length, 1);
+  // Envelope decode and signature recovery are memoized in the codec (and
+  // pre-warmed by the worker pool); claim resolution is cheap arithmetic.
+  const verified = verifyCanonicalHankoStructure(input.digest, input.hanko);
   for (const [index, claim] of verified.claims.entries()) {
     assertAuthority(claim as ResolvedClaim, index, input.validateBoardAuthority);
   }

@@ -1,5 +1,5 @@
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../../types/account';
-import { cloneAccountFrame } from '../../state/state-clone';
+import { cloneIsolatedAccountFrame as cloneAccountFrame } from '../../../protocol/state/account-input-clone';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import {
   cloneIsolatedAccountInput,

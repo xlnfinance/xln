@@ -7,8 +7,6 @@ import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/e
 import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machine/events/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 import { LIMITS } from '../../../config/constants';
-import { serializeCanonicalTaggedJson } from '../../../protocol/serialization';
-import { utf8ByteLength } from '../../../protocol/crypto/keccak-text';
 import { accountTxWithoutPostCommitHankos } from '../../settlement/witness-projection';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
@@ -20,9 +18,6 @@ export const MAX_FRAME_SIZE_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 // Entity time/J-height before an incoming frame is applied.
 const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 
-/** Exact UTF-8 wire size checked once while building the outbound frame. */
-export const getCanonicalAccountFrameSizeBytes = (frame: AccountFrame): number =>
-  utf8ByteLength(serializeCanonicalTaggedJson(frame));
 /**
  * Cheap shape checks used by inbound Account consensus before signature work.
  *
@@ -123,18 +118,9 @@ const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
   ], 'integrity');
 };
 
-const inboundAccountFrameHash = (frame: AccountFrame): string =>
-  computeCanonicalAccountFrameHash(frame);
-
-export async function createFrameHash(frame: AccountFrame): Promise<string> {
-  return computeCanonicalAccountFrameHash(frame);
-}
-
 /** Verify the signed frame envelope; J-finality may advance newer live state. */
 export function assertAccountFrameHash(frame: AccountFrame, code: string): void {
-  if (inboundAccountFrameHash(frame) !== frame.stateHash) throw new Error(code);
+  if (computeCanonicalAccountFrameHash(frame) !== frame.stateHash) throw new Error(code);
 }
 
-export async function computeFrameHash(frame: AccountFrame): Promise<string> {
-  return createFrameHash(frame);
-}
+export const computeFrameHash = computeCanonicalAccountFrameHash;

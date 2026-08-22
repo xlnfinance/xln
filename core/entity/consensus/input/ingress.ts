@@ -17,7 +17,6 @@ import {
   getEntityMempoolAdmissionError,
   isSingleSignerEntity,
   isEntityInputWellFormed,
-  validateEntityReplica,
 } from '../replica-validation';
 import { entityLog } from '../entity-log';
 
@@ -134,15 +133,6 @@ export const prepareEntityInputIngress = (
   const frameHash = input.proposedFrame?.hash?.slice(0, 10) || 'none';
   logEntityInput(env, input, workingReplica, entityDisplay, frameHash);
 
-  // cloneIsolatedEntityInput is an owned canonical copy, not another trust
-  // boundary. Re-validating it doubled every AccountInput TypeGuard while
-  // proving nothing beyond the exact wire validation immediately above.
-  if (!validateEntityReplica(workingReplica)) {
-    log.error(
-      `❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`,
-    );
-    return rejectIngress('ENTITY_REPLICA_INVALID', workingReplica);
-  }
   return {
     accepted: true,
     context: {

@@ -3,7 +3,7 @@ import { createAccountConsensusContext } from '../../../entity/account/account-c
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { applyAccountInput, proposeAccountFrame } from '../../../account/consensus';
-import { createFrameHash } from '../../../account/consensus/frame/hash';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
 import { prependUniqueMempoolTxs } from '../../../account/consensus/helpers';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
@@ -309,7 +309,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   );
   const invalidInput = structuredClone(sealedProposal);
   invalidInput.proposal.frame.accountStateRoot = `0x${'99'.repeat(32)}`;
-  invalidInput.proposal.frame.stateHash = await createFrameHash(invalidInput.proposal.frame);
+  invalidInput.proposal.frame.stateHash = computeFrameHash(invalidInput.proposal.frame);
   const [frameHanko] = await signEntityHashes(
     env,
     sourceEntityId,

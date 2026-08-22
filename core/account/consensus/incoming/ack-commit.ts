@@ -2,7 +2,7 @@ import type { AccountFrame, AccountOutput, AccountPeerInput, AccountReplica } fr
 import type { AccountConsensusContext } from '../context';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
-import { cloneAccountFrame } from '../../state/state-clone';
+import { cloneIsolatedAccountFrame as cloneAccountFrame } from '../../../protocol/state/account-input-clone';
 import { getAccountPerspective } from '../../state/perspective';
 import { deriveAccountFrameTokenIds } from '../../state/frame';
 import { appendAccountMempoolTxs } from '../../input/mempool';

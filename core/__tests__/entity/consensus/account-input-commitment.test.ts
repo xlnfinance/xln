@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { assertAccountFrameHash, createFrameHash } from '../../../account/consensus/frame/hash';
+import { assertAccountFrameHash, computeFrameHash } from '../../../account/consensus/frame/hash';
 import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
 import { canonicalAccountInputCommitment } from '../../../entity/consensus/frame/account-input-commitment';
 import {
@@ -65,7 +65,7 @@ const makeFrame = async (offerId: string): Promise<AccountFrame> => {
     }],
     stateHash: '',
   };
-  frame.stateHash = await createFrameHash(frame);
+  frame.stateHash = computeFrameHash(frame);
   return frame;
 };
 
@@ -108,7 +108,7 @@ test('Entity frame hash binds Account stateHash not nested offer bodies', async 
   const left = await makeFrame('offer-a');
   const right = structuredClone(left);
   right.accountTxs = [fatOffer('offer-b') as AccountFrame['accountTxs'][number]];
-  expect(left.stateHash).not.toBe(await createFrameHash(right));
+  expect(left.stateHash).not.toBe(computeFrameHash(right));
   expect(() => assertAccountFrameHash(right, 'TAMPERED_BODY')).toThrow('TAMPERED_BODY');
   expect(entityHash([frameInput(left)])).toBe(entityHash([frameInput(right)]));
 });
@@ -140,14 +140,14 @@ test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle 
       },
     },
   } as AccountFrame['accountTxs'][number]);
-  frame.stateHash = await createFrameHash(frame);
+  frame.stateHash = computeFrameHash(frame);
   const changed = structuredClone(frame);
   const seal = changed.accountTxs[1];
   if (seal?.type !== 'settle_transition' || seal.data.kind !== 'seal') {
     throw new Error('SETTLEMENT_SEAL_FIXTURE_INVALID');
   }
   seal.data.settlementHanko = '0xpeer-subset-b';
-  expect(await createFrameHash(changed)).toBe(frame.stateHash);
+  expect(computeFrameHash(changed)).toBe(frame.stateHash);
   expect(entityHash([frameInput(changed)])).not.toBe(entityHash([frameInput(frame)]));
 });
 
