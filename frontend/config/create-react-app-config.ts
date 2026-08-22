@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { UserConfig } from 'vite';
 
+import { parseDevelopmentGatewayPort } from './development-gateway';
 import { getSurface, type SurfaceId } from './surfaces';
 
 const FRONTEND_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -13,11 +14,16 @@ type ReactAppConfigInput = Readonly<{
   rootDirectory: string;
 }>;
 
+export const getReactAppBase = (
+  surfaceId: SurfaceId,
+  useDevelopmentGateway: boolean,
+): '/' | `/__app/${SurfaceId}/` => useDevelopmentGateway ? `/__app/${surfaceId}/` : '/';
+
 export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfigInput): UserConfig => {
   const surface = getSurface(surfaceId);
   return {
     root: rootDirectory,
-    base: '/',
+    base: getReactAppBase(surfaceId, USE_DEVELOPMENT_GATEWAY),
     appType: 'spa',
     publicDir: false,
     plugins: [react()],
@@ -28,7 +34,9 @@ export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfi
       strictPort: true,
       hmr: {
         path: surface.hmrPath,
-        clientPort: USE_DEVELOPMENT_GATEWAY ? 8080 : surface.developmentPort,
+        clientPort: USE_DEVELOPMENT_GATEWAY
+          ? parseDevelopmentGatewayPort(process.env['XLN_REACT_GATEWAY_PORT'])
+          : surface.developmentPort,
       },
     },
     build: {

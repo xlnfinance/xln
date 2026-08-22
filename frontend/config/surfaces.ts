@@ -13,7 +13,12 @@ type PrefixRoute = Readonly<{
   pathname: `/${string}`;
 }>;
 
-export type RouteRule = ExactRoute | PrefixRoute;
+type StemRoute = Readonly<{
+  kind: 'stem';
+  pathname: `/${string}`;
+}>;
+
+export type RouteRule = ExactRoute | PrefixRoute | StemRoute;
 
 export type SurfaceDefinition = Readonly<{
   id: SurfaceId;
@@ -22,11 +27,12 @@ export type SurfaceDefinition = Readonly<{
   artifactDirectory: `.artifacts/${SurfaceId}`;
   assetDirectory: `assets/${SurfaceId}`;
   routes: readonly RouteRule[];
-  fixedAssets: readonly `/${string}`[];
+  assetRoutes: readonly RouteRule[];
 }>;
 
 const exact = (pathname: `/${string}`): ExactRoute => ({ kind: 'exact', pathname });
 const prefix = (pathname: `/${string}`): PrefixRoute => ({ kind: 'prefix', pathname });
+const stem = (pathname: `/${string}`): StemRoute => ({ kind: 'stem', pathname });
 
 export const SURFACES = [
   {
@@ -44,7 +50,7 @@ export const SURFACES = [
       exact('/unicast'),
       exact('/market-cap'),
     ],
-    fixedAssets: ['/install.sh'],
+    assetRoutes: [exact('/install.sh')],
   },
   {
     id: 'docs',
@@ -53,7 +59,7 @@ export const SURFACES = [
     artifactDirectory: '.artifacts/docs',
     assetDirectory: 'assets/docs',
     routes: [exact('/docs')],
-    fixedAssets: ['/docs-catalog', '/llms.txt', '/llms-full.txt'],
+    assetRoutes: [prefix('/docs-catalog'), stem('/llms')],
   },
   {
     id: 'wallet',
@@ -62,13 +68,12 @@ export const SURFACES = [
     artifactDirectory: '.artifacts/wallet',
     assetDirectory: 'assets/wallet',
     routes: [exact('/app'), prefix('/address'), exact('/testnet')],
-    fixedAssets: [
-      '/contracts',
-      '/brainvault-worker.js',
-      '/hash-wasm-argon2.js',
-      '/hash-wasm-blake3.js',
-      '/push-wake-sw.js',
-      '/route-mode.js',
+    assetRoutes: [
+      prefix('/contracts'),
+      exact('/brainvault-worker.js'),
+      stem('/hash-wasm-'),
+      exact('/push-wake-sw.js'),
+      exact('/route-mode.js'),
     ],
   },
   {
@@ -86,7 +91,7 @@ export const SURFACES = [
       prefix('/ai'),
       exact('/embed'),
     ],
-    fixedAssets: ['/scenarios', '/comparative-results.json'],
+    assetRoutes: [prefix('/scenarios'), exact('/comparative-results.json')],
   },
 ] as const satisfies readonly SurfaceDefinition[];
 
@@ -115,17 +120,23 @@ const canonicalizePathname = (pathname: string): string => {
   return pathname.replace(/\/+$/, '');
 };
 
-const matchesRoute = (pathname: string, rule: RouteRule): boolean =>
-  rule.kind === 'exact'
-    ? pathname === rule.pathname
-    : pathname === rule.pathname || pathname.startsWith(`${rule.pathname}/`);
+export const matchesRoute = (pathname: string, rule: RouteRule): boolean => {
+  if (rule.kind === 'exact') return pathname === rule.pathname;
+  if (rule.kind === 'stem') return pathname.startsWith(rule.pathname);
+  return pathname === rule.pathname || pathname.startsWith(`${rule.pathname}/`);
+};
+
+export const isEdgeRoute = (rawPathname: string): boolean => {
+  const pathname = canonicalizePathname(rawPathname);
+  return EDGE_ROUTES.some((rule) => matchesRoute(pathname, rule));
+};
 
 export const resolveRouteOwner = (rawPathname: string): RouteOwner => {
   const pathname = canonicalizePathname(rawPathname);
+  if (isEdgeRoute(pathname)) return 'edge';
   for (const surface of SURFACES) {
     if (surface.routes.some((rule) => matchesRoute(pathname, rule))) return surface.id;
   }
-  if (EDGE_ROUTES.some((rule) => matchesRoute(pathname, rule))) return 'edge';
   return 'edge';
 };
 

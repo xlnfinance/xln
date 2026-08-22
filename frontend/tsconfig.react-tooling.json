@@ -5,6 +5,7 @@
   },
   "include": [
     "apps/*/vite.config.ts",
+    "config/development-gateway.ts",
     "scripts/assemble.ts",
     "config/create-react-app-config.ts",
     "config/surfaces.ts",
@@ -12,6 +13,9 @@
     "scripts/candidate-release.ts",
     "scripts/check.ts",
     "scripts/command-runner.ts",
+    "scripts/dev-gateway.ts",
+    "scripts/dev.ts",
+    "scripts/run-dev-gateway.ts",
     "scripts/surface-selection.ts"
   ]
 }

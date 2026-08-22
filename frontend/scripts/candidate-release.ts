@@ -30,6 +30,7 @@ type CandidateApplication = Readonly<{
   viteManifest: `apps/${SurfaceId}/manifest.json`;
   assetDirectory: `assets/${SurfaceId}`;
   routes: readonly RouteRule[];
+  assetRoutes: readonly RouteRule[];
 }>;
 
 export type CandidateReleaseManifest = Readonly<{
@@ -175,6 +176,7 @@ const createApplications = (): readonly CandidateApplication[] => SURFACES.map((
   viteManifest: `apps/${surface.id}/manifest.json`,
   assetDirectory: surface.assetDirectory,
   routes: surface.routes,
+  assetRoutes: surface.assetRoutes,
 }));
 
 export const planCandidateRelease = async (frontendRoot: string): Promise<CandidateReleasePlan> => {

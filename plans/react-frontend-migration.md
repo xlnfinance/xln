@@ -235,7 +235,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `IN PROGRESS — VERSIONED APPLICATION ARTIFACT ASSEMBLY IMPLEMENTED`
+**Status:** `IN PROGRESS — CANDIDATE ASSEMBLY AND SAME-ORIGIN DEV GATEWAY VERIFIED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -383,9 +383,9 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Add the same-origin development gateway using the encoded application and
-   edge route contract without changing canonical production selection.
-2. Split the first generated-input producers into their declared namespaces and
+1. Split the first generated-input producers into their declared namespaces and
    feed them into candidate assembly with collision checks.
-3. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
+2. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
    Runtime-client packages deferred until their first real flow needs them.
+3. Capture the remaining missing-asset and CSP behavior as the first generated
+   inputs are attached to their owning candidate applications.

@@ -14,6 +14,10 @@ describe('frontend route ownership', () => {
     expect(resolveRouteOwner('/address/0xabc')).toBe('wallet');
     expect(resolveRouteOwner('/qa/hlt')).toBe('ops');
     expect(resolveRouteOwner('/ai/session-1')).toBe('ops');
+    expect(SURFACES.find(({ id }) => id === 'docs')?.assetRoutes).toContainEqual({
+      kind: 'stem',
+      pathname: '/llms',
+    });
   });
 
   test('keeps server routes and unknown paths edge-owned', () => {
@@ -40,6 +44,7 @@ describe('frontend route ownership', () => {
 
     const declaredRoutes = [
       ...SURFACES.flatMap(({ routes }) => routes.map(({ kind, pathname }) => `${kind}:${pathname}`)),
+      ...SURFACES.flatMap(({ assetRoutes }) => assetRoutes.map(({ kind, pathname }) => `${kind}:${pathname}`)),
       ...EDGE_ROUTES.map(({ kind, pathname }) => `${kind}:${pathname}`),
     ];
     expect(uniqueValues(declaredRoutes)).toBe(true);
