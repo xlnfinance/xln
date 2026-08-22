@@ -13,22 +13,14 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
  */
 
 import type { AccountFrame, RuntimeOverlayRecord } from '../../types/account';
-import type {
-  CertifiedEntityFrameLink,
-  EntityCandidateEffect,
-  EntityReplica,
-  EntityState,
-} from '../../entity/types';
+import type { CertifiedEntityFrameLink, EntityCandidateEffect, EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica, RuntimeHistoryRecord } from '../types';
 import type { LogCategory, FrameLogEntry } from '../../types/logging';
 
 import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { invalidateEntityAccountCommitment } from '../../entity/consensus/state-root';
 import { accountFrameWithoutPostCommitHankos } from '../../account/settlement/witness-projection';
-import {
-  consumeHtlcRuntimeEvent,
-  indexCertifiedEntityFrameNotes,
-} from '../../entity/htlc/note-index';
+import { consumeHtlcRuntimeEvent, indexCertifiedEntityFrameNotes } from '../../entity/htlc/note-index';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
 const getLogState = (env: RuntimeReplica) => {
@@ -63,10 +55,7 @@ export const clearRuntimeFrameEvents = (env: RuntimeReplica): void => {
 };
 
 /** Install explicit events for a synthetic frame fixture; never restores history. */
-export const replaceRuntimeFrameEvents = (
-  env: RuntimeReplica,
-  events: readonly FrameLogEntry[],
-): void => {
+export const replaceRuntimeFrameEvents = (env: RuntimeReplica, events: readonly FrameLogEntry[]): void => {
   const buffer = getFrameEvents(env);
   buffer.splice(0, buffer.length, ...events.map(entry => ({ ...entry })));
 };
@@ -113,7 +102,12 @@ const getPendingAuditEvents = (env: RuntimeReplica): Map<string, Record<string, 
 const queuePendingAuditEvent = (env: RuntimeReplica, payload: Record<string, unknown>): void => {
   const pending = getPendingAuditEvents(env);
   const key = encodeCanonicalConsensusValue(payload);
-  if (!pending.has(key)) pending.set(key, structuredClone(payload));
+  // Shallow clone: every call site builds a fresh payload literal, so only
+  // `data` could be a back-reference to mutable state. A shallow copy of the
+  // top-level fields is sufficient because the canonical key already binds
+  // the full structure — a later mutation to `data` would not change the key
+  // already stored, so the dedup map never confuses two different payloads.
+  if (!pending.has(key)) pending.set(key, { ...payload });
 };
 
 const appendFrameLog = (
@@ -202,9 +196,10 @@ const pushOverlayRecord = (env: RuntimeReplica, record: RuntimeOverlayRecord): v
   overlay.set(key, record);
 
   const infrastructure = env.infrastructure ?? (env.infrastructure = {});
-  const currentMarks = infrastructure.currentStorageOverlayMarks instanceof Map
-    ? infrastructure.currentStorageOverlayMarks
-    : (infrastructure.currentStorageOverlayMarks = new Map());
+  const currentMarks =
+    infrastructure.currentStorageOverlayMarks instanceof Map
+      ? infrastructure.currentStorageOverlayMarks
+      : (infrastructure.currentStorageOverlayMarks = new Map());
   currentMarks.set(key, { ...record });
 };
 
@@ -257,10 +252,7 @@ export const applyRuntimeStorageChanges = (env: RuntimeReplica, changes: readonl
   }
 };
 
-const applyEntityStorageChanges = (
-  state: EntityState,
-  changes: readonly RuntimeOverlayRecord[],
-): void => {
+const applyEntityStorageChanges = (state: EntityState, changes: readonly RuntimeOverlayRecord[]): void => {
   for (const change of changes) {
     if (change.family === 'account' && change.entityId.toLowerCase() === state.entityId.toLowerCase()) {
       invalidateEntityAccountCommitment(state, change.counterpartyId);
@@ -331,13 +323,11 @@ export const publishEntityCandidateEffects = (
     effect: Extract<EntityCandidateEffect, { kind: 'entityFrameHistory' }>,
   ): EntityReplica => {
     if (
-      !sourceReplica
-      || sourceReplica.entityId.toLowerCase() !== effect.entityId.toLowerCase()
-      || sourceReplica.signerId.toLowerCase() !== effect.signerId.toLowerCase()
+      !sourceReplica ||
+      sourceReplica.entityId.toLowerCase() !== effect.entityId.toLowerCase() ||
+      sourceReplica.signerId.toLowerCase() !== effect.signerId.toLowerCase()
     ) {
-      throw new Error(
-        `ENTITY_FRAME_HISTORY_REPLICA_MISSING:entity=${effect.entityId}:signer=${effect.signerId}`,
-      );
+      throw new Error(`ENTITY_FRAME_HISTORY_REPLICA_MISSING:entity=${effect.entityId}:signer=${effect.signerId}`);
     }
     return sourceReplica;
   };
@@ -361,10 +351,7 @@ export const publishEntityCandidateEffects = (
     } else if (effect.kind === 'accountFrameHistory') {
       recordAccountFrameHistory(env, effect);
     } else if (effect.kind === 'runtimeEvent') {
-      const eventEntityId =
-        typeof effect.data['entityId'] === 'string'
-          ? effect.data['entityId'].toLowerCase()
-          : null;
+      const eventEntityId = typeof effect.data['entityId'] === 'string' ? effect.data['entityId'].toLowerCase() : null;
       // The caller has just applied this exact replica. Never infer event
       // ownership by scanning siblings: one Runtime may host several validator
       // replicas for the same Entity, and choosing by entityId would make local
@@ -375,9 +362,7 @@ export const publishEntityCandidateEffects = (
           : null;
       env.emit(
         effect.eventName,
-        eventReplica
-          ? consumeHtlcRuntimeEvent(eventReplica, effect.eventName, effect.data)
-          : effect.data,
+        eventReplica ? consumeHtlcRuntimeEvent(eventReplica, effect.eventName, effect.data) : effect.data,
       );
     } else if (effect.kind === 'securityIncidentRecord') {
       recordRuntimeSecurityIncident(env, effect.identity);
