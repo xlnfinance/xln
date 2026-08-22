@@ -6,15 +6,14 @@
 import { countOp } from '../support/performance/op-counters';
 import type { ConsensusConfig, EntityState } from '../entity/types';
 import type { EntityRuntimeContext } from '../entity/runtime-context';
-import type { HankoBoardDelays, HankoString } from '../types/hanko';
+import type { HankoBoardDelays, HankoEnvelope, HankoString } from '../types/hanko';
 import { ethers } from 'ethers';
 import { cachedChecksumAddress, toLowerAddressOrNull } from '../protocol/crypto/address-cache';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import {
   getSignerAddress,
-  getSignerPrivateKey,
   recoverAddressFromDigestSignature,
-  signDigestBytesWithPrivateKey,
+  signAccountFrame,
 } from '../account/crypto';
 import { compareStableText } from '../protocol/serialization';
 import { haltRuntimeFailure } from '../protocol/errors/failure-taxonomy';
@@ -166,23 +165,15 @@ export async function inspectHankoForHash(
  *
  * For multi-signer quorum, call buildQuorumHanko with the committed votes.
  */
-export async function signEntityHashes(
+const resolveSingleSignerHankoClaim = (
   env: EntityRuntimeContext,
   entityId: string,
   signerId: string,
-  hashes: string[],
   authorityState?: EntityState,
-): Promise<HankoString[]> {
+): HankoEnvelope['claims'][number] => {
   if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signEntityHashes called without env.runtimeSeed for entity ${entityId.slice(-4)}`);
   }
-
-  const hankos: HankoString[] = [];
-
-  // Key ownership is scoped by this Runtime's seed. The signer module already
-  // imports the same browser-safe crypto boundary, so a per-seal dynamic import
-  // only adds a Promise/module lookup on the Account consensus hot path.
-  const privateKey = getSignerPrivateKey(env, signerId);
   const signerAddress = getSignerAddress(env, signerId);
   if (!signerAddress) {
     throw new Error(`HANKO_SIGNER_ADDRESS_MISSING: entityId=${entityId} signerId=${signerId}`);
@@ -214,34 +205,66 @@ export async function signEntityHashes(
       );
     }
   }
+  return {
+    entityId: normalizedEntityId as `0x${string}`,
+    entityIndexes: [0n],
+    weights: [1n],
+    threshold: 1n,
+    ...resolveHankoBoardDelays(),
+  };
+};
 
-  const delays = resolveHankoBoardDelays();
-  for (const hash of hashes) {
-    const hashBuffer = requireLocalSigningDigest(hash);
-    const signed = signDigestBytesWithPrivateKey(privateKey, hashBuffer);
-    if (signed.signature.length !== 64) {
-      throw new Error(`LOCAL_SIGNING_SIGNATURE_LENGTH_INVALID:${signed.signature.length}`);
-    }
-    if (signed.recovery !== 0 && signed.recovery !== 1) {
-      throw new Error(`LOCAL_SIGNING_RECOVERY_INVALID:${signed.recovery}`);
-    }
-    const signature = new Uint8Array(65);
-    signature.set(signed.signature);
-    signature[64] = 27 + signed.recovery;
-    hankos.push(encodeHankoEnvelope({
-      placeholders: [],
-      packedSignatures: packHankoSignatures([signature]),
-      claims: [{
-        entityId: normalizedEntityId as `0x${string}`,
-        entityIndexes: [0n],
-        weights: [1n],
-        threshold: 1n,
-        ...delays,
-      }],
-    }));
+const toHankoSignature = (signatureHex: string): Uint8Array => {
+  if (!/^0x[0-9a-fA-F]{130}$/.test(signatureHex)) {
+    throw new Error('LOCAL_HANKO_SIGNATURE_INVALID');
   }
+  const signature = ethers.getBytes(signatureHex);
+  const recovery = signature[64];
+  if (recovery !== 0 && recovery !== 1) {
+    throw new Error(`LOCAL_HANKO_RECOVERY_INVALID:${String(recovery)}`);
+  }
+  signature[64] = 27 + recovery;
+  return signature;
+};
 
-  return hankos;
+/**
+ * Encode single-signer Hankos from the exact raw manifest signatures already
+ * produced for `collectedSigs`. Signing the same digest again created no new
+ * authority: both witnesses use the same key and deterministic ECDSA bytes.
+ */
+export function encodeSingleSignerEntityHankos(
+  env: EntityRuntimeContext,
+  entityId: string,
+  signerId: string,
+  signatures: readonly string[],
+  authorityState?: EntityState,
+): HankoString[] {
+  const claim = resolveSingleSignerHankoClaim(env, entityId, signerId, authorityState);
+  return signatures.map(signature => encodeHankoEnvelope({
+    placeholders: [],
+    packedSignatures: packHankoSignatures([toHankoSignature(signature)]),
+    claims: [claim],
+  }));
+}
+
+export async function signEntityHashes(
+  env: EntityRuntimeContext,
+  entityId: string,
+  signerId: string,
+  hashes: string[],
+  authorityState?: EntityState,
+): Promise<HankoString[]> {
+  const signatures = hashes.map(hash => {
+    requireLocalSigningDigest(hash);
+    return signAccountFrame(env, signerId, hash);
+  });
+  return encodeSingleSignerEntityHankos(
+    env,
+    entityId,
+    signerId,
+    signatures,
+    authorityState,
+  );
 }
 
 type QuorumConfig = {

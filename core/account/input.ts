@@ -1,4 +1,4 @@
-import type { AccountExternalFinalityInput, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountExternalFinalityInput, AccountPeerInput, AccountState } from '../types/account';
 import type { AccountPeerRejectionCode } from './input/peer-rejection';
 import { isAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 import { canonicalAccountDisputeConfig } from './config/dispute-config';
@@ -7,31 +7,6 @@ export type AccountInputEnvelopeError = Readonly<{
   code: AccountPeerRejectionCode;
   reason: string;
 }>;
-
-/**
- * Build the local-only Account input committed by the owning Entity frame.
- * The direction is derived from the canonical Account pair, never supplied by
- * a transaction handler that could accidentally route to a third entity.
- */
-export const createLocalAccountInput = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed' | 'disputeConfig'>,
-  fromEntityId: string,
-  txs: AccountTx[],
-): AccountInput => {
-  if (fromEntityId !== account.leftEntity && fromEntityId !== account.rightEntity) {
-    throw new Error(`ACCOUNT_LOCAL_INPUT_OWNER_MISMATCH:${fromEntityId}`);
-  }
-  return {
-    kind: 'txs',
-    fromEntityId,
-    toEntityId:
-      fromEntityId === account.leftEntity ? account.rightEntity : account.leftEntity,
-    domain: { ...account.domain },
-    disputeConfig: canonicalAccountDisputeConfig(account.disputeConfig),
-    watchSeed: account.watchSeed,
-    txs,
-  };
-};
 
 export const createAccountDisputeFinalityInput = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'disputeConfig'>,
@@ -92,7 +67,7 @@ export const createAccountDisputeStartedInput = (
 /** Validate the common envelope before any Account variant can mutate state. */
 export const getAccountInputEnvelopeError = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed' | 'disputeConfig'>,
-  input: AccountInput,
+  input: AccountExternalFinalityInput | AccountPeerInput,
 ): AccountInputEnvelopeError | undefined => {
   if (
     !input.domain ||
@@ -144,12 +119,6 @@ export const getAccountInputEnvelopeError = (
     return {
       code: 'ACCOUNT_PEER_DOMAIN_MISMATCH',
       reason: `ACCOUNT_INPUT_DOMAIN_MISMATCH:${input.fromEntityId}`,
-    };
-  }
-  if (input.kind === 'txs' && input.watchSeed === undefined) {
-    return {
-      code: 'ACCOUNT_PEER_WATCH_SEED_INVALID',
-      reason: `ACCOUNT_LOCAL_INPUT_WATCH_SEED_MISSING:${input.fromEntityId}`,
     };
   }
   if (input.watchSeed !== undefined && !isAccountWatchSeed(input.watchSeed)) {

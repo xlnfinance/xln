@@ -48,14 +48,27 @@ const buildCommitHankos = async (
   execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
   localProposal: boolean,
+  localCommitHankos?: readonly HankoString[],
 ): Promise<HankoBuildResult> => {
   const { env, workingReplica } = context;
   const hashes = execution.hashesToSign;
-  // A single-signer proposer sealed its own quorum hankos while building the
-  // frame; re-verifying its own fresh signatures would be one ECDSA recover
-  // per hash for nothing.
-  if (localProposal && frame.hankos && frame.hankos.length === hashes.length) {
-    return { accepted: true, hankos: frame.hankos };
+  // The single-signer proposer built every exact secondary Hanko once while
+  // sealing. Keep that full list on the local stack only: the certified frame
+  // persists just its own Hanko after Account/output witnesses are attached.
+  if (localProposal) {
+    if (
+      !localCommitHankos ||
+      localCommitHankos.length !== hashes.length ||
+      localCommitHankos.some(hanko => typeof hanko !== 'string' || hanko.length === 0) ||
+      frame.hankos?.length !== 1 ||
+      frame.hankos[0] !== localCommitHankos[0]
+    ) {
+      throw new Error(
+        `LOCAL_ENTITY_COMMIT_HANKO_MANIFEST_MISMATCH:${frame.height}:${frame.hash}:` +
+        `${localCommitHankos?.length ?? 0}:${hashes.length}`,
+      );
+    }
+    return { accepted: true, hankos: [...localCommitHankos] };
   }
   const manifestMismatch = getEntityHashManifestMismatch(
     hashes,
@@ -209,7 +222,14 @@ const installCommittedState = (
     { family: 'entity', entityId: committedState.entityId },
   );
   emitCommittedEntitySizeLog(entitySizeLog);
-  frame.hankos = hankos;
+  const entityFrameHanko = hankos[0];
+  if (!entityFrameHanko) {
+    throw new Error(`ENTITY_FRAME_COMMIT_HANKO_MISSING:${frame.height}:${frame.hash}`);
+  }
+  // Secondary Hankos are already sealed into their exact latest Account,
+  // dispute, Entity-output or J payload. Retaining them again in lineage made
+  // one 292 KB signature manifest occupy 8.84 MB without adding authority.
+  frame.hankos = [entityFrameHanko];
   requireCertifiedEntityFrameAfterQuorum(frame);
   appendCertifiedEntityFrameLink(
     workingReplica,
@@ -242,6 +262,8 @@ export const finalizeCommitNotification = async (
     broadcastValidators?: readonly string[];
     /** Frame built by this replica in this same input (single-signer board = own quorum). */
     localProposal?: boolean;
+    /** Full single-signer proof list owned only by the current call stack. */
+    localCommitHankos?: readonly HankoString[];
   } = {},
 ): Promise<ApplyEntityInputResult> => {
   const { env, entityOutbox, workingReplica } = context;
@@ -251,6 +273,7 @@ export const finalizeCommitNotification = async (
     execution,
     signaturesBySigner,
     options.localProposal === true,
+    options.localCommitHankos,
   );
   if (!proof.accepted) return proof.result;
   attachCommitProofsAndOutputs(context, frame, execution, proof.hankos);

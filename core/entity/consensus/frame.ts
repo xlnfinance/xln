@@ -141,23 +141,21 @@ const buildCanonicalArrayPayloadPrefixBytes = (canonicalTxs: unknown[]): number[
   const prefixBytes = [0];
   for (const [index, tx] of canonicalTxs.entries()) {
     const bytes = utf8ByteLength(encodeCanonicalConsensusValue(tx));
-    prefixBytes.push(prefixBytes[index]! + bytes + (index === 0 ? 0 : 1));
+    const previousBytes = prefixBytes[index];
+    if (previousBytes === undefined) throw new Error('ENTITY_FRAME_TX_PREFIX_GAP');
+    prefixBytes.push(previousBytes + bytes + (index === 0 ? 0 : 1));
   }
   return prefixBytes;
 };
 
-const buildEntityFrameTxPrefixBytes = (
-  canonicalTxs: unknown[],
-  fullBytes: number,
-): number[] => {
+const buildEntityFrameTxPrefixBytes = (canonicalTxs: unknown[]): number[] => {
   const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(canonicalTxs);
-  const framingBytes = fullBytes
-    - payloadPrefixBytes.at(-1)!;
-  if (framingBytes < 0) throw new Error('ENTITY_FRAME_TX_PREFIX_BYTE_ACCOUNTING_INVALID');
+  // Encode only the constant empty envelope. Canonical arrays are exactly
+  // '[' + child encodings separated by ',' + ']', so encoding the complete
+  // multi-megabyte tx array merely to rediscover this constant was duplicate
+  // O(frame bytes) work on every proposal.
+  const framingBytes = getEntityFrameTxByteLengthFromCanonical([]);
   const prefixBytes = payloadPrefixBytes.map(bytes => framingBytes + bytes);
-  if (prefixBytes.at(-1) !== fullBytes) {
-    throw new Error(`ENTITY_FRAME_TX_PREFIX_BYTE_ACCOUNTING_DIVERGED:${prefixBytes.at(-1)}:${fullBytes}`);
-  }
   return prefixBytes;
 };
 
@@ -173,12 +171,10 @@ export const assertEntityFrameTxByteBudget = (txs: EntityTx[]): void => {
 
 export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   const canonical = canonicalEntityTxsForFrameHash(txs);
-  const fullBytes = getEntityFrameTxByteLengthFromCanonical(canonical);
+  const prefixBytes = buildEntityFrameTxPrefixBytes(canonical);
+  const fullBytes = prefixBytes[prefixBytes.length - 1];
+  if (fullBytes === undefined) throw new Error('ENTITY_FRAME_TX_PREFIX_EMPTY');
   if (fullBytes <= MAX_ENTITY_FRAME_TX_BYTES) return txs;
-  // Canonical arrays have one comma between exact child encodings. Build the
-  // prefix byte table once: the old binary search re-encoded every large
-  // AccountInput body O(log n) times after already encoding the full frame.
-  const prefixBytes = buildEntityFrameTxPrefixBytes(canonical, fullBytes);
   let low = 0;
   let high = txs.length;
   while (low < high) {
@@ -240,6 +236,8 @@ export type EntityFrameWirePrefixMeter = ((
 ) => number) & {
   /** Bind one immutable proposal context and encode its fixed bytes once. */
   forRest: (rest: Omit<EntityFrameWireBudgetInput, 'txs'>) => (count: number) => number;
+  /** Exact standalone tx-envelope bytes for the same canonical prefix. */
+  txBytes: (count: number) => number;
 };
 
 export const createEntityFrameWirePrefixMeter = (txs: EntityTx[]): EntityFrameWirePrefixMeter => {
@@ -268,7 +266,32 @@ export const createEntityFrameWirePrefixMeter = (txs: EntityTx[]): EntityFrameWi
       return fixedBytes + payloadPrefixBytes[count]!;
     };
   };
+  const txFramingBytes = getEntityFrameTxByteLengthFromCanonical([]);
+  meter.txBytes = (count: number): number => {
+    assertCount(count);
+    return txFramingBytes + payloadPrefixBytes[count]!;
+  };
   return meter;
+};
+
+export const selectEntityFrameTxByteBudgetWithMeter = (
+  txs: EntityTx[],
+): Readonly<{ txs: EntityTx[]; meter: EntityFrameWirePrefixMeter }> => {
+  const meter = createEntityFrameWirePrefixMeter(txs);
+  if (meter.txBytes(txs.length) <= MAX_ENTITY_FRAME_TX_BYTES) return { txs, meter };
+  let low = 0;
+  let high = txs.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (meter.txBytes(mid) <= MAX_ENTITY_FRAME_TX_BYTES) low = mid;
+    else high = mid - 1;
+  }
+  if (low === 0 && txs.length > 0) {
+    throw new Error(
+      `ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${meter.txBytes(1)}:${MAX_ENTITY_FRAME_TX_BYTES}`,
+    );
+  }
+  return { txs: txs.slice(0, low), meter };
 };
 
 export const selectEntityFrameTxPrefixForWireBudget = (
@@ -278,9 +301,12 @@ export const selectEntityFrameTxPrefixForWireBudget = (
 ): EntityTx[] => {
   if (txs.length === 0) return txs;
   const canonical = canonicalEntityTxsForFrameHash(txs);
-  const fullBytes = measureEntityFrameWireBytesFromCanonical(canonical, rest);
+  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(canonical);
+  const framingBytes = measureEntityFrameWireBytesFromCanonical([], rest);
+  const prefixBytes = payloadPrefixBytes.map(bytes => framingBytes + bytes);
+  const fullBytes = prefixBytes.at(-1);
+  if (fullBytes === undefined) throw new Error('ENTITY_FRAME_WIRE_PREFIX_EMPTY');
   if (fullBytes <= maxBytes) return txs;
-  const prefixBytes = buildEntityFrameTxPrefixBytes(canonical, fullBytes);
   let low = 0;
   let high = txs.length;
   while (low < high) {

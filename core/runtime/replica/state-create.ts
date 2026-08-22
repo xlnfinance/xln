@@ -10,6 +10,7 @@ import type { Profile } from '../../entity/profile';
 import { buildLocalEntityProfile } from '../../network/p2p/gossip/helper';
 import { deriveRuntimeIdFromSeed, normalizeDbNamespace } from '../../storage/runtime-dbs';
 import type { RuntimeReplica } from '../types';
+import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop/loop-environment';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -46,7 +47,11 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     let env!: RuntimeReplica;
     const gossip = createGossipLayer({
       onAnnounce: profile => {
-        if (!env || env.infrastructure?.infraDbClosing) return;
+        if (
+          !env ||
+          env.infrastructure?.infraDbClosing ||
+          readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true
+        ) return;
         const write = persistGossipProfileToInfraDb(env, deps.infraGossipDbAccess, profile).catch(error => {
           runtimeLog.warn('infra_db.gossip_persist_failed', {
             entity: String(profile?.entityId || '').slice(-8),

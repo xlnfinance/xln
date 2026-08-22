@@ -48,8 +48,10 @@ const {
   createEmptyEnv,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
+  readPersistedEntityFrameHistory,
   validateRuntimeRecoveryBundle,
 } = runtime;
+const { hashEntityProposalTxPrefix } = await import('../../../../entity/consensus/proposal/replay-oracle');
 const {
   HLT_HUB_RECORDING_SCHEMA,
   summarizeHltHubFrames,
@@ -87,6 +89,10 @@ try {
     fromHeight: baseHeight + 1,
     toHeight: targetHeight,
     limit: expectedFrames,
+    // Replay proves these checkpoints from runtimeStateHash/postStateHash.
+    // Repeating the full 1000-user Runtime machine in every materialized
+    // journal frame makes a bounded 420 MB WAL expand to tens of GB in RAM.
+    includeRuntimeMachine: false,
   });
   if (
     frames.length !== expectedFrames ||
@@ -108,19 +114,49 @@ try {
     frames,
   });
   const recording = buildRuntimeRecording([snapshot, tail]);
+  const requestedFrames = new Map<string, { entityId: string; entityHeight: number }>();
+  for (const frame of frames) {
+    for (const context of frame.entityContexts.values()) {
+      const entityId = context.entityId.toLowerCase();
+      const key = `${entityId}:${context.height}`;
+      requestedFrames.set(key, { entityId, entityHeight: context.height });
+    }
+  }
+  const entityProposalOracle = await Promise.all(
+    Array.from(requestedFrames.values())
+      .sort((left, right) => left.entityId.localeCompare(right.entityId) || left.entityHeight - right.entityHeight)
+      .map(async ({ entityId, entityHeight }) => {
+        const links = await readPersistedEntityFrameHistory(env, entityId, 1, {
+          maxRuntimeHeight: targetHeight,
+          maxEntityHeight: entityHeight,
+        });
+        const frame = links[0]?.frame;
+        if (!frame || frame.height !== entityHeight || frame.entityContext.entityId.toLowerCase() !== entityId) {
+          throw new Error(`HLT_ENTITY_PROPOSAL_ORACLE_FRAME_MISSING:${entityId}:${entityHeight}`);
+        }
+        return {
+          entityId,
+          entityHeight,
+          txCount: frame.txs.length,
+          txPrefixHash: hashEntityProposalTxPrefix(entityId, entityHeight, frame.txs),
+          frameHash: frame.hash,
+        };
+      }),
+  );
   const artifact: HltHubRecording = {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: Date.now(),
     source: { workDir, users, workload },
     recording,
     totals: summarizeHltHubFrames(frames),
+    entityProposalOracle,
   };
   mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
   writeHltHubRecording(outputPath, artifact);
   console.log(
     `HLT_BUILD_RECORDING_OK path=${outputPath} runtime=${runtimeId} ` +
     `heights=${baseHeight}-${targetHeight} frames=${frames.length} ` +
-    `accountInputs=${artifact.totals.accountInputs} outbox=${artifact.totals.outboxEnvelopes}`,
+    `entityInputs=${artifact.totals.runtimeEntityInputs} outbox=${artifact.totals.outboxEnvelopes}`,
   );
 } finally {
   await closeRuntimeDb(env);

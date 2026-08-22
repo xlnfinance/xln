@@ -72,6 +72,19 @@ const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip']
     structuredClone(Array.from(liveEnv.gossip.profiles.entries())),
   );
   const getProfiles = (): Profile[] => Array.from(profiles.values());
+  const getProfile = (entityId: string): Profile | undefined =>
+    profiles.get(entityId.trim().toLowerCase());
+  const profileIdByRuntime = new Map<string, string>();
+  for (const profile of profiles.values()) {
+    const runtimeId = String(profile.runtimeId || '').trim().toLowerCase();
+    if (!runtimeId || profileIdByRuntime.has(runtimeId)) continue;
+    const selected = liveEnv.gossip.getProfileByRuntimeId(runtimeId);
+    if (selected) profileIdByRuntime.set(runtimeId, selected.entityId.trim().toLowerCase());
+  }
+  const getProfileByRuntimeId = (runtimeId: string): Profile | undefined => {
+    const entityId = profileIdByRuntime.get(runtimeId.trim().toLowerCase());
+    return entityId ? profiles.get(entityId) : undefined;
+  };
   const jurisdictions = new Map(structuredClone(Array.from(liveEnv.gossip.jurisdictions.entries())));
   const hubProfiles = structuredClone(liveEnv.gossip.getHubs());
   const encryptionKeyForRuntime = (runtimeId: string): string | null => {
@@ -91,6 +104,8 @@ const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip']
     announceJurisdiction: detachedMutation,
     setProfiles: detachedMutation,
     getProfiles,
+    getProfile,
+    getProfileByRuntimeId,
     getJurisdictions: () => Array.from(jurisdictions.values()),
     getHubs: () => [...hubProfiles],
     getProfileBundle: (entityId: string) => {

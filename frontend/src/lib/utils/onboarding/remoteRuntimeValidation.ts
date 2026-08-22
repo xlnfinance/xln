@@ -158,7 +158,6 @@ export const buildRuntimeWsRecoveryPeerSource = (options: {
     signerId: options.requesterSignerId || '1',
     seed: requesterSeed,
     encryptionKeyPair: deriveEncryptionKeyPair(requesterSeed),
-    maxReconnectAttempts: 1,
   });
 
   return {

@@ -148,20 +148,14 @@ describe('State and Replica boundary characterization', () => {
     const accountRoot = computeAccountStateRoot(account.state);
     expect(accountRoot).toBe(computeAccountStateRootCold(account.state));
 
-    const bilateralTransition = beginAccountTransition(
-      account,
-      ['boundary', 'bilateral'],
-    );
+    const bilateralTransition = beginAccountTransition(account);
     accountTransitionView(bilateralTransition).state.deltas.put(1, createDefaultDelta(1));
     const bilateralChange = commitAccountTransition(bilateralTransition).account;
     expect(computeAccountStateRoot(bilateralChange.state)).not.toBe(accountRoot);
     expect(computeAccountStateRoot(bilateralChange.state))
       .toBe(computeAccountStateRootCold(bilateralChange.state));
 
-    const envelopeTransition = beginAccountTransition(
-      account,
-      ['boundary', 'envelope'],
-    );
+    const envelopeTransition = beginAccountTransition(account);
     accountTransitionView(envelopeTransition).mempool.push({
       type: 'direct_payment',
       data: { tokenId: 1, amount: 5n },
@@ -169,10 +163,7 @@ describe('State and Replica boundary characterization', () => {
     const entityEnvelopeChange = commitAccountTransition(envelopeTransition).account;
     expect(computeAccountStateRoot(entityEnvelopeChange.state)).toBe(accountRoot);
 
-    const witnessTransition = beginAccountTransition(
-      account,
-      ['boundary', 'witness'],
-    );
+    const witnessTransition = beginAccountTransition(account);
     accountTransitionView(witnessTransition).currentFrameHanko = hex('91', 65);
     const localWitnessChange = commitAccountTransition(witnessTransition).account;
     expect(computeAccountStateRoot(localWitnessChange.state)).toBe(accountRoot);

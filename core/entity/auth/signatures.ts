@@ -31,4 +31,4 @@ export const signatureMapSize = (value: unknown): number =>
  * verifies the collected signatures and voting power before applying a frame.
  */
 export const hasEntityCommitCertificate = (frame: EntityFrame | undefined): boolean =>
-  Array.isArray(frame?.hankos) && frame.hankos.length > 0;
+  Array.isArray(frame?.hankos) && frame.hankos.length === 1;

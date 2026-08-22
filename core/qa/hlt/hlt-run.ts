@@ -338,7 +338,7 @@ export const startHltIsolatedRun = (options: {
   const recordingPath = phase === 'build'
     ? join(recordingDir, `${startedAt}-${options.config.mode}-${options.config.users}.json`)
     : latestRecordingPath(cwd);
-  if (!recordingPath) throw new Error('HLT_REPLAY_RECORDING_MISSING: run Build chains first');
+  if (!recordingPath) throw new Error('HLT_REPLAY_RECORDING_MISSING: run the live test first');
   const reportPath = phase === 'replay' ? join(replayDir, `${startedAt}.json`) : null;
   if (phase === 'build') env['XLN_HLT_RECORDING_OUTPUT'] = recordingPath;
   assertHltIsolatedEnv(env);

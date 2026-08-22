@@ -1,7 +1,7 @@
 import type { RuntimeEntityInputsEnvelope } from '../../runtime/types';
+import { accountInputProposal } from '../../account/consensus/flush';
 import {
   deliveryAccepted,
-  deliveryDeferred,
   deliveryFailure,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
@@ -30,6 +30,7 @@ import {
   serializeWsMessage,
   type RuntimeWsMessage,
 } from './ws-protocol';
+import { countOp, recordOpEvent } from '../../support/performance/op-counters';
 import { isRuntimeId, normalizeRuntimeId } from './auth/runtime-id';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from './auth/hello-auth';
 import { createHelloChallengeRegistry } from './auth/hello-challenge';
@@ -39,6 +40,7 @@ import {
   type WebSocketSendResult,
 } from '../websocket-send-result';
 import { createStructuredLogger } from '../../support/logger';
+import { traceAccountDeliveryHop } from '../../support/performance/account-delivery-trace';
 
 const directWsLog = createStructuredLogger('network.direct_ws');
 
@@ -47,9 +49,49 @@ type DirectRuntimeWsOptions = {
   runtimeSeed: Uint8Array | string;
   path?: string;
   helloSkewMs?: number;
-  onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => Promise<void> | void;
+  onEntityInputs: (
+    from: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    timestamp?: number,
+    sessionAuthenticated?: boolean,
+  ) => Promise<void> | void;
+  /** Signs an envelope for a session without keys; keyed sessions send unsigned. */
+  signEnvelope?: (to: string, envelope: RuntimeEntityInputsEnvelope) => RuntimeEntityInputsEnvelope;
+  /**
+   * Negative delivery signal only. There are deliberately no positive
+   * transport receipts and no retries: the owning Runtime must halt and dump
+   * the rejected committed Account envelope for operator investigation.
+   */
+  onDeliveryFailure?: (failure: Readonly<{
+    direction: 'inbound' | 'outbound';
+    peerRuntimeId: string;
+    messageId: string;
+    error: string;
+    envelope?: RuntimeEntityInputsEnvelope;
+  }>) => void;
+  onSessionClose?: (failure: Readonly<{
+    peerRuntimeId: string;
+    code: number;
+    reason: string;
+    bufferedAmount: number | null;
+  }>) => void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
 };
+
+export const isCleanDirectRuntimeSessionClose = (close: Readonly<{
+  code: number;
+  bufferedAmount: number | null;
+}>): boolean => close.code === 1000 && close.bufferedAmount === 0;
+
+/**
+ * A peer going offline is not a protocol contradiction. Account consensus
+ * detects missing ACKs and resends from committed state after reconnect. Only
+ * bytes still buffered in this process are concrete evidence that a committed
+ * envelope was accepted by the transport but did not leave the socket.
+ */
+export const hasUndeliveredDirectRuntimeSessionBytes = (close: Readonly<{
+  bufferedAmount: number | null;
+}>): boolean => close.bufferedAmount === null || close.bufferedAmount > 0;
 
 export type DirectWebSocket = {
   readyState?: number;
@@ -70,7 +112,6 @@ type DirectWsSession = {
   runtimeId: string | null;
   ws: DirectWebSocket;
   handshakeDone: boolean;
-  duplicateClosing: boolean;
   peerEncryptionPubKey: string | null;
   authAudience: string | null;
   authNonce: string | null;
@@ -81,11 +122,20 @@ type DirectWsSession = {
   outboundEncSeq: number;
   lastSeen: number;
   /** `send() === -1` means queued by Bun, not dropped. Retain the streak only
-   *  for observability and a time-bounded stuck-socket watchdog; never send the
-   *  same financial envelope through a second route after Bun accepted it. */
+   *  for observability; never close, retry, or send the same financial
+   *  envelope through a second route after Bun accepted it. */
   consecutiveBackpressuredSends: number;
   backpressureStartedAt: number;
 };
+
+export type DirectRuntimeSessionState = Readonly<{
+  runtimeId: string;
+  open: boolean;
+  lastSeen: number;
+  consecutiveBackpressuredSends: number;
+  backpressureAgeMs: number;
+  bufferedAmount: number | null;
+}>;
 
 type DirectRuntimeWsContext = {
   options: DirectRuntimeWsOptions;
@@ -98,6 +148,51 @@ type DirectRuntimeWsContext = {
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
+
+const countEntityInputEnvelopeKinds = (
+  prefix: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  route: Readonly<{ fromRuntimeId: string; toRuntimeId: string }>,
+): void => {
+  let entityTxs = 0;
+  let accountInputs = 0;
+  let accountFrames = 0;
+  let frameAcks = 0;
+  let acks = 0;
+  let htlcLocks = 0;
+  let htlcResolves = 0;
+  countOp(`${prefix}.envelopes`);
+  for (const input of envelope.entityInputs) {
+    countOp(`${prefix}.entityInputs`);
+    for (const tx of input.entityTxs ?? []) {
+      entityTxs += 1;
+      countOp(`${prefix}.entityTx.${tx.type}`);
+      if (tx.type !== 'accountInput') continue;
+      accountInputs += 1;
+      countOp(`${prefix}.accountInput.${tx.data.kind}`);
+      if (tx.data.kind === 'frame') accountFrames += 1;
+      else if (tx.data.kind === 'frame_ack') frameAcks += 1;
+      else if (tx.data.kind === 'ack') acks += 1;
+      for (const accountTx of accountInputProposal(tx.data)?.frame.accountTxs ?? []) {
+        countOp(`${prefix}.accountTx.${accountTx.type}`);
+        if (accountTx.type === 'htlc_lock') htlcLocks += 1;
+        else if (accountTx.type === 'htlc_resolve') htlcResolves += 1;
+      }
+    }
+  }
+  recordOpEvent(`${prefix}.envelope`, {
+    fromRuntimeId: route.fromRuntimeId,
+    toRuntimeId: route.toRuntimeId,
+    entityInputs: envelope.entityInputs.length,
+    entityTxs,
+    accountInputs,
+    accountFrames,
+    frameAcks,
+    acks,
+    htlcLocks,
+    htlcResolves,
+  });
+};
 
 const isSocketOpen = (ws: DirectWebSocket | null | undefined): boolean => {
   if (!ws) return false;
@@ -112,7 +207,15 @@ const normalizeEncryptionPubKey = (pubKey: unknown): string | null => {
 };
 
 const send = (ws: DirectWebSocket, msg: RuntimeWsMessage): void => {
-  ws.send(serializeWsMessage(msg));
+  const payload = serializeWsMessage(msg);
+  countOp(`socket.directServer.out.${msg.type}`, payload.length);
+  recordOpEvent('socket.directServer.out.wire', {
+    type: msg.type,
+    fromRuntimeId: String(msg.from ?? ''),
+    toRuntimeId: String(msg.to ?? ''),
+    bytes: payload.length,
+  });
+  ws.send(payload);
 };
 
 const signSessionFrame = (
@@ -167,7 +270,15 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
   if (!isSocketOpen(ws)) return { sent: false };
   let result: WebSocketSendResult;
   try {
-    result = ws.send(serializeWsMessage(msg));
+    const payload = serializeWsMessage(msg);
+    countOp(`socket.directServer.out.${msg.type}`, payload.length);
+    recordOpEvent('socket.directServer.out.wire', {
+      type: msg.type,
+      fromRuntimeId: String(msg.from ?? ''),
+      toRuntimeId: String(msg.to ?? ''),
+      bytes: payload.length,
+    });
+    result = ws.send(payload);
   } catch (error) {
     return { sent: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -188,7 +299,6 @@ const ensureSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): Di
     runtimeId: null,
     ws,
     handshakeDone: false,
-    duplicateClosing: false,
     peerEncryptionPubKey: null,
     authAudience: null,
     authNonce: null,
@@ -221,15 +331,19 @@ const rememberRuntimeSession = (
 ): boolean => {
   const existing = context.sessionsByRuntime.get(runtimeId);
   if (existing && existing.ws !== session.ws) {
-    existing.duplicateClosing = true;
+    if (isSocketOpen(existing.ws)) {
+      directWsLog.error('session.duplicate_rejected', {
+        runtimeId,
+        existingBufferedAmount: existing.ws.getBufferedAmount?.() ?? null,
+      });
+      return false;
+    }
+    forgetSession(context, existing.ws);
   }
   session.runtimeId = runtimeId;
   session.handshakeDone = true;
   session.lastSeen = Date.now();
   context.sessionsByRuntime.set(runtimeId, session);
-  if (existing && existing.ws !== session.ws) {
-    existing.ws.close(4009, 'session-replaced');
-  }
   return true;
 };
 
@@ -256,48 +370,48 @@ const resultFromSendAttempt = (
   failureCode: string,
 ): DeliveryResult => {
   if (attempt.sent) return deliveryAccepted(acceptedCode);
-  if (attempt.error !== undefined) {
-    return deliveryFailure({
-      category: 'TransientRace',
-      code: failureCode,
-      message: attempt.error,
-      terminal: false,
-    });
-  }
-  return deliveryDeferred({ outcome: 'deferred', code: failureCode });
+  return deliveryFailure({
+    category: 'Contradiction',
+    code: failureCode,
+    message: attempt.error ?? 'WebSocket send returned dropped',
+    terminal: true,
+  });
 };
 
 const getDeliverableSession = (
   context: DirectRuntimeWsContext,
   targetRuntimeId: string,
-  invalidCode: string,
-  missingCode: string,
 ): { targetKey: string; session: DirectWsSession } | DeliveryResult => {
   const targetKey = normalizeRuntimeId(targetRuntimeId);
-  if (!targetKey) return deliveryDeferred({ outcome: 'deferred', code: invalidCode });
+  if (!targetKey) {
+    return deliveryFailure({
+      category: 'Contradiction',
+      code: 'ROUTE_DIRECT_TARGET_RUNTIME_INVALID',
+      message: `Invalid target Runtime id: ${targetRuntimeId}`,
+      terminal: true,
+    });
+  }
   const session = context.sessionsByRuntime.get(targetKey);
   if (!session || !session.handshakeDone || !isSocketOpen(session.ws)) {
     if (session && !isSocketOpen(session.ws)) forgetSession(context, session.ws);
-    return deliveryDeferred({ outcome: 'deferred', code: missingCode });
+    return deliveryFailure({
+      category: 'Contradiction',
+      code: 'ROUTE_DIRECT_SESSION_MISSING',
+      message: `No open authenticated direct session for Runtime ${targetKey}`,
+      terminal: true,
+    });
   }
   return { targetKey, session };
 };
 
 // Bun's ServerWebSocket.send() reports 0 ("dropped") both when the peer is
-// truly gone and when an otherwise-healthy socket hits a transient
-// backpressure/queue-full condition while readyState still reads OPEN
-// (github.com/oven-sh/bun#9368). Forgetting the session on every dropped
-// send orphans a live client: its next authenticated frame lands on the
-// same still-open socket, finds no session, and gets bounced as
-// "Handshake required" even though it never saw a close/error and has no
-// reason to re-send hello. Only forget once the transport itself confirms
-// the socket is no longer open; a live socket's failed send is retryable.
+// truly gone and when an otherwise-healthy socket hits queue pressure. Keep
+// the authenticated session while the socket is open so the failure remains
+// explicit; the caller halts with its durable outbox intact. Never retry or
+// substitute a second route here.
 const forgetIfDisconnected = (context: DirectRuntimeWsContext, ws: DirectWebSocket): void => {
   if (!isSocketOpen(ws)) forgetSession(context, ws);
 };
-
-const STUCK_BACKPRESSURE_THRESHOLD = 4;
-export const DIRECT_STUCK_BACKPRESSURE_MS = 10_000;
 
 const resetBackpressure = (session: DirectWsSession): void => {
   session.consecutiveBackpressuredSends = 0;
@@ -305,7 +419,6 @@ const resetBackpressure = (session: DirectWsSession): void => {
 };
 
 const noteSendOutcome = (
-  context: DirectRuntimeWsContext,
   session: DirectWsSession,
   attempt: DirectSendAttempt,
 ): void => {
@@ -322,17 +435,9 @@ const noteSendOutcome = (
     ageMs: now - session.backpressureStartedAt,
     bufferedAmount: session.ws.getBufferedAmount?.() ?? null,
   });
-  if (
-    session.consecutiveBackpressuredSends < STUCK_BACKPRESSURE_THRESHOLD ||
-    now - session.backpressureStartedAt < DIRECT_STUCK_BACKPRESSURE_MS
-  ) return;
-  resetBackpressure(session);
-  directWsLog.warn('entity_inputs.stuck_backpressure_closed', {
-    runtimeId: session.runtimeId,
-    bufferedAmount: session.ws.getBufferedAmount?.() ?? null,
-  });
-  session.ws.close(4010, 'stuck-backpressure');
-  forgetSession(context, session.ws);
+  // Bun -1 means the bytes were queued. Closing this authenticated socket on
+  // queue age destroys its accepted FIFO and can strand bilateral ACKs. The
+  // drain callback resets telemetry; only an actual send failure is fatal.
 };
 
 const sendEntityInputsDelivery = (
@@ -341,17 +446,23 @@ const sendEntityInputsDelivery = (
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
 ): DeliveryResult => {
-  const target = getDeliverableSession(
-    context,
-    targetRuntimeId,
-    'ROUTE_DIRECT_TARGET_RUNTIME_INVALID',
-    'ROUTE_DIRECT_MISS_FAILOVER',
-  );
+  const target = getDeliverableSession(context, targetRuntimeId);
   if (!('session' in target)) return target;
   const peerKey = normalizeEncryptionPubKey(target.session.peerEncryptionPubKey);
-  if (!peerKey) return deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_TARGET_KEY_MISSING' });
+  if (!peerKey) {
+    return deliveryFailure({
+      category: 'Contradiction',
+      code: 'ROUTE_DIRECT_SESSION_KEY_MISSING',
+      message: `Authenticated direct session has no peer encryption key: ${target.targetKey}`,
+      terminal: true,
+    });
+  }
   let msg: RuntimeWsMessage;
   try {
+    countEntityInputEnvelopeKinds('socket.directServer.out', envelope, {
+      fromRuntimeId: context.serverRuntimeId,
+      toRuntimeId: target.targetKey,
+    });
     const sessionKeys = target.session.sessionKeys;
     const encSeq = sessionKeys ? ++target.session.outboundEncSeq : undefined;
     msg = {
@@ -365,7 +476,16 @@ const sendEntityInputsDelivery = (
         : Date.now(),
       payload: sessionKeys && encSeq !== undefined
         ? encryptSessionJSON(envelope, sessionKeys.s2c, encSeq)
-        : encryptJSON(envelope, hexToPubKey(peerKey)),
+        : encryptJSON(
+            envelope.sourceSignature
+              ? envelope
+              : (() => {
+                  const signed = context.options.signEnvelope?.(target.targetKey, envelope);
+                  if (!signed?.sourceSignature) throw new Error('DIRECT_UNKEYED_ENVELOPE_UNSIGNED');
+                  return signed;
+                })(),
+            hexToPubKey(peerKey),
+          ),
       ...(encSeq !== undefined ? { encSeq } : {}),
       encrypted: true,
       ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
@@ -375,15 +495,15 @@ const sendEntityInputsDelivery = (
     };
   } catch (error) {
     return deliveryFailure({
-      category: 'TransientRace',
+      category: 'Contradiction',
       code: 'ROUTE_DIRECT_SEND_FAILED',
       message: error instanceof Error ? error.message : String(error),
-      terminal: false,
+      terminal: true,
     });
   }
   const attempt = trySend(target.session.ws, signSessionFrame(context, target.session, msg));
   if (!attempt.sent) forgetIfDisconnected(context, target.session.ws);
-  noteSendOutcome(context, target.session, attempt);
+  noteSendOutcome(target.session, attempt);
   directWsLog.debug('entity_inputs.send_attempt', {
     id: msg.id,
     to: targetRuntimeId,
@@ -472,7 +592,10 @@ const handleHandshake = (
     ackSessionPubKey = pubKeyToHex(ephemeral.publicKey);
   }
   if (!rememberRuntimeSession(context, session, normalizedFrom)) {
-    session.duplicateClosing = true;
+    sendSession(context, session, {
+      type: 'error',
+      error: `DIRECT_DUPLICATE_RUNTIME_SESSION:${normalizedFrom}`,
+    });
     ws.close(4009, 'duplicate-runtime');
     return true;
   }
@@ -585,39 +708,81 @@ const handleEntityInputs = async (
   }
   const fromRuntimeId = validateMessageRoute(context, session, msg, 'Direct');
   if (!fromRuntimeId) return;
+  let envelope: RuntimeEntityInputsEnvelope | undefined;
+  const sessionKeys = session.sessionKeys;
   try {
-    const sessionKeys = session.sessionKeys;
     if (sessionKeys && msg.encSeq === undefined) throw new Error('Direct session entity_inputs must carry encSeq');
-    const envelope = decodeRuntimeEntityInputsEnvelope(
+    envelope = decodeRuntimeEntityInputsEnvelope(
       sessionKeys && msg.encSeq !== undefined
         ? decryptSessionJSON(msg.payload, sessionKeys.c2s, msg.encSeq)
         : decryptJSON(msg.payload, context.keyPair.privateKey),
     );
+    countEntityInputEnvelopeKinds('socket.directServer.in', envelope, {
+      fromRuntimeId,
+      toRuntimeId: context.serverRuntimeId,
+    });
     directWsLog.debug('entity_inputs.received', {
       id: msg.id,
       from: fromRuntimeId,
       encSeq: msg.encSeq ?? null,
       entities: envelope.entityInputs.length,
     });
+    traceAccountDeliveryHop('direct-decoded', envelope, {
+      runtimeId: context.serverRuntimeId,
+      peerRuntimeId: fromRuntimeId,
+      messageId: msg.id,
+      encSeq: msg.encSeq ?? null,
+    });
     await context.options.onEntityInputs(
       fromRuntimeId,
       envelope,
       typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+      Boolean(sessionKeys && msg.encSeq !== undefined),
     );
+    traceAccountDeliveryHop('direct-admitted', envelope, {
+      runtimeId: context.serverRuntimeId,
+      peerRuntimeId: fromRuntimeId,
+      messageId: msg.id,
+    });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     directWsLog.warn('entity_inputs.receive_failed', {
       id: msg.id,
       from: fromRuntimeId,
       encSeq: msg.encSeq ?? null,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
+    });
+    context.options.onDeliveryFailure?.({
+      direction: 'inbound',
+      peerRuntimeId: fromRuntimeId,
+      messageId: String(msg.id || ''),
+      error: message,
+      ...(envelope ? { envelope } : {}),
     });
     rejectDirectMessage(
       context,
       session,
       msg,
-      `Direct delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      `Direct delivery failed: ${message}`.slice(0, 3_500),
     );
   }
+};
+
+const handlePeerDeliveryFailure = (
+  context: DirectRuntimeWsContext,
+  session: DirectWsSession,
+  msg: RuntimeWsMessage,
+): boolean => {
+  if (msg.type !== 'error' || typeof msg.inReplyTo !== 'string') return false;
+  const fromRuntimeId = validateMessageRoute(context, session, msg, 'Direct error');
+  if (!fromRuntimeId) return true;
+  context.options.onDeliveryFailure?.({
+    direction: 'outbound',
+    peerRuntimeId: fromRuntimeId,
+    messageId: msg.inReplyTo,
+    error: String(msg.error || 'Unknown peer delivery failure'),
+  });
+  return true;
 };
 
 const handleDirectMessage = async (
@@ -626,16 +791,21 @@ const handleDirectMessage = async (
   raw: string | Buffer | ArrayBuffer,
 ): Promise<void> => {
   const session = ensureSession(context, ws);
-  if (session.duplicateClosing) {
-    directWsLog.warn('wire_message.rejected_replaced_session', {
-      runtimeId: session.runtimeId,
-      bytes: typeof raw === 'string' ? raw.length : raw.byteLength,
-    });
-    return;
-  }
+  // A replacement hello may close the old socket while already-authenticated
+  // frames are queued in Bun. They remain valid Runtime-authorized input and
+  // must be drained through normal replay fences. Returning here used to erase
+  // committed Account ACKs without either admission or a negative signal.
   let msg: RuntimeWsMessage;
   try {
     msg = deserializeWsMessage(raw);
+    const wireBytes = typeof raw === 'string' ? raw.length : raw.byteLength;
+    countOp(`socket.directServer.in.${msg.type}`, wireBytes);
+    recordOpEvent('socket.directServer.in.wire', {
+      type: msg.type,
+      fromRuntimeId: String(msg.from ?? ''),
+      toRuntimeId: String(msg.to ?? ''),
+      bytes: wireBytes,
+    });
   } catch (error) {
     directWsLog.warn('wire_message.deserialize_failed', {
       bytes: typeof raw === 'string' ? raw.length : raw.byteLength,
@@ -670,6 +840,7 @@ const handleDirectMessage = async (
   }
   if (msg.type === 'hello' || msg.type === 'debug_event') return;
   session.lastSeen = Date.now();
+  if (handlePeerDeliveryFailure(context, session, msg)) return;
   if (await handleRecoveryRequest(context, session, msg)) return;
   await handleEntityInputs(context, session, msg);
 };
@@ -693,14 +864,13 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   };
   return {
     path: context.routePath,
-    getSessionState: (): Array<{
-      runtimeId: string;
-      open: boolean;
-      lastSeen: number;
-      consecutiveBackpressuredSends: number;
-      backpressureAgeMs: number;
-      bufferedAmount: number | null;
-    }> =>
+    hasOpenSession: (runtimeId: string): boolean => {
+      const targetRuntimeId = normalizeRuntimeId(runtimeId);
+      if (!targetRuntimeId) return false;
+      const session = context.sessionsByRuntime.get(targetRuntimeId);
+      return Boolean(session?.handshakeDone && isSocketOpen(session.ws));
+    },
+    getSessionState: (): DirectRuntimeSessionState[] =>
       Array.from(context.sessionsByRuntime.values())
         .map(session => ({
           runtimeId: session.runtimeId || '',
@@ -735,13 +905,50 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         ensureSession(context, ws);
         context.helloChallenges.issue(ws, directRuntimeWsAudience(context.serverRuntimeId));
       },
-      message: (ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer): Promise<void> =>
-        handleDirectMessage(context, ws, raw),
+      message(ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer): void {
+        void handleDirectMessage(context, ws, raw).catch(error => {
+          const session = context.sessions.get(ws);
+          const message = error instanceof Error ? error.message : String(error);
+          directWsLog.error('wire_message.unhandled_failure', {
+            runtimeId: session?.runtimeId ?? null,
+            bytes: typeof raw === 'string' ? raw.length : raw.byteLength,
+            error: message,
+          });
+          context.options.onDeliveryFailure?.({
+            direction: 'inbound',
+            peerRuntimeId: sessionRuntimeId(session ?? ensureSession(context, ws)),
+            messageId: '',
+            error: `DIRECT_UNHANDLED_MESSAGE_FAILURE:${message}`,
+          });
+          ws.close(1011, 'direct-message-failure');
+        });
+      },
       drain(ws: DirectWebSocket): void {
         const session = context.sessions.get(ws);
         if (session) resetBackpressure(session);
       },
-      close(ws: DirectWebSocket): void {
+      close(ws: DirectWebSocket, code = 0, reasonRaw: string | Buffer = ''): void {
+        const session = context.sessions.get(ws);
+        const runtimeId = session ? sessionRuntimeId(session) : '';
+        if (runtimeId) {
+          const reason = Buffer.isBuffer(reasonRaw) ? reasonRaw.toString('utf8') : String(reasonRaw || '');
+          const close = {
+            runtimeId,
+            code,
+            reason,
+            bufferedAmount: ws.getBufferedAmount?.() ?? null,
+          };
+          const clean = isCleanDirectRuntimeSessionClose(close);
+          const undelivered = hasUndeliveredDirectRuntimeSessionBytes(close);
+          countOp(`socket.directServer.close.${clean ? 'clean' : 'abnormal'}`);
+          directWsLog[clean ? 'info' : undelivered ? 'error' : 'warn']('session.closed', close);
+          context.options.onSessionClose?.({
+            peerRuntimeId: runtimeId,
+            code,
+            reason,
+            bufferedAmount: close.bufferedAmount,
+          });
+        }
         forgetSession(context, ws);
       },
     },

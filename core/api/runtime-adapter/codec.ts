@@ -1,4 +1,5 @@
 import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
+import { LIMITS } from '../../config/constants';
 import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/codec/binary-codec';
 import type { Codec } from '../../protocol/serialization/codec';
 import {
@@ -7,8 +8,9 @@ import {
 } from './wire-schema';
 import type { RuntimeAdapterRequest } from './types';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
+import { countOp } from '../../support/performance/op-counters';
 
-const DEFAULT_MAX_MESSAGE_BYTES = 1_048_576;
+const DEFAULT_MAX_MESSAGE_BYTES = LIMITS.MAX_RUNTIME_ADAPTER_MESSAGE_BYTES;
 
 const asBytes = (raw: ArrayBuffer | ArrayBufferView): Uint8Array => {
   if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
@@ -73,6 +75,7 @@ export const decodeRuntimeAdapterMessage = (raw: unknown): RuntimeAdapterWireMes
 export const decodeRuntimeAdapterRequest = (raw: unknown): RuntimeAdapterRequest => {
   const message = decodeRuntimeAdapterMessage(raw);
   if (!('id' in message)) throw new Error('RADAPTER_CLIENT_REQUEST_REQUIRED');
+  countOp(`socket.radapter.in.${message.op}`, runtimeAdapterMessageByteLength(raw));
   return message;
 };
 

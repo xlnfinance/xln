@@ -2,6 +2,11 @@ import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../support/logger';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/gossip/local-profile-lifecycle';
+import {
+  buildEntityProfileDescriptor,
+  computeEntityProfileDescriptorHash,
+} from '../../entity/profile/profile-descriptor';
+import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import {
   dispatchEntityOutputs,
@@ -23,12 +28,15 @@ const collectLocallySignableEntityIds = (env: RuntimeReplica): Set<string> => {
   return entityIds;
 };
 
-const hasFreshProfileWitness = (env: RuntimeReplica, entityId: string): boolean => {
+export const hasCertifiedCurrentProfileWitness = (replica: EntityReplica): boolean => {
+  const currentHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(replica.state));
+  return replica.hankoWitness?.get(currentHash)?.type === 'profile';
+};
+
+const hasCurrentProfileWitness = (env: RuntimeReplica, entityId: string): boolean => {
   for (const replica of env.state.eReplicas.values()) {
     if (replica.entityId.toLowerCase() !== entityId) continue;
-    for (const entry of replica.hankoWitness?.values() ?? []) {
-      if (entry.type === 'profile' && entry.entityHeight === replica.state.height) return true;
-    }
+    if (hasCertifiedCurrentProfileWitness(replica)) return true;
   }
   return false;
 };
@@ -39,6 +47,8 @@ export type CommittedEntityOutputPlan = {
   preparedOutputGraph: PreparedOutputGraph;
 };
 
+const DIRECT_OUTPUT_CONNECT_TIMEOUT_MS = 10_000;
+
 export const dispatchCommittedEntityOutputs = async (
   env: RuntimeReplica,
   changedEntityIds: ReadonlySet<string>,
@@ -48,13 +58,11 @@ export const dispatchCommittedEntityOutputs = async (
   const p2p = ensureRuntimeInfrastructure(env).p2p ?? null;
   const localIds = collectLocallySignableEntityIds(env);
   const changedLocalIds = [...changedEntityIds].filter(
-    entityId => localIds.has(entityId) && hasFreshProfileWitness(env, entityId),
+    entityId => localIds.has(entityId) && hasCurrentProfileWitness(env, entityId),
   );
-  const knownIds = new Set(
-    (env.gossip?.getProfiles?.() ?? []).map(profile => profile.entityId.toLowerCase()),
-  );
-  const newIds = changedLocalIds.filter(entityId => !knownIds.has(entityId));
-  const refreshIds = changedLocalIds.filter(entityId => knownIds.has(entityId));
+  const getProfile = env.gossip?.getProfile;
+  const newIds = changedLocalIds.filter(entityId => getProfile?.(entityId) === undefined);
+  const refreshIds = changedLocalIds.filter(entityId => getProfile?.(entityId) !== undefined);
 
   if (p2p && plan.remoteOutputs.length > 0 && newIds.length > 0) {
     await p2p.announceProfilesForEntitiesNow(newIds, 'pre-output-profile-refresh', false);
@@ -69,21 +77,46 @@ export const dispatchCommittedEntityOutputs = async (
   if (plan.deferredOutputs.length > 0) {
     throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
   }
-  dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
+  // Sovereign clients open only the routes used by this committed frame. A
+  // Profile supplies the endpoint; the actual socket is established lazily at
+  // the send boundary. Hub servers already own inbound user sessions and must
+  // not dial every user back.
+  let transportReady = true;
+  if (p2p && !env.infrastructure?.directEntityInputsDispatch && plan.remoteOutputs.length > 0) {
+    const targetEntityIds = Array.from(new Set(
+      plan.remoteOutputs.map(({ output }) => output.entityId.toLowerCase()),
+    ));
+    try {
+      transportReady = await p2p.bootstrapDirectEntityRoutes(targetEntityIds, DIRECT_OUTPUT_CONNECT_TIMEOUT_MS);
+    } catch (error) {
+      transportReady = false;
+      env.warn('network', 'DIRECT_OUTPUT_CONNECT_FAILED', {
+        targetEntityIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!transportReady) {
+      env.warn('network', 'DIRECT_OUTPUT_NOT_SENT', {
+        targetEntityIds,
+        remoteOutputs: plan.remoteOutputs.length,
+      });
+    }
+  }
+  if (transportReady) {
+    dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
+  }
   // The outbox is retained across every failure path. Clear it only after the
   // transport synchronously accepts every envelope; there is no timer retry.
   env.pendingNetworkOutputs = [];
-  if (refreshIds.length > 0) {
-    p2p?.announceProfilesForEntities(refreshIds, 'routing-profile-refresh');
+  if (p2p && refreshIds.length > 0) {
+    await p2p.announceProfilesForEntitiesNow(refreshIds, 'routing-profile-refresh', false);
   }
   if (p2p && plan.remoteOutputs.length === 0 && newIds.length > 0) {
     // First publication is not debounced: peers cannot route to an entity
-    // whose profile they have never seen.
-    p2p.announceProfilesForEntitiesNow(newIds, 'routing-profile-new', false).catch(error => {
-      runtimeLog.warn('routing_profile_new.announce_failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    // whose profile they have never seen. Awaiting also keeps publication
+    // failure attached to the exact committed side-effect instead of hiding it
+    // in a timer callback with no causal owner.
+    await p2p.announceProfilesForEntitiesNow(newIds, 'routing-profile-new', false);
   }
 
 };

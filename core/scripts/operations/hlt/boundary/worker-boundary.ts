@@ -34,7 +34,7 @@ export type LoadAccountProjection = Readonly<{
 export type LoadSustainedReport = Readonly<{
   schema: 'xln-production-swap-load-sustained-v1';
   mode: 'same';
-  schedule: 'one_order_per_account_per_round';
+  schedule: 'one_order_per_account_per_round' | 'resting_maker_aggressive_taker' | 'balanced_role_rotation';
   configuredUsers: number;
   configuredRounds: number;
   cadenceMs: number;
@@ -46,8 +46,13 @@ export type LoadSustainedReport = Readonly<{
   maxOrdersPerAccountFrame: number;
   runtimeInputBatches: number;
   roundSubmissionLagMs: readonly number[];
-  matchedEconomicSwaps: number;
-  fullySettledEconomicSwaps: number;
+  expectedSubmittedOffers: number;
+  expectedMatchedTrades: number;
+  expectedFullySettledOffers: number;
+  cancelledOffers: number;
+  stpOffers: number;
+  matchedSubmittedOffers: number;
+  exchangeDistribution: LoadExchangeDistribution;
   completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence';
   enqueueAckElapsedMs: number;
   commandObservedElapsedMs: number;
@@ -57,8 +62,6 @@ export type LoadSustainedReport = Readonly<{
   fullySettledTps: number;
   tradeCountBefore: number;
   tradeCountAfter: number;
-  submittedEconomicSwaps: number;
-  uncompletedEconomicSwapsAfterRun: number;
   driverRssBefore: number;
   driverRssAfter: number;
   walBytesBefore: number;
@@ -69,6 +72,21 @@ export type LoadSustainedReport = Readonly<{
   loadDurableBefore: LoadFrame;
   loadDurableAfter: LoadFrame;
   settlementEvidence: ProductionSwapSettlementEvidence;
+}>;
+
+export type LoadExchangeDistribution = Readonly<{
+  submittedOffers: number;
+  matchedSubmittedOffers: number;
+  matchedTrades: number;
+  cancelledOffers: number;
+  mmOnlyTakers: number;
+  userOnlyTakers: number;
+  partialUserMakerFills: number;
+  mmResidualTakers: number;
+  sweep2Takers: number;
+  sweep5Takers: number;
+  sweep10Takers: number;
+  sweep20Takers: number;
 }>;
 
 const requireText = (value: unknown, code: string): string => {
@@ -332,13 +350,20 @@ export type HubSettlementCounters = Readonly<{
   height: number;
   lockBookOpen: number;
   htlcFeesEarned: bigint;
+  acceptedPayments: number;
   completedPayments: number;
   matchedSwaps: number;
   metricsRuntimeHeight: number;
 }>;
 
 export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounters => {
-  const core = decodeHubCoreRecord(value);
+  const core = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_HUB_SETTLEMENT_COUNTERS_INVALID');
+  requireExactBoundaryKeys(
+    core,
+    ['height', 'lockBookOpen', 'htlcFeesEarned', 'metrics'],
+    [],
+    'PRODUCTION_SWAP_LOAD_HUB_SETTLEMENT_COUNTERS_FIELDS_INVALID',
+  );
   const lockBookOpen = core['lockBookOpen'];
   if (!Number.isSafeInteger(lockBookOpen) || Number(lockBookOpen) < 0) {
     throw new Error('PRODUCTION_SWAP_LOAD_HUB_LOCKBOOK_OPEN_INVALID');
@@ -348,7 +373,7 @@ export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounte
   const metrics = requireBoundaryRecord(core['metrics'], 'PRODUCTION_SWAP_LOAD_HUB_METRICS_INVALID');
   requireExactBoundaryKeys(
     metrics,
-    ['completedPayments', 'matchedSwaps', 'updatedAtRuntimeHeight'],
+    ['acceptedPayments', 'completedPayments', 'matchedSwaps', 'updatedAtRuntimeHeight'],
     [],
     'PRODUCTION_SWAP_LOAD_HUB_METRICS_FIELDS_INVALID',
   );
@@ -356,6 +381,11 @@ export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounte
     height: requireBoundaryInteger(core['height'], 'PRODUCTION_SWAP_LOAD_HUB_HEIGHT_INVALID', 0),
     lockBookOpen: Number(lockBookOpen),
     htlcFeesEarned: fees,
+    acceptedPayments: requireBoundaryInteger(
+      metrics['acceptedPayments'],
+      'PRODUCTION_SWAP_LOAD_HUB_ACCEPTED_PAYMENTS_INVALID',
+      0,
+    ),
     completedPayments: requireBoundaryInteger(
       metrics['completedPayments'],
       'PRODUCTION_SWAP_LOAD_HUB_COMPLETED_PAYMENTS_INVALID',
@@ -396,16 +426,32 @@ const decodeReportLoadFrame = (value: unknown): LoadFrame => {
   };
 };
 
+const decodeLoadExchangeDistribution = (value: unknown): LoadExchangeDistribution => {
+  const distribution = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_DISTRIBUTION_INVALID');
+  const fields = [
+    'submittedOffers', 'matchedSubmittedOffers', 'matchedTrades', 'cancelledOffers',
+    'mmOnlyTakers', 'userOnlyTakers', 'partialUserMakerFills', 'mmResidualTakers',
+    'sweep2Takers', 'sweep5Takers', 'sweep10Takers', 'sweep20Takers',
+  ] as const;
+  requireExactBoundaryKeys(distribution, fields, [], 'PRODUCTION_SWAP_LOAD_DISTRIBUTION_FIELDS_INVALID');
+  return Object.fromEntries(fields.map(field => [field, requireBoundaryInteger(
+    distribution[field],
+    `PRODUCTION_SWAP_LOAD_DISTRIBUTION_${field.toUpperCase()}_INVALID`,
+    0,
+  )])) as LoadExchangeDistribution;
+};
+
 export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport => {
   const report = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_REPORT_INVALID');
   const numeric = [
     'configuredUsers', 'configuredRounds', 'cadenceMs', 'offeredOrderRate',
     'offeredEconomicSwapRate', 'loadMakerAccountCount', 'loadTakerAccountCount',
     'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
-    'runtimeInputBatches', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
+    'runtimeInputBatches', 'expectedSubmittedOffers', 'expectedMatchedTrades',
+    'expectedFullySettledOffers', 'cancelledOffers', 'stpOffers', 'matchedSubmittedOffers',
     'enqueueAckElapsedMs', 'commandObservedElapsedMs', 'matchedElapsedMs',
     'fullySettledElapsedMs', 'tradeCountBefore',
-    'tradeCountAfter', 'submittedEconomicSwaps', 'uncompletedEconomicSwapsAfterRun',
+    'tradeCountAfter',
     'driverRssBefore', 'driverRssAfter',
     'walBytesBefore', 'walBytesAfter',
   ] as const;
@@ -413,17 +459,26 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     'schema', 'mode', 'schedule', 'configuredUsers', 'configuredRounds', 'cadenceMs',
     'offeredOrderRate', 'offeredEconomicSwapRate', 'loadMakerAccountCount',
     'loadTakerAccountCount', 'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
-    'runtimeInputBatches', 'roundSubmissionLagMs', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
+    'runtimeInputBatches', 'roundSubmissionLagMs', 'expectedSubmittedOffers',
+    'expectedMatchedTrades', 'expectedFullySettledOffers', 'cancelledOffers', 'stpOffers',
+    'matchedSubmittedOffers', 'exchangeDistribution',
     'completionAuthority', 'enqueueAckElapsedMs', 'commandObservedElapsedMs',
     'matchedElapsedMs', 'fullySettledElapsedMs', 'matchedTps', 'fullySettledTps', 'tradeCountBefore',
-    'tradeCountAfter', 'submittedEconomicSwaps', 'uncompletedEconomicSwapsAfterRun',
+    'tradeCountAfter',
     'driverRssBefore', 'driverRssAfter',
     'walBytesBefore', 'walBytesAfter', 'crossedBookAfterRun',
     'durableBefore', 'durableAfter', 'loadDurableBefore', 'loadDurableAfter',
     'settlementEvidence',
   ], [], 'PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
   if (report['schema'] !== 'xln-production-swap-load-sustained-v1' || report['mode'] !== 'same') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEMA_INVALID');
-  if (report['schedule'] !== 'one_order_per_account_per_round') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_INVALID');
+  const schedule = report['schedule'];
+  if (
+    schedule !== 'one_order_per_account_per_round' &&
+    schedule !== 'resting_maker_aggressive_taker' &&
+    schedule !== 'balanced_role_rotation'
+  ) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_INVALID');
+  }
   if (report['completionAuthority'] !== 'committed_trade_count_and_bilateral_runtime_quiescence') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_AUTHORITY_INVALID');
   if (report['crossedBookAfterRun'] !== false) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
   for (const field of numeric) requireBoundaryInteger(report[field], `PRODUCTION_SWAP_LOAD_REPORT_${field.toUpperCase()}_INVALID`);
@@ -436,12 +491,16 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
   const durableAfter = decodeReportLoadFrame(report['durableAfter']);
   const loadDurableBefore = decodeReportLoadFrame(report['loadDurableBefore']);
   const loadDurableAfter = decodeReportLoadFrame(report['loadDurableAfter']);
-  const matched = Number(report['matchedEconomicSwaps']);
-  const fullySettled = Number(report['fullySettledEconomicSwaps']);
+  const submitted = Number(report['expectedSubmittedOffers']);
+  const matched = Number(report['expectedMatchedTrades']);
+  const fullySettled = Number(report['expectedFullySettledOffers']);
+  const cancelled = Number(report['cancelledOffers']);
+  const stpOffers = Number(report['stpOffers']);
+  const matchedSubmitted = Number(report['matchedSubmittedOffers']);
   if (Number(report['tradeCountAfter']) - Number(report['tradeCountBefore']) !== matched) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_TRADE_DELTA_MISMATCH');
   }
-  if (Number(report['submittedEconomicSwaps']) !== matched || fullySettled !== matched || Number(report['uncompletedEconomicSwapsAfterRun']) !== 0) {
+  if (fullySettled !== submitted || matchedSubmitted > submitted) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SUBMISSION_INVALID');
   }
   const maxOrdersPerAccountFrame = Number(report['maxOrdersPerAccountFrame']);
@@ -456,14 +515,21 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
   if (participantAccounts !== makerAccounts + takerAccounts || makerAccounts !== takerAccounts || takerAccounts < 1) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_COUNTS_INVALID');
   }
-  if (Number(report['configuredUsers']) !== participantAccounts || matched !== takerAccounts * rounds) {
+  const expectedSubmitted = participantAccounts * rounds;
+  if (Number(report['configuredUsers']) !== participantAccounts || submitted !== expectedSubmitted) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_TOTAL_INVALID');
   }
-  if (Number(report['runtimeInputBatches']) !== Math.ceil(rounds / maxOrdersPerAccountFrame)) {
+  if ((schedule === 'one_order_per_account_per_round' || schedule === 'balanced_role_rotation') &&
+    (matched > takerAccounts * rounds || cancelled > submitted || matchedSubmitted > submitted)) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_PEER_TOTAL_INVALID');
+  }
+  if (Number(report['runtimeInputBatches']) !== expectedSubmitted) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ROUND_COUNT_INVALID');
   }
   const expectedOrderRate = participantAccounts * 1_000 / cadenceMs;
-  const expectedEconomicRate = takerAccounts * 1_000 / cadenceMs;
+  const expectedEconomicRate = (schedule === 'resting_maker_aggressive_taker'
+    ? participantAccounts
+    : takerAccounts) * 1_000 / cadenceMs;
   if (report['offeredOrderRate'] !== expectedOrderRate || report['offeredEconomicSwapRate'] !== expectedEconomicRate) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_OFFERED_RATE_INVALID');
   }
@@ -483,8 +549,13 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
   if (durableAfter.height < durableBefore.height) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_HEIGHT_REGRESSION');
   if (loadDurableAfter.height < loadDurableBefore.height) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_LOAD_HEIGHT_REGRESSION');
   const settlementEvidence = decodeProductionSwapSettlementEvidence(report['settlementEvidence']);
+  const exchangeDistribution = decodeLoadExchangeDistribution(report['exchangeDistribution']);
   const rates = assertProductionSwapFullySettled(settlementEvidence);
-  if (settlementEvidence.expectedSwaps !== matched ||
+  if (settlementEvidence.expectedSubmittedOffers !== submitted ||
+    settlementEvidence.expectedMatchedTrades !== matched ||
+    settlementEvidence.expectedFullySettledOffers !== fullySettled ||
+    settlementEvidence.cancelledOffers !== cancelled ||
+    settlementEvidence.stpOffers !== stpOffers ||
     settlementEvidence.tradeCountBefore !== Number(report['tradeCountBefore']) ||
     settlementEvidence.tradeCountAfter !== Number(report['tradeCountAfter']) ||
     settlementEvidence.matchedElapsedMs !== Number(report['matchedElapsedMs']) ||
@@ -492,8 +563,14 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     rates.matchedTps !== report['matchedTps'] || rates.fullySettledTps !== report['fullySettledTps']) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SETTLEMENT_EVIDENCE_MISMATCH');
   }
+  if (exchangeDistribution.submittedOffers !== submitted ||
+    exchangeDistribution.matchedSubmittedOffers !== matchedSubmitted ||
+    exchangeDistribution.matchedTrades !== matched ||
+    exchangeDistribution.cancelledOffers !== cancelled) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_DISTRIBUTION_MISMATCH');
+  }
   return {
-    schema: report['schema'], mode: report['mode'], schedule: report['schedule'],
+    schema: report['schema'], mode: report['mode'], schedule,
     configuredUsers: Number(report['configuredUsers']), configuredRounds: rounds,
     cadenceMs, offeredOrderRate: report['offeredOrderRate'],
     offeredEconomicSwapRate: report['offeredEconomicSwapRate'],
@@ -503,8 +580,13 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     maxOrdersPerAccountFrame,
     runtimeInputBatches: Number(report['runtimeInputBatches']),
     roundSubmissionLagMs,
-    matchedEconomicSwaps: matched,
-    fullySettledEconomicSwaps: fullySettled,
+    expectedSubmittedOffers: submitted,
+    expectedMatchedTrades: matched,
+    expectedFullySettledOffers: fullySettled,
+    cancelledOffers: cancelled,
+    stpOffers,
+    matchedSubmittedOffers: matchedSubmitted,
+    exchangeDistribution,
     completionAuthority: report['completionAuthority'],
     enqueueAckElapsedMs: Number(report['enqueueAckElapsedMs']),
     commandObservedElapsedMs: Number(report['commandObservedElapsedMs']),
@@ -513,8 +595,6 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     matchedTps: report['matchedTps'], fullySettledTps: report['fullySettledTps'],
     tradeCountBefore: Number(report['tradeCountBefore']),
     tradeCountAfter: Number(report['tradeCountAfter']),
-    submittedEconomicSwaps: Number(report['submittedEconomicSwaps']),
-    uncompletedEconomicSwapsAfterRun: Number(report['uncompletedEconomicSwapsAfterRun']),
     driverRssBefore: Number(report['driverRssBefore']),
     driverRssAfter: Number(report['driverRssAfter']), walBytesBefore: Number(report['walBytesBefore']),
     walBytesAfter: Number(report['walBytesAfter']), crossedBookAfterRun: false,

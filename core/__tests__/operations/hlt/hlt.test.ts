@@ -37,6 +37,7 @@ import {
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
   quoteAmountFromWeightedLotsForDecimals,
   quoteAmountAtPrice,
+  MAX_ORDERBOOK_QTY_LOTS,
 } from '../../../orderbook';
 import { projectBookPricePageTree } from '../../../orderbook/pages/page';
 import {
@@ -47,14 +48,15 @@ import { prepareSwapOfferAmounts } from '../../../account/tx/handlers/swap/offer
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
 import {
   deriveLoadLaneIdentities,
-  CONTROL_CONCURRENCY,
-  partitionLoadControlBatches,
-  partitionLoadProvisioningBatches,
 } from '../../../scripts/operations/hlt/lanes/worker-lanes';
 import { parseSameLoadSchedule } from '../../../scripts/operations/hlt/workload/load-schedule';
 import {
+  assertRealisticExchangeDistribution,
+  assertBalancedExchangeDistribution,
   buildIndependentMakerTakerPlan,
   buildParallelLaneOfferPlan,
+  buildBalancedExchangePlan,
+  buildRealisticExchangePlan,
 } from '../../../scripts/operations/hlt/workload/worker-same-plan';
 import {
   assertOpenLoopOfferBudget,
@@ -120,14 +122,12 @@ describe('production swap load evidence', () => {
     await admitOrderbookAccountTxBatch(
       createAccountConsensusContext(createEmptyEnv('orderbook-account-batch')),
       account,
-      account.state.leftEntity,
       txs,
     );
     expect(account.mempool).toEqual(txs);
     await expect(admitOrderbookAccountTxBatch(
       createAccountConsensusContext(createEmptyEnv('orderbook-account-batch-duplicate')),
       account,
-      account.state.leftEntity,
       txs,
     )).rejects.toThrow('ORDERBOOK_ACCOUNT_TX_ADMISSION_FAILED');
     expect(account.mempool).toEqual(txs);
@@ -217,20 +217,6 @@ describe('production swap load evidence', () => {
     expect(new Set([...identities, ...next].map(identity => identity.entityId)).size).toBe(6);
   });
 
-  test('user provisioning stays below the authenticated Runtime API burst', () => {
-    const control = partitionLoadControlBatches(
-      Array.from({ length: CONTROL_CONCURRENCY * 2 + 1 }, (_, index) => index),
-    );
-    expect(control.map(batch => batch.length))
-      .toEqual([CONTROL_CONCURRENCY, CONTROL_CONCURRENCY, 1]);
-    expect(control.flat()).toEqual(Array.from({ length: CONTROL_CONCURRENCY * 2 + 1 }, (_, index) => index));
-    const provisioning = partitionLoadProvisioningBatches(
-      Array.from({ length: 101 }, (_, index) => index),
-    );
-    expect(provisioning.map(batch => batch.length)).toEqual([16, 16, 16, 16, 16, 16, 5]);
-    expect(provisioning.every(batch => batch.length <= 16)).toBe(true);
-  });
-
   test('parallel lane plan emits exact marketable offers', () => {
     const midpoint = 25_000_000n;
     const { maxAllowed } = deriveSameOrderbookPriceBandBounds(midpoint);
@@ -263,6 +249,7 @@ describe('production swap load evidence', () => {
       3,
       10_000_000n,
       priceTicks,
+      priceTicks,
     );
     expect(plan.makerPlans.map(item => item.offers.length)).toEqual([3, 3, 3]);
     expect(plan.takerPlans.map(item => item.offers.length)).toEqual([3, 3, 3]);
@@ -280,6 +267,172 @@ describe('production swap load evidence', () => {
     }
   });
 
+  test('realistic exchange deterministically proves partial, sweep, MM residual and cancel tail', () => {
+    const mmAsk = { priceTicks: 25_005_000n, qtyLots: MAX_ORDERBOOK_QTY_LOTS };
+    const plan = buildRealisticExchangePlan({
+      hubEntityId: `0x${'11'.repeat(32)}`,
+      offerNamespace: 'realistic-test',
+      rounds: 1,
+      lanesPerSide: 100,
+      minimumTradeSize: 10_000_000n,
+      partialMakerAskPriceTicks: 24_995_000n,
+      makerAskPriceTicks: 25_000_000n,
+      restingBidPriceTicks: 24_990_000n,
+      takerLimitPriceTicks: 25_010_000n,
+      mmAsks: [mmAsk],
+    });
+    expect(plan.distribution).toEqual({
+      submittedOffers: 200,
+      matchedSubmittedOffers: 160,
+      matchedTrades: 152,
+      cancelledOffers: 40,
+      mmOnlyTakers: 90,
+      userOnlyTakers: 9,
+      partialUserMakerFills: 1,
+      mmResidualTakers: 1,
+      sweep2Takers: 2,
+      sweep5Takers: 3,
+      sweep10Takers: 2,
+      sweep20Takers: 1,
+    });
+    expect(plan.traderPlans).toHaveLength(200);
+    expect(plan.traderPlans.flatMap(lane => lane.cancelledOfferIds)).toHaveLength(40);
+    expect(() => assertRealisticExchangeDistribution(plan.distribution)).not.toThrow();
+    const roundOffers = plan.traderPlans.map((lane, index) => {
+      const offer = lane.offers[0];
+      if (offer?.type !== 'placeSwapOffer' || offer.data.priceTicks === undefined) {
+        throw new Error(`TEST_REALISTIC_TRADER_OFFER_MISSING:${index}`);
+      }
+      return offer;
+    });
+    const passive = roundOffers.filter(offer =>
+      offer.data.giveTokenId === 2 || offer.data.priceTicks === 24_990_000n);
+    const aggressive = roundOffers.filter(offer => offer.data.priceTicks === 25_010_000n);
+    expect(passive).toHaveLength(100);
+    expect(aggressive).toHaveLength(100);
+    const passiveAskIds = new Set(passive.filter(offer => offer.data.giveTokenId === 2)
+      .map(offer => offer.data.offerId));
+    const matchedMakerPrices = passive.filter(offer => offer.data.giveTokenId === 2)
+      .map(offer => offer.data.priceTicks!);
+    expect(matchedMakerPrices[0]).toBeLessThan(matchedMakerPrices[1]!);
+
+    let book = createBook({ bucketWidthTicks: 1n, maxOrders: 1_000, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0, ownerId: 'mm', orderId: 'mm-ask', side: 1, tif: 0,
+      postOnly: false, priceTicks: mmAsk.priceTicks, qtyLots: mmAsk.qtyLots,
+    }).state;
+    const tradesByTaker = new Map<string, ReturnType<typeof applyCommand>['events']>();
+    const applyOffer = (tx: (typeof plan.traderPlans)[number]['offers'][number], ownerId: string): void => {
+      if (tx.type !== 'placeSwapOffer' || tx.data.priceTicks === undefined) {
+        throw new Error('TEST_REALISTIC_OFFER_INVALID');
+      }
+      const baseAmount = tx.data.giveTokenId === 2 ? tx.data.giveAmount : tx.data.wantAmount;
+      const applied = applyCommand(book, {
+        kind: 0,
+        ownerId,
+        orderId: tx.data.offerId,
+        side: tx.data.giveTokenId === 2 ? 1 : 0,
+        tif: 0,
+        postOnly: false,
+        priceTicks: tx.data.priceTicks,
+        qtyLots: baseAmount / getSwapLotScale(2),
+      }, {
+        executionQtyMultipleAtPrice: priceTicks =>
+          getSwapExactQuoteLotMultipleAtPriceForDimensions(18, 6, priceTicks),
+      });
+      book = applied.state;
+      tradesByTaker.set(tx.data.offerId, applied.events.filter(event => event.type === 'TRADE'));
+    };
+    passive.forEach((offer, index) => applyOffer(offer, `passive-trader-${index}`));
+    aggressive.forEach((offer, index) => applyOffer(offer, `aggressive-trader-${index}`));
+    const trades = [...tradesByTaker.values()].flat();
+    expect(trades).toHaveLength(plan.distribution.matchedTrades);
+    expect(trades.some(event => event.type === 'TRADE' && event.qty < event.makerQtyBefore)).toBe(true);
+    for (const sweep of [2, 5, 10, 20]) {
+      expect([...tradesByTaker.values()].some(events => events.filter(event =>
+        event.type === 'TRADE' && passiveAskIds.has(event.makerOrderId)).length === sweep)).toBe(true);
+    }
+    expect([...tradesByTaker.values()].some(events => events.length === 1 &&
+      events[0]?.type === 'TRADE' && events[0].makerOrderId === 'mm-ask')).toBe(true);
+
+    book = createBook({ bucketWidthTicks: 1n, maxOrders: 1_000, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0, ownerId: 'mm', orderId: 'mm-ask', side: 1, tif: 0,
+      postOnly: false, priceTicks: mmAsk.priceTicks, qtyLots: mmAsk.qtyLots,
+    }).state;
+    tradesByTaker.clear();
+    [...passive].reverse().forEach((offer, index) => applyOffer(offer, `reversed-passive-${index}`));
+    aggressive.forEach((offer, index) => applyOffer(offer, `reversed-aggressive-${index}`));
+    expect([...tradesByTaker.values()].flat()).toHaveLength(plan.distribution.matchedTrades);
+  });
+
+  test('every realistic trader uses both sides while each round emits one order per user', () => {
+    const plan = buildRealisticExchangePlan({
+      hubEntityId: `0x${'12'.repeat(32)}`,
+      offerNamespace: 'role-free-test',
+      rounds: 10,
+      lanesPerSide: 100,
+      minimumTradeSize: 10_000_000n,
+      partialMakerAskPriceTicks: 24_995_000n,
+      makerAskPriceTicks: 25_000_000n,
+      restingBidPriceTicks: 24_990_000n,
+      takerLimitPriceTicks: 25_010_000n,
+      mmAsks: [{ priceTicks: 25_005_000n, qtyLots: MAX_ORDERBOOK_QTY_LOTS }],
+    });
+    expect(plan.traderPlans).toHaveLength(200);
+    for (const trader of plan.traderPlans) {
+      expect(trader.offers).toHaveLength(10);
+      expect(trader.baseCredit).toBe(trader.offers.reduce((total, offer) =>
+        total + (offer.type === 'placeSwapOffer' && offer.data.giveTokenId === 2
+          ? offer.data.giveAmount
+          : 0n), 0n));
+      expect(trader.quoteCredit).toBe(trader.offers.reduce((total, offer) =>
+        total + (offer.type === 'placeSwapOffer' && offer.data.giveTokenId === 1
+          ? offer.data.giveAmount
+          : 0n), 0n));
+      const sides = new Set(trader.offers.map(offer => {
+        if (offer.type !== 'placeSwapOffer') throw new Error('TEST_REALISTIC_TRADER_TYPE_INVALID');
+        return offer.data.giveTokenId;
+      }));
+      expect(sides).toEqual(new Set([1, 2]));
+    }
+    for (let round = 0; round < 10; round += 1) {
+      const offers = plan.traderPlans.map(trader => trader.offers[round]);
+      expect(offers).toHaveLength(200);
+      expect(offers.filter(offer => offer?.type === 'placeSwapOffer' && offer.data.giveTokenId === 2))
+        .toHaveLength(60);
+      expect(offers.filter(offer => offer?.type === 'placeSwapOffer' && offer.data.giveTokenId === 1))
+        .toHaveLength(140);
+    }
+  });
+
+  test('balanced exchange matches every order without consuming MM depth', () => {
+    const plan = buildBalancedExchangePlan({
+      hubEntityId: `0x${'13'.repeat(32)}`,
+      offerNamespace: 'balanced-test',
+      rounds: 10,
+      traders: 1_000,
+      minimumTradeSize: 10_000_000n,
+      priceTicks: 25_000_000n,
+    });
+    expect(plan.traderPlans).toHaveLength(1_000);
+    expect(plan.distribution).toMatchObject({
+      submittedOffers: 10_000,
+      matchedSubmittedOffers: 10_000,
+      matchedTrades: 5_000,
+      cancelledOffers: 0,
+      mmOnlyTakers: 0,
+      mmResidualTakers: 0,
+    });
+    expect(() => assertBalancedExchangeDistribution(plan.distribution)).not.toThrow();
+    for (const trader of plan.traderPlans) {
+      expect(new Set(trader.offers.map(offer => {
+        if (offer.type !== 'placeSwapOffer') throw new Error('TEST_BALANCED_OFFER_INVALID');
+        return offer.data.giveTokenId;
+      }))).toEqual(new Set([1, 2]));
+    }
+  });
+
   test('each sustained round emits exactly one order per user Account', () => {
     const plans = buildIndependentMakerTakerPlan(
       `0x${'11'.repeat(32)}`,
@@ -287,6 +440,7 @@ describe('production swap load evidence', () => {
       30,
       3,
       10_000_000n,
+      25_000_000n,
       25_000_000n,
     );
     const identities = Array.from({ length: 3 }, (_, index) => ({
@@ -306,6 +460,7 @@ describe('production swap load evidence', () => {
       6,
       1,
       10_000_000n,
+      25_000_000n,
       25_000_000n,
     );
     const identity = {
@@ -375,18 +530,22 @@ describe('production swap load evidence', () => {
   test('sustained report separates offered order rate from fully bilateral economic settlement', () => {
     const root = `0x${'ab'.repeat(32)}`;
     const settlementEvidence = {
-      expectedSwaps: 10,
+      expectedSubmittedOffers: 20,
+      expectedMatchedTrades: 10,
+      expectedFullySettledOffers: 20,
+      cancelledOffers: 0,
+      stpOffers: 0,
       tradeCountBefore: 5,
       tradeCountAfter: 15,
       matchedElapsedMs: 250,
       fullySettledElapsedMs: 500,
-      createdOfferIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
+      createdOfferIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
       accounts: [{
         accountKey: 'load/hub',
-        createdOfferIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
-        committedOfferIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
-        committedResolveIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
-        liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
+        createdOfferIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
+        committedOfferIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
+        committedResolveIds: Array.from({ length: 20 }, (_, index) => `offer-${index}`),
+        liveOfferIds: [], stpOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
         { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
@@ -403,14 +562,20 @@ describe('production swap load evidence', () => {
       offeredOrderRate: 4, offeredEconomicSwapRate: 2,
       loadMakerAccountCount: 2, loadTakerAccountCount: 2,
       loadParticipantAccountCount: 4, maxOrdersPerAccountFrame: 1,
-      runtimeInputBatches: 5, roundSubmissionLagMs: [0, 1, 0, 2, 0],
-      matchedEconomicSwaps: 10, fullySettledEconomicSwaps: 10,
+      runtimeInputBatches: 20, roundSubmissionLagMs: Array.from({ length: 20 }, () => 0),
+      expectedSubmittedOffers: 20, expectedMatchedTrades: 10,
+      expectedFullySettledOffers: 20, cancelledOffers: 0, stpOffers: 0,
+      matchedSubmittedOffers: 20,
+      exchangeDistribution: {
+        submittedOffers: 20, matchedSubmittedOffers: 20, matchedTrades: 10, cancelledOffers: 0,
+        mmOnlyTakers: 0, userOnlyTakers: 10, partialUserMakerFills: 0, mmResidualTakers: 0,
+        sweep2Takers: 0, sweep5Takers: 0, sweep10Takers: 0, sweep20Takers: 0,
+      },
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
       enqueueAckElapsedMs: 10, commandObservedElapsedMs: 20,
       matchedElapsedMs: 250, fullySettledElapsedMs: 500,
-      matchedTps: 40, fullySettledTps: 20,
+      matchedTps: 40, fullySettledTps: 40,
       tradeCountBefore: 5, tradeCountAfter: 15,
-      submittedEconomicSwaps: 10, uncompletedEconomicSwapsAfterRun: 0,
       driverRssBefore: 100, driverRssAfter: 110,
       walBytesBefore: 1_000, walBytesAfter: 2_000,
       crossedBookAfterRun: false,
@@ -421,7 +586,7 @@ describe('production swap load evidence', () => {
       settlementEvidence,
     });
     expect(report.matchedTps).toBe(40);
-    expect(report.fullySettledTps).toBe(20);
+    expect(report.fullySettledTps).toBe(40);
     expect(report.loadParticipantAccountCount).toBe(4);
     expect(report.offeredOrderRate).toBe(4);
     expect(report.walBytesAfter).toBe(2_000);
@@ -435,13 +600,15 @@ describe('production swap load evidence', () => {
 
   test('settlement authority rejects pending bilateral and Runtime work', () => {
     const base = {
-      expectedSwaps: 1, tradeCountBefore: 7, tradeCountAfter: 8,
+      expectedSubmittedOffers: 1, expectedMatchedTrades: 1,
+      expectedFullySettledOffers: 1, cancelledOffers: 0, stpOffers: 0,
+      tradeCountBefore: 7, tradeCountAfter: 8,
       matchedElapsedMs: 10, fullySettledElapsedMs: 20,
       createdOfferIds: ['offer-1'],
       accounts: [{
         accountKey: 'load/hub', createdOfferIds: ['offer-1'],
         committedOfferIds: ['offer-1'], committedResolveIds: ['offer-1'],
-        liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
+        liveOfferIds: [], stpOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
         { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, pendingAccountFrames: 0 },
@@ -487,7 +654,7 @@ describe('production swap load evidence', () => {
     expect(source).toContain('error.retryable');
     expect(source).toContain('XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS');
     expect(source).toContain('LOAD_EVIDENCE_CONCURRENCY = 8');
-    expect(source).toContain('SETTLEMENT_POLL_WIDE_MS = 2_000');
+    expect(source).toContain('SETTLEMENT_POLL_WIDE_MS = 100');
     expect(source).toContain('settlement evidence incomplete');
     expect(source).toContain('pendingAccountFrames');
     expect(source).toContain('pendingAccountSample');
@@ -532,6 +699,10 @@ describe('production swap load evidence', () => {
       bestBidPriceTicks: null,
       bestAskPriceTicks: price,
       executableAskPriceTicks: [price, secondPrice],
+      executableAsks: [
+        { priceTicks: price, qtyLots: 1n },
+        { priceTicks: secondPrice, qtyLots: 2n },
+      ],
       visibleBidOrders: 0,
       visibleAskOrders: 2,
     });

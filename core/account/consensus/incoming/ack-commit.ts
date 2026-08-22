@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountOutput, AccountReplica } from '../../../types/account';
+import type { AccountFrame, AccountOutput, AccountPeerInput, AccountReplica } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
@@ -10,7 +10,6 @@ import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { accountInputAck, accountInputProposal } from '../flush';
 import { runPostFrameAutoRebalanceCheck } from '../helpers';
-import { assertLiveCommitMatchesFrame } from './commit-root';
 import {
   getDisputeSealRequirementError,
   storeCounterpartyDisputeSeal,
@@ -19,6 +18,7 @@ import {
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
+import { timePerfPhase } from '../../../support/performance/profile';
 
 const ackLog = createStructuredLogger('account.ack');
 
@@ -85,19 +85,23 @@ const verifyPendingAckCertificate = async (
       ),
     };
   }
+  const ackHanko = ack.frameHanko;
 
   const expectedEntity = account.proofHeader.toEntity;
   ackLog.debug('hanko.verify', { height: ackHeight, frame: shortHash(frameHash) });
-  const verified = await securityContext.verifyHanko(
-    ack.frameHanko,
-    frameHash,
-    expectedEntity,
-    securityContext.counterpartyCertifiedBoard
-      ? {
-          registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
-          allowPreviousBoard: false,
-        }
-      : { allowPreviousBoard: false },
+  const verified = await timePerfPhase(
+    'account.verify.ackHanko',
+    () => securityContext.verifyHanko(
+      ackHanko,
+      frameHash,
+      expectedEntity,
+      securityContext.counterpartyCertifiedBoard
+        ? {
+            registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
+            allowPreviousBoard: false,
+          }
+        : { allowPreviousBoard: false },
+    ),
   );
   if (!verified.valid) {
     return {
@@ -127,7 +131,7 @@ const verifyPendingAckCertificate = async (
     from: shortId(verified.entityId),
     height: ackHeight,
   });
-  return { kind: 'continue', ack, ackHanko: ack.frameHanko, frameHash };
+  return { kind: 'continue', ack, ackHanko, frameHash };
 };
 
 const applyPendingFrameTransactions = async (
@@ -147,17 +151,11 @@ const applyPendingFrameTransactions = async (
   });
   candidateEffects.push(...committed.candidateEffects);
   timedOutHashlocks.push(...committed.timedOutHashlocks);
-  assertLiveCommitMatchesFrame(
-    account,
-    pendingFrame.accountStateRoot,
-    'proposer',
-    pendingFrame.height,
-  );
 };
 
 const installPendingFrameCommit = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   pendingFrame: AccountFrame,
   ack: AccountFrameAck,
   ackHanko: string,
@@ -196,7 +194,7 @@ const installPendingFrameCommit = (
 
 const queuePostAckWork = async (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   committedHeight: number,
   securityContext: AccountInputSecurityContext,
   candidateEffects: AccountOutput[],
@@ -219,7 +217,7 @@ const queuePostAckWork = async (
 export const handlePendingFrameAck = async (
   context: AccountConsensusContext,
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   ackHeight: number | undefined,
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
   events: string[],

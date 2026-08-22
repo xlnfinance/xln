@@ -2069,6 +2069,26 @@ describe('audit fail-fast regressions', () => {
     expect(rightAccount.pendingFrame).toBeUndefined();
     expect(rightAccount.mempool).toEqual([{ type: 'add_delta', data: { tokenId: 2 } }]);
     expect(rightAccount.rollbackCount).toBe(1);
+    const winningFrame = sealedLeftProposal.proposal.frame;
+    const winningDisputeSeal = sealedLeftProposal.proposal.disputeSeal;
+    if (!winningDisputeSeal) throw new Error('LEFT_COLLISION_DISPUTE_SEAL_MISSING');
+    expect(computeAccountStateRoot(rightAccount.state)).toBe(winningFrame.accountStateRoot);
+    expect(rightAccount.currentFrame).toEqual(winningFrame);
+    expect(accepted.committedFrames).toEqual([{ frame: winningFrame, committedViaNewFrame: true }]);
+    expect(rightAccount.counterpartyDisputeHash).toBe(winningDisputeSeal.hash);
+    expect(rightAccount.counterpartyDisputeProofBodyHash).toBe(winningDisputeSeal.proofBodyHash);
+    expect(rightAccount.counterpartyDisputeProofNonce).toBe(winningDisputeSeal.proofNonce);
+    expect(rightAccount.counterpartyDisputeProofProposerIsLeft).toBe(winningDisputeSeal.proposerIsLeft);
+    if (accepted.response?.kind !== 'ack') throw new Error('LEFT_COLLISION_ACK_RESPONSE_MISSING');
+    expect(accepted.response.ack).toMatchObject({
+      height: winningFrame.height,
+      frameHash: winningFrame.stateHash,
+    });
+    expect(accepted.hashesToSign?.[0]).toMatchObject({
+      hash: winningFrame.stateHash,
+      type: 'accountFrame',
+    });
+    expect(accepted.accountJClaimNodeChanges).toBeUndefined();
   });
 
   test('LEFT always wins a valid same-height collision regardless of settlement evidence', async () => {

@@ -8,6 +8,7 @@ import {
   type RuntimeOutputRoutingDeps,
 } from '../delivery/topology/output-routing';
 import { createPreparedOutputGraph } from './prepared-output';
+import { timePerfPhase } from '../../support/performance/profile';
 
 export type RuntimeContinuationEnqueuer = (
   env: RuntimeReplica,
@@ -24,7 +25,7 @@ export const applyRecoveryRuntimeOutputPlan = (
   enqueueRuntimeContinuation: RuntimeContinuationEnqueuer,
 ) => {
   const preparedOutputGraph = createPreparedOutputGraph();
-  const originated = entityOutbox.map(output =>
+  const originated = timePerfPhase('recovery.output.originated', () => entityOutbox.map(output =>
     output.sourceRuntimeFrame
       ? output
       : {
@@ -34,25 +35,27 @@ export const applyRecoveryRuntimeOutputPlan = (
             timestamp: env.state.timestamp,
           },
         },
-  );
-  const pending = buildPendingNetworkOutputs(
+  ));
+  const pending = timePerfPhase('recovery.output.pending', () => buildPendingNetworkOutputs(
     pruneSettledOutputs(env, [...(env.pendingNetworkOutputs ?? []), ...originated]),
     preparedOutputGraph,
-  );
-  const plan = planEntityOutputs(env, pending, routing, preparedOutputGraph);
+  ));
+  const plan = timePerfPhase('recovery.output.plan', () =>
+    planEntityOutputs(env, pending, routing, preparedOutputGraph));
   if (plan.deferredOutputs.length > 0) {
     throw new Error(`ROUTE_DEFERRED_OUTPUTS_FORBIDDEN:${plan.deferredOutputs.length}`);
   }
-  enqueueRuntimeContinuation(
+  timePerfPhase('recovery.output.enqueueLocal', () => enqueueRuntimeContinuation(
     env,
     plan.localOutputs.map(({ sourceRuntimeFrame: _sourceRuntimeFrame, ...output }) => output),
     undefined,
     undefined,
     env.state.timestamp,
-  );
-  env.pendingNetworkOutputs = buildPendingNetworkOutputs(
-    plan.remoteOutputs.map(({ output }) => output),
-    preparedOutputGraph,
-  );
+  ));
+  env.pendingNetworkOutputs = timePerfPhase('recovery.output.remotePending', () =>
+    buildPendingNetworkOutputs(
+      plan.remoteOutputs.map(({ output }) => output),
+      preparedOutputGraph,
+    ));
   return plan;
 };

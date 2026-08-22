@@ -22,7 +22,7 @@
  *   - inbound peer settlement Hankos on the Entity frame (Account merkle
  *     strips quorum-subset bytes; the receiving Entity must commit the exact
  *     peer witness that arrived in this frame)
- *   - local `kind: 'txs'` bodies (no Account frame exists yet)
+ *   - local `kind: 'enqueue'` commands (no Account frame exists yet)
  */
 
 import type { AccountTx } from '../../../types/account';

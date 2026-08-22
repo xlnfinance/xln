@@ -10,6 +10,8 @@ import {
   ENTITY_STATE_ROOT_EXCLUDED_FIELDS,
   invalidateEntityAccountCommitment,
   computeEntityAccountValueHash,
+  ENTITY_ACCOUNT_LEAF_FIELDS,
+  entityAccountLeafMerkleKey,
 } from '../../../../entity/consensus/state-root';
 import { createEntityFrameHash } from '../../../../entity/consensus/frame';
 import { certifiedEntityFrameLinkFingerprint } from '../../../../entity/consensus/frame/lineage';
@@ -19,10 +21,23 @@ import { PersistentEntityAccountMap } from '../../../../entity/state/persistent-
 import { createBook } from '../../../../orderbook/core';
 import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 import { initCrontab } from '../../../../entity/scheduler';
+import { computeIntegrityDigest } from '../../../../support/integrity-checksum';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
 const signerId = `0x${'33'.repeat(20)}`;
+
+test('precomputed Entity Account leaf keys equal the canonical integrity labels', () => {
+  const utf8 = new TextEncoder();
+  for (const field of ENTITY_ACCOUNT_LEAF_FIELDS) {
+    expect(entityAccountLeafMerkleKey(field)).toBe(
+      computeIntegrityDigest(utf8.encode(`xln.entity.account-leaf.${field}`)),
+    );
+  }
+  expect(() => entityAccountLeafMerkleKey('unclassified')).toThrow(
+    'ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:unclassified',
+  );
+});
 
 const persistentEnvelope = (account: ReturnType<typeof makeAccountReplica>) => {
   delete (account as { swapOrderHistory?: unknown }).swapOrderHistory;

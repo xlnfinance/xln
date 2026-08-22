@@ -261,12 +261,24 @@ export const commitEntityFrameCandidateState = (
 };
 
 /**
- * Root of the certified frame this replica just committed, if it is the head.
+ * Root of the certified frame this replica just committed, whether the
+ * current endpoint is carried by the short head or its checkpoint anchor.
  * A committed input that does not advance the height (mempool admission,
  * deferred proposal, precommit collection) must not write any
  * ENTITY_STATE_ROOT_FIELDS. Entity State changes only through certified frames.
  */
 export const committedEntityStateRoot = (replica: EntityReplica): string | undefined => {
   const head = replica.certifiedFrameHead?.frame;
-  return head && head.height === replica.state.height ? head.stateRoot : undefined;
+  if (
+    head &&
+    head.height === replica.state.height &&
+    head.hash === replica.state.prevFrameHash
+  ) return head.stateRoot;
+  const anchor = replica.certifiedFrameAnchor;
+  if (
+    anchor &&
+    anchor.height === replica.state.height &&
+    anchor.frameHash === (replica.state.height === 0 ? 'genesis' : replica.state.prevFrameHash)
+  ) return anchor.stateRoot;
+  return undefined;
 };

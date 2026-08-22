@@ -14,7 +14,11 @@ import {
 import { RuntimeAdapterError } from '../../../api/runtime-adapter/errors';
 import { safeStringify } from '../../../protocol/serialization';
 import { assertProductionSwapFullySettled, type ProductionSwapSettlementEvidence } from './settlement';
-import { PRODUCTION_SWAP_LOAD_PAIR_ID, type ConnectedRuntime } from './worker-runtime';
+import {
+  PRODUCTION_SWAP_LOAD_PAIR_ID,
+  reconnectRuntimeControl,
+  type ConnectedRuntime,
+} from './worker-runtime';
 
 export type SettlementAccountPair = Readonly<{
   hubEntityId: string;
@@ -27,7 +31,10 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 // Evidence reads walk history views on the Hub under test; polling every few
 // milliseconds would measure the poller, not settlement.
 const SETTLEMENT_POLL_MS = 250;
-const SETTLEMENT_POLL_WIDE_MS = 2_000;
+// The measured phase reads only the Hub's compact committed counters. User
+// Runtime state is intentionally untouched until matching has completed, so
+// population size must not degrade the timestamp to a two-second grid.
+const SETTLEMENT_POLL_WIDE_MS = 100;
 const LOAD_EVIDENCE_CONCURRENCY = 8;
 const settlementPollMs = (pairCount: number): number =>
   pairCount > 64 ? SETTLEMENT_POLL_WIDE_MS : SETTLEMENT_POLL_MS;
@@ -40,7 +47,8 @@ const forEachLimited = async <T>(
   let cursor = 0;
   const worker = async (): Promise<void> => {
     while (cursor < items.length) {
-      const item = items[cursor]!;
+      const item = items[cursor];
+      if (item === undefined) throw new Error(`PRODUCTION_SWAP_SETTLEMENT_CURSOR_INVALID:${cursor}`);
       cursor += 1;
       await fn(item);
     }
@@ -171,7 +179,9 @@ const requireAccount = (
   const matches = response.accounts.filter(account =>
     account.entityId === entityId && account.counterpartyEntityId === counterpartyEntityId);
   if (matches.length !== 1) throw new Error(`PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_RESPONSE_NOT_UNIQUE:${entityId}:${counterpartyEntityId}`);
-  return matches[0]!;
+  const match = matches[0];
+  if (!match) throw new Error(`PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_RESPONSE_MISSING:${entityId}:${counterpartyEntityId}`);
+  return match;
 };
 
 const sameOfferIds = (account: AccountResponse, ids: readonly string[]): boolean =>
@@ -198,12 +208,15 @@ const combineAccount = (
     hubAccount.offers[index]!.closed && loadAccount.offers[index]!.closed);
   const live = pair.offerIds.filter((_id, index) =>
     hubAccount.offers[index]!.live || loadAccount.offers[index]!.live);
+  const stp = pair.offerIds.filter((_id, index) =>
+    hubAccount.offers[index]!.stpCommitted && loadAccount.offers[index]!.stpCommitted);
   return {
     accountKey: hubAccount.accountKey,
     createdOfferIds: pair.offerIds,
     committedOfferIds: committed,
     committedResolveIds: resolved,
     liveOfferIds: live,
+    stpOfferIds: stp,
     pendingFrame: hubAccount.pendingFrame || loadAccount.pendingFrame,
     pendingProposal: hubAccount.pendingProposal || loadAccount.pendingProposal,
     mempoolTxs: hubAccount.mempool.count + loadAccount.mempool.count,
@@ -287,7 +300,7 @@ const readLoadLite = async (
  */
 const dumpStuckCounterpartyState = async (
   load: readonly LoadRuntimeGroup[],
-  sample: readonly Readonly<{ entityId: string; counterpartyEntityId: string; height: number }>[],
+  sample: SettlementEvidenceResponse['pendingAccountSample'],
 ): Promise<void> => {
   for (const entry of sample.slice(0, 4)) {
     const group = load.find(candidate =>
@@ -308,11 +321,8 @@ const dumpStuckCounterpartyState = async (
       console.error(JSON.stringify({
         stuckDump: 'counterparty-view',
         counterparty: entry.counterpartyEntityId.slice(-8),
-        hubPendingHeight: entry.height,
-        userCurrentHeight: account?.currentHeight ?? null,
-        userCurrentStateHash: account?.currentStateHash ?? null,
-        userPendingFrame: account?.pendingFrame ?? null,
-        userPendingProposal: account?.pendingProposal ?? null,
+        hub: entry,
+        user: account ?? null,
       }));
     } catch (error) {
       console.error(JSON.stringify({
@@ -327,6 +337,93 @@ const dumpStuckCounterpartyState = async (
 const queuesBusy = (response: SettlementEvidenceResponse): boolean =>
   Object.values(response.queues).some(queue => queue.count > 0);
 
+export const waitForExpectedMatchedTrades = async (options: Readonly<{
+  hub: ConnectedRuntime;
+  hubBookEntityId: string;
+  tradeCountBefore: number;
+  expectedMatchedTrades: number;
+  startedAt: number;
+  timeoutMs?: number;
+  allowAdditionalTrades?: boolean;
+  acceptDrainedBelowTarget?: boolean;
+}>): Promise<Readonly<{ matchedTrades: number; matchedElapsedMs: number }>> => {
+  const deadline = performance.now() + (
+    options.timeoutMs ?? Number(process.env['XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS'] || 60_000)
+  );
+  const request: SettlementEvidenceRequest = {
+    type: 'settlement-evidence',
+    book: { entityId: options.hubBookEntityId, pairId: PRODUCTION_SWAP_LOAD_PAIR_ID },
+    accounts: [],
+  };
+  const target = options.tradeCountBefore + options.expectedMatchedTrades;
+  let matchedElapsedMs: number | null = null;
+  let lastTradeCount: number | undefined;
+  let lastLiveOrderCount: number | undefined;
+  while (performance.now() <= deadline) {
+    const evidence = await readEvidence(options.hub, request);
+    const tradeCount = evidence?.book?.tradeCount;
+    const tradeCountChanged = tradeCount !== undefined && tradeCount !== lastTradeCount;
+    lastLiveOrderCount = evidence?.book?.liveOrderCount ?? lastLiveOrderCount;
+    if (tradeCount !== undefined && tradeCount > target && !options.allowAdditionalTrades) {
+      throw new Error(`PRODUCTION_SWAP_LOAD_UNEXPECTED_CONCURRENT_TRADES:${tradeCount}:${target}`);
+    }
+    const targetReached = tradeCount !== undefined && (
+      options.allowAdditionalTrades ? tradeCount >= target : tradeCount === target
+    );
+    if (targetReached && (matchedElapsedMs === null || tradeCountChanged)) {
+      matchedElapsedMs = Math.max(1, Math.ceil(performance.now() - options.startedAt));
+    }
+    lastTradeCount = tradeCount ?? lastTradeCount;
+    const drained = evidence !== null && !queuesBusy(evidence);
+    if (drained && (targetReached || options.acceptDrainedBelowTarget)) {
+      matchedElapsedMs ??= Math.max(1, Math.ceil(performance.now() - options.startedAt));
+      return {
+        matchedTrades: (tradeCount ?? options.tradeCountBefore) - options.tradeCountBefore,
+        matchedElapsedMs,
+      };
+    }
+    await sleep(SETTLEMENT_POLL_WIDE_MS);
+  }
+  throw new Error(
+    `PRODUCTION_SWAP_LOAD_MATCH_TIMEOUT:actual=${String(lastTradeCount)}:target=${target}:` +
+    `liveOrders=${String(lastLiveOrderCount)}`,
+  );
+};
+
+export const waitForRestingMakerOffers = async (options: Readonly<{
+  hub: ConnectedRuntime;
+  hubBookEntityId: string;
+  pairs: readonly SettlementAccountPair[];
+  timeoutMs?: number;
+}>): Promise<void> => {
+  const deadline = performance.now() + (
+    options.timeoutMs ?? Number(process.env['XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS'] || 60_000)
+  );
+  const request = requestFor(options.pairs, 'hub', options.hubBookEntityId);
+  let lastEvidence: SettlementEvidenceResponse | null = null;
+  while (performance.now() <= deadline) {
+    const evidence = await readEvidence(options.hub, request);
+    lastEvidence = evidence ?? lastEvidence;
+    const ready = evidence?.accounts.length === options.pairs.length &&
+      evidence.accounts.every(account => account.offers.length === 1 &&
+        account.offers[0]?.offerCommitted === true && account.offers[0].live === true);
+    if (ready) return;
+    await sleep(SETTLEMENT_POLL_WIDE_MS);
+  }
+  const notReady = lastEvidence?.accounts.filter(account =>
+    account.offers.length !== 1 || account.offers[0]?.offerCommitted !== true ||
+    account.offers[0].live !== true) ?? [];
+  console.error('[load] maker rest timeout', safeStringify({
+    expected: options.pairs.length,
+    observed: lastEvidence?.accounts.length ?? 0,
+    ready: (lastEvidence?.accounts.length ?? 0) - notReady.length,
+    sample: notReady.slice(0, 5),
+    queues: lastEvidence?.queues ?? null,
+    pendingAccountSample: lastEvidence?.pendingAccountSample ?? null,
+  }));
+  throw new Error(`PRODUCTION_SWAP_LOAD_MAKER_REST_TIMEOUT:${options.pairs.length}`);
+};
+
 export const waitForFullySettledEvidence = async (options: {
   hub: ConnectedRuntime;
   load: readonly LoadRuntimeGroup[];
@@ -334,8 +431,12 @@ export const waitForFullySettledEvidence = async (options: {
   hubBookEntityId: string;
   pairs: readonly SettlementAccountPair[];
   tradeCountBefore: number;
-  expectedSwaps: number;
+  expectedSubmittedOffers: number;
+  expectedMatchedTrades: number;
+  expectedFullySettledOffers: number;
+  cancelledOffers: number;
   startedAt: number;
+  matchedElapsedMs?: number;
   timeoutMs?: number;
 }): Promise<ProductionSwapSettlementEvidence> => {
   const deadline = performance.now() + (
@@ -349,17 +450,18 @@ export const waitForFullySettledEvidence = async (options: {
   };
   let lastProgressAt = 0;
   let lastTradeCount = options.tradeCountBefore;
-  let matchedElapsedMs: number | null = null;
+  let matchedElapsedMs: number | null = options.matchedElapsedMs ?? null;
   let hubLiteLastSample: SettlementEvidenceResponse['pendingAccountSample'] = [];
+  let loadControlConnected = false;
   while (performance.now() <= deadline) {
-    const [hubLite, loadLite, marketMakerLite] = await Promise.all([
-      readEvidence(options.hub, hubLiteRequest),
-      readLoadLite(options.load),
-      readEvidence(options.marketMaker, EMPTY_ACCOUNTS_REQUEST),
-    ]);
+    // The Hub is the causal source for matching and every bilateral output.
+    // Poll it alone until matching and its queues drain. Fan-out reads across
+    // hundreds of sovereign user Runtimes during active settlement steal CPU
+    // from the very nodes under test and cannot prove completion any earlier.
+    const hubLite = await readEvidence(options.hub, hubLiteRequest);
     const liteBook = hubLite?.book;
     if (liteBook) {
-      const targetTradeCount = options.tradeCountBefore + options.expectedSwaps;
+      const targetTradeCount = options.tradeCountBefore + options.expectedMatchedTrades;
       if (liteBook.tradeCount > targetTradeCount) {
         throw new Error(
           `PRODUCTION_SWAP_LOAD_UNEXPECTED_CONCURRENT_TRADES:${liteBook.tradeCount}:${targetTradeCount}`,
@@ -376,16 +478,14 @@ export const waitForFullySettledEvidence = async (options: {
         matchedElapsedMs = Math.max(1, Math.ceil(performance.now() - options.startedAt));
       }
     }
-    if (hubLite === null || loadLite === null || marketMakerLite === null) {
+    if (hubLite === null) {
       const now = performance.now();
       if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
         console.error('[load] settlement evidence incomplete', JSON.stringify({
-          hub: hubLite !== null, load: loadLite !== null, marketMaker: marketMakerLite !== null,
+          hub: false,
           pairs: options.pairs.length, elapsedMs: Math.round(now - options.startedAt),
-          hubQueues: hubLite?.queues ?? null,
-          hubPendingSample: hubLite?.pendingAccountSample ?? null,
-          loadQueues: loadLite?.queues ?? null,
-          loadPendingSample: loadLite?.pendingAccountSample ?? null,
+          hubQueues: null,
+          hubPendingSample: null,
         }));
         lastProgressAt = now;
       }
@@ -393,7 +493,8 @@ export const waitForFullySettledEvidence = async (options: {
       await sleep(pollMs);
       continue;
     }
-    if (queuesBusy(hubLite) || queuesBusy(loadLite) || queuesBusy(marketMakerLite)) {
+    const targetTradeCount = options.tradeCountBefore + options.expectedMatchedTrades;
+    if (queuesBusy(hubLite) || liteBook?.tradeCount !== targetTradeCount) {
       hubLiteLastSample = hubLite.pendingAccountSample;
       const now = performance.now();
       if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
@@ -401,9 +502,33 @@ export const waitForFullySettledEvidence = async (options: {
           elapsedMs: Math.round(now - options.startedAt),
           hubQueues: hubLite.queues,
           hubPendingSample: hubLite.pendingAccountSample,
-          loadQueues: loadLite.queues,
-          loadPendingSample: loadLite.pendingAccountSample,
-          marketMakerQueues: marketMakerLite.queues,
+        }));
+        lastProgressAt = now;
+      }
+      if (now + pollMs > deadline) break;
+      await sleep(pollMs);
+      continue;
+    }
+    if (!loadControlConnected) {
+      // Sovereign users have no frontend during the measured phase. Their
+      // RuntimeAdapter control sockets are opened only after Hub matching and
+      // queue drain, when the auditor needs exact bilateral completion state.
+      await Promise.all(options.load.map(group => reconnectRuntimeControl(group.runtime)));
+      loadControlConnected = true;
+    }
+    const [loadLite, marketMakerLite] = await Promise.all([
+      readLoadLite(options.load),
+      readEvidence(options.marketMaker, EMPTY_ACCOUNTS_REQUEST),
+    ]);
+    if (loadLite === null || marketMakerLite === null ||
+      queuesBusy(loadLite) || queuesBusy(marketMakerLite)) {
+      const now = performance.now();
+      if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
+        console.error('[load] settlement peer queues busy', safeStringify({
+          elapsedMs: Math.round(now - options.startedAt),
+          loadQueues: loadLite?.queues ?? null,
+          loadPendingSample: loadLite?.pendingAccountSample ?? null,
+          marketMakerQueues: marketMakerLite?.queues ?? null,
         }));
         lastProgressAt = now;
       }
@@ -458,11 +583,15 @@ export const waitForFullySettledEvidence = async (options: {
     if (matchedElapsedMs === null) {
       throw new Error(
         `PRODUCTION_SWAP_LOAD_TRADE_NOT_COMMITTED:` +
-        `${options.tradeCountBefore + options.expectedSwaps}:reached=${book.tradeCount}`,
+        `${options.tradeCountBefore + options.expectedMatchedTrades}:reached=${book.tradeCount}`,
       );
     }
     const evidence: ProductionSwapSettlementEvidence = {
-      expectedSwaps: options.expectedSwaps,
+      expectedSubmittedOffers: options.expectedSubmittedOffers,
+      expectedMatchedTrades: options.expectedMatchedTrades,
+      expectedFullySettledOffers: options.expectedFullySettledOffers,
+      cancelledOffers: options.cancelledOffers,
+      stpOffers: accounts.reduce((sum, account) => sum + account.stpOfferIds.length, 0),
       tradeCountBefore: options.tradeCountBefore,
       tradeCountAfter: book.tradeCount,
       matchedElapsedMs,

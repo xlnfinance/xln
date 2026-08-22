@@ -57,4 +57,19 @@ describe('FinTS EntityFrame phase views', () => {
       `ENTITY_FRAME_CERTIFIED_PROOF_SHAPE_INVALID:${candidate.hash}`,
     );
   });
+
+  test('rejects duplicated secondary Hankos and a non-EntityFrame manifest head', () => {
+    const duplicated = frame();
+    duplicated.collectedSigs = new Map([['signer', ['signature']]]);
+    duplicated.hankos = ['frame-hanko', 'secondary-hanko'];
+    expect(hasCertifiedEntityFrameProofShape(duplicated)).toBe(false);
+
+    const wrongHead = frame();
+    wrongHead.collectedSigs = new Map([['signer', ['signature']]]);
+    wrongHead.hankos = ['frame-hanko'];
+    const manifestHead = wrongHead.hashesToSign[0];
+    if (!manifestHead) throw new Error('TEST_ENTITY_FRAME_MANIFEST_HEAD_MISSING');
+    wrongHead.hashesToSign[0] = { ...manifestHead, type: 'accountFrame' };
+    expect(hasCertifiedEntityFrameProofShape(wrongHead)).toBe(false);
+  });
 });

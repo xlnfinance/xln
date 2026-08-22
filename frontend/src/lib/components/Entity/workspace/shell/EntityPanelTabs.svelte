@@ -646,13 +646,18 @@ $: paymentView = displayProjectionFrame
       entityId: currentEntityValue || tab.entityId,
       replicas: activeReplicas,
       profiles: panelProfiles,
-      networkGraph: actionRuntimeEnv?.gossip?.getNetworkGraph?.() ?? null,
-    });
+    networkGraph: actionRuntimeEnv?.gossip?.getNetworkGraph?.() ?? null,
+  });
+$: swapActionReplicas = getRuntimeEnv(actionRuntimeEnv)?.state.eReplicas ?? activeReplicas;
 $: swapRuntimeView = buildSwapPanelRuntimeView({
   profiles: panelProfiles,
   networkProfiles: getGossipProfiles(actionRuntimeEnv),
   entityNames: panelView.entityNames,
-  replicas: activeReplicas,
+  // The compact display projection contains only the selected Entity. Cross-j
+  // route construction needs every locally owned sibling replica; embedded
+  // actions therefore read the live Runtime map while remote mode keeps using
+  // its validated projection.
+  replicas: swapActionReplicas,
 }) as SwapPanelRuntimeView;
 $: currentEntityValue = String(replica && replica.state ? replica.state.entityId || tab.entityId || "" : tab.entityId || "").trim();
 $: currentSignerId = (() => {

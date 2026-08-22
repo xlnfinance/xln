@@ -111,6 +111,44 @@ test('waitForCounterpartyRuntimeRoutes requires a gossip runtime id', async () =
   expect(hasCounterpartyRuntimeRoute(env as never, '0xabc')).toBe(true);
 });
 
+test('waitForCounterpartyRuntimeRoutes waits for the direct handshake before admitting output', async () => {
+  let directCalls = 0;
+  const env = {
+    gossip: {
+      getProfiles: () => [{ entityId: '0xabc', runtimeId: '0xruntime' }],
+    },
+    infrastructure: {
+      p2p: {
+        ensureProfiles: async () => true,
+        bootstrapDirectEntityRoutes: async (entityIds: string[]) => {
+          directCalls += 1;
+          expect(entityIds).toEqual(['0xabc']);
+          return true;
+        },
+      },
+    },
+  };
+
+  await expect(waitForCounterpartyRuntimeRoutes(env as never, ['0xabc'], 100)).resolves.toBe(true);
+  expect(directCalls).toBe(1);
+});
+
+test('waitForCounterpartyRuntimeRoutes rejects a profile whose direct handshake did not open', async () => {
+  const env = {
+    gossip: {
+      getProfiles: () => [{ entityId: '0xabc', runtimeId: '0xruntime' }],
+    },
+    infrastructure: {
+      p2p: {
+        ensureProfiles: async () => true,
+        bootstrapDirectEntityRoutes: async () => false,
+      },
+    },
+  };
+
+  await expect(waitForCounterpartyRuntimeRoutes(env as never, ['0xabc'], 100)).resolves.toBe(false);
+});
+
 test('waitForCounterpartyRuntimeRoutes rejects profiles without runtime routes', async () => {
   const env = {
     gossip: {

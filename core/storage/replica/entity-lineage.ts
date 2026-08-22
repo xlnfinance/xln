@@ -10,6 +10,7 @@ import {
 } from '../../entity/consensus';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { certifiedEntityFrameLinkFingerprint } from '../../entity/consensus/frame/lineage';
+import { committedEntityStateRoot } from '../../entity/state-clone';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
@@ -27,6 +28,7 @@ import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusC
 import type { RuntimeReplica } from '../../runtime/types';
 import { validateConsensusConfig } from '../../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
+import { requireCertifiedEntityFrameAfterQuorum } from '../../entity/consensus/frame/phase-views';
 import {
   getBoardHandoverFrameConfig,
   getBoardHandoverLeaderState,
@@ -246,6 +248,7 @@ const assertCertificateVariant = (
   preAuthority: EntityFrameAuthority,
 ): void => {
   const frame = assertFrameBody(entityId, link);
+  requireCertifiedEntityFrameAfterQuorum(frame);
   const signingConfig = assertLeaderTransition(env, entityId, link, preAuthority);
   const manifest = frame.hashesToSign!;
   const bundles = frame.collectedSigs;
@@ -1063,7 +1066,21 @@ export const buildRuntimeCheckpointLineagePlan = (
         authority: evidence!.authority,
         ...(evidence!.authorityEvidenceHash ? { authorityEvidenceHash: evidence!.authorityEvidenceHash } : {}),
       };
-      const { stateRoot, authorityRoot } = replicaStateCommitments(entry.replica.state);
+      // This is a hot pre-transition rebase, not a cold recovery audit. The
+      // exact committed root was already verified when its certified frame
+      // entered the Runtime and is carried by the head/anchor. Rebuilding the
+      // full Account radix here duplicated the next proposal's root seal and
+      // cost ~9% of Hub replay CPU. Recovery and storage admission retain the
+      // cold state-vs-certificate checks elsewhere in this module.
+      const stateRoot = genesisAnchor?.stateRoot
+        ?? committedEntityStateRoot(entry.replica)
+        // A newly imported validator may share another local replica's exact
+        // certified endpoint before it owns a head/anchor. It must prove its
+        // state once; ordinary committed replicas always take the O(1) path.
+        ?? computeCanonicalEntityConsensusStateHash(entry.replica.state);
+      const authorityRoot = computeEntityFrameAuthorityRoot(
+        buildEntityFrameAuthority(entry.replica.state),
+      );
       const anchorAuthorityRoot = computeEntityFrameAuthorityRoot(anchor.authority);
       if (stateRoot !== anchor.stateRoot || authorityRoot !== anchorAuthorityRoot) {
         throw new Error(

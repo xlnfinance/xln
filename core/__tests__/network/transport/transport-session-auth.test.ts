@@ -168,6 +168,34 @@ describe('bound websocket session authority', () => {
     expect(socket.sent).toHaveLength(0);
   });
 
+  test('post-handshake correlated errors retain delivery identity', async () => {
+    const errors: string[] = [];
+    const client = new RuntimeWsClient({
+      url: 'ws://unused.invalid',
+      runtimeId: CLIENT_RUNTIME_ID,
+      helloAudience: 'relay:test',
+      encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
+      onError: error => errors.push(error.message),
+    });
+    const internal = client as unknown as {
+      helloAcknowledged: boolean;
+      handleHandshakeMessage(message: RuntimeWsMessage): boolean;
+      handleApplicationMessage(message: RuntimeWsMessage): Promise<boolean>;
+    };
+    internal.helloAcknowledged = true;
+    const rejection: RuntimeWsMessage = {
+      type: 'error',
+      inReplyTo: 'account-output-7',
+      error: 'Direct delivery failed: Runtime rejected ACK H7',
+    };
+
+    expect(internal.handleHandshakeMessage(rejection)).toBe(false);
+    expect(await internal.handleApplicationMessage(rejection)).toBe(true);
+    expect(errors).toEqual([
+      'P2P_REMOTE_REJECTED:id=account-output-7:to=:reason=Direct delivery failed: Runtime rejected ACK H7',
+    ]);
+  });
+
   test('client refuses a challenge forwarded from another endpoint', async () => {
     const received: RuntimeWsMessage[] = [];
     const errors: string[] = [];
@@ -199,7 +227,6 @@ describe('bound websocket session authority', () => {
       signerId: '1',
       seed: CLIENT_SEED,
       encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
-      maxReconnectAttempts: 1,
       onError: error => errors.push(error.message),
     });
     clients.push(client);
@@ -365,7 +392,6 @@ describe('bound websocket session authority', () => {
       signerId: '1',
       seed: CLIENT_SEED,
       encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
-      maxReconnectAttempts: 1,
       onError: error => errors.push(error.message),
     });
     clients.push(client);

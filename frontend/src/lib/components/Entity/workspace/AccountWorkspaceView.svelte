@@ -413,6 +413,8 @@
       {confirmAndQueueDisputeFinalize}
       {confirmAndQueueDisputePrepare}
       {addTokenToAccount}
+      {paymentView}
+      {swapRuntimeView}
       {submitRuntimeInput}
     />
 

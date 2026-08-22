@@ -11,7 +11,11 @@ import {
 } from '../../../protocol/boundary-validation';
 
 export type ProductionSwapSettlementEvidence = Readonly<{
-  expectedSwaps: number;
+  expectedSubmittedOffers: number;
+  expectedMatchedTrades: number;
+  expectedFullySettledOffers: number;
+  cancelledOffers: number;
+  stpOffers: number;
   tradeCountBefore: number;
   tradeCountAfter: number;
   matchedElapsedMs: number;
@@ -28,6 +32,7 @@ type AccountSettlementEvidence = Readonly<{
   createdOfferIds: readonly string[];
   committedOfferIds: readonly string[];
   committedResolveIds: readonly string[];
+  stpOfferIds: readonly string[];
   liveOfferIds: readonly string[];
   pendingFrame: boolean;
   pendingProposal: boolean;
@@ -72,7 +77,7 @@ const decodeAccountEvidence = (value: unknown, index: number): AccountSettlement
   const account = requireBoundaryRecord(value, `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_INVALID:${index}`);
   requireExactBoundaryKeys(account, [
     'accountKey', 'createdOfferIds', 'committedOfferIds', 'committedResolveIds',
-    'liveOfferIds', 'pendingFrame', 'pendingProposal', 'mempoolTxs',
+    'liveOfferIds', 'stpOfferIds', 'pendingFrame', 'pendingProposal', 'mempoolTxs',
   ], [], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_FIELDS_INVALID:${index}`);
   return {
     accountKey: requireString(account['accountKey'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_KEY_INVALID:${index}`),
@@ -80,6 +85,7 @@ const decodeAccountEvidence = (value: unknown, index: number): AccountSettlement
     committedOfferIds: requireUniqueStrings(account['committedOfferIds'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_OFFERS_INVALID:${index}`),
     committedResolveIds: requireUniqueStrings(account['committedResolveIds'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_RESOLVES_INVALID:${index}`),
     liveOfferIds: requireUniqueStrings(account['liveOfferIds'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_LIVE_INVALID:${index}`),
+    stpOfferIds: requireUniqueStrings(account['stpOfferIds'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_STP_INVALID:${index}`),
     pendingFrame: requireBoolean(account['pendingFrame'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_FRAME_INVALID:${index}`),
     pendingProposal: requireBoolean(account['pendingProposal'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_PROPOSAL_INVALID:${index}`),
     mempoolTxs: requireBoundaryInteger(account['mempoolTxs'], `PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_MEMPOOL_INVALID:${index}`),
@@ -120,7 +126,8 @@ export const decodeProductionSwapSettlementEvidence = (
 ): ProductionSwapSettlementEvidence => {
   const evidence = requireBoundaryRecord(value, 'PRODUCTION_SWAP_SETTLEMENT_INVALID');
   requireExactBoundaryKeys(evidence, [
-    'expectedSwaps', 'tradeCountBefore', 'tradeCountAfter', 'matchedElapsedMs',
+    'expectedSubmittedOffers', 'expectedMatchedTrades', 'expectedFullySettledOffers',
+    'cancelledOffers', 'stpOffers', 'tradeCountBefore', 'tradeCountAfter', 'matchedElapsedMs',
     'fullySettledElapsedMs', 'createdOfferIds', 'accounts', 'runtimes',
     'bestBidPriceTicks', 'bestAskPriceTicks',
   ], [], 'PRODUCTION_SWAP_SETTLEMENT_FIELDS_INVALID');
@@ -128,7 +135,27 @@ export const decodeProductionSwapSettlementEvidence = (
     throw new Error('PRODUCTION_SWAP_SETTLEMENT_COLLECTIONS_INVALID');
   }
   return {
-    expectedSwaps: requireBoundaryInteger(evidence['expectedSwaps'], 'PRODUCTION_SWAP_SETTLEMENT_EXPECTED_INVALID', 1),
+    expectedSubmittedOffers: requireBoundaryInteger(
+      evidence['expectedSubmittedOffers'],
+      'PRODUCTION_SWAP_SETTLEMENT_SUBMITTED_INVALID',
+      1,
+    ),
+    expectedMatchedTrades: requireBoundaryInteger(
+      evidence['expectedMatchedTrades'],
+      'PRODUCTION_SWAP_SETTLEMENT_MATCHED_INVALID',
+      1,
+    ),
+    expectedFullySettledOffers: requireBoundaryInteger(
+      evidence['expectedFullySettledOffers'],
+      'PRODUCTION_SWAP_SETTLEMENT_FULLY_SETTLED_INVALID',
+      1,
+    ),
+    cancelledOffers: requireBoundaryInteger(
+      evidence['cancelledOffers'],
+      'PRODUCTION_SWAP_SETTLEMENT_CANCELLED_INVALID',
+      0,
+    ),
+    stpOffers: requireBoundaryInteger(evidence['stpOffers'], 'PRODUCTION_SWAP_SETTLEMENT_STP_INVALID', 0),
     tradeCountBefore: requireBoundaryInteger(evidence['tradeCountBefore'], 'PRODUCTION_SWAP_SETTLEMENT_TRADE_BEFORE_INVALID'),
     tradeCountAfter: requireBoundaryInteger(evidence['tradeCountAfter'], 'PRODUCTION_SWAP_SETTLEMENT_TRADE_AFTER_INVALID'),
     matchedElapsedMs: requireBoundaryInteger(evidence['matchedElapsedMs'], 'PRODUCTION_SWAP_SETTLEMENT_MATCHED_TIME_INVALID', 1),
@@ -147,11 +174,21 @@ const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
 export const assertProductionSwapFullySettled = (
   evidence: ProductionSwapSettlementEvidence,
 ): ProductionSwapSettlementRates => {
-  if (evidence.tradeCountAfter - evidence.tradeCountBefore !== evidence.expectedSwaps) {
+  if (evidence.tradeCountAfter - evidence.tradeCountBefore !== evidence.expectedMatchedTrades) {
     throw new Error('PRODUCTION_SWAP_SETTLEMENT_TRADE_DELTA_MISMATCH');
   }
-  if (evidence.createdOfferIds.length < evidence.expectedSwaps) {
+  if (evidence.createdOfferIds.length !== evidence.expectedSubmittedOffers) {
     throw new Error('PRODUCTION_SWAP_SETTLEMENT_CREATED_COUNT_INVALID');
+  }
+  if (evidence.expectedFullySettledOffers !== evidence.expectedSubmittedOffers) {
+    throw new Error('PRODUCTION_SWAP_SETTLEMENT_FULLY_SETTLED_COUNT_INVALID');
+  }
+  if (evidence.cancelledOffers > evidence.expectedSubmittedOffers) {
+    throw new Error('PRODUCTION_SWAP_SETTLEMENT_CANCELLED_COUNT_INVALID');
+  }
+  const stpOfferIds = evidence.accounts.flatMap(account => account.stpOfferIds);
+  if (new Set(stpOfferIds).size !== stpOfferIds.length || stpOfferIds.length !== evidence.stpOffers) {
+    throw new Error('PRODUCTION_SWAP_SETTLEMENT_STP_COUNT_INVALID');
   }
   const accountIds = evidence.accounts.flatMap(account => account.createdOfferIds);
   if (!sameIds(evidence.createdOfferIds, accountIds) || new Set(accountIds).size !== accountIds.length) {
@@ -161,6 +198,9 @@ export const assertProductionSwapFullySettled = (
     if (!sameIds(account.createdOfferIds, account.committedOfferIds) ||
       !sameIds(account.createdOfferIds, account.committedResolveIds)) {
       throw new Error(`PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_COMMIT_INCOMPLETE:${account.accountKey}`);
+    }
+    if (account.stpOfferIds.some(id => !account.committedResolveIds.includes(id))) {
+      throw new Error(`PRODUCTION_SWAP_SETTLEMENT_STP_NOT_RESOLVED:${account.accountKey}`);
     }
     if (account.liveOfferIds.length || account.pendingFrame || account.pendingProposal || account.mempoolTxs) {
       throw new Error(`PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_NOT_DRAINED:${account.accountKey}`);
@@ -184,7 +224,7 @@ export const assertProductionSwapFullySettled = (
     throw new Error('PRODUCTION_SWAP_SETTLEMENT_TIMING_ORDER_INVALID');
   }
   return {
-    matchedTps: evidence.expectedSwaps * 1_000 / evidence.matchedElapsedMs,
-    fullySettledTps: evidence.expectedSwaps * 1_000 / evidence.fullySettledElapsedMs,
+    matchedTps: evidence.expectedMatchedTrades * 1_000 / evidence.matchedElapsedMs,
+    fullySettledTps: evidence.expectedFullySettledOffers * 1_000 / evidence.fullySettledElapsedMs,
   };
 };

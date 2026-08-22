@@ -21,6 +21,7 @@ import { deriveForwardHtlcLockId } from '../../../../protocol/htlc/utils';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { hasInboundHtlcRoute } from '../../../htlc/route-views';
 import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
+import { countOp } from '../../../../support/performance/op-counters';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -96,6 +97,7 @@ const applyPreparedHtlcOutcome = (
     ctx.accountTxs.push({ accountId: inboundEntity, tx: {
       type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'error', reason },
     } });
+    countOp(`htlc.inbound.reject.${reason}`);
     return;
   }
   if (prepared.outcome.kind === 'final') {
@@ -114,6 +116,7 @@ const applyPreparedHtlcOutcome = (
     ctx.accountTxs.push({ accountId: inboundEntity, tx: {
       type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: prepared.outcome.secret },
     } });
+    countOp('htlc.inbound.final');
     return;
   }
   const outboundLockId = deriveForwardHtlcLockId(lock.lockId);
@@ -124,6 +127,11 @@ const applyPreparedHtlcOutcome = (
     pendingFee: lock.amount - prepared.outcome.forwardAmount,
     createdTimestamp: ctx.newState.timestamp,
   });
+  ctx.candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcForwardAccepted',
+    data: { entityId: ctx.newState.entityId, hashlock: lock.hashlock },
+  });
   ctx.accountTxs.push({ accountId: prepared.outcome.nextHopEntityId, tx: { type: 'htlc_lock', data: {
     lockId: outboundLockId, hashlock: lock.hashlock, tokenId: lock.tokenId,
     amount: prepared.outcome.forwardAmount,
@@ -131,6 +139,7 @@ const applyPreparedHtlcOutcome = (
     revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
     envelope: prepared.outcome.innerEnvelope,
   } } });
+  countOp('htlc.inbound.forward');
 };
 
 /**

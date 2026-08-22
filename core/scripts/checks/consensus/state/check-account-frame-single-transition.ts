@@ -38,8 +38,21 @@ if (callsNamed(validation, 'commitAccountTransition').length !== 1) {
 }
 
 const collisionReplayCalls = callsNamed(source, 'reexecuteIncomingFrame');
-if (collisionReplayCalls.length !== 1) {
-  throw new Error(`ACCOUNT_RECEIVER_COLLISION_REPLAY_COUNT:${collisionReplayCalls.length}`);
+if (collisionReplayCalls.length !== 0) {
+  throw new Error(`ACCOUNT_RECEIVER_COLLISION_REEXECUTION_FORBIDDEN:${collisionReplayCalls.length}`);
+}
+if (callsNamed(commit, 'publishAccountOverlay').length !== 1) {
+  throw new Error('ACCOUNT_RECEIVER_PREPARED_OVERLAY_PUBLISH_REQUIRED');
+}
+if (!text.includes('ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH')) {
+  throw new Error('ACCOUNT_RECEIVER_PREPARED_OVERLAY_IDENTITY_GUARD_REQUIRED');
+}
+const incoming = findFunction('handleIncomingAccountFrame');
+if (
+  callsNamed(incoming, 'applySameHeightIncomingFrameRollback').length !== 1
+  || callsNamed(incoming, 'commitIncomingFrameOnRealState').length !== 1
+) {
+  throw new Error('ACCOUNT_RECEIVER_COLLISION_PREPARED_COMMIT_PATH_INVALID');
 }
 
 const requireSource = (path: string): ts.SourceFile => {

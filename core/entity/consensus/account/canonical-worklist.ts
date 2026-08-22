@@ -1,9 +1,48 @@
 import { compareStableText } from '../../../protocol/serialization';
 
-export type CanonicalAccountWorklist = Readonly<{
-  add(accountId: string): boolean;
-  take(): string | undefined;
+/**
+ * One frame-local Account work authority.
+ *
+ * `true` means the Account transition owes a peer response even when its
+ * mempool is empty. The response bytes never live here: the AccountReplica is
+ * the sole authority for its pending proposal or last outbound ACK.
+ */
+export type ProposableAccountMap = Map<string, boolean>;
+
+type CanonicalAccountWork = Readonly<{
+  accountId: string;
+  force: boolean;
 }>;
+
+export type CanonicalAccountWorklist = Readonly<{
+  add(accountId: string, force?: boolean): boolean;
+  take(): CanonicalAccountWork | undefined;
+}>;
+
+const normalizeAccountId = (accountId: string): string => accountId.toLowerCase();
+
+/** Normal work must never erase an already mandatory peer response. */
+export const markProposableAccount = (
+  accounts: ProposableAccountMap,
+  accountId: string,
+  force = false,
+): void => {
+  const key = normalizeAccountId(accountId);
+  accounts.set(key, Boolean(accounts.get(key)) || force);
+};
+
+/**
+ * Ordered peer inputs may supersede an earlier obligation in the same Entity
+ * frame. In particular, a pure ACK commits our pending proposal and must clear
+ * `force` so the final flush cannot create an ACK loop.
+ */
+export const setProposableAccountForce = (
+  accounts: ProposableAccountMap,
+  accountId: string,
+  force: boolean,
+): void => {
+  accounts.set(normalizeAccountId(accountId), force);
+};
 
 /**
  * Deterministic Account work queue for one Entity frame.
@@ -14,30 +53,40 @@ export type CanonicalAccountWorklist = Readonly<{
  * the order produced by repeatedly sorting the remaining Set.
  */
 export const createCanonicalAccountWorklist = (
-  accountIds: Iterable<string>,
+  accounts: ReadonlyMap<string, boolean>,
 ): CanonicalAccountWorklist => {
-  const queue = [...new Set(accountIds)].sort(compareStableText);
+  const forced = new Map(
+    [...accounts].map(([accountId, force]) => [normalizeAccountId(accountId), force] as const),
+  );
+  const queue = [...forced.keys()].sort(compareStableText);
   const scheduled = new Set(queue);
   let cursor = 0;
 
   return Object.freeze({
-    add(accountId: string): boolean {
-      if (scheduled.has(accountId)) return false;
-      scheduled.add(accountId);
+    add(accountId: string, force = false): boolean {
+      const key = normalizeAccountId(accountId);
+      if (scheduled.has(key)) {
+        if (force) forced.set(key, true);
+        return false;
+      }
+      scheduled.add(key);
+      forced.set(key, force);
       let low = cursor;
       let high = queue.length;
       while (low < high) {
         const middle = low + Math.floor((high - low) / 2);
-        if (compareStableText(queue[middle]!, accountId) <= 0) low = middle + 1;
+        if (compareStableText(queue[middle]!, key) <= 0) low = middle + 1;
         else high = middle;
       }
-      queue.splice(low, 0, accountId);
+      queue.splice(low, 0, key);
       return true;
     },
-    take(): string | undefined {
+    take(): CanonicalAccountWork | undefined {
       const accountId = queue[cursor];
       if (accountId !== undefined) cursor += 1;
-      return accountId;
+      return accountId === undefined
+        ? undefined
+        : { accountId, force: forced.get(accountId) === true };
     },
   });
 };

@@ -357,7 +357,8 @@ describe('swap panel helpers', () => {
     expect(tabs).toContain('profiles: panelProfiles');
     expect(tabs).toContain('networkProfiles: getGossipProfiles(actionRuntimeEnv)');
     expect(tabs).toContain('entityNames: panelView.entityNames');
-    expect(tabs).toContain('replicas: activeReplicas');
+    expect(tabs).toContain('swapActionReplicas = getRuntimeEnv(actionRuntimeEnv)?.state.eReplicas ?? activeReplicas');
+    expect(tabs).toContain('replicas: swapActionReplicas');
   });
 
   test('SwapPanel remote swap actions submit through projection-backed command paths', async () => {

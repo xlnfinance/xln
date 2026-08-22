@@ -6,11 +6,14 @@
 
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { findAccountByCounterparty } from '../../../account/state/account-lookup';
+import { isLeftEntity } from '../../../account/utils';
+import { accountInputAck, accountInputProposal } from '../../../account/consensus/flush';
 import { getEntityReplicaById } from '../../../entity/replica/replica-lookup';
 import { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { AccountFrame } from '../../../types/account';
+import { RuntimeAdapterError } from '../errors';
 import {
   buildSettlementBookEvidence,
   decodeSettlementBookEvidence,
@@ -40,6 +43,7 @@ type OfferEvidence = Readonly<{
   offerId: string;
   offerCommitted: boolean;
   resolveCommitted: boolean;
+  stpCommitted: boolean;
   live: boolean;
   closed: boolean;
 }>;
@@ -47,7 +51,19 @@ type OfferEvidence = Readonly<{
 type PendingAccountSample = Readonly<{
   entityId: string;
   counterpartyEntityId: string;
+  localIsLeft: boolean;
+  currentHeight: number;
+  currentStateHash: string;
   height: number;
+  pendingFrameHash: string;
+  pendingFrameTxCount: number;
+  pendingInputKind: 'frame' | 'frame_ack';
+  pendingAckHeight: number | null;
+  pendingProposalHeight: number;
+  lastOutboundAckHeight: number | null;
+  rollbackCount: number;
+  lastRollbackFrameHash: string | null;
+  mempoolCount: number;
 }>;
 
 export type SettlementEvidenceResponse = Readonly<{
@@ -143,10 +159,31 @@ const pendingAccountFrameSnapshot = (
       if (!account.pendingFrame) continue;
       count += 1;
       if (sample.length < MAX_PENDING_ACCOUNT_SAMPLE) {
+        const pendingInput = account.pendingAccountInput;
+        const pendingProposal = pendingInput ? accountInputProposal(pendingInput) : undefined;
+        if (!pendingInput || !pendingProposal) {
+          throw new Error(
+            `SETTLEMENT_PENDING_INPUT_INVARIANT:${replica.state.entityId}:${counterpartyEntityId}:` +
+            `height=${account.pendingFrame.height}`,
+          );
+        }
+        const pendingAck = accountInputAck(pendingInput);
         sample.push({
           entityId: replica.state.entityId,
           counterpartyEntityId,
+          localIsLeft: isLeftEntity(replica.state.entityId, counterpartyEntityId),
+          currentHeight: account.currentHeight,
+          currentStateHash: account.currentFrame.stateHash,
           height: account.pendingFrame.height,
+          pendingFrameHash: account.pendingFrame.stateHash,
+          pendingFrameTxCount: account.pendingFrame.accountTxs.length,
+          pendingInputKind: pendingInput.kind,
+          pendingAckHeight: pendingAck ? pendingAck.height : null,
+          pendingProposalHeight: pendingProposal.frame.height,
+          lastOutboundAckHeight: account.lastOutboundFrameAck?.height ?? null,
+          rollbackCount: account.rollbackCount,
+          lastRollbackFrameHash: account.lastRollbackFrameHash ?? null,
+          mempoolCount: account.mempool.length,
         });
       }
     }
@@ -157,18 +194,22 @@ const pendingAccountFrameSnapshot = (
 const committedOfferFlags = (
   frames: readonly AccountFrame[],
   offerId: string,
-): Readonly<{ offerCommitted: boolean; resolveCommitted: boolean }> => {
+): Readonly<{ offerCommitted: boolean; resolveCommitted: boolean; stpCommitted: boolean }> => {
   let offerCommitted = false;
   let resolveCommitted = false;
+  let stpCommitted = false;
   for (const frame of frames) {
     for (const tx of frame.accountTxs) {
       if (tx.type === 'swap_offer' && tx.data.offerId === offerId) offerCommitted = true;
       if ((tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack') && tx.data.offerId === offerId) {
         resolveCommitted = true;
       }
+      if (tx.type === 'swap_resolve' && tx.data.offerId === offerId && tx.data.comment?.startsWith('STP:')) {
+        stpCommitted = true;
+      }
     }
   }
-  return { offerCommitted, resolveCommitted };
+  return { offerCommitted, resolveCommitted, stpCommitted };
 };
 
 const accountEvidence = async (
@@ -183,6 +224,17 @@ const accountEvidence = async (
   if (!account) throw new Error(`RADAPTER_SETTLEMENT_ACCOUNT_NOT_FOUND:${request.entityId}:${request.counterpartyEntityId}`);
   const frames = await readAccountFrames(env, request.entityId, request.counterpartyEntityId, 1_000);
   const certifiedHead = frames.at(-1);
+  if (certifiedHead && certifiedHead.height < account.currentHeight) {
+    // Runtime admin deliberately reads immutable history before taking the
+    // short committed-State lease. A commit between those two snapshots makes
+    // the history stale, never authoritative. Tell the caller to observe again;
+    // equal-height hash disagreement and history-ahead remain hard failures.
+    throw new RuntimeAdapterError(
+      'E_INTERNAL',
+      `RADAPTER_SETTLEMENT_CERTIFIED_HEAD_BEHIND:${request.entityId}:${request.counterpartyEntityId}`,
+      true,
+    );
+  }
   if (!certifiedHead || certifiedHead.height !== account.currentHeight ||
     certifiedHead.stateHash !== account.currentFrame.stateHash) {
     throw new Error(`RADAPTER_SETTLEMENT_CERTIFIED_HEAD_MISMATCH:${request.entityId}:${request.counterpartyEntityId}`);
@@ -264,14 +316,15 @@ const decodeResponseAccount = (value: unknown, index: number): SettlementEvidenc
   if (typeof currentStateHash !== 'string' || !HASH.test(currentStateHash)) throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_ROOT_INVALID:${index}`);
   const offers = account['offers'].map((raw, offerIndex) => {
     const offer = requireBoundaryRecord(raw, `RADAPTER_SETTLEMENT_RESPONSE_OFFER_INVALID:${index}:${offerIndex}`);
-    requireExactBoundaryKeys(offer, ['offerId', 'offerCommitted', 'resolveCommitted', 'live', 'closed'], [], `RADAPTER_SETTLEMENT_RESPONSE_OFFER_FIELDS_INVALID:${index}:${offerIndex}`);
-    for (const field of ['offerCommitted', 'resolveCommitted', 'live', 'closed'] as const) {
+    requireExactBoundaryKeys(offer, ['offerId', 'offerCommitted', 'resolveCommitted', 'stpCommitted', 'live', 'closed'], [], `RADAPTER_SETTLEMENT_RESPONSE_OFFER_FIELDS_INVALID:${index}:${offerIndex}`);
+    for (const field of ['offerCommitted', 'resolveCommitted', 'stpCommitted', 'live', 'closed'] as const) {
       if (typeof offer[field] !== 'boolean') throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_OFFER_FLAG_INVALID:${index}:${offerIndex}`);
     }
     return {
       offerId: requireOfferId(offer['offerId'], `RADAPTER_SETTLEMENT_RESPONSE_OFFER_ID_INVALID:${index}:${offerIndex}`),
       offerCommitted: offer['offerCommitted'] === true,
       resolveCommitted: offer['resolveCommitted'] === true,
+      stpCommitted: offer['stpCommitted'] === true,
       live: offer['live'] === true,
       closed: offer['closed'] === true,
     };
@@ -297,17 +350,59 @@ const decodePendingAccountSample = (value: unknown): SettlementEvidenceResponse[
     const entry = requireBoundaryRecord(raw, `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ENTRY_INVALID:${index}`);
     requireExactBoundaryKeys(
       entry,
-      ['entityId', 'counterpartyEntityId', 'height'],
+      [
+        'entityId', 'counterpartyEntityId', 'localIsLeft', 'currentHeight', 'currentStateHash',
+        'height', 'pendingFrameHash', 'pendingFrameTxCount', 'pendingInputKind', 'pendingAckHeight',
+        'pendingProposalHeight', 'lastOutboundAckHeight', 'rollbackCount', 'lastRollbackFrameHash',
+        'mempoolCount',
+      ],
       [],
       `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_FIELDS_INVALID:${index}`,
     );
+    const requireHash = (field: 'currentStateHash' | 'pendingFrameHash'): string => {
+      const hash = entry[field];
+      if (typeof hash !== 'string' || !HASH.test(hash)) {
+        throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_${field.toUpperCase()}_INVALID:${index}`);
+      }
+      return hash;
+    };
+    const requireNullableHeight = (field: 'pendingAckHeight' | 'lastOutboundAckHeight'): number | null =>
+      entry[field] === null
+        ? null
+        : requireBoundaryInteger(
+            entry[field],
+            `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_${field.toUpperCase()}_INVALID:${index}`,
+          );
+    const rollbackHash = entry['lastRollbackFrameHash'];
+    if (rollbackHash !== null && (typeof rollbackHash !== 'string' || !HASH.test(rollbackHash))) {
+      throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ROLLBACK_HASH_INVALID:${index}`);
+    }
+    const pendingInputKind = entry['pendingInputKind'];
+    if (pendingInputKind !== 'frame' && pendingInputKind !== 'frame_ack') {
+      throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_INPUT_KIND_INVALID:${index}`);
+    }
+    if (typeof entry['localIsLeft'] !== 'boolean') {
+      throw new Error(`RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_SIDE_INVALID:${index}`);
+    }
     return {
       entityId: requireEntityId(entry['entityId'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ENTITY_INVALID:${index}`),
       counterpartyEntityId: requireEntityId(
         entry['counterpartyEntityId'],
         `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_COUNTERPARTY_INVALID:${index}`,
       ),
+      localIsLeft: entry['localIsLeft'],
+      currentHeight: requireBoundaryInteger(entry['currentHeight'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_CURRENT_HEIGHT_INVALID:${index}`),
+      currentStateHash: requireHash('currentStateHash'),
       height: requireBoundaryInteger(entry['height'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_HEIGHT_INVALID:${index}`),
+      pendingFrameHash: requireHash('pendingFrameHash'),
+      pendingFrameTxCount: requireBoundaryInteger(entry['pendingFrameTxCount'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_TX_COUNT_INVALID:${index}`),
+      pendingInputKind,
+      pendingAckHeight: requireNullableHeight('pendingAckHeight'),
+      pendingProposalHeight: requireBoundaryInteger(entry['pendingProposalHeight'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_PROPOSAL_HEIGHT_INVALID:${index}`),
+      lastOutboundAckHeight: requireNullableHeight('lastOutboundAckHeight'),
+      rollbackCount: requireBoundaryInteger(entry['rollbackCount'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ROLLBACK_COUNT_INVALID:${index}`),
+      lastRollbackFrameHash: rollbackHash,
+      mempoolCount: requireBoundaryInteger(entry['mempoolCount'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_MEMPOOL_COUNT_INVALID:${index}`),
     };
   });
 };

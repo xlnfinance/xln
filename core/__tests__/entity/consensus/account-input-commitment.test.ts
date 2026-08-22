@@ -151,21 +151,6 @@ test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle 
   expect(entityHash([frameInput(changed)])).not.toBe(entityHash([frameInput(frame)]));
 });
 
-test('local kind:txs bodies remain in the Entity frame digest', () => {
-  const tx = (amount: bigint): EntityTx => ({
-    type: 'accountInput',
-    data: {
-      kind: 'txs',
-      fromEntityId: ENTITY,
-      toEntityId: PEER,
-      domain: { chainId: 1, depositoryAddress: `0x${'cc'.repeat(20)}` },
-      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      txs: [{ type: 'direct_payment', data: { tokenId: 1, amount, nonce: 'p1' } }],
-    },
-  } as EntityTx);
-  expect(entityHash([tx(1n)])).not.toBe(entityHash([tx(2n)]));
-});
-
 test('commitment encoding of 100 fat frames stays off the nested offer bytes', async () => {
   const frames = await Promise.all(Array.from({ length: 100 }, (_, i) => makeFrame(`offer-${i}`)));
   const txs = frames.map(frame => frameInput(frame));

@@ -90,7 +90,6 @@ describe('direct runtime session keys', () => {
       seed: CLIENT_SEED,
       encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
       getTargetEncryptionKey: () => serverEncryptionKey,
-      maxReconnectAttempts: 1,
       onError: error => errors.push(error.message),
       onEntityInputs: (from, envelope) => {
         clientReceived.push({ from, envelope });

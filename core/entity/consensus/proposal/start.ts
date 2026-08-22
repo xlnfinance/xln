@@ -1,5 +1,8 @@
 import { signAccountFrame } from '../../../account/crypto';
-import { assertEntityConfigBoardAuthority, signEntityHashes } from '../../../hanko/signing';
+import {
+  assertEntityConfigBoardAuthority,
+  encodeSingleSignerEntityHankos,
+} from '../../../hanko/signing';
 import { shortHash, shortId } from '../../../support/logger';
 import { assertFrameJPrefix } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import {
@@ -9,7 +12,11 @@ import {
 import type { EntityReplica, EntityState, EntityFrame, EntityCandidate } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
-import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from '../frame';
+import type { HankoString } from '../../../types/hanko';
+import {
+  createEntityFrameHashFromStateRoot,
+  entityFrameEventsEqual,
+} from '../frame';
 import { applyEntityFrame, applyRuntimeOwnedEntityFrame } from '../frame/application';
 import { copyProposableAccounts } from '../account/touched-accounts';
 import {
@@ -38,7 +45,9 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
-import { fitEntityProposalToWireBudget, recordEntityWireBudgetFitHint } from './wire-budget';
+import { fitEntityProposalToWireBudget } from './wire-budget';
+import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
+import { countOp } from '../../../support/performance/op-counters';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases, timePerfPhase } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
@@ -313,6 +322,12 @@ type PreparedEntityProposal = Readonly<{
   jPrefixCertificate: EntityFrame['jPrefixCertificate'] | undefined;
 }>;
 
+type SealedEntityProposal = Readonly<{
+  frame: EntityFrame;
+  /** Full secondary proof material lives only across this local commit call. */
+  localCommitHankos?: readonly HankoString[];
+}>;
+
 const fitAndApplyEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
@@ -332,6 +347,12 @@ const fitAndApplyEntityProposal = async (
     proposalTxs,
     jPrefixCertificate: proposalJPrefixCertificate ?? undefined,
     usePersistedReplayContext: context.usePersistedReplayContext,
+    ...(selection.proposalSelection.wirePrefixMeter
+      ? { wirePrefixMeter: selection.proposalSelection.wirePrefixMeter }
+      : {}),
+    ...(selection.requiredTxPrefixCount !== undefined
+      ? { requiredPrefixCount: selection.requiredTxPrefixCount }
+      : {}),
   });
   if (fitted.txs.length !== selection.proposalTxs.length) selection.proposalTxs = fitted.txs;
   profile.checkpoint('wireFit');
@@ -370,7 +391,7 @@ const sealEntityProposal = async (
   selection: EntityProposalSelection,
   prepared: PreparedEntityProposal,
   profile: ProposalProfile,
-): Promise<EntityFrame> => {
+): Promise<SealedEntityProposal> => {
   const { env, workingReplica } = context;
   const { txs, entityContext, applied, leader, jPrefixCertificate } = prepared;
   const height = workingReplica.state.height + 1;
@@ -387,6 +408,13 @@ const sealEntityProposal = async (
     parentFrameHash, height, timestamp, txs, applied.events, state.entityId,
     stateRoot, authorityRoot, entityContext, jPrefixCertificate,
   );
+  const replayOracle = env.infrastructure?.replayEntityProposalOracle;
+  if (replayOracle && context.usePersistedReplayContext) {
+    const expected = requireEntityProposalReplayOracleEntry(replayOracle, workingReplica.entityId, height);
+    if (frameHash !== expected.frameHash) {
+      throw new Error(`HLT_ENTITY_PROPOSAL_ORACLE_FRAME_HASH_MISMATCH:${height}:${expected.frameHash}:${frameHash}`);
+    }
+  }
   profile.checkpoint('frameHash');
   const outputHashes = buildCertifiedEntityOutputHashes(state, env, height, frameHash, applied.outputs);
   profile.checkpoint('outputHashes');
@@ -403,25 +431,34 @@ const sealEntityProposal = async (
     ...(workingReplica.pendingLeaderCertificate ? { certificate: workingReplica.pendingLeaderCertificate } : {}),
   };
   const sealedContext = selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame';
-  assertEstimatedSealedEntityFrameWire({
+  const estimatedWireBytes = assertEstimatedSealedEntityFrameWire({
     height, parentFrameHash, stateRoot, authorityRoot, entityContext,
     txs: [...txs], events: applied.events, hash: frameHash, timestamp,
     leader: leaderBody,
     ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     hashesToSign,
   }, workingReplica.signerId, selection.isSingleSigner, sealedContext);
+  countOp('entity.frame.sealed', estimatedWireBytes);
+  countOp(`entity.frame.txs.${
+    txs.length === 0 ? '0' : txs.length === 1 ? '1' : txs.length < 8 ? '2-7'
+      : txs.length < 32 ? '8-31' : txs.length < 128 ? '32-127' : '128+'
+  }`);
   profile.checkpoint('wireEstimate');
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
   profile.checkpoint('manifestSignatures');
-  const hankos = selection.isSingleSigner
-    ? await signEntityHashes(
+  const localCommitHankos = selection.isSingleSigner
+    ? encodeSingleSignerEntityHankos(
         env,
         workingReplica.state.entityId,
         workingReplica.signerId,
-        hashesToSign.map(hashInfo => hashInfo.hash),
+        selfSigs,
         state,
       )
     : undefined;
+  const entityFrameHanko = localCommitHankos?.[0];
+  if (selection.isSingleSigner && !entityFrameHanko) {
+    throw new Error(`LOCAL_ENTITY_FRAME_HANKO_MISSING:${height}:${frameHash}`);
+  }
   profile.checkpoint('hankoEncoding');
   const frame: EntityFrame = {
     height, parentFrameHash, stateRoot, authorityRoot, entityContext,
@@ -430,7 +467,7 @@ const sealEntityProposal = async (
     ...(jPrefixCertificate ? { jPrefixCertificate: structuredClone(jPrefixCertificate) } : {}),
     hashesToSign,
     collectedSigs: new Map([[workingReplica.signerId.toLowerCase(), selfSigs]]),
-    ...(hankos ? { hankos } : {}),
+    ...(entityFrameHanko ? { hankos: [entityFrameHanko] } : {}),
   };
   // This is the owning constructor, not an untrusted wire boundary. The body
   // was already canonically encoded and bounded by createEntityFrameHash*, and
@@ -438,9 +475,11 @@ const sealEntityProposal = async (
   // signature and a larger-than-canonical single-signer Hanko. Re-decoding the
   // object here encoded the multi-megabyte frame twice more per proposal.
   // Remote/recovered frames still use validateProposedEntityFrame at ingress.
-  recordEntityWireBudgetFitHint(env, workingReplica, frame.txs.length);
   storeCandidate(workingReplica, applied, state, frameHash, hashesToSign, authority);
-  return frame;
+  return {
+    frame,
+    ...(localCommitHankos ? { localCommitHankos } : {}),
+  };
 };
 
 /**
@@ -453,7 +492,7 @@ const buildEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   profile: ProposalProfile,
-): Promise<EntityFrame | null> => {
+): Promise<SealedEntityProposal | null> => {
   const prepared = await fitAndApplyEntityProposal(context, selection, profile);
   return prepared ? sealEntityProposal(context, selection, prepared, profile) : null;
 };
@@ -477,7 +516,7 @@ const buildEntityProposalEvictingRejected = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   profile: ProposalProfile,
-): Promise<EntityFrame | null> => {
+): Promise<SealedEntityProposal | null> => {
   for (let round = 0; round <= selection.proposalTxs.length; round += 1) {
     try {
       return await buildEntityProposal(context, selection, profile);
@@ -567,8 +606,9 @@ export const startEntityProposalIfReady = async (
     txs: selection.proposalTxs.map(tx => tx.type),
   });
   const priorState = workingReplica.state;
-  const frame = await buildEntityProposalEvictingRejected(context, selection, profile);
-  if (!frame) return null;
+  const sealed = await buildEntityProposalEvictingRejected(context, selection, profile);
+  if (!sealed) return null;
+  const { frame } = sealed;
   const candidate = workingReplica.candidate;
   if (!candidate) throw new Error('ENTITY_PROPOSAL_CANDIDATE_MISSING');
   if (selection.isSingleSigner) {
@@ -577,6 +617,7 @@ export const startEntityProposalIfReady = async (
     const handoverConfig = getBoardHandoverFrameConfig(context.env, priorState, frame.txs);
     const result = await finalizeCommitNotification(context, frame, candidate, frame.collectedSigs ?? new Map(), {
       localProposal: true,
+      ...(sealed.localCommitHankos ? { localCommitHankos: sealed.localCommitHankos } : {}),
       ...(handoverConfig ? { broadcastCommit: true, broadcastValidators: priorState.config.validators } : {}),
     });
     profile.checkpoint('commit');

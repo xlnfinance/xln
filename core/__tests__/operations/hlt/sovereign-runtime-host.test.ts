@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getBytes } from 'ethers';
+import { deserializeTaggedJson } from '../../../protocol/serialization';
 import { importEntity } from '../../../runtime/registration/entity-creation';
 import { acquireLocalTestPortLease } from '../../../scripts/e2e/harness/local-test-port-lease';
 import {
@@ -24,12 +25,12 @@ const waitForEntity = async (lane: Awaited<ReturnType<typeof spawnLaneRuntimes>>
   throw new Error(`SOVEREIGN_HOST_ENTITY_NOT_COMMITTED:${lane.identity.entityId}`);
 };
 
-test('one process hosts isolated sovereign Runtime replicas', async () => {
+test('one process hosts isolated sovereign Runtime replicas across worker shutdown', async () => {
   const lease = await acquireLocalTestPortLease({ timeoutMs: 10_000 });
   const workDir = mkdtempSync(join(tmpdir(), 'xln-sovereign-host-'));
   const rootSeed = 'sovereign-runtime-host-test-root';
-  const seeds = deriveLoadLaneSeeds(rootSeed, 2, 'taker');
-  const identities = deriveLoadLaneIdentities(rootSeed, 2, 'taker');
+  const seeds = deriveLoadLaneSeeds(rootSeed, 26, 'taker');
+  const identities = deriveLoadLaneIdentities(rootSeed, 26, 'taker');
   const lanes = await spawnLaneRuntimes({
     workDir,
     portBase: lease.basePort,
@@ -37,10 +38,12 @@ test('one process hosts isolated sovereign Runtime replicas', async () => {
     laneSeeds: seeds,
     laneIndexOffset: 0,
   });
+  let stopped = false;
   try {
-    expect(lanes).toHaveLength(2);
-    expect(lanes[0]!.child).toBe(lanes[1]!.child);
+    expect(lanes).toHaveLength(26);
+    expect(lanes[0]!.child).toBe(lanes[25]!.child);
     expect(lanes[0]!.hostIngress).toBe(lanes[1]!.hostIngress);
+    expect(lanes[0]!.hostIngress).not.toBe(lanes[25]!.hostIngress);
     expect(lanes[0]!.port).not.toBe(lanes[1]!.port);
     expect(lanes[0]!.runtime.adapter.runtimeId).not.toBe(lanes[1]!.runtime.adapter.runtimeId);
     await queueLaneRuntimeInputWave(0, lanes.map(lane => ({
@@ -61,9 +64,30 @@ test('one process hosts isolated sovereign Runtime replicas', async () => {
       },
     })));
     await Promise.all(lanes.map(waitForEntity));
-    const entitySets = await Promise.all(lanes.map(lane => lane.runtime.control.listEntities()));
+    const entitySets = await Promise.all(lanes.slice(0, 2).map(lane => lane.runtime.control.listEntities()));
     expect(entitySets[0]!.map(entity => entity.entityId)).toEqual([identities[0]!.entityId]);
     expect(entitySets[1]!.map(entity => entity.entityId)).toEqual([identities[1]!.entityId]);
+    const diagnostics = await Promise.all([lanes[0]!, lanes[25]!].map(async lane => {
+      const response = await fetch(`${lane.hostIngress.baseUrl}/api/hlt/diagnostics`, {
+        headers: { authorization: `Bearer ${lane.hostIngress.authKey}` },
+      });
+      expect(response.ok).toBeTrue();
+      return deserializeTaggedJson(await response.text()) as {
+        runtimes: number;
+        memory: { rss: number; heapUsed: number };
+        totals: { radapterClients: number; relayClients: number; directClients: number };
+      };
+    }));
+    expect(diagnostics.map(value => value.runtimes)).toEqual([25, 1]);
+    expect(diagnostics.map(value => value.totals.radapterClients)).toEqual([25, 1]);
+    expect(diagnostics.every(value => value.memory.rss > 0 && value.memory.heapUsed > 0)).toBeTrue();
+    const child = lanes[0]!.child;
+    await stopLaneRuntimes(lanes);
+    stopped = true;
+    const output = [...child.stdoutLines, ...child.stderrLines].join('\n');
+    expect(output).not.toContain('HLT_SOVEREIGN_WORKER_STOP_ERROR');
+    expect(output).not.toContain('HLT_SOVEREIGN_WORKER_CLOSE_UNAVAILABLE');
+    expect(output).not.toContain('NAPI FATAL');
   } catch (error) {
     for (const lane of lanes) {
       console.error(`sovereign-host stdout:\n${lane.child.stdoutLines.slice(-80).join('\n')}`);
@@ -71,8 +95,8 @@ test('one process hosts isolated sovereign Runtime replicas', async () => {
     }
     throw error;
   } finally {
-    await stopLaneRuntimes(lanes);
+    if (!stopped) await stopLaneRuntimes(lanes);
     lease.release();
     rmSync(workDir, { recursive: true, force: true });
   }
-}, 60_000);
+}, 120_000);

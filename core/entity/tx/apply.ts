@@ -1,4 +1,4 @@
-import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
+import type { RuntimeOverlayRecord } from '../../types/account';
 import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/machine/input';
@@ -110,8 +110,8 @@ export interface ApplyEntityTxResult {
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
   accountTxs?: AccountTxTarget[];
-  /** Exact consensus response that the final Entity flush must preserve. */
-  requiredAccountResponse?: AccountPeerInput;
+  /** Final Channel.ts-style work state for one peer AccountInput. */
+  accountInputWork?: Readonly<{ accountId: string; force: boolean }>;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   swapOffersCreated?: SwapOfferEvent[];
   swapCancelRequests?: SwapCancelRequestEvent[];
@@ -226,24 +226,36 @@ const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, 
     options.accountConsensusContext,
     options,
   );
-  return {
+  return accountHandlerResultToEntityTxResult(result, entityTx.data.fromEntityId);
+};
+
+const accountHandlerResultToEntityTxResult = (
+  result: Awaited<ReturnType<typeof applyAccountInputToEntity>>,
+  counterpartyId: string,
+): EntityTxReducerResult => ({
     newState: result.newState,
     outputs: result.outputs,
     accountTxs: result.accountTxs,
     // Rejected unknown-peer genesis never created an Account. Marking it dirty
     // made Hanko seal look up a missing leaf and halt the next honest frame.
-    accountChanges: result.newState.accounts.has(entityTx.data.fromEntityId)
-      ? [entityTx.data.fromEntityId]
+    accountChanges: result.newState.accounts.has(counterpartyId)
+      ? [counterpartyId]
       : [],
     candidateEffects: result.candidateEffects,
     swapOffersCreated: result.swapOffersCreated,
     swapCancelRequests: result.swapCancelRequests,
     swapOffersCancelled: result.swapOffersCancelled,
-    ...(result.requiredAccountResponse ? { requiredAccountResponse: result.requiredAccountResponse } : {}),
+    ...(result.forceAccountFlush === undefined
+      ? {}
+      : {
+          accountInputWork: {
+            accountId: counterpartyId,
+            force: result.forceAccountFlush,
+          },
+        }),
     ...(result.accountJClaimNodeChanges ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges } : {}),
     ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
-  };
-};
+  });
 
 const handleSettleApproveEntityTx: EntityTxDispatcher = async (
   env,

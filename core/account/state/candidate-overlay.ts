@@ -1,20 +1,7 @@
-/** Evictable Account transition draft keyed by committed root and ordered input bytes. */
+/** One isolated Account transition draft over the current live replica. */
 
 import type { AccountReplica } from '../../types/account';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
-import {
-  createAccountPairKey,
-  toEntityId,
-  type AccountPairKey,
-  type EntityId,
-} from '../../protocol/identity';
-import {
-  toEvidenceHash,
-  toStateHash,
-  type EvidenceHash,
-  type StateHash,
-} from '../../protocol/hashes';
+import { toStateHash, type StateHash } from '../../protocol/hashes';
 import { computeAccountStateRoot } from '../commitment/state-root';
 import { createStructuredLogger } from '../../support/logger';
 import {
@@ -26,18 +13,9 @@ import {
   type AccountStateDraftOwner,
 } from './account-state-draft';
 
-export type AccountTransitionKey = Readonly<{
-  entityId: EntityId;
-  accountId: AccountPairKey;
-  baseRoot: StateHash;
-  orderedInputPrefixHash: EvidenceHash;
-}>;
-
 export type AccountTransitionCommit = Readonly<{
   account: AccountReplica;
   accountStateRoot: StateHash;
-  hash: StateHash;
-  cacheKey: EvidenceHash;
   nodeChanges: AccountStateDraftNodeChanges;
 }>;
 
@@ -59,57 +37,14 @@ export const countAccountTransitionNodeChanges = (
 
 type OverlayStatus = 'active' | 'committed' | 'discarded';
 export class AccountTransitionOverlay {
-  readonly cacheKey: EvidenceHash;
   readonly lifecycle: { status: OverlayStatus };
   readonly stateDraft: AccountStateDraftOwner;
 
-  constructor(
-    readonly base: AccountReplica,
-    readonly key: AccountTransitionKey,
-  ) {
+  constructor(readonly base: AccountReplica) {
     this.lifecycle = { status: 'active' };
     this.stateDraft = beginAccountStateDraft(base);
-    this.cacheKey = transitionCacheKey(key);
   }
 }
-const UTF8 = new TextEncoder();
-/** Callers pass purpose + hashes/ids, never Account frame or tx bodies. */
-const orderedInputHash = (orderedInputPrefix: unknown): EvidenceHash =>
-  toEvidenceHash(computeIntegrityDigest(UTF8.encode(encodeCanonicalConsensusValue({
-    domain: 'xln.account.transition-input.v1',
-    orderedInputPrefix,
-  }))));
-
-const transitionCacheKey = (key: AccountTransitionKey): EvidenceHash =>
-  toEvidenceHash(computeIntegrityDigest(UTF8.encode(encodeCanonicalConsensusValue({
-    domain: 'xln.account.transition-cache.v1',
-    entityId: key.entityId,
-    accountId: key.accountId,
-    baseRoot: key.baseRoot,
-    orderedInputPrefixHash: key.orderedInputPrefixHash,
-  }))));
-
-const counterpartyForOwner = (account: AccountReplica, owner: EntityId): EntityId => {
-  const left = toEntityId(account.state.leftEntity.toLowerCase());
-  const right = toEntityId(account.state.rightEntity.toLowerCase());
-  if (owner === left) return right;
-  if (owner === right) return left;
-  throw new Error(`ACCOUNT_TRANSITION_OWNER_MISMATCH:${owner}:${left}:${right}`);
-};
-
-const createAccountTransitionKey = (
-  account: AccountReplica,
-  orderedInputPrefix: unknown,
-): AccountTransitionKey => {
-  const entityId = toEntityId(account.proofHeader.fromEntity.toLowerCase());
-  const counterparty = counterpartyForOwner(account, entityId);
-  return {
-    entityId,
-    accountId: createAccountPairKey(entityId, counterparty),
-    baseRoot: toStateHash(computeAccountStateRoot(account.state)),
-    orderedInputPrefixHash: orderedInputHash(orderedInputPrefix),
-  };
-};
 
 const requireActive = (overlay: AccountTransitionOverlay): void => {
   if (overlay.lifecycle.status !== 'active') {
@@ -119,13 +54,13 @@ const requireActive = (overlay: AccountTransitionOverlay): void => {
 
 const overlayLog = createStructuredLogger('account.overlay');
 
-export const beginAccountTransition = (
-  base: AccountReplica,
-  orderedInputPrefix: unknown,
-): AccountTransitionOverlay => new AccountTransitionOverlay(
-  base,
-  createAccountTransitionKey(base, orderedInputPrefix),
-);
+// The former content-derived transition key was never read by a cache. It
+// hashed the complete Account root plus caller metadata for every draft and
+// duplicated the only root that matters: the prepared post-transition root.
+// Static Patricia paths already identify persisted Account nodes; overlays are
+// ephemeral isolation boundaries and must not invent a second identity layer.
+export const beginAccountTransition = (base: AccountReplica): AccountTransitionOverlay =>
+  new AccountTransitionOverlay(base);
 
 export const accountTransitionView = (overlay: AccountTransitionOverlay): AccountDraftReplica => {
   requireActive(overlay);
@@ -134,10 +69,19 @@ export const accountTransitionView = (overlay: AccountTransitionOverlay): Accoun
 
 export const commitAccountTransition = (
   overlay: AccountTransitionOverlay,
+  source = 'unspecified',
 ): AccountTransitionCommit => {
   requireActive(overlay);
   const prepared = prepareAccountStateDraft(overlay.stateDraft, overlay.stateDraft.draft);
   const account = prepared.account;
+  // Compute the signed financial root exactly once at the transition boundary.
+  // Callers propagate this value through validation/publish instead of walking
+  // the same Patricia branches again after a field-for-field overlay fold.
+  const accountStateRoot = toStateHash(computeAccountStateRoot(
+    account.state,
+    undefined,
+    `transitionCommit.${source}`,
+  ));
   overlay.lifecycle.status = 'committed';
   overlayLog.debug('overlay.prepared', {
     from: account.proofHeader.fromEntity.slice(-8),
@@ -145,10 +89,8 @@ export const commitAccountTransition = (
   });
   return {
     account,
-    cacheKey: overlay.cacheKey,
-    get accountStateRoot() { return toStateHash(computeAccountStateRoot(account.state)); },
-    get hash() { return this.accountStateRoot; },
-    get nodeChanges() { return prepared.nodeChanges; },
+    accountStateRoot,
+    nodeChanges: prepared.nodeChanges,
   };
 };
 
@@ -201,15 +143,14 @@ export const publishAccountOverlay = (
 export const publishAccountTransition = (
   live: AccountReplica,
   overlay: AccountTransitionOverlay,
+  source = 'unspecified',
 ): AccountTransitionCommit => {
-  const committed = commitAccountTransition(overlay);
+  const committed = commitAccountTransition(overlay, source);
   publishAccountOverlay(live, committed.account);
   return {
     account: live,
-    cacheKey: committed.cacheKey,
-    get accountStateRoot() { return committed.accountStateRoot; },
-    get hash() { return committed.hash; },
-    get nodeChanges() { return committed.nodeChanges; },
+    accountStateRoot: committed.accountStateRoot,
+    nodeChanges: committed.nodeChanges,
   };
 };
 

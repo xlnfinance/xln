@@ -11,7 +11,7 @@ import {
   type RuntimeWsSessionKeys,
 } from './ws-protocol';
 import { signDigest } from '../../account/crypto';
-import { countOp } from '../../support/performance/op-counters';
+import { countOp, recordOpEvent } from '../../support/performance/op-counters';
 import {
   decryptJSON,
   decryptSessionJSON,
@@ -27,10 +27,10 @@ import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './auth/runtime-id';
 import { createStructuredLogger } from '../../support/logger';
 import { decodeRuntimeEntityInputsEnvelope } from './auth/entity-input-envelope';
-import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { verifyRuntimeWsFrameAuth } from './auth/hello-auth';
+import { safeStringify } from '../../protocol/serialization';
+import { traceAccountDeliveryHop } from '../../support/performance/account-delivery-trace';
 
-const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 const wsLog = createStructuredLogger('runtime.wsClient');
 
 // Separate interfaces for browser and Node.js WebSocket implementations
@@ -139,7 +139,14 @@ export type RuntimeWsClientOptions = {
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
-  onEntityInputs?: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => Promise<void> | void;
+  onEntityInputs?: (
+    from: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    timestamp?: number,
+    sessionAuthenticated?: boolean,
+  ) => Promise<void> | void;
+  /** Signs an envelope for sealed-box (relay) delivery; keyed sessions send unsigned. */
+  signEnvelope?: (to: string, envelope: RuntimeEntityInputsEnvelope) => RuntimeEntityInputsEnvelope;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
@@ -147,8 +154,6 @@ export type RuntimeWsClientOptions = {
   onRecoveryBundleResponse?: (from: string, payload: unknown, message: RuntimeWsMessage) => Promise<void> | void;
   onOpen?: () => void;
   onError?: (error: Error) => void;
-  // <= 0 means unlimited reconnect attempts
-  maxReconnectAttempts?: number;
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefined';
@@ -186,10 +191,6 @@ type PendingRecoveryBundleRequest = {
 };
 
 export class RuntimeWsClient {
-  private static readonly BACKOFF_BASE_MS = 1000;
-  private static readonly BACKOFF_MAX_MS = 30000;
-  private static readonly BACKOFF_MIN_MS = 250;
-  private static readonly DEFAULT_MAX_RECONNECT_ATTEMPTS = 0;
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
@@ -198,9 +199,6 @@ export class RuntimeWsClient {
   private closePromise: Promise<void> | null = null;
   private terminalCloseTimeoutMs = 1_000;
   private options: RuntimeWsClientOptions;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectAttempts = 0;
-  private nextReconnectAt: number = 0;
   private suppressNextClose = false;
   private helloSent = false;
   private helloAcknowledged = false;
@@ -215,7 +213,6 @@ export class RuntimeWsClient {
   private outboundEncSeq = 0;
   private messageTimestamp = 0;
   private readonly encryptionPubKeyHex: string | null;
-  private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
   gossipCursor: number | undefined = undefined;
 
@@ -233,9 +230,6 @@ export class RuntimeWsClient {
     this.encryptionPubKeyHex = options.encryptionKeyPair
       ? pubKeyToHex(options.encryptionKeyPair.publicKey)
       : null;
-    this.maxReconnectAttempts = Number.isFinite(options.maxReconnectAttempts as number)
-      ? Number(options.maxReconnectAttempts)
-      : RuntimeWsClient.DEFAULT_MAX_RECONNECT_ATTEMPTS;
   }
 
   getUrl(): string {
@@ -333,29 +327,33 @@ export class RuntimeWsClient {
     const reason = String(reasonInput || '');
     const cleanSuffix = wasClean === undefined ? '' : ` clean=${wasClean ? 1 : 0}`;
     const summary =
-      `WS_CLOSE runtime=${this.options.runtimeId.slice(0, 10)} relay=${this.options.url} ` +
-      `code=${code} reason="${reason || 'n/a'}"${cleanSuffix}`;
-    const shouldReconnect = this.shouldReconnectAfterClose(code, reason);
-    if (shouldReconnect) {
-      const normalClose = wasClean === true || NORMAL_CLOSE_CODES.has(code);
-      (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
-      if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
-      this.scheduleReconnect();
-    } else if (!this.isDuplicateRuntimeClose(code, reason)) {
-      console.warn(`[WS] ${summary} — reconnect disabled`);
-    }
+      `WS_UNEXPECTED_CLOSE:runtime=${this.options.runtimeId}:url=${this.options.url}:` +
+      `generation=${generation}:code=${code}:reason=${reason || 'n/a'}${cleanSuffix}:` +
+      `helloAcknowledged=${this.helloAcknowledged ? 1 : 0}:readyState=${this.ws ? readSocketReadyState(this.ws) : -1}:` +
+      `buffered=${Number(this.ws && isNodeWebSocket(this.ws) ? this.ws.bufferedAmount ?? 0 : 0)}`;
+    this.helloAcknowledged = false;
+    this.sessionKeys = null;
+    console.error(`[WS] ${summary}`);
+    // A close frame is never Account-consensus evidence. Reconnecting here can
+    // replace an authenticated socket while committed ACK bytes are still in
+    // flight, so the transport has one canonical policy: halt and let an
+    // operator establish a fresh route explicitly.
+    this.options.onError?.(new Error(summary));
   }
 
   private handleSocketError(generation: number, error: Error): void {
     if (this.closed || generation !== this.lifecycleGeneration) return;
     this.connecting = false;
-    this.options.onError?.(error);
-    // Some implementations emit only "error" when the handshake fails.
-    // scheduleReconnect owns idempotence if a later close event also arrives.
-    if (!this.closed && !this.isOpen()) {
-      console.error(`[WS] Error on ${this.options.url} — scheduling reconnect`);
-      this.scheduleReconnect();
-    }
+    const fatal = new Error(
+      `WS_UNEXPECTED_ERROR:runtime=${this.options.runtimeId}:url=${this.options.url}:` +
+      `generation=${generation}:helloAcknowledged=${this.helloAcknowledged ? 1 : 0}:` +
+      `readyState=${this.ws ? readSocketReadyState(this.ws) : -1}:` +
+      `buffered=${Number(this.ws && isNodeWebSocket(this.ws) ? this.ws.bufferedAmount ?? 0 : 0)}:` +
+      `error=${error.message}`,
+      { cause: error },
+    );
+    console.error(`[WS] ${fatal.message}`);
+    this.options.onError?.(fatal);
   }
 
   private bindNodeSocket(socket: NodeWebSocket, generation: number): void {
@@ -391,65 +389,6 @@ export class RuntimeWsClient {
     socket.onmessage = event => this.dispatchMessage(event.data, generation);
     socket.onclose = event => this.handleSocketClose(generation, event.code, event.reason, event.wasClean);
     socket.onerror = event => this.handleSocketError(generation, new Error(`WebSocket error: ${event.type}`));
-  }
-
-  private computeBackoffMs(): number {
-    const base = RuntimeWsClient.BACKOFF_BASE_MS * Math.pow(2, this.reconnectAttempts - 1);
-    const clamped = Math.min(base, RuntimeWsClient.BACKOFF_MAX_MS);
-    const jitter = 0.7 + Math.random() * 0.6; // 0.7..1.3
-    return Math.max(RuntimeWsClient.BACKOFF_MIN_MS, Math.round(clamped * jitter));
-  }
-
-  private scheduleReconnect() {
-    if (this.closed || this.connecting || this.isOpen()) return;
-    if (this.reconnectTimer) return;
-    this.reconnectAttempts += 1;
-    const capped = this.maxReconnectAttempts > 0;
-    if (capped && this.reconnectAttempts > this.maxReconnectAttempts) {
-      const err = new Error(
-        `WS_RECONNECT_EXHAUSTED: ${this.options.url} failed after ${this.maxReconnectAttempts} attempts`,
-      );
-      console.error(`[WS] Reconnect exhausted for ${this.options.url}`);
-      this.options.onError?.(err);
-      return;
-    }
-    const delayMs = this.computeBackoffMs();
-    this.nextReconnectAt = Date.now() + delayMs;
-    console.log(`[WS] Reconnecting to ${this.options.url} in ${delayMs}ms (attempt ${this.reconnectAttempts})`);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.nextReconnectAt = 0;
-      if (this.closed) return;
-      this.connect().catch(error => this.options.onError?.(error as Error));
-    }, delayMs);
-  }
-
-  private shouldReconnectAfterClose(code: number, reason: string): boolean {
-    if (this.closed) return false;
-    if (this.isDuplicateRuntimeClose(code, reason)) {
-      console.info(
-        `[WS] Duplicate runtime session for ${this.options.runtimeId} on ${this.options.url}; ` +
-          'retrying with normal backoff',
-      );
-      // A close frame is not authenticated protocol authority. Browser tabs
-      // may enter visibility-controlled standby, but a headless Runtime must
-      // never become permanently unreachable because a relay (or MITM on a
-      // plaintext development socket) forged code 4009 or its reason string.
-      return true;
-    }
-    return true;
-  }
-
-  private isDuplicateRuntimeClose(code: number, reason: string): boolean {
-    const normalizedReason = String(reason || '').toLowerCase();
-    return code === 4009 || normalizedReason.includes('duplicate-runtime');
-  }
-
-  getReconnectState(): { attempt: number; nextAt: number } | null {
-    if (this.reconnectTimer && this.nextReconnectAt > 0) {
-      return { attempt: this.reconnectAttempts, nextAt: this.nextReconnectAt };
-    }
-    return null;
   }
 
   private rejectPendingRecoveryBundleRequests(error: Error): void {
@@ -568,6 +507,8 @@ export class RuntimeWsClient {
       const msg = deserializeWsMessage(raw);
       failfastAssert(!!msg && typeof msg === 'object', 'WS_MSG_NOT_OBJECT', 'WS message must be an object');
       failfastAssert(typeof msg.type === 'string', 'WS_MSG_TYPE_INVALID', 'WS message type must be a string', { msg });
+      const transport = this.options.url.includes('/relay') ? 'relay' : 'direct';
+      countOp(`socket.${transport}.in.${msg.type}`, typeof raw === 'string' ? raw.length : raw.byteLength);
       return msg;
     } catch (error) {
       this.sendDebugEvent({
@@ -636,7 +577,6 @@ export class RuntimeWsClient {
       if (this.helloAcknowledged) return true;
       this.helloAcknowledged = true;
       this.connecting = false;
-      this.reconnectAttempts = 0;
       if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
         this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
       }
@@ -647,6 +587,11 @@ export class RuntimeWsClient {
       if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, undefined, msg.error || 'Unknown error')) {
         return true;
       }
+      // A correlated error after hello is a negative delivery result, not a
+      // handshake diagnostic. It must reach handleApplicationMessage with the
+      // authenticated peer identity and request id intact; consuming it here
+      // previously reduced every post-WAL rejection to an uncorrelated warning.
+      if (this.helloAcknowledged && typeof msg.inReplyTo === 'string') return false;
       this.options.onError?.(new Error(msg.error || 'Unknown error'));
       return true;
     }
@@ -654,13 +599,12 @@ export class RuntimeWsClient {
   }
 
   private verifyInboundDirectFrame(msg: RuntimeWsMessage): boolean {
-    // Relay error frames carry no `from`/auth — they come from the transport
-    // itself, not the peer. Dropping them on the identity check silently
-    // swallowed every async delivery rejection (586 lost bilateral ACKs).
-    if (msg.type === 'error') return true;
     const directPeerRuntimeId = this.helloAudience?.startsWith('xln-runtime:')
       ? normalizeRuntimeId(this.helloAudience.slice('xln-runtime:'.length))
       : '';
+    // Relay transport errors carry no peer auth. A direct peer error is signed
+    // like every other post-handshake frame; accepting an unsigned direct
+    // rejection would let a socket attacker halt a Runtime.
     if (!directPeerRuntimeId) return true;
     const peerKey = typeof msg.fromEncryptionPubKey === 'string' ? msg.fromEncryptionPubKey.toLowerCase() : '';
     const verifiedError = normalizeRuntimeId(msg.from || '') !== directPeerRuntimeId
@@ -695,7 +639,10 @@ export class RuntimeWsClient {
         message: 'Rejected unencrypted entity_inputs',
         from: msg.from,
       });
-      this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_inputs from ${msg.from}`));
+      this.reportInboundEntityInputsRejection(
+        msg,
+        new Error(`P2P_UNENCRYPTED: Received unencrypted entity_inputs from ${msg.from}`),
+      );
       return true;
     }
     if (!this.options.encryptionKeyPair) {
@@ -706,12 +653,15 @@ export class RuntimeWsClient {
         message: 'Missing encryption keypair for decrypt',
         from: msg.from,
       });
-      this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
+      this.reportInboundEntityInputsRejection(
+        msg,
+        new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'),
+      );
       return true;
     }
     let envelope: RuntimeEntityInputsEnvelope;
+    const sessionKeys = this.sessionKeys;
     try {
-      const sessionKeys = this.sessionKeys;
       if (sessionKeys && msg.encSeq === undefined) throw new Error('P2P_SESSION_ENC_SEQ_MISSING');
       envelope = decodeRuntimeEntityInputsEnvelope(
         sessionKeys && msg.encSeq !== undefined
@@ -726,7 +676,10 @@ export class RuntimeWsClient {
         message: (error as Error).message,
         from: msg.from,
       });
-      this.options.onError?.(error as Error);
+      this.reportInboundEntityInputsRejection(
+        msg,
+        error instanceof Error ? error : new Error(String(error)),
+      );
       return true;
     }
 
@@ -735,16 +688,9 @@ export class RuntimeWsClient {
         msg.from,
         envelope,
         typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+        Boolean(sessionKeys && msg.encSeq !== undefined),
       );
     } catch (error) {
-      if (error instanceof Error && isRetryableIngressBackpressure(error)) {
-        wsLog.info('entity_inputs.retryable_backpressure', {
-          error: error.message,
-          from: msg.from,
-        });
-        this.options.onError?.(error);
-        return true;
-      }
       const handlerError = error instanceof Error ? error : new Error(String(error));
       console.error('❌ WS-CLIENT-ENTITY-INPUT-HANDLER-FAILED:', handlerError);
       this.sendDebugEvent({
@@ -753,14 +699,39 @@ export class RuntimeWsClient {
         message: handlerError.message,
         from: msg.from,
       });
-      this.options.onError?.(handlerError);
+      this.reportInboundEntityInputsRejection(msg, handlerError, envelope);
     }
     return true;
   }
 
+  private reportInboundEntityInputsRejection(
+    msg: RuntimeWsMessage,
+    cause: Error,
+    envelope?: RuntimeEntityInputsEnvelope,
+  ): void {
+    const reason = `P2P_INBOUND_ENTITY_INPUT_REJECTED:${cause.message}`;
+    const rejectionSent = this.sendRaw({
+      type: 'error',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      ...(msg.from ? { to: msg.from } : {}),
+      timestamp: this.nextMessageTimestamp(),
+      ...(msg.id ? { inReplyTo: msg.id } : {}),
+      // The wire error is only a negative signal. The receiving Runtime keeps
+      // the complete plaintext envelope in its fatal dump below.
+      error: reason.slice(0, 3_500),
+    });
+    this.options.onError?.(new Error(
+      `${reason}:messageId=${String(msg.id || '')}:from=${String(msg.from || '')}:` +
+      `negativeSignalSent=${rejectionSent}:envelope=${envelope ? safeStringify(envelope) : '<decode-failed>'}`,
+      { cause },
+    ));
+  }
+
   private async handleApplicationMessage(msg: RuntimeWsMessage): Promise<boolean> {
-    // Relay errors are diagnostics/routing hints only. Account ACK and its
-    // resend loop own financial liveness; transport must never grow receipts.
+    // This is a negative result only, never a positive receipt. Account
+    // consensus still owns completion, but a rejected committed output must
+    // halt loudly because no transport retry or route substitution is allowed.
     if (msg.type === 'error' && typeof msg.inReplyTo === 'string') {
       const reason = typeof msg.error === 'string' ? msg.error : String(msg.error ?? 'unknown');
       this.sendDebugEvent({
@@ -862,9 +833,16 @@ export class RuntimeWsClient {
     // direct session seals under the c2s key with a counter nonce.
     const sessionKeys = this.sessionKeys;
     const encSeq = sessionKeys ? ++this.outboundEncSeq : undefined;
-    const payload = sessionKeys && encSeq !== undefined
-      ? encryptSessionJSON(envelope, sessionKeys.c2s, encSeq)
-      : encryptJSON(envelope, targetPubKey);
+    let payload: string;
+    if (sessionKeys && encSeq !== undefined) {
+      payload = encryptSessionJSON(envelope, sessionKeys.c2s, encSeq);
+    } else {
+      const signed = envelope.sourceSignature
+        ? envelope
+        : this.options.signEnvelope?.(to, envelope);
+      if (!signed?.sourceSignature) throw new Error('P2P_RELAY_ENVELOPE_UNSIGNED');
+      payload = encryptJSON(signed, targetPubKey);
+    }
 
     return this.sendRaw({
       type: 'entity_inputs',
@@ -883,7 +861,7 @@ export class RuntimeWsClient {
         ? { entityId: envelope.entityInputs[0].entityId }
         : {}),
       txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),
-    });
+    }, envelope);
   }
 
   sendGossipRequest(to: string, payload: unknown): boolean {
@@ -998,7 +976,7 @@ export class RuntimeWsClient {
     });
   }
 
-  private sendRaw(msg: RuntimeWsMessage): boolean {
+  private sendRaw(msg: RuntimeWsMessage, accountEnvelope?: RuntimeEntityInputsEnvelope): boolean {
     if (this.closed) return false;
     // Gate on hello acknowledgement, not connecting. handleSocketError/Close clear
     // connecting while the socket can still be OPEN, which previously let
@@ -1070,23 +1048,64 @@ export class RuntimeWsClient {
       return false;
     }
     const payload = serializeWsMessage(outboundMsg);
-    countOp(`ws.send.${outboundMsg.type}`, payload.length);
+    const transport = this.options.url.includes('/relay') ? 'relay' : 'direct';
+    countOp(`socket.${transport}.out.${outboundMsg.type}`, payload.length);
+    recordOpEvent(`socket.${transport}.out.wire`, {
+      type: outboundMsg.type,
+      fromRuntimeId: this.options.runtimeId,
+      toRuntimeId: String(outboundMsg.to ?? ''),
+      bytes: payload.length,
+    });
+    if (accountEnvelope) {
+      traceAccountDeliveryHop('ws-send-start', accountEnvelope, {
+        runtimeId: this.options.runtimeId,
+        targetRuntimeId: outboundMsg.to,
+        messageId: outboundMsg.id,
+        generation: this.lifecycleGeneration,
+        bytes: payload.length,
+        readyState: this.ws ? readSocketReadyState(this.ws) : -1,
+        bufferedAmount: Number(this.ws && isNodeWebSocket(this.ws) ? this.ws.bufferedAmount ?? 0 : 0),
+      });
+    }
     try {
       if (isNodeWebSocket(this.ws)) {
+        const socket = this.ws;
         const messageId = String(outboundMsg.id || '');
         const messageType = String(outboundMsg.type || '');
         const targetRuntimeId = String(outboundMsg.to || '');
-        this.ws.send(payload, error => {
-          if (!error) return;
+        socket.send(payload, error => {
+          if (!error) {
+            if (accountEnvelope) {
+              traceAccountDeliveryHop('ws-send-flushed', accountEnvelope, {
+                runtimeId: this.options.runtimeId,
+                targetRuntimeId,
+                messageId,
+                generation: this.lifecycleGeneration,
+                bytes: payload.length,
+                bufferedAmount: Number(socket.bufferedAmount ?? 0),
+              });
+            }
+            return;
+          }
           this.options.onError?.(new Error(
             `WS_ASYNC_SEND_FAILED:type=${messageType}:id=${messageId}:to=${targetRuntimeId}:` +
-            `bytes=${payload.length}:buffered=${Number(this.ws && isNodeWebSocket(this.ws) ? this.ws.bufferedAmount ?? 0 : 0)}:` +
-            `error=${error.message}`,
+            `bytes=${payload.length}:buffered=${Number(socket.bufferedAmount ?? 0)}:` +
+            `error=${error.message}:envelope=${accountEnvelope ? safeStringify(accountEnvelope) : '<non-financial>'}`,
             { cause: error },
           ));
         });
       } else {
         this.ws.send(payload);
+        if (accountEnvelope) {
+          traceAccountDeliveryHop('ws-send-flushed', accountEnvelope, {
+            runtimeId: this.options.runtimeId,
+            targetRuntimeId: outboundMsg.to,
+            messageId: outboundMsg.id,
+            generation: this.lifecycleGeneration,
+            bytes: payload.length,
+            browserSendReturned: true,
+          });
+        }
       }
       return true;
     } catch (error) {
@@ -1136,12 +1155,6 @@ export class RuntimeWsClient {
     this.connecting = false;
     this.rejectPendingRecoveryBundleRequests(new Error(reason));
     this.suppressNextClose = true;
-    this.reconnectAttempts = 0;
-    this.nextReconnectAt = 0;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
     return this.ws;
   }
 

@@ -47,6 +47,7 @@ import {
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import { makeAccount } from '../../helpers/cross-j';
+import { hubRebalanceTaskAlreadyRanAtTimestamp } from '../../../entity/tx/handlers/account/committed-input';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -145,6 +146,20 @@ describe('runtime scheduled wake', () => {
     expect(collectDueScheduledWakeJobs(state, HUB_REBALANCE_INTERVAL_MS, true)).toEqual([
       { kind: 'task', id: 'hubRebalance', dueAt: HUB_REBALANCE_INTERVAL_MS },
     ]);
+  });
+
+  test('does not rearm a same-timestamp rebalance kick after the task already ran', () => {
+    const id = entityId('24');
+    const proposer = signerId('34');
+    const state = makeState(id, proposer, 10_000);
+    const task = state.crontabState?.tasks.get('hubRebalance');
+    if (!task) throw new Error('TEST_HUB_REBALANCE_TASK_MISSING');
+
+    task.lastRun = 9_000;
+    expect(hubRebalanceTaskAlreadyRanAtTimestamp(state)).toBe(false);
+
+    task.lastRun = state.timestamp;
+    expect(hubRebalanceTaskAlreadyRanAtTimestamp(state)).toBe(true);
   });
 
   test('quiesce preserves newly-due hooks without treating them as drainable work', async () => {

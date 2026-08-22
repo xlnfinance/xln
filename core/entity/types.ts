@@ -416,7 +416,9 @@ export interface EntityFrame {
   // signerId -> array of EOA signatures (indexes match hashesToSign[])
   collectedSigs?: Map<string, string[]>;
 
-  // 3. After threshold: merged quorum hankos (one per hash, indexes match hashesToSign[])
+  // 3. After threshold: only the EntityFrame quorum Hanko (hashesToSign[0]).
+  // Secondary Hankos are materialized at commit and retained only by their
+  // latest Account/dispute/output/J payload, never duplicated in lineage.
   hankos?: HankoString[];
 }
 

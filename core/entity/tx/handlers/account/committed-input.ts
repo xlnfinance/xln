@@ -11,6 +11,7 @@ import { emitScopedEvents } from '../../../../support/scoped-events';
 import { addMessages } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../support/logger';
 import { scheduleHook } from '../../../scheduler';
+import { getRebalanceAccountIds } from '../../../consensus/account/work-index';
 import { putEntityAccountCandidate } from '../../../state/persistent-account-map';
 import type { ApplyEntityTxOptions } from '../../apply';
 import { buildHubRebalancePolicyTx } from './lifecycle/admin';
@@ -89,13 +90,38 @@ const buildCommittedSwapOfferEvent = (
   };
 };
 
+export const hubRebalanceTaskAlreadyRanAtTimestamp = (
+  state: Pick<EntityState, 'timestamp' | 'crontabState'>,
+): boolean => {
+  const task = state.crontabState?.tasks.get('hubRebalance');
+  return task !== undefined && task.lastRun >= state.timestamp;
+};
+
+const shouldScheduleCommittedAccountWork = (
+  state: EntityState,
+  counterpartyId: string,
+): boolean => {
+  if (!state.hubRebalanceConfig || !state.crontabState) return false;
+  // A committed Account frame is not itself rebalance work. Scheduling an
+  // immediate hook for every payment/swap creates a second signed Entity frame
+  // and WAL commit with no output. The Patricia Account work index is the
+  // canonical readiness projection; only a leaf classified as runnable may
+  // wake the global rebalance task.
+  if (!getRebalanceAccountIds(state).has(counterpartyId)) return false;
+  // A wake runs before the remaining Entity transactions in its frame. Those
+  // transactions can leave another runnable Account leaf behind, but rearming
+  // the same-timestamp kick would create an unbounded one-wake/one-WAL-frame
+  // loop. The task has already inspected this logical tick; its canonical
+  // periodic deadline owns any remaining work.
+  return !hubRebalanceTaskAlreadyRanAtTimestamp(state);
+};
+
 const scheduleCommittedAccountWork = (
   state: EntityState,
   counterpartyId: string,
 ): void => {
-  if (!state.hubRebalanceConfig || !state.crontabState) return;
-  // Rebalance stays global across all Accounts, but any newly committed frame
-  // must wake the scheduler promptly rather than waiting for a periodic scan.
+  if (!shouldScheduleCommittedAccountWork(state, counterpartyId)) return;
+  if (!state.crontabState) throw new Error('HUB_REBALANCE_CRONTAB_MISSING');
   scheduleHook(state.crontabState, {
     id: 'hub-rebalance-kick',
     triggerAt: state.timestamp,
@@ -260,7 +286,7 @@ const logCommittedSwapEffects = (effects: CommittedAccountEffects): void => {
 
 export const applySuccessfulAccountInput = async (
   context: SuccessfulAccountInputContext,
-): Promise<AccountPeerInput | undefined> => {
+): Promise<boolean | undefined> => {
   const { env, state, input, account, counterpartyId, createdAccount, result, effects } = context;
   effects.candidateEffects.push(...(result.candidateEffects ?? []));
   addMessages(state, result.events);
@@ -277,7 +303,6 @@ export const applySuccessfulAccountInput = async (
     },
     state.entityId,
   );
-  scheduleCommittedAccountWork(state, counterpartyId);
   effects.hashesToSign.push(...(result.hashesToSign ?? []));
   recordCommittedFrames(context);
 
@@ -294,17 +319,25 @@ export const applySuccessfulAccountInput = async (
   await applyCommittedFrameTransactions(context);
   queueInitialHubPolicies(context, committedInboundGenesis);
   applyCommittedHtlcFollowups(context);
+  scheduleCommittedAccountWork(state, counterpartyId);
   context.checkpointProfile('committedFollowups');
   logCommittedSwapEffects(effects);
 
-  if (!result.response) return undefined;
-  const response = structuredClone(result.response);
+  if (!result.response) {
+    // Only the pure ACK that actually commits our pending frame may clear a
+    // previous forced response in this Entity batch. Stale/duplicate no-op
+    // ACKs preserve it; otherwise [duplicate frame, stale ACK] loses the exact
+    // re-answer and deadlocks the bilateral lane.
+    const committedOurPending = !accountInputProposal(input)
+      && (result.committedFrames ?? []).some(frame => !frame.committedViaNewFrame);
+    return committedOurPending ? false : undefined;
+  }
   accountHandlerLog.debug('response.deferred_to_entity_flush', {
     from: shortId(state.entityId),
-    to: shortId(response.toEntityId),
-    height: accountInputReferenceHeight(response),
-    prevHanko: Boolean(accountInputAck(response)),
+    to: shortId(result.response.toEntityId),
+    height: accountInputReferenceHeight(result.response),
+    prevHanko: Boolean(accountInputAck(result.response)),
   });
   context.checkpointProfile('responseDeferred');
-  return response;
+  return true;
 };

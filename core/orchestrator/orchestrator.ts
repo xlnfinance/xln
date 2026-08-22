@@ -13,6 +13,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+import { applyHubRuntimeFrameDelay } from './process/hub-runtime-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../support/process/child-secrets';
 import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
 import {
@@ -48,6 +49,7 @@ import { createAssistantProxyFromEnv, resolveAssistantDirectClientIp, resolveAss
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
 import { resolveRequestClientIp } from '../api/server/network/relay-direct';
+import { dumpOpCounters, installGlobalOpCounters, resetOpCounters } from '../support/performance/op-counters';
 import {
   isOperatorRequest,
   loadOrCreateOperatorToken,
@@ -192,6 +194,7 @@ import {
 } from './replica-import/runtime-import-manifest';
 
 const args = parseArgs();
+await installGlobalOpCounters('orchestrator');
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
 const readGitValue = (gitArgs: string[]): string => {
   try {
@@ -1489,7 +1492,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    env: sanitizeChildProcessEnv({
+    env: sanitizeChildProcessEnv(applyHubRuntimeFrameDelay({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: child.dbPath,
       XLN_BRAINVAULT_OWNER_PATH: join(child.dbPath, 'brainvault-owner.json'),
@@ -1501,11 +1504,10 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
-      // A managed Hub batches for throughput: a Runtime frame costs about the
-      // same for one transaction or a hundred, so a small floor between frames
-      // lets concurrent ingress share one frame. The operator may raise it; the
-      // child never inherits the driver's own (wallet-shaped) value.
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'] ?? '5',
+      // Runtime work is event-driven. A fixed post-commit sleep taxes every
+      // payment round even when more authenticated ingress is already queued.
+      // Absence means the canonical zero-delay Runtime default; an operator
+      // may deliberately add a positive batching floor for diagnostics.
       // Profiling a load run means profiling the Hub: it is the single writer
       // every payment and every swap passes through. The child builds none of
       // this unless the operator asked for it.
@@ -1521,6 +1523,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_RUNTIME_OP_COUNTERS']
         ? { XLN_RUNTIME_OP_COUNTERS: process.env['XLN_RUNTIME_OP_COUNTERS'] }
         : {}),
+      ...(process.env['XLN_RUNTIME_OP_COUNTERS_DIR']
+        ? { XLN_RUNTIME_OP_COUNTERS_DIR: process.env['XLN_RUNTIME_OP_COUNTERS_DIR'] }
+        : {}),
       ...(process.env['XLN_ENTITY_PROPOSAL_TRACE']
         ? { XLN_ENTITY_PROPOSAL_TRACE: process.env['XLN_ENTITY_PROPOSAL_TRACE'] }
         : {}),
@@ -1533,7 +1538,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ENTITY_STATE_ROOT_PROFILE']
         ? { XLN_ENTITY_STATE_ROOT_PROFILE: process.env['XLN_ENTITY_STATE_ROOT_PROFILE'] }
         : {}),
-    }),
+    }, process.env['XLN_HUB_MIN_FRAME_DELAY_MS'])),
   });
   child.proc = proc;
   if (!proc.pid) {
@@ -2689,6 +2694,20 @@ const handleMetadataRequest = (
 const httpDrain = createHttpDrainTracker();
 const FRONTEND_STATIC_DIR = './frontend/build';
 
+const handlePerformanceControl = (
+  request: Request,
+  pathname: string,
+  operatorAuthorized: boolean,
+  headers: HeadersInit,
+): Response | null => {
+  if (pathname !== '/api/control/performance/op-counters/reset' || request.method !== 'POST') return null;
+  if (!operatorAuthorized) {
+    return new Response(safeStringify({ error: 'Operator access required' }), { status: 403, headers });
+  }
+  resetOpCounters();
+  return new Response(safeStringify({ ok: true }), { headers });
+};
+
 const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
@@ -2708,6 +2727,8 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     const preflightResponse = operatorPreflightResponse(request, url, operatorAuthorized);
     if (preflightResponse) return preflightResponse;
 
+    const performanceResponse = handlePerformanceControl(request, pathname, operatorAuthorized, headers);
+    if (performanceResponse) return performanceResponse;
     const faucetPolicyResponse = await enforceFaucetPolicy(request, operatorAuthorized, process.env, headers);
     if (faucetPolicyResponse) return faucetPolicyResponse;
 
@@ -2924,6 +2945,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
 });
 
 const shutdown = async (): Promise<void> => {
+  dumpOpCounters('orchestrator', 'shutdown');
   await stopServerGracefully(server, httpDrain, 'orchestrator', 5_000);
   await stopAllChildren({
     quiesceRounds: 1,

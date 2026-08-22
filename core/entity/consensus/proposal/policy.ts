@@ -5,7 +5,10 @@ import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityState, EntityFrame } from '../../types';
 import { selectCrossJCommitPhaseTxs } from '../../transition/cross-j-proposer-materialization';
-import { selectEntityFrameTxByteBudget } from '../frame';
+import {
+  selectEntityFrameTxByteBudgetWithMeter,
+  type EntityFrameWirePrefixMeter,
+} from '../frame';
 import {
   normalizeConsensusOutputOrigin,
   resolveConsensusOutputBoardAuthority,
@@ -47,16 +50,25 @@ export type ProposableEntityTxSelection = {
   txs: EntityTx[];
   currentAuthorityReady: boolean;
   reason?: string;
+  wirePrefixMeter?: EntityFrameWirePrefixMeter;
 };
 
 const applyJRangeBudgetToSelection = (selection: ProposableEntityTxSelection): ProposableEntityTxSelection => {
   const budgeted = selectEntityTxsWithinJRangeBudget(selection.txs);
-  const frameBudgetedTxs = selectEntityFrameTxByteBudget(budgeted.txs);
+  // Bound the candidate before materializing HTLC/profile context. The later
+  // combined wire meter enforces the same cap without another full encode,
+  // but feeding an unbounded backlog into context fitting is substantially
+  // slower than this exact early prefix selection.
+  const frameBudget = selectEntityFrameTxByteBudgetWithMeter(budgeted.txs);
+  const frameBudgetedTxs = frameBudget.txs;
   const deferredByFrameBytes = frameBudgetedTxs.length !== budgeted.txs.length;
-  if (budgeted.deferredJRangeCount === 0 && !deferredByFrameBytes) return selection;
+  if (budgeted.deferredJRangeCount === 0 && !deferredByFrameBytes) {
+    return { ...selection, txs: frameBudgetedTxs, wirePrefixMeter: frameBudget.meter };
+  }
   return {
     ...selection,
     txs: frameBudgetedTxs,
+    wirePrefixMeter: frameBudget.meter,
     ...(selection.reason
       ? {}
       : { reason: deferredByFrameBytes ? 'ENTITY_FRAME_BYTE_BUDGET_DEFERRED' : 'J_RANGE_FRAME_BUDGET_DEFERRED' }),

@@ -29,7 +29,7 @@
   };
 
   let users = $state(HLT_DASHBOARD_DEFAULTS.users);
-  let runtimesPerProcess = $state(HLT_DASHBOARD_DEFAULTS.runtimesPerProcess);
+  const runtimesPerProcess = HLT_DASHBOARD_DEFAULTS.runtimesPerProcess;
   let ratePerUserPerSecond = $state(HLT_DASHBOARD_DEFAULTS.ratePerUserPerSecond);
   let durationSeconds = $state(HLT_DASHBOARD_DEFAULTS.durationSeconds);
   let hubs = $state(HLT_DASHBOARD_DEFAULTS.hubs);
@@ -46,7 +46,6 @@
   let snapshot = $state<HltDashboardPayload | null>(null);
   let actionBusy = $state(false);
   let activeTab = $state<'control' | 'progress'>('control');
-  let phase = $state<'build' | 'replay'>('build');
   let replayMode = $state<'max' | 'fixed' | 'sweep'>('max');
   let replayRates = $state('250,500,750,1000,1500,2000');
 
@@ -64,7 +63,15 @@
     paymentAmountMax,
   });
   const preview = $derived(previewHltDashboard(config));
+  const runtimeProcessCount = $derived(Math.ceil(users / runtimesPerProcess));
   const chart = $derived(layoutHltTpsChart(snapshot?.ledger ?? []));
+  const paymentPipeline = $derived(snapshot?.payment ? [
+    { label: 'Started', value: snapshot.payment.submittedPayments, color: '#8e8a80' },
+    { label: 'H1 accepted', value: snapshot.payment.acceptedPayments, color: '#5d7ea8' },
+    { label: 'Completed', value: snapshot.payment.completedPayments, color: '#c49b47' },
+    { label: 'ACK drained', value: snapshot.payment.drainedPayments, color: '#72a67a' },
+  ] : []);
+  const paymentPipelineMax = $derived(Math.max(1, ...paymentPipeline.map(stage => stage.value)));
   const maxPerfTotal = $derived(Math.max(1, ...(snapshot?.perf.rows ?? []).map(row => row.totalMs)));
   const run = $derived(snapshot?.run ?? IDLE_RUN);
 
@@ -79,7 +86,7 @@
     snapshot = payload;
   };
 
-  const startIsolated = async (): Promise<void> => {
+  const startIsolated = async (selectedPhase: 'build' | 'replay'): Promise<void> => {
     actionBusy = true;
     loadError = null;
     try {
@@ -96,7 +103,7 @@
           profile,
           paymentMin: String(paymentAmountMin),
           paymentMax: String(paymentAmountMax),
-          phase,
+          phase: selectedPhase,
           replayMode,
           replayRates,
         }),
@@ -152,7 +159,7 @@
     <div>
       <div class="eyebrow">Load stand</div>
       <h1>HLT</h1>
-      <p class="sub">Start launches a separate smoke shard with its own ports. Live bun run dev stays on 8080/8082.</p>
+      <p class="sub">Record runs an isolated live shard and saves H1 inputs. Replay runs those inputs without users.</p>
     </div>
     <div class="hlt-head-actions">
       {#if run.active}
@@ -165,17 +172,8 @@
         >
           {actionBusy ? 'Stopping…' : 'Stop shard'}
         </button>
-      {:else}
-        <button
-          class="hlt-start"
-          type="button"
-          data-testid="hlt-start"
-          disabled={actionBusy}
-          onclick={() => void startIsolated()}
-        >
-          {actionBusy ? 'Starting…' : phase === 'build' ? 'Build frame chains' : 'Replay H1'}
-        </button>
       {/if}
+      <a class="mini-action" href="/qa/quorum">Quorum</a>
       <a class="mini-action" href="/qa">QA cockpit</a>
       <button class="mini-action" type="button" data-testid="hlt-copy-command" onclick={() => void copyCommand()}>
         {copied ? 'Copied' : 'Copy smoke'}
@@ -188,15 +186,16 @@
   {/if}
 
   {#if snapshot?.snapshotError}
-    <div class="error-banner" data-testid="hlt-snapshot-error">
-      Historical HLT artifact rejected: {snapshot.snapshotError}
-    </div>
+    <details class="notice-banner" data-testid="hlt-snapshot-error">
+      <summary>Previous result uses an older schema and is excluded. A new run will replace it.</summary>
+      <code>{snapshot.snapshotError}</code>
+    </details>
   {/if}
 
   {#if run.status !== 'idle'}
     <section class="run-banner" data-testid="hlt-run" data-status={run.status}>
       <div>
-        <span>{run.phase === 'replay' ? 'Hub replay' : 'Build chains'}</span>
+        <span>{run.phase === 'replay' ? 'Replay last recording' : 'Live test + recording'}</span>
         <strong data-testid="hlt-run-status">{run.status}{run.pid === null ? '' : ` · pid ${run.pid}`}</strong>
         {#if run.workDir}
           <p class="run-meta" data-testid="hlt-run-workdir">{run.workDir}</p>
@@ -209,7 +208,10 @@
         {/if}
       </div>
       {#if run.logTail}
-        <pre class="run-log" data-testid="hlt-run-log">{run.logTail}</pre>
+        <details class="run-log-details">
+          <summary>Run diagnostics</summary>
+          <pre class="run-log" data-testid="hlt-run-log">{run.logTail}</pre>
+        </details>
       {/if}
     </section>
   {/if}
@@ -221,31 +223,47 @@
 
   {#if activeTab === 'control'}
     <section class="panel phase-panel" data-testid="hlt-phases">
-      <h2>Two-phase HLT</h2>
+      <h2>Run mode</h2>
       <div class="phase-grid">
-        <button class:active={phase === 'build'} type="button" onclick={() => phase = 'build'}>
-          <span>1</span><strong>Build chains</strong><small>Real sovereign users, faucet, traffic, ACK drain, sealed H1 WAL.</small>
-        </button>
-        <button class:active={phase === 'replay'} type="button" onclick={() => phase = 'replay'}>
-          <span>2</span><strong>Hub replay</strong><small>Checkpoint restore, exact input replay, state + ordered outbox hash equality.</small>
-        </button>
+        <article class="run-action-card">
+          <strong>Record</strong>
+          <small>Run real sovereign users, drain ACKs, and save the exact H1 recording.</small>
+          <button
+            class="hlt-start"
+            type="button"
+            data-testid="hlt-record"
+            disabled={actionBusy || run.active}
+            onclick={() => void startIsolated('build')}
+          >{actionBusy ? 'Starting…' : 'Start record'}</button>
+        </article>
+        <article class="run-action-card">
+          <strong>Replay</strong>
+          <small>Run the last saved H1 inputs without users and verify identical state and outbox.</small>
+          <div class="replay-controls-inline">
+            <label>
+              Mode
+              <select bind:value={replayMode} data-testid="hlt-replay-mode">
+                <option value="max">Max throughput</option>
+                <option value="fixed">Fixed 1000 TPS</option>
+                <option value="sweep">Saturation sweep</option>
+              </select>
+            </label>
+            {#if replayMode === 'sweep'}
+              <label>
+                Offered TPS points
+                <input class="text-input" bind:value={replayRates} data-testid="hlt-replay-rates" />
+              </label>
+            {/if}
+          </div>
+          <button
+            class="hlt-start replay-start"
+            type="button"
+            data-testid="hlt-replay"
+            disabled={actionBusy || run.active}
+            onclick={() => void startIsolated('replay')}
+          >{actionBusy ? 'Starting…' : 'Start replay'}</button>
+        </article>
       </div>
-      {#if phase === 'replay'}
-        <div class="controls replay-controls">
-          <label>
-            Replay mode
-            <select bind:value={replayMode} data-testid="hlt-replay-mode">
-              <option value="max">Max throughput</option>
-              <option value="fixed">Fixed 1000 TPS</option>
-              <option value="sweep">Saturation sweep</option>
-            </select>
-          </label>
-          <label>
-            Offered TPS points
-            <input class="text-input" bind:value={replayRates} data-testid="hlt-replay-rates" />
-          </label>
-        </div>
-      {/if}
     </section>
 
   <section class="panel">
@@ -255,10 +273,11 @@
         Users total <strong data-testid="hlt-users">{users}</strong>
         <input type="range" min="2" max="1000" step="2" bind:value={users} data-testid="hlt-users-input" />
       </label>
-      <label>
-        Sovereign runtimes / process <strong data-testid="hlt-users-per-process">{runtimesPerProcess}</strong>
-        <input type="range" min="1" max="200" step="1" bind:value={runtimesPerProcess} data-testid="hlt-users-per-process-input" />
-      </label>
+      <div class="packing-summary" data-testid="hlt-runtime-packing">
+        <span>Runtime processes</span>
+        <strong>{runtimeProcessCount}</strong>
+        <small>{runtimesPerProcess} users per OS process</small>
+      </div>
       <label>
         Actions / user / s <strong>{ratePerUserPerSecond}</strong>
         <input type="range" min="1" max="10" step="1" bind:value={ratePerUserPerSecond} />
@@ -354,6 +373,25 @@
         <span>Wall</span>
         <strong>{formatMs(snapshot.payment.elapsedMs)}</strong>
       </article>
+      <article class="result-card">
+        <span>Source lag p95 / max</span>
+        <strong>{snapshot.payment.sourceDispatchP95Ms} / {snapshot.payment.sourceDispatchMaxMs} ms</strong>
+      </article>
+      <article class="result-card">
+        <span>Queue ACK max</span>
+        <strong>{snapshot.payment.sourceAckMaxMs} ms</strong>
+      </article>
+    </section>
+    <section class="panel" data-testid="hlt-payment-pipeline">
+      <h2>Payment conservation checkpoints</h2>
+      <svg class="pipeline-chart" viewBox="0 0 680 156" role="img" aria-label="Payment checkpoints">
+        {#each paymentPipeline as stage, index}
+          <text x="0" y={25 + index * 36} fill="#cfc6af" font-size="12">{stage.label}</text>
+          <rect x="105" y={10 + index * 36} width="520" height="20" rx="5" fill="rgba(255,255,255,0.05)" />
+          <rect x="105" y={10 + index * 36} width={520 * stage.value / paymentPipelineMax} height="20" rx="5" fill={stage.color} />
+          <text x="638" y={25 + index * 36} fill="#fff4d8" font-size="12">{stage.value}</text>
+        {/each}
+      </svg>
     </section>
   {/if}
 
@@ -374,6 +412,14 @@
       <article class="result-card">
         <span>Settled wall</span>
         <strong>{formatMs(snapshot.swap.fullySettledElapsedMs)}</strong>
+      </article>
+      <article class="result-card">
+        <span>STP</span>
+        <strong data-testid="hlt-swap-stp">{snapshot.swap.stp}</strong>
+      </article>
+      <article class="result-card">
+        <span>Source lag p95 / max</span>
+        <strong>{snapshot.swap.sourceDispatchP95Ms} / {snapshot.swap.sourceDispatchMaxMs} ms</strong>
       </article>
     </section>
   {/if}

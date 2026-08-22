@@ -336,11 +336,11 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     }
   });
 
-  test('rejects a local AccountInput hidden inside a persisted EntityTx', () => {
+  test('rejects a local enqueue hidden inside a persisted EntityTx', () => {
     expect(() => validateEntityTx({
       type: 'accountInput',
       data: {
-        kind: 'txs',
+        kind: 'enqueue',
         fromEntityId: entityId,
         toEntityId: counterpartyId,
         domain: {
@@ -351,7 +351,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
         watchSeed: hash,
         txs: [],
       },
-    }, 'ACCOUNT_INPUT_WAL')).toThrow('ACCOUNT_INPUT_WAL_DATA_LOCAL_INPUT_FORBIDDEN');
+    }, 'ACCOUNT_INPUT_WAL')).toThrow('ACCOUNT_INPUT_WAL_DATA_KIND_INVALID:enqueue');
   });
 
   test('exactly decodes persisted Account peer inputs before restore', () => {

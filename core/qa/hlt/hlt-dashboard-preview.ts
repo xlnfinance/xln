@@ -81,6 +81,13 @@ export type HltLedgerRun = Readonly<{
 export type HltPaymentCard = Readonly<{
   deliveredTps: number;
   offeredRate: number;
+  submittedPayments: number;
+  acceptedPayments: number;
+  completedPayments: number;
+  drainedPayments: number;
+  sourceDispatchP95Ms: number;
+  sourceDispatchMaxMs: number;
+  sourceAckMaxMs: number;
   deliveredPayments: number;
   elapsedMs: number;
   users: number;
@@ -99,6 +106,10 @@ export type HltSwapCard = Readonly<{
   submitted: number;
   matched: number;
   fullySettled: number;
+  stp: number;
+  sourceDispatchP95Ms: number;
+  sourceDispatchMaxMs: number;
+  sourceAckMaxMs: number;
   matchedElapsedMs: number;
   fullySettledElapsedMs: number;
   users: number;
@@ -289,7 +300,7 @@ export const previewHltDashboard = (config: HltDashboardConfig): HltDashboardPre
     paymentLanes: plan.paymentLanes,
     swapLanes: plan.swapLanes,
     offeredPayPerSecond: plan.offeredPaymentRatePerSecond,
-    offeredSwapPerSecond: plan.offeredSwapRatePerSecond,
+    offeredSwapPerSecond: plan.offeredSwapOrderRatePerSecond,
     offeredOrderPerSecond: plan.offeredOrderRatePerSecond,
     hubShare: hubShareFor(config.mode, plan.economy.hubLabels.length),
     isolatedCommand: isolatedCommand({ ...config, mix }),

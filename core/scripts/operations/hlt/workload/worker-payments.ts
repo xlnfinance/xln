@@ -10,7 +10,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { decodeSettlementEvidenceResponse } from '../../../../api/runtime-adapter/control/settlement-evidence';
 import { safeStringify } from '../../../../protocol/serialization';
 import type { RuntimeInput } from '../../../../runtime/types';
@@ -24,10 +24,16 @@ import {
   type LoadIdentity,
   type HubSettlementCounters,
 } from '../boundary/worker-boundary';
-import { decodeLoadPaymentReport } from '../boundary/worker-payment-boundary';
+import { decodeLoadPaymentReport, type PaymentSettlementSample } from '../boundary/worker-payment-boundary';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
-import { setupParallelLoadLanes } from '../lanes/worker-lanes';
-import { stopLaneRuntimes, type LaneRuntime } from '../lanes/lane-runtimes';
+import { HLT_FAUCET_AMOUNT, setupParallelLoadLanes } from '../lanes/worker-lanes';
+import {
+  queueLaneRuntimeInputWave,
+  assertLaneHostSocketCounterCoverage,
+  resetLaneHostOpCounters,
+  stopLaneRuntimes,
+  type LaneRuntime,
+} from '../lanes/lane-runtimes';
 import {
   connectRuntime,
   directoryBytes,
@@ -35,8 +41,10 @@ import {
   exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readWithRateLimitRetry,
+  resetHltProcessOpCounters,
+  assertHltHubProcessIsolation,
+  stopHltHubBackgroundIo,
   resolveWalPath,
-  sendEnqueued,
   type ConnectedRuntime,
   type WorkerArgs,
 } from '../worker-runtime';
@@ -45,8 +53,8 @@ import {
   paymentAmountFor,
   paymentReceiverIndexSamePopulation,
   paymentTotalForSender,
-  paymentTotalsByReceiverSamePopulation,
 } from './worker-payments-plan';
+import { buildPacedOperationSchedule } from './operation-pacer';
 
 /** Payments move the quote token; the swap workload owns the base token. */
 export const PAYMENT_TOKEN_ID = 1;
@@ -200,10 +208,22 @@ export const buildRoundPayment = (
       amount,
       maxSenderDebit: amount * MAX_SENDER_DEBIT_MULTIPLE,
       deliveryMode: 'async',
-      description: `hlt-payment-r${round + 1}`,
+      description: `hlt-payment-s${senderIndex + 1}-r${round + 1}`,
     },
   };
-  return { entityId: sender.entityId, signerId: sender.signerId, entityTxs: [payment] };
+  const input = { entityId: sender.entityId, signerId: sender.signerId, entityTxs: [payment] };
+  const route = payment.data.route;
+  if (
+    route.length !== 3 ||
+    route[0] !== sender.entityId ||
+    route[1] !== hubEntityId ||
+    route[2] !== receiver.entityId ||
+    sender.entityId === receiver.entityId ||
+    route.filter(entityId => entityId === hubEntityId).length !== 1
+  ) {
+    throw new Error('HLT_PAYMENT_SINGLE_HUB_ROUTE_INVALID');
+  }
+  return input;
 };
 
 /**
@@ -215,26 +235,63 @@ export const waitForHubSettlement = async (
   hub: ConnectedRuntime,
   hubEntityId: string,
   completedPaymentsBefore: number,
+  acceptedPaymentsBefore: number,
   expectedPayments: number,
-): Promise<HubSettlementCounters> => {
+  economicStartedAt: number,
+): Promise<Readonly<{
+  counters: HubSettlementCounters;
+  hubIngressElapsedMs: number;
+  deliveredElapsedMs: number;
+  settlementSamples: readonly PaymentSettlementSample[];
+}>> => {
   const startedAt = Date.now();
   const deadline = startedAt + DELIVERY_TIMEOUT_MS;
   let reportedAtMs = 0;
   let lastCompleted = -1;
   let lastLockBook = -1;
   let stalledSinceMs = startedAt;
+  let deliveredElapsedMs: number | null = null;
+  let hubIngressElapsedMs: number | null = null;
+  const settlementSamples: PaymentSettlementSample[] = [];
   while (Date.now() < deadline) {
-    const core = decodeHubSettlementCounters(
-      await withReadTimeout(readWithRateLimitRetry<unknown>(hub, `entity/${hubEntityId}`), DELIVERY_MAX_STALL_MS, 'entity'),
-    );
+    const core = decodeHubSettlementCounters(await withReadTimeout(
+      readWithRateLimitRetry<unknown>(hub, `entity/${hubEntityId}/settlement-counters`),
+      DELIVERY_MAX_STALL_MS,
+      'settlementCounters',
+    ));
     const completed = core.completedPayments - completedPaymentsBefore;
+    const accepted = core.acceptedPayments - acceptedPaymentsBefore;
+    if (accepted < 0 || accepted > expectedPayments) {
+      throw new Error(
+        `HLT_PAYMENT_HUB_INGRESS_DELTA_INVALID:before=${acceptedPaymentsBefore}:` +
+        `after=${core.acceptedPayments}:expected=${expectedPayments}`,
+      );
+    }
     if (completed < 0 || completed > expectedPayments) {
       throw new Error(
         `HLT_PAYMENT_METRIC_DELTA_INVALID:before=${completedPaymentsBefore}:` +
         `after=${core.completedPayments}:expected=${expectedPayments}`,
       );
     }
+    const sampleElapsedMs = Math.max(1, Math.ceil(performance.now() - economicStartedAt));
+    settlementSamples.push({
+      elapsedMs: sampleElapsedMs,
+      runtimeHeight: core.height,
+      acceptedPayments: accepted,
+      completedPayments: completed,
+      lockBookOpen: core.lockBookOpen,
+    });
+    if (accepted === expectedPayments) {
+      hubIngressElapsedMs ??= sampleElapsedMs;
+    }
     if (core.lockBookOpen === 0 && completed === expectedPayments) {
+      if (accepted !== expectedPayments) {
+        throw new Error(`HLT_PAYMENT_HUB_INGRESS_INCOMPLETE:${accepted}:${expectedPayments}`);
+      }
+      // Economic throughput ends when the committed Hub counter says every
+      // payment completed. Continue polling to the stronger zero-queue gate,
+      // but do not charge unrelated swap ACK drain to payment TPS.
+      deliveredElapsedMs ??= sampleElapsedMs;
       const evidence = decodeSettlementEvidenceResponse(await withReadTimeout(
         hub.adapter.control<unknown>({ type: 'settlement-evidence', book: null, accounts: [] }),
         DELIVERY_MAX_STALL_MS,
@@ -242,7 +299,10 @@ export const waitForHubSettlement = async (
       ));
       const pending = Object.values(evidence.queues)
         .reduce((total, queue) => total + queue.count, 0);
-      if (pending === 0) return core;
+      if (pending === 0) {
+        if (hubIngressElapsedMs === null) throw new Error('HLT_PAYMENT_HUB_INGRESS_TIME_MISSING');
+        return { counters: core, hubIngressElapsedMs, deliveredElapsedMs, settlementSamples };
+      }
     }
     const elapsedMs = Date.now() - startedAt;
     if (completed !== lastCompleted) {
@@ -257,7 +317,8 @@ export const waitForHubSettlement = async (
       reportedAtMs = elapsedMs;
       console.log(
         `[load] hub elapsedMs=${elapsedMs} lockBookOpen=${core.lockBookOpen} ` +
-        `completed=${completed}/${expectedPayments} fees=${core.htlcFeesEarned} height=${core.height} ` +
+        `accepted=${accepted}/${expectedPayments} completed=${completed}/${expectedPayments} ` +
+        `fees=${core.htlcFeesEarned} height=${core.height} ` +
         `rate=${(completed / Math.max(1, elapsedMs) * 1_000).toFixed(1)}/s ` +
         `stalledMs=${stalledMs}`,
       );
@@ -290,11 +351,13 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       { length: lanes },
       (_, senderIndex) => paymentTotalForSender(senderIndex, args.rounds, amountRange),
     );
-    const perReceiver = paymentTotalsByReceiverSamePopulation(lanes, args.rounds, amountRange);
-    const credit = perSender.map((spent, index) => {
-      const received = perReceiver[index]!;
-      return (spent > received ? spent : received) * CREDIT_HEADROOM_MULTIPLE;
-    });
+    const requiredFaucet = perSender.reduce((largest, amount) => amount > largest ? amount : largest, 0n) *
+      CREDIT_HEADROOM_MULTIPLE;
+    if (requiredFaucet > HLT_FAUCET_AMOUNT) {
+      throw new Error(
+        `HLT_PAYMENT_FAUCET_INSUFFICIENT:required=${requiredFaucet}:available=${HLT_FAUCET_AMOUNT}`,
+      );
+    }
     const setup = await setupParallelLoadLanes({
       workDir: args.workDir,
       portBase: args.portBase,
@@ -303,10 +366,6 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       lanes,
       laneOffset: args.laneOffset,
       role: 'taker',
-      laneGrantedCreditTokenId: PAYMENT_TOKEN_ID,
-      laneGrantedCreditAmounts: credit,
-      hubGrantedCreditTokenId: PAYMENT_TOKEN_ID,
-      hubGrantedCreditAmounts: credit,
     });
     users = setup.runtimes;
 
@@ -319,53 +378,97 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       )),
     );
 
+    await stopHltHubBackgroundIo(args);
+    await Promise.all([
+      resetLaneHostOpCounters(users),
+      resetHltProcessOpCounters(args, [hub]),
+    ]);
+
     await exportReplayBaseSnapshotIfConfigured(hub);
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const hubDurableBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
     const hubCountersBefore = decodeHubSettlementCounters(
-      await readWithRateLimitRetry<unknown>(hub, `entity/${hubIdentity.entityId}`),
+      await readWithRateLimitRetry<unknown>(hub, `entity/${hubIdentity.entityId}/settlement-counters`),
     );
 
     const startedAt = performance.now();
-    const enqueued = await Promise.all(users.map((lane, index) => sendEnqueued(
-      lane.runtime,
-      `hlt-payment-batch-${hubDurableBefore.height}-${index}`,
-      {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: lane.identity.entityId,
-          signerId: lane.identity.signerId,
-          entityTxs: Array.from({ length: args.rounds }, (_, round) => {
-            const receiver = users[paymentReceiverIndexSamePopulation(index, round, users.length)]!;
-            const built = buildRoundPayment(
-              lane.identity,
-              hubIdentity.entityId,
-              receiver.identity,
-              index,
-              round,
-              amountRange,
-            );
-            const tx = built.entityTxs?.[0];
-            if (!tx) throw new Error('HLT_PAYMENT_TX_MISSING');
-            return tx;
-          }),
-        }],
-      },
-    )));
-    const enqueueAckElapsedMs = Math.max(0, ...enqueued.map(entry => entry.enqueueAckElapsedMs));
-    const roundSubmissionLagMs = [Math.max(0, Math.ceil(performance.now() - startedAt))];
+    let enqueueAckElapsedMs = 0;
+    const roundSubmissionLagMs: number[] = [];
+    const pendingSubmissions: Array<Promise<Readonly<{ ackMs: number; error: unknown | null }>>> = [];
+    let submissionFailure: unknown | null = null;
+    const schedule = buildPacedOperationSchedule({
+      participants: users.length,
+      rounds: args.rounds,
+      cadenceMs: args.cadenceMs,
+    });
+    for (const operation of schedule) {
+      const scheduledAt = startedAt + operation.dueOffsetMs;
+      const waitMs = scheduledAt - performance.now();
+      if (waitMs > 0) await sleep(waitMs);
+      if (submissionFailure !== null) throw submissionFailure;
+      const waveStartedAt = performance.now();
+      const lane = users[operation.participantIndex]!;
+      const receiver = users[paymentReceiverIndexSamePopulation(
+        operation.participantIndex,
+        operation.round,
+        users.length,
+      )]!;
+      const entityInput = buildRoundPayment(
+        lane.identity,
+        hubIdentity.entityId,
+        receiver.identity,
+        operation.participantIndex,
+        operation.round,
+        amountRange,
+      );
+      if (entityInput.entityTxs?.length !== 1) throw new Error('HLT_PAYMENT_TX_MISSING');
+      const pending = queueLaneRuntimeInputWave(operation.ordinal, [{
+        lane,
+        input: {
+          runtimeTxs: [],
+          entityInputs: [entityInput],
+        },
+      }]).then(
+        () => ({ ackMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error: null }),
+        error => {
+          submissionFailure ??= error;
+          return { ackMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error };
+        },
+      );
+      pendingSubmissions.push(pending);
+      roundSubmissionLagMs.push(Math.max(0, Math.ceil(performance.now() - scheduledAt)));
+    }
+    const sourceDispatchFinishedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
+    const submissionResults = await Promise.all(pendingSubmissions);
+    const failedSubmission = submissionResults.find(result => result.error !== null);
+    if (failedSubmission) throw failedSubmission.error;
+    enqueueAckElapsedMs = Math.max(0, ...submissionResults.map(result => result.ackMs));
+    const sourceAllAckedElapsedMs = Math.max(
+      sourceDispatchFinishedElapsedMs,
+      Math.ceil(performance.now() - startedAt),
+    );
     const submittedPayments = lanes * args.rounds;
-    const hubCountersAfter = await waitForHubSettlement(
+    const paymentSettlement = await waitForHubSettlement(
       hub,
       hubIdentity.entityId,
       hubCountersBefore.completedPayments,
+      hubCountersBefore.acceptedPayments,
       submittedPayments,
+      startedAt,
     );
-    const deliveredElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
+    const hubCountersAfter = paymentSettlement.counters;
+    const hubIngressElapsedMs = paymentSettlement.hubIngressElapsedMs;
+    const deliveredElapsedMs = paymentSettlement.deliveredElapsedMs;
+    const [hubIo, laneIo] = await Promise.all([
+      assertHltHubProcessIsolation(args),
+      assertLaneHostSocketCounterCoverage(users),
+    ]);
+    console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo })}`);
     const report = decodeLoadPaymentReport({
       schema: 'xln-hlt-payment-load-v1',
       mode: 'payments',
+      runId: basename(args.workDir),
       completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
       configuredUsers: lanes,
       configuredRounds: args.rounds,
@@ -381,11 +484,17 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       submittedPayments,
       deliveredPayments: submittedPayments,
       enqueueAckElapsedMs,
-      commandObservedElapsedMs: enqueueAckElapsedMs,
+      sourceDispatchFinishedElapsedMs,
+      sourceAllAckedElapsedMs,
+      commandObservedElapsedMs: sourceAllAckedElapsedMs,
       deliveredElapsedMs,
       deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
       hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
       hubCompletedPaymentsAfter: hubCountersAfter.completedPayments,
+      hubAcceptedPaymentsBefore: hubCountersBefore.acceptedPayments,
+      hubAcceptedPaymentsAfter: hubCountersAfter.acceptedPayments,
+      hubIngressElapsedMs,
+      settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs,
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),

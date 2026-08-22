@@ -61,10 +61,7 @@ const applyOnDraft = <T extends AccountTx>(
   tx: T,
   apply: (draft: ReturnType<typeof accountTransitionView>) => ReturnType<typeof handleRebalanceRefund>,
 ): ReturnType<typeof handleRebalanceRefund> => {
-  const transition = beginAccountTransition(
-    replica,
-    { purpose: 'rebalance-financial-test', tx },
-  );
+  const transition = beginAccountTransition(replica);
   const result = apply(accountTransitionView(transition));
   if (!result.ok) {
     discardAccountTransition(transition);

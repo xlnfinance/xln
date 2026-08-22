@@ -20,6 +20,7 @@ export type PersistenceQueryDeps = {
   readPersistedStorageFramePayloads(
     env: RuntimeReplica,
     frame: RuntimeFrame,
+    options?: { includeRuntimeMachine?: boolean },
   ): Promise<RuntimeFramePayloads>;
   loadEnvFromStorageByReplay(
     runtimeId?: string | null,

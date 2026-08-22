@@ -157,43 +157,50 @@ assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
 
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function validateIncomingFrameOnDraft',
-  'const transition = beginAccountTransition(',
+  "'account.receive.frameHash'",
+  '() => verifySenderFrameHash(receivedFrame, events)',
+  'const transition = timePerfPhase(',
+  '() => beginAccountTransition(account)',
   'const clonedMachine = accountTransitionView(transition);',
-  'const replayResult = await replayIncomingFrameOnClone(',
-  'const frameHashMismatch = await verifySenderFrameHash',
-  'const committed = commitAccountTransition(transition);',
+  'const replayResult = await timePerfPhase(',
+  '() => replayIncomingFrameOnClone(',
+  'const committed = timePerfPhase(',
+  "() => commitAccountTransition(transition, 'incomingValidation')",
   'const validatedMachine = committed.account;',
-  'const localAccountStateRoot = committed.accountStateRoot;',
-  'localAccountStateRoot !== receivedFrame.accountStateRoot',
-  '!accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)',
-  'const proofResult = buildAccountProofBodyFromJurisdictions(context, validatedMachine);',
+  'const stateMismatch = validateIncomingCommittedState(',
+  'committed.accountStateRoot,',
+  'const proofResult = timePerfPhase(',
+  '() => buildAccountProofBodyFromJurisdictions(context, validatedMachine)',
   'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = getDisputeSealRequirementError(',
 ]);
 
 assertOrder(accountCommitTransition, accountCommitTransitionPath, [
-  'const owner = beginAccountTransition(',
+  'const owner = timePerfPhase(',
+  '() => beginAccountTransition(account)',
   'const draft = accountTransitionView(owner);',
   'for (const tx of frame.accountTxs) {',
   'const result = await applyAccountTx(',
   'assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);',
-  'publishAccountOverlay(account, commitAccountTransition(owner).account);',
+  'const committed = timePerfPhase(',
+  "() => commitAccountTransition(owner, 'frameCommit')",
+  'publishAccountOverlay(account, committed.account);',
+  'assertLiveCommitMatchesFrame(',
 ]);
 assertDirectCallCount(accountCommitTransitionPath, 'beginAccountTransition', 1);
 assertDirectCallCount(accountCommitTransitionPath, 'commitAccountTransition', 1);
-assertDirectCallCount('core/account/consensus/index.ts', 'commitAccountFrameTransition', 1);
+assertDirectCallCount('core/account/consensus/index.ts', 'commitAccountFrameTransition', 0);
 assertDirectCallCount('core/account/consensus/incoming/ack-commit.ts', 'commitAccountFrameTransition', 1);
 assertOrder(accountConsensus, accountConsensusPath, [
-  'const reexecuteIncomingFrame = async (',
-  'const committed = await commitAccountFrameTransition({',
+  'async function handleIncomingAccountFrame',
   'if (preflight.rollbackPendingFrame) {',
-  'await reexecuteIncomingFrame(',
+  'applySameHeightIncomingFrameRollback(account, preflight.receivedFrame, events);',
+  'await commitIncomingFrameOnRealState(',
 ]);
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
-  'if (installValidatedTransition) {',
   'publishAccountOverlay(account, validation.clonedMachine);',
-  'assertLiveCommitMatchesFrame(',
+  'ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH',
   'account.currentFrame = cloneAccountFrame(receivedFrame);',
   'const committedFrame = cloneAccountFrame(receivedFrame);',
   'committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });',
@@ -236,13 +243,14 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'ingressInput,',
   'trustedLocalCrossJurisdiction,',
   'if (admissionError) {',
-  'const workingReplica = forkEntityReplicaForInput(replica);',
   'if (!isEntityInputWellFormed(ingressInput)) {',
+  'const accountInputOnly = Boolean(',
+  'const workingReplica = forkEntityReplicaForInput(replica, accountInputOnly);',
   'const input = cloneIsolatedEntityInput(ingressInput);',
   'normalizeProposedFrameCollectedSigs(input.proposedFrame);',
-  'if (!isEntityInputWellFormed(input)) {',
 ]);
 assertIncludes(entityConsensus, 'const supplied = entityInput.entityTxs ?? [];', entityConsensusPath);
+assertIncludes(entityConsensus, "if (admitted.every(tx => tx.type === 'accountInput')) {", entityConsensusPath);
 assertInitializer(
   'core/entity/consensus/input/admission.ts',
   'admitted',
@@ -253,7 +261,7 @@ assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityCon
 assertIncludes(entityConsensus, 'const hankos: HankoString[] = [];', entityConsensusPath);
 assertIncludes(entityConsensus, 'await buildQuorumHanko(', entityConsensusPath);
 assertIncludes(entityConsensus, 'attachHankoWitnessToOutputs(', entityConsensusPath);
-assertIncludes(entityConsensus, 'entityOutbox.push(...commitOutputs);', entityConsensusPath);
+assertIncludes(entityConsensus, '...wrapCertifiedEntityOutputs(', entityConsensusPath);
 assertIncludes(entityConsensus, 'if (isEmitter) jOutbox.push(...execution.jOutputs);', entityConsensusPath);
 
 assertIncludes(accountFrame, 'canonicalJurisdictionEventsHash(events)', accountFramePath);
@@ -265,13 +273,16 @@ assertOrder(accountFrame, accountFramePath, [
   "['accountStateRoot', frame.accountStateRoot],",
 ]);
 assertOrder(entityFrame, entityFramePath, [
+  'export const assertEntityFrameTotalByteBudget',
   'const encoded = encodeCanonicalConsensusValue({',
   "domain: 'xln:entity-frame',",
-  'txs: input.txs.map(canonicalEntityTxForFrameHash),',
+  'txs: canonicalEntityTxsForFrameHash(input.txs),',
+  'return encoded;',
+  'export function createEntityFrameHashFromStateRoot',
   'stateRoot: stateRoot.toLowerCase(),',
   'authorityRoot: authorityRoot.toLowerCase(),',
   'const encoded = assertEntityFrameTotalByteBudget(frameData);',
-  'const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));',
+  'const hash = keccakTextHash(encoded);',
   'return hash;',
 ]);
 assertOrder(entityFrame, entityFramePath, [

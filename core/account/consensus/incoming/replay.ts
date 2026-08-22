@@ -1,4 +1,4 @@
-import type { AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountDisputeSeal, AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import {
   copyAccountDisputeConfig,
@@ -21,7 +21,7 @@ export type AccountInputHeightNormalization =
   | { ok: false; message: string };
 
 export const normalizeAccountInputHeight = (
-  input: AccountInput,
+  input: AccountPeerInput,
 ): AccountInputHeightNormalization => {
   const referenceHeight = accountInputReferenceHeight(input);
   const normalizedInputHeight = referenceHeight === undefined || referenceHeight === null
@@ -37,7 +37,7 @@ export const normalizeAccountInputHeight = (
 };
 
 export const getDisputeHankoShapeError = (
-  input: AccountInput,
+  input: AccountPeerInput,
 ): string | undefined => {
   const seals = [
     accountInputAck(input)?.disputeSeal,
@@ -79,7 +79,7 @@ export type AccountInputReplayClassification = {
 
 export const classifyAccountInputReplay = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
 ): AccountInputReplayClassification => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
@@ -115,7 +115,7 @@ const sameAccountStateHash = (left: string | undefined, right: string | undefine
   && left.toLowerCase() === right.toLowerCase();
 
 const duplicateAckHashesToSign = (
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   response: AccountPeerInput,
 ): AccountConsensusHashToSign[] | undefined => {
@@ -128,7 +128,7 @@ const duplicateAckHashesToSign = (
 };
 
 const applyDuplicateAck = (
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   response: AccountPeerInput,
   events: string[],
@@ -155,13 +155,13 @@ const reusableCertifiedAckSeal = (account: AccountReplica): AccountDisputeSeal |
 
 const rebuildDuplicateCommittedFrameAck = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   receivedHeight: number,
   events: string[],
 ): HandleAccountInputResult => {
   const disputeSeal = reusableCertifiedAckSeal(account);
-  const response: Extract<AccountInput, { kind: 'ack' }> = {
+  const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
     kind: 'ack',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
@@ -190,7 +190,7 @@ const rebuildDuplicateCommittedFrameAck = (
 
 export const buildDuplicateCommittedFrameAck = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   events: string[],
   replayCurrentHeight: number,
   receivedFrame: AccountFrame,
@@ -250,7 +250,7 @@ export const buildDuplicateCommittedFrameAck = (
 
 export const handleReplayOrObsoleteAccountInput = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   replay: AccountInputReplayClassification,
   events: string[],
 ): HandleAccountInputResult | undefined => {

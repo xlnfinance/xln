@@ -55,6 +55,15 @@ const addAdmittedTransactions = (
       admitted,
     );
   }
+  if (admitted.every(tx => tx.type === 'accountInput')) {
+    // AccountInput is already authenticated/decoded at the Entity boundary and
+    // is forbidden inside an EntityCommand. Old mempool entries were prepared
+    // when first admitted; re-running the whole growing prefix through command
+    // canonicalization made Hub ingress quadratic. Append the exact new
+    // protocol delta and preserve FIFO order.
+    workingReplica.mempool = [...workingReplica.mempool, ...admitted];
+    return [];
+  }
   workingReplica.mempool = prioritizeScheduledWakeTransactions(
     prepareLocallyAuthoredEntityTxs(
       env,

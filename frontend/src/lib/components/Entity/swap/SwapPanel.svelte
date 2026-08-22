@@ -101,6 +101,7 @@ import {
   type SwapRouteOption,
   type PairOption,
 } from '../swap-panel-core';
+import { planSameJSwapCommand, resolveSameJSwapPartyRoles } from './commands/same-j-swap-command';
 export let replica: EntityReplica | null;
 export let tab: Tab;
 export let env: RuntimeReplica | null = null;
@@ -713,22 +714,14 @@ function requireSwapPartyRoles(
 } {
   const entityId = String(candidate?.entityId || candidate?.state?.entityId || '').trim().toLowerCase();
   const normalizedHubEntityId = String(hubEntityId || '').trim().toLowerCase();
-  const entityIsHub = swapRuntimeView.committedRoles.get(entityId);
-  const hubIsHub = getHubProfile(normalizedHubEntityId)?.metadata?.isHub;
-  // These booleans choose the signed response clocks for a newly opened
-  // Account. Missing gossip or a partial replica must stop the command rather
-  // than silently treating either party as a 24-hour user.
-  if (!entityId || !normalizedHubEntityId || typeof entityIsHub !== 'boolean' || hubIsHub !== true) {
-    throw new Error(`SWAP_${label}_PARTY_ROLE_UNAVAILABLE:${entityId}:${normalizedHubEntityId}`);
-  }
-  const committedHubRole = swapRuntimeView.committedRoles.get(normalizedHubEntityId);
   return {
-    entityRoleEvidence: { entityId, isHub: entityIsHub, source: 'committed-profile' },
-    hubRoleEvidence: {
-      entityId: normalizedHubEntityId,
-      isHub: true,
-      source: committedHubRole === true ? 'committed-profile' : 'verified-gossip-profile',
-    },
+    ...resolveSameJSwapPartyRoles({
+      sourceEntityId: entityId,
+      hubEntityId: normalizedHubEntityId,
+      hubProfile: getHubProfile(normalizedHubEntityId),
+      committedRoles: swapRuntimeView.committedRoles,
+      label,
+    }),
     committedRoles: swapRuntimeView.committedRoles,
   };
 }
@@ -2494,15 +2487,6 @@ async function placeSwapOffer() {
     if (!activeXlnFunctions?.planSwapCommand) {
       throw new Error('SWAP_COMMAND_PLANNER_UNAVAILABLE');
     }
-    const swapNetAuthorization = placementMode === 'cross'
-      ? { maxFee: 0n, minNetReceive: effectiveWantAmount }
-      : (() => {
-          const feeBps = getHubProfile(resolvedCounterparty)?.metadata?.swapTakerFeeBps;
-          if (!activeXlnFunctions.deriveSwapNetAuthorization || !Number.isSafeInteger(feeBps)) {
-            throw new Error('SWAP_FEE_POLICY_UNAVAILABLE');
-          }
-          return activeXlnFunctions.deriveSwapNetAuthorization(effectiveWantAmount, Number(feeBps));
-        })();
     const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(committedSourceReplica);
     // Setup is derived from the latest committed target Account, not the
     // asynchronously rendered workspace projection. Otherwise a second order
@@ -2526,37 +2510,69 @@ async function placeSwapOffer() {
           account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId)?.state ?? null,
         }
       : null;
-    const commandPlan = activeXlnFunctions.planSwapCommand({
-      mode: placementMode,
-      logicalTimestamp: logicalNow,
-      logicalHeight,
-      routeValue: liveSelectedRouteValue,
-      giveTokenId: giveToken,
-      giveTokenDecimals: getTokenDecimals(giveToken),
-      wantTokenId: wantToken,
-      wantTokenDecimals: getTokenDecimals(wantToken),
-      giveAmount,
-      priceTicks: canonicalPriceTicks,
-      ...swapNetAuthorization,
-      source: {
-        entityId: sourceEntityId,
-        signerId,
-        hubEntityId: resolvedCounterparty,
-        hubSignerId: sourceHubSignerId,
-        jurisdiction: sourceJurisdictionRef,
-        entityRoleEvidence: sourcePartyRoles.entityRoleEvidence,
-        hubRoleEvidence: sourcePartyRoles.hubRoleEvidence,
-        committedRoles: sourcePartyRoles.committedRoles,
-        account: committedSourceReplica?.state.accounts.get(resolvedCounterparty)?.state ?? null,
-      },
-      ...(targetCommandParty
-        ? {
-            target: targetCommandParty,
-            allowOpenTargetAccount: !targetAccountExists,
-          }
-        : {}),
-      expiresInMs: 24 * 60 * 60 * 1_000,
-    });
+    const commandPlan = placementMode === 'same'
+      ? planSameJSwapCommand({
+          committedSourceReplica,
+          runtimeView: swapRuntimeView,
+          source: {
+            entityId: sourceEntityId,
+            signerId,
+            jurisdiction: sourceJurisdictionRef,
+          },
+          hub: {
+            entityId: resolvedCounterparty,
+            signerId: sourceHubSignerId,
+            profile: getHubProfile(resolvedCounterparty),
+          },
+          roles: {
+            entityRoleEvidence: sourcePartyRoles.entityRoleEvidence,
+            hubRoleEvidence: sourcePartyRoles.hubRoleEvidence,
+          },
+          tokens: {
+            giveTokenId: giveToken,
+            giveTokenDecimals: getTokenDecimals(giveToken),
+            wantTokenId: wantToken,
+            wantTokenDecimals: getTokenDecimals(wantToken),
+          },
+          giveAmount,
+          priceTicks: canonicalPriceTicks,
+          routeValue: liveSelectedRouteValue,
+          expectedWantAmount: effectiveWantAmount,
+          logicalClock: { logicalTimestamp: logicalNow, logicalHeight },
+          runtimeFunctions: activeXlnFunctions,
+        })
+      : activeXlnFunctions.planSwapCommand({
+          mode: 'cross',
+          logicalTimestamp: logicalNow,
+          logicalHeight,
+          routeValue: liveSelectedRouteValue,
+          giveTokenId: giveToken,
+          giveTokenDecimals: getTokenDecimals(giveToken),
+          wantTokenId: wantToken,
+          wantTokenDecimals: getTokenDecimals(wantToken),
+          giveAmount,
+          priceTicks: canonicalPriceTicks,
+          maxFee: 0n,
+          minNetReceive: effectiveWantAmount,
+          source: {
+            entityId: sourceEntityId,
+            signerId,
+            hubEntityId: resolvedCounterparty,
+            hubSignerId: sourceHubSignerId,
+            jurisdiction: sourceJurisdictionRef,
+            entityRoleEvidence: sourcePartyRoles.entityRoleEvidence,
+            hubRoleEvidence: sourcePartyRoles.hubRoleEvidence,
+            committedRoles: sourcePartyRoles.committedRoles,
+            account: committedSourceReplica.state.accounts.get(resolvedCounterparty)?.state ?? null,
+          },
+          ...(targetCommandParty
+            ? {
+                target: targetCommandParty,
+                allowOpenTargetAccount: !targetAccountExists,
+              }
+            : {}),
+          expiresInMs: 24 * 60 * 60 * 1_000,
+        });
     const offerId = commandPlan.offerId;
     effectiveGiveAmount = commandPlan.preparedOrder.effectiveGive;
     effectiveWantAmount = commandPlan.preparedOrder.effectiveWant;

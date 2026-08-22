@@ -1,4 +1,4 @@
-import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { HankoString } from '../../../types/hanko';
@@ -134,10 +134,10 @@ const requireDraftWitness = (
   throw new Error(`HANKO_DRAFT_UNSEALED:hash=${hash}:type=${type}:entityHeight=${entityHeight}`);
 };
 
-const getOutboundAccount = (state: EntityState | undefined, input: AccountInput): AccountReplica | undefined =>
+const getOutboundAccount = (state: EntityState | undefined, input: AccountPeerInput): AccountReplica | undefined =>
   state?.accounts.get(input.toEntityId);
 
-const getAckFrameHash = (state: EntityState | undefined, input: AccountInput): string | undefined => {
+const getAckFrameHash = (state: EntityState | undefined, input: AccountPeerInput): string | undefined => {
   const ack = accountInputAck(input);
   if (!ack) return undefined;
   if (typeof ack.frameHash !== 'string' || ack.frameHash.trim().length === 0) {
@@ -168,7 +168,7 @@ const sealDispute = (
 };
 
 const sealAccountInput = (
-  input: AccountInput,
+  input: AccountPeerInput,
   state: EntityState | undefined,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,

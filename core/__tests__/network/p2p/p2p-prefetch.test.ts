@@ -75,9 +75,8 @@ test('inbound forged envelope is rejected before profile prefetch', async () => 
   p2p.env = target;
   p2p.closing = false;
   p2p.closed = false;
-  p2p.ensureProfilesForInput = async () => {
+  p2p.scheduleProfilePrefetch = () => {
     profileFetches += 1;
-    return true;
   };
   p2p.onEntityInputs = () => {
     admitted += 1;
@@ -104,7 +103,7 @@ test('inbound forged envelope is rejected before profile prefetch', async () => 
   expect(admitted).toBe(0);
 });
 
-test('inbound entity batch resolves one deduplicated profile cohort', async () => {
+test('inbound entity batch coalesces missing profiles into one relay fetch', async () => {
   const source = createEmptyEnv('p2p-prefetch-cohort-source');
   const target = createEmptyEnv('p2p-prefetch-cohort-target');
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
@@ -113,6 +112,9 @@ test('inbound entity batch resolves one deduplicated profile cohort', async () =
   p2p.env = target;
   p2p.closing = false;
   p2p.closed = false;
+  p2p.pendingProfilePrefetchIds = new Set();
+  p2p.profilePrefetchTimer = null;
+  p2p.hasProfileForEntity = () => false;
   p2p.ensureProfiles = async (entityIds: string[]) => {
     requiredBatches.push(entityIds);
     return true;
@@ -134,9 +136,35 @@ test('inbound entity batch resolves one deduplicated profile cohort', async () =
   });
 
   await (p2p as any).acceptInboundEntityInputs('relay', source.runtimeId, envelope, 1);
+  await Bun.sleep(25);
 
   expect(requiredBatches).toEqual([[SOURCE_ENTITY_ID]]);
   expect(admitted).toBe(1);
+});
+
+test('one Runtime tick of 1000 profile misses emits one bulk gossip fetch', async () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const batches: string[][] = [];
+  p2p.env = { warn: () => undefined };
+  p2p.closing = false;
+  p2p.closed = false;
+  p2p.pendingProfilePrefetchIds = new Set();
+  p2p.profilePrefetchTimer = null;
+  p2p.hasProfileForEntity = () => false;
+  p2p.ensureProfiles = async (entityIds: string[]) => {
+    batches.push(entityIds);
+    return true;
+  };
+
+  for (let index = 0; index < 1_000; index += 1) {
+    (p2p as any).scheduleProfilePrefetch([
+      `0x${index.toString(16).padStart(64, '0')}`,
+    ]);
+  }
+  await Bun.sleep(25);
+
+  expect(batches).toHaveLength(1);
+  expect(batches[0]).toHaveLength(1_000);
 });
 
 test('enqueueEntityInputsDelivery starts profile prefetch before transport resolution', () => {

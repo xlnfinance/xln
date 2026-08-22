@@ -3,7 +3,7 @@
  * replaying any transaction. This phase never mutates live Account state.
  */
 
-import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
+import type { AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { getAccountFrameStructuralError } from '../frame/hash';
@@ -13,6 +13,7 @@ import { resolveSameHeightIncomingFrame } from './collision';
 import { buildDuplicateCommittedFrameAck, describeAccountState } from './replay';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, accountInputDisputeRequired, rejectAccountPeerInput } from '../result';
+import { timePerfPhase } from '../../../support/performance/profile';
 
 const preflightLog = createStructuredLogger('account.preflight');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
@@ -28,7 +29,7 @@ export type IncomingFramePreflightResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 const verifyIncomingFrameHanko = async (
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   events: string[],
   securityContext: AccountInputSecurityContext,
@@ -46,16 +47,19 @@ const verifyIncomingFrameHanko = async (
     height: receivedFrame.height,
     from: shortId(input.fromEntityId),
   });
-  const { valid, entityId: recoveredEntityId } = await securityContext.verifyHanko(
-    hankoToVerify,
-    receivedFrame.stateHash,
-    input.fromEntityId,
-    securityContext.counterpartyCertifiedBoard
-      ? {
-          registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
-          allowPreviousBoard: false,
-        }
-      : { allowPreviousBoard: false },
+  const { valid, entityId: recoveredEntityId } = await timePerfPhase(
+    'account.verify.frameHanko',
+    () => securityContext.verifyHanko(
+      hankoToVerify,
+      receivedFrame.stateHash,
+      input.fromEntityId,
+      securityContext.counterpartyCertifiedBoard
+        ? {
+            registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
+            allowPreviousBoard: false,
+          }
+        : { allowPreviousBoard: false },
+    ),
   );
   if (!valid || !recoveredEntityId) {
     return rejectAccountPeerInput(
@@ -73,7 +77,7 @@ const verifyIncomingFrameHanko = async (
 
 const handleStaleIncomingFrame = async (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   replayCurrentHeight: number,
   events: string[],
@@ -108,7 +112,7 @@ const handleStaleIncomingFrame = async (
 
 const validateIncomingFrameProposer = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   events: string[],
 ): HandleAccountInputResult | undefined => {
@@ -133,7 +137,7 @@ const validateIncomingFrameProposer = (
 
 const validateIncomingFrameChain = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   normalizedInputHeight: number | undefined,
   securityContext: AccountInputSecurityContext,
@@ -207,7 +211,7 @@ const validateIncomingFrameChain = (
 
 const validateIncomingFrameDeadline = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   securityContext: AccountInputSecurityContext,
   events: string[],
@@ -251,7 +255,7 @@ const validateIncomingFrameDeadline = (
 
 export const preflightIncomingAccountFrame = async (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
   events: string[],

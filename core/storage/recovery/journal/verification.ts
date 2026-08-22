@@ -28,6 +28,7 @@ import {
 } from '../machine';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { prepareRuntimeOutputPayloadRows } from '../../wal/outbox-payload';
+import { timePerfPhase } from '../../../support/performance/profile';
 
 export const assertRecoveryOutboxMatches = (
   expectedOutputs: readonly RoutedEntityInput[],
@@ -62,28 +63,32 @@ export const verifyRecoveryJournalFrame = (
 ): void => {
   // Frames written before contexts were keyed by certified height carry one
   // bare `replicaId` key per replica; compare them under the current key shape.
-  const expectedEntityContexts = encodeCanonicalConsensusValue(new Map(
-    [...(frame.entityContexts ?? new Map())].map(([key, context]) => [
-      key.split(':').length === 2 ? `${key}:${context.height}` : key,
-      context,
-    ]),
-  ));
-  const actualEntityContexts = encodeCanonicalConsensusValue(result.entityContexts);
+  const expectedEntityContexts = timePerfPhase('recovery.verify.entityContexts.expected', () =>
+    encodeCanonicalConsensusValue(new Map(
+      [...(frame.entityContexts ?? new Map())].map(([key, context]) => [
+        key.split(':').length === 2 ? `${key}:${context.height}` : key,
+        context,
+      ]),
+    )));
+  const actualEntityContexts = timePerfPhase('recovery.verify.entityContexts.actual', () =>
+    encodeCanonicalConsensusValue(result.entityContexts));
   if (actualEntityContexts !== expectedEntityContexts) {
     throw new Error(
       `RECOVERY_JOURNAL_ENTITY_CONTEXTS_MISMATCH:height=${height}:` +
       `expected=${expectedEntityContexts}:actual=${actualEntityContexts}`,
     );
   }
-  if (frame.runtimeMachine) {
-    assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachine, height);
+  const expectedRuntimeMachine = frame.runtimeMachine;
+  if (expectedRuntimeMachine) {
+    timePerfPhase('recovery.verify.runtimeMachine', () =>
+      assertRecoveryRuntimeMachineMatches(env, expectedRuntimeMachine, height));
   }
-  const lineage = frame.replicaMetaCheckpoint
+  const lineage = timePerfPhase('recovery.verify.lineage', () => frame.replicaMetaCheckpoint
     ? buildRuntimeCheckpointLineagePlan(env)
-    : null;
-  const commitment = lineage
+    : null);
+  const commitment = timePerfPhase('recovery.verify.replicaMeta', () => lineage
     ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage)
-    : buildStorageLiveReplicaMetaCommitment(env);
+    : buildStorageLiveReplicaMetaCommitment(env));
   if (commitment.digest !== frame.replicaMetaDigest) {
     const inputs = frame.runtimeInput.entityInputs.map(input => ({
       entityId: input.entityId,
@@ -108,18 +113,19 @@ export const verifyRecoveryJournalFrame = (
       `actualMeta=${safeStringify(inspectStorageReplicaMetaEntries(commitment.entries)).slice(0, 8_000)}`,
     );
   }
-  const postStateHash = computeStoragePostStateHash({
-    height,
-    timestamp: env.state.timestamp,
-    replicaMetaDigest: commitment.digest,
-    runtimeComponentDigests: computeRuntimePostStateComponentDigests(
-      buildReplayVerifiableRuntimePostStateView(env, {
-        pendingNetworkOutputs: [],
-        excludePersistedHistoryRecords: true,
-      }),
-    ),
-    runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
-  });
+  const postStateHash = timePerfPhase('recovery.verify.postState', () =>
+    computeStoragePostStateHash({
+      height,
+      timestamp: env.state.timestamp,
+      replicaMetaDigest: commitment.digest,
+      runtimeComponentDigests: computeRuntimePostStateComponentDigests(
+        buildReplayVerifiableRuntimePostStateView(env, {
+          pendingNetworkOutputs: [],
+          excludePersistedHistoryRecords: true,
+        }),
+      ),
+      runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
+    }));
   if (postStateHash !== frame.postStateHash) {
     throw new Error(
       `RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=${height}:` +
@@ -127,7 +133,8 @@ export const verifyRecoveryJournalFrame = (
     );
   }
   if (frame.runtimeStateHash) {
-    const stateHash = computeCanonicalStateHashFromEnv(env);
+    const stateHash = timePerfPhase('recovery.verify.runtimeState', () =>
+      computeCanonicalStateHashFromEnv(env));
     if (stateHash !== frame.runtimeStateHash) {
       const actualMachine = buildStorageRuntimeMachineSnapshot(env);
       const fields = frame.runtimeMachine

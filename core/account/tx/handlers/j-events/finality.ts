@@ -215,14 +215,7 @@ export const applyFinalizedAccountJEvents = (
 
   // J-claim finality is atomic: malformed structural proof data must not leave
   // reserves changed while the workspace/proof transition is rejected.
-  const overlay = beginAccountTransition(
-    account,
-    {
-      purpose: 'j-event-finality',
-      events: collected.settledEvents,
-      finalizedNonce: collected.finalizedNonce,
-    },
-  );
+  const overlay = beginAccountTransition(account);
   try {
     applySettledEventsOnView(
       accountTransitionView(overlay),
@@ -231,7 +224,7 @@ export const applyFinalizedAccountJEvents = (
       collected.finalizedNonce,
       deltaTransformerAddress,
     );
-    const committed = publishAccountTransition(account, overlay);
+    const committed = publishAccountTransition(account, overlay, 'jFinality');
     jEventFinalityLog.debug('finality.overlay_committed', {
       changedPatriciaNodes: countAccountTransitionNodeChanges(committed.nodeChanges),
       jNonce: collected.finalizedNonce,

@@ -1,3 +1,4 @@
+import { LIMITS } from '../../config/constants';
 import { safeStringify } from '../../protocol/serialization';
 import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
@@ -11,8 +12,6 @@ export const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
 // a smaller independent cap would wedge that canonical height forever. The
 // extra MiB bounds the Runtime/JInput envelope for the existing count limits.
 export const MAX_RUNTIME_J_INPUT_BYTES = MAX_ENTITY_FRAME_J_RANGE_BYTES + 1024 * 1024;
-const MAX_RUNTIME_TXS = 1_000;
-const MAX_RUNTIME_ENTITY_INPUTS = 10_000;
 
 type RejectRuntimeInput = (message: string) => never;
 
@@ -75,11 +74,17 @@ export const validateRuntimeInputShapeAndLimits = (
     reject(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
   }
   validateRuntimeJIngressLimits(env, runtimeInput, reject);
-  if (runtimeInput.runtimeTxs.length > MAX_RUNTIME_TXS) {
-    reject(`Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > ${MAX_RUNTIME_TXS}`);
+  if (runtimeInput.runtimeTxs.length > LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS) {
+    reject(
+      `Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > ` +
+      `${LIMITS.MAX_RUNTIME_INPUT_RUNTIME_TXS}`,
+    );
   }
-  if (runtimeInput.entityInputs.length > MAX_RUNTIME_ENTITY_INPUTS) {
-    reject(`Too many entity inputs: ${runtimeInput.entityInputs.length} > ${MAX_RUNTIME_ENTITY_INPUTS}`);
+  if (runtimeInput.entityInputs.length > LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS) {
+    reject(
+      `Too many entity inputs: ${runtimeInput.entityInputs.length} > ` +
+      `${LIMITS.MAX_RUNTIME_INPUT_ENTITY_INPUTS}`,
+    );
   }
 };
 

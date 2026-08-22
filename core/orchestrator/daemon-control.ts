@@ -57,6 +57,44 @@ export type ControlRuntimeSnapshot = Readonly<{
   checkpointHash: string;
 }>;
 
+export type ControlDirectRuntimeSession = Readonly<{
+  runtimeId: string;
+  open: boolean;
+  lastSeen: number;
+  consecutiveBackpressuredSends: number;
+  backpressureAgeMs: number;
+  bufferedAmount: number | null;
+}>;
+
+const decodeDirectRuntimeSession = (value: unknown): ControlDirectRuntimeSession => {
+  const session = requireBoundaryRecord(value, 'CONTROL_DIRECT_SESSION_INVALID');
+  requireExactBoundaryKeys(session, [
+    'runtimeId', 'open', 'lastSeen', 'consecutiveBackpressuredSends',
+    'backpressureAgeMs', 'bufferedAmount',
+  ], [], 'CONTROL_DIRECT_SESSION_FIELDS_INVALID');
+  const runtimeId = String(session['runtimeId'] || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(runtimeId)) throw new Error('CONTROL_DIRECT_SESSION_RUNTIME_ID_INVALID');
+  if (typeof session['open'] !== 'boolean') throw new Error('CONTROL_DIRECT_SESSION_OPEN_INVALID');
+  const bufferedAmount = session['bufferedAmount'];
+  if (bufferedAmount !== null) {
+    requireBoundaryInteger(bufferedAmount, 'CONTROL_DIRECT_SESSION_BUFFERED_AMOUNT_INVALID');
+  }
+  return {
+    runtimeId,
+    open: session['open'],
+    lastSeen: requireBoundaryInteger(session['lastSeen'], 'CONTROL_DIRECT_SESSION_LAST_SEEN_INVALID'),
+    consecutiveBackpressuredSends: requireBoundaryInteger(
+      session['consecutiveBackpressuredSends'],
+      'CONTROL_DIRECT_SESSION_BACKPRESSURE_COUNT_INVALID',
+    ),
+    backpressureAgeMs: requireBoundaryInteger(
+      session['backpressureAgeMs'],
+      'CONTROL_DIRECT_SESSION_BACKPRESSURE_AGE_INVALID',
+    ),
+    bufferedAmount: bufferedAmount as number | null,
+  };
+};
+
 const decodeControlEntitySummary = (value: unknown): ControlEntitySummary => {
   const summary = requireBoundaryRecord(value, 'CONTROL_ENTITY_SUMMARY_INVALID');
   requireExactBoundaryKeys(
@@ -423,6 +461,29 @@ export class DaemonControlClient {
       && /^0x[0-9a-f]{64}$/.test(String(profile.runtimeEncPubKey ?? ''));
   }
 
+  async gossipProfilesSendReady(
+    targets: readonly Readonly<{ entityId: string; runtimeId: string }>[],
+  ): Promise<Readonly<{ ready: boolean; missing: string[] }>> {
+    const response = requireBoundaryRecord(
+      await this.post('/api/control/gossip-profiles-send-ready', { targets }),
+      'CONTROL_GOSSIP_SEND_READY_RESPONSE_INVALID',
+    );
+    requireExactBoundaryKeys(
+      response,
+      ['ok', 'ready', 'missing'],
+      [],
+      'CONTROL_GOSSIP_SEND_READY_RESPONSE_FIELDS_INVALID',
+    );
+    if (response['ok'] !== true || typeof response['ready'] !== 'boolean' || !Array.isArray(response['missing'])) {
+      throw new Error('CONTROL_GOSSIP_SEND_READY_RESPONSE_INVALID');
+    }
+    const missing = response['missing'].map(value => String(value).trim().toLowerCase());
+    if (missing.some(entityId => !/^0x[0-9a-f]{64}$/.test(entityId))) {
+      throw new Error('CONTROL_GOSSIP_SEND_READY_RESPONSE_MISSING_INVALID');
+    }
+    return { ready: response['ready'], missing };
+  }
+
   /**
    * Counterparties this Runtime currently sees in `entityId`'s gossip profile.
    * A routed payment is admitted against the sender's own gossip view, so a
@@ -492,6 +553,57 @@ export class DaemonControlClient {
       await sleep(250);
     }
     throw new Error(`CONTROL_P2P_DIRECT_ROUTES_NOT_OPEN:entities=${entityIds.join(',')}`);
+  }
+
+  async readDirectRuntimeSessions(): Promise<ControlDirectRuntimeSession[]> {
+    const response = requireBoundaryRecord(
+      await this.get('/api/control/p2p/direct-sessions'),
+      'CONTROL_DIRECT_SESSIONS_RESPONSE_INVALID',
+    );
+    requireExactBoundaryKeys(
+      response,
+      ['ok', 'runtimeId', 'sessions'],
+      [],
+      'CONTROL_DIRECT_SESSIONS_RESPONSE_FIELDS_INVALID',
+    );
+    const runtimeId = String(response['runtimeId'] || '').trim().toLowerCase();
+    if (response['ok'] !== true || !/^0x[0-9a-f]{40}$/.test(runtimeId)) {
+      throw new Error('CONTROL_DIRECT_SESSIONS_RESPONSE_IDENTITY_INVALID');
+    }
+    if (!Array.isArray(response['sessions'])) throw new Error('CONTROL_DIRECT_SESSIONS_LIST_INVALID');
+    const sessions = response['sessions'].map(decodeDirectRuntimeSession);
+    if (new Set(sessions.map(session => session.runtimeId)).size !== sessions.length) {
+      throw new Error('CONTROL_DIRECT_SESSIONS_RUNTIME_DUPLICATE');
+    }
+    return sessions;
+  }
+
+  async waitForDirectRuntimeSessions(
+    expectedRuntimeIds: readonly string[],
+    timeoutMs = 30_000,
+  ): Promise<void> {
+    const expected = expectedRuntimeIds.map(runtimeId => runtimeId.trim().toLowerCase());
+    if (expected.some(runtimeId => !/^0x[0-9a-f]{40}$/.test(runtimeId))) {
+      throw new Error('CONTROL_DIRECT_SESSIONS_EXPECTED_RUNTIME_ID_INVALID');
+    }
+    if (new Set(expected).size !== expected.length) {
+      throw new Error('CONTROL_DIRECT_SESSIONS_EXPECTED_RUNTIME_DUPLICATE');
+    }
+    const deadline = Date.now() + timeoutMs;
+    let lastSessions: ControlDirectRuntimeSession[] = [];
+    while (Date.now() < deadline) {
+      lastSessions = await this.readDirectRuntimeSessions();
+      const byRuntime = new Map(lastSessions.map(session => [session.runtimeId, session]));
+      if (expected.every(runtimeId => byRuntime.get(runtimeId)?.open === true)) return;
+      await sleep(100);
+    }
+    const byRuntime = new Map(lastSessions.map(session => [session.runtimeId, session]));
+    const missing = expected.filter(runtimeId => !byRuntime.has(runtimeId));
+    const closed = expected.filter(runtimeId => byRuntime.get(runtimeId)?.open === false);
+    throw new Error(
+      `CONTROL_DIRECT_SESSIONS_NOT_OPEN:expected=${expected.length}:present=${lastSessions.length}:` +
+      `missing=${missing.join(',')}:closed=${closed.join(',')}`,
+    );
   }
 
   async exportRuntimeSnapshot(): Promise<ControlRuntimeSnapshot> {

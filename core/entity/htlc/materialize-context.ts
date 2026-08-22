@@ -247,6 +247,27 @@ const collectInboundEntries = (
 });
 
 /**
+ * Exact ordered-prefix fingerprint available to WAL replay without repeating
+ * X25519 decryption. A persisted context can only describe a FIFO proposal
+ * prefix whose inbound binding set is exactly this set.
+ */
+export const collectInboundHtlcBindingKeys = (
+  state: EntityState,
+  proposalTxs: readonly EntityTx[],
+): string[] => {
+  const keys = getEffectiveHtlcFrameTxs(state, proposalTxs).flatMap(tx => {
+    if (tx.type !== 'accountInput') return [];
+    const proposal = accountInputProposal(tx.data);
+    if (!proposal) return [];
+    return proposal.frame.accountTxs.flatMap(accountTx =>
+      accountTx.type === 'htlc_lock' && accountTx.data.envelope !== undefined
+        ? [preparedHtlcBindingKey(buildInboundBinding(tx, proposal, accountTx))]
+        : []);
+  });
+  return [...new Set(keys)].sort((left, right) => left.localeCompare(right));
+};
+
+/**
  * One Account frame can reach a proposer twice in the same Runtime frame — a
  * peer retransmits, or the same proposal arrives over two transports — and
  * batching makes that ordinary rather than rare, because a wider frame covers
@@ -317,7 +338,19 @@ export const assertHtlcPreparedInfraContext = async (
   assertEntityEncryptionKeypair(replayInput.entityEncryptionPublicKey, replayInput.entityEncryptionPrivateKey);
   const expectedEntries = canonicalizeInboundEntries(collectInboundEntries(replayInput));
   if (encodeCanonicalConsensusValue(expectedEntries) !== encodeCanonicalConsensusValue(actual.entries)) {
-    throw new Error('HTLC_PREPARED_INBOUND_REPLAY_MISMATCH');
+    const expectedKeys = expectedEntries.map(entry => preparedHtlcBindingKey(entry.binding));
+    const actualKeys = actual.entries.map(entry => preparedHtlcBindingKey(entry.binding));
+    const mismatchIndex = expectedKeys.findIndex((key, index) => key !== actualKeys[index]);
+    const firstMismatch = mismatchIndex >= 0
+      ? mismatchIndex
+      : Math.min(expectedKeys.length, actualKeys.length);
+    throw new Error(
+      `HTLC_PREPARED_INBOUND_REPLAY_MISMATCH:` +
+      `expected=${expectedEntries.length}:actual=${actual.entries.length}:` +
+      `index=${firstMismatch}:` +
+      `expectedKey=${expectedKeys[firstMismatch] ?? 'missing'}:` +
+      `actualKey=${actualKeys[firstMismatch] ?? 'missing'}`,
+    );
   }
   assertOriginatedHtlcPayments({
     state: input.state,

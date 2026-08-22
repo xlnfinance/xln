@@ -63,6 +63,16 @@ export const extractCrossJurisdictionRouteFromTx = (
   return route && typeof route === 'object' ? route as CrossJurisdictionSwapRoute : null;
 };
 
+/** Exact signed Profile owners needed to prove the two sibling Runtime cohorts. */
+export const crossJurisdictionRouteProfileEntityIds = (
+  route: CrossJurisdictionSwapRoute,
+): string[] => [...new Set([
+  normalizeEntityRef(route.source?.entityId),
+  normalizeEntityRef(route.target?.counterpartyEntityId),
+  normalizeEntityRef(route.source?.counterpartyEntityId),
+  normalizeEntityRef(route.target?.entityId),
+].filter(Boolean))];
+
 export const isCrossJurisdictionSiblingPair = (
   route: CrossJurisdictionSwapRoute,
   sourceEntityId: string,

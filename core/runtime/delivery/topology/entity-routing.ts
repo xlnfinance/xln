@@ -1,4 +1,4 @@
-import type { AccountInput, AccountFrame, AccountTx } from '../../../types/account';
+import type { AccountPeerInput, AccountFrame, AccountTx } from '../../../types/account';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -15,6 +15,7 @@ import { safeStringify } from '../../../protocol/serialization';
 import { cloneCrossJurisdictionRoute } from '../../../extensions/cross-j';
 import { validatePreparedCrossJurisdictionRoute } from '../../../extensions/cross-j/prepared-route';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../admit/entity-input-envelope-auth.ts';
+import { traceAccountDeliveryHop } from '../../../support/performance/account-delivery-trace';
 import { assertInboundCrossJRuntimeTopology } from './cross-j-topology.ts';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
@@ -67,7 +68,7 @@ type CrossJAdmissionCandidate = {
   pairKey: string;
   phase: 'proposal' | 'ack';
   leg: 'source' | 'target';
-  accountInput: AccountInput;
+  accountInput: AccountPeerInput;
   frame: AccountFrame;
   pulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   alreadyCommitted: boolean;
@@ -186,13 +187,13 @@ const pairedProgressListsMatch = (
 ): boolean => source.length === target.length && source.every(sourceTx =>
   target.filter(targetTx => crossProgressKey(targetTx.data.fill) === crossProgressKey(sourceTx.data)).length === 1);
 
-const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
+const effectiveAccountInputs = (input: RoutedEntityInput): AccountPeerInput[] =>
   getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
 
 const sourceAdmissionCandidate = (
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountInput,
+  accountInput: AccountPeerInput,
 ): CrossJAdmissionCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
@@ -241,7 +242,7 @@ const findReplicaAccount = (
 const proposalAlreadyCommitted = (
   env: RuntimeReplica,
   input: RoutedEntityInput,
-  accountInput: AccountInput,
+  accountInput: AccountPeerInput,
 ): boolean => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return false;
@@ -254,7 +255,7 @@ const proposalAlreadyCommitted = (
 const targetProposalCandidate = (
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountInput,
+  accountInput: AccountPeerInput,
 ): CrossJAdmissionCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
@@ -374,7 +375,7 @@ type CrossJRejectedAccountInputReason =
 
 type CrossJRejectedAccountInput = {
   inputIndex: number;
-  accountInput: AccountInput;
+  accountInput: AccountPeerInput;
   reason: CrossJRejectedAccountInputReason;
   /** Sub-causes when `reason` is 'candidate-invalid'; empty otherwise. */
   detail: string[];
@@ -401,7 +402,7 @@ type CrossJAdmissionFrameCandidate = {
   pairKey: string;
   originKey: string;
   phase: 'proposal' | 'ack';
-  accountInput: AccountInput;
+  accountInput: AccountPeerInput;
   frame: AccountFrame;
   sourcePulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   targetPulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
@@ -437,7 +438,7 @@ const proposalCandidateInvalidReasons = (
 const buildCrossJProposalFrameCandidate = (
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountInput,
+  accountInput: AccountPeerInput,
 ): CrossJAdmissionFrameCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
@@ -496,7 +497,7 @@ const buildCrossJAckFrameCandidate = (
   env: RuntimeReplica,
   input: RoutedEntityInput,
   inputIndex: number,
-  accountInput: AccountInput,
+  accountInput: AccountPeerInput,
 ): CrossJAdmissionFrameCandidate | null => {
   const ack = accountInputAck(accountInput);
   if (!ack) return null;
@@ -1095,7 +1096,7 @@ const findInvalidAtomicCrossJIndexes = (
 
 const stripRejectedAccountTxs = (
   input: RoutedEntityInput,
-  rejected: ReadonlySet<AccountInput>,
+  rejected: ReadonlySet<AccountPeerInput>,
 ): RoutedEntityInput | null => {
   const entityTxs: EntityTx[] = [];
   for (const tx of input.entityTxs ?? []) {
@@ -1149,7 +1150,7 @@ const removeRejectedCrossJAccountInputs = (
   inputs: readonly RoutedEntityInput[],
   rejectedLegs: readonly CrossJRejectedAccountInput[],
 ): { inputs: RoutedEntityInput[]; retainedIndexes: number[] } => {
-  const rejectedByInput = new Map<number, Set<AccountInput>>();
+  const rejectedByInput = new Map<number, Set<AccountPeerInput>>();
   for (const candidate of rejectedLegs) {
     const rejected = rejectedByInput.get(candidate.inputIndex) ?? new Set();
     rejected.add(candidate.accountInput);
@@ -1322,9 +1323,8 @@ export const resolveRuntimeIdForEntity = (
   // This is routing metadata, not consensus state. Gossip can only decide where
   // to send the next encrypted entity_input; local REA still rejects unknown
   // entities and cross-j topology is validated again before remote dispatch.
-  if (env.gossip?.getProfiles) {
-    const profiles = env.gossip.getProfiles() as Profile[];
-    const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
+  if (env.gossip?.getProfile) {
+    const profile = env.gossip.getProfile(target) as Profile | undefined;
     const resolved = resolveRuntimeIdFromProfile(profile);
     if (resolved) {
       hints?.set(target, { runtimeId: resolved, seenAt: now });
@@ -1444,7 +1444,7 @@ const validateInboundEntityCommands = (
   let commandState = findInboundTargetReplica(env, input)?.state;
   for (const tx of input.entityTxs ?? []) {
     if (tx.type === 'accountInput') {
-      // AccountInput is the raw cross-runtime protocol input. Runtime routing
+      // AccountPeerInput is the raw cross-runtime protocol input. Runtime routing
       // may batch many independent Account lanes for one target Entity/Runtime;
       // each frame/ACK Hanko is still verified independently by
       // applyAccountInput inside the one target Entity frame.
@@ -1530,13 +1530,14 @@ const validateInboundP2PEntityInput = (
     !env.scenarioMode &&
     options.acceptedBeforeQuiesce !== true
   ) {
-    // Persistence quiesce is bounded transport backpressure, not corruption.
-    // The durable sender retries the exact input after publication completes.
+    // Quiesce cannot silently absorb or defer a committed Account envelope.
+    // There is no transport retry contract: reject it loudly so both Runtimes
+    // halt with the exact envelope and socket identity available for audit.
     return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_RUNTIME_QUIESCING', {
       fromRuntimeId: from,
       entityId: input.entityId,
       txTypes: context.txTypes,
-    }, context, 'info');
+    }, context);
   }
 
   validateInboundEntityCommands(env, from, input);
@@ -1722,6 +1723,12 @@ export const routeInboundP2PEntityInputs = (
   const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps, options);
   if (inputs.length > 0) {
     deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, envelope.sourceRuntimeTimestamp, options);
+    traceAccountDeliveryHop('runtime-mempool', envelope, {
+      runtimeId: env.runtimeId,
+      peerRuntimeId: from,
+      queuedInputs: inputs.length,
+      runtimeMempoolEntityInputs: env.runtimeMempool?.entityInputs.length ?? null,
+    });
     env.info('network', 'INBOUND_ENTITY_INPUTS', {
       fromRuntimeId: from,
       sourceRuntimeHeight: envelope.sourceRuntimeHeight,

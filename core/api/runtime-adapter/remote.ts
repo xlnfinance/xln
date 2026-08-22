@@ -461,9 +461,12 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
         const code = Number((event as { code?: number } | undefined)?.code ?? 0);
         const reasonRaw = (event as { reason?: string | Buffer } | undefined)?.reason;
         const reason = typeof reasonRaw === 'string' ? reasonRaw : Buffer.from(reasonRaw ?? []).toString('utf8');
-        console.error(
-          `[radapter-client] socket closed: code=${code} reason=${JSON.stringify(reason)} url=${wsUrl}`,
-        );
+        const superseded = generation !== this.socketGeneration;
+        if (!superseded && !this.intentionalClose) {
+          console.error(
+            `[radapter-client] socket closed: code=${code} reason=${JSON.stringify(reason)} url=${wsUrl}`,
+          );
+        }
         if (!settled) {
           settled = true;
           reject(new RuntimeAdapterError('E_INTERNAL', `runtime adapter socket closed before open: ${wsUrl}`, true));

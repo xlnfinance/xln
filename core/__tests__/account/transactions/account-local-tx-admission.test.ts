@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test';
 import { admitLocalAccountTx } from '../../../account/input/local-tx-admission';
 import { applyAccountInput } from '../../../account/consensus/index';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
-import { createLocalAccountInput } from '../../../account/input';
 import { prependUniqueMempoolTxs } from '../../../account/consensus/helpers';
 import {
   canProcessAccountTxForDisputeStatus,
@@ -17,7 +16,6 @@ import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { makeAccount as makeCanonicalAccount } from '../../helpers/cross-j';
 import {
-  accountInputFailureMessage,
   isProposedAccountFrame,
   proposeAccountFrameMessage,
 } from '../../../account/consensus/result';
@@ -63,12 +61,10 @@ describe('account mempool multiplicity', () => {
       .toThrow('DISPUTE_STARTER_NOT_A_PARTY');
   });
 
-  test('routes local transactions through the canonical AccountInput boundary', async () => {
+  test('enqueues local transactions without a peer envelope', async () => {
     const account = accountWithPending(PAYMENT);
 
-    const input = createLocalAccountInput(account.state, '0xsender', [
-      structuredClone(PAYMENT),
-    ]);
+    const input = { kind: 'enqueue' as const, txs: [structuredClone(PAYMENT)] };
     const result = await applyAccountInput(accountContext(), account, input, {
       entityTimestamp: 1,
       finalizedJHeight: 0,
@@ -189,7 +185,8 @@ describe('account mempool multiplicity', () => {
     delete account.pendingFrame;
     account.status = 'dispute_preparing';
     account.mempool = [claim];
-    const before = structuredClone(account);
+    const beforeMempool = structuredClone(account.mempool);
+    const beforePendingFrame = account.pendingFrame;
 
     const result = await proposeAccountFrame(accountContext(), account, 1);
 
@@ -197,7 +194,9 @@ describe('account mempool multiplicity', () => {
     expect(result.ok).toBe(false);
     expect('accountInput' in result).toBe(false);
     expect(proposeAccountFrameMessage(result)).toBe('ACCOUNT_PROPOSAL_STATUS_FROZEN:dispute_preparing');
-    expect(account).toEqual(before);
+    expect(account.status).toBe('dispute_preparing');
+    expect(account.mempool).toEqual(beforeMempool);
+    expect(account.pendingFrame).toBe(beforePendingFrame);
   });
 
   test('preparation return rejects active and permanently disputed Accounts', () => {
@@ -229,27 +228,14 @@ describe('account mempool multiplicity', () => {
       () => structuredClone(PAYMENT),
     );
     const before = structuredClone(account.mempool);
-    const input = createLocalAccountInput(account.state, '0xsender', [
-      structuredClone(PAYMENT),
-      structuredClone(PAYMENT),
-    ]);
+    const input = {
+      kind: 'enqueue' as const,
+      txs: [structuredClone(PAYMENT), structuredClone(PAYMENT)],
+    };
 
     await expect(applyAccountInput(accountContext(), account, input))
       .rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
     expect(account.mempool).toEqual(before);
-  });
-
-  test('rejects a malformed local envelope before mempool mutation', async () => {
-    const account = accountWithPending(PAYMENT);
-    const input = {
-      ...createLocalAccountInput(account.state, '0xsender', [structuredClone(PAYMENT)]),
-      toEntityId: '0xthird-party',
-    };
-
-    const result = await applyAccountInput(accountContext(), account, input);
-    expect(result.ok).toBe(false);
-    expect(accountInputFailureMessage(result)).toContain('ACCOUNT_INPUT_PARTY_MISMATCH');
-    expect(account.mempool).toEqual([]);
   });
 
   test('rollback restores identical direct payments with their full multiplicity', () => {

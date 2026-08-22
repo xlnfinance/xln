@@ -155,6 +155,7 @@ export async function proposeAccountFrame(
     frameJHeight,
     events,
     checkpointProfile,
+    accountProposalProfileEnabled(),
   );
   if (!frameBuild.ok) return frameBuild.result;
   const { frame: newFrame } = frameBuild;

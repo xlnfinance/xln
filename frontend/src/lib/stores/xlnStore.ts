@@ -1271,9 +1271,13 @@ const announcePaymentGossipProfiles = (env: RuntimeReplica, profiles: GossipProf
 export async function refreshPaymentRuntimeGossip(options: {
   reason: string;
   targetEntities: string[];
+  runtimeEnv?: RuntimeReplica | null;
   onDebug?: (code: string, message: string, details?: Record<string, unknown>) => void;
 }): Promise<{ profiles: GossipProfile[]; announced: number }> {
-  const env = getEnv();
+  // Payment commands may target an explicitly selected embedded Runtime while
+  // the global store is publishing a newer projection. Profiles must be
+  // installed into the exact live Runtime that will materialize the HTLC.
+  const env = options.runtimeEnv ?? getEnv();
   const xln = env ? await getXLN() : null;
   const targetEntities = Array.from(new Set((options.targetEntities || []).map(normalizeGossipEntityId).filter(Boolean)));
   const mergedProfiles = new Map<string, GossipProfile>();

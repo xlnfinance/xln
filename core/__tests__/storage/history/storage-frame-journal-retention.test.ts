@@ -1100,9 +1100,12 @@ describe('storage frame journal retention', () => {
 
     const verification = await verifyRuntimeChain(runtimeId, seed);
     expect(verification.ok).toBe(true);
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
-      'RUNTIME_RESTORE_UNDISPATCHED_OUTPUTS:1',
-    );
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    expect(restored?.pendingNetworkOutputs).toEqual([]);
+    if (restored) {
+      await closeRuntimeDb(restored);
+      await closeInfraDb(restored);
+    }
   });
 
   test('production refuses storage safety override flags', async () => {

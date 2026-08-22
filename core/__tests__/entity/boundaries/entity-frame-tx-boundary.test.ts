@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { validateProposedEntityFrame, assertEstimatedSealedEntityFrameWire } from '../../../entity/consensus/frame/validation';
 import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 
 const entityId = `0x${'01'.repeat(32)}`;
 const signerId = `0x${'02'.repeat(20)}`;
@@ -159,6 +160,71 @@ test('unsigned Entity frames estimate sealed bytes before sign', () => {
   };
   expect(() => assertEstimatedSealedEntityFrameWire(frame, signerId, true, 'SingleSignerEntityFrame'))
     .toThrow(/hashesToSign=\d+:sigs=/);
+});
+
+test('unsigned Entity frame estimate exactly matches every conservative sealed template branch', () => {
+  const availableHashes = [
+    { hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: 'frame' },
+    { hash: `0x${'55'.repeat(32)}`, type: 'entityOutput', context: 'output' },
+  ];
+  const signature = `0x${'11'.repeat(65)}`;
+  const hanko = `0x${'22'.repeat(2_200)}`;
+  for (const { hashCount, includeHankos } of [
+    { hashCount: 1, includeHankos: true },
+    { hashCount: 2, includeHankos: true },
+    { hashCount: 2, includeHankos: false },
+  ]) {
+    const hashesToSign = availableHashes.slice(0, hashCount);
+    const frame = {
+      height: 1,
+      parentFrameHash: 'genesis',
+      stateRoot: `0x${'11'.repeat(32)}`,
+      authorityRoot: `0x${'22'.repeat(32)}`,
+      timestamp: 1,
+      entityContext: emptyContext,
+      txs: [],
+      events: [],
+      hash: `0x${'33'.repeat(32)}`,
+      leader: { proposerSignerId: signerId, view: 0 },
+      hashesToSign,
+    };
+    const exact = new TextEncoder().encode(encodeCanonicalConsensusValue({
+      ...frame,
+      collectedSigs: new Map([[signerId.toLowerCase(), hashesToSign.map(() => signature)]]),
+      ...(includeHankos ? { hankos: [hanko] } : {}),
+    })).byteLength;
+    expect(assertEstimatedSealedEntityFrameWire(frame, signerId, includeHankos, 'EntityFrame'))
+      .toBe(exact);
+  }
+});
+
+test('single-signer sealed estimate keeps one EntityFrame Hanko across 2000 exact digests', () => {
+  const hashesToSign = Array.from({ length: 2_000 }, (_, index) => ({
+    hash: `0x${index.toString(16).padStart(64, '0')}`,
+    type: index === 0 ? 'entityFrame' : 'accountFrame',
+    context: `hash:${index}`,
+  }));
+  const frameHash = hashesToSign[0]?.hash;
+  if (!frameHash) throw new Error('TEST_ENTITY_FRAME_MANIFEST_HEAD_MISSING');
+  const frame = {
+    height: 1,
+    parentFrameHash: 'genesis',
+    stateRoot: `0x${'11'.repeat(32)}`,
+    authorityRoot: `0x${'22'.repeat(32)}`,
+    timestamp: 1,
+    entityContext: emptyContext,
+    txs: [],
+    events: [],
+    hash: frameHash,
+    leader: { proposerSignerId: signerId, view: 0 },
+    hashesToSign,
+  };
+  expect(assertEstimatedSealedEntityFrameWire(
+    frame,
+    signerId,
+    true,
+    'SingleSignerEntityFrame',
+  )).toBeLessThan(10_000_000);
 });
 
 test('proposal signs only after the estimated sealed wire fits', () => {

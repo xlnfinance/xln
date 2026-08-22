@@ -11,7 +11,6 @@ import { cancelHook, scheduleHook } from '../../scheduler';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import { applyAccountInput } from '../../../account/consensus';
 import { getEntityAccountForWrite } from '../../state/persistent-account-map';
-import { createLocalAccountInput } from '../../../account/input';
 import { entityLog } from '../entity-log';
 import {
   buildCrossJurisdictionFillNoticeOutput,
@@ -27,6 +26,7 @@ import type {
   SwapCancelRequestEvent,
   SwapOfferEvent,
 } from '../../tx/handlers/account';
+import { markProposableAccount } from '../account/canonical-worklist';
 
 const recordAccountChange = (
   context: ApplyEntityTxsInOrderContext,
@@ -44,7 +44,7 @@ export const shouldSuppressReturnedAccountTx = (
   account: Pick<AccountReplica, 'status'>,
 ): boolean => !canProcessAccountTxForDisputeStatus(account.status);
 
-const applyReturnedAccountTxs = async (
+const applyLocalAccountEffects = async (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
   accountTxs: Array<{ accountId: string; tx: AccountTx }>,
@@ -108,13 +108,13 @@ const applyReturnedAccountTxs = async (
     const admission = await applyAccountInput(
       context.accountConsensusContext,
       account,
-      createLocalAccountInput(account.state, state.entityId, [tx]),
+      { kind: 'enqueue', txs: [tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     if (tx.type === 'cross_swap_fill_ack') {
       appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, context.allOutputs);
     }
-    context.proposableAccounts.add(accountId);
+    markProposableAccount(context.proposableAccounts, accountId);
     recordAccountChange(context, state, accountId);
     if (tx.type === 'htlc_lock' && tx.data.timelock && tx.data.lockId && state.crontabState) {
       scheduleHook(state.crontabState, {
@@ -162,7 +162,7 @@ const markTxAccountsProposable = (
   const addIfReady = (accountId: string): void => {
     const account = state.accounts.get(accountId);
     if (account && accountHasProposableMempool(account, state)) {
-      context.proposableAccounts.add(accountId);
+      markProposableAccount(context.proposableAccounts, accountId);
     }
   };
   if (entityTx.type === 'accountInput') {
@@ -187,7 +187,7 @@ export const applyEntityTxReturnedEffects = async (
   },
 ): Promise<void> => {
   if (effects.accountTxs?.length) {
-    await applyReturnedAccountTxs(context, state, effects.accountTxs);
+    await applyLocalAccountEffects(context, state, effects.accountTxs);
   }
   collectSwapEvents(
     context,

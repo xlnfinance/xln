@@ -120,6 +120,7 @@ export const stageExternalEntityInput = async (
   options: RuntimeEntityInputApplyOptions,
   promoteCandidateState: boolean,
   deferProposal = false,
+  requiredEntityTxIndex?: number,
 ): Promise<StagedEntityInput> => {
   const startedAt = getPerfMs();
   if (options.isReplay) {
@@ -161,6 +162,7 @@ export const stageExternalEntityInput = async (
     promoteCandidateState,
     undefined,
     deferProposal,
+    requiredEntityTxIndex,
   );
   return {
     input,

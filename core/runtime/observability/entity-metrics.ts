@@ -3,6 +3,7 @@ import type { FrameLogEntry } from '../../types/logging';
 import type { RuntimeEntityMetricStats, RuntimeReplica } from '../types';
 
 const EMPTY_ENTITY_METRICS: RuntimeEntityMetricStats = Object.freeze({
+  acceptedPayments: 0,
   completedPayments: 0,
   matchedSwaps: 0,
   updatedAtRuntimeHeight: 0,
@@ -42,13 +43,15 @@ export const recordCommittedRuntimeEntityMetrics = (
   if (!Number.isSafeInteger(runtimeHeight) || runtimeHeight < 0) {
     throw new Error(`RUNTIME_ENTITY_METRIC_HEIGHT_INVALID:${runtimeHeight}`);
   }
-  const increments = new Map<string, { completedPayments: number; matchedSwaps: number }>();
+  const increments = new Map<string, { acceptedPayments: number; completedPayments: number; matchedSwaps: number }>();
   for (const event of events) {
     if (event.category !== 'system') continue;
-    if (event.message !== 'HtlcReceived' && event.message !== 'SwapMatched') continue;
+    if (event.message !== 'HtlcForwardAccepted' && event.message !== 'HtlcReceived' && event.message !== 'SwapMatched') continue;
     const entityId = requireEventEntityId(event);
-    const current = increments.get(entityId) ?? { completedPayments: 0, matchedSwaps: 0 };
-    if (event.message === 'HtlcReceived') {
+    const current = increments.get(entityId) ?? { acceptedPayments: 0, completedPayments: 0, matchedSwaps: 0 };
+    if (event.message === 'HtlcForwardAccepted') {
+      current.acceptedPayments = checkedAdd(current.acceptedPayments, 1, 'acceptedPayments.frame');
+    } else if (event.message === 'HtlcReceived') {
       current.completedPayments = checkedAdd(current.completedPayments, 1, 'completedPayments.frame');
     } else {
       const count = event.data?.['count'];
@@ -65,6 +68,11 @@ export const recordCommittedRuntimeEntityMetrics = (
   for (const [entityId, increment] of increments) {
     const current = stats.get(entityId) ?? EMPTY_ENTITY_METRICS;
     stats.set(entityId, {
+      acceptedPayments: checkedAdd(
+        current.acceptedPayments,
+        increment.acceptedPayments,
+        'acceptedPayments.total',
+      ),
       completedPayments: checkedAdd(
         current.completedPayments,
         increment.completedPayments,

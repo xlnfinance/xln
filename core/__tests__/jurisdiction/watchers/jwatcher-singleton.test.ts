@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { getHealthStatus } from '../../../api/server/health';
 import { startJurisdictionWatchers } from '../../../runtime';
+import { pauseJurisdictionWatchersAndWait } from '../../../runtime/loop/loop-watchers';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
@@ -49,6 +50,9 @@ const makeAdapter = (options?: { watching?: boolean }) => {
     stopWatching() {
       this.stopCount += 1;
       watching = false;
+    },
+    async stopWatchingAndWait() {
+      this.stopWatching();
     },
     isWatching() {
       return watching;
@@ -99,5 +103,18 @@ describe('canonical J-watcher ownership', () => {
     expect(primary.isWatching()).toBe(true);
     expect(duplicate.stopCount).toBe(1);
     expect(duplicate.isWatching()).toBe(false);
+  });
+
+  test('paused watcher cannot be resurrected by later Runtime work', async () => {
+    const adapter = makeAdapter();
+    const env = makeEnv([['arrakis', makeReplica(adapter), adapter]]);
+
+    startJurisdictionWatchers(env);
+    await pauseJurisdictionWatchersAndWait(env);
+    startJurisdictionWatchers(env);
+
+    expect(adapter.startCount).toBe(1);
+    expect(adapter.stopCount).toBe(1);
+    expect(adapter.isWatching()).toBe(false);
   });
 });

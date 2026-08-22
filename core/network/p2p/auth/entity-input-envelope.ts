@@ -1,4 +1,5 @@
 import type { RuntimeEntityInputsEnvelope } from '../../../runtime/types';
+import { LIMITS } from '../../../config/constants';
 import {
   validateDeliverableEntityInput,
   type ValidatedDeliverableEntityInput,
@@ -16,7 +17,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../../protocol/boundary-validation';
 
-export const MAX_P2P_ENTITY_INPUTS = 256;
+export const MAX_P2P_ENTITY_INPUTS = LIMITS.MAX_P2P_ENTITY_INPUTS_PER_ENVELOPE;
 
 export type DecodedRuntimeEntityInputsEnvelope = Omit<
   RuntimeEntityInputsEnvelope,
@@ -71,8 +72,8 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): DecodedRuntim
   const envelope = requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_INVALID');
   requireExactBoundaryKeys(
     envelope,
-    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs', 'sourceSignature'],
-    ['atomicCrossJurisdictionPair'],
+    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs'],
+    ['atomicCrossJurisdictionPair', 'sourceSignature'],
     'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID',
   );
   let sourceRuntimeId: RuntimeId;
@@ -82,7 +83,7 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): DecodedRuntim
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_RUNTIME_INVALID');
   }
   const sourceSignature = envelope['sourceSignature'];
-  if (typeof sourceSignature !== 'string' || !/^0x[0-9a-f]{130}$/.test(sourceSignature)) {
+  if (sourceSignature !== undefined && (typeof sourceSignature !== 'string' || !/^0x[0-9a-f]{130}$/.test(sourceSignature))) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_SIGNATURE_INVALID');
   }
   if (!Array.isArray(envelope['entityInputs'])) {
@@ -103,7 +104,7 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): DecodedRuntim
   const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
   return {
     sourceRuntimeId,
-    sourceSignature,
+    ...(sourceSignature !== undefined ? { sourceSignature } : {}),
     sourceRuntimeHeight: toRuntimeHeight(requireFrameCoordinate(envelope['sourceRuntimeHeight'], 'HEIGHT')),
     sourceRuntimeTimestamp: toUnixMs(requireFrameCoordinate(envelope['sourceRuntimeTimestamp'], 'TIMESTAMP')),
     entityInputs,

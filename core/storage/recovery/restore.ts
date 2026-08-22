@@ -49,7 +49,6 @@ export type RuntimeRecoveryDeps = Pick<
     explicitTimestamp?: number,
   ): void;
   infraGossipDbAccess: Parameters<typeof loadGossipProfilesFromInfraDb>[1];
-  generateHookPings(env: RuntimeReplica, nowMs?: number, queuedAt?: number): void;
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
   applyRuntimeInput: RuntimeModule['applyRuntimeInput'];
 };
@@ -68,7 +67,6 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     closeInfraDb,
     enqueueRuntimeContinuation,
     infraGossipDbAccess,
-    generateHookPings,
     startJurisdictionWatchers,
     getRuntimeOutputRoutingDeps,
     applyRuntimeInput,
@@ -92,7 +90,12 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       });
     }
     registerCommittedSingleSignerWallets(env);
-    for (const profile of gossipProfiles) env.gossip?.announce?.(profile);
+    if (options.readOnly) {
+      if (!env.gossip?.setProfiles) throw new Error('RECOVERY_GOSSIP_HYDRATION_UNAVAILABLE');
+      env.gossip.setProfiles(gossipProfiles);
+    } else {
+      for (const profile of gossipProfiles) env.gossip?.announce?.(profile);
+    }
     return env;
   };
 
@@ -103,7 +106,6 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
         applyRuntimeInput,
         applyRuntimeOutputPlan: applyDeterministicRuntimeOutputPlan,
         getRuntimeOutputRoutingDeps,
-        generateHookPings,
       },
       env,
       frames,

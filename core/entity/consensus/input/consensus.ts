@@ -9,7 +9,9 @@ import { logError, shortHash } from '../../../support/logger';
 import { nodeProcess } from '../../../support/process/runtime-process';
 import type { EntityInput, EntityReplica } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
+import type { EntityTx } from '../../../types/entity-tx';
 import { getPerfMs } from '../../../support/time';
+import { countOp } from '../../../support/performance/op-counters';
 import { hasProposableAccount } from '../account/work-index';
 import { isCanonicalEntityFrameDigest } from '../frame';
 import {
@@ -154,12 +156,16 @@ type EntityConsensusProfile = Readonly<{
 
 const createEntityConsensusProfile = (): EntityConsensusProfile => {
   const startedAt = getPerfMs();
+  let previousAt = startedAt;
   const checkpoints: Record<string, number> = {};
   return {
     startedAt,
     checkpoints,
     checkpoint(label) {
-      checkpoints[label] = Math.round(getPerfMs() - startedAt);
+      const now = getPerfMs();
+      checkpoints[label] = Math.round(now - startedAt);
+      countOp(`entity.phase.${label}`, 0, Math.round((now - previousAt) * 1_000));
+      previousAt = now;
     },
   };
 };
@@ -218,6 +224,22 @@ export const isProposalDeferrableEntityInput = (input: EntityInput): boolean =>
   !input.leaderTimeoutVote &&
   !input.localRuntimeProtocol;
 
+const requiredAtomicAccountTx = (
+  input: EntityInput,
+  index: number | undefined,
+): EntityTx | undefined => {
+  if (index === undefined) return undefined;
+  const tx = input.entityTxs?.[index];
+  if (tx?.type !== 'accountInput') {
+    throw haltRuntimeFailure(
+      'RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_INDEX_INVALID',
+      `RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_INDEX_INVALID:${input.entityId}:${index}:` +
+        `${tx?.type ?? 'missing'}`,
+    );
+  }
+  return tx;
+};
+
 export const applyEntityInput = async (
   env: EntityRuntimeContext,
   entityReplica: EntityReplica,
@@ -225,6 +247,8 @@ export const applyEntityInput = async (
   options: {
     trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
     promoteCandidateState?: boolean;
+    /** Index of the raw AccountInput required by a Runtime atomic cohort. */
+    requiredEntityTxIndex?: number;
     /**
      * Admit the input's transactions into the replica mempool without opening
      * a proposal. The Runtime batch flushes every touched replica once at the
@@ -246,6 +270,7 @@ export const applyEntityInput = async (
   if (!ingress.accepted) return ingress.result;
   const phaseContext = ingress.context;
   entityInput = phaseContext.entityInput;
+  const requiredEntityTx = requiredAtomicAccountTx(entityInput, options.requiredEntityTxIndex);
   const { entityOutbox, workingReplica } = phaseContext;
   profile.checkpoint('ingress');
 
@@ -292,6 +317,7 @@ export const applyEntityInput = async (
     trustedLocalCrossJurisdiction,
     trustedLocalEntityTxs,
     accountWorkOnly,
+    ...(requiredEntityTx ? { requiredEntityTx } : {}),
     checkpoint: profile.checkpoint,
   });
   traceEntityProposal(phaseContext, proposalSelection, entityInput, options.deferProposal === true, accountWorkOnly);

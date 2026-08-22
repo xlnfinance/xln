@@ -128,6 +128,16 @@ const readPositiveInteger = (name: string): number | undefined => {
   return value;
 };
 
+const readNonNegativeInteger = (name: string): number | undefined => {
+  const raw = readRuntimeEnv(name);
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`RUNTIME_CONFIG_${name.slice(4)}_INVALID:${raw}`);
+  }
+  return value;
+};
+
 /**
  * A Runtime frame costs about the same whether it carries one transaction or a
  * hundred: the fixed apply/commit/persist work dominates the marginal per-tx
@@ -135,7 +145,8 @@ const readPositiveInteger = (name: string): number | undefined => {
  * price of up to this much added latency per hop. Hubs want a floor here;
  * a single-user wallet wants zero so its own payment is not delayed.
  */
-const runtimeMinFrameDelayMs = (): number => readPositiveInteger('XLN_RUNTIME_MIN_FRAME_DELAY_MS') ?? 0;
+const runtimeMinFrameDelayMs = (): number =>
+  readNonNegativeInteger('XLN_RUNTIME_MIN_FRAME_DELAY_MS') ?? 0;
 
 export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']> => {
   env.runtimeConfig ??= {

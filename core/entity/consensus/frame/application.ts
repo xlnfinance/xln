@@ -66,7 +66,10 @@ import {
   selectCrossJOpeningAccountProposalTxs,
 } from '../../transition/cross-j-proposer-materialization';
 import { initCrontab } from '../../scheduler';
-import { applyEntityTx, type ApplyEntityTxResult } from '../../tx/apply';
+import {
+  applyEntityTx,
+  type ApplyEntityTxResult,
+} from '../../tx/apply';
 import {
   processOrderbookCancels,
   processOrderbookSwaps,
@@ -80,13 +83,13 @@ import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
+import { traceAccountFlushHop } from '../../../support/performance/account-delivery-trace';
 import {
   getProposableAccountIds,
   getQueuedAccountIds,
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
-import { createLocalAccountInput } from '../../../account/input';
 import { assertEntityFrameTxByteBudget } from '../frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from '../output/certification';
 import { invalidateEntityAccountCommitment } from '../state-root';
@@ -126,8 +129,14 @@ import {
   copyProposableAccounts,
   dirtyAccountIdsFromState,
 } from '../account/touched-accounts';
-import { createCanonicalAccountWorklist } from '../account/canonical-worklist';
+import {
+  createCanonicalAccountWorklist,
+  markProposableAccount,
+  setProposableAccountForce,
+  type ProposableAccountMap,
+} from '../account/canonical-worklist';
 import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
+import { EntityCandidateMap } from '../../state/candidate-map';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -299,15 +308,26 @@ const collectEntityTxResult = (
       context.accountJClaimReplacedNodeHashes.add(hash);
     }
   }
-  if (result.requiredAccountResponse) {
-    const accountId = result.requiredAccountResponse.toEntityId.toLowerCase();
-    context.proposableAccounts.add(accountId);
-    // Later authenticated inputs supersede earlier responses for the same
-    // bilateral lane because only the final Account state may be flushed.
-    context.requiredAccountResponses.set(
+  if (result.accountInputWork) {
+    const accountId = result.accountInputWork.accountId.toLowerCase();
+    // This is Channel.ts's one flushable lane with an explicit force bit.
+    // A later pure ACK sets false and therefore cannot trigger an ACK loop.
+    setProposableAccountForce(
+      context.proposableAccounts,
       accountId,
-      structuredClone(result.requiredAccountResponse),
+      result.accountInputWork.force,
     );
+    const account = result.newState.accounts.get(accountId);
+    if (!account) throw new Error(`ACCOUNT_INPUT_WORK_ACCOUNT_MISSING:${accountId}`);
+    if (result.accountInputWork.force) {
+      traceAccountFlushHop(
+        'entity-response-required',
+        result.newState.entityId,
+        accountId,
+        account,
+        undefined,
+      );
+    }
   }
   context.allOutputs.push(...filterEntityFrameBroadcastContinuations(
     context.allOutputs,
@@ -466,8 +486,7 @@ type ProposePendingAccountFramesContext = {
   env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
-  proposableAccounts: Set<string>;
-  requiredAccountResponses: Map<string, AccountPeerInput>;
+  proposableAccounts: ProposableAccountMap;
   allOutputs: EntityOutput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
@@ -478,7 +497,7 @@ async function materializeDeferredSettlementApprovals(
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   state: EntityState,
-  proposableAccounts: Set<string>,
+  proposableAccounts: ProposableAccountMap,
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>,
   storageChanges: RuntimeOverlayRecord[],
 ): Promise<void> {
@@ -518,14 +537,14 @@ async function materializeDeferredSettlementApprovals(
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account.state, state.entityId, [draft.tx]),
+      { kind: 'enqueue', txs: [draft.tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount !== 1) {
       throw new Error(`SETTLEMENT_DEFERRED_SEAL_NOT_ADMITTED:${accountId}`);
     }
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     collectedHashes.push(...draft.hashesToSign);
-    proposableAccounts.add(accountId);
+    markProposableAccount(proposableAccounts, accountId);
     deferred.delete(accountId);
   }
 }
@@ -626,18 +645,18 @@ const proposeAccountFrameCandidate = async (
         const admission = await applyAccountInput(
           context.accountConsensusContext,
           inboundAccount,
-          createLocalAccountInput(inboundAccount.state, state.entityId, [{
+          { kind: 'enqueue', txs: [{
           type: 'htlc_resolve',
           data: {
             lockId: route.inboundLockId,
             outcome: 'error',
             reason: `forward_failed:${reason}`,
           },
-          }]),
+          }] },
         );
         if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
         recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
-        proposableAccounts.add(route.inboundEntity);
+        markProposableAccount(proposableAccounts, route.inboundEntity);
         scheduleAccount(route.inboundEntity);
       }
     }
@@ -646,59 +665,89 @@ const proposeAccountFrameCandidate = async (
   return proposal;
 };
 
-const assertRequiredAccountResponsePreserved = (
+const liveOutboundAck = (
+  account: AccountReplica,
   accountKey: string,
-  required: AccountPeerInput | undefined,
+): Extract<AccountPeerInput, { kind: 'ack' }> | undefined => {
+  const saved = account.lastOutboundFrameAck;
+  if (!saved) return undefined;
+  if (saved.counterpartyEntityId.toLowerCase() !== accountKey.toLowerCase()) {
+    throw new Error(`ACCOUNT_FORCED_ACK_COUNTERPARTY_MISMATCH:${accountKey}`);
+  }
+  if (Number(saved.height) !== Number(account.currentHeight)) {
+    throw new Error(
+      `ACCOUNT_FORCED_ACK_HEIGHT_MISMATCH:${accountKey}:${saved.height}:${account.currentHeight}`,
+    );
+  }
+  const ack = accountInputAck(saved.response);
+  if (!ack || Number(ack.height) !== Number(saved.height)) {
+    throw new Error(`ACCOUNT_FORCED_ACK_BYTES_INVALID:${accountKey}:${saved.height}`);
+  }
+  if (ack.frameHash.toLowerCase() !== account.currentFrame.stateHash.toLowerCase()) {
+    throw new Error(`ACCOUNT_FORCED_ACK_HASH_MISMATCH:${accountKey}:${saved.height}`);
+  }
+  return structuredClone(saved.response);
+};
+
+/**
+ * Channel.ts flushes from live channel state, never from a second response
+ * cache. XLN does the same, retaining only exact Hanko-bearing proposal/ACK
+ * bytes in the AccountReplica so a mandatory flush cannot invent new bytes.
+ */
+const resolveForcedAccountInput = (
+  account: AccountReplica,
+  accountKey: string,
+): AccountPeerInput => {
+  const pendingFrame = account.pendingFrame;
+  if (!pendingFrame) {
+    const ack = liveOutboundAck(account, accountKey);
+    if (!ack) throw new Error(`ACCOUNT_FORCED_RESPONSE_MISSING:${accountKey}:${account.currentHeight}`);
+    return ack;
+  }
+
+  const pending = account.pendingAccountInput;
+  const proposal = pending ? accountInputProposal(pending) : undefined;
+  if (!pending || !proposal) {
+    throw new Error(`ACCOUNT_FORCED_PENDING_INPUT_MISSING:${accountKey}:${pendingFrame.height}`);
+  }
+  if (
+    Number(proposal.frame.height) !== Number(pendingFrame.height)
+    || proposal.frame.stateHash.toLowerCase() !== pendingFrame.stateHash.toLowerCase()
+  ) {
+    throw new Error(`ACCOUNT_FORCED_PENDING_INPUT_DIVERGED:${accountKey}:${pendingFrame.height}`);
+  }
+
+  const savedAck = account.lastOutboundFrameAck;
+  if (!savedAck) return structuredClone(pending);
+  const ack = liveOutboundAck(account, accountKey);
+  if (!ack) throw new Error(`ACCOUNT_FORCED_ACK_MISSING:${accountKey}`);
+  const pendingAck = accountInputAck(pending);
+  if (pendingAck && safeStringify(pendingAck) === safeStringify(ack.ack)) {
+    return structuredClone(pending);
+  }
+  return {
+    ...structuredClone(pending),
+    kind: 'frame_ack',
+    ack: structuredClone(ack.ack),
+    proposal: structuredClone(proposal),
+  };
+};
+
+const assertForcedAccountInputPreserved = (
+  accountKey: string,
+  required: AccountPeerInput,
   final: AccountPeerInput,
 ): void => {
-  if (!required) return;
   const requiredAck = accountInputAck(required);
   const requiredProposal = accountInputProposal(required);
   const finalAck = accountInputAck(final);
   const finalProposal = accountInputProposal(final);
   if (requiredAck && (!finalAck || safeStringify(finalAck) !== safeStringify(requiredAck))) {
-    throw new Error(`ACCOUNT_REQUIRED_ACK_NOT_BUNDLED:${accountKey}:${requiredAck.height}`);
+    throw new Error(`ACCOUNT_FORCED_ACK_NOT_BUNDLED:${accountKey}:${requiredAck.height}`);
   }
   if (requiredProposal && (!finalProposal || safeStringify(finalProposal) !== safeStringify(requiredProposal))) {
-    throw new Error(`ACCOUNT_REQUIRED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`);
+    throw new Error(`ACCOUNT_FORCED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`);
   }
-};
-
-const liveRequiredAccountResponse = (
-  account: AccountReplica,
-  required: AccountPeerInput | undefined,
-): AccountPeerInput | undefined => {
-  if (!required) return undefined;
-  const ack = accountInputAck(required);
-  const proposal = accountInputProposal(required);
-  if (!ack && !proposal) return required;
-
-  // Several ordered peer inputs may advance one Account inside a single
-  // Entity frame. An ACK required by an early duplicate becomes redundant if
-  // a later authenticated frame advances beyond it: that later frame could
-  // only exist after the peer consumed the ACK. Likewise, a response proposal
-  // is live only while it is still this replica's exact pending frame. Keeping
-  // stale halves here made the final flush demand an impossible older ACK and
-  // halted a healthy Runtime under batched resend load.
-  const keepAck = Boolean(ack && Number(ack.height) >= Number(account.currentHeight));
-  const pendingFrame = account.pendingFrame;
-  const keepProposal = Boolean(proposal && (
-    pendingFrame
-      ? Number(pendingFrame.height) === Number(proposal.frame.height) &&
-        pendingFrame.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase()
-      : Number(proposal.frame.height) > Number(account.currentHeight)
-  ));
-  if (keepAck && keepProposal) return required;
-  const shared = {
-    fromEntityId: required.fromEntityId,
-    toEntityId: required.toEntityId,
-    domain: required.domain,
-    disputeConfig: required.disputeConfig,
-    ...(required.watchSeed === undefined ? {} : { watchSeed: required.watchSeed }),
-  };
-  if (keepAck && ack) return { ...shared, kind: 'ack', ack };
-  if (keepProposal && proposal) return { ...shared, kind: 'frame', proposal };
-  return undefined;
 };
 
 const routeFinalAccountInput = (
@@ -753,14 +802,14 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     env,
     currentEntityState,
     proposableAccounts,
-    requiredAccountResponses,
   } = context;
   const worklist = createCanonicalAccountWorklist(proposableAccounts);
   let proposedFrames = 0;
 
   while (true) {
-    const accountKey = worklist.take();
-    if (!accountKey) break;
+    const work = worklist.take();
+    if (!work) break;
+    const { accountId: accountKey, force } = work;
     const account = getEntityAccountForWrite(currentEntityState.accounts, accountKey);
     const { counterparty: cpId } = account
       ? getAccountPerspective(account.state, currentEntityState.entityId)
@@ -770,7 +819,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     }
 
     const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
-    if (crossJOpeningProposalTxs === null) {
+    if (crossJOpeningProposalTxs === null && !force) {
       entityLog.debug('account.cross_j_opening_cohort_wait', {
         account: shortId(accountKey),
         entity: shortId(currentEntityState.entityId),
@@ -778,18 +827,27 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       continue;
     }
 
-    const requiredResponse = liveRequiredAccountResponse(
-      account,
-      requiredAccountResponses.get(accountKey.toLowerCase()),
-    );
-
-    const proposal = await proposeAccountFrameCandidate(
-      context,
+    const requiredResponse = force
+      ? resolveForcedAccountInput(account, accountKey)
+      : undefined;
+    traceAccountFlushHop(
+      'entity-flush-start',
+      currentEntityState.entityId,
       accountKey,
       account,
-      crossJOpeningProposalTxs,
-      accountId => { worklist.add(accountId); },
+      requiredResponse,
+      { proposable: accountHasProposableMempool(account, currentEntityState) },
     );
+
+    const proposal = crossJOpeningProposalTxs === null
+      ? undefined
+      : await proposeAccountFrameCandidate(
+          context,
+          accountKey,
+          account,
+          crossJOpeningProposalTxs,
+          accountId => { worklist.add(accountId); },
+        );
     // Idle/rejected Account attempts are not frames. Counting either result as
     // committed work keeps an otherwise empty Entity preview alive, advances
     // Entity height, and immediately schedules the same impossible attempt
@@ -799,8 +857,28 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     const finalAccountInput = proposal && isProposedAccountFrame(proposal)
       ? proposal.accountInput
       : requiredResponse;
-    if (!finalAccountInput) continue;
-    assertRequiredAccountResponsePreserved(accountKey, requiredResponse, finalAccountInput);
+    traceAccountFlushHop(
+      'entity-flush-done',
+      currentEntityState.entityId,
+      accountKey,
+      account,
+      requiredResponse,
+      {
+        proposalDisposition: proposal === undefined
+          ? 'none'
+          : isProposedAccountFrame(proposal)
+            ? 'proposed'
+            : 'rejected',
+        finalInputKind: finalAccountInput?.kind ?? null,
+      },
+    );
+    if (!finalAccountInput) {
+      if (force) throw new Error(`ACCOUNT_FORCED_OUTPUT_MISSING:${accountKey}`);
+      continue;
+    }
+    if (requiredResponse) {
+      assertForcedAccountInputPreserved(accountKey, requiredResponse, finalAccountInput);
+    }
     routeFinalAccountInput(
       context,
       accountKey,
@@ -819,7 +897,7 @@ type ApplyOrderbookMatchingContext = {
   currentEntityState: EntityState;
   allSwapOffersCreated: SwapOfferEvent[];
   allOutputs: EntityOutput[];
-  proposableAccounts: Set<string>;
+  proposableAccounts: ProposableAccountMap;
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
 };
@@ -953,13 +1031,13 @@ const applyOrderbookAccountTxs = async (
     else localBatches.set(accountId, { account, txs: [tx] });
   }
   for (const [accountId, { account, txs }] of localBatches) {
-    await admitOrderbookAccountTxBatch(accountConsensusContext, account, state.entityId, txs);
+    await admitOrderbookAccountTxBatch(accountConsensusContext, account, txs);
     for (const tx of txs) {
       if (tx.type === 'cross_swap_fill_ack') {
         appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, allOutputs);
       }
     }
-    proposableAccounts.add(accountId);
+    markProposableAccount(proposableAccounts, accountId);
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     entityLog.debug('orderbook.account_txs_queued', {
       account: shortId(accountId, 8),
@@ -1020,11 +1098,11 @@ async function applyOrderbookMatching(
 ): Promise<OrderbookFrameStats> {
   const { env, currentEntityState, allSwapOffersCreated } = context;
   const stats = emptyOrderbookFrameStats();
+  const books = currentEntityState.orderbookExt?.books;
   stats.hasPersistedCrossJurisdictionBook = Boolean(
-    currentEntityState.orderbookExt &&
-    Array.from(currentEntityState.orderbookExt.books?.keys?.() || []).some(pairId =>
-      String(pairId).startsWith('cross:'),
-    ),
+    books instanceof EntityCandidateMap
+      ? books.someKey(pairId => pairId.startsWith('cross:'))
+      : books && Array.from(books.keys()).some(pairId => pairId.startsWith('cross:')),
   );
   // Account offer commits are bilateral, so both endpoint Entities observe
   // them. Only the endpoint that explicitly owns orderbookExt is a matcher;
@@ -1060,7 +1138,7 @@ type ApplySwapCancelRequestsContext = {
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   allSwapCancelRequests: SwapCancelRequestEvent[];
-  proposableAccounts: Set<string>;
+  proposableAccounts: ProposableAccountMap;
   allOutputs: EntityOutput[];
   storageChanges: RuntimeOverlayRecord[];
 };
@@ -1092,11 +1170,11 @@ async function applySwapCancelRequests(
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
+      { kind: 'enqueue', txs: [tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
-    proposableAccounts.add(accountId);
+    markProposableAccount(proposableAccounts, accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
 
@@ -1114,13 +1192,13 @@ async function applySwapCancelRequests(
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
+      { kind: 'enqueue', txs: [tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     if (tx.type === 'cross_swap_fill_ack') {
       appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
     }
-    proposableAccounts.add(accountId);
+    markProposableAccount(proposableAccounts, accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
 
@@ -1230,8 +1308,7 @@ const createEntityFrameApplyContext = (
     allJOutputs: [],
     collectedHashes: [],
     collectedHashManifest: new Map(),
-    proposableAccounts: new Set(),
-    requiredAccountResponses: new Map(),
+    proposableAccounts: new Map(),
     allSwapOffersCreated: [],
     allSwapCancelRequests: [],
     allSwapOffersCancelled: [],
@@ -1269,7 +1346,7 @@ const primeEntityFrameAccountWork = async (
     context.allOutputs,
   );
   for (const accountId of getProposableAccountIds(state)) {
-    context.proposableAccounts.add(accountId);
+    markProposableAccount(context.proposableAccounts, accountId);
   }
 };
 
@@ -1379,7 +1456,7 @@ const buildEntityFrameResult = (
   jOutputs: context.allJOutputs,
   candidateEffects: context.candidateEffects,
   storageChanges: mergeStorageOverlayRecords(undefined, context.storageChanges),
-  proposableAccounts: copyProposableAccounts(context.proposableAccounts),
+  proposableAccounts: copyProposableAccounts(context.proposableAccounts.keys()),
   accountsToProposeFramesCount,
   events: readEntityFrameEvents(currentEntityState),
   collectedHashes: context.collectedHashes,
@@ -1415,7 +1492,7 @@ const refreshChangedAccountCommitments = (
 ): void => {
   const changedAccountIds = new Set(collectTouchedAccountIds(
     state.entityId,
-    context.proposableAccounts,
+    context.proposableAccounts.keys(),
     context.storageChanges,
     dirtyAccountIdsFromState(state),
   ));
@@ -1499,7 +1576,6 @@ const applyPostEntityTxPhases = async (
         accountConsensusContext: context.accountConsensusContext,
         currentEntityState,
         proposableAccounts: context.proposableAccounts,
-        requiredAccountResponses: context.requiredAccountResponses,
         allOutputs: context.allOutputs,
         collectedHashes: context.collectedHashes,
         accountJClaimNodeStore: context.accountJClaimNodeStore,

@@ -57,6 +57,7 @@ export interface RuntimeInput {
  * They are observability, never consensus State or replay authority.
  */
 export type RuntimeEntityMetricStats = Readonly<{
+  acceptedPayments: number;
   completedPayments: number;
   matchedSwaps: number;
   updatedAtRuntimeHeight: number;
@@ -419,12 +420,15 @@ export interface UnsignedRuntimeEntityInputsEnvelope {
 /**
  * Transport-independent source authentication for Runtime-to-Runtime input.
  *
- * Relay hop authentication only proves who spoke to the relay. The encrypted
- * plaintext therefore carries its own signature, bound to the exact target,
- * so direct, relayed and process-local delivery enforce one canonical rule.
+ * Relay hop authentication only proves who spoke to the relay, so an envelope
+ * that travels through a relay (sealed-box, unauthenticated sender) carries a
+ * source signature bound to the exact target. A keyed direct session already
+ * authenticates every frame to the handshake-signed peer identity, so the
+ * per-envelope ECDSA signature is omitted there (it cost one sign plus one
+ * recover per envelope on the hub main thread for no added authenticity).
  */
 export interface RuntimeEntityInputsEnvelope extends UnsignedRuntimeEntityInputsEnvelope {
-  sourceSignature: string;
+  sourceSignature?: string;
 }
 
 /**
@@ -469,6 +473,8 @@ interface RuntimeInfrastructure {
   entityEncryptionSeeds?: Map<string, string>;
   /** Exact WAL-committed contexts installed only while replaying one Runtime frame. */
   replayEntityContexts?: Map<string, EntityInfraContext>;
+  /** HLT replay-only exact certified Entity proposal boundaries. */
+  replayEntityProposalOracle?: Map<string, import('../entity/consensus/proposal/replay-oracle').EntityProposalReplayOracleEntry>;
   /**
    * Process-local chain clients, keyed by canonical jurisdiction name.
    *
@@ -507,6 +513,8 @@ interface RuntimeInfrastructure {
   };
   persistencePaused?: boolean;
   persistenceQuiescing?: boolean;
+  /** Operator/HLT fence: a stopped external watcher must not be resurrected by the Runtime loop. */
+  jurisdictionWatchersPaused?: boolean;
   lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
   maxEntityInputsPerFrame?: number;
   maxEntityTxsPerFrame?: number;
@@ -534,6 +542,8 @@ interface RuntimeInfrastructure {
   /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
   inFlightEntityInputs?: number;
   p2p?: RuntimeP2P | null | undefined;
+  /** Process-local inbound direct sessions that can deliver to verified Entity routes. */
+  observeDirectOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
   observeOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
   pendingP2PConfig?: RuntimeP2PConfig | null;
   lastP2PConfig?: RuntimeP2PConfig | null;

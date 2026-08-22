@@ -51,4 +51,18 @@ describe('Entity persistent candidate map', () => {
     expect(first.get('alice')?.balance).toBe(20n);
     expect(second.get('alice')?.balance).toBe(30n);
   });
+
+  test('someKey observes additions and deletions without flattening the candidate', () => {
+    const candidate = new EntityCandidateMap(
+      new Map([['same:1/2', 1], ['cross:1/2', 2]]),
+      value => value,
+    );
+    expect(candidate.someKey(key => key.startsWith('cross:'))).toBe(true);
+    candidate.delete('cross:1/2');
+    expect(candidate.someKey(key => key.startsWith('cross:'))).toBe(false);
+    candidate.set('cross:2/3', 3);
+    expect(candidate.someKey(key => key.startsWith('cross:'))).toBe(true);
+    candidate.clear();
+    expect(candidate.someKey(key => key.startsWith('cross:'))).toBe(false);
+  });
 });

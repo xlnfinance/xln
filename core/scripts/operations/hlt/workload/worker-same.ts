@@ -15,7 +15,7 @@ import {
   assertProductionSwapFullySettled,
 } from '../settlement';
 import { waitForFullySettledEvidence } from '../settlement-reader';
-import { stopLaneRuntimes } from '../lanes/lane-runtimes';
+import { resetLaneHostOpCounters, stopLaneRuntimes } from '../lanes/lane-runtimes';
 import {
   prepareParallelSameLoad,
   submitPreparedParallelSameLoad,
@@ -24,11 +24,13 @@ import {
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
   connectRuntime,
+  disconnectRuntimeControl,
   directoryBytes,
   entryByLabel,
   exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readLoadBook,
+  resetHltProcessOpCounters,
   resolveWalPath,
   type WorkerArgs,
 } from '../worker-runtime';
@@ -57,6 +59,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       workDir: args.workDir,
       portBase: args.portBase,
       hub,
+      marketMaker,
       hubIdentity,
       initialBook: setupBook,
       minimumTradeSize,
@@ -64,20 +67,29 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       rounds: args.rounds,
       lanes: args.lanes,
       laneOffset: args.laneOffset,
+      execution: 'peer',
     });
     const initialBook = await readLoadBook(hub, hubIdentity.entityId);
-    if (initialBook.tradeCount !== setupBook.tradeCount) {
-      throw new Error('PRODUCTION_SWAP_LOAD_SETUP_CONCURRENT_TRADES');
+    if (initialBook.tradeCount !== preparedParallel.setupTradeCount) {
+      throw new Error(
+        `PRODUCTION_SWAP_LOAD_SETUP_TRADE_COUNT_MISMATCH:` +
+        `${initialBook.tradeCount}:${preparedParallel.setupTradeCount}`,
+      );
     }
-    const laneRuntimes = [...preparedParallel.makerRuntimes, ...preparedParallel.takerRuntimes];
+    const laneRuntimes = [...preparedParallel.traderRuntimes];
     const readLaneFrames = async () => Promise.all(laneRuntimes.map(async lane =>
       decodeLoadFrame(await lane.runtime.adapter.read<unknown>('frame/latest'))));
+    await Promise.all([
+      resetLaneHostOpCounters(laneRuntimes),
+      resetHltProcessOpCounters(args, [hub]),
+    ]);
     await exportReplayBaseSnapshotIfConfigured(hub);
     const initialFrame = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const laneInitialFrames = await readLaneFrames();
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const driverRssBefore = process.memoryUsage().rss;
+    for (const lane of laneRuntimes) disconnectRuntimeControl(lane.runtime);
     const startedAt = performance.now();
     const submitted = await submitPreparedParallelSameLoad({
       hub, hubIdentity, initialBook,
@@ -94,7 +106,10 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       hubBookEntityId: hubIdentity.entityId,
       pairs: submitted.settlementPairs,
       tradeCountBefore: initialBook.tradeCount,
-      expectedSwaps: args.swaps * args.rounds,
+      expectedSubmittedOffers: preparedParallel.distribution.submittedOffers,
+      expectedMatchedTrades: preparedParallel.distribution.matchedTrades,
+      expectedFullySettledOffers: preparedParallel.distribution.submittedOffers,
+      cancelledOffers: 0,
       startedAt,
     });
     const rates = assertProductionSwapFullySettled(settlementEvidence);
@@ -129,8 +144,13 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       runtimeInputBatches: submitted.runtimeInputBatches,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
-      matchedEconomicSwaps: settlementEvidence.tradeCountAfter - initialBook.tradeCount,
-      fullySettledEconomicSwaps: settlementEvidence.expectedSwaps,
+      expectedSubmittedOffers: preparedParallel.distribution.submittedOffers,
+      expectedMatchedTrades: preparedParallel.distribution.matchedTrades,
+      expectedFullySettledOffers: preparedParallel.distribution.submittedOffers,
+      cancelledOffers: 0,
+      stpOffers: settlementEvidence.stpOffers,
+      matchedSubmittedOffers: preparedParallel.distribution.matchedSubmittedOffers,
+      exchangeDistribution: preparedParallel.distribution,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       matchedElapsedMs,
@@ -139,8 +159,6 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       fullySettledTps: rates.fullySettledTps,
       tradeCountBefore: initialBook.tradeCount,
       tradeCountAfter: settlementEvidence.tradeCountAfter,
-      submittedEconomicSwaps: args.swaps * args.rounds,
-      uncompletedEconomicSwapsAfterRun: 0,
       driverRssBefore,
       driverRssAfter: process.memoryUsage().rss,
       walBytesBefore,
@@ -166,7 +184,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
     console.log(safeStringify(report));
   } finally {
     if (preparedParallel) {
-      await stopLaneRuntimes([...preparedParallel.makerRuntimes, ...preparedParallel.takerRuntimes]);
+      await stopLaneRuntimes(preparedParallel.traderRuntimes);
     }
     hub.adapter.disconnect();
     marketMaker.adapter.disconnect();

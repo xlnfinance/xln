@@ -10,7 +10,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { deriveDelta, isLeftEntity } from '../../../account/utils';
 import { RuntimeAdapterError } from '../../../api/runtime-adapter/errors';
 import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
@@ -18,6 +18,7 @@ import type { RuntimeAdapterSendResult } from '../../../api/runtime-adapter/type
 import { DaemonControlClient } from '../../../orchestrator/daemon-control';
 import { canonicalPair } from '../../../orderbook';
 import { safeParse, safeStringify } from '../../../protocol/serialization';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import {
   buildHltPlan,
   HLT_DEFAULT_BASE_TOKEN_ID,
@@ -59,6 +60,197 @@ export type ConnectedRuntime = Readonly<{
   entry: LoadRuntimeEntry;
   wsUrl: string;
 }>;
+
+const opCounterResetUrl = (rawUrl: string): string => {
+  const url = new URL(rawUrl);
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+  url.pathname = '/api/control/performance/op-counters/reset';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+const opCounterSnapshotUrl = (rawUrl: string): string => {
+  const url = new URL(rawUrl);
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+  url.pathname = '/api/control/performance/op-counters';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+const hltBackgroundStopUrl = (rawUrl: string): string => {
+  const url = new URL(rawUrl);
+  url.pathname = '/api/control/performance/background-io/stop';
+  return url.toString();
+};
+
+const resetProcessOpCounters = async (rawUrl: string, label: string): Promise<void> => {
+  const response = await fetch(opCounterResetUrl(rawUrl), { method: 'POST' });
+  const payload = await response.json() as unknown;
+  const record = requireBoundaryRecord(payload, `HLT_OP_COUNTER_RESET_RESPONSE_INVALID:${label}`);
+  requireExactBoundaryKeys(record, ['ok'], [], `HLT_OP_COUNTER_RESET_RESPONSE_FIELDS_INVALID:${label}`);
+  if (!response.ok || record['ok'] !== true) {
+    throw new Error(`HLT_OP_COUNTER_RESET_FAILED:${label}:status=${response.status}`);
+  }
+};
+
+export const hltProcessOpCounterResetTargets = (
+  portBase: number,
+  runtimes: readonly Readonly<{ wsUrl: string; label: string }>[],
+): ReadonlyArray<readonly [url: string, label: string]> => {
+  const processes = new Map<string, string>([
+    [opCounterResetUrl(`http://127.0.0.1:${portBase + 10}`), 'H1'],
+    [opCounterResetUrl(`http://127.0.0.1:${portBase + 11}`), 'H2'],
+    [opCounterResetUrl(`http://127.0.0.1:${portBase + 12}`), 'H3'],
+  ]);
+  for (const runtime of runtimes) processes.set(opCounterResetUrl(runtime.wsUrl), runtime.label);
+  return [...processes];
+};
+
+export const resetHltProcessOpCounters = async (
+  args: Pick<WorkerArgs, 'portBase'>,
+  runtimes: readonly ConnectedRuntime[],
+): Promise<void> => {
+  const processes = hltProcessOpCounterResetTargets(
+    args.portBase,
+    runtimes.map(runtime => ({ wsUrl: runtime.wsUrl, label: runtime.entry.label })),
+  );
+  await Promise.all([
+    ...processes.map(([url, label]) => resetProcessOpCounters(url, label)),
+    resetProcessOpCounters(`http://127.0.0.1:${args.portBase + 4}`, 'orchestrator'),
+  ]);
+};
+
+export const stopHltHubBackgroundIo = async (
+  args: Pick<WorkerArgs, 'portBase'>,
+): Promise<void> => {
+  await Promise.all([10, 11, 12].map(async offset => {
+    const label = `H${offset - 9}`;
+    const response = await fetch(hltBackgroundStopUrl(`http://127.0.0.1:${args.portBase + offset}`), {
+      method: 'POST',
+    });
+    const payload = requireBoundaryRecord(
+      await response.json() as unknown,
+      `HLT_BACKGROUND_STOP_RESPONSE_INVALID:${label}`,
+    );
+    requireExactBoundaryKeys(payload, ['ok'], [], `HLT_BACKGROUND_STOP_RESPONSE_FIELDS_INVALID:${label}`);
+    if (!response.ok || payload['ok'] !== true) {
+      throw new Error(`HLT_BACKGROUND_STOP_FAILED:${label}:status=${response.status}`);
+    }
+  }));
+};
+
+export type HltOpCounter = Readonly<{ calls: number; bytes: number; durationUs: number }>;
+
+export const decodeHltOpCounterSnapshot = (payload: unknown, label: string): Map<string, HltOpCounter> => {
+  const record = requireBoundaryRecord(payload, `HLT_OP_COUNTER_SNAPSHOT_INVALID:${label}`);
+  requireExactBoundaryKeys(record, ['counters'], [], `HLT_OP_COUNTER_SNAPSHOT_FIELDS_INVALID:${label}`);
+  const counters = requireBoundaryRecord(record['counters'], `HLT_OP_COUNTERS_INVALID:${label}`);
+  const decoded = new Map<string, HltOpCounter>();
+  for (const [name, rawCounter] of Object.entries(counters)) {
+    const counter = requireBoundaryRecord(rawCounter, `HLT_OP_COUNTER_INVALID:${label}:${name}`);
+    requireExactBoundaryKeys(counter, ['calls', 'bytes', 'durationUs'], [], `HLT_OP_COUNTER_FIELDS_INVALID:${label}:${name}`);
+    const values = ['calls', 'bytes', 'durationUs'].map(key => Number(counter[key]));
+    if (values.some(value => !Number.isSafeInteger(value) || value < 0)) {
+      throw new Error(`HLT_OP_COUNTER_VALUE_INVALID:${label}:${name}:${safeStringify(counter)}`);
+    }
+    decoded.set(name, { calls: values[0]!, bytes: values[1]!, durationUs: values[2]! });
+  }
+  return decoded;
+};
+
+export const decodeHltOpCounterReport = (payload: unknown): unknown => {
+  const report = requireBoundaryRecord(payload, 'HLT_OP_COUNTER_REPORT_INVALID');
+  requireExactBoundaryKeys(report, ['schema', 'runId', 'hubs'], [], 'HLT_OP_COUNTER_REPORT_FIELDS_INVALID');
+  if (report['schema'] !== 'xln-hlt-op-counters-v1') throw new Error('HLT_OP_COUNTER_REPORT_SCHEMA_INVALID');
+  if (typeof report['runId'] !== 'string' || report['runId'].length === 0) {
+    throw new Error('HLT_OP_COUNTER_REPORT_RUN_ID_INVALID');
+  }
+  const hubs = requireBoundaryRecord(report['hubs'], 'HLT_OP_COUNTER_REPORT_HUBS_INVALID');
+  requireExactBoundaryKeys(hubs, ['H1', 'H2', 'H3'], [], 'HLT_OP_COUNTER_REPORT_HUB_FIELDS_INVALID');
+  for (const label of ['H1', 'H2', 'H3']) {
+    decodeHltOpCounterSnapshot({ counters: hubs[label] }, label);
+  }
+  return report;
+};
+
+const readProcessOpCounters = async (rawUrl: string, label: string): Promise<Map<string, HltOpCounter>> => {
+  const response = await fetch(opCounterSnapshotUrl(rawUrl));
+  const payload = await response.json() as unknown;
+  if (!response.ok) throw new Error(`HLT_OP_COUNTER_SNAPSHOT_FAILED:${label}:status=${response.status}`);
+  return decodeHltOpCounterSnapshot(payload, label);
+};
+
+export const assertSocketCounterCoverage = (
+  counters: ReadonlyMap<string, HltOpCounter>,
+  label: string,
+): void => {
+  const raw = counters.get('boundary.socket.send');
+  if (!raw) return;
+  const explicit = [...counters]
+    .filter(([name, counter]) => /^socket\..+\.out\./.test(name) && counter.bytes > 0)
+    .reduce((sum, [, counter]) => ({ calls: sum.calls + counter.calls, bytes: sum.bytes + counter.bytes }), {
+      calls: 0,
+      bytes: 0,
+    });
+  if (raw.calls !== explicit.calls || raw.bytes !== explicit.bytes) {
+    throw new Error(`HLT_SOCKET_COUNTER_COVERAGE:${label}:raw=${safeStringify(raw)}:explicit=${safeStringify(explicit)}`);
+  }
+};
+
+export const summarizeHltIoCounters = (
+  counters: ReadonlyMap<string, HltOpCounter>,
+): Readonly<Record<string, HltOpCounter>> => Object.fromEntries(
+  [...counters]
+    .filter(([name, counter]) => counter.calls > 0 && [
+      'socket.',
+      'boundary.socket.',
+      'boundary.http.',
+      'boundary.level.',
+    ].some(prefix => name.startsWith(prefix)))
+    .sort(([left], [right]) => left.localeCompare(right)),
+);
+
+/** Payments isolate H1. Any H2/H3 network, HTTP or LevelDB work after the
+ * synchronized reset is unexplained background load and invalidates TPS. */
+export const findForbiddenHltHubIo = (
+  calls: ReadonlyMap<string, number>,
+): ReadonlyArray<readonly [name: string, calls: number]> => {
+  const forbiddenPrefixes = ['socket.', 'boundary.socket.', 'boundary.http.', 'boundary.level.'];
+  return [...calls]
+    .filter(([name, count]) => count > 0 && forbiddenPrefixes.some(prefix => name.startsWith(prefix)))
+    .sort(([left], [right]) => left.localeCompare(right));
+};
+
+export const assertHltHubProcessIsolation = async (
+  args: Pick<WorkerArgs, 'portBase' | 'workDir'>,
+): Promise<Readonly<Record<string, Readonly<Record<string, HltOpCounter>>>>> => {
+  const ioByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
+  const countersByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
+  for (const [offset, label] of [[10, 'H1'], [11, 'H2'], [12, 'H3']] as const) {
+    const counters = await readProcessOpCounters(`http://127.0.0.1:${args.portBase + offset}`, label);
+    assertSocketCounterCoverage(counters, label);
+    ioByHub[label] = summarizeHltIoCounters(counters);
+    countersByHub[label] = Object.fromEntries(counters);
+    const calls = new Map([...counters].map(([name, counter]) => [name, counter.calls]));
+    if (label === 'H1') {
+      const http = [...calls].filter(([name, count]) => count > 0 && name.startsWith('boundary.http.'));
+      if (http.length > 0) throw new Error(`HLT_PAYMENT_BACKGROUND_IO:H1:${safeStringify(Object.fromEntries(http))}`);
+      continue;
+    }
+    const active = findForbiddenHltHubIo(calls);
+    if (active.length > 0) {
+      throw new Error(`HLT_PAYMENT_BACKGROUND_IO:${label}:${safeStringify(Object.fromEntries(active))}`);
+    }
+  }
+  persistReport(join(args.workDir, 'hlt-op-counters-report.json'), {
+    schema: 'xln-hlt-op-counters-v1',
+    runId: basename(args.workDir),
+    hubs: countersByHub,
+  }, decodeHltOpCounterReport);
+  return ioByHub;
+};
 export type ObservedCommand = Readonly<{
   result: RuntimeAdapterSendResult;
   enqueueAckElapsedMs: number;
@@ -96,7 +288,10 @@ const parsePositiveBigint = (raw: string | undefined, defaultValue: bigint, code
  * Build the run plan from population flags, or return null when the caller
  * used the raw lane spelling instead.
  */
-const parseHltPlanArgs = (values: ReadonlyMap<string, string>): HltPlan | null => {
+const defaultMixForMode = (mode: string): string =>
+  mode === 'payments' ? '0:1' : mode === 'mixed' ? '1:1' : '1:0';
+
+const parseHltPlanArgs = (values: ReadonlyMap<string, string>, mode: string): HltPlan | null => {
   const users = values.get('--users');
   if (users === undefined) {
     const stray = HLT_ECONOMY_FLAGS.filter(flag => flag !== '--users' && values.has(flag));
@@ -116,8 +311,10 @@ const parseHltPlanArgs = (values: ReadonlyMap<string, string>): HltPlan | null =
   return buildHltPlan({
     users: parsePositiveInteger(users, 'HLT_USERS_INVALID'),
     ratePerUserPerSecond: parsePositiveInteger(values.get('--rate-per-user') ?? '1', 'HLT_RATE_PER_USER_INVALID'),
-    durationSeconds: parsePositiveInteger(values.get('--duration-s') ?? '60', 'HLT_DURATION_INVALID'),
-    mix: parseHltMix(values.get('--mix') ?? '1:0'),
+    // Ten seconds is the primary sustained HLT gate. The 60-second soak is an
+    // explicit follow-up, so profiling iterations never inherit soak duration.
+    durationSeconds: parsePositiveInteger(values.get('--duration-s') ?? '10', 'HLT_DURATION_INVALID'),
+    mix: parseHltMix(values.get('--mix') ?? defaultMixForMode(mode)),
     baseTokenId: parsePositiveInteger(
       values.get('--base-token') ?? String(HLT_DEFAULT_BASE_TOKEN_ID),
       'HLT_BASE_TOKEN_INVALID',
@@ -152,7 +349,8 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   // An economy describes the population; lanes, rounds and cadence follow from
   // it. Mixing the two spellings would let a run report a population it never
   // spawned, so the derived flags are rejected rather than overridden.
-  const plan = parseHltPlanArgs(values);
+  const mode = String(values.get('--mode') ?? 'same').trim();
+  const plan = parseHltPlanArgs(values, mode);
   if (plan) {
     for (const derived of ['--swaps', '--lanes', '--rounds', '--cadence-ms']) {
       if (values.has(derived)) throw new Error(`HLT_ECONOMY_CONFLICTS_WITH_DERIVED_FLAG:${derived}`);
@@ -161,7 +359,6 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   const swaps = plan
     ? plan.swapLanes
     : parsePositiveInteger(values.get('--swaps') ?? '1', 'PRODUCTION_SWAP_LOAD_SWAPS_INVALID');
-  const mode = String(values.get('--mode') ?? 'same').trim();
   const lanes = plan
     ? (mode === 'payments' ? plan.paymentLanes : plan.swapLanes)
     : parsePositiveInteger(values.get('--lanes') ?? '1', 'PRODUCTION_SWAP_LOAD_LANES_INVALID');
@@ -266,8 +463,13 @@ export const connectRuntime = async (
   const adapter = new RemoteRuntimeAdapter();
   await adapter.connect({ mode: 'remote', wsUrl, authKey: entry.token, requestTimeoutMs: 30_000 });
   if (!adapter.commandReady || adapter.nextCommandSequence === null) {
+    const reason = adapter.commandReadyReason ?? (
+      adapter.nextCommandSequence === null ? 'command-frontier-missing' : 'unknown'
+    );
     adapter.disconnect();
-    throw new Error(`PRODUCTION_SWAP_LOAD_RUNTIME_NOT_COMMAND_READY:${entry.label}`);
+    throw new Error(
+      `PRODUCTION_SWAP_LOAD_RUNTIME_NOT_COMMAND_READY:${entry.label}:reason=${reason}`,
+    );
   }
   const url = new URL(wsUrl);
   if ((url.protocol !== 'ws:' && url.protocol !== 'wss:') || url.username || url.password || url.search || url.hash) {
@@ -283,6 +485,29 @@ export const connectRuntime = async (
     entry,
     wsUrl,
   };
+};
+
+export const disconnectRuntimeControl = (runtime: ConnectedRuntime): void => {
+  runtime.adapter.disconnect();
+};
+
+export const reconnectRuntimeControl = async (runtime: ConnectedRuntime): Promise<void> => {
+  if (runtime.adapter.status === 'connected') return;
+  await runtime.adapter.connect({
+    mode: 'remote',
+    wsUrl: runtime.wsUrl,
+    authKey: runtime.entry.token,
+    requestTimeoutMs: 30_000,
+  });
+  if (!runtime.adapter.commandReady || runtime.adapter.nextCommandSequence === null) {
+    const reason = runtime.adapter.commandReadyReason ?? (
+      runtime.adapter.nextCommandSequence === null ? 'command-frontier-missing' : 'unknown'
+    );
+    runtime.adapter.disconnect();
+    throw new Error(
+      `PRODUCTION_SWAP_LOAD_RUNTIME_NOT_COMMAND_READY:${runtime.entry.label}:reason=${reason}`,
+    );
+  }
 };
 
 export const exportReplayBaseSnapshotIfConfigured = async (
@@ -302,6 +527,32 @@ export const exportReplayBaseSnapshotIfConfigured = async (
 };
 
 const COMMAND_OBSERVATION_TIMEOUT_MS = 120_000;
+
+// RuntimeAdapter's owner command frontier is strictly contiguous. Concurrent
+// callers may share one authenticated adapter, but two commands must never
+// read the same next sequence before either becomes durable. HLT workload
+// traffic bypasses this control lane through the per-host batch ingress; this
+// lock only serializes setup/operator commands for one Runtime.
+const adapterCommandTails = new Map<RemoteRuntimeAdapter, Promise<void>>();
+
+const withExclusiveAdapterCommand = async <T>(
+  runtime: ConnectedRuntime,
+  effect: () => Promise<T>,
+): Promise<T> => {
+  const previous = adapterCommandTails.get(runtime.adapter) ?? Promise.resolve();
+  let release = (): void => {};
+  const turn = new Promise<void>(resolve => { release = resolve; });
+  adapterCommandTails.set(runtime.adapter, turn);
+  await previous;
+  try {
+    return await effect();
+  } finally {
+    release();
+    if (adapterCommandTails.get(runtime.adapter) === turn) {
+      adapterCommandTails.delete(runtime.adapter);
+    }
+  }
+};
 
 const awaitObservedRuntimeCommand = async (
   runtime: ConnectedRuntime,
@@ -331,7 +582,7 @@ export const sendEnqueued = async (
   runtime: ConnectedRuntime,
   commandId: string,
   input: RuntimeInput,
-): Promise<ObservedCommand> => {
+): Promise<ObservedCommand> => withExclusiveAdapterCommand(runtime, async () => {
   const commandSequence = runtime.adapter.nextCommandSequence;
   if (commandSequence === null) throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_FRONTIER_MISSING:${runtime.entry.label}`);
   const startedAt = performance.now();
@@ -349,13 +600,13 @@ export const sendEnqueued = async (
     await sleep(10);
   }
   throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_NOT_ENQUEUED:${commandId}`);
-};
+});
 
 export const sendObserved = async (
   runtime: ConnectedRuntime,
   commandId: string,
   input: RuntimeInput,
-): Promise<ObservedCommand> => {
+): Promise<ObservedCommand> => withExclusiveAdapterCommand(runtime, async () => {
   const commandSequence = runtime.adapter.nextCommandSequence;
   if (commandSequence === null) throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_FRONTIER_MISSING:${runtime.entry.label}`);
   const startedAt = performance.now();
@@ -370,7 +621,7 @@ export const sendObserved = async (
       Math.ceil(performance.now() - startedAt),
     ),
   };
-};
+});
 
 export const findIdentity = async (
   runtime: ConnectedRuntime,

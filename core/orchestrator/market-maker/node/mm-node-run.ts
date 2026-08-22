@@ -2,7 +2,10 @@
 
 import { createHash } from 'node:crypto';
 import { drainJWatcherBacklog } from '../../../jurisdiction/adapter/operations/backlog-drain';
-import { createDirectRuntimeWsRoute } from '../../../network/p2p/direct-runtime-bun';
+import {
+  createDirectRuntimeWsRoute,
+  hasUndeliveredDirectRuntimeSessionBytes,
+} from '../../../network/p2p/direct-runtime-bun';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../../runtime/admit/entity-input-envelope-auth.ts';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../../../api/runtime-adapter/codec';
@@ -44,6 +47,7 @@ import { requiresLocalNodeOperator } from '../../../api/server/control/node-http
 import { resolveRuntimeAdminControl } from '../../../api/server/control/runtime-admin';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import type { RuntimeReplica } from '../../../runtime/types';
+import { haltRuntimeRequiresOperator } from '../../../runtime/replica/lifecycle';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -93,6 +97,7 @@ import {
   MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
   MARKET_MAKER_QUOTE_LOOP_MS,
   MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+  MARKET_MAKER_STEADY_QUOTES_ENABLED,
   MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK,
   type MarketMakerConnectivityBudget,
   type MarketMakerEntityContext,
@@ -888,12 +893,12 @@ const createMarketMakerWebSocketHandler = (
   drain(ws: MarketMakerServerSocket) {
     if (ws.data?.type !== 'rpc') directRuntimeWs.websocket.drain(ws);
   },
-  close(ws: MarketMakerServerSocket) {
+  close(ws: MarketMakerServerSocket, code: number, reason: string) {
     if (ws.data?.type === 'rpc') {
       forgetRuntimeAdapterClient(ws);
       return;
     }
-    directRuntimeWs.websocket.close(ws);
+    directRuntimeWs.websocket.close(ws, code, reason);
   },
 });
 
@@ -1627,6 +1632,9 @@ const createMarketMakerMaintenanceLoops = (deps: MarketMakerMaintenanceLoopDeps)
   const maintainQuotes = async (): Promise<void> => {
     if (hasMarketMakerRuntimeBacklog(deps.env)) return;
     if (deps.phase() === 'offers-ready') {
+      // HLT may intentionally freeze the bootstrap snapshot. Bootstrap still
+      // follows the canonical quote path; only post-ready replenishment stops.
+      if (!MARKET_MAKER_STEADY_QUOTES_ENABLED) return;
       const before = deps.health.publishReady();
       if (isMarketMakerFullDepthComplete(before)) return;
       await deps.driveQuotes('steady');
@@ -2096,7 +2104,31 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     runtimeSeed: resolvedArgs.seed,
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
-    onEntityInputs: async (from, envelope, ingressTimestamp) => {
+    onDeliveryFailure: failure => {
+      const error = new Error(`DIRECT_ACCOUNT_DELIVERY_FATAL:${safeStringify(failure)}`);
+      state.lastDirectInputError = {
+        at: Date.now(),
+        fromRuntimeId: failure.peerRuntimeId,
+        entityIds: failure.envelope?.entityInputs.map(input => String(input.entityId || '')) ?? [],
+        signerIds: failure.envelope?.entityInputs.map(input => String(input.signerId || '')) ?? [],
+        txTypes: failure.envelope?.entityInputs.flatMap(input =>
+          (input.entityTxs || []).map(tx => String(tx?.type || ''))
+        ) ?? [],
+        error: error.message,
+      };
+      env.error?.('network', 'DIRECT_ACCOUNT_DELIVERY_FATAL', failure);
+      haltRuntimeRequiresOperator(env, error);
+    },
+    onSessionClose: failure => {
+      if (!hasUndeliveredDirectRuntimeSessionBytes(failure)) {
+        env.warn?.('network', 'DIRECT_RUNTIME_PEER_OFFLINE', failure);
+        return;
+      }
+      const error = new Error(`DIRECT_RUNTIME_SESSION_CLOSED:${safeStringify(failure)}`);
+      env.error?.('network', 'DIRECT_RUNTIME_SESSION_CLOSED', failure);
+      haltRuntimeRequiresOperator(env, error);
+    },
+    onEntityInputs: async (from, envelope, ingressTimestamp, sessionAuthenticated) => {
       if (!state.externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
       const debugEntry: DirectEntityInputDebug = {
         at: Date.now(),
@@ -2107,7 +2139,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
       };
       state.lastDirectInput = debugEntry;
       try {
-        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
+        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope, sessionAuthenticated === true);
         handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, {
           envelopeSourceVerified: true,
           entityInputsValidated: true,
@@ -2121,11 +2153,10 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
       }
     },
   });
-  env.infrastructure = env.infrastructure ?? {};
-  // Direct dispatch is process infrastructure. It is deliberately installed
-  // outside every Runtime frame and excluded from canonical state roots.
-  env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
-    directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
+  // MM is a client of Hub Runtime servers. Its outbound AccountInput path is
+  // the authenticated MM -> Hub duplex client owned by RuntimeP2P; installing
+  // server dispatch here made MM look for H1 in the wrong inbound-session map.
+  // The HTTP /ws listener remains ingress-only and never selects output routes.
   const handleRuntimeAdapterWsMessage = createMarketMakerRuntimeAdapterHandler({
     env,
     isMutatingIngressReady: () => state.externalIngressReady,
@@ -2272,6 +2303,7 @@ const createMarketMakerQuoteLifecycle = (
     state.bootstrapEntityStateHash = finalization.entityStateHash;
     state.bootstrapReadyAt = Date.now();
     state.phase = 'offers-ready';
+    env.infrastructure?.p2p?.finishBootstrapPolling();
     health.setCurrentHealth(finalization.health);
     health.rebuildHealthResponse();
   };

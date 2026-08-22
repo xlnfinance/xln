@@ -471,12 +471,9 @@ export type AccountFrameProposal = {
 // and propose the next frame. Each state epoch carries its own frame Hanko and
 // optional dispute seal. Sharing one seal across ACK + proposal is invalid
 // because the two parts commit different account states.
-export type AccountLocalInput = AccountInputBase & {
-  /**
-   * Locally authorized transactions for the next Account frame. This branch
-   * is committed inside the parent Entity frame and is never sent to a peer.
-   */
-  kind: 'txs';
+export type AccountEnqueueInput = {
+  /** Local Entity command. It never crosses an Entity or transport boundary. */
+  kind: 'enqueue';
   txs: AccountTx[];
 };
 
@@ -539,7 +536,7 @@ export type AccountPeerInput =
 
 /** Every command accepted by an Account replica enters this one boundary. */
 export type AccountInput =
-  | AccountLocalInput
+  | AccountEnqueueInput
   | AccountExternalFinalityInput
   | AccountPeerInput;
 

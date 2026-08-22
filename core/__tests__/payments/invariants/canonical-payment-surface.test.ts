@@ -101,12 +101,12 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(ENTITY_TX_TYPES.includes('lendingRepay')).toBe(true);
   expect(ENTITY_TX_TYPES.includes('lendingClosePosition')).toBe(true);
 
-  const paymentPanel = source('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte');
-  expect(paymentPanel).toContain("const isDirect = deliveryMode === 'direct';");
-  expect(paymentPanel).toContain("const isTrusted = deliveryMode === 'trusted';");
-  expect(paymentPanel).toContain('const usesDirectPayment = isDirect || isTrusted;');
-  expect(paymentPanel).toContain("entityTxs: usesDirectPayment\n          ? [{\n              type: 'directPayment' as const");
-  expect(paymentPanel).toContain("          : [{\n              type: 'htlcPayment' as const");
+  const paymentCommand = source('frontend/src/lib/components/Entity/payments/runtime/payment-command.ts');
+  expect(paymentCommand).toContain("const isDirect = input.deliveryMode === 'direct';");
+  expect(paymentCommand).toContain("const isTrusted = input.deliveryMode === 'trusted';");
+  expect(paymentCommand).toContain('const usesDirectPayment = isDirect || isTrusted;');
+  expect(paymentCommand).toContain("entityTxs: usesDirectPayment\n        ? [{\n            type: 'directPayment'");
+  expect(paymentCommand).toContain("        : [{\n            type: 'htlcPayment'");
 
   expect(source('core/entity/tx/handlers/payments/direct-payment.ts'))
     .toContain("type: 'direct_payment'");
@@ -173,7 +173,8 @@ test('four payment modes stay distinct while retired swap alternatives fail loud
   for (const mode of ['direct', 'instant', 'async', 'trusted']) {
     expect(paymentPanel).toContain(`value: '${mode}'`);
   }
-  expect(paymentPanel).toContain("type: 'directPayment' as const");
+  expect(source('frontend/src/lib/components/Entity/payments/runtime/payment-command.ts'))
+    .toContain("type: 'directPayment'");
 });
 
 test('same-j offers are projected only by the counterparty matcher', () => {

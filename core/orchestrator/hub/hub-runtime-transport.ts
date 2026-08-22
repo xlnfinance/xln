@@ -1,5 +1,8 @@
 import type { DirectWebSocket } from '../../network/p2p/direct-runtime-bun';
-import { createDirectRuntimeWsRoute } from '../../network/p2p/direct-runtime-bun';
+import {
+  createDirectRuntimeWsRoute,
+  hasUndeliveredDirectRuntimeSessionBytes,
+} from '../../network/p2p/direct-runtime-bun';
 import { safeStringify } from '../../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../../api/runtime-adapter/codec';
 import { resolveRuntimeAdapterRead } from '../../api/runtime-adapter/resolve';
@@ -8,7 +11,7 @@ import {
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
 } from '../../api/runtime-adapter/server';
-import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/admit/entity-input-envelope-auth.ts';
+import { assertRuntimeEntityInputsEnvelopeSource, signRuntimeEntityInputsEnvelope } from '../../runtime/admit/entity-input-envelope-auth.ts';
 import {
   enqueueRuntimeInput,
   handleInboundP2PEntityInputs,
@@ -24,6 +27,12 @@ import {
   validateRuntimeInputAdmission,
 } from '../../runtime';
 import type { RuntimeReplica } from '../../runtime/types';
+import { haltRuntimeRequiresOperator } from '../../runtime/replica/lifecycle';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
+import {
+  crossJurisdictionRouteProfileEntityIds,
+  extractCrossJurisdictionRouteFromTx,
+} from '../../extensions/cross-j/boundary';
 import type { BrainVaultOwnerController } from '../../api/server/ownership/brainvault';
 import { resolveRuntimeAdminControl } from '../../api/server/control/runtime-admin';
 
@@ -44,6 +53,35 @@ export type DirectInputDebugState = {
   lastError: DirectEntityInputDebug | null;
 };
 
+const collectCrossJProfileIds = (
+  envelope: import('../../runtime/types').RuntimeEntityInputsEnvelope,
+): string[] => [...new Set(envelope.entityInputs.flatMap(input =>
+  getEffectiveEntityInputTxs(input).flatMap(tx => {
+    if (tx.type !== 'prepareCrossJurisdictionSwap') return [];
+    const route = extractCrossJurisdictionRouteFromTx(tx);
+    return route ? crossJurisdictionRouteProfileEntityIds(route) : [];
+  }),
+))];
+
+const warmCrossJProfileRoutes = async (
+  env: RuntimeReplica,
+  envelope: import('../../runtime/types').RuntimeEntityInputsEnvelope,
+): Promise<void> => {
+  const required = collectCrossJProfileIds(envelope);
+  if (required.length === 0) return;
+  const missing = required.filter(entityId =>
+    !env.infrastructure?.verifiedProfileRoutes?.has(entityId));
+  if (missing.length === 0) return;
+  const p2p = env.infrastructure?.p2p;
+  if (!p2p) throw new Error(`CROSS_J_PROFILE_WARMUP_UNAVAILABLE:${missing.join(',')}`);
+  await p2p.ensureProfiles(missing, 1);
+  const unresolved = missing.filter(entityId =>
+    !env.infrastructure?.verifiedProfileRoutes?.has(entityId));
+  if (unresolved.length > 0) {
+    throw new Error(`CROSS_J_PROFILE_WARMUP_FAILED:${unresolved.join(',')}`);
+  }
+};
+
 export const createHubDirectRuntimeRoute = (
   env: RuntimeReplica,
   runtimeSeed: string,
@@ -54,12 +92,37 @@ export const createHubDirectRuntimeRoute = (
   route = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed,
+    signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(env, to, envelope),
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead(
         { env },
         `recovery/bundles/${encodeURIComponent(lookupKey)}`,
       ),
-    onEntityInputs: async (from, envelope, ingressTimestamp) => {
+    onDeliveryFailure: failure => {
+      const error = new Error(`DIRECT_ACCOUNT_DELIVERY_FATAL:${safeStringify(failure)}`);
+      debug.lastError = {
+        at: Date.now(),
+        fromRuntimeId: failure.peerRuntimeId,
+        entityIds: failure.envelope?.entityInputs.map(input => String(input.entityId || '')) ?? [],
+        signerIds: failure.envelope?.entityInputs.map(input => String(input.signerId || '')) ?? [],
+        txTypes: failure.envelope?.entityInputs.flatMap(input =>
+          (input.entityTxs || []).map(tx => String(tx?.type || ''))
+        ) ?? [],
+        error: error.message,
+      };
+      env.error?.('network', 'DIRECT_ACCOUNT_DELIVERY_FATAL', failure);
+      haltRuntimeRequiresOperator(env, error);
+    },
+    onSessionClose: failure => {
+      if (!hasUndeliveredDirectRuntimeSessionBytes(failure)) {
+        env.warn?.('network', 'DIRECT_RUNTIME_PEER_OFFLINE', failure);
+        return;
+      }
+      const error = new Error(`DIRECT_RUNTIME_SESSION_CLOSED:${safeStringify(failure)}`);
+      env.error?.('network', 'DIRECT_RUNTIME_SESSION_CLOSED', failure);
+      haltRuntimeRequiresOperator(env, error);
+    },
+    onEntityInputs: async (from, envelope, ingressTimestamp, sessionAuthenticated) => {
       if (!isIngressReady()) {
         throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
       }
@@ -78,7 +141,8 @@ export const createHubDirectRuntimeRoute = (
       };
       debug.lastSeen = entry;
       try {
-        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
+        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope, sessionAuthenticated === true);
+        await warmCrossJProfileRoutes(env, envelope);
         handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, {
           envelopeSourceVerified: true,
           entityInputsValidated: true,
@@ -93,16 +157,46 @@ export const createHubDirectRuntimeRoute = (
     },
   });
   env.infrastructure = env.infrastructure ?? {};
-  // Output routing falls back to P2P when the direct peer is unavailable.
+  env.infrastructure.observeDirectOnlineEntityIds = entityIds => {
+    const online = new Set<string>();
+    for (const rawEntityId of entityIds) {
+      const entityId = rawEntityId.toLowerCase();
+      const runtimeId = env.infrastructure?.verifiedProfileRoutes?.get(entityId)?.runtimeId;
+      if (runtimeId && route.hasOpenSession(runtimeId)) online.add(entityId);
+    }
+    return online;
+  };
+  // A sovereign user dials the Hub, so its authenticated inbound uWS session
+  // is the canonical user route. Hubs dial each other from signed Profiles,
+  // so Hub-to-Hub output uses that already-open outbound direct P2P socket.
+  // Route selection happens before the only send attempt: this is not a retry
+  // and must never fall through after either transport accepted bytes.
   env.infrastructure.directEntityInputsDispatch = (
     targetRuntimeId,
     envelope,
     ingressTimestamp,
-  ) => route.sendEntityInputsDelivery(
-    targetRuntimeId,
-    envelope,
-    ingressTimestamp,
-  );
+  ) => {
+    if (route.hasOpenSession(targetRuntimeId)) {
+      return route.sendEntityInputsDelivery(
+        targetRuntimeId,
+        envelope,
+        ingressTimestamp,
+      );
+    }
+    const p2p = env.infrastructure?.p2p;
+    if (p2p) {
+      return p2p.enqueueEntityInputsDelivery(
+        targetRuntimeId,
+        envelope,
+        ingressTimestamp,
+      );
+    }
+    return route.sendEntityInputsDelivery(
+      targetRuntimeId,
+      envelope,
+      ingressTimestamp,
+    );
+  };
   return route;
 };
 

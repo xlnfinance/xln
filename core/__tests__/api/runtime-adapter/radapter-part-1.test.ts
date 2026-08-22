@@ -605,6 +605,12 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
     { env },
     `entity/${entityId}`,
   );
+  const settlementCounters = await resolveRuntimeAdapterRead<{
+    height: number;
+    lockBookOpen: number;
+    htlcFeesEarned: bigint;
+    metrics: { acceptedPayments: number; completedPayments: number };
+  }>({ env }, `entity/${entityId}/settlement-counters`);
   const accounts = await resolveRuntimeAdapterRead<{
     items: Array<{ currentHeight: number }>;
     nextCursor: string | null;
@@ -629,6 +635,17 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   ]);
   expect(entity.entityId).toBe(entityId);
   expect(entity.profile.name).toBe('Adapter Test');
+  expect(settlementCounters).toEqual({
+    height: 7,
+    lockBookOpen: 0,
+    htlcFeesEarned: 0n,
+    metrics: {
+      acceptedPayments: 0,
+      completedPayments: 0,
+      matchedSwaps: 0,
+      updatedAtRuntimeHeight: 0,
+    },
+  });
   expect(accounts.items).toHaveLength(1);
   expect(accounts.items[0]?.currentHeight).toBe(1);
   expect(accounts.nextCursor).toBe(null);

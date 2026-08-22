@@ -4,6 +4,7 @@ import {
   encodeBinaryPayload,
   encodeBinaryPayloadWithCanonical,
 } from './binary-codec';
+import { countOp, countOpWithSite } from '../../support/performance/op-counters';
 
 export const notFound = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
@@ -16,7 +17,9 @@ export const encodeBuffer = (
   value: unknown,
   options: { omitSymbolKeys?: boolean } = {},
 ): Buffer => {
-  return Buffer.from(encodeBinaryPayload(value, 'msgpack', options));
+  const buffer = Buffer.from(encodeBinaryPayload(value, 'msgpack', options));
+  countOpWithSite('storage.encode', buffer.byteLength, 1);
+  return buffer;
 };
 
 export const encodeBufferPrepared = (
@@ -24,7 +27,9 @@ export const encodeBufferPrepared = (
   options: { omitSymbolKeys?: boolean } = {},
 ): { buffer: Buffer; canonical: unknown } => {
   const encoded = encodeBinaryPayloadWithCanonical(value, 'msgpack', options);
-  return { buffer: Buffer.from(encoded.bytes), canonical: encoded.canonical };
+  const buffer = Buffer.from(encoded.bytes);
+  countOpWithSite('storage.encodePrepared', buffer.byteLength, 1);
+  return { buffer, canonical: encoded.canonical };
 };
 
 const requireStorageMsgpack = (buffer: Buffer): void => {
@@ -56,6 +61,15 @@ export const writeBatch = async (
   options: { sync?: boolean } = {},
 ): Promise<void> => {
   const sync = options.sync ?? storageSyncWritesEnabled();
-  await batch.write(sync ? { sync: true } : undefined);
+  const startedAt = performance.now();
+  try {
+    await batch.write(sync ? { sync: true } : undefined);
+  } finally {
+    countOp(
+      `storage.batchWrite.${sync ? 'sync' : 'async'}`,
+      0,
+      Math.round((performance.now() - startedAt) * 1_000),
+    );
+  }
 };
 import { Buffer } from '../../support/platform-crypto';

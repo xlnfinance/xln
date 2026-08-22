@@ -297,7 +297,11 @@ const validateFrameOptionalEvidence = (
     }
   }
   if (frame['hankos'] !== undefined) {
-    validateArray(frame['hankos'], `${context}.hankos`);
+    const hankos = validateArray(frame['hankos'], `${context}.hankos`);
+    if (hankos.length !== 1) {
+      throw new FinancialDataCorruptionError(`${context}.hankos must contain exactly the EntityFrame Hanko`);
+    }
+    validateString(hankos[0], `${context}.hankos[0]`);
   }
 };
 
@@ -337,16 +341,53 @@ const validateHashManifest = (value: unknown, context: string): void => {
 };
 
 const PLACEHOLDER_ECDSA_SIG = `0x${'11'.repeat(65)}`;
-// 1000i sealed hankos were 3.60–3.82 MB (~4.2 KB each). A 2 KB placeholder let
-// pre-sign pass at ~8.7 MB and post-sign fail at 10.54–12.29 MB.
+// A certified EntityFrame retains only its own Hanko. Secondary Hankos are
+// sealed into their exact Account/dispute/output payloads before commit.
 const PLACEHOLDER_HANKO = `0x${'22'.repeat(2_200)}`;
+
+const repeatedCanonicalArrayBytes = (encodedElementBytes: number, count: number): number =>
+  utf8ByteLength('["Array",[]]') + count * encodedElementBytes + Math.max(0, count - 1);
+
+const singleEntryCanonicalMapBytes = (encodedKeyBytes: number, encodedValueBytes: number): number =>
+  utf8ByteLength('["Map",[]]') + 2 + encodedKeyBytes + 1 + encodedValueBytes;
+
+const addedCanonicalObjectPropertyBytes = (
+  key: 'collectedSigs' | 'hankos',
+  encodedValueBytes: number,
+): number => utf8ByteLength(`,["${key}",]`) + encodedValueBytes;
+
+const estimateSealedEntityFrameWireBytes = (
+  frame: Record<string, unknown>,
+  signerId: string,
+  hashCount: number,
+  includeHankos: boolean,
+): number => {
+  if (Object.hasOwn(frame, 'collectedSigs') || Object.hasOwn(frame, 'hankos')) {
+    throw new FinancialDataCorruptionError('ENTITY_FRAME_WIRE_ESTIMATE_REQUIRES_UNSIGNED_FRAME');
+  }
+  const unsignedBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
+  const signerBytes = utf8ByteLength(encodeCanonicalConsensusValue(signerId.toLowerCase()));
+  const signatureBytes = utf8ByteLength(encodeCanonicalConsensusValue(PLACEHOLDER_ECDSA_SIG));
+  const signaturesBytes = repeatedCanonicalArrayBytes(signatureBytes, hashCount);
+  const collectedSigsBytes = singleEntryCanonicalMapBytes(signerBytes, signaturesBytes);
+  const withSignatures = unsignedBytes + addedCanonicalObjectPropertyBytes(
+    'collectedSigs',
+    collectedSigsBytes,
+  );
+  if (!includeHankos) return withSignatures;
+  const hankoBytes = utf8ByteLength(encodeCanonicalConsensusValue(PLACEHOLDER_HANKO));
+  return withSignatures + addedCanonicalObjectPropertyBytes(
+    'hankos',
+    repeatedCanonicalArrayBytes(hankoBytes, 1),
+  );
+};
 
 const assertEntityFrameSealedWireBudget = (
   frame: Record<string, unknown>,
   context: string,
-): void => {
+): number => {
   const wireBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
-  if (wireBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return;
+  if (wireBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return wireBytes;
   const part = (value: unknown): number => {
     try { return utf8ByteLength(encodeCanonicalConsensusValue(value)); } catch { return -1; }
   };
@@ -361,22 +402,32 @@ const assertEntityFrameSealedWireBudget = (
   );
 };
 
-/** Sealed bytes include hashesToSign + sigs + hankos. Fit measured empty events;
+/** Sealed bytes include hashesToSign + sigs + the EntityFrame Hanko. Fit measured empty events;
  *  throw here after apply, before sign, so eviction does not pay for a doomed seal. */
 export const assertEstimatedSealedEntityFrameWire = (
   frame: Record<string, unknown>,
   signerId: string,
   includeHankos: boolean,
   context: string,
-): void => {
+): number => {
   const hashes = frame['hashesToSign'];
   if (!Array.isArray(hashes) || hashes.length === 0) {
     throw new FinancialDataCorruptionError(`${context}.hashesToSign cannot be empty`);
   }
-  assertEntityFrameSealedWireBudget({
+  const estimatedBytes = estimateSealedEntityFrameWireBytes(
+    frame,
+    signerId,
+    hashes.length,
+    includeHankos,
+  );
+  if (estimatedBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return estimatedBytes;
+  // Failure path retains the exact historical diagnostics. The hot path uses
+  // byte arithmetic and never builds or encodes thousands of placeholder
+  // Hanko strings merely to prove the same conservative bound.
+  return assertEntityFrameSealedWireBudget({
     ...frame,
     collectedSigs: new Map([[signerId.toLowerCase(), hashes.map(() => PLACEHOLDER_ECDSA_SIG)]]),
-    ...(includeHankos ? { hankos: hashes.map(() => PLACEHOLDER_HANKO) } : {}),
+    ...(includeHankos ? { hankos: [PLACEHOLDER_HANKO] } : {}),
   }, context);
 };
 

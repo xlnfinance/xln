@@ -23,6 +23,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { hmacSha256 } from '../../protocol/crypto/fast-sha256';
 import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/codec/binary-codec';
 import type { Codec } from '../../protocol/serialization/codec';
+import { LIMITS } from '../../config/constants';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';
 import {
   requireBoundaryInteger,
@@ -35,7 +36,7 @@ import {
  * delivery must keep two Account legs in one authenticated envelope, so the
  * shared direct/relay receiver cap needs room for both plus protocol metadata.
  */
-export const DEFAULT_MAX_WS_MESSAGE_BYTES = 32 * 1024 * 1024;
+export const DEFAULT_MAX_WS_MESSAGE_BYTES = LIMITS.MAX_RUNTIME_WS_MESSAGE_BYTES;
 const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
   id: 128,
   from: 128,

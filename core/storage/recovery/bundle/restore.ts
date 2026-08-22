@@ -104,11 +104,9 @@ export const restoreRuntimeFromBundles = async (
     if (options.readOnly) throw mismatch;
     await deps.failAfterCleanup(env, mismatch);
   }
-  if (!options.readOnly && (env.pendingNetworkOutputs?.length ?? 0) > 0) {
-    throw new Error(
-      `RECOVERY_BUNDLE_UNDISPATCHED_OUTPUTS:${env.pendingNetworkOutputs!.length}:` +
-      'automatic resend is forbidden',
-    );
-  }
+  // Read-only recovery retains the reconstructed outputs for equivalence
+  // inspection. A live restore discards them: network delivery is best-effort
+  // and is never resumed from historical Runtime frames.
+  if (!options.readOnly) env.pendingNetworkOutputs = [];
   return env;
 };

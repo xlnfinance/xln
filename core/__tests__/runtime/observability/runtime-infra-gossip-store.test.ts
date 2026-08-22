@@ -16,6 +16,7 @@ import {
   buildCryptographicProfileFixture,
   deriveSingleSignerFixtureEntityId,
 } from '../../helpers/cryptographic-profile';
+import { createGossipLayer } from '../../../network/p2p/gossip';
 
 const keyText = (key: Buffer | string): string => Buffer.isBuffer(key) ? key.toString() : String(key);
 
@@ -60,6 +61,28 @@ class FakeInfraDb {
     }
   }
 }
+
+test('snapshot profile hydration rebuilds indexes without re-persisting profiles', () => {
+  const entityId = deriveSingleSignerFixtureEntityId('gossip-hydration-profile');
+  const runtimeId = `0x${'12'.repeat(20)}`;
+  const runtimeEncPubKey = `0x${'34'.repeat(32)}`;
+  let persisted = 0;
+  const gossip = createGossipLayer({ onAnnounce: () => { persisted += 1; } });
+  gossip.setProfiles?.([{
+    ...buildCryptographicProfileFixture({
+      entityId,
+      signingSeed: 'gossip-hydration-profile',
+      name: 'Hydrated',
+    }),
+    runtimeId,
+    runtimeEncPubKey,
+  }]);
+
+  expect(persisted).toBe(0);
+  expect(gossip.getProfile(entityId)?.runtimeId).toBe(runtimeId);
+  expect(gossip.getProfileByRuntimeId(runtimeId)?.entityId).toBe(entityId);
+  expect(gossip.encryptionKeyForRuntime(runtimeId)).toBe(runtimeEncPubKey);
+});
 
 test('runtime infra gossip restore diagnostics use structured logging', () => {
   const source = readFileSync(join(process.cwd(), 'core/runtime/envelope/gossip-store.ts'), 'utf8');

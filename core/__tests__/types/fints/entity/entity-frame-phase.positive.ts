@@ -13,7 +13,7 @@ type Expect<T extends true> = T;
 type DraftHasNoSignatures = Expect<Equal<DraftEntityFrame['collectedSigs'], undefined>>;
 type DraftHasNoHankos = Expect<Equal<DraftEntityFrame['hankos'], undefined>>;
 type LockedRequiresSignatures = Expect<Equal<LockedEntityFrame['collectedSigs'], Map<string, string[]>>>;
-type CertifiedRequiresHankos = Expect<Equal<CertifiedEntityFrame['hankos'], string[]>>;
+type CertifiedRequiresHankos = Expect<Equal<CertifiedEntityFrame['hankos'], [string]>>;
 
 export const consumeEntityFramePhases = (
   draft: DraftEntityFrame,

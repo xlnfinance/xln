@@ -5,6 +5,7 @@
 import type { AccountFrame, AccountReplica, AccountState, SettlementWorkspace } from '../../types/account';
 import { isPersistentAccountStateMap } from './persistent-state-map';
 import { createStructuredLogger } from '../../support/logger';
+import { transferAccountStateRootMemo } from '../commitment/state-root';
 import {
   cloneIsolatedAccountFrame,
   cloneIsolatedAccountInput,
@@ -63,7 +64,7 @@ const requireSharedCollection = (state: AccountState, field: (typeof ACCOUNT_STA
 const forkAccountStateShell = (state: AccountState): AccountState => {
   for (const field of ACCOUNT_STATE_COLLECTIONS) requireSharedCollection(state, field);
   rejectUnexpectedMaps(state, 'state');
-  return {
+  const shell: AccountState = {
     ...state,
     domain: copyRecord(state.domain),
     disputeConfig: copyRecord(state.disputeConfig),
@@ -73,6 +74,11 @@ const forkAccountStateShell = (state: AccountState): AccountState => {
       ? {}
       : { settlementWorkspace: copyWorkspace(state.settlementWorkspace) }),
   };
+  // AccountState roots are derived caches, not protocol state. Preserve a
+  // warm root only across this exact value fork; replacement of any committed
+  // collection/scalar invalidates it structurally in computeAccountStateRoot.
+  transferAccountStateRootMemo(state, shell);
+  return shell;
 };
 
 const forkShadow = (shadow: AccountReplica['shadow']): AccountReplica['shadow'] => {

@@ -9,166 +9,94 @@ import {
   type ManagedEntityIdentity,
 } from '../../../../orchestrator/daemon-control';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
-import { spawnLaneRuntimes, stopLaneRuntimes, type LaneRuntime } from './lane-runtimes';
-import { deriveDelta, isLeftEntity } from '../../../../account/utils';
+import {
+  queueLaneRuntimeInputWave,
+  spawnLaneRuntimes,
+  stopLaneRuntimes,
+  waitForLaneFinancialReadiness,
+  waitForLaneHostReadiness,
+  type LaneRuntime,
+} from './lane-runtimes';
+import { getTokenInfo } from '../../../../account/utils';
 import { importEntity } from '../../../../runtime/registration/entity-creation';
 import type { RuntimeInput } from '../../../../runtime/types';
 import { decodeEntitySummaries, type LoadIdentity } from '../boundary/worker-boundary';
-import {
-  readLoadAccount,
-  sendObserved,
-  waitForCounterpartyCredit,
-  waitForCredit,
-  type ConnectedRuntime,
-} from '../worker-runtime';
+import { sendObserved, type ConnectedRuntime } from '../worker-runtime';
 
-/**
- * Provisioning fan-out. Each lane is its own daemon with its own rate budget,
- * so this bounds the driver and the Hub-directed polls, not a per-lane quota.
- * A four-figure population would otherwise spend minutes in setup alone.
- */
-export const CONTROL_CONCURRENCY = Math.max(
-  4,
-  Math.min(256, Number(process.env['XLN_HLT_CONTROL_CONCURRENCY'] || '') || 32),
-);
-const LOAD_LANE_GOSSIP_POLL_MS = 10_000;
-const CONTROL_BATCH_PAUSE_MS = 100;
-/** Gossip poll while provisioning; each poll re-verifies the peers it learns. */
-const PROVISIONING_GOSSIP_POLL_MS = 1_000;
-// Non-reliable route identity retains the complete transaction fingerprints.
-// Keep setup frames below the 10 KB durable Runtime-machine row limit: the
-// observed 50-Account shape encoded to 21,598 bytes, while 16 leaves headroom.
-const PROVISIONING_ACCOUNTS_PER_FRAME = 16;
 const VISIBILITY_TIMEOUT_MS = 60_000;
-const PER_ENTITY_VISIBILITY_BUDGET_MS = 500;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+export const HLT_FAUCET_TOKEN_ID = 1;
+export const HLT_FAUCET_AMOUNT = 5_000n * 10n ** BigInt(getTokenInfo(HLT_FAUCET_TOKEN_ID).decimals);
+export const HLT_USER_RECEIVE_WINDOW = HLT_FAUCET_AMOUNT * 2n;
+
+export type LoadLaneRole = 'maker' | 'taker' | 'trader';
 
 export const deriveLoadLaneSeeds = (
   meshRootSeed: string,
   lanes: number,
-  role: 'maker' | 'taker' = 'taker',
+  role: LoadLaneRole = 'taker',
   laneOffset = 0,
 ): string[] => Array.from({ length: lanes }, (_, index) => {
   const laneNumber = laneOffset + index + 1;
   return deriveMeshChildSeed(
     meshRootSeed,
-    role === 'taker'
-      ? `production-swap-load:lane:${laneNumber}`
-      : `production-swap-load:maker-lane:${laneNumber}`,
+    role === 'trader'
+      ? `production-swap-load:trader-lane:${laneNumber}`
+      : role === 'taker'
+        ? `production-swap-load:lane:${laneNumber}`
+        : `production-swap-load:maker-lane:${laneNumber}`,
   );
 });
 
 export const deriveLoadLaneIdentities = (
   meshRootSeed: string,
   lanes: number,
-  role: 'maker' | 'taker' = 'taker',
+  role: LoadLaneRole = 'taker',
   laneOffset = 0,
 ): ManagedEntityIdentity[] => deriveLoadLaneSeeds(meshRootSeed, lanes, role, laneOffset).map((seed, index) =>
   deriveManagedEntityIdentity({
-    name: `Load ${role === 'maker' ? 'Maker' : 'Taker'} ${String(laneOffset + index + 1).padStart(4, '0')}`,
+    name: `Load ${role === 'trader' ? 'Trader' : role === 'maker' ? 'Maker' : 'Taker'} ${String(laneOffset + index + 1).padStart(4, '0')}`,
     seed,
     signerLabel: 'owner',
     position: { x: index % 32, y: Math.floor(index / 32), z: 0 },
   }));
 
-export const partitionLoadControlBatches = <T>(values: readonly T[]): readonly (readonly T[])[] => {
-  const batches: T[][] = [];
-  for (let offset = 0; offset < values.length; offset += CONTROL_CONCURRENCY) {
-    batches.push(values.slice(offset, offset + CONTROL_CONCURRENCY));
-  }
-  return batches;
-};
-
-export const partitionLoadProvisioningBatches = <T>(
-  values: readonly T[],
-): readonly (readonly T[])[] => {
-  const batches: T[][] = [];
-  for (let offset = 0; offset < values.length; offset += PROVISIONING_ACCOUNTS_PER_FRAME) {
-    batches.push(values.slice(offset, offset + PROVISIONING_ACCOUNTS_PER_FRAME));
-  }
-  return batches;
-};
-
-const runInBatches = async <T>(
-  values: readonly T[],
-  effect: (value: T, index: number) => Promise<void>,
-): Promise<void> => {
-  let offset = 0;
-  const batches = partitionLoadControlBatches(values);
-  for (let index = 0; index < batches.length; index += 1) {
-    const batch = batches[index]!;
-    await Promise.all(batch.map((value, batchIndex) => effect(value, offset + batchIndex)));
-    offset += batch.length;
-    // Provisioning is outside the measured workload. Pacing it below the
-    // authenticated operator API budget avoids manufacturing a setup-only
-    // rate-limit failure that says nothing about Hub settlement capacity.
-    if (index + 1 < batches.length) await sleep(CONTROL_BATCH_PAUSE_MS);
-  }
-};
-
 /**
- * Every new user must become discoverable before it can trade, and each
- * profile a peer learns costs that peer a full Hanko verification. Onboarding
- * therefore gets a budget proportional to the population instead of one flat
- * minute, and it reports how fast the directory is actually converging — that
- * rate is a result, not harness noise.
+ * One population barrier, never one waiter per user. Every poll samples all
+ * sovereign Runtimes concurrently and the failure names the exact missing
+ * users; setup latency therefore cannot grow through harness serialization.
  */
-const waitForVisibleEntities = async (
-  runtime: ConnectedRuntime,
-  entityIds: readonly string[],
-  code: string,
-): Promise<void> => {
-  const required = new Set(entityIds);
-  const startedAt = Date.now();
-  const deadline = startedAt + VISIBILITY_TIMEOUT_MS + entityIds.length * PER_ENTITY_VISIBILITY_BUDGET_MS;
-  let lastMissing = -1;
-  while (Date.now() < deadline) {
-    const visible = new Set(
-      decodeEntitySummaries(await runtime.adapter.read<unknown>('entities')).map(entity => entity.entityId),
-    );
-    const missing = [...required].filter(entityId => !visible.has(entityId)).length;
-    if (missing === 0) {
-      console.log(`[load] gossip converged entities=${required.size} elapsedMs=${Date.now() - startedAt}`);
-      return;
-    }
-    if (missing !== lastMissing) {
-      console.log(`[load] gossip pending=${missing}/${required.size} elapsedMs=${Date.now() - startedAt}`);
-      lastMissing = missing;
-    }
-    await sleep(250);
-  }
-  throw new Error(`${code}:missing=${lastMissing}:of=${required.size}`);
-};
-
-const waitForSendReadyProfile = async (
-  runtime: ConnectedRuntime,
-  entityId: string,
-  targetRuntimeId: string,
-  code: string,
+const waitForPopulationEntities = async (
+  runtimes: readonly LaneRuntime[],
 ): Promise<void> => {
   const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
+  let missing: string[] = runtimes.map(lane => lane.laneKey);
   while (Date.now() < deadline) {
-    if (await runtime.control.hubProfileSendReady(entityId, targetRuntimeId)) return;
+    const ready = await Promise.all(runtimes.map(async lane => {
+      const entities = decodeEntitySummaries(await lane.runtime.adapter.read<unknown>('entities'));
+      return entities.some(entity => entity.entityId === lane.identity.entityId);
+    }));
+    missing = runtimes.filter((_lane, index) => !ready[index]).map(lane => lane.laneKey);
+    if (missing.length === 0) return;
     await sleep(100);
   }
-  // `found` alone is not send-ready: the profile must bind this exact target
-  // runtime and carry its X25519 key, or every encrypted send will miss.
   throw new Error(
-    `${code}:entityId=${entityId.slice(-8)}:runtimeId=${targetRuntimeId.slice(-8)}`,
+    `PRODUCTION_SWAP_LOAD_POPULATION_ENTITY_NOT_READY:missing=${missing.length}:` +
+    `users=${missing.join(',')}`,
   );
 };
 
-/** After register+credit the user must advertise the Hub lane, or peers cannot quote a payment. */
-const waitForOwnReceiveReadyProfile = async (lane: LaneRuntime, hubEntityId: string): Promise<void> => {
-  const selfId = lane.identity.entityId.toLowerCase();
-  const hubId = hubEntityId.toLowerCase();
-  const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const counterparties = await lane.runtime.control.gossipProfileCounterparties(selfId);
-    if (counterparties?.includes(hubId)) return;
-    await sleep(100);
-  }
-  throw new Error(`HLT_OWN_PROFILE_NOT_RECEIVE_READY:${lane.laneKey}:${selfId.slice(0, 12)}`);
+const waitForHubProfilesSendReady = async (
+  hub: ConnectedRuntime,
+  lanes: readonly LaneRuntime[],
+): Promise<void> => {
+  const readiness = await hub.control.gossipProfilesSendReady(lanes.map(lane => ({
+    entityId: lane.identity.entityId,
+    runtimeId: lane.runtimeId,
+  })));
+  if (readiness.ready) return;
+  throw new Error(`PRODUCTION_SWAP_LOAD_USER_PROFILES_NOT_SEND_READY:missing=${readiness.missing.length}:` +
+    `entities=${readiness.missing.join(',')}`);
 };
 
 const buildLaneImports = (identities: readonly ManagedEntityIdentity[]): RuntimeInput['runtimeTxs'] =>
@@ -184,12 +112,32 @@ const buildLaneImports = (identities: readonly ManagedEntityIdentity[]): Runtime
     },
   }));
 
+const buildLaneProfileInputs = (
+  identities: readonly ManagedEntityIdentity[],
+): RuntimeInput['entityInputs'] => identities.map(identity => ({
+  entityId: identity.entityId,
+  signerId: identity.signerId,
+  entityTxs: [{
+    type: 'profile-update',
+    data: { profile: { entityId: identity.entityId, name: identity.name } },
+  }],
+}));
+
 const buildLaneAccountInputs = (
   identities: readonly ManagedEntityIdentity[],
   hubEntityId: string,
-  creditTokenId: number,
-  creditAmounts: readonly bigint[],
-): RuntimeInput['entityInputs'] => identities.map((identity, index) => ({
+  additionalReceiveWindows: readonly Readonly<{ tokenId: number; amount: bigint }>[] = [],
+): RuntimeInput['entityInputs'] => identities.map(identity => {
+  // Put every user at the midpoint of its bilateral window: after the real
+  // $5000 faucet it can both send $5000 and receive $5000 through H1. Using a
+  // window equal to the faucet placed every Account at its endpoint, so H1
+  // correctly rejected the first forwarded HTLC as insufficient capacity.
+  const receiveWindows = new Map<number, bigint>([[HLT_FAUCET_TOKEN_ID, HLT_USER_RECEIVE_WINDOW]]);
+  for (const window of additionalReceiveWindows) {
+    const current = receiveWindows.get(window.tokenId) ?? 0n;
+    if (window.amount > current) receiveWindows.set(window.tokenId, window.amount);
+  }
+  return {
   entityId: identity.entityId,
   signerId: identity.signerId,
   entityTxs: [{
@@ -200,16 +148,25 @@ const buildLaneAccountInputs = (
         { entityId: identity.entityId, isHub: false, source: 'operator-config' },
         { entityId: hubEntityId, isHub: true, source: 'operator-config' },
       ),
+      // HLT measures payment/swap consensus, not collateral automation. Equal
+      // soft/hard limits are the canonical manual-rebalance policy and prevent
+      // every faucet payment from manufacturing a fee frame + J-side request.
+      rebalancePolicy: {
+        r2cRequestSoftLimit: HLT_FAUCET_AMOUNT,
+        hardLimit: HLT_FAUCET_AMOUNT,
+        maxAcceptableFee: 0n,
+      },
     },
-  }, {
-    type: 'extendCredit',
+  }, ...Array.from(receiveWindows, ([tokenId, amount]) => ({
+    type: 'extendCredit' as const,
     data: {
       counterpartyEntityId: hubEntityId,
-      tokenId: creditTokenId,
-      amount: creditAmounts[index]!,
+      tokenId,
+      amount,
     },
-  }],
-}));
+  }))],
+  };
+});
 
 export const setupParallelLoadLanes = async (options: {
   workDir: string;
@@ -219,21 +176,11 @@ export const setupParallelLoadLanes = async (options: {
   lanes: number;
   laneOffset: number;
   role: 'maker' | 'taker';
-  laneGrantedCreditTokenId: number;
-  laneGrantedCreditAmounts: readonly bigint[];
-  hubGrantedCreditTokenId: number;
-  hubGrantedCreditAmounts: readonly bigint[];
 }): Promise<{ identities: LoadIdentity[]; runtimes: LaneRuntime[] }> => {
   const rootSeed = readFileSync(join(options.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
   if (!rootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
   const seeds = deriveLoadLaneSeeds(rootSeed, options.lanes, options.role, options.laneOffset);
   const identities = deriveLoadLaneIdentities(rootSeed, options.lanes, options.role, options.laneOffset);
-  if (
-    options.laneGrantedCreditAmounts.length !== identities.length ||
-    options.hubGrantedCreditAmounts.length !== identities.length
-  ) {
-    throw new Error('PRODUCTION_SWAP_LOAD_LANE_CREDIT_CARDINALITY_INVALID');
-  }
   // Every lane is a sovereign Runtime. Hosts only share an OS process in
   // bounded groups (200 by default, operator-selectable up to 1000).
   const runtimes = await spawnLaneRuntimes({
@@ -244,7 +191,15 @@ export const setupParallelLoadLanes = async (options: {
     laneIndexOffset: (options.role === 'maker' ? 0 : options.lanes) + options.laneOffset * 2,
   });
   try {
-    return await provisionLoadLanes(options, identities, runtimes);
+    await provisionLoadPopulation({
+      hub: options.hub,
+      hubIdentity: options.hubIdentity,
+      population: runtimes.map(lane => ({ lane, receiveWindows: [] })),
+    });
+    return {
+      identities: identities.map(identity => ({ entityId: identity.entityId, signerId: identity.signerId })),
+      runtimes,
+    };
   } catch (error) {
     // A failed provisioning step must not leave daemons listening on the lane
     // ports: the next run would connect to a halted stranger on :21000.
@@ -253,247 +208,221 @@ export const setupParallelLoadLanes = async (options: {
   }
 };
 
-const provisionLoadLanes = async (
-  options: Parameters<typeof setupParallelLoadLanes>[0],
-  identities: readonly ManagedEntityIdentity[],
-  runtimes: LaneRuntime[],
-): Promise<{ identities: LoadIdentity[]; runtimes: LaneRuntime[] }> => {
-  await runInBatches(runtimes, async lane => {
-    await lane.runtime.control.registerSigner(lane.identity.signerId, lane.identity.privateKeyHex);
-    const existing = new Set((await lane.runtime.control.listEntities()).map(entity => entity.entityId));
-    if (!existing.has(lane.identity.entityId)) {
-      await sendObserved(lane.runtime, `prod-load-import-${options.role}-${lane.laneKey}`, {
-        runtimeTxs: buildLaneImports([lane.identity]),
-        entityInputs: [],
-      });
-      // A child cannot consume an EntityInput until importReplica is committed
-      // by its parent Runtime. Combining both in one RuntimeInput leaves Entity
-      // height zero because admission uses the pre-frame child set. Empty
-      // EntityInputs intentionally create no heights, so certify the initial
-      // public descriptor with the canonical profile transaction instead of a
-      // synthetic chat or a special bootstrap-only state-machine path.
-      await sendObserved(lane.runtime, `prod-load-genesis-${options.role}-${lane.laneKey}`, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: lane.identity.entityId,
-          signerId: lane.identity.signerId,
-          entityTxs: [{
-            type: 'profile-update',
-            data: {
-              profile: {
-                entityId: lane.identity.entityId,
-                name: lane.identity.name,
-              },
-            },
-          }],
-        }],
-      });
-    }
-    await waitForVisibleEntities(lane.runtime, [lane.identity.entityId], 'PRODUCTION_SWAP_LOAD_LANES_NOT_IMPORTED');
-  });
-  // P2P state is sovereign even when several replicas share one OS process.
-  await runInBatches(runtimes, lane => lane.runtime.control.configureP2P({
-    relayUrls: [lane.relayUrl],
-    advertiseEntityIds: [lane.identity.entityId],
-    gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
-  }));
-  // The Hub does not pin users. Each user must still publish a receive-ready
-  // profile (Hub counterparty in accounts) before any peer can quote a route.
-  await runInBatches(runtimes, async (lane, index) => {
-    // Account opening is bilateral. Both encrypted return paths must exist
-    // before the first frame; observing only user -> Hub races the Hub's ACK.
-    await Promise.all([
-      waitForSendReadyProfile(
-        lane.runtime,
-        options.hubIdentity.entityId,
-        options.hub.adapter.runtimeId,
-        `PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_SEND_READY:${lane.laneKey}`,
-      ),
-      waitForSendReadyProfile(
-        options.hub,
-        lane.identity.entityId,
-        lane.runtime.adapter.runtimeId,
-        `PRODUCTION_SWAP_LOAD_USER_PROFILE_NOT_SEND_READY:${lane.laneKey}`,
-      ),
-    ]);
-    // A verified endpoint is only route metadata. Complete the authenticated
-    // user -> Hub session before committing the bilateral proposal. The direct
-    // server session is duplex, so the Hub returns the Account ACK over this
-    // same authenticated socket; no second client, relay, or retry is needed.
-    await lane.runtime.control.waitForDirectEntityRoutes([options.hubIdentity.entityId]);
-    await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {
-      runtimeTxs: [],
-      entityInputs: buildLaneAccountInputs(
-        [lane.identity],
-        options.hubIdentity.entityId,
-        options.laneGrantedCreditTokenId,
-        [options.laneGrantedCreditAmounts[index]!],
-      ),
-    });
-  });
-  // Each lane confirms its own grant from its own replica; the Hub is the
-  // process under test and must not spend its client budget on provisioning.
-  await runInBatches(runtimes, (lane, index) => waitForCounterpartyCredit(
-    lane.runtime,
-    lane.identity.entityId,
-    options.hubIdentity.entityId,
-    options.laneGrantedCreditTokenId,
-    options.laneGrantedCreditAmounts[index]!,
-  ));
-  const hubBatches = partitionLoadProvisioningBatches(runtimes);
-  let laneOffset = 0;
-  for (let batchIndex = 0; batchIndex < hubBatches.length; batchIndex += 1) {
-    const batch = hubBatches[batchIndex]!;
-    const hubCredits = options.hubGrantedCreditAmounts.slice(laneOffset, laneOffset + batch.length);
-    await sendObserved(options.hub, `prod-load-credit-${options.role}-${options.laneOffset}-${options.lanes}-${batchIndex + 1}`, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: options.hubIdentity.entityId,
-        signerId: options.hubIdentity.signerId,
-        entityTxs: batch.map((lane, index) => ({
-          type: 'extendCredit' as const,
-          data: {
-            counterpartyEntityId: lane.identity.entityId,
-            tokenId: options.hubGrantedCreditTokenId,
-            amount: hubCredits[index]!,
-          },
-        })),
-      }],
-    });
-    await runInBatches(batch, (lane, index) => waitForCredit(
-      lane.runtime,
-      lane.identity.entityId,
-      options.hubIdentity.entityId,
-      options.hubGrantedCreditTokenId,
-      hubCredits[index]!,
-    ));
-    laneOffset += batch.length;
-  }
-  await runInBatches(runtimes, lane => waitForOwnReceiveReadyProfile(lane, options.hubIdentity.entityId));
-  // Fast polling only served setup; a real user Runtime does not ask the Hub
-  // for gossip four times a second while trading.
-  await runInBatches(runtimes, lane => lane.runtime.control.configureP2P({
-    relayUrls: [lane.relayUrl],
-    advertiseEntityIds: [lane.identity.entityId],
-    gossipPollMs: LOAD_LANE_GOSSIP_POLL_MS,
-  }));
-  return {
-    identities: identities.map(identity => ({ entityId: identity.entityId, signerId: identity.signerId })),
-    runtimes,
-  };
-};
-
-/**
- * Additive credit on already-opened Hub Accounts, both directions.
- * `extendCredit` writes `set_credit_limit` as an absolute assignment, not a
- * delta. A later payment grant on the swap quote token must not lower the
- * swap quote window or every taker bid is rejected and mixed HLT matches 0.
- * Mixed payments also spend that quote, so the payment extra is summed onto
- * the live swap window (`additive: true`) — 100c died 2000 short of a 10M fill.
- */
-export const raisedCreditLimit = (current: bigint, needed: bigint): bigint | null =>
-  current >= needed ? null : needed;
-
-export const additiveCreditTarget = (current: bigint, extra: bigint): bigint =>
-  current + extra;
-
-const replicaCreditLimits = async (
-  runtime: ConnectedRuntime,
-  ownerEntityId: string,
-  counterpartyEntityId: string,
-  tokenId: number,
-): Promise<{ ownCreditLimit: bigint; peerCreditLimit: bigint }> => {
-  const account = await readLoadAccount(runtime, ownerEntityId, counterpartyEntityId);
-  const delta = account?.state.deltas.get(tokenId);
-  if (!delta) return { ownCreditLimit: 0n, peerCreditLimit: 0n };
-  const derived = deriveDelta(delta, isLeftEntity(ownerEntityId, counterpartyEntityId));
-  return { ownCreditLimit: derived.ownCreditLimit, peerCreditLimit: derived.peerCreditLimit };
-};
-
-export const grantBilateralTokenCredit = async (options: {
+/** One role-free population: every user is funded to trade both token sides. */
+export const setupParallelLoadTraderPopulation = async (options: {
+  workDir: string;
+  portBase: number;
   hub: ConnectedRuntime;
   hubIdentity: LoadIdentity;
-  runtimes: readonly LaneRuntime[];
-  tokenId: number;
-  amounts: readonly bigint[];
-  label: string;
-  additive?: boolean;
-}): Promise<void> => {
-  if (options.amounts.length !== options.runtimes.length) {
-    throw new Error('HLT_BILATERAL_CREDIT_CARDINALITY_INVALID');
+  traders: number;
+  laneOffset: number;
+  receiveWindows: readonly (readonly Readonly<{ tokenId: number; amount: bigint }>[])[];
+}): Promise<{ identities: LoadIdentity[]; runtimes: LaneRuntime[] }> => {
+  if (options.receiveWindows.length !== options.traders) {
+    throw new Error(`HLT_TRADER_RECEIVE_WINDOWS_INVALID:${options.receiveWindows.length}:${options.traders}`);
   }
-  const userTargets: bigint[] = [];
-  await runInBatches(options.runtimes, async (lane, index) => {
-    const extra = options.amounts[index]!;
-    const { peerCreditLimit } = await replicaCreditLimits(
-      lane.runtime,
-      lane.identity.entityId,
-      options.hubIdentity.entityId,
-      options.tokenId,
-    );
-    const target = options.additive ? additiveCreditTarget(peerCreditLimit, extra) : extra;
-    userTargets[index] = target;
-    const amount = raisedCreditLimit(peerCreditLimit, target);
-    if (amount === null) return;
-    await sendObserved(lane.runtime, `${options.label}-user-${lane.laneKey}`, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: lane.identity.entityId,
-        signerId: lane.identity.signerId,
-        entityTxs: [{
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: options.hubIdentity.entityId,
-            tokenId: options.tokenId,
-            amount,
-          },
-        }],
-      }],
-    });
+  const rootSeed = readFileSync(join(options.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
+  if (!rootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
+  const seeds = deriveLoadLaneSeeds(rootSeed, options.traders, 'trader', options.laneOffset);
+  const identities = deriveLoadLaneIdentities(rootSeed, options.traders, 'trader', options.laneOffset);
+  const runtimes = await spawnLaneRuntimes({
+    workDir: options.workDir,
+    portBase: options.portBase,
+    identities,
+    laneSeeds: seeds,
+    laneIndexOffset: options.laneOffset * 2,
   });
-  await runInBatches(options.runtimes, (lane, index) => waitForCounterpartyCredit(
-    lane.runtime,
-    lane.identity.entityId,
-    options.hubIdentity.entityId,
-    options.tokenId,
-    userTargets[index]!,
-  ));
-  const hubTargets = await Promise.all(options.runtimes.map(async (lane, index) => {
-    const extra = options.amounts[index]!;
-    const { ownCreditLimit } = await replicaCreditLimits(
-      lane.runtime,
-      lane.identity.entityId,
-      options.hubIdentity.entityId,
-      options.tokenId,
-    );
-    const target = options.additive ? additiveCreditTarget(ownCreditLimit, extra) : extra;
-    return { lane, amount: raisedCreditLimit(ownCreditLimit, target) };
-  }));
-  const hubGrants = hubTargets.filter((entry): entry is { lane: LaneRuntime; amount: bigint } => entry.amount !== null);
-  const hubBatches = partitionLoadProvisioningBatches(hubGrants);
-  for (let batchIndex = 0; batchIndex < hubBatches.length; batchIndex += 1) {
-    const batch = hubBatches[batchIndex]!;
-    await sendObserved(options.hub, `${options.label}-hub-${batchIndex + 1}`, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: options.hubIdentity.entityId,
-        signerId: options.hubIdentity.signerId,
-        entityTxs: batch.map(entry => ({
-          type: 'extendCredit' as const,
-          data: {
-            counterpartyEntityId: entry.lane.identity.entityId,
-            tokenId: options.tokenId,
-            amount: entry.amount,
-          },
-        })),
-      }],
+  try {
+    await provisionLoadPopulation({
+      hub: options.hub,
+      hubIdentity: options.hubIdentity,
+      population: runtimes.map((lane, index) => ({
+        lane,
+        receiveWindows: options.receiveWindows[index] ?? [],
+      })),
     });
-    await runInBatches(batch, entry => waitForCredit(
-      entry.lane.runtime,
-      entry.lane.identity.entityId,
-      options.hubIdentity.entityId,
-      options.tokenId,
-      entry.amount,
-    ));
+    return {
+      identities: identities.map(identity => ({ entityId: identity.entityId, signerId: identity.signerId })),
+      runtimes,
+    };
+  } catch (error) {
+    await stopLaneRuntimes(runtimes);
+    throw error;
   }
+};
+
+export type ParallelLoadLaneCohort = Readonly<{
+  role: 'maker' | 'taker';
+  receiveWindows?: readonly (readonly Readonly<{ tokenId: number; amount: bigint }>[])[];
+}>;
+
+type PopulationLane = Readonly<{
+  lane: LaneRuntime;
+  receiveWindows: readonly Readonly<{ tokenId: number; amount: bigint }>[];
+}>;
+
+/**
+ * Spawn all load users as one population before provisioning role-specific
+ * Accounts. Host packing is deliberately role-blind: maker/taker are workload
+ * roles, not Runtime trust boundaries. With 1,000 users and the canonical
+ * 200-per-process density this creates exactly five host processes while every
+ * user still owns a distinct RuntimeReplica, WAL, signer and direct H1 socket.
+ */
+export const setupParallelLoadLaneCohorts = async (options: {
+  workDir: string;
+  portBase: number;
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  lanes: number;
+  laneOffset: number;
+  cohorts: readonly [ParallelLoadLaneCohort, ParallelLoadLaneCohort];
+}): Promise<readonly [
+  { identities: LoadIdentity[]; runtimes: LaneRuntime[] },
+  { identities: LoadIdentity[]; runtimes: LaneRuntime[] },
+]> => {
+  const rootSeed = readFileSync(join(options.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
+  if (!rootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
+  const cohortMaterial = options.cohorts.map(cohort => ({
+    cohort,
+    identities: deriveLoadLaneIdentities(rootSeed, options.lanes, cohort.role, options.laneOffset),
+    seeds: deriveLoadLaneSeeds(rootSeed, options.lanes, cohort.role, options.laneOffset),
+  }));
+  const identities = cohortMaterial.flatMap(material => material.identities);
+  const seeds = cohortMaterial.flatMap(material => material.seeds);
+  const runtimes = await spawnLaneRuntimes({
+    workDir: options.workDir,
+    portBase: options.portBase,
+    identities,
+    laneSeeds: seeds,
+    laneIndexOffset: options.laneOffset * 2,
+  });
+  const firstRuntimes = runtimes.slice(0, options.lanes);
+  const secondRuntimes = runtimes.slice(options.lanes);
+  try {
+    const firstMaterial = cohortMaterial[0];
+    const secondMaterial = cohortMaterial[1];
+    if (!firstMaterial || !secondMaterial) throw new Error('HLT_LOAD_COHORT_MATERIAL_MISSING');
+    await provisionLoadPopulation({
+      hub: options.hub,
+      hubIdentity: options.hubIdentity,
+      population: cohortMaterial.flatMap((material, cohortIndex) => {
+        const cohortRuntimes = cohortIndex === 0 ? firstRuntimes : secondRuntimes;
+        return cohortRuntimes.map((lane, laneIndex) => ({
+          lane,
+          receiveWindows: material.cohort.receiveWindows?.[laneIndex] ?? [],
+        }));
+      }),
+    });
+    return [{
+      identities: firstMaterial.identities.map(identity => ({
+        entityId: identity.entityId,
+        signerId: identity.signerId,
+      })),
+      runtimes: firstRuntimes,
+    }, {
+      identities: secondMaterial.identities.map(identity => ({
+        entityId: identity.entityId,
+        signerId: identity.signerId,
+      })),
+      runtimes: secondRuntimes,
+    }];
+  } catch (error) {
+    await stopLaneRuntimes(runtimes);
+    throw error;
+  }
+};
+
+const provisionLoadPopulation = async (options: {
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  population: readonly PopulationLane[];
+}): Promise<void> => {
+  const { population } = options;
+  if (population.length < 1) throw new Error('PRODUCTION_SWAP_LOAD_POPULATION_EMPTY');
+  const runtimes = population.map(entry => entry.lane);
+
+  // Runtime admission projects imports before applying EntityInputs, so each
+  // user needs one canonical bootstrap input, not the retired import/genesis pair.
+  await queueLaneRuntimeInputWave(0, population.map(({ lane }) => ({
+    lane,
+    input: {
+      runtimeTxs: buildLaneImports([lane.identity]),
+      entityInputs: buildLaneProfileInputs([lane.identity]),
+    },
+  })));
+  await waitForPopulationEntities(runtimes);
+
+  await Promise.all(runtimes.map(lane => lane.runtime.control.configureP2P({
+    relayUrls: [lane.relayUrl],
+    advertiseEntityIds: [lane.identity.entityId],
+  })));
+  // First every user learns H1 and completes its direct handshake. Only then
+  // may H1 fetch user profiles: the prior concurrent barrier repeatedly asked
+  // for users whose later host processes had not announced yet, exhausting
+  // H1's gossip budget and turning readiness into WS_RELAY_FATAL noise.
+  await waitForLaneHostReadiness(
+    runtimes,
+    options.hubIdentity.entityId,
+    options.hub.adapter.runtimeId,
+    VISIBILITY_TIMEOUT_MS,
+  );
+  await options.hub.control.waitForDirectRuntimeSessions(
+    runtimes.map(lane => lane.runtimeId),
+    VISIBILITY_TIMEOUT_MS,
+  );
+  await waitForHubProfilesSendReady(options.hub, runtimes);
+
+  // All sovereign users open and fund their H1 Account in one host-wide
+  // Runtime-input batch. Each Runtime still commits its own independent frame.
+  await queueLaneRuntimeInputWave(1, population.map(entry => ({
+    lane: entry.lane,
+    input: {
+      runtimeTxs: [],
+      entityInputs: buildLaneAccountInputs(
+        [entry.lane.identity],
+        options.hubIdentity.entityId,
+        entry.receiveWindows,
+      ),
+    },
+  })));
+  await waitForLaneFinancialReadiness(population.map(entry => ({
+    lane: entry.lane,
+    hubEntityId: options.hubIdentity.entityId,
+    windows: [
+      { tokenId: HLT_FAUCET_TOKEN_ID, minimum: HLT_FAUCET_AMOUNT },
+      ...entry.receiveWindows.map(window => ({ tokenId: window.tokenId, minimum: window.amount })),
+    ],
+  })), 'hub', false);
+
+  // One real H1 Entity frame pays the token-1 faucet to every user. Users grant
+  // exactly this receive window while opening the Account; no synthetic H1
+  // credit or token-2 faucet can manufacture benchmark inventory.
+  await sendObserved(options.hub, `prod-load-faucet-population-${population.length}`, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: options.hubIdentity.entityId,
+      signerId: options.hubIdentity.signerId,
+      entityTxs: population.map(entry => ({
+        type: 'directPayment' as const,
+        data: {
+          targetEntityId: entry.lane.identity.entityId,
+          tokenId: HLT_FAUCET_TOKEN_ID,
+          amount: HLT_FAUCET_AMOUNT,
+          route: [options.hubIdentity.entityId, entry.lane.identity.entityId],
+          deliveryMode: 'direct' as const,
+          description: 'HLT $5000 token-1 faucet',
+        },
+      })),
+    }],
+  });
+
+  // Final readiness is population-wide and financial: both credit directions
+  // must be committed and every self profile must advertise the H1 Account.
+  // Promise.all rejects with the exact first lane; no timeout is swallowed.
+  await waitForLaneFinancialReadiness(population.map(entry => ({
+    lane: entry.lane,
+    hubEntityId: options.hubIdentity.entityId,
+    windows: [{ tokenId: HLT_FAUCET_TOKEN_ID, minimum: HLT_FAUCET_AMOUNT }],
+  })), 'user', true);
+  console.log(`[load] population ready users=${population.length}`);
 };

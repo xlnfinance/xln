@@ -204,13 +204,7 @@ const applyFixtureSwapResolve = async (
   tx: Extract<AccountTx, { type: 'swap_resolve' }>,
   byLeft: boolean,
 ) => {
-  const owner = beginAccountTransition(
-    account,
-    {
-      purpose: 'orderbook-matching-fixture',
-      offerId: tx.data.offerId,
-    },
-  );
+  const owner = beginAccountTransition(account);
   try {
     const result = await handleSwapResolve(accountTransitionView(owner), tx, byLeft, 1);
     if (!result.ok) {

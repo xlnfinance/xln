@@ -82,7 +82,7 @@ function buildEntityProfile(
 }
 
 const getNextProfileTimestamp = (env: RuntimeReplica, entityId: string, proposedTimestamp?: number): number => {
-  const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
+  const existingProfile = env.gossip.getProfile(entityId);
   const lastTimestamp = existingProfile?.lastUpdated ?? 0;
   const candidate = typeof proposedTimestamp === 'number' ? proposedTimestamp : env.state.timestamp;
   return Math.max(1, lastTimestamp + 1, candidate);

@@ -137,10 +137,11 @@ const createPersistedStorageNavigationApi = (
   const readPersistedStorageFramePayloads = async (
     env: RuntimeReplica,
     frame: NonNullable<Awaited<ReturnType<typeof readStorageFrameRecord>>>,
+    options?: { includeRuntimeMachine?: boolean },
   ): Promise<Awaited<ReturnType<typeof readStorageFramePayloads>>> => {
     for (const handle of await listPersistedStorageHandles(env)) {
       if (frame.height > handle.latestHeight) continue;
-      return readStorageFramePayloads(handle.db, frame);
+      return readStorageFramePayloads(handle.db, frame, options);
     }
     throw new Error(`STORAGE_FRAME_PAYLOAD_SOURCE_MISSING:${frame.height}`);
   };

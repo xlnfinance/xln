@@ -1230,7 +1230,7 @@ async function readJBatchSnapshot(
     rpcCount: number;
   }>;
 }> {
-  return await page.evaluate(({ entityId, signerId }) => {
+  return await page.evaluate(async ({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.state?.eReplicas) {
       return {
@@ -1272,18 +1272,24 @@ async function readJBatchSnapshot(
     const rep = key ? env.state.eReplicas.get(key) : null;
     const pending = rep?.state?.jBatchState?.batch;
     const sent = rep?.state?.jBatchState?.sentBatch?.batch;
-    const history = Array.from(rep?.state?.jBlockChain || []).flatMap((block: any) =>
-      Array.from(block?.events || [])
-        .filter((event: any) =>
-          event?.type === 'HankoBatchProcessed'
-          && String(event?.data?.entityId || '').toLowerCase() === String(entityId).toLowerCase())
-        .map((event: any) => ({
-          txHash: event.transactionHash,
-          status: 'confirmed',
-          jBlockNumber: event.blockNumber,
-          entityNonce: Number(event?.data?.nonce || 0),
-          operations: {},
-        })));
+    const adapter = (window as any).__xln?.adapter;
+    if (!adapter?.query?.activity) {
+      throw new Error('XLN_RUNTIME_ADAPTER_ACTIVITY_QUERY_MISSING');
+    }
+    const activity = await adapter.query.activity({
+      entityId,
+      kind: 'onchain',
+      limit: 500,
+      scanLimit: 2_000,
+    });
+    const history = Array.from(activity?.events || [])
+      .filter((event: any) => event?.rawType === 'HankoBatchProcessed')
+      .map((event: any) => ({
+        txHash: String(event?.hash || ''),
+        status: 'confirmed',
+        jBlockNumber: Number(String(event?.subtitle || '').match(/J#(\d+)/)?.[1] || event?.height || 0),
+        operations: {},
+      }));
     const last = history.length > 0 ? history[history.length - 1] : null;
     const lastOps = (last?.operations && typeof last.operations === 'object') ? last.operations : {};
     const jurisdiction = rep?.state?.config?.jurisdiction;

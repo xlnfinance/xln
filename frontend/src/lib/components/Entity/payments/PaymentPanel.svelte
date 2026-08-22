@@ -4,7 +4,6 @@
   import { ScanLine, X, Check } from 'lucide-svelte';
   import jsQR from 'jsqr';
   import type {
-    RoutedEntityInput as EntityInputPayload,
     RuntimeReplica,
     PaymentRoute,
     PaymentDeliveryMode,
@@ -31,13 +30,17 @@
     hasCertifiedEntityEncryptionKey,
     findProfileByEntityId,
     normalizeEntityId,
-    quoteHop,
   } from '../payment-routing';
   import {
     emptyPaymentPanelView,
     type PaymentPanelView,
     type PaymentReplicaView,
   } from './payment-panel-view';
+  import { buildPaymentRuntimeInput } from './runtime/payment-command';
+  import {
+    quotePaymentCandidateRoutes,
+    type PaymentRouteQuote,
+  } from './runtime/payment-route-quote';
 
   export let entityId: string;
   export let paymentView: PaymentPanelView = emptyPaymentPanelView();
@@ -71,13 +74,7 @@
   let scannerFrame = 0;
   let findingRoutes = false;
   let sendingPayment = false;
-  type RouteOption = {
-    path: string[];
-    hops: Array<{ from: string; to: string; fee: bigint; feePPM: number }>;
-    totalFee: bigint;
-    senderAmount: bigint;
-    recipientAmount: bigint;
-  };
+  type RouteOption = PaymentRouteQuote;
   let routes: RouteOption[] = [];
   let selectedRouteIndex = -1;
   let preflightError: string | null = null;
@@ -481,27 +478,6 @@
     );
   }
 
-  function quoteRequiredInboundForForward(desiredForward: bigint, feePPM: number, baseFee: bigint): bigint {
-    if (desiredForward <= 0n) {
-      throw new Error(`Invalid desired forward amount: ${desiredForward}`);
-    }
-    let low = desiredForward + baseFee;
-    let high = low;
-    const forwardOut = (amountIn: bigint) => {
-      const ppmFee = (amountIn * BigInt(Math.max(0, Math.floor(feePPM)))) / 1_000_000n;
-      const totalFee = baseFee + ppmFee;
-      if (totalFee >= amountIn) throw new Error(`Fee too high for amount ${amountIn}`);
-      return amountIn - totalFee;
-    };
-    while (forwardOut(high) < desiredForward) high *= 2n;
-    while (low < high) {
-      const mid = (low + high) / 2n;
-      if (forwardOut(mid) >= desiredForward) high = mid;
-      else low = mid + 1n;
-    }
-    return low;
-  }
-
   function emitUiDebugEvent(code: string, message: string, details: Record<string, unknown> = {}) {
     const payload = {
       source: 'PaymentPanel',
@@ -713,6 +689,7 @@
     const result = await refreshPaymentRuntimeGossip({
       reason,
       targetEntities,
+      runtimeEnv: currentEnv,
       onDebug: emitUiDebugEvent,
     });
     mergeRuntimeProfiles(result.profiles);
@@ -720,10 +697,18 @@
 
   async function ensureRecipientProfileReady() {
     let issue = getRecipientProfileIssue();
-    if (!issue) return;
+    const target = normalizeEntityId(targetEntityId);
+    const runtimeHasProfile = (): boolean => Boolean(currentEnv?.gossip?.getProfile?.(target));
+    if (!issue && runtimeHasProfile()) return;
     await refreshGossipOnDemand('recipient-profile', [targetEntityId]);
     issue = getRecipientProfileIssue();
-    if (!issue) return;
+    if (!issue && runtimeHasProfile()) return;
+    if (!runtimeHasProfile()) {
+      throw new Error(`Recipient ${targetEntityId} profile is not installed in the active Runtime`);
+    }
+    if (!issue) {
+      throw new Error(`Recipient ${targetEntityId} readiness changed during profile refresh`);
+    }
     emitUiDebugEvent(issue.code, issue.message, issue.details || {});
     if (issue.code === 'PAYMENT_PREFLIGHT_KEY_MISSING') {
       throw new Error(`${issue.message}. Cannot build encrypted HTLC route.`);
@@ -928,81 +913,19 @@
       }
 
       const quoteCandidateRoutes = (paths: string[][]): RouteOption[] => {
-        const quotedRoutes: RouteOption[] = [];
-        for (const normalizedPath of paths) {
-          const path = normalizedPath.map((id) => network.canonicalIds.get(id) || id);
-          const intermediaries = path.slice(1, -1);
-          let downstreamAmount = amountInSmallestUnit;
-          const intermediaryFeeByEntity = new Map<string, { fee: bigint; feePPM: number }>();
-          let hasCapacity = true;
-          for (let i = intermediaries.length - 1; i >= 0; i -= 1) {
-            const intermediary = intermediaries[i]!;
-            const nextHop = path[i + 2]!;
-            if (!activeXlnFunctions?.deriveDelta) {
-              throw new Error('Runtime deriveDelta is unavailable');
-            }
-            const quote = quoteHop(
-              currentReplicas,
-              getGossipProfiles(),
-              activeXlnFunctions.deriveDelta,
-              intermediary,
-              nextHop,
-              tokenId,
-              downstreamAmount,
-              DEFAULT_UNKNOWN_HOP_FEE_PPM,
-            );
-            if (!quote || quote.outCap < downstreamAmount) {
-              hasCapacity = false;
-              break;
-            }
-            const requiredInbound = quoteRequiredInboundForForward(downstreamAmount, quote.feePPM, quote.baseFee);
-            intermediaryFeeByEntity.set(intermediary, {
-              fee: requiredInbound - downstreamAmount,
-              feePPM: quote.feePPM,
-            });
-            downstreamAmount = requiredInbound;
-          }
-          if (!hasCapacity) continue;
-
-          if (path.length > 1) {
-            if (!activeXlnFunctions?.deriveDelta) {
-              throw new Error('Runtime deriveDelta is unavailable');
-            }
-            const senderQuote = quoteHop(
-              currentReplicas,
-              getGossipProfiles(),
-              activeXlnFunctions.deriveDelta,
-              path[0]!,
-              path[1]!,
-              tokenId,
-              downstreamAmount,
-              DEFAULT_UNKNOWN_HOP_FEE_PPM,
-            );
-            if (!senderQuote || senderQuote.outCap < downstreamAmount) {
-              continue;
-            }
-          }
-
-          const senderAmount = downstreamAmount;
-          const hops = path.slice(0, -1).map((from, i) => {
-            const feeInfo = intermediaryFeeByEntity.get(from) || { fee: 0n, feePPM: 0 };
-            return {
-              from,
-              to: path[i + 1]!,
-              fee: feeInfo.fee,
-              feePPM: feeInfo.feePPM,
-            };
-          });
-          const totalFee = senderAmount - amountInSmallestUnit;
-          quotedRoutes.push({
-            path,
-            hops,
-            totalFee,
-            senderAmount,
-            recipientAmount: amountInSmallestUnit,
-          });
+        if (!activeXlnFunctions?.deriveDelta) {
+          throw new Error('Runtime deriveDelta is unavailable');
         }
-        return quotedRoutes;
+        return quotePaymentCandidateRoutes({
+          paths,
+          canonicalIds: network.canonicalIds,
+          replicaMap: currentReplicas,
+          profiles: getGossipProfiles(),
+          deriveDelta: activeXlnFunctions.deriveDelta,
+          tokenId,
+          recipientAmount: amountInSmallestUnit,
+          defaultUnknownHopFeePPM: DEFAULT_UNKNOWN_HOP_FEE_PPM,
+        });
       };
 
       let quotedRoutes = quoteCandidateRoutes(foundPaths);
@@ -1126,56 +1049,18 @@
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
       if (requireEncryption) await ensureRouteKeyCoverage(route.path);
-      const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
-
       const resolvedSignerId = resolvePaymentSignerId(currentEnv);
 
-      const descriptionValue = description.trim();
-      const isDirect = deliveryMode === 'direct';
-      const isTrusted = deliveryMode === 'trusted';
-      const usesDirectPayment = isDirect || isTrusted;
-      const conditionalDeliveryMode = deliveryMode === 'instant' ? 'instant' as const : 'async' as const;
-      const trustedGatewayEntityId = route.path.length === 3
-        ? route.path[1]
-        : undefined;
-      if (isTrusted && (!trustedGatewayEntityId || route.totalFee !== 0n)) {
-        throw new Error('Trusted delivery requires exactly one fee-free gateway');
-      }
-      if (isDirect && route.path.length !== 2) {
-        throw new Error('Direct delivery requires a bilateral route');
-      }
-      const paymentInput: EntityInputPayload = {
+      if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
+      await submitRuntimeInput(buildPaymentRuntimeInput({
         entityId,
         signerId: resolvedSignerId,
-        entityTxs: usesDirectPayment
-          ? [{
-              type: 'directPayment' as const,
-              data: {
-                targetEntityId: routeTargetEntityId,
-                tokenId,
-                amount: route.recipientAmount,
-                route: route.path,
-                deliveryMode: isTrusted ? 'trusted' as const : 'direct' as const,
-                ...(isTrusted ? { trustedGatewayEntityId: trustedGatewayEntityId! } : {}),
-                ...(descriptionValue ? { description: descriptionValue } : {}),
-              },
-            }]
-          : [{
-              type: 'htlcPayment' as const,
-              data: {
-                targetEntityId: routeTargetEntityId,
-                tokenId,
-                amount: route.recipientAmount,
-                maxSenderDebit: route.senderAmount,
-                route: route.path,
-                deliveryMode: conditionalDeliveryMode,
-                ...(descriptionValue ? { description: descriptionValue } : {}),
-              },
-            }],
-      };
-
-      if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
-      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] });
+        targetEntityId,
+        tokenId,
+        deliveryMode,
+        description,
+        route,
+      }));
       return { queued: true };
     } catch (error) {
       logPaymentDiagnostic('Payment submission failed', error, {

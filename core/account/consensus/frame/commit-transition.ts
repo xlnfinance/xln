@@ -9,6 +9,7 @@ import type {
   AccountOutput,
   AccountReplica,
 } from '../../../types/account';
+import type { StateHash } from '../../../protocol/hashes';
 import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
 import {
   accountTransitionView,
@@ -24,8 +25,11 @@ import {
 } from '../helpers';
 import type { AccountConsensusContext } from '../context';
 import type { HtlcEnforcementClock } from '../../htlc-deadline';
+import { assertLiveCommitMatchesFrame } from '../incoming/commit-root';
+import { timePerfPhase } from '../../../support/performance/profile';
 
 export type CommittedAccountFrameTransition = Readonly<{
+  accountStateRoot: StateHash;
   candidateEffects: readonly AccountOutput[];
   timedOutHashlocks: readonly string[];
 }>;
@@ -49,13 +53,9 @@ export const commitAccountFrameTransition = async (
   options: CommitAccountFrameTransitionOptions,
 ): Promise<CommittedAccountFrameTransition> => {
   const { account, frame } = options;
-  const owner = beginAccountTransition(
-    account,
-    {
-      purpose: 'committed-account-frame',
-      role: options.role,
-      stateHash: frame.stateHash,
-    },
+  const owner = timePerfPhase(
+    'account.commit.beginOverlay',
+    () => beginAccountTransition(account),
   );
   const draft = accountTransitionView(owner);
   const candidateEffects: AccountOutput[] = [];
@@ -63,32 +63,49 @@ export const commitAccountFrameTransition = async (
   const jHeight = frame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
 
   try {
-    for (const tx of frame.accountTxs) {
-      const beforeSettlement = captureSettlementVector(draft);
-      const result = await applyAccountTx(
-        draft,
-        tx,
-        frame.byLeft,
-        frame.timestamp,
-        jHeight,
-        false,
-        options.context,
-        options.jClaimSession,
-        options.counterpartyCertifiedBoardHash,
-        options.htlcEnforcementClock,
-      );
-      if (!result.ok) {
-        throw new Error(
-          `Frame ${frame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
+    await timePerfPhase('account.commit.applyTxs', async () => {
+      for (const tx of frame.accountTxs) {
+        const beforeSettlement = captureSettlementVector(draft);
+        const result = await applyAccountTx(
+          draft,
+          tx,
+          frame.byLeft,
+          frame.timestamp,
+          jHeight,
+          false,
+          options.context,
+          options.jClaimSession,
+          options.counterpartyCertifiedBoardHash,
+          options.htlcEnforcementClock,
         );
+        if (!result.ok) {
+          throw new Error(
+            `Frame ${frame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
+          );
+        }
+        assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);
+        candidateEffects.push(...(result.candidateEffects ?? []));
+        if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
       }
-      assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);
-      candidateEffects.push(...(result.candidateEffects ?? []));
-      if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
-    }
+    });
 
-    publishAccountOverlay(account, commitAccountTransition(owner).account);
+    const committed = timePerfPhase(
+      'account.commit.prepareOverlay',
+      () => commitAccountTransition(owner, 'frameCommit'),
+    );
+    timePerfPhase('account.commit.publishOverlay', () => {
+      publishAccountOverlay(account, committed.account);
+      assertLiveCommitMatchesFrame(
+        account,
+        frame.accountStateRoot,
+        options.role === 'proposer/commit' ? 'proposer' : 'receiver',
+        frame.height,
+        committed.account,
+        committed.accountStateRoot,
+      );
+    });
     return Object.freeze({
+      accountStateRoot: committed.accountStateRoot,
       candidateEffects: Object.freeze(candidateEffects),
       timedOutHashlocks: Object.freeze(timedOutHashlocks),
     });

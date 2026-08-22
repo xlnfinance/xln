@@ -148,6 +148,9 @@ describe('external wallet API faucet transaction gate', () => {
     expect(source.indexOf("externalWalletLog.debug('faucet.erc20.gas_topup_tx'")).toBeLessThan(
       source.indexOf("waitForFaucetTx(transferTx, 'user-token-transfer'"),
     );
+    expect(source.indexOf('if (options.ensureEth) await provisionEthBalance')).toBeLessThan(
+      source.indexOf('if (options.ensureTokens) {'),
+    );
     expect(source).not.toContain('console.log');
     expect(source).not.toContain('console.warn');
     expect(source).not.toContain('console.error');

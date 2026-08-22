@@ -12,6 +12,11 @@ type RadixNode<K, V> = Readonly<{
   children: ReadonlyMap<number, RadixNode<K, V>>;
 }>;
 
+type MutableRadixNode<K, V> = {
+  leaf?: RadixLeaf<K, V>;
+  children: Map<number, MutableRadixNode<K, V>>;
+};
+
 const EMPTY_CHILDREN: ReadonlyMap<number, RadixNode<never, never>> = new Map<
   number,
   RadixNode<never, never>
@@ -30,6 +35,27 @@ const candidateKeyPath = (token: string, radix: CandidateMapRadix): readonly num
   const path: number[] = [];
   for (const byte of bytes) path.push(byte >>> 4, byte & 0x0f);
   return path;
+};
+
+const buildRadixRoot = <K, V>(base: Map<K, V>, radix: CandidateMapRadix): RadixNode<K, V> | undefined => {
+  if (base.size === 0) return undefined;
+  const root: MutableRadixNode<K, V> = { children: new Map() };
+  let order = 0;
+  for (const [key, value] of base) {
+    const token = candidateKeyToken(key);
+    let node = root;
+    for (const slot of candidateKeyPath(token, radix)) {
+      let child = node.children.get(slot);
+      if (!child) {
+        child = { children: new Map() };
+        node.children.set(slot, child);
+      }
+      node = child;
+    }
+    node.leaf = { key, token, value, order };
+    order += 1;
+  }
+  return root;
 };
 
 const radixGet = <K, V>(
@@ -91,6 +117,19 @@ const collectRadixLeaves = <K, V>(
   for (const child of node.children.values()) collectRadixLeaves(child, leaves);
 };
 
+const someRadixLeaf = <K, V>(
+  node: RadixNode<K, V> | undefined,
+  predicate: (key: K) => boolean,
+  deleted: ReadonlySet<K>,
+): boolean => {
+  if (!node) return false;
+  if (node.leaf && !deleted.has(node.leaf.key) && predicate(node.leaf.key)) return true;
+  for (const child of node.children.values()) {
+    if (someRadixLeaf(child, predicate, deleted)) return true;
+  }
+  return false;
+};
+
 /**
  * Frame-local persistent radix overlay.
  *
@@ -126,21 +165,9 @@ export class EntityCandidateMap<K, V> implements Map<K, V> {
       this.#nextOrder = visible.nextOrder;
       return;
     }
-    let root: RadixNode<K, V> | undefined;
-    let order = 0;
-    for (const [key, value] of base) {
-      const token = candidateKeyToken(key);
-      root = radixSet(root, candidateKeyPath(token, this.#radix), 0, {
-        key,
-        token,
-        value,
-        order,
-      });
-      order += 1;
-    }
-    this.#root = root;
+    this.#root = buildRadixRoot(base, this.#radix);
     this.#baseSize = base.size;
-    this.#nextOrder = order;
+    this.#nextOrder = base.size;
   }
 
   get size(): number {
@@ -265,6 +292,17 @@ export class EntityCandidateMap<K, V> implements Map<K, V> {
 
   [Symbol.iterator](): MapIterator<[K, V]> {
     return this.entries();
+  }
+
+  /** Prefix/existence lookup without materializing and sorting every visible key. */
+  someKey(predicate: (key: K) => boolean): boolean {
+    if (!this.#cleared && someRadixLeaf(this.#root, predicate, this.#deleted)) return true;
+    for (const key of this.#changes.keys()) {
+      if ((this.#cleared || !radixGet(this.#root, candidateKeyToken(key), this.#radix)) && predicate(key)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   forEach(

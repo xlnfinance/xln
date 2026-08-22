@@ -1936,6 +1936,20 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     const entityId = parts[1];
     if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
 
+    if (parts.length === 3 && parts[2] === 'settlement-counters') {
+      if (readAtHeight(query) !== null) {
+        throw new RuntimeAdapterError('E_BAD_QUERY', 'historical settlement counters are unavailable');
+      }
+      const replica = findReplica(ctx.env, entityId);
+      if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
+      return {
+        height: replica.state.height,
+        lockBookOpen: replica.state.lockBook.size,
+        htlcFeesEarned: replica.state.htlcFeesEarned,
+        metrics: readRuntimeEntityMetricStats(ctx.env, entityId),
+      } as T;
+    }
+
     if (parts.length === 3 && (parts[2] === 'accounts' || parts[2] === 'books' || parts[2] === 'book-docs')) {
       const height = readAtHeight(query);
       const targetHeight = height ?? envHeight(ctx.env);

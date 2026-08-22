@@ -1,6 +1,6 @@
 import { appendAccountMempoolTxs } from './mempool';
 import { txFingerprint } from '../../protocol/state/tx-multiset';
-import type { AccountLocalInput, AccountReplica, AccountTx } from '../../types/account';
+import type { AccountEnqueueInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult } from '../consensus/types';
 import { accountInputApplied } from '../consensus/result';
 
@@ -47,9 +47,9 @@ const planLocalAccountTxAdmission = (
 };
 
 /** Apply the local-only branch of the canonical AccountInput boundary. */
-export const applyLocalAccountInput = (
+export const applyAccountEnqueue = (
   account: AccountMempoolQueue,
-  input: AccountLocalInput,
+  input: AccountEnqueueInput,
 ): HandleAccountInputResult => {
   const admitted = planLocalAccountTxAdmission(account, input.txs);
   appendAccountMempoolTxs(account, admitted, 'account:localInput');

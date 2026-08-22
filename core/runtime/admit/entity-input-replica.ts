@@ -137,6 +137,23 @@ const routeEntityOutputs = async (
  * Runtime provenance is restored after Entity canonicalization because WAL
  * replay must preserve the authenticated origin lanes used by live routing.
  */
+const logEntityInputProfile = (
+  replicaKey: string,
+  rawOutputs: number,
+  applyEntityInputMs: number,
+  routeOutputsMs: number,
+): void => {
+  const totalMs = applyEntityInputMs + routeOutputsMs;
+  if (!entityInputProfileEnabled() && totalMs < entityInputSlowMs()) return;
+  entityInputLog.info('replica.apply_input.profile', {
+    replica: shortId(replicaKey, 8),
+    rawOutputs,
+    applyEntityInputMs,
+    routeOutputsMs,
+    totalMs,
+  });
+};
+
 export const applyEntityInputToReplica = async (
   env: RuntimeReplica,
   entityReplica: EntityReplica,
@@ -147,6 +164,7 @@ export const applyEntityInputToReplica = async (
   promoteCandidateState: boolean,
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work',
   deferProposal = false,
+  requiredEntityTxIndex?: number,
 ): Promise<AppliedEntityReplicaInput> => {
   if (DEBUG) {
     entityInputLog.debug('input.processing', {
@@ -177,7 +195,13 @@ export const applyEntityInputToReplica = async (
       normalizedInput,
       trustedLocalRuntimeProtocol
         ? { trustedLocalRuntimeProtocol, promoteCandidateState }
-        : { promoteCandidateState, deferProposal },
+        : {
+            promoteCandidateState,
+            deferProposal,
+            ...(requiredEntityTxIndex === undefined
+              ? {}
+              : { requiredEntityTxIndex }),
+          },
     );
   } catch (error) {
     throw new RuntimeEntityInputApplyError(
@@ -200,16 +224,7 @@ export const applyEntityInputToReplica = async (
     replicaKey,
   );
   const routeOutputsMs = Math.round(getPerfMs() - routeOutputsStartedAt);
-  const totalMs = applyEntityInputMs + routeOutputsMs;
-  if (entityInputProfileEnabled() || totalMs >= entityInputSlowMs()) {
-    entityInputLog.info('replica.apply_input.profile', {
-      replica: shortId(replicaKey, 8),
-      rawOutputs: applied.outputs.length,
-      applyEntityInputMs,
-      routeOutputsMs,
-      totalMs,
-    });
-  }
+  logEntityInputProfile(replicaKey, applied.outputs.length, applyEntityInputMs, routeOutputsMs);
   return {
     outcome: applied.outcome,
     appliedInput: preserveAppliedRoutedProvenance(

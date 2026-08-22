@@ -7,20 +7,18 @@
 
 import { applyAccountInput } from '../../../account/consensus';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
-import { createLocalAccountInput } from '../../../account/input';
 import { haltRuntimeFailure } from '../../../protocol/errors/failure-taxonomy';
 import type { AccountReplica, AccountTx } from '../../../types/account';
 
 export const admitOrderbookAccountTxBatch = async (
   context: AccountConsensusContext,
   account: AccountReplica,
-  ownerEntityId: string,
   txs: readonly AccountTx[],
 ): Promise<void> => {
   const admission = await applyAccountInput(
     context,
     account,
-    createLocalAccountInput(account.state, ownerEntityId, [...txs]),
+    { kind: 'enqueue', txs: [...txs] },
   );
   if (!admission.ok || admission.admittedAccountTxCount !== txs.length) {
     const admitted = admission.ok ? admission.admittedAccountTxCount ?? 0 : 0;

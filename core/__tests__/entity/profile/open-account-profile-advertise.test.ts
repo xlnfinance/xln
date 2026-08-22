@@ -12,6 +12,7 @@ import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../runtime';
+import { hasCertifiedCurrentProfileWitness } from '../../../runtime/frame/dispatch';
 import type { EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import { createTestJReplica } from '../../helpers/j-replica';
@@ -149,5 +150,11 @@ describe('openAccount profile advertise', () => {
     expect(dump.descriptorAccounts, `descriptor ${JSON.stringify(dump)}`).toContain(hubEntityId);
     expect(dump.gossipAccounts, `gossip ${JSON.stringify(dump)}`).toContain(hubEntityId);
     expect(BigInt(dump.liquidity ?? '0'), `liquidity ${JSON.stringify(dump)}`).toBeGreaterThan(0n);
+
+    const unchangedProfileReplica: EntityReplica = {
+      ...user,
+      state: { ...user.state, height: user.state.height + 1 },
+    };
+    expect(hasCertifiedCurrentProfileWitness(unchangedProfileReplica)).toBe(true);
   });
 });

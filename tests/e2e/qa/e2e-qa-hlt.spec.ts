@@ -48,9 +48,17 @@ const HLT_FIXTURE = {
       status: 'green',
     },
   ],
+  snapshotError: null,
   payment: {
     deliveredTps: 149.276,
     offeredRate: 100,
+    submittedPayments: 1000,
+    acceptedPayments: 1000,
+    completedPayments: 1000,
+    drainedPayments: 1000,
+    sourceDispatchP95Ms: 8,
+    sourceDispatchMaxMs: 12,
+    sourceAckMaxMs: 20,
     deliveredPayments: 1000,
     elapsedMs: 6699,
     users: 200,
@@ -62,6 +70,7 @@ const HLT_FIXTURE = {
     heightAfter: 313,
   },
   swap: null,
+  replay: null,
   perf: {
     parsedProfiles: 2,
     rows: [
@@ -104,8 +113,11 @@ const HLT_FIXTURE = {
     active: false,
     status: 'idle',
     pid: null,
+    phase: null,
     workDir: null,
     logPath: null,
+    recordingPath: null,
+    reportPath: null,
     startedAt: null,
     finishedAt: null,
     exitCode: null,
@@ -155,15 +167,13 @@ test('renders the configurable HLT dashboard across viewports', { tag: '@functio
   await page.goto('/qa/hlt');
   const dashboard = page.getByTestId('hlt-dashboard');
   await expect(dashboard).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('hlt-start')).toBeVisible();
+  await expect(page.getByTestId('hlt-record')).toHaveText('Start record');
+  await expect(page.getByTestId('hlt-replay')).toHaveText('Start replay');
   await expect(page.getByTestId('hlt-users')).toHaveText('200');
-  await expect(page.getByTestId('hlt-users-per-process')).toHaveText('40');
-  await expect(page.getByTestId('hlt-daemons')).toHaveText('5');
-  await expect(page.getByTestId('hlt-offered-pay')).toContainText('100');
-  await expect(page.getByTestId('hlt-result-tps')).toContainText('149');
-  await expect(page.getByTestId('hlt-result-frames')).toHaveText('14');
-  await expect(page.getByTestId('hlt-perf-row')).toHaveCount(2);
-  await expect(page.getByTestId('hlt-ledger-row').first()).toContainText('149');
+  await expect(page.getByTestId('hlt-runtime-packing')).toContainText('1');
+  await expect(page.getByTestId('hlt-runtime-packing')).toContainText('200 users per OS process');
+  await expect(page.getByTestId('hlt-daemons')).toHaveText('1');
+  await expect(page.getByTestId('hlt-offered-pay')).toContainText('200');
 
   await page.getByTestId('hlt-users-input').evaluate((element) => {
     const input = element as HTMLInputElement;
@@ -172,8 +182,9 @@ test('renders the configurable HLT dashboard across viewports', { tag: '@functio
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await expect(page.getByTestId('hlt-users')).toHaveText('64');
-  await expect(page.getByTestId('hlt-daemons')).toHaveText('2');
-  await expect(page.getByTestId('hlt-offered-pay')).toContainText('32');
+  await expect(page.getByTestId('hlt-runtime-packing')).toContainText('1');
+  await expect(page.getByTestId('hlt-daemons')).toHaveText('1');
+  await expect(page.getByTestId('hlt-offered-pay')).toContainText('64');
 
   for (const viewport of [
     { name: 'wide', width: 1600, height: 1000 },
@@ -182,20 +193,41 @@ test('renders the configurable HLT dashboard across viewports', { tag: '@functio
   ]) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await expect(dashboard).toBeVisible();
-    await expect(page.getByTestId('hlt-start')).toBeVisible();
+    await expect(page.getByTestId('hlt-record')).toBeVisible();
+    await expect(page.getByTestId('hlt-replay')).toBeVisible();
     const bounds = await dashboard.boundingBox();
     expect(bounds, `${viewport.name} HLT dashboard must have layout bounds`).not.toBeNull();
     expect(bounds!.x, `${viewport.name} HLT dashboard must stay in the viewport`).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width, `${viewport.name} HLT dashboard must not overflow horizontally`)
       .toBeLessThanOrEqual(viewport.width + 1);
     await page.screenshot({
-      path: testInfo.outputPath(`${viewport.name}-qa-hlt.png`),
+      path: testInfo.outputPath(`${viewport.name}-qa-hlt-control.png`),
       animations: 'disabled',
       fullPage: true,
     });
   }
 
-  await page.getByTestId('hlt-start').click();
+  await page.getByRole('button', { name: 'HLT Progress' }).click();
+  await expect(page.getByTestId('hlt-result-tps')).toContainText('149');
+  await expect(page.getByTestId('hlt-result-frames')).toHaveText('14');
+  await expect(page.getByTestId('hlt-perf-row')).toHaveCount(2);
+  await expect(page.getByTestId('hlt-ledger-row').first()).toContainText('149');
+  for (const viewport of [
+    { name: 'wide', width: 1600, height: 1000 },
+    { name: 'laptop', width: 1280, height: 800 },
+    { name: 'iphone', width: 393, height: 852 },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await expect(page.getByTestId('hlt-payment-result')).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`${viewport.name}-qa-hlt-progress.png`),
+      animations: 'disabled',
+      fullPage: true,
+    });
+  }
+
+  await page.getByRole('button', { name: 'Control' }).click();
+  await page.getByTestId('hlt-record').click();
   await expect(page.getByTestId('hlt-run-status')).toContainText('running');
   await expect(page.getByTestId('hlt-abort')).toBeVisible();
 });

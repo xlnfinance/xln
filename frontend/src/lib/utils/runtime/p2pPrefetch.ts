@@ -191,10 +191,12 @@ export async function waitForCounterpartyRuntimeRoutes(
   await prewarmCounterpartyProfiles(env, targets, Math.min(boundedTimeoutMs, DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
   while (Date.now() < deadline) {
     const missing = targets.filter((entityId) => !hasCounterpartyRuntimeRoute(env, entityId));
-    if (missing.length === 0) return true;
+    if (missing.length === 0) break;
     await prewarmCounterpartyProfiles(env, missing, Math.min(500, Math.max(100, deadline - Date.now())));
     await sleep(100);
   }
-
-  return targets.every((entityId) => hasCounterpartyRuntimeRoute(env, entityId));
+  if (!targets.every((entityId) => hasCounterpartyRuntimeRoute(env, entityId))) return false;
+  const p2p = env.infrastructure?.p2p;
+  if (!p2p?.bootstrapDirectEntityRoutes) return true;
+  return p2p.bootstrapDirectEntityRoutes(targets, Math.max(1, deadline - Date.now()));
 }

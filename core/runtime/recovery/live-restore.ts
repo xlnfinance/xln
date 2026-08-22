@@ -39,12 +39,10 @@ export const loadLiveRuntimeFromDB = async (
 
     await deps.rehydrate(env, options?.trustedJurisdictionRpcBindings);
     deps.registerCommittedSingleSignerWallets(env);
-    if ((env.pendingNetworkOutputs?.length ?? 0) > 0) {
-      throw new Error(
-        `RUNTIME_RESTORE_UNDISPATCHED_OUTPUTS:${env.pendingNetworkOutputs!.length}:` +
-        'automatic resend is forbidden; inspect the durable outbox and issue an explicit operator action',
-      );
-    }
+    // Network outputs are one-shot post-commit effects, not a durable delivery
+    // queue. Replay reconstructs them only to verify deterministic equivalence.
+    // A live restore must neither resend nor block on the last replayed frame.
+    env.pendingNetworkOutputs = [];
     return env;
   } catch (error) {
     const message = error instanceof Error

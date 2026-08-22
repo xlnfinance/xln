@@ -16,9 +16,13 @@ import { resolveInboundAccount } from './inbound-account';
 import { rejectFrozenAccountInput } from './frozen-input';
 import type { CommittedAccountEffects } from './committed-input';
 import {
-  applyAccountConsensusInput,
+  finishAccountConsensusInput,
+  prepareAccountConsensusRun,
+  completeAccountConsensusRun,
   type AccountInputPhaseContext,
+  type PreparedAccountConsensusRun,
 } from './input-phases';
+import { applyAccountInput } from '../../../../account/consensus';
 import {
   buildAccountHandlerResult,
   type AccountHandlerResult,
@@ -26,6 +30,7 @@ import {
 import { addMessage } from '../../../frame-events';
 import { safeStringify } from '../../../../protocol/serialization';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
+import { traceAccountApplyHop } from '../../../../support/performance/account-delivery-trace';
 
 export {
   canProcessFrozenAccountInput,
@@ -82,14 +87,53 @@ const createCommittedAccountEffects = (): CommittedAccountEffects => ({
 
 type AccountInputCheckpoint = (label: string) => void;
 
-const applyAccountInputPhases = async (
+type AccountInputProfileScope = Readonly<{
+  checkpoint: AccountInputCheckpoint;
+  complete(outcome: string): void;
+}>;
+
+const createAccountInputProfileScope = (
+  state: EntityState,
+  input: AccountPeerInput,
+): AccountInputProfileScope => {
+  const startedAt = getPerfMs();
+  const marks: Record<string, number> = {};
+  traceAccountApplyHop('account-apply-start', input, {
+    entityId: state.entityId,
+    entityHeight: state.height,
+  });
+  return {
+    checkpoint: label => {
+      marks[label] = precisePerfMs(getPerfMs() - startedAt);
+    },
+    complete: outcome => {
+      traceAccountApplyHop('account-apply-done', input, {
+        entityId: state.entityId,
+        entityHeight: state.height,
+        outcome,
+      });
+      logAccountInputProfile(state, input, outcome, startedAt, marks);
+    },
+  };
+};
+
+type PreparedEntityAccountInput = Readonly<{
+  context: AccountInputPhaseContext;
+  consensus: PreparedAccountConsensusRun;
+}>;
+
+type PreparedEntityAccountInputResult =
+  | Readonly<{ kind: 'terminal'; result: AccountHandlerResult }>
+  | Readonly<{ kind: 'ready'; prepared: PreparedEntityAccountInput }>;
+
+const prepareAccountInputToEntity = (
   state: EntityState,
   input: AccountPeerInput,
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   options: ApplyEntityTxOptions | undefined,
   checkpointProfile: AccountInputCheckpoint,
-): Promise<AccountHandlerResult> => {
+): PreparedEntityAccountInputResult => {
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
   accountHandlerLog.debug('input.apply', {
@@ -137,7 +181,7 @@ const applyAccountInputPhases = async (
   const { account, counterpartyId, createdAccount } = resolution;
   checkpointProfile('accountResolve');
   if (rejectFrozenAccountInput(state, account, input, counterpartyId)) {
-    return buildAccountHandlerResult(state, effects);
+    return { kind: 'terminal', result: buildAccountHandlerResult(state, effects) };
   }
 
   const context: AccountInputPhaseContext = {
@@ -153,16 +197,58 @@ const applyAccountInputPhases = async (
     checkpointProfile,
   };
   checkpointProfile('preConsensus');
-  const consensus = await applyAccountConsensusInput(context);
+  return {
+    kind: 'ready',
+    prepared: {
+      context,
+      consensus: prepareAccountConsensusRun(context),
+    },
+  };
+};
+
+const finishPreparedAccountInput = async (
+  prepared: PreparedEntityAccountInput,
+  result: Awaited<ReturnType<typeof applyAccountInput>>,
+): Promise<AccountHandlerResult> => {
+  const { context, consensus: consensusRun } = prepared;
+  completeAccountConsensusRun(context, consensusRun, result);
+  const consensus = await finishAccountConsensusInput(context, result);
   if (consensus.terminalResult) return consensus.terminalResult;
 
-  checkpointProfile('finalize');
+  context.checkpointProfile('finalize');
   return buildAccountHandlerResult(
-    state,
-    effects,
-    consensus.requiredAccountResponse,
+    context.state,
+    context.effects,
+    consensus.forceAccountFlush,
     consensus.accountJClaimNodeChanges,
   );
+};
+
+const applyAccountInputPhases = async (
+  state: EntityState,
+  input: AccountPeerInput,
+  env: EntityRuntimeContext,
+  accountConsensusContext: AccountConsensusContext,
+  options: ApplyEntityTxOptions | undefined,
+  checkpointProfile: AccountInputCheckpoint,
+): Promise<AccountHandlerResult> => {
+  const resolution = prepareAccountInputToEntity(
+    state,
+    input,
+    env,
+    accountConsensusContext,
+    options,
+    checkpointProfile,
+  );
+  if (resolution.kind === 'terminal') return resolution.result;
+  const { context, consensus } = resolution.prepared;
+  const result = await applyAccountInput(
+    context.accountConsensusContext,
+    context.account,
+    context.input,
+    consensus.securityContext,
+  );
+  return finishPreparedAccountInput(resolution.prepared, result);
 };
 
 const logAccountInputProfile = (
@@ -193,11 +279,7 @@ export async function applyAccountInputToEntity(
   accountConsensusContext: AccountConsensusContext,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {
-  const startedAt = getPerfMs();
-  const marks: Record<string, number> = {};
-  const checkpoint = (label: string): void => {
-    marks[label] = precisePerfMs(getPerfMs() - startedAt);
-  };
+  const profile = createAccountInputProfileScope(state, input);
   let outcome = 'returned';
   try {
     return await applyAccountInputPhases(
@@ -206,12 +288,12 @@ export async function applyAccountInputToEntity(
       env,
       accountConsensusContext,
       options,
-      checkpoint,
+      profile.checkpoint,
     );
   } catch (error) {
     outcome = 'threw';
     throw error;
   } finally {
-    logAccountInputProfile(state, input, outcome, startedAt, marks);
+    profile.complete(outcome);
   }
 }

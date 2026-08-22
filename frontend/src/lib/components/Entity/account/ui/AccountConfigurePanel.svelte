@@ -7,7 +7,10 @@
   import ConfigureWorkspaceTabs from '../../workspace/shell/ConfigureWorkspaceTabs.svelte';
   import CreditForm from './CreditForm.svelte';
   import LiveRequiredState from '../../workspace/shell/LiveRequiredState.svelte';
+  import LoadTestingController from './load-testing/LoadTestingController.svelte';
   import type { ConfigureWorkspaceTab } from '../../workspace/entity-panel-routing';
+  import type { PaymentPanelView } from '../../payments/payment-panel-view';
+  import type { SwapPanelRuntimeView } from '../../swap/swap-panel-helpers';
 
   type ConfigureTokenOption = {
     id: number;
@@ -31,6 +34,8 @@
   export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
+  export let paymentView: PaymentPanelView;
+  export let swapRuntimeView: SwapPanelRuntimeView | null = null;
 
   $: configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId);
   $: profiles = Array.from(profileByEntityId.values());
@@ -93,6 +98,17 @@
       accountIds={workspaceAccountIds}
       {entityNames}
       accountOverride={configureAccount ?? null}
+      {submitRuntimeInput}
+    />
+  {:else if configureWorkspaceTab === 'load-testing'}
+    <LoadTestingController
+      entityId={replica?.state?.entityId || tab.entityId}
+      {workspaceAccountId}
+      {replica}
+      {liveRuntimeEnv}
+      {activeIsLive}
+      {paymentView}
+      {swapRuntimeView}
       {submitRuntimeInput}
     />
   {:else if configureWorkspaceTab === 'dispute'}

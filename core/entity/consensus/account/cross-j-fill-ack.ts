@@ -91,14 +91,13 @@ export const stashPendingCrossJurisdictionFillAck = (
 
 const admitGeneratedAccountTx = async (
   accountConsensusContext: AccountConsensusContext,
-  state: EntityState,
   account: AccountReplica,
   tx: AccountTx,
 ): Promise<boolean> => {
   const result = await applyAccountInput(
     accountConsensusContext,
     account,
-    createLocalAccountInput(account.state, state.entityId, [tx]),
+    { kind: 'enqueue', txs: [tx] },
   );
   return result.ok && result.admittedAccountTxCount === 1;
 };
@@ -132,7 +131,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   currentEntityState: EntityState,
-  proposableAccounts: Set<string>,
+  proposableAccounts: ProposableAccountMap,
   storageChanges: RuntimeOverlayRecord[],
   candidateEffects: EntityCandidateEffect[],
   outputs: EntityOutput[],
@@ -198,11 +197,11 @@ export const drainPendingCrossJurisdictionFillAcks = async (
     // loses target-side informational progress, and the later cooperative
     // close then wedges against the stale mirror. The TTL incident resolves
     // only when the ack actually entered an Account frame.
-    if (!(await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, pendingAck.tx))) {
+    if (!(await admitGeneratedAccountTx(accountConsensusContext, account, pendingAck.tx))) {
       continue;
     }
     appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, pendingAck.tx, outputs);
-    proposableAccounts.add(pendingAck.accountId);
+    markProposableAccount(proposableAccounts, pendingAck.accountId);
     storageChanges.push({
       family: 'account',
       entityId: currentEntityState.entityId,
@@ -226,7 +225,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
 export const drainCommittedCrossJurisdictionCancelAcks = async (
   accountConsensusContext: AccountConsensusContext,
   currentEntityState: EntityState,
-  proposableAccounts: Set<string>,
+  proposableAccounts: ProposableAccountMap,
   storageChanges: RuntimeOverlayRecord[],
   outputs: EntityOutput[],
 ): Promise<number> => {
@@ -239,9 +238,9 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
     if (!account) {
       throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ACCOUNT_MISSING", `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
-    if (!(await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, tx))) continue;
+    if (!(await admitGeneratedAccountTx(accountConsensusContext, account, tx))) continue;
     appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, outputs);
-    proposableAccounts.add(accountId);
+    markProposableAccount(proposableAccounts, accountId);
     storageChanges.push({
       family: 'account',
       entityId: currentEntityState.entityId,
@@ -255,7 +254,6 @@ import { applyAccountInput } from '../../../account/consensus';
 import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import { ensureEntityCollectionCandidate } from '../../state/persistent-collection-map';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
-import { createLocalAccountInput } from '../../../account/input';
 import {
   buildCrossJurisdictionFillId,
   buildCrossJurisdictionFillNoticeTx,
@@ -274,6 +272,7 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityCandidateEffect, EntityInput, EntityOutput, EntityState } from '../../types';
 import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import { entityLog } from '../entity-log';
+import { markProposableAccount, type ProposableAccountMap } from './canonical-worklist';
 
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../../extensions/cross-j/fill-ack';
 

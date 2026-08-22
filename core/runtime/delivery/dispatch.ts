@@ -16,7 +16,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
-import { signRuntimeEntityInputsEnvelope } from '../admit/entity-input-envelope-auth.ts';
+import { buildUnsignedRuntimeEntityInputsEnvelope } from '../admit/entity-input-envelope-auth.ts';
 import {
   buildPendingNetworkOutputs,
   buildRoutingDeliveryResult,
@@ -35,6 +35,7 @@ import { planEntityOutputs } from './plan';
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 import { MAX_P2P_ENTITY_INPUTS } from '../../network/p2p/auth/entity-input-envelope';
+import { traceAccountDeliveryHop } from '../../support/performance/account-delivery-trace';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -119,7 +120,7 @@ const batchOrdinaryOutputsBySourceFrame = (
 
 const buildRuntimeEntityInputsEnvelope = (
   env: RuntimeReplica,
-  targetRuntimeId: string,
+  _targetRuntimeId: string,
   outputs: readonly DeliverableEntityInput[],
 ): RuntimeEntityInputsEnvelope => {
   if (outputs.length === 0) throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_EMPTY');
@@ -160,7 +161,7 @@ const buildRuntimeEntityInputsEnvelope = (
     } = output;
     return validateDeliverableEntityInput(input);
   });
-  return signRuntimeEntityInputsEnvelope(env, targetRuntimeId, {
+  return buildUnsignedRuntimeEntityInputsEnvelope(env, {
     sourceRuntimeId,
     sourceRuntimeHeight: envelopeFrame.height,
     sourceRuntimeTimestamp: envelopeFrame.timestamp,
@@ -271,7 +272,18 @@ const tryDirectOutputEnvelope = (
     ),
     'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
   );
-  if (!isDeliveryDelivered(delivery)) return false;
+  if (!isDeliveryDelivered(delivery)) {
+    const detail = {
+      targetRuntimeId: group.targetRuntimeId,
+      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+      delivery,
+      outputs: summarizeAccountEnvelopeOutputs(sendable),
+    };
+    env.error?.('network', 'ROUTE_DIRECT_NOT_DELIVERED', detail);
+    requireDeliveryDelivered(delivery, result =>
+      `ROUTE_DIRECT_NOT_DELIVERED:runtime=${group.targetRuntimeId}:code=${result.code}:` +
+      `sourceHeight=${envelope.sourceRuntimeHeight}:inputs=${sendable.length}`);
+  }
   routeLog.debug('output.accepted', {
     atMs: getWallClockMs(),
     transport: 'direct',
@@ -346,7 +358,16 @@ const dispatchOutputEnvelope = (
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeOutputRoutingDeps,
 ): void => {
-  if (tryDirectOutputEnvelope(env, group, sendable, envelope, deps)) return;
+  const state = deps.ensureRuntimeInfrastructure(env);
+  if (state.directEntityInputsDispatch) {
+    // A Runtime that owns a duplex direct server has one authoritative peer
+    // socket map. Falling through to relay after a direct miss forks transport
+    // ordering and can erase Account ACKs after synchronous outbox retirement.
+    if (!tryDirectOutputEnvelope(env, group, sendable, envelope, deps)) {
+      throw new Error(`ROUTE_DIRECT_DISPATCH_INVARIANT:${group.targetRuntimeId}`);
+    }
+    return;
+  }
   dispatchP2POutputEnvelope(env, group, sendable, envelope, deps);
 };
 
@@ -362,6 +383,11 @@ export const dispatchEntityOutputs = (
     }
     const sendable = group.outputs;
     const envelope = buildRuntimeEntityInputsEnvelope(env, group.targetRuntimeId, sendable);
+    traceAccountDeliveryHop('committed-output', envelope, {
+      runtimeId: env.runtimeId,
+      targetRuntimeId: group.targetRuntimeId,
+      transport: deps.ensureRuntimeInfrastructure(env).directEntityInputsDispatch ? 'direct-server' : 'p2p-client',
+    });
     if (group.atomic || sendable.some(isCrossJAdmissionSourceProposal)) {
       routeLog.info('crossj.admission_envelope_dispatch', {
         atomic: group.atomic,

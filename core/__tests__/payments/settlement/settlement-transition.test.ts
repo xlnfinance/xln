@@ -146,10 +146,7 @@ const applyEntityAccountTx = async (
 ) => {
   const base = state.accounts.get(counterpartyId);
   if (!base) throw new Error(`TEST_ACCOUNT_MISSING:${counterpartyId}`);
-  const owner = beginAccountTransition(
-    base,
-    { purpose: 'test-account-tx', accountTx },
-  );
+  const owner = beginAccountTransition(base);
   const result = await applyAccountTx(
     accountTransitionView(owner),
     accountTx,

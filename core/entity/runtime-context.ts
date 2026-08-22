@@ -7,6 +7,7 @@ import type {
 } from './consumption/consumption-accumulator-types';
 import type { EntityReplica } from './types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
+import type { EntityProposalReplayOracleEntry } from './consensus/proposal/replay-oracle';
 
 /**
  * Runtime-owned capabilities visible during one Entity transition.
@@ -42,15 +43,8 @@ export interface EntityRuntimeContext {
     observeOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
     /** Exact WAL-committed contexts installed only while replaying one Runtime frame. */
     replayEntityContexts?: Map<string, EntityInfraContext>;
-    /**
-     * Proposer-only rolling hint, keyed `entityId:signerId`: the tx count that
-     * last fit the wire budget. fitEntityProposalToWireBudget starts its
-     * shrink-search there instead of at the full mempool size, skipping a
-     * guaranteed-oversized full HTLC-context materialize (measured at
-     * 1-3+ seconds under load) when the same replica has repeatedly needed to
-     * shrink. Never authoritative: the byte measurement still gates every fit.
-     */
-    wireBudgetFitHints?: Map<string, number>;
+    /** HLT-only exact certified proposal boundaries; absent for production and old recordings. */
+    replayEntityProposalOracle?: Map<string, EntityProposalReplayOracleEntry>;
     consumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodeDeletes?: Set<string>;

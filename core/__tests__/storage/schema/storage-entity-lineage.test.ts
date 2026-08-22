@@ -7,6 +7,7 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../../account/crypto';
+import { buildQuorumHanko } from '../../../hanko/signing';
 import { provisionTestEntityEncryptionKey , createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
@@ -143,6 +144,14 @@ const certifyNextFrame = async (
   );
   const hashesToSign = [{ hash, type: 'entityFrame' as const, context: `entity-frame:${height}` }];
   const signature = await signAccountFrame(env, signerId, hash);
+  const frameHanko = await buildQuorumHanko(
+    env,
+    preState.entityId,
+    hash,
+    [{ signerId, signature }],
+    postStateWithoutHead.config,
+    postStateWithoutHead,
+  );
   const frame = {
     parentFrameHash,
     height,
@@ -159,6 +168,7 @@ const certifyNextFrame = async (
     },
     hashesToSign,
     collectedSigs: new Map([[signerId, [signature]]]),
+    hankos: [frameHanko],
   };
   return {
     state: { ...postStateWithoutHead, prevFrameHash: hash },

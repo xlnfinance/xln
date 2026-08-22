@@ -151,6 +151,25 @@ Everywhere in code: fail-fast and loud (full stop + throw popup on error).
 
 Use three test levels for every fix; do not jump straight to broad suites.
 
+- **HLT TPS authority:** TPS means only simultaneous H1 `matchedEconomicSwaps / matchedElapsed`
+  and `deliveredPayments / deliveredElapsed` from the same real sovereign-Runtime run. Replay,
+  AccountTx/s, submitted/enqueued orders and microbenchmarks are diagnostics, never TPS or progress.
+  The canonical target is 1,000 user Runtimes packed 200 per OS process with zero transport loss
+  and zero pending Account ACKs after the five-second HLT drain gate.
+- **TPS investigation order is mandatory:** before profiling or editing a hot function, build the
+  per-economic-operation ledger keyed by the unique payment `lockId` or swap id: submitted command,
+  every Runtime/Entity/Account input, exact Account frame `(height,stateHash)`, socket delivery,
+  committed completion and ACK drain. Separate required protocol stages, bundled stages, exact
+  duplicate delivery and transaction replay. Gross `EntityInput`/`AccountInput` counts are never an
+  explanation by themselves.
+- **Amdahl gate:** before implementing a performance change, state its measured authoritative-live
+  cost and maximum possible TPS gain. Do not spend a work cycle on an optimization that cannot close
+  a material part of the current TPS gap unless it is required to unblock the next authoritative run.
+  Replay-only gains are not work progress without evidence that the same cost limits live H1.
+- **TPS failure reset:** if two consecutive implementation attempts do not materially increase the
+  authoritative H1 metric, stop local optimization, discard the current bottleneck theory, and restart
+  from the unique-operation ledger and replay-to-live phase boundary. Never continue accumulating
+  percentage micro-optimizations while the requested order-of-magnitude gap remains.
 - Run CPU-heavy gates and parallel E2E locally on the Mac Studio; hosted CI is a secondary reproducibility signal, not the primary debugging loop.
 - Localize a failure with the exact target first. Do not rerun a broad suite until its L1/L2 regression is green.
 - Run each required broad gate once per unchanged commit candidate; do not repeat it without a relevant code or environment change.

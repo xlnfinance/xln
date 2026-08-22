@@ -16,7 +16,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import { requireBoundaryInteger, requireBoundaryRecord } from '../../protocol/boundary-validation';
 import { safeParse, safeStringify } from '../../protocol/serialization';
@@ -38,6 +38,7 @@ import type {
 
 const MAX_PERF_LOG_BYTES = 8_000_000;
 const MAX_PERF_ROWS = 24;
+const RUN_ID = /^[A-Za-z0-9._-]+$/;
 
 const hltDashboardDir = (root = process.cwd()): string =>
   resolve(root, '.logs', 'qa', 'hlt');
@@ -111,6 +112,12 @@ const readHltProgressLedger = (root = process.cwd()): HltLedgerRun[] => {
   return runs.map(decodeLedgerRun);
 };
 
+const percentile = (values: readonly number[], fraction: number): number => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0;
+};
+
 export const paymentCardFromReport = (value: unknown): HltPaymentCard => {
   const report = decodeLoadPaymentReport(value);
   const hubFrames = report.hubDurableAfter.height - report.hubDurableBefore.height;
@@ -118,6 +125,13 @@ export const paymentCardFromReport = (value: unknown): HltPaymentCard => {
   return {
     deliveredTps: report.deliveredTps,
     offeredRate: report.offeredPaymentRate,
+    submittedPayments: report.submittedPayments,
+    acceptedPayments: report.hubAcceptedPaymentsAfter - report.hubAcceptedPaymentsBefore,
+    completedPayments: report.hubCompletedPaymentsAfter - report.hubCompletedPaymentsBefore,
+    drainedPayments: report.deliveredPayments,
+    sourceDispatchP95Ms: percentile(report.roundSubmissionLagMs, 0.95),
+    sourceDispatchMaxMs: Math.max(0, ...report.roundSubmissionLagMs),
+    sourceAckMaxMs: report.enqueueAckElapsedMs,
     deliveredPayments: report.deliveredPayments,
     elapsedMs: report.deliveredElapsedMs,
     users: report.configuredUsers,
@@ -138,9 +152,13 @@ const swapCardFromReport = (value: unknown): HltSwapCard => {
     matchedTps: report.matchedTps,
     fullySettledTps: report.fullySettledTps,
     offeredSwapRate: report.offeredEconomicSwapRate,
-    submitted: report.submittedEconomicSwaps,
-    matched: report.matchedEconomicSwaps,
-    fullySettled: report.fullySettledEconomicSwaps,
+    submitted: report.expectedSubmittedOffers,
+    matched: report.expectedMatchedTrades,
+    fullySettled: report.expectedFullySettledOffers,
+    stp: report.stpOffers,
+    sourceDispatchP95Ms: percentile(report.roundSubmissionLagMs, 0.95),
+    sourceDispatchMaxMs: Math.max(0, ...report.roundSubmissionLagMs),
+    sourceAckMaxMs: report.enqueueAckElapsedMs,
     matchedElapsedMs: report.matchedElapsedMs,
     fullySettledElapsedMs: report.fullySettledElapsedMs,
     users: report.configuredUsers,
@@ -174,6 +192,8 @@ const decodePerfRow = (value: unknown, index: number): RuntimePerfRow => {
 
 const decodeHltPerfSummary = (value: unknown): RuntimePerfSummary => {
   const record = requireBoundaryRecord(value, 'HLT_PERF_INVALID');
+  const runId = record['runId'];
+  if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new Error('HLT_PERF_RUN_ID_INVALID');
   const rows = record['rows'];
   if (!Array.isArray(rows)) throw new Error('HLT_PERF_ROWS_INVALID');
   return {
@@ -285,6 +305,7 @@ export const publishHltDashboardPerfFromWorkDir = (workDir: string, root = proce
   const directory = hltDashboardDir(root);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   writeJsonAtomic(join(directory, 'latest-perf.json'), {
+    runId: basename(workDir),
     parsedProfiles: summary.parsedProfiles,
     rows: summary.rows.slice(0, MAX_PERF_ROWS),
   });

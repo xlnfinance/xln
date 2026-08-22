@@ -35,7 +35,11 @@ const getWatcherKey = (replica: JReplica, adapter: JAdapter): string => {
 export const startJurisdictionWatchers = (env: RuntimeReplica): void => {
   // Quiesce closes ingress before draining accepted work. Never resurrect a
   // producer after that fence has been raised.
-  if (env.infrastructure?.persistenceQuiescing || !env.state.jReplicas?.size) return;
+  if (
+    env.infrastructure?.persistenceQuiescing ||
+    env.infrastructure?.jurisdictionWatchersPaused ||
+    !env.state.jReplicas?.size
+  ) return;
   const owners = new Map<string, JAdapter>();
   for (const { name, adapter } of getLiveJAdapterEntries(env)) {
     const replica = env.state.jReplicas.get(name)!;
@@ -103,4 +107,13 @@ export const stopJurisdictionWatchersAndWait = async (env: RuntimeReplica): Prom
     .map(result => (result.reason instanceof Error ? result.reason : new Error(String(result.reason))));
   if (errors.length === 1) throw errors[0];
   if (errors.length > 1) throw new AggregateError(errors, 'JADAPTER_WATCHER_DRAIN_FAILED');
+};
+
+/** Raise a process-local fence before draining so Runtime work cannot restart
+ * a watcher between stop completion and the next measured operation. */
+export const pauseJurisdictionWatchersAndWait = async (env: RuntimeReplica): Promise<void> => {
+  const infrastructure = env.infrastructure;
+  if (!infrastructure) throw new Error('JADAPTER_WATCHER_PAUSE_INFRASTRUCTURE_MISSING');
+  infrastructure.jurisdictionWatchersPaused = true;
+  await stopJurisdictionWatchersAndWait(env);
 };

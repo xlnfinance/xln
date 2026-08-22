@@ -8,7 +8,6 @@
 
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
-import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { deriveRuntimeAdapterCapabilityToken } from '../../../../api/runtime-adapter/security/auth';
 import { resolveJurisdictionsJsonPath } from '../../../../jurisdiction/adapter/jurisdictions-path';
@@ -31,12 +30,21 @@ import {
 } from '../../../../protocol/boundary-validation';
 import { deriveRuntimeIdFromSeed } from '../../../../storage/runtime-dbs';
 import type { RuntimeInput } from '../../../../runtime/types';
-import { connectRuntime, type ConnectedRuntime } from '../worker-runtime';
+import {
+  assertSocketCounterCoverage,
+  summarizeHltIoCounters,
+  type HltOpCounter,
+  connectRuntime,
+  decodeHltOpCounterSnapshot,
+  type ConnectedRuntime,
+} from '../worker-runtime';
+import { sovereignRuntimeWorkerStart } from './sovereign-runtime-sharding';
 
 export type LaneRuntimeHostIngress = Readonly<{
   authKey: string;
   baseUrl: string;
   id: string;
+  sequence: { nextWave: number };
 }>;
 
 export type LaneRuntime = Readonly<{
@@ -137,8 +145,172 @@ export const queueLaneRuntimeInputWave = async (
     group.entries.push({ runtimeId: lane.runtimeId, input });
     groups.set(lane.hostIngress.id, group);
   }
-  await Promise.all([...groups.values()].map(group =>
-    postHostRuntimeInputBatch(group.host, wave, group.entries)));
+  await Promise.all([...groups.values()].map(group => {
+    // Sequence is host-local because a fresh sovereign host starts at wave 0.
+    // Allocation happens synchronously before I/O, so concurrent open-loop
+    // callers retain deterministic admission order without setup-specific
+    // offsets or a second ingress path.
+    const hostWave = group.host.sequence.nextWave;
+    group.host.sequence.nextWave += 1;
+    return postHostRuntimeInputBatch(group.host, hostWave, group.entries);
+  }));
+};
+
+/** Reset optional process counters after setup so reports cover economic work only. */
+export const resetLaneHostOpCounters = async (lanes: readonly LaneRuntime[]): Promise<void> => {
+  const hosts = new Map(lanes.map(lane => [lane.hostIngress.id, lane.hostIngress]));
+  await Promise.all([...hosts.values()].map(async host => {
+    const response = await fetch(`${host.baseUrl}/api/hlt/op-counters/reset`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${host.authKey}` },
+    });
+    const raw = await response.text();
+    const decoded = requireBoundaryRecord(
+      raw.trim() ? deserializeTaggedJson(raw) : {},
+      'HLT_HOST_OP_COUNTER_RESET_RESPONSE_INVALID',
+    );
+    requireExactBoundaryKeys(decoded, ['ok'], [], 'HLT_HOST_OP_COUNTER_RESET_RESPONSE_FIELDS_INVALID');
+    if (!response.ok || decoded['ok'] !== true) {
+      throw new Error(`HLT_HOST_OP_COUNTER_RESET_FAILED:host=${host.id}:body=${safeStringify(decoded)}`);
+    }
+  }));
+};
+
+export const assertLaneHostSocketCounterCoverage = async (
+  lanes: readonly LaneRuntime[],
+): Promise<Readonly<Record<string, Readonly<Record<string, HltOpCounter>>>>> => {
+  const hosts = new Map(lanes.map(lane => [lane.hostIngress.id, lane.hostIngress]));
+  const snapshots = await Promise.all([...hosts.values()].map(async host => {
+    const response = await fetch(`${host.baseUrl}/api/hlt/op-counters`, {
+      headers: { authorization: `Bearer ${host.authKey}` },
+    });
+    const raw = await response.text();
+    const decoded = raw.trim() ? deserializeTaggedJson(raw) : {};
+    if (!response.ok) throw new Error(`HLT_HOST_OP_COUNTER_SNAPSHOT_FAILED:host=${host.id}:status=${response.status}`);
+    const counters = decodeHltOpCounterSnapshot(decoded, host.id);
+    assertSocketCounterCoverage(counters, host.id);
+    return [host.id, summarizeHltIoCounters(counters)] as const;
+  }));
+  return Object.fromEntries(snapshots);
+};
+
+const readHostReadiness = async (
+  host: LaneRuntimeHostIngress,
+  runtimeIds: readonly string[],
+  hubEntityId: string,
+  hubRuntimeId: string,
+  signal?: AbortSignal,
+): Promise<string[]> => {
+  const response = await fetch(`${host.baseUrl}/api/hlt/readiness`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${host.authKey}`,
+      'content-type': 'application/json',
+    },
+    body: serializeTaggedJson({ hubEntityId, hubRuntimeId, runtimeIds }),
+    ...(signal ? { signal } : {}),
+  });
+  const raw = await response.text();
+  const decoded = requireBoundaryRecord(
+    raw.trim() ? deserializeTaggedJson(raw) : {},
+    'HLT_HOST_READINESS_RESPONSE_INVALID',
+  );
+  if (!response.ok) {
+    throw new Error(`HLT_HOST_READINESS_REJECTED:host=${host.id}:status=${response.status}:body=${safeStringify(decoded)}`);
+  }
+  requireExactBoundaryKeys(decoded, ['ok', 'ready', 'missing'], [], 'HLT_HOST_READINESS_RESPONSE_FIELDS_INVALID');
+  if (decoded['ok'] !== true || typeof decoded['ready'] !== 'boolean' || !Array.isArray(decoded['missing'])) {
+    throw new Error(`HLT_HOST_READINESS_RESPONSE_INVALID:host=${host.id}`);
+  }
+  const missing = decoded['missing'].map(value => String(value).trim().toLowerCase());
+  if (missing.some(runtimeId => !/^0x[0-9a-f]{40}$/.test(runtimeId))) {
+    throw new Error(`HLT_HOST_READINESS_MISSING_INVALID:host=${host.id}`);
+  }
+  return missing;
+};
+
+/** Five host-wide polls for 1,000 users; no per-port HTTP readiness storm. */
+export const waitForLaneHostReadiness = async (
+  lanes: readonly LaneRuntime[],
+  hubEntityId: string,
+  hubRuntimeId: string,
+  timeoutMs: number,
+): Promise<void> => {
+  const groups = new Map<string, { host: LaneRuntimeHostIngress; runtimeIds: string[] }>();
+  for (const lane of lanes) {
+    const group = groups.get(lane.hostIngress.id) ?? { host: lane.hostIngress, runtimeIds: [] };
+    group.runtimeIds.push(lane.runtimeId);
+    groups.set(lane.hostIngress.id, group);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort('HLT_HOST_READINESS_TIMEOUT'), timeoutMs);
+  try {
+    const missing = (await Promise.all([...groups.values()].map(group => readHostReadiness(
+      group.host,
+      group.runtimeIds,
+      hubEntityId,
+      hubRuntimeId,
+      controller.signal,
+    )))).flat();
+    if (missing.length > 0) {
+      throw new Error(`HLT_HOST_READINESS_INCOMPLETE:missing=${missing.length}:runtimeIds=${missing.join(',')}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export type LaneFinancialReadinessTarget = Readonly<{
+  lane: LaneRuntime;
+  hubEntityId: string;
+  windows: readonly Readonly<{ tokenId: number; minimum: bigint }>[];
+}>;
+
+export const waitForLaneFinancialReadiness = async (
+  targets: readonly LaneFinancialReadinessTarget[],
+  perspective: 'user' | 'hub',
+  requireProfile: boolean,
+): Promise<void> => {
+  const groups = new Map<string, { host: LaneRuntimeHostIngress; targets: LaneFinancialReadinessTarget[] }>();
+  for (const target of targets) {
+    const group = groups.get(target.lane.hostIngress.id) ?? { host: target.lane.hostIngress, targets: [] };
+    group.targets.push(target);
+    groups.set(target.lane.hostIngress.id, group);
+  }
+  const results = await Promise.all([...groups.values()].map(async group => {
+    const response = await fetch(`${group.host.baseUrl}/api/hlt/financial-readiness`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${group.host.authKey}`,
+        'content-type': 'application/json',
+      },
+      body: serializeTaggedJson({
+        perspective,
+        requireProfile,
+        targets: group.targets.map(target => ({
+          runtimeId: target.lane.runtimeId,
+          entityId: target.lane.identity.entityId,
+          hubEntityId: target.hubEntityId,
+          windows: target.windows,
+        })),
+      }),
+    });
+    const raw = await response.text();
+    const decoded = requireBoundaryRecord(raw.trim() ? deserializeTaggedJson(raw) : {}, 'HLT_HOST_FINANCIAL_READINESS_RESPONSE_INVALID');
+    if (!response.ok) throw new Error(`HLT_HOST_FINANCIAL_READINESS_REJECTED:${group.host.id}:${safeStringify(decoded)}`);
+    requireExactBoundaryKeys(decoded, ['ok', 'ready', 'missing', 'details'], [], 'HLT_HOST_FINANCIAL_READINESS_RESPONSE_FIELDS_INVALID');
+    if (decoded['ok'] !== true || typeof decoded['ready'] !== 'boolean' || !Array.isArray(decoded['missing']) || !Array.isArray(decoded['details'])) {
+      throw new Error('HLT_HOST_FINANCIAL_READINESS_RESPONSE_INVALID');
+    }
+    return {
+      missing: decoded['missing'].map(value => String(value)),
+      details: decoded['details'],
+    };
+  }));
+  const missing = results.flatMap(result => result.missing);
+  if (missing.length > 0) {
+    throw new Error(`HLT_HOST_FINANCIAL_READINESS_INCOMPLETE:missing=${missing.length}:details=${safeStringify(results.flatMap(result => result.details))}`);
+  }
 };
 
 const RUNTIMES_PER_PROCESS = (() => {
@@ -170,11 +342,12 @@ export const laneRuntimePort = (portBase: number, laneIndex: number): number => 
   return port;
 };
 
-const SPAWN_CONCURRENCY = Math.max(
-  4,
-  Math.min(32, Number(process.env['XLN_HLT_SPAWN_CONCURRENCY'] || '') || cpus().length),
-);
 const READY_TIMEOUT_MS = 180_000;
+
+const connectSovereignRuntimeAdapters = async <T>(
+  values: readonly T[],
+  connect: (value: T, index: number) => Promise<LaneRuntime>,
+): Promise<LaneRuntime[]> => Promise.all(values.map(connect));
 
 const spawnSovereignRuntimeHost = async (options: {
   workDir: string;
@@ -204,12 +377,22 @@ const spawnSovereignRuntimeHost = async (options: {
       XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
       XLN_DB_PATH: join(dbRoot, 'db'),
       XLN_RDB_ROOT: dbRoot,
+      // The local-prod runner creates a fresh workDir for every HLT. Opening
+      // 200 empty restore/infra stores per host is pure setup overhead and can
+      // accidentally admit stale state if an operator reuses a failed run.
+      XLN_DISABLE_RUNTIME_RESTORE: '1',
       XLN_STORAGE_HISTORY_PATH: join(dbRoot, 'storage-health-history.json'),
       XLN_JURISDICTIONS_PATH: jurisdictionsPath,
       XLN_LOG_LEVEL: process.env['XLN_LOAD_LANE_LOG_LEVEL'] || 'warn',
+      XLN_HLT_DIRECT_ONLY: '1',
+      ...(process.env['XLN_P2P_DELIVERY_TRACE'] === '1' ? { XLN_P2P_DELIVERY_TRACE: '1' } : {}),
       ...(process.env['XLN_HEAVY_LOGS'] ? { XLN_HEAVY_LOGS: '1' } : {}),
       ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),
       ...(process.env['XLN_RUNTIME_APPLY_PROFILE'] ? { XLN_RUNTIME_APPLY_PROFILE: '1' } : {}),
+      ...(process.env['XLN_RUNTIME_OP_COUNTERS'] ? { XLN_RUNTIME_OP_COUNTERS: '1' } : {}),
+      ...(process.env['XLN_RUNTIME_OP_COUNTERS_DIR']
+        ? { XLN_RUNTIME_OP_COUNTERS_DIR: process.env['XLN_RUNTIME_OP_COUNTERS_DIR'] }
+        : {}),
       ...(process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME']
         ? { XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME'] }
         : {}),
@@ -226,7 +409,7 @@ const spawnSovereignRuntimeHost = async (options: {
         Math.max(1_000, (Number(process.env['XLN_HLT_USERS'] || '0') || 64) * 4),
       ),
     },
-    { authSeed, laneSeedsJson: safeStringify(options.laneSeeds), relayUrl },
+    { authSeed, laneSeedsJson: safeStringify(options.laneSeeds) },
   );
   const daemonLog = createWriteStream(join(dbRoot, 'daemon.log'), { flags: 'a' });
   child.proc.stdout.on('data', (chunk: Buffer) => daemonLog.write(chunk));
@@ -244,18 +427,29 @@ const spawnSovereignRuntimeHost = async (options: {
       }
     },
   );
-  const firstRuntimeId = deriveRuntimeIdFromSeed(`${options.laneSeeds[0]!}:runtime`);
-  if (!firstRuntimeId) throw new Error('HLT_SOVEREIGN_HOST_FIRST_RUNTIME_ID_MISSING');
-  const hostIngress: LaneRuntimeHostIngress = {
-    id: `${child.name}:${firstRuntimeId}`,
-    baseUrl: `http://127.0.0.1:${firstPort}`,
-    authKey: deriveRuntimeAdapterCapabilityToken(authSeed, 'full', Date.now() + 60 * 60_000, {
-      audience: firstRuntimeId,
-      keyId: 'load-host-batch',
-      tokenId: randomBytes(16).toString('hex'),
-    }),
+  const workerIngress = new Map<number, LaneRuntimeHostIngress>();
+  const ingressForRuntime = (index: number): LaneRuntimeHostIngress => {
+    const workerStart = sovereignRuntimeWorkerStart(index);
+    const existing = workerIngress.get(workerStart);
+    if (existing) return existing;
+    const workerRuntimeId = deriveRuntimeIdFromSeed(`${options.laneSeeds[workerStart]!}:runtime`);
+    if (!workerRuntimeId) {
+      throw new Error(`HLT_SOVEREIGN_WORKER_RUNTIME_ID_MISSING:${workerStart}`);
+    }
+    const ingress: LaneRuntimeHostIngress = {
+      id: `${child.name}:worker-${workerStart}:${workerRuntimeId}`,
+      baseUrl: `http://127.0.0.1:${firstPort + workerStart}`,
+      sequence: { nextWave: 0 },
+      authKey: deriveRuntimeAdapterCapabilityToken(authSeed, 'full', Date.now() + 60 * 60_000, {
+        audience: workerRuntimeId,
+        keyId: 'load-host-worker-batch',
+        tokenId: randomBytes(16).toString('hex'),
+      }),
+    };
+    workerIngress.set(workerStart, ingress);
+    return ingress;
   };
-  return Promise.all(options.identities.map(async (identity, index) => {
+  return connectSovereignRuntimeAdapters(options.identities, async (identity, index) => {
     const port = firstPort + index;
     const runtimeId = deriveRuntimeIdFromSeed(`${options.laneSeeds[index]!}:runtime`);
     if (!runtimeId) throw new Error(`HLT_SOVEREIGN_RUNTIME_ID_MISSING:${index}`);
@@ -277,10 +471,10 @@ const spawnSovereignRuntimeHost = async (options: {
       runtime,
       runtimeId,
       relayUrl,
-      hostIngress,
+      hostIngress: ingressForRuntime(index),
       hostedEntityIds: [identity.entityId],
     };
-  }));
+  });
 };
 
 export const spawnLaneRuntimes = async (options: {
@@ -303,17 +497,14 @@ export const spawnLaneRuntimes = async (options: {
   }
   const lanes: LaneRuntime[] = [];
   try {
-    for (let offset = 0; offset < groups.length; offset += SPAWN_CONCURRENCY) {
-      const spawned = await Promise.all(groups.slice(offset, offset + SPAWN_CONCURRENCY).map(group =>
-        spawnSovereignRuntimeHost({
-          workDir: options.workDir,
-          portBase: options.portBase,
-          identities: group.identities,
-          laneSeeds: group.seeds,
-          laneIndex: options.laneIndexOffset + group.start,
-        })));
-      lanes.push(...spawned.flat());
-    }
+    const spawned = await Promise.all(groups.map(group => spawnSovereignRuntimeHost({
+      workDir: options.workDir,
+      portBase: options.portBase,
+      identities: group.identities,
+      laneSeeds: group.seeds,
+      laneIndex: options.laneIndexOffset + group.start,
+    })));
+    lanes.push(...spawned.flat());
     return lanes;
   } catch (error) {
     await stopLaneRuntimes(lanes);
@@ -333,5 +524,12 @@ export const laneDaemons = (lanes: readonly LaneRuntime[]): LaneRuntime[] => {
 
 export const stopLaneRuntimes = async (lanes: readonly LaneRuntime[]): Promise<void> => {
   for (const lane of lanes) lane.runtime.adapter.disconnect();
-  await Promise.allSettled(laneDaemons(lanes).map(lane => stopManagedChild(lane.child)));
+  // The settlement gate has already proved every Account/Runtime queue empty,
+  // and a fresh HLT never restores these ephemeral load-user databases. Waiting
+  // for one host to close hundreds of independent LevelDB handles added ~30 s
+  // after the measured run without producing stronger financial evidence.
+  await Promise.all(laneDaemons(lanes).map(lane => stopManagedChild(lane.child, {
+    terminateTimeoutMs: 250,
+    killTimeoutMs: 2_000,
+  })));
 };

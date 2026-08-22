@@ -49,16 +49,17 @@ const registerLocalRuntimeSigners = (
   }
 };
 
+const runtimeRestoreDisabled = (): boolean =>
+  !runtimeIsBrowser &&
+  !!nodeProcess &&
+  /^(1|true)$/i.test(String(nodeProcess.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? ''));
+
 const restoreRuntimeAtBootstrap = async (
   baseEnv: RuntimeReplica,
   options: RuntimeCreationOptions | undefined,
   deps: RuntimeBootstrapDeps,
 ): Promise<{ env: RuntimeReplica; restored: boolean }> => {
-  const restoreDisabled =
-    !runtimeIsBrowser &&
-    !!nodeProcess &&
-    /^(1|true)$/i.test(String(nodeProcess.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? ''));
-  if (restoreDisabled) return { env: baseEnv, restored: false };
+  if (runtimeRestoreDisabled()) return { env: baseEnv, restored: false };
 
   const env = await deps.loadRuntime(baseEnv.runtimeId, baseEnv.runtimeSeed, {
     ...(options?.trustedJurisdictionRpcBindings
@@ -99,7 +100,7 @@ export const bootstrapRuntime = async (
   );
   const env = restored.env;
   attachEventEmitters(env);
-  if (!restored.restored) {
+  if (!restored.restored && !runtimeRestoreDisabled()) {
     try {
       await deps.loadGossipProfiles(env);
     } catch (error) {

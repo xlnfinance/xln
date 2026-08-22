@@ -26,8 +26,14 @@ export const assertLiveCommitMatchesFrame = (
   side: 'proposer' | 'receiver',
   height: number,
   validatedMachine?: AccountReplica,
+  preparedRoot?: string,
 ): void => {
-  const incrementalRoot = computeAccountStateRoot(account.state);
+  // A committed overlay already computed this exact root before its financial
+  // state object was folded into `account`. Reuse it on the success path. A
+  // second Patricia walk here proved only the assignment operation and doubled
+  // Account consensus hashing; the independent hot+cold walks remain on every
+  // mismatch and retain the complete fail-fast dump.
+  const incrementalRoot = preparedRoot ?? computeAccountStateRoot(account.state, undefined, 'commitAssertion');
   if (incrementalRoot === expectedRoot) return;
   const coldRoot = computeAccountStateRootCold(account.state);
   const details = {

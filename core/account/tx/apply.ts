@@ -65,10 +65,7 @@ export async function applyAccountTxToMutableReplica(
   counterpartyCertifiedBoardHash?: string,
   htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> {
-  const owner = beginAccountTransition(
-    account,
-    { purpose: 'account-tx', type: accountTx.type },
-  );
+  const owner = beginAccountTransition(account);
   try {
     const result = await applyAccountTx(
       accountTransitionView(owner),
@@ -86,7 +83,7 @@ export async function applyAccountTxToMutableReplica(
       discardAccountTransition(owner);
       return result;
     }
-    publishAccountTransition(account, owner);
+    publishAccountTransition(account, owner, 'mutableTx');
     return result;
   } catch (error) {
     if (owner.lifecycle.status === 'active') discardAccountTransition(owner);

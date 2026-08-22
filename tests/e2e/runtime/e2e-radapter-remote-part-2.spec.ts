@@ -852,10 +852,8 @@ test(
         async () =>
           page.evaluate(() => {
             const receipt = (window as any).__xln?.commands?.latest as
-              | {
+                | {
                   status?: string;
-                  upstreamReceiptId?: string | null;
-                  statusUrl?: string | null;
                   acceptedAtHeight?: number | null;
                   inputSummary?: { entityInputs?: number; entityTxs?: number };
                   error?: string | null;
@@ -885,8 +883,6 @@ test(
         __xlnRuntimeCommands?: {
           latest?: {
             receiptId?: string;
-            upstreamReceiptId?: string | null;
-            statusUrl?: string | null;
             status?: string;
             acceptedAtHeight?: number | null;
             committedAtHeight?: number | null;
@@ -907,8 +903,6 @@ test(
     expect(controlResult.beforeHeight).toBeGreaterThanOrEqual(activeH1Before.height);
     expect(controlResult.sendHeight).toBeGreaterThanOrEqual(controlResult.beforeHeight);
     expect(controlResult.receipt?.receiptId).toMatch(/^runtime-command-/);
-    expect(controlResult.receipt?.upstreamReceiptId).toBeTruthy();
-    expect(controlResult.receipt?.statusUrl).toContain('/api/control/runtime-input/');
     expect(['accepted', 'observed']).toContain(controlResult.receipt?.status);
     // The normal wallet intentionally hides accepted/observed terminal receipts;
     // the durable receipt remains inspectable through the command debug surface.

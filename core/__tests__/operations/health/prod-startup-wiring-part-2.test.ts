@@ -8,6 +8,7 @@ import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../../../api/public/external-wal
 import { safeStringify } from '../../../protocol/serialization';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
 import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-parallel-isolated';
+import { applyHubRuntimeFrameDelay } from '../../../orchestrator/process/hub-runtime-env';
 
 const repoRoot = process.cwd();
 const readPlatformDeploy = (): string =>
@@ -47,6 +48,27 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('Hub child drains immediately unless an operator requests a non-negative batching floor', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const inherited = applyHubRuntimeFrameDelay({
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20',
+      XLN_UNRELATED_SETTING: 'kept',
+    }, undefined);
+    expect(inherited).not.toHaveProperty('XLN_RUNTIME_MIN_FRAME_DELAY_MS');
+    expect(inherited['XLN_UNRELATED_SETTING']).toBe('kept');
+    expect(applyHubRuntimeFrameDelay(inherited, '100')).toMatchObject({
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '100',
+      XLN_UNRELATED_SETTING: 'kept',
+    });
+    expect(applyHubRuntimeFrameDelay(inherited, '0')).toMatchObject({
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
+      XLN_UNRELATED_SETTING: 'kept',
+    });
+    expect(orchestrator).toContain(
+      "}, process.env['XLN_HUB_MIN_FRAME_DELAY_MS'])),",
+    );
+  });
+
   test('prod runtime child keeps merge debug output structured and gated', () => {
     const mergeSource = readFileSync(join(repoRoot, 'core/entity/consensus/input/merge.ts'), 'utf8');
     expect(mergeSource).toContain("const entityInputMergeLog = createStructuredLogger('entity.input.merge');");
@@ -790,6 +812,8 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("emitDebugEvent('mm-health-transient'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS');
     expect(smoke).toContain("if (message.includes('LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS')) throw error;");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_RESET_FAILED');
+    expect(smoke).toContain("if (message.includes('LOCAL_PROD_SMOKE_RESET_FAILED')) throw error;");
     expect(smoke).toContain('if (iteration % 10 === 0 || healthReady(stageHealth))');
     expect(smoke).toContain('if (healthReady(stageHealth))');
     expect(smoke).toContain('return stageHealth;');
@@ -1160,6 +1184,7 @@ describe('production startup wiring', () => {
     expect(quotePipelineStart).toBeGreaterThan(readyStart);
     expect(driveStart).toBeGreaterThan(quotePipelineStart);
     expect(quotePipelineEnd).toBeGreaterThan(driveStart);
+    expect(mmNode).toContain('if (!MARKET_MAKER_STEADY_QUOTES_ENABLED) return;');
 
     const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
     const quotePipeline = mmNode.slice(quotePipelineStart, quotePipelineEnd);
@@ -1250,6 +1275,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub and market maker require one authenticated direct entity route', () => {
+    const apiServer = readFileSync(join(repoRoot, 'core/api/server/index.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
     const hubTransport = readFileSync(join(repoRoot, 'core/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
@@ -1261,7 +1287,9 @@ describe('production startup wiring', () => {
     expect(hubTransport).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).toContain('route.sendEntityInputsDelivery(');
-    expect(mmNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
+    expect(mmNode).not.toContain('env.infrastructure.directEntityInputsDispatch');
+    expect(apiServer).not.toContain('env.infrastructure.directEntityInputsDispatch');
+    expect(apiServer).not.toContain('sendEntityInputDirectViaRelaySocketDelivery');
     expect(hubNode).not.toContain('preferRelayForEntityInput');
     expect(mmNode).not.toContain('preferRelayForEntityInput');
     expect(mmNode).not.toContain('allowDirectClients: false');
@@ -1337,7 +1365,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain(
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );
-    expect(hubNode).toContain('if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;');
+    expect(hubNode).toContain('if (!AUTO_PROVISION_EXTERNAL_FAUCET) return;');
     expect(driveMeshBootstrap).toContain('await input.ensureFaucetReady();');
     expect(hubNode).not.toContain(
       'if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()',

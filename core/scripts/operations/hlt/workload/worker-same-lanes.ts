@@ -3,41 +3,120 @@
 import type { RuntimeInput } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { LIMITS } from '../../../../config/constants';
+import { deriveDelta, isLeftEntity } from '../../../../account/utils';
+import { deriveSwapNetAuthorization } from '../../../../account/swap/swap-net-authorization';
+import {
+  getStaticSwapTokenDimensions,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  getSwapLotScale,
+  quoteAmountAtPrice,
+} from '../../../../orderbook';
 import type { LoadBookSnapshot } from '../boundary/worker-book-boundary';
 import type { LoadIdentity } from '../boundary/worker-boundary';
-import { setupParallelLoadLanes } from '../lanes/worker-lanes';
+import {
+  HLT_FAUCET_AMOUNT,
+  setupParallelLoadTraderPopulation,
+} from '../lanes/worker-lanes';
 import {
   queueLaneRuntimeInputWave,
   type LaneRuntime,
 } from '../lanes/lane-runtimes';
 import {
+  buildBalancedExchangePlan,
   buildIndependentMakerTakerPlan,
+  buildRealisticExchangePlan,
   LOAD_BASE_TOKEN_ID,
   LOAD_QUOTE_TOKEN_ID,
+  requiredReceiveCreditForOffers,
+  type RealisticExchangeDistribution,
+  type SwapLanePlan,
 } from './worker-same-plan';
+import { buildPacedOperationSchedule } from './operation-pacer';
 import { deriveSameOrderbookPriceBandBounds } from '../../../../entity/tx/handlers/account/orderbook/helpers';
-import type { ConnectedRuntime } from '../worker-runtime';
-import type { SettlementAccountPair } from '../settlement-reader';
+import { readLoadAccount, readLoadBook, type ConnectedRuntime } from '../worker-runtime';
+import { assertProductionSwapFullySettled } from '../settlement';
+import {
+  waitForFullySettledEvidence,
+  type SettlementAccountPair,
+} from '../settlement-reader';
 
 export type ParallelLaneSubmission = Readonly<{
   runtimeInputBatches: number;
   offersPerRound: number;
   enqueueAckElapsedMs: number;
+  sourceDispatchFinishedElapsedMs: number;
+  sourceAllAckedElapsedMs: number;
   commandObservedElapsedMs: number;
   roundSubmissionLagMs: readonly number[];
   settlementPairs: readonly SettlementAccountPair[];
 }>;
 
-export type PreparedParallelSameLoad = Readonly<{
-  makerIdentities: readonly LoadIdentity[];
-  takerIdentities: readonly LoadIdentity[];
-  makerRuntimes: readonly LaneRuntime[];
-  takerRuntimes: readonly LaneRuntime[];
-  makerPlans: ReturnType<typeof buildIndependentMakerTakerPlan>['makerPlans'];
-  takerPlans: ReturnType<typeof buildIndependentMakerTakerPlan>['takerPlans'];
+export type RestingTailCancellation = Readonly<{
+  cancelledOffers: number;
+  enqueueAckElapsedMs: number;
 }>;
 
-type IndependentLanePlans = PreparedParallelSameLoad['makerPlans'];
+export type PreparedParallelSameLoad = Readonly<{
+  hubEntityId: string;
+  traderIdentities: readonly LoadIdentity[];
+  traderRuntimes: readonly LaneRuntime[];
+  traderPlans: readonly SwapLanePlan[];
+  setupTradeCount: number;
+  distribution: RealisticExchangeDistribution;
+}>;
+
+const ceilDivide = (value: bigint, divisor: bigint): bigint =>
+  (value + divisor - 1n) / divisor;
+
+const requireIndex = <T>(values: readonly T[], index: number, code: string): T => {
+  const value = values[index];
+  if (value === undefined) throw new Error(`${code}:${index}`);
+  return value;
+};
+
+const buildMakerInventorySeedOffer = (
+  hubEntityId: string,
+  makerIndex: number,
+  requiredBaseAmount: bigint,
+  priceTicks: bigint,
+): Extract<EntityTx, { type: 'placeSwapOffer' }> => {
+  const dimensions = getStaticSwapTokenDimensions(LOAD_QUOTE_TOKEN_ID, LOAD_BASE_TOKEN_ID);
+  const baseLot = getSwapLotScale(LOAD_BASE_TOKEN_ID);
+  const exactQuoteLots = getSwapExactQuoteLotMultipleAtPriceForDimensions(
+    dimensions.wantTokenDecimals,
+    dimensions.giveTokenDecimals,
+    priceTicks,
+  );
+  // H1 charges the seed taker 1 bps in the received token. Seed enough gross
+  // token-2 that the committed net inventory still covers every maker order.
+  const requiredGrossBaseAmount = ceilDivide(requiredBaseAmount * 10_000n, 9_999n);
+  const baseLots = ceilDivide(requiredGrossBaseAmount, baseLot);
+  const executableLots = ceilDivide(baseLots, exactQuoteLots) * exactQuoteLots;
+  const baseAmount = executableLots * baseLot;
+  const quoteAmount = quoteAmountAtPrice(
+    LOAD_BASE_TOKEN_ID,
+    LOAD_QUOTE_TOKEN_ID,
+    baseAmount,
+    priceTicks,
+  );
+  const authorization = deriveSwapNetAuthorization(baseAmount, 1);
+  if (authorization.minNetReceive < requiredBaseAmount || quoteAmount <= 0n) {
+    throw new Error(`HLT_MAKER_INVENTORY_SEED_AMOUNT_INVALID:${makerIndex}`);
+  }
+  return {
+    type: 'placeSwapOffer',
+    data: {
+      counterpartyEntityId: hubEntityId,
+      offerId: `hlt-maker-inventory-${makerIndex + 1}`,
+      giveTokenId: LOAD_QUOTE_TOKEN_ID,
+      giveAmount: quoteAmount,
+      wantTokenId: LOAD_BASE_TOKEN_ID,
+      wantAmount: baseAmount,
+      ...dimensions,
+      ...authorization,
+    },
+  };
+};
 
 export type ParallelLoadRoundExtraTxs = (args: {
   lane: LaneRuntime;
@@ -59,11 +138,12 @@ const collectRoundExtraTxs = (
 
 export const buildLaneRoundOfferInputs = (
   identities: readonly LoadIdentity[],
-  plans: IndependentLanePlans,
+  plans: readonly SwapLanePlan[],
   round: number,
   offersPerRound = 1,
 ): RuntimeInput['entityInputs'] => identities.map((identity, index) => {
-  const offers = plans[index]!.offers.slice(round, round + offersPerRound);
+  const offers = requireIndex(plans, index, 'PRODUCTION_SWAP_LOAD_LANE_PLAN_MISSING')
+    .offers.slice(round, round + offersPerRound);
   if (offers.length === 0) throw new Error('PRODUCTION_SWAP_LOAD_ROUND_OFFERS_EMPTY');
   return {
     entityId: identity.entityId,
@@ -106,11 +186,14 @@ export const assertOpenLoopOfferBudget = (offersPerAccount: number): void => {
 const settlementPairs = (
   hubEntityId: string,
   identities: readonly LoadIdentity[],
-  plans: IndependentLanePlans,
+  plans: readonly SwapLanePlan[],
+  firstRound = 0,
+  rounds?: number,
 ): SettlementAccountPair[] => identities.map((identity, index) => ({
   hubEntityId,
   loadEntityId: identity.entityId,
-  offerIds: plans[index]!.offers.map(tx => {
+  offerIds: requireIndex(plans, index, 'PRODUCTION_SWAP_LOAD_SETTLEMENT_PLAN_MISSING').offers
+    .slice(firstRound, rounds === undefined ? undefined : firstRound + rounds).map(tx => {
     if (tx.type !== 'placeSwapOffer') throw new Error('PRODUCTION_SWAP_LOAD_SETTLEMENT_OFFER_TYPE_INVALID');
     return tx.data.offerId;
   }),
@@ -120,6 +203,7 @@ export const prepareParallelSameLoad = async (options: {
   workDir: string;
   portBase: number;
   hub: ConnectedRuntime;
+  marketMaker: ConnectedRuntime;
   hubIdentity: LoadIdentity;
   initialBook: LoadBookSnapshot;
   minimumTradeSize: bigint;
@@ -127,6 +211,7 @@ export const prepareParallelSameLoad = async (options: {
   rounds: number;
   lanes: number;
   laneOffset: number;
+  execution: 'peer' | 'realistic' | 'balanced';
 }): Promise<PreparedParallelSameLoad> => {
   assertOpenLoopOfferBudget(options.rounds);
   const highestVisibleAsk = options.initialBook.executableAskPriceTicks.at(-1);
@@ -141,58 +226,177 @@ export const prepareParallelSameLoad = async (options: {
   if (anchor <= bestBid || anchor >= bestVisibleAsk) {
     throw new Error('PRODUCTION_SWAP_LOAD_INDEPENDENT_SPREAD_MISSING');
   }
-  // Load makers and takers meet inside the real MM spread. Neither side can
-  // consume bootstrap MM liquidity, so every counted trade proves an
-  // independently signed maker Account settled against a distinct taker lane.
-  const { makerPlans, takerPlans } = buildIndependentMakerTakerPlan(
-    options.hubIdentity.entityId,
-    `prod-load-${options.laneOffset}`,
-    options.swapsPerRound * options.rounds,
-    options.lanes,
-    options.minimumTradeSize,
-    anchor,
-  );
+  const regularMakerAsk = (anchor + bestVisibleAsk) / 2n;
+  if (regularMakerAsk <= anchor || regularMakerAsk >= bestVisibleAsk) {
+    throw new Error('HLT_REALISTIC_USER_PRICE_LEVELS_MISSING');
+  }
+  const totalOrdersPerCohort = options.swapsPerRound * options.rounds;
+  // Every user is a trader. Strategy assignment changes per round; there are
+  // no permanent maker/taker populations or role-specific Runtime hosts.
+  const realisticPlans = options.execution === 'realistic'
+    ? buildRealisticExchangePlan({
+        hubEntityId: options.hubIdentity.entityId,
+        offerNamespace: `prod-load-${options.laneOffset}-realistic`,
+        rounds: options.rounds,
+        lanesPerSide: options.lanes,
+        minimumTradeSize: options.minimumTradeSize,
+        partialMakerAskPriceTicks: anchor,
+        makerAskPriceTicks: regularMakerAsk,
+        restingBidPriceTicks: bestBid,
+        takerLimitPriceTicks: highestVisibleAsk,
+        mmAsks: options.initialBook.executableAsks,
+      })
+    : null;
+  const balancedPlans = options.execution === 'balanced'
+    ? buildBalancedExchangePlan({
+        hubEntityId: options.hubIdentity.entityId,
+        offerNamespace: `prod-load-${options.laneOffset}-balanced`,
+        rounds: options.rounds,
+        traders: options.lanes * 2,
+        minimumTradeSize: options.minimumTradeSize,
+        priceTicks: anchor,
+      })
+    : null;
+  const peerPlans = realisticPlans || balancedPlans ? null : buildIndependentMakerTakerPlan(
+        options.hubIdentity.entityId,
+        `prod-load-${options.laneOffset}`,
+        totalOrdersPerCohort,
+        options.lanes,
+        options.minimumTradeSize,
+        anchor,
+        anchor,
+      );
+  const traderPlans = realisticPlans?.traderPlans ?? balancedPlans?.traderPlans ?? [
+    ...(peerPlans?.makerPlans ?? []),
+    ...(peerPlans?.takerPlans ?? []),
+  ];
   if (
-    makerPlans.some(plan => plan.offers.length !== options.rounds) ||
-    takerPlans.some(plan => plan.offers.length !== options.rounds) ||
-    makerPlans.some(plan => plan.baseCredit <= 0n || plan.quoteCredit <= 0n) ||
-    takerPlans.some(plan => plan.baseCredit <= 0n || plan.quoteCredit <= 0n)
+    traderPlans.length !== options.lanes * 2 ||
+    traderPlans.some(plan => plan.offers.length !== options.rounds) ||
+    traderPlans.some(plan => plan.baseCredit <= 0n || plan.quoteCredit <= 0n)
   ) {
     throw new Error('PRODUCTION_SWAP_LOAD_LANE_PLAN_EMPTY');
   }
-  const makers = await setupParallelLoadLanes({
+  const seedOffers = traderPlans.map((plan, index) => buildMakerInventorySeedOffer(
+        options.hubIdentity.entityId,
+        index,
+        plan.baseCredit,
+        highestVisibleAsk,
+      ));
+  const baseLot = getSwapLotScale(LOAD_BASE_TOKEN_ID);
+  const requiredSeedBase = seedOffers.reduce((total, offer) => total + offer.data.wantAmount, 0n);
+  const executableSeedBase = options.initialBook.executableAsks
+    .filter(ask => ask.priceTicks <= highestVisibleAsk)
+    .reduce((total, ask) => total + ask.qtyLots * baseLot, 0n);
+  if (requiredSeedBase > executableSeedBase) {
+    throw new Error(
+      `HLT_TRADER_INVENTORY_DEPTH_INSUFFICIENT:required=${requiredSeedBase}:available=${executableSeedBase}`,
+    );
+  }
+  const traders = await setupParallelLoadTraderPopulation({
     workDir: options.workDir,
     portBase: options.portBase,
     hub: options.hub,
     hubIdentity: options.hubIdentity,
-    lanes: options.lanes,
+    traders: traderPlans.length,
     laneOffset: options.laneOffset,
-    role: 'maker',
-    laneGrantedCreditTokenId: LOAD_QUOTE_TOKEN_ID,
-    laneGrantedCreditAmounts: makerPlans.map(plan => plan.quoteCredit),
-    hubGrantedCreditTokenId: LOAD_BASE_TOKEN_ID,
-    hubGrantedCreditAmounts: makerPlans.map(plan => plan.baseCredit),
+    receiveWindows: traderPlans.map((plan, index) => {
+      const seed = requireIndex(seedOffers, index, 'HLT_TRADER_INVENTORY_SEED_MISSING');
+      return [{
+        tokenId: LOAD_BASE_TOKEN_ID,
+        amount: requiredReceiveCreditForOffers(
+          seed.data.wantAmount,
+          LOAD_BASE_TOKEN_ID,
+          plan.offers,
+        ),
+      }, {
+        tokenId: LOAD_QUOTE_TOKEN_ID,
+        amount: requiredReceiveCreditForOffers(
+          HLT_FAUCET_AMOUNT,
+          LOAD_QUOTE_TOKEN_ID,
+          plan.offers,
+        ),
+      }];
+    }),
   });
-  const takers = await setupParallelLoadLanes({
-    workDir: options.workDir,
-    portBase: options.portBase,
-    hub: options.hub,
-    hubIdentity: options.hubIdentity,
-    lanes: options.lanes,
-    laneOffset: options.laneOffset,
-    role: 'taker',
-    laneGrantedCreditTokenId: LOAD_BASE_TOKEN_ID,
-    laneGrantedCreditAmounts: takerPlans.map(plan => plan.baseCredit),
-    hubGrantedCreditTokenId: LOAD_QUOTE_TOKEN_ID,
-    hubGrantedCreditAmounts: takerPlans.map(plan => plan.quoteCredit),
-  });
+  let setupTradeCount = (await readLoadBook(options.hub, options.hubIdentity.entityId)).tradeCount;
+  {
+    const seedPairs: SettlementAccountPair[] = traders.runtimes.map((lane, index) => ({
+      hubEntityId: options.hubIdentity.entityId,
+      loadEntityId: lane.identity.entityId,
+      offerIds: [requireIndex(seedOffers, index, 'HLT_TRADER_INVENTORY_SEED_MISSING').data.offerId],
+    }));
+    const seedStartedAt = performance.now();
+    await queueLaneRuntimeInputWave(0, traders.runtimes.map((lane, index) => ({
+      lane,
+      input: {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: lane.identity.entityId,
+          signerId: lane.identity.signerId,
+          entityTxs: [requireIndex(seedOffers, index, 'HLT_TRADER_INVENTORY_SEED_MISSING')],
+        }],
+      },
+    })));
+    const seedEvidence = await waitForFullySettledEvidence({
+      hub: options.hub,
+      load: traders.runtimes.map((lane, index) => ({
+        runtime: lane.runtime,
+        pairs: [requireIndex(seedPairs, index, 'HLT_TRADER_INVENTORY_PAIR_MISSING')],
+      })),
+      marketMaker: options.marketMaker,
+      hubBookEntityId: options.hubIdentity.entityId,
+      pairs: seedPairs,
+      tradeCountBefore: setupTradeCount,
+      expectedSubmittedOffers: seedOffers.length,
+      expectedMatchedTrades: seedOffers.length,
+      expectedFullySettledOffers: seedOffers.length,
+      cancelledOffers: 0,
+      startedAt: seedStartedAt,
+    });
+    assertProductionSwapFullySettled(seedEvidence);
+    setupTradeCount = seedEvidence.tradeCountAfter;
+  }
+  // Every trader acquires token-2 through a real MM setup fill and retains
+  // token-1 from the one canonical faucet, so either side is executable.
+  const traderReady = await Promise.all(traders.runtimes.map(async (lane, index) => {
+    const account = await readLoadAccount(lane.runtime, lane.identity.entityId, options.hubIdentity.entityId);
+    const plan = requireIndex(traderPlans, index, 'HLT_TRADER_PLAN_MISSING');
+    const baseDelta = account?.state.deltas.get(LOAD_BASE_TOKEN_ID);
+    const quoteDelta = account?.state.deltas.get(LOAD_QUOTE_TOKEN_ID);
+    return Boolean(baseDelta && quoteDelta && deriveDelta(
+      baseDelta,
+      isLeftEntity(lane.identity.entityId, options.hubIdentity.entityId),
+    ).outCapacity >= plan.baseCredit && deriveDelta(
+      quoteDelta,
+      isLeftEntity(lane.identity.entityId, options.hubIdentity.entityId),
+    ).outCapacity >= plan.quoteCredit);
+  }));
+  const unready = traders.runtimes.filter((_lane, index) => !traderReady[index]).map(lane => lane.laneKey);
+  if (unready.length > 0) {
+    throw new Error(`HLT_SWAP_POPULATION_NOT_READY:missing=${unready.length}:users=${unready.join(',')}`);
+  }
+  console.log(`[load] swap population ready users=${traders.runtimes.length}`);
   return {
-    makerIdentities: makers.identities,
-    takerIdentities: takers.identities,
-    makerRuntimes: makers.runtimes,
-    takerRuntimes: takers.runtimes,
-    makerPlans,
-    takerPlans,
+    hubEntityId: options.hubIdentity.entityId,
+    traderIdentities: traders.identities,
+    traderRuntimes: traders.runtimes,
+    traderPlans,
+    setupTradeCount,
+    distribution: realisticPlans?.distribution ?? balancedPlans?.distribution ?? {
+      submittedOffers: totalOrdersPerCohort * 2,
+      matchedSubmittedOffers: totalOrdersPerCohort * 2,
+      matchedTrades: totalOrdersPerCohort,
+      cancelledOffers: 0,
+      mmOnlyTakers: 0,
+      userOnlyTakers: totalOrdersPerCohort,
+      partialUserMakerFills: 0,
+      mmResidualTakers: 0,
+      sweep2Takers: 0,
+      sweep5Takers: 0,
+      sweep10Takers: 0,
+      sweep20Takers: 0,
+    },
   };
 };
 
@@ -222,62 +426,18 @@ export const submitPreparedParallelSameLoad = async (options: {
 }): Promise<ParallelLaneSubmission> => {
   const startedAt = performance.now();
   const roundSubmissionLagMs: number[] = [];
-  const actionsPerFrame = options.actionsPerFrame ?? 1;
-  // Offered load is a stream, not a closed-loop benchmark. One RuntimeInput
-  // carries at most three adjacent user actions, the production-realistic
-  // Account frame range selected by the owner. Batches remain open-loop: they
-  // never wait for Hub progress, Runtime commit, or an earlier Account ACK.
+  if ((options.actionsPerFrame ?? 1) !== 1) {
+    throw new Error('HLT_PACED_STREAM_REQUIRES_ONE_ACTION_PER_RUNTIME_INPUT');
+  }
+  // Offered load is open-loop and evenly paced across sovereign users. It
+  // never waits for Hub progress, Runtime commit, or an earlier Account ACK.
   const pendingWaves: Array<Promise<Readonly<{ elapsedMs: number; error: unknown | null }>>> = [];
   let streamFailure: unknown | null = null;
   let waveIndex = 0;
-  for (let firstRound = 0; firstRound < options.rounds;) {
-    const batchRounds = resolveLoadBatchRounds(options.rounds - firstRound, actionsPerFrame);
-    const dueAt = startedAt + firstRound * options.cadenceMs;
-    const remainingMs = dueAt - performance.now();
-    if (remainingMs > 0) await new Promise(resolve => setTimeout(resolve, remainingMs));
-    if (streamFailure !== null) throw streamFailure;
-    const lagMs = Math.max(0, Math.ceil(performance.now() - dueAt));
-    roundSubmissionLagMs.push(lagMs);
-    const laneInputs = [
-      ...options.prepared.makerRuntimes.map((lane, index) => {
-        const identity = options.prepared.makerIdentities[index]!;
-        return {
-          lane,
-          inputs: withRoundExtraTxs(
-            buildLaneRoundOfferInputs(
-              [identity],
-              [options.prepared.makerPlans[index]!],
-              firstRound,
-              batchRounds,
-            ),
-            collectRoundExtraTxs(options.extraEntityTxs, lane, identity, firstRound, batchRounds),
-          ),
-        };
-      }),
-      ...options.prepared.takerRuntimes.map((lane, index) => {
-        const identity = options.prepared.takerIdentities[index]!;
-        return {
-          lane,
-          inputs: withRoundExtraTxs(
-            buildLaneRoundOfferInputs(
-              [identity],
-              [options.prepared.takerPlans[index]!],
-              firstRound,
-              batchRounds,
-            ),
-            collectRoundExtraTxs(options.extraEntityTxs, lane, identity, firstRound, batchRounds),
-          ),
-        };
-      }),
-    ];
-    const waveStartedAt = performance.now();
-    const wave = queueLaneRuntimeInputWave(waveIndex, laneInputs.map(({ lane, inputs }) => ({
-      lane,
-      input: {
-        runtimeTxs: [],
-        entityInputs: inputs,
-      },
-    })));
+  const trackWave = (
+    wave: Promise<void>,
+    waveStartedAt: number,
+  ): void => {
     pendingWaves.push(wave.then(
       () => ({ elapsedMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error: null }),
       error => {
@@ -285,26 +445,127 @@ export const submitPreparedParallelSameLoad = async (options: {
         return { elapsedMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error };
       },
     ));
-    console.log(
-      `[load] stream dispatched wave=${waveIndex} rounds=${firstRound}-${firstRound + batchRounds - 1} ` +
-      `submitted=${(firstRound + batchRounds) * options.swapsPerRound} lagMs=${lagMs}`,
-    );
-    waveIndex += 1;
-    firstRound += batchRounds;
+  };
+  const schedule = buildPacedOperationSchedule({
+    participants: options.prepared.traderRuntimes.length,
+    rounds: options.rounds,
+    cadenceMs: options.cadenceMs,
+  });
+  for (const operation of schedule) {
+    const firstRound = operation.round;
+    const batchRounds = 1;
+    const dueAt = startedAt + operation.dueOffsetMs;
+    const remainingMs = dueAt - performance.now();
+    if (remainingMs > 0) await new Promise(resolve => setTimeout(resolve, remainingMs));
+    if (streamFailure !== null) throw streamFailure;
+    const lagMs = Math.max(0, Math.ceil(performance.now() - dueAt));
+    roundSubmissionLagMs.push(lagMs);
+    const index = operation.participantIndex;
+    const lane = requireIndex(options.prepared.traderRuntimes, index, 'HLT_TRADER_RUNTIME_MISSING');
+    const identity = requireIndex(options.prepared.traderIdentities, index, 'HLT_TRADER_IDENTITY_MISSING');
+    const traderInputs = [{
+        lane,
+        inputs: withRoundExtraTxs(
+          buildLaneRoundOfferInputs(
+            [identity],
+            [requireIndex(options.prepared.traderPlans, index, 'HLT_TRADER_PLAN_MISSING')],
+            firstRound,
+            batchRounds,
+          ),
+          collectRoundExtraTxs(options.extraEntityTxs, lane, identity, firstRound, batchRounds),
+        ),
+      }];
+    const waveStartedAt = performance.now();
+    const queue = (laneInputs: typeof traderInputs): Promise<void> =>
+      queueLaneRuntimeInputWave(waveIndex++, laneInputs.map(({ lane, inputs }) => ({
+      lane,
+      input: {
+        runtimeTxs: [],
+        entityInputs: inputs,
+      },
+    })));
+    trackWave(queue(traderInputs), waveStartedAt);
+    if ((operation.ordinal + 1) % options.prepared.traderRuntimes.length === 0) {
+      console.log(
+        `[load] stream dispatched=${operation.ordinal + 1}/${schedule.length} ` +
+        `round=${firstRound + 1}/${options.rounds} lagMs=${lagMs}`,
+      );
+    }
   }
+  const sourceDispatchFinishedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
   const waveResults = await Promise.all(pendingWaves);
   const failedWave = waveResults.find(result => result.error !== null);
   if (failedWave) throw failedWave.error;
-  const ingressAcceptedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
+  const sourceLateRound = roundSubmissionLagMs.findIndex(lagMs => lagMs >= options.cadenceMs);
+  if (sourceLateRound >= 0) {
+    throw new Error(
+      `HLT_SOURCE_CADENCE_MISSED:round=${sourceLateRound}:` +
+      `lagMs=${roundSubmissionLagMs[sourceLateRound]}:cadenceMs=${options.cadenceMs}`,
+    );
+  }
+  const maxWaveAckMs = Math.max(0, ...waveResults.map(result => result.elapsedMs));
+  const sourceAllAckedElapsedMs = Math.max(
+    sourceDispatchFinishedElapsedMs,
+    Math.ceil(performance.now() - startedAt),
+  );
+  if (maxWaveAckMs >= options.cadenceMs) {
+    throw new Error(`HLT_SOURCE_QUEUE_ACK_MISSED:maxMs=${maxWaveAckMs}:cadenceMs=${options.cadenceMs}`);
+  }
+  console.log(
+    `[load] source asserted users=${options.prepared.traderRuntimes.length} rounds=${options.rounds} ` +
+    `actions=${options.prepared.traderRuntimes.length * options.rounds} ` +
+    `maxLagMs=${Math.max(0, ...roundSubmissionLagMs)} maxQueueAckMs=${maxWaveAckMs}`,
+  );
   return {
-    runtimeInputBatches: Math.ceil(options.rounds / actionsPerFrame),
-    offersPerRound: actionsPerFrame,
-    enqueueAckElapsedMs: ingressAcceptedElapsedMs,
-    commandObservedElapsedMs: ingressAcceptedElapsedMs,
+    runtimeInputBatches: schedule.length,
+    offersPerRound: 1,
+    enqueueAckElapsedMs: Math.max(1, maxWaveAckMs),
+    sourceDispatchFinishedElapsedMs,
+    sourceAllAckedElapsedMs,
+    commandObservedElapsedMs: sourceAllAckedElapsedMs,
     roundSubmissionLagMs,
-    settlementPairs: [
-      ...settlementPairs(options.hubIdentity.entityId, options.prepared.makerIdentities, options.prepared.makerPlans),
-      ...settlementPairs(options.hubIdentity.entityId, options.prepared.takerIdentities, options.prepared.takerPlans),
-    ],
+    settlementPairs: settlementPairs(
+      options.hubIdentity.entityId,
+      options.prepared.traderIdentities,
+      options.prepared.traderPlans,
+    ),
+  };
+};
+
+export const cancelPreparedRestingTail = async (
+  prepared: PreparedParallelSameLoad,
+): Promise<RestingTailCancellation> => {
+  const submissions = prepared.traderRuntimes.flatMap((lane, index) => {
+    const identity = requireIndex(prepared.traderIdentities, index, 'HLT_TRADER_IDENTITY_MISSING');
+    const plan = requireIndex(prepared.traderPlans, index, 'HLT_TRADER_PLAN_MISSING');
+    if (plan.cancelledOfferIds.length === 0) return [];
+    return [{
+      lane,
+      input: {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: identity.entityId,
+          signerId: identity.signerId,
+          entityTxs: plan.cancelledOfferIds.map(offerId => ({
+            type: 'proposeCancelSwap' as const,
+            data: { counterpartyEntityId: prepared.hubEntityId, offerId },
+          })),
+        }],
+      },
+    }];
+  });
+  const cancelledOffers = submissions.reduce(
+    (sum, submission) => sum + (submission.input.entityInputs[0]?.entityTxs.length ?? 0),
+    0,
+  );
+  if (cancelledOffers !== prepared.distribution.cancelledOffers) {
+    throw new Error(`HLT_RESTING_TAIL_COUNT_MISMATCH:${cancelledOffers}:${prepared.distribution.cancelledOffers}`);
+  }
+  if (submissions.length === 0) return { cancelledOffers: 0, enqueueAckElapsedMs: 0 };
+  const startedAt = performance.now();
+  await queueLaneRuntimeInputWave(0, submissions);
+  return {
+    cancelledOffers,
+    enqueueAckElapsedMs: Math.max(1, Math.ceil(performance.now() - startedAt)),
   };
 };

@@ -29,6 +29,7 @@ export type EntityProposalSelection = {
   proposalJPrefixCertificate: ReturnType<typeof buildJPrefixCertificate>;
   proposalSelection: Awaited<ReturnType<typeof selectProposableEntityTxs>>;
   proposalTxs: EntityTx[];
+  requiredTxPrefixCount?: number;
   shouldRollFrozenBaseJPrefixRound: boolean;
 };
 
@@ -37,6 +38,8 @@ export type EntityProposalSelectionOptions = {
   trustedLocalCrossJurisdiction: boolean;
   trustedLocalEntityTxs: EntityTx[];
   accountWorkOnly: boolean;
+  /** Runtime-authenticated atomic AccountInput that this staged frame must evaluate. */
+  requiredEntityTx?: EntityTx;
   checkpoint(label: string): void;
 };
 
@@ -65,6 +68,25 @@ const addCertifiedJRange = (
     ]);
   }
   return certifiedRange;
+};
+
+const logReplicaMetaSelection = (
+  env: EntityRuntimeContext,
+  replica: EntityReplica,
+  proposalTxs: readonly EntityTx[],
+  requiredTxIndex: number,
+  reason: string | undefined,
+): void => {
+  if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] !== '1') return;
+  entityLog.info('replica_meta.selection_debug', {
+    entityId: replica.entityId,
+    entityHeight: replica.state.height,
+    runtimeHeight: env.state.height,
+    mempool: replica.mempool.map(tx => tx.type),
+    selected: proposalTxs.map(tx => tx.type),
+    requiredTxPrefixCount: requiredTxIndex >= 0 ? requiredTxIndex + 1 : 0,
+    reason: reason ?? null,
+  });
 };
 
 export const selectEntityProposal = async (
@@ -123,16 +145,18 @@ export const selectEntityProposal = async (
   // A frozen-base roll may only open the next J-prefix round. Mixing ordinary
   // work into it would advance Entity state past an honest observed J event.
   const proposalTxs = shouldRollFrozenBaseJPrefixRound ? [] : proposalSelection.txs;
-  if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
-    entityLog.info('replica_meta.selection_debug', {
-      entityId: replica.entityId,
-      entityHeight: replica.state.height,
-      runtimeHeight: env.state.height,
-      mempool: replica.mempool.map(tx => tx.type),
-      selected: proposalTxs.map(tx => tx.type),
-      reason: proposalSelection.reason ?? null,
-    });
+  const requiredTxIndex = options.requiredEntityTx
+    ? proposalTxs.indexOf(options.requiredEntityTx)
+    : -1;
+  if (options.requiredEntityTx && requiredTxIndex < 0) {
+    throw haltRuntimeFailure(
+      'RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_NOT_SELECTED',
+      `RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_NOT_SELECTED:${replica.entityId}:` +
+        `mempool=${replica.mempool.length}:selected=${proposalTxs.length}:` +
+        `reason=${proposalSelection.reason ?? 'none'}`,
+    );
   }
+  logReplicaMetaSelection(env, replica, proposalTxs, requiredTxIndex, proposalSelection.reason);
   if (
     options.trustedLocalCrossJurisdiction &&
     proposalTxs.length !== trustedProposalTxs.length
@@ -154,6 +178,9 @@ export const selectEntityProposal = async (
     proposalJPrefixCertificate,
     proposalSelection,
     proposalTxs,
+    ...(requiredTxIndex >= 0
+      ? { requiredTxPrefixCount: requiredTxIndex + 1 }
+      : {}),
     shouldRollFrozenBaseJPrefixRound,
   };
 };

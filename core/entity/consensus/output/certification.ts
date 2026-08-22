@@ -381,7 +381,12 @@ export const resolveConsensusOutputBoardAuthority = (
 
 const canonicalCertifiedEntityTxs = (entityTxs: EntityTx[]): unknown[] => {
   countOp('certified.canonicalCertifiedEntityTxs');
-  return structuredClone(entityTxs);
+  // Canonical encoding is synchronous, read-only, and already rejects accessors,
+  // symbols, exotic prototypes and cycles. Cloning here added no trust boundary:
+  // the same immutable EntityTx array was cloned again for semantic and outer
+  // hashes, multiplying allocations on every certified output without changing
+  // a single signed byte.
+  return entityTxs;
 };
 
 const computeCertifiedEntityOutputSemanticHash = (

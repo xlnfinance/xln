@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
-import { countOpWithSite } from '../../support/performance/op-counters';
+import { countOpWithSite, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 
 import { compareStableText } from './';
 
@@ -77,20 +78,23 @@ const newStack = (): CanonicalStack => ({ ancestors: new Map(), segments: [] });
  * migration, not a refactor.
  */
 export const encodeCanonicalConsensusValue = (value: unknown): string => {
-  const encoded = encodeInner(value, newStack());
-  countOpWithSite('canonical.encode', encoded.length, 1);
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const encoded = encodeUncached(value, newStack());
+  countOpWithSite(
+    'canonical.encode',
+    encoded.length,
+    1,
+    OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+  );
   return encoded;
 };
 
 const encodeChild = (value: unknown, stack: CanonicalStack, segment: string): string => {
   stack.segments.push(segment);
-  const encoded = encodeInner(value, stack);
+  const encoded = encodeUncached(value, stack);
   stack.segments.pop();
   return encoded;
 };
-
-const encodeInner = (value: unknown, stack: CanonicalStack): string =>
-  encodeUncached(value, stack);
 
 const encodeUncached = (value: unknown, stack: CanonicalStack): string => {
   if (value === null) return '["Null"]';

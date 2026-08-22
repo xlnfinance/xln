@@ -13,6 +13,8 @@ import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
 import { createStructuredLogger } from '../../support/logger';
 import { getPerfMs } from '../../support/time';
+import { observePerfCount } from '../../support/performance/profile';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { settlementWorkspaceWithoutHankos } from '../settlement/witness-projection';
 import { encodeAccountStateValue } from './account-state-value';
 import {
@@ -278,8 +280,6 @@ export const computeAccountCommitmentSectionDetailCold = (
  * identity. Overlay handlers replace `settlementWorkspace` and accumulators;
  * they must not mutate those objects in place on a memoized state.
  */
-const ACCOUNT_STATE_ROOT_MEMO = Symbol('ACCOUNT_STATE_ROOT_MEMO');
-
 type AccountRootScalarIdentities = {
   domain: AccountState['domain'];
   disputeConfig: AccountState['disputeConfig'];
@@ -298,6 +298,9 @@ type AccountStateRootMemo = {
   scalars: AccountRootScalarIdentities;
   root: string;
 };
+
+const ACCOUNT_STATE_ROOT_MEMO_MAX = 4_096;
+const accountStateRootMemos = new Map<AccountState, AccountStateRootMemo>();
 
 const ACCOUNT_ROOT_COLLECTION_FIELDS = [
   'deltas',
@@ -345,42 +348,72 @@ const sameScalarIdentities = (left: AccountRootScalarIdentities, account: Accoun
   left.lastFinalizedJHeight === account.lastFinalizedJHeight;
 
 const readAccountStateRootMemo = (account: AccountState): AccountStateRootMemo | undefined => {
-  const memo = Reflect.get(account, ACCOUNT_STATE_ROOT_MEMO);
-  return memo === undefined ? undefined : memo as AccountStateRootMemo;
+  return accountStateRootMemos.get(account);
 };
 
-const writeAccountStateRootMemo = (account: AccountState, memo: AccountStateRootMemo): void => {
-  const existing = Object.getOwnPropertyDescriptor(account, ACCOUNT_STATE_ROOT_MEMO);
-  if (existing?.writable) {
-    Reflect.set(account, ACCOUNT_STATE_ROOT_MEMO, memo);
-    return;
+const writeAccountStateRootMemo = (account: AccountState, memo: AccountStateRootMemo): boolean => {
+  if (accountStateRootMemos.size >= ACCOUNT_STATE_ROOT_MEMO_MAX && !accountStateRootMemos.has(account)) {
+    const oldest = accountStateRootMemos.keys().next();
+    if (!oldest.done) accountStateRootMemos.delete(oldest.value);
   }
-  try {
-    Object.defineProperty(account, ACCOUNT_STATE_ROOT_MEMO, {
-      value: memo,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-  } catch {
-    // Frozen/sealed AccountState still hashes correctly; it cannot cache.
-  }
+  accountStateRootMemos.set(account, memo);
+  return true;
+};
+
+/**
+ * Carry one already-verified derived root across an exact AccountState shell
+ * fork. The fork owns fresh bounded records, so the memo is rebound to the
+ * target identities instead of copying the non-enumerable cache object.
+ *
+ * This is safe only for a value-preserving fork. Any later collection/scalar
+ * replacement misses through the identities below; Account transitions then
+ * compute and install the new root before Entity commits the child leaf.
+ */
+export const transferAccountStateRootMemo = (
+  source: AccountState,
+  target: AccountState,
+): boolean => {
+  const sourceCollections = accountRootCollectionIdentities(source);
+  const memo = readAccountStateRootMemo(source);
+  if (
+    !memo ||
+    !sameCollections(memo.collections, sourceCollections) ||
+    !sameScalarIdentities(memo.scalars, source)
+  ) return false;
+  return writeAccountStateRootMemo(target, {
+    collections: accountRootCollectionIdentities(target),
+    scalars: accountRootScalarIdentities(target),
+    root: memo.root,
+  });
 };
 
 export const computeAccountStateRoot = (
   account: AccountState,
   timing?: AccountStateRootTiming,
+  source = 'unspecified',
 ): string => {
   if (timing === undefined && accountStateRootDebugRecorder === null) {
     const collections = accountRootCollectionIdentities(account);
     const memo = readAccountStateRootMemo(account);
     if (memo && sameCollections(memo.collections, collections) && sameScalarIdentities(memo.scalars, account)) {
+      observePerfCount('account.stateRoot.cacheHit');
+      observePerfCount(`account.stateRoot.cacheHit.${source}`);
+      countOp(`account.stateRoot.cacheHit.${source}`);
       return memo.root;
     }
+    observePerfCount('account.stateRoot.cacheMiss');
+    observePerfCount(`account.stateRoot.cacheMiss.${source}`);
+    const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const root = computeAccountStateRootUncached(account);
+    countOp(
+      `account.stateRoot.cacheMiss.${source}`,
+      0,
+      OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+    );
     writeAccountStateRootMemo(account, { collections, scalars: accountRootScalarIdentities(account), root });
     return root;
   }
+  observePerfCount(`account.stateRoot.uncached.${source}`);
   return computeAccountStateRootUncached(account, timing);
 };
 

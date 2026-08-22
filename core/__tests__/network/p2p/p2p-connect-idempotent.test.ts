@@ -14,9 +14,7 @@ type FakeRelayClient = {
 const makeDetachedP2P = (client: FakeRelayClient): RuntimeP2P & Record<string, unknown> => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, unknown>;
   p2p.clients = [client];
-  p2p.registerVisibilityReconnect = () => {
-    p2p.registeredVisibility = Number(p2p.registeredVisibility || 0) + 1;
-  };
+  p2p.relayUrls = [];
   p2p.startPolling = () => {
     p2p.startedPolling = Number(p2p.startedPolling || 0) + 1;
   };
@@ -37,7 +35,6 @@ test('RuntimeP2P connect is idempotent while relay client is connecting', () => 
 
   expect(p2p.isConnecting()).toBe(true);
   expect(p2p.closedClients).toBeUndefined();
-  expect(p2p.registeredVisibility).toBe(1);
   expect(p2p.startedPolling).toBe(1);
 });
 
@@ -52,11 +49,10 @@ test('RuntimeP2P connect is idempotent while relay client is open', () => {
 
   expect(p2p.isConnected()).toBe(true);
   expect(p2p.closedClients).toBeUndefined();
-  expect(p2p.registeredVisibility).toBe(1);
   expect(p2p.startedPolling).toBe(1);
 });
 
-test('RuntimeP2P connect preserves a relay client waiting to reconnect', () => {
+test('RuntimeP2P connect rejects a retired reconnect timer as live transport activity', () => {
   const p2p = makeDetachedP2P({
     isOpen: () => false,
     isConnecting: () => false,
@@ -65,9 +61,31 @@ test('RuntimeP2P connect preserves a relay client waiting to reconnect', () => {
 
   p2p.connect();
 
-  expect(p2p.closedClients).toBeUndefined();
-  expect(p2p.registeredVisibility).toBe(1);
+  expect(p2p.closedClients).toBe(1);
   expect(p2p.startedPolling).toBe(1);
+});
+
+test('RuntimeP2P pauses gossip timers without closing established transport', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, unknown>;
+  const announceTimer = setTimeout(() => {}, 60_000);
+  const prefetchTimer = setTimeout(() => {}, 60_000);
+  p2p.backgroundIoPaused = false;
+  p2p.announceTimer = announceTimer;
+  p2p.profilePrefetchTimer = prefetchTimer;
+  p2p.pendingAnnounceEntities = new Set(['entity']);
+  p2p.pendingProfilePrefetchIds = new Set(['profile']);
+  p2p.stopPolling = () => { p2p.pollingStopped = true; };
+  p2p.clients = [{ transport: 'still-open' }];
+
+  p2p.pauseBackgroundIo();
+
+  expect(p2p.backgroundIoPaused).toBe(true);
+  expect(p2p.pollingStopped).toBe(true);
+  expect(p2p.announceTimer).toBeNull();
+  expect(p2p.profilePrefetchTimer).toBeNull();
+  expect(p2p.pendingAnnounceEntities).toEqual(new Set());
+  expect(p2p.pendingProfilePrefetchIds).toEqual(new Set());
+  expect(p2p.clients).toEqual([{ transport: 'still-open' }]);
 });
 
 test('RuntimeP2P reconnect flushes locally queued jurisdiction discovery without local profiles', async () => {

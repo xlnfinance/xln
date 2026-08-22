@@ -41,6 +41,7 @@ import {
   type JurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
 import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
+import { countOp } from '../../support/performance/op-counters';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -69,6 +70,26 @@ const relayRouterLog = createStructuredLogger('relay.router');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
   ? (message: string): void => relayRouterLog.debug('verbose', { line: message })
   : (_message: string): void => {};
+
+type RelayMeterCategory = 'financial' | 'gossip' | 'recovery' | 'debug' | 'control' | 'error';
+
+const relayMeterCategory = (type: string): RelayMeterCategory => {
+  if (type === 'entity_inputs') return 'financial';
+  if (type.startsWith('gossip_')) return 'gossip';
+  if (type.startsWith('recovery_bundle_')) return 'recovery';
+  if (type === 'debug_event') return 'debug';
+  if (type === 'error') return 'error';
+  return 'control';
+};
+
+const countRelaySocket = (
+  direction: 'in' | 'out',
+  type: string,
+  bytes: number,
+): void => {
+  countOp(`socket.relayRouter.${direction}`, bytes);
+  countOp(`socket.relayRouter.${direction}.${relayMeterCategory(type)}`, bytes);
+};
 
 const rememberSocketRuntimeId = (ws: unknown, runtimeId: string): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
@@ -230,10 +251,13 @@ const sendRelayDelivery = (
   if (!isRelaySocketOpen(ws)) {
     return { delivery: requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN'), backpressured: false };
   }
+  const payload = wireBytes ?? serializeWsMessage(msg as RuntimeWsMessage);
+  countRelaySocket('out', String((msg as { type?: unknown }).type ?? ''), payload.byteLength);
   let result: RelaySendResult;
   try {
-    result = config.send(ws, wireBytes ?? serializeWsMessage(msg as RuntimeWsMessage));
+    result = config.send(ws, payload);
   } catch (error) {
+    countOp('socket.relayRouter.out.sendFailed');
     return {
       delivery: requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error)),
       backpressured: false,
@@ -241,8 +265,10 @@ const sendRelayDelivery = (
   }
   const disposition = classifyWebSocketSendResult(result);
   if (disposition === 'dropped') {
+    countOp('socket.relayRouter.out.dropped');
     return { delivery: requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED'), backpressured: false };
   }
+  countOp(`socket.relayRouter.out.${disposition === 'backpressured' ? 'backpressured' : 'delivered'}`);
   return { delivery: requireRelayDeliveryMetadata('delivered'), backpressured: disposition === 'backpressured' };
 };
 
@@ -675,6 +701,10 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
 
 const isRoutableRelayType = (type: string): boolean =>
   type === 'entity_inputs' ||
+  // A correlated peer error is the negative half of AccountInput delivery.
+  // Relay must forward it to the original sender; consuming it locally makes
+  // a rejected committed envelope indistinguishable from successful handoff.
+  type === 'error' ||
   type === 'gossip_response' ||
   LIVE_RECOVERY_MESSAGE_TYPES.has(type);
 
@@ -892,6 +922,23 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
     }));
     return true;
   }
+  if (type === 'error' && typeof msg.inReplyTo !== 'string') {
+    pushDebugEvent(config.store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'rejected',
+      reason: 'ROUTABLE_ERROR_CORRELATION_MISSING',
+      details: { traceId },
+    });
+    config.send(ws, serializeWsMessage({
+      type: 'error',
+      error: 'ROUTABLE_ERROR_CORRELATION_MISSING',
+      ...(context.id ? { inReplyTo: context.id } : {}),
+    }));
+    return true;
+  }
   if (type === 'entity_inputs' && (msg.encrypted !== true || typeof payload !== 'string')) {
     pushDebugEvent(config.store, {
       event: 'error',
@@ -1093,6 +1140,7 @@ export const relayRoute = async (
   }
 
   const context = createRelayRouteContext(config, ws, rawMsg as RuntimeWsMessage, rawBytes);
+  countRelaySocket('in', context.type, relayMessageByteLength(context));
   if (!prepareRelaySession(context)) return;
   const { type, to, from, traceId } = context;
 

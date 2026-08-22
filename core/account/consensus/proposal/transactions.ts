@@ -276,16 +276,7 @@ const validateOptimisticBatch = async (
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<{ machine: AccountReplica; applied: AppliedProposalTx[] } | null> => {
   if (!shouldUseOptimisticProposalBatch(context.proposalWindow)) return null;
-  const transition = beginAccountTransition(
-    context.account,
-    {
-      purpose: 'proposal-optimistic-batch',
-      frameTimestamp: context.frameTimestamp,
-      frameJHeight: context.frameJHeight,
-      txCount: context.proposalWindow.length,
-      txTypes: context.proposalWindow.map(tx => tx.type),
-    },
-  );
+  const transition = beginAccountTransition(context.account);
   const machine = accountTransitionView(transition);
   const applied: AppliedProposalTx[] = [];
   try {
@@ -298,7 +289,7 @@ const validateOptimisticBatch = async (
       }
       applied.push(result);
     }
-    return { machine: commitAccountTransition(transition).account, applied };
+    return { machine: commitAccountTransition(transition, 'proposalBatch').account, applied };
   } catch (error) {
     discardAccountTransition(transition);
     throw error;
@@ -342,15 +333,7 @@ export const validateProposalTransactions = async (
   let clonedMachine = context.account;
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
-    const transition = beginAccountTransition(
-      clonedMachine,
-      {
-        purpose: 'proposal-transaction',
-        type: tx.type,
-        frameTimestamp: context.frameTimestamp,
-        frameJHeight: context.frameJHeight,
-      },
-    );
+    const transition = beginAccountTransition(clonedMachine);
     const txMachine = accountTransitionView(transition);
     let applied: AppliedProposalTx;
     try {
@@ -366,7 +349,7 @@ export const validateProposalTransactions = async (
       else txsToRemove.push(tx);
       continue;
     }
-    clonedMachine = commitAccountTransition(transition).account;
+    clonedMachine = commitAccountTransition(transition, 'proposalTx').account;
     collectSuccessfulTransaction(
       context.account,
       effects,

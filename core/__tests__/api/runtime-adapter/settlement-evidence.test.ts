@@ -8,6 +8,7 @@ import {
 } from '../../../api/runtime-adapter/control/settlement-evidence';
 import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
 import { validateRuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
+import { RuntimeAdapterError } from '../../../api/runtime-adapter/errors';
 import { applyCommand, canonicalPair, createBook } from '../../../orderbook';
 import { createEmptyEnv } from '../../../runtime';
 import {
@@ -24,7 +25,7 @@ const leftId = entity('11');
 const rightId = entity('22');
 const offerId = 'settlement-offer-1';
 
-const makeSettlementEnv = (pending = false) => {
+const makeSettlementEnv = (pending = false, stp = false) => {
   const env = createEmptyEnv('settlement-evidence');
   const signerId = addr('aa');
   const jurisdiction = makeJurisdiction('J1', 31_337, 'dd', 'ee');
@@ -57,12 +58,27 @@ const makeSettlementEnv = (pending = false) => {
       type: 'swap_offer', data: offer,
     }, {
       type: 'swap_resolve',
-      data: { offerId, fillRatio: 65_535, cancelRemainder: true },
+      data: {
+        offerId,
+        fillRatio: stp ? 0 : 65_535,
+        cancelRemainder: true,
+        ...(stp ? { comment: 'STP:self-resting-order' } : {}),
+      },
     }],
     accountStateRoot: `0x${'12'.repeat(32)}`,
     stateHash: `0x${'34'.repeat(32)}`,
   };
-  if (pending) account.pendingFrame = account.currentFrame;
+  if (pending) {
+    account.pendingFrame = account.currentFrame;
+    account.pendingAccountInput = {
+      kind: 'frame',
+      fromEntityId: leftId,
+      toEntityId: rightId,
+      domain: structuredClone(account.state.domain),
+      disputeConfig: structuredClone(account.state.disputeConfig),
+      proposal: { frame: structuredClone(account.currentFrame) },
+    };
+  }
   const accounts = openWritableEntityAccounts(state);
   accounts.set(rightId, account);
   state.accounts = accounts.sealCandidate();
@@ -96,7 +112,19 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
   expect(pending.pendingAccountSample).toEqual([{
     entityId: leftId,
     counterpartyEntityId: rightId,
+    localIsLeft: true,
+    currentHeight: 2,
+    currentStateHash: `0x${'34'.repeat(32)}`,
     height: 2,
+    pendingFrameHash: `0x${'34'.repeat(32)}`,
+    pendingFrameTxCount: 2,
+    pendingInputKind: 'frame',
+    pendingAckHeight: null,
+    pendingProposalHeight: 2,
+    lastOutboundAckHeight: null,
+    rollbackCount: 0,
+    lastRollbackFrameHash: null,
+    mempoolCount: 0,
   }]);
   expect(response.queues.pendingOutputs.digest).toMatch(/^0x[0-9a-f]{64}$/);
   expect(response.book).toEqual({
@@ -109,7 +137,7 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     digest: expect.stringMatching(/^0x[0-9a-f]{64}$/),
   });
   expect(response.accounts[0]?.offers).toEqual([{
-    offerId, offerCommitted: true, resolveCommitted: true, live: false, closed: true,
+    offerId, offerCommitted: true, resolveCommitted: true, stpCommitted: false, live: false, closed: true,
   }]);
   expect(() => decodeSettlementEvidenceRequest({ ...request, extra: true }))
     .toThrow('RADAPTER_SETTLEMENT_REQUEST_FIELDS_INVALID');
@@ -121,6 +149,33 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     ...response,
     book: { ...response.book, liveOrderCount: 'all' },
   })).toThrow('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_COUNT_INVALID');
+});
+
+test('settlement evidence classifies only a persisted head behind live state as retryable', async () => {
+  const env = makeSettlementEnv();
+  const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
+  const staleFrame = { ...account.currentFrame, height: account.currentHeight - 1 };
+  const behind = await buildSettlementEvidence(env, request, async () => [staleFrame])
+    .then(() => null, error => error);
+  expect(behind).toBeInstanceOf(RuntimeAdapterError);
+  expect(behind).toMatchObject({ code: 'E_INTERNAL', retryable: true });
+
+  const divergentFrame = { ...account.currentFrame, stateHash: `0x${'ff'.repeat(32)}` };
+  const divergent = await buildSettlementEvidence(env, request, async () => [divergentFrame])
+    .then(() => null, error => error);
+  expect(divergent).not.toBeInstanceOf(RuntimeAdapterError);
+  expect(divergent).toMatchObject({
+    message: `RADAPTER_SETTLEMENT_CERTIFIED_HEAD_MISMATCH:${leftId}:${rightId}`,
+  });
+});
+
+test('settlement evidence counts a committed STP resolve explicitly', async () => {
+  const env = makeSettlementEnv(false, true);
+  const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
+  const response = decodeSettlementEvidenceResponse(
+    await buildSettlementEvidence(env, request, async () => [account.currentFrame]),
+  );
+  expect(response.accounts[0]?.offers[0]?.stpCommitted).toBe(true);
 });
 
 test('settlement queue counters never traverse signed payload bodies', async () => {

@@ -8,6 +8,7 @@ import {
 import { createStructuredLogger } from '../../support/logger';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { sealCommittedAccountValue } from '../../account/state/commitment/value-seal';
+import { observePerfCount } from '../../support/performance/profile';
 import {
   ACCOUNT_WORK_PENDING,
   ACCOUNT_WORK_QUEUED,
@@ -320,6 +321,13 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   // the same candidate twice per frame (commitments + seal) must not re-hash
   // every dirty Account leaf.
   #projection: PersistentEntityAccountMap | undefined;
+  // Operational conflict clock for speculative Account-machine jobs. It is
+  // deliberately outside committed state: worker completion order must never
+  // affect Entity bytes, while every claimed/replaced Account invalidates a
+  // result prepared from an older shell.
+  readonly #revisions = new Map<string, number>();
+  #clearRevision = 0;
+  #mutationClock = 0;
 
   constructor(base: PersistentEntityAccountMap) {
     this.#base = base;
@@ -348,6 +356,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     if (this.#deleted.has(entityId)) return undefined;
     const existing = this.#shells.get(entityId);
     if (existing) {
+      this.#bumpRevision(entityId);
       if (existing === this.#base.get(entityId)) {
         const shell = forkAccountReplicaShell(existing);
         this.#shells.set(entityId, shell);
@@ -359,6 +368,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     if (this.#cleared) return undefined;
     const committed = this.#base.get(entityId);
     if (!committed) return undefined;
+    this.#bumpRevision(entityId);
     const shell = forkAccountReplicaShell(committed);
     this.#shells.set(entityId, shell);
     candidateLog.debug('account.claimed', { entityId: entityId.slice(-8), height: shell.currentHeight });
@@ -376,6 +386,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     this.#projection = undefined;
     this.#deleted.delete(entityId);
     this.#shells.set(entityId, account);
+    this.#bumpRevision(entityId);
     candidateLog.debug('account.replaced', { entityId: entityId.slice(-8), height: account.currentHeight });
     return this;
   }
@@ -386,6 +397,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     const existed = this.has(entityId);
     this.#shells.delete(entityId);
     if (!this.#cleared && this.#base.has(entityId)) this.#deleted.add(entityId);
+    if (existed) this.#bumpRevision(entityId);
     return existed;
   }
 
@@ -395,6 +407,8 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     this.#shells.clear();
     this.#deleted.clear();
     this.#cleared = true;
+    this.#mutationClock += 1;
+    this.#clearRevision = this.#mutationClock;
   }
 
   *entries(): MapIterator<[string, AccountReplica]> {
@@ -471,6 +485,12 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     return new Set([...this.#shells.keys(), ...this.#deleted]);
   }
 
+  /** Exact frame-local revision used only to reject stale worker results. */
+  revision(entityId: string): number {
+    this.#requireActive();
+    return Math.max(this.#clearRevision, this.#revisions.get(entityId) ?? 0);
+  }
+
   workMask(entityId: string): AccountWorkMask | undefined {
     if (this.#deleted.has(entityId)) return undefined;
     const account = this.#shells.get(entityId);
@@ -528,11 +548,21 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
         value: finalize ? account : forkAccountReplicaShell(account),
       });
     }
+    observePerfCount('entity.accountProjection.calls');
+    observePerfCount('entity.accountProjection.mutations', mutations.length);
+    observePerfCount(
+      finalize ? 'entity.accountProjection.finalize' : 'entity.accountProjection.snapshot',
+    );
     return this.#base.foldDirty(mutations, this.#cleared);
   }
 
   #requireActive(): void {
     if (!this.#active) throw new Error('ENTITY_ACCOUNT_CANDIDATE_SEALED');
+  }
+
+  #bumpRevision(entityId: string): void {
+    this.#mutationClock += 1;
+    this.#revisions.set(entityId, this.#mutationClock);
   }
 
 }

@@ -1,4 +1,4 @@
-import type { AccountInput, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountPeerInput, AccountReplica } from '../../../types/account';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { accountInputBoardReseal } from '../flush';
 import type { HandleAccountInputResult } from '../types';
@@ -122,7 +122,7 @@ const validateBoardResealFrame = (
 
 const validateBoardResealMetadata = (
   account: AccountReplica,
-  input: AccountInput,
+  input: AccountPeerInput,
   reseal: BoardResealPayload,
   securityContext: AccountInputSecurityContext,
   events: string[],

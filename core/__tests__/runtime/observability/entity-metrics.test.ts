@@ -21,10 +21,12 @@ describe('post-WAL Entity metrics', () => {
   test('counts exact committed payment and swap events', () => {
     const env = createEmptyEnv('entity-metrics');
     recordCommittedRuntimeEntityMetrics(env, 7, [
+      event('HtlcForwardAccepted', { entityId: ENTITY, hashlock: `0x${'12'.repeat(32)}` }),
       event('HtlcReceived', { entityId: ENTITY }),
       event('SwapMatched', { entityId: ENTITY, count: 3 }),
     ]);
     expect(readRuntimeEntityMetricStats(env, ENTITY)).toEqual({
+      acceptedPayments: 1,
       completedPayments: 1,
       matchedSwaps: 3,
       updatedAtRuntimeHeight: 7,

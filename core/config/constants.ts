@@ -17,11 +17,15 @@ export const UINT16_MAX = 0xffff;
 
 export const LIMITS = {
 
-  /** Maximum transactions in entity mempool before rejection */
-  MEMPOOL_SIZE: 1000,
+  /**
+   * Maximum queued Entity transactions. Throughput pressure is drained by the
+   * Runtime FIFO; 10k is headroom for one 1000-user HLT cadence plus backlog,
+   * never permission to drop a valid input at this boundary.
+   */
+  MEMPOOL_SIZE: 10_000,
 
   /** Maximum pending transactions in one bilateral Account mempool/frame. */
-  ACCOUNT_MEMPOOL_SIZE: 1000,
+  ACCOUNT_MEMPOOL_SIZE: 10_000,
 
   /** Maximum size of a single frame in bytes. 1000 tx frames get a 10KB/tx budget. */
   MAX_FRAME_SIZE_BYTES: 10_000_000,
@@ -84,11 +88,35 @@ export const LIMITS = {
   /** Maximum resting orders per pair book */
   MAX_ORDERBOOK_ORDERS_PER_PAIR: 10_000,
 
-  /** Process-local Runtime ingress bounds; accepted durable work bypasses these only during recovery. */
-  MAX_RUNTIME_MEMPOOL_RUNTIME_TXS: 1_000,
+  /**
+   * Process-local Runtime ingress bounds. Every individual lane admits at
+   * least one complete 10k-item load batch. The aggregate is the sum of its
+   * three independently bounded lanes, so one busy lane cannot steal another.
+   */
+  MAX_RUNTIME_MEMPOOL_RUNTIME_TXS: 10_000,
   MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS: 10_000,
-  MAX_RUNTIME_MEMPOOL_J_INPUTS: 1_000,
-  MAX_RUNTIME_MEMPOOL_TOTAL_ITEMS: 20_000,
+  MAX_RUNTIME_MEMPOOL_J_INPUTS: 10_000,
+  MAX_RUNTIME_MEMPOOL_TOTAL_ITEMS: 30_000,
+
+  /** One externally submitted RuntimeInput before it joins the Runtime FIFO. */
+  MAX_RUNTIME_INPUT_RUNTIME_TXS: 10_000,
+  MAX_RUNTIME_INPUT_ENTITY_INPUTS: 10_000,
+
+  /** Pending post-WAL network outputs. Reaching this is fatal, never eviction. */
+  MAX_PENDING_NETWORK_OUTPUTS: 10_000,
+
+  /** EntityInputs carried by one authenticated P2P envelope. Byte caps still dominate. */
+  MAX_P2P_ENTITY_INPUTS_PER_ENVELOPE: 10_000,
+
+  /** Market-maker planning work admitted by one deterministic Runtime tick. */
+  MAX_MARKET_MAKER_NEW_OFFERS_PER_TICK: 10_000,
+  MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK: 10_000,
+  MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK: 10_000,
+
+  /** Binary transport/control ceilings; all exceed one canonical 10 MB frame. */
+  MAX_RUNTIME_WS_MESSAGE_BYTES: 32 * 1024 * 1024,
+  MAX_RUNTIME_ADAPTER_MESSAGE_BYTES: 16 * 1024 * 1024,
+  MAX_HLT_HOST_BATCH_BODY_BYTES: 32 * 1024 * 1024,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

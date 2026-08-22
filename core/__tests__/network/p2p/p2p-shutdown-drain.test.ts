@@ -20,35 +20,44 @@ test('offline target and ingress rejection are loud transport failures', () => {
   env.warn = (_category, message) => { warnings.push(message); };
 
   reportRelayClientError(env, 'ws://relay', new Error('ENTITY_INPUT_TARGET_NOT_CONNECTED'));
-  expect(errors).toEqual(['ENTITY_INPUT_TARGET_OFFLINE']);
+  expect(errors).toEqual(['WS_RELAY_FATAL']);
   expect(warnings).toEqual([]);
 
   reportRelayClientError(env, 'ws://relay', new Error('ENTITY_INPUT_RATE_LIMITED'));
   expect(errors).toEqual([
-    'ENTITY_INPUT_TARGET_OFFLINE',
-    'ENTITY_INPUT_RATE_LIMITED',
+    'WS_RELAY_FATAL',
+    'WS_RELAY_FATAL',
   ]);
   expect(warnings).toEqual([]);
 
   reportRelayClientError(env, 'ws://relay', new Error(
-    'INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput',
+    'P2P_INBOUND_ENTITY_INPUT_REJECTED:INBOUND_ENTITY_RUNTIME_QUIESCING: ' +
+      'entity=0x11 signer=0x22 txTypes=consensusOutput',
   ));
   expect(errors).toEqual([
-    'ENTITY_INPUT_TARGET_OFFLINE',
-    'ENTITY_INPUT_RATE_LIMITED',
-    'WS_CLIENT_INGRESS_REJECTED',
+    'WS_RELAY_FATAL',
+    'WS_RELAY_FATAL',
+    'WS_RELAY_FATAL',
   ]);
   expect(warnings).toEqual([]);
 
   reportRelayClientError(env, 'ws://relay', new Error('unexpected transport failure'));
-  expect(warnings).toEqual(['WS_CLIENT_ERROR']);
+  expect(errors).toEqual([
+    'WS_RELAY_FATAL',
+    'WS_RELAY_FATAL',
+    'WS_RELAY_FATAL',
+    'WS_RELAY_FATAL',
+  ]);
+  expect(warnings).toEqual([]);
 });
 
 test('direct runtime rejection is a visible transport error, never a retry hint', () => {
   const env = createEmptyEnv('p2p-direct-quiesce-severity');
   const info: string[] = [];
+  const errors: string[] = [];
   const warnings: string[] = [];
   env.info = (_category, message) => { info.push(message); };
+  env.error = (_category, message) => { errors.push(message); };
   env.warn = (_category, message) => { warnings.push(message); };
 
   expect(reportDirectClientError(
@@ -58,11 +67,13 @@ test('direct runtime rejection is a visible transport error, never a retry hint'
     new Error('INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput'),
   )).toBe('transport-error');
   expect(info).toEqual([]);
-  expect(warnings).toEqual(['WS_DIRECT_ERROR']);
+  expect(errors).toEqual(['WS_DIRECT_FATAL']);
+  expect(warnings).toEqual([]);
 
   expect(reportDirectClientError(env, 'ws://peer/ws', `0x${'22'.repeat(20)}`, new Error('socket failed')))
     .toBe('transport-error');
-  expect(warnings).toEqual(['WS_DIRECT_ERROR', 'WS_DIRECT_ERROR']);
+  expect(errors).toEqual(['WS_DIRECT_FATAL', 'WS_DIRECT_FATAL']);
+  expect(warnings).toEqual([]);
 });
 
 test('node websocket async send failures retain exact envelope correlation', () => {
@@ -103,21 +114,32 @@ test('node websocket async send failures retain exact envelope correlation', () 
   expect(errors[0]).toContain(':buffered=77:error=kernel flush failed');
 });
 
-test('an unauthenticated duplicate-runtime close cannot permanently stop a headless client', () => {
+test('a socket close never schedules an implicit transport retry', () => {
+  const errors: string[] = [];
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
     helloAudience: 'ws://127.0.0.1:1/relay',
+    onError: error => errors.push(error.message),
   });
   const internals = client as unknown as {
     closed: boolean;
-    shouldReconnectAfterClose: (code: number, reason: string) => boolean;
+    connecting: boolean;
+    lifecycleGeneration: number;
+    ws: { readyState: number; bufferedAmount: number };
+    handleSocketClose: (generation: number, code: number, reason: string) => void;
   };
 
-  expect(internals.shouldReconnectAfterClose(4009, 'superseded-runtime')).toBe(true);
+  internals.ws = { readyState: 3, bufferedAmount: 0 };
+  internals.connecting = true;
+  internals.handleSocketClose(0, 4009, 'duplicate-runtime');
+
+  expect(internals.lifecycleGeneration).toBe(0);
+  expect(internals.connecting).toBe(false);
   expect(internals.closed).toBe(false);
-  expect(internals.shouldReconnectAfterClose(1006, 'duplicate-runtime')).toBe(true);
-  expect(internals.closed).toBe(false);
+  expect(errors).toEqual([
+    expect.stringContaining('WS_UNEXPECTED_CLOSE:'),
+  ]);
 });
 
 test('websocket client remains closed until the authenticated hello settles', async () => {
@@ -142,7 +164,6 @@ test('websocket client remains closed until the authenticated hello settles', as
     runtimeId: RUNTIME_ID,
     helloAudience: canonicalizeRuntimeWsAudience(`ws://127.0.0.1:${server.port}/relay`),
     encryptionKeyPair: deriveEncryptionKeyPair('p2p-handshake-lifecycle'),
-    maxReconnectAttempts: 1,
   });
 
   await client.connect();
@@ -391,7 +412,7 @@ test('synchronous websocket close keeps a missing handshake loud during awaited 
   expect(internals.ws).toBe(socket);
 });
 
-test('p2p shutdown cancels the deferred bootstrap poll', async () => {
+test('p2p start has no duplicate bootstrap poll before slow reconciliation', async () => {
   const env = createEmptyEnv('p2p-shutdown-drain');
   const p2p = new RuntimeP2P({
     env,
@@ -399,21 +420,21 @@ test('p2p shutdown cancels the deferred bootstrap poll', async () => {
     onEntityInputs: () => {},
     onGossipProfiles: () => {},
   });
-  let bootstrapPolls = 0;
+  let gossipPolls = 0;
   const internals = p2p as unknown as {
     requestSeedGossip: () => void;
     startPolling: () => void;
     closeAndWait: () => Promise<void>;
   };
   internals.requestSeedGossip = () => {
-    bootstrapPolls += 1;
+    gossipPolls += 1;
   };
 
   internals.startPolling();
   await internals.closeAndWait();
   await Bun.sleep(150);
 
-  expect(bootstrapPolls).toBe(0);
+  expect(gossipPolls).toBe(0);
 });
 
 test('p2p shutdown aborts an in-flight retry delay', async () => {

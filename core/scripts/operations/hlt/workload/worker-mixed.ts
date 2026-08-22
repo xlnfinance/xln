@@ -3,12 +3,13 @@
  *
  * Mix 1:1 no longer partitions users into pay-only vs swap-only halves.
  * The same 1000 Entities open one Hub Account, then each cadence tick
- * every user pays someone else and every maker/taker pair matches twice
- * so offered pay/s and swap/s are equal.
+ * every user pays someone else and submits exactly one swap order. Half the
+ * users ask and half bid at one exact price; roles flip every round. N users
+ * therefore mean exactly N payments + N offers = N/2 economic swaps per tick.
  */
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
   decodeEntitySummaries,
@@ -21,22 +22,31 @@ import {
 } from '../boundary/worker-boundary';
 import { decodeLoadPaymentReport } from '../boundary/worker-payment-boundary';
 import { assertProductionSwapFullySettled } from '../settlement';
-import { waitForFullySettledEvidence } from '../settlement-reader';
-import { grantBilateralTokenCredit } from '../lanes/worker-lanes';
-import { stopLaneRuntimes } from '../lanes/lane-runtimes';
+import { waitForExpectedMatchedTrades, waitForFullySettledEvidence } from '../settlement-reader';
+import {
+  assertLaneHostSocketCounterCoverage,
+  resetLaneHostOpCounters,
+  stopLaneRuntimes,
+} from '../lanes/lane-runtimes';
 import {
   prepareParallelSameLoad,
+  cancelPreparedRestingTail,
   submitPreparedParallelSameLoad,
   type PreparedParallelSameLoad,
 } from './worker-same-lanes';
+import { assertBalancedExchangeDistribution } from './worker-same-plan';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
   connectRuntime,
+  disconnectRuntimeControl,
   directoryBytes,
   entryByLabel,
   exportReplayBaseSnapshotIfConfigured,
   persistReport,
   readLoadBook,
+  resetHltProcessOpCounters,
+  assertHltHubProcessIsolation,
+  stopHltHubBackgroundIo,
   resolveWalPath,
   type WorkerArgs,
 } from '../worker-runtime';
@@ -45,12 +55,9 @@ import {
 } from '../economy';
 import {
   paymentReceiverIndexSamePopulation,
-  paymentTotalForSender,
-  paymentTotalsByReceiverSamePopulation,
 } from './worker-payments-plan';
 import {
   buildRoundPayment,
-  CREDIT_HEADROOM_MULTIPLE,
   PAYMENT_TOKEN_ID,
   waitForHubSettlement,
   waitForRoutableReceivers,
@@ -60,7 +67,6 @@ import type { LaneRuntime } from '../lanes/lane-runtimes';
 export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> => {
   const plan = args.plan;
   if (!plan) throw new Error('HLT_MIXED_PLAN_REQUIRED');
-  const swapMatches = plan.swapMatchesPerLaneRound;
   const manifestPath = join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json');
   const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown);
   const hubLabel = plan.economy.hubLabels[0] ?? 'H1';
@@ -82,34 +88,20 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       workDir: args.workDir,
       portBase: args.portBase,
       hub,
+      marketMaker,
       hubIdentity,
       initialBook: setupBook,
       minimumTradeSize,
       swapsPerRound: args.lanes,
-      rounds: args.rounds * swapMatches,
+      rounds: args.rounds,
       lanes: args.lanes,
       laneOffset: args.laneOffset,
+      execution: 'balanced',
     });
-    const users: LaneRuntime[] = [...prepared.makerRuntimes, ...prepared.takerRuntimes];
+    assertBalancedExchangeDistribution(prepared.distribution);
+    console.log(`[load] balanced exchange ${safeStringify(prepared.distribution)}`);
+    const users: LaneRuntime[] = [...prepared.traderRuntimes];
     const amountRange = plan.economy.paymentAmountRange ?? HLT_DEFAULT_PAYMENT_AMOUNT_RANGE;
-    const perSender = users.map((_, senderIndex) =>
-      paymentTotalForSender(senderIndex, args.rounds, amountRange) * CREDIT_HEADROOM_MULTIPLE);
-    const perReceiver = paymentTotalsByReceiverSamePopulation(users.length, args.rounds, amountRange)
-      .map(total => total * CREDIT_HEADROOM_MULTIPLE);
-    const quoteCredit = users.map((_, index) => {
-      const spend = perSender[index]!;
-      const receive = perReceiver[index]!;
-      return spend > receive ? spend : receive;
-    });
-    await grantBilateralTokenCredit({
-      hub,
-      hubIdentity,
-      runtimes: users,
-      tokenId: PAYMENT_TOKEN_ID,
-      amounts: quoteCredit,
-      additive: true,
-      label: 'hlt-mixed-pay-credit',
-    });
     await waitForRoutableReceivers(
       users,
       hubIdentity.entityId,
@@ -120,40 +112,48 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     );
 
     const initialBook = await readLoadBook(hub, hubIdentity.entityId);
-    if (initialBook.tradeCount !== setupBook.tradeCount) {
-      throw new Error('PRODUCTION_SWAP_LOAD_SETUP_CONCURRENT_TRADES');
+    if (initialBook.tradeCount !== prepared.setupTradeCount) {
+      throw new Error(
+        `PRODUCTION_SWAP_LOAD_SETUP_TRADE_COUNT_MISMATCH:${initialBook.tradeCount}:${prepared.setupTradeCount}`,
+      );
     }
+    await stopHltHubBackgroundIo(args);
+    await Promise.all([
+      resetLaneHostOpCounters(users),
+      resetHltProcessOpCounters(args, [hub]),
+    ]);
     await exportReplayBaseSnapshotIfConfigured(hub);
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const hubDurableBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const hubCountersBefore = decodeHubSettlementCounters(
-      await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}`),
+      await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}/settlement-counters`),
     );
     const driverRssBefore = process.memoryUsage().rss;
-    const expectedSwaps = args.lanes * args.rounds * swapMatches;
+    const expectedSubmittedOffers = prepared.distribution.submittedOffers;
     const senderIndexByLaneKey = new Map(users.map((lane, index) => [lane.laneKey, index]));
-    const offerCadenceMs = Math.max(1, Math.floor(args.cadenceMs / swapMatches));
+    const offerCadenceMs = args.cadenceMs;
 
+    // Control URLs remain available, but no frontend is connected while H1 is
+    // measured. Financial delivery uses only each sovereign Runtime's direct
+    // P2P socket; settlement-reader reconnects control after Hub drain.
+    for (const lane of users) disconnectRuntimeControl(lane.runtime);
     const startedAt = performance.now();
-    // Open-loop stream: three adjacent swap actions share one RuntimeInput.
-    // With swapMatches=2 this folds alternating 2/1 payments into each input,
-    // staying inside the owner-approved 1-3 swaps + 1-3 payments per frame.
-    // Nothing waits for Hub progress or a previous Runtime commit.
+    // One cadence tick is exactly one swap + one payment per sovereign user.
+    // Nothing waits for Hub progress, Runtime commit, or an earlier Account ACK.
     const submitted = await submitPreparedParallelSameLoad({
       hub,
       hubIdentity,
       initialBook,
       swapsPerRound: args.lanes,
-      rounds: args.rounds * swapMatches,
+      rounds: args.rounds,
       cadenceMs: offerCadenceMs,
-      actionsPerFrame: 3,
+      actionsPerFrame: 1,
       prepared,
       extraEntityTxs: ({ lane, identity, round }) => {
-        if (round % swapMatches !== 0) return [];
         const senderIndex = senderIndexByLaneKey.get(lane.laneKey);
         if (senderIndex === undefined) throw new Error(`HLT_MIXED_TICK_LANE_MISMATCH:${lane.laneKey}`);
-        const tick = round / swapMatches;
+        const tick = round;
         const receiver = users[paymentReceiverIndexSamePopulation(senderIndex, tick, users.length)]!;
         return buildRoundPayment(
           identity,
@@ -166,33 +166,70 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       },
     });
     const submittedPayments = users.length * args.rounds;
-    const settlementEvidence = await waitForFullySettledEvidence({
-      hub,
-      load: users.map(lane => ({
-        runtime: lane.runtime,
-        pairs: submitted.settlementPairs.filter(pair => pair.loadEntityId === lane.identity.entityId),
-      })),
-      marketMaker,
-      hubBookEntityId: hubIdentity.entityId,
-      pairs: submitted.settlementPairs,
-      tradeCountBefore: initialBook.tradeCount,
-      expectedSwaps,
-      startedAt,
-    });
-    const rates = assertProductionSwapFullySettled(settlementEvidence);
-    const matchedElapsedMs = settlementEvidence.matchedElapsedMs;
-    const hubCountersAfter = await waitForHubSettlement(
+    // Both economic counters start at the same open-loop timestamp. Waiting
+    // for swap drain before observing payments made payment TPS equal to the
+    // slower swap gate even when every payment had already committed.
+    const paymentSettlementPromise = waitForHubSettlement(
       hub,
       hubIdentity.entityId,
       hubCountersBefore.completedPayments,
+      hubCountersBefore.acceptedPayments,
       submittedPayments,
+      startedAt,
     );
-    const deliveredElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
+    // Pairwise-balanced orders have no measured MM dependency. The committed
+    // Hub trade delta, not submitted order count, is the swap TPS authority.
+    const matchedDrain = await waitForExpectedMatchedTrades({
+      hub,
+      hubBookEntityId: hubIdentity.entityId,
+      tradeCountBefore: initialBook.tradeCount,
+      expectedMatchedTrades: args.lanes * args.rounds,
+      startedAt,
+      allowAdditionalTrades: true,
+      acceptDrainedBelowTarget: true,
+    });
+    const expectedMatchedTrades = matchedDrain.matchedTrades;
+    const matchedElapsedMs = matchedDrain.matchedElapsedMs;
+    const observedDistribution = {
+      ...prepared.distribution,
+      matchedTrades: expectedMatchedTrades,
+    };
+    const cancellation = await cancelPreparedRestingTail(prepared);
+    const [settlementEvidence, paymentSettlement] = await Promise.all([
+      waitForFullySettledEvidence({
+        hub,
+        load: users.map(lane => ({
+          runtime: lane.runtime,
+          pairs: submitted.settlementPairs.filter(pair => pair.loadEntityId === lane.identity.entityId),
+        })),
+        marketMaker,
+        hubBookEntityId: hubIdentity.entityId,
+        pairs: submitted.settlementPairs,
+        tradeCountBefore: initialBook.tradeCount,
+        expectedSubmittedOffers,
+        expectedMatchedTrades,
+        expectedFullySettledOffers: expectedSubmittedOffers,
+        cancelledOffers: cancellation.cancelledOffers,
+        startedAt,
+        matchedElapsedMs,
+      }),
+      paymentSettlementPromise,
+    ]);
+    const rates = assertProductionSwapFullySettled(settlementEvidence);
+    const hubCountersAfter = paymentSettlement.counters;
+    const hubIngressElapsedMs = paymentSettlement.hubIngressElapsedMs;
+    const deliveredElapsedMs = paymentSettlement.deliveredElapsedMs;
+    const [hubIo, laneIo] = await Promise.all([
+      assertHltHubProcessIsolation(args),
+      assertLaneHostSocketCounterCoverage(users),
+    ]);
+    console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo })}`);
     const hubDurableAfter = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
 
     const paymentReport = decodeLoadPaymentReport({
       schema: 'xln-hlt-payment-load-v1',
       mode: 'payments',
+      runId: basename(args.workDir),
       completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
       configuredUsers: users.length,
       configuredRounds: args.rounds,
@@ -205,11 +242,17 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       submittedPayments,
       deliveredPayments: submittedPayments,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
+      sourceDispatchFinishedElapsedMs: submitted.sourceDispatchFinishedElapsedMs,
+      sourceAllAckedElapsedMs: submitted.sourceAllAckedElapsedMs,
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       deliveredElapsedMs,
       deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
       hubCompletedPaymentsBefore: hubCountersBefore.completedPayments,
       hubCompletedPaymentsAfter: hubCountersAfter.completedPayments,
+      hubAcceptedPaymentsBefore: hubCountersBefore.acceptedPayments,
+      hubAcceptedPaymentsAfter: hubCountersAfter.acceptedPayments,
+      hubIngressElapsedMs,
+      settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),
@@ -222,9 +265,9 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const swapReport = decodeLoadSustainedReport({
       schema: 'xln-production-swap-load-sustained-v1',
       mode: 'same',
-      schedule: 'one_order_per_account_per_round',
+      schedule: 'balanced_role_rotation',
       configuredUsers: users.length,
-      configuredRounds: args.rounds * swapMatches,
+      configuredRounds: args.rounds,
       cadenceMs: offerCadenceMs,
       offeredOrderRate: users.length * 1_000 / offerCadenceMs,
       offeredEconomicSwapRate: args.lanes * 1_000 / offerCadenceMs,
@@ -235,8 +278,13 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       runtimeInputBatches: submitted.runtimeInputBatches,
       roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
-      matchedEconomicSwaps: settlementEvidence.tradeCountAfter - initialBook.tradeCount,
-      fullySettledEconomicSwaps: settlementEvidence.expectedSwaps,
+      expectedSubmittedOffers,
+      expectedMatchedTrades,
+      expectedFullySettledOffers: expectedSubmittedOffers,
+      cancelledOffers: cancellation.cancelledOffers,
+      stpOffers: settlementEvidence.stpOffers,
+      matchedSubmittedOffers: prepared.distribution.matchedSubmittedOffers,
+      exchangeDistribution: observedDistribution,
       enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
       commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       matchedElapsedMs,
@@ -245,8 +293,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       fullySettledTps: rates.fullySettledTps,
       tradeCountBefore: initialBook.tradeCount,
       tradeCountAfter: settlementEvidence.tradeCountAfter,
-      submittedEconomicSwaps: expectedSwaps,
-      uncompletedEconomicSwapsAfterRun: 0,
       driverRssBefore,
       driverRssAfter: process.memoryUsage().rss,
       walBytesBefore,
@@ -263,7 +309,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     publishHltDashboardPerfFromWorkDir(args.workDir);
     console.log(safeStringify({ payment: paymentReport, swap: swapReport }));
   } finally {
-    if (prepared) await stopLaneRuntimes([...prepared.makerRuntimes, ...prepared.takerRuntimes]);
+    if (prepared) await stopLaneRuntimes(prepared.traderRuntimes);
     hub.adapter.disconnect();
     marketMaker.adapter.disconnect();
   }

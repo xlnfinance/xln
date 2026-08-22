@@ -3,20 +3,23 @@
 **Reserve-Credit Provable Account Network** — bilateral finance with provable
 credit, collateral enforcement, and EVM dispute resolution.
 
-Start with [constraints.md](constraints.md). It explains why XLN is not "one
-more L2", but a consequence of the scaling and enforcement constraints.
+Start with [constraints.md](constraints.md). It explains why xln is not "one
+more L2", but a consequence of the scaling and enforcement constraints. Then
+read [competitors.md](competitors.md) for the architecture-only comparison with
+big-block chains, sharding, rollups, channels, and bilateral systems.
 
 ## Quick Start
 
-**New to XLN**
+**New to xln**
 
 1. [constraints.md](constraints.md) — why broadcast finance cannot scale
-2. [intro.md](intro.md) — XLN in 5 minutes
-3. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
-4. [core/rjea-architecture.md](core/rjea-architecture.md) — the core/entity/account/jurisdiction stack
-5. [architecture/reactive-network.html](architecture/reactive-network.html) — the reactive cascade diagram
-6. [status.md](status.md) — the current source of truth
-7. [../todo.md](../todo.md) — the active TODO/NEXT backlog
+2. [competitors.md](competitors.md) — xln versus big blocks, sharding, rollups, and channels
+3. [intro.md](intro.md) — xln in 5 minutes
+4. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
+5. [core/rjea-architecture.md](core/rjea-architecture.md) — the core/entity/account/jurisdiction stack
+6. [architecture/reactive-network.html](architecture/reactive-network.html) — the reactive cascade diagram
+7. [status.md](status.md) — the current source of truth
+8. [../todo.md](../todo.md) — the active TODO/NEXT backlog
 
 **Developers**
 
@@ -41,9 +44,10 @@ more L2", but a consequence of the scaling and enforcement constraints.
 
 | Document | Description |
 |----------|-------------|
+| [competitors.md](competitors.md) | architecture-only comparison with global ledgers, sharding, rollups, and channels |
 | [architecture/bilaterality.md](architecture/bilaterality.md) | why bilateral topology is necessary |
 | [architecture/reactive-network.html](architecture/reactive-network.html) | visual cascade of account/entity/core/cross-runtime reactions |
-| [architecture/why-evm.md](architecture/why-evm.md) | why XLN needs EVM enforcement |
+| [architecture/why-evm.md](architecture/why-evm.md) | why xln needs EVM enforcement |
 | [architecture/hanko.md](architecture/hanko.md) | hierarchical entity signatures |
 | [architecture/contracts.md](architecture/contracts.md) | on-chain contract surface |
 | [merkle.md](merkle.md) | durable state and Merkle roots |
@@ -85,4 +89,4 @@ more L2", but a consequence of the scaling and enforcement constraints.
 
 - [archive/](archive/) — historical planning, research, philosophy, and logs
 
-**Last updated:** 2026-06-16
+**Last updated:** 2026-08-21

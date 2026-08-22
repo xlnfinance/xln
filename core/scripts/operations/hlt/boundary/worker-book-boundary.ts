@@ -24,6 +24,7 @@ export type LoadBookSnapshot = Readonly<{
   bestBidPriceTicks: bigint | null;
   bestAskPriceTicks: bigint;
   executableAskPriceTicks: readonly bigint[];
+  executableAsks: readonly Readonly<{ priceTicks: bigint; qtyLots: bigint }>[];
   /** Orders in the bounded remote book view, not the full Patricia tree. */
   visibleBidOrders: number;
   visibleAskOrders: number;
@@ -106,6 +107,20 @@ const decodeExecutableAskPrices = (pages: BookPricePageTree): bigint[] => {
   return prices;
 };
 
+const decodeExecutableAsks = (
+  pages: BookPricePageTree,
+): Array<Readonly<{ priceTicks: bigint; qtyLots: bigint }>> => {
+  const asks: Array<Readonly<{ priceTicks: bigint; qtyLots: bigint }>> = [];
+  for (const [key, page] of pages.entries()) {
+    for (let slot = page.headSlot; slot < page.nextSlot; slot += 1) {
+      const order = page.slots[slot];
+      if (order) asks.push({ priceTicks: key.priceTicks, qtyLots: order.qtyLots });
+    }
+  }
+  if (asks.length === 0) throw new Error('PRODUCTION_SWAP_LOAD_MM_ASK_MISSING');
+  return asks;
+};
+
 const decodeBestBidPrice = (
   pages: BookPricePageTree,
 ): bigint | null => pages.lastEntry()?.[0].priceTicks ?? null;
@@ -145,6 +160,7 @@ export const decodeLoadBookPage = (value: unknown, pairId: string): LoadBookSnap
     bestBidPriceTicks: decodeBestBidPrice(bids),
     bestAskPriceTicks: executableAskPriceTicks[0]!,
     executableAskPriceTicks,
+    executableAsks: decodeExecutableAsks(asks),
     visibleBidOrders: countVisibleBookOrders(bids),
     visibleAskOrders: countVisibleBookOrders(asks),
   };

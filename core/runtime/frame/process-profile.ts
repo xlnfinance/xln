@@ -7,7 +7,13 @@ import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica } from '../types';
 import { getPerfMs } from '../../support/time';
 import { nodeProcess } from '../../support/process/runtime-process';
-import { OP_COUNTERS_ENABLED, diffOpCounters, snapshotOpCounters, type OpCounterSnapshot } from '../../support/performance/op-counters';
+import {
+  OP_COUNTERS_ENABLED,
+  countOp,
+  diffOpCounters,
+  snapshotOpCounters,
+  type OpCounterSnapshot,
+} from '../../support/performance/op-counters';
 
 const runtimeLog = createStructuredLogger('runtime');
 const APPLY_PROFILE = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';
@@ -121,6 +127,7 @@ type ProcessProfileState = {
   liveEnv: RuntimeReplica;
   enabled: boolean;
   startedAt: number;
+  lastWallAt: number;
   cpuStart: CpuUsage | undefined;
   opsStart: OpCounterSnapshot | undefined;
   marks: Record<string, number>;
@@ -155,7 +162,10 @@ const createProfileMetrics = (
 });
 
 const markRuntimeProcessProfile = (state: ProcessProfileState, label: string): void => {
-  state.marks[label] = Math.round(getPerfMs() - state.startedAt);
+  const nowWall = getPerfMs();
+  state.marks[label] = Math.round(nowWall - state.startedAt);
+  countOp(`runtime.phase.${label}`, 0, Math.round((nowWall - state.lastWallAt) * 1_000));
+  state.lastWallAt = nowWall;
   if (state.lastCpu && nodeProcess?.cpuUsage) {
     const now = nodeProcess.cpuUsage();
     state.cpuMarks.push({
@@ -273,7 +283,7 @@ export const createRuntimeProcessProfile = (
   const opsStart = enabled && OP_COUNTERS_ENABLED ? snapshotOpCounters('frame') : undefined;
   const metrics = createProfileMetrics(liveEnv, enabled, triggerReason);
   const state: ProcessProfileState = {
-    liveEnv, enabled, startedAt, cpuStart, opsStart,
+    liveEnv, enabled, startedAt, lastWallAt: startedAt, cpuStart, opsStart,
     marks: {}, cpuMarks: [], lastCpu: cpuStart,
     phaseOps: {}, lastOps: opsStart, metrics,
   };

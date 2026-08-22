@@ -10,7 +10,7 @@ import type {
   AccountBoardReseal,
   AccountDisputeSeal,
   AccountFrame,
-  AccountInput,
+  AccountPeerInput,
   AccountReplica,
   AccountState,
   AccountTx,
@@ -30,6 +30,7 @@ import {
   computeAccountStateRoot,
   computeCanonicalMerkleRoot,
   EMPTY_ACCOUNT_STATE_ROOT,
+  encodeAccountStateValue,
 } from '../../account/commitment/state-root';
 import { counterpartySettlementHankos } from '../../account/settlement/witness-projection';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
@@ -37,6 +38,8 @@ import { createStructuredLogger } from '../../support/logger';
 import { readRuntimeEnv } from '../../support/process/runtime-process';
 import { getPerfMs } from '../../support/time';
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { timePerfPhase } from '../../support/performance/profile';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import {
   ENTITY_ACCOUNT_VALUE_MAP_RADIX,
   PersistentEntityAccountMap,
@@ -44,6 +47,7 @@ import {
 } from '../state/persistent-account-map';
 import { entityCollectionCommitment } from '../state/persistent-collection-map';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
+import { buildHexKeyedMerkle } from '../../protocol/state/radix-merkle';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -261,6 +265,43 @@ const ACCOUNT_LEAF_BODY_FIELDS = [
 /** Hoisted: the projection runs once per account leaf on every root computation. */
 const ACCOUNT_LEAF_BODY_FIELD_SET: ReadonlySet<string> = new Set(ACCOUNT_LEAF_BODY_FIELDS);
 
+const ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS = [
+  'accountStateRoot',
+  'mempoolRoot',
+  'currentFrameHash',
+  'pendingFrameHash',
+  'counterpartySettlementHankos',
+  'pendingWithdrawals',
+  'shadow',
+  'pendingAccountInput',
+  'lastOutboundFrameAck',
+] as const;
+
+export const ENTITY_ACCOUNT_LEAF_FIELDS = [
+  ...ACCOUNT_ENTITY_COMMITTED_FIELDS.filter(field => !ACCOUNT_LEAF_BODY_FIELD_SET.has(field)),
+  ...ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS,
+] as const;
+const ENTITY_ACCOUNT_LEAF_UTF8 = new TextEncoder();
+const ENTITY_ACCOUNT_LEAF_KEYS: ReadonlyMap<string, string> = new Map(
+  ENTITY_ACCOUNT_LEAF_FIELDS.map(field => [
+    field,
+    computeIntegrityDigest(ENTITY_ACCOUNT_LEAF_UTF8.encode(`xln.entity.account-leaf.${field}`)),
+  ]),
+);
+
+export const entityAccountLeafMerkleKey = (field: string): string => {
+  const hexKey = ENTITY_ACCOUNT_LEAF_KEYS.get(field);
+  if (!hexKey) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
+  return hexKey;
+};
+
+const computeEntityAccountLeafMerkleRoot = (
+  entries: ReadonlyArray<readonly [string, unknown]>,
+): string => buildHexKeyedMerkle(entries.map(([field, value]) => ({
+  hexKey: entityAccountLeafMerkleKey(field),
+  value: encodeAccountStateValue(value),
+})), { hashAlgorithm: 'integrity' }).root;
+
 const compactDisputeSeal = (seal: AccountDisputeSeal): Record<string, unknown> => ({
   hash: seal.hash,
   proofBodyHash: seal.proofBodyHash,
@@ -276,7 +317,7 @@ const compactBoardReseal = (reseal: AccountBoardReseal): Record<string, unknown>
   ...(reseal.disputeSeal ? { disputeSeal: compactDisputeSeal(reseal.disputeSeal) } : {}),
 });
 
-const compactAccountInputBinding = (input: AccountInput): Record<string, unknown> => {
+const compactAccountInputBinding = (input: AccountPeerInput): Record<string, unknown> => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
   const disputeSeal = input.kind === 'dispute' ? accountInputDisputeSeal(input) : undefined;
@@ -332,7 +373,7 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
     const value: unknown = account[field];
     if (value !== undefined) projected[field] = value;
   }
-  projected['accountStateRoot'] = computeAccountStateRoot(account.state);
+  projected['accountStateRoot'] = computeAccountStateRoot(account.state, undefined, 'entityLeaf');
   projected['mempoolRoot'] = mempoolRoot(account.mempool);
   const currentFrameHash = frameHashBinding(account.currentFrame);
   if (currentFrameHash !== undefined) projected['currentFrameHash'] = currentFrameHash;
@@ -531,13 +572,26 @@ type EntitySectionCommitment = {
   encodedBytes: number;
 };
 
-export const computeEntityAccountValueHash = (account: AccountReplica): string =>
-  computeCanonicalMerkleRoot(
-    'entity.account-leaf',
-    Object.entries(projectAccountConsensusState(account))
+export const computeEntityAccountValueHash = (account: AccountReplica): string => {
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const entries = timePerfPhase(
+    'entity.accountLeaf.project',
+    () => Object.entries(projectAccountConsensusState(account))
       .sort(([left], [right]) => compareStableText(left, right)),
-    'integrity',
   );
+  const projectedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const digest = timePerfPhase(
+    'entity.accountLeaf.merkle',
+    () => computeEntityAccountLeafMerkleRoot(entries),
+  );
+  if (OP_COUNTERS_ENABLED) {
+    const endedAt = getPerfMs();
+    countOp('entity.accountLeaf.project', 0, Math.round((projectedAt - startedAt) * 1_000));
+    countOp('entity.accountLeaf.merkle', 0, Math.round((endedAt - projectedAt) * 1_000));
+    countOp('entity.accountLeaf.valueHash', 0, Math.round((endedAt - startedAt) * 1_000));
+  }
+  return digest;
+};
 
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
   if (state.accounts instanceof EntityAccountCandidateMap) {
@@ -574,8 +628,15 @@ const commitEntityConsensusSections = (
   Object.entries(projected)
     .sort(([left], [right]) => compareStableText(left, right))
     .map(([field, value]) => {
-      const encoded =
-        field === 'accounts' && state ? encodeEntityAccountsSection(state, cold) : encodeCanonicalConsensusValue(value);
+      const encodeSection = (): string => field === 'accounts' && state
+        ? encodeEntityAccountsSection(state, cold)
+        : encodeCanonicalConsensusValue(value);
+      // The Account Patricia root was the only material section in the
+      // measured H1 profile. Keep that surgical timer; wrapping every scalar
+      // section added dozens of environment checks to every production root.
+      const encoded = field === 'accounts'
+        ? timePerfPhase('entity.stateRoot.section.accounts', encodeSection)
+        : encodeSection();
       return {
         field,
         digest: computeIntegrityDigest(UTF8.encode(encoded)),
@@ -591,6 +652,17 @@ const computeEntityRootFromSections = (sections: readonly EntitySectionCommitmen
     }),
   );
 
+const assertEntityRootAudit = (state: EntityState, root: string, enabled: boolean): void => {
+  if (!enabled) return;
+  const cold = computeCanonicalEntityConsensusStateHashCold(state);
+  if (root !== cold) throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${root}:cold=${cold}`);
+};
+
+const entityRootDebugFlags = (): Readonly<{ audit: boolean; profile: boolean }> => ({
+  audit: readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') === '1',
+  profile: readRuntimeEnv('XLN_ENTITY_STATE_ROOT_PROFILE') === '1',
+});
+
 export const computeCanonicalEntityConsensusStateHash = (state: EntityState): string => {
   // EntityState is intentionally plain deterministic data, not an observable
   // mutation wrapper. Caching this parent root on object identity is therefore
@@ -601,19 +673,24 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
   // Opt-in only: the audit recomputes the cold root and the byte breakdown
   // re-encodes the whole projection; either would distort a frame-level
   // process profile that enabled it implicitly.
-  const audit = readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') === '1';
-  const profile = readRuntimeEnv('XLN_ENTITY_STATE_ROOT_PROFILE') === '1';
+  const { audit, profile } = entityRootDebugFlags();
   const startedAt = getPerfMs();
-  const projected = projectEntityConsensusState(state, false);
+  const projected = timePerfPhase(
+    'entity.stateRoot.projection',
+    () => projectEntityConsensusState(state, false),
+  );
   const projectedAt = getPerfMs();
-  const sections = commitEntityConsensusSections(projected, state);
+  const sections = timePerfPhase(
+    'entity.stateRoot.sections',
+    () => commitEntityConsensusSections(projected, state),
+  );
   const sectionsAt = getPerfMs();
-  const root = computeEntityRootFromSections(sections);
+  const root = timePerfPhase(
+    'entity.stateRoot.root',
+    () => computeEntityRootFromSections(sections),
+  );
   const endedAt = getPerfMs();
-  if (audit) {
-    const cold = computeCanonicalEntityConsensusStateHashCold(state);
-    if (root !== cold) throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${root}:cold=${cold}`);
-  }
+  assertEntityRootAudit(state, root, audit);
   if (!profile) return root;
   const profileProjected = projectEntityConsensusState(state);
   const topSectionBytes = sections

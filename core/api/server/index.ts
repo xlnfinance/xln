@@ -30,7 +30,7 @@ import { registerEnvChangeCallback } from '../../runtime/loop/loop-environment.t
 import { ensurePendingNumberedRegistrationsResumed } from '../../runtime/registration/numbered-registration-driver';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../../protocol/serialization';
-import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import { createExternalWalletApi } from '../public/external-wallet-api';
 import { maybeHandleQaRequest } from '../../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../jurisdiction/adapter';
@@ -79,7 +79,6 @@ import { decodeRuntimeAdapterRequest, runtimeAdapterMessageByteLength } from '..
 import {
   getRelayClientIp,
   resolveRequestClientIp,
-  sendEntityInputDirectViaRelaySocketDelivery,
   type RelaySocketData,
   type RelaySocket,
 } from './network/relay-direct';
@@ -113,6 +112,7 @@ import { handleRuntimeRpcProxy } from './rpc/proxy';
 import { requiresLocalNodeOperator } from './control/node-http-access';
 import { handleP2PControl } from './control/p2p';
 import { handleGossipProfileCounterparties } from './control/gossip-counterparties';
+import { handleGossipProfilesSendReady } from './control/gossip-send-ready';
 import { handleRuntimeInputControl } from './control/runtime-input';
 import { handleSignerRegistration } from './control/signer';
 import { createStackManagerController } from './control/stack-manager';
@@ -190,16 +190,6 @@ const withStartupStepTimeout = async <T>(
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
-};
-
-const oneShotLogs = new Map<string, number>();
-const ONE_SHOT_TTL_MS = 60_000;
-const logOneShot = (key: string, message: string, fields: Record<string, unknown> = {}) => {
-  const nowMs = Date.now();
-  const last = oneShotLogs.get(key) ?? 0;
-  if (nowMs - last < ONE_SHOT_TTL_MS) return;
-  oneShotLogs.set(key, nowMs);
-  serverLog.warn(message, fields);
 };
 
 const currentRuntimeHeight = (env: RuntimeReplica | null): number => Math.max(0, Math.floor(Number(env?.state.height ?? 0)));
@@ -321,14 +311,6 @@ let serverBootPhase: RuntimeTransportBootPhase = 'starting';
 let serverBootError: string | null = null;
 let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
-
-const sendDirectEntityInput = (
-  env: RuntimeReplica,
-  targetRuntimeId: string,
-  envelope: RuntimeEntityInputsEnvelope,
-  ingressTimestamp?: number,
-) =>
-  sendEntityInputDirectViaRelaySocketDelivery(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
 
 const installProcessSafetyGuards = (): void => {
   if (processGuardsInstalled) return;
@@ -458,6 +440,13 @@ const maybeHandleControlApi = async (
       return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
     }
     return handleGossipProfileCounterparties(req, env, headers);
+  }
+
+  if (pathname === '/api/control/gossip-profiles-send-ready' && req.method === 'POST') {
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    return handleGossipProfilesSendReady(req, env, headers);
   }
 
   if (pathname === '/api/control/signers/register' && req.method === 'POST') {
@@ -1524,9 +1513,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
     env.quietRuntimeLogs = !verboseRuntimeLogs;
     serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
+    // A sovereign user/custody Runtime is a client of hubs. Its outbound
+    // AccountInput transport must use the RuntimeP2P duplex that it dialled to
+    // the hub; the API server's inbound /relay client map is not an outbound
+    // route directory. Installing directEntityInputsDispatch here previously
+    // made custody search for H1 in its own server map and fail after commit.
     env.infrastructure = env.infrastructure ?? {};
-    env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
-      sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
     // A daemon hosting many entities must not disappear into one long
     // synchronous frame: bounded frames keep the event loop accepting sockets
     // and answering control calls between them (same knob as hub-node).

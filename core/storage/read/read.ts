@@ -248,6 +248,7 @@ export const readStorageFrameRecord = async (
 export const readStorageFramePayloads = async (
   db: RuntimeDbLike,
   frame: RuntimeFrame,
+  options?: { includeRuntimeMachine?: boolean },
 ): Promise<RuntimeFramePayloads> => {
   const targetHeight = frame.height;
   const runtimeOutputs = frame.runtimeOutputRefs?.length
@@ -262,7 +263,7 @@ export const readStorageFramePayloads = async (
       frame.entityContextRefs,
     )
     : new Map();
-  const runtimeMachine = frame.runtimeMachineRoot
+  const runtimeMachine = options?.includeRuntimeMachine !== false && frame.runtimeMachineRoot
     ? await readRuntimeMachineGraph(
       db,
       targetHeight,

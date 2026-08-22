@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../../../account/crypto';
-import { RuntimeP2P } from '../../../network/p2p/p2p';
+import { reportDirectClientError, RuntimeP2P } from '../../../network/p2p/p2p';
 import { hexToPubKey } from '../../../protocol/crypto/p2p-crypto';
 import type { Profile } from '../../../entity/profile';
 import type { RuntimeReplica } from '../../../runtime/types';
@@ -48,7 +48,13 @@ const buildProfile = (
 const makeP2P = (profiles: Profile[]): RuntimeP2P => new RuntimeP2P({
   env: {
     runtimeSeed: 'p2p-direct-policy-local',
-    gossip: { getProfiles: () => profiles },
+    gossip: {
+      getProfiles: () => profiles,
+      getProfile: (entityId: string) => profiles.find(profile => profile.entityId === entityId),
+      getProfileByRuntimeId: (runtimeId: string) =>
+        profiles.find(profile => profile.runtimeId === runtimeId && profile.metadata?.isHub === true) ??
+        profiles.find(profile => profile.runtimeId === runtimeId),
+    },
     warn: () => {},
   } as unknown as RuntimeReplica,
   runtimeId: runtimeIdFor('local'),
@@ -57,6 +63,29 @@ const makeP2P = (profiles: Profile[]): RuntimeP2P => new RuntimeP2P({
 });
 
 describe('RuntimeP2P direct transport policy', () => {
+  test('halts on a correlated post-WAL delivery rejection', () => {
+    const env = {
+      state: { height: 41, timestamp: 123 },
+      infrastructure: {},
+      error: () => {},
+      warn: () => {},
+    } as unknown as RuntimeReplica;
+
+    reportDirectClientError(
+      env,
+      'ws://127.0.0.1:9100/direct-runtime',
+      runtimeIdFor('target'),
+      new Error('P2P_REMOTE_REJECTED:id=ack-h7:reason=target refused input'),
+    );
+
+    expect(env.infrastructure?.operatorStatus).toBe('HALTED_REQUIRES_OPERATOR');
+    expect(env.infrastructure?.fatalDebugPayload).toMatchObject({
+      height: 41,
+      timestamp: 123,
+      message: expect.stringContaining('P2P_REMOTE_REJECTED:id=ack-h7'),
+    });
+  });
+
   test('rejects malformed X25519 public-key hex instead of decoding zeros', () => {
     expect(() => hexToPubKey(`0x${'zz'.repeat(32)}`)).toThrow('P2P_INVALID_PUBKEY');
   });

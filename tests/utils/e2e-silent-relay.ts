@@ -38,7 +38,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	        if (window.__silentRelayWebSocketInstalled) return;
 	        window.__silentRelayWebSocketInstalled = true;
         const NativeWebSocket = window.WebSocket;
-        const normalizeSyntheticLevels = (levels) => {
+        const normalizeSyntheticLevels = (levels, hubEntityId) => {
           let runningTotal = 0;
           return (Array.isArray(levels) ? levels : []).flatMap((level) => {
             const size = Number(level && level.size || 0);
@@ -52,6 +52,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
               price: String(level && level.price || '0'),
               size: String(size),
               total: String(total),
+              sourceHubEntityIds: [String(hubEntityId || '').toLowerCase()],
             };
             return /^[0-9]+$/.test(normalized.price) && normalized.price !== '0' ? [normalized] : [];
           });
@@ -100,6 +101,8 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
               const snapshot = pickSyntheticSnapshot(hubEntityId, pairId);
 	              if (!snapshot) continue;
 	              const now = Date.now();
+	              const sourceHubEntityId = String(hubEntityId || '').toLowerCase();
+	              const jurisdictionRef = 'stack:1:0xcccccccccccccccccccccccccccccccccccccccc';
 	              bumpStat('snapshotDispatches');
 	              socket.dispatchEvent(new MessageEvent('message', {
                 data: JSON.stringify({
@@ -109,20 +112,30 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
                   timestamp: now,
                   payload: {
                     format: 'exact-price-levels',
-                    hubEntityId: String(hubEntityId || '').toLowerCase(),
                     pairId: String(pairId || ''),
+                    jurisdictionRef,
                     depth,
                     displayDecimals: 4,
                     priceScale: '10000',
-                    bucketWidthTicks: null,
-                    bids: normalizeSyntheticLevels(snapshot.bids).slice(0, depth),
-                    asks: normalizeSyntheticLevels(snapshot.asks).slice(0, depth),
+                    bids: normalizeSyntheticLevels(snapshot.bids, sourceHubEntityId).slice(0, depth),
+                    asks: normalizeSyntheticLevels(snapshot.asks, sourceHubEntityId).slice(0, depth),
                     spread: null,
                     spreadPercent: '-',
-                    source: 'orderbookExt',
-                    entityHeight: 1,
-                    entityStateHash: null,
-                    hubUpdatedAt: now,
+                    lastTradePrice: null,
+                    lastTradeObservedAt: null,
+                    lastTradeHubEntityId: null,
+                    source: 'relayAggregate',
+                    sourceCount: 1,
+                    sources: [{
+                      hubEntityId: sourceHubEntityId,
+                      jurisdictionRef,
+                      entityHeight: 1,
+                      entityStateHash: null,
+                      hubUpdatedAt: now,
+                      snapshotUpdatedAt: now,
+                      tradeCount: 0,
+                      lastTradePrice: null,
+                    }],
                     updatedAt: now,
                   },
                 }),

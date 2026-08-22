@@ -194,7 +194,13 @@ export const startRuntimeP2P = (
   if (reusable) return reusable;
 
   state.p2p = new RuntimeP2P(buildRuntimeP2POptions(env, config, resolvedRuntimeId, deps));
-  state.observeOnlineEntityIds = entityIds => state.p2p?.observeOnlineEntityIds(entityIds) ?? new Set();
+  state.observeOnlineEntityIds = entityIds => {
+    const online = new Set(state.p2p?.observeOnlineEntityIds(entityIds) ?? []);
+    for (const entityId of state.observeDirectOnlineEntityIds?.(entityIds) ?? []) {
+      online.add(entityId);
+    }
+    return online;
+  };
   p2pState(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
   state.p2p.connect();
   return state.p2p;

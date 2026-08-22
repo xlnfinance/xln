@@ -2,7 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
 import {
   createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute,
-  DIRECT_STUCK_BACKPRESSURE_MS,
+  hasUndeliveredDirectRuntimeSessionBytes,
+  isCleanDirectRuntimeSessionClose,
 } from '../../../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
@@ -45,6 +46,19 @@ const nextTestAuthTimestamp = (): number => {
 afterEach(() => {
   signerByRuntime.clear();
   socketChallenge.clear();
+});
+
+test('classifies only an empty RFC 1000 direct close as clean', () => {
+  expect(isCleanDirectRuntimeSessionClose({ code: 1000, bufferedAmount: 0 })).toBe(true);
+  expect(isCleanDirectRuntimeSessionClose({ code: 1000, bufferedAmount: 1 })).toBe(false);
+  expect(isCleanDirectRuntimeSessionClose({ code: 1006, bufferedAmount: 0 })).toBe(false);
+  expect(isCleanDirectRuntimeSessionClose({ code: 1000, bufferedAmount: null })).toBe(false);
+});
+
+test('distinguishes peer disconnect from concrete unsent socket bytes', () => {
+  expect(hasUndeliveredDirectRuntimeSessionBytes({ bufferedAmount: 0 })).toBe(false);
+  expect(hasUndeliveredDirectRuntimeSessionBytes({ bufferedAmount: 1 })).toBe(true);
+  expect(hasUndeliveredDirectRuntimeSessionBytes({ bufferedAmount: null })).toBe(true);
 });
 
 const createDirectRuntimeWsRoute = (
@@ -526,6 +540,42 @@ describe('direct runtime websocket route', () => {
     expect(received).toBe(0);
   });
 
+  test('surfaces an authenticated peer rejection without replying with another error', async () => {
+    const serverSeed = 'direct-route-server-peer-rejection';
+    const clientSeed = 'direct-route-client-peer-rejection';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const failures: unknown[] = [];
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInputs: () => undefined,
+      onDeliveryFailure: failure => failures.push(failure),
+    });
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    const sentBeforeRejection = sent.length;
+
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'error',
+      id: 'peer-error-1',
+      inReplyTo: 'server-output-7',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      error: 'P2P_INBOUND_ENTITY_INPUT_REJECTED:account H7',
+    }));
+
+    expect(failures).toEqual([{
+      direction: 'outbound',
+      peerRuntimeId: clientRuntimeId,
+      messageId: 'server-output-7',
+      error: 'P2P_INBOUND_ENTITY_INPUT_REJECTED:account H7',
+    }]);
+    expect(sent).toHaveLength(sentBeforeRejection);
+  });
+
   test('answers read-only recovery bundle requests over the authenticated direct socket', async () => {
     const serverSeed = 'direct-route-server-recovery';
     const clientSeed = 'direct-route-client-recovery';
@@ -639,7 +689,7 @@ describe('direct runtime websocket route', () => {
     expect(route.getSessionState()).toEqual([]);
   });
 
-  test('a fresh authenticated hello atomically replaces a stale direct socket', async () => {
+  test('rejects a duplicate session and keeps the original Account FIFO authoritative', async () => {
     const serverSeed = 'direct-route-server-duplicate';
     const clientSeed = 'direct-route-client-duplicate';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -661,10 +711,14 @@ describe('direct runtime websocket route', () => {
     await route.websocket.message(first.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     await route.websocket.message(second.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
 
-    expect(first.ws.readyState).toBe(3);
-    expect(second.ws.readyState).toBe(1);
-    expect(first.closed.at(-1)).toEqual({ code: 4009, reason: 'session-replaced' });
-    expect(second.sent.at(-1)?.type).toBe('hello_ack');
+    expect(first.ws.readyState).toBe(1);
+    expect(second.ws.readyState).toBe(3);
+    expect(first.closed).toEqual([]);
+    expect(second.closed.at(-1)).toEqual({ code: 4009, reason: 'duplicate-runtime' });
+    expect(second.sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: `DIRECT_DUPLICATE_RUNTIME_SESSION:${clientRuntimeId}`,
+    });
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
     ]);
@@ -685,12 +739,30 @@ describe('direct runtime websocket route', () => {
       outcome: 'delivered',
       code: 'ROUTE_DIRECT_DELIVERED',
     });
-    expect(second.sent.at(-1)?.type).toBe('entity_inputs');
-    const firstSentCount = first.sent.length;
-    first.ws.readyState = 1;
-    await route.websocket.message(first.ws, 'late-frame-from-replaced-socket');
-    expect(first.sent).toHaveLength(firstSentCount);
-    expect(received).toEqual([]);
+    expect(first.sent.at(-1)?.type).toBe('entity_inputs');
+    const inboundInput: RoutedEntityInput = {
+      entityId: `0x${'44'.repeat(32)}`,
+      runtimeId: serverRuntimeId,
+      signerId: serverRuntimeId,
+      entityTxs: [],
+    };
+    const inboundEnvelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: clientRuntimeId,
+      sourceSignature: `0x${'22'.repeat(65)}`,
+      sourceRuntimeHeight: 2,
+      sourceRuntimeTimestamp: 2,
+      entityInputs: [inboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
+    };
+    await route.websocket.message(first.ws, serializeWsMessage({
+      type: 'entity_inputs',
+      id: 'in-flight-account-input',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      encrypted: true,
+      payload: encryptJSON(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
+    }));
+    expect(received).toEqual([inboundEnvelope]);
   });
 
   test('reports typed miss delivery when target direct socket is absent', () => {
@@ -716,15 +788,15 @@ describe('direct runtime websocket route', () => {
       sourceRuntimeTimestamp: 1,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
     })).toMatchObject({
-      outcome: 'deferred',
-      code: 'ROUTE_DIRECT_MISS_FAILOVER',
-      retryable: true,
-      fatal: false,
-      terminal: false,
+      outcome: 'failed',
+      code: 'ROUTE_DIRECT_SESSION_MISSING',
+      retryable: false,
+      fatal: true,
+      terminal: true,
     });
   });
 
-  test('accepts Bun queued backpressure, but defers an ambiguous zero-byte drop', async () => {
+  test('accepts Bun queued backpressure, but fails an ambiguous zero-byte drop', async () => {
     const serverSeed = 'direct-route-server-send-contract';
     const clientSeed = 'direct-route-client-send-contract';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -788,10 +860,11 @@ describe('direct runtime websocket route', () => {
       return 0;
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
-      outcome: 'deferred',
+      outcome: 'failed',
       code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: true,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
     });
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
@@ -805,10 +878,11 @@ describe('direct runtime websocket route', () => {
       return 0;
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
-      outcome: 'deferred',
-      code: 'ROUTE_DIRECT_MISS_FAILOVER',
-      retryable: true,
-      terminal: false,
+      outcome: 'failed',
+      code: 'ROUTE_DIRECT_SESSION_MISSING',
+      retryable: false,
+      fatal: true,
+      terminal: true,
     });
     expect(route.getSessionState()).toEqual([]);
   });
@@ -848,10 +922,11 @@ describe('direct runtime websocket route', () => {
       sourceRuntimeTimestamp: 1,
       entityInputs: [],
     })).toMatchObject({
-      outcome: 'deferred',
+      outcome: 'failed',
       code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: true,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
     });
     expect(ws.readyState).toBe(1);
     expect(route.getSessionState()).toEqual([
@@ -892,7 +967,7 @@ describe('direct runtime websocket route', () => {
     expect(received).toEqual([inboundEnvelope]);
   });
 
-  test('force-closes only sustained queued backpressure, never a four-message burst', async () => {
+  test('never closes a live socket after Bun queued accepted Account bytes', async () => {
     const serverSeed = 'direct-route-server-stuck-backpressure';
     const clientSeed = 'direct-route-client-stuck-backpressure';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -934,13 +1009,20 @@ describe('direct runtime websocket route', () => {
         }),
       ]);
 
-      now.mockReturnValue(1_000 + DIRECT_STUCK_BACKPRESSURE_MS + 1);
+      now.mockReturnValue(61_001);
       expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
         outcome: 'delivered',
         code: 'ROUTE_DIRECT_DELIVERED',
       });
-      expect(closed).toEqual([{ code: 4010, reason: 'stuck-backpressure' }]);
-      expect(route.getSessionState()).toEqual([]);
+      expect(closed).toEqual([]);
+      expect(route.getSessionState()).toEqual([
+        expect.objectContaining({
+          runtimeId: clientRuntimeId,
+          open: true,
+          consecutiveBackpressuredSends: 4,
+          backpressureAgeMs: 60_001,
+        }),
+      ]);
     } finally {
       now.mockRestore();
     }
@@ -996,7 +1078,7 @@ describe('direct runtime websocket route', () => {
     ]);
   });
 
-  test('preserves direct socket root errors in a retryable structured delivery result', async () => {
+  test('preserves direct socket root errors in a terminal delivery failure', async () => {
     const serverSeed = 'direct-route-server-send-error';
     const clientSeed = 'direct-route-client-send-error';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -1029,11 +1111,11 @@ describe('direct runtime websocket route', () => {
     expect(delivery).toMatchObject({
       outcome: 'failed',
       code: 'ROUTE_DIRECT_SEND_FAILED',
-      retryable: true,
-      fatal: false,
-      terminal: false,
+      retryable: false,
+      fatal: true,
+      terminal: true,
       failure: {
-        category: 'TransientRace',
+        category: 'Contradiction',
         message: 'socket write exploded',
       },
     });

@@ -27,6 +27,8 @@ import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } fr
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './auth/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
+import { haltRuntimeRequiresOperator } from '../../runtime/replica/lifecycle';
+import { traceAccountDeliveryHop } from '../../support/performance/account-delivery-trace';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   decodeGossipProfileBatchRequest,
@@ -41,6 +43,10 @@ import {
 } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
+import {
+  crossJurisdictionRouteProfileEntityIds,
+  extractCrossJurisdictionRouteFromTx,
+} from '../../extensions/cross-j/boundary';
 import { HEAVY_LOGS } from '../../support/debug-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
@@ -55,8 +61,10 @@ import {
   isDeliveryDelivered,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import { isRetryableIngressBackpressure, RETRYABLE_INGRESS_BACKPRESSURE } from './ingress-backpressure';
-import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/admit/entity-input-envelope-auth.ts';
+import {
+  assertRuntimeEntityInputsEnvelopeSource,
+  signRuntimeEntityInputsEnvelope,
+} from '../../runtime/admit/entity-input-envelope-auth.ts';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 import {
   decodeJurisdictionGossipAnnouncement,
@@ -68,22 +76,14 @@ const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
-const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
-const ENTITY_INPUT_RATE_LIMITED = 'ENTITY_INPUT_RATE_LIMITED';
+const hltDirectFinancialTransportRequired = (): boolean =>
+  typeof process !== 'undefined' && process.env?.['XLN_HLT_DIRECT_ONLY'] === '1';
 export const reportRelayClientError = (env: RuntimeReplica, relay: string, error: Error): void => {
-  if (error.message.includes(ENTITY_INPUT_TARGET_OFFLINE)) {
-    env.error?.('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
-    return;
-  }
-  if (error.message.includes(ENTITY_INPUT_RATE_LIMITED)) {
-    env.error?.('network', 'ENTITY_INPUT_RATE_LIMITED', { relay, error: error.message });
-    return;
-  }
-  if (isRetryableIngressBackpressure(error)) {
-    env.error?.('network', 'WS_CLIENT_INGRESS_REJECTED', { relay, error: error.message });
-    return;
-  }
-  env.warn('network', 'WS_CLIENT_ERROR', { relay, error: error.message });
+  env.error?.('network', 'WS_RELAY_FATAL', { relay, error: error.message });
+  // Relay still carries gossip, but a Runtime cannot prove that an unexpected
+  // socket failure excluded committed financial bytes. Never reconnect or
+  // downgrade the event to a warning; freeze the exact live state for audit.
+  haltRuntimeRequiresOperator(env, error);
 };
 
 export const reportDirectClientError = (
@@ -92,11 +92,12 @@ export const reportDirectClientError = (
   targetRuntimeId: string,
   error: Error,
 ): 'transport-error' => {
-  env.warn('network', 'WS_DIRECT_ERROR', {
+  env.error?.('network', 'WS_DIRECT_FATAL', {
     endpoint,
     targetRuntimeId,
     error: error.message,
   });
+  haltRuntimeRequiresOperator(env, error);
   return 'transport-error';
 };
 
@@ -324,6 +325,10 @@ const HUB_PROFILE_HEARTBEAT_MS = 15_000;
 const USER_PROFILE_HEARTBEAT_MS = 3_600_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
 const GOSSIP_ROUTE_FETCH_RETRY_DELAYS_MS = [60, 120, 240];
+// Transport may receive hundreds of envelopes in one Runtime tick. Missing
+// profile discovery is external I/O, so collapse the whole tick into one
+// bounded relay request instead of creating one gossip exchange per envelope.
+const PROFILE_PREFETCH_COALESCE_MS = 10;
 
 /** Everything a peer needs from a non-hub profile except live capacities. */
 const profileTopologyKey = (profile: Profile): string => safeStringify([
@@ -344,17 +349,6 @@ const profileTopologyKey = (profile: Profile): string => safeStringify([
   ]),
   { ...profile.metadata, profileHanko: undefined },
 ]);
-const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
-
-const isInactiveTabStandby = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  try {
-    return sessionStorage.getItem(INACTIVE_TAB_STANDBY_KEY) === '1';
-  } catch {
-    return false;
-  }
-};
-
 export class RuntimeP2P {
   private env: RuntimeReplica;
   private runtimeId: string;
@@ -398,15 +392,15 @@ export class RuntimeP2P {
       lastUpdated: number;
     }
   >;
-  private bootstrapPollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
-  private visibilityHandler: (() => void) | null = null;
-  private focusHandler: (() => void) | null = null;
   private encryptionKeyPair: P2PKeyPair;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
   private profileFetches = new Map<string, Promise<boolean>>();
+  private pendingProfilePrefetchIds = new Set<string>();
+  private profilePrefetchTimer: ReturnType<typeof setTimeout> | null = null;
   private lastHeartbeatAnnounceAt = 0;
+  private backgroundIoPaused = false;
   private closing = false;
   private closed = false;
   private closePromise: Promise<void> | null = null;
@@ -469,7 +463,7 @@ export class RuntimeP2P {
     if (config.gossipPollMs !== undefined) {
       const prevPollMs = this.gossipPollMs;
       this.gossipPollMs = normalizeGossipPollMs(config.gossipPollMs);
-      if (!this.pollInterval) {
+      if (!this.pollInterval && !this.backgroundIoPaused) {
         this.startPolling();
       } else if (prevPollMs !== this.gossipPollMs) {
         // Interval changed while polling: restart to apply the new cadence.
@@ -490,7 +484,6 @@ export class RuntimeP2P {
 
   connect() {
     if (this.closing || this.closed) throw new Error('P2P_CONNECT_AFTER_CLOSE');
-    this.registerVisibilityReconnect();
     this.startPolling();
     if (this.hasRelayConnectionActivity()) return;
     this.closeClients();
@@ -514,9 +507,10 @@ export class RuntimeP2P {
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
         },
-        onEntityInputs: async (from, envelope, timestamp) => {
-          if (!this.clients.includes(client)) return;
-          await this.acceptInboundEntityInputs('relay', from, envelope, timestamp);
+        signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(this.env, to, envelope),
+        onEntityInputs: async (from, envelope, timestamp, sessionAuthenticated) => {
+          if (!this.clients.includes(client)) throw new Error('P2P_RELAY_CLIENT_OWNERSHIP_LOST');
+          await this.acceptInboundEntityInputs('relay', from, envelope, timestamp, sessionAuthenticated === true);
         },
         onGossipRequest: (from, payload) => {
           if (!this.closing && !this.closed && this.clients.includes(client)) {
@@ -535,18 +529,7 @@ export class RuntimeP2P {
         },
         onError: error => {
           reportRelayClientError(this.env, url, error);
-          // Transport is deliberately best-effort. Only bilateral Account ACK
-          // advances/removes financial work; never reintroduce P2P receipts.
-          if (
-            error.message.includes('TARGET_NOT_CONNECTED') ||
-            error.message.includes('TARGET_OFFLINE') ||
-            error.message.includes('RATE_LIMITED')
-          ) {
-            this.refreshGossip();
-            this.reconnect();
-          }
         },
-        maxReconnectAttempts: 0,
       });
       this.clients.push(client);
       client.connect().catch(error => {
@@ -583,27 +566,27 @@ export class RuntimeP2P {
   private stopActivity(): void {
     this.shutdownController.abort();
     this.stopPolling();
-    this.unregisterVisibilityReconnect();
     if (this.announceTimer) {
       clearTimeout(this.announceTimer);
       this.announceTimer = null;
     }
     this.pendingAnnounceEntities.clear();
+    if (this.profilePrefetchTimer) {
+      clearTimeout(this.profilePrefetchTimer);
+      this.profilePrefetchTimer = null;
+    }
+    this.pendingProfilePrefetchIds.clear();
   }
 
   private startPolling() {
+    if (this.backgroundIoPaused) return;
     if (this.pollInterval) {
       // Already polling
       return;
     }
-    // Request immediately, then periodically
-    this.bootstrapPollTimer = setTimeout(() => {
-      this.bootstrapPollTimer = null;
-      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-      this.requestSeedGossip('incremental');
-      void this.maybeHeartbeatAnnounce();
-      logSlowBrowserTimer('p2p.seed-poll.bootstrap', startedAt);
-    }, 100);
+    // Relay `onOpen` owns the one immediate full bootstrap. This interval is
+    // only slow reconciliation; a second 100ms bootstrap timer duplicated the
+    // same request on every newly-created Runtime.
     this.pollInterval = setInterval(() => {
       const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
       this.requestSeedGossip('incremental');
@@ -622,49 +605,29 @@ export class RuntimeP2P {
   }
 
   private stopPolling() {
-    if (this.bootstrapPollTimer) {
-      clearTimeout(this.bootstrapPollTimer);
-      this.bootstrapPollTimer = null;
-    }
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
   }
 
-  private registerVisibilityReconnect() {
-    if (typeof document === 'undefined') return;
-    if (this.visibilityHandler) return;
-    const resume = () => {
-      if (isInactiveTabStandby()) {
-        return;
-      }
-      const activeClient = !!this.getActiveClient();
-      if (document.visibilityState !== 'visible') {
-        return;
-      }
-      if (!activeClient) {
-        p2pLog.warn('browser.resume_reconnect');
-        this.reconnect();
-        return;
-      }
-      this.requestSeedGossip('incremental');
-    };
-    this.visibilityHandler = resume;
-    this.focusHandler = resume;
-    document.addEventListener('visibilitychange', this.visibilityHandler);
-    window.addEventListener('focus', this.focusHandler);
-  }
-
-  private unregisterVisibilityReconnect() {
-    if (typeof document === 'undefined') return;
-    if (!this.visibilityHandler) return;
-    document.removeEventListener('visibilitychange', this.visibilityHandler);
-    this.visibilityHandler = null;
-    if (this.focusHandler) {
-      window.removeEventListener('focus', this.focusHandler);
-      this.focusHandler = null;
+  /**
+   * Freeze periodic gossip/profile traffic while keeping established direct
+   * transport sessions alive for an isolated HLT economic window.
+   */
+  pauseBackgroundIo(): void {
+    this.backgroundIoPaused = true;
+    this.stopPolling();
+    if (this.announceTimer) {
+      clearTimeout(this.announceTimer);
+      this.announceTimer = null;
     }
+    this.pendingAnnounceEntities.clear();
+    if (this.profilePrefetchTimer) {
+      clearTimeout(this.profilePrefetchTimer);
+      this.profilePrefetchTimer = null;
+    }
+    this.pendingProfilePrefetchIds.clear();
   }
 
   getQueueState(): {
@@ -714,13 +677,8 @@ export class RuntimeP2P {
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {
-    const client = this.getActiveClient();
-    if (client) return null; // Connected, no reconnect pending
-    // Check first client's reconnect state
-    for (const c of this.clients) {
-      const state = c.getReconnectState();
-      if (state) return state;
-    }
+    // Kept only as a health-schema projection. Transport never schedules a
+    // reconnect; a non-null value would violate the canonical fail-stop policy.
     return null;
   }
 
@@ -829,6 +787,19 @@ export class RuntimeP2P {
       targetRuntimeId,
     });
     const primary = this.resolveTransportClient(normalizedTargetRuntimeId);
+    traceAccountDeliveryHop('p2p-route', envelope, {
+      runtimeId: this.runtimeId,
+      targetRuntimeId: normalizedTargetRuntimeId,
+      transport: primary.transport,
+      clientOpen: primary.client?.isOpen() ?? false,
+      directEndpoint: this.getDirectPeerEndpoint(normalizedTargetRuntimeId),
+    });
+    if (hltDirectFinancialTransportRequired() && primary.transport !== 'direct') {
+      throw new Error(
+        `HLT_RELAY_ENTITY_INPUT_FORBIDDEN:source=${this.runtimeId}:target=${normalizedTargetRuntimeId}:` +
+        `envelope=${safeStringify(envelope)}`,
+      );
+    }
     let transport = primary.transport;
     let delivery: EntityInputDeliveryResult | null = null;
     const client = primary.client?.isOpen() ? primary.client : null;
@@ -935,7 +906,7 @@ export class RuntimeP2P {
 
   private hasRelayConnectionActivity(): boolean {
     return this.clients.some(
-      client => client.isOpen() || client.isConnecting() || client.getReconnectState() !== null,
+      client => client.isOpen() || client.isConnecting(),
     );
   }
 
@@ -1074,6 +1045,14 @@ export class RuntimeP2P {
 
     if (input.entityTxs) {
       for (const tx of getEffectiveEntityInputTxs(input)) {
+        if (tx.type === 'prepareCrossJurisdictionSwap') {
+          const route = extractCrossJurisdictionRouteFromTx(tx);
+          if (route) {
+            for (const entityId of crossJurisdictionRouteProfileEntityIds(route)) {
+              entitiesToCheck.add(entityId);
+            }
+          }
+        }
         if (tx.type === 'accountInput' && tx.data) {
           const accountInput = tx.data as { fromEntityId?: string; toEntityId?: string };
           if (accountInput.fromEntityId) entitiesToCheck.add(accountInput.fromEntityId);
@@ -1089,30 +1068,21 @@ export class RuntimeP2P {
     return Array.from(entitiesToCheck).filter(Boolean);
   }
 
-  private async ensureProfilesForInput(input: RoutedEntityInput): Promise<boolean> {
-    const missingEntities = this.collectProfileEntityIdsForInput(input).filter(
-      entityId => !this.hasProfileForEntity(entityId),
-    );
-    if (missingEntities.length === 0) return true;
-    const resolved = await this.ensureProfiles(missingEntities);
-    if (!resolved) {
-      this.env.warn('network', 'P2P_INPUT_PROFILE_PREFETCH_MISS', {
-        missingEntities,
-        entityId: input.entityId,
-        txTypes: input.entityTxs?.map(tx => tx.type) || [],
-      });
-    }
-    return resolved;
-  }
-
   private async acceptInboundEntityInputs(
-    _transport: 'relay' | 'direct',
+    transport: 'relay' | 'direct',
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
     timestamp: number | undefined,
+    sessionAuthenticated = false,
   ): Promise<void> {
+    if (hltDirectFinancialTransportRequired() && transport !== 'direct') {
+      throw new Error(
+        `HLT_RELAY_ENTITY_INPUT_FORBIDDEN:source=${from}:target=${this.runtimeId}:` +
+        `envelope=${safeStringify(envelope)}`,
+      );
+    }
     if (this.closing || this.closed) {
-      throw new Error(`${RETRYABLE_INGRESS_BACKPRESSURE}p2p-closing-before-admission`);
+      throw new Error('P2P_INBOUND_RUNTIME_CLOSING:before-admission');
     }
     // Drain witness: the last trace of an inbound bilateral ACK before the
     // deterministic intake. One debug line per envelope, scoped so an HLT run
@@ -1120,17 +1090,13 @@ export class RuntimeP2P {
     if (HEAVY_LOGS) {
       console.debug(`[P2P-INBOUND] entity_inputs from=${from.slice(-8)} inputs=${envelope.entityInputs.length}`);
     }
-    assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope);
+    assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope, sessionAuthenticated);
     const requiredProfileIds = uniqueTransportValues(
       envelope.entityInputs.flatMap(input => this.collectProfileEntityIdsForInput(input)),
-    ).filter(Boolean);
-    if (requiredProfileIds.length > 0) {
-      void this.ensureProfiles(requiredProfileIds).catch(error => {
-        this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
-      });
-    }
+    ).filter(entityId => entityId && !this.hasProfileForEntity(entityId));
+    this.scheduleProfilePrefetch(requiredProfileIds);
     if (this.closing || this.closed) {
-      throw new Error(`${RETRYABLE_INGRESS_BACKPRESSURE}p2p-closing-before-runtime-intake`);
+      throw new Error('P2P_INBOUND_RUNTIME_CLOSING:before-runtime-intake');
     }
     await this.onEntityInputs(from, envelope, timestamp, {
       envelopeSourceVerified: true,
@@ -1143,9 +1109,44 @@ export class RuntimeP2P {
       entityId => !this.hasProfileForEntity(entityId),
     );
     if (missingEntities.length === 0) return;
-    void this.ensureProfilesForInput(input).catch(error => {
-      this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
-    });
+    this.scheduleProfilePrefetch(missingEntities);
+  }
+
+  private scheduleProfilePrefetch(entityIds: readonly string[]): void {
+    if (this.closing || this.closed || this.backgroundIoPaused) return;
+    this.pendingProfilePrefetchIds ??= new Set<string>();
+    for (const entityId of entityIds) {
+      const normalized = normalizeId(entityId);
+      if (normalized && !this.hasProfileForEntity(normalized)) {
+        this.pendingProfilePrefetchIds.add(normalized);
+      }
+    }
+    if (this.pendingProfilePrefetchIds.size === 0 || this.profilePrefetchTimer) return;
+    this.profilePrefetchTimer = setTimeout(() => {
+      this.profilePrefetchTimer = null;
+      void this.flushProfilePrefetch();
+    }, PROFILE_PREFETCH_COALESCE_MS);
+  }
+
+  private async flushProfilePrefetch(): Promise<void> {
+    if (this.closing || this.closed) return;
+    const entityIds = Array.from(this.pendingProfilePrefetchIds)
+      .filter(entityId => !this.hasProfileForEntity(entityId))
+      .sort(compareStableText);
+    this.pendingProfilePrefetchIds.clear();
+    if (entityIds.length === 0) return;
+    try {
+      await this.ensureProfiles(entityIds);
+    } catch (error) {
+      this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', {
+        entityIds: entityIds.length,
+        error: (error as Error).message,
+      });
+    } finally {
+      if (this.pendingProfilePrefetchIds.size > 0) {
+        this.scheduleProfilePrefetch([]);
+      }
+    }
   }
 
   refreshGossip() {
@@ -1153,8 +1154,52 @@ export class RuntimeP2P {
     void this.maybeHeartbeatAnnounce();
   }
 
+  /** Bootstrap may poll quickly while peers are being created; steady state never does. */
+  finishBootstrapPolling(): void {
+    if (this.gossipPollMs === GOSSIP_POLL_MS) return;
+    this.updateConfig({ gossipPollMs: GOSSIP_POLL_MS });
+  }
+
   async syncProfiles(): Promise<boolean> {
     return this.fetchProfilesWithRetry([]);
+  }
+
+  /** Wait locally for the relay-open seed page; never emits a retry request. */
+  async waitForSeedProfiles(entityIds: readonly string[], timeoutMs: number): Promise<boolean> {
+    const required = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
+    if (required.length === 0) return true;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (required.every(entityId => this.hasProfileForEntity(entityId))) return true;
+      if (!(await this.waitForActiveDelay(Math.min(20, Math.max(1, deadline - Date.now()))))) return false;
+    }
+    return required.every(entityId => this.hasProfileForEntity(entityId));
+  }
+
+  /** One incremental seed-directory refresh, followed only by local waiting. */
+  async refreshSeedProfilesAndWait(entityIds: readonly string[], timeoutMs: number): Promise<boolean> {
+    const required = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
+    if (required.length === 0) return true;
+    const deadline = Date.now() + timeoutMs;
+    while (!this.getActiveClient() && Date.now() < deadline) {
+      if (!(await this.waitForActiveDelay(Math.min(20, Math.max(1, deadline - Date.now()))))) return false;
+    }
+    if (!this.getActiveClient()) return false;
+    this.requestSeedGossip('incremental');
+    return this.waitForSeedProfiles(required, Math.max(1, deadline - Date.now()));
+  }
+
+  /** Seed profile + one direct handshake; all waiting after bootstrap is local. */
+  async bootstrapDirectEntityRoutes(entityIds: readonly string[], timeoutMs: number): Promise<boolean> {
+    const normalized = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
+    const deadline = Date.now() + timeoutMs;
+    if (!(await this.waitForSeedProfiles(normalized, Math.max(1, deadline - Date.now())))) return false;
+    this.prepareDirectEntityRoutes(normalized);
+    while (Date.now() < deadline) {
+      if (this.prepareDirectEntityRoutes(normalized)) return true;
+      if (!(await this.waitForActiveDelay(Math.min(20, Math.max(1, deadline - Date.now()))))) return false;
+    }
+    return this.prepareDirectEntityRoutes(normalized);
   }
 
   /**
@@ -1208,8 +1253,7 @@ export class RuntimeP2P {
 
   private getProfileByEntity(entityId: string): Profile | null {
     const targetEntityId = normalizeId(entityId);
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    return profiles.find(profile => normalizeId(profile.entityId) === targetEntityId) || null;
+    return this.env.gossip?.getProfile?.(targetEntityId) ?? null;
   }
 
   private expandRequiredProfileIds(entityIds: string[]): string[] {
@@ -1327,7 +1371,7 @@ export class RuntimeP2P {
   }
 
   async announceLocalProfiles() {
-    if (this.closing || this.closed) return;
+    if (this.closing || this.closed || this.backgroundIoPaused) return;
     const profiles = await this.getLocalProfilesForEntities();
     if (this.closing || this.closed) return;
     const jurisdictions = this.env.gossip.getJurisdictions();
@@ -1353,7 +1397,7 @@ export class RuntimeP2P {
   }
 
   announceProfilesForEntities(entityIds: string[], reason: string = 'runtime-change') {
-    if (this.closing || this.closed) return;
+    if (this.closing || this.closed || this.backgroundIoPaused) return;
     if (!entityIds || entityIds.length === 0) return;
     for (const entityId of entityIds) {
       if (!entityId) continue;
@@ -1378,7 +1422,7 @@ export class RuntimeP2P {
     reason: string = 'runtime-change',
     includePending = true,
   ): Promise<void> {
-    if (this.closing || this.closed) return;
+    if (this.closing || this.closed || this.backgroundIoPaused) return;
     if (!entityIds || entityIds.length === 0) return;
     const targets = new Set<string>();
     if (includePending) {
@@ -1405,12 +1449,12 @@ export class RuntimeP2P {
   }
 
   /**
-   * Hubs re-announce whenever their certified profile changes (debounced by
-   * the caller). Non-hub profiles only leave the runtime when their topology
-   * changed or the heartbeat elapsed; capacity-only churn stays local.
+   * Capacity changes on every financial frame and are stale immediately under
+   * load. Relay publication is therefore topology-triggered for every Entity,
+   * including hubs; capacity hints refresh on the configured heartbeat. Exact
+   * bilateral admission remains the financial capacity authority.
    */
   private shouldAnnounceProfile(profile: Profile): boolean {
-    if (profile.metadata.isHub === true) return true;
     const previous = this.lastAnnouncedProfiles.get(normalizeId(profile.entityId));
     if (!previous) return true;
     if (previous.topologyKey !== profileTopologyKey(profile)) return true;
@@ -1418,7 +1462,7 @@ export class RuntimeP2P {
   }
 
   private async announceProfilesNow(entityIds: string[], reason: string) {
-    if (this.closing || this.closed) return;
+    if (this.closing || this.closed || this.backgroundIoPaused) return;
     const builtProfiles = await this.getLocalProfilesForEntities(entityIds);
     if (this.closing || this.closed) return;
     // The freshest certified profile always lands in the local cache (local
@@ -1471,7 +1515,7 @@ export class RuntimeP2P {
 
       // MONOTONIC TIMESTAMP: Ensure timestamp grows even if env.timestamp doesn't change
       // Get last announced timestamp for this entity from gossip
-      const existingProfile = this.env.gossip?.getProfiles?.().find(profile => profile.entityId === entityId);
+      const existingProfile = this.env.gossip?.getProfile?.(entityId);
       const lastTimestamp = existingProfile?.lastUpdated || 0;
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.state.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
@@ -1591,8 +1635,7 @@ export class RuntimeP2P {
         });
         continue;
       }
-      const existingProfiles = this.env.gossip?.getProfiles?.() || [];
-      const existing = existingProfiles.find(existingProfile => existingProfile.entityId === sanitized.entityId);
+      const existing = this.env.gossip?.getProfile?.(sanitized.entityId);
       const verifiedRoute = this.getVerifiedRuntimeRoute(sanitized.entityId);
       if (verifiedRoute && verifiedRoute.lastUpdated >= sanitized.lastUpdated) {
         if (
@@ -1736,14 +1779,10 @@ export class RuntimeP2P {
   private getDirectPeerEndpoint(runtimeId: string): string | null {
     const normalizedTargetRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedTargetRuntimeId || normalizedTargetRuntimeId === this.runtimeId) return null;
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    for (const profile of profiles) {
-      if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
-      if (profile.metadata?.isHub !== true) continue;
-      const endpoint = normalizeOptionalWsUrl(profile.wsUrl);
-      if (endpoint && isBrowserDirectWsEndpointAllowed(endpoint)) return endpoint;
-    }
-    return null;
+    const profile = this.env.gossip?.getProfileByRuntimeId?.(normalizedTargetRuntimeId);
+    if (profile?.metadata?.isHub !== true) return null;
+    const endpoint = normalizeOptionalWsUrl(profile.wsUrl);
+    return endpoint && isBrowserDirectWsEndpointAllowed(endpoint) ? endpoint : null;
   }
 
   private resolveTargetEncryptionKey(targetRuntimeId: string): Uint8Array | null {
@@ -1803,15 +1842,8 @@ export class RuntimeP2P {
       return;
     }
     if (existing && existingUrl === endpoint) {
-      if (!existing.isOpen() && !existing.isConnecting()) {
-        existing.connect().catch(error => {
-          this.env.warn('network', 'WS_DIRECT_CONNECT_FAILED', {
-            endpoint,
-            targetRuntimeId: normalizedTargetRuntimeId,
-            error: (error as Error).message,
-          });
-        });
-      }
+      // Initial creation below owns the only connect attempt. Re-entering route
+      // resolution must never turn a dead socket into an implicit retry.
       return;
     }
     if (existing) {
@@ -1837,9 +1869,12 @@ export class RuntimeP2P {
         ) return;
         this.directClientErrors.delete(normalizedTargetRuntimeId);
       },
-      onEntityInputs: async (from, envelope, timestamp) => {
-        if (this.directClients.get(normalizedTargetRuntimeId) !== client) return;
-        await this.acceptInboundEntityInputs('direct', from, envelope, timestamp);
+      signEnvelope: (to, envelope) => signRuntimeEntityInputsEnvelope(this.env, to, envelope),
+      onEntityInputs: async (from, envelope, timestamp, sessionAuthenticated) => {
+        if (this.directClients.get(normalizedTargetRuntimeId) !== client) {
+          throw new Error(`P2P_DIRECT_CLIENT_OWNERSHIP_LOST:${normalizedTargetRuntimeId}`);
+        }
+        await this.acceptInboundEntityInputs('direct', from, envelope, timestamp, sessionAuthenticated === true);
       },
       onError: error => {
         if (
@@ -1852,17 +1887,17 @@ export class RuntimeP2P {
           error: error.message,
         });
       },
-      maxReconnectAttempts: 0,
     });
     this.directClients.set(normalizedTargetRuntimeId, client);
     this.directClientUrls.set(normalizedTargetRuntimeId, endpoint);
     client.connect().catch(error => {
       if (this.closing || this.closed) return;
-      this.env.warn('network', 'WS_DIRECT_CONNECT_FAILED', {
+      reportDirectClientError(
+        this.env,
         endpoint,
-        targetRuntimeId: normalizedTargetRuntimeId,
-        error: (error as Error).message,
-      });
+        normalizedTargetRuntimeId,
+        error instanceof Error ? error : new Error(String(error)),
+      );
     });
   }
 

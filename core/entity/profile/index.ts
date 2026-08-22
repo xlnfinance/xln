@@ -714,19 +714,45 @@ const canonicalizeProfileAccounts = (
 
 const CANONICAL_PROFILE_CACHE_MAX = 4_096;
 const canonicalProfileCache = new Map<Profile, { encoded: string; canonical: Profile }>();
+const immutableCanonicalProfiles = new Set<Profile>();
+
+const freezeCanonicalProfileValue = (value: unknown, seen: Set<object>): void => {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach(item => freezeCanonicalProfileValue(item, seen));
+  } else {
+    Object.values(value as Record<string, unknown>)
+      .forEach(item => freezeCanonicalProfileValue(item, seen));
+  }
+  Object.freeze(value);
+};
+
+const freezeCanonicalProfile = (profile: Profile): Profile => {
+  freezeCanonicalProfileValue(profile, new Set());
+  if (immutableCanonicalProfiles.size >= CANONICAL_PROFILE_CACHE_MAX) {
+    const oldest = immutableCanonicalProfiles.values().next();
+    if (!oldest.done) immutableCanonicalProfiles.delete(oldest.value);
+  }
+  immutableCanonicalProfiles.add(profile);
+  return profile;
+};
 
 const rememberCanonicalProfile = (profile: Profile, canonical: Profile): Profile => {
   if (canonicalProfileCache.size >= CANONICAL_PROFILE_CACHE_MAX) {
     const oldest = canonicalProfileCache.keys().next();
     if (!oldest.done) canonicalProfileCache.delete(oldest.value);
   }
+  const immutable = immutableCanonicalProfiles.has(canonical)
+    ? canonical
+    : freezeCanonicalProfile(canonical);
   canonicalProfileCache.set(profile, {
     // The fingerprint is strict: symbols, accessors and unsupported values
     // cannot collide with a previously validated financial profile.
     encoded: encodeCanonicalConsensusValue(profile),
-    canonical,
+    canonical: immutable,
   });
-  return canonical;
+  return immutable;
 };
 
 export const canonicalizeProfile = (
@@ -735,6 +761,7 @@ export const canonicalizeProfile = (
 ): Profile =>
   timePerfPhase('profile.canonicalize', () => {
     observePerfCount('profile.canonicalize');
+    if (immutableCanonicalProfiles.has(profile)) return profile;
     const cached = canonicalProfileCache.get(profile);
     if (cached && encodeCanonicalConsensusValue(profile) === cached.encoded) {
       return cached.canonical;

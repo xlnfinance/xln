@@ -235,8 +235,22 @@ export const readWalletSnapshotBody = async (request: Request): Promise<WalletSn
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_FIELD_INVALID', `allowances[${index}]`);
     }
-    const entry = requireBoundaryRecord(value, 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_INVALID');
-    requireExactBoundaryKeys(entry, ['tokenAddress', 'spender'], [], 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_FIELDS_INVALID');
+    let entry: Record<string, unknown>;
+    try {
+      entry = requireBoundaryRecord(value, 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_INVALID');
+      requireExactBoundaryKeys(
+        entry,
+        ['tokenAddress', 'spender'],
+        [],
+        'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_FIELDS_INVALID',
+      );
+    } catch (error) {
+      throw new RequestBodyError(
+        400,
+        'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_FIELDS_INVALID',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     const tokenAddress = normalizeSnapshotAddress(
       entry['tokenAddress'],
       `allowances[${index}].tokenAddress`,

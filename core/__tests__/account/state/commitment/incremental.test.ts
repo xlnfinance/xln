@@ -10,6 +10,7 @@ import {
 import { PersistentEntityCollectionMap } from '../../../../entity/state/persistent-collection-map';
 import { computeEntityAccountValueHash } from '../../../../entity/consensus/state-root';
 import { safeStringify } from '../../../../protocol/serialization';
+import { resetPerfPhases, snapshotPerfPhases } from '../../../../support/performance/profile';
 import type { SwapOffer } from '../../../../types/account';
 import type { EntityState } from '../../../../entity/types';
 import { createDefaultDelta } from '../../../../account/state/delta';
@@ -117,6 +118,29 @@ const measured = (operation: () => string): { value: string; durationMs: number 
 };
 
 describe('incremental Account commitment', () => {
+  test('value-preserving Account shell fork carries the prepared root without rehashing', () => {
+    const previousProfile = process.env['XLN_ENTITY_FRAME_PROFILE'];
+    process.env['XLN_ENTITY_FRAME_PROFILE'] = '1';
+    resetPerfPhases();
+    try {
+      const base = account(10_000);
+      const root = computeAccountStateRoot(base.state);
+      const shell = forkAccountReplicaShell(base);
+      expect(computeAccountStateRoot(shell.state)).toBe(root);
+      const counts = snapshotPerfPhases().counts;
+      expect(counts['account.stateRoot.cacheMiss']).toBe(1);
+      expect(counts['account.stateRoot.cacheHit']).toBe(1);
+
+      bumpOffer(shell, 'offer-05000');
+      expect(computeAccountStateRoot(shell.state)).not.toBe(root);
+      expect(snapshotPerfPhases().counts['account.stateRoot.cacheMiss']).toBe(2);
+    } finally {
+      resetPerfPhases();
+      if (previousProfile === undefined) delete process.env['XLN_ENTITY_FRAME_PROFILE'];
+      else process.env['XLN_ENTITY_FRAME_PROFILE'] = previousProfile;
+    }
+  });
+
   test('updates one leaf in a 10k-offer account and matches a cold rebuild', () => {
     const base = account(10_000);
     const cold = measured(() => computeAccountStateRoot(base.state));

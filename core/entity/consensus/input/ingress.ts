@@ -104,16 +104,24 @@ export const prepareEntityInputIngress = (
     return rejectIngress('ENTITY_MEMPOOL_ADMISSION_REJECTED', replica);
   }
 
-  // Validate the exact retry bytes before canonical clone normalization can
+  // Validate the exact wire bytes before canonical clone normalization can
   // discard forbidden fields or coerce malformed signature containers.
-  const workingReplica = forkEntityReplicaForInput(replica);
   if (!isEntityInputWellFormed(ingressInput)) {
     const detail =
       `entityId=${ingressInput.entityId} ` +
       `txs=${ingressInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
     log.error(`❌ Invalid ingress input for ${ingressInput.entityId}: ${detail}`);
-    return rejectIngress('ENTITY_INPUT_INVALID', workingReplica);
+    return rejectIngress('ENTITY_INPUT_INVALID', replica);
   }
+  const accountInputOnly = Boolean(
+    ingressInput.entityTxs?.length &&
+    ingressInput.entityTxs.every(tx => tx.type === 'accountInput') &&
+    !ingressInput.proposedFrame &&
+    !ingressInput.hashPrecommits &&
+    !ingressInput.jPrefixAttestations &&
+    !ingressInput.leaderTimeoutVote,
+  );
+  const workingReplica = forkEntityReplicaForInput(replica, accountInputOnly);
   const input = cloneIsolatedEntityInput(ingressInput);
   if (ingressInput.leaderTimeoutVote && input.leaderTimeoutVote) {
     copyLocalEntityLeaderTimeoutVoteAuthorization(
@@ -126,13 +134,9 @@ export const prepareEntityInputIngress = (
   const frameHash = input.proposedFrame?.hash?.slice(0, 10) || 'none';
   logEntityInput(env, input, workingReplica, entityDisplay, frameHash);
 
-  if (!isEntityInputWellFormed(input)) {
-    const detail =
-      `entityId=${input.entityId} ` +
-      `txs=${input.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
-    log.error(`❌ Invalid input for ${input.entityId}: ${detail}`);
-    return rejectIngress('ENTITY_INPUT_INVALID', workingReplica);
-  }
+  // cloneIsolatedEntityInput is an owned canonical copy, not another trust
+  // boundary. Re-validating it doubled every AccountInput TypeGuard while
+  // proving nothing beyond the exact wire validation immediately above.
   if (!validateEntityReplica(workingReplica)) {
     log.error(
       `❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`,

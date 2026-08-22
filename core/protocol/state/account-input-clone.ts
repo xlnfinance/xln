@@ -52,6 +52,9 @@ const cloneFrameProposal = (proposal: AccountFrameProposal): AccountFrameProposa
 
 export function cloneIsolatedAccountInput<T extends AccountInput>(input: T): T;
 export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
+  if (input.kind === 'enqueue') {
+    return { kind: 'enqueue', txs: input.txs.map(cloneIsolatedAccountTx) };
+  }
   const base = {
     fromEntityId: input.fromEntityId,
     toEntityId: input.toEntityId,
@@ -60,8 +63,6 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
     ...(input.watchSeed !== undefined ? { watchSeed: input.watchSeed } : {}),
   };
   switch (input.kind) {
-    case 'txs':
-      return { ...base, kind: input.kind, txs: input.txs.map(cloneIsolatedAccountTx) };
     case 'external_finality':
       return {
         ...base,

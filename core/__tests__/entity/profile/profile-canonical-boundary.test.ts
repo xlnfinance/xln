@@ -147,11 +147,11 @@ test('certified route authority comes from the verified Hanko claim, never an em
 });
 
 test('signed gossip profile taxonomy accepts only canonical kinds and sorted sectors', () => {
-  const profile = buildCryptographicProfileFixture({
+  const profile = structuredClone(buildCryptographicProfileFixture({
     entityId: deriveSingleSignerFixtureEntityId('profile-taxonomy'),
     signingSeed: 'profile-taxonomy',
     name: 'taxonomy',
-  }) as unknown as { metadata: Record<string, unknown> };
+  })) as unknown as { metadata: Record<string, unknown> };
   profile.metadata['entityKind'] = 'company';
   profile.metadata['sectors'] = ['finance', 'technology'];
   expect(parseProfile(profile).metadata).toMatchObject({
@@ -196,4 +196,10 @@ test('canonicalizeProfile is identity on a gossip-cached output', () => {
     name: 'cached',
   });
   expect(canonicalizeProfile(canonical)).toBe(canonical);
+  expect(Object.isFrozen(canonical)).toBe(true);
+  expect(Object.isFrozen(canonical.accounts)).toBe(true);
+  expect(Object.isFrozen(canonical.metadata)).toBe(true);
+  expect(() => {
+    canonical.lastUpdated += 1;
+  }).toThrow();
 });

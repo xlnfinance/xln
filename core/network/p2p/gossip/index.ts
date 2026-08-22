@@ -31,6 +31,10 @@ export interface GossipLayer {
     announcement: JurisdictionGossipAnnouncement,
     officialFoundationSignerId?: string,
   ) => boolean;
+  /** O(1) canonical profile lookup; hot routing must never copy+scan the cache. */
+  getProfile: (entityId: string) => Profile | undefined;
+  /** O(1) direct transport lookup by authenticated Runtime id. */
+  getProfileByRuntimeId: (runtimeId: string) => Profile | undefined;
   getProfiles: () => Profile[];
   getJurisdictions: () => JurisdictionGossipAnnouncement[];
   getHubs: () => Profile[];
@@ -53,6 +57,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   // runtimeId -> X25519 pub key. One admission path (announce) maintains it;
   // sends resolve peer keys from profiles, never from a transport socket map.
   const runtimeKeys = new Map<string, string>();
+  const runtimeProfiles = new Map<string, Map<string, Profile>>();
   const normalizeRuntimeIdKey = (value: string): string => String(value || '').trim().toLowerCase();
   const validX25519Hex = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value);
   const indexRuntimeKey = (profile: Profile): void => {
@@ -63,10 +68,10 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   const encryptionKeyForRuntime = (runtimeId: string): string | null =>
     runtimeKeys.get(normalizeRuntimeIdKey(runtimeId)) ?? null;
 
-  const announce = (profile: Profile): void => {
+  const installProfile = (profile: Profile, publish: boolean): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts.length}`);
-    const existing = profiles.get(profile.entityId);
     const normalized = canonicalizeProfile(profile);
+    const existing = profiles.get(normalized.entityId);
     const newTimestamp = normalized.lastUpdated;
     const existingTimestamp = existing?.lastUpdated || 0;
     const shouldUpdate = !existing
@@ -81,9 +86,22 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       logDebug('GOSSIP', `📡 Gossip REJECTED: ${profile.entityId.slice(-4)} ts=${newTimestamp}<=${existingTimestamp}`);
       return;
     }
-    profiles.set(profile.entityId, normalized);
+    if (existing?.runtimeId) {
+      const previousRuntimeId = normalizeRuntimeIdKey(existing.runtimeId);
+      const previousRuntimeProfiles = runtimeProfiles.get(previousRuntimeId);
+      previousRuntimeProfiles?.delete(existing.entityId);
+      if (previousRuntimeProfiles?.size === 0) runtimeProfiles.delete(previousRuntimeId);
+    }
+    profiles.set(normalized.entityId, normalized);
+    if (normalized.runtimeId) {
+      const runtimeId = normalizeRuntimeIdKey(normalized.runtimeId);
+      const byEntity = runtimeProfiles.get(runtimeId) ?? new Map<string, Profile>();
+      byEntity.set(normalized.entityId, normalized);
+      runtimeProfiles.set(runtimeId, byEntity);
+    }
     indexRuntimeKey(normalized);
     logDebug('GOSSIP', `📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalized.accounts.length}`);
+    if (!publish) return;
     try {
       options.onAnnounce?.(normalized);
     } catch (error) {
@@ -93,8 +111,21 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       );
     }
   };
+  const announce = (profile: Profile): void => installProfile(profile, true);
 
   const getProfiles = (): Profile[] => Array.from(profiles.values());
+  const getProfile = (entityId: string): Profile | undefined =>
+    profiles.get(String(entityId || '').trim().toLowerCase());
+  const getProfileByRuntimeId = (runtimeId: string): Profile | undefined => {
+    const candidates = runtimeProfiles.get(normalizeRuntimeIdKey(runtimeId));
+    if (!candidates) return undefined;
+    let first: Profile | undefined;
+    for (const candidate of candidates.values()) {
+      first ??= candidate;
+      if (isHubProfile(candidate)) return candidate;
+    }
+    return first;
+  };
   const announceJurisdiction = (
     value: JurisdictionGossipAnnouncement,
     officialFoundationSignerId = options.officialFoundationSignerId,
@@ -121,7 +152,10 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   const setProfiles = (incoming: Iterable<Profile>): void => {
     profiles.clear();
     runtimeKeys.clear();
-    for (const profile of incoming) announce(profile);
+    runtimeProfiles.clear();
+    // Snapshot hydration reconstructs the live cache. It must not re-publish
+    // every already-durable profile through the external persistence callback.
+    for (const profile of incoming) installProfile(profile, false);
   };
   const getNetworkGraph = () => ({
     findPaths: async (source: string, target: string, amount?: bigint, tokenId = 1) => {
@@ -140,6 +174,8 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     announce,
     encryptionKeyForRuntime,
     announceJurisdiction,
+    getProfile,
+    getProfileByRuntimeId,
     getProfiles,
     getJurisdictions,
     getHubs,

@@ -64,6 +64,7 @@ import {
   ensurePendingNumberedRegistrationsResumed,
   registerNumberedEntities,
 } from '../../runtime/registration/numbered-registration-driver';
+import { countOp } from '../../support/performance/op-counters';
 
 export type RuntimeAdapterSocket = {
   send: (message: string | Uint8Array) => unknown;
@@ -134,6 +135,14 @@ export type RuntimeAdapterServerDeps = {
 	};
 
 const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
+// A process may host many sovereign RuntimeReplicas (the HLT packs up to 200).
+// Tick fanout is runtime-local: scanning the process-global client registry on
+// every committed frame turns independent replicas into O(runtimes * clients)
+// work and makes the control plane throttle the financial state machines.
+const clientsByRuntime = new Map<RuntimeReplica, Set<RuntimeAdapterSocket>>();
+
+export const countRuntimeAdapterClients = (env: RuntimeReplica): number =>
+  clientsByRuntime.get(env)?.size ?? 0;
 const brainVaultJobs = new Map<RuntimeAdapterSocket, ActiveBrainVaultJob>();
 const attachedEnvChanges = new Map<RuntimeReplica, () => void>();
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
@@ -344,8 +353,18 @@ const getClientState = (
       sendBucket: createConfiguredBucket('SEND', 10, 5),
     };
     clients.set(ws, state);
+    if (env) {
+      const runtimeClients = clientsByRuntime.get(env) ?? new Set<RuntimeAdapterSocket>();
+      runtimeClients.add(ws);
+      clientsByRuntime.set(env, runtimeClients);
+    }
   } else if (state.env === null) {
     state.env = env;
+    if (env) {
+      const runtimeClients = clientsByRuntime.get(env) ?? new Set<RuntimeAdapterSocket>();
+      runtimeClients.add(ws);
+      clientsByRuntime.set(env, runtimeClients);
+    }
   } else if (env !== null && state.env !== env) {
     throw new Error('RADAPTER_SOCKET_RUNTIME_REBIND_FORBIDDEN');
   }
@@ -361,8 +380,26 @@ const closeRuntimeAdapterSocketIfBackpressured = (ws: RuntimeAdapterSocket): boo
 
 const sendRuntimeAdapterEncoded = (ws: RuntimeAdapterSocket, encoded: string | Uint8Array): void => {
   if (closeRuntimeAdapterSocketIfBackpressured(ws)) return;
+  countOp(
+    'socket.radapter.out.response',
+    typeof encoded === 'string' ? new TextEncoder().encode(encoded).byteLength : encoded.byteLength,
+  );
   const disposition = classifyWebSocketSendResult(ws.send(encoded) as WebSocketSendResult);
   if (disposition === 'accepted') return;
+  if (disposition === 'backpressured') {
+    // Bun/uWS returns -1 after accepting the complete payload into its socket
+    // backpressure queue. Closing here discarded the queued RPC response and
+    // manufactured a 1013 disconnect on every sufficiently large HLT frame
+    // summary. The next send still enforces the explicit buffered-byte ceiling;
+    // a zero return remains an unambiguous drop and closes loudly below.
+    runtimeAdapterLog.warn('send.queued_backpressure', {
+      bytes: typeof encoded === 'string'
+        ? new TextEncoder().encode(encoded).byteLength
+        : encoded.byteLength,
+      bufferedAmount: ws.getBufferedAmount?.() ?? null,
+    });
+    return;
+  }
   ws.close?.(1013, 'runtime adapter socket backpressure');
 };
 
@@ -467,7 +504,13 @@ const requireBucket = (bucket: TokenBucket, label: string): void => {
 export const forgetRuntimeAdapterClient = (ws: RuntimeAdapterSocket): void => {
   brainVaultJobs.get(ws)?.abort.abort();
   brainVaultJobs.delete(ws);
+  const env = clients.get(ws)?.env;
   clients.delete(ws);
+  if (env) {
+    const runtimeClients = clientsByRuntime.get(env);
+    runtimeClients?.delete(ws);
+    if (runtimeClients?.size === 0) clientsByRuntime.delete(env);
+  }
 };
 
 export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, error: unknown): void => {
@@ -477,7 +520,8 @@ export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, erro
 
 export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {
   prunePendingCommands(env);
-  if (clients.size === 0) return;
+  const runtimeClients = clientsByRuntime.get(env);
+  if (!runtimeClients || runtimeClients.size === 0) return;
   const height = Math.max(0, Math.floor(Number(env.state.height ?? 0)));
   const readiness = getRuntimeCommandReadiness(env);
   const message = encodeRuntimeAdapterMessageForBrowser({
@@ -488,8 +532,11 @@ export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {
     commandReadyReason: readiness.reason,
   });
   const now = Date.now();
-  for (const [ws, state] of clients.entries()) {
-    if (state.env !== env) continue;
+  for (const ws of runtimeClients) {
+    const state = clients.get(ws);
+    if (!state || state.env !== env) {
+      throw new Error('RADAPTER_RUNTIME_CLIENT_INDEX_DIVERGED');
+    }
     if (state.authExpiresAtMs !== null && state.authExpiresAtMs <= now) {
       state.authLevel = null;
       state.authExpiresAtMs = null;
@@ -499,10 +546,10 @@ export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {
     }
     if (!state.authLevel) continue;
     try {
-      ws.send(message);
+      sendRuntimeAdapterEncoded(ws, message);
     } catch (error) {
       runtimeAdapterLog.debug('tick_send_failed', { reason: errorMessage(error) });
-      clients.delete(ws);
+      forgetRuntimeAdapterClient(ws);
     }
   }
 };

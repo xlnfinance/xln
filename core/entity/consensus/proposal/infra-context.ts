@@ -20,6 +20,7 @@ import {
 type ProposerInfraContext = EntityRuntimeContext & {
   gossip?: {
     getProfiles?: () => import('../../profile').Profile[];
+    getProfile?: (entityId: string) => import('../../profile').Profile | undefined;
     getNetworkGraph?: () => {
       findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) =>
         Promise<Array<{ path: string[] }>>;
@@ -61,12 +62,11 @@ export const hasReplayEntityContext = (env: EntityRuntimeContext, replica: Entit
   ) !== undefined;
 
 const createOnlineObservation = (
-  profiles: readonly InfraProfile[],
+  hasProfile: (entityId: string) => boolean,
   observeOnlineEntityIds: (ids: readonly string[]) => ReadonlySet<string>,
 ): OnlineObservation => {
   const observed = new Map<string, boolean>();
   const missing = new Set<string>();
-  const profileEntityIds = new Set(profiles.map(profile => String(profile.entityId).toLowerCase()));
   return {
     observed,
     missing,
@@ -74,7 +74,7 @@ const createOnlineObservation = (
       const canonical = peerEntityId.toLowerCase();
       const existing = observed.get(canonical);
       if (existing !== undefined) return existing;
-      if (!profileEntityIds.has(canonical)) {
+      if (!hasProfile(canonical)) {
         missing.add(canonical);
         return false;
       }
@@ -88,7 +88,8 @@ const createOnlineObservation = (
 const selectInfraProfiles = (
   entityId: string,
   htlcTxs: readonly EntityTx[],
-  profiles: readonly InfraProfile[],
+  getProfile: (entityId: string) => InfraProfile | undefined,
+  allProfiles: readonly InfraProfile[],
 ): { profiles: InfraProfile[]; routeEntityIds: Set<string>; needsRouteResolution: boolean } => {
   const routeEntityIds = new Set(htlcTxs.flatMap(tx =>
     tx.type === 'htlcPayment' ? tx.data.route.map(value => String(value).toLowerCase()) : []));
@@ -99,8 +100,12 @@ const selectInfraProfiles = (
   return {
     routeEntityIds,
     needsRouteResolution,
-    profiles: profiles.filter(profile =>
-      needsRouteResolution || originatedPeerIds.has(String(profile.entityId).toLowerCase())),
+    profiles: needsRouteResolution
+      ? [...allProfiles]
+      : [...originatedPeerIds].flatMap(id => {
+          const profile = getProfile(id);
+          return profile ? [profile] : [];
+        }),
   };
 };
 
@@ -127,15 +132,23 @@ const materializeFreshEntityInfraContext = async (
   const proposerSignerId = replica.signerId.trim().toLowerCase();
   const htlcTxs = getEffectiveHtlcFrameTxs(replica.state, proposalTxs).filter(entityTxNeedsHtlcInfra);
   const needsHtlcInfra = htlcTxs.length > 0;
-  const getProfiles = (env as ProposerInfraContext).gossip?.getProfiles;
-  if (needsHtlcInfra && !getProfiles) throw new Error('ENTITY_INFRA_GOSSIP_UNAVAILABLE');
-  const allProfiles = needsHtlcInfra ? getProfiles!() : [];
-  const selected = selectInfraProfiles(entityId, htlcTxs, allProfiles);
+  const gossip = (env as ProposerInfraContext).gossip;
+  const getProfiles = gossip?.getProfiles;
+  const getProfile = gossip?.getProfile;
+  if (needsHtlcInfra && (!getProfiles || !getProfile)) throw new Error('ENTITY_INFRA_GOSSIP_UNAVAILABLE');
+  const needsRouteResolution = htlcTxs.some(
+    tx => tx.type === 'htlcPayment' && tx.data.route.length === 0,
+  );
+  const allProfiles = needsRouteResolution ? getProfiles!() : [];
+  const selected = selectInfraProfiles(entityId, htlcTxs, getProfile ?? (() => undefined), allProfiles);
   const observeOnlineEntityIds = env.infrastructure?.observeOnlineEntityIds;
   if (needsHtlcInfra && !observeOnlineEntityIds) {
     throw new Error('ENTITY_INFRA_LIVENESS_OBSERVER_UNAVAILABLE');
   }
-  const online = createOnlineObservation(allProfiles, observeOnlineEntityIds ?? (() => new Set()));
+  const online = createOnlineObservation(
+    id => getProfile?.(id) !== undefined,
+    observeOnlineEntityIds ?? (() => new Set()),
+  );
   const graph = (env as ProposerInfraContext).gossip?.getNetworkGraph?.();
   if (selected.needsRouteResolution && !graph) throw new Error('ENTITY_INFRA_ROUTE_RESOLVER_UNAVAILABLE');
   const resolveRoute = async (

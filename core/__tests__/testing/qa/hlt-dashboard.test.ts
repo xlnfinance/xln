@@ -1,8 +1,8 @@
 import { describe, expect, test, afterEach } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { maybeHandleQaRequest } from '../../../qa/api';
@@ -25,6 +25,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const SAMPLE_PAYMENT = {
   schema: 'xln-hlt-payment-load-v1',
   mode: 'payments',
+  runId: 'hlt-dashboard-test',
   completionAuthority: 'committed_entity_metrics_and_bilateral_runtime_quiescence',
   configuredUsers: 200,
   configuredRounds: 10,
@@ -37,12 +38,21 @@ const SAMPLE_PAYMENT = {
   submittedPayments: 1000,
   deliveredPayments: 1000,
   enqueueAckElapsedMs: 70,
+  sourceDispatchFinishedElapsedMs: 60,
+  sourceAllAckedElapsedMs: 70,
   commandObservedElapsedMs: 70,
   deliveredElapsedMs: 6699,
   deliveredTps: 149.27601134497687,
   hubCompletedPaymentsBefore: 50,
   hubCompletedPaymentsAfter: 1050,
-  roundSubmissionLagMs: [74],
+  hubAcceptedPaymentsBefore: 40,
+  hubAcceptedPaymentsAfter: 1040,
+  hubIngressElapsedMs: 5000,
+  settlementSamples: [
+    { elapsedMs: 5000, runtimeHeight: 310, acceptedPayments: 1000, completedPayments: 900, lockBookOpen: 100 },
+    { elapsedMs: 6699, runtimeHeight: 313, acceptedPayments: 1000, completedPayments: 1000, lockBookOpen: 0 },
+  ],
+  roundSubmissionLagMs: Array.from({ length: 1000 }, () => 1),
   walBytesBefore: 13268608,
   walBytesAfter: 29856693,
   hubDurableBefore: {
@@ -122,8 +132,16 @@ describe('hlt dashboard snapshot', () => {
       join(workDir, 'server.log'),
       '[H1] [INFO][runtime] process.profile {"elapsedMs":12,"phases":[{"name":"apply","ms":12}]}\n',
     );
-    publishHltDashboardReport('payment', SAMPLE_PAYMENT, root);
+    publishHltDashboardReport('payment', { ...SAMPLE_PAYMENT, runId: basename(workDir) }, root);
     publishHltDashboardPerfFromWorkDir(workDir, root);
+    const paymentArtifact = JSON.parse(readFileSync(join(root, '.logs/qa/hlt/latest-payment.json'), 'utf8')) as {
+      runId?: string;
+    };
+    const perfArtifact = JSON.parse(readFileSync(join(root, '.logs/qa/hlt/latest-perf.json'), 'utf8')) as {
+      runId?: string;
+    };
+    expect(paymentArtifact.runId).toBe(basename(workDir));
+    expect(perfArtifact.runId).toBe(paymentArtifact.runId);
     const snapshot = readHltDashboardSnapshot(root);
     expect(snapshot.payment?.deliveredTps).toBeCloseTo(149.276, 3);
     expect(snapshot.perf.parsedProfiles).toBe(1);

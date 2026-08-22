@@ -890,6 +890,7 @@ describe('multisig secondary Hanko production', () => {
       }
     }
     expect(leader.workingReplica.state.height).toBe(1);
+    expect(leader.workingReplica.certifiedFrameHead?.frame.hankos).toHaveLength(1);
 
     const outbound = leader.outputs
       .flatMap(output => output.entityTxs ?? [])
@@ -957,6 +958,7 @@ describe('multisig secondary Hanko production', () => {
       output.signerId === validators[0] && output.proposedFrame?.hankos?.length,
     );
     if (!noticeForProposer) throw new Error('TEST_QUORUM_NOTICE_FOR_PROPOSER_MISSING');
+    expect(noticeForProposer.proposedFrame?.hankos).toHaveLength(1);
 
     registerOnly(proposer.env, validators[0]!);
     const caughtUp = await applyEntityInput(

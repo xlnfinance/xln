@@ -75,7 +75,8 @@ const expectedAtomicAccountFrame = (
         }]
       : [];
   });
-  return expected.length === 1 ? expected[0]! : null;
+  const [onlyExpected] = expected;
+  return expected.length === 1 && onlyExpected ? onlyExpected : null;
 };
 
 const stagedAtomicLegCommitted = (staged: StagedEntityInput): boolean => {
@@ -95,6 +96,19 @@ const stagedAtomicLegCommitted = (staged: StagedEntityInput): boolean => {
     frame.height === expected.height &&
     frame.stateHash === expected.stateHash,
   );
+};
+
+const requiredAtomicAccountInputIndex = (input: RoutedEntityInput): number => {
+  const indexes = (input.entityTxs ?? []).flatMap((tx, index) =>
+    tx.type === 'accountInput' ? [index] : []);
+  if (indexes.length !== 1) {
+    throw new Error(
+      `RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_COUNT_INVALID:${input.entityId}:${indexes.length}`,
+    );
+  }
+  const [onlyIndex] = indexes;
+  if (onlyIndex === undefined) throw new Error('RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_INDEX_MISSING');
+  return onlyIndex;
 };
 
 const describeStagedAtomicLeg = (staged: StagedEntityInput): Record<string, unknown> => {
@@ -212,9 +226,29 @@ export const applyAtomicEntityInputPair = async (
   ];
   let staged: [StagedEntityInput, StagedEntityInput];
   try {
+    const requiredIndexes: [number, number] = [
+      requiredAtomicAccountInputIndex(pair[0]),
+      requiredAtomicAccountInputIndex(pair[1]),
+    ];
     staged = [
-      await stageExternalEntityInput(env, pair[0], indexes[0], options, false),
-      await stageExternalEntityInput(env, pair[1], indexes[1], options, false),
+      await stageExternalEntityInput(
+        env,
+        pair[0],
+        indexes[0],
+        options,
+        false,
+        false,
+        requiredIndexes[0],
+      ),
+      await stageExternalEntityInput(
+        env,
+        pair[1],
+        indexes[1],
+        options,
+        false,
+        false,
+        requiredIndexes[1],
+      ),
     ];
   } catch (error) {
     const rejection = atomicPairProtocolRejection(error);

@@ -160,6 +160,27 @@ export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T =>
       cloned[key] = { ...(value as EntityInput['hashPrecommitFrame']) };
       continue;
     }
+    if (key === 'sourceRuntimeFrame') {
+      if (!value || typeof value !== 'object') {
+        throw new Error('RUNTIME_INPUT_SOURCE_RUNTIME_FRAME_INVALID');
+      }
+      cloned[key] = { ...(value as Record<string, unknown>) };
+      continue;
+    }
+    if (key === 'atomicCrossJurisdictionPair') {
+      if (!value || typeof value !== 'object') {
+        throw new Error('RUNTIME_INPUT_ATOMIC_PAIR_INVALID');
+      }
+      cloned[key] = { ...(value as Record<string, unknown>) };
+      continue;
+    }
+    if (key === 'certifiedOutputIdentity') {
+      if (!value || typeof value !== 'object') {
+        throw new Error('RUNTIME_INPUT_CERTIFIED_OUTPUT_IDENTITY_INVALID');
+      }
+      cloned[key] = { ...(value as Record<string, unknown>) };
+      continue;
+    }
     if (key === 'hashPrecommits') {
       if (!(value instanceof Map)) throw new Error('RUNTIME_INPUT_HASH_PRECOMMITS_INVALID');
       cloned[key] = new Map(Array.from(value, ([signerId, signatures]) => [
@@ -178,6 +199,13 @@ export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T =>
     }
     if (key === 'leaderTimeoutVote') {
       cloned[key] = cloneIsolatedEntityLeaderTimeoutVote(value as EntityLeaderTimeoutVote);
+      continue;
+    }
+    // Primitive values are already isolated by value. Sending them through
+    // structuredClone adds native serialization work to every Runtime ingress
+    // without changing ownership or mutation safety.
+    if (value === null || typeof value !== 'object') {
+      cloned[key] = value;
       continue;
     }
     cloned[key] = structuredClone(value);

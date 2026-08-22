@@ -43,6 +43,7 @@ import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './process/node-runtime-quiesce';
+import { pauseJurisdictionWatchersAndWait } from '../runtime/loop/loop-watchers';
 import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
@@ -92,6 +93,7 @@ import { createStackManagerController, type StackManagerController } from '../ap
 import { hasDaemonControlAuth, parseTaggedControlBody } from '../api/server/control/auth';
 import { JSON_HEADERS } from '../api/server/utils';
 import { handleKnownProfileRequest } from '../api/server/network/gossip-profiles';
+import { handleGossipProfilesSendReady } from '../api/server/control/gossip-send-ready';
 import {
   getActiveJAdapter,
   getP2P,
@@ -153,7 +155,13 @@ import {
   type DirectInputDebugState,
   type HubServerSocket,
 } from './hub/hub-runtime-transport';
-import { dumpOpCounters, installGlobalOpCounters } from '../support/performance/op-counters';
+import type { DirectRuntimeSessionState } from '../network/p2p/direct-runtime-bun';
+import {
+  dumpOpCounters,
+  installGlobalOpCounters,
+  resetOpCounters,
+  snapshotOpCounters,
+} from '../support/performance/op-counters';
 import {
   dumpRuntimeSamplingProfile,
   startRuntimeSamplingProfiler,
@@ -1928,7 +1936,25 @@ const createHubControlRequestHandler = (dependencies: {
   markShuttingDown: () => void;
 }): ((request: Request, url: URL) => Promise<Response | null>) =>
   async (request, url) => {
+    if (request.method === 'GET' && url.pathname === '/api/control/performance/op-counters') {
+      return new Response(safeStringify({ counters: snapshotOpCounters() }), { headers: JSON_HEADERS });
+    }
     if (request.method !== 'POST') return null;
+    if (url.pathname === '/api/control/performance/background-io/stop') {
+      if (process.env['XLN_HLT_DIRECT_ONLY'] !== '1') {
+        return new Response(safeStringify({ ok: false, error: 'HLT_ONLY' }), {
+          status: 403,
+          headers: JSON_HEADERS,
+        });
+      }
+      await pauseJurisdictionWatchersAndWait(dependencies.state);
+      dependencies.state.infrastructure?.p2p?.pauseBackgroundIo();
+      return new Response(safeStringify({ ok: true }), { headers: JSON_HEADERS });
+    }
+    if (url.pathname === '/api/control/performance/op-counters/reset') {
+      resetOpCounters();
+      return new Response(safeStringify({ ok: true }), { headers: JSON_HEADERS });
+    }
     if (url.pathname === '/api/control/runtime/snapshot') {
       const outputPath = String(process.env['XLN_RUNTIME_SNAPSHOT_EXPORT_PATH'] || '').trim();
       if (!outputPath || !isAbsolute(outputPath)) {
@@ -2025,6 +2051,7 @@ type HubHttpContext = {
     lastSeen: DirectEntityInputDebug | null;
     lastError: DirectEntityInputDebug | null;
   };
+  getDirectRuntimeSessions: () => DirectRuntimeSessionState[];
   handleStatus: (url: URL, operatorAuthorized: boolean) => Response | null;
   handleControl: (request: Request, url: URL) => Promise<Response | null>;
   stackManagerController: StackManagerController;
@@ -2049,6 +2076,13 @@ const handleHubHttpRequest = async (
   if (faucetPolicyResponse) return faucetPolicyResponse;
   const statusResponse = context.handleStatus(url, operatorAuthorized);
   if (statusResponse) return statusResponse;
+  if (url.pathname === '/api/control/p2p/direct-sessions' && request.method === 'GET') {
+    return new Response(safeStringify({
+      ok: true,
+      runtimeId: String(context.env.runtimeId || '').toLowerCase(),
+      sessions: context.getDirectRuntimeSessions(),
+    }), { headers: JSON_HEADERS });
+  }
   if (url.pathname === '/api/gossip/profile' && request.method === 'GET') {
     // Expose this Hub Runtime's admitted profile view. HLT and operators must
     // verify the encrypted return route before opening a bilateral Account.
@@ -2058,6 +2092,9 @@ const handleHubHttpRequest = async (
       relayStore: null,
       headers: JSON_HEADERS,
     });
+  }
+  if (url.pathname === '/api/control/gossip-profiles-send-ready' && request.method === 'POST') {
+    return handleGossipProfilesSendReady(request, context.env, JSON_HEADERS);
   }
   if (url.pathname === '/api/stack-manager/status' && request.method === 'GET') {
     return context.stackManagerController.status(request, context.env);
@@ -2477,6 +2514,7 @@ const startHubHttpSurface = (
     getJAdapter: () => live.activeJAdapter,
     ensureTokenCatalog: () => requireHubTokenCatalog(live),
     getDirectInputDebug: () => ({ ...directInputDebug }),
+    getDirectRuntimeSessions: directRuntimeWs.getSessionState,
     handleStatus: createHubStatusHandler(live, bootstrapClockMs),
     handleControl,
     stackManagerController,
@@ -2525,12 +2563,12 @@ const startHubHttpSurface = (
       drain(ws: HubServerSocket) {
         if (ws.data?.type !== 'rpc') directRuntimeWs.websocket.drain(ws);
       },
-      close(ws: HubServerSocket) {
+      close(ws: HubServerSocket, code: number, reason: string) {
         if (ws.data?.type === 'rpc') {
           forgetRuntimeAdapterClient(ws);
           return;
         }
-        directRuntimeWs.websocket.close(ws);
+        directRuntimeWs.websocket.close(ws, code, reason);
       },
     },
   });
@@ -2584,7 +2622,10 @@ const createHubMeshBootstrapController = (
     };
     let faucetProvision: Promise<void> | null = null;
     const ensureFaucetReady = async (): Promise<void> => {
-      if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;
+      // Every Hub exposes the faucet API and derives its own faucet signer.
+      // H1 creates the shared token catalog, while H2/H3 wait for it above;
+      // limiting funding to --deploy-tokens left their valid API unfunded.
+      if (!AUTO_PROVISION_EXTERNAL_FAUCET) return;
       faucetProvision ??= externalWalletApi.provisionFaucetWallet().then(() => {
         if (!live.shuttingDown) nodeLog.info('faucet_provision.ready', { name: resolvedArgs.name });
       });
@@ -2613,6 +2654,7 @@ const createHubMeshBootstrapController = (
         });
         if (complete) {
           markProgress('complete');
+          live.p2p?.finishBootstrapPolling();
           if (loop) clearInterval(loop);
           loop = null;
         }

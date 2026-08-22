@@ -2,7 +2,13 @@ export type ViewTab = 'assets' | 'accounts' | 'ownership' | 'settings';
 export type SettingsSubview = 'wallet' | 'consensus' | 'recovery' | 'display' | 'stack-manager' | 'network' | 'data' | 'log' | 'entity';
 export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'lending' | 'history' | 'configure' | 'appearance';
 export type AssetWorkspaceTab = 'move' | 'history';
-export type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
+export type ConfigureWorkspaceTab =
+  | 'extend-credit'
+  | 'request-credit'
+  | 'collateral'
+  | 'token'
+  | 'load-testing'
+  | 'dispute';
 
 export type EntityPanelRouteState = {
   activeTab: ViewTab;

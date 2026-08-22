@@ -266,6 +266,10 @@ export type MarketMakerHealth = {
 };
 
 export const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
+export const MARKET_MAKER_STEADY_QUOTES_ENABLED = readBooleanEnv(
+  'MARKET_MAKER_STEADY_QUOTES_ENABLED',
+  true,
+);
 export const MARKET_MAKER_HEALTH_REFRESH_MS = Math.max(
   250,
   Number(process.env['MARKET_MAKER_HEALTH_REFRESH_MS'] || '1000'),
@@ -294,7 +298,10 @@ export const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
 );
 export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
-  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
+  Number(
+    process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] ||
+    LIMITS.MAX_MARKET_MAKER_NEW_OFFERS_PER_TICK,
+  ),
 );
 // Steady quote maintenance is paced. Bootstrap is intentionally not: it plans
 // all books first and commits one same-J batch followed by one cross-J batch.
@@ -304,15 +311,24 @@ export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // second authority path, inflates WAL, and races an already pending frame.
 export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'),
+  Number(
+    process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] ||
+    LIMITS.MAX_MARKET_MAKER_CROSS_ROUTE_JOBS_PER_TICK,
+  ),
 );
 export const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'),
+  Number(
+    process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] ||
+    LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK,
+  ),
 );
 export const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'),
+  Number(
+    process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] ||
+    LIMITS.MAX_MARKET_MAKER_CONNECTIVITY_TXS_PER_TICK,
+  ),
 );
 // One canonical visible ladder for every market. A production shell override
 // previously reduced cross-J to three levels while same-J exposed ten, so

@@ -8,9 +8,12 @@ import {
 } from '../../../runtime/loop/loop-environment.ts';
 import {
   clearPendingAuditEvents,
+  clearRuntimeFrameEvents,
   dropPendingHistoryRecords,
   peekPendingHistoryRecords,
+  readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
+import { recordCommittedRuntimeEntityMetrics } from '../../../runtime/observability/entity-metrics';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
@@ -41,6 +44,7 @@ import {
   verifyRecoveryJournalFrame,
 } from './verification';
 import { assertCrossJLocalCohorts } from '../../../runtime/delivery/topology/cross-j-topology';
+import { timePerfPhase } from '../../../support/performance/profile';
 
 const APPLY_ALLOWED = Symbol.for('xln.runtime.env.apply.allowed');
 const REPLAY_MODE = Symbol.for('xln.runtime.env.replay.mode');
@@ -60,7 +64,6 @@ export type RecoveryJournalDeps = {
     routing: RuntimeOutputRoutingDeps,
   ): unknown;
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
-  generateHookPings(env: RuntimeReplica): void;
 };
 
 const validateReplayFrameHeader = (
@@ -134,9 +137,11 @@ const replayOneFrame = async (
   installReplayOutputSignerHints(env, collectOutputSignerHints(frame, height));
   installReplayOutputRuntimeRoutes(env, frame.runtimeOutputs ?? []);
   if (!env.infrastructure) throw new Error('RECOVERY_RUNTIME_INFRASTRUCTURE_REQUIRED');
-  env.infrastructure.replayEntityContexts = new Map(
-    [...(frame.entityContexts ?? new Map())].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
-  );
+  // validateEntityInfraContext constructs an isolated decoded value before
+  // apply, and materializeEntityInfraContext clones that value for the
+  // reducer. Cloning the immutable WAL source here was a third full copy of
+  // the same HTLC graph and provided no additional ownership boundary.
+  env.infrastructure.replayEntityContexts = new Map(frame.entityContexts ?? new Map());
   writeRuntimeMetadata(env, APPLY_ALLOWED, true);
   try {
     if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
@@ -145,10 +150,11 @@ const replayOneFrame = async (
         consumptionNodes: getConsumptionNodeStore(env).size,
       });
     }
-    const result = await deps.applyRuntimeInput(
-      env,
-      frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
-    );
+    const result = await timePerfPhase('recovery.frame.applyRuntimeInput', () =>
+      deps.applyRuntimeInput(
+        env,
+        frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+      ));
     assertCrossJLocalCohorts(env);
     const jOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
     registerPendingCommittedJOutbox(env, jOutbox.durable);
@@ -160,26 +166,37 @@ const replayOneFrame = async (
         ),
       ),
     );
-    deps.applyRuntimeOutputPlan(
+    timePerfPhase('recovery.frame.applyOutputPlan', () => deps.applyRuntimeOutputPlan(
       env,
       result.entityOutbox,
       deps.getRuntimeOutputRoutingDeps(),
-    );
-    assertRecoveryOutboxMatches(
+    ));
+    timePerfPhase('recovery.frame.verifyOutbox', () => assertRecoveryOutboxMatches(
       frame.runtimeOutputs ?? [],
       env.pendingNetworkOutputs ?? [],
       frame.runtimeOutputRefs ?? [],
       height,
-    );
-    deps.generateHookPings(env);
+    ));
     const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);
+    const committedEvents = readRuntimeFrameEvents(env);
     clearPendingAuditEvents(env);
+    // Production hook generation is already committed in pendingRuntimeInput.
+    // Re-generating it during replay was dead work immediately overwritten by
+    // this authoritative WAL value.
     env.runtimeMempool = frame.pendingRuntimeInput
       ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
       : { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];
     dropPendingHistoryRecords(env, history.length);
-    verifyRecoveryJournalFrame(env, frame, height, result);
+    timePerfPhase('recovery.frame.verifyJournal', () =>
+      verifyRecoveryJournalFrame(env, frame, height, result));
+    // Production consumes exactly one event buffer after each authoritative
+    // WAL commit. Replay previously retained every earlier frame's events,
+    // manufacturing an O(history) live buffer and making economic TPS
+    // impossible to derive from the verified transition. Record only after
+    // the persisted frame passes every equivalence check, then clear it.
+    recordCommittedRuntimeEntityMetrics(env, height, committedEvents);
+    clearRuntimeFrameEvents(env);
   } finally {
     if (env.infrastructure) delete env.infrastructure.replayEntityContexts;
     clearReplayOutputSignerHints(env);

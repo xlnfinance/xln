@@ -33,6 +33,18 @@ const orderbookSameLog = createStructuredLogger('orderbook.same');
 
 export { crossBookQtyLots };
 
+const finalBookUpdates = (
+  updates: readonly { pairId: string; book: BookState }[],
+): { pairId: string; book: BookState }[] => {
+  // A matching pass may apply hundreds of offers to one hot pair. Intermediate
+  // immutable books are private working states; publishing each one rebuilt
+  // the same Patricia path and storage marker once per order. Commit exactly
+  // the final state of every touched pair, preserving first-touch pair order.
+  const byPair = new Map<string, BookState>();
+  for (const update of updates) byPair.set(update.pairId, update.book);
+  return Array.from(byPair, ([pairId, book]) => ({ pairId, book }));
+};
+
 const processCrossJurisdictionOrderbookOffers = (
   input: CrossOrderbookProcessInput,
 ): void => {
@@ -147,5 +159,10 @@ export function processOrderbookSwaps(
     recordDebugProjectionReject,
   });
 
-  return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  return {
+    accountTxs,
+    crossJurisdictionFills,
+    bookUpdates: finalBookUpdates(bookUpdates),
+    debugProjectionRejects,
+  };
 }

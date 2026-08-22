@@ -146,12 +146,11 @@ const refillThresholdFor = (target: bigint): bigint => {
 
 const provisionTokenBalance = async (
   context: ExternalWalletApiContext,
-  adapter: JAdapter,
   wallet: ethers.NonceManager,
   token: JTokenInfo,
 ): Promise<void> => {
   const faucetAddress = await wallet.getAddress();
-  const contract = ERC20Mock__factory.connect(token.address, toErc20ContractRunner(adapter.signer, 'adapter.signer'));
+  const contract = ERC20Mock__factory.connect(token.address, toErc20ContractRunner(wallet, 'faucetWallet'));
   const balance = await contract.balanceOf(faucetAddress);
   const target = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
   const threshold = refillThresholdFor(target);
@@ -163,8 +162,12 @@ const provisionTokenBalance = async (
     targetBalance: target.toString(),
   });
   if (balance >= threshold) return;
-  const tx = await contract.transfer(faucetAddress, target - balance);
-  await waitForFaucetTx(tx, 'token-transfer', {
+  // Auto-provision is a testnet-only contract: catalog entries must implement
+  // the canonical unrestricted ERC20Mock mint surface. Transferring from the
+  // Hub J-adapter silently coupled faucet readiness to whichever Anvil account
+  // imported that Hub and left H2/H3 permanently unfunded.
+  const tx = await contract.mint(faucetAddress, target - balance);
+  await waitForFaucetTx(tx, 'token-mint', {
     token: token.symbol,
     tokenAddress: token.address,
     faucetAddress,
@@ -209,10 +212,10 @@ export const provisionFaucetWalletFunding = async (
       }
       return;
     }
-    if (options.ensureTokens) {
-      for (const token of tokens) await provisionTokenBalance(context, adapter, wallet, token);
-    }
     if (options.ensureEth) await provisionEthBalance(context, adapter, faucetAddress);
+    if (options.ensureTokens) {
+      for (const token of tokens) await provisionTokenBalance(context, wallet, token);
+    }
   });
 };
 

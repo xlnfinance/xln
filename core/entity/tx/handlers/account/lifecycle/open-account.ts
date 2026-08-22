@@ -24,7 +24,6 @@ import {
   sameAccountStateDomain,
 } from '../../../../../account/commitment/state-root';
 import { applyAccountInput } from '../../../../../account/consensus';
-import { createLocalAccountInput } from '../../../../../account/input';
 import { createEmptyAccountJClaimAccumulator } from '../../../../../account/j-claims/j-claim-accumulator';
 import { MAX_PROFILE_ADVERTISED_ACCOUNTS } from '../../../../profile/profile-descriptor';
 import { buildHubRebalancePolicyTx } from './admin';
@@ -148,7 +147,7 @@ const seedOpenAccountPolicies = async (
   // accountStateRoot still commits the complete live Account state and becomes
   // the starting root for the first proposal. Treating that root as a frame
   // hash invents evidence neither peer signed and breaks strict WAL replay.
-  account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
+  account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state, undefined, 'openGenesis');
   const tokenId = tx.data.tokenId ?? 1;
   const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
     .filter(id => Number.isFinite(id) && id > 0);
@@ -167,7 +166,7 @@ const seedOpenAccountPolicies = async (
   const admission = await applyAccountInput(
     accountConsensusContext,
     account,
-    createLocalAccountInput(account.state, state.entityId, initialAccountTxs),
+    { kind: 'enqueue', txs: initialAccountTxs },
   );
   if (!admission.ok || admission.admittedAccountTxCount !== initialAccountTxs.length) {
     throw new Error(`OPEN_ACCOUNT_INITIAL_TXS_NOT_ADMITTED:${counterpartyId}`);

@@ -9,6 +9,7 @@ import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { validateDeliverableEntityInput } from '../delivery/topology/routing-validation';
 import { computeProfileRouteHash } from '../../entity/profile/profile-signing';
 import { recoverDigestSignerAddress } from '../../account/crypto';
+import { LIMITS } from '../../config/constants';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
@@ -30,7 +31,7 @@ import {
 } from './identity';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 
-export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
+export const MAX_PENDING_NETWORK_OUTPUTS = LIMITS.MAX_PENDING_NETWORK_OUTPUTS;
 
 export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
   getEffectiveEntityInputTxs(output).some(tx => {
@@ -272,6 +273,7 @@ type RuntimeP2PDispatch = {
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
   ): DeliveryResult;
+  bootstrapDirectEntityRoutes?(entityIds: readonly string[], timeoutMs: number): Promise<boolean>;
   getVerifiedRuntimeRoute?(entityId: string): { runtimeId: string; lastUpdated: number } | null;
 };
 
@@ -359,13 +361,8 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
   const targetEntityId = String(entityId || '')
     .trim()
     .toLowerCase();
-  if (!targetEntityId || !env.gossip?.getProfiles) return [];
-  const profile = env.gossip.getProfiles().find(
-    candidate =>
-      String(candidate?.entityId || '')
-        .trim()
-        .toLowerCase() === targetEntityId,
-  );
+  if (!targetEntityId || !env.gossip?.getProfile) return [];
+  const profile = env.gossip.getProfile(targetEntityId);
   if (!profile?.runtimeSignature) return [];
   // One recover per distinct (route hash, signature), not per planned output.
   try {
@@ -448,11 +445,24 @@ const compareCertifiedOutputDelivery = (left: RoutedEntityInput, right: RoutedEn
   );
 };
 
-export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number =>
+const compareOutputDeliveryWithKeys = (
+  left: RoutedEntityInput,
+  right: RoutedEntityInput,
+  leftRouteKey: string,
+  rightRouteKey: string,
+): number =>
   compareCertifiedOutputDelivery(left, right) ||
   outputDeliveryPriority(left) - outputDeliveryPriority(right) ||
   compareEntityFrameDelivery(left, right) ||
-  compareStableText(buildRouteOutputKey(left), buildRouteOutputKey(right));
+  compareStableText(leftRouteKey, rightRouteKey);
+
+export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number =>
+  compareOutputDeliveryWithKeys(
+    left,
+    right,
+    buildRouteOutputKey(left),
+    buildRouteOutputKey(right),
+  );
 
 export const buildPendingNetworkOutputs = (
   outputs: RoutedEntityInput[],
@@ -486,7 +496,12 @@ export const buildPendingNetworkOutputs = (
         ? output
         : { ...output, entityTxs: ordered };
     })
-    .sort(compareOutputDelivery);
+    .sort((left, right) => compareOutputDeliveryWithKeys(
+      left,
+      right,
+      graph.prepare(left).routeKey,
+      graph.prepare(right).routeKey,
+    ));
   if (pending.length > MAX_PENDING_NETWORK_OUTPUTS) {
     throw new Error(
       `NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${pending.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`,

@@ -23,9 +23,9 @@ export type HltAmountRange = Readonly<{ min: bigint; max: bigint }>;
 export const HLT_DEFAULT_PAYMENT_AMOUNT_RANGE: HltAmountRange = { min: 1_000n, max: 1_000n };
 
 export type HltEconomy = Readonly<{
-  /** Total user Runtime processes. Swap lanes pair them as maker/taker. */
+  /** Total sovereign user RuntimeReplicas; OS processes only pack them. */
   users: number;
-  /** Actions offered per user per second. */
+  /** Actions offered per user per second for every enabled workload. */
   ratePerUserPerSecond: number;
   durationSeconds: number;
   mix: HltWorkloadMix;
@@ -49,17 +49,17 @@ export type HltPlan = Readonly<{
   /** Payment sender/receiver pairs when the workloads are disjoint. */
   paymentLanes: number;
   /**
-   * Matched swaps each maker/taker pair submits per cadence tick.
-   * Simultaneous mix uses 2 so 1000 users at 1 action/s offer 1000 swaps/s
-   * and 1000 payments/s from the same population.
+   * Submitted offers per two-user maker/taker pair per cadence tick. Mixed
+   * HLT sends one order per user: 1000 users offer 1000 orders/s plus 1000
+   * payments/s. Committed SwapMatched counters remain the only TPS authority.
    */
-  swapMatchesPerLaneRound: number;
+  swapOrdersPerLaneRound: number;
   rounds: number;
   cadenceMs: number;
   /** Orders per second the population offers to the Hub. */
   offeredOrderRatePerSecond: number;
-  /** Economic swaps per second: one maker order plus one taker order. */
-  offeredSwapRatePerSecond: number;
+  /** Submitted swap orders per second; never reported as matched TPS. */
+  offeredSwapOrderRatePerSecond: number;
   offeredPaymentRatePerSecond: number;
   totalUserRuntimes: number;
 }>;
@@ -103,15 +103,15 @@ export const buildHltPlan = (economy: HltEconomy): HltPlan => {
   if (paymentAmountRange.max < paymentAmountRange.min) {
     throw new Error(`HLT_PAYMENT_AMOUNT_RANGE_INVALID:${paymentAmountRange.min}:${paymentAmountRange.max}`);
   }
-  // One round is one action per user. Sub-millisecond cadence would make the
+  // One round is one action per enabled workload per user. Sub-millisecond cadence would make the
   // scheduler, not the Hub, the thing under test.
   if (ratePerUserPerSecond > 1_000) throw new Error(`HLT_RATE_PER_USER_TOO_HIGH:${ratePerUserPerSecond}`);
   const bothWorkloads = mix.swap > 0 && mix.payment > 0;
   const swapLanes = mix.swap > 0 ? users / 2 : 0;
   const paymentLanes = mix.payment > 0 ? users : 0;
-  const swapMatchesPerLaneRound = bothWorkloads ? 2 : 1;
+  const swapOrdersPerLaneRound = bothWorkloads ? 2 : 1;
   const rounds = durationSeconds * ratePerUserPerSecond;
-  const offeredSwapRatePerSecond = swapLanes * ratePerUserPerSecond * swapMatchesPerLaneRound;
+  const offeredSwapOrderRatePerSecond = swapLanes * ratePerUserPerSecond * swapOrdersPerLaneRound;
   const offeredPaymentRatePerSecond = (bothWorkloads ? users : paymentLanes) * ratePerUserPerSecond;
   return {
     economy: {
@@ -126,11 +126,12 @@ export const buildHltPlan = (economy: HltEconomy): HltPlan => {
     },
     swapLanes,
     paymentLanes,
-    swapMatchesPerLaneRound,
+    swapOrdersPerLaneRound,
     rounds,
     cadenceMs: Math.max(1, Math.round(1_000 / ratePerUserPerSecond)),
-    offeredOrderRatePerSecond: offeredSwapRatePerSecond * 2 + offeredPaymentRatePerSecond,
-    offeredSwapRatePerSecond,
+    offeredOrderRatePerSecond:
+      offeredSwapOrderRatePerSecond * (bothWorkloads ? 1 : 2) + offeredPaymentRatePerSecond,
+    offeredSwapOrderRatePerSecond,
     offeredPaymentRatePerSecond,
     totalUserRuntimes: users,
   };
@@ -156,9 +157,9 @@ export const parseHltLabels = (raw: string, code: string): string[] => {
 
 export const describeHltPlan = (plan: HltPlan): string =>
   `[hlt] users=${plan.totalUserRuntimes} swapLanes=${plan.swapLanes} paymentLanes=${plan.paymentLanes} ` +
-  `swapMatchesPerLaneRound=${plan.swapMatchesPerLaneRound} ` +
+  `swapOrdersPerLaneRound=${plan.swapOrdersPerLaneRound} ` +
   `rate=${plan.economy.ratePerUserPerSecond}/user/s cadence=${plan.cadenceMs}ms rounds=${plan.rounds} ` +
   `duration=${plan.economy.durationSeconds}s offeredOrders=${plan.offeredOrderRatePerSecond}/s ` +
-  `offeredSwaps=${plan.offeredSwapRatePerSecond}/s offeredPayments=${plan.offeredPaymentRatePerSecond}/s ` +
+  `offeredSwapOrders=${plan.offeredSwapOrderRatePerSecond}/s offeredPayments=${plan.offeredPaymentRatePerSecond}/s ` +
   `hubs=${plan.economy.hubLabels.join('+')} mm=${plan.economy.marketMakerLabels.join('+') || 'none'} ` +
   `tokens=${plan.economy.baseTokenId}/${plan.economy.quoteTokenId}`;

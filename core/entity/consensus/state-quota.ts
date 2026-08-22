@@ -130,8 +130,6 @@ type ConsumptionSizeLog = Readonly<{
   details: Record<string, string>;
 }>;
 
-const ENTITY_SIZE_OBSERVATION_PERIOD_FRAMES = 100;
-
 const measureConsumptionState = (state: EntityState) =>
   measureEntityConsensusStateBytes(state, {
     getAccumulatorState: candidate => candidate.consumptionAccumulator,
@@ -143,17 +141,18 @@ export const prepareCommittedEntitySizeLog = (
   postState: EntityState,
 ): ConsumptionSizeLog | null => {
   const configuredWarningBytes = env.runtimeConfig?.entityConsensusStateWarningBytes;
-  if (
-    configuredWarningBytes === undefined
-    && postState.height !== 1
-    && postState.height % ENTITY_SIZE_OBSERVATION_PERIOD_FRAMES !== 0
-  ) return null;
+  // This is telemetry, not a consensus or storage limit. Serializing the full
+  // pre/post Entity projection every 100 frames added an O(total state) pause
+  // to the hot path. Operators that need this diagnostic opt in with an exact
+  // warning threshold; normal operation relies on incremental graph/storage
+  // byte accounting instead of rebuilding a debug blob.
+  if (configuredWarningBytes === undefined) return null;
   const before = measureConsumptionState(preState);
   const after = measureConsumptionState(postState);
   const assessment = classifyEntityConsensusStateQuotaTransition(
     before.totalBytes,
     after.totalBytes,
-    configuredWarningBytes === undefined ? undefined : { warningBytes: configuredWarningBytes },
+    { warningBytes: configuredWarningBytes },
   );
   return {
     warning: assessment.classification !== 'within',

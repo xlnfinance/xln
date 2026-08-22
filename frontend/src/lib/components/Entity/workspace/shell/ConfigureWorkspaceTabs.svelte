@@ -16,6 +16,7 @@
     { id: 'request-credit', label: 'Request Credit', testId: 'configure-tab-request-credit' },
     { id: 'collateral', label: 'Request Collateral', testId: 'configure-tab-collateral' },
     { id: 'token', label: 'Add Token', testId: 'configure-tab-token' },
+    { id: 'load-testing', label: 'Load Testing', testId: 'configure-tab-load-testing' },
     { id: 'dispute', label: 'Dispute', testId: 'configure-tab-dispute', danger: true },
   ];
 </script>

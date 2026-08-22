@@ -19,11 +19,18 @@ import {
 // Hanko strings are re-decoded several times per input (verify, proposer
 // inspection, witness checks, ack validation). Decoding and signature recovery
 // are pure functions of their string inputs, so bounded memos are exact.
-const MEMO_MAX_ENTRIES = 2048;
+// One 1000-peer Hub wave carries roughly two current Hankos per Account plus
+// their ACK echoes. A 2048-entry clear-all cache repeatedly discarded the
+// same signatures mid-wave and paid secp recovery again. Keep a bounded
+// rolling working set large enough for several concurrent waves.
+const MEMO_MAX_ENTRIES = 16_384;
 const decodedEnvelopes = new Map<string, HankoEnvelope>();
 const recoveredSignatures = new Map<string, readonly HankoRecoveredSignature[]>();
 const memoSet = <T>(memo: Map<string, T>, key: string, value: T): T => {
-  if (memo.size >= MEMO_MAX_ENTRIES) memo.clear();
+  if (memo.size >= MEMO_MAX_ENTRIES) {
+    const oldest = memo.keys().next();
+    if (!oldest.done) memo.delete(oldest.value);
+  }
   memo.set(key, value);
   return value;
 };

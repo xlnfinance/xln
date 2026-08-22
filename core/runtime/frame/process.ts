@@ -3,7 +3,7 @@
  * commit the authoritative WAL, publish live state, then run external effects.
  * Key entrypoint: applyAndCommitRuntimeFrame. Human-audit importance: 100/100.
  */
-import { runWithOpScope } from '../../support/performance/op-counters';
+import { recordOpEvent, runWithOpScopes } from '../../support/performance/op-counters';
 import { TIMING } from '../../config/constants';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from '../observability/history-retention';
@@ -175,6 +175,36 @@ const buildRuntimeFrameInput = (
   };
 };
 
+const recordRuntimeFrameIngress = (
+  env: RuntimeReplica,
+  runtimeInput: RuntimeInput,
+  queuedAt: number | undefined,
+): void => {
+  let entityTxs = 0;
+  let accountFrames = 0;
+  let frameAcks = 0;
+  let acks = 0;
+  for (const input of runtimeInput.entityInputs) {
+    for (const tx of input.entityTxs ?? []) {
+      entityTxs += 1;
+      if (tx.type !== 'accountInput') continue;
+      if (tx.data.kind === 'frame') accountFrames += 1;
+      else if (tx.data.kind === 'frame_ack') frameAcks += 1;
+      else if (tx.data.kind === 'ack') acks += 1;
+    }
+  }
+  recordOpEvent('runtime.frame.ingress', {
+    runtimeId: String(env.runtimeId ?? env.dbNamespace ?? 'unknown').trim().toLowerCase(),
+    height: env.state.height + 1,
+    queuedAt: queuedAt ?? -1,
+    entityInputs: runtimeInput.entityInputs.length,
+    entityTxs,
+    accountFrames,
+    frameAcks,
+    acks,
+  });
+};
+
 const resolveRuntimeFrameTimestamp = (
   env: RuntimeReplica,
   mempoolQueuedAt: number | undefined,
@@ -230,6 +260,7 @@ const openRuntimeFrameCandidate = (
     adapter.setQuietLogs?.(quietRuntimeLogs);
   }
   const runtimeInput = buildRuntimeFrameInput(env, mempool, deps);
+  recordRuntimeFrameIngress(env, runtimeInput, mempoolQueuedAt);
   liveState.inFlightEntityInputs = runtimeInput.entityInputs.length;
   return {
     transaction,
@@ -526,7 +557,13 @@ export const createRuntimeProcessor = (deps: RuntimeProcessDeps) => (
   env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeDelay = 0,
-): Promise<RuntimeReplica> => runWithOpScope('frame', () => processRuntimeFrameOnce(deps, env, inputs, runtimeDelay));
+): Promise<RuntimeReplica> => {
+  const runtimeScope = String(env.runtimeId ?? env.dbNamespace ?? 'unknown').trim().toLowerCase();
+  return runWithOpScopes(
+    ['frame', `runtime:${runtimeScope || 'unknown'}`],
+    () => processRuntimeFrameOnce(deps, env, inputs, runtimeDelay),
+  );
+};
 
 const processRuntimeFrameOnce = async (
   deps: RuntimeProcessDeps,

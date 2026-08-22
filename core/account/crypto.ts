@@ -4,7 +4,8 @@
  */
 
 import * as secp256k1 from '@noble/secp256k1';
-import { countOpWithSite } from '../support/performance/op-counters';
+import { countOpWithSite, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
+import { getPerfMs } from '../support/time';
 import { isBrowserRuntime } from '../support/platform-crypto';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -612,7 +613,7 @@ export function signDigestBytesWithPrivateKey(
     throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${messageBytes.length}`);
   }
   installHmacSync();
-  countOpWithSite('ecdsa.sign', 0, 3);
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const native = getNativeSecp256k1();
   if (native) {
     // Same raw secp256k1 ECDSA operation as noble, only through the native
@@ -620,9 +621,21 @@ export function signDigestBytesWithPrivateKey(
     // portable implementation below; Hanko bytes and on-chain ecrecover compatibility do not
     // change.
     const { signature, recid } = native.ecdsaSign(messageBytes, privateKey);
+    countOpWithSite(
+      'ecdsa.sign',
+      0,
+      3,
+      OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+    );
     return { signature: new Uint8Array(signature), recovery: recid };
   }
   const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
+  countOpWithSite(
+    'ecdsa.sign',
+    0,
+    3,
+    OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+  );
   return { signature, recovery };
 }
 
@@ -634,11 +647,17 @@ export function recoverAddressFromDigestSignature(
   if (messageBytes.length !== 32 || signature.length !== 64) return null;
   if (recovery !== 0 && recovery !== 1) return null;
   try {
-    countOpWithSite('ecdsa.recover', 0, 2);
+    const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const native = getNativeSecp256k1();
     const publicKey = native
       ? native.ecdsaRecover(signature, recovery, messageBytes, false)
       : secp256k1.recoverPublicKey(messageBytes, signature, recovery, false);
+    countOpWithSite(
+      'ecdsa.recover',
+      0,
+      2,
+      OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0,
+    );
     return `0x${keccak256(publicKey.slice(1)).slice(-40)}`.toLowerCase();
   } catch {
     return null;

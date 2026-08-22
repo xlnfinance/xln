@@ -9,9 +9,21 @@ import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../accoun
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
+  BOUNDARY_AUDIT_ENABLED,
+  diffOpCounters,
   dumpOpCounters,
   installGlobalOpCounters,
+  snapshotOpCounters,
+  type OpCounterSnapshot,
 } from '../../../../support/performance/op-counters';
+import {
+  dumpRuntimeSamplingProfile,
+  startRuntimeSamplingProfiler,
+} from '../../../../support/performance/sampling-profiler';
+import {
+  resetPerfPhases,
+  snapshotPerfPhases,
+} from '../../../../support/performance/profile';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -20,25 +32,118 @@ import {
 } from '../../../../runtime';
 import type { RuntimeRecoveryBundleV1 } from '../../../../storage/recovery/bundle/types';
 import type { PersistedFrameJournal } from '../../../../storage/types';
-import { readHltHubRecording, summarizeHltHubFrames } from './recording';
+import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profile';
+import { readHltHubRecording } from './recording';
+import { summarizePaymentWork } from './payment-work-ledger';
+import { buildEntityProposalReplayOracleMap } from '../../../../entity/consensus/proposal/replay-oracle';
 
 type ReplayMode = 'max' | 'fixed' | 'sweep';
+
+type EconomicCounters = Readonly<{
+  deliveredPayments: number;
+  matchedEconomicSwaps: number;
+}>;
+
+const subtractEconomicCounters = (
+  final: EconomicCounters,
+  baseline: EconomicCounters,
+): EconomicCounters => {
+  const deliveredPayments = final.deliveredPayments - baseline.deliveredPayments;
+  const matchedEconomicSwaps = final.matchedEconomicSwaps - baseline.matchedEconomicSwaps;
+  if (deliveredPayments < 0 || matchedEconomicSwaps < 0) {
+    throw new Error(
+      `HLT_REPLAY_ECONOMIC_COUNTER_REGRESSION:` +
+      `payments=${baseline.deliveredPayments}:${final.deliveredPayments}:` +
+      `swaps=${baseline.matchedEconomicSwaps}:${final.matchedEconomicSwaps}`,
+    );
+  }
+  return { deliveredPayments, matchedEconomicSwaps };
+};
+
+type ReplayFrameProfile = Readonly<{
+  height: number;
+  timestamp: number;
+  entityInputs: number;
+  txKinds: Readonly<Record<string, number>>;
+  elapsedMs: number;
+  deliveredPayments: number;
+  matchedEconomicSwaps: number;
+}>;
+
+type ReplayAmplificationTotals = Readonly<{
+  canonicalEncodeBytes: number;
+  storageEncodeBytes: number;
+  sealedEntityFrameBytes: number;
+  ecdsaSigns: number;
+  ecdsaRecovers: number;
+}>;
+
+type ReplayAmplification = Readonly<{
+  totals: ReplayAmplificationTotals;
+  perRuntimeEntityInput: ReplayAmplificationTotals;
+  perDeliveredPayment: ReplayAmplificationTotals | null;
+  perMatchedEconomicSwap: ReplayAmplificationTotals | null;
+}>;
 
 type ReplayTrial = Readonly<{
   offeredTps: number | null;
   frames: number;
-  accountInputs: number;
-  accountTxs: number;
+  runtimeEntityInputs: number;
+  entityInputsPerFrame: number;
   outboxEnvelopes: number;
   elapsedMs: number;
   cpuMs: number;
-  accountInputTps: number;
-  accountTxTps: number;
-  cpuAccountTxTps: number;
+  deliveredPayments: number;
+  deliveredPaymentTps: number;
+  matchedEconomicSwaps: number;
+  matchedEconomicSwapTps: number;
   finalHeight: number;
   finalPendingOutbox: number;
   equivalent: true;
+  amplification: ReplayAmplification;
+  frameProfile?: readonly ReplayFrameProfile[];
+  operations: OpCounterSnapshot;
+  perf: ReturnType<typeof snapshotPerfPhases>;
 }>;
+
+const amplificationTotals = (operations: OpCounterSnapshot): ReplayAmplificationTotals => ({
+  canonicalEncodeBytes: operations['canonical.encode']?.bytes ?? 0,
+  storageEncodeBytes: operations['storage.encode']?.bytes ?? 0,
+  sealedEntityFrameBytes: operations['entity.frame.sealed']?.bytes ?? 0,
+  ecdsaSigns: operations['ecdsa.sign']?.calls ?? 0,
+  ecdsaRecovers: operations['ecdsa.recover']?.calls ?? 0,
+});
+
+const divideAmplification = (
+  totals: ReplayAmplificationTotals,
+  units: number,
+): ReplayAmplificationTotals => ({
+  canonicalEncodeBytes: totals.canonicalEncodeBytes / units,
+  storageEncodeBytes: totals.storageEncodeBytes / units,
+  sealedEntityFrameBytes: totals.sealedEntityFrameBytes / units,
+  ecdsaSigns: totals.ecdsaSigns / units,
+  ecdsaRecovers: totals.ecdsaRecovers / units,
+});
+
+const summarizeReplayAmplification = (
+  operations: OpCounterSnapshot,
+  runtimeEntityInputs: number,
+  deliveredPayments: number,
+  matchedEconomicSwaps: number,
+): ReplayAmplification => {
+  const totals = amplificationTotals(operations);
+  if (runtimeEntityInputs < 1) throw new Error('HLT_REPLAY_AMPLIFICATION_INPUTS_MISSING');
+  return {
+    totals,
+    perRuntimeEntityInput: divideAmplification(totals, runtimeEntityInputs),
+    perDeliveredPayment: deliveredPayments > 0
+      ? divideAmplification(totals, deliveredPayments)
+      : null,
+    perMatchedEconomicSwap: matchedEconomicSwaps > 0
+      ? divideAmplification(totals, matchedEconomicSwaps)
+      : null,
+  };
+};
 
 const optionalArgument = (name: string): string | null => {
   const index = process.argv.indexOf(`--${name}`);
@@ -74,6 +179,7 @@ const recordingPath = resolve(requiredArgument('recording'));
 const outputPath = resolve(optionalArgument('output') ?? `${recordingPath}.replay.json`);
 const mode = parseMode();
 const rates = parseRates(mode);
+const frameProfileEnabled = process.argv.includes('--frame-profile');
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
@@ -113,8 +219,7 @@ const prewarmRecordedHubSigners = (
 };
 
 const frameUnits = (frame: PersistedFrameJournal): number => {
-  const totals = summarizeHltHubFrames([frame]);
-  return totals.accountTxs > 0 ? totals.accountTxs : totals.accountInputs;
+  return frame.runtimeInput.entityInputs.length;
 };
 
 const waitForOfferedRate = async (
@@ -127,6 +232,17 @@ const waitForOfferedRate = async (
   const remaining = dueAt - performance.now();
   if (remaining > 0) await Bun.sleep(remaining);
 };
+
+const readEconomicCounters = (
+  env: Awaited<ReturnType<typeof restoreEnvFromRecoveryBundles>>,
+): EconomicCounters => [...(env.infrastructure?.entityMetricStats?.values() ?? [])]
+  .reduce(
+    (total, metrics) => ({
+      deliveredPayments: total.deliveredPayments + metrics.completedPayments,
+      matchedEconomicSwaps: total.matchedEconomicSwaps + metrics.matchedSwaps,
+    }),
+    { deliveredPayments: 0, matchedEconomicSwaps: 0 },
+  );
 
 const assertReplayTerminalEquivalent = (finalHeight: number): true => {
   if (finalHeight !== artifact.recording.targetHeight) {
@@ -155,35 +271,83 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     targetHeight: artifact.recording.baseHeight,
     readOnly: true,
   });
+  // Max replay measures the deterministic machine, not terminal rendering.
+  // Runtime logs are an envelope-side external effect and are intentionally
+  // excluded alongside sockets and durable writes.
+  env.quietRuntimeLogs = true;
+  if (artifact.entityProposalOracle) {
+    if (!env.infrastructure) throw new Error('HLT_REPLAY_INFRASTRUCTURE_MISSING');
+    env.infrastructure.replayEntityProposalOracle = buildEntityProposalReplayOracleMap(
+      artifact.entityProposalOracle,
+    );
+  }
   prewarmRecordedHubSigners(env);
+  const economicBaseline = readEconomicCounters(env);
+  await startRuntimeSamplingProfiler('hlt-replay-tail');
+  resetPerfPhases();
+  const operationsBefore = snapshotOpCounters();
   const startedAt = performance.now();
   const cpuStarted = process.cpuUsage();
   let cumulativeUnits = 0;
+  const frameProfile: ReplayFrameProfile[] = [];
   try {
-    for (const frame of frames) {
-      cumulativeUnits += frameUnits(frame);
-      await waitForOfferedRate(offeredTps, cumulativeUnits, startedAt);
-      await replayRecoveryFrameJournals(env, [frame]);
+    if (offeredTps === 0 && !frameProfileEnabled) {
+      // Max mode measures the canonical recovery primitive over its native WAL
+      // tail shape. Re-entering the public replay boundary for every frame
+      // repeatedly toggled replay metadata and revalidated Runtime config; it
+      // was harness overhead absent from both restore and live H1 execution.
+      await replayRecoveryFrameJournals(env, frames);
+    } else {
+      for (const frame of frames) {
+        cumulativeUnits += frameUnits(frame);
+        await waitForOfferedRate(offeredTps, cumulativeUnits, startedAt);
+        const economicBefore = readEconomicCounters(env);
+        const frameStartedAt = performance.now();
+        await replayRecoveryFrameJournals(env, [frame]);
+        if (frameProfileEnabled) {
+          const economicAfter = readEconomicCounters(env);
+          frameProfile.push({
+            height: frame.height,
+            timestamp: frame.timestamp,
+            entityInputs: frame.runtimeInput.entityInputs.length,
+            txKinds: countEntityInputTxKinds(frame.runtimeInput.entityInputs).txKinds,
+            elapsedMs: performance.now() - frameStartedAt,
+            deliveredPayments: economicAfter.deliveredPayments - economicBefore.deliveredPayments,
+            matchedEconomicSwaps: economicAfter.matchedEconomicSwaps - economicBefore.matchedEconomicSwaps,
+          });
+        }
+      }
     }
     const elapsedMs = performance.now() - startedAt;
     const cpu = process.cpuUsage(cpuStarted);
     const cpuMs = (cpu.user + cpu.system) / 1_000;
     const seconds = Math.max(elapsedMs / 1_000, Number.EPSILON);
-    const cpuSeconds = Math.max(cpuMs / 1_000, Number.EPSILON);
+    const economic = subtractEconomicCounters(readEconomicCounters(env), economicBaseline);
+    const operations = diffOpCounters(operationsBefore);
     return {
       offeredTps: offeredTps > 0 ? offeredTps : null,
       frames: artifact.totals.runtimeFrames,
-      accountInputs: artifact.totals.accountInputs,
-      accountTxs: artifact.totals.accountTxs,
+      runtimeEntityInputs: artifact.totals.runtimeEntityInputs,
+      entityInputsPerFrame: artifact.totals.runtimeEntityInputs / artifact.totals.runtimeFrames,
       outboxEnvelopes: artifact.totals.outboxEnvelopes,
       elapsedMs,
       cpuMs,
-      accountInputTps: artifact.totals.accountInputs / seconds,
-      accountTxTps: artifact.totals.accountTxs / seconds,
-      cpuAccountTxTps: artifact.totals.accountTxs / cpuSeconds,
+      deliveredPayments: economic.deliveredPayments,
+      deliveredPaymentTps: economic.deliveredPayments / seconds,
+      matchedEconomicSwaps: economic.matchedEconomicSwaps,
+      matchedEconomicSwapTps: economic.matchedEconomicSwaps / seconds,
       finalHeight: env.state.height,
       finalPendingOutbox: env.pendingNetworkOutputs?.length ?? 0,
       equivalent: assertReplayTerminalEquivalent(env.state.height),
+      amplification: summarizeReplayAmplification(
+        operations,
+        artifact.totals.runtimeEntityInputs,
+        economic.deliveredPayments,
+        economic.matchedEconomicSwaps,
+      ),
+      ...(frameProfileEnabled ? { frameProfile } : {}),
+      operations,
+      perf: snapshotPerfPhases(),
     };
   } finally {
     await closeRuntimeDb(env);
@@ -197,9 +361,25 @@ for (const rate of rates) {
   trials.push(trial);
   console.log(
     `HLT_REPLAY_EQUIVALENT offered=${trial.offeredTps ?? 'max'} ` +
-    `accountTxTps=${trial.accountTxTps.toFixed(2)} cpuAccountTxTps=${trial.cpuAccountTxTps.toFixed(2)} ` +
+    `payments=${trial.deliveredPayments}/${trial.deliveredPaymentTps.toFixed(2)}tps ` +
+    `swaps=${trial.matchedEconomicSwaps}/${trial.matchedEconomicSwapTps.toFixed(2)}tps ` +
+    `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
     `height=${trial.finalHeight} pendingOutbox=${trial.finalPendingOutbox}`,
   );
+}
+dumpRuntimeSamplingProfile('complete');
+
+if (BOUNDARY_AUDIT_ENABLED) {
+  const forbidden = Object.entries(snapshotOpCounters())
+    .filter(([name, counter]) => counter.calls > 0 && [
+      'boundary.socket.',
+      'boundary.http.',
+      'boundary.level.',
+      'boundary.timer.',
+    ].some(prefix => name.startsWith(prefix)));
+  if (forbidden.length > 0) {
+    throw new Error(`HLT_REPLAY_EXTERNAL_SIDE_EFFECT:${safeStringify(Object.fromEntries(forbidden))}`);
+  }
 }
 
 const report = {
@@ -208,6 +388,9 @@ const report = {
   recordingPath,
   recordingManifestHash: artifact.recording.manifestHash,
   mode,
+  ...(artifact.source.workload === 'payments'
+    ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }
+    : {}),
   trials,
 };
 writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });

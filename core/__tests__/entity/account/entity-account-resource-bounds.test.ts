@@ -5,7 +5,6 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { applyAccountInput, proposeAccountFrame } from '../../../account/consensus';
 import { createFrameHash } from '../../../account/consensus/frame/hash';
 import { prependUniqueMempoolTxs } from '../../../account/consensus/helpers';
-import { createLocalAccountInput } from '../../../account/input';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { LIMITS } from '../../../config/constants';
@@ -373,7 +372,7 @@ test('single and batch Account mempool enqueue reject atomically at the shared c
   await expect(applyAccountInput(
     createAccountConsensusContext(env),
     full,
-    createLocalAccountInput(full.state, entityId, [memoTx(20_000)]),
+    { kind: 'enqueue', txs: [memoTx(20_000)] },
   )).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
   expect(full.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE);
 

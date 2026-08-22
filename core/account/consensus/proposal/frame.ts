@@ -79,11 +79,16 @@ export const buildProposalFrame = async (
   jHeight: number,
   events: string[],
   checkpointProfile: (label: string) => void,
+  collectStateRootTiming = false,
 ): Promise<ProposalFrameBuildResult> => {
-  const stateRootTiming: AccountStateRootTiming = {};
+  // Fine-grained timing bypasses the Account-root memo by design. Enabling it
+  // unconditionally made production compute the same candidate root again
+  // when the Account leaf entered the Entity radix. The phase checkpoint is
+  // sufficient for slow-path logs; detailed sections are explicit profiling.
+  const stateRootTiming: AccountStateRootTiming | undefined = collectStateRootTiming ? {} : undefined;
   let accountStateRoot: string;
   try {
-    accountStateRoot = computeAccountStateRoot(candidate.state, stateRootTiming);
+    accountStateRoot = computeAccountStateRoot(candidate.state, stateRootTiming, 'proposalFrame');
   } catch (error) {
     return {
       ok: false,
@@ -131,5 +136,5 @@ export const buildProposalFrame = async (
     };
   }
   checkpointProfile('frameValidation');
-  return { ok: true, frame, stateRootTiming };
+  return { ok: true, frame, stateRootTiming: stateRootTiming ?? {} };
 };

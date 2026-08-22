@@ -7,8 +7,39 @@ import {
   readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
+import { ENV_REPLAY_MODE_KEY, writeRuntimeMetadata } from '../../../runtime/loop/loop-environment';
 
-test('every machine event reaches history only after commit flush', () => {
+test('read-only replay keeps storage invalidation without building disposable history', () => {
+  const env = createEmptyEnv('replay-history-side-effect-seed');
+  writeRuntimeMetadata(env, ENV_REPLAY_MODE_KEY, true);
+  publishEntityCandidateEffects(env, null, [{
+    kind: 'accountFrameHistory',
+    entityId: '0x01',
+    counterpartyId: '0x02',
+    accountHeight: 1,
+    source: 'peerCommit',
+    frame: {
+      height: 1,
+      timestamp: 100,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: 'genesis',
+      accountStateRoot: '0x01',
+      stateHash: '0x02',
+      byLeft: true,
+      deltas: [],
+    },
+  }]);
+
+  expect(env.infrastructure?.pendingHistoryRecords).toBeUndefined();
+  expect([...env.overlay!.values()]).toEqual([{
+    family: 'account',
+    entityId: '0x01',
+    counterpartyId: '0x02',
+  }]);
+});
+
+test('machine events stay in durable Runtime history without relay duplication', () => {
   const env = createEmptyEnv('env-events-audit-commit-seed');
   const forwarded: Array<Record<string, unknown>> = [];
   env.infrastructure!.p2p = {
@@ -23,16 +54,15 @@ test('every machine event reaches history only after commit flush', () => {
 
   expect(forwarded).toHaveLength(0);
   expect(readRuntimeFrameEvents(env)).toHaveLength(1);
-  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(1);
+  expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
 
   flushPendingAuditEvents(env);
 
-  expect(forwarded).toHaveLength(1);
-  expect(forwarded[0]?.eventName).toBe('OrdinaryCommittedFact');
-  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(0);
+  expect(forwarded).toHaveLength(0);
+  expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
 });
 
-test('clearing pending audit events drops uncommitted high-signal emits', () => {
+test('ordinary machine emits never enter the relay audit buffer', () => {
   const env = createEmptyEnv('env-events-audit-clear-seed');
   const forwarded: Array<Record<string, unknown>> = [];
   env.infrastructure!.p2p = {
@@ -47,7 +77,7 @@ test('clearing pending audit events drops uncommitted high-signal emits', () => 
   flushPendingAuditEvents(env);
 
   expect(forwarded).toHaveLength(0);
-  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(0);
+  expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
 });
 
 test('warn and error diagnostics cannot escape before WAL commit', () => {
@@ -88,7 +118,7 @@ test('candidate notifications remain inert until commit publication and dedupe b
   } as never;
   const effect = {
     kind: 'debug' as const,
-    payload: { code: 'REB_STEP', entityId: '0x01', frameHeight: 7 },
+    payload: { level: 'error', code: 'REB_STEP', entityId: '0x01', frameHeight: 7 },
   };
 
   expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();

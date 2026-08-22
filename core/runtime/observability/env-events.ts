@@ -30,6 +30,7 @@ import {
   indexCertifiedEntityFrameNotes,
 } from '../../entity/htlc/note-index';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
+import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop/loop-environment';
 
 const getLogState = (env: RuntimeReplica) => {
   if (!env.infrastructure) env.infrastructure = {};
@@ -291,6 +292,10 @@ export const recordAccountFrameHistory = (
   const counterpartyId = String(record.counterpartyId || '').toLowerCase();
   const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
   if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) return;
+  if (readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) {
+    applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
+    return;
+  }
   // History is the certified semantic chain. Quorum witnesses are retained in
   // EntityReplica.hankoWitness; persisting their non-unique byte encodings in
   // the frame record would manufacture forks between honest threshold subsets.
@@ -384,6 +389,10 @@ export const publishEntityCandidateEffects = (
     } else if (effect.kind === 'securityIncidentResolve') {
       resolveRuntimeSecurityIncident(env, effect.identity);
     } else {
+      // Informational candidate traces (currently REB_STEP) are local
+      // diagnostics, not a second network event stream. Relay only actionable
+      // audit levels; committed machine facts already live in Runtime history.
+      if (effect.payload['level'] !== 'warn' && effect.payload['level'] !== 'error') continue;
       queuePendingAuditEvent(env, effect.payload);
     }
   }
@@ -397,6 +406,10 @@ const recordEntityFrameHistory = (
   const entityHeight = Number(record.link?.frame?.height ?? 0);
   if (!entityId || !Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
     throw new Error(`HISTORY_VIEW_ENTITY_FRAME_IDENTITY_INVALID:${entityId}:${String(entityHeight)}`);
+  }
+  if (readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) {
+    applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
+    return;
   }
   const pending = getPendingHistoryRecords(env);
   const existing = pending.find(
@@ -481,16 +494,9 @@ export function attachEventEmitters(env: RuntimeReplica): void {
       },
       'EVENT',
     );
-    // `emit` means a committed machine fact, so every event belongs in the
-    // Runtime event stream. Importance-by-name heuristics are both lossy and
-    // brittle: adding a new event must not require updating a second table.
-    // Operational debug logs use the structured logger methods instead.
-    queuePendingAuditEvent(env, {
-      level: 'event',
-      eventName,
-      data,
-      runtimeId: env.runtimeId,
-      at: env.state.timestamp,
-    });
+    // The frame log is committed with the Runtime WAL and queried from history.
+    // Mirroring every machine fact to the relay duplicated the durable stream
+    // as one signed socket frame per Runtime frame. Only explicit warn/error
+    // and candidate debug effects use the relay audit lane.
   };
 }

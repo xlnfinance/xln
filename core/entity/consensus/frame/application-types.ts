@@ -1,4 +1,4 @@
-import type { AccountPeerInput, RuntimeOverlayRecord } from '../../../types/account';
+import type { RuntimeOverlayRecord } from '../../../types/account';
 import type { EntityCandidateEffect, EntityOutput, EntityState, HashType } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
@@ -17,6 +17,7 @@ import type {
 import type { VerifiedCertifiedEntityOutput } from '../output/certification';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../../types/entity/htlc-infra-context';
+import type { ProposableAccountMap } from '../account/canonical-worklist';
 
 export type ApplyEntityTxsInOrderContext = {
   env: EntityRuntimeContext;
@@ -30,8 +31,7 @@ export type ApplyEntityTxsInOrderContext = {
   allJOutputs: JInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   collectedHashManifest: Map<string, { type: HashType; context: string }>;
-  proposableAccounts: Set<string>;
-  requiredAccountResponses: Map<string, AccountPeerInput>;
+  proposableAccounts: ProposableAccountMap;
   allSwapOffersCreated: SwapOfferEvent[];
   allSwapCancelRequests: SwapCancelRequestEvent[];
   allSwapOffersCancelled: SwapCancelEvent[];

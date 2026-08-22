@@ -46,19 +46,41 @@ export const hasCurrentProfileBoardAuthority = async (
 
 const PROFILE_ROUTE_DOMAIN = 'xln-profile-runtime-route-v1';
 const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');
+const PROFILE_HASH_MEMO_MAX = 4_096;
+const canonicalProfileHashMemo = new Map<Profile, string>();
+const canonicalProfileRouteHashMemo = new Map<Profile, string>();
+
+const rememberProfileHash = (memo: Map<Profile, string>, profile: Profile, hash: string): string => {
+  if (memo.size >= PROFILE_HASH_MEMO_MAX && !memo.has(profile)) {
+    const oldest = memo.keys().next();
+    if (!oldest.done) memo.delete(oldest.value);
+  }
+  memo.set(profile, hash);
+  return hash;
+};
 
 export const computeProfileHash = (profile: Profile): string => {
   const canonicalProfile = canonicalizeProfile(profile);
-  return computeCanonicalProfileHash(canonicalProfile);
+  return memoizedCanonicalProfileHash(canonicalProfile);
 };
 
 const computeCanonicalProfileHash = (canonicalProfile: Profile): string =>
   computeEntityProfileDescriptorHash(profileToEntityProfileDescriptor(canonicalProfile));
 
+const memoizedCanonicalProfileHash = (canonicalProfile: Profile): string => {
+  const cached = canonicalProfileHashMemo.get(canonicalProfile);
+  if (cached) return cached;
+  return rememberProfileHash(
+    canonicalProfileHashMemo,
+    canonicalProfile,
+    computeCanonicalProfileHash(canonicalProfile),
+  );
+};
+
 const computeCanonicalProfileRouteHash = (canonicalProfile: Profile): string => {
   const route = {
     domain: PROFILE_ROUTE_DOMAIN,
-    profileHash: computeCanonicalProfileHash(canonicalProfile),
+    profileHash: memoizedCanonicalProfileHash(canonicalProfile),
     entityId: canonicalProfile.entityId,
     runtimeId: canonicalProfile.runtimeId,
     runtimeEncPubKey: canonicalProfile.runtimeEncPubKey,
@@ -72,7 +94,13 @@ const computeCanonicalProfileRouteHash = (canonicalProfile: Profile): string => 
 
 export const computeProfileRouteHash = (profile: Profile): string => {
   const canonicalProfile = canonicalizeProfile(profile);
-  return computeCanonicalProfileRouteHash(canonicalProfile);
+  const cached = canonicalProfileRouteHashMemo.get(canonicalProfile);
+  if (cached) return cached;
+  return rememberProfileHash(
+    canonicalProfileRouteHashMemo,
+    canonicalProfile,
+    computeCanonicalProfileRouteHash(canonicalProfile),
+  );
 };
 
 const resolveProfileCertifiedBoardHash = (

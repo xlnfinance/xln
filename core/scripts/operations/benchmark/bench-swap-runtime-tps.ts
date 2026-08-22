@@ -297,10 +297,7 @@ const applyAccountFrame = async (
   timestamp: number,
   jHeight: number,
 ): Promise<void> => {
-  const owner = beginAccountTransition(
-    account,
-    { purpose: 'benchmark-frame', txs },
-  );
+  const owner = beginAccountTransition(account);
   try {
     const draft = accountTransitionView(owner);
     for (const tx of txs) {

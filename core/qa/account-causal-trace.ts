@@ -1,6 +1,6 @@
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
-import type { AccountInput, AccountTx } from '../types/account';
+import type { AccountPeerInput, AccountTx } from '../types/account';
 import type { EntityInput } from '../entity/types';
 
 type AccountTxCausalTrace = {
@@ -10,7 +10,7 @@ type AccountTxCausalTrace = {
 };
 
 type AccountEnvelopeCausalTrace = {
-  kind: AccountInput['kind'];
+  kind: AccountPeerInput['kind'];
   from: string;
   to: string;
   ackHeight?: number;
@@ -55,7 +55,7 @@ const summarizeAccountTx = (tx: AccountTx): AccountTxCausalTrace => {
   };
 };
 
-const summarizeAccountEnvelope = (input: AccountInput): AccountEnvelopeCausalTrace => {
+const summarizeAccountEnvelope = (input: AccountPeerInput): AccountEnvelopeCausalTrace => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
   const proposalTxs = (proposal?.frame.accountTxs ?? []).map(summarizeAccountTx);

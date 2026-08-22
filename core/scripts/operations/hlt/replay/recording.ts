@@ -10,23 +10,23 @@ import {
 } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { accountInputProposal } from '../../../../account/consensus/flush';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
 import { safeParse, serializeTaggedJson } from '../../../../protocol/serialization';
 import {
   validateRuntimeRecording,
   type RuntimeRecording,
 } from '../../../../runtime';
-import type { EntityTx } from '../../../../types/entity-tx';
 import type { PersistedFrameJournal } from '../../../../storage/types';
+import {
+  buildEntityProposalReplayOracleMap,
+  type EntityProposalReplayOracleEntry,
+} from '../../../../entity/consensus/proposal/replay-oracle';
 
 export const HLT_HUB_RECORDING_SCHEMA = 'xln-hlt-hub-recording-v1' as const;
 
 export type HltHubRecordingTotals = Readonly<{
   runtimeFrames: number;
   runtimeEntityInputs: number;
-  accountInputs: number;
-  accountTxs: number;
   outboxEnvelopes: number;
 }>;
 
@@ -40,50 +40,19 @@ export type HltHubRecording = Readonly<{
   }>;
   recording: RuntimeRecording;
   totals: HltHubRecordingTotals;
+  /** Exact certified Entity proposal boundaries. Optional for v1 recordings written before this oracle. */
+  entityProposalOracle?: readonly EntityProposalReplayOracleEntry[];
 }>;
-
-const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => {
-  // AccountInput is always a raw top-level EntityTx. Certified output bodies
-  // are forbidden from carrying it, so replay metrics must not resurrect a
-  // compatibility reader for that invalid shape.
-  if (tx.type === 'runtimeOutput') return tx.data.entityTxs;
-  if (tx.type === 'entityCommand') return tx.data.txs;
-  if (tx.type === 'propose' && tx.data.action.type === 'entity_transaction') return tx.data.action.data.txs;
-  return [];
-};
-
-const countEntityTxWork = (txs: readonly EntityTx[]): { accountInputs: number; accountTxs: number } =>
-  txs.reduce((total, tx) => {
-    const nested = countEntityTxWork(nestedEntityTxs(tx));
-    const proposal = tx.type === 'accountInput' ? accountInputProposal(tx.data) : null;
-    return {
-      accountInputs: total.accountInputs + nested.accountInputs + (tx.type === 'accountInput' ? 1 : 0),
-      accountTxs: total.accountTxs + nested.accountTxs + (proposal?.frame.accountTxs.length ?? 0),
-    };
-  }, { accountInputs: 0, accountTxs: 0 });
 
 export const summarizeHltHubFrames = (
   frames: readonly PersistedFrameJournal[],
-): HltHubRecordingTotals => frames.reduce((total, frame) => {
-  const work = frame.runtimeInput.entityInputs.reduce((sum, input) => {
-    const counted = countEntityTxWork(input.entityTxs ?? []);
-    return {
-      accountInputs: sum.accountInputs + counted.accountInputs,
-      accountTxs: sum.accountTxs + counted.accountTxs,
-    };
-  }, { accountInputs: 0, accountTxs: 0 });
-  return {
+): HltHubRecordingTotals => frames.reduce((total, frame) => ({
     runtimeFrames: total.runtimeFrames + 1,
     runtimeEntityInputs: total.runtimeEntityInputs + frame.runtimeInput.entityInputs.length,
-    accountInputs: total.accountInputs + work.accountInputs,
-    accountTxs: total.accountTxs + work.accountTxs,
     outboxEnvelopes: total.outboxEnvelopes + (frame.runtimeOutputRefs?.length ?? 0),
-  };
-}, {
+  }), {
   runtimeFrames: 0,
   runtimeEntityInputs: 0,
-  accountInputs: 0,
-  accountTxs: 0,
   outboxEnvelopes: 0,
 });
 
@@ -93,16 +62,42 @@ const recordingFrames = (recording: RuntimeRecording): PersistedFrameJournal[] =
 const sameTotals = (left: HltHubRecordingTotals, right: HltHubRecordingTotals): boolean =>
   Object.keys(left).every(key => left[key as keyof HltHubRecordingTotals] === right[key as keyof HltHubRecordingTotals]);
 
+const decodeEntityProposalOracle = (value: unknown): readonly EntityProposalReplayOracleEntry[] => {
+  if (!Array.isArray(value)) throw new Error('HLT_ENTITY_PROPOSAL_ORACLE_INVALID');
+  const entries = value.map((source, index) => {
+    const entry = requireBoundaryRecord(source, `HLT_ENTITY_PROPOSAL_ORACLE_ENTRY_INVALID:${index}`);
+    requireExactBoundaryKeys(
+      entry,
+      ['entityId', 'entityHeight', 'txCount', 'txPrefixHash', 'frameHash'],
+      [],
+      `HLT_ENTITY_PROPOSAL_ORACLE_ENTRY:${index}`,
+    );
+    return {
+      entityId: String(entry['entityId']),
+      entityHeight: Number(entry['entityHeight']),
+      txCount: Number(entry['txCount']),
+      txPrefixHash: String(entry['txPrefixHash']),
+      frameHash: String(entry['frameHash']),
+    };
+  });
+  return Array.from(buildEntityProposalReplayOracleMap(entries).values());
+};
+
 export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   const root = requireBoundaryRecord(value, 'HLT_HUB_RECORDING_INVALID');
-  requireExactBoundaryKeys(root, ['schema', 'createdAt', 'source', 'recording', 'totals'], [], 'HLT_HUB_RECORDING');
+  requireExactBoundaryKeys(
+    root,
+    ['schema', 'createdAt', 'source', 'recording', 'totals'],
+    ['entityProposalOracle'],
+    'HLT_HUB_RECORDING',
+  );
   if (root['schema'] !== HLT_HUB_RECORDING_SCHEMA) throw new Error('HLT_HUB_RECORDING_SCHEMA_INVALID');
   const source = requireBoundaryRecord(root['source'], 'HLT_HUB_RECORDING_SOURCE_INVALID');
   requireExactBoundaryKeys(source, ['workDir', 'users', 'workload'], [], 'HLT_HUB_RECORDING_SOURCE');
   const totals = requireBoundaryRecord(root['totals'], 'HLT_HUB_RECORDING_TOTALS_INVALID');
   requireExactBoundaryKeys(
     totals,
-    ['runtimeFrames', 'runtimeEntityInputs', 'accountInputs', 'accountTxs', 'outboxEnvelopes'],
+    ['runtimeFrames', 'runtimeEntityInputs', 'outboxEnvelopes'],
     [],
     'HLT_HUB_RECORDING_TOTALS',
   );
@@ -119,10 +114,11 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
     totals: {
       runtimeFrames: Number(totals['runtimeFrames']),
       runtimeEntityInputs: Number(totals['runtimeEntityInputs']),
-      accountInputs: Number(totals['accountInputs']),
-      accountTxs: Number(totals['accountTxs']),
       outboxEnvelopes: Number(totals['outboxEnvelopes']),
     },
+    ...(root['entityProposalOracle'] !== undefined
+      ? { entityProposalOracle: decodeEntityProposalOracle(root['entityProposalOracle']) }
+      : {}),
   };
   if (!Number.isSafeInteger(decoded.createdAt) || decoded.createdAt < 0) throw new Error('HLT_HUB_RECORDING_CREATED_AT_INVALID');
   if (!decoded.source.workDir || !decoded.source.workload || !Number.isSafeInteger(decoded.source.users) || decoded.source.users < 1) {

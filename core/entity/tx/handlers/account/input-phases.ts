@@ -2,7 +2,10 @@ import type { AccountPeerInput, AccountReplica } from '../../../../types/account
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountConsensusContext } from '../../../../account/consensus/context';
-import { applyAccountInput } from '../../../../account/consensus';
+import {
+  applyAccountInput,
+  type AccountInputSecurityContext,
+} from '../../../../account/consensus';
 import {
   accountInputFailureMessage,
   accountInputPeerRejectionCode,
@@ -51,10 +54,16 @@ export type AccountInputPhaseContext = {
 };
 
 export type AccountConsensusOutcome = {
-  requiredAccountResponse?: AccountPeerInput;
+  forceAccountFlush?: boolean;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   terminalResult?: AccountHandlerResult;
 };
+
+export type PreparedAccountConsensusRun = Readonly<{
+  pendingBeforeTxs: string[];
+  inputFrameTxs: string[];
+  securityContext: AccountInputSecurityContext;
+}>;
 
 const logCrossFillAckResult = (
   context: AccountInputPhaseContext,
@@ -104,14 +113,14 @@ const finishAppliedAccountInput = async (
   result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { ok: true }>,
 ): Promise<AccountConsensusOutcome> => {
   const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
-  const response = await applySuccessfulAccountInput({
+  const forceAccountFlush = await applySuccessfulAccountInput({
     env, state, input, account, counterpartyId, createdAccount, result, effects,
     ...(options ? { options } : {}),
     checkpointProfile: context.checkpointProfile,
   });
   context.checkpointProfile('postConsensus');
   return {
-    ...(response ? { requiredAccountResponse: response } : {}),
+    ...(forceAccountFlush === undefined ? {} : { forceAccountFlush }),
     ...(result.accountJClaimNodeChanges
       ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges }
       : {}),
@@ -179,7 +188,7 @@ const finishRejectedAccountInput = (
   return assertNeverAccountResult(result.rejection);
 };
 
-const finishAccountConsensusInput = async (
+export const finishAccountConsensusInput = async (
   context: AccountInputPhaseContext,
   result: Awaited<ReturnType<typeof applyAccountInput>>,
 ): Promise<AccountConsensusOutcome> => {
@@ -189,8 +198,10 @@ const finishAccountConsensusInput = async (
   return assertNeverAccountResult(result);
 };
 
-export const applyAccountConsensusInput = async (context: AccountInputPhaseContext): Promise<AccountConsensusOutcome> => {
-  const { env, accountConsensusContext, state, input, account } = context;
+export const prepareAccountConsensusRun = (
+  context: AccountInputPhaseContext,
+): PreparedAccountConsensusRun => {
+  const { env, state, input, account } = context;
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
   const hasConsensusInput =
@@ -213,26 +224,41 @@ export const applyAccountConsensusInput = async (context: AccountInputPhaseConte
     getCertifiedBoardNodeStore(env),
     input.fromEntityId,
   );
-  const result = await applyAccountInput(accountConsensusContext, account, input, {
-    entityTimestamp: state.timestamp,
-    finalizedJHeight: state.lastFinalizedJHeight ?? 0,
-    owningEntityIsHub: Boolean(state.hubRebalanceConfig),
-    verifyHanko: (hanko, hash, expectedEntityId, authority) =>
+  return {
+    pendingBeforeTxs,
+    inputFrameTxs,
+    securityContext: {
+      entityTimestamp: state.timestamp,
+      finalizedJHeight: state.lastFinalizedJHeight ?? 0,
+      owningEntityIsHub: Boolean(state.hubRebalanceConfig),
+      verifyHanko: (hanko, hash, expectedEntityId, authority) =>
       verifyHankoForHash(hanko, hash, expectedEntityId, env, {
         ...authority,
         observerState: state,
       }),
-    ...(certifiedBoard
-      ? {
-          counterpartyCertifiedBoard: {
-            boardHash: certifiedBoard.boardHash,
-            activatedAtJHeight: certifiedBoard.activatedAtJHeight,
-            logIndex: certifiedBoard.logIndex,
-          },
-        }
-      : {}),
-  });
+      ...(certifiedBoard
+        ? {
+            counterpartyCertifiedBoard: {
+              boardHash: certifiedBoard.boardHash,
+              activatedAtJHeight: certifiedBoard.activatedAtJHeight,
+              logIndex: certifiedBoard.logIndex,
+            },
+          }
+        : {}),
+    },
+  };
+};
+
+export const completeAccountConsensusRun = (
+  context: AccountInputPhaseContext,
+  prepared: PreparedAccountConsensusRun,
+  result: Awaited<ReturnType<typeof applyAccountInput>>,
+): void => {
   context.checkpointProfile('consensus');
-  logCrossFillAckResult(context, result, pendingBeforeTxs, inputFrameTxs);
-  return finishAccountConsensusInput(context, result);
+  logCrossFillAckResult(
+    context,
+    result,
+    prepared.pendingBeforeTxs,
+    prepared.inputFrameTxs,
+  );
 };

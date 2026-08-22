@@ -155,7 +155,9 @@ const PROFILING_ENV_KEYS = [
   'XLN_RUNTIME_PROCESS_SLOW_MS', 'XLN_RUNTIME_APPLY_SLOW_MS',
   'XLN_ENTITY_FRAME_PROFILE', 'XLN_ENTITY_FRAME_SLOW_MS',
   'XLN_ENTITY_STATE_ROOT_PROFILE', 'XLN_ACCOUNT_STATE_ROOT_PROFILE',
-  'XLN_STORAGE_VERBOSE', 'XLN_RUNTIME_OP_COUNTERS',
+  'XLN_STORAGE_VERBOSE', 'XLN_RUNTIME_OP_COUNTERS', 'XLN_RUNTIME_OP_COUNTERS_DIR',
+  'XLN_RUNTIME_BOUNDARY_AUDIT',
+  'XLN_RUNTIME_SAMPLING_PROFILE', 'XLN_RUNTIME_SAMPLING_PROFILE_DIR',
   'XLN_LOG_LEVEL', 'XLN_LOG_SCOPES',
   'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE', 'XLN_HEAVY_LOGS',
 ] as const;
@@ -168,6 +170,9 @@ const localTestLease = await acquireLocalTestPortLease({
 const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
 const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
 if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
+  // The baseline isolates Hub consensus: relay remains discovery-only until
+  // hub-direct 1000 swaps/s + 1000 payments/s is proven with zero Account loss.
+  inheritedProcessEnv['XLN_HLT_DIRECT_ONLY'] = '1';
   inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] =
     process.env['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] || String(Math.max(64, hltUsers));
   inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] =
@@ -1021,6 +1026,10 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       const marketMakerProbe = fetchMarketMakerHealthProbe(health);
       const directMarketMakerHealth = marketMakerProbe.payload;
       const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);
+      const resetError = String(stageHealth.reset?.lastError || '').trim();
+      if (resetError) {
+        throw new Error(`LOCAL_PROD_SMOKE_RESET_FAILED:${resetError}`);
+      }
       last = summarizeHealth(stageHealth);
       emitDebugEvent('health-snapshot', { stage: 'health-poll', snapshot: last });
       const nowMs = Date.now();
@@ -1089,6 +1098,7 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       if (message.includes('LOCAL_PROD_SMOKE_FATAL_LOG')) throw error;
       if (message.includes('LOCAL_PROD_SMOKE_MM_HEALTH_FAILED')) throw error;
       if (message.includes('LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS')) throw error;
+      if (message.includes('LOCAL_PROD_SMOKE_RESET_FAILED')) throw error;
       last = message;
     }
     iteration += 1;
@@ -1187,6 +1197,9 @@ const main = async (): Promise<void> => {
         inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || '',
     } : {}),
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
+    MARKET_MAKER_STEADY_QUOTES_ENABLED:
+      process.env['MARKET_MAKER_STEADY_QUOTES_ENABLED'] ||
+      (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] === '1' ? '0' : '1'),
     XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0',
     MARKET_MAKER_RUNTIME_TICK_DELAY_MS:
       process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0',

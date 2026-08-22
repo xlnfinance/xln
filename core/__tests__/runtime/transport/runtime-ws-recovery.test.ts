@@ -8,7 +8,6 @@ import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../../../network/relay/standalone-server';
 import { createEmptyEnv } from '../../../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../../../runtime/admit/entity-input-envelope-auth.ts';
-import { RETRYABLE_INGRESS_BACKPRESSURE } from '../../../network/p2p/ingress-backpressure';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'runtime-ws-recovery-client-a';
@@ -275,11 +274,12 @@ describe('runtime websocket recovery requests', () => {
     expect(requesterErrors).toEqual([]);
   });
 
-  test('reports a retryable inbound entity rejection without killing the websocket consumer', async () => {
+  test('reports an inbound Account rejection to both ends without hiding it', async () => {
     const consoleError = spyOn(console, 'error').mockImplementation(() => undefined);
     const relay = startRelay();
     const url = `ws://127.0.0.1:${relay.server.port}`;
     const receiverErrors: string[] = [];
+    const senderErrors: string[] = [];
     let received = 0;
     const sender = makeClient({
       url,
@@ -287,6 +287,7 @@ describe('runtime websocket recovery requests', () => {
       runtimeId: RUNTIME_A,
       signerId: '1',
       getTargetEncryptionKey: runtimeId => (runtimeId === RUNTIME_B ? deriveEncryptionKeyPair(SEED_B).publicKey : null),
+      onError: error => senderErrors.push(error.message),
     });
     const receiver = makeClient({
       url,
@@ -295,7 +296,7 @@ describe('runtime websocket recovery requests', () => {
       signerId: '2',
       onEntityInputs: () => {
         received += 1;
-        throw new Error(`${RETRYABLE_INGRESS_BACKPRESSURE} test-quiesce`);
+        throw new Error('INBOUND_ENTITY_RUNTIME_QUIESCING:test-quiesce');
       },
       onError: error => receiverErrors.push(error.message),
     });
@@ -320,8 +321,12 @@ describe('runtime websocket recovery requests', () => {
     });
     expect(sender.sendEntityInputsRaw(RUNTIME_B, envelope)).toBe(true);
     await waitUntil(
-      () => receiverErrors.some(message => message.startsWith(RETRYABLE_INGRESS_BACKPRESSURE)),
-      'retryable rejection reported',
+      () => receiverErrors.some(message => message.includes('INBOUND_ENTITY_RUNTIME_QUIESCING')),
+      'receiver rejection reported',
+    );
+    await waitUntil(
+      () => senderErrors.some(message => message.includes('P2P_REMOTE_REJECTED')),
+      'sender rejection reported',
     );
     expect(received).toBe(1);
     expect(receiver.isOpen()).toBe(true);

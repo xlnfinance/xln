@@ -10,8 +10,9 @@ export type LockedEntityFrame = EntityFrame & {
   collectedSigs: Map<string, string[]>;
 };
 
-export type CertifiedEntityFrame = LockedEntityFrame & {
-  hankos: HankoString[];
+export type CertifiedEntityFrame = Omit<LockedEntityFrame, 'hankos'> & {
+  /** Commit marker and proof for hashesToSign[0], the EntityFrame hash. */
+  hankos: [HankoString];
 };
 
 const hasExactSignatureManifest = (
@@ -39,8 +40,11 @@ export const hasCertifiedEntityFrameProofShape = (
   frame: EntityFrame,
 ): frame is CertifiedEntityFrame => isLockedEntityFrame(frame)
   && Array.isArray(frame.hankos)
-  && frame.hankos.length === frame.hashesToSign.length
-  && frame.hankos.every(hanko => typeof hanko === 'string' && hanko.length > 0);
+  && frame.hankos.length === 1
+  && typeof frame.hankos[0] === 'string'
+  && frame.hankos[0].length > 0
+  && frame.hashesToSign[0]?.type === 'entityFrame'
+  && frame.hashesToSign[0].hash === frame.hash;
 
 export const requireCertifiedEntityFrameAfterQuorum = (
   frame: EntityFrame,

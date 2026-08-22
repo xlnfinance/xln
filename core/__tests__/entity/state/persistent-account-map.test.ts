@@ -376,4 +376,33 @@ describe('PersistentEntityAccountMap', () => {
     expect(committed.get(RIGHT)?.pendingFrame?.height).toBe(11);
     expect(committed.get(RIGHT)?.pendingFrame?.stateHash).toBe(`0x${'ab'.repeat(32)}`);
   });
+
+  test('invalidates speculative Account work on every write boundary', () => {
+    const base = PersistentEntityAccountMap.fromMap(
+      new Map([[RIGHT, productionAccount()]]),
+      LEFT,
+      computeEntityAccountValueHash,
+    );
+    const overlay = new EntityAccountCandidateMap(base);
+    const untouched = overlay.revision(RIGHT);
+
+    expect(overlay.get(RIGHT)).toBeDefined();
+    expect(overlay.revision(RIGHT)).toBe(untouched);
+
+    const first = overlay.getForWrite(RIGHT);
+    if (!first) throw new Error('TEST_WRITE_SHELL_MISSING');
+    const claimed = overlay.revision(RIGHT);
+    expect(claimed).toBeGreaterThan(untouched);
+
+    expect(overlay.getForWrite(RIGHT)).toBe(first);
+    expect(overlay.revision(RIGHT)).toBeGreaterThan(claimed);
+
+    const beforeReplace = overlay.revision(RIGHT);
+    overlay.set(RIGHT, first);
+    expect(overlay.revision(RIGHT)).toBeGreaterThan(beforeReplace);
+
+    const beforeClear = overlay.revision(RIGHT);
+    overlay.clear();
+    expect(overlay.revision(RIGHT)).toBeGreaterThan(beforeClear);
+  });
 });

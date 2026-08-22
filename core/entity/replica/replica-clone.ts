@@ -36,12 +36,19 @@ const copyValidatorJHistory = (
  */
 export const forkEntityReplicaForInput = (
   replica: EntityReplica,
+  shareMempool = false,
 ): EntityReplica => {
   const forked: EntityReplica = {
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: replica.state,
-    mempool: Array.isArray(replica.mempool) ? [...replica.mempool] : [],
+    // Plain AccountInput admission never mutates the inherited array: it
+    // installs a new appended array before returning. Sharing that immutable
+    // prefix avoids copying 1+2+...+N Hub transactions in one Runtime frame.
+    // Every other lane keeps the fully isolated copy.
+    mempool: Array.isArray(replica.mempool)
+      ? (shareMempool ? replica.mempool : [...replica.mempool])
+      : [],
     ...(replica.proposal && {
       proposal: cloneIsolatedProposedEntityFrame(replica.proposal),
     }),
