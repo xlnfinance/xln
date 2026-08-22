@@ -93,27 +93,23 @@ export const ENTITY_STATE_ROOT_FIELDS = [
   'lending',
 ] as const satisfies readonly (keyof EntityState)[];
 
-export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
-  'prevFrameHash',
-] as const satisfies readonly (keyof EntityState)[];
+export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = ['prevFrameHash'] as const satisfies readonly (keyof EntityState)[];
 
-type CoveredEntityState = Covered<EntityState, AssertNever<Exclude<
-  keyof EntityState,
-  | (typeof ENTITY_STATE_ROOT_FIELDS)[number]
-  | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
->>>;
+type CoveredEntityState = Covered<
+  EntityState,
+  AssertNever<
+    Exclude<
+      keyof EntityState,
+      (typeof ENTITY_STATE_ROOT_FIELDS)[number] | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
+    >
+  >
+>;
 
 const projectAccountEnvelopeCollections = (account: AccountReplica): Record<string, unknown> => ({
-  pendingWithdrawalsRoot: requirePersistentAccountStateMap(
-    account.pendingWithdrawals,
-    'pendingWithdrawals',
-  ).rootHash(),
+  pendingWithdrawalsRoot: requirePersistentAccountStateMap(account.pendingWithdrawals, 'pendingWithdrawals').rootHash(),
   shadow: {
     rebalance: {
-      policyRoot: requirePersistentAccountStateMap(
-        account.shadow.rebalance.policy,
-        'rebalanceShadowPolicy',
-      ).rootHash(),
+      policyRoot: requirePersistentAccountStateMap(account.shadow.rebalance.policy, 'rebalanceShadowPolicy').rootHash(),
       submittedAtByTokenRoot: requirePersistentAccountStateMap(
         account.shadow.rebalance.submittedAtByToken,
         'rebalanceShadowSubmitted',
@@ -234,17 +230,15 @@ const ACCOUNT_ENTITY_LOCAL_FIELDS = [
   'currentDisputeProofHanko',
 ] as const satisfies readonly (keyof AccountReplica)[];
 
-type CoveredAccountReplica = Covered<AccountReplica,
-  | AssertNever<Exclude<
-    keyof AccountState,
-    (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]
-  >>
-  | AssertNever<Exclude<
-    keyof AccountReplica,
-    | 'state'
-    | (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number]
-    | (typeof ACCOUNT_ENTITY_LOCAL_FIELDS)[number]
-  >>
+type CoveredAccountReplica = Covered<
+  AccountReplica,
+  | AssertNever<Exclude<keyof AccountState, (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]>>
+  | AssertNever<
+      Exclude<
+        keyof AccountReplica,
+        'state' | (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number] | (typeof ACCOUNT_ENTITY_LOCAL_FIELDS)[number]
+      >
+    >
 >;
 
 /** Bodies already committed by a child root or frame hash. Copied as hashes below. */
@@ -317,8 +311,7 @@ const mempoolRoot = (mempool: readonly AccountTx[]): string => {
   );
 };
 
-const frameHashBinding = (frame: AccountFrame | undefined): string | undefined =>
-  frame ? frame.stateHash : undefined;
+const frameHashBinding = (frame: AccountFrame | undefined): string | undefined => (frame ? frame.stateHash : undefined);
 
 const projectAccountConsensusState = (account: CoveredAccountReplica): Record<string, unknown> => {
   const projected: Record<string, unknown> = {};
@@ -338,10 +331,7 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
   if (currentFrameHash !== undefined) projected['currentFrameHash'] = currentFrameHash;
   const pendingFrameHash = frameHashBinding(account.pendingFrame);
   if (pendingFrameHash !== undefined) projected['pendingFrameHash'] = pendingFrameHash;
-  const peerSettlementHankos = counterpartySettlementHankos(
-    account.state.settlementWorkspace,
-    localIsLeft,
-  );
+  const peerSettlementHankos = counterpartySettlementHankos(account.state.settlementWorkspace, localIsLeft);
   if (peerSettlementHankos) {
     projected['counterpartySettlementHankos'] = peerSettlementHankos;
   }
@@ -466,18 +456,20 @@ const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts =
   // as the frame-local event collector cannot enter through this string-key
   // allowlist.
   const projected = Object.fromEntries(
-    ENTITY_STATE_ROOT_FIELDS
-      .filter((field) => ![
-        'htlcRoutes',
-        'lockBook',
-        'crontabState',
-        'crossJurisdictionSwaps',
-        'crossJurisdictionAuthorizations',
-        'pendingCrossJurisdictionFillAcks',
-        'crossJurisdictionBookAdmissions',
-      ].includes(field))
-      .filter((field) => Object.hasOwn(state, field))
-      .map((field) => [field, state[field]]),
+    ENTITY_STATE_ROOT_FIELDS.filter(
+      field =>
+        ![
+          'htlcRoutes',
+          'lockBook',
+          'crontabState',
+          'crossJurisdictionSwaps',
+          'crossJurisdictionAuthorizations',
+          'pendingCrossJurisdictionFillAcks',
+          'crossJurisdictionBookAdmissions',
+        ].includes(field),
+    )
+      .filter(field => Object.hasOwn(state, field))
+      .map(field => [field, state[field]]),
   );
   const orderbookExt = projectOrderbookConsensusState(state.orderbookExt);
   return {
@@ -531,11 +523,58 @@ type EntitySectionCommitment = {
   encodedBytes: number;
 };
 
+/**
+ * Memo for computeCanonicalEntityConsensusStateHash. The parent root encodes
+ * ~35 scalar/collection sections; repeat calls at the same height (proposal
+ * state root, wire budget, audit) must not re-encode all sections. The memo
+ * is a non-enumerable field on EntityState, keyed on object identity of every
+ * ENTITY_STATE_ROOT_FIELDS entry. Field replacement (the overlay convention
+ * also required by ACCOUNT_STATE_ROOT_MEMO) invalidates the cache; in-place
+ * mutation would not, so overlay handlers must continue to replace fields
+ * rather than mutate them.
+ */
+const ENTITY_STATE_ROOT_MEMO = Symbol('ENTITY_STATE_ROOT_MEMO');
+
+type EntityStateRootMemo = {
+  fields: readonly unknown[];
+  root: string;
+};
+
+const entityStateRootFieldIdentities = (state: EntityState): unknown[] =>
+  ENTITY_STATE_ROOT_FIELDS.map(field => state[field]);
+
+const sameEntityStateRootFields = (left: readonly unknown[], right: readonly unknown[]): boolean => {
+  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+  return true;
+};
+
+const readEntityStateRootMemo = (state: EntityState): EntityStateRootMemo | undefined => {
+  const memo = Reflect.get(state, ENTITY_STATE_ROOT_MEMO);
+  return memo === undefined ? undefined : (memo as EntityStateRootMemo);
+};
+
+const writeEntityStateRootMemo = (state: EntityState, memo: EntityStateRootMemo): void => {
+  const existing = Object.getOwnPropertyDescriptor(state, ENTITY_STATE_ROOT_MEMO);
+  if (existing?.writable) {
+    Reflect.set(state, ENTITY_STATE_ROOT_MEMO, memo);
+    return;
+  }
+  try {
+    Object.defineProperty(state, ENTITY_STATE_ROOT_MEMO, {
+      value: memo,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen/sealed EntityState still hashes correctly; it cannot cache.
+  }
+};
+
 export const computeEntityAccountValueHash = (account: AccountReplica): string =>
   computeCanonicalMerkleRoot(
     'entity.account-leaf',
-    Object.entries(projectAccountConsensusState(account))
-      .sort(([left], [right]) => compareStableText(left, right)),
+    Object.entries(projectAccountConsensusState(account)).sort(([left], [right]) => compareStableText(left, right)),
     'integrity',
   );
 
@@ -593,16 +632,33 @@ const computeEntityRootFromSections = (sections: readonly EntitySectionCommitmen
 
 export const computeCanonicalEntityConsensusStateHash = (state: EntityState): string => {
   // EntityState is intentionally plain deterministic data, not an observable
-  // mutation wrapper. Caching this parent root on object identity is therefore
-  // unsafe: profile/config/orderbook fields may change at the same height and
-  // an Account-root-only key would silently certify the previous state. The
-  // large Account subtree remains incrementally cached by its Patricia map;
-  // this small parent commitment must always bind the scalar sections now.
-  // Opt-in only: the audit recomputes the cold root and the byte breakdown
-  // re-encodes the whole projection; either would distort a frame-level
-  // process profile that enabled it implicitly.
+  // mutation wrapper. The memo below caches on the identity of every
+  // ENTITY_STATE_ROOT_FIELDS entry — not just the Account root — so any field
+  // replacement invalidates the cache. Overlay handlers must continue to
+  // replace fields rather than mutate them in place, the same convention
+  // required by ACCOUNT_STATE_ROOT_MEMO. The audit flag below still catches
+  // any missed invalidation by recomputing the cold root.
   const audit = readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') === '1';
   const profile = readRuntimeEnv('XLN_ENTITY_STATE_ROOT_PROFILE') === '1';
+  if (!audit && !profile) {
+    const fields = entityStateRootFieldIdentities(state);
+    const memo = readEntityStateRootMemo(state);
+    if (memo && sameEntityStateRootFields(memo.fields, fields)) {
+      return memo.root;
+    }
+    const root = computeCanonicalEntityConsensusStateHashUncached(state);
+    writeEntityStateRootMemo(state, { fields, root });
+    return root;
+  }
+  return computeCanonicalEntityConsensusStateHashUncached(state, { audit, profile });
+};
+
+const computeCanonicalEntityConsensusStateHashUncached = (
+  state: EntityState,
+  opts?: { audit?: boolean; profile?: boolean },
+): string => {
+  const audit = opts?.audit ?? false;
+  const profile = opts?.profile ?? false;
   const startedAt = getPerfMs();
   const projected = projectEntityConsensusState(state, false);
   const projectedAt = getPerfMs();
@@ -699,8 +755,10 @@ export const computeCanonicalEntityConsensusStateHashCold = (state: EntityState)
 export const computeEntityConsensusSectionDigestsCold = (
   state: EntityState,
 ): ReadonlyArray<Readonly<{ field: string; digest: string }>> =>
-  commitEntityConsensusSections(projectEntityConsensusState(state, false), state, true)
-    .map(({ field, digest }) => ({ field, digest }));
+  commitEntityConsensusSections(projectEntityConsensusState(state, false), state, true).map(({ field, digest }) => ({
+    field,
+    digest,
+  }));
 
 export const computeEntityAccountDigests = (
   state: EntityState,
@@ -714,10 +772,12 @@ export const computeEntityAccountDigests = (
 
 export const computeEntityAccountFieldDigests = (
   state: EntityState,
-): ReadonlyArray<Readonly<{
-  counterpartyId: string;
-  fields: ReadonlyArray<Readonly<{ field: string; digest: string }>>;
-}>> =>
+): ReadonlyArray<
+  Readonly<{
+    counterpartyId: string;
+    fields: ReadonlyArray<Readonly<{ field: string; digest: string }>>;
+  }>
+> =>
   [...state.accounts]
     .map(([counterpartyId, account]) => ({
       counterpartyId,
