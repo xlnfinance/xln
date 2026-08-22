@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTx, applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../../../entity/tx/handlers/account/index';
@@ -90,8 +90,13 @@ const makeAccount = (counterparty: string): AccountReplica => {
     currentHeight: 1,
     rollbackCount: 0,
     proofHeader: { fromEntity: HUB, toEntity: counterparty, nextProofNonce: 1 },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
 };
 
@@ -115,10 +120,7 @@ const commit = async (
   timestamp: number,
 ): Promise<AccountTxTarget[]> => {
   const base = state.accounts.get(counterparty)!;
-  const transition = beginAccountTransition(
-    base,
-    { purpose: 'lending-test', tx, timestamp },
-  );
+  const transition = beginAccountTransition(base);
   const result = await applyAccountTx(
     accountTransitionView(transition),
     tx,
@@ -142,10 +144,7 @@ const applyOnly = async (
   timestamp: number,
 ): Promise<Awaited<ReturnType<typeof applyAccountTx>>> => {
   const base = state.accounts.get(counterparty)!;
-  const transition = beginAccountTransition(
-    base,
-    { purpose: 'lending-test-apply', tx, timestamp },
-  );
+  const transition = beginAccountTransition(base);
   const result = await applyAccountTx(accountTransitionView(transition), tx, byLeft, timestamp);
   if (!result.ok) {
     discardAccountTransition(transition);
@@ -312,11 +311,11 @@ describe('payer-authenticated hub lending', () => {
       },
     };
 
-    await expect(applyAccountTx(account, tx, true)).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
-    const first = await applyAccountTx(account, tx, false);
+    await expect(applyAccountTxToMutableReplica(account, tx, true)).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
+    const first = await applyAccountTxToMutableReplica(account, tx, false);
     expect(first.ok).toBe(true);
     const offdeltaAfterFirst = account.state.deltas.get(1)!.offdelta;
-    await expect(applyAccountTx(account, tx, false)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    await expect(applyAccountTxToMutableReplica(account, tx, false)).rejects.toThrow('LENDING_INTENT_REPLAY');
     expect(account.state.deltas.get(1)!.offdelta).toBe(offdeltaAfterFirst);
   });
 
