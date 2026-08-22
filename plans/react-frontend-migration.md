@@ -235,7 +235,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `READY AFTER MINIMAL ROOTS`
+**Status:** `IN PROGRESS — VERSIONED APPLICATION ARTIFACT ASSEMBLY IMPLEMENTED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -366,7 +366,7 @@ any mismatch. Never compile on production.
 
 ## Done criteria
 
-- [ ] Four independent React/Vite/TypeScript application roots exist.
+- [x] Four independent React/Vite/TypeScript application roots exist.
 - [ ] Every retained browser route and capability has one application owner.
 - [ ] Each app checks, tests, builds, and runs targeted browser flows without
       building unrelated apps.
@@ -383,9 +383,9 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Start WP0 inventory and WP1 scaffolding in parallel where files do not
-   overlap.
-2. Establish independent site and docs roots first; they provide quick feedback
-   for scoped tooling and shared UI conventions.
-3. Add wallet/ops roots and introduce browser/runtime-client packages only when
-   the first real flow needs them.
+1. Add the same-origin development gateway using the encoded application and
+   edge route contract without changing canonical production selection.
+2. Split the first generated-input producers into their declared namespaces and
+   feed them into candidate assembly with collision checks.
+3. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
+   Runtime-client packages deferred until their first real flow needs them.

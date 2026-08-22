@@ -17,6 +17,7 @@
 		"check": "bun run check:unsafe-types && bun copy-static-files.js && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && bun scripts/vite-build-check.ts",
 		"check:react": "bun scripts/check.ts --all --level=local",
 		"build:react": "bun scripts/build.ts --all",
+		"assemble:react": "bun scripts/assemble.ts",
 		"check:unsafe-types": "bun scripts/check-unsafe-types.ts",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e -- playwright test",
