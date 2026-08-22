@@ -210,6 +210,8 @@ const spawnSovereignRuntimeHost = async (options: {
       ...(process.env['XLN_HEAVY_LOGS'] ? { XLN_HEAVY_LOGS: '1' } : {}),
       ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),
       ...(process.env['XLN_RUNTIME_APPLY_PROFILE'] ? { XLN_RUNTIME_APPLY_PROFILE: '1' } : {}),
+      ...(process.env['XLN_ACCOUNT_PROPOSAL_PROFILE'] ? { XLN_ACCOUNT_PROPOSAL_PROFILE: '1' } : {}),
+      ...(process.env['XLN_ENTITY_FRAME_PROFILE'] ? { XLN_ENTITY_FRAME_PROFILE: '1' } : {}),
       ...(process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME']
         ? { XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME'] }
         : {}),

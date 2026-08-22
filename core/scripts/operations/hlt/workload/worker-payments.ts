@@ -69,6 +69,8 @@ const DELIVERY_TIMEOUT_MS = 600_000;
 const DELIVERY_MAX_STALL_MS = Number(process.env['XLN_HLT_MAX_STALL_MS'] || 0) || Infinity;
 /** How often the delivery curve is printed while a run is in flight. */
 const DELIVERY_REPORT_MS = 2_000;
+/** Stagger the t=0 submission burst across all lanes to test whether the dead zone is event-loop congestion. 0 = simultaneous (default). */
+const SUBMIT_RAMP_MS = Number(process.env['XLN_HLT_SUBMIT_RAMP_MS'] || '0') || 0;
 const ROUTE_BARRIER_POLL_MS = 500;
 const ROUTE_BARRIER_TIMEOUT_MS = 300_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -328,31 +330,34 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     );
 
     const startedAt = performance.now();
-    const enqueued = await Promise.all(users.map((lane, index) => sendEnqueued(
-      lane.runtime,
-      `hlt-payment-batch-${hubDurableBefore.height}-${index}`,
-      {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: lane.identity.entityId,
-          signerId: lane.identity.signerId,
-          entityTxs: Array.from({ length: args.rounds }, (_, round) => {
-            const receiver = users[paymentReceiverIndexSamePopulation(index, round, users.length)]!;
-            const built = buildRoundPayment(
-              lane.identity,
-              hubIdentity.entityId,
-              receiver.identity,
-              index,
-              round,
-              amountRange,
-            );
-            const tx = built.entityTxs?.[0];
-            if (!tx) throw new Error('HLT_PAYMENT_TX_MISSING');
-            return tx;
-          }),
-        }],
-      },
-    )));
+    const enqueued = await Promise.all(users.map((lane, index) => {
+      const rampDelay = SUBMIT_RAMP_MS > 0 ? Math.floor(index * SUBMIT_RAMP_MS / users.length) : 0;
+      return (rampDelay > 0 ? sleep(rampDelay) : Promise.resolve()).then(() => sendEnqueued(
+        lane.runtime,
+        `hlt-payment-batch-${hubDurableBefore.height}-${index}`,
+        {
+          runtimeTxs: [],
+          entityInputs: [{
+            entityId: lane.identity.entityId,
+            signerId: lane.identity.signerId,
+            entityTxs: Array.from({ length: args.rounds }, (_, round) => {
+              const receiver = users[paymentReceiverIndexSamePopulation(index, round, users.length)]!;
+              const built = buildRoundPayment(
+                lane.identity,
+                hubIdentity.entityId,
+                receiver.identity,
+                index,
+                round,
+                amountRange,
+              );
+              const tx = built.entityTxs?.[0];
+              if (!tx) throw new Error('HLT_PAYMENT_TX_MISSING');
+              return tx;
+            }),
+          }],
+        },
+      ));
+    }));
     const enqueueAckElapsedMs = Math.max(0, ...enqueued.map(entry => entry.enqueueAckElapsedMs));
     const roundSubmissionLagMs = [Math.max(0, Math.ceil(performance.now() - startedAt))];
     const submittedPayments = lanes * args.rounds;

@@ -1536,6 +1536,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ACCOUNT_PROPOSAL_PROFILE']
         ? { XLN_ACCOUNT_PROPOSAL_PROFILE: process.env['XLN_ACCOUNT_PROPOSAL_PROFILE'] }
         : {}),
+      ...(process.env['XLN_RUNTIME_FRAME_LOG']
+        ? { XLN_RUNTIME_FRAME_LOG: process.env['XLN_RUNTIME_FRAME_LOG'] }
+        : {}),
     }),
   });
   child.proc = proc;
