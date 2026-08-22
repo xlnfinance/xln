@@ -73,11 +73,9 @@ describe('bounded physical storage values', () => {
     await expect(readBoundedEncodedValue(missing.db, ownerKey)).rejects.toThrow('STORAGE_BOUNDED_CHUNK_MISSING');
 
     const tamperedRows = rows.map(row => ({ key: row.key, value: Buffer.from(row.value) }));
-    const chunk = decodeBuffer<Record<string, unknown>>(tamperedRows[1]!.value);
-    const bytes = Buffer.from(chunk['bytes'] as Uint8Array);
-    bytes[0] = bytes[0] === 0 ? 1 : 0;
-    chunk['bytes'] = bytes;
-    tamperedRows[1] = { key: tamperedRows[1]!.key, value: encodeBuffer(chunk) };
+    const bytes = Buffer.from(tamperedRows[1]!.value);
+    bytes[0] = bytes[0]! ^ 0xff;
+    tamperedRows[1] = { key: tamperedRows[1]!.key, value: bytes };
     const tampered = makeMemoryDb(tamperedRows);
     await expect(readBoundedEncodedValue(tampered.db, ownerKey)).rejects.toThrow('STORAGE_BOUNDED_DIGEST_MISMATCH');
   });

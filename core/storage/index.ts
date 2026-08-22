@@ -5,6 +5,7 @@
  */
 import { getPerfMs } from '../support/time';
 import { decodeValidatedBuffer, encodeBuffer, encodeBufferPrepared, writeBatch } from './codec/codec';
+import { canonicalizeBinaryPayload } from './codec/binary-codec';
 import {
   boundedStorageRowsBytes,
   prepareBoundedStorageValueRows,
@@ -1638,7 +1639,9 @@ const buildStorageFrameRecordPlan = (
     commitments.runtimeMachine,
   );
   mark('frameEncode.machineGraph');
-  const frameBase = buildStorageRuntimeFrame(
+  // Canonicalized once: the frame hash and the stored record both encode
+  // this multi-megabyte input log, and a canonical tree skips the walk.
+  const frameBase = canonicalizeBinaryPayload(buildStorageRuntimeFrame(
     options,
     prepared,
     commitments,
@@ -1647,7 +1650,7 @@ const buildStorageFrameRecordPlan = (
     outputPayloads.refs,
     entityContextPayloads.refs,
     runtimeMachineGraph.root,
-  );
+  ), { omitSymbolKeys: true });
   mark('frameEncode.frameBase');
   const frameRecord = {
     ...frameBase,

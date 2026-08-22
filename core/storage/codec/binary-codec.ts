@@ -190,6 +190,10 @@ const packCanonical = (canonical: unknown, codec: XlnBinaryCodecName): Uint8Arra
 export const packTransportValue = (value: unknown): Uint8Array => asBytes(msgpackCodec.pack(value));
 export const unpackTransportValue = (bytes: Uint8Array): unknown => msgpackCodec.unpack(bytes);
 
+/** Canonical (sorted, marked) copy of a value; later encodes of it skip the walk. */
+export const canonicalizeBinaryPayload = <T>(value: T, options: { omitSymbolKeys?: boolean } = {}): T =>
+  canonicalize(value, '$', new Set(), true, options.omitSymbolKeys === true) as T;
+
 export const encodeBinaryPayloadWithCanonical = (
   value: unknown,
   codec: XlnBinaryCodecName = 'msgpack',

@@ -23,13 +23,6 @@ type BoundedValueManifest = Readonly<{
   digest: string;
 }>;
 
-type BoundedValueChunk = Readonly<{
-  kind: 'boundedValueChunk';
-  version: 1;
-  index: number;
-  bytes: Uint8Array;
-}>;
-
 export type BoundedStorageRow = Readonly<{ key: Buffer; value: Buffer }>;
 
 const exactKeys = (value: Record<string, unknown>, expected: readonly string[], code: string): void => {
@@ -79,33 +72,6 @@ const maybeManifest = (value: unknown): BoundedValueManifest | null => {
   return validateManifest(value);
 };
 
-const validateChunk = (
-  value: unknown,
-  expectedIndex: number,
-  expectedBytes: number,
-): BoundedValueChunk => {
-  const chunk = record(value, 'STORAGE_BOUNDED_CHUNK_REQUIRED');
-  exactKeys(chunk, ['kind', 'version', 'index', 'bytes'], 'STORAGE_BOUNDED_CHUNK');
-  if (chunk['kind'] !== 'boundedValueChunk' || chunk['version'] !== 1) {
-    throw new Error(`STORAGE_BOUNDED_CHUNK_VERSION_INVALID:${expectedIndex}`);
-  }
-  if (chunk['index'] !== expectedIndex) {
-    throw new Error(`STORAGE_BOUNDED_CHUNK_INDEX_MISMATCH:${String(chunk['index'])}:${expectedIndex}`);
-  }
-  if (!(chunk['bytes'] instanceof Uint8Array) || chunk['bytes'].byteLength !== expectedBytes) {
-    throw new Error(
-      `STORAGE_BOUNDED_CHUNK_BYTES_INVALID:${expectedIndex}:` +
-      `${chunk['bytes'] instanceof Uint8Array ? chunk['bytes'].byteLength : 'type'}:${expectedBytes}`,
-    );
-  }
-  return {
-    kind: 'boundedValueChunk',
-    version: 1,
-    index: expectedIndex,
-    bytes: chunk['bytes'],
-  };
-};
-
 const assertPhysicalBudget = (value: Buffer, label: string): void => {
   if (value.byteLength >= MAX_PHYSICAL_STORAGE_VALUE_BYTES) {
     throw new Error(
@@ -138,15 +104,12 @@ export const prepareBoundedStorageValueRows = (
   const ownerValue = encodeBuffer(manifest);
   assertPhysicalBudget(ownerValue, 'manifest');
   const rows: BoundedStorageRow[] = [{ key: ownerKey, value: ownerValue }];
+  // Chunks are raw slices of the already-encoded value: the manifest binds
+  // length, count and digest, so wrapping each slice in its own MessagePack
+  // record only copied every multi-megabyte frame one more time.
   for (let index = 0; index < chunkCount; index += 1) {
     const start = index * BOUNDED_VALUE_CHUNK_PAYLOAD_BYTES;
-    const value = encodeBuffer({
-      kind: 'boundedValueChunk',
-      version: 1,
-      index,
-      bytes: encodedValue.subarray(start, start + BOUNDED_VALUE_CHUNK_PAYLOAD_BYTES),
-    } satisfies BoundedValueChunk);
-    assertPhysicalBudget(value, `chunk:${index}`);
+    const value = encodedValue.subarray(start, start + BOUNDED_VALUE_CHUNK_PAYLOAD_BYTES);
     rows.push({ key: keyBoundedValueChunk(ownerKey, index), value });
   }
   return rows;
@@ -174,10 +137,10 @@ const readManifestValue = async (
     if (!chunkRaw) throw new Error(`STORAGE_BOUNDED_CHUNK_MISSING:${ownerKey.toString('hex')}:${index}`);
     const remaining = manifest.byteLength - index * BOUNDED_VALUE_CHUNK_PAYLOAD_BYTES;
     const expectedBytes = Math.min(BOUNDED_VALUE_CHUNK_PAYLOAD_BYTES, remaining);
-    return Buffer.from(decodeValidatedBuffer(
-      chunkRaw,
-      value => validateChunk(value, index, expectedBytes),
-    ).bytes);
+    if (chunkRaw.byteLength !== expectedBytes) {
+      throw new Error(`STORAGE_BOUNDED_CHUNK_BYTES_INVALID:${index}:${chunkRaw.byteLength}:${expectedBytes}`);
+    }
+    return chunkRaw;
   }));
   const encoded = Buffer.concat(chunks, manifest.byteLength);
   const digest = computeIntegrityDigest(encoded).toLowerCase();
