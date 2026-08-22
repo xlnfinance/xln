@@ -11,7 +11,7 @@
  * The allowlist is exact: a file path plus the literal substring that is
  * permitted in it. Widening it is a design decision, not a formatting fix.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 type Allowance = {
@@ -135,13 +135,16 @@ const ALLOWLIST: readonly Allowance[] = [
   },
 ];
 
-const listFiles = (directory: string): string[] => readdirSync(directory, {
-  withFileTypes: true,
-}).flatMap(entry => {
-  const path = join(directory, entry.name);
-  if (entry.isDirectory()) return listFiles(path);
-  return entry.isFile() && SCAN_EXTENSIONS.some(ext => path.endsWith(ext)) ? [path] : [];
-});
+const listFiles = (directory: string): string[] => {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, {
+    withFileTypes: true,
+  }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return listFiles(path);
+    return entry.isFile() && SCAN_EXTENSIONS.some(ext => path.endsWith(ext)) ? [path] : [];
+  });
+};
 
 const isAllowed = (file: string, line: string): boolean =>
   ALLOWLIST.some(entry => entry.file === file && line.includes(entry.match));

@@ -48,6 +48,7 @@
     "@tsconfig/node20",
     "@types/minimatch",
     "@stryker-mutator/command-runner",
-    "three"
+    "three",
+    "@openzeppelin/contracts"
   ]
 }
