@@ -17,6 +17,8 @@ export type RadixMerkleOptions = {
 export type RadixMerkleLeaf = {
   key: Uint8Array;
   value: Uint8Array;
+  /** Precomputed `computeRadixMerkleLeafHash(key, value)`; value bytes are then only needed by materialization. */
+  hash?: string;
 };
 
 export type RadixMerkleResult = {
@@ -353,6 +355,20 @@ type MerkleBuildContext = {
   depth: number;
 };
 
+// Fixed-schema trees (Entity account leaf, Account state root) rebuild the
+// same few dozen keys on every commit; their slot paths never change.
+const PATH_SLOT_CACHE_MAX = 4096;
+const pathSlotCache = new Map<string, number[]>();
+const cachedPathSlots = (keyHex: string, key: Uint8Array, radix: RadixMerkleRadix): number[] => {
+  const cacheKey = `${radix}:${keyHex}`;
+  const hit = pathSlotCache.get(cacheKey);
+  if (hit) return hit;
+  const slots = pathSlots(key, radix);
+  if (pathSlotCache.size >= PATH_SLOT_CACHE_MAX) pathSlotCache.clear();
+  pathSlotCache.set(cacheKey, slots);
+  return slots;
+};
+
 const normalizeMerkleItems = (
   leaves: RadixMerkleLeaf[],
   radix: RadixMerkleRadix,
@@ -370,8 +386,8 @@ const normalizeMerkleItems = (
       keyHex,
       key: leaf.key,
       value: leaf.value,
-      path: pathSlots(leaf.key, radix),
-      hash: leafHash(leaf, hashAlgorithm),
+      path: cachedPathSlots(keyHex, leaf.key, radix),
+      hash: leaf.hash ?? leafHash(leaf, hashAlgorithm),
     });
   }
   const items = Array.from(deduped.values());

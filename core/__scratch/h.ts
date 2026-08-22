@@ -1,0 +1,11 @@
+import { computeIntegrityDigest } from '../support/integrity-checksum';
+import { createHash } from 'node:crypto';
+const b = new Uint8Array(100).fill(3);
+const N = 200000;
+const bench = (n: string, f: () => unknown) => { for (let i=0;i<1000;i++) f(); const t=performance.now(); for (let i=0;i<N;i++) f(); console.log(n, ((performance.now()-t)/N*1000).toFixed(2), 'µs'); };
+bench('current computeIntegrityDigest', () => computeIntegrityDigest(b));
+const H: any = (globalThis as any).Bun.CryptoHasher;
+bench('Bun.CryptoHasher.hash static + hex', () => '0x' + Buffer.from(H.hash('sha256', b)).toString('hex'));
+bench('Bun.CryptoHasher.hash static hex enc', () => '0x' + H.hash('sha256', b, 'hex'));
+bench('node createHash', () => '0x' + createHash('sha256').update(b).digest('hex'));
+process.exit(0);

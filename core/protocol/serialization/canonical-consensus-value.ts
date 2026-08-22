@@ -77,6 +77,28 @@ const newStack = (): CanonicalStack => ({ ancestors: new Map(), segments: [] });
  * stable because changing either bytes or error identities is a protocol
  * migration, not a refactor.
  */
+/**
+ * Immutable arrays whose canonical encoding is already known. A sealed Entity
+ * frame's tx array is encoded by wire fitting, the frame hash, the wire
+ * estimate and the storage validators: the same multi-megabyte walk several
+ * times per frame. Registration is explicit and identity-keyed; the stored
+ * length guards the one cheap mutation we can detect. Callers only register
+ * arrays that are immutable by protocol (sealed frame txs).
+ */
+const preEncodedArrays = new WeakMap<readonly unknown[], { length: number; encoded: string }>();
+
+export const rememberCanonicalArrayEncoding = (array: readonly unknown[], encoded: string): void => {
+  preEncodedArrays.set(array, { length: array.length, encoded });
+};
+
+export const encodeCanonicalArrayOnce = (array: readonly unknown[]): string => {
+  const hit = preEncodedArrays.get(array);
+  if (hit && hit.length === array.length) return hit.encoded;
+  const encoded = encodeCanonicalConsensusValue(array);
+  rememberCanonicalArrayEncoding(array, encoded);
+  return encoded;
+};
+
 export const encodeCanonicalConsensusValue = (value: unknown): string => {
   const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const encoded = encodeUncached(value, newStack());
@@ -172,6 +194,11 @@ const encodeUncached = (value: unknown, stack: CanonicalStack): string => {
     }
     if (Array.isArray(value)) {
       const length = value.length;
+      const preEncoded = preEncodedArrays.get(value);
+      if (preEncoded && preEncoded.length === length) {
+        countOpWithSite('canonical.encode.arrayHit', preEncoded.encoded.length, 2);
+        return preEncoded.encoded;
+      }
       // Own keys of a well-formed array: every index plus `length`.
       const names = Object.getOwnPropertyNames(value);
       if (names.length !== length + 1 || Object.getOwnPropertySymbols(value).length !== 0) {

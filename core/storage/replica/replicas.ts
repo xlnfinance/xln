@@ -164,7 +164,23 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     const signerId = normalizeEntityId(replica.signerId || '');
     if (!entityId || !signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
-    const latestLineage = replica.certifiedFrameHead;
+    // Live (non-checkpoint) frames only commit to this head's digest. The
+    // certified frame body is already persisted by hash in certified history;
+    // embedding the full tx list here re-encoded every multi-megabyte hub frame
+    // once per replica per R-frame purely to hash it.
+    const head = replica.certifiedFrameHead;
+    const latestLineage = head
+      ? {
+          frame: {
+            hash: head.frame.hash,
+            height: head.frame.height,
+            stateRoot: head.frame.stateRoot,
+            parentFrameHash: head.frame.parentFrameHash,
+            authorityRoot: head.frame.authorityRoot,
+          },
+          postAuthority: head.postAuthority,
+        }
+      : undefined;
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),
       value: encodeBuffer({

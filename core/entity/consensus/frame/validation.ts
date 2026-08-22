@@ -17,7 +17,7 @@ import {
 } from './infra-context-validation';
 import { assertEntityFrameTotalByteBudget } from '../frame';
 import { LIMITS } from '../../../config/constants';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalArrayOnce, encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { toFrameHash, toStateHash, type FrameHash, type StateHash } from '../../../protocol/hashes';
 import {
   toEntityHeight,
@@ -365,6 +365,7 @@ const estimateSealedEntityFrameWireBytes = (
   if (Object.hasOwn(frame, 'collectedSigs') || Object.hasOwn(frame, 'hankos')) {
     throw new FinancialDataCorruptionError('ENTITY_FRAME_WIRE_ESTIMATE_REQUIRES_UNSIGNED_FRAME');
   }
+  if (Array.isArray(frame['txs'])) encodeCanonicalArrayOnce(frame['txs']);
   const unsignedBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
   const signerBytes = utf8ByteLength(encodeCanonicalConsensusValue(signerId.toLowerCase()));
   const signatureBytes = utf8ByteLength(encodeCanonicalConsensusValue(PLACEHOLDER_ECDSA_SIG));
@@ -386,6 +387,9 @@ const assertEntityFrameSealedWireBudget = (
   frame: Record<string, unknown>,
   context: string,
 ): number => {
+  // Sealed frame txs are immutable: the wire estimate, the storage validator
+  // and the frame-hash budget all re-encode this same array otherwise.
+  if (Array.isArray(frame['txs'])) encodeCanonicalArrayOnce(frame['txs']);
   const wireBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
   if (wireBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return wireBytes;
   const part = (value: unknown): number => {

@@ -47,7 +47,8 @@ import {
 } from '../state/persistent-account-map';
 import { entityCollectionCommitment } from '../state/persistent-collection-map';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
-import { buildHexKeyedMerkle } from '../../protocol/state/radix-merkle';
+import { buildRadixMerkle, computeRadixMerkleLeafHash } from '../../protocol/state/radix-merkle';
+import { ethers } from 'ethers';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -295,12 +296,45 @@ export const entityAccountLeafMerkleKey = (field: string): string => {
   return hexKey;
 };
 
+const EMPTY_LEAF_VALUE = new Uint8Array(0);
+const ENTITY_ACCOUNT_LEAF_KEY_BYTES: ReadonlyMap<string, Uint8Array> = new Map(
+  Array.from(ENTITY_ACCOUNT_LEAF_KEYS, ([field, hexKey]) => [field, ethers.getBytes(hexKey)]),
+);
+
+/**
+ * Per-Account memo of field leaf hashes keyed by value identity. A payment
+ * touches roughly half of an Account leaf's ~25 fields; the untouched half
+ * (proof header, credit config, seals of the other side, ...) was re-encoded
+ * and re-hashed on every commit. Identity is exact for frozen/replaced values;
+ * a mutated-in-place object would be a consensus bug long before it reached
+ * this cache. Bounded by live Accounts; evicted wholesale when oversized.
+ */
+type LeafFieldMemo = Map<string, { value: unknown; hash: string }>;
+const LEAF_MEMO_MAX_ACCOUNTS = 65_536;
+const leafFieldMemos = new Map<string, LeafFieldMemo>();
+
 const computeEntityAccountLeafMerkleRoot = (
+  accountKey: string,
   entries: ReadonlyArray<readonly [string, unknown]>,
-): string => buildHexKeyedMerkle(entries.map(([field, value]) => ({
-  hexKey: entityAccountLeafMerkleKey(field),
-  value: encodeAccountStateValue(value),
-})), { hashAlgorithm: 'integrity' }).root;
+): string => {
+  let memo = leafFieldMemos.get(accountKey);
+  if (!memo) {
+    if (leafFieldMemos.size >= LEAF_MEMO_MAX_ACCOUNTS) leafFieldMemos.clear();
+    memo = new Map();
+    leafFieldMemos.set(accountKey, memo);
+  }
+  const leaves = entries.map(([field, value]) => {
+    const keyBytes = ENTITY_ACCOUNT_LEAF_KEY_BYTES.get(field);
+    if (!keyBytes) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
+    const cached = memo.get(field);
+    const hash = cached && cached.value === value
+      ? cached.hash
+      : computeRadixMerkleLeafHash(keyBytes, encodeAccountStateValue(value), 'integrity');
+    if (!cached || cached.value !== value) memo.set(field, { value, hash });
+    return { key: keyBytes, value: EMPTY_LEAF_VALUE, hash };
+  });
+  return buildRadixMerkle(leaves, { hashAlgorithm: 'integrity' }).root;
+};
 
 const compactDisputeSeal = (seal: AccountDisputeSeal): Record<string, unknown> => ({
   hash: seal.hash,
@@ -582,7 +616,10 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
   const projectedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const digest = timePerfPhase(
     'entity.accountLeaf.merkle',
-    () => computeEntityAccountLeafMerkleRoot(entries),
+    () => computeEntityAccountLeafMerkleRoot(
+      `${account.state.leftEntity}|${account.state.rightEntity}|${account.proofHeader.fromEntity}`,
+      entries,
+    ),
   );
   if (OP_COUNTERS_ENABLED) {
     const endedAt = getPerfMs();

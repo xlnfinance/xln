@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusValue, rememberCanonicalArrayEncoding } from '../../protocol/serialization/canonical-consensus-value';
 import { keccakTextHash, utf8ByteLength } from '../../protocol/crypto/keccak-text';
 import type { EntityFrameEvent, EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
@@ -131,16 +131,30 @@ const encodeEntityFrameTxsPayload = (canonicalTxs: unknown[]): string =>
     txs: canonicalTxs,
   });
 
-const canonicalEntityTxsForFrameHash = (txs: EntityTx[]): unknown[] =>
-  txs.map(canonicalEntityTxForFrameHash);
+// Sealed frame txs are immutable; the commitment projection and its canonical
+// bytes are computed once per tx array and reused by every meter and hash.
+type CanonicalFrameTxs = { length: number; canonical: unknown[]; perTxBytes: number[] };
+const canonicalTxsByFrameTxs = new WeakMap<EntityTx[], CanonicalFrameTxs>();
+const canonicalFrameTxs = (txs: EntityTx[]): CanonicalFrameTxs => {
+  const hit = canonicalTxsByFrameTxs.get(txs);
+  if (hit && hit.length === txs.length) return hit;
+  const canonical = txs.map(canonicalEntityTxForFrameHash);
+  const perTx = canonical.map(tx => encodeCanonicalConsensusValue(tx));
+  // Canonical arrays are exactly '["Array",[' + children joined by ',' + ']]'.
+  rememberCanonicalArrayEncoding(canonical, `["Array",[${perTx.join(',')}]]`);
+  const entry = { length: txs.length, canonical, perTxBytes: perTx.map(utf8ByteLength) };
+  canonicalTxsByFrameTxs.set(txs, entry);
+  return entry;
+};
+const canonicalEntityTxsForFrameHash = (txs: EntityTx[]): unknown[] => canonicalFrameTxs(txs).canonical;
 
 const getEntityFrameTxByteLengthFromCanonical = (canonicalTxs: unknown[]): number =>
   utf8ByteLength(encodeEntityFrameTxsPayload(canonicalTxs));
 
-const buildCanonicalArrayPayloadPrefixBytes = (canonicalTxs: unknown[]): number[] => {
+const buildCanonicalArrayPayloadPrefixBytes = (canonicalTxs: unknown[], perTxBytes?: number[]): number[] => {
   const prefixBytes = [0];
   for (const [index, tx] of canonicalTxs.entries()) {
-    const bytes = utf8ByteLength(encodeCanonicalConsensusValue(tx));
+    const bytes = perTxBytes?.[index] ?? utf8ByteLength(encodeCanonicalConsensusValue(tx));
     const previousBytes = prefixBytes[index];
     if (previousBytes === undefined) throw new Error('ENTITY_FRAME_TX_PREFIX_GAP');
     prefixBytes.push(previousBytes + bytes + (index === 0 ? 0 : 1));

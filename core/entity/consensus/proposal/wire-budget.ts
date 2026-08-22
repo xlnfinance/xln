@@ -13,6 +13,7 @@ import { LIMITS } from '../../../config/constants';
 import { getPrevFrameHash } from '../frame/lineage';
 import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
+import { countOp } from '../../../support/performance/op-counters';
 import { preparedHtlcBindingKey } from '../../../types/entity/htlc-infra-context';
 import { collectInboundHtlcBindingKeys } from '../../htlc/materialize-context';
 import { hasReplayEntityContext, materializeEntityInfraContext } from './infra-context';
@@ -227,7 +228,11 @@ const fitLiveEntityProposal = async (
     let candidate = allTxs.length;
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
-      const materialized = await materializeOrHalve(env, replica, slice, requiredPrefixCount);
+      countOp('entity.wireFit.attempt', slice.length);
+      const materialized = await timePerfPhase(
+        'entity.wireFit.materialize',
+        () => materializeOrHalve(env, replica, slice, requiredPrefixCount),
+      );
       if (!('entityContext' in materialized)) {
         candidate = materialized.txs.length;
         continue;
