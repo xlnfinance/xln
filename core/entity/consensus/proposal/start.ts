@@ -46,6 +46,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
 import { fitEntityProposalToWireBudget } from './wire-budget';
+import { primeProposalHankos } from './prime-hankos';
 import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
 import { countOp } from '../../../support/performance/op-counters';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
@@ -341,6 +342,7 @@ const fitAndApplyEntityProposal = async (
     : { ...workingReplica, state: withBoardAuthority(workingReplica.state, authorityConfig) };
   const leader = getReplicaProposalLeader(authorityReplica);
   assertProposalPrefix(env, authorityReplica, selection, leader.view);
+  const primedHankos = primeProposalHankos(proposalTxs);
   const fitted = await fitEntityProposalToWireBudget({
     env,
     replica: workingReplica,
@@ -364,6 +366,7 @@ const fitAndApplyEntityProposal = async (
       entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
     }));
   }
+  if (primedHankos) await primedHankos;
   const applyFrame = context.promoteCandidateState && selection.isSingleSigner
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;

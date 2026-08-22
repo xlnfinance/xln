@@ -13,6 +13,12 @@ import {
   recoverAddressFromDigestSignature,
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
+import {
+  ECDSA_RECOVER_RECORD_BYTES,
+  ECDSA_RECOVER_RESULT_BYTES,
+  recoverAddressesBatch,
+} from '../protocol/crypto/ecdsa-recover-pool';
+import { countOp } from '../support/performance/op-counters';
 
 // Wire type: tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])
 // laid out by the direct codec in ./abi (byte-identical to AbiCoder).
@@ -300,6 +306,71 @@ const recoverHankoSignaturesUncached = (
     signerIds.add(signerEntityId);
     return Object.freeze({ signerEntityId, signature });
   }));
+};
+
+/**
+ * Warm `recoverHankoSignatures` for many (digest, hanko) pairs at once on the
+ * worker pool. Pure acceleration: entries that fail to unpack or recover are
+ * simply left out, and the synchronous verifier reproduces the exact error
+ * later. Never changes what is accepted, only where the curve math runs.
+ */
+export const primeRecoveredHankoSignatures = async (
+  items: ReadonlyArray<Readonly<{ digest: string; hanko: string }>>,
+): Promise<number> => {
+  type Planned = { key: string; signatures: readonly HankoHex[]; first: number };
+  const planned: Planned[] = [];
+  const seen = new Set<string>();
+  let total = 0;
+  for (const item of items) {
+    let signatures: readonly HankoHex[];
+    try {
+      const digest = asHankoBytes32(item.digest, 'DIGEST');
+      const packed = decodeHankoEnvelope(item.hanko as HankoString).packedSignatures;
+      const key = `${digest}|${packed}`;
+      if (seen.has(key) || recoveredSignatures.has(key)) continue;
+      seen.add(key);
+      signatures = unpackHankoSignatures(packed);
+      planned.push({ key, signatures, first: total });
+    } catch {
+      continue;
+    }
+    total += signatures.length;
+  }
+  if (total === 0) return 0;
+  const records = new Uint8Array(total * ECDSA_RECOVER_RECORD_BYTES);
+  for (const plan of planned) {
+    const digestBytes = ethers.getBytes(plan.key.slice(0, 66));
+    plan.signatures.forEach((signature, index) => {
+      const base = (plan.first + index) * ECDSA_RECOVER_RECORD_BYTES;
+      const bytes = ethers.getBytes(signature);
+      records.set(digestBytes, base);
+      records.set(bytes.subarray(0, 64), base + 32);
+      records[base + 96] = bytes[64]! - 27;
+    });
+  }
+  const addresses = await recoverAddressesBatch(records);
+  countOp(addresses ? 'hanko.prime.batch' : 'hanko.prime.noPool', total);
+  if (!addresses) return 0;
+  let primed = 0;
+  for (const plan of planned) {
+    if (recoveredSignatures.has(plan.key)) continue;
+    const signerIds = new Set<string>();
+    let valid = true;
+    const recovered = plan.signatures.map((signature, index) => {
+      const offset = (plan.first + index) * ECDSA_RECOVER_RESULT_BYTES;
+      const address = addresses.subarray(offset, offset + ECDSA_RECOVER_RESULT_BYTES);
+      if (address.every(byte => byte === 0)) valid = false;
+      const signerEntityId = ethers.zeroPadValue(address, 32).toLowerCase() as HankoHex;
+      if (signerIds.has(signerEntityId)) valid = false;
+      signerIds.add(signerEntityId);
+      return Object.freeze({ signerEntityId, signature });
+    });
+    if (!valid) continue;
+    memoSet(recoveredSignatures, plan.key, Object.freeze(recovered));
+    primed += 1;
+  }
+  countOp('hanko.prime.primed', primed);
+  return primed;
 };
 
 const signAndPackHankoDigest = (
