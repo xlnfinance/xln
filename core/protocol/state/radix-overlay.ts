@@ -174,7 +174,9 @@ class RadixOverlayTransaction<K, V> implements RadixOverlayOwner<K, V> {
   prepare(): PreparedRadixOverlay<K, V> {
     this.requireActive();
     const base = this.#base;
-    const values = base.foldMutations(
+    // An overlay that never wrote republishes its base by identity: no fold,
+    // and identity-keyed root memos downstream keep hitting.
+    const values = !this.#reset && this.#mutations.size === 0 ? base : base.foldMutations(
       this.sortedMutations().map(mutation => mutation.kind === 'put'
         ? { kind: 'put', key: mutation.key, value: mutation.value }
         : { kind: 'delete', key: mutation.key }),
@@ -327,6 +329,7 @@ export const prepareRadixOverlay = <K, V>(
   const tx = requireTransaction(owner);
   return tx.prepare();
 };
+
 
 /** Machine-only owner operation. Discard is a consume, not an idempotent cleanup. */
 export const discardRadixOverlay = <K, V>(owner: RadixOverlayOwner<K, V>): void => {

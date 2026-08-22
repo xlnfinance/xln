@@ -52,15 +52,22 @@ class AccountCollectionOverlay<K extends AccountStateMapKey, V>
   readonly #namespace: AccountStateMapNamespace;
   readonly #radixOwner: RadixOverlayOwner<K, V>;
 
+  readonly #base: PersistentAccountStateMap<K, V>;
+
   constructor(base: PersistentAccountStateMap<K, V>) {
     this.#namespace = base.namespace;
+    this.#base = base;
     this.#radixOwner = beginRadixOverlay(base.radixValuesForOverlay());
     this.view = new AccountCollectionDraftView(this.#radixOwner.view);
   }
 
   prepare(): PreparedAccountCollection<K, V> {
     const prepared = prepareRadixOverlay(this.#radixOwner);
-    const values = PersistentAccountStateMap.fromRadixValues(this.#namespace, prepared.values);
+    // Untouched collection: keep the committed wrapper itself. A fresh wrapper
+    // over the same values broke every identity-keyed root memo downstream.
+    const values = prepared.values === this.#base.radixValuesForOverlay()
+      ? this.#base
+      : PersistentAccountStateMap.fromRadixValues(this.#namespace, prepared.values);
     return Object.freeze({
       namespace: this.#namespace,
       values,
