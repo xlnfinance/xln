@@ -939,7 +939,7 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
     }));
     return true;
   }
-  if (type === 'entity_inputs' && (msg.encrypted !== true || typeof payload !== 'string')) {
+  if (type === 'entity_inputs' && (msg.encrypted !== true || !(payload instanceof Uint8Array))) {
     pushDebugEvent(config.store, {
       event: 'error',
       from,

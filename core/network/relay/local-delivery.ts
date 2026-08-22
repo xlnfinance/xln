@@ -6,7 +6,7 @@
  */
 
 import { handleInboundP2PEntityInputs } from '../../runtime.ts';
-import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
+import { deriveEncryptionKeyPair, decryptPayload, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { EntityReplica } from '../../entity/types';
 import {
@@ -81,12 +81,12 @@ export const createLocalDeliveryHandler = (
       throw new Error(`Unsupported local delivery type: ${String(msg.type)}`);
     }
 
-    if (msg.encrypted !== true || typeof payload !== 'string') {
+    if (msg.encrypted !== true || !(payload instanceof Uint8Array)) {
       throw new Error('P2P_UNENCRYPTED: local entity_inputs must be encrypted');
     }
     const activeKeyPair = getServerKeyPair();
     const envelope = decodeRuntimeEntityInputsEnvelope(
-      decryptJSON(payload, activeKeyPair.privateKey),
+      decryptPayload(payload, activeKeyPair.privateKey),
     );
     assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
     relayLog(`[RELAY] → decrypted entity_inputs: inputs=${envelope.entityInputs?.length ?? 0}`);

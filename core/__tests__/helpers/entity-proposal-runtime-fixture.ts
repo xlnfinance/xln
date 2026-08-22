@@ -26,7 +26,7 @@ import {
 } from '../../network/p2p/ws-protocol';
 import {
   deriveEncryptionKeyPair,
-  encryptJSON,
+  encryptPayload,
   pubKeyToHex,
 } from '../../protocol/crypto/p2p-crypto';
 import {
@@ -352,7 +352,7 @@ export const deliverEncryptedProposal = async (
     to: env.runtimeId!,
     timestamp: 1_000,
     encrypted: true,
-    payload: encryptJSON(envelope, deriveEncryptionKeyPair(durableProposalRuntimeSeed).publicKey),
+    payload: encryptPayload(envelope, deriveEncryptionKeyPair(durableProposalRuntimeSeed).publicKey),
   };
   const authTimestamp = hello.auth!.timestamp + 1;
   await route.websocket.message(socket.ws, serializeWsMessage({

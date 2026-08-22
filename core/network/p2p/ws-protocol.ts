@@ -93,7 +93,7 @@ export type RuntimeWsMessage = {
   to?: string;
   timestamp?: number;
   payload?: unknown;
-  encrypted?: boolean;        // If true, payload is encrypted base64 string
+  encrypted?: boolean;        // If true, payload is ciphertext bytes
   entityId?: string;
   txs?: number;
   auth?: RuntimeWsAuth;
@@ -180,7 +180,7 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
         ['id', 'from', 'to', 'payload', 'encrypted'],
         ['fromEncryptionPubKey', 'timestamp', 'entityId', 'txs', 'encSeq'],
       );
-      if (typeof message['encrypted'] !== 'boolean' || typeof message['payload'] !== 'string') {
+      if (typeof message['encrypted'] !== 'boolean' || !(message['payload'] instanceof Uint8Array)) {
         throw new Error('WS_MESSAGE_ENTITY_INPUTS_ENCRYPTION_INVALID');
       }
       if (message['encSeq'] !== undefined) requireBoundaryInteger(message['encSeq'], 'WS_MESSAGE_ENC_SEQ_INVALID');

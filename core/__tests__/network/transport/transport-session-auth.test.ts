@@ -347,7 +347,7 @@ describe('bound websocket session authority', () => {
       from: CLIENT_RUNTIME_ID,
       fromEncryptionPubKey: CLIENT_KEY,
       to: SERVER_RUNTIME_ID,
-      payload: 'captured',
+      payload: new TextEncoder().encode('captured'),
       encrypted: true,
     }, binding.challenge, binding.audience);
     await relayRoute(config, relaySocket.ws, relayFrame);

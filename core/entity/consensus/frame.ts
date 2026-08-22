@@ -162,8 +162,8 @@ const buildCanonicalArrayPayloadPrefixBytes = (canonicalTxs: unknown[], perTxByt
   return prefixBytes;
 };
 
-const buildEntityFrameTxPrefixBytes = (canonicalTxs: unknown[]): number[] => {
-  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(canonicalTxs);
+const buildEntityFrameTxPrefixBytes = (canonicalTxs: unknown[], perTxBytes?: number[]): number[] => {
+  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(canonicalTxs, perTxBytes);
   // Encode only the constant empty envelope. Canonical arrays are exactly
   // '[' + child encodings separated by ',' + ']', so encoding the complete
   // multi-megabyte tx array merely to rediscover this constant was duplicate
@@ -184,8 +184,8 @@ export const assertEntityFrameTxByteBudget = (txs: EntityTx[]): void => {
 };
 
 export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
-  const canonical = canonicalEntityTxsForFrameHash(txs);
-  const prefixBytes = buildEntityFrameTxPrefixBytes(canonical);
+  const frameTxs = canonicalFrameTxs(txs);
+  const prefixBytes = buildEntityFrameTxPrefixBytes(frameTxs.canonical, frameTxs.perTxBytes);
   const fullBytes = prefixBytes[prefixBytes.length - 1];
   if (fullBytes === undefined) throw new Error('ENTITY_FRAME_TX_PREFIX_EMPTY');
   if (fullBytes <= MAX_ENTITY_FRAME_TX_BYTES) return txs;
@@ -255,9 +255,8 @@ export type EntityFrameWirePrefixMeter = ((
 };
 
 export const createEntityFrameWirePrefixMeter = (txs: EntityTx[]): EntityFrameWirePrefixMeter => {
-  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(
-    canonicalEntityTxsForFrameHash(txs),
-  );
+  const frameTxs = canonicalFrameTxs(txs);
+  const payloadPrefixBytes = buildCanonicalArrayPayloadPrefixBytes(frameTxs.canonical, frameTxs.perTxBytes);
   const assertCount = (count: number): void => {
     if (!Number.isSafeInteger(count) || count < 0 || count >= payloadPrefixBytes.length) {
       throw new Error('ENTITY_FRAME_WIRE_PREFIX_COUNT_INVALID:' + count + ':' + txs.length);

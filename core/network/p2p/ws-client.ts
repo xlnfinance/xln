@@ -13,10 +13,10 @@ import {
 import { signDigest } from '../../account/crypto';
 import { countOp, recordOpEvent } from '../../support/performance/op-counters';
 import {
-  decryptJSON,
-  decryptSessionJSON,
-  encryptJSON,
-  encryptSessionJSON,
+  decryptPayload,
+  decryptSessionPayload,
+  encryptPayload,
+  encryptSessionPayload,
   generateEphemeralKeyPair,
   hexToPubKey,
   pubKeyToHex,
@@ -665,8 +665,8 @@ export class RuntimeWsClient {
       if (sessionKeys && msg.encSeq === undefined) throw new Error('P2P_SESSION_ENC_SEQ_MISSING');
       envelope = decodeRuntimeEntityInputsEnvelope(
         sessionKeys && msg.encSeq !== undefined
-          ? decryptSessionJSON(msg.payload as string, sessionKeys.s2c, msg.encSeq)
-          : decryptJSON(msg.payload as string, this.options.encryptionKeyPair.privateKey),
+          ? decryptSessionPayload(msg.payload as Uint8Array, sessionKeys.s2c, msg.encSeq)
+          : decryptPayload(msg.payload as Uint8Array, this.options.encryptionKeyPair.privateKey),
       );
     } catch (error) {
       console.error('❌ WS-CLIENT-DECRYPT-FAILED:', error);
@@ -833,15 +833,15 @@ export class RuntimeWsClient {
     // direct session seals under the c2s key with a counter nonce.
     const sessionKeys = this.sessionKeys;
     const encSeq = sessionKeys ? ++this.outboundEncSeq : undefined;
-    let payload: string;
+    let payload: Uint8Array;
     if (sessionKeys && encSeq !== undefined) {
-      payload = encryptSessionJSON(envelope, sessionKeys.c2s, encSeq);
+      payload = encryptSessionPayload(envelope, sessionKeys.c2s, encSeq);
     } else {
       const signed = envelope.sourceSignature
         ? envelope
         : this.options.signEnvelope?.(to, envelope);
       if (!signed?.sourceSignature) throw new Error('P2P_RELAY_ENVELOPE_UNSIGNED');
-      payload = encryptJSON(signed, targetPubKey);
+      payload = encryptPayload(signed, targetPubKey);
     }
 
     return this.sendRaw({

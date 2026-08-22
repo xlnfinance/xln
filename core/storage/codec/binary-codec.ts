@@ -181,6 +181,15 @@ const packCanonical = (canonical: unknown, codec: XlnBinaryCodecName): Uint8Arra
   return encoded;
 };
 
+/**
+ * Transport values are never hashed, so they skip the canonical key-order
+ * walk and go straight through the structured-clone MessagePack codec
+ * (exact bigint / Uint8Array / undefined round trip). Decoders still run the
+ * boundary validators on the unpacked value.
+ */
+export const packTransportValue = (value: unknown): Uint8Array => asBytes(msgpackCodec.pack(value));
+export const unpackTransportValue = (bytes: Uint8Array): unknown => msgpackCodec.unpack(bytes);
+
 export const encodeBinaryPayloadWithCanonical = (
   value: unknown,
   codec: XlnBinaryCodecName = 'msgpack',

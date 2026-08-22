@@ -11,8 +11,7 @@ import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fa
 export { x25519SharedSecret } from './fast-x25519';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
-import { safeStringify, safeParse } from '../serialization';
+import { packTransportValue, unpackTransportValue } from '../../storage/codec/binary-codec';
 
 export type P2PKeyPair = {
   publicKey: Uint8Array;  // 32 bytes
@@ -121,31 +120,16 @@ function decryptMessage(
 }
 
 /**
- * Encrypt JSON object for recipient
+ * Seal a transport value for a recipient (ephemeral ECDH sealed box).
+ * Plaintext is MessagePack (exact bigint/bytes round trip), never JSON text;
+ * the ciphertext travels as raw bytes inside the MessagePack ws envelope.
  */
-export function encryptJSON(
-  data: unknown,
-  recipientPubKey: Uint8Array
-): string {
-  // CRITICAL: Use safeStringify to handle BigInt values in AccountInput payloads
-  const json = safeStringify(data);
-  const plaintext = new TextEncoder().encode(json);
-  const encrypted = encryptMessage(plaintext, recipientPubKey);
-  return encodeBase64Bytes(encrypted);
+export function encryptPayload(data: unknown, recipientPubKey: Uint8Array): Uint8Array {
+  return encryptMessage(packTransportValue(data), recipientPubKey);
 }
 
-/**
- * Decrypt JSON object with our private key
- */
-export function decryptJSON(
-  encryptedBase64: string,
-  privateKey: Uint8Array
-): unknown {
-  const encrypted = decodeBase64Bytes(encryptedBase64);
-  const plaintext = decryptMessage(encrypted, privateKey);
-  const json = new TextDecoder().decode(plaintext);
-  // CRITICAL: Use safeParse to restore BigInt values from string encoding
-  return safeParse(json);
+export function decryptPayload(encrypted: Uint8Array, privateKey: Uint8Array): unknown {
+  return unpackTransportValue(decryptMessage(encrypted, privateKey));
 }
 
 /** Fresh ephemeral X25519 keypair for one transport session. */
@@ -163,20 +147,17 @@ const sessionNonce = (seq: number): Uint8Array => {
 };
 
 /**
- * Seal JSON under a per-session key with a counter nonce. The caller owns
- * the counter (one direction, strictly increasing, never reused per key).
- * Wire format: ciphertext (data + 16 tag), base64.
+ * Seal a transport value under a per-session key with a counter nonce. The
+ * caller owns the counter (one direction, strictly increasing, never reused
+ * per key). Wire format: ciphertext (data + 16 tag) as raw bytes.
  */
-export function encryptSessionJSON(data: unknown, key: Uint8Array, seq: number): string {
-  const plaintext = new TextEncoder().encode(safeStringify(data));
-  return encodeBase64Bytes(chacha20poly1305(key, sessionNonce(seq)).encrypt(plaintext));
+export function encryptSessionPayload(data: unknown, key: Uint8Array, seq: number): Uint8Array {
+  return chacha20poly1305(key, sessionNonce(seq)).encrypt(packTransportValue(data));
 }
 
-export function decryptSessionJSON(encryptedBase64: string, key: Uint8Array, seq: number): unknown {
-  const ciphertext = decodeBase64Bytes(encryptedBase64);
+export function decryptSessionPayload(ciphertext: Uint8Array, key: Uint8Array, seq: number): unknown {
   if (ciphertext.length < 16) throw new Error('P2P_DECRYPT_ERROR: Message too short');
-  const plaintext = chacha20poly1305(key, sessionNonce(seq)).decrypt(ciphertext);
-  return safeParse(new TextDecoder().decode(plaintext));
+  return unpackTransportValue(chacha20poly1305(key, sessionNonce(seq)).decrypt(ciphertext));
 }
 
 /**

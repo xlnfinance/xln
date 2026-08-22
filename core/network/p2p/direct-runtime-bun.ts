@@ -7,11 +7,11 @@ import {
 } from '../../protocol/payments/delivery-result';
 import { compareCanonicalText } from '../../orderbook/swap-keys';
 import {
-  decryptJSON,
-  decryptSessionJSON,
+  decryptPayload,
+  decryptSessionPayload,
   deriveEncryptionKeyPair,
-  encryptJSON,
-  encryptSessionJSON,
+  encryptPayload,
+  encryptSessionPayload,
   generateEphemeralKeyPair,
   hexToPubKey,
   pubKeyToHex,
@@ -475,8 +475,8 @@ const sendEntityInputsDelivery = (
         ? ingressTimestamp
         : Date.now(),
       payload: sessionKeys && encSeq !== undefined
-        ? encryptSessionJSON(envelope, sessionKeys.s2c, encSeq)
-        : encryptJSON(
+        ? encryptSessionPayload(envelope, sessionKeys.s2c, encSeq)
+        : encryptPayload(
             envelope.sourceSignature
               ? envelope
               : (() => {
@@ -702,7 +702,7 @@ const handleEntityInputs = async (
     rejectDirectMessage(context, session, msg, 'Direct target runtimeId mismatch');
     return;
   }
-  if (!msg.encrypted || typeof msg.payload !== 'string') {
+  if (!msg.encrypted || !(msg.payload instanceof Uint8Array)) {
     rejectDirectMessage(context, session, msg, 'Direct entity_inputs must be encrypted');
     return;
   }
@@ -714,8 +714,8 @@ const handleEntityInputs = async (
     if (sessionKeys && msg.encSeq === undefined) throw new Error('Direct session entity_inputs must carry encSeq');
     envelope = decodeRuntimeEntityInputsEnvelope(
       sessionKeys && msg.encSeq !== undefined
-        ? decryptSessionJSON(msg.payload, sessionKeys.c2s, msg.encSeq)
-        : decryptJSON(msg.payload, context.keyPair.privateKey),
+        ? decryptSessionPayload(msg.payload, sessionKeys.c2s, msg.encSeq)
+        : decryptPayload(msg.payload, context.keyPair.privateKey),
     );
     countEntityInputEnvelopeKinds('socket.directServer.in', envelope, {
       fromRuntimeId,

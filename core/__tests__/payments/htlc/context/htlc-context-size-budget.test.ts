@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { LIMITS } from '../../../../config/constants';
 import { encodeCanonicalConsensusValue } from '../../../../protocol/serialization/canonical-consensus-value';
 import { resolveRuntimeWsMaxMessageBytes, serializeWsMessage } from '../../../../network/p2p/ws-protocol';
-import { deriveEncryptionKeyPair, encryptJSON } from '../../../../protocol/crypto/p2p-crypto';
+import { deriveEncryptionKeyPair, encryptPayload } from '../../../../protocol/crypto/p2p-crypto';
 import { parseProfile } from '../../../../entity/profile';
 
 const id = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
@@ -34,7 +34,7 @@ test('100-hop minimal full-profile context fits protocol but transport remains t
   const contextBytes = new TextEncoder().encode(encodeCanonicalConsensusValue(context)).byteLength;
   expect(contextBytes).toBeLessThan(LIMITS.MAX_FRAME_SIZE_BYTES);
 
-  const encryptedPayload = encryptJSON({ entityInputs: [{ entityId: id(1), signerId: address, entityTxs: [{ type: 'fixture', data: context }] }] }, deriveEncryptionKeyPair('context-size-target').publicKey);
+  const encryptedPayload = encryptPayload({ entityInputs: [{ entityId: id(1), signerId: address, entityTxs: [{ type: 'fixture', data: context }] }] }, deriveEncryptionKeyPair('context-size-target').publicKey);
   expect(() => serializeWsMessage({ type: 'entity_inputs', from: 'source', to: 'target', payload: encryptedPayload, encrypted: true }))
     .not.toThrow();
   expect(contextBytes).toBeLessThan(resolveRuntimeWsMaxMessageBytes());

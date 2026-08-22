@@ -12,7 +12,7 @@ import {
 } from '../../../network/relay/store';
 import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
-import { encryptJSON, deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
+import { encryptPayload, deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
 import { DEFAULT_GOSSIP_BATCH_LIMIT } from '../../../network/p2p/gossip/profile-batch';
 import { createLocalDeliveryHandler } from '../../../network/relay/local-delivery';
 import { createEmptyEnv } from '../../../runtime';
@@ -608,7 +608,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-payload',
+      payload: new TextEncoder().encode('encrypted-payload'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -654,7 +654,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-payload',
+      payload: new TextEncoder().encode('encrypted-payload'),
       encrypted: true,
     });
     await sendInput('within-budget');
@@ -705,7 +705,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-account-input',
+      payload: new TextEncoder().encode('encrypted-account-input'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -725,7 +725,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-account-input',
+      payload: new TextEncoder().encode('encrypted-account-input'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -738,7 +738,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-account-input',
+      payload: new TextEncoder().encode('encrypted-account-input'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -797,7 +797,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-account-input',
+      payload: new TextEncoder().encode('encrypted-account-input'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -849,7 +849,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-account-input',
+      payload: new TextEncoder().encode('encrypted-account-input'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -893,7 +893,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: 'encrypted-account-input',
+      payload: new TextEncoder().encode('encrypted-account-input'),
       encrypted: true,
       entityId: ENTITY_B,
       txs: 1,
@@ -1210,7 +1210,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
-      payload: 'encrypted-payload',
+      payload: new TextEncoder().encode('encrypted-payload'),
       encrypted: true,
       entityId: ENTITY_C,
       txs: 1,
@@ -1286,7 +1286,7 @@ describe('relay-router gossip fanout', () => {
       type: 'entity_inputs',
       to: env.runtimeId,
       encrypted: true,
-      payload: encryptJSON(envelope, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),
+      payload: encryptPayload(envelope, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),
     })).rejects.toThrow('NO_LOCAL_REPLICA');
 
     expect(store.debugEvents.some(event => {
@@ -1319,7 +1319,7 @@ describe('relay-router gossip fanout', () => {
       type: 'entity_inputs',
       to: env.runtimeId,
       encrypted: true,
-      payload: encryptJSON({
+      payload: encryptPayload({
         ...envelope,
         sourceRuntimeHeight: 2,
       }, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),

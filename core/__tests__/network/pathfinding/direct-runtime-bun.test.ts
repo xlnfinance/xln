@@ -5,7 +5,7 @@ import {
   hasUndeliveredDirectRuntimeSessionBytes,
   isCleanDirectRuntimeSessionClose,
 } from '../../../network/p2p/direct-runtime-bun';
-import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
+import { decryptPayload, deriveEncryptionKeyPair, encryptPayload, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../../../network/p2p/auth/hello-auth';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
@@ -410,10 +410,10 @@ describe('direct runtime websocket route', () => {
     expect(outbound?.from).toBe(serverRuntimeId);
     expect(outbound?.to).toBe(clientRuntimeId);
     expect(outbound?.encrypted).toBe(true);
-    const decryptedOutbound = decryptJSON<RuntimeEntityInputsEnvelope>(
-      String(outbound?.payload || ''),
+    const decryptedOutbound = decryptPayload(
+      outbound?.payload as Uint8Array,
       deriveEncryptionKeyPair(clientSeed).privateKey,
-    );
+    ) as RuntimeEntityInputsEnvelope;
     expect(decryptedOutbound).toEqual(outboundEnvelope);
 
     const inboundInput: RoutedEntityInput = {
@@ -437,7 +437,7 @@ describe('direct runtime websocket route', () => {
       to: serverRuntimeId,
       timestamp: 456,
       encrypted: true,
-      payload: encryptJSON(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
+      payload: encryptPayload(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
     }));
 
     expect(received).toEqual([
@@ -522,7 +522,7 @@ describe('direct runtime websocket route', () => {
       to: serverRuntimeId,
       timestamp: 456,
       encrypted: true,
-      payload: encryptJSON({
+      payload: encryptPayload({
         sourceRuntimeId: clientRuntimeId,
         sourceSignature: `0x${'11'.repeat(65)}`,
         sourceRuntimeHeight: -1,
@@ -760,7 +760,7 @@ describe('direct runtime websocket route', () => {
       fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
       to: serverRuntimeId,
       encrypted: true,
-      payload: encryptJSON(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
+      payload: encryptPayload(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
     }));
     expect(received).toEqual([inboundEnvelope]);
   });
@@ -960,7 +960,7 @@ describe('direct runtime websocket route', () => {
       to: serverRuntimeId,
       timestamp: 2,
       encrypted: true,
-      payload: encryptJSON(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
+      payload: encryptPayload(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
     }));
 
     expect(sent.at(-1)?.type).not.toBe('error');
