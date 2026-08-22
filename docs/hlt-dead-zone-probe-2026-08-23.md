@@ -178,11 +178,15 @@ sig verification" hypothesis is disproved. The real costs are:
 - **Lever 6a (account value hash memo):** NO HELP. The radix map already
   caches leaf node hashes; `valueHash` is only called once per leaf. The
   memo added overhead without benefit.
-- **Lever 7 (structuredClone reduction):** NEXT TARGET. 43K clones/run
-  (~100/frame). Top callers: `cloneIsolatedEntityInput` (8K, per-tx
-  isolation), observability `queuePendingAuditEvent` (11K, event
-  cloning), `recordCommittedFrames` (4K, frame history). The
-  observability cloning (24% of total) is a potential quick win.
+- **Lever 7a (observability clone reduction):** DONE. Replaced
+  `structuredClone(payload)` with shallow `{ ...payload }` in
+  `queuePendingAuditEvent`. All call sites build fresh object literals,
+  so the canonical dedup key already binds the full structure.
+  `structuredClone`: 43,836 → 33,432 (-24%, -10K calls).
+- **Lever 7b (structuredClone reduction):** NEXT TARGET. Remaining 33K
+  clones: `cloneIsolatedEntityInput` (8K, per-tx isolation),
+  `recordCommittedFrames` (4K, frame history), `collectEntityTxResult`
+  (3K, tx results). These are consensus-critical and harder to optimize.
 - **Lever 2 (batch sig verify):** DEPRIORITIZED. Only 4% of ops; max
   ~7ms/frame savings even with perfect batching.
 
@@ -193,3 +197,4 @@ sig verification" hypothesis is disproved. The real costs are:
 | `c9ec6ddca` | `XLN_RUNTIME_FRAME_LOG` forwarded smoke → orchestrator → hub child; `XLN_ACCOUNT_PROPOSAL_PROFILE`/`XLN_ENTITY_FRAME_PROFILE` forwarded to lane daemons; `XLN_HLT_SUBMIT_RAMP_MS` staggered submission ramp |
 | `efea96a42` | Fat-frame gate: `minFrameMempoolDepth`/`maxFrameDelayMs` config + `decodeRuntimeConfig` schema update                                                                                                       |
 | `fc55888f8` | Entity state root memo on field identity (Lever 6). `canonical.encode` -42% (322K → 187K)                                                                                                                   |
+| `c23164d82` | Shallow-clone audit event payload (Lever 7a). `structuredClone` -24% (44K → 33K)                                                                                                                            |
