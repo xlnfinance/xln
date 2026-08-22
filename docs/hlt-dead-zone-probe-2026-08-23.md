@@ -21,15 +21,15 @@ burst across 500ms instead of firing 200 submissions simultaneously.
 
 ## 3. Evidence
 
-| Signal | Value | Conclusion |
-|---|---|---|
-| Hub mempool at h=334 | 129 entity inputs queued | Hub is NOT starved — it has work |
-| Hub frame processing (78 frames, >1 inputs) | avg 191ms, total 14.9s | Hub is the bottleneck |
-| Hub `apply` phase per frame | 193–376ms | Dominated by per-ACK consensus |
-| Hub `save` phase per frame | 68–94ms | Frame encode + WAL |
-| Hub txKinds during dead zone | 100% `accountInput:frame_ack` | Processing bilateral ACKs, not payments |
-| Daemon proposal processing (1826 proposals) | avg 0.6ms | Daemons are 300× faster than hub |
-| Daemon frame processing (30 htlcPayment txs) | 10–12ms per frame | Daemons are NOT congested |
+| Signal                                       | Value                         | Conclusion                              |
+| -------------------------------------------- | ----------------------------- | --------------------------------------- |
+| Hub mempool at h=334                         | 129 entity inputs queued      | Hub is NOT starved — it has work        |
+| Hub frame processing (78 frames, >1 inputs)  | avg 191ms, total 14.9s        | Hub is the bottleneck                   |
+| Hub `apply` phase per frame                  | 193–376ms                     | Dominated by per-ACK consensus          |
+| Hub `save` phase per frame                   | 68–94ms                       | Frame encode + WAL                      |
+| Hub txKinds during dead zone                 | 100% `accountInput:frame_ack` | Processing bilateral ACKs, not payments |
+| Daemon proposal processing (1826 proposals)  | avg 0.6ms                     | Daemons are 300× faster than hub        |
+| Daemon frame processing (30 htlcPayment txs) | 10–12ms per frame             | Daemons are NOT congested               |
 
 Hub frame log excerpt (H1, payment phase):
 
@@ -49,11 +49,11 @@ it one frame at a time at ~191ms per frame.
 
 ## 4. Causality test (staggered 500ms ramp)
 
-| Metric | No ramp (simultaneous) | 500ms ramp | Change |
-|---|---|---|---|
-| Dead zone | ~8.7s | ~6.4s | −27% |
-| Final TPS | 199.1/s | 220.4/s | +11% |
-| Delivery time | 30.1s | 27.2s | −10% |
+| Metric        | No ramp (simultaneous) | 500ms ramp | Change |
+| ------------- | ---------------------- | ---------- | ------ |
+| Dead zone     | ~8.7s                  | ~6.4s      | −27%   |
+| Final TPS     | 199.1/s                | 220.4/s    | +11%   |
+| Delivery time | 30.1s                  | 27.2s      | −10%   |
 
 Staggering reduced but did NOT eliminate the dead zone. This confirms the
 bottleneck is hub-side frame processing, not daemon-side congestion.
@@ -89,8 +89,37 @@ The dead zone fix is NOT daemon-side. Two paths:
 The staggered ramp (`XLN_HLT_SUBMIT_RAMP_MS=500`) provides a modest 11%
 TPS gain as a harness-level optimization with zero consensus risk.
 
-## 7. Instrumentation committed
+## 7. Lever 4 results (fat-frame gate)
 
-| Commit | Content |
-|---|---|
+Implemented `minFrameMempoolDepth`/`maxFrameDelayMs` config: hold hub
+frames back until enough mempool work accumulates, or a max delay cap
+fires. Default off (0); `scenarioMode` bypasses entirely.
+
+| Config                      | Dead zone | TPS   | Delivery | Δ TPS  |
+| --------------------------- | --------- | ----- | -------- | ------ |
+| Baseline (no gate, no ramp) | ~8.7s     | 199.1 | 30.1s    | —      |
+| Ramp only (500ms)           | ~6.4s     | 220.4 | 27.2s    | +10.7% |
+| Gate only (50/25ms)         | ~6.5s     | 227.4 | 26.4s    | +14.2% |
+| Gate+Ramp (50/25ms + 500ms) | ~6.5s     | 223.4 | 26.9s    | +12.2% |
+| Gate (100/100ms)            | ~8.6s     | 217.4 | 27.6s    | +9.2%  |
+
+**Best config: `XLN_HUB_MIN_FRAME_MEMPOOL_DEPTH=50`, `XLN_HUB_MAX_FRAME_DELAY_MS=25`**
+
+- +14.2% TPS (199.1 → 227.4)
+- -12.3% delivery time (30.1s → 26.4s)
+- -25% dead zone (8.7s → 6.5s)
+
+Fat frames are 3× more efficient per input: h=223 processed 250 inputs
+in 418ms (1.7ms/input) vs h=220 92 inputs in 479ms (5.2ms/input).
+
+Gate and ramp are NOT additive — both smooth the ACK burst; combining
+over-smooths. maxDelay=100ms is too high — adds latency without
+proportional batching benefit. Dead zone floor is ~6.5s; hub per-frame
+processing (400–500ms) is the remaining bottleneck (Lever 2).
+
+## 8. Instrumentation committed
+
+| Commit      | Content                                                                                                                                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `c9ec6ddca` | `XLN_RUNTIME_FRAME_LOG` forwarded smoke → orchestrator → hub child; `XLN_ACCOUNT_PROPOSAL_PROFILE`/`XLN_ENTITY_FRAME_PROFILE` forwarded to lane daemons; `XLN_HLT_SUBMIT_RAMP_MS` staggered submission ramp |
+| `efea96a42` | Fat-frame gate: `minFrameMempoolDepth`/`maxFrameDelayMs` config + `decodeRuntimeConfig` schema update                                                                                                       |
