@@ -2,6 +2,7 @@ import { keccak256 } from 'ethers';
 import { deriveDelta } from '../../account/utils';
 import { getAccountPerspective } from '../../account/state/perspective';
 import type { EntityState } from '../types';
+import { PersistentEntityAccountMap } from '../state/persistent-account-map';
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
 import { LIMITS } from '../../config/constants';
 import { HANKO_MAX_BYTES } from '../../hanko/codec';
@@ -255,11 +256,46 @@ export const buildEntityProfileDescriptor = (
 export const computeEntityProfileDescriptorHash = (descriptor: EntityProfileDescriptor): string =>
   keccak256(UTF8.encode(serializeTaggedJson(descriptor)));
 
+/**
+ * The descriptor walks every Account; the hub rebuilt it four times per
+ * R-frame (before/after apply, dispatch witness check, gossip). Committed
+ * Account maps are immutable, so the hash is memoized by the exact inputs the
+ * descriptor reads; a live candidate map is never cached.
+ */
+type ProfileHashMemo = { accounts: unknown; profile: unknown; hubConfig: unknown; config: unknown; key: unknown; hash: string };
+const profileHashMemos = new WeakMap<EntityState, ProfileHashMemo>();
+
+export const computeEntityProfileHash = (state: EntityState): string => {
+  const accounts = state.accounts;
+  const cacheable = accounts instanceof PersistentEntityAccountMap;
+  const memo = cacheable ? profileHashMemos.get(state) : undefined;
+  if (
+    memo &&
+    memo.accounts === accounts &&
+    memo.profile === state.profile &&
+    memo.hubConfig === state.hubRebalanceConfig &&
+    memo.config === state.config &&
+    memo.key === state.entityEncryptionPublicKey
+  ) return memo.hash;
+  const hash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(state));
+  if (cacheable) {
+    profileHashMemos.set(state, {
+      accounts,
+      profile: state.profile,
+      hubConfig: state.hubRebalanceConfig,
+      config: state.config,
+      key: state.entityEncryptionPublicKey,
+      hash,
+    });
+  }
+  return hash;
+};
+
 export const buildChangedEntityProfileHashToSign = (
   state: EntityState,
   previousProfileHash: string | null,
 ): { hash: string; type: 'profile'; context: string } | null => {
-  const hash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(state));
+  const hash = computeEntityProfileHash(state);
   return previousProfileHash === hash ? null : { hash, type: 'profile', context: `profile:${hash}` };
 };
 

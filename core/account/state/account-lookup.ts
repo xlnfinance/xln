@@ -23,6 +23,10 @@ export const findAccountByCounterparty = (
 ): AccountReplica | null => {
   const counterparty = normalizeEntityId(counterpartyEntityId);
   if (!counterparty) return null;
+  // Accounts are keyed by counterparty id; the scan below is only the
+  // fallback for non-normalized keys.
+  const direct = accounts.get(counterparty);
+  if (direct) return direct;
   for (const [key, account] of accounts) {
     if (normalizeEntityId(key) === counterparty || accountMatchesCounterparty(account, ownerEntityId, counterparty)) {
       return account;

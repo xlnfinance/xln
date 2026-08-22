@@ -2,10 +2,7 @@ import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../support/logger';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/gossip/local-profile-lifecycle';
-import {
-  buildEntityProfileDescriptor,
-  computeEntityProfileDescriptorHash,
-} from '../../entity/profile/profile-descriptor';
+import { computeEntityProfileHash } from '../../entity/profile/profile-descriptor';
 import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import {
@@ -29,7 +26,7 @@ const collectLocallySignableEntityIds = (env: RuntimeReplica): Set<string> => {
 };
 
 export const hasCertifiedCurrentProfileWitness = (replica: EntityReplica): boolean => {
-  const currentHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(replica.state));
+  const currentHash = computeEntityProfileHash(replica.state);
   return replica.hankoWitness?.get(currentHash)?.type === 'profile';
 };
 

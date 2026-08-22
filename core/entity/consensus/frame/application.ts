@@ -100,8 +100,7 @@ import { applyEntityTxReturnedEffects } from './tx-effects';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
 import {
   buildChangedEntityProfileHashToSign,
-  buildEntityProfileDescriptor,
-  computeEntityProfileDescriptorHash,
+  computeEntityProfileHash,
 } from '../../profile/profile-descriptor';
 
 import {
@@ -1649,7 +1648,7 @@ const applyEntityFrameWithIsolation = async (
     entityContext = validateEntityInfraContext(entityContext);
   }
   const profileHashStartedAt = getPerfMs();
-  const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));
+  const previousProfileHash = computeEntityProfileHash(entityState);
   const previousProfileHashMs = Math.round(getPerfMs() - profileHashStartedAt);
   const working = await prepareEntityFrameWorkingSet(
     env,
@@ -1699,9 +1698,7 @@ const applyEntityFrameWithIsolation = async (
     // its descriptor bytes did not change. The hash-keyed witness slot may
     // otherwise retain the retired board's Hanko and fail current-board-only
     // profile authentication immediately after the transition.
-    const profileHash = computeEntityProfileDescriptorHash(
-      buildEntityProfileDescriptor(working.currentEntityState),
-    );
+    const profileHash = computeEntityProfileHash(working.currentEntityState);
     working.context.collectedHashes.push({
       hash: profileHash,
       type: 'profile',
