@@ -110,6 +110,14 @@ export const createHubDirectRuntimeRoute = (
         ) ?? [],
         error: error.message,
       };
+      // An inbound failure is a rejected peer input: the session already got
+      // the typed rejection, and genuine internal contradictions halt through
+      // their own halt paths during apply. Only a peer refusing our committed
+      // output (outbound) is a fatal delivery contradiction for this Hub.
+      if (failure.direction === 'inbound') {
+        env.error?.('network', 'DIRECT_INBOUND_REJECTED', failure);
+        return;
+      }
       env.error?.('network', 'DIRECT_ACCOUNT_DELIVERY_FATAL', failure);
       haltRuntimeRequiresOperator(env, error);
     },
