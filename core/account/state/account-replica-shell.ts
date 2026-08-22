@@ -2,15 +2,11 @@
  * Bounded Entity-owned AccountReplica shell.
  * Growing Patricia collections stay shared; only known envelope fields are copied.
  */
-import type { AccountFrame, AccountReplica, AccountState, SettlementWorkspace } from '../../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountState, SettlementWorkspace } from '../../types/account';
 import { isPersistentAccountStateMap } from './persistent-state-map';
 import { createStructuredLogger } from '../../support/logger';
 import { transferAccountStateRootMemo } from '../commitment/state-root';
-import {
-  cloneIsolatedAccountFrame,
-  cloneIsolatedAccountInput,
-  cloneIsolatedAccountTx,
-} from '../../protocol/state/account-input-clone';
+import { cloneIsolatedAccountTx } from '../../protocol/state/account-input-clone';
 
 const shellLog = createStructuredLogger('entity.account.shell');
 
@@ -30,7 +26,28 @@ const copyRecord = <T extends object>(value: T): T => ({ ...value });
 
 const copyArray = <T>(value: readonly T[]): T[] => [...value];
 
-const copyFrame = (frame: AccountFrame): AccountFrame => cloneIsolatedAccountFrame(frame);
+// Committed frames are values: nothing mutates a frame's txs/deltas in place
+// after it is built, so a shell shares them and only owns the top-level record.
+const copyFrame = (frame: AccountFrame): AccountFrame => ({ ...frame });
+
+/** Shell of a cached outbound input: witnesses are attached on the shell's own proposal/ack records. */
+const forkAccountInputShell = <T extends AccountInput>(input: T): T => {
+  const shell = { ...input } as T & { proposal?: { frame: AccountFrame; disputeSeal?: object }; ack?: { disputeSeal?: object } };
+  if ('proposal' in shell && shell.proposal) {
+    shell.proposal = {
+      ...shell.proposal,
+      frame: copyFrame(shell.proposal.frame),
+      ...(shell.proposal.disputeSeal ? { disputeSeal: { ...shell.proposal.disputeSeal } } : {}),
+    };
+  }
+  if ('ack' in shell && shell.ack) {
+    shell.ack = {
+      ...shell.ack,
+      ...(shell.ack.disputeSeal ? { disputeSeal: { ...shell.ack.disputeSeal } } : {}),
+    };
+  }
+  return shell as T;
+};
 
 const copyWorkspace = (workspace: SettlementWorkspace): SettlementWorkspace => ({
   ...workspace,
@@ -128,11 +145,11 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
     shadow: forkShadow(base.shadow),
   };
   if (base.pendingFrame) shell.pendingFrame = copyFrame(base.pendingFrame);
-  if (base.pendingAccountInput) shell.pendingAccountInput = cloneIsolatedAccountInput(base.pendingAccountInput);
+  if (base.pendingAccountInput) shell.pendingAccountInput = forkAccountInputShell(base.pendingAccountInput);
   if (base.lastOutboundFrameAck) {
     shell.lastOutboundFrameAck = {
       ...base.lastOutboundFrameAck,
-      response: cloneIsolatedAccountInput(base.lastOutboundFrameAck.response),
+      response: forkAccountInputShell(base.lastOutboundFrameAck.response),
     };
   }
   if (base.boardResealMigration) shell.boardResealMigration = copyRecord(base.boardResealMigration);

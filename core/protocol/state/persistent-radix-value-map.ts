@@ -469,9 +469,10 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
   foldMutations(
     mutations: Iterable<RadixFoldMutation<K, V>>,
     reset = false,
+    ownValue: PersistentRadixValueMapOptions<K, V>['ownValue'] = this.#options.ownValue,
   ): PersistentRadixValueMap<K, V> {
     const folded = foldRadixMutations(
-      this.#options,
+      ownValue === this.#options.ownValue ? this.#options : { ...this.#options, ownValue },
       this.#root,
       this.#leafCount,
       [...mutations],

@@ -43,16 +43,25 @@ const requireDurableAddress = (name: string, value: unknown): string => {
  * `replica.contracts` is the only persisted source; live adapters are I/O
  * handles, never proof authority.
  */
+// The stack is a pure function of the persisted `contracts` record; every
+// Account proof body resolved it again with four checksum conversions.
+const durableStacks = new WeakMap<object, DurableJurisdictionStack>();
+
 export const requireDurableJurisdictionStack = (replica: JReplica): DurableJurisdictionStack => {
   const chainId = Number(replica.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new Error('JURISDICTION_DURABLE_STACK_CHAIN_ID_MISSING');
   }
-  return {
+  const contracts = replica.contracts;
+  const memoized = contracts ? durableStacks.get(contracts) : undefined;
+  if (memoized && memoized.chainId === chainId) return memoized;
+  const stack: DurableJurisdictionStack = {
     chainId,
-    depository: requireDurableAddress('depository', replica.contracts?.depository),
-    entityProvider: requireDurableAddress('entity_provider', replica.contracts?.entityProvider),
-    account: requireDurableAddress('account', replica.contracts?.account),
-    deltaTransformer: requireDurableAddress('delta_transformer', replica.contracts?.deltaTransformer),
+    depository: requireDurableAddress('depository', contracts?.depository),
+    entityProvider: requireDurableAddress('entity_provider', contracts?.entityProvider),
+    account: requireDurableAddress('account', contracts?.account),
+    deltaTransformer: requireDurableAddress('delta_transformer', contracts?.deltaTransformer),
   };
+  if (contracts) durableStacks.set(contracts, stack);
+  return stack;
 };

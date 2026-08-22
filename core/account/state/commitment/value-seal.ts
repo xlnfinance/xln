@@ -34,22 +34,28 @@ const requirePersistentCollections = (state: AccountState): void => {
 // the previous commit; re-walking it on every put was ~40 us per Account.
 const sealedGraphs = new WeakSet<object>();
 
+const describeSealPath = (trail: readonly (string | object)[]): string =>
+  trail.filter((part): part is string => typeof part === 'string').join('.');
+
 const sealBoundedGraph = (
   value: unknown,
-  ancestors: readonly object[] = [],
-  path = 'account',
+  ancestors: Set<object>,
+  trail: (string | object)[],
 ): void => {
   if (value === null || typeof value !== 'object') return;
   if (sealedGraphs.has(value)) return;
   if (isPersistentAccountStateMap(value)) return;
   if (value instanceof Map || value instanceof Set) {
-    throw new Error(`ACCOUNT_VALUE_SEAL_RAW_COLLECTION_FORBIDDEN:${path}`);
+    throw new Error(`ACCOUNT_VALUE_SEAL_RAW_COLLECTION_FORBIDDEN:${describeSealPath(trail)}`);
   }
-  if (ancestors.includes(value)) throw new Error('ACCOUNT_VALUE_SEAL_CYCLE');
-  const nextAncestors = [...ancestors, value];
+  if (ancestors.has(value)) throw new Error('ACCOUNT_VALUE_SEAL_CYCLE');
+  ancestors.add(value);
   for (const field of Object.getOwnPropertyNames(value)) {
-    sealBoundedGraph(Reflect.get(value, field), nextAncestors, `${path}.${field}`);
+    trail.push(field);
+    sealBoundedGraph(Reflect.get(value, field), ancestors, trail);
+    trail.pop();
   }
+  ancestors.delete(value);
   Object.freeze(value);
   sealedGraphs.add(value);
 };
@@ -75,6 +81,6 @@ export const sealCommittedAccountValue = (account: AccountReplica): AccountRepli
   if (!isPersistentAccountStateMap(account.shadow.rebalance.submittedAtByToken)) {
     throw new Error('ACCOUNT_VALUE_SEAL_REBALANCE_SUBMITTED_NOT_PERSISTENT');
   }
-  sealBoundedGraph(account);
+  sealBoundedGraph(account, new Set(), ['account']);
   return account;
 };

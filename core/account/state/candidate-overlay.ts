@@ -90,7 +90,9 @@ export const commitAccountTransition = (
   return {
     account,
     accountStateRoot,
-    nodeChanges: prepared.nodeChanges,
+    // Lazy: twelve Patricia diff walks per transition whose only consumer is
+    // a diagnostic node counter in the J-event finality log.
+    get nodeChanges() { return prepared.nodeChanges; },
   };
 };
 

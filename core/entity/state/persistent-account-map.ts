@@ -9,6 +9,7 @@ import { createStructuredLogger } from '../../support/logger';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { sealCommittedAccountValue } from '../../account/state/commitment/value-seal';
 import { observePerfCount } from '../../support/performance/profile';
+import { countOp } from '../../support/performance/op-counters';
 import {
   ACCOUNT_WORK_PENDING,
   ACCOUNT_WORK_QUEUED,
@@ -200,6 +201,7 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
   foldDirty(
     mutations: Iterable<EntityAccountDirtyMutation>,
     reset = false,
+    seal = true,
   ): PersistentEntityAccountMap {
     const last = new Map<string, EntityAccountDirtyMutation>();
     for (const mutation of mutations) {
@@ -228,7 +230,10 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
       };
     }
     return new PersistentEntityAccountMap(
-      this.#values.foldMutations(ordered, reset),
+      // A snapshot fold hashes live shells without freezing them: the frame
+      // still attaches Hanko witnesses (local, uncommitted fields) after the
+      // state root, and any committed write drops the snapshot anyway.
+      this.#values.foldMutations(ordered, reset, seal ? undefined : value => value),
       this.#work.foldMutations(workMutations, reset),
       counts,
       this.#ownerEntityId,
@@ -321,6 +326,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   // the same candidate twice per frame (commitments + seal) must not re-hash
   // every dirty Account leaf.
   #projection: PersistentEntityAccountMap | undefined;
+  #hashProjection: PersistentEntityAccountMap | undefined;
   // Operational conflict clock for speculative Account-machine jobs. It is
   // deliberately outside committed state: worker completion order must never
   // affect Entity bytes, while every claimed/replaced Account invalidates a
@@ -353,6 +359,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   getForWrite(entityId: string): AccountReplica | undefined {
     this.#requireActive();
     this.#projection = undefined;
+    this.#hashProjection = undefined;
     if (this.#deleted.has(entityId)) return undefined;
     const existing = this.#shells.get(entityId);
     if (existing) {
@@ -384,6 +391,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   set(entityId: string, account: AccountReplica): this {
     this.#requireActive();
     this.#projection = undefined;
+    this.#hashProjection = undefined;
     this.#deleted.delete(entityId);
     this.#shells.set(entityId, account);
     this.#bumpRevision(entityId);
@@ -394,6 +402,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   delete(entityId: string): boolean {
     this.#requireActive();
     this.#projection = undefined;
+    this.#hashProjection = undefined;
     const existed = this.has(entityId);
     this.#shells.delete(entityId);
     if (!this.#cleared && this.#base.has(entityId)) this.#deleted.add(entityId);
@@ -404,6 +413,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   clear(): void {
     this.#requireActive();
     this.#projection = undefined;
+    this.#hashProjection = undefined;
     this.#shells.clear();
     this.#deleted.clear();
     this.#cleared = true;
@@ -444,13 +454,21 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     for (const [key, value] of this.entries()) callback.call(thisArg, value, key, this);
   }
 
+  /**
+   * Root of the live overlay. Folds the live shells without forking or
+   * freezing them; every committed write below drops this projection, so a
+   * cached leaf hash can never outlive the bytes it certified.
+   */
   rootHash(): string {
-    return this.snapshotCandidate().rootHash();
+    this.#requireActive();
+    this.#hashProjection ??= this.#project('hash');
+    return this.#hashProjection.rootHash();
   }
 
+  /** Isolated (forked, sealed) view for a nested candidate base. */
   snapshotCandidate(): PersistentEntityAccountMap {
     this.#requireActive();
-    this.#projection ??= this.#project(false);
+    this.#projection ??= this.#project('fork');
     return this.#projection;
   }
 
@@ -458,6 +476,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   dropCachedProjection(): void {
     this.#requireActive();
     this.#projection = undefined;
+    this.#hashProjection = undefined;
   }
 
   getCertifiedBase(entityId: string): AccountReplica | undefined {
@@ -467,7 +486,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   sealCandidate(): PersistentEntityAccountMap {
     // Fold dirty Account shells into the Patricia base. Hash stays lazy until
     // `.hash` / `rootHash()` is read at the Entity state-root boundary.
-    const committed = this.#projection ?? this.#project(true);
+    const committed = this.#projection ?? this.#project('final');
     this.#active = false;
     candidateLog.debug('candidate.sealed', {
       base: this.#base.size,
@@ -535,7 +554,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     };
   }
 
-  #project(finalize: boolean): PersistentEntityAccountMap {
+  #project(mode: 'hash' | 'fork' | 'final'): PersistentEntityAccountMap {
     this.#requireActive();
     const mutations: EntityAccountDirtyMutation[] = [...this.#deleted]
       .sort()
@@ -545,15 +564,14 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
       mutations.push({
         kind: 'put',
         key: entityId,
-        value: finalize ? account : forkAccountReplicaShell(account),
+        value: mode === 'fork' ? forkAccountReplicaShell(account) : account,
       });
     }
     observePerfCount('entity.accountProjection.calls');
     observePerfCount('entity.accountProjection.mutations', mutations.length);
-    observePerfCount(
-      finalize ? 'entity.accountProjection.finalize' : 'entity.accountProjection.snapshot',
-    );
-    return this.#base.foldDirty(mutations, this.#cleared);
+    observePerfCount(`entity.accountProjection.${mode}`);
+    countOp(`entity.accountProjection.${mode}`, mutations.length);
+    return this.#base.foldDirty(mutations, this.#cleared, mode !== 'hash');
   }
 
   #requireActive(): void {
