@@ -1533,6 +1533,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ENTITY_STATE_ROOT_PROFILE']
         ? { XLN_ENTITY_STATE_ROOT_PROFILE: process.env['XLN_ENTITY_STATE_ROOT_PROFILE'] }
         : {}),
+      ...(process.env['XLN_ACCOUNT_PROPOSAL_PROFILE']
+        ? { XLN_ACCOUNT_PROPOSAL_PROFILE: process.env['XLN_ACCOUNT_PROPOSAL_PROFILE'] }
+        : {}),
     }),
   });
   child.proc = proc;

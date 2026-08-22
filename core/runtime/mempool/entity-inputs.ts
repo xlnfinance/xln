@@ -112,7 +112,10 @@ const logEntityInputBatchProfile = (
   elapsedMs: number,
 ): void => {
   if (!entityInputProfileEnabled() && elapsedMs < entityInputSlowMs()) return;
-  entityInputLog.info('inputs.profile', {
+  // warn when explicitly requested: hub children default to warn level,
+  // so info here would silently discard the operator's profile run.
+  const emit = entityInputProfileEnabled() ? entityInputLog.warn : entityInputLog.info;
+  emit('inputs.profile', {
     height: env.state.height,
     elapsedMs,
     mergedInputs: inputs.length,

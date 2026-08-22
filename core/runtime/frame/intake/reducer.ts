@@ -73,7 +73,10 @@ const createApplyProfiler = (): ApplyProfiler => {
     finish: (env, result, runtimeTxs) => {
       const elapsedMs = Math.round(getPerfMs() - start);
       if (APPLY_PROFILE_ENABLED || elapsedMs >= APPLY_SLOW_MS) {
-        runtimeLog.info('apply.profile', {
+        // warn when explicitly requested: hub children default to warn level,
+        // so info here would silently discard the operator's profile run.
+        const emit = APPLY_PROFILE_ENABLED ? runtimeLog.warn : runtimeLog.info;
+        emit('apply.profile', {
           height: env.state.height,
           elapsedMs,
           runtimeTxs: runtimeTxs.length,

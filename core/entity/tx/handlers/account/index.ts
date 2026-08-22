@@ -174,7 +174,10 @@ const logAccountInputProfile = (
 ): void => {
   const elapsedMs = precisePerfMs(getPerfMs() - startedAt);
   if (!accountInputProfileEnabled() && elapsedMs < accountInputSlowMs()) return;
-  accountHandlerLog.info('input.profile', {
+  // warn when explicitly requested: hub children default to warn level,
+  // so info here would silently discard the operator's profile run.
+  const emit = accountInputProfileEnabled() ? accountHandlerLog.warn : accountHandlerLog.info;
+  emit('input.profile', {
     entity: shortId(state.entityId, 8),
     counterparty: shortId(input.fromEntityId, 8),
     kind: input.kind,

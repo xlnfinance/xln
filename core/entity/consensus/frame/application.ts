@@ -1534,7 +1534,10 @@ const logEntityFrameProfile = (
   const { context, frameProfileStartMs, frameProfileMarks } = working;
   const elapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
   if (!entityFrameProfileEnabled() && elapsedMs < entityFrameSlowMs()) return;
-  entityLog.info('frame.profile', {
+  // warn when explicitly requested: hub children default to warn level,
+  // so info here would silently discard the operator's profile run.
+  const emit = entityFrameProfileEnabled() ? entityLog.warn : entityLog.info;
+  emit('frame.profile', {
     entity: String(post.currentEntityState.entityId || '').slice(-8),
     elapsedMs,
     txs: entityTxs.length,

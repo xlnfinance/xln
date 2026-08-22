@@ -65,7 +65,10 @@ const logProposalProfile = (
 ): void => {
   const totalMs = Math.round(getPerfMs() - profileStartMs);
   if (!accountProposalProfileEnabled() && totalMs < accountProposalSlowMs()) return;
-  accountLog.info('proposal.profile', {
+  // warn when explicitly requested: hub children default to warn level,
+  // so info here would silently discard the operator's profile run.
+  const emit = accountProposalProfileEnabled() ? accountLog.warn : accountLog.info;
+  emit('proposal.profile', {
     entity: shortId(proof.signingEntityId, 8),
     counterparty: shortId(counterparty, 8),
     height: frame.frame.height,

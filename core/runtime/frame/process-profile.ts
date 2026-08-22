@@ -259,7 +259,9 @@ const finishRuntimeProcessProfile = (
       violations,
     });
   }
-  if (profile.outcome === 'completed') runtimeLog.info('process.profile', fields);
+  // Explicitly requested profiling must survive the Hub child's default warn
+  // log level; implicit slow-frame emission stays at info.
+  if (profile.outcome === 'completed' && !state.enabled) runtimeLog.info('process.profile', fields);
   else runtimeLog.warn('process.profile', fields);
 };
 
