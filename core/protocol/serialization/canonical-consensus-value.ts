@@ -88,6 +88,9 @@ const newStack = (): CanonicalStack => ({ ancestors: new Map(), segments: [] });
 const preEncodedArrays = new WeakMap<readonly unknown[], { length: number; encoded: string }>();
 
 export const rememberCanonicalArrayEncoding = (array: readonly unknown[], encoded: string): void => {
+  // The registered array is frozen so its element set cannot drift behind the
+  // cached bytes; element objects are sealed frame txs, immutable by protocol.
+  Object.freeze(array);
   preEncodedArrays.set(array, { length: array.length, encoded });
 };
 

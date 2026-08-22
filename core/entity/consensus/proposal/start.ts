@@ -342,7 +342,6 @@ const fitAndApplyEntityProposal = async (
     : { ...workingReplica, state: withBoardAuthority(workingReplica.state, authorityConfig) };
   const leader = getReplicaProposalLeader(authorityReplica);
   assertProposalPrefix(env, authorityReplica, selection, leader.view);
-  const primedHankos = primeProposalHankos(proposalTxs);
   const fitted = await fitEntityProposalToWireBudget({
     env,
     replica: workingReplica,
@@ -366,7 +365,9 @@ const fitAndApplyEntityProposal = async (
       entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
     }));
   }
-  if (primedHankos) await primedHankos;
+  // Only the fitted prefix is applied; recover its Hanko signatures on the
+  // worker pool before the synchronous verifiers need them.
+  await primeProposalHankos(selection.proposalTxs);
   const applyFrame = context.promoteCandidateState && selection.isSingleSigner
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;

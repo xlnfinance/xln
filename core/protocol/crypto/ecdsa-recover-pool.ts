@@ -12,10 +12,14 @@
  * Record layout: [32 digest][64 compact signature][1 recovery(0|1)] = 97 bytes.
  * Result layout: [20 address] per record, all-zero when recovery failed.
  */
-import { isMainThread, parentPort } from 'node:worker_threads';
-import { cpus } from 'node:os';
-
 import { keccak256Bytes } from './fast-keccak';
+
+// Bun-only. The module is imported by shared core, so it must not touch node
+// built-ins at load time (the browser bundle resolves them to empty shims).
+type BunGlobal = { isMainThread?: boolean };
+const bunRuntime = (): BunGlobal | undefined => (globalThis as { Bun?: BunGlobal }).Bun;
+const workerScope = (): (Worker & { postMessage: (value: unknown, transfer?: Transferable[]) => void }) | undefined =>
+  typeof self !== 'undefined' && bunRuntime()?.isMainThread === false ? (self as unknown as Worker & { postMessage: (value: unknown, transfer?: Transferable[]) => void }) : undefined;
 
 export const ECDSA_RECOVER_RECORD_BYTES = 97;
 export const ECDSA_RECOVER_RESULT_BYTES = 20;
@@ -56,12 +60,14 @@ export const recoverBatchSync = (native: NativeSecp256k1, records: Uint8Array): 
 
 type Job = { id: number; records: Uint8Array };
 
-if (!isMainThread && parentPort && process.env['XLN_ECDSA_RECOVER_WORKER'] === '1') {
+const scope = workerScope();
+if (scope && process.env['XLN_ECDSA_RECOVER_WORKER'] === '1') {
   const native = loadNative();
-  parentPort.on('message', (job: Job) => {
+  scope.onmessage = (event: MessageEvent<Job>) => {
+    const job = event.data;
     const result = native ? recoverBatchSync(native, job.records) : new Uint8Array(0);
-    parentPort!.postMessage({ id: job.id, result }, [result.buffer as ArrayBuffer]);
-  });
+    scope.postMessage({ id: job.id, result }, [result.buffer as ArrayBuffer]);
+  };
 }
 
 let pool: Worker[] | null | undefined;
@@ -72,13 +78,23 @@ const poolSize = (): number => {
   const raw = process.env['XLN_ECDSA_RECOVER_WORKERS'];
   const configured = raw === undefined || raw === '' ? NaN : Number(raw);
   if (Number.isSafeInteger(configured) && configured >= 0) return configured;
-  return Math.max(0, Math.min(8, cpus().length - 2));
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 0;
+  return Math.max(0, Math.min(8, (cores || 2) - 2));
+};
+
+/** A dead worker fails every in-flight job closed: callers fall back to the sync verifier. */
+const retirePool = (): void => {
+  for (const worker of pool ?? []) worker.terminate();
+  pool = null;
+  const failed = [...pending.values()];
+  pending.clear();
+  for (const resolve of failed) resolve(new Uint8Array(0));
 };
 
 const getPool = (): Worker[] | null => {
   if (pool !== undefined) return pool;
   const size = poolSize();
-  if (size === 0 || isMainThread === false || typeof Worker === 'undefined') {
+  if (size === 0 || bunRuntime()?.isMainThread !== true || typeof Worker === 'undefined') {
     pool = null;
     return pool;
   }
@@ -93,6 +109,8 @@ const getPool = (): Worker[] | null => {
       pending.delete(id);
       resolve(result);
     };
+    worker.onerror = retirePool;
+    worker.addEventListener('close', retirePool);
     (worker as unknown as { unref?: () => void }).unref?.();
     return worker;
   });
