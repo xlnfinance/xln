@@ -312,13 +312,25 @@ export const isRuntimeFrameReady = (
   overrideDelayMs?: number,
 ): boolean => {
   if (env.scenarioMode) return true;
-  const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
+  const config = ensureRuntimeConfig(env);
+  const rawDelayMs = overrideDelayMs ?? config.minFrameDelayMs ?? 0;
   if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return true;
   const lastFrameAt = ensureRuntimeInfrastructure(env).lastFrameAt;
   if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) {
     return true;
   }
-  return Math.max(0, now - lastFrameAt) >= Math.floor(rawDelayMs);
+  const elapsed = Math.max(0, now - lastFrameAt);
+  if (elapsed < Math.floor(rawDelayMs)) return false;
+  // Min delay satisfied. If a mempool depth threshold is configured, hold the
+  // frame back until enough work accumulates or the max delay cap fires.
+  const minDepth = config.minFrameMempoolDepth ?? 0;
+  const maxDelayMs = config.maxFrameDelayMs ?? 0;
+  if (minDepth > 0 && maxDelayMs > 0 && elapsed < maxDelayMs) {
+    const mempool = requireRuntimeMempool(env);
+    const depth = mempool.entityInputs.length + mempool.runtimeTxs.length;
+    if (depth < minDepth) return false;
+  }
+  return true;
 };
 
 export const getRemainingRuntimeFrameDelayMs = (
@@ -326,11 +338,25 @@ export const getRemainingRuntimeFrameDelayMs = (
   overrideDelayMs?: number,
 ): number => {
   if (env.scenarioMode) return 0;
-  const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
+  const config = ensureRuntimeConfig(env);
+  const rawDelayMs = overrideDelayMs ?? config.minFrameDelayMs ?? 0;
   if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return 0;
   const lastFrameAt = ensureRuntimeInfrastructure(env).lastFrameAt;
   if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) {
     return 0;
   }
-  return Math.max(0, Math.floor(rawDelayMs) - Math.max(0, getWallClockMs() - lastFrameAt));
+  const now = getWallClockMs();
+  const elapsed = Math.max(0, now - lastFrameAt);
+  const minRemaining = Math.max(0, Math.floor(rawDelayMs) - elapsed);
+  if (minRemaining > 0) return minRemaining;
+  // Min delay has passed. If holding for mempool depth, return time until
+  // the max delay cap fires (so the loop sleeps instead of spinning).
+  const minDepth = config.minFrameMempoolDepth ?? 0;
+  const maxDelayMs = config.maxFrameDelayMs ?? 0;
+  if (minDepth > 0 && maxDelayMs > 0 && elapsed < maxDelayMs) {
+    const mempool = requireRuntimeMempool(env);
+    const depth = mempool.entityInputs.length + mempool.runtimeTxs.length;
+    if (depth < minDepth) return Math.max(1, maxDelayMs - elapsed);
+  }
+  return 0;
 };

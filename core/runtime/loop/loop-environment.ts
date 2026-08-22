@@ -137,9 +137,29 @@ const readPositiveInteger = (name: string): number | undefined => {
  */
 const runtimeMinFrameDelayMs = (): number => readPositiveInteger('XLN_RUNTIME_MIN_FRAME_DELAY_MS') ?? 0;
 
+/**
+ * Minimum mempool depth before a frame is cut. When >0, the hub holds frames
+ * back until at least this many entity inputs + runtime txs are queued, or
+ * `maxFrameDelayMs` elapses since the last frame — whichever comes first.
+ * This pushes the hub into the fat-frame regime, amortizing per-frame fixed
+ * costs (state root, WAL, Hanko signing) over more txs. Default 0 = off
+ * (cut as soon as the min delay timer fires, same as before).
+ */
+const runtimeMinFrameMempoolDepth = (): number => readPositiveInteger('XLN_RUNTIME_MIN_FRAME_MEMPOOL_DEPTH') ?? 0;
+
+/**
+ * Upper bound on how long a frame may be held back for mempool accumulation.
+ * Only effective when `minFrameMempoolDepth` > 0. Prevents unbounded latency
+ * for low-throughput workloads: even if the threshold is not met, the frame
+ * is cut after this many milliseconds. Default 0 = off.
+ */
+const runtimeMaxFrameDelayMs = (): number => readPositiveInteger('XLN_RUNTIME_MAX_FRAME_DELAY_MS') ?? 0;
+
 export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']> => {
   env.runtimeConfig ??= {
     minFrameDelayMs: runtimeMinFrameDelayMs(),
+    minFrameMempoolDepth: runtimeMinFrameMempoolDepth(),
+    maxFrameDelayMs: runtimeMaxFrameDelayMs(),
     loopIntervalMs: isProductionRuntime ? 25 : 0,
     snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
   };

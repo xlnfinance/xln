@@ -47,11 +47,11 @@ export const decodeRuntimeConfig = (
 ): RuntimeReplica['runtimeConfig'] => {
   const config = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(config, [], [
-    'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames',
+    'minFrameDelayMs', 'minFrameMempoolDepth', 'maxFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames',
     'entityConsensusStateWarningBytes', 'advertiseProfileMirrors', 'performance', 'storage',
   ], `${code}_FIELDS`);
   for (const field of [
-    'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames', 'entityConsensusStateWarningBytes',
+    'minFrameDelayMs', 'minFrameMempoolDepth', 'maxFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames', 'entityConsensusStateWarningBytes',
   ]) if (config[field] !== undefined) requireFiniteNumber(config[field], `${code}_${field.toUpperCase()}`, 0);
   if (config['advertiseProfileMirrors'] !== undefined) {
     requireBoolean(config['advertiseProfileMirrors'], `${code}_ADVERTISE_PROFILE_MIRRORS`);

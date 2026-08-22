@@ -1506,6 +1506,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       // lets concurrent ingress share one frame. The operator may raise it; the
       // child never inherits the driver's own (wallet-shaped) value.
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'] ?? '5',
+      // Fat-frame gate (hub-only): hold frames for mempool depth or max delay.
+      ...(process.env['XLN_HUB_MIN_FRAME_MEMPOOL_DEPTH'] ? { XLN_RUNTIME_MIN_FRAME_MEMPOOL_DEPTH: process.env['XLN_HUB_MIN_FRAME_MEMPOOL_DEPTH'] } : {}),
+      ...(process.env['XLN_HUB_MAX_FRAME_DELAY_MS'] ? { XLN_RUNTIME_MAX_FRAME_DELAY_MS: process.env['XLN_HUB_MAX_FRAME_DELAY_MS'] } : {}),
       // Profiling a load run means profiling the Hub: it is the single writer
       // every payment and every swap passes through. The child builds none of
       // this unless the operator asked for it.

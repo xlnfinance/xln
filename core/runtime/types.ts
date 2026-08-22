@@ -707,6 +707,10 @@ export interface RuntimeReplica {
   overlay?: Map<string, RuntimeOverlayRecord>;
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
+    /** Minimum queued inputs+txs before cutting a frame (fat-frame gate). */
+    minFrameMempoolDepth?: number;
+    /** Upper bound on holding a frame for minFrameMempoolDepth. */
+    maxFrameDelayMs?: number;
     loopIntervalMs?: number;  // Loop interval for runtime processing
     /** In-memory/debug history cadence. Durable storage snapshots use storage.snapshotPeriodFrames. */
     snapshotIntervalFrames?: number;
