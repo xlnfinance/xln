@@ -50,6 +50,31 @@ function profile(
 }
 
 describe('Routing metadata hard requirements', () => {
+  test('keeps the usable reverse edge of a one-sided advertised Account', () => {
+    const profiles = new Map<string, Profile>([
+      [ALICE, profile(ALICE, ALICE.slice(0, 42), {
+        routingFeePPM: 1,
+        baseFee: 0n,
+        isHub: false,
+      }, [{ counterpartyId: BOB, tokenCapacities: caps(0n, 10_000n) }])],
+      [BOB, profile(BOB, BOB.slice(0, 42), {
+        routingFeePPM: 1,
+        baseFee: 0n,
+        isHub: false,
+      }, [])],
+    ]);
+
+    const graph = buildNetworkGraph(profiles, TOKEN_ID);
+    expect(graph.edges.get(ALICE)).toBeUndefined();
+    expect(graph.edges.get(BOB)).toEqual([expect.objectContaining({
+      from: BOB,
+      to: ALICE,
+      capacity: 10_000n,
+    })]);
+    expect(new PathFinder(graph).findRoutes(BOB, ALICE, 1_000n, TOKEN_ID)[0]?.path)
+      .toEqual([BOB, ALICE]);
+  });
+
   test('decodes canonical JSON BigInt tags before routing', () => {
     const parsed = parseProfile({
       ...profile(ALICE, ALICE.slice(0, 42), {

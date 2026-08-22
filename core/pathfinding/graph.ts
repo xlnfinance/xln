@@ -100,7 +100,7 @@ export function buildNetworkGraph(
 
       // Get capacities for this token
       const tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);
-      if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
+      if (!tokenCapacity) continue;
 
       const baseFee = sanitizeBaseFee(profile.metadata.baseFee);
       const basePpm = sanitizeFeePPM(profile.metadata.routingFeePPM, 1);
@@ -110,18 +110,20 @@ export function buildNetworkGraph(
         tokenCapacity.inCapacity
       );
 
-      // Create edge
-      const edge: AccountEdge = {
-        from: fromEntity,
-        to: toEntity,
-        tokenId,
-        capacity: tokenCapacity.outCapacity,
-        baseFee,
-        feePPM,
-        disabled: false,
-      };
-
-      fromEdges.push(edge);
+      // The one advertised row describes both directions of the bilateral
+      // Account. Each direction is independently usable: a zero outbound side
+      // must not discard a positive mirrored inbound side.
+      if (tokenCapacity.outCapacity > 0n) {
+        fromEdges.push({
+          from: fromEntity,
+          to: toEntity,
+          tokenId,
+          capacity: tokenCapacity.outCapacity,
+          baseFee,
+          feePPM,
+          disabled: false,
+        });
+      }
 
       // Store account capacities
       const accountKey = `${fromEntity}:${toEntity}:${tokenId}`;
