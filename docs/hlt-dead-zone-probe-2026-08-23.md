@@ -183,10 +183,13 @@ sig verification" hypothesis is disproved. The real costs are:
   `queuePendingAuditEvent`. All call sites build fresh object literals,
   so the canonical dedup key already binds the full structure.
   `structuredClone`: 43,836 → 33,432 (-24%, -10K calls).
-- **Lever 7b (structuredClone reduction):** NEXT TARGET. Remaining 33K
-  clones: `cloneIsolatedEntityInput` (8K, per-tx isolation),
-  `recordCommittedFrames` (4K, frame history), `collectEntityTxResult`
-  (3K, tx results). These are consensus-critical and harder to optimize.
+- **Lever 7b (structuredClone reduction):** DEAD END. Remaining 33K
+  clones are all consensus-critical isolation barriers. The biggest
+  caller (`cloneIsolatedEntityInput`, 8K) is an explicit Bun 1.3.x bug
+  workaround. The rest (`recordCommittedFrames`, `collectEntityTxResult`,
+  `committed-input` response) protect against mutation between candidate
+  effect creation and history recording. Removing them risks silent state
+  corruption.
 - **Lever 2 (batch sig verify):** DEPRIORITIZED. Only 4% of ops; max
   ~7ms/frame savings even with perfect batching.
 
