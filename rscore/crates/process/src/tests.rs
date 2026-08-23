@@ -3,7 +3,8 @@ use std::io::Cursor;
 use xln_rscore_abi::{AbiValue, Envelope, MessageKind, OpTag, decode_envelope, encode_envelope};
 
 use crate::test_fixture::{
-    candidate_command, committed_lock, hello, load, load_profile, prepare, request, shutdown,
+    candidate_command, committed_lock, hello, load, load_profile, prepare, prepare_htlc_lifecycle,
+    request, shutdown,
 };
 use crate::{ProcessSession, read_frame, serve, write_frame};
 
@@ -41,6 +42,25 @@ fn restore_preserves_revision_and_accepts_committed_htlc_rows() {
     assert_ok(prepared.clone());
     assert_eq!(prepared_revisions(&prepared), (41, 42));
     assert_prepared_payment_profile_root(&prepared);
+}
+
+#[test]
+fn process_wire_executes_same_account_htlc_lock_and_secret_resolve() {
+    let mut session = ready_session();
+    let prepared = session.handle(prepare_htlc_lifecycle(2)).envelope;
+    assert_ok(prepared.clone());
+    let AbiValue::Tuple(payload) = &prepared.body.fields()[0] else {
+        panic!("response payload must be tuple")
+    };
+    let AbiValue::Tuple(outputs) = &payload.fields()[3] else {
+        panic!("prepared outputs must be tuple")
+    };
+    assert_eq!(outputs.len(), 1);
+    assert_ok(
+        session
+            .handle(candidate_command(3, OpTag::CommitRuntime, 2))
+            .envelope,
+    );
 }
 
 #[test]

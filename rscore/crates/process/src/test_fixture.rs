@@ -125,6 +125,50 @@ pub fn prepare(id: u64, amount: i64) -> Envelope {
     request(id, OpTag::ExecuteWave, vec![tuple(vec![job])])
 }
 
+pub fn prepare_htlc_lifecycle(id: u64) -> Envelope {
+    let lock_id = format!("0x{}", "ab".repeat(32));
+    let secret = vec![1_u8; 32];
+    let hashlock = hex::decode("cebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc")
+        .expect("literal hashlock");
+    let lock = tuple(vec![
+        AbiValue::Integer(1),
+        AbiValue::Text(lock_id.clone()),
+        AbiValue::Bytes(hashlock),
+        AbiValue::Text("2000".into()),
+        AbiValue::Integer(50),
+        AbiValue::Text("3".into()),
+        AbiValue::Integer(1),
+        AbiValue::Nil,
+        AbiValue::Nil,
+    ]);
+    let resolve = tuple(vec![
+        AbiValue::Integer(2),
+        AbiValue::Text(lock_id),
+        AbiValue::Integer(0),
+        AbiValue::Bytes(secret),
+    ]);
+    request(
+        id,
+        OpTag::ExecuteWave,
+        vec![tuple(vec![job(0, 1, lock), job(1, 0, resolve)])],
+    )
+}
+
+fn job(input_index: u32, proposer: i128, tx: AbiValue) -> AbiValue {
+    tuple(vec![
+        AbiValue::Integer(i128::from(input_index)),
+        AbiValue::Bytes(account_id().to_vec()),
+        AbiValue::Integer(proposer),
+        tuple(vec![
+            AbiValue::Integer(1000),
+            AbiValue::Integer(1000),
+            AbiValue::Integer(1),
+            AbiValue::Integer(0),
+        ]),
+        tx,
+    ])
+}
+
 pub fn candidate_command(id: u64, op_tag: OpTag, prepare_id: u64) -> Envelope {
     request(
         id,
