@@ -395,26 +395,45 @@ const mempoolRoot = (mempool: readonly AccountTx[], cold: boolean): string => {
   return root;
 };
 
-const inputBindingMemos = new RecencyMemo<AccountPeerInput, Record<string, unknown>>(4_096);
+// Shell forks re-create the input/ACK objects every frame, so identity memos
+// missed on every projection. The binding is a pure function of the few
+// fields below; key the memo on them and the projected object stays stable
+// (which is what keeps the leaf preimage memo hitting).
+const inputBindingKey = (input: AccountPeerInput): string => {
+  const proposal = accountInputProposal(input);
+  const ack = accountInputAck(input);
+  const seal = input.kind === 'dispute' ? accountInputDisputeSeal(input) : undefined;
+  const reseal = accountInputBoardReseal(input);
+  const sealKey = (value: AccountDisputeSeal | undefined): string =>
+    value ? `${value.hash}:${value.proofBodyHash}:${value.proofNonce}:${value.proposerIsLeft}` : '';
+  return `${input.kind}|${input.fromEntityId}|${input.toEntityId}` +
+    `|${proposal ? `${proposal.frame.height}:${proposal.frame.stateHash}:${sealKey(proposal.disputeSeal)}` : ''}` +
+    `|${ack ? `${ack.height}:${ack.frameHash}:${sealKey(ack.disputeSeal)}` : ''}` +
+    `|${sealKey(seal)}` +
+    `|${reseal ? `${reseal.height}:${reseal.frameHash}:${reseal.boardActivationJHeight}:${reseal.boardActivationLogIndex}:${sealKey(reseal.disputeSeal)}` : ''}`;
+};
+const inputBindingMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
 const compactAccountInputBindingMemo = (input: AccountPeerInput): Record<string, unknown> => {
-  const hit = inputBindingMemos.get(input);
+  const key = inputBindingKey(input);
+  const hit = inputBindingMemos.get(key);
   if (hit) return hit;
   const binding = compactAccountInputBinding(input);
-  inputBindingMemos.set(input, binding);
+  inputBindingMemos.set(key, binding);
   return binding;
 };
 
 type OutboundAck = NonNullable<AccountReplica['lastOutboundFrameAck']>;
-const outboundAckMemos = new RecencyMemo<OutboundAck, Record<string, unknown>>(4_096);
+const outboundAckMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
 const outboundAckBinding = (ack: OutboundAck): Record<string, unknown> => {
-  const hit = outboundAckMemos.get(ack);
+  const key = `${ack.height}|${ack.counterpartyEntityId}|${inputBindingKey(ack.response)}`;
+  const hit = outboundAckMemos.get(key);
   if (hit) return hit;
   const binding = {
     height: ack.height,
     counterpartyEntityId: ack.counterpartyEntityId.toLowerCase(),
-    response: compactAccountInputBinding(ack.response),
+    response: compactAccountInputBindingMemo(ack.response),
   };
-  outboundAckMemos.set(ack, binding);
+  outboundAckMemos.set(key, binding);
   return binding;
 };
 
