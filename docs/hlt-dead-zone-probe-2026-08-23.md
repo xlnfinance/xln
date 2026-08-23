@@ -184,6 +184,32 @@ sig verification" hypothesis is disproved. The real costs are:
 3. **`ecdsa.sign` (20,891)** — signing is 43% more calls than recovery.
    Manifest signatures and hanko encoding add 16ms/frame combined.
 
+### Bun 1.4.0 re-profile (after all optimizations)
+
+Same config, same profiling flags. Frame phases and op counters after
+Lever 4 + 6b + 7a + 7b + Bun 1.4 + lazy cacheKey.
+
+| Phase              | Bun 1.3.14 | Bun 1.4.0 | Δ    |
+| ------------------ | ---------- | --------- | ---- |
+| frameApply         | 175ms      | 140ms     | -20% |
+| stateRoot          | 65ms       | 50ms      | -23% |
+| wireFit            | 12ms       | 9ms       | -25% |
+| hankoEncoding      | 9ms        | 8ms       | -11% |
+| manifestSignatures | 7ms        | 7ms       | 0%   |
+| commit             | 4ms        | 3ms       | -25% |
+| **Total**          | **272ms**  | **217ms** | -20% |
+
+| Operation        | Bun 1.3.14 | Bun 1.4.0 | Δ    |
+| ---------------- | ---------- | --------- | ---- |
+| canonical.encode | 322,840    | 148,366   | -54% |
+| keccak.ethers    | 107,608    | 107,020   | 0%   |
+| structuredClone  | 43,836     | 30,529    | -30% |
+| ecdsa.sign       | 20,891     | 21,100    | +1%  |
+| ecdsa.recover    | 14,521     | 14,684    | +1%  |
+
+Bun 1.4 gives a uniform ~20% speedup across all phases. The op counter
+reductions from our optimizations are preserved and compounded.
+
 ### Revised levers
 
 - **Lever 5 (state root amortization):** DEAD END. State root is already
@@ -216,6 +242,13 @@ sig verification" hypothesis is disproved. The real costs are:
   response). They protect against mutation between candidate effect
   creation and history recording. Removing them risks silent state
   corruption.
+- **Lever 8 (lazy transition cacheKey):** DONE.
+  `AccountTransitionOverlay` eagerly computed `transitionCacheKey`
+  (canonical.encode + keccak) on every construction, but no external
+  consumer ever reads `.cacheKey`. Made `baseRoot` and
+  `orderedInputPrefixHash` lazy getters. `canonical.encode`: 191,772 →
+  148,366 (-23%, -43K calls). Top 2 callers (orderedInputHash,
+  transitionCacheKey) eliminated from profile.
 - **Lever 2 (batch sig verify):** DEPRIORITIZED. Only 4% of ops; max
   ~7ms/frame savings even with perfect batching.
 
@@ -229,3 +262,4 @@ sig verification" hypothesis is disproved. The real costs are:
 | `c23164d82` | Shallow-clone audit event payload (Lever 7a). `structuredClone` -24% (44K → 33K)                                                                                                                            |
 | `155eac4f3` | Bun 1.4.0 upgrade. +14.7% TPS from runtime alone (204 → 234 avg)                                                                                                                                            |
 | `d3858806e` | Simplify cloneIsolatedEntityInput (Lever 7b). Single structuredClone + 5 regression tests. -9% (33K → 30K)                                                                                                  |
+| `780a267a8` | Lazy AccountTransitionKey (Lever 8). Skip unused cacheKey computation. canonical.encode -23% (192K → 148K)                                                                                                  |
