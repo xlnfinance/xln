@@ -10,8 +10,8 @@ pub fn hello(worker_count: usize) -> BodyTuple {
     ])
 }
 
-pub fn loaded(revision: u64) -> BodyTuple {
-    body(vec![integer(revision)])
+pub fn loaded(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
+    body(vec![integer(revision), AbiValue::Bytes(accounts_root.to_vec())])
 }
 
 pub fn prepared(candidate: &PreparedBatch) -> Result<BodyTuple, crate::ProcessError> {
@@ -36,7 +36,10 @@ pub fn prepared(candidate: &PreparedBatch) -> Result<BodyTuple, crate::ProcessEr
 }
 
 pub fn committed(response: &BatchResponse) -> BodyTuple {
-    body(vec![integer(response.committed_revision)])
+    body(vec![
+        integer(response.committed_revision),
+        AbiValue::Bytes(response.accounts_root.to_vec()),
+    ])
 }
 
 pub fn aborted(revision: u64) -> BodyTuple {

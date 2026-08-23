@@ -176,13 +176,15 @@ impl ProcessSession {
             return Err(ProcessError::EngineAlreadyLoaded);
         }
         let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
-        self.engine = Some(StatefulBatchEngine::restore(
+        let engine = StatefulBatchEngine::restore(
             EngineGeneration::from_bytes(binding.engine_generation),
             self.worker_count,
             revision,
             accounts,
-        )?);
-        Ok((wire_encode::loaded(revision), false))
+        )?;
+        let accounts_root = engine.accounts_root();
+        self.engine = Some(engine);
+        Ok((wire_encode::loaded(revision, accounts_root), false))
     }
 
     fn prepare(

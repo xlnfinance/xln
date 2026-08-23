@@ -13,7 +13,17 @@
     "htlc-timeout-lock",
     "htlc-timeout-resolve"
   ],
-  "rootFields": ["deltasRadixRoot", "locksRadixRoot", "paymentProfileAccountStateRoot"],
-  "request": { "bytes": 2072, "sha256": "244c43f1dbdca73a340611b8addd4feb84435475eef1190be6956cfae747b36b" },
-  "response": { "bytes": 3510, "sha256": "75e2a12de59c3ab6b41912c840f4acd3e2ed1150d945144da590e064b37cc6fa" }
+  "rootFields": [
+    "deltasRadixRoot",
+    "locksRadixRoot",
+    "paymentProfileAccountStateRoot"
+  ],
+  "request": {
+    "bytes": 2072,
+    "sha256": "6b9946be918c3aefa5cc12975041d428b662e7d375d06b7f2cd5f640f6db6667"
+  },
+  "response": {
+    "bytes": 3510,
+    "sha256": "fbfda1d6da26c3b1fc6c1935d11786d901301409b0b484cf69a93701806afd65"
+  }
 }

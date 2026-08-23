@@ -82,6 +82,9 @@ pub struct IndexedOutput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BatchResponse {
     pub committed_revision: u64,
+    /// Accounts-level Patricia root after this commit (radix 16, leaf =
+    /// per-account payment-profile state root).
+    pub accounts_root: [u8; 32],
     pub results: Vec<IndexedResult>,
     pub outputs: Vec<IndexedOutput>,
 }

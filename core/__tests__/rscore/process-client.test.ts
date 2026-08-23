@@ -26,6 +26,8 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
 
       const loaded = (await client.restore(7, [])) as unknown[];
       expect(loaded[0]).toBe(7);
+      // Empty accounts tree commits to the all-zero root.
+      expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(new Uint8Array(32));
 
       const page = (await client.readAccountSummaryPage(null, 8, [1])) as unknown[];
       expect(page[0]).toBe(7); // revision

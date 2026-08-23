@@ -55,4 +55,9 @@ pub enum BatchError {
     StaleCandidate { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_REVISION_OVERFLOW")]
     RevisionOverflow,
+    #[error("RSCORE_BATCH_ACCOUNTS_TREE:{account_id}:{detail}")]
+    AccountsTree {
+        account_id: AccountId,
+        detail: String,
+    },
 }
