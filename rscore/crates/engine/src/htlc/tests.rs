@@ -1,10 +1,10 @@
 use num_bigint::BigInt;
 
 use crate::{
-    AccountDomain, AccountExecutionContext, AccountIdentity, AccountRejection, AccountReplica,
-    AccountState, AccountTx, AccountVerdict, Delta, DepositoryAddress, EntityId, HtlcHashlock,
-    HtlcLockTx, HtlcRejection, HtlcResolveOutcome, HtlcResolveTx, SequentialAccountEngine, Side,
-    TokenId, ValidationRejection, WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity,
+    AccountRejection, AccountReplica, AccountState, AccountTx, AccountVerdict, Delta,
+    DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx, HtlcRejection, HtlcResolveOutcome,
+    HtlcResolveTx, SequentialAccountEngine, Side, TokenId, ValidationRejection, WatchSeed,
 };
 
 fn entity(byte: u8) -> EntityId {
@@ -39,7 +39,12 @@ fn replica() -> AccountReplica {
     .expect("literal delta");
     AccountReplica::new(
         entity(0x11),
-        AccountState::new(identity, vec![delta]).expect("literal state"),
+        AccountState::new(
+            identity,
+            AccountDisputeConfig::new(10, 10).expect("literal dispute config"),
+            vec![delta],
+        )
+        .expect("literal state"),
     )
     .expect("literal replica")
 }

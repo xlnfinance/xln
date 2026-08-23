@@ -7,8 +7,8 @@ use xln_rscore_abi::{
     AbiValue, BodyTuple, Envelope, MessageKind, OpTag, decode_envelope, encode_envelope,
 };
 use xln_rscore_engine::{
-    AccountDomain, AccountExecutionContext, AccountIdentity, AccountOutput, AccountRejection,
-    AccountReplica, AccountState, AccountTx, AccountVerdict, DeliveryMode, Delta,
+    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountOutput,
+    AccountRejection, AccountReplica, AccountState, AccountTx, AccountVerdict, DeliveryMode, Delta,
     DepositoryAddress, EntityId, HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome,
     HtlcResolveTx, SequentialAccountEngine, Side, TokenId, WatchSeed,
 };
@@ -107,7 +107,7 @@ fn parse_delta(value: &AbiValue) -> Result<Delta, Box<dyn Error>> {
 
 fn parse_initial(value: &AbiValue) -> Result<(AccountReplica, BTreeSet<TokenId>), Box<dyn Error>> {
     let fields = tuple(value)?;
-    if fields.len() != 7 {
+    if fields.len() != 8 {
         return Err(invalid("DIFFERENTIAL_INITIAL_ARITY").into());
     }
     let owner = EntityId::parse(text(&fields[0])?)?;
@@ -118,13 +118,19 @@ fn parse_initial(value: &AbiValue) -> Result<(AccountReplica, BTreeSet<TokenId>)
         DepositoryAddress::parse(text(&fields[4])?)?,
     )?;
     let identity = AccountIdentity::new(domain, left, right, WatchSeed::parse(text(&fields[5])?)?)?;
-    let deltas = tuple(&fields[6])?
+    let dispute_fields = tuple(&fields[6])?;
+    if dispute_fields.len() != 2 {
+        return Err(invalid("DIFFERENTIAL_DISPUTE_CONFIG_ARITY").into());
+    }
+    let dispute_config =
+        AccountDisputeConfig::new(unsigned(&dispute_fields[0])?, unsigned(&dispute_fields[1])?)?;
+    let deltas = tuple(&fields[7])?
         .iter()
         .map(parse_delta)
         .collect::<Result<Vec<_>, _>>()?;
     let tokens = deltas.iter().map(Delta::token_id).collect();
     Ok((
-        AccountReplica::new(owner, AccountState::new(identity, deltas)?)?,
+        AccountReplica::new(owner, AccountState::new(identity, dispute_config, deltas)?)?,
         tokens,
     ))
 }
@@ -348,6 +354,12 @@ fn step_value(
         values_tuple(vec![
             AbiValue::Bytes(replica.state().deltas_root().to_vec()),
             AbiValue::Bytes(replica.state().htlc_locks_root().to_vec()),
+            AbiValue::Bytes(
+                replica
+                    .state()
+                    .payment_profile_account_state_root()?
+                    .to_vec(),
+            ),
         ]),
     ]))
 }

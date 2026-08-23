@@ -5,6 +5,7 @@
 //! canonical TypeScript engine before native execution is enabled.
 
 mod balance;
+mod commitment;
 mod context;
 mod delta;
 mod engine;
@@ -28,5 +29,5 @@ pub use htlc::{
 };
 pub use identity::{AccountDomain, AccountIdentity, DepositoryAddress, EntityId, Side, WatchSeed};
 pub use output::AccountOutput;
-pub use state::{AccountReplica, AccountState, LendingIntentKind};
+pub use state::{AccountDisputeConfig, AccountReplica, AccountState, LendingIntentKind};
 pub use tx::{AccountTx, DeliveryMode, LendingAction, LendingTermId, ReserveSide};

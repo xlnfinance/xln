@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 import { applyAccountTxToMutableReplica } from '../../core/account/tx/apply';
+import { computeAccountStateRoot } from '../../core/account/commitment/state-root';
 import { createDefaultDelta } from '../../core/account/state/delta';
 import { PersistentAccountStateMap } from '../../core/account/state/persistent-state-map';
 import { packTransportValue } from '../../core/protocol/serialization/binary-codec';
@@ -28,7 +29,7 @@ type HtlcOutcome = Readonly<{ outcome: 'secret'; secret: string }> | Readonly<{ 
 
 const SCHEMA = 'payment-v1';
 const TYPESCRIPT_AUTHORITY = '1001909ab2f927d60b889a02cbd7113ddc09e79d';
-const ROOT_FIELDS = ['deltasRadixRoot', 'locksRadixRoot'] as const;
+const ROOT_FIELDS = ['deltasRadixRoot', 'locksRadixRoot', 'paymentProfileAccountStateRoot'] as const;
 const LEFT = entity('aa');
 const RIGHT = entity('bb');
 const TARGET = entity('cc');
@@ -253,7 +254,7 @@ const requestBody = (): WireValue[] => {
   const delta = initialDelta();
   return [
     SCHEMA,
-    [LEFT, LEFT, RIGHT, 31_337, DEPOSITORY, WATCH_SEED, [deltaWire(delta)]],
+    [LEFT, LEFT, RIGHT, 31_337, DEPOSITORY, WATCH_SEED, [10, 10], [deltaWire(delta)]],
     CASES.map(({ id, byLeft, wire, context }) => [id, byLeft ? 0 : 1, contextWire(context), wire]),
   ];
 };
@@ -278,7 +279,9 @@ const lockWire = (lock: HtlcLock): WireValue[] => [
   lock.envelopeHash ?? null,
 ];
 
-const stateEvidence = (account: AccountReplica): [WireValue[], WireValue[], Uint8Array, Uint8Array] => {
+const stateEvidence = (
+  account: AccountReplica,
+): [WireValue[], WireValue[], Uint8Array, Uint8Array, Uint8Array] => {
   const deltas = [...account.state.deltas.values()].sort((left, right) => left.tokenId - right.tokenId);
   const locks = [...account.state.locks.values()].sort((left, right) =>
     left.lockId < right.lockId ? -1 : left.lockId > right.lockId ? 1 : 0,
@@ -288,6 +291,7 @@ const stateEvidence = (account: AccountReplica): [WireValue[], WireValue[], Uint
     locks.map(lockWire),
     hexBytes(account.state.deltas.rootHash()),
     hexBytes(account.state.locks.rootHash()),
+    hexBytes(computeAccountStateRoot(account.state)),
   ];
 };
 
@@ -368,7 +372,7 @@ const executeTypescript = async (): Promise<WireValue[]> => {
     const verdict: WireValue[] = result.ok
       ? ['applied']
       : ['rejected', result.rejection.kind, result.rejection.code, result.rejection.message];
-    const [deltaRows, lockRows, deltasRadixRoot, locksRadixRoot] = stateEvidence(account);
+    const [deltaRows, lockRows, deltasRadixRoot, locksRadixRoot, paymentProfileAccountStateRoot] = stateEvidence(account);
     steps.push([
       entry.id,
       verdict,
@@ -376,7 +380,7 @@ const executeTypescript = async (): Promise<WireValue[]> => {
       resultOutputs(entry, result, priorLock),
       deltaRows,
       lockRows,
-      [deltasRadixRoot, locksRadixRoot],
+      [deltasRadixRoot, locksRadixRoot, paymentProfileAccountStateRoot],
     ]);
   }
   return [SCHEMA, steps];

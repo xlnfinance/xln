@@ -9,6 +9,41 @@ use xln_rscore_protocol::{
 use crate::delta::MAX_ACCOUNT_TOKEN_ROWS;
 use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenId};
 
+const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;
+const MAX_ACCOUNT_HTLC_LOCKS: usize = 32;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountDisputeConfig {
+    left_response_seconds: u32,
+    right_response_seconds: u32,
+}
+
+impl AccountDisputeConfig {
+    pub fn new(
+        left_response_seconds: u64,
+        right_response_seconds: u64,
+    ) -> Result<Self, StateError> {
+        let left_response_seconds = response_seconds("LEFT", left_response_seconds)?;
+        let right_response_seconds = response_seconds("RIGHT", right_response_seconds)?;
+        let total = u64::from(left_response_seconds) + u64::from(right_response_seconds);
+        if total > MAX_ACCOUNT_DISPUTE_SECONDS {
+            return Err(StateError::DisputeResponseTotalExceeded(total));
+        }
+        Ok(Self {
+            left_response_seconds,
+            right_response_seconds,
+        })
+    }
+
+    pub const fn left_response_seconds(self) -> u32 {
+        self.left_response_seconds
+    }
+
+    pub const fn right_response_seconds(self) -> u32 {
+        self.right_response_seconds
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LendingIntentKind {
     Fund,
@@ -37,13 +72,27 @@ impl LendingIntentKind {
 #[derive(Clone)]
 pub struct AccountState {
     identity: AccountIdentity,
+    dispute_config: AccountDisputeConfig,
     deltas: PersistentRadixMap<Delta>,
     locks: PersistentRadixMap<HtlcLock>,
     lending_intents: Option<PersistentRadixMap<LendingIntentKind>>,
 }
 
 impl AccountState {
-    pub fn new(identity: AccountIdentity, deltas: Vec<Delta>) -> Result<Self, StateError> {
+    pub fn new(
+        identity: AccountIdentity,
+        dispute_config: AccountDisputeConfig,
+        deltas: Vec<Delta>,
+    ) -> Result<Self, StateError> {
+        Self::restore(identity, dispute_config, deltas, Vec::new())
+    }
+
+    pub fn restore(
+        identity: AccountIdentity,
+        dispute_config: AccountDisputeConfig,
+        deltas: Vec<Delta>,
+        locks: Vec<HtlcLock>,
+    ) -> Result<Self, StateError> {
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
                 context: "decode",
@@ -59,16 +108,57 @@ impl AccountState {
             }
             map = put_delta_map(&map, delta)?;
         }
+        if locks.len() > MAX_ACCOUNT_HTLC_LOCKS {
+            return Err(StateError::HtlcRestoreLimitExceeded {
+                actual: locks.len(),
+                maximum: MAX_ACCOUNT_HTLC_LOCKS,
+            });
+        }
+        let mut seen_locks = BTreeSet::new();
+        let mut lock_map = PersistentRadixMap::empty();
+        for lock in locks {
+            lock.validate_for_restore()?;
+            if !seen_locks.insert(lock.lock_id().to_owned()) {
+                return Err(StateError::DuplicateHtlcLock(lock.lock_id().to_owned()));
+            }
+            lock_map = put_htlc_map(&lock_map, lock)?;
+        }
         Ok(Self {
             identity,
+            dispute_config,
             deltas: map,
-            locks: PersistentRadixMap::empty(),
+            locks: lock_map,
             lending_intents: None,
         })
     }
 
     pub const fn identity(&self) -> &AccountIdentity {
         &self.identity
+    }
+
+    pub const fn dispute_config(&self) -> AccountDisputeConfig {
+        self.dispute_config
+    }
+
+    /// Exact TypeScript AccountStateRoot for the isolated payment profile.
+    ///
+    /// This state type cannot represent swaps, pulls, rebalance policy, J-claim
+    /// progress, settlement workspaces, or a non-zero J nonce/height. Those
+    /// sections are therefore committed at their canonical genesis values;
+    /// callers must reject a wider Account snapshot instead of projecting it.
+    pub fn payment_profile_account_state_root(&self) -> Result<[u8; 32], StateError> {
+        crate::commitment::payment_account_state_root(
+            &self.identity,
+            self.dispute_config,
+            crate::commitment::PaymentAccountRoots {
+                deltas: self.deltas.root_hash(),
+                locks: self.locks.root_hash(),
+                lending_intents: self
+                    .lending_intents
+                    .as_ref()
+                    .map_or([0; 32], PersistentRadixMap::root_hash),
+            },
+        )
     }
 
     pub fn delta(&self, token_id: TokenId) -> Option<&Delta> {
@@ -148,12 +238,7 @@ impl AccountState {
     }
 
     pub(crate) fn put_htlc_lock(&mut self, lock: HtlcLock) -> Result<(), StateError> {
-        let key = crate::htlc_lock_radix_key(lock.lock_id())?;
-        let digest = crate::htlc_lock_value_digest(&lock)?;
-        self.locks = self
-            .locks
-            .updated(key, lock, digest)
-            .map_err(|error| StateError::PersistentMap(error.to_string()))?;
+        self.locks = put_htlc_map(&self.locks, lock)?;
         Ok(())
     }
 
@@ -243,6 +328,16 @@ fn put_delta_map(
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
 
+fn put_htlc_map(
+    map: &PersistentRadixMap<HtlcLock>,
+    lock: HtlcLock,
+) -> Result<PersistentRadixMap<HtlcLock>, StateError> {
+    let key = crate::htlc_lock_radix_key(lock.lock_id())?;
+    let digest = crate::htlc_lock_value_digest(&lock)?;
+    map.updated(key, lock, digest)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
 fn delta_digest(delta: &Delta) -> Result<[u8; 32], StateError> {
     let mut fields = vec![(
         "tokenId".into(),
@@ -264,4 +359,8 @@ fn canonical_digest(value: CanonicalValue) -> Result<[u8; 32], StateError> {
 
 fn text_key(value: &str) -> Result<Vec<u8>, StateError> {
     encode_raw_text_key(value).map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
+fn response_seconds(side: &'static str, value: u64) -> Result<u32, StateError> {
+    u32::try_from(value).map_err(|_| StateError::InvalidDisputeResponseSeconds { side, value })
 }

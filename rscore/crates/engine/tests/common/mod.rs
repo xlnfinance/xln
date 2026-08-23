@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountDomain, AccountIdentity, AccountReplica, AccountState, Delta, DepositoryAddress,
-    EntityId, TokenId, WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, Delta,
+    DepositoryAddress, EntityId, TokenId, WatchSeed,
 };
 
 pub fn entity(byte: u8) -> EntityId {
@@ -54,7 +54,12 @@ pub fn replica(
         WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("literal watch seed");
     let identity =
         AccountIdentity::new(domain, left, right, watch_seed).expect("canonical parties");
-    let state = AccountState::new(identity, deltas).expect("literal state");
+    let state = AccountState::new(
+        identity,
+        AccountDisputeConfig::new(10, 10).expect("literal dispute config"),
+        deltas,
+    )
+    .expect("literal state");
     AccountReplica::new(owner, state).expect("party owner")
 }
 

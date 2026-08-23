@@ -31,6 +31,18 @@ pub enum StateError {
     PersistentMap(String),
     #[error("ACCOUNT_STATE_LEAF_TOO_LARGE:{actual}:{maximum}")]
     AccountStateLeafTooLarge { actual: usize, maximum: usize },
+    #[error("ACCOUNT_DISPUTE_{side}_RESPONSE_SECONDS_INVALID:{value}")]
+    InvalidDisputeResponseSeconds { side: &'static str, value: u64 },
+    #[error("ACCOUNT_DISPUTE_RESPONSE_TOTAL_EXCEEDED:{0}")]
+    DisputeResponseTotalExceeded(u64),
+    #[error("ACCOUNT_HTLC_RESTORE_INVALID:{field}:{value}")]
+    InvalidHtlcRestore { field: &'static str, value: String },
+    #[error("ACCOUNT_HTLC_RESTORE_DUPLICATE:{0}")]
+    DuplicateHtlcLock(String),
+    #[error("ACCOUNT_HTLC_RESTORE_LIMIT_EXCEEDED:{actual}:{maximum}")]
+    HtlcRestoreLimitExceeded { actual: usize, maximum: usize },
+    #[error("ACCOUNT_STATE_ROOT:{0}")]
+    AccountStateRoot(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

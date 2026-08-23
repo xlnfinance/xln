@@ -1,6 +1,8 @@
 use num_bigint::BigInt;
 
-use crate::{HtlcHashlock, OpaqueHtlcCiphertext, Side, TokenId};
+use crate::delta::max_payment_amount;
+use crate::htlc::boundary::MAX_SAFE_INTEGER;
+use crate::{HtlcHashlock, OpaqueHtlcCiphertext, Side, StateError, TokenId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HtlcDeliveryMode {
@@ -74,6 +76,47 @@ impl HtlcLock {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore(
+        lock_id: String,
+        hashlock: HtlcHashlock,
+        timelock: BigInt,
+        reveal_before_height: u64,
+        amount: BigInt,
+        token_id: TokenId,
+        sender: Side,
+        created_height: u64,
+        created_timestamp: u64,
+        envelope_hash: Option<[u8; 32]>,
+    ) -> Result<Self, StateError> {
+        let lock = Self::new(
+            lock_id,
+            hashlock,
+            timelock,
+            reveal_before_height,
+            amount,
+            token_id,
+            sender,
+            created_height,
+            created_timestamp,
+            envelope_hash,
+        );
+        lock.validate_for_restore()?;
+        Ok(lock)
+    }
+
+    pub(crate) fn validate_for_restore(&self) -> Result<(), StateError> {
+        require_bytes32("lockId", &self.lock_id)?;
+        require_positive("timelock", &self.timelock, None)?;
+        require_positive("amount", &self.amount, Some(&max_payment_amount()))?;
+        if self.token_id.get() == 0 {
+            return Err(invalid_restore("tokenId", self.token_id.to_string()));
+        }
+        require_safe_integer("revealBeforeHeight", self.reveal_before_height)?;
+        require_safe_integer("createdHeight", self.created_height)?;
+        require_safe_integer("createdTimestamp", self.created_timestamp)
+    }
+
     pub fn lock_id(&self) -> &str {
         &self.lock_id
     }
@@ -107,6 +150,46 @@ impl HtlcLock {
     pub fn envelope_hash_hex(&self) -> Option<String> {
         self.envelope_hash.as_ref().map(super::boundary::hex_32)
     }
+}
+
+fn require_bytes32(field: &'static str, value: &str) -> Result<(), StateError> {
+    let canonical = value
+        .strip_prefix("0x")
+        .is_some_and(|payload| payload.len() == 64 && payload.bytes().all(is_lower_hex));
+    if canonical {
+        Ok(())
+    } else {
+        Err(invalid_restore(field, value))
+    }
+}
+
+fn require_positive(
+    field: &'static str,
+    value: &BigInt,
+    maximum: Option<&BigInt>,
+) -> Result<(), StateError> {
+    if value <= &BigInt::from(0) || maximum.is_some_and(|maximum| value > maximum) {
+        return Err(invalid_restore(field, value.to_string()));
+    }
+    Ok(())
+}
+
+fn require_safe_integer(field: &'static str, value: u64) -> Result<(), StateError> {
+    if value > MAX_SAFE_INTEGER {
+        return Err(invalid_restore(field, value.to_string()));
+    }
+    Ok(())
+}
+
+fn invalid_restore(field: &'static str, value: impl Into<String>) -> StateError {
+    StateError::InvalidHtlcRestore {
+        field,
+        value: value.into(),
+    }
+}
+
+fn is_lower_hex(value: u8) -> bool {
+    value.is_ascii_digit() || (b'a'..=b'f').contains(&value)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
