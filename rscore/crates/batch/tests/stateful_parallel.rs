@@ -1,7 +1,10 @@
 mod common;
 
 use xln_rscore_batch::{AccountSeed, BatchError, BatchVerdict, StatefulBatchEngine};
-use xln_rscore_engine::{AccountOutput, AccountTx, ValidationRejection};
+use xln_rscore_engine::{
+    AccountDisputeConfig, AccountOutput, AccountReplica, AccountState, AccountTx,
+    ValidationRejection,
+};
 
 use common::{
     HTLC_HASHLOCK, HTLC_SECRET, account_id, delta_root, direct_job, full_seed, generation,
@@ -14,6 +17,18 @@ const PAYMENT_JOBS_PER_ACCOUNT: u32 = 33;
 fn engine(workers: usize) -> StatefulBatchEngine {
     let seeds = (0..ACCOUNT_COUNT).map(seed).collect();
     StatefulBatchEngine::new(generation(), workers, seeds).expect("batch engine")
+}
+
+#[test]
+fn restore_starts_at_committed_revision_and_prepares_the_next_revision() {
+    let restored = StatefulBatchEngine::restore(generation(), 2, 41, vec![seed(0)])
+        .expect("restored batch engine");
+    assert_eq!(restored.revision(), 41);
+    let prepared = restored
+        .prepare(&[direct_job(0, 0, 1)])
+        .expect("restored prepare");
+    assert_eq!(prepared.base_revision(), 41);
+    assert_eq!(prepared.next_revision(), 42);
 }
 
 fn mixed_jobs() -> Vec<xln_rscore_batch::BatchJob> {
@@ -137,6 +152,25 @@ fn commit_rejects_different_replica_identity() {
         Err(BatchError::CandidateBaseMismatch(account_id(0)))
     );
     assert_eq!(target.revision(), 0);
+    assert_eq!(delta_root(&target, 0), root);
+}
+
+#[test]
+fn commit_rejects_same_maps_with_different_dispute_config() {
+    let source =
+        StatefulBatchEngine::new(generation(), 1, vec![seed_with_dispute_config(0, 10, 10)])
+            .expect("source engine");
+    let prepared = source
+        .prepare(&[direct_job(0, 0, 5)])
+        .expect("source prepare");
+    let mut target =
+        StatefulBatchEngine::new(generation(), 1, vec![seed_with_dispute_config(0, 11, 10)])
+            .expect("target engine");
+    let root = delta_root(&target, 0);
+    assert_eq!(
+        target.commit(prepared),
+        Err(BatchError::CandidateBaseMismatch(account_id(0)))
+    );
     assert_eq!(delta_root(&target, 0), root);
 }
 
@@ -278,5 +312,27 @@ fn prepare_error(engine: &StatefulBatchEngine, jobs: &[xln_rscore_batch::BatchJo
     match engine.prepare(jobs) {
         Ok(_) => panic!("expected batch preparation error"),
         Err(error) => error,
+    }
+}
+
+fn seed_with_dispute_config(value: u32, left: u64, right: u64) -> AccountSeed {
+    let original = seed(value);
+    let owner = original.replica.owner().clone();
+    let identity = original.replica.state().identity().clone();
+    let delta = original
+        .replica
+        .state()
+        .delta(token(1))
+        .expect("seed delta")
+        .clone();
+    let state = AccountState::new(
+        identity,
+        AccountDisputeConfig::new(left, right).expect("dispute config"),
+        vec![delta],
+    )
+    .expect("account state");
+    AccountSeed {
+        account_id: account_id(value),
+        replica: AccountReplica::new(owner, state).expect("account replica"),
     }
 }

@@ -1,9 +1,9 @@
 use num_bigint::BigInt;
 use xln_rscore_batch::{AccountId, AccountSeed, BatchJob, EngineGeneration};
 use xln_rscore_engine::{
-    AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica, AccountState,
-    AccountTx, DeliveryMode, Delta, DepositoryAddress, EntityId, HtlcHashlock, HtlcLockTx,
-    HtlcResolveOutcome, HtlcResolveTx, Side, TokenId, WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
+    AccountState, AccountTx, DeliveryMode, Delta, DepositoryAddress, EntityId, HtlcHashlock,
+    HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, Side, TokenId, WatchSeed,
 };
 
 pub const HTLC_SECRET: &str = "0x0101010101010101010101010101010101010101010101010101010101010101";
@@ -51,7 +51,12 @@ fn seed_with_deltas(value: u32, deltas: Vec<Delta>) -> AccountSeed {
         WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("literal watch seed");
     let identity =
         AccountIdentity::new(domain, left.clone(), right, watch_seed).expect("canonical parties");
-    let state = AccountState::new(identity, deltas).expect("literal state");
+    let state = AccountState::new(
+        identity,
+        AccountDisputeConfig::new(10, 10).expect("literal dispute config"),
+        deltas,
+    )
+    .expect("literal state");
     AccountSeed {
         account_id: account_id(value),
         replica: AccountReplica::new(left, state).expect("literal owner"),

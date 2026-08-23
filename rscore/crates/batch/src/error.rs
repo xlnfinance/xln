@@ -46,6 +46,11 @@ pub enum BatchError {
     CandidateAccountNotFound(AccountId),
     #[error("RSCORE_BATCH_CANDIDATE_BASE_MISMATCH:{0}")]
     CandidateBaseMismatch(AccountId),
+    #[error("RSCORE_BATCH_CANDIDATE_FINGERPRINT:{account_id}:{source}")]
+    CandidateFingerprint {
+        account_id: AccountId,
+        source: xln_rscore_engine::StateError,
+    },
     #[error("RSCORE_BATCH_CANDIDATE_STALE:{actual}:{expected}")]
     StaleCandidate { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_REVISION_OVERFLOW")]

@@ -1,8 +1,8 @@
 use std::fmt;
 
 use xln_rscore_engine::{
-    AccountExecutionContext, AccountIdentity, AccountOutput, AccountRejection, AccountReplica,
-    AccountTx, EntityId, Side,
+    AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, EntityId,
+    Side,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -45,10 +45,7 @@ pub struct AccountSeed {
 pub(crate) struct ReplicaFingerprint {
     pub owner: EntityId,
     pub owner_side: Side,
-    pub identity: AccountIdentity,
-    pub deltas_root: [u8; 32],
-    pub locks_root: [u8; 32],
-    pub lending_intents_root: Option<[u8; 32]>,
+    pub payment_profile_root: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +95,12 @@ pub struct PreparedBatch {
     pub(crate) outputs: Vec<IndexedOutput>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedPaymentProfileRoot {
+    pub account_id: AccountId,
+    pub payment_profile_root: [u8; 32],
+}
+
 impl PreparedBatch {
     pub const fn base_revision(&self) -> u64 {
         self.base_revision
@@ -113,5 +116,19 @@ impl PreparedBatch {
 
     pub fn outputs(&self) -> &[IndexedOutput] {
         &self.outputs
+    }
+
+    pub fn payment_profile_roots(
+        &self,
+    ) -> Result<Vec<PreparedPaymentProfileRoot>, xln_rscore_engine::StateError> {
+        self.updates
+            .iter()
+            .map(|(account_id, _, replica)| {
+                Ok(PreparedPaymentProfileRoot {
+                    account_id: *account_id,
+                    payment_profile_root: replica.state().payment_profile_account_state_root()?,
+                })
+            })
+            .collect()
     }
 }

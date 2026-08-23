@@ -10,8 +10,8 @@ mod stateful;
 mod types;
 
 pub use error::BatchError;
-pub use stateful::StatefulBatchEngine;
+pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};
 pub use types::{
     AccountId, AccountSeed, BatchJob, BatchResponse, BatchVerdict, EngineGeneration, IndexedOutput,
-    IndexedResult, PreparedBatch,
+    IndexedResult, PreparedBatch, PreparedPaymentProfileRoot,
 };

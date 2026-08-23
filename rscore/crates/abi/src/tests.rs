@@ -123,6 +123,7 @@ fn every_closed_operation_and_message_kind_round_trips() {
         OpTag::CommitRuntime,
         OpTag::AbortRuntime,
         OpTag::ReadAccountSummaryPage,
+        OpTag::Shutdown,
     ];
     let kinds = [MessageKind::Request, MessageKind::Ok, MessageKind::Error];
     for op_tag in operations {
@@ -176,10 +177,10 @@ fn rejects_unknown_tags_and_wrong_fixed_width_identifiers() {
     skip_binding_and_identity(&mut parser);
     let op_position = parser.position() + 1;
     let mut unknown_op = encoded.clone();
-    unknown_op[op_position] = 13;
+    unknown_op[op_position] = 14;
     assert_eq!(
         decode_envelope(&unknown_op, BODY_ARITY),
-        Err(AbiError::UnknownOpTag(13))
+        Err(AbiError::UnknownOpTag(14))
     );
     assert_eq!(parser.read_unsigned(), Ok(5));
     let kind_position = parser.position() + 1;

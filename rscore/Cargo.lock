@@ -295,6 +295,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "xln-rscore-process"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "num-bigint",
+ "thiserror",
+ "xln-rscore-abi",
+ "xln-rscore-batch",
+ "xln-rscore-engine",
+]
+
+[[package]]
 name = "xln-rscore-protocol"
 version = "0.1.0"
 dependencies = [

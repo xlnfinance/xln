@@ -10,7 +10,7 @@ use crate::{
     AccountId, AccountSeed, BatchError, BatchJob, BatchResponse, EngineGeneration, PreparedBatch,
 };
 
-const MAX_WORKERS: usize = 256;
+pub const MAX_BATCH_WORKERS: usize = 256;
 const MAX_BATCH_JOBS: usize = 1_000_000;
 
 pub struct StatefulBatchEngine {
@@ -26,7 +26,16 @@ impl StatefulBatchEngine {
         worker_count: usize,
         seeds: Vec<AccountSeed>,
     ) -> Result<Self, BatchError> {
-        if worker_count == 0 || worker_count > MAX_WORKERS {
+        Self::restore(engine_generation, worker_count, 0, seeds)
+    }
+
+    pub fn restore(
+        engine_generation: EngineGeneration,
+        worker_count: usize,
+        revision: u64,
+        seeds: Vec<AccountSeed>,
+    ) -> Result<Self, BatchError> {
+        if worker_count == 0 || worker_count > MAX_BATCH_WORKERS {
             return Err(BatchError::InvalidWorkerCount(worker_count));
         }
         let accounts = collect_accounts(seeds)?;
@@ -37,7 +46,7 @@ impl StatefulBatchEngine {
             .map_err(|error| BatchError::ThreadPoolBuild(error.to_string()))?;
         Ok(Self {
             engine_generation,
-            revision: 0,
+            revision,
             pool,
             accounts,
         })
@@ -104,7 +113,7 @@ impl StatefulBatchEngine {
                 .accounts
                 .get(account_id)
                 .ok_or(BatchError::CandidateAccountNotFound(*account_id))?;
-            let actual = replica_fingerprint(account);
+            let actual = replica_fingerprint(*account_id, account)?;
             if actual != *expected {
                 return Err(BatchError::CandidateBaseMismatch(*account_id));
             }
@@ -170,7 +179,7 @@ impl StatefulBatchEngine {
                     })?;
                 Ok(AccountWork {
                     account_id,
-                    base_fingerprint: replica_fingerprint(base),
+                    base_fingerprint: replica_fingerprint(account_id, base)?,
                     base,
                     jobs,
                 })
@@ -229,13 +238,16 @@ fn build_prepared(
     }
 }
 
-fn replica_fingerprint(account: &AccountReplica) -> ReplicaFingerprint {
-    ReplicaFingerprint {
+fn replica_fingerprint(
+    account_id: AccountId,
+    account: &AccountReplica,
+) -> Result<ReplicaFingerprint, BatchError> {
+    Ok(ReplicaFingerprint {
         owner: account.owner().clone(),
         owner_side: account.owner_side(),
-        identity: account.state().identity().clone(),
-        deltas_root: account.state().deltas_root(),
-        locks_root: account.state().htlc_locks_root(),
-        lending_intents_root: account.state().lending_intents_root(),
-    }
+        payment_profile_root: account
+            .state()
+            .payment_profile_account_state_root()
+            .map_err(|source| BatchError::CandidateFingerprint { account_id, source })?,
+    })
 }
