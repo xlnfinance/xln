@@ -31,6 +31,14 @@ pub enum Command {
         prepare_request_id: [u8; 8],
     },
     Shutdown,
+    ReadCapacityBatch {
+        requests: Vec<xln_rscore_batch::CapacityRequest>,
+    },
+    ReadAccountSummaryPage {
+        cursor: Option<AccountId>,
+        limit: usize,
+        token_ids: Vec<xln_rscore_engine::TokenId>,
+    },
 }
 
 pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
@@ -43,6 +51,8 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::CommitRuntime => decode_commit(payload),
         OpTag::AbortRuntime => decode_abort(payload),
         OpTag::Shutdown => decode_shutdown(payload),
+        OpTag::ReadCapacityBatch => decode_capacity_batch(payload),
+        OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
 }
@@ -104,6 +114,49 @@ fn decode_abort(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 fn decode_shutdown(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     exact(fields, 0, "shutdown")?;
     Ok(Command::Shutdown)
+}
+
+const MAX_CAPACITY_BATCH_ROWS: usize = 4_096;
+const MAX_SUMMARY_PAGE_LIMIT: u32 = 1_024;
+const MAX_SUMMARY_TOKEN_IDS: usize = 64;
+
+fn decode_capacity_batch(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "capacityBatch")?;
+    let rows = tuple(&fields[0])?;
+    if rows.len() > MAX_CAPACITY_BATCH_ROWS {
+        return Err(ProcessError::Expected("capacityBatchRows"));
+    }
+    Ok(Command::ReadCapacityBatch {
+        requests: rows
+            .iter()
+            .map(|row| {
+                let row = exact(tuple(row)?, 3, "capacityRequest")?;
+                Ok(xln_rscore_batch::CapacityRequest {
+                    account_id: AccountId::from_bytes(fixed_bytes(&row[0], "accountId")?),
+                    token_id: token(&row[1])?,
+                    side: side(&row[2], "side")?,
+                })
+            })
+            .collect::<Result<_, ProcessError>>()?,
+    })
+}
+
+fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 3, "summaryPage")?;
+    let cursor = optional_fixed_bytes(&fields[0], "cursor")?.map(AccountId::from_bytes);
+    let limit = bounded_u32(&fields[1], "limit")?;
+    if limit == 0 || limit > MAX_SUMMARY_PAGE_LIMIT {
+        return Err(ProcessError::Expected("summaryPageLimit"));
+    }
+    let token_ids = tuple(&fields[2])?;
+    if token_ids.len() > MAX_SUMMARY_TOKEN_IDS {
+        return Err(ProcessError::Expected("summaryTokenIds"));
+    }
+    Ok(Command::ReadAccountSummaryPage {
+        cursor,
+        limit: limit as usize,
+        token_ids: token_ids.iter().map(token).collect::<Result<_, _>>()?,
+    })
 }
 
 fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {

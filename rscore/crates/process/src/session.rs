@@ -130,7 +130,41 @@ impl ProcessSession {
             Command::Commit { prepare_request_id } => self.commit(prepare_request_id),
             Command::Abort { prepare_request_id } => self.abort(prepare_request_id),
             Command::Shutdown => self.shutdown(),
+            Command::ReadCapacityBatch { requests } => self.capacity_batch(&requests),
+            Command::ReadAccountSummaryPage {
+                cursor,
+                limit,
+                token_ids,
+            } => self.summary_page(cursor, limit, &token_ids),
         }
+    }
+
+    /// Read-only: serves the committed map even while a Prepare is pending.
+    fn capacity_batch(
+        &self,
+        requests: &[xln_rscore_batch::CapacityRequest],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
+        Ok((
+            wire_encode::capacity_rows(engine.revision(), &engine.capacity_batch(requests)),
+            false,
+        ))
+    }
+
+    /// Read-only page plus whole-engine reducers computed inside the engine.
+    fn summary_page(
+        &self,
+        cursor: Option<xln_rscore_batch::AccountId>,
+        limit: usize,
+        token_ids: &[xln_rscore_engine::TokenId],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
+        let (rows, next_cursor) = engine.summary_page(cursor, limit);
+        let totals = engine.totals(token_ids);
+        Ok((
+            wire_encode::summary_page(engine.revision(), &rows, next_cursor, &totals),
+            false,
+        ))
     }
 
     fn load(

@@ -64,6 +64,24 @@ impl StatefulBatchEngine {
         self.accounts.get(account_id)
     }
 
+    pub(crate) fn pool(&self) -> &ThreadPool {
+        &self.pool
+    }
+
+    /// Committed accounts in ascending id order, starting strictly after
+    /// `cursor` (or from the first account when `cursor` is `None`).
+    pub fn accounts_after(
+        &self,
+        cursor: Option<AccountId>,
+    ) -> impl Iterator<Item = (&AccountId, &AccountReplica)> {
+        use std::ops::Bound;
+        let lower = match cursor {
+            Some(id) => Bound::Excluded(id),
+            None => Bound::Unbounded,
+        };
+        self.accounts.range((lower, Bound::Unbounded))
+    }
+
     pub fn prepare(&self, jobs: &[BatchJob]) -> Result<PreparedBatch, BatchError> {
         self.validate_jobs(jobs)?;
         let next_revision = self

@@ -47,6 +47,79 @@ pub fn shutdown() -> BodyTuple {
     body(Vec::new())
 }
 
+pub fn capacity_rows(
+    revision: u64,
+    rows: &[Option<xln_rscore_engine::DeltaPerspective>],
+) -> BodyTuple {
+    body(vec![
+        integer(revision),
+        tuple(
+            rows.iter()
+                .map(|row| match row {
+                    None => AbiValue::Nil,
+                    Some(view) => tuple(vec![
+                        AbiValue::Text(view.in_capacity.to_string()),
+                        AbiValue::Text(view.out_capacity.to_string()),
+                        AbiValue::Text(view.own_credit_limit.to_string()),
+                        AbiValue::Text(view.peer_credit_limit.to_string()),
+                    ]),
+                })
+                .collect(),
+        ),
+    ])
+}
+
+pub fn summary_page(
+    revision: u64,
+    rows: &[xln_rscore_batch::AccountSummaryRow],
+    next_cursor: Option<xln_rscore_batch::AccountId>,
+    totals: &xln_rscore_batch::EngineTotals,
+) -> BodyTuple {
+    body(vec![
+        integer(revision),
+        tuple(
+            rows.iter()
+                .map(|row| {
+                    tuple(vec![
+                        AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
+                        AbiValue::Integer(match row.owner_side {
+                            xln_rscore_engine::Side::Left => 0,
+                            xln_rscore_engine::Side::Right => 1,
+                        }),
+                        integer(row.delta_rows),
+                        integer(row.htlc_locks),
+                        AbiValue::Bytes(row.deltas_root.to_vec()),
+                        AbiValue::Bytes(row.htlc_locks_root.to_vec()),
+                    ])
+                })
+                .collect(),
+        ),
+        match next_cursor {
+            None => AbiValue::Nil,
+            Some(cursor) => AbiValue::Bytes(cursor.as_bytes().to_vec()),
+        },
+        tuple(vec![
+            integer(totals.accounts),
+            integer(totals.htlc_locks),
+            tuple(
+                totals
+                    .tokens
+                    .iter()
+                    .map(|token| {
+                        tuple(vec![
+                            AbiValue::Integer(i128::from(token.token_id.get())),
+                            integer(token.rows),
+                            AbiValue::Text(token.collateral.to_string()),
+                            AbiValue::Text(token.owner_in_capacity.to_string()),
+                            AbiValue::Text(token.owner_out_capacity.to_string()),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ]),
+    ])
+}
+
 pub fn error(error: &crate::ProcessError) -> BodyTuple {
     body(vec![
         AbiValue::Text(error.code().into()),

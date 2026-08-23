@@ -181,6 +181,10 @@ fn account_id() -> [u8; 32] {
     [0x44; 32]
 }
 
+pub fn fixture_account_id() -> [u8; 32] {
+    account_id()
+}
+
 fn entity_bytes(suffix: u8) -> [u8; 32] {
     let mut bytes = [0_u8; 32];
     bytes[31] = suffix;

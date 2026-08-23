@@ -6,9 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+num-bigint.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
 xln-rscore-engine = { path = "../engine" }
 
-[dev-dependencies]
-num-bigint.workspace = true

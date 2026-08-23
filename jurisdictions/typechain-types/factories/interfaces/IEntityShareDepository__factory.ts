@@ -2,107 +2,98 @@
 /* tslint:disable */
 /* eslint-disable */
 
-import { Contract, Interface, type ContractRunner } from "ethers";
-import type {
-  IEntityShareDepository,
-  IEntityShareDepositoryInterface,
-} from "../../interfaces/IEntityShareDepository";
+  import { Contract, Interface, type ContractRunner } from "ethers";
+  import type { IEntityShareDepository, IEntityShareDepositoryInterface } from "../../interfaces/IEntityShareDepository.js";
 
-const _abi = [
+  const _abi = [
   {
-    inputs: [
+    "inputs": [
       {
-        internalType: "bytes32",
-        name: "entityId",
-        type: "bytes32",
+        "internalType": "bytes32",
+        "name": "entityId",
+        "type": "bytes32"
       },
       {
-        internalType: "uint256",
-        name: "tokenId",
-        type: "uint256",
-      },
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
     ],
-    name: "_reserves",
-    outputs: [
+    "name": "_reserves",
+    "outputs": [
       {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
     ],
-    stateMutability: "view",
-    type: "function",
+    "stateMutability": "view",
+    "type": "function"
   },
   {
-    inputs: [],
-    name: "_status",
-    outputs: [
+    "inputs": [],
+    "name": "_status",
+    "outputs": [
       {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
     ],
-    stateMutability: "view",
-    type: "function",
+    "stateMutability": "view",
+    "type": "function"
   },
   {
-    inputs: [],
-    name: "entityProvider",
-    outputs: [
+    "inputs": [],
+    "name": "entityProvider",
+    "outputs": [
       {
-        internalType: "address",
-        name: "",
-        type: "address",
-      },
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
     ],
-    stateMutability: "view",
-    type: "function",
+    "stateMutability": "view",
+    "type": "function"
   },
   {
-    inputs: [
+    "inputs": [
       {
-        internalType: "uint8",
-        name: "tokenType",
-        type: "uint8",
+        "internalType": "uint8",
+        "name": "tokenType",
+        "type": "uint8"
       },
       {
-        internalType: "address",
-        name: "contractAddress",
-        type: "address",
+        "internalType": "address",
+        "name": "contractAddress",
+        "type": "address"
       },
       {
-        internalType: "uint256",
-        name: "externalTokenId",
-        type: "uint256",
-      },
+        "internalType": "uint256",
+        "name": "externalTokenId",
+        "type": "uint256"
+      }
     ],
-    name: "registerExternalToken",
-    outputs: [
+    "name": "registerExternalToken",
+    "outputs": [
       {
-        internalType: "uint256",
-        name: "tokenId",
-        type: "uint256",
-      },
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
     ],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
 ] as const;
 
-export class IEntityShareDepository__factory {
-  static readonly abi = _abi;
-  static createInterface(): IEntityShareDepositoryInterface {
-    return new Interface(_abi) as IEntityShareDepositoryInterface;
+  export class IEntityShareDepository__factory {
+    static readonly abi = _abi;
+    static createInterface(): IEntityShareDepositoryInterface {
+      return new Interface(_abi) as IEntityShareDepositoryInterface;
+    }
+    static connect(address: string, runner?: ContractRunner | null): IEntityShareDepository {
+      return new Contract(address, _abi, runner) as unknown as IEntityShareDepository;
+    }
   }
-  static connect(
-    address: string,
-    runner?: ContractRunner | null
-  ): IEntityShareDepository {
-    return new Contract(
-      address,
-      _abi,
-      runner
-    ) as unknown as IEntityShareDepository;
-  }
-}
+  

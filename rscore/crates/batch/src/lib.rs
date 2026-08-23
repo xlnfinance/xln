@@ -6,10 +6,12 @@
 
 mod error;
 mod execution;
+mod query;
 mod stateful;
 mod types;
 
 pub use error::BatchError;
+pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};
 pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};
 pub use types::{
     AccountId, AccountSeed, BatchJob, BatchResponse, BatchVerdict, EngineGeneration, IndexedOutput,

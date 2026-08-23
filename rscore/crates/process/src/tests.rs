@@ -246,3 +246,98 @@ fn assert_error(envelope: Envelope, expected: &str) {
         "actual error: code={code} message={message}"
     );
 }
+
+#[test]
+fn capacity_batch_and_summary_page_read_committed_state() {
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello(0)).envelope);
+    assert_ok(session.handle(load(1, 3, vec![committed_lock()])).envelope);
+
+    let account = crate::test_fixture::fixture_account_id();
+    let capacity = session
+        .handle(request(
+            2,
+            OpTag::ReadCapacityBatch,
+            vec![tuple_of(vec![
+                tuple_of(vec![
+                    AbiValue::Bytes(account.to_vec()),
+                    AbiValue::Integer(1),
+                    AbiValue::Integer(0),
+                ]),
+                tuple_of(vec![
+                    AbiValue::Bytes(vec![0x00; 32]),
+                    AbiValue::Integer(1),
+                    AbiValue::Integer(0),
+                ]),
+            ])],
+        ))
+        .envelope;
+    assert_ok(capacity.clone());
+    let AbiValue::Tuple(payload) = &capacity.body.fields()[0] else {
+        panic!("capacity payload tuple expected");
+    };
+    let fields = payload.fields();
+    assert_eq!(fields[0], AbiValue::Integer(3));
+    let AbiValue::Tuple(rows) = &fields[1] else {
+        panic!("rows tuple expected");
+    };
+    assert_eq!(rows.fields().len(), 2);
+    // Existing account row carries four text scalars; unknown account is Nil.
+    assert!(matches!(&rows.fields()[0], AbiValue::Tuple(row) if row.fields().len() == 4));
+    assert_eq!(rows.fields()[1], AbiValue::Nil);
+
+    let page = session
+        .handle(request(
+            3,
+            OpTag::ReadAccountSummaryPage,
+            vec![
+                AbiValue::Nil,
+                AbiValue::Integer(16),
+                tuple_of(vec![AbiValue::Integer(1), AbiValue::Integer(2)]),
+            ],
+        ))
+        .envelope;
+    assert_ok(page.clone());
+    let AbiValue::Tuple(payload) = &page.body.fields()[0] else {
+        panic!("page payload tuple expected");
+    };
+    let fields = payload.fields();
+    assert_eq!(fields[0], AbiValue::Integer(3));
+    let AbiValue::Tuple(rows) = &fields[1] else {
+        panic!("summary rows expected");
+    };
+    assert_eq!(rows.fields().len(), 1);
+    let AbiValue::Tuple(row) = &rows.fields()[0] else {
+        panic!("summary row tuple expected");
+    };
+    // account id, owner side, delta rows, lock count, two 32-byte roots
+    assert_eq!(row.fields()[0], AbiValue::Bytes(account.to_vec()));
+    assert_eq!(row.fields()[2], AbiValue::Integer(1));
+    assert_eq!(row.fields()[3], AbiValue::Integer(1));
+    assert_eq!(fields[2], AbiValue::Nil, "single page has no cursor");
+    let AbiValue::Tuple(totals) = &fields[3] else {
+        panic!("totals tuple expected");
+    };
+    assert_eq!(totals.fields()[0], AbiValue::Integer(1));
+    assert_eq!(totals.fields()[1], AbiValue::Integer(1));
+    let AbiValue::Tuple(tokens) = &totals.fields()[2] else {
+        panic!("token totals expected");
+    };
+    let AbiValue::Tuple(token_one) = &tokens.fields()[0] else {
+        panic!("token row expected");
+    };
+    assert_eq!(token_one.fields()[1], AbiValue::Integer(1));
+    assert_eq!(token_one.fields()[2], AbiValue::Text("1000000".into()));
+    let AbiValue::Tuple(token_two) = &tokens.fields()[1] else {
+        panic!("token row expected");
+    };
+    assert_eq!(token_two.fields()[1], AbiValue::Integer(0));
+
+    // Read-only ops must not disturb the atomic write lifecycle.
+    let prepared = session.handle(prepare(4, 5)).envelope;
+    assert_ok(prepared);
+}
+
+fn tuple_of(fields: Vec<AbiValue>) -> AbiValue {
+    AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields))
+}
