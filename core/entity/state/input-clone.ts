@@ -1,4 +1,4 @@
-import type { EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityFrame } from '../types';
+import type { EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityFrame } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import type {
   JPrefixAttestation,
@@ -18,36 +18,28 @@ const cloneJPrefixClaim = <T extends JPrefixClaim>(claim: T): T => ({
     events: block.events.map(event => structuredClone(event)),
     ...(block.disputeFinalizationEvidence
       ? {
-          disputeFinalizationEvidence: block.disputeFinalizationEvidence
-            .map(evidence => structuredClone(evidence)),
+          disputeFinalizationEvidence: block.disputeFinalizationEvidence.map(evidence => structuredClone(evidence)),
         }
       : {}),
   })),
 });
 
-const cloneJPrefixAttestation = (attestation: JPrefixAttestation): JPrefixAttestation =>
-  ({
-    ...cloneJPrefixClaim(attestation),
-    headers: attestation.headers.map(header => ({ ...header })),
-  });
+const cloneJPrefixAttestation = (attestation: JPrefixAttestation): JPrefixAttestation => ({
+  ...cloneJPrefixClaim(attestation),
+  headers: attestation.headers.map(header => ({ ...header })),
+});
 
 const cloneJPrefixCertificate = (certificate: JPrefixCertificate): JPrefixCertificate => ({
   ...certificate,
   selected: cloneJPrefixClaim(certificate.selected),
-  attestations: new Map(Array.from(certificate.attestations, ([signerId, attestation]) => [
-    signerId,
-    cloneJPrefixAttestation(attestation),
-  ])),
+  attestations: new Map(
+    Array.from(certificate.attestations, ([signerId, attestation]) => [signerId, cloneJPrefixAttestation(attestation)]),
+  ),
 });
 
-const cloneLeaderVote = (
-  vote: EntityLeaderTimeoutVote,
-  activeFrames: Set<object>,
-): EntityLeaderTimeoutVote => ({
+const cloneLeaderVote = (vote: EntityLeaderTimeoutVote, activeFrames: Set<object>): EntityLeaderTimeoutVote => ({
   ...vote,
-  ...(vote.preparedFrame
-    ? { preparedFrame: cloneProposedEntityFrame(vote.preparedFrame, activeFrames) }
-    : {}),
+  ...(vote.preparedFrame ? { preparedFrame: cloneProposedEntityFrame(vote.preparedFrame, activeFrames) } : {}),
 });
 
 const cloneLeaderCertificate = (
@@ -58,18 +50,14 @@ const cloneLeaderCertificate = (
   votes: new Map(certificate.votes),
   ...(certificate.preparedVotes
     ? {
-        preparedVotes: new Map(Array.from(certificate.preparedVotes, ([signerId, vote]) => [
-          signerId,
-          cloneLeaderVote(vote, activeFrames),
-        ])),
+        preparedVotes: new Map(
+          Array.from(certificate.preparedVotes, ([signerId, vote]) => [signerId, cloneLeaderVote(vote, activeFrames)]),
+        ),
       }
     : {}),
 });
 
-const cloneProposedEntityFrame = (
-  frame: EntityFrame,
-  activeFrames: Set<object>,
-): EntityFrame => {
+const cloneProposedEntityFrame = (frame: EntityFrame, activeFrames: Set<object>): EntityFrame => {
   if (activeFrames.has(frame)) throw new Error('RUNTIME_INPUT_PREPARED_FRAME_CYCLE');
   activeFrames.add(frame);
   try {
@@ -93,16 +81,13 @@ const cloneProposedEntityFrame = (
           ? { relayCertificate: cloneLeaderCertificate(frame.leader.relayCertificate, activeFrames) }
           : {}),
       },
-      ...(frame.jPrefixCertificate
-        ? { jPrefixCertificate: cloneJPrefixCertificate(frame.jPrefixCertificate) }
-        : {}),
+      ...(frame.jPrefixCertificate ? { jPrefixCertificate: cloneJPrefixCertificate(frame.jPrefixCertificate) } : {}),
       hashesToSign: frame.hashesToSign.map(hashToSign => ({ ...hashToSign })),
       ...(frame.collectedSigs
         ? {
-            collectedSigs: new Map(Array.from(frame.collectedSigs, ([signerId, signatures]) => [
-              signerId,
-              [...signatures],
-            ])),
+            collectedSigs: new Map(
+              Array.from(frame.collectedSigs, ([signerId, signatures]) => [signerId, [...signatures]]),
+            ),
           }
         : {}),
       ...(frame.hankos ? { hankos: [...frame.hankos] } : {}),
@@ -117,77 +102,52 @@ export const copyJPrefixRound = (round: JPrefixRound): JPrefixRound => ({
   parentFrameHash: round.parentFrameHash,
   jurisdictionRef: round.jurisdictionRef,
   baseHeight: round.baseHeight,
-  attestations: new Map(Array.from(round.attestations, ([signerId, attestation]) => [
-    signerId,
-    cloneJPrefixAttestation(attestation),
-  ])),
+  attestations: new Map(
+    Array.from(round.attestations, ([signerId, attestation]) => [signerId, cloneJPrefixAttestation(attestation)]),
+  ),
   ...(round.certificate ? { certificate: cloneJPrefixCertificate(round.certificate) } : {}),
 });
 
-export const cloneIsolatedProposedEntityFrame = (
-  frame: EntityFrame,
-): EntityFrame => cloneProposedEntityFrame(frame, new Set());
+export const cloneIsolatedProposedEntityFrame = (frame: EntityFrame): EntityFrame =>
+  cloneProposedEntityFrame(frame, new Set());
 
-export const cloneIsolatedEntityLeaderTimeoutVote = (
-  vote: EntityLeaderTimeoutVote,
-): EntityLeaderTimeoutVote => cloneLeaderVote(vote, new Set());
+export const cloneIsolatedEntityLeaderTimeoutVote = (vote: EntityLeaderTimeoutVote): EntityLeaderTimeoutVote =>
+  cloneLeaderVote(vote, new Set());
 
-export const cloneIsolatedEntityLeaderCertificate = (
-  certificate: EntityLeaderCertificate,
-): EntityLeaderCertificate => cloneLeaderCertificate(certificate, new Set());
+export const cloneIsolatedEntityLeaderCertificate = (certificate: EntityLeaderCertificate): EntityLeaderCertificate =>
+  cloneLeaderCertificate(certificate, new Set());
 
 /**
- * Bun 1.3.x can corrupt a later repeated reference when one structuredClone
- * spans several protocol values. Runtime inputs never assign meaning to JS
- * object identity, so isolate every EntityInput field and every EntityTx.
+ * Clone an EntityInput/EntityOutput. Bun 1.3.x corrupted repeated object
+ * references within a single structuredClone call (oven-sh/bun#32791,
+ * #32796); the per-field isolation below was a workaround. Bun 1.4.0
+ * fixes the reference pool sync, so a single structuredClone is safe.
+ * Shape validation is retained as fail-fast protocol safety.
  */
 export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T => {
-  const cloned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (key === 'entityTxs') {
-      if (!Array.isArray(value)) throw new Error('RUNTIME_INPUT_ENTITY_TXS_INVALID');
-      cloned[key] = cloneIsolatedEntityTxs(value as EntityTx[]);
-      continue;
+  // Pre-clone shape validation.
+  const entries = Object.entries(input);
+  for (const [key, value] of entries) {
+    if (key === 'entityTxs' && !Array.isArray(value)) {
+      throw new Error('RUNTIME_INPUT_ENTITY_TXS_INVALID');
     }
-    if (key === 'proposedFrame') {
-      cloned[key] = cloneIsolatedProposedEntityFrame(value as EntityFrame);
-      continue;
+    if (key === 'hashPrecommitFrame' && (!value || typeof value !== 'object')) {
+      throw new Error('RUNTIME_INPUT_HASH_PRECOMMIT_FRAME_INVALID');
     }
-    if (key === 'hashPrecommitFrame') {
-      if (!value || typeof value !== 'object') {
-        throw new Error('RUNTIME_INPUT_HASH_PRECOMMIT_FRAME_INVALID');
-      }
-      cloned[key] = { ...(value as EntityInput['hashPrecommitFrame']) };
-      continue;
+    if (key === 'hashPrecommits' && !(value instanceof Map)) {
+      throw new Error('RUNTIME_INPUT_HASH_PRECOMMITS_INVALID');
     }
-    if (key === 'hashPrecommits') {
-      if (!(value instanceof Map)) throw new Error('RUNTIME_INPUT_HASH_PRECOMMITS_INVALID');
-      cloned[key] = new Map(Array.from(value, ([signerId, signatures]) => [
-        signerId,
-        [...(signatures as string[])],
-      ]));
-      continue;
+    if (key === 'jPrefixAttestations' && !(value instanceof Map)) {
+      throw new Error('RUNTIME_INPUT_J_PREFIX_ATTESTATIONS_INVALID');
     }
-    if (key === 'jPrefixAttestations') {
-      if (!(value instanceof Map)) throw new Error('RUNTIME_INPUT_J_PREFIX_ATTESTATIONS_INVALID');
-      cloned[key] = new Map(Array.from(value, ([signerId, attestation]) => [
-        signerId,
-        cloneJPrefixAttestation(attestation as JPrefixAttestation),
-      ]));
-      continue;
-    }
-    if (key === 'leaderTimeoutVote') {
-      cloned[key] = cloneIsolatedEntityLeaderTimeoutVote(value as EntityLeaderTimeoutVote);
-      continue;
-    }
-    cloned[key] = structuredClone(value);
   }
-  const entityTxs = cloned['entityTxs'];
+  const cloned = structuredClone(input) as T;
+  // Post-clone shape check: structuredClone must preserve array length.
   if (
     input.entityTxs !== undefined &&
-    (!Array.isArray(entityTxs) || entityTxs.length !== input.entityTxs.length)
+    (!Array.isArray(cloned.entityTxs) || cloned.entityTxs.length !== input.entityTxs.length)
   ) {
     throw new Error('RUNTIME_INPUT_ENTITY_TX_CLONE_SHAPE_MISMATCH');
   }
-  return cloned as T;
+  return cloned;
 };
