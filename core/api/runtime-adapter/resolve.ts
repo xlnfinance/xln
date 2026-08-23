@@ -1003,7 +1003,6 @@ const compactAccountDocForView = (
   // payload by the page width.
   if (doc.pendingFrame) compact.pendingFrame = compactAccountFrameForView(doc.pendingFrame);
   if (doc.lastOutboundFrameAck) compact.lastOutboundFrameAck = doc.lastOutboundFrameAck;
-  if (doc.pendingForwards) compact.pendingForwards = doc.pendingForwards;
   if (doc.lastRollbackFrameHash) compact.lastRollbackFrameHash = doc.lastRollbackFrameHash;
   if (doc.currentFrameHanko) compact.currentFrameHanko = doc.currentFrameHanko;
   if (doc.counterpartyFrameHanko) compact.counterpartyFrameHanko = doc.counterpartyFrameHanko;

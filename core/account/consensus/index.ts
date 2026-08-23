@@ -500,13 +500,6 @@ async function commitIncomingFrameOnRealState(
     height: receivedFrame.height,
     tokens: account.state.deltas.size,
   });
-  if (account.pendingForwards?.length) {
-    accountLog.debug('pending_forwards.copied', {
-      count: account.pendingForwards.length,
-      routes: account.pendingForwards.map(forward => forward.route.map(r => shortId(r))),
-    });
-  }
-
   account.currentFrame = cloneIsolatedAccountFrame(receivedFrame);
   account.currentHeight = receivedFrame.height;
   const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;

@@ -510,7 +510,6 @@ const accountEntityOverlayState = (account: AccountReplica): unknown => ({
   disputePrepare: account.disputePrepare,
   settlementWorkspace: settlementWorkspaceWithoutHankos(account.state.settlementWorkspace),
   activeDispute: account.activeDispute,
-  pendingForwards: account.pendingForwards,
   pendingWithdrawalsRoot: pendingWithdrawalOverlayRoot(account.pendingWithdrawals),
   shadow: {
     rebalance: {

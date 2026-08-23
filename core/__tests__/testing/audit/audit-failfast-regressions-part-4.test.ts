@@ -1340,19 +1340,9 @@ describe('audit fail-fast regressions', () => {
         ack: { height: 8, frameHash: `0x${'08'.repeat(32)}`, frameHanko: `0x${'aa'.repeat(65)}` },
       },
     };
-    accountMachine.pendingForwards = [
-      {
-        route: [hex20('33'), hex20('44')],
-        tokenId: 1,
-        amount: 123n,
-        description: 'pending-forward-storage',
-      },
-    ];
-
     const doc = projectAccountDoc(accountMachine);
 
     expect(doc.lastOutboundFrameAck).toEqual(accountMachine.lastOutboundFrameAck);
-    expect(doc.pendingForwards).toEqual(accountMachine.pendingForwards);
   });
 
   test('expired HTLC never rolls back its signed pending Account frame', async () => {

@@ -392,12 +392,15 @@ export const publishEntityCandidateEffects = (
       recordRuntimeSecurityIncident(env, effect.identity);
     } else if (effect.kind === 'securityIncidentResolve') {
       resolveRuntimeSecurityIncident(env, effect.identity);
-    } else {
+    } else if (effect.kind === 'debug') {
       // Informational candidate traces (currently REB_STEP) are local
       // diagnostics, not a second network event stream. Relay only actionable
       // audit levels; committed machine facts already live in Runtime history.
       if (effect.payload['level'] !== 'warn' && effect.payload['level'] !== 'error') continue;
       queuePendingAuditEvent(env, effect.payload);
+    } else {
+      const unhandled: never = effect;
+      throw new Error(`ENTITY_CANDIDATE_EFFECT_UNHANDLED:${String(unhandled)}`);
     }
   }
 };

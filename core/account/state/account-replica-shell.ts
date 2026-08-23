@@ -176,12 +176,6 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
           }),
     };
   }
-  if (base.pendingForwards) {
-    shell.pendingForwards = base.pendingForwards.map(forward => ({
-      ...forward,
-      route: copyArray(forward.route),
-    }));
-  }
   shellLog.debug('replica.forked', {
     from: base.proofHeader.fromEntity.slice(-8),
     to: base.proofHeader.toEntity.slice(-8),

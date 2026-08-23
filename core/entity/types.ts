@@ -477,7 +477,7 @@ export interface CertifiedEntityLineageAnchor {
 
 
 export type EntityCandidateEffect =
-  | AccountOutput
+  | Extract<AccountOutput, { kind: 'runtimeEvent' | 'debug' }>
   | {
       kind: 'entityFrameHistory';
       entityId: string;
@@ -493,21 +493,12 @@ export type EntityCandidateEffect =
       frame: AccountFrame;
     }
   | {
-      kind: 'runtimeEvent';
-      eventName: string;
-      data: Record<string, unknown>;
-    }
-  | {
       kind: 'securityIncidentRecord';
       identity: RuntimeSecurityIncidentIdentity;
     }
   | {
       kind: 'securityIncidentResolve';
       identity: RuntimeSecurityIncidentIdentity;
-    }
-  | {
-      kind: 'debug';
-      payload: Record<string, unknown>;
     };
 
 

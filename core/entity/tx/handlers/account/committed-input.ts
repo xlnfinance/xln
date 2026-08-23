@@ -1,4 +1,9 @@
-import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../../types/account';
+import type {
+  AccountOutput,
+  AccountPeerInput,
+  AccountReplica,
+  AccountTx,
+} from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { HandleAccountInputApplied } from '../../../../account/consensus/types';
@@ -22,7 +27,7 @@ import {
   applyCommittedHtlcLockFollowup,
   applyHtlcSecretFollowups,
   applyHtlcTimeoutFollowups,
-  applyPendingForwardFollowup,
+  applyDirectPaymentForwardFollowups,
 } from './committed-htlc-followups';
 import type { AccountTxTarget } from './orderbook/queue';
 import type {
@@ -32,6 +37,8 @@ import type {
 } from './orderbook/offers';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
+
+type DirectPaymentForward = Extract<AccountOutput, { kind: 'directPaymentForward' }>;
 
 type AccountHashToSign = {
   hash: string;
@@ -253,6 +260,7 @@ const queueInitialHubPolicies = (
 
 const applyCommittedHtlcFollowups = (
   context: SuccessfulAccountInputContext,
+  directPaymentForwards: readonly DirectPaymentForward[],
 ): void => {
   const { env, state, input, account, result, effects } = context;
   const followupContext = {
@@ -265,9 +273,32 @@ const applyCommittedHtlcFollowups = (
     accountTxs: effects.accountTxs,
     candidateEffects: effects.candidateEffects,
   };
-  applyPendingForwardFollowup(followupContext);
+  applyDirectPaymentForwardFollowups(followupContext, directPaymentForwards);
   applyHtlcTimeoutFollowups(followupContext, result.timedOutHashlocks ?? []);
   applyHtlcSecretFollowups(followupContext, result.revealedSecrets ?? []);
+};
+
+const collectCommittedAccountOutputs = (
+  effects: CommittedAccountEffects,
+  outputs: readonly AccountOutput[],
+): DirectPaymentForward[] => {
+  const directPaymentForwards: DirectPaymentForward[] = [];
+  for (const output of outputs) {
+    switch (output.kind) {
+      case 'directPaymentForward':
+        directPaymentForwards.push(output);
+        break;
+      case 'runtimeEvent':
+      case 'debug':
+        effects.candidateEffects.push(output);
+        break;
+      default: {
+        const unhandled: never = output;
+        throw new Error(`ACCOUNT_OUTPUT_UNHANDLED:${String(unhandled)}`);
+      }
+    }
+  }
+  return directPaymentForwards;
 };
 
 const logCommittedSwapEffects = (effects: CommittedAccountEffects): void => {
@@ -290,7 +321,10 @@ export const applySuccessfulAccountInput = async (
   context: SuccessfulAccountInputContext,
 ): Promise<boolean | undefined> => {
   const { env, state, input, account, counterpartyId, createdAccount, result, effects } = context;
-  effects.candidateEffects.push(...(result.candidateEffects ?? []));
+  const directPaymentForwards = collectCommittedAccountOutputs(
+    effects,
+    result.candidateEffects ?? [],
+  );
   addMessages(state, result.events);
   emitScopedEvents(
     env,
@@ -320,7 +354,7 @@ export const applySuccessfulAccountInput = async (
 
   await applyCommittedFrameTransactions(context);
   queueInitialHubPolicies(context, committedInboundGenesis);
-  applyCommittedHtlcFollowups(context);
+  applyCommittedHtlcFollowups(context, directPaymentForwards);
   scheduleCommittedAccountWork(state, counterpartyId);
   context.checkpointProfile('committedFollowups');
   logCommittedSwapEffects(effects);

@@ -241,7 +241,7 @@ const ACCOUNT_VIEW_REQUIRED = [
   'pendingWithdrawals', 'shadow',
 ] as const;
 const ACCOUNT_VIEW_OPTIONAL = [
-  'pendingFrame', 'pendingAccountInput', 'lastOutboundFrameAck', 'pendingForwards',
+  'pendingFrame', 'pendingAccountInput', 'lastOutboundFrameAck',
   'lastRollbackFrameHash', 'currentFrameHanko',
   'counterpartyFrameHanko', 'boardResealMigration', 'counterpartyBoardReseal',
   'currentDisputeProofHanko', 'currentDisputeProofNonce', 'currentDisputeProofBodyHash',

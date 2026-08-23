@@ -225,7 +225,6 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'counterpartyDisputeHash',
   'disputePrepare',
   'activeDispute',
-  'pendingForwards',
   'pendingWithdrawals',
   'shadow',
 ] as const satisfies readonly (keyof AccountReplica)[];

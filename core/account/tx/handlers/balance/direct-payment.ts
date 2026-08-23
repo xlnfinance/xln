@@ -5,7 +5,7 @@
  * Reference: Channel.ts DirectPayment transition (2024_src/app/Transition.ts:321-344)
  */
 
-import type { AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountOutput, AccountReplica, AccountTx } from '../../../../types/account';
 import type { AccountDraftReplica } from '../../../state/account-state-draft';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
@@ -15,12 +15,16 @@ import { createStructuredLogger } from '../../../../support/logger';
 import { getAccountPerspective } from '../../../state/perspective';
 import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import type { ApplyAccountTxResult } from '../../apply-types';
-import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import {
+  accountTxApplied,
+  accountTxValidationRejected,
+  withAccountTxCandidateEffects,
+} from '../../apply-result';
 
 const directPaymentLog = createStructuredLogger('account.payment');
 
 type DirectPaymentTx = Extract<AccountTx, { type: 'direct_payment' }>;
-type PendingPaymentForward = NonNullable<AccountReplica['pendingForwards']>[number];
+type DirectPaymentForward = Extract<AccountOutput, { kind: 'directPaymentForward' }>;
 
 const validatePaymentEnvelope = (
   payment: DirectPaymentTx['data'],
@@ -155,7 +159,7 @@ const buildPaymentForward = (
   payment: DirectPaymentTx['data'],
   paymentFromEntity: string,
   counterparty: string,
-): PendingPaymentForward | undefined => {
+): DirectPaymentForward | undefined => {
   const { route, tokenId, amount, description, trustedGatewayEntityId } = payment;
   const isOutgoing = sameEntity(paymentFromEntity, account.proofHeader.fromEntity);
   if (isOutgoing || route.length === 1) return undefined;
@@ -172,6 +176,7 @@ const buildPaymentForward = (
     throw new Error('TRUSTED_PAYMENT_FORWARD_LOOP');
   }
   return {
+    kind: 'directPaymentForward',
     tokenId,
     amount,
     route: [...route],
@@ -210,7 +215,9 @@ export function handleDirectPayment(
   appendPaymentEvent(account, accountTx.data, parties, byLeft, counterparty, events);
   if (forward) {
     events.push(`↪️ Forwarding payment to ${forward.route.at(-1)!.slice(-4)} via ${forward.route.length - 1} more hops`);
-    account.pendingForwards = [...(account.pendingForwards ?? []), forward];
   }
-  return accountTxApplied(events);
+  return withAccountTxCandidateEffects(
+    accountTxApplied(events),
+    forward ? [forward] : [],
+  );
 }

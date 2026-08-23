@@ -399,12 +399,6 @@ test('storage projection round-trip preserves canonical account optional-field s
     state: { ...currentAccount.state },
   };
   account.hankoSignature = '0xaccount-proof-hanko';
-  account.pendingForwards = [{
-    tokenId: 1,
-    amount: 25n,
-    route: [entityId, counterpartyId],
-    description: 'projection-round-trip',
-  }];
   account.state.lendingIntents = PersistentAccountStateMap.fromEntries('lendingIntents', [['lend-0123456789abcdef', 'fund']]);
   account.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [['custom-transformer', {
     transformerAddress: `0x${'33'.repeat(20)}`,
@@ -460,7 +454,6 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
-  expect(hydratedState.accounts.get(counterpartyId)?.pendingForwards).toEqual(account.pendingForwards);
   expect(hydratedState.accounts.get(counterpartyId)?.state.lendingIntents).toEqual(account.state.lendingIntents);
   expect(hydratedState.accounts.get(counterpartyId)?.state.subcontracts).toEqual(account.state.subcontracts);
   expect(hydratedState.accounts.get(counterpartyId)?.disputePrepare).toEqual(account.disputePrepare);

@@ -1,4 +1,11 @@
-import type { AccountFrame, AccountPeerInput, AccountReplica, AccountTx, HtlcLock } from '../../../../types/account';
+import type {
+  AccountFrame,
+  AccountOutput,
+  AccountPeerInput,
+  AccountReplica,
+  AccountTx,
+  HtlcLock,
+} from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../support/debug-flags';
@@ -40,6 +47,7 @@ type HtlcFollowupContext = {
 };
 
 type RevealedSecret = { secret: string; hashlock: string };
+type DirectPaymentForward = Extract<AccountOutput, { kind: 'directPaymentForward' }>;
 type HtlcSecretFollowupContext = Pick<
   HtlcFollowupContext,
   'env' | 'state' | 'newState' | 'outputs' | 'accountTxs' | 'candidateEffects'
@@ -185,10 +193,12 @@ export async function applyCommittedHtlcLockFollowup(
   applyPreparedHtlcOutcome(ctx, lock, prepared);
 }
 
-export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
-  const { state, account, newState, accountTxs } = ctx;
-  const forwards = account.pendingForwards;
-  if (!forwards?.length) return;
+export function applyDirectPaymentForwardFollowups(
+  ctx: HtlcFollowupContext,
+  forwards: readonly DirectPaymentForward[],
+): void {
+  const { state, newState, accountTxs } = ctx;
+  if (forwards.length === 0) return;
 
   for (const [forwardIndex, forward] of forwards.entries()) {
     const nextHop = forward.route.length > 1 ? forward.route[1] : undefined;
@@ -218,7 +228,6 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
       },
     });
   }
-  delete account.pendingForwards;
 }
 
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {

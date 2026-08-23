@@ -337,18 +337,6 @@ export interface AccountReplica {
     crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
   };
 
-  // Payment routing: locally derived follow-ups for every routed payment in a
-  // committed Account frame. This must remain an ordered list: byte-identical
-  // payments are independent signed intents and must never be deduplicated.
-  pendingForwards?: Array<{
-    tokenId: number;
-    amount: bigint;
-    route: string[];
-    description?: string;
-    deliveryMode: 'trusted';
-    trustedGatewayEntityId: string;
-  }>;
-
   // Withdrawal tracking (Phase 2: C→R)
   pendingWithdrawals: AccountStateCollection<string, {
     requestId: string;
@@ -548,15 +536,29 @@ export type AccountInput =
  * Runtime WAL commit.
  */
 export type AccountOutput =
-  | {
+  | Readonly<{
+      /**
+       * Ordered follow-up emitted only when a trusted payment commits at its
+       * gateway. Byte-identical values are distinct signed payment intents and
+       * must never be deduplicated by Account, Entity, or Runtime batching.
+       */
+      kind: 'directPaymentForward';
+      tokenId: number;
+      amount: bigint;
+      route: readonly string[];
+      description?: string;
+      deliveryMode: 'trusted';
+      trustedGatewayEntityId: string;
+    }>
+  | Readonly<{
       kind: 'runtimeEvent';
       eventName: string;
       data: Record<string, unknown>;
-    }
-  | {
+    }>
+  | Readonly<{
       kind: 'debug';
       payload: Record<string, unknown>;
-    };
+    }>;
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
