@@ -204,12 +204,17 @@ sig verification" hypothesis is disproved. The real costs are:
   `queuePendingAuditEvent`. All call sites build fresh object literals,
   so the canonical dedup key already binds the full structure.
   `structuredClone`: 43,836 → 33,432 (-24%, -10K calls).
-- **Lever 7b (structuredClone reduction):** DEAD END. Remaining 33K
-  clones are all consensus-critical isolation barriers. The biggest
-  caller (`cloneIsolatedEntityInput`, 8K) is an explicit Bun 1.3.x bug
-  workaround. The rest (`recordCommittedFrames`, `collectEntityTxResult`,
-  `committed-input` response) protect against mutation between candidate
-  effect creation and history recording. Removing them risks silent state
+- **Lever 7b (structuredClone reduction):** DONE. Bun 1.4.0 fixes the
+  reference pool corruption bug (oven-sh/bun#32791, #32796) that
+  `cloneIsolatedEntityInput` worked around with per-field isolation.
+  Simplified to a single `structuredClone(input)` call with pre-clone
+  shape validation. Added 5 regression tests for the reference pool bug.
+  `structuredClone`: 33,432 → 30,438 (-9%). Best HLT run: 243.1 TPS.
+- **Lever 7c (remaining structuredClone):** DEAD END. Remaining 30K
+  clones are consensus-critical isolation barriers
+  (`recordCommittedFrames`, `collectEntityTxResult`, `committed-input`
+  response). They protect against mutation between candidate effect
+  creation and history recording. Removing them risks silent state
   corruption.
 - **Lever 2 (batch sig verify):** DEPRIORITIZED. Only 4% of ops; max
   ~7ms/frame savings even with perfect batching.
@@ -222,3 +227,5 @@ sig verification" hypothesis is disproved. The real costs are:
 | `efea96a42` | Fat-frame gate: `minFrameMempoolDepth`/`maxFrameDelayMs` config + `decodeRuntimeConfig` schema update                                                                                                       |
 | `fc55888f8` | Entity state root memo on field identity (Lever 6). `canonical.encode` -42% (322K → 187K)                                                                                                                   |
 | `c23164d82` | Shallow-clone audit event payload (Lever 7a). `structuredClone` -24% (44K → 33K)                                                                                                                            |
+| `155eac4f3` | Bun 1.4.0 upgrade. +14.7% TPS from runtime alone (204 → 234 avg)                                                                                                                                            |
+| `d3858806e` | Simplify cloneIsolatedEntityInput (Lever 7b). Single structuredClone + 5 regression tests. -9% (33K → 30K)                                                                                                  |
