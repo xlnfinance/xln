@@ -26,6 +26,15 @@ import { timePerfPhase } from '../../../support/performance/profile';
 
 const ackLog = createStructuredLogger('account.ack');
 
+/** Proposer-side dispute proof fields written by finalize after the candidate was captured. */
+const LOCAL_PROOF_FIELDS = [
+  'currentDisputeHash',
+  'currentDisputeProofBodyHash',
+  'currentDisputeProofNonce',
+  'currentDisputeProofProposerIsLeft',
+  'currentDisputeProofHanko',
+] as const satisfies readonly (keyof AccountReplica)[];
+
 export type PendingFrameAckResult =
   | { kind: 'not_applicable' }
   | { kind: 'fallthrough' }
@@ -148,11 +157,16 @@ const applyPendingFrameTransactions = async (
 ): Promise<void> => {
   const prepared = takePreparedProposalCommit(preparedCommitKey(account, pendingFrame.stateHash), account.state);
   if (prepared) {
-    // Only the transition's AccountState is prepared. Shell fields outside the
-    // live envelope (dispute proof hash/nonce, proof header) moved on when the
-    // proposal was finalized after the candidate was captured; folding the
-    // whole captured shell rewound the dispute nonce and the next seal reused it.
-    publishAccountOverlay(account, { ...account, state: prepared.candidate.state });
+    // The candidate was captured before the proposal was finalized: the local
+    // dispute seal draft and proof nonce moved on afterwards. Fold the
+    // transition (state, withdrawals, shadow) but keep those live proof fields;
+    // folding the whole captured shell rewound the nonce and the next seal reused it.
+    const folded: AccountReplica = { ...prepared.candidate, proofHeader: account.proofHeader };
+    for (const field of LOCAL_PROOF_FIELDS) {
+      if (account[field] === undefined) delete folded[field];
+      else Reflect.set(folded, field, account[field]);
+    }
+    publishAccountOverlay(account, folded);
     assertLiveCommitMatchesFrame(
       account,
       pendingFrame.accountStateRoot,

@@ -22,6 +22,10 @@ import {
 
 export type { JAdapterMode };
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
+import { configureCryptoPoolEntry } from '../../protocol/crypto/crypto-pool';
+
+// Bun host: the crypto worker pool needs this module URL (shared core cannot spell import.meta).
+configureCryptoPoolEntry(new URL('../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
 const SCENARIO_JADAPTER_MISSING = 'SCENARIO_JADAPTER_MISSING';
 
