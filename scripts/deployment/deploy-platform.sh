@@ -58,7 +58,7 @@ IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
-if [ ! -f "$REPO_ROOT/package.json" ] || [ ! -d "$REPO_ROOT/runtime" ]; then
+if [ ! -f "$REPO_ROOT/package.json" ] || [ ! -d "$REPO_ROOT/core" ]; then
   echo "DEPLOY_REPOSITORY_ROOT_INVALID:path=$REPO_ROOT" >&2
   exit 1
 fi
