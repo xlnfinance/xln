@@ -704,13 +704,13 @@ test('100 fat Account leaves reseal in under 100ms including cached repeats', ()
 test('Entity consensus root rejects non-finite and cyclic state instead of omitting it', () => {
   const nonFinite = baseState();
   nonFinite.timestamp = Number.NaN;
-  expect(() => computeCanonicalEntityConsensusStateHash(nonFinite)).toThrow('ENTITY_STATE_ROOT_NON_FINITE_NUMBER');
+  expect(() => computeCanonicalEntityConsensusStateHash(nonFinite)).toThrow('XLN_BINARY_CODEC_UNSUPPORTED:path=$:detail=number=NaN');
 
   const cyclic = baseState();
   const value: Record<string, unknown> = {};
   value['self'] = value;
   cyclic.proposals.set('cycle', value as never);
-  expect(() => computeCanonicalEntityConsensusStateHash(cyclic)).toThrow('ENTITY_STATE_ROOT_CYCLE');
+  expect(() => computeCanonicalEntityConsensusStateHash(cyclic)).toThrow('XLN_BINARY_CODEC_CYCLE');
 });
 
 test('Entity frame hash binds the complete shared post-replay state root', async () => {

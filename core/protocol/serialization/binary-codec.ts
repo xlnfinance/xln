@@ -216,6 +216,14 @@ export const encodeBinaryPayloadWithCanonical = (
   return { bytes: packCanonical(canonical, codec), canonical };
 };
 
+/**
+ * Strict canonical msgpack bytes for consensus hashing: `undefined` is
+ * rejected rather than preserved, so a hash never silently covers a missing
+ * field. No framing magic: the bytes are an input to keccak, not a payload.
+ */
+export const encodeCanonicalConsensusBytes = (value: unknown): Uint8Array =>
+  asBytes(msgpackCodec.pack(canonicalize(value, '$', new Set(), false, false)));
+
 export const encodeBinaryPayload = (
   value: unknown,
   codec: XlnBinaryCodecName = 'msgpack',

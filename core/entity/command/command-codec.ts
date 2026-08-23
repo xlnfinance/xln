@@ -1,5 +1,6 @@
 import { RecencyMemo } from '../../support/collections/recency-memo';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 import { ethers } from 'ethers';
 
 import { LIMITS } from '../../config/constants';
@@ -8,7 +9,7 @@ import type { EntityTx, SignedEntityCommandV1 } from '../../types/entity-tx';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from '../auth/authorization';
 import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
 
-const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
+const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:binary' as const;
 export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers
   .id('xln:entity-command:unregistered-stack:v1')
   .toLowerCase();
@@ -62,12 +63,10 @@ export function assertEntityCommandTxs(txs: unknown): asserts txs is EntityTx[] 
       throw new Error(`ENTITY_COMMAND_PROTOCOL_TX_FORBIDDEN:${String((tx as { type: unknown }).type)}`);
     }
   }
-  const byteLength = new TextEncoder().encode(
-    encodeCanonicalConsensusValue({
-      version: ENTITY_COMMAND_DOMAIN,
-      txs,
-    }),
-  ).byteLength;
+  const byteLength = encodeCanonicalConsensusBytes({
+    version: ENTITY_COMMAND_DOMAIN,
+    txs,
+  }).byteLength;
   if (byteLength > MAX_ENTITY_COMMAND_BYTES) {
     throw new Error(`ENTITY_COMMAND_BYTE_LIMIT_EXCEEDED:${byteLength}:${MAX_ENTITY_COMMAND_BYTES}`);
   }
@@ -105,16 +104,12 @@ export const assertEntityCommandAuthorBindings = (authorSignerId: string, txs: E
 
 export const hashEntityCommandTxs = (txs: EntityTx[]): string => {
   assertEntityCommandTxs(txs);
-  return ethers
-    .keccak256(
-      ethers.toUtf8Bytes(
-        encodeCanonicalConsensusValue({
-          version: ENTITY_COMMAND_DOMAIN,
-          txs,
-        }),
-      ),
-    )
-    .toLowerCase();
+  return keccakBytesHash(
+    encodeCanonicalConsensusBytes({
+      version: ENTITY_COMMAND_DOMAIN,
+      txs,
+    }),
+  );
 };
 
 const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBody => {
@@ -156,24 +151,20 @@ export const hashEntityCommand = (command: EntityCommandBody): string => {
 
 const hashEntityCommandUncached = (command: EntityCommandBody): string => {
   const body = normalizeEntityCommandBody(command);
-  return ethers
-    .keccak256(
-      ethers.toUtf8Bytes(
-        encodeCanonicalConsensusValue({
-          domain: ENTITY_COMMAND_DOMAIN,
-          version: body.version,
-          entityId: body.entityId,
-          stackKey: body.stackKey,
-          boardHash: body.boardHash,
-          boardEpoch: body.boardEpoch,
-          authorSignerId: body.authorSignerId,
-          authorSigner: body.authorSigner,
-          nonce: body.nonce,
-          txsHash: body.txsHash,
-        }),
-      ),
-    )
-    .toLowerCase();
+  return keccakBytesHash(
+    encodeCanonicalConsensusBytes({
+      domain: ENTITY_COMMAND_DOMAIN,
+      version: body.version,
+      entityId: body.entityId,
+      stackKey: body.stackKey,
+      boardHash: body.boardHash,
+      boardEpoch: body.boardEpoch,
+      authorSignerId: body.authorSignerId,
+      authorSigner: body.authorSigner,
+      nonce: body.nonce,
+      txsHash: body.txsHash,
+    }),
+  );
 };
 
 const exactCommandKeys = new Set([
@@ -233,15 +224,8 @@ export const mergeEntityCommandTransactions = (txs: EntityTx[]): EntityTx[] => {
       continue;
     }
     const command = normalizeSignedEntityCommand(tx.data);
-    const slot = encodeCanonicalConsensusValue({
-      entityId: command.entityId,
-      stackKey: command.stackKey,
-      boardHash: command.boardHash,
-      boardEpoch: command.boardEpoch,
-      authorSignerId: command.authorSignerId,
-      nonce: command.nonce,
-    });
-    const identity = encodeCanonicalConsensusValue(command);
+    const slot = `${command.entityId}|${command.stackKey}|${command.boardHash}|${command.boardEpoch}|${command.authorSignerId}|${command.nonce}`;
+    const identity = keccakBytesHash(encodeCanonicalConsensusBytes(command));
     const prior = commands.get(slot);
     if (prior === identity) continue;
     // Nonces only grow: a rewritten same-slot command is cancelled in favor of

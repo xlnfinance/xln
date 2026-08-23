@@ -3,7 +3,7 @@
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import { encodeRawRadixTextKey } from '../../protocol/state/radix-merkle';
 import {
   PersistentRadixValueMap,
@@ -13,11 +13,10 @@ import {
   type RadixFoldMutation,
 } from '../../protocol/state/persistent-radix-value-map';
 
-const UTF8 = new TextEncoder();
 const MAX_ENTITY_COLLECTION_LEAF_BYTES = 10_000;
 
 const valueHash = <Value>(value: Value): string => {
-  const encoded = UTF8.encode(encodeCanonicalConsensusValue(value));
+  const encoded = encodeCanonicalConsensusBytes(value);
   if (encoded.byteLength > MAX_ENTITY_COLLECTION_LEAF_BYTES) {
     throw new Error(
       `ENTITY_COLLECTION_LEAF_TOO_LARGE:${encoded.byteLength}:${MAX_ENTITY_COLLECTION_LEAF_BYTES}`,

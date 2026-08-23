@@ -4,7 +4,7 @@
  * Key projections: bounded Entity fields and nested Account/Book Patricia roots.
  * Human-audit importance: 100/100 — this root is the Entity quorum's signed state.
  */
-import { keccakTextHash } from '../../protocol/crypto/keccak-text';
+import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import type {
   AccountBoardReseal,
@@ -19,6 +19,7 @@ import type { AssertNever, Covered } from '../../types/hash-coverage/coverage';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import {
   accountInputAck,
   accountInputBoardReseal,
@@ -657,7 +658,6 @@ export const encodeCanonicalEntityConsensusState = (state: EntityState): string 
     state: projectEntityConsensusState(state),
   });
 
-const UTF8 = new TextEncoder();
 
 type EntitySectionCommitment = {
   field: string;
@@ -702,7 +702,7 @@ export const invalidateEntityAccountCommitment = (state: EntityState, counterpar
   }
 };
 
-const encodeEntityAccountsSection = (state: EntityState, cold: boolean): string => {
+const encodeEntityAccountsSection = (state: EntityState, cold: boolean): Uint8Array => {
   const root = cold
     ? PersistentEntityAccountMap.fromEntries(
         state.accounts,
@@ -710,8 +710,8 @@ const encodeEntityAccountsSection = (state: EntityState, cold: boolean): string 
         computeEntityAccountValueHashCold,
       ).rootHash()
     : state.accounts.rootHash();
-  return encodeCanonicalConsensusValue({
-    domain: 'xln.entity.accounts.radix-merkle.v2',
+  return encodeCanonicalConsensusBytes({
+    domain: 'xln.entity.accounts.radix-merkle:binary',
     radix: ENTITY_ACCOUNT_VALUE_MAP_RADIX,
     hashAlgorithm: 'integrity',
     leafCount: state.accounts.size,
@@ -734,24 +734,24 @@ const commitEntityConsensusSections = (
   Object.entries(projected)
     .sort(([left], [right]) => compareStableText(left, right))
     .map(([field, value]) => {
-      const encodeSection = (): string => field === 'accounts' && state
+      const encodeSection = (): Uint8Array => field === 'accounts' && state
         ? encodeEntityAccountsSection(state, cold)
-        : encodeCanonicalConsensusValue(value);
+        : encodeCanonicalConsensusBytes(value);
       // The Account Patricia root was the only material section in the
       // measured H1 profile. Keep that surgical timer; wrapping every scalar
       // section added dozens of environment checks to every production root.
       const encoded = timePerfPhase(`entity.stateRoot.section.${field}`, encodeSection);
       return {
         field,
-        digest: computeIntegrityDigest(UTF8.encode(encoded)),
-        encodedBytes: encoded.length,
+        digest: computeIntegrityDigest(encoded),
+        encodedBytes: encoded.byteLength,
       };
     });
 
 const computeEntityRootFromSections = (sections: readonly EntitySectionCommitment[]): string =>
-  keccakTextHash(
-    encodeCanonicalConsensusValue({
-      domain: 'xln.entity.consensus-state.sections',
+  keccakBytesHash(
+    encodeCanonicalConsensusBytes({
+      domain: 'xln.entity.consensus-state.sections:binary',
       sections: sections.map(({ field, digest }) => ({ field, digest })),
     }),
   );
@@ -908,7 +908,7 @@ export const computeEntityAccountFieldDigests = (
       fields: Object.entries(projectAccountConsensusState(account))
         .map(([field, value]) => ({
           field,
-          digest: computeIntegrityDigest(UTF8.encode(encodeCanonicalConsensusValue(value))),
+          digest: computeIntegrityDigest(encodeCanonicalConsensusBytes(value)),
         }))
         .sort((left, right) => compareStableText(left.field, right.field)),
     }))
@@ -945,9 +945,9 @@ export const buildEntityFrameAuthority = (state: EntityState): EntityFrameAuthor
 };
 
 export const computeEntityFrameAuthorityRoot = (authority: EntityFrameAuthority): string =>
-  keccakTextHash(
-    encodeCanonicalConsensusValue({
-      domain: 'xln.entity.frame-authority',
+  keccakBytesHash(
+    encodeCanonicalConsensusBytes({
+      domain: 'xln.entity.frame-authority:binary',
       authority: {
         config: projectConsensusConfigCommitment(authority.config),
         leaderState: normalizeAuthorityLeader(authority.config, authority.leaderState),
