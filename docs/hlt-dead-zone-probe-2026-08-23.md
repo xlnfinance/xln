@@ -119,6 +119,27 @@ over-smooths. maxDelay=100ms is too high — adds latency without
 proportional batching benefit. Dead zone floor is ~6.5s; hub per-frame
 processing (400–500ms) is the remaining bottleneck.
 
+## 7a. Bun 1.4.0 upgrade
+
+Upgraded from Bun 1.3.14 to 1.4.0 (released 2026-08-20). The 1.4 release
+rewrites the runtime from Zig to Rust, fixes `structuredClone` reference
+pool corruption (PRs #32791, #32796 — the exact bug that
+`cloneIsolatedEntityInput` works around), and reduces memory usage by
+up to 35%.
+
+`bun run check` passes on 1.4.0 with no source changes.
+
+| Run | Bun 1.3.14 (all opts) | Bun 1.4.0 (all opts) |
+| --- | --------------------- | -------------------- |
+| 1   | 210.5 TPS             | 227.4 TPS            |
+| 2   | 208.2 TPS             | 239.7 TPS            |
+| 3   | 194.1 TPS             | 234.6 TPS            |
+| Avg | ~204 TPS              | ~234 TPS             |
+
+**+14.7% TPS from the runtime upgrade alone** (204 → 234 avg).
+Best single run: 239.7 TPS (was 227.4 on 1.3.14).
+Delivery time: 25.0s (was 26.4s best on 1.3.14).
+
 ## 8. Op-counter profile: the real bottleneck
 
 Run with `XLN_RUNTIME_OP_COUNTERS=1` + `XLN_ENTITY_FRAME_PROFILE=1`
