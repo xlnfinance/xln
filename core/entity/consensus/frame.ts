@@ -133,8 +133,8 @@ const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> =>
 // MessagePack header that carries that digest. Canonical JSON text was the
 // preimage before this (2026-08-23): every multi-megabyte frame was rendered
 // to JSON several times per proposal for hashing and wire metering.
-const ENTITY_FRAME_TXS_DOMAIN = 'xln:entity-frame-txs:v2';
-const ENTITY_FRAME_DOMAIN = 'xln:entity-frame:v3';
+const ENTITY_FRAME_TXS_DOMAIN = 'xln:entity-frame-txs:binary';
+const ENTITY_FRAME_DOMAIN = 'xln:entity-frame:binary-context-digest';
 const TX_LENGTH_PREFIX_BYTES = 4;
 
 type CanonicalFrameTxs = {

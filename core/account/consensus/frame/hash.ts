@@ -10,7 +10,6 @@ import { LIMITS } from '../../../config/constants';
 import { accountTxWithoutPostCommitHankos } from '../../settlement/witness-projection';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
-export const MAX_FRAME_SIZE_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 // A peer controls its proposed timestamp. Reject future time because it could
 // prematurely satisfy payer-side deadlines. Do not reject old signed frames:
 // exact retransmission must remain available after an arbitrary outage.

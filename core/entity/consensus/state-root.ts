@@ -300,7 +300,7 @@ const ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS = [
   'lastOutboundFrameAck',
 ] as const;
 
-export const ENTITY_ACCOUNT_LEAF_FIELDS = [
+const ENTITY_ACCOUNT_LEAF_FIELDS = [
   ...ACCOUNT_ENTITY_COMMITTED_FIELDS.filter(field => !ACCOUNT_LEAF_BODY_FIELD_SET.has(field)),
   ...ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS,
 ] as const;

@@ -148,27 +148,6 @@ export const isSingleSignerEntity = (state: EntityState): boolean => {
   }
 };
 
-export const validateEntityReplica = (replica: EntityReplica): boolean => {
-  try {
-    if (!replica.entityId || !replica.signerId) {
-      log.error(`❌ Invalid replica IDs: ${replica.entityId}:${replica.signerId}`);
-      return false;
-    }
-    if (replica.state.height < 0) {
-      log.error(`❌ Invalid state height: ${replica.state.height}`);
-      return false;
-    }
-    if (replica.mempool.length > LIMITS.MEMPOOL_SIZE) {
-      log.error(`❌ External mempool overflow: ${replica.mempool.length} > ${LIMITS.MEMPOOL_SIZE}`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    log.error(`❌ Replica validation error: ${error}`);
-    return false;
-  }
-};
-
 export const getEntityMempoolAdmissionError = (
   replica: EntityReplica,
   input: EntityInput,

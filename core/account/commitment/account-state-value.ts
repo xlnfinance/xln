@@ -384,6 +384,3 @@ const writeAccountStateValue = (w: RlpWriter, value: unknown): void => {
 
 export const encodeAccountStateValue = (value: unknown): Uint8Array => encodeStandalone(value);
 
-/** Legacy node-free encoder kept as a second oracle for equivalence tests. */
-export const encodeAccountStateValueLegacy = (value: unknown): Uint8Array =>
-  encodeAccountStateValueDirect(value);

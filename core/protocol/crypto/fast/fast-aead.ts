@@ -92,4 +92,3 @@ export const aead = (key: Uint8Array, nonce: Uint8Array, aad?: Uint8Array): Aead
   return nodeCrypto ? nativeAead(nodeCrypto, key, nonce, aad) : gcm(key, nonce, aad);
 };
 
-export const aeadBackend = (): 'native-aes-gcm' | 'noble-aes-gcm' => (nodeCrypto ? 'native-aes-gcm' : 'noble-aes-gcm');

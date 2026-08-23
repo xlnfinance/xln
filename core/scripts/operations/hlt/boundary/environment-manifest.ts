@@ -19,9 +19,9 @@ export type HltEnvironmentManifest = Readonly<{
   cryptoSignWorkers: number | 'default';
 }>;
 
-const flagOn = (name: string, fallback: boolean): boolean => {
+const flagOn = (name: string, whenUnset: boolean): boolean => {
   const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
+  if (raw === undefined || raw === '') return whenUnset;
   return raw !== '0' && raw.toLowerCase() !== 'false' && raw.toLowerCase() !== 'off';
 };
 

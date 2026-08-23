@@ -141,11 +141,11 @@ export const configureCryptoPoolEntry = (entry: URL): void => {
 let nextJobId = 0;
 const pending = new Map<number, (result: JobResult['result']) => void>();
 
-const configuredSize = (name: string, fallback: number): number => {
+const configuredSize = (name: string, defaultSize: number): number => {
   const raw = process.env[name];
   const configured = raw === undefined || raw === '' ? NaN : Number(raw);
   if (Number.isSafeInteger(configured) && configured >= 0) return configured;
-  return fallback;
+  return defaultSize;
 };
 
 const cores = (): number => (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 0) || 2;

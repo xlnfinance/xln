@@ -47,7 +47,7 @@ export type HtlcEnvelopeContext = Readonly<{
   revealBeforeHeight: number;
 }>;
 
-const CONTEXT_DOMAIN = new TextEncoder().encode('xln:htlc-envelope-context:v2');
+const CONTEXT_DOMAIN = new TextEncoder().encode('xln:htlc-envelope-context:binary');
 const CONTEXT_PREIMAGE_BYTES = CONTEXT_DOMAIN.length + 32 + 32 + 8 + 20 + 32 + 32 + 8 + 32 + 32 + 8;
 
 const writeHex = (out: Uint8Array, offset: number, hex: string, length: number, code: string): number => {
