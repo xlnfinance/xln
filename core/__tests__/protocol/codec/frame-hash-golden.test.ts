@@ -22,7 +22,7 @@ const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x9b55ab751f698879e3215f49008d58305333e69
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
 // Intentional testnet reset: the canonical Entity frame commits the exact infra context,
 // while Entity state commits its shared encryption public key.
-const ENTITY_FRAME_GOLDEN_HASH = '0x03689c0f9aa77992c4af7745491f6203904c4f25ebae7109964c8cccc3624492';
+const ENTITY_FRAME_GOLDEN_HASH = '0x2dcf9cc256efe2c243178277f4c45d45c09b1050f8e9aa6748d03099ce75e614';
 
 const makeEntityContextFixture = (): EntityInfraContext => ({
   version: 1,

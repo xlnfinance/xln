@@ -24,11 +24,10 @@ export const encodeBuffer = (
 };
 
 /**
- * Row bytes that are only ever decoded back into objects (content-addressed
- * payload rows, the frame record, activity rows) skip the canonical walk:
- * the same code path emits the same key order, and every hash over these
- * rows is taken over the stored bytes themselves. Commitments that must
- * match across processes (frame hash, replica meta, heads) stay canonical.
+ * Row bytes that are only ever decoded back into objects (the frame record,
+ * activity rows) skip the canonical walk. Content-addressed payload rows must
+ * NOT use this: their ref is the hash of the stored bytes and replay rebuilds
+ * the same ref from WAL-decoded (canonically ordered) objects.
  */
 export const encodeBufferAsIs = (value: unknown): Buffer => {
   const buffer = Buffer.from(packPreorderedBinaryPayload(value));

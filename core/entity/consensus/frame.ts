@@ -134,7 +134,7 @@ const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> =>
 // preimage before this (2026-08-23): every multi-megabyte frame was rendered
 // to JSON several times per proposal for hashing and wire metering.
 const ENTITY_FRAME_TXS_DOMAIN = 'xln:entity-frame-txs:v2';
-const ENTITY_FRAME_DOMAIN = 'xln:entity-frame:v2';
+const ENTITY_FRAME_DOMAIN = 'xln:entity-frame:v3';
 const TX_LENGTH_PREFIX_BYTES = 4;
 
 type CanonicalFrameTxs = {
@@ -244,6 +244,21 @@ export type EntityFrameWireBudgetInput = {
   jPrefixCertificate?: JPrefixCertificate;
 };
 
+// The infra context (every inbound HTLC entry with its inner onion layer) is
+// the bulk of a Hub frame header. It commits as one digest over its canonical
+// bytes, computed once per context object for the wire-budget measure, the
+// frame hash and validation alike.
+type CanonicalEntityContext = { digest: string; byteLength: number };
+const canonicalContexts = new RecencyMemo<EntityInfraContext, CanonicalEntityContext>(64);
+const canonicalEntityContext = (context: EntityInfraContext): CanonicalEntityContext => {
+  const hit = canonicalContexts.get(context);
+  if (hit) return hit;
+  const bytes = encodeBinaryPayload(context);
+  const entry = { digest: computeIntegrityDigest(bytes), byteLength: bytes.byteLength };
+  canonicalContexts.set(context, entry);
+  return entry;
+};
+
 const encodeEntityFrameHeader = (
   rest: Omit<EntityFrameWireBudgetInput, 'txs'>,
   txCount: number,
@@ -259,15 +274,16 @@ const encodeEntityFrameHeader = (
   entityId: rest.entityId,
   stateRoot: rest.stateRoot,
   authorityRoot: rest.authorityRoot,
-  entityContext: rest.entityContext,
+  entityContextDigest: canonicalEntityContext(rest.entityContext).digest,
   jPrefixCertificate: rest.jPrefixCertificate ?? null,
 });
 
 const EMPTY_TXS_DIGEST = canonicalFrameTxs([]).digest;
 
-/** Wire bytes of the frame without txs: the header carries everything else. */
+/** Wire bytes of the frame without txs: the header plus the context it commits by digest. */
 const measureEntityFrameRestBytes = (rest: Omit<EntityFrameWireBudgetInput, 'txs'>): number =>
-  encodeEntityFrameHeader(rest, 0, EMPTY_TXS_DIGEST).byteLength;
+  encodeEntityFrameHeader(rest, 0, EMPTY_TXS_DIGEST).byteLength
+  + canonicalEntityContext(rest.entityContext).byteLength;
 
 export const measureEntityFrameWireBytes = (input: EntityFrameWireBudgetInput): number =>
   measureEntityFrameRestBytes(input) + getEntityFrameTxByteLength(input.txs);
@@ -347,7 +363,9 @@ export const selectEntityFrameTxPrefixForWireBudget = (
 export const assertEntityFrameTotalByteBudget = (input: EntityFrameWireBudgetInput): Uint8Array => {
   const frameTxs = canonicalFrameTxs(input.txs);
   const header = encodeEntityFrameHeader(input, frameTxs.length, frameTxs.digest);
-  const frameBytes = header.byteLength + prefixAt(frameTxs.prefixBytes, frameTxs.length);
+  const frameBytes = header.byteLength
+    + canonicalEntityContext(input.entityContext).byteLength
+    + prefixAt(frameTxs.prefixBytes, frameTxs.length);
   if (frameBytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
     // Failure path only: say which part is fat so the deferral log is actionable.
     const part = (value: unknown): number => {
