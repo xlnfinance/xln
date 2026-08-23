@@ -3,19 +3,18 @@ use std::error::Error;
 use std::io::{self, Read, Write};
 
 use num_bigint::BigInt;
-use sha2::{Digest, Sha256};
 use xln_rscore_abi::{
     AbiValue, BodyTuple, Envelope, MessageKind, OpTag, decode_envelope, encode_envelope,
 };
 use xln_rscore_engine::{
-    AccountDomain, AccountIdentity, AccountOutput, AccountRejection, AccountReplica, AccountState,
-    AccountTx, AccountVerdict, DeliveryMode, Delta, DepositoryAddress, EntityId,
-    SequentialAccountEngine, Side, TokenId, WatchSeed,
+    AccountDomain, AccountExecutionContext, AccountIdentity, AccountOutput, AccountRejection,
+    AccountReplica, AccountState, AccountTx, AccountVerdict, DeliveryMode, Delta,
+    DepositoryAddress, EntityId, HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome,
+    HtlcResolveTx, SequentialAccountEngine, Side, TokenId, WatchSeed,
 };
-use xln_rscore_protocol::{CanonicalValue, encode_account_state_value};
 
 const REQUEST_ARITY: usize = 3;
-const RESPONSE_SCHEMA: &str = "balance-direct-v1";
+const RESPONSE_SCHEMA: &str = "payment-v1";
 
 fn invalid(detail: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, detail.into())
@@ -57,6 +56,26 @@ fn token(value: &AbiValue) -> Result<TokenId, Box<dyn Error>> {
 
 fn bigint(value: &AbiValue) -> Result<BigInt, Box<dyn Error>> {
     Ok(text(value)?.parse()?)
+}
+
+fn unsigned(value: &AbiValue) -> Result<u64, Box<dyn Error>> {
+    Ok(u64::try_from(integer(value)?)?)
+}
+
+fn context(value: &AbiValue) -> Result<Option<AccountExecutionContext>, Box<dyn Error>> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = tuple(value)?;
+    if fields.len() != 4 {
+        return Err(invalid("DIFFERENTIAL_CONTEXT_ARITY").into());
+    }
+    Ok(Some(AccountExecutionContext::new(
+        unsigned(&fields[0])?,
+        unsigned(&fields[1])?,
+        unsigned(&fields[2])?,
+        unsigned(&fields[3])?,
+    )))
 }
 
 fn side(value: &AbiValue) -> Result<Side, io::Error> {
@@ -144,6 +163,31 @@ fn parse_tx(value: &AbiValue) -> Result<AccountTx, Box<dyn Error>> {
             },
             trusted_gateway_entity_id: optional_text(&fields[8])?,
         }),
+        3 if fields.len() == 7 => Ok(AccountTx::HtlcLock(HtlcLockTx {
+            lock_id: text(&fields[1])?.to_owned(),
+            hashlock: HtlcHashlock::parse(text(&fields[2])?)?,
+            timelock: bigint(&fields[3])?,
+            reveal_before_height: unsigned(&fields[4])?,
+            amount: bigint(&fields[5])?,
+            token_id: token(&fields[6])?,
+            delivery_mode: None,
+            envelope: None,
+        })),
+        4 if fields.len() == 4 => {
+            let outcome = match integer(&fields[2])? {
+                0 => HtlcResolveOutcome::Secret {
+                    secret: text(&fields[3])?.to_owned(),
+                },
+                1 => HtlcResolveOutcome::Error {
+                    reason: optional_text(&fields[3])?,
+                },
+                tag => return Err(invalid(format!("DIFFERENTIAL_HTLC_OUTCOME_TAG:{tag}")).into()),
+            };
+            Ok(AccountTx::HtlcResolve(HtlcResolveTx {
+                lock_id: text(&fields[1])?.to_owned(),
+                outcome,
+            }))
+        }
         tag => Err(invalid(format!(
             "DIFFERENTIAL_TX_TAG_OR_ARITY:{tag}:{}",
             fields.len()
@@ -178,58 +222,33 @@ fn observable_rows<'a>(replica: &'a AccountReplica, tokens: &BTreeSet<TokenId>) 
         .collect()
 }
 
-fn modeled_delta_state_root(rows: &[&Delta]) -> Result<[u8; 32], Box<dyn Error>> {
-    let values = rows
-        .iter()
-        .map(|delta| {
-            CanonicalValue::Object(vec![
-                (
-                    "tokenId".into(),
-                    CanonicalValue::Number(f64::from(delta.token_id().get())),
-                ),
-                (
-                    "collateral".into(),
-                    CanonicalValue::BigInt(delta.collateral().clone()),
-                ),
-                (
-                    "ondelta".into(),
-                    CanonicalValue::BigInt(delta.ondelta().clone()),
-                ),
-                (
-                    "offdelta".into(),
-                    CanonicalValue::BigInt(delta.offdelta().clone()),
-                ),
-                (
-                    "leftCreditLimit".into(),
-                    CanonicalValue::BigInt(delta.left_credit_limit().clone()),
-                ),
-                (
-                    "rightCreditLimit".into(),
-                    CanonicalValue::BigInt(delta.right_credit_limit().clone()),
-                ),
-                (
-                    "leftAllowance".into(),
-                    CanonicalValue::BigInt(delta.allowance(Side::Left).clone()),
-                ),
-                (
-                    "rightAllowance".into(),
-                    CanonicalValue::BigInt(delta.allowance(Side::Right).clone()),
-                ),
-                (
-                    "leftHold".into(),
-                    CanonicalValue::BigInt(delta.hold(Side::Left).clone()),
-                ),
-                (
-                    "rightHold".into(),
-                    CanonicalValue::BigInt(delta.hold(Side::Right).clone()),
-                ),
-            ])
-        })
-        .collect();
-    Ok(Sha256::digest(encode_account_state_value(&CanonicalValue::Array(values))?).into())
+fn lock_value(lock: &HtlcLock) -> AbiValue {
+    values_tuple(vec![
+        AbiValue::Text(lock.lock_id().into()),
+        AbiValue::Text(lock.hashlock().as_str().into()),
+        AbiValue::Text(lock.timelock().to_string()),
+        AbiValue::Integer(i128::from(lock.reveal_before_height())),
+        AbiValue::Text(lock.amount().to_string()),
+        AbiValue::Integer(i128::from(lock.token_id().get())),
+        AbiValue::Bool(lock.sender() == Side::Left),
+        AbiValue::Integer(i128::from(lock.created_height())),
+        AbiValue::Integer(i128::from(lock.created_timestamp())),
+        lock.envelope_hash_hex()
+            .map_or(AbiValue::Nil, AbiValue::Text),
+    ])
 }
 
-fn output_value(output: &AccountOutput) -> Result<AbiValue, io::Error> {
+fn observable_locks<'a>(
+    replica: &'a AccountReplica,
+    lock_ids: &BTreeSet<String>,
+) -> Vec<&'a HtlcLock> {
+    lock_ids
+        .iter()
+        .filter_map(|lock_id| replica.state().htlc_lock(lock_id))
+        .collect()
+}
+
+fn output_value(output: &AccountOutput) -> AbiValue {
     match output {
         AccountOutput::DirectPaymentForward {
             token_id,
@@ -238,7 +257,7 @@ fn output_value(output: &AccountOutput) -> Result<AbiValue, io::Error> {
             description,
             delivery_mode,
             trusted_gateway_entity_id,
-        } => Ok(values_tuple(vec![
+        } => values_tuple(vec![
             AbiValue::Text("directPaymentForward".into()),
             AbiValue::Integer(i128::from(token_id.get())),
             AbiValue::Text(amount.to_string()),
@@ -252,10 +271,35 @@ fn output_value(output: &AccountOutput) -> Result<AbiValue, io::Error> {
                 .into(),
             ),
             AbiValue::Text(trusted_gateway_entity_id.clone()),
-        ])),
-        unsupported => Err(invalid(format!(
-            "DIFFERENTIAL_OUTPUT_UNSUPPORTED:{unsupported:?}"
-        ))),
+        ]),
+        AccountOutput::HtlcSecret {
+            lock_id,
+            hashlock,
+            secret,
+            token_id,
+            amount,
+        } => values_tuple(vec![
+            AbiValue::Text("htlcSecret".into()),
+            AbiValue::Text(lock_id.clone()),
+            AbiValue::Text(hashlock.clone()),
+            AbiValue::Text(secret.clone()),
+            AbiValue::Integer(i128::from(token_id.get())),
+            AbiValue::Text(amount.to_string()),
+        ]),
+        AccountOutput::HtlcError {
+            lock_id,
+            hashlock,
+            token_id,
+            amount,
+            reason,
+        } => values_tuple(vec![
+            AbiValue::Text("htlcError".into()),
+            AbiValue::Text(lock_id.clone()),
+            AbiValue::Text(hashlock.clone()),
+            AbiValue::Integer(i128::from(token_id.get())),
+            AbiValue::Text(amount.to_string()),
+            reason.clone().map_or(AbiValue::Nil, AbiValue::Text),
+        ]),
     }
 }
 
@@ -266,6 +310,7 @@ fn verdict_value(verdict: &AccountVerdict) -> AbiValue {
             let kind = match rejection {
                 AccountRejection::Validation(_) => "validation",
                 AccountRejection::DeltaRowLimitExceeded { .. } => "delta_row_limit_exceeded",
+                AccountRejection::HtlcLockCapacity { .. } => "htlc_lock_capacity",
             };
             values_tuple(vec![
                 AbiValue::Text("rejected".into()),
@@ -282,8 +327,10 @@ fn step_value(
     transition: &xln_rscore_engine::AccountTransition,
     replica: &AccountReplica,
     tokens: &BTreeSet<TokenId>,
+    lock_ids: &BTreeSet<String>,
 ) -> Result<AbiValue, Box<dyn Error>> {
     let rows = observable_rows(replica, tokens);
+    let locks = observable_locks(replica, lock_ids);
     Ok(values_tuple(vec![
         AbiValue::Text(id),
         verdict_value(transition.verdict()),
@@ -295,17 +342,12 @@ fn step_value(
                 .map(AbiValue::Text)
                 .collect(),
         ),
-        values_tuple(
-            transition
-                .outputs()
-                .iter()
-                .map(output_value)
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
+        values_tuple(transition.outputs().iter().map(output_value).collect()),
         values_tuple(rows.iter().map(|delta| delta_value(delta)).collect()),
+        values_tuple(locks.iter().map(|lock| lock_value(lock)).collect()),
         values_tuple(vec![
-            AbiValue::Bytes(modeled_delta_state_root(&rows)?.to_vec()),
             AbiValue::Bytes(replica.state().deltas_root().to_vec()),
+            AbiValue::Bytes(replica.state().htlc_locks_root().to_vec()),
         ]),
     ]))
 }
@@ -319,23 +361,36 @@ fn execute(envelope: Envelope) -> Result<Envelope, Box<dyn Error>> {
         return Err(invalid("DIFFERENTIAL_SCHEMA").into());
     }
     let (mut replica, mut tokens) = parse_initial(&body[1])?;
+    let mut lock_ids = BTreeSet::new();
     let mut steps = Vec::new();
     for case in tuple(&body[2])? {
         let fields = tuple(case)?;
-        if fields.len() != 3 {
+        if fields.len() != 4 {
             return Err(invalid("DIFFERENTIAL_CASE_ARITY").into());
         }
         let id = text(&fields[0])?.to_owned();
-        let tx = parse_tx(&fields[2])?;
+        let tx = parse_tx(&fields[3])?;
         if let AccountTx::AddDelta { token_id }
         | AccountTx::SetCreditLimit { token_id, .. }
         | AccountTx::DirectPayment { token_id, .. } = &tx
         {
             tokens.insert(*token_id);
         }
-        let transition = SequentialAccountEngine::apply(&replica, side(&fields[1])?, &tx)?;
+        if let AccountTx::HtlcLock(lock) = &tx {
+            tokens.insert(lock.token_id);
+            lock_ids.insert(lock.lock_id.clone());
+        } else if let AccountTx::HtlcResolve(resolve) = &tx {
+            lock_ids.insert(resolve.lock_id.clone());
+        }
+        let proposer = side(&fields[1])?;
+        let transition = match context(&fields[2])? {
+            Some(context) => {
+                SequentialAccountEngine::apply_with_context(&replica, proposer, &tx, &context)?
+            }
+            None => SequentialAccountEngine::apply(&replica, proposer, &tx)?,
+        };
         let next = transition.candidate().unwrap_or(&replica);
-        steps.push(step_value(id, &transition, next, &tokens)?);
+        steps.push(step_value(id, &transition, next, &tokens, &lock_ids)?);
         if let Some(candidate) = transition.committed() {
             replica = candidate;
         }

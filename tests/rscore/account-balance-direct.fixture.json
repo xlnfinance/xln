@@ -1,8 +1,19 @@
 {
-  "schema": "balance-direct-v1",
+  "schema": "payment-v1",
   "typescriptAuthority": "1001909ab2f927d60b889a02cbd7113ddc09e79d",
-  "cases": ["add-delta", "left-credit", "right-credit", "direct", "trusted", "forged-direction"],
-  "rootFields": ["modeledDeltaStateRoot", "deltasRadixRoot"],
-  "request": { "bytes": 1437, "sha256": "5dab5b0957479137ed58028ae23f876c203edc9dd41c4b290d8715906fa5d2ef" },
-  "response": { "bytes": 1640, "sha256": "fe9b864bc0c297c3c7a096364cfbe25e007f409cc7a80813d53cac4b1dd604c8" }
+  "cases": [
+    "add-delta",
+    "left-credit",
+    "right-credit",
+    "direct",
+    "trusted",
+    "forged-direction",
+    "htlc-secret-lock",
+    "htlc-secret-resolve",
+    "htlc-timeout-lock",
+    "htlc-timeout-resolve"
+  ],
+  "rootFields": ["deltasRadixRoot", "locksRadixRoot"],
+  "request": { "bytes": 2069, "sha256": "2605ed658bfbbb9d9eafdaacae6b04a476b0743285a106ed8b349a2a3c140636" },
+  "response": { "bytes": 3170, "sha256": "183dcffdb24c9eac6208b13a18843fc4b8b9e1ab9082000e3a04d862f4db7003" }
 }

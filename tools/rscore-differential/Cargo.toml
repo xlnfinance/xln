@@ -7,9 +7,7 @@ publish = false
 
 [dependencies]
 num-bigint = "0.4.6"
-sha2 = "0.10.9"
 xln-rscore-abi = { path = "../../rscore/crates/abi" }
 xln-rscore-engine = { path = "../../rscore/crates/engine" }
-xln-rscore-protocol = { path = "../../rscore/crates/protocol" }
 
 [workspace]
