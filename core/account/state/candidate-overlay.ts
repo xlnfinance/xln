@@ -3,18 +3,8 @@
 import type { AccountReplica } from '../../types/account';
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
-import {
-  createAccountPairKey,
-  toEntityId,
-  type AccountPairKey,
-  type EntityId,
-} from '../../protocol/identity';
-import {
-  toEvidenceHash,
-  toStateHash,
-  type EvidenceHash,
-  type StateHash,
-} from '../../protocol/hashes';
+import { createAccountPairKey, toEntityId, type AccountPairKey, type EntityId } from '../../protocol/identity';
+import { toEvidenceHash, toStateHash, type EvidenceHash, type StateHash } from '../../protocol/hashes';
 import { computeAccountStateRoot } from '../commitment/state-root';
 import { createStructuredLogger } from '../../support/logger';
 import {
@@ -41,27 +31,38 @@ export type AccountTransitionCommit = Readonly<{
   nodeChanges: AccountStateDraftNodeChanges;
 }>;
 
-export const countAccountTransitionNodeChanges = (
-  changes: AccountStateDraftNodeChanges,
-): number =>
-  changes.deltas.puts.length + changes.deltas.dels.length
-  + changes.locks.puts.length + changes.locks.dels.length
-  + changes.swapOffers.puts.length + changes.swapOffers.dels.length
-  + changes.pulls.puts.length + changes.pulls.dels.length
-  + changes.subcontracts.puts.length + changes.subcontracts.dels.length
-  + changes.lendingIntents.puts.length + changes.lendingIntents.dels.length
-  + changes.requestedRebalance.puts.length + changes.requestedRebalance.dels.length
-  + changes.requestedRebalanceFeeState.puts.length + changes.requestedRebalanceFeeState.dels.length
-  + changes.rebalanceFeePolicies.puts.length + changes.rebalanceFeePolicies.dels.length
-  + changes.pendingWithdrawals.puts.length + changes.pendingWithdrawals.dels.length
-  + changes.rebalanceShadowPolicy.puts.length + changes.rebalanceShadowPolicy.dels.length
-  + changes.rebalanceShadowSubmitted.puts.length + changes.rebalanceShadowSubmitted.dels.length;
+export const countAccountTransitionNodeChanges = (changes: AccountStateDraftNodeChanges): number =>
+  changes.deltas.puts.length +
+  changes.deltas.dels.length +
+  changes.locks.puts.length +
+  changes.locks.dels.length +
+  changes.swapOffers.puts.length +
+  changes.swapOffers.dels.length +
+  changes.pulls.puts.length +
+  changes.pulls.dels.length +
+  changes.subcontracts.puts.length +
+  changes.subcontracts.dels.length +
+  changes.lendingIntents.puts.length +
+  changes.lendingIntents.dels.length +
+  changes.requestedRebalance.puts.length +
+  changes.requestedRebalance.dels.length +
+  changes.requestedRebalanceFeeState.puts.length +
+  changes.requestedRebalanceFeeState.dels.length +
+  changes.rebalanceFeePolicies.puts.length +
+  changes.rebalanceFeePolicies.dels.length +
+  changes.pendingWithdrawals.puts.length +
+  changes.pendingWithdrawals.dels.length +
+  changes.rebalanceShadowPolicy.puts.length +
+  changes.rebalanceShadowPolicy.dels.length +
+  changes.rebalanceShadowSubmitted.puts.length +
+  changes.rebalanceShadowSubmitted.dels.length;
 
 type OverlayStatus = 'active' | 'committed' | 'discarded';
 export class AccountTransitionOverlay {
-  readonly cacheKey: EvidenceHash;
   readonly lifecycle: { status: OverlayStatus };
   readonly stateDraft: AccountStateDraftOwner;
+  #cacheKey: EvidenceHash | undefined;
+  #key: AccountTransitionKey;
 
   constructor(
     readonly base: AccountReplica,
@@ -69,25 +70,42 @@ export class AccountTransitionOverlay {
   ) {
     this.lifecycle = { status: 'active' };
     this.stateDraft = beginAccountStateDraft(base);
-    this.cacheKey = transitionCacheKey(key);
+    this.#key = key;
+  }
+
+  get cacheKey(): EvidenceHash {
+    if (this.#cacheKey === undefined) this.#cacheKey = transitionCacheKey(this.#key);
+    return this.#cacheKey;
   }
 }
 const UTF8 = new TextEncoder();
 /** Callers pass purpose + hashes/ids, never Account frame or tx bodies. */
 const orderedInputHash = (orderedInputPrefix: unknown): EvidenceHash =>
-  toEvidenceHash(computeIntegrityDigest(UTF8.encode(encodeCanonicalConsensusValue({
-    domain: 'xln.account.transition-input.v1',
-    orderedInputPrefix,
-  }))));
+  toEvidenceHash(
+    computeIntegrityDigest(
+      UTF8.encode(
+        encodeCanonicalConsensusValue({
+          domain: 'xln.account.transition-input.v1',
+          orderedInputPrefix,
+        }),
+      ),
+    ),
+  );
 
 const transitionCacheKey = (key: AccountTransitionKey): EvidenceHash =>
-  toEvidenceHash(computeIntegrityDigest(UTF8.encode(encodeCanonicalConsensusValue({
-    domain: 'xln.account.transition-cache.v1',
-    entityId: key.entityId,
-    accountId: key.accountId,
-    baseRoot: key.baseRoot,
-    orderedInputPrefixHash: key.orderedInputPrefixHash,
-  }))));
+  toEvidenceHash(
+    computeIntegrityDigest(
+      UTF8.encode(
+        encodeCanonicalConsensusValue({
+          domain: 'xln.account.transition-cache.v1',
+          entityId: key.entityId,
+          accountId: key.accountId,
+          baseRoot: key.baseRoot,
+          orderedInputPrefixHash: key.orderedInputPrefixHash,
+        }),
+      ),
+    ),
+  );
 
 const counterpartyForOwner = (account: AccountReplica, owner: EntityId): EntityId => {
   const left = toEntityId(account.state.leftEntity.toLowerCase());
@@ -97,10 +115,7 @@ const counterpartyForOwner = (account: AccountReplica, owner: EntityId): EntityI
   throw new Error(`ACCOUNT_TRANSITION_OWNER_MISMATCH:${owner}:${left}:${right}`);
 };
 
-const createAccountTransitionKey = (
-  account: AccountReplica,
-  orderedInputPrefix: unknown,
-): AccountTransitionKey => {
+const createAccountTransitionKey = (account: AccountReplica, orderedInputPrefix: unknown): AccountTransitionKey => {
   const entityId = toEntityId(account.proofHeader.fromEntity.toLowerCase());
   const counterparty = counterpartyForOwner(account, entityId);
   return {
@@ -111,6 +126,41 @@ const createAccountTransitionKey = (
   };
 };
 
+/**
+ * Lazy transition key. `baseRoot` (computeAccountStateRoot) and
+ * `orderedInputPrefixHash` (canonical.encode + keccak) are only needed when
+ * `cacheKey` is read. Eager construction burned ~40% of all canonical.encode
+ * calls producing a value that no external consumer reads.
+ */
+type LazyAccountTransitionKey = {
+  entityId: EntityId;
+  accountId: AccountPairKey;
+  baseRoot: StateHash;
+  orderedInputPrefixHash: EvidenceHash;
+};
+
+const createLazyAccountTransitionKey = (
+  account: AccountReplica,
+  orderedInputPrefix: unknown,
+): LazyAccountTransitionKey & { _lazy?: { baseRoot?: StateHash; orderedInputPrefixHash?: EvidenceHash } } => {
+  const entityId = toEntityId(account.proofHeader.fromEntity.toLowerCase());
+  const counterparty = counterpartyForOwner(account, entityId);
+  const lazy: { baseRoot?: StateHash; orderedInputPrefixHash?: EvidenceHash } = {};
+  return {
+    entityId,
+    accountId: createAccountPairKey(entityId, counterparty),
+    get baseRoot() {
+      if (lazy.baseRoot === undefined) lazy.baseRoot = toStateHash(computeAccountStateRoot(account.state));
+      return lazy.baseRoot;
+    },
+    get orderedInputPrefixHash() {
+      if (lazy.orderedInputPrefixHash === undefined) lazy.orderedInputPrefixHash = orderedInputHash(orderedInputPrefix);
+      return lazy.orderedInputPrefixHash;
+    },
+    _lazy: lazy,
+  } as LazyAccountTransitionKey & { _lazy?: { baseRoot?: StateHash; orderedInputPrefixHash?: EvidenceHash } };
+};
+
 const requireActive = (overlay: AccountTransitionOverlay): void => {
   if (overlay.lifecycle.status !== 'active') {
     throw new Error(`ACCOUNT_TRANSITION_OVERLAY_NOT_ACTIVE:${overlay.lifecycle.status}`);
@@ -119,22 +169,15 @@ const requireActive = (overlay: AccountTransitionOverlay): void => {
 
 const overlayLog = createStructuredLogger('account.overlay');
 
-export const beginAccountTransition = (
-  base: AccountReplica,
-  orderedInputPrefix: unknown,
-): AccountTransitionOverlay => new AccountTransitionOverlay(
-  base,
-  createAccountTransitionKey(base, orderedInputPrefix),
-);
+export const beginAccountTransition = (base: AccountReplica, orderedInputPrefix: unknown): AccountTransitionOverlay =>
+  new AccountTransitionOverlay(base, createLazyAccountTransitionKey(base, orderedInputPrefix));
 
 export const accountTransitionView = (overlay: AccountTransitionOverlay): AccountDraftReplica => {
   requireActive(overlay);
   return overlay.stateDraft.draft;
 };
 
-export const commitAccountTransition = (
-  overlay: AccountTransitionOverlay,
-): AccountTransitionCommit => {
+export const commitAccountTransition = (overlay: AccountTransitionOverlay): AccountTransitionCommit => {
   requireActive(overlay);
   const prepared = prepareAccountStateDraft(overlay.stateDraft, overlay.stateDraft.draft);
   const account = prepared.account;
@@ -146,9 +189,15 @@ export const commitAccountTransition = (
   return {
     account,
     cacheKey: overlay.cacheKey,
-    get accountStateRoot() { return toStateHash(computeAccountStateRoot(account.state)); },
-    get hash() { return this.accountStateRoot; },
-    get nodeChanges() { return prepared.nodeChanges; },
+    get accountStateRoot() {
+      return toStateHash(computeAccountStateRoot(account.state));
+    },
+    get hash() {
+      return this.accountStateRoot;
+    },
+    get nodeChanges() {
+      return prepared.nodeChanges;
+    },
   };
 };
 
@@ -172,10 +221,7 @@ const ACCOUNT_LIVE_ENVELOPE = new Set<keyof AccountReplica>([
   'publicPinned',
 ]);
 
-export const publishAccountOverlay = (
-  live: AccountReplica,
-  prepared: AccountReplica,
-): AccountReplica => {
+export const publishAccountOverlay = (live: AccountReplica, prepared: AccountReplica): AccountReplica => {
   const keys = new Set<keyof AccountReplica>([
     ...(Object.keys(live) as (keyof AccountReplica)[]),
     ...(Object.keys(prepared) as (keyof AccountReplica)[]),
@@ -183,9 +229,7 @@ export const publishAccountOverlay = (
   for (const key of keys) {
     if (ACCOUNT_LIVE_ENVELOPE.has(key)) continue;
     const value = prepared[key];
-    const applied = value === undefined
-      ? Reflect.deleteProperty(live, key)
-      : Reflect.set(live, key, value);
+    const applied = value === undefined ? Reflect.deleteProperty(live, key) : Reflect.set(live, key, value);
     if (!applied) throw new Error(`ACCOUNT_OVERLAY_PUBLISH_FAILED:${String(key)}`);
   }
   overlayLog.debug('overlay.folded', {
@@ -207,9 +251,15 @@ export const publishAccountTransition = (
   return {
     account: live,
     cacheKey: committed.cacheKey,
-    get accountStateRoot() { return committed.accountStateRoot; },
-    get hash() { return committed.hash; },
-    get nodeChanges() { return committed.nodeChanges; },
+    get accountStateRoot() {
+      return committed.accountStateRoot;
+    },
+    get hash() {
+      return committed.hash;
+    },
+    get nodeChanges() {
+      return committed.nodeChanges;
+    },
   };
 };
 
