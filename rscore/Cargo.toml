@@ -1,0 +1,22 @@
+[workspace]
+members = ["crates/protocol"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.94"
+
+[workspace.dependencies]
+hex = "0.4.3"
+num-bigint = "0.4.6"
+ryu-js = "1.0.2"
+sha2 = "0.10.9"
+thiserror = "2.0.16"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+
