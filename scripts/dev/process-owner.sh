@@ -29,7 +29,7 @@ dev_process_start_identity() {
 
 dev_role_allowed() {
   case "$1" in
-    anvil|anvil2|rpc-ready|mesh|watchtower|runtime|vite|vite-http|ready) return 0 ;;
+    anvil|anvil2|rpc-ready|backend-ready|mesh|watchtower|runtime|vite|vite-http|ready) return 0 ;;
     *) return 1 ;;
   esac
 }

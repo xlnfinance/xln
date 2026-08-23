@@ -123,10 +123,11 @@ export async function superviseDev(options: DevSupervisorOptions): Promise<numbe
   };
 
   const spawnRole = (role: DevChildRole): DevRoleProcess => {
-    const applicationReady = DEV_APPLICATION_ROLES.includes(role as typeof DEV_APPLICATION_ROLES[number]);
+    const chainsReady = DEV_APPLICATION_ROLES.includes(role as typeof DEV_APPLICATION_ROLES[number])
+      || role === DEV_BACKEND_BARRIER_ROLE;
     const child = spawn('bash', [options.childScript, role], {
       cwd: options.cwd,
-      env: applicationReady ? { ...process.env, XLN_DEV_CHAINS_READY: '1' } : process.env,
+      env: chainsReady ? { ...process.env, XLN_DEV_CHAINS_READY: '1' } : process.env,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

@@ -122,6 +122,7 @@ describe('dev RPC readiness', () => {
 test('dev starts application services only after both exact Anvil chains are ready', () => {
   const runner = readFileSync(join(repoRoot, 'scripts/dev/run-dev.sh'), 'utf8');
   const child = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
+  const ownership = readFileSync(join(repoRoot, 'scripts/dev/process-owner.sh'), 'utf8');
   const supervisor = readFileSync(join(repoRoot, 'scripts/dev/supervise-dev.ts'), 'utf8');
   expect(DEV_ROLES).toEqual(['anvil', 'anvil2', 'mesh', 'watchtower', 'runtime', 'vite', 'vite-http', 'ready']);
   expect(runner).toContain('bun scripts/dev/supervise-dev.ts');
@@ -140,7 +141,8 @@ test('dev starts application services only after both exact Anvil chains are rea
   expect(backendStart).toBeGreaterThan(barrier);
   expect(backendBarrier).toBeGreaterThan(backendStart);
   expect(frontendStart).toBeGreaterThan(backendBarrier);
-  expect(child).toContain('backend-ready)\n    run_owned bun scripts/dev/wait-dev-backend-ready.ts');
+  expect(child).toContain('backend-ready)\n    run_owned bun scripts/dev/readiness/wait-dev-backend-ready.ts');
+  expect(ownership).toContain('rpc-ready|backend-ready|mesh');
 });
 
 test('dev cleanup reaps only owner-recorded processes and only deletes the dev shard', () => {
@@ -567,7 +569,11 @@ test('dev supervisor owns all roles, preserves their logs and stops siblings aft
 set -euo pipefail
 role="$1"
 echo "started role=$role"
-if [[ "$role" == "ready" || "$role" == "rpc-ready" || "$role" == "backend-ready" ]]; then exit 0; fi
+if [[ "$role" == "backend-ready" ]]; then
+  [[ "\${XLN_DEV_CHAINS_READY:-}" == "1" ]] || exit 8
+  exit 0
+fi
+if [[ "$role" == "ready" || "$role" == "rpc-ready" ]]; then exit 0; fi
 if [[ "$role" == "mesh" ]]; then sleep 0.1; exit 7; fi
 if [[ "$role" == "anvil" ]]; then
   sleep 30 &

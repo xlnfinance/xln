@@ -163,7 +163,7 @@ case "$role" in
     wait_for_dev_chains
     ;;
   backend-ready)
-    run_owned bun scripts/dev/wait-dev-backend-ready.ts \
+    run_owned bun scripts/dev/readiness/wait-dev-backend-ready.ts \
       --api-url "http://127.0.0.1:${API_PORT}" \
       --watchtower-url "http://127.0.0.1:${WATCHTOWER_PORT}" \
       --runtime-bundle "$DEV_RUNTIME_BUNDLE_PATH" \

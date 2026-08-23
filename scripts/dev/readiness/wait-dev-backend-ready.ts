@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { probeDevBackendReady, type DevBackendReadyProbe } from './wait-dev-ready';
+import { probeDevBackendReady, type DevBackendReadyProbe } from '../wait-dev-ready';
 
 const flags = new Map<string, string>();
 for (let index = 2; index < process.argv.length; index += 1) {
