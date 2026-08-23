@@ -43,7 +43,7 @@ Protocol-neutral unless stated.
 
 - Wire-fit slow start (×1.15 cap per frame) removed; first attempt predicted from
   the last sealed wire/tx byte ratio; the measured loop stays the authority.
-- Batch ECDSA recover on a Bun worker pool (`core/protocol/crypto/ecdsa-recover-pool.ts`,
+- Batch ECDSA recover on a Bun worker pool (`core/protocol/crypto/crypto-pool.ts`,
   `core/entity/consensus/proposal/prime-hankos.ts`): inbound frame/seal hanko
   signatures are recovered by bytes (97-byte records, transferable) for the fitted
   tx prefix, warming the codec memo; verifiers unchanged. Main-thread recovers

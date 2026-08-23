@@ -175,13 +175,33 @@ export const encryptOpaqueHtlcBytes = (
 const decryptedLayerMemo = new Map<string, Uint8Array>();
 const DECRYPTED_LAYER_MEMO_MAX = 4096;
 
+const decryptedLayerMemoKey = (ciphertext: OpaqueHtlcCiphertext, entityPublicKey: string, contextHash: string): string =>
+  `${ciphertext.ciphertext}|${entityPublicKey}|${contextHash}`;
+
+/** Worker-pool result for one layer; the synchronous decrypt then hits the memo. */
+export const primeDecryptedOpaqueHtlcLayer = (
+  ciphertext: OpaqueHtlcCiphertext,
+  entityPublicKey: string,
+  contextHash: string,
+  plaintext: Uint8Array,
+): void => {
+  if (decryptedLayerMemo.size >= DECRYPTED_LAYER_MEMO_MAX) decryptedLayerMemo.clear();
+  decryptedLayerMemo.set(decryptedLayerMemoKey(ciphertext, entityPublicKey, contextHash), plaintext.slice());
+};
+
+export const isDecryptedOpaqueHtlcLayerPrimed = (
+  ciphertext: OpaqueHtlcCiphertext,
+  entityPublicKey: string,
+  contextHash: string,
+): boolean => decryptedLayerMemo.has(decryptedLayerMemoKey(ciphertext, entityPublicKey, contextHash));
+
 export const decryptOpaqueHtlcBytes = (
   ciphertext: OpaqueHtlcCiphertext,
   entityPublicKey: string,
   entityPrivateKey: string,
   contextHash: string,
 ): Uint8Array => {
-  const memoKey = `${ciphertext.ciphertext}|${entityPublicKey}|${contextHash}`;
+  const memoKey = decryptedLayerMemoKey(ciphertext, entityPublicKey, contextHash);
   const memoized = decryptedLayerMemo.get(memoKey);
   if (memoized !== undefined) {
     assertEntityEncryptionKeypair(entityPublicKey, entityPrivateKey);

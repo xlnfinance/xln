@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { decodeBinaryPayload } from '@xln/core/storage/codec/binary-codec';
+  import { decodeBinaryPayload } from '@xln/core/protocol/serialization/binary-codec';
   import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/core/storage/schema/account-field-tags';
   import { compareStableText } from '$lib/utils/stableSort';
   import { parseJsonUnknown } from '$lib/utils/boundary';

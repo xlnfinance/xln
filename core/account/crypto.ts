@@ -3,6 +3,7 @@
  * Canonical signerId is EOA address (lowercase). Keys are loaded via registerSignerKey.
  */
 
+import { cryptoPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatch as signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
 import * as secp256k1 from '@noble/secp256k1';
 import { countOpWithSite, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { getPerfMs } from '../support/time';
@@ -603,6 +604,37 @@ export function signDigest(scope: SignerKeyScope, signerId: string, digestHex: s
   const { signature, recovery } = signDigestBytesWithPrivateKey(privateKey, messageBytes);
   const sigHex = Buffer.from(signature).toString('hex') + recovery.toString(16).padStart(2, '0');
   return `0x${sigHex}`;
+}
+
+/**
+ * Sign many digests with one signer on the crypto worker pool. Same RFC 6979
+ * deterministic secp256k1 operation as signDigest, so the bytes are identical;
+ * returns null when no pool is available (caller signs synchronously).
+ */
+export async function signDigestsBatch(
+  scope: SignerKeyScope,
+  signerId: string,
+  digestsHex: readonly string[],
+): Promise<string[] | null> {
+  const seed = seedFromScope(scope);
+  if (seed === null) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signDigestsBatch called without runtimeSeed for signer ${signerId}`);
+  }
+  if (digestsHex.length === 0 || !cryptoPoolEnabled()) return null;
+  const privateKey = getOrDeriveKey(seed, signerId);
+  const digests = new Uint8Array(digestsHex.length * 32);
+  digestsHex.forEach((digestHex, index) => {
+    const bytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
+    if (bytes.length !== 32) throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${bytes.length}`);
+    digests.set(bytes, index * 32);
+  });
+  const signatures = await signDigestsBatchOnPool(privateKey, digests);
+  if (!signatures) return null;
+  countOpWithSite('ecdsa.sign.pool', digestsHex.length, 3);
+  return digestsHex.map((_, index) => {
+    const signature = signatures.subarray(index * ECDSA_SIGNATURE_BYTES, (index + 1) * ECDSA_SIGNATURE_BYTES);
+    return `0x${Buffer.from(signature.subarray(0, 64)).toString('hex')}${(signature[64] ?? 0).toString(16).padStart(2, '0')}`;
+  });
 }
 
 export function signDigestBytesWithPrivateKey(

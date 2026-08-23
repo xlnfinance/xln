@@ -17,7 +17,7 @@ import {
   ECDSA_RECOVER_RECORD_BYTES,
   ECDSA_RECOVER_RESULT_BYTES,
   recoverAddressesBatch,
-} from '../protocol/crypto/ecdsa-recover-pool';
+} from '../protocol/crypto/crypto-pool';
 import { countOp } from '../support/performance/op-counters';
 
 // Wire type: tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])

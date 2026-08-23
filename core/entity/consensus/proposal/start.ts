@@ -1,4 +1,4 @@
-import { signAccountFrame } from '../../../account/crypto';
+import { signAccountFrame, signDigestsBatch } from '../../../account/crypto';
 import {
   assertEntityConfigBoardAuthority,
   encodeSingleSignerEntityHankos,
@@ -268,9 +268,11 @@ const signProposalManifest = async (
     state.config,
     state,
   );
-  return Promise.all(
-    hashesToSign.map(hash => signAccountFrame(env, replica.signerId, hash.hash)),
-  );
+  // Same deterministic secp256k1 bytes either way; the pool takes the batch
+  // off the main thread on a Hub, a single-runtime host signs inline.
+  const pooled = await signDigestsBatch(env, replica.signerId, hashesToSign.map(hash => hash.hash));
+  if (pooled) return pooled;
+  return hashesToSign.map(hash => signAccountFrame(env, replica.signerId, hash.hash));
 };
 
 const assertProposalPrefix = (

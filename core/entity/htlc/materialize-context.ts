@@ -10,6 +10,8 @@ import {
   assertOpaqueHtlcCiphertext,
   decryptOpaqueHtlcBytes,
   HtlcCiphertextAuthenticationError,
+  isDecryptedOpaqueHtlcLayerPrimed,
+  primeDecryptedOpaqueHtlcLayer,
 } from '../../protocol/htlc/multi-recipient';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../protocol/htlc/codec/onion-layer';
 import type { EntityState } from '../types';
@@ -24,6 +26,9 @@ import { validateHtlcPreparedInfraContext } from './prepared-context-validation'
 import { getEffectiveEntityInputTxs } from '../consensus/output/envelope';
 import { resolveCanonicalEntityBoardShares } from '../auth/authorization';
 import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
+import { cryptoPoolEnabled, decryptOnionLayersBatch, type OnionJobItem } from '../../protocol/crypto/crypto-pool';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
   state: EntityState;
@@ -298,6 +303,56 @@ const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcE
   return canonical;
 };
 
+/**
+ * Every inbound lock layer costs one X25519 scalar multiplication plus an AEAD
+ * open. On a Hub that is thousands per frame; the crypto pool decrypts them
+ * in parallel and warms the layer memo, so the synchronous walk below only
+ * unwraps plaintext. Failures are left to the synchronous path to classify.
+ */
+const primeInboundLayerDecryption = async (input: MaterializeHtlcPreparedContextInput): Promise<void> => {
+  if (!cryptoPoolEnabled()) return;
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const items: OnionJobItem[] = [];
+  for (const tx of input.proposalTxs) {
+    if (tx.type !== 'accountInput') continue;
+    const proposal = accountInputProposal(tx.data);
+    if (!proposal) continue;
+    for (const accountTx of proposal.frame.accountTxs) {
+      if (accountTx.type !== 'htlc_lock' || accountTx.data.envelope === undefined) continue;
+      const layer = encryptedHtlcLayer(accountTx.data.envelope);
+      if (!layer) continue;
+      const binding = buildInboundBinding(tx, proposal, accountTx);
+      const contextHash = computeHtlcEnvelopeContextHash({
+        fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
+        domain: binding.domain, lockId: binding.lockId, hashlock: binding.hashlock,
+        tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
+        revealBeforeHeight: binding.revealBeforeHeight,
+      });
+      if (isDecryptedOpaqueHtlcLayerPrimed(layer, input.entityEncryptionPublicKey, contextHash)) continue;
+      items.push({
+        ciphertext: layer,
+        publicKey: input.entityEncryptionPublicKey,
+        privateKey: input.entityEncryptionPrivateKey,
+        contextHash,
+      });
+    }
+  }
+  countOp('htlc.onion.prime.collect', items.length, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0);
+  if (items.length === 0) return;
+  const awaitedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const results = await decryptOnionLayersBatch(items);
+  countOp('htlc.onion.prime.await', items.length, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - awaitedAt) * 1_000) : 0);
+  if (!results) return;
+  let primed = 0;
+  results.forEach((result, index) => {
+    const item = items[index];
+    if (!item || !(result instanceof Uint8Array)) return;
+    primeDecryptedOpaqueHtlcLayer(item.ciphertext, item.publicKey, item.contextHash, result);
+    primed += 1;
+  });
+  countOp('htlc.onion.prime.primed', primed);
+};
+
 /** Proposer-only materialization. Validators replay only the returned bytes. */
 export const materializeHtlcPreparedInfraContext = async (
   input: MaterializeHtlcPreparedContextInput,
@@ -306,6 +361,7 @@ export const materializeHtlcPreparedInfraContext = async (
   // Validate once, outside the attacker-controlled envelope loop, and fail loud.
   assertEntityEncryptionKeypair(input.entityEncryptionPublicKey, input.entityEncryptionPrivateKey);
   const effectiveInput = { ...input, proposalTxs: getEffectiveHtlcFrameTxs(input.state, input.proposalTxs) };
+  await primeInboundLayerDecryption(effectiveInput);
   const entries = canonicalizeInboundEntries(collectInboundEntries(effectiveInput));
   const originated = await materializeOriginatedHtlcPayments({
     state: effectiveInput.state,

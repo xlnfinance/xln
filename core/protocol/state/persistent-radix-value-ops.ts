@@ -67,8 +67,13 @@ const radixCommonPrefixLength = (left: readonly number[], right: readonly number
   return index;
 };
 
-export const radixPathStartsWith = (path: readonly number[], prefix: readonly number[]): boolean =>
-  prefix.every((slot, index) => path[index] === slot);
+export const radixPathStartsWith = (path: readonly number[], prefix: readonly number[], from = 0): boolean => {
+  if (prefix.length > path.length) return false;
+  for (let index = from; index < prefix.length; index += 1) {
+    if (path[index] !== prefix[index]) return false;
+  }
+  return true;
+};
 
 const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
   const limit = Math.min(left.length, right.length);

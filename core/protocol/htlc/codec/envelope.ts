@@ -16,7 +16,8 @@
  * Account payment data contains no validator or board material.
  */
 
-import { keccak256 } from 'ethers';
+import { keccakBytesHash } from '../../crypto/keccak-text';
+import { hexToBytes } from '../../../support/hex-bytes';
 import { HTLC, LIMITS } from '../../../config/constants';
 import { safeStringify } from '../../serialization';
 import { encryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../multi-recipient';
@@ -46,31 +47,54 @@ export type HtlcEnvelopeContext = Readonly<{
   revealBeforeHeight: number;
 }>;
 
-const envelopeContextHashMemo = new Map<string, string>();
-const ENVELOPE_CONTEXT_HASH_MEMO_MAX = 8192;
+const CONTEXT_DOMAIN = new TextEncoder().encode('xln:htlc-envelope-context:v2');
+const CONTEXT_PREIMAGE_BYTES = CONTEXT_DOMAIN.length + 32 + 32 + 8 + 20 + 32 + 32 + 8 + 32 + 32 + 8;
 
+const writeHex = (out: Uint8Array, offset: number, hex: string, length: number, code: string): number => {
+  const normalized = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
+  if (normalized.length !== length * 2) throw new Error(`${code}:${hex}`);
+  const bytes = hexToBytes(`0x${normalized}`);
+  out.set(bytes, offset);
+  return offset + length;
+};
+
+const writeUint64 = (out: Uint8Array, offset: number, value: number, code: string): number => {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${code}:${String(value)}`);
+  new DataView(out.buffer, out.byteOffset).setBigUint64(offset, BigInt(value));
+  return offset + 8;
+};
+
+const writeUint256 = (out: Uint8Array, offset: number, value: bigint, code: string): number => {
+  if (value < 0n || value >= 1n << 256n) throw new Error(`${code}:${String(value)}`);
+  let remaining = value;
+  for (let index = 31; index >= 0; index -= 1) {
+    out[offset + index] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+  return offset + 32;
+};
+
+/**
+ * AAD binding of one onion layer to its lock. Fixed binary layout (every
+ * field width-prefixed by type), hashed once; the JSON form it replaces was
+ * rendered on every materialization of every inbound lock.
+ */
 export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): string => {
-  const encoded = safeStringify({
-    version: 'xln:htlc-envelope-context:v1',
-    fromEntityId: context.fromEntityId.toLowerCase(),
-    toEntityId: context.toEntityId.toLowerCase(),
-    domain: {
-      chainId: context.domain.chainId,
-      depositoryAddress: context.domain.depositoryAddress.toLowerCase(),
-    },
-    lockId: context.lockId,
-    hashlock: context.hashlock.toLowerCase(),
-    tokenId: context.tokenId,
-    amount: context.amount,
-    timelock: context.timelock,
-    revealBeforeHeight: context.revealBeforeHeight,
-  });
-  const memoized = envelopeContextHashMemo.get(encoded);
-  if (memoized !== undefined) return memoized;
-  const hash = keccak256(new TextEncoder().encode(encoded));
-  if (envelopeContextHashMemo.size >= ENVELOPE_CONTEXT_HASH_MEMO_MAX) envelopeContextHashMemo.clear();
-  envelopeContextHashMemo.set(encoded, hash);
-  return hash;
+  const out = new Uint8Array(CONTEXT_PREIMAGE_BYTES);
+  out.set(CONTEXT_DOMAIN, 0);
+  let offset = CONTEXT_DOMAIN.length;
+  offset = writeHex(out, offset, context.fromEntityId.toLowerCase(), 32, 'HTLC_CONTEXT_FROM_INVALID');
+  offset = writeHex(out, offset, context.toEntityId.toLowerCase(), 32, 'HTLC_CONTEXT_TO_INVALID');
+  offset = writeUint64(out, offset, context.domain.chainId, 'HTLC_CONTEXT_CHAIN_INVALID');
+  offset = writeHex(out, offset, context.domain.depositoryAddress.toLowerCase(), 20, 'HTLC_CONTEXT_DEPOSITORY_INVALID');
+  offset = writeHex(out, offset, context.lockId.toLowerCase(), 32, 'HTLC_CONTEXT_LOCK_INVALID');
+  offset = writeHex(out, offset, context.hashlock.toLowerCase(), 32, 'HTLC_CONTEXT_HASHLOCK_INVALID');
+  offset = writeUint64(out, offset, context.tokenId, 'HTLC_CONTEXT_TOKEN_INVALID');
+  offset = writeUint256(out, offset, context.amount, 'HTLC_CONTEXT_AMOUNT_INVALID');
+  offset = writeUint256(out, offset, context.timelock, 'HTLC_CONTEXT_TIMELOCK_INVALID');
+  offset = writeUint64(out, offset, context.revealBeforeHeight, 'HTLC_CONTEXT_REVEAL_INVALID');
+  if (offset !== CONTEXT_PREIMAGE_BYTES) throw new Error('HTLC_CONTEXT_PREIMAGE_LENGTH');
+  return keccakBytesHash(out);
 };
 
 export const deriveHtlcLockIdAtHop = (rootLockId: string, hopIndex: number): string => {

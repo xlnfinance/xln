@@ -1,6 +1,6 @@
 import { accountInputAck, accountInputDisputeSeal, accountInputProposal } from '../../../account/consensus/flush';
 import { primeRecoveredHankoSignatures } from '../../../hanko/codec';
-import { ecdsaRecoverPoolEnabled } from '../../../protocol/crypto/ecdsa-recover-pool';
+import { cryptoPoolEnabled } from '../../../protocol/crypto/crypto-pool';
 import type { EntityTx } from '../../../types/entity-tx';
 
 /**
@@ -11,7 +11,7 @@ import type { EntityTx } from '../../../types/entity-tx';
  * Acceptance is unchanged: the verifiers still rebuild and compare every digest.
  */
 export const primeProposalHankos = (txs: readonly EntityTx[]): Promise<number> | null => {
-  if (!ecdsaRecoverPoolEnabled()) return null;
+  if (!cryptoPoolEnabled()) return null;
   const items: { digest: string; hanko: string }[] = [];
   for (const tx of txs) {
     if (tx.type !== 'accountInput') continue;

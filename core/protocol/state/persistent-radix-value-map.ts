@@ -71,15 +71,20 @@ export type PersistentRadixNodeChanges<K, V> = Readonly<{
 
 const radixLog = createStructuredLogger('persistent-radix');
 
+// Descent already matched every slot up to the parent's path plus the child
+// slot; only the child's compressed extension needs comparing.
 const getLeaf = <K, V>(
   node: ValueNode<K, V> | null,
   path: readonly number[],
   keyBytes: Uint8Array,
+  matched = 0,
 ): ValueLeaf<K, V> | undefined => {
-  if (!node || !radixPathStartsWith(path, node.path)) return undefined;
+  if (!node || !radixPathStartsWith(path, node.path, matched)) return undefined;
   if (node.kind === 'leaf') return radixBytesEqual(node.keyBytes, keyBytes) ? node : undefined;
   const slot = path[node.path.length];
-  return slot === undefined ? undefined : getLeaf(node.children[slot] ?? null, path, keyBytes);
+  return slot === undefined
+    ? undefined
+    : getLeaf(node.children[slot] ?? null, path, keyBytes, node.path.length + 1);
 };
 
 const prefixNode = <K, V>(
