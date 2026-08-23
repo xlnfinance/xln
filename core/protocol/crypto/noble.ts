@@ -1,9 +1,9 @@
 /**
- * Noble Crypto Provider (X25519 + ChaCha20-Poly1305)
+ * Noble Crypto Provider (X25519 + AES-256-GCM)
  *
  * State-of-the-art onion routing encryption (Lightning/Tor pattern)
  * - X25519: Elliptic curve key agreement (32-byte keys)
- * - ChaCha20-Poly1305: Authenticated stream cipher (unlimited size, +16 byte overhead)
+ * - AES-256-GCM: Authenticated stream cipher (unlimited size, +16 byte overhead)
  * - Ephemeral keys per encryption (unlinkable)
  *
  * Future: Upgrade to X25519+Kyber hybrid (post-quantum)
@@ -11,7 +11,7 @@
 
 import type { CryptoProvider, CryptoKeyPair } from './provider';
 import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast-x25519';
-import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { aead } from './fast-aead';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 
 export type NobleCryptoProviderOptions = {
@@ -68,7 +68,7 @@ export class NobleCryptoProvider implements CryptoProvider {
       throw error;
     }
 
-    // Derive ChaCha20-Poly1305 key from shared secret (use first 32 bytes)
+    // Derive AES-256-GCM key from shared secret (use first 32 bytes)
     const key = sharedSecret.slice(0, 32);
 
     const nonce = this.options.deterministicSeed
@@ -77,8 +77,7 @@ export class NobleCryptoProvider implements CryptoProvider {
 
     // Encrypt data
     const dataBytes = new TextEncoder().encode(data);
-    const cipher = chacha20poly1305(key, nonce);
-    const ciphertext = cipher.encrypt(dataBytes);
+    const ciphertext = aead(key, nonce).encrypt(dataBytes);
 
     // Pack: ephemeralPub (32) + nonce (12) + ciphertext (data.length + 16 for auth tag)
     const packed = new Uint8Array(32 + 12 + ciphertext.length);
@@ -103,12 +102,11 @@ export class NobleCryptoProvider implements CryptoProvider {
     }
     const sharedSecret = x25519SharedSecret(privKeyBytes, ephemeralPub);
 
-    // Derive ChaCha20-Poly1305 key
+    // Derive AES-256-GCM key
     const key = sharedSecret.slice(0, 32);
 
     // Decrypt data
-    const cipher = chacha20poly1305(key, nonce);
-    const plaintext = cipher.decrypt(ciphertext);
+    const plaintext = aead(key, nonce).decrypt(ciphertext);
 
     return new TextDecoder().decode(plaintext);
   }

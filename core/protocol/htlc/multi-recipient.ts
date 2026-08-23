@@ -1,4 +1,4 @@
-import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { aead } from '../crypto/fast-aead';
 import { x25519PublicKey, x25519SharedSecret } from '../crypto/fast-x25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
@@ -8,7 +8,7 @@ import { MAX_HTLC_BINARY_LAYER_BYTES } from './codec/binary';
 export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:v1' as const;
 export type OpaqueHtlcCiphertext = Readonly<{
   version: typeof HTLC_OPAQUE_CIPHERTEXT_VERSION;
-  /** ephemeral X25519 public key || ChaCha20-Poly1305 ciphertext+tag */
+  /** ephemeral X25519 public key || AES-256-GCM ciphertext+tag */
   ciphertext: string;
 }>;
 
@@ -153,7 +153,7 @@ export const encryptOpaqueHtlcBytes = (
   const shared = x25519SharedSecret(ephemeralSecret, recipient);
   const context = contextBytes(contextHash);
   const nonce = deriveNonce(ephemeralPublic, recipient, context);
-  const encrypted = chacha20poly1305(aeadKey(shared, context), nonce, context).encrypt(plaintext);
+  const encrypted = aead(aeadKey(shared, context), nonce, context).encrypt(plaintext);
   const packed = new Uint8Array(ephemeralPublic.length + encrypted.length);
   packed.set(ephemeralPublic, 0);
   packed.set(encrypted, ephemeralPublic.length);
@@ -210,7 +210,7 @@ const decryptOpaqueHtlcBytesUncached = (
   let plaintext: Uint8Array;
   try {
     const shared = x25519SharedSecret(privateKey, ephemeralPublic);
-    plaintext = chacha20poly1305(aeadKey(shared, context), nonce, context).decrypt(encrypted);
+    plaintext = aead(aeadKey(shared, context), nonce, context).decrypt(encrypted);
   } catch (error) {
     throw new HtlcCiphertextAuthenticationError(error);
   }

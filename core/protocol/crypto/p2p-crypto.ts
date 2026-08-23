@@ -1,7 +1,7 @@
 /**
  * P2P Encryption Layer (2019-style NaCl box approach)
  *
- * Uses X25519 + ChaCha20-Poly1305 for message encryption.
+ * Uses X25519 + AES-256-GCM for message encryption.
  * Derives encryption keypair directly from seed (same as 2019 version).
  *
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data + 16 tag)
@@ -9,7 +9,7 @@
 
 import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast-x25519';
 export { x25519SharedSecret } from './fast-x25519';
-import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { aead } from './fast-aead';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { packTransportValue, unpackTransportValue } from '../../storage/codec/binary-codec';
 
@@ -56,7 +56,7 @@ export function deriveEncryptionKeyPair(seed: Uint8Array | string): P2PKeyPair {
 }
 
 /**
- * Encrypt message for recipient (ephemeral ECDH + ChaCha20-Poly1305)
+ * Encrypt message for recipient (ephemeral ECDH + AES-256-GCM)
  *
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data.length + 16)
  */
@@ -71,15 +71,14 @@ function encryptMessage(
   // ECDH: derive shared secret
   const sharedSecret = x25519SharedSecret(ephemeralPriv, recipientPubKey);
 
-  // Use shared secret as ChaCha20-Poly1305 key (first 32 bytes)
+  // Use shared secret as AES-256-GCM key (first 32 bytes)
   const key = sharedSecret.slice(0, 32);
 
-  // Random nonce (12 bytes for ChaCha20-Poly1305)
+  // Random nonce (12 bytes for AES-256-GCM)
   const nonce = crypto.getRandomValues(new Uint8Array(12));
 
   // Encrypt
-  const cipher = chacha20poly1305(key, nonce);
-  const ciphertext = cipher.encrypt(plaintext);
+  const ciphertext = aead(key, nonce).encrypt(plaintext);
 
   // Pack: ephemeralPub (32) + nonce (12) + ciphertext
   const packed = new Uint8Array(32 + 12 + ciphertext.length);
@@ -113,8 +112,7 @@ function decryptMessage(
   const key = sharedSecret.slice(0, 32);
 
   // Decrypt
-  const cipher = chacha20poly1305(key, nonce);
-  const plaintext = cipher.decrypt(ciphertext);
+  const plaintext = aead(key, nonce).decrypt(ciphertext);
 
   return plaintext;
 }
@@ -152,12 +150,12 @@ const sessionNonce = (seq: number): Uint8Array => {
  * per key). Wire format: ciphertext (data + 16 tag) as raw bytes.
  */
 export function encryptSessionPayload(data: unknown, key: Uint8Array, seq: number): Uint8Array {
-  return chacha20poly1305(key, sessionNonce(seq)).encrypt(packTransportValue(data));
+  return aead(key, sessionNonce(seq)).encrypt(packTransportValue(data));
 }
 
 export function decryptSessionPayload(ciphertext: Uint8Array, key: Uint8Array, seq: number): unknown {
   if (ciphertext.length < 16) throw new Error('P2P_DECRYPT_ERROR: Message too short');
-  return unpackTransportValue(chacha20poly1305(key, sessionNonce(seq)).decrypt(ciphertext));
+  return unpackTransportValue(aead(key, sessionNonce(seq)).decrypt(ciphertext));
 }
 
 /**
