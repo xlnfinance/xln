@@ -214,12 +214,33 @@ const prepareAccountTxRow = (
   return row.hash;
 };
 
+// Splitting an Account frame into header + per-tx rows keeps every row under
+// the bound and lets resent frames share tx rows. A small frame (one or two
+// HTLC legs, the bulk of Hub traffic) fits one row; five content-addressed
+// rows per output was most of the outbox encode cost.
+const WHOLE_ROW_MAX_BYTES = Math.floor(MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES / 2);
+
 const prepareEntityTxRow = (
   tx: EntityTx,
   rowsByHash: Map<RuntimeOutputPayloadHash, RuntimeOutputPayloadRow>,
   depth = 0,
 ): RuntimeOutputPayloadHash => {
   if (depth > 16) throw new Error('STORAGE_RUNTIME_OUTPUT_TX_NESTING_LIMIT');
+  if (
+    tx.type === 'accountInput'
+    && (tx.data.kind === 'frame' || tx.data.kind === 'frame_ack')
+    && tx.data.proposal.frame.accountTxs.length <= 2
+  ) {
+    const whole = encodeBuffer({
+      kind: 'entityTx', version: 1, entityTxPath: 'none', accountTxPath: 'none',
+      header: tx, entityTxPageRefs: [], accountTxPageRefs: [],
+    } satisfies StoredEntityTx, { omitSymbolKeys: true });
+    if (whole.byteLength < WHOLE_ROW_MAX_BYTES) {
+      const hash = hashPayload(whole);
+      rowsByHash.set(hash, { hash, key: keyRuntimeOutputPayload(hash), value: whole });
+      return hash;
+    }
+  }
   const split = splitEntityTx(tx);
   const entityTxRefs = split.entityTxs.map(child =>
     prepareEntityTxRow(child, rowsByHash, depth + 1));

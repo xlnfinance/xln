@@ -12,7 +12,7 @@ import { makeAccount } from '../../helpers/cross-j';
 
 // Intentional testnet reset: Account frame/state integrity commitments use the
 // native-SHA integrity helper; Ethereum-facing proof hashes remain Keccak.
-const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1fcaeb4b29a0fa1d4c0c7b0';
+const ACCOUNT_FRAME_GOLDEN_HASH = '0xdadd355aca7a74a990d3f4a8a3cd1653b3050e6cc012a6939c598a30f5473a35';
 // Independently calculated with a standalone tagged-tuple reference encoder.
 // Keep these literal so changing the production codec cannot bless itself.
 // Intentional testnet reset: Entity Accounts are committed through the
@@ -22,7 +22,7 @@ const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x9b55ab751f698879e3215f49008d58305333e69
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
 // Intentional testnet reset: the canonical Entity frame commits the exact infra context,
 // while Entity state commits its shared encryption public key.
-const ENTITY_FRAME_GOLDEN_HASH = '0xd3f46fc66058d53b453f28303e32dc1347cd72698dacc4b88163c5cad46f1d57';
+const ENTITY_FRAME_GOLDEN_HASH = '0x03689c0f9aa77992c4af7745491f6203904c4f25ebae7109964c8cccc3624492';
 
 const makeEntityContextFixture = (): EntityInfraContext => ({
   version: 1,

@@ -195,7 +195,7 @@ const installPendingFrameCommit = (
     });
   }
   committedFrames.push({
-    frame: cloneAccountFrame(pendingFrame),
+    frame: account.currentFrame,
     committedViaNewFrame: false,
   });
 

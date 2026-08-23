@@ -522,10 +522,10 @@ async function commitIncomingFrameOnRealState(
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
   }
 
-  // History and live head cannot share one object: later in-place
-  // accountStateRoot writes on currentFrame must not mutate committed history.
-  const committedFrame = cloneAccountFrame(receivedFrame);
-  committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
+  // The committed Account graph is frozen at Entity commit, so history may
+  // share the live head's frame object; only genesis handlers write
+  // accountStateRoot in place, and never on this path.
+  committedFrames.push({ frame: account.currentFrame, committedViaNewFrame: true });
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
   events.push(...validation.processEvents);

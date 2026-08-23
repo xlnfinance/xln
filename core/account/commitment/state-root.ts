@@ -10,6 +10,7 @@ import type { AccountReplica, AccountState, AccountStateDomain } from '../../typ
 import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/state/radix-merkle';
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { hexToBytes } from '../../support/hex-bytes';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
 import { createStructuredLogger } from '../../support/logger';
 import { getPerfMs } from '../../support/time';
@@ -128,24 +129,47 @@ const ACCOUNT_STATE_LEAF_KEYS = Object.freeze({
 
 type AccountStateLeafPath = keyof typeof ACCOUNT_STATE_LEAF_KEYS;
 
-const stateLeaf = (path: AccountStateLeafPath, value: unknown): { hexKey: string; value: Uint8Array } => ({
-  // AccountState has exactly five fixed sections. Precompute their keys once;
-  // an ambient cache for arbitrary entity/account IDs would violate the pure
-  // transition model and retain attacker-controlled labels.
-  hexKey: ACCOUNT_STATE_LEAF_KEYS[path],
-  value: encodeAccountStateValue(value),
-});
+
+const FLAT_DIGEST_DOMAIN = new TextEncoder().encode('xln.flat-digest.v1');
+
+/**
+ * Integrity commitments over a handful of labelled sections (Account frame,
+ * Account state, mempool) are one digest over the key-sorted
+ * (labelKey ‖ sha256(section)) pairs. Nothing proves one section against the
+ * root, so the radix tree those roots used to be built from was only cost.
+ * keccak commitments keep the Merkle shape.
+ */
+const computeFlatIntegrityRoot = (
+  namespace: string,
+  entries: ReadonlyArray<readonly [path: string, value: unknown]>,
+): string => {
+  const leaves = entries
+    .map(([path, value]) => ({
+      key: integrityMerkleKey(namespace, path),
+      digest: computeIntegrityDigest(encodeAccountStateValue(value)),
+    }))
+    .sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
+  const preimage = new Uint8Array(FLAT_DIGEST_DOMAIN.length + leaves.length * 64);
+  preimage.set(FLAT_DIGEST_DOMAIN, 0);
+  let offset = FLAT_DIGEST_DOMAIN.length;
+  for (const leaf of leaves) {
+    preimage.set(hexToBytes(leaf.key), offset);
+    preimage.set(hexToBytes(leaf.digest), offset + 32);
+    offset += 64;
+  }
+  return computeIntegrityDigest(preimage);
+};
 
 export const computeCanonicalMerkleRoot = (
   namespace: string,
   entries: ReadonlyArray<readonly [path: string, value: unknown]>,
   hashAlgorithm: RadixMerkleHashAlgorithm = 'keccak256',
-): string => buildHexKeyedMerkle(entries.map(([path, value]) => ({
-    hexKey: hashAlgorithm === 'integrity'
-      ? integrityMerkleKey(namespace, path)
-      : keccakLabelDigest(`xln.${namespace}.${path}`),
+): string => hashAlgorithm === 'integrity'
+  ? computeFlatIntegrityRoot(namespace, entries)
+  : buildHexKeyedMerkle(entries.map(([path, value]) => ({
+    hexKey: keccakLabelDigest(`xln.${namespace}.${path}`),
     value: encodeAccountStateValue(value),
-})), { hashAlgorithm }).root;
+  })), { hashAlgorithm }).root;
 
 const accountStateRootEntries = (
   account: AccountState,
@@ -440,9 +464,8 @@ const computeAccountStateRootUncached = (
   const mapStatuses: Record<string, AccountMapCommitmentTiming> | undefined = profile ? {} : undefined;
   const entries = accountStateRootEntries(account, false, mapTimings, mapStatuses);
   const entriesAt = profile ? getPerfMs() : 0;
-  const leaves = entries.map(([path, value]) => stateLeaf(path, value));
   const leavesAt = profile ? getPerfMs() : 0;
-  const root = buildHexKeyedMerkle(leaves, { hashAlgorithm: 'integrity' }).root;
+  const root = computeFlatIntegrityRoot('account.state', entries);
   if (profile) {
     const endedAt = getPerfMs();
     const profileRecord = {
@@ -475,11 +498,7 @@ const computeAccountStateRootUncached = (
 
 /** Cold oracle used by tests/restore audits to detect every missed cache invalidation. */
 export const computeAccountStateRootCold = (account: AccountState): string => {
-  const entries = accountStateRootEntries(account, true);
-  return buildHexKeyedMerkle(
-    entries.map(([path, value]) => stateLeaf(path, value)),
-    { hashAlgorithm: 'integrity' },
-  ).root;
+  return computeFlatIntegrityRoot('account.state', accountStateRootEntries(account, true));
 };
 
 const pendingWithdrawalOverlayRoot = (

@@ -212,6 +212,7 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
     }
     const ordered = [...last.values()].sort((left, right) =>
       left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+    countOp('entity.accounts.foldDirty', ordered.length);
     const workBase = reset ? this.#work.emptied() : this.#work;
     let counts = reset ? emptyWorkCounts() : this.#workCounts;
     const workMutations: RadixFoldMutation<string, AccountWorkMask>[] = [];

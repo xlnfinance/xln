@@ -1218,6 +1218,11 @@ type PreparedStorageFrameSave = Exclude<
 const FRAME_ENCODE_SUBSTAGE_PROFILE =
   typeof process !== 'undefined' && process.env?.['XLN_STORAGE_FRAME_ENCODE_PROFILE'] === '1';
 
+// The previous frame record is read back only for its hash; the frame this
+// process just wrote is that record. Multi-megabyte Hub frames cost ~27 ms
+// per decode, so the last written (height, hash) per WAL db is remembered.
+const lastWrittenFrameHash = new Map<RuntimeDbLike, { height: number; hash: string }>();
+
 const resolveStorageAppendPosition = async (
   options: StorageFrameSaveOptions,
   walDb: RuntimeDbLike,
@@ -1243,6 +1248,10 @@ const resolveStorageAppendPosition = async (
       `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ` +
       `${options.env.state.height} after persisted head ${head.latestHeight}`,
     );
+  }
+  const remembered = lastWrittenFrameHash.get(walDb);
+  if (remembered && remembered.height === head.latestHeight && head.latestHeight > 0) {
+    return { previousFrame: null, prevFrameHash: remembered.hash };
   }
   const previous =
     head.latestHeight > 0
@@ -2278,6 +2287,7 @@ export const saveRuntimeFrameToStorage = async (
     writeStartedAt,
     prepareMarks,
   );
+  lastWrittenFrameHash.set(walDb, { height: options.env.state.height, hash: framePlan.frameHash });
   const snapshot = await runStorageSnapshotLifecycle(
     options,
     db,
