@@ -1160,12 +1160,12 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   checkpoint('lineage');
   // Projected and canonicalized once: post-state view, machine snapshot and
   // the WAL frame all hash/encode this same durable pending mempool tree.
-  const durablePendingInput = encodeBufferPrepared(
+  const durablePendingInput = canonicalizeBinaryPayload(
     buildDurableRuntimeMempool(
       options.pendingRuntimeInput ?? options.env.runtimeMempool,
     ),
     { omitSymbolKeys: true },
-  ).canonical as RuntimeInput;
+  ) as RuntimeInput;
   const planningMs = options.getPerfMs() - planningStartedAt;
   const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
   return {

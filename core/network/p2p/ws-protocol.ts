@@ -16,7 +16,6 @@
 
 import { serializeTaggedJson } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
-import { utf8Bytes } from '../../protocol/crypto/keccak-text';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -461,7 +460,13 @@ const frameAuthPreimage = (
   authTimestamp: number,
 ): Uint8Array => {
   const { auth: _auth, ...unsigned } = message;
-  return utf8Bytes(serializeTaggedJson([FRAME_DOMAIN, audience, nonce, authTimestamp, unsigned]));
+  // The frame itself is MessagePack. Authenticate the same binary value
+  // directly instead of canonical-JSON encoding every ciphertext to base64
+  // and then sending that ciphertext as MessagePack a second time.
+  return encodeBinaryPayload(
+    [FRAME_DOMAIN, audience, nonce, authTimestamp, unsigned],
+    'msgpack',
+  );
 };
 
 /** Session-key frame authenticator: same preimage as the signed digest, HMAC instead of ECDSA. */
