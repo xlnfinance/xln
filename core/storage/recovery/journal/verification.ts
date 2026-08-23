@@ -26,7 +26,8 @@ import {
   assertRecoveryRuntimeMachineMatches,
   listRecoveryRuntimeMachineMismatchFields,
 } from '../machine';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
 import { prepareRuntimeOutputPayloadRows } from '../../wal/outbox-payload';
 import { timePerfPhase } from '../../../support/performance/profile';
 
@@ -64,18 +65,19 @@ export const verifyRecoveryJournalFrame = (
   // Frames written before contexts were keyed by certified height carry one
   // bare `replicaId` key per replica; compare them under the current key shape.
   const expectedEntityContexts = timePerfPhase('recovery.verify.entityContexts.expected', () =>
-    encodeCanonicalConsensusValue(new Map(
+    keccakBytesHash(encodeCanonicalConsensusBytes(new Map(
       [...(frame.entityContexts ?? new Map())].map(([key, context]) => [
         key.split(':').length === 2 ? `${key}:${context.height}` : key,
         context,
       ]),
-    )));
+    ))));
   const actualEntityContexts = timePerfPhase('recovery.verify.entityContexts.actual', () =>
-    encodeCanonicalConsensusValue(result.entityContexts));
+    keccakBytesHash(encodeCanonicalConsensusBytes(result.entityContexts)));
   if (actualEntityContexts !== expectedEntityContexts) {
     throw new Error(
       `RECOVERY_JOURNAL_ENTITY_CONTEXTS_MISMATCH:height=${height}:` +
-      `expected=${expectedEntityContexts}:actual=${actualEntityContexts}`,
+      `expectedDigest=${expectedEntityContexts}:actualDigest=${actualEntityContexts}:` +
+      `actual=${safeStringify(result.entityContexts)}`,
     );
   }
   const expectedRuntimeMachine = frame.runtimeMachine;

@@ -1,6 +1,6 @@
-import { keccakTextHash } from '../../../protocol/crypto/keccak-text';
+import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
 import { normalizeEntityId } from '../../../protocol/identity/entity-id';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import type { EntityTx } from '../../../types/entity-tx';
 
 export type EntityProposalReplayOracleEntry = Readonly<{
@@ -20,8 +20,8 @@ export const hashEntityProposalTxPrefix = (
   entityId: string,
   entityHeight: number,
   txs: readonly EntityTx[],
-): string => keccakTextHash(encodeCanonicalConsensusValue([
-  'xln.hlt.entity-proposal-prefix.v1',
+): string => keccakBytesHash(encodeCanonicalConsensusBytes([
+  'xln.hlt.entity-proposal-prefix:binary',
   normalizeEntityId(entityId),
   entityHeight,
   txs,
