@@ -664,7 +664,7 @@ const PERFORMANCE_FILES = {
     'entity/consensus/proposal/hanko/prime-hankos.ts',
     'entity/htlc/materialize-context.ts',
     'entity/state/persistent-collection-map.ts',
-    'entity/scheduler/wake/proposal-resend.ts',
+    'account/validation/pending-proposal-validation.ts',
     'protocol/htlc/multi-recipient.ts',
     'protocol/htlc/codec/envelope.ts',
     'orderbook/core.ts',

@@ -41,7 +41,7 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   currentDisputeProofProposerIsLeft: 59,
   counterpartyDisputeProofProposerIsLeft: 60,
   publicPinned: 61,
-  pendingProposalSentAt: 62,
+  // Tag 62 belonged to the retired proposal-resend timestamp; never reuse it.
 } as const;
 
 export type StorageAccountField = keyof typeof STORAGE_ACCOUNT_FIELD_TAG;

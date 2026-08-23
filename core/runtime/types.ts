@@ -515,7 +515,8 @@ interface RuntimeInfrastructure {
   persistenceQuiescing?: boolean;
   /** Operator/HLT fence: a stopped external watcher must not be resurrected by the Runtime loop. */
   jurisdictionWatchersPaused?: boolean;
-  lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
+  /** Ephemeral wall-clock start of the most recent committed Runtime frame. */
+  lastFrameStartedAt?: number;
   maxEntityInputsPerFrame?: number;
   maxEntityTxsPerFrame?: number;
   processingPromise?: Promise<void> | null;
@@ -716,7 +717,8 @@ export interface RuntimeReplica {
   /** Process-local accumulated dirty storage keys; never consensus or WAL state. */
   overlay?: Map<string, RuntimeOverlayRecord>;
   runtimeConfig?: {
-    minFrameDelayMs?: number; // Minimum delay between runtime frames
+    /** Minimum start-to-start period for live Runtime frames; replay/scenarios ignore it. */
+    minFrameDelayMs?: number;
     loopIntervalMs?: number;  // Loop interval for runtime processing
     /** In-memory/debug history cadence. Durable storage snapshots use storage.snapshotPeriodFrames. */
     snapshotIntervalFrames?: number;

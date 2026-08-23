@@ -6,6 +6,8 @@ import { initCrontab } from '../../../entity/scheduler';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { EntityCollectionCandidateMap } from '../../../entity/state/persistent-collection-map';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { beginAccountCollectionOverlay } from '../../../account/state/account-overlay-map';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const domain = { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` };
@@ -78,24 +80,26 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides =
 describe('same-frame incoming HTLC followup', () => {
   test('Account accepts only the raw matching preimage', async () => {
     const secret = id('7');
-    const account = {
-      locks: new Map([[id('4'), {
+    const locks = PersistentAccountStateMap.fromEntries('locks', [[id('4'), {
         lockId: id('4'), hashlock: hashHtlcSecret(secret), tokenId: 1, amount: 10n,
         timelock: 100_000n, revealBeforeHeight: 100, senderIsLeft: true,
         createdHeight: 1, createdTimestamp: 1,
-      }]]),
-      deltas: new Map([[1, {
+      }]]);
+    const deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, {
         tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n,
         leftCreditLimit: 0n, rightCreditLimit: 0n, leftHold: 10n, rightHold: 0n,
-      }]]),
-    };
+      }]]);
+    const draft = () => ({
+      locks: beginAccountCollectionOverlay(locks).view,
+      deltas: beginAccountCollectionOverlay(deltas).view,
+    });
     const wrong = await handleHtlcResolve(
-      structuredClone(account) as never,
+      draft() as never,
       { type: 'htlc_resolve', data: { lockId: id('4'), outcome: 'secret', secret: id('8') } },
       false, 1, 1,
     );
     expect(wrong.ok).toBe(false);
-    const applied = structuredClone(account);
+    const applied = draft();
     const valid = await handleHtlcResolve(
       applied as never,
       { type: 'htlc_resolve', data: { lockId: id('4'), outcome: 'secret', secret } },

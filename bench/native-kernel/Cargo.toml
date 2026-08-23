@@ -1,0 +1,21 @@
+[package]
+name = "xln-native-kernel-bench"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "xln-native-kernel-server"
+path = "src/server.rs"
+
+[dependencies]
+rayon = "1.11"
+secp256k1 = { version = "0.31", features = ["recovery"] }
+sha2 = "0.10"
+sha3 = "0.10"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

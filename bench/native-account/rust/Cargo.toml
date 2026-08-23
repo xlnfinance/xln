@@ -1,0 +1,17 @@
+[package]
+name = "xln-native-account-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rayon = "1.11"
+secp256k1 = { version = "0.31", features = ["global-context", "recovery"] }
+sha2 = "0.10"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+panic = "abort"
+strip = "symbols"

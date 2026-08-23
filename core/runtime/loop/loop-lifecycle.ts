@@ -10,6 +10,7 @@ import {
   generateHookPings,
   getEarliestWallClockDueTimestamp,
   getRemainingRuntimeFrameDelayMs,
+  getRuntimeFramePeriodMs,
 } from './loop-work.ts';
 import { yieldRuntimeIoTurn } from '../replica/platform.ts';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
@@ -79,7 +80,7 @@ const waitForNextRuntimeWork = async (
   if (deps.hasRuntimeWork(env)) {
     const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
     if (remainingDelayMs > 0) await sleep(remainingDelayMs);
-    else if (tickDelayMs > 0) await sleep(tickDelayMs);
+    else if (getRuntimeFramePeriodMs(env) === 0 && tickDelayMs > 0) await sleep(tickDelayMs);
     return;
   }
   const nextDueAt = deps.getNextWallClockWakeTimestamp(env);

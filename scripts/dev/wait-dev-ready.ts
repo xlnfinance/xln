@@ -25,6 +25,11 @@ export type DevReadyProbe = {
   startedAtMs: number;
 };
 
+export type DevBackendReadyProbe = Pick<
+  DevReadyProbe,
+  'apiUrl' | 'watchtowerUrl' | 'runtimeBundle' | 'startedAtMs'
+>;
+
 export type DevReadyResult =
   | { ready: true }
   | { ready: false; reason: string; fatal: boolean };
@@ -166,7 +171,7 @@ const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> 
       );
 };
 
-export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResult> => {
+export const probeDevBackendReady = async (input: DevBackendReadyProbe): Promise<DevReadyResult> => {
   try {
     const importResponse = await fetchWithin(`${input.apiUrl}/api/runtime-import?access=admin`);
     const importStatus = await readObject(importResponse);
@@ -182,10 +187,25 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
       return notReady('runtime-bundle-not-fresh');
     }
 
-    const [appResponse, runtimeResponse, watchtowerResponse] = await Promise.all([
+    const watchtowerResponse = await fetchWithin(`${input.watchtowerUrl}/api/tower/healthz`);
+    const watchtower = await readObject(watchtowerResponse);
+    if (!watchtowerResponse.ok || watchtower['ok'] !== true) {
+      return notReady(`watchtower-http-${watchtowerResponse.status}`);
+    }
+    return { ready: true };
+  } catch (error) {
+    return notReady(error instanceof Error ? error.message : String(error));
+  }
+};
+
+export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResult> => {
+  try {
+    const backend = await probeDevBackendReady(input);
+    if (!backend.ready) return backend;
+
+    const [appResponse, runtimeResponse] = await Promise.all([
       fetchWithin(`${input.webUrl}/app`),
       fetchWithin(`${input.webUrl}/runtime.js`),
-      fetchWithin(`${input.watchtowerUrl}/api/tower/healthz`),
     ]);
     await appResponse.body?.cancel();
     if (!appResponse.ok) return notReady(`wallet-http-${appResponse.status}`);
@@ -193,10 +213,6 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
     await runtimeResponse.body?.cancel();
     if (!runtimeResponse.ok || !runtimeType.includes('javascript')) {
       return notReady(`runtime-http-${runtimeResponse.status}`);
-    }
-    const watchtower = await readObject(watchtowerResponse);
-    if (!watchtowerResponse.ok || watchtower['ok'] !== true) {
-      return notReady(`watchtower-http-${watchtowerResponse.status}`);
     }
     for (const webUrl of input.relayWebUrls) {
       const relay = await probeRelayChallenge(webUrl);

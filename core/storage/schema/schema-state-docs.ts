@@ -159,7 +159,7 @@ const ACCOUNT_REPLICA_OPTIONAL = [
   'counterpartyDisputeProofNonce', 'counterpartyDisputeProofBodyHash',
   'currentDisputeProofProposerIsLeft', 'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputePrepare',
-  'activeDispute', 'publicPinned', 'pendingProposalSentAt',
+  'activeDispute', 'publicPinned',
 ] as const;
 const ACCOUNT_STATE_REQUIRED = [
   'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
@@ -298,9 +298,6 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   }
   if (doc['publicPinned'] !== undefined) {
     requireStorageBoolean(doc['publicPinned'], `${code}_PUBLIC_PINNED`);
-  }
-  if (doc['pendingProposalSentAt'] !== undefined) {
-    requireBoundaryInteger(doc['pendingProposalSentAt'], `${code}_PENDING_PROPOSAL_SENT_AT`);
   }
 };
 

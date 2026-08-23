@@ -10,13 +10,11 @@ import {
 } from '../commitment/state-root';
 
 /**
- * A resend is a durable copy of one exact proposal, not a second proposal lane.
- * Keeping the signed frame and cached wire input coupled prevents recovery
- * from sending a different payload. Runtime resolves the current validator
- * route when it durably admits each output; transport metadata is not Account
- * state.
+ * The pending signed proposal is exact evidence for the in-flight Account
+ * frame. It is retained for ACK validation and recovery, never as an automatic
+ * transport retry queue.
  */
-export const validatePendingAccountResend = (
+export const validatePendingAccountProposal = (
   account: Record<string, unknown>,
   context: string,
 ): void => {

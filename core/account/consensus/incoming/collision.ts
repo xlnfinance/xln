@@ -118,8 +118,8 @@ export const handleUnmatchedAck = (
     normalizedInputHeight === Number(account.currentHeight ?? 0) + 1 &&
     !account.pendingFrame;
   if (earlyNextAck) {
-    // A pure ACK cannot advance without its pending frame. The durable resend
-    // path will recover it after the local frame-install tick.
+    // A pure ACK cannot advance without its pending frame. The original
+    // proposal remains the only proposal delivery; do not synthesize another.
     events.push(
       `Ignored early ACK for frame ${String(normalizedInputHeight)} ` +
         `(current=${String(account.currentHeight ?? 0)}, pending=none)`,
@@ -179,16 +179,16 @@ export const resolveSameHeightIncomingFrame = (
     if (account.mempool.length > 0) {
       events.push(`⚠️ LEFT has ${account.mempool.length} pending txs while waiting for RIGHT's ACK`);
     }
-    const response = account.pendingAccountInput;
-    const proposal = response ? accountInputProposal(response) : undefined;
-    if (!response || !proposal || proposal.frame.stateHash !== account.pendingFrame.stateHash) {
+    const pendingProposal = account.pendingAccountInput
+      ? accountInputProposal(account.pendingAccountInput)
+      : undefined;
+    if (!pendingProposal || pendingProposal.frame.stateHash !== account.pendingFrame.stateHash) {
       throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
     }
-    // Resend exact signed bytes. Rebuilding could change nonce, body or Hanko.
-    // RIGHT discarded its own frame and must adopt ours: the flush re-bundles.
-    delete account.pendingProposalSentAt;
+    // The original proposal already left in its committed Runtime outbox.
+    // A collision must not create a second automatic carry. RIGHT learns the
+    // deterministic winner from that original delivery.
     return accountInputApplied({
-      response: structuredClone(response),
       events,
       ...(committedFrames.length > 0 && { committedFrames }),
     });
@@ -226,7 +226,6 @@ export const applySameHeightIncomingFrameRollback = (
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  delete account.pendingProposalSentAt;
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedFrame.stateHash;
   if (account.rollbackCount > 1) {

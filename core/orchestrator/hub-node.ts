@@ -55,6 +55,7 @@ import { createStructuredLogger } from '../support/logger';
 import { getPerfMs } from '../support/time';
 import { handleMeshBootstrapLoopError } from './mesh/mesh-bootstrap-fail-fast';
 import { reportManagedChildFatal } from './process/managed-child-fatal-ipc';
+import { readHubSteadyRuntimeFramePeriodMs } from './process/hub-runtime-env';
 import {
   advanceBootstrapProgress,
   beginBootstrapProgress,
@@ -2654,6 +2655,9 @@ const createHubMeshBootstrapController = (
           ensureFaucetReady,
         });
         if (complete) {
+          const steadyFramePeriodMs = readHubSteadyRuntimeFramePeriodMs();
+          if (!live.env.runtimeConfig) throw new Error('HUB_RUNTIME_CONFIG_MISSING');
+          live.env.runtimeConfig.minFrameDelayMs = steadyFramePeriodMs;
           markProgress('complete');
           live.p2p?.finishBootstrapPolling();
           if (loop) clearInterval(loop);

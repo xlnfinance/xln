@@ -29,7 +29,12 @@ import { getWallClockMs } from '../../../support/time';
 import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import { rebuildScheduledWakeIndex } from '../../../runtime/mempool/scheduled-wake';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
-import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../../../runtime/loop/loop-work.ts';
+import {
+  applyEntityInputFrameCap,
+  applyEntityTxFrameCap,
+  getRemainingRuntimeFrameDelayMs,
+  isRuntimeFrameReady,
+} from '../../../runtime/loop/loop-work.ts';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -789,7 +794,7 @@ describe('runtime ingress timestamp', () => {
     expect(env.state.height).toBe(firstHeight + 1);
   });
 
-  test('runtime loop waits for minFrameDelayMs between processed cycles', async () => {
+  test('runtime loop enforces minFrameDelayMs start-to-start and includes queued work', async () => {
     const env = createIsolatedEnv('runtime-frame-delay-seed');
     env.quietRuntimeLogs = true;
     addTestJurisdiction(env);
@@ -819,6 +824,7 @@ describe('runtime ingress timestamp', () => {
     });
 
     await processRuntime(env);
+    expect(env.infrastructure?.lastFrameStartedAt).toBeNumber();
     env.runtimeConfig = { minFrameDelayMs: 60, loopIntervalMs: 1 };
 
     enqueueRuntimeInput(env, {
@@ -839,6 +845,9 @@ describe('runtime ingress timestamp', () => {
       })],
       entityInputs: [],
     });
+    if (!env.infrastructure) throw new Error('TEST_RUNTIME_INFRASTRUCTURE_MISSING');
+    const cadenceBaseline = Date.now();
+    env.infrastructure.lastFrameStartedAt = cadenceBaseline;
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
@@ -847,9 +856,22 @@ describe('runtime ingress timestamp', () => {
 
       await sleep(100);
       expect(env.state.eReplicas.get(`${delayedEntityId}:${delayedSignerId}`)).toBeDefined();
+      expect(env.infrastructure?.lastFrameStartedAt).toBeGreaterThanOrEqual(
+        cadenceBaseline + 60,
+      );
     } finally {
       stop();
     }
+  });
+
+  test('runtime frame cadence is immediate after processing already consumed the period', () => {
+    const env = createIsolatedEnv('runtime-start-period-elapsed');
+    env.runtimeConfig = { minFrameDelayMs: 250, loopIntervalMs: 1 };
+    if (!env.infrastructure) throw new Error('TEST_RUNTIME_INFRASTRUCTURE_MISSING');
+    env.infrastructure.lastFrameStartedAt = Date.now() - 300;
+
+    expect(getRemainingRuntimeFrameDelayMs(env)).toBe(0);
+    expect(isRuntimeFrameReady(env, Date.now())).toBe(true);
   });
 
   test('runtime loop starts jurisdiction watchers exactly once per replica', async () => {

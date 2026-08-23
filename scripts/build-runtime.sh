@@ -11,7 +11,7 @@ mkdir -p "$(dirname "$OUT")"
 echo "[build-runtime] bundling core/api/public/browser.ts -> $OUT"
 bun build core/api/public/browser.ts --target=browser --outfile="$OUT" --minify \
   --external http --external https --external zlib \
-  --external fs --external path --external crypto \
+  --external fs --external path \
   --external stream --external buffer --external url \
   --external net --external tls --external os --external util \
   --external node:module

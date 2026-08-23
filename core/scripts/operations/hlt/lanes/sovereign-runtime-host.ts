@@ -74,6 +74,12 @@ type HostSocket = ServerWebSocket<HostSocketData>;
 
 const JSON_HEADERS = { 'content-type': 'application/json', 'cache-control': 'no-store' };
 const HLT_HOST_BATCH_MAX_BODY_BYTES = LIMITS.MAX_HLT_HOST_BATCH_BODY_BYTES;
+const lanePersistenceEnabled = (() => {
+  const raw = String(process.env['XLN_HLT_LANE_PERSISTENCE'] ?? '0').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  throw new Error(`HLT_LANE_PERSISTENCE_INVALID:${raw}`);
+})();
 const isShardWorker = !isMainThread;
 const processFirstPort = isShardWorker
   ? 0
@@ -544,6 +550,13 @@ const bootRuntime = async (laneSeed: string, index: number): Promise<void> => {
     throw new Error(`HLT_SOVEREIGN_RUNTIME_ID_INVALID:${runtimeId}`);
   }
   env.quietRuntimeLogs = true;
+  env.runtimeConfig = {
+    ...env.runtimeConfig,
+    storage: {
+      ...env.runtimeConfig?.storage,
+      enabled: lanePersistenceEnabled,
+    },
+  };
   startRuntimeLoop(env, {
     onFatal: async payload => {
       console.error(`HLT_SOVEREIGN_RUNTIME_FATAL ${safeStringify({ runtimeId, payload })}`);
@@ -567,8 +580,8 @@ const bootRuntime = async (laneSeed: string, index: number): Promise<void> => {
 
 const bootAll = async (): Promise<void> => {
   // A host is only process packing: every Runtime owns independent state,
-  // WAL, loop and transport. Serial boot groups manufactured a 31-second HLT
-  // setup delay without protecting any shared protocol state.
+  // loop and transport. Persistence is explicit per load Runtime; the default
+  // in-memory mode avoids making one machine emulate 1,000 unrelated disks.
   await Promise.all(laneSeeds.map((laneSeed, index) => bootRuntime(laneSeed, index)));
 };
 

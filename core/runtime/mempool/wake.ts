@@ -33,8 +33,8 @@ export type RuntimeWakeDeps = {
 
 /**
  * True when an entity has periodic/security work that actually needs wakeups.
- * Generic bilateral work must not be hub-gated: a normal user runtime with a
- * lost ACK still needs to wake up and resend its pending account frame.
+ * Generic bilateral work does not create wall-clock wakeups. Hooks, chain
+ * submissions and governance have their own explicit deadlines.
  */
 export { entityNeedsPeriodicWake };
 

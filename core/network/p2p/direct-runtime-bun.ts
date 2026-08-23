@@ -85,8 +85,8 @@ export const isCleanDirectRuntimeSessionClose = (close: Readonly<{
 }>): boolean => close.code === 1000 && close.bufferedAmount === 0;
 
 /**
- * A peer going offline is not a protocol contradiction. Account consensus
- * detects missing ACKs and resends from committed state after reconnect. Only
+ * A peer going offline is not a protocol contradiction. Account proposals are
+ * one-shot committed outputs and are never recreated after reconnect. Only
  * bytes still buffered in this process are concrete evidence that a committed
  * envelope was accepted by the transport but did not leave the socket.
  */

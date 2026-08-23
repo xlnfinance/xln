@@ -763,7 +763,7 @@ const submitAuditRuntimeJOutbox = async (
 };
 
 describe('audit fail-fast regressions', () => {
-  test('Entity flush re-sends LEFT winning proposal after simultaneous-frame collision', async () => {
+  test('Entity flush does not re-carry LEFT winning proposal after simultaneous-frame collision', async () => {
     const seed = 'entity-flush-simultaneous-left-winner';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -828,9 +828,7 @@ describe('audit fail-fast regressions', () => {
     const accountOutputs = applied.outputs
       .flatMap(output => output.entityTxs ?? [])
       .filter((tx): tx is Extract<EntityTx, { type: 'accountInput' }> => tx.type === 'accountInput');
-    expect(accountOutputs).toHaveLength(1);
-    expect(accountOutputs[0]?.data).toEqual(leftInput);
-    expect(accountOutputs[0]?.data.kind).toBe('frame');
+    expect(accountOutputs).toHaveLength(0);
     expect(applied.newState.accounts.get(right.entityId)?.pendingFrame?.stateHash).toBe(
       leftAccount.pendingFrame?.stateHash,
     );

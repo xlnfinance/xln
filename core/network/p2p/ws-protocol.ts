@@ -59,9 +59,9 @@ const utf8Encoder = new TextEncoder();
 
 /**
  * Transport is intentionally best-effort. Do not add entity-input delivery
- * receipts or rejections here: bilateral Account ACK plus Account resend is
- * the only financial delivery/completion protocol. A second acknowledgement
- * layer creates conflicting liveness state and must never prune Runtime outbox.
+ * receipts or rejections here: bilateral Account ACK is the financial
+ * completion protocol. A second acknowledgement layer creates conflicting
+ * liveness state and must never prune Runtime outbox.
  */
 type RuntimeWsMessageType =
   | 'hello'

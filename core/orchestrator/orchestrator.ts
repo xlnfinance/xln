@@ -1504,10 +1504,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
-      // Runtime work is event-driven. A fixed post-commit sleep taxes every
-      // payment round even when more authenticated ingress is already queued.
-      // Absence means the canonical zero-delay Runtime default; an operator
-      // may deliberately add a positive batching floor for diagnostics.
+      // Hub bootstrap drains at zero delay. Once direct routes, Accounts,
+      // credits and reserves are ready, the child activates this start-to-start
+      // period so steady traffic batches without adding post-processing sleep.
       // Profiling a load run means profiling the Hub: it is the single writer
       // every payment and every swap passes through. The child builds none of
       // this unless the operator asked for it.

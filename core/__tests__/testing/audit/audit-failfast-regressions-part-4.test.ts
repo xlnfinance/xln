@@ -1672,7 +1672,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.currentHeight).toBe(1);
   });
 
-  test('applyAccountInput re-sends bundled ACK plus frame when that response was lost', async () => {
+  test('duplicate committed frame returns ACK only and never re-carries a pending proposal', async () => {
     const seed = 'account-frame-duplicate-bundled-response';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1725,8 +1725,10 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.response).toEqual(accountMachine.pendingAccountInput);
-    expect(result.response?.kind).toBe('frame_ack');
+    expect(result.response?.kind).toBe('ack');
+    expect(result.response?.kind === 'ack' ? result.response.ack : undefined).toEqual(
+      accountMachine.pendingAccountInput.ack,
+    );
     expect(accountMachine.currentHeight).toBe(10);
     expect(accountMachine.pendingFrame?.height).toBe(11);
   });
@@ -2154,7 +2156,7 @@ describe('audit fail-fast regressions', () => {
     const result = await applyAccountInput(createAccountConsensusContext(env), leftAccount, sealedRightProposal);
     expect(result.ok).toBe(true);
     expect(result.events).toContainEqual(expect.stringContaining('LEFT-WINS'));
-    expect(result.response).toEqual(leftAccount.pendingAccountInput);
+    expect(result.response).toBeUndefined();
     expect(leftAccount.currentHeight).toBe(0);
     expect(leftAccount.pendingFrame?.accountTxs).toEqual([staleSettlementSeal]);
     expect(leftAccount.mempool).toEqual([]);

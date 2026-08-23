@@ -12,7 +12,7 @@ import { validateDelta } from './delta-validation';
 import { assertAccountDeltaCapacity } from '../state/delta';
 import { decodeAccountFrame } from './frame-validation';
 import { decodeAccountTxs } from '../tx-validation';
-import { validatePendingAccountResend } from './pending-resend-validation';
+import { validatePendingAccountProposal } from './pending-proposal-validation';
 import {
   validateRebalanceFeePolicies,
   validateRequestedRebalanceAmounts,
@@ -152,7 +152,7 @@ function assertAccountReplica(
   validateAccountFinancialMaps(state, account, context);
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
-  validatePendingAccountResend(account, context);
+  validatePendingAccountProposal(account, context);
   requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);
   assertAccountJClaimAccumulatorState(
     state['leftPendingJClaims'] as AccountReplica['state']['leftPendingJClaims'],

@@ -206,7 +206,7 @@ export interface AccountState {
  * Complete deterministic replica owned by one Entity.
  *
  * The inherited State is the bilateral commitment shared by both peers. The
- * fields declared here coordinate proposal, acknowledgement, resend and
+ * fields declared here coordinate proposal, acknowledgement and
  * Entity-owned automation. The parent Entity may commit this wider envelope,
  * but Account-root helpers must accept `AccountState`, never the envelope.
  */
@@ -230,7 +230,8 @@ export interface AccountReplica {
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
-  pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>; // Cached outbound frame input for resend/nudge
+  /** Exact signed proposal evidence awaiting the counterparty ACK. */
+  pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>;
   lastOutboundFrameAck?: {
     height: number;
     counterpartyEntityId: string;
@@ -247,16 +248,6 @@ export interface AccountReplica {
    * advertises the thousands of users that opened toward it.
    */
   publicPinned?: boolean;
-  /**
-   * Entity timestamp (ms) at which `pendingAccountInput` was last put on the
-   * wire. A flush re-bundles the pending proposal only when it was never sent,
-   * when a LEFT-wins collision demands the exact resend, or once
-   * ACCOUNT_PROPOSAL_RESEND_MS have passed without ACK; otherwise only the
-   * newest ACK goes out. The scheduled wake turns the same deadline into a
-   * forced flush on an otherwise idle Entity.
-   */
-  pendingProposalSentAt?: number;
-
   // Rollback support for bilateral disagreements
   rollbackCount: number;
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments

@@ -28,6 +28,8 @@ export type CommittedRuntimeEffects = {
   queuedJSubmitRetries: RuntimeTx[];
   outputPlan: RuntimeFrameOutputPlan;
   routing: RuntimeOutputRoutingDeps;
+  /** Start time of the committed live frame; absent for replay/scenario frames. */
+  frameStartedAt?: number;
 };
 
 const countRuntimeInfraEffects = (input: RuntimeInput | undefined): number =>
@@ -75,7 +77,7 @@ export const runCommittedRuntimeEffects = async (
   });
   profile.mark('jOutbox');
 
-  state.lastFrameAt = getWallClockMs();
+  if (effects.frameStartedAt !== undefined) state.lastFrameStartedAt = effects.frameStartedAt;
   if (env.strictScenario) {
     const { assertRuntimeStateStrict } = await import('../assertions');
     await assertRuntimeStateStrict(env);

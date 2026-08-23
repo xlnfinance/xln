@@ -35,7 +35,7 @@ import {
 } from './transaction';
 import { createRuntimeProcessProfile, type RuntimeProcessProfile } from './process-profile';
 import { restoreUndurableRuntimeInput } from './intake/recovery';
-import { startRuntimeFrame } from './lifecycle/start';
+import { startRuntimeFrame, type RuntimeFrameStart } from './lifecycle/start';
 import { prepareRuntimeFrameInput } from './lifecycle/prepare';
 import { applyPreparedRuntimeFrame } from './apply';
 import { planRuntimeFrameOutputs } from './plan';
@@ -469,7 +469,7 @@ const applyAndCommitRuntimeFrame = async (
   processState: RuntimeLifecycleState,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
-  started: { frameHeightBeforeTick: number; frameTimestampBeforeTick: number },
+  started: RuntimeFrameStart,
   deps: RuntimeProcessDeps,
 ): Promise<{ env: RuntimeReplica; staleWriterStopped: boolean }> => {
   const candidate = openRuntimeFrameCandidate(
@@ -542,6 +542,9 @@ const applyAndCommitRuntimeFrame = async (
       queuedJSubmitRetries: applied.queuedJSubmitRetries,
       outputPlan,
       routing,
+      ...(frameAdvanced && started.frameStartedAt !== undefined
+        ? { frameStartedAt: started.frameStartedAt }
+        : {}),
     },
     profile,
     {

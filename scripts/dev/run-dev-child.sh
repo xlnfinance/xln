@@ -12,7 +12,7 @@ if [[ -z "$role" ]]; then
 fi
 
 case "$role" in
-  anvil|anvil2|rpc-ready|mesh|watchtower|runtime|vite|vite-http|ready)
+  anvil|anvil2|rpc-ready|backend-ready|mesh|watchtower|runtime|vite|vite-http|ready)
     ;;
   *)
     echo "DEV_CHILD_ROLE_UNKNOWN:${role}" >&2
@@ -31,7 +31,7 @@ require_env() {
 for name in RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT DEV_LOG_DIR MESH_LOG_LEVEL XLN_RDB_ROOT XLN_JDB_ROOT XLN_DEV_PID_DIR XLN_DEV_OWNER_ID; do
   require_env "$name"
 done
-if [[ "$role" == "ready" ]]; then
+if [[ "$role" == "ready" || "$role" == "backend-ready" ]]; then
   for name in DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_RELAY_WEB_URLS; do
     require_env "$name"
   done
@@ -161,6 +161,14 @@ case "$role" in
     ;;
   rpc-ready)
     wait_for_dev_chains
+    ;;
+  backend-ready)
+    run_owned bun scripts/dev/wait-dev-backend-ready.ts \
+      --api-url "http://127.0.0.1:${API_PORT}" \
+      --watchtower-url "http://127.0.0.1:${WATCHTOWER_PORT}" \
+      --runtime-bundle "$DEV_RUNTIME_BUNDLE_PATH" \
+      --started-at-ms "$DEV_STARTED_AT_MS" \
+      --timeout-ms "$DEV_READY_TIMEOUT_MS"
     ;;
   mesh)
     run_owned env \

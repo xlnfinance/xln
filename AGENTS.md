@@ -139,7 +139,7 @@ Quick iteration signals (full autonomy):
 - Check imports before reading (no imports = delete, don't analyze)
 
 ## 🚨 BROWSER BUILD
-`bun build core/runtime.ts --target=browser --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util`
+`bun build core/runtime.ts --target=browser --external http --external https --external zlib --external fs --external path --external stream --external buffer --external url --external net --external tls --external os --external util`
 (runtime.ts runs in browser, never --target node)
 
 

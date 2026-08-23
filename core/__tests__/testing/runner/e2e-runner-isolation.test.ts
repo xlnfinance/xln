@@ -394,6 +394,9 @@ describe('isolated E2E runner resources', () => {
         writeFileSync(resolve(root, file), `${file}:v1`);
       }
       const original = computeE2EBuildInputHash(files, root);
+      expect(computeE2EBuildInputHash(files, root, '1.4.0')).not.toBe(
+        computeE2EBuildInputHash(files, root, '1.3.14'),
+      );
       writeFileSync(resolve(root, files[0]!), 'runner:changed');
       writeFileSync(resolve(root, files[1]!), 'test:changed');
       expect(computeE2EBuildInputHash(files, root)).toBe(original);
