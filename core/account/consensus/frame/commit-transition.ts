@@ -19,6 +19,7 @@ import {
   publishAccountOverlay,
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
+import { noteAccountFrameForShadow } from '../../../rscore/shadow-hook';
 import {
 } from '../helpers';
 import type { AccountConsensusContext } from '../context';
@@ -99,6 +100,21 @@ export const commitAccountFrameTransition = async (
         committed.account,
         committed.accountStateRoot,
       );
+    });
+    // Fire-and-forget: mirror this committed frame into the Rust account
+    // engine when shadow mode is on (no-op otherwise, one env check).
+    noteAccountFrameForShadow({
+      ownerEntityId: account.proofHeader.fromEntity,
+      counterpartyEntityId: account.proofHeader.toEntity,
+      frameHeight: frame.height,
+      byLeft: frame.byLeft,
+      timestamp: frame.timestamp,
+      jHeight,
+      enforcementTimestamp: options.htlcEnforcementClock?.timestamp ?? frame.timestamp,
+      enforcementJHeight: options.htlcEnforcementClock?.jHeight ?? jHeight,
+      accountTxs: frame.accountTxs,
+      committedStateRoot: committed.accountStateRoot,
+      account,
     });
     return Object.freeze({
       accountStateRoot: committed.accountStateRoot,

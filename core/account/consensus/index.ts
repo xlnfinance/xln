@@ -3,6 +3,7 @@
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
 
+import { noteAccountFrameForShadow } from '../../rscore/shadow-hook';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -487,6 +488,24 @@ async function commitIncomingFrameOnRealState(
   publishAccountOverlay(account, validation.clonedMachine);
   if (account.state !== validation.clonedMachine.state) {
     throw new Error('ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH');
+  }
+  // Fire-and-forget: mirror the receiver-side committed frame into the Rust
+  // account engine when shadow mode is on (no-op otherwise).
+  {
+    const shadowJHeight = receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
+    noteAccountFrameForShadow({
+      ownerEntityId: ourEntityId,
+      counterpartyEntityId: cpForCommitLog,
+      frameHeight: receivedFrame.height,
+      byLeft: receivedFrame.byLeft,
+      timestamp: receivedFrame.timestamp,
+      jHeight: shadowJHeight,
+      enforcementTimestamp: receivedFrame.timestamp,
+      enforcementJHeight: shadowJHeight,
+      accountTxs: receivedFrame.accountTxs,
+      committedStateRoot: receivedFrame.accountStateRoot,
+      account,
+    });
   }
   timedOutHashlocks.push(...validation.timedOutHashlocks);
   candidateEffects.push(...validation.candidateEffects);
