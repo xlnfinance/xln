@@ -21,7 +21,43 @@ export const txFingerprint = (tx: FingerprintableTx): string => {
   return fingerprint;
 };
 
+type CompactAccountInput = {
+  kind: string;
+  fromEntityId: string;
+  toEntityId: string;
+  domain?: unknown;
+  disputeConfig?: unknown;
+  watchSeed?: unknown;
+  proposal?: { frame: { height: number; stateHash: string }; frameHanko?: string; disputeSeal?: { hash: string; hanko?: string } };
+  ack?: { height: number; frameHash: string; frameHanko?: string; disputeSeal?: { hash: string; hanko?: string } };
+};
+
+const sealKey = (seal: { hash: string; hanko?: string } | undefined): string =>
+  seal ? `${seal.hash}:${seal.hanko ?? ''}` : '';
+
+/**
+ * A Hub mempool is mostly Account inputs whose identity is fixed by their
+ * endpoints, heights, hashes and Hankos; rendering the whole frame body (every
+ * onion layer) to JSON for a multiset key was most of fingerprinting.
+ */
+const compactAccountInputFingerprint = (data: unknown): string | undefined => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  const input = data as CompactAccountInput;
+  if (input.kind !== 'frame' && input.kind !== 'frame_ack' && input.kind !== 'ack') return undefined;
+  if (typeof input.fromEntityId !== 'string' || typeof input.toEntityId !== 'string') return undefined;
+  const proposal = input.kind === 'ack' ? undefined : input.proposal;
+  const ack = input.kind === 'frame' ? undefined : input.ack;
+  const envelope = safeStringify([input.domain ?? null, input.disputeConfig ?? null, input.watchSeed ?? null]);
+  return `accountInput:${input.kind}|${input.fromEntityId}|${input.toEntityId}|${envelope}` +
+    `|${proposal ? `${proposal.frame.height}:${proposal.frame.stateHash}:${proposal.frameHanko ?? ''}:${sealKey(proposal.disputeSeal)}` : ''}` +
+    `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${sealKey(ack.disputeSeal)}` : ''}`;
+};
+
 const txFingerprintUncached = (tx: FingerprintableTx): string => {
+  if (tx.type === 'accountInput') {
+    const compact = compactAccountInputFingerprint(tx.data);
+    if (compact !== undefined) return compact;
+  }
   if (
     tx.type !== 'consensusOutput' ||
     !tx.data ||

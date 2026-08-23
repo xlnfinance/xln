@@ -49,7 +49,9 @@ export const counterpartySettlementHankos = (
   };
 };
 
+/** Read-only projection: only a sealing settle_transition has hankos to strip, so only it is cloned. */
 export const accountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
+  if (!(tx.type === 'settle_transition' && tx.data.kind === 'seal')) return tx;
   const unsigned = cloneIsolatedAccountTx(tx);
   if (unsigned.type === 'settle_transition' && unsigned.data.kind === 'seal') {
     delete unsigned.data.settlementHanko;
@@ -58,8 +60,9 @@ export const accountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
   return unsigned;
 };
 
+/** Owned copy for the certified history record: every tx is cloned, hankos stripped. */
 export const accountFrameWithoutPostCommitHankos = (frame: AccountFrame): AccountFrame => ({
   ...frame,
-  accountTxs: frame.accountTxs.map(accountTxWithoutPostCommitHankos),
+  accountTxs: frame.accountTxs.map(tx => accountTxWithoutPostCommitHankos(cloneIsolatedAccountTx(tx))),
   deltas: frame.deltas.map(delta => ({ ...delta })),
 });

@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { hexToBytes } from '../support/hex-bytes';
 import { FailureDispositionError } from '../protocol/errors/failure-taxonomy';
 
 import { decodeHankoAbi, encodeHankoAbi, type HankoAbiClaim } from './abi';
@@ -226,13 +227,39 @@ const signatureCount = (byteLength: number): number => {
   return candidate;
 };
 
+const SECP256K1_HALF_ORDER_BYTES = hexToBytes(`0x${SECP256K1_HALF_ORDER.toString(16).padStart(64, '0')}`);
+const HEX_BYTE_TEXT = Array.from({ length: 256 }, (_, value) => value.toString(16).padStart(2, '0'));
+const bytesToLowerHex = (bytes: Uint8Array): string => {
+  let output = '0x';
+  for (let index = 0; index < bytes.length; index += 1) output += HEX_BYTE_TEXT[bytes[index] ?? 0];
+  return output;
+};
+
+/** Unsigned big-endian compare of two 32-byte scalars, no BigInt round trip. */
+const compareScalarBytes = (bytes: Uint8Array, offset: number, reference: Uint8Array): number => {
+  for (let index = 0; index < 32; index += 1) {
+    const difference = (bytes[offset + index] ?? 0) - (reference[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+};
+
+const isZeroScalar = (bytes: Uint8Array, offset: number): boolean => {
+  for (let index = 0; index < 32; index += 1) if (bytes[offset + index] !== 0) return false;
+  return true;
+};
+
+// Hub frames pack hundreds of signatures; parsing r and s through hex text
+// and BigInt for the low-s rule was most of Hanko encoding time.
 const assertCanonicalSignature = (signature: Uint8Array, index: number): void => {
   if (signature.length !== 65) invalidHanko(`HANKO_SIGNATURE_LENGTH_INVALID:${index}`);
   const recovery = signature[64];
   if (recovery !== 27 && recovery !== 28) invalidHanko(`HANKO_SIGNATURE_RECOVERY_INVALID:${index}`);
-  const r = BigInt(ethers.hexlify(signature.slice(0, 32)));
-  const s = BigInt(ethers.hexlify(signature.slice(32, 64)));
-  if (r === 0n || s === 0n || s > SECP256K1_HALF_ORDER) {
+  if (
+    isZeroScalar(signature, 0)
+    || isZeroScalar(signature, 32)
+    || compareScalarBytes(signature, 32, SECP256K1_HALF_ORDER_BYTES) > 0
+  ) {
     invalidHanko(`HANKO_SIGNATURE_NON_CANONICAL:${index}`);
   }
 };
@@ -241,7 +268,9 @@ export const packHankoSignatures = (signatures: readonly Uint8Array[]): HankoHex
   if (signatures.length === 0) return '0x';
   signatures.forEach(assertCanonicalSignature);
   const recoveryBits = new Uint8Array(Math.ceil(signatures.length / 8));
+  const packed = new Uint8Array(signatures.length * 64 + recoveryBits.length);
   signatures.forEach((signature, index) => {
+    packed.set(signature.subarray(0, 64), index * 64);
     if (signature[64] === 28) {
       const byteIndex = Math.floor(index / 8);
       const current = recoveryBits[byteIndex];
@@ -249,10 +278,8 @@ export const packHankoSignatures = (signatures: readonly Uint8Array[]): HankoHex
       recoveryBits[byteIndex] = current | (1 << (index % 8));
     }
   });
-  return ethers.hexlify(ethers.concat([
-    ...signatures.map((signature) => signature.slice(0, 64)),
-    recoveryBits,
-  ])).toLowerCase() as HankoHex;
+  packed.set(recoveryBits, signatures.length * 64);
+  return bytesToLowerHex(packed) as HankoHex;
 };
 
 export const unpackHankoSignatures = (packed: string): readonly HankoHex[] => {
@@ -270,12 +297,11 @@ export const unpackHankoSignatures = (packed: string): readonly HankoHex[] => {
     const recoveryByte = bytes[recoveryOffset + Math.floor(index / 8)];
     if (recoveryByte === undefined) invalidHanko(`HANKO_RECOVERY_BYTE_MISSING:${index}`);
     const recovery = ((recoveryByte >> (index % 8)) & 1) === 0 ? 27 : 28;
-    const signature = ethers.getBytes(ethers.concat([
-      bytes.slice(index * 64, (index + 1) * 64),
-      Uint8Array.of(recovery),
-    ]));
+    const signature = new Uint8Array(65);
+    signature.set(bytes.subarray(index * 64, (index + 1) * 64), 0);
+    signature[64] = recovery;
     assertCanonicalSignature(signature, index);
-    return ethers.hexlify(signature).toLowerCase() as HankoHex;
+    return bytesToLowerHex(signature) as HankoHex;
   });
 };
 
