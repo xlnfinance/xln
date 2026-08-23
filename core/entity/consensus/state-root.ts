@@ -540,6 +540,63 @@ type EntityStateRootMemo = {
   root: string;
 };
 
+/**
+ * Per-section digest cache. The whole-state memo misses whenever any field
+ * changes (e.g. height, timestamp), but most sections (config, accounts,
+ * orderbookExt, …) keep the same value reference across the spread that
+ * buildProposalState uses. The section cache stores each section's digest
+ * keyed on the source field's object identity, so a spread that changes only
+ * height/timestamp/leaderState re-encodes just those 3 sections instead of
+ * all ~35.
+ */
+const ENTITY_SECTION_DIGEST_CACHE = Symbol('ENTITY_SECTION_DIGEST_CACHE');
+
+type SectionDigestEntry = { value: unknown; digest: string; encodedBytes: number };
+type SectionDigestCache = Map<string, SectionDigestEntry>;
+
+const readSectionDigestCache = (state: EntityState): SectionDigestCache | undefined => {
+  const cache = Reflect.get(state, ENTITY_SECTION_DIGEST_CACHE);
+  return cache === undefined ? undefined : (cache as SectionDigestCache);
+};
+
+const writeSectionDigestCache = (state: EntityState, cache: SectionDigestCache): void => {
+  const existing = Object.getOwnPropertyDescriptor(state, ENTITY_SECTION_DIGEST_CACHE);
+  if (existing?.writable) {
+    Reflect.set(state, ENTITY_SECTION_DIGEST_CACHE, cache);
+    return;
+  }
+  try {
+    Object.defineProperty(state, ENTITY_SECTION_DIGEST_CACHE, {
+      value: cache,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen/sealed EntityState still hashes correctly; it cannot cache.
+  }
+};
+
+const ensureSectionDigestCache = (state: EntityState): SectionDigestCache => {
+  const existing = readSectionDigestCache(state);
+  if (existing) return existing;
+  const cache: SectionDigestCache = new Map();
+  writeSectionDigestCache(state, cache);
+  return cache;
+};
+
+/**
+ * Copy section digest cache from source to target. When buildProposalState
+ * spreads appliedState into a new object, only height/timestamp/leaderState
+ * change; the other ~32 sections keep the same value references. Inheriting
+ * the cache lets the second state-root computation reuse all unchanged
+ * section digests instead of re-encoding them.
+ */
+export const inheritEntitySectionDigestCache = (source: EntityState, target: EntityState): void => {
+  const cache = readSectionDigestCache(source);
+  if (cache) writeSectionDigestCache(target, cache);
+};
+
 const entityStateRootFieldIdentities = (state: EntityState): unknown[] =>
   ENTITY_STATE_ROOT_FIELDS.map(field => state[field]);
 
@@ -605,22 +662,44 @@ const encodeEntityAccountsSection = (state: EntityState, _cold: boolean): string
  * `stateHash`, mempool root, envelope roots) so a dirty Account reseals only
  * its path. Pending/current frames stay certified without re-encoding bodies.
  */
+const encodeSectionValue = (field: string, value: unknown, state: EntityState | undefined, cold: boolean): string =>
+  field === 'accounts' && state ? encodeEntityAccountsSection(state, cold) : encodeCanonicalConsensusValue(value);
+
+const commitSection = (
+  field: string,
+  value: unknown,
+  state: EntityState | undefined,
+  cache: SectionDigestCache | undefined,
+  cold: boolean,
+): EntitySectionCommitment => {
+  const sourceField = state ? (field as keyof EntityState) : undefined;
+  const cacheKey = sourceField && state ? state[sourceField] : value;
+  if (cache) {
+    const cached = cache.get(field);
+    if (cached && cached.value === cacheKey) {
+      return { field, digest: cached.digest, encodedBytes: cached.encodedBytes };
+    }
+  }
+  const encoded = encodeSectionValue(field, value, state, cold);
+  const entry: EntitySectionCommitment = {
+    field,
+    digest: computeIntegrityDigest(UTF8.encode(encoded)),
+    encodedBytes: encoded.length,
+  };
+  if (cache) cache.set(field, { value: cacheKey, digest: entry.digest, encodedBytes: entry.encodedBytes });
+  return entry;
+};
+
 const commitEntityConsensusSections = (
   projected: Record<string, unknown>,
   state?: EntityState,
   cold = false,
-): EntitySectionCommitment[] =>
-  Object.entries(projected)
+): EntitySectionCommitment[] => {
+  const sectionCache = state && !cold ? ensureSectionDigestCache(state) : undefined;
+  return Object.entries(projected)
     .sort(([left], [right]) => compareStableText(left, right))
-    .map(([field, value]) => {
-      const encoded =
-        field === 'accounts' && state ? encodeEntityAccountsSection(state, cold) : encodeCanonicalConsensusValue(value);
-      return {
-        field,
-        digest: computeIntegrityDigest(UTF8.encode(encoded)),
-        encodedBytes: encoded.length,
-      };
-    });
+    .map(([field, value]) => commitSection(field, value, state, sectionCache, cold));
+};
 
 const computeEntityRootFromSections = (sections: readonly EntitySectionCommitment[]): string =>
   keccakTextHash(

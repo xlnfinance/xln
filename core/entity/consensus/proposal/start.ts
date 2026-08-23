@@ -37,6 +37,7 @@ import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
+  inheritEntitySectionDigestCache,
 } from '../state-root';
 import { fitEntityProposalToWireBudget, recordEntityWireBudgetFitHint } from './wire-budget';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
@@ -231,7 +232,7 @@ const buildProposalState = (
   view: number,
 ): EntityState => {
   const handoverLeader = getBoardHandoverLeaderState(env, replica.state, txs);
-  return {
+  const state = {
     ...appliedState,
     entityId: replica.state.entityId,
     height,
@@ -244,6 +245,8 @@ const buildProposalState = (
         : (replica.state.leaderState?.changedAtHeight ?? 0),
     },
   };
+  inheritEntitySectionDigestCache(appliedState, state);
+  return state;
 };
 
 const signProposalManifest = async (
