@@ -207,6 +207,14 @@ const normalizeEncryptionPubKey = (pubKey: unknown): string | null => {
   return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : null;
 };
 
+const timeOp = <T>(name: string, fn: () => T): T => {
+  if (!OP_COUNTERS_ENABLED) return fn();
+  const startedAt = getPerfMs();
+  const result = fn();
+  countOp(name, 0, Math.round((getPerfMs() - startedAt) * 1_000));
+  return result;
+};
+
 const send = (ws: DirectWebSocket, msg: RuntimeWsMessage): void => {
   const payload = serializeWsMessage(msg);
   countOp(`socket.directServer.out.${msg.type}`, payload.length);
@@ -234,13 +242,12 @@ const signSessionFrame = (
   // hello_ack carries the server ephemeral key and must be runtime-signed;
   // every later frame of a keyed session is authenticated by the s2c MAC.
   if (session.sessionKeys && msg.type !== 'hello_ack') {
+    const macAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+    const mac = macRuntimeWsFrame(session.sessionKeys.s2c, unsigned, session.authAudience, session.authNonce, timestamp);
+    countOp('socket.directServer.out.mac', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - macAt) * 1_000) : 0);
     return {
       ...unsigned,
-      auth: {
-        nonce: session.authNonce,
-        timestamp,
-        mac: macRuntimeWsFrame(session.sessionKeys.s2c, unsigned, session.authAudience, session.authNonce, timestamp),
-      },
+      auth: { nonce: session.authNonce, timestamp, mac },
     };
   }
   return {
@@ -271,7 +278,9 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
   if (!isSocketOpen(ws)) return { sent: false };
   let result: WebSocketSendResult;
   try {
+    const serializeAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const payload = serializeWsMessage(msg);
+    countOp('socket.directServer.out.serialize', payload.length, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - serializeAt) * 1_000) : 0);
     countOp(`socket.directServer.out.${msg.type}`, payload.length);
     recordOpEvent('socket.directServer.out.wire', {
       type: msg.type,
@@ -279,7 +288,7 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
       toRuntimeId: String(msg.to ?? ''),
       bytes: payload.length,
     });
-    result = ws.send(payload);
+    result = timeOp('socket.directServer.out.wsSend', () => ws.send(payload));
   } catch (error) {
     return { sent: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -476,7 +485,7 @@ const sendEntityInputsDelivery = (
         ? ingressTimestamp
         : Date.now(),
       payload: sessionKeys && encSeq !== undefined
-        ? encryptSessionPayload(envelope, sessionKeys.s2c, encSeq)
+        ? timeOp('socket.directServer.out.encrypt', () => encryptSessionPayload(envelope, sessionKeys.s2c, encSeq))
         : encryptPayload(
             envelope.sourceSignature
               ? envelope

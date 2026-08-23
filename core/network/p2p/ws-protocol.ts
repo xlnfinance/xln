@@ -20,7 +20,11 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { hmacSha256 } from '../../protocol/crypto/fast-sha256';
-import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
+import {
+  decodeValidatedBinaryPayload,
+  encodeBinaryPayload,
+  packPreorderedBinaryPayload,
+} from '../../protocol/serialization/binary-codec';
 import type { Codec } from '../../protocol/serialization/codec';
 import { LIMITS } from '../../config/constants';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';
@@ -463,10 +467,28 @@ const frameAuthPreimage = (
   // The frame itself is MessagePack. Authenticate the same binary value
   // directly instead of canonical-JSON encoding every ciphertext to base64
   // and then sending that ciphertext as MessagePack a second time.
+  const flat = flatSortedFrame(unsigned);
+  if (flat) {
+    // Same bytes as the canonical walk for a flat frame (scalars and raw
+    // ciphertext only), without cloning the multi-kilobyte payload per MAC.
+    return packPreorderedBinaryPayload([FRAME_DOMAIN, audience, nonce, authTimestamp, flat]);
+  }
   return encodeBinaryPayload(
     [FRAME_DOMAIN, audience, nonce, authTimestamp, unsigned],
     'msgpack',
   );
+};
+
+/** Sorted-key copy of a frame whose values are all scalars or bytes; null when nested. */
+const flatSortedFrame = (frame: Record<string, unknown>): Record<string, unknown> | null => {
+  if (Object.getPrototypeOf(frame) !== Object.prototype) return null;
+  const output: Record<string, unknown> = {};
+  for (const key of Object.keys(frame).sort()) {
+    const value = frame[key];
+    if (value !== null && typeof value === 'object' && !(value instanceof Uint8Array)) return null;
+    output[key] = value;
+  }
+  return output;
 };
 
 /** Session-key frame authenticator: same preimage as the signed digest, HMAC instead of ECDSA. */

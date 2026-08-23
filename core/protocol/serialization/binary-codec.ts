@@ -188,6 +188,19 @@ const packCanonical = (canonical: unknown, codec: XlnBinaryCodecName): Uint8Arra
  * boundary validators on the unpacked value.
  */
 export const packTransportValue = (value: unknown): Uint8Array => asBytes(msgpackCodec.pack(value));
+
+/**
+ * Payload-framed (magic-prefixed) pack WITHOUT the canonical walk. Only for
+ * values the caller has already put in canonical shape (sorted plain keys,
+ * scalars and bytes): the bytes then equal encodeBinaryPayload's.
+ */
+export const packPreorderedBinaryPayload = (value: unknown): Uint8Array => {
+  const body = asBytes(msgpackCodec.pack(value));
+  const encoded = new Uint8Array(1 + body.byteLength);
+  encoded[0] = XLN_BINARY_CODEC_MAGIC.msgpack;
+  encoded.set(body, 1);
+  return encoded;
+};
 export const unpackTransportValue = (bytes: Uint8Array): unknown => msgpackCodec.unpack(bytes);
 
 /** Canonical (sorted, marked) copy of a value; later encodes of it skip the walk. */
