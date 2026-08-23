@@ -1,4 +1,3 @@
-import { isProposalResendDue } from '../../scheduler/wake/proposal-resend';
 import { FailureDispositionError, haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 /**
@@ -308,12 +307,6 @@ const collectEntityTxResult = (
       context.accountJClaimReplacedNodeHashes.add(hash);
     }
   }
-  for (const accountId of result.accountResendWork ?? []) {
-    if (!result.newState.accounts.has(accountId)) throw new Error(`ACCOUNT_RESEND_WORK_ACCOUNT_MISSING:${accountId}`);
-    // The wake is the idle-Entity half of the resend rule; the forced flush
-    // below re-bundles the exact pending proposal because its deadline passed.
-    setProposableAccountForce(context.proposableAccounts, accountId, true);
-  }
   if (result.accountInputWork) {
     const accountId = result.accountInputWork.accountId.toLowerCase();
     // This is Channel.ts's one flushable lane with an explicit force bit.
@@ -347,7 +340,7 @@ const collectEntityTxResult = (
     for (const hashInfo of result.hashesToSign) {
       const existing = context.collectedHashManifest.get(hashInfo.hash);
       if (existing?.type === hashInfo.type && existing.context === hashInfo.context) {
-        // At-least-once transport plus Account-level resend may place several
+        // At-least-once transport may place several
         // certified copies of one already-committed frame in the same Entity
         // candidate. The final response map already emits one response per
         // bilateral lane; request its exact witness once as well. A same hash
@@ -698,44 +691,22 @@ const liveOutboundAck = (
 /**
  * Channel.ts flushes from live channel state, never from a second response
  * cache. XLN does the same, retaining only exact Hanko-bearing proposal/ACK
- * bytes in the AccountReplica so a mandatory flush cannot invent new bytes.
+ * bytes in the AccountReplica so a flush cannot invent new bytes.
  */
 const resolveForcedAccountInput = (
   account: AccountReplica,
   accountKey: string,
-  entityTimestamp: number,
-): AccountPeerInput => {
-  const pendingFrame = account.pendingFrame;
+): AccountPeerInput | undefined => {
   const ack = liveOutboundAck(account, accountKey);
-  if (!pendingFrame) {
+  if (!account.pendingFrame) {
     if (!ack) throw new Error(`ACCOUNT_FORCED_RESPONSE_MISSING:${accountKey}:${account.currentHeight}`);
     return ack;
   }
 
-  const pending = account.pendingAccountInput;
-  const proposal = pending ? accountInputProposal(pending) : undefined;
-  if (!pending || !proposal) {
-    throw new Error(`ACCOUNT_FORCED_PENDING_INPUT_MISSING:${accountKey}:${pendingFrame.height}`);
-  }
-  if (
-    Number(proposal.frame.height) !== Number(pendingFrame.height)
-    || proposal.frame.stateHash.toLowerCase() !== pendingFrame.stateHash.toLowerCase()
-  ) {
-    throw new Error(`ACCOUNT_FORCED_PENDING_INPUT_DIVERGED:${accountKey}:${pendingFrame.height}`);
-  }
-
-  // Already on the wire and still inside the ACK window: only the newest ACK
-  // goes out. Re-bundling the proposal on every unrelated flush made the peer
-  // re-verify it and echo its own cached response, ~23% of proposal traffic.
-  const sentAt = account.pendingProposalSentAt;
-  if (sentAt !== undefined && !isProposalResendDue(sentAt, entityTimestamp) && ack) {
-    return ack;
-  }
-  account.pendingProposalSentAt = entityTimestamp;
-  if (!ack) return structuredClone(pending);
-  const pendingAck = accountInputAck(pending);
-  if (pendingAck && safeStringify(pendingAck) === safeStringify(ack.ack)) return structuredClone(pending);
-  return { ...structuredClone(pending), kind: 'frame_ack', ack: ack.ack, proposal: structuredClone(proposal) };
+  // A proposal leaves exactly once with the Runtime frame that created it.
+  // While it is pending, a forced flush may add a newly available ACK but may
+  // never reconstruct or re-carry the old proposal from Account state.
+  return ack;
 };
 
 const assertForcedAccountInputPreserved = (
@@ -833,7 +804,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     }
 
     const requiredResponse = force
-      ? resolveForcedAccountInput(account, accountKey, currentEntityState.timestamp)
+      ? resolveForcedAccountInput(account, accountKey)
       : undefined;
     traceAccountFlushHop(
       'entity-flush-start',
@@ -859,7 +830,6 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     // again. Only an actual Account proposal is causal work worth certifying.
     if (proposal && isProposedAccountFrame(proposal)) {
       proposedFrames += 1;
-      account.pendingProposalSentAt = currentEntityState.timestamp;
     }
 
     const finalAccountInput = proposal && isProposedAccountFrame(proposal)
@@ -881,7 +851,6 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       },
     );
     if (!finalAccountInput) {
-      if (force) throw new Error(`ACCOUNT_FORCED_OUTPUT_MISSING:${accountKey}`);
       continue;
     }
     if (requiredResponse) {
@@ -1591,7 +1560,7 @@ const applyPostEntityTxPhases = async (
       });
   markFrameProfile('accountProposals');
   // Account proposal construction mutates the Account replica envelope
-  // (pending frame, Hanko and resend state). Refresh each dirty leaf only
+  // (pending frame and Hanko state). Refresh each dirty leaf only
   // after that final mutation. Doing it earlier would preserve a valid-looking
   // but stale incremental Entity root.
   refreshChangedAccountCommitments(

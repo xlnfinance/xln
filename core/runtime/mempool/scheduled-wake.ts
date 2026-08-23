@@ -1,4 +1,3 @@
-import { collectDueProposalResends, nextProposalResendDeadline } from '../../entity/scheduler/wake/proposal-resend';
 import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
@@ -100,9 +99,6 @@ export const collectDueScheduledWakeJobs = (
   for (const hook of state.crontabState?.hooks?.values() ?? []) {
     if (hook.triggerAt <= now) jobs.push({ kind: 'hook', id: hook.id, dueAt: hook.triggerAt });
   }
-  for (const resend of collectDueProposalResends(state, now)) {
-    jobs.push({ kind: 'accountResend', id: resend.accountKey, dueAt: resend.dueAt });
-  }
   if (includePeriodicTasks) {
     for (const task of state.crontabState?.tasks?.values() ?? []) {
       const dueAt = crontabTaskDueAt(task);
@@ -130,8 +126,6 @@ const nextReplicaDeadline = (replica: EntityReplica): number | null => {
   for (const hook of replica.state.crontabState?.hooks?.values() ?? []) {
     next = Math.min(next, hook.triggerAt);
   }
-  const resendAt = nextProposalResendDeadline(replica.state);
-  if (resendAt !== null) next = Math.min(next, resendAt);
   if (entityNeedsPeriodicWake(replica)) {
     for (const task of replica.state.crontabState?.tasks?.values() ?? []) {
       if (!task.enabled) continue;

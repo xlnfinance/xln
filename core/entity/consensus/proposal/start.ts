@@ -297,15 +297,23 @@ const signProposalManifest = async (
   );
   countOp('entity.proposal.boardAuthority', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - authorityAt) * 1_000) : 0);
   const earlySigned = early ? await early.signatures : null;
-  if (earlySigned) {
+  if (early && earlySigned) {
     const byHash = new Map<string, string>();
-    early!.hashes.forEach((hash, index) => byHash.set(hash, earlySigned[index]!));
+    early.hashes.forEach((hash, index) => {
+      const signature = earlySigned[index];
+      if (signature === undefined) throw new Error(`ENTITY_EARLY_MANIFEST_SIGNATURE_MISSING:${hash}`);
+      byHash.set(hash, signature);
+    });
     const remaining = hashesToSign.filter(entry => !byHash.has(entry.hash)).map(entry => entry.hash);
     const lateSigned = remaining.length === 0
       ? []
       : (await signDigestsBatch(env, replica.signerId, remaining))
         ?? remaining.map(hash => signAccountFrame(env, replica.signerId, hash));
-    remaining.forEach((hash, index) => byHash.set(hash, lateSigned[index]!));
+    remaining.forEach((hash, index) => {
+      const signature = lateSigned[index];
+      if (signature === undefined) throw new Error(`ENTITY_LATE_MANIFEST_SIGNATURE_MISSING:${hash}`);
+      byHash.set(hash, signature);
+    });
     return hashesToSign.map(entry => {
       const signature = byHash.get(entry.hash);
       if (signature === undefined) throw new Error(`ENTITY_MANIFEST_SIGNATURE_MISSING:${entry.hash}`);

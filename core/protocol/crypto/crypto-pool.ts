@@ -139,7 +139,6 @@ export const configureCryptoPoolEntry = (entry: URL): void => {
 };
 
 let nextJobId = 0;
-const pending = new Map<number, (result: JobResult['result']) => void>();
 
 const configuredSize = (name: string, defaultSize: number): number => {
   const raw = process.env[name];
@@ -158,6 +157,7 @@ const cores = (): number => (typeof navigator !== 'undefined' ? navigator.hardwa
 class WorkerLane {
   #workers: Worker[] | null | undefined;
   #nextSlot = 0;
+  readonly #pending = new Map<number, (result: JobResult['result']) => void>();
   readonly #size: () => number;
 
   constructor(size: () => number) {
@@ -168,8 +168,8 @@ class WorkerLane {
   #retire(): void {
     for (const worker of this.#workers ?? []) worker.terminate();
     this.#workers = null;
-    const failed = [...pending.values()];
-    pending.clear();
+    const failed = [...this.#pending.values()];
+    this.#pending.clear();
     for (const resolve of failed) resolve(new Uint8Array(0));
   }
 
@@ -191,9 +191,9 @@ class WorkerLane {
       } as WorkerOptions);
       worker.onmessage = event => {
         const { id, result } = event.data as JobResult;
-        const resolve = pending.get(id);
+        const resolve = this.#pending.get(id);
         if (!resolve) return;
-        pending.delete(id);
+        this.#pending.delete(id);
         resolve(result);
       };
       worker.onerror = () => this.#retire();
@@ -212,7 +212,7 @@ class WorkerLane {
       const worker = workers[this.#nextSlot % workers.length];
       this.#nextSlot += 1;
       if (!worker) throw new Error('CRYPTO_POOL_WORKER_SLOT_MISSING');
-      pending.set(job.id, resolve);
+      this.#pending.set(job.id, resolve);
       worker.postMessage(job, transfer ?? []);
     });
   }
@@ -258,7 +258,7 @@ export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8A
 
 /** Sign N digests with one key; 65-byte recoverable signatures in input order, or null. */
 export const signDigestsBatchOnPool = async (privateKey: Uint8Array, digests: Uint8Array): Promise<Uint8Array | null> => {
-  const workers = signLane.workers() ?? getPool();
+  const workers = signLane.workers();
   if (!workers) return null;
   const count = Math.floor(digests.length / 32);
   if (count === 0) return new Uint8Array(0);
@@ -268,7 +268,7 @@ export const signDigestsBatchOnPool = async (privateKey: Uint8Array, digests: Ui
     const end = Math.min(count, start + perWorker);
     const slice = digests.slice(start * 32, end * 32);
     const id = nextJobId += 1;
-    parts.push((signLane.workers() ? signLane : bulkLane).submit({ id, kind: 'sign', privateKey: privateKey.slice(), digests: slice }, [slice.buffer as ArrayBuffer])
+    parts.push(signLane.submit({ id, kind: 'sign', privateKey: privateKey.slice(), digests: slice }, [slice.buffer as ArrayBuffer])
       .then(result => ({ offset: start, result })));
   }
   const out = new Uint8Array(count * ECDSA_SIGNATURE_BYTES);

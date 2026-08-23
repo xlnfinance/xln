@@ -1,5 +1,6 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import type { RuntimeReplica } from '../../../runtime/types';
+import { hmacSha256 } from '../../../protocol/crypto/fast/fast-sha256';
 import type { RuntimeAdapterAuthLevel, RuntimeAdapterAuthRole } from '../types';
 
 const AUTH_DOMAIN = 'xln-radapter-v1';
@@ -112,9 +113,7 @@ export const runtimeAdapterRevokedTokenIds = (): Set<string> => {
 };
 
 const hmacHex = (seed: string, payload: string): string =>
-  createHmac('sha256', normalizedSeed(seed))
-    .update(payload)
-    .digest('hex');
+  bytesToHex(hmacSha256(utf8ToBytes(normalizedSeed(seed)), utf8ToBytes(payload)));
 
 export const deriveRuntimeAdapterCapabilityToken = (
   seed: string,
@@ -134,7 +133,7 @@ export const deriveRuntimeAdapterCapabilityToken = (
   }
   const audience = normalizeTokenField(String(options.audience || resolveRuntimeAdapterAuthAudience(null)).toLowerCase(), 'AUDIENCE');
   const keyId = normalizeTokenField(String(options.keyId || DEFAULT_CAPABILITY_KEY_ID), 'KID');
-  const tokenId = normalizeTokenField(String(options.tokenId || randomBytes(16).toString('hex')), 'JTI');
+  const tokenId = normalizeTokenField(String(options.tokenId || bytesToHex(randomBytes(16))), 'JTI');
   const signature = hmacHex(seed, `${AUTH_DOMAIN}:cap:${level}:${exp}:${audience}:${keyId}:${tokenId}`);
   const tokenRole = level === 'inspect' ? 'read' : 'full';
   return [
@@ -152,7 +151,16 @@ const constantTimeEquals = (left: string, right: string): boolean => {
   const leftBuffer = Buffer.from(left, 'utf8');
   const rightBuffer = Buffer.from(right, 'utf8');
   if (leftBuffer.byteLength !== rightBuffer.byteLength) return false;
-  return timingSafeEqual(leftBuffer, rightBuffer);
+  let difference = 0;
+  for (let index = 0; index < leftBuffer.byteLength; index += 1) {
+    const leftByte = leftBuffer[index];
+    const rightByte = rightBuffer[index];
+    if (leftByte === undefined || rightByte === undefined) {
+      throw new Error(`RADAPTER_AUTH_COMPARE_INDEX_INVALID:${index}`);
+    }
+    difference |= leftByte ^ rightByte;
+  }
+  return difference === 0;
 };
 
 export const resolveRuntimeAdapterAuthSeed = (): string | null => {

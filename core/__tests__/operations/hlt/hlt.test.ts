@@ -585,7 +585,7 @@ describe('production swap load evidence', () => {
       loadDurableAfter: { height: 31, canonicalStateHash: root },
       settlementEvidence,
       environment: {
-        disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, laneWalSync: true,
+        disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, lanePersistence: true, laneWalSync: true,
         laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
       },
     });

@@ -141,6 +141,33 @@ const applyDuplicateAck = (
   });
 };
 
+const cacheAckOnlyResponse = (
+  account: AccountReplica,
+  pendingResponse: AccountPeerInput,
+  input: AccountPeerInput,
+  receivedHeight: number,
+): Extract<AccountPeerInput, { kind: 'ack' }> => {
+  const pendingAck = accountInputAck(pendingResponse);
+  if (!pendingAck) {
+    throw new Error(`DUPLICATE_ACK_PENDING_RESPONSE_MISSING_ACK:${receivedHeight}`);
+  }
+  const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
+    kind: 'ack',
+    fromEntityId: pendingResponse.fromEntityId,
+    toEntityId: pendingResponse.toEntityId,
+    domain: copyAccountStateDomain(pendingResponse.domain),
+    disputeConfig: copyAccountDisputeConfig(pendingResponse.disputeConfig),
+    ...(pendingResponse.watchSeed !== undefined ? { watchSeed: pendingResponse.watchSeed } : {}),
+    ack: structuredClone(pendingAck),
+  };
+  account.lastOutboundFrameAck = {
+    height: receivedHeight,
+    counterpartyEntityId: input.fromEntityId,
+    response: structuredClone(response),
+  };
+  return response;
+};
+
 const reusableCertifiedAckSeal = (account: AccountReplica): AccountDisputeSeal | undefined => {
   if (!hasLocalCertifiedDisputeProof(account)) return undefined;
   if (Number(account.currentDisputeProofNonce) <= Number(account.state.jNonce ?? 0)) return undefined;
@@ -216,13 +243,19 @@ export const buildDuplicateCommittedFrameAck = (
     && Number(pendingAck.height) === receivedHeight
     && pendingResponse.toEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
   ) {
-    events.push(`↩️ Re-sent cached response for duplicate committed frame ${receivedHeight}`);
+    const response = cacheAckOnlyResponse(
+      account,
+      pendingResponse,
+      input,
+      receivedHeight,
+    );
+    events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
     replayLog.debug('input.duplicate_ack_cached_pending', {
       height: receivedHeight,
       from: shortId(input.fromEntityId),
       currentHeight: account.currentHeight,
     });
-    return applyDuplicateAck(input, receivedFrame, pendingResponse, events);
+    return applyDuplicateAck(input, receivedFrame, response, events);
   }
   const cachedAck = account.lastOutboundFrameAck;
   if (

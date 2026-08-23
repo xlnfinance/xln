@@ -155,8 +155,13 @@ const updateSourceHash = (hash: ReturnType<typeof createHash>, file: string, dat
   hash.update('\0');
 };
 
-export const computeE2EBuildInputHash = (files: readonly string[], root = process.cwd()): string => {
+export const computeE2EBuildInputHash = (
+  files: readonly string[],
+  root = process.cwd(),
+  bunVersion = Bun.version,
+): string => {
   const hash = createHash('sha256');
+  updateSourceHash(hash, 'runtime:bun-version', Buffer.from(bunVersion));
   for (const file of files.filter(isE2EBuildInputPath).slice().sort(compareStableText)) {
     const data = readFileSync(resolve(root, file));
     updateSourceHash(hash, file, data);
@@ -205,6 +210,7 @@ export const computeCodeFingerprint = (): E2ECodeFingerprint => {
   const files = listRepositorySourceFiles().filter(isE2ECodeInputPath);
   const hash = createHash('sha256');
   const buildInputHash = createHash('sha256');
+  updateSourceHash(buildInputHash, 'runtime:bun-version', Buffer.from(Bun.version));
   let trackedBytes = 0;
   for (const file of files) {
     const absolutePath = resolve(process.cwd(), file);

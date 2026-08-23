@@ -1,6 +1,7 @@
 import type { EntityInput } from '../../../entity/types';
 import type { RuntimeReplica } from '../../types';
 import type { RuntimeProcessProfile } from '../process-profile';
+import { getWallClockMs } from '../../../support/time';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -19,6 +20,8 @@ export type RuntimeFrameStart = {
   ready: boolean;
   frameHeightBeforeTick: number;
   frameTimestampBeforeTick: number;
+  /** Live scheduler time only; never enters deterministic Runtime state. */
+  frameStartedAt?: number;
 };
 
 const stopAtDebugFrame = async (env: RuntimeReplica): Promise<void> => {
@@ -56,5 +59,6 @@ export const startRuntimeFrame = async (
     ready: ingress.ready,
     frameHeightBeforeTick,
     frameTimestampBeforeTick,
+    ...(ingress.ready && !env.scenarioMode ? { frameStartedAt: getWallClockMs() } : {}),
   };
 };

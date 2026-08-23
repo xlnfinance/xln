@@ -19,6 +19,7 @@ if (!['payments', 'same', 'mixed', 'cross'].includes(workload)) {
 const snapshotPath = join(workDir, 'hlt-h1-base-snapshot.json');
 const buildEnv = {
   ...process.env,
+  XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE: '1',
   XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: snapshotPath,
 };
 const smoke = spawnSync(process.execPath, ['core/scripts/operations/production/local-prod-smoke.ts'], {

@@ -312,25 +312,41 @@ export const isRuntimeFrameReady = (
   overrideDelayMs?: number,
 ): boolean => {
   if (env.scenarioMode) return true;
-  const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
-  if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return true;
-  const lastFrameAt = ensureRuntimeInfrastructure(env).lastFrameAt;
-  if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) {
+  const periodMs = getRuntimeFramePeriodMs(env, overrideDelayMs);
+  if (periodMs <= 0) return true;
+  const lastFrameStartedAt = ensureRuntimeInfrastructure(env).lastFrameStartedAt;
+  if (
+    typeof lastFrameStartedAt !== 'number' ||
+    !Number.isFinite(lastFrameStartedAt) ||
+    lastFrameStartedAt <= 0
+  ) {
     return true;
   }
-  return Math.max(0, now - lastFrameAt) >= Math.floor(rawDelayMs);
+  return Math.max(0, now - lastFrameStartedAt) >= periodMs;
+};
+
+export const getRuntimeFramePeriodMs = (
+  env: RuntimeReplica,
+  overrideDelayMs?: number,
+): number => {
+  if (env.scenarioMode) return 0;
+  const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
+  return Number.isFinite(rawDelayMs) && rawDelayMs > 0 ? Math.floor(rawDelayMs) : 0;
 };
 
 export const getRemainingRuntimeFrameDelayMs = (
   env: RuntimeReplica,
   overrideDelayMs?: number,
 ): number => {
-  if (env.scenarioMode) return 0;
-  const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
-  if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return 0;
-  const lastFrameAt = ensureRuntimeInfrastructure(env).lastFrameAt;
-  if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) {
+  const periodMs = getRuntimeFramePeriodMs(env, overrideDelayMs);
+  if (periodMs <= 0) return 0;
+  const lastFrameStartedAt = ensureRuntimeInfrastructure(env).lastFrameStartedAt;
+  if (
+    typeof lastFrameStartedAt !== 'number' ||
+    !Number.isFinite(lastFrameStartedAt) ||
+    lastFrameStartedAt <= 0
+  ) {
     return 0;
   }
-  return Math.max(0, Math.floor(rawDelayMs) - Math.max(0, getWallClockMs() - lastFrameAt));
+  return Math.max(0, periodMs - Math.max(0, getWallClockMs() - lastFrameStartedAt));
 };

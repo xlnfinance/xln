@@ -129,13 +129,18 @@ test('dev starts application services only after both exact Anvil chains are rea
   const firstReady = child.indexOf("--chain-id 31337");
   const secondReady = child.indexOf("--chain-id 31338");
   const barrier = supervisor.indexOf('const barrier = spawnRole(DEV_CHAIN_BARRIER_ROLE)');
-  const applicationStart = supervisor.indexOf('for (const role of DEV_APPLICATION_ROLES) spawnRole(role)');
+  const backendStart = supervisor.indexOf('for (const role of DEV_BACKEND_ROLES) spawnRole(role)');
+  const backendBarrier = supervisor.indexOf('const backendBarrier = spawnRole(DEV_BACKEND_BARRIER_ROLE)');
+  const frontendStart = supervisor.indexOf('for (const role of DEV_FRONTEND_ROLES) spawnRole(role)');
   expect(firstReady).toBeGreaterThan(0);
   expect(secondReady).toBeGreaterThan(firstReady);
   expect(child).toContain('rpc-ready)\n    wait_for_dev_chains');
   expect(child).toContain('DEV_CHAINS_NOT_READY:role=${role}');
   expect(barrier).toBeGreaterThan(0);
-  expect(applicationStart).toBeGreaterThan(barrier);
+  expect(backendStart).toBeGreaterThan(barrier);
+  expect(backendBarrier).toBeGreaterThan(backendStart);
+  expect(frontendStart).toBeGreaterThan(backendBarrier);
+  expect(child).toContain('backend-ready)\n    run_owned bun scripts/dev/wait-dev-backend-ready.ts');
 });
 
 test('dev cleanup reaps only owner-recorded processes and only deletes the dev shard', () => {
@@ -487,7 +492,7 @@ test('storage health measures the configured RDB and JDB shard roots', async () 
   const jdbRoot = join(root, 'jdb');
   const historyPath = join(root, 'health.json');
   const probe = await run('bun', ['-e', [
-    "const { getStorageHealth } = await import('./runtime/support/storage-monitor.ts');",
+    "const { getStorageHealth } = await import('./core/support/storage-monitor.ts');",
     'const health = await getStorageHealth();',
     'console.log(JSON.stringify({ historyPath: health.historyPath, tracked: health.tracked.map(x => ({ name: x.name, path: x.path })) }));',
   ].join(' ')], {
@@ -562,7 +567,7 @@ test('dev supervisor owns all roles, preserves their logs and stops siblings aft
 set -euo pipefail
 role="$1"
 echo "started role=$role"
-if [[ "$role" == "ready" || "$role" == "rpc-ready" ]]; then exit 0; fi
+if [[ "$role" == "ready" || "$role" == "rpc-ready" || "$role" == "backend-ready" ]]; then exit 0; fi
 if [[ "$role" == "mesh" ]]; then sleep 0.1; exit 7; fi
 if [[ "$role" == "anvil" ]]; then
   sleep 30 &
@@ -581,6 +586,7 @@ while true; do sleep 0.05; done
   expect(exitCode).toBe(7);
   const log = readFileSync(join(logDir, 'dev.log'), 'utf8');
   for (const role of DEV_ROLES) expect(log).toContain(`started role=${role}`);
+  expect(log).toContain('started role=backend-ready');
   expect(log).toContain('[MESH] DEV_ROLE_EXIT code=7 signal=none');
   expect(log).toContain('DEV_STOPPED exitCode=7');
   const descendantPid = Number(readFileSync(descendantPidPath, 'utf8').trim());

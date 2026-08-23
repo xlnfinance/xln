@@ -149,9 +149,8 @@ const buildInboundBinding = (
 };
 
 // The same inbound lock is decrypted by the wire-budget fit (per attempt), by
-// the proposal, by the validator replay of the same frame, and again when the
-// payer re-sends its still-pending proposal (a fresh tx object each time). The
-// X25519+cipher round is pure in (ciphertext, AAD, keys), so memoize by content.
+// the proposal and by validator replay of the same frame. The X25519+cipher
+// round is pure in (ciphertext, AAD, keys), so memoize by content.
 type DecryptedInboundEnvelope = PreparedEnvelope | { rejectReason: 'decrypt_failed' | 'ciphertext_invalid' };
 const decryptedInboundEnvelopes = new Map<string, DecryptedInboundEnvelope>();
 const DECRYPTED_ENVELOPE_MEMO_MAX = 65_536;

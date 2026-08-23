@@ -112,8 +112,6 @@ export interface ApplyEntityTxResult {
   accountTxs?: AccountTxTarget[];
   /** Final Channel.ts-style work state for one peer AccountInput. */
   accountInputWork?: Readonly<{ accountId: string; force: boolean }>;
-  /** Accounts whose unacknowledged proposal must go on the wire again in this frame. */
-  accountResendWork?: readonly string[];
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   swapOffersCreated?: SwapOfferEvent[];
   swapCancelRequests?: SwapCancelRequestEvent[];

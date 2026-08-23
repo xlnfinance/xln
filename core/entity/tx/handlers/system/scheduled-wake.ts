@@ -4,7 +4,6 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { executeCrontab } from '../../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../../scheduler/wake/scheduled-wake-validation';
 import { isCollectiveEntityActionTx } from '../../../auth/authorization';
-import { collectDueProposalResends } from '../../../scheduler/wake/proposal-resend';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 
@@ -15,12 +14,8 @@ export const handleScheduledWakeEntityTx = async (
   manualBroadcastInInput: boolean,
 ) => {
   assertScheduledWakeMatchesState(state, tx);
-  // Resends are recomputed from committed Account state at the frame clock,
-  // like hooks and tasks: the wake's job list is advisory, never authority.
-  const accountResendWork = collectDueProposalResends(state, state.timestamp).map(due => due.accountKey);
   if (!state.crontabState) {
-    if (accountResendWork.length === 0) throw new Error('SCHEDULED_WAKE_CRONTAB_MISSING');
-    return { newState: state, outputs: [], accountResendWork };
+    throw new Error('SCHEDULED_WAKE_CRONTAB_MISSING');
   }
   const transition = {
     entityId: state.entityId,
@@ -53,7 +48,6 @@ export const handleScheduledWakeEntityTx = async (
     // certifying an output back to the same Entity adds a second Runtime frame
     // and lets the command become stale behind unrelated local progress.
     ...(approvedEntityTxs.length > 0 ? { approvedEntityTxs } : {}),
-    ...(accountResendWork.length > 0 ? { accountResendWork } : {}),
     ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
     ...(accountChanges.size > 0 ? { accountChanges: [...accountChanges].sort() } : {}),
     ...(candidateEffects.length > 0 ? { candidateEffects } : {}),

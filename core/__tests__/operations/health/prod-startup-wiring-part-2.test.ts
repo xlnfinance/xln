@@ -8,7 +8,11 @@ import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../../../api/public/external-wal
 import { safeStringify } from '../../../protocol/serialization';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../../../scripts/e2e/harness/e2e-fatal-log-monitor';
 import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-parallel-isolated';
-import { applyHubRuntimeFrameDelay } from '../../../orchestrator/process/hub-runtime-env';
+import {
+  applyHubRuntimeFrameDelay,
+  DEFAULT_HUB_RUNTIME_FRAME_PERIOD_MS,
+  readHubSteadyRuntimeFramePeriodMs,
+} from '../../../orchestrator/process/hub-runtime-env';
 
 const repoRoot = process.cwd();
 const readPlatformDeploy = (): string =>
@@ -48,22 +52,31 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
-  test('Hub child drains immediately unless an operator requests a non-negative batching floor', () => {
+  test('Hub child drains by default and activates an explicit steady start period after bootstrap', () => {
     const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
     const inherited = applyHubRuntimeFrameDelay({
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '20',
       XLN_UNRELATED_SETTING: 'kept',
     }, undefined);
-    expect(inherited).not.toHaveProperty('XLN_RUNTIME_MIN_FRAME_DELAY_MS');
+    expect(inherited['XLN_RUNTIME_MIN_FRAME_DELAY_MS']).toBe('0');
+    expect(inherited['XLN_HUB_STEADY_FRAME_PERIOD_MS']).toBe(
+      String(DEFAULT_HUB_RUNTIME_FRAME_PERIOD_MS),
+    );
     expect(inherited['XLN_UNRELATED_SETTING']).toBe('kept');
     expect(applyHubRuntimeFrameDelay(inherited, '100')).toMatchObject({
-      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '100',
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
+      XLN_HUB_STEADY_FRAME_PERIOD_MS: '100',
       XLN_UNRELATED_SETTING: 'kept',
     });
     expect(applyHubRuntimeFrameDelay(inherited, '0')).toMatchObject({
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
+      XLN_HUB_STEADY_FRAME_PERIOD_MS: '0',
       XLN_UNRELATED_SETTING: 'kept',
     });
+    expect(readHubSteadyRuntimeFramePeriodMs(inherited)).toBe(0);
+    expect(() => readHubSteadyRuntimeFramePeriodMs({
+      XLN_HUB_STEADY_FRAME_PERIOD_MS: '-1',
+    })).toThrow('HUB_STEADY_FRAME_PERIOD_MS_INVALID:-1');
     expect(orchestrator).toContain(
       "}, process.env['XLN_HUB_MIN_FRAME_DELAY_MS'])),",
     );

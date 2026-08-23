@@ -13,7 +13,6 @@ bun --no-orphans build core/api/public/browser.ts \
   --external zlib \
   --external fs \
   --external path \
-  --external crypto \
   --external stream \
   --external buffer \
   --external url \

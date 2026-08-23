@@ -91,7 +91,7 @@ describe('opaque Entity HTLC encryption', () => {
     )).toThrow('HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH');
   });
 
-  test('content-keyed hash memos are byte-identical to a cold hash', () => {
+  test('opaque ciphertext and fixed-width context hashes are value-stable', () => {
     const opaque = {
       version: 'xln:htlc-opaque:aes-gcm' as const,
       ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -105,6 +105,6 @@ describe('opaque Entity HTLC encryption', () => {
     expect(readFileSync(join(import.meta.dir, '../../../protocol/htlc/multi-recipient.ts'), 'utf8'))
       .toContain('opaqueCiphertextHashMemo');
     expect(readFileSync(join(import.meta.dir, '../../../protocol/htlc/codec/envelope.ts'), 'utf8'))
-      .toContain('envelopeContextHashMemo');
+      .toContain('CONTEXT_PREIMAGE_BYTES');
   });
 });

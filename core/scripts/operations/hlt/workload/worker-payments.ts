@@ -500,7 +500,8 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     console.log(
       `[load] verdict deliveredTps=${report.deliveredTps.toFixed(1)} ` +
       `${isProductionEquivalentHltEnvironment(report.environment) ? 'production-equivalent' : 'DIAGNOSTIC (isolated/fast environment)'} ` +
-      `laneNice=${report.environment.laneNice} certifiedHistory=${report.environment.certifiedHistory} hubWalSync=${report.environment.hubWalSync}`,
+      `lanePersistence=${report.environment.lanePersistence} laneNice=${report.environment.laneNice} ` +
+      `certifiedHistory=${report.environment.certifiedHistory} hubWalSync=${report.environment.hubWalSync}`,
     );
   } finally {
     await stopLaneRuntimes(users);

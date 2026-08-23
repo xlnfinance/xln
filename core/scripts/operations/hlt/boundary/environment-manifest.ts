@@ -2,7 +2,7 @@
  * Every switch that changes what an HLT number means travels inside the
  * report. A TPS figure without these is a diagnostic, not a result: the
  * decoder rejects a report that omits them, and readers can tell a
- * production-equivalent run (history on, hub WAL fsync on, lanes at nice 0)
+ * production-equivalent run (history and all WALs on, lanes at nice 0)
  * from an isolated-Hub measurement (lanes niced) at a glance.
  */
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
@@ -12,6 +12,8 @@ export type HltEnvironmentManifest = Readonly<{
   disputeSeals: 'always';
   certifiedHistory: boolean;
   hubWalSync: boolean;
+  /** Sovereign load-user Runtime frames are durable. False means intentional in-memory clients. */
+  lanePersistence: boolean;
   laneWalSync: boolean;
   /** `nice` applied to lane (user Runtime) processes; 0 = full contention on one box. */
   laneNice: number;
@@ -43,6 +45,7 @@ export const collectHltEnvironmentManifest = (): HltEnvironmentManifest => {
     disputeSeals: 'always',
     certifiedHistory: flagOn('XLN_STORAGE_CERTIFIED_HISTORY', true),
     hubWalSync: flagOn('XLN_STORAGE_WAL_SYNC', true),
+    lanePersistence: flagOn('XLN_HLT_LANE_PERSISTENCE', false),
     laneWalSync: process.env['XLN_HLT_LANE_WAL_SYNC'] === undefined
       ? flagOn('XLN_STORAGE_WAL_SYNC', true)
       : flagOn('XLN_HLT_LANE_WAL_SYNC', true),
@@ -55,7 +58,7 @@ export const collectHltEnvironmentManifest = (): HltEnvironmentManifest => {
 export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltEnvironmentManifest => {
   const record = requireBoundaryRecord(value, `${code}_INVALID`);
   requireExactBoundaryKeys(record, [
-    'disputeSeals', 'certifiedHistory', 'hubWalSync', 'laneWalSync', 'laneNice', 'cryptoPoolWorkers', 'cryptoSignWorkers',
+    'disputeSeals', 'certifiedHistory', 'hubWalSync', 'lanePersistence', 'laneWalSync', 'laneNice', 'cryptoPoolWorkers', 'cryptoSignWorkers',
   ], [], `${code}_FIELDS_INVALID`);
   if (record['disputeSeals'] !== 'always') throw new Error(`${code}_DISPUTE_SEALS_INVALID`);
   const bool = (key: string): boolean => {
@@ -77,6 +80,7 @@ export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltE
     disputeSeals: 'always',
     certifiedHistory: bool('certifiedHistory'),
     hubWalSync: bool('hubWalSync'),
+    lanePersistence: bool('lanePersistence'),
     laneWalSync: bool('laneWalSync'),
     laneNice,
     cryptoPoolWorkers: workers('cryptoPoolWorkers'),
@@ -86,4 +90,8 @@ export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltE
 
 /** Production-equivalent means nothing that trades durability or isolation for speed was switched on. */
 export const isProductionEquivalentHltEnvironment = (manifest: HltEnvironmentManifest): boolean =>
-  manifest.certifiedHistory && manifest.hubWalSync && manifest.laneWalSync && manifest.laneNice === 0;
+  manifest.certifiedHistory
+  && manifest.hubWalSync
+  && manifest.lanePersistence
+  && manifest.laneWalSync
+  && manifest.laneNice === 0;

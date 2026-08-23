@@ -357,7 +357,7 @@ describe('hlt payment report boundary', () => {
     walBytesBefore: 100, walBytesAfter: 200,
     hubDurableBefore: frame, hubDurableAfter: { ...frame, height: 40 },
     environment: {
-      disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, laneWalSync: true,
+      disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, lanePersistence: true, laneWalSync: true,
       laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
     },
   };

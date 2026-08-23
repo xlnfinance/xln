@@ -17,11 +17,14 @@ export const DEV_ROLES = [
   'ready',
 ] as const;
 
-const DEV_APPLICATION_ROLES = ['mesh', 'watchtower', 'runtime', 'vite', 'vite-http', 'ready'] as const;
+const DEV_BACKEND_ROLES = ['mesh', 'watchtower', 'runtime'] as const;
+const DEV_FRONTEND_ROLES = ['vite', 'vite-http', 'ready'] as const;
+const DEV_APPLICATION_ROLES = [...DEV_BACKEND_ROLES, ...DEV_FRONTEND_ROLES] as const;
 const DEV_CHAIN_BARRIER_ROLE = 'rpc-ready' as const;
+const DEV_BACKEND_BARRIER_ROLE = 'backend-ready' as const;
 
 type DevRole = typeof DEV_ROLES[number];
-type DevChildRole = DevRole | typeof DEV_CHAIN_BARRIER_ROLE;
+type DevChildRole = DevRole | typeof DEV_CHAIN_BARRIER_ROLE | typeof DEV_BACKEND_BARRIER_ROLE;
 type DevRoleProcess = {
   readonly role: DevChildRole;
   readonly child: ChildProcess;
@@ -84,7 +87,7 @@ const signalProcessGroup = (processGroupId: number, signal: NodeJS.Signals): voi
 };
 
 export const shouldEchoDevLine = (role: DevChildRole, line: string, stderr: boolean): boolean => {
-  if (stderr || role === 'ready' || role === DEV_CHAIN_BARRIER_ROLE) return true;
+  if (stderr || role === 'ready' || role === DEV_CHAIN_BARRIER_ROLE || role === DEV_BACKEND_BARRIER_ROLE) return true;
   return /^(DEV_|CONTROL_READY|RPC2_JURISDICTION_READY|RUNTIME_IMPORT_READY|VITE_STARTING|Bundled|\s+runtime\.js)/.test(line)
     || line.includes('baseline ready')
     || line.includes('service.listen')
@@ -141,7 +144,7 @@ export async function superviseDev(options: DevSupervisorOptions): Promise<numbe
         roleProcess.signalable = false;
         return;
       }
-      if ((role === 'ready' || role === DEV_CHAIN_BARRIER_ROLE) && code === 0) {
+      if ((role === 'ready' || role === DEV_CHAIN_BARRIER_ROLE || role === DEV_BACKEND_BARRIER_ROLE) && code === 0) {
         // Finite readiness roles have no live descendant after their wrapper
         // exits. Retire the PGID immediately so PID reuse can never make a
         // later shutdown signal an unrelated process group.
@@ -182,7 +185,15 @@ export async function superviseDev(options: DevSupervisorOptions): Promise<numbe
     terminal.then(() => 'terminal' as const),
   ]);
   if (firstOutcome === 'barrier' && !stopping) {
-    for (const role of DEV_APPLICATION_ROLES) spawnRole(role);
+    for (const role of DEV_BACKEND_ROLES) spawnRole(role);
+    const backendBarrier = spawnRole(DEV_BACKEND_BARRIER_ROLE);
+    const backendOutcome = await Promise.race([
+      waitForExit(backendBarrier.child).then(() => 'backend' as const),
+      terminal.then(() => 'terminal' as const),
+    ]);
+    if (backendOutcome === 'backend' && !stopping) {
+      for (const role of DEV_FRONTEND_ROLES) spawnRole(role);
+    }
   }
 
   const exitCode = await terminal;
