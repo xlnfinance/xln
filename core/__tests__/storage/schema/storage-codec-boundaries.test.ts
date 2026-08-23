@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import { Level } from 'level';
 
 import type { AccountFrame } from '../../../types/account';
-import { decodeBinaryPayload, encodeBinaryPayload } from '../../../storage/codec/binary-codec';
+import { decodeBinaryPayload, encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 import { decodeBuffer, encodeBuffer, writeBatch } from '../../../storage/codec/codec';
 import {
   readHistoryViewAccountFrames,
@@ -188,7 +188,7 @@ describe('canonical binary codec', () => {
   });
 
   test('encodes plain browser payloads without a global Buffer polyfill', () => {
-    const moduleUrl = new URL('../../../storage/codec/binary-codec.ts', import.meta.url).href;
+    const moduleUrl = new URL('../../../protocol/serialization/binary-codec.ts', import.meta.url).href;
     const serializationUrl = new URL('../../../protocol/serialization/index.ts', import.meta.url).href;
     const child = Bun.spawnSync({
       cmd: ['bun', '-e', [

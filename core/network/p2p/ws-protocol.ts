@@ -20,7 +20,7 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { hmacSha256 } from '../../protocol/crypto/fast-sha256';
-import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/codec/binary-codec';
+import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import type { Codec } from '../../protocol/serialization/codec';
 import { LIMITS } from '../../config/constants';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';

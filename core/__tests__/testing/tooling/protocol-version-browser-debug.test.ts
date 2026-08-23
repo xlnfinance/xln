@@ -10,7 +10,7 @@ import {
   decodeRuntimeAdapterBrowserMessage,
   encodeRuntimeAdapterMessageForBrowser,
 } from '../../../api/runtime-adapter/codec';
-import { decodeBinaryPayload, encodeBinaryPayload } from '../../../storage/codec/binary-codec';
+import { decodeBinaryPayload, encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 
 describe('global network protocol version', () => {
   test('adds version 1 to every serialized peer envelope', () => {

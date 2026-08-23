@@ -53,7 +53,7 @@ import {
 } from '../../runtime/command/frontier';
 import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command/frontier-auth';
 import { verifyRuntimeAdapterOwnerBinding } from './security/owner-binding';
-import { encodeBinaryPayload } from '../../storage/codec/binary-codec';
+import { encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import {
   classifyWebSocketSendResult,

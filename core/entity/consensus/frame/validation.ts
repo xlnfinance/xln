@@ -1,4 +1,3 @@
-import { utf8ByteLength } from '../../../protocol/crypto/keccak-text';
 import {
   FinancialDataCorruptionError,
   validateArray,
@@ -17,7 +16,7 @@ import {
 } from './infra-context-validation';
 import { assertEntityFrameTotalByteBudget } from '../frame';
 import { LIMITS } from '../../../config/constants';
-import { encodeCanonicalArrayOnce, encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { packTransportValue } from '../../../protocol/serialization/binary-codec';
 import { toFrameHash, toStateHash, type FrameHash, type StateHash } from '../../../protocol/hashes';
 import { RecencySet } from '../../../support/recency-memo';
 import {
@@ -346,17 +345,11 @@ const PLACEHOLDER_ECDSA_SIG = `0x${'11'.repeat(65)}`;
 // sealed into their exact Account/dispute/output payloads before commit.
 const PLACEHOLDER_HANKO = `0x${'22'.repeat(2_200)}`;
 
-const repeatedCanonicalArrayBytes = (encodedElementBytes: number, count: number): number =>
-  utf8ByteLength('["Array",[]]') + count * encodedElementBytes + Math.max(0, count - 1);
-
-const singleEntryCanonicalMapBytes = (encodedKeyBytes: number, encodedValueBytes: number): number =>
-  utf8ByteLength('["Map",[]]') + 2 + encodedKeyBytes + 1 + encodedValueBytes;
-
-const addedCanonicalObjectPropertyBytes = (
-  key: 'collectedSigs' | 'hankos',
-  encodedValueBytes: number,
-): number => utf8ByteLength(`,["${key}",]`) + encodedValueBytes;
-
+/**
+ * Wire bytes of the unsigned frame plus the signature/Hanko fields a sealed
+ * frame gains, measured on the MessagePack transport encoding the frame
+ * actually travels in. Placeholders stand in for bytes not yet known.
+ */
 const estimateSealedEntityFrameWireBytes = (
   frame: Record<string, unknown>,
   signerId: string,
@@ -366,44 +359,27 @@ const estimateSealedEntityFrameWireBytes = (
   if (Object.hasOwn(frame, 'collectedSigs') || Object.hasOwn(frame, 'hankos')) {
     throw new FinancialDataCorruptionError('ENTITY_FRAME_WIRE_ESTIMATE_REQUIRES_UNSIGNED_FRAME');
   }
-  if (Array.isArray(frame['txs'])) encodeCanonicalArrayOnce(frame['txs']);
-  const unsignedBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
-  const signerBytes = utf8ByteLength(encodeCanonicalConsensusValue(signerId.toLowerCase()));
-  const signatureBytes = utf8ByteLength(encodeCanonicalConsensusValue(PLACEHOLDER_ECDSA_SIG));
-  const signaturesBytes = repeatedCanonicalArrayBytes(signatureBytes, hashCount);
-  const collectedSigsBytes = singleEntryCanonicalMapBytes(signerBytes, signaturesBytes);
-  const withSignatures = unsignedBytes + addedCanonicalObjectPropertyBytes(
-    'collectedSigs',
-    collectedSigsBytes,
-  );
-  if (!includeHankos) return withSignatures;
-  const hankoBytes = utf8ByteLength(encodeCanonicalConsensusValue(PLACEHOLDER_HANKO));
-  return withSignatures + addedCanonicalObjectPropertyBytes(
-    'hankos',
-    repeatedCanonicalArrayBytes(hankoBytes, 1),
-  );
+  const sealed = {
+    ...frame,
+    collectedSigs: new Map([[signerId.toLowerCase(), Array.from({ length: hashCount }, () => PLACEHOLDER_ECDSA_SIG)]]),
+    ...(includeHankos ? { hankos: [PLACEHOLDER_HANKO] } : {}),
+  };
+  return packTransportValue(sealed).byteLength;
 };
 
 const assertEntityFrameSealedWireBudget = (
   frame: Record<string, unknown>,
   context: string,
 ): number => {
-  // Sealed frame txs are immutable: the wire estimate, the storage validator
-  // and the frame-hash budget all re-encode this same array otherwise.
-  if (Array.isArray(frame['txs'])) encodeCanonicalArrayOnce(frame['txs']);
-  const wireBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
+  const wireBytes = packTransportValue(frame).byteLength;
   if (wireBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return wireBytes;
   const part = (value: unknown): number => {
-    try { return utf8ByteLength(encodeCanonicalConsensusValue(value)); } catch { return -1; }
+    try { return packTransportValue(value).byteLength; } catch { return -1; }
   };
   throw new FinancialDataCorruptionError(
     `${context} wire byte limit exceeded: ${wireBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}` +
-    `:txs=${Array.isArray(frame['txs']) ? (frame['txs'] as unknown[]).length : 0}/${part(frame['txs'])}` +
-    `:events=${Array.isArray(frame['events']) ? (frame['events'] as unknown[]).length : 0}/${part(frame['events'])}` +
-    `:context=${part(frame['entityContext'])}` +
-    `:hashesToSign=${part(frame['hashesToSign'])}` +
-    `:sigs=${part(frame['collectedSigs'])}` +
-    `:hankos=${part(frame['hankos'])}`,
+    `:txs=${part(frame['txs'])}:events=${part(frame['events'])}:context=${part(frame['entityContext'])}` +
+    `:hankos=${part(frame['hankos'])}:collectedSigs=${part(frame['collectedSigs'])}`,
   );
 };
 

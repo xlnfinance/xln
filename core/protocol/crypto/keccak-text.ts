@@ -47,6 +47,12 @@ export const keccakTextHash = (text: string): string => {
   return toHexDigest(keccak256Bytes(bytes));
 };
 
+/** Lowercase `0x`-prefixed keccak256 of raw bytes. */
+export const keccakBytesHash = (bytes: Uint8Array): string => {
+  countOpWithSite('keccak.bytes', bytes.length, 1);
+  return toHexDigest(keccak256Bytes(bytes));
+};
+
 /** Lowercase keccak256 of hex-encoded bytes; identical to `ethers.keccak256(hex)` without its BytesLike walk. */
 export const keccakHexHash = (hex: string): string => {
   const bytes = hexToBytes(hex);

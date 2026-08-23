@@ -169,7 +169,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const validatedMachine = committed.account;',
   'const stateMismatch = validateIncomingCommittedState(',
   'committed.accountStateRoot,',
-  'const proofResult = timePerfPhase(',
+  'const proofResult = accountDisputeSealsEnabled()',
   '() => buildAccountProofBodyFromJurisdictions(context, validatedMachine)',
   'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = getDisputeSealRequirementError(',
@@ -273,15 +273,13 @@ assertOrder(accountFrame, accountFramePath, [
 ]);
 assertOrder(entityFrame, entityFramePath, [
   'export const assertEntityFrameTotalByteBudget',
-  'const encoded = encodeCanonicalConsensusValue({',
-  "domain: 'xln:entity-frame',",
-  'txs: canonicalEntityTxsForFrameHash(input.txs),',
-  'return encoded;',
+  'const frameTxs = canonicalFrameTxs(input.txs);',
+  'const header = encodeEntityFrameHeader(input, frameTxs.length, frameTxs.digest);',
+  'return header;',
   'export function createEntityFrameHashFromStateRoot',
   'stateRoot: stateRoot.toLowerCase(),',
   'authorityRoot: authorityRoot.toLowerCase(),',
-  'const encoded = assertEntityFrameTotalByteBudget(frameData);',
-  'const hash = keccakTextHash(encoded);',
+  'const hash = keccakBytesHash(preimage);',
   'return hash;',
 ]);
 assertOrder(entityFrame, entityFramePath, [

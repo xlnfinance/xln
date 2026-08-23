@@ -6,7 +6,7 @@
 import { getPerfMs } from '../support/time';
 import { auditEntityStateRootAtCheckpoint } from '../entity/consensus/state-root';
 import { decodeValidatedBuffer, encodeBuffer, encodeBufferPrepared, writeBatch } from './codec/codec';
-import { canonicalizeBinaryPayload } from './codec/binary-codec';
+import { canonicalizeBinaryPayload } from '../protocol/serialization/binary-codec';
 import {
   boundedStorageRowsBytes,
   prepareBoundedStorageValueRows,

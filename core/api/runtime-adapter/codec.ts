@@ -1,6 +1,6 @@
 import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
 import { LIMITS } from '../../config/constants';
-import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/codec/binary-codec';
+import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import type { Codec } from '../../protocol/serialization/codec';
 import {
   validateRuntimeAdapterWireMessage,

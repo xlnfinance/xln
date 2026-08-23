@@ -2,7 +2,7 @@ import { Packr } from 'msgpackr';
 import {
   deserializeTaggedJson,
   serializeCanonicalTaggedJson,
-} from '../../protocol/serialization';
+} from './';
 
 export type XlnBinaryCodecName = 'json' | 'msgpack';
 

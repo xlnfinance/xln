@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { validateProposedEntityFrame, assertEstimatedSealedEntityFrameWire } from '../../../entity/consensus/frame/validation';
 import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { packTransportValue } from '../../../protocol/serialization/binary-codec';
 
 const entityId = `0x${'01'.repeat(32)}`;
 const signerId = `0x${'02'.repeat(20)}`;
@@ -140,7 +140,7 @@ test('sealed Entity frame wire errors name hashesToSign separately from the hash
     hashesToSign: [{ hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: pad }],
     collectedSigs: new Map([[signerId, [`0x${'55'.repeat(65)}`]]]),
   };
-  expect(() => validateProposedEntityFrame(frame, 'EntityFrame')).toThrow(/hashesToSign=\d+:sigs=/);
+  expect(() => validateProposedEntityFrame(frame, 'EntityFrame')).toThrow(/hankos=-?\d+:collectedSigs=\d+/);
 });
 
 test('unsigned Entity frames estimate sealed bytes before sign', () => {
@@ -159,7 +159,7 @@ test('unsigned Entity frames estimate sealed bytes before sign', () => {
     hashesToSign: [{ hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: pad }],
   };
   expect(() => assertEstimatedSealedEntityFrameWire(frame, signerId, true, 'SingleSignerEntityFrame'))
-    .toThrow(/hashesToSign=\d+:sigs=/);
+    .toThrow(/hankos=-?\d+:collectedSigs=\d+/);
 });
 
 test('unsigned Entity frame estimate exactly matches every conservative sealed template branch', () => {
@@ -188,11 +188,11 @@ test('unsigned Entity frame estimate exactly matches every conservative sealed t
       leader: { proposerSignerId: signerId, view: 0 },
       hashesToSign,
     };
-    const exact = new TextEncoder().encode(encodeCanonicalConsensusValue({
+    const exact = packTransportValue({
       ...frame,
       collectedSigs: new Map([[signerId.toLowerCase(), hashesToSign.map(() => signature)]]),
       ...(includeHankos ? { hankos: [hanko] } : {}),
-    })).byteLength;
+    }).byteLength;
     expect(assertEstimatedSealedEntityFrameWire(frame, signerId, includeHankos, 'EntityFrame'))
       .toBe(exact);
   }

@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { compareStableText } from '../../protocol/serialization';
-import { encodeBinaryPayload } from '../codec/binary-codec';
+import { encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 
 export type StorageReplicaMetaDigestEntry = Readonly<{
   key: Uint8Array;

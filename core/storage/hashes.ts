@@ -12,7 +12,7 @@ import {
   computeCanonicalEntityHash,
   computeCanonicalRuntimeStateHash,
 } from './canonical-hash';
-import { encodeBinaryPayload } from './codec/binary-codec';
+import { encodeBinaryPayload } from '../protocol/serialization/binary-codec';
 import { STORAGE_FRAME_FORMAT, normalizeEntityId } from './keys';
 import { buildReplicaLookup } from './replica/replicas';
 import type { RuntimeFrame, StorageFrameEntityHash } from './types';

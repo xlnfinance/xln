@@ -17,7 +17,7 @@ import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
 } from '../../../runtime/command/frontier-auth';
-import { encodeBinaryPayload } from '../../../storage/codec/binary-codec';
+import { encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 import type { RuntimeTx } from '../../../runtime/types';
 import type { RuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
 

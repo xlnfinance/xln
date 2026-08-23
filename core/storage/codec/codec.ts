@@ -3,7 +3,7 @@ import {
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,
   encodeBinaryPayloadWithCanonical,
-} from './binary-codec';
+} from '../../protocol/serialization/binary-codec';
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
 
 export const notFound = (error: unknown): boolean => {
