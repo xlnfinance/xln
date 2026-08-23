@@ -36,6 +36,10 @@ import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { addr, makeAccount, makeState } from '../../helpers/cross-j';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import {
+  sealHankoWitnessInState,
+  type HankoWitnessEntry,
+} from '../../../entity/consensus/input/hanko-witness';
 
 const putCommittedAccount = (
   state: EntityState,
@@ -328,6 +332,151 @@ test('Account advance re-arms the same activation and issues the current frame r
   expect(second.newState.accounts.get(fixture.counterpartyId)?.boardResealMigration)
     .toMatchObject({ reason: 'issued', issuedFrameHeight: 2, issuedFrameHash: digest(252) });
   expect(second.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
+});
+
+test('local board rotation re-Hankos the exact pending proposal once', async () => {
+  const signerId = deriveSignerAddressSync('board-rehanko-pending', '1').toLowerCase();
+  const sourceEntityId = digest(260);
+  const env = createEmptyEnv('board-rehanko-pending');
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-rehanko-pending', '1'));
+  const state = createEntityFrameCandidateState(makeState(sourceEntityId, signerId, jurisdiction));
+  state.timestamp = 3_000;
+  state.crontabState = initCrontab();
+  state.leaderState = { activeValidatorId: signerId, view: 0, changedAtHeight: 0 };
+  const fixture = await makeCertifiedCounterpartyAccount(
+    env,
+    sourceEntityId,
+    signerId,
+    1n,
+    digest(261),
+  );
+  const pendingFrame = {
+    ...fixture.account.currentFrame,
+    height: 2,
+    prevFrameHash: digest(261),
+    stateHash: digest(262),
+  };
+  fixture.account.lastOutboundFrameAck = {
+    height: 1,
+    counterpartyEntityId: fixture.counterpartyId,
+    response: {
+      kind: 'ack',
+      fromEntityId: sourceEntityId,
+      toEntityId: fixture.counterpartyId,
+      domain: fixture.account.state.domain,
+      disputeConfig: fixture.account.state.disputeConfig,
+      ack: { height: 1, frameHash: digest(261), frameHanko: '0xold-ack' as never },
+    },
+  };
+  fixture.account.pendingFrame = pendingFrame;
+  fixture.account.pendingAccountInput = {
+    kind: 'frame_ack',
+    fromEntityId: sourceEntityId,
+    toEntityId: fixture.counterpartyId,
+    domain: fixture.account.state.domain,
+    disputeConfig: fixture.account.state.disputeConfig,
+    ack: { height: 1, frameHash: digest(261), frameHanko: '0xold-ack' as never },
+    proposal: { frame: structuredClone(pendingFrame), frameHanko: '0xold' as never },
+  };
+  state.accounts.set(fixture.counterpartyId, fixture.account);
+  installBoardResealHook(state, activation(sourceEntityId, 8));
+
+  const result = await handleScheduledWakeEntityTx(
+    env,
+    state,
+    scheduledWakeForHook(state, signerId),
+    false,
+  );
+  const tx = result.outputs[0]?.entityTxs?.[0];
+  expect(tx).toMatchObject({
+    type: 'accountInput',
+    data: {
+      kind: 'frame_ack',
+      ack: { height: 1, frameHash: digest(261) },
+      proposal: { frame: { height: 2, stateHash: digest(262) } },
+    },
+  });
+  if (tx?.type !== 'accountInput' || tx.data.kind !== 'frame_ack') {
+    throw new Error('TEST_BOARD_REHANKO_PENDING_OUTPUT_MISSING');
+  }
+  expect(tx.data.ack.frameHanko).toBeUndefined();
+  expect(tx.data.proposal.frameHanko).toBeUndefined();
+  expect(result.hashesToSign?.map(entry => entry.hash)).toEqual([digest(261), digest(262)]);
+  expect(result.newState.accounts.get(fixture.counterpartyId)?.pendingAccountInput?.proposal.frameHanko)
+    .toBeUndefined();
+  expect(result.newState.accounts.get(fixture.counterpartyId)?.lastOutboundFrameAck?.response.ack.frameHanko)
+    .toBeUndefined();
+  const newAckHanko = '0xnew-ack' as HankoWitnessEntry['hanko'];
+  const newProposalHanko = '0xnew-proposal' as HankoWitnessEntry['hanko'];
+  sealHankoWitnessInState(result.newState, new Map([
+    [digest(261), {
+      hanko: newAckHanko,
+      type: 'accountFrame' as const,
+      entityHeight: 1,
+      createdAt: result.newState.timestamp,
+    }],
+    [digest(262), {
+      hanko: newProposalHanko,
+      type: 'accountFrame' as const,
+      entityHeight: 1,
+      createdAt: result.newState.timestamp,
+    }],
+  ]), 1, [fixture.counterpartyId]);
+  const migrated = result.newState.accounts.get(fixture.counterpartyId);
+  expect(migrated?.lastOutboundFrameAck?.response.ack.frameHanko).toBe(newAckHanko);
+  expect(migrated?.pendingAccountInput?.ack.frameHanko).toBe(newAckHanko);
+  expect(migrated?.pendingAccountInput?.proposal.frameHanko).toBe(newProposalHanko);
+});
+
+test('local board rotation re-Hankos the exact held ACK instead of mismatched current-frame reseal', async () => {
+  const signerId = deriveSignerAddressSync('board-rehanko-ack', '1').toLowerCase();
+  const sourceEntityId = digest(270);
+  const env = createEmptyEnv('board-rehanko-ack');
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-rehanko-ack', '1'));
+  const state = createEntityFrameCandidateState(makeState(sourceEntityId, signerId, jurisdiction));
+  state.timestamp = 3_000;
+  state.crontabState = initCrontab();
+  state.leaderState = { activeValidatorId: signerId, view: 0, changedAtHeight: 0 };
+  const fixture = await makeCertifiedCounterpartyAccount(
+    env,
+    sourceEntityId,
+    signerId,
+    1n,
+    digest(271),
+  );
+  fixture.account.lastOutboundFrameAck = {
+    height: 1,
+    counterpartyEntityId: fixture.counterpartyId,
+    response: {
+      kind: 'ack',
+      fromEntityId: sourceEntityId,
+      toEntityId: fixture.counterpartyId,
+      domain: fixture.account.state.domain,
+      disputeConfig: fixture.account.state.disputeConfig,
+      ack: { height: 1, frameHash: digest(271), frameHanko: '0xold' as never },
+    },
+  };
+  state.accounts.set(fixture.counterpartyId, fixture.account);
+  installBoardResealHook(state, activation(sourceEntityId, 9));
+
+  const result = await handleScheduledWakeEntityTx(
+    env,
+    state,
+    scheduledWakeForHook(state, signerId),
+    false,
+  );
+  const tx = result.outputs[0]?.entityTxs?.[0];
+  expect(tx).toMatchObject({
+    type: 'accountInput',
+    data: { kind: 'ack', ack: { height: 1, frameHash: digest(271) } },
+  });
+  if (tx?.type !== 'accountInput' || tx.data.kind !== 'ack') {
+    throw new Error('TEST_BOARD_REHANKO_ACK_OUTPUT_MISSING');
+  }
+  expect(tx.data.ack.frameHanko).toBeUndefined();
+  expect(result.hashesToSign?.map(entry => entry.hash)).toEqual([digest(271)]);
+  expect(result.newState.accounts.get(fixture.counterpartyId)?.lastOutboundFrameAck?.response.ack.frameHanko)
+    .toBeUndefined();
 });
 
 test('1000 board reseals drain in deterministic 32-account frames across restart', async () => {

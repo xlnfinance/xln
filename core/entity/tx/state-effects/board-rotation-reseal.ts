@@ -1,4 +1,9 @@
-import type { AccountBoardResealMigration, AccountDisputeSeal, AccountReplica } from '../../../types/account';
+import type {
+  AccountBoardResealMigration,
+  AccountDisputeSeal,
+  AccountPeerInput,
+  AccountReplica,
+} from '../../../types/account';
 import type { EntityInput, EntityState, HashToSign } from '../../types';
 import type { CertifiedBoardNodeStore } from '../../../types/entity-board-registry';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
@@ -8,9 +13,14 @@ import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
 import { createStructuredLogger } from '../../../support/logger';
 import { EntityAccountCandidateMap, getEntityAccountForWrite } from '../../state/persistent-account-map';
 import {
+  cloneIsolatedAccountInput,
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../../protocol/state/account-input-clone';
+import {
+  accountInputAck,
+  accountInputProposal,
+} from '../../../account/consensus/flush';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 
@@ -32,6 +42,10 @@ export type BoardRotationResealDrafts = {
 export type BoardRotationAccountMigration = {
   counterpartyId: string;
   marker: AccountBoardResealMigration | null;
+  reHanko?: {
+    target: 'pendingAccountInput' | 'lastOutboundFrameAck';
+    input: AccountPeerInput;
+  };
 };
 
 type AccountResealDraft = {
@@ -129,6 +143,7 @@ const migration = (
   activationLogIndex: number,
   reason: AccountBoardResealMigration['reason'] | null,
   issued?: { height: number; frameHash: string },
+  reHanko?: BoardRotationAccountMigration['reHanko'],
 ): BoardRotationAccountMigration => ({
   counterpartyId,
   marker: reason ? {
@@ -140,6 +155,7 @@ const migration = (
       issuedFrameHash: issued.frameHash,
     } : {}),
   } : null,
+  ...(reHanko ? { reHanko } : {}),
 });
 
 export const accountNeedsBoardResealForActivation = (
@@ -289,6 +305,150 @@ const buildResealOutput = (
   }
 };
 
+type InFlightReHankoDraft = {
+  input: AccountPeerInput;
+  target: NonNullable<BoardRotationAccountMigration['reHanko']>['target'];
+  issued: { height: number; frameHash: string };
+  hashesToSign: HashToSign[];
+};
+
+const appendReHankoHash = (
+  hashes: HashToSign[],
+  seen: Set<string>,
+  hash: string,
+  type: HashToSign['type'],
+  context: string,
+): void => {
+  const normalized = hash.toLowerCase();
+  if (!bytes32(normalized)) throw new Error(`BOARD_REHANKO_HASH_INVALID:${context}:${hash}`);
+  if (seen.has(normalized)) return;
+  seen.add(normalized);
+  hashes.push({ hash: normalized, type, context });
+};
+
+const clearLocalHankosAndCollectHashes = (
+  input: AccountPeerInput,
+  context: string,
+): { issued: InFlightReHankoDraft['issued']; hashesToSign: HashToSign[] } => {
+  const hashesToSign: HashToSign[] = [];
+  const seen = new Set<string>();
+  const ack = accountInputAck(input);
+  if (ack) {
+    appendReHankoHash(hashesToSign, seen, ack.frameHash, 'accountFrame', `${context}:ack`);
+    delete ack.frameHanko;
+    if (ack.disputeSeal) {
+      appendReHankoHash(hashesToSign, seen, ack.disputeSeal.hash, 'dispute', `${context}:ack-dispute`);
+      delete ack.disputeSeal.hanko;
+    }
+  }
+  const proposal = accountInputProposal(input);
+  if (proposal) {
+    appendReHankoHash(
+      hashesToSign,
+      seen,
+      proposal.frame.stateHash,
+      'accountFrame',
+      `${context}:proposal`,
+    );
+    delete proposal.frameHanko;
+    if (proposal.disputeSeal) {
+      appendReHankoHash(
+        hashesToSign,
+        seen,
+        proposal.disputeSeal.hash,
+        'dispute',
+        `${context}:proposal-dispute`,
+      );
+      delete proposal.disputeSeal.hanko;
+    }
+  }
+  const issued = proposal
+    ? { height: Number(proposal.frame.height), frameHash: proposal.frame.stateHash.toLowerCase() }
+    : ack
+      ? { height: Number(ack.height), frameHash: ack.frameHash.toLowerCase() }
+      : undefined;
+  if (!issued || !Number.isSafeInteger(issued.height) || issued.height < 1) {
+    throw new Error(`BOARD_REHANKO_FRAME_MISSING:${context}`);
+  }
+  return { issued, hashesToSign };
+};
+
+const buildInFlightReHankoDraft = (
+  state: EntityState,
+  counterpartyId: string,
+  account: AccountReplica,
+  activation: BoardResealActivation,
+): InFlightReHankoDraft | undefined => {
+  let source: AccountPeerInput | undefined;
+  let target: InFlightReHankoDraft['target'] | undefined;
+  if (account.pendingFrame) {
+    if (!account.pendingAccountInput) {
+      throw new Error(`BOARD_REHANKO_PENDING_INPUT_MISSING:${counterpartyId}:${account.pendingFrame.height}`);
+    }
+    const proposal = accountInputProposal(account.pendingAccountInput);
+    if (
+      !proposal ||
+      Number(proposal.frame.height) !== Number(account.pendingFrame.height) ||
+      proposal.frame.stateHash.toLowerCase() !== account.pendingFrame.stateHash.toLowerCase()
+    ) {
+      throw new Error(`BOARD_REHANKO_PENDING_INPUT_MISMATCH:${counterpartyId}:${account.pendingFrame.height}`);
+    }
+    source = account.pendingAccountInput;
+    target = 'pendingAccountInput';
+  } else {
+    const cached = account.lastOutboundFrameAck;
+    if (
+      cached &&
+      Number(cached.height) === Number(account.currentHeight) &&
+      cached.counterpartyEntityId.toLowerCase() === counterpartyId
+    ) {
+      source = cached.response;
+      target = 'lastOutboundFrameAck';
+    }
+  }
+  if (!source || !target) return undefined;
+  if (
+    source.fromEntityId.toLowerCase() !== state.entityId.toLowerCase() ||
+    source.toEntityId.toLowerCase() !== counterpartyId
+  ) {
+    throw new Error(`BOARD_REHANKO_PARTY_MISMATCH:${counterpartyId}`);
+  }
+  const input = cloneIsolatedAccountInput(source);
+  const context = `board-rehanko:${activation.jHeight}:${activation.logIndex}:${counterpartyId}`;
+  const { issued, hashesToSign } = clearLocalHankosAndCollectHashes(input, context);
+  return { input, target, issued, hashesToSign };
+};
+
+const buildInFlightAccountReHankoDraft = (
+  state: EntityState,
+  store: CertifiedBoardNodeStore,
+  activation: BoardResealActivation,
+  counterpartyId: string,
+  account: AccountReplica,
+  position: ActivationPosition,
+): AccountResealDraft | undefined => {
+  const draft = buildInFlightReHankoDraft(state, counterpartyId, account, activation);
+  if (!draft) return undefined;
+  const output = buildResealOutput(state, store, counterpartyId, account, [{
+    type: 'accountInput',
+    data: cloneIsolatedAccountInput(draft.input),
+  }]);
+  return {
+    ...(output ? { output } : {}),
+    hashesToSign: output ? draft.hashesToSign : [],
+    migration: migration(
+      counterpartyId,
+      ...position,
+      output ? 'issued' : 'output-route-unavailable',
+      output ? draft.issued : undefined,
+      output ? {
+        target: draft.target,
+        input: cloneIsolatedAccountInput(draft.input),
+      } : undefined,
+    ),
+  };
+};
+
 const buildCertifiedAccountResealDraft = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
@@ -354,6 +514,15 @@ const buildAccountResealDraft = (
   if (Number(account.currentHeight) < 1) {
     return { hashesToSign: [], migration: migration(counterpartyId, ...position, null) };
   }
+  const inFlight = buildInFlightAccountReHankoDraft(
+    state,
+    store,
+    activation,
+    counterpartyId,
+    account,
+    position,
+  );
+  if (inFlight) return inFlight;
   const issue = accountFrameIssue(state, counterpartyId, account);
   if (issue) return { hashesToSign: [], migration: migration(counterpartyId, ...position, issue) };
   return buildCertifiedAccountResealDraft(state, store, activation, counterpartyId, account, position);
@@ -369,6 +538,45 @@ export const applyBoardRotationResealMigrations = (
   for (const update of updates) {
     const account = getEntityAccountForWrite(state.accounts, update.counterpartyId);
     if (!account) throw new Error(`BOARD_RESEAL_MIGRATION_ACCOUNT_MISSING:${update.counterpartyId}`);
+    if (update.reHanko?.target === 'pendingAccountInput') {
+      const pendingInput = update.reHanko.input;
+      const proposal = accountInputProposal(pendingInput);
+      if (
+        !account.pendingFrame ||
+        (pendingInput.kind !== 'frame' && pendingInput.kind !== 'frame_ack') ||
+        !proposal ||
+        proposal.frame.stateHash.toLowerCase() !== account.pendingFrame.stateHash.toLowerCase()
+      ) {
+        throw new Error(`BOARD_REHANKO_PENDING_MIGRATION_MISMATCH:${update.counterpartyId}`);
+      }
+      account.pendingAccountInput = cloneIsolatedAccountInput(pendingInput);
+      const bundledAck = accountInputAck(pendingInput);
+      if (bundledAck && account.lastOutboundFrameAck) {
+        const cachedAck = accountInputAck(account.lastOutboundFrameAck.response);
+        if (
+          !cachedAck ||
+          Number(cachedAck.height) !== Number(bundledAck.height) ||
+          cachedAck.frameHash.toLowerCase() !== bundledAck.frameHash.toLowerCase()
+        ) {
+          throw new Error(`BOARD_REHANKO_BUNDLED_ACK_CACHE_MISMATCH:${update.counterpartyId}`);
+        }
+        const refreshedAck = cloneIsolatedAccountInput(account.lastOutboundFrameAck.response);
+        delete refreshedAck.ack.frameHanko;
+        if (refreshedAck.ack.disputeSeal) delete refreshedAck.ack.disputeSeal.hanko;
+        account.lastOutboundFrameAck.response = refreshedAck;
+      }
+    } else if (update.reHanko?.target === 'lastOutboundFrameAck') {
+      const ack = accountInputAck(update.reHanko.input);
+      if (
+        !account.lastOutboundFrameAck ||
+        !ack ||
+        Number(ack.height) !== Number(account.lastOutboundFrameAck.height)
+      ) {
+        throw new Error(`BOARD_REHANKO_ACK_MIGRATION_MISMATCH:${update.counterpartyId}`);
+      }
+      account.lastOutboundFrameAck.response = cloneIsolatedAccountInput(update.reHanko.input) as
+        typeof account.lastOutboundFrameAck.response;
+    }
     if (update.marker) account.boardResealMigration = { ...update.marker };
     else delete account.boardResealMigration;
   }
