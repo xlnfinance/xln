@@ -11,6 +11,7 @@ import { createDefaultDelta } from '../../../account/state/delta';
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { getDisputeProofTupleError } from '../../../account/consensus/dispute/proof-views';
 import { addr, makeAccount } from '../../helpers/cross-j';
 
 test('authenticated J finality enters the canonical AccountInput boundary', async () => {
@@ -60,6 +61,12 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
       events: [],
     },
   }];
+  account.counterpartyDisputeProofHanko = `0x${'44'.repeat(65)}`;
+  account.counterpartyDisputeProofNonce = 3;
+  account.counterpartyDisputeProofProposerIsLeft = true;
+  account.counterpartyDisputeProofBodyHash = `0x${'55'.repeat(32)}`;
+  account.counterpartyDisputeHash = `0x${'66'.repeat(32)}`;
+  expect(getDisputeProofTupleError(account)).toBeNull();
 
   const input = createAccountDisputeFinalityInput(
     account.state,
@@ -107,6 +114,12 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     rightAllowance: 0n,
   });
   expect(account.state.pulls?.size).toBe(0);
+  expect(account.counterpartyDisputeProofHanko).toBeUndefined();
+  expect(account.counterpartyDisputeProofNonce).toBeUndefined();
+  expect(account.counterpartyDisputeProofProposerIsLeft).toBeUndefined();
+  expect(account.counterpartyDisputeProofBodyHash).toBeUndefined();
+  expect(account.counterpartyDisputeHash).toBeUndefined();
+  expect(getDisputeProofTupleError(account)).toBeNull();
 });
 
 test('external finality rejects an entity outside the bilateral account', () => {

@@ -179,9 +179,16 @@ export const applyAccountDisputeFinality = (
   }
   account.status = 'disputed';
   freezeAccountForDispute(account, false);
+  // A counterparty dispute proof is one atomic authority tuple. Keeping its
+  // hash or proposer role after finality while deleting the signed body fields
+  // creates a partial proof that every later proof view must reject. On-chain
+  // finality retires the entire peer tuple together; historical evidence lives
+  // in certified Account-frame storage, not in the live replica envelope.
   delete account.counterpartyDisputeProofHanko;
   delete account.counterpartyDisputeProofNonce;
+  delete account.counterpartyDisputeProofProposerIsLeft;
   delete account.counterpartyDisputeProofBodyHash;
+  delete account.counterpartyDisputeHash;
   reconcileFinalizedDeltas(account, finalizedTokenIds);
   clearFinalizedCollections(account);
 
