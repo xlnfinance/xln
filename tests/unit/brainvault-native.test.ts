@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../core/protocol/version';
 import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -93,7 +94,7 @@ test('native derivation rejects empty names and passphrases without imposing a l
 
 test('radapter accepts exact BrainVault messages and rejects secret-bearing drift', () => {
   expect(validateRuntimeAdapterWireMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     id: 'derive-1',
     op: 'brainvault-derive',
     jobId: 'brainvault-1',
@@ -107,20 +108,20 @@ test('radapter accepts exact BrainVault messages and rejects secret-bearing drif
   })).toMatchObject({ op: 'brainvault-derive' });
 
   expect(validateRuntimeAdapterWireMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     op: 'brainvault-progress',
     jobId: 'brainvault-1',
     progress: { completed: 1, total: 100, elapsedMs: 150, lastShardMs: 150, workers: 8 },
   })).toMatchObject({ op: 'brainvault-progress' });
 
   expect(validateRuntimeAdapterWireMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     id: 'reveal-1',
     op: 'brainvault-reveal',
   })).toMatchObject({ op: 'brainvault-reveal' });
 
   expect(() => validateRuntimeAdapterWireMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     id: 'derive-leak',
     op: 'brainvault-derive',
     jobId: 'brainvault-2',
@@ -135,7 +136,7 @@ test('radapter accepts exact BrainVault messages and rejects secret-bearing drif
   })).toThrow('RADAPTER_REQUEST_BRAINVAULT_INPUT_FIELDS_INVALID');
 
   expect(() => validateRuntimeAdapterWireMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     id: 'derive-empty-passphrase',
     op: 'brainvault-derive',
     jobId: 'brainvault-3',

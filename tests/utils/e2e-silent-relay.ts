@@ -74,7 +74,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	          bumpStat('noMarketDispatches');
 	          socket.dispatchEvent(new MessageEvent('message', {
             data: JSON.stringify({
-              v: 1,
+              v: 2,
               type: 'market_status',
               inReplyTo: subscribeMessage.id || 'market_subscribe',
               status: 'no_market',

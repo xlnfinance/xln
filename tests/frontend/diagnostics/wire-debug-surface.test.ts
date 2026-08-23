@@ -5,7 +5,7 @@ import { wireDebug } from '../../../frontend/src/lib/utils/runtime/wireDebug';
 describe('browser wire debug surface', () => {
   test('decodes exact peer and rAdapter wire values without changing production codecs', () => {
     const peer = wireDebug.encodeWs({ type: 'ping' });
-    expect(wireDebug.protocolVersion).toBe(1);
+    expect(wireDebug.protocolVersion).toBe(2);
     expect(wireDebug.decode(peer)).toEqual({ type: 'ping', v: 1 });
     expect(wireDebug.decodeWs(peer)).toEqual({ type: 'ping' });
 

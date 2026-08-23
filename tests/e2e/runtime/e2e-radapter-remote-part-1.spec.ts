@@ -314,7 +314,7 @@ const installOneMillionRuntimeAdapterSocket = async (
                   : request.path === 'activity'
                     ? { events: [], nextCursor: null }
                     : viewFrame;
-          const response = JSON.stringify({ v: 1, inReplyTo: request.id, ok: true, payload });
+          const response = JSON.stringify({ v: 2, inReplyTo: request.id, ok: true, payload });
           const byteLength = encoder.encode(response).byteLength;
           stats.maxPayloadBytes = Math.max(stats.maxPayloadBytes, byteLength);
           if (request.path === 'view-frame') {
