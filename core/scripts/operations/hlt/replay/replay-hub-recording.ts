@@ -2,6 +2,7 @@
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
+import { configureCryptoPoolEntry } from '../../../../protocol/crypto/crypto-pool';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -36,6 +37,8 @@ import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profi
 import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
 import { buildEntityProposalReplayOracleMap } from '../../../../entity/consensus/proposal/replay-oracle';
+
+configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
 type ReplayMode = 'max' | 'fixed' | 'sweep';
 

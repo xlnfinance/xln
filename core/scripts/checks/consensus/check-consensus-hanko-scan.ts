@@ -169,7 +169,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const validatedMachine = committed.account;',
   'const stateMismatch = validateIncomingCommittedState(',
   'committed.accountStateRoot,',
-  'const proofResult = accountDisputeSealsEnabled()',
+  'const proofResult = timePerfPhase(',
   '() => buildAccountProofBodyFromJurisdictions(context, validatedMachine)',
   'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = getDisputeSealRequirementError(',
@@ -289,7 +289,7 @@ assertOrder(entityFrame, entityFramePath, [
 
 assertIncludes(hankoSigning, 'throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signEntityHashes called without env.runtimeSeed', hankoSigningPath);
 assertIncludes(hankoSigning, 'const normalizedEntityId = encodeQuorumEntityId(entityId);', hankoSigningPath);
-assertIncludes(hankoSigning, 'const singleSignerBoardHash = hashBoard(encodeBoard({', hankoSigningPath);
+assertIncludes(hankoSigning, 'const singleSignerBoardHash = singleSignerBoardHashFor(signerAddress);', hankoSigningPath);
 assertIncludes(hankoSigning, 'if (singleSignerBoardHash !== normalizedEntityId)', hankoSigningPath);
 assertNotMatches(
   hankoSigning,

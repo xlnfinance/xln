@@ -13,13 +13,10 @@ import {
 } from '../helpers';
 import type { ProposeAccountFrameResult } from '../types';
 import { proposeAccountFrameRejected } from '../result';
-import { accountDisputeSealsEnabled, replaceLocalDisputeDraft } from '../dispute/seal';
-
-type ProposalProofBody = Pick<ReturnType<typeof buildAccountProofBodyFromJurisdictions>, 'proofBodyHash'>;
-const DISPUTE_SEALS_DISABLED_PROOF: ProposalProofBody = { proofBodyHash: `0x${'00'.repeat(32)}` };
+import { replaceLocalDisputeDraft } from '../dispute/seal';
 
 type DisputeProjection = {
-  proof: ProposalProofBody;
+  proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   hash?: string;
   nonce: number;
   proposerIsLeft: boolean;
@@ -31,7 +28,7 @@ export type PreparedProposalProof = {
   disputeHash?: string;
   signedProofNonce: number;
   proposerIsLeft: boolean;
-  proof: ProposalProofBody;
+  proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
 };
 
 export type ProposalProofResult =
@@ -43,9 +40,6 @@ const buildDisputeProjection = (
   account: AccountReplica,
   candidate: AccountReplica,
 ): DisputeProjection => {
-  const proposerIsLeft =
-    account.proofHeader.fromEntity.toLowerCase() === candidate.state.leftEntity.toLowerCase();
-  if (!accountDisputeSealsEnabled()) return { proof: DISPUTE_SEALS_DISABLED_PROOF, nonce: 0, proposerIsLeft };
   try {
     const proof = buildAccountProofBodyFromJurisdictions(jurisdictions, candidate);
     const bodyChanged =
@@ -53,6 +47,8 @@ const buildDisputeProjection = (
       account.currentDisputeProofBodyHash?.toLowerCase();
     const nonceConsumed =
       Number(account.currentDisputeProofNonce ?? 0) <= Number(candidate.state.jNonce ?? 0);
+    const proposerIsLeft =
+      account.proofHeader.fromEntity.toLowerCase() === candidate.state.leftEntity.toLowerCase();
     if (!bodyChanged && !nonceConsumed) return { proof, nonce: 0, proposerIsLeft };
     const nonce = Math.max(
       Number(candidate.proofHeader.nextProofNonce ?? 0),

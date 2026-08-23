@@ -1,5 +1,5 @@
 import { Wallet } from 'ethers';
-import { decodeBinaryPayload, encodeBinaryPayload } from '../../../core/storage/codec/binary-codec';
+import { decodeBinaryPayload, encodeBinaryPayload } from '../../../core/protocol/serialization/binary-codec';
 import { STORAGE_SCHEMA_VERSION } from '../../../core/storage/keys';
 import { allowBrowserIssue, expect, test, type Page } from '../../global-setup.mts';
 

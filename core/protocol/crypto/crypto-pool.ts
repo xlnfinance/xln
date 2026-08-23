@@ -129,6 +129,15 @@ if (scope && process.env['XLN_CRYPTO_POOL_WORKER'] === '1') {
   });
 }
 
+// The worker entry is this module, but shared core must not spell
+// `import.meta` (Playwright loads core through a CJS transform). The Bun host
+// that owns the pool hands the module URL in at startup; without it the pool
+// is simply off and every caller takes the synchronous path.
+let workerEntry: URL | null = null;
+export const configureCryptoPoolEntry = (entry: URL): void => {
+  workerEntry = entry;
+};
+
 let nextJobId = 0;
 const pending = new Map<number, (result: JobResult['result']) => void>();
 
@@ -171,8 +180,13 @@ class WorkerLane {
       this.#workers = null;
       return null;
     }
+    const entry = workerEntry;
+    if (!entry) {
+      this.#workers = null;
+      return null;
+    }
     this.#workers = Array.from({ length: size }, () => {
-      const worker = new Worker(new URL(import.meta.url), {
+      const worker = new Worker(entry, {
         env: { ...process.env, XLN_CRYPTO_POOL_WORKER: '1' },
       } as WorkerOptions);
       worker.onmessage = event => {

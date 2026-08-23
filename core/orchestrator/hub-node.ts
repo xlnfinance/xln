@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
@@ -2741,6 +2742,7 @@ const run = async (): Promise<void> => {
   }
   process.env['JADAPTER_DEV_PRIVATE_KEY'] = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
 
+  configureCryptoPoolEntry(new URL('../protocol/crypto/crypto-pool.ts', import.meta.url));
   await startRuntimeSamplingProfiler(resolvedArgs.name);
   await installGlobalOpCounters(resolvedArgs.name);
   const runtimeBootStartedAt = startTiming('runtime_boot');
