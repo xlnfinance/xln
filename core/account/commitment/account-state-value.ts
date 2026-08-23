@@ -122,9 +122,10 @@ const bigintMagnitudeBytes = (magnitude: bigint): Uint8Array => {
   const odd = hex.length & 1;
   const bytes = new Uint8Array((hex.length + odd) >> 1);
   let out = 0;
-  if (odd) bytes[out++] = HEX_NIBBLE[hex.charCodeAt(0)]!;
+  const nibble = (index: number): number => HEX_NIBBLE[hex.charCodeAt(index)] ?? 0;
+  if (odd) bytes[out++] = nibble(0);
   for (let index = odd; index < hex.length; index += 2) {
-    bytes[out++] = (HEX_NIBBLE[hex.charCodeAt(index)]! << 4) | HEX_NIBBLE[hex.charCodeAt(index + 1)]!;
+    bytes[out++] = (nibble(index) << 4) | nibble(index + 1);
   }
   return bytes;
 };
@@ -247,7 +248,7 @@ class RlpWriter {
     // TypedArray.set has a fixed call cost that dominates for the short
     // tags, keys and scalars that make up almost every item.
     if (length <= 64) {
-      for (let index = 0; index < length; index += 1) buf[offset++] = value[index]!;
+      for (let index = 0; index < length; index += 1) buf[offset++] = value[index] ?? 0;
     } else {
       buf.set(value, offset);
       offset += length;
@@ -257,7 +258,8 @@ class RlpWriter {
 
   /** RLP string item. */
   payload(value: Uint8Array): void {
-    if (value.byteLength === 1 && value[0]! < 0x80) { this.byte(value[0]!); return; }
+    const single = value.byteLength === 1 ? value[0] : undefined;
+    if (single !== undefined && single < 0x80) { this.byte(single); return; }
     this.header(0x80, 0xb7, value.byteLength);
     this.bytes(value);
   }
@@ -288,7 +290,7 @@ class RlpWriter {
     this.ensure(extra);
     this.buf.copyWithin(start + 1 + extra, start + 1, this.len);
     this.buf[start] = 0xf7 + extra;
-    for (let index = 0; index < extra; index += 1) this.buf[start + 1 + index] = lengthBytes[index]!;
+    for (let index = 0; index < extra; index += 1) this.buf[start + 1 + index] = lengthBytes[index] ?? 0;
     this.len += extra;
   }
 

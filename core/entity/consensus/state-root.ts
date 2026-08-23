@@ -613,6 +613,7 @@ const projectEntityConsensusState = (
       .map((field) => [field, state[field]]),
   );
   const orderbookExt = timePerfPhase('entity.proj.orderbook', () => projectOrderbookConsensusState(state.orderbookExt));
+  const crontabState = state.crontabState;
   return {
     ...projected,
     config: timePerfPhase('entity.proj.config', () => projectConsensusConfigCommitment(state.config)),
@@ -626,11 +627,11 @@ const projectEntityConsensusState = (
       : state.accounts,
     htlcRoutes: timePerfPhase('entity.proj.htlcRoutes', () => entityCollectionCommitment(state.htlcRoutes, cold)),
     lockBook: timePerfPhase('entity.proj.lockBook', () => entityCollectionCommitment(state.lockBook, cold)),
-    ...(state.crontabState
+    ...(crontabState
       ? {
           crontabState: {
-            tasks: state.crontabState.tasks,
-            hooks: timePerfPhase('entity.proj.hooks', () => entityCollectionCommitment(state.crontabState!.hooks, cold)),
+            tasks: crontabState.tasks,
+            hooks: timePerfPhase('entity.proj.hooks', () => entityCollectionCommitment(crontabState.hooks, cold)),
           },
         }
       : {}),
