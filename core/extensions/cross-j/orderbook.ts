@@ -492,6 +492,7 @@ export const resolveCrossJurisdictionExecutionPriceTicks = (
 export type CrossOrderbookFill = {
   filledLots: bigint;
   weightedCost: bigint;
+  cancelRemainder?: boolean;
 };
 
 const scaleByExactFillRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
@@ -666,6 +667,7 @@ export const buildCrossJurisdictionFillAck = (
   const executionTargetAmount = targetAmount;
   const nextActualTargetAmount = previousTargetClaimed + executionTargetAmount;
   const terminalCancel =
+    fill.cancelRemainder === true ||
     fillRatio >= CROSS_J_MAX_FILL_RATIO ||
     nextActualTargetAmount >= targetTotal;
 

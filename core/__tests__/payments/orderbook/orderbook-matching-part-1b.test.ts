@@ -243,7 +243,190 @@ function makeAccountIndex(offerIds: readonly string[]): AccountReplica {
   );
 }
 
+const makeCrossLifecycleOffer = (
+  offerId: string,
+  accountId: string,
+  makerEntityId: string,
+  side: 0 | 1,
+  lots: bigint,
+  timeInForce: 0 | 1 | 2,
+  createdHeight: number,
+) => {
+  const sourceJurisdiction = side === 1 ? TESTNET_STACK : TRON_STACK;
+  const targetJurisdiction = side === 1 ? TRON_STACK : TESTNET_STACK;
+  const route = {
+    orderId: offerId,
+    bookOwnerEntityId: HUB_ENTITY,
+    venueId: CROSS_USDC_USDC_PAIR,
+    makerEntityId,
+    hubEntityId: HUB_ENTITY,
+    source: {
+      jurisdiction: sourceJurisdiction,
+      entityId: makerEntityId,
+      counterpartyEntityId: HUB_ENTITY,
+      tokenId: 1,
+      amount: lots * SWAP_LOT_SCALE,
+    },
+    target: {
+      jurisdiction: targetJurisdiction,
+      entityId: makerEntityId,
+      counterpartyEntityId: HUB_ENTITY,
+      tokenId: 1,
+      amount: lots * SWAP_LOT_SCALE,
+    },
+    status: 'resting' as const,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  return {
+    offerId,
+    accountId,
+    makerIsLeft: false,
+    fromEntity: HUB_ENTITY,
+    toEntity: makerEntityId,
+    createdHeight,
+    giveTokenId: 1,
+    giveAmount: lots * SWAP_LOT_SCALE,
+    quantizedGive: lots * SWAP_LOT_SCALE,
+    wantTokenId: 1,
+    wantAmount: lots * SWAP_LOT_SCALE,
+    quantizedWant: lots * SWAP_LOT_SCALE,
+    timeInForce,
+    priceTicks: ORDERBOOK_PRICE_SCALE,
+    crossJurisdiction: route,
+  };
+};
+
+const makeCrossLifecycleState = (offers: ReturnType<typeof makeCrossLifecycleOffer>[]) => ({
+  entityId: HUB_ENTITY,
+  accounts: new Map(offers.map(offer => [offer.accountId, makeAccountMachine([offer])])),
+  orderbookExt: {
+    hubProfile: {
+      entityId: HUB_ENTITY,
+      name: 'Hub',
+      minTradeSize: 0n,
+      spreadDistribution: {
+        makerBps: 0,
+        takerBps: 10_000,
+        hubBps: 0,
+        makerReferrerBps: 0,
+        takerReferrerBps: 0,
+      },
+      referenceTokenId: 1,
+      supportedPairs: [CROSS_USDC_USDC_PAIR],
+    },
+    books: new Map(),
+    orderPairs: new Map(),
+    pairDimensions: new Map(),
+    referrals: new Map(),
+  },
+});
+
 describe('orderbook matching execution mapping', () => {
+  test('cross-j zero-fill IOC and FOK terminate with cancel ACK instead of halting', () => {
+    for (const timeInForce of [1, 2] as const) {
+      const offer = makeCrossLifecycleOffer(
+        `unfilled-${timeInForce}`,
+        TAKER_ACCOUNT,
+        TAKER_ENTITY,
+        0,
+        1n,
+        timeInForce,
+        1,
+      );
+      const result = processCommittedOrderbookSwaps(
+        makeCrossLifecycleState([offer]) as any,
+        [offer] as any,
+      );
+      expect(result.debugProjectionRejects).toEqual([]);
+      expect(result.bookUpdates).toEqual([]);
+      expect(result.accountTxs).toEqual([{
+        accountId: TAKER_ACCOUNT,
+        tx: expect.objectContaining({
+          type: 'cross_swap_fill_ack',
+          data: expect.objectContaining({
+            offerId: offer.offerId,
+            ackKind: 'cancel',
+            cancelRemainder: true,
+          }),
+        }),
+      }]);
+    }
+  });
+
+  test('cross-j partial IOC cancels only the taker remainder', () => {
+    const maker = makeCrossLifecycleOffer(
+      'partial-ioc-maker',
+      MAKER_ACCOUNT,
+      MAKER_ENTITY,
+      1,
+      1n,
+      0,
+      1,
+    );
+    const taker = makeCrossLifecycleOffer(
+      'partial-ioc-taker',
+      TAKER_ACCOUNT,
+      TAKER_ENTITY,
+      0,
+      2n,
+      1,
+      2,
+    );
+    const result = processCommittedOrderbookSwaps(
+      makeCrossLifecycleState([maker, taker]) as any,
+      [maker, taker] as any,
+    );
+    const makerAck = result.accountTxs.find(op => op.accountId === MAKER_ACCOUNT);
+    const takerAck = result.accountTxs.find(op => op.accountId === TAKER_ACCOUNT);
+    expect(makerAck?.tx.type).toBe('cross_swap_fill_ack');
+    expect(makerAck?.tx.data.cancelRemainder).toBe(true);
+    expect(takerAck?.tx.type).toBe('cross_swap_fill_ack');
+    expect(takerAck?.tx.data.cancelRemainder).toBe(true);
+    expect(takerAck?.tx.data.ackKind).toBe('fill');
+    expect(takerAck?.tx.data.cumulativeFillRatio).toBeLessThan(65_535);
+    expect(result.debugProjectionRejects).toEqual([]);
+  });
+
+  test('cross-j STP after a partial fill cancels the taker remainder', () => {
+    const externalMaker = makeCrossLifecycleOffer(
+      'stp-external-maker',
+      MAKER_ACCOUNT_ONE,
+      MAKER_ONE,
+      1,
+      1n,
+      0,
+      1,
+    );
+    const selfMaker = makeCrossLifecycleOffer(
+      'stp-self-maker',
+      MAKER_ACCOUNT_TWO,
+      TAKER_ENTITY,
+      1,
+      1n,
+      0,
+      2,
+    );
+    const taker = makeCrossLifecycleOffer(
+      'stp-taker',
+      TAKER_ACCOUNT,
+      TAKER_ENTITY,
+      0,
+      2n,
+      0,
+      3,
+    );
+    const result = processCommittedOrderbookSwaps(
+      makeCrossLifecycleState([externalMaker, selfMaker, taker]) as any,
+      [externalMaker, selfMaker, taker] as any,
+    );
+    const takerAck = result.accountTxs.find(op => op.accountId === TAKER_ACCOUNT);
+    expect(takerAck?.tx.type).toBe('cross_swap_fill_ack');
+    expect(takerAck?.tx.data.cancelRemainder).toBe(true);
+    expect(takerAck?.tx.data.cumulativeFillRatio).toBeLessThan(65_535);
+    expect(result.debugProjectionRejects).toEqual([]);
+  });
+
   test('requantizes a partial fill at the committed price', async () => {
     const lot = SWAP_LOT_SCALE;
     const accountMachine = makeAccountMachine({

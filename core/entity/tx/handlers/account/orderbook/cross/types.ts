@@ -36,6 +36,7 @@ export type CrossOrderbookProcessInput = {
 type CrossAggregatedFill = {
   filledLots: bigint;
   weightedCost: bigint;
+  cancelRemainder: boolean;
 };
 
 export type CrossOrderbookPass = CrossOrderbookProcessInput & {

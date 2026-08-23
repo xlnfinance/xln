@@ -6,7 +6,10 @@ import {
   getSwapExactQuoteLotMultipleAtPriceForDimensions,
 } from '../../../../../../orderbook';
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
-import { resolveCrossJurisdictionExecutionPriceTicks } from '../../../../../../extensions/cross-j/orderbook';
+import {
+  buildCrossJurisdictionCancelAck,
+  resolveCrossJurisdictionExecutionPriceTicks,
+} from '../../../../../../extensions/cross-j/orderbook';
 import {
   aggregateCrossTradeFills,
   buildCrossMarketOfferFromBookOrder,
@@ -131,6 +134,8 @@ const commitRestingCrossOffer = (
 const aggregateCrossTrades = (
   pass: CrossOrderbookPass,
   trades: ReturnType<typeof collectTradeEvents>,
+  takerOrderId: string,
+  cancelTakerRemainder: boolean,
 ): void => {
   for (const event of trades) {
     orderbookCrossLog.debug('trade', {
@@ -167,13 +172,34 @@ const aggregateCrossTrades = (
     if (current) {
       current.filledLots += fill.filledLots;
       current.weightedCost += fill.weightedCost;
+      if (orderId === takerOrderId && cancelTakerRemainder) current.cancelRemainder = true;
     } else {
       pass.aggregatedFills.set(orderId, {
         filledLots: fill.filledLots,
         weightedCost: fill.weightedCost,
+        cancelRemainder: orderId === takerOrderId && cancelTakerRemainder,
       });
     }
   }
+};
+
+const isExpectedLifecycleReject = (reason: string): boolean =>
+  reason === 'no fill' ||
+  reason === 'FOK cannot fill entirely' ||
+  reason === 'STP cancel taker';
+
+const queueRejectedCrossOfferCancellation = (
+  pass: CrossOrderbookPass,
+  offer: PreparedCrossOffer,
+): void => {
+  pass.suspendedOrderIds.add(offer.namespacedOrderId);
+  pass.accountTxs.push({
+    accountId: offer.accountId,
+    tx: buildCrossJurisdictionCancelAck(
+      offer.rawOffer.offerId,
+      offer.marketOffer.route,
+    ),
+  });
 };
 
 export const processCrossOrderbookOffer = (
@@ -186,11 +212,25 @@ export const processCrossOrderbookOffer = (
   if (!result) return;
   const rejects = rejectEventsForOrder(result.events, offer.namespacedOrderId);
   const trades = canonicalCrossTradeEvents(pass, collectTradeEvents(result.events));
+  const expectedLifecycleReject = rejects.length > 0 && rejects.every(event =>
+    isExpectedLifecycleReject(event.reason));
   if (rejects.length > 0 && trades.length === 0) {
+    if (expectedLifecycleReject) {
+      queueRejectedCrossOfferCancellation(pass, offer);
+      return;
+    }
     pass.rejectInvalidCrossOffer(
       offer.accountId,
       rawOffer.offerId,
       `cross-post-only-reject:${rejects.map(event => event.reason).join(',')}`,
+    );
+    return;
+  }
+  if (rejects.length > 0 && !expectedLifecycleReject) {
+    pass.rejectInvalidCrossOffer(
+      offer.accountId,
+      rawOffer.offerId,
+      `cross-order-reject:${rejects.map(event => event.reason).join(',')}`,
     );
     return;
   }
@@ -215,5 +255,10 @@ export const processCrossOrderbookOffer = (
   if (trades.length > 0) {
     pass.speculativeTradePairs.add(offer.marketOffer.pairId);
   }
-  aggregateCrossTrades(pass, trades);
+  aggregateCrossTrades(
+    pass,
+    trades,
+    offer.namespacedOrderId,
+    rawOffer.timeInForce !== 0 || expectedLifecycleReject,
+  );
 };
