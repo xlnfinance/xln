@@ -119,11 +119,21 @@ const collectOutputSignerHints = (
   return hints;
 };
 
+export type RecoveryReplayOptions = Readonly<{
+  /**
+   * `false` skips the per-frame outbox/journal/post-state equivalence checks.
+   * Measurement only (pure Hub apply cost); restore and audited replay always
+   * verify.
+   */
+  verify: boolean;
+}>;
+
 const replayOneFrame = async (
   deps: RecoveryJournalDeps,
   env: RuntimeReplica,
   frame: PersistedFrameJournal,
   height: number,
+  options: RecoveryReplayOptions,
 ): Promise<void> => {
   // Reaching a later committed frame proves that the preceding frame crossed
   // its synchronous post-WAL dispatch boundary. Keep only this frame's outbox
@@ -171,12 +181,14 @@ const replayOneFrame = async (
       result.entityOutbox,
       deps.getRuntimeOutputRoutingDeps(),
     ));
-    timePerfPhase('recovery.frame.verifyOutbox', () => assertRecoveryOutboxMatches(
-      frame.runtimeOutputs ?? [],
-      env.pendingNetworkOutputs ?? [],
-      frame.runtimeOutputRefs ?? [],
-      height,
-    ));
+    if (options.verify) {
+      timePerfPhase('recovery.frame.verifyOutbox', () => assertRecoveryOutboxMatches(
+        frame.runtimeOutputs ?? [],
+        env.pendingNetworkOutputs ?? [],
+        frame.runtimeOutputRefs ?? [],
+        height,
+      ));
+    }
     const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);
     const committedEvents = readRuntimeFrameEvents(env);
     clearPendingAuditEvents(env);
@@ -188,8 +200,10 @@ const replayOneFrame = async (
       : { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];
     dropPendingHistoryRecords(env, history.length);
-    timePerfPhase('recovery.frame.verifyJournal', () =>
-      verifyRecoveryJournalFrame(env, frame, height, result));
+    if (options.verify) {
+      timePerfPhase('recovery.frame.verifyJournal', () =>
+        verifyRecoveryJournalFrame(env, frame, height, result));
+    }
     // Production consumes exactly one event buffer after each authoritative
     // WAL commit. Replay previously retained every earlier frame's events,
     // manufacturing an O(history) live buffer and making economic TPS
@@ -209,6 +223,7 @@ export const replayPersistedRuntimeJournals = async (
   deps: RecoveryJournalDeps,
   env: RuntimeReplica,
   frames: PersistedFrameJournal[],
+  options: RecoveryReplayOptions = { verify: true },
 ): Promise<void> => {
   deps.ensureRuntimeConfig(env);
   const previousReplayMode = readRuntimeMetadata(env, REPLAY_MODE);
@@ -223,7 +238,7 @@ export const replayPersistedRuntimeJournals = async (
     );
     for (const frame of frames) {
       const height = validateReplayFrameHeader(frame, expectedHeight);
-      await replayOneFrame(deps, env, frame, height);
+      await replayOneFrame(deps, env, frame, height, options);
       if (env.state.height !== height) {
         throw new Error(
           `RECOVERY_JOURNAL_REPLAY_HEIGHT_MISMATCH: ` +

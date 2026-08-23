@@ -14,7 +14,7 @@ import {
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/recovery/j-adapter-restore';
 import { runtimeIsBrowser } from '../../support/process/runtime-process';
 import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
-import { replayPersistedRuntimeJournals } from './journal';
+import { replayPersistedRuntimeJournals, type RecoveryReplayOptions } from './journal';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';
 import type { RuntimeRecoveryBundleV1 } from './bundle/types';
@@ -99,7 +99,11 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     return env;
   };
 
-  const replayRecoveryFrameJournals = (env: RuntimeReplica, frames: PersistedFrameJournal[]): Promise<void> =>
+  const replayRecoveryFrameJournals = (
+    env: RuntimeReplica,
+    frames: PersistedFrameJournal[],
+    options?: RecoveryReplayOptions,
+  ): Promise<void> =>
     replayPersistedRuntimeJournals(
       {
         ensureRuntimeConfig,
@@ -109,6 +113,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       },
       env,
       frames,
+      options,
     );
   const failRecoveryRestoreAfterCleanup = async (env: RuntimeReplica, error: unknown): Promise<never> => {
     const originalError = error instanceof Error ? error : new Error(String(error));

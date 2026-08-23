@@ -103,6 +103,8 @@ type ReplayTrial = Readonly<{
   finalHeight: number;
   finalPendingOutbox: number;
   equivalent: true;
+  /** false = per-frame recovery equivalence checks were skipped (pure apply cost). */
+  frameVerified: boolean;
   amplification: ReplayAmplification;
   frameProfile?: readonly ReplayFrameProfile[];
   operations: OpCounterSnapshot;
@@ -186,6 +188,9 @@ const frameProfileEnabled = process.argv.includes('--frame-profile');
 // Hash-format changes (leaf/preimage encoding) legitimately diverge from the
 // recorded frame hashes; terminal equivalence (height, outbox, payments) still holds.
 const proposalOracleEnabled = !process.argv.includes('--no-oracle');
+// Pure Hub apply cost: skips per-frame recovery equivalence checks (outbox,
+// journal, post-state). The report records verified=false.
+const recoveryVerifyEnabled = !process.argv.includes('--no-verify');
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
@@ -302,14 +307,14 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       // tail shape. Re-entering the public replay boundary for every frame
       // repeatedly toggled replay metadata and revalidated Runtime config; it
       // was harness overhead absent from both restore and live H1 execution.
-      await replayRecoveryFrameJournals(env, frames);
+      await replayRecoveryFrameJournals(env, frames, { verify: recoveryVerifyEnabled });
     } else {
       for (const frame of frames) {
         cumulativeUnits += frameUnits(frame);
         await waitForOfferedRate(offeredTps, cumulativeUnits, startedAt);
         const economicBefore = readEconomicCounters(env);
         const frameStartedAt = performance.now();
-        await replayRecoveryFrameJournals(env, [frame]);
+        await replayRecoveryFrameJournals(env, [frame], { verify: recoveryVerifyEnabled });
         if (frameProfileEnabled) {
           const economicAfter = readEconomicCounters(env);
           frameProfile.push({
@@ -345,6 +350,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       finalHeight: env.state.height,
       finalPendingOutbox: env.pendingNetworkOutputs?.length ?? 0,
       equivalent: assertReplayTerminalEquivalent(env.state.height),
+      frameVerified: recoveryVerifyEnabled,
       amplification: summarizeReplayAmplification(
         operations,
         artifact.totals.runtimeEntityInputs,
@@ -366,7 +372,7 @@ for (const rate of rates) {
   const trial = await runTrial(rate);
   trials.push(trial);
   console.log(
-    `HLT_REPLAY_EQUIVALENT offered=${trial.offeredTps ?? 'max'} ` +
+    `HLT_REPLAY_EQUIVALENT offered=${trial.offeredTps ?? 'max'} frameVerified=${trial.frameVerified} ` +
     `payments=${trial.deliveredPayments}/${trial.deliveredPaymentTps.toFixed(2)}tps ` +
     `swaps=${trial.matchedEconomicSwaps}/${trial.matchedEconomicSwapTps.toFixed(2)}tps ` +
     `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
