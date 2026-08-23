@@ -134,7 +134,9 @@ const validateScheduledWake = (value: unknown, code: string): void => {
   requireArray(data['jobs'], `${code}_JOBS`).forEach((raw, index) => {
     const job = requireBoundaryRecord(raw, `${code}_JOB_${index}`);
     requireExactBoundaryKeys(job, ['kind', 'id', 'dueAt'], [], `${code}_JOB_${index}_FIELDS`);
-    if (job['kind'] !== 'hook' && job['kind'] !== 'task') throw new Error(`${code}_JOB_${index}_KIND`);
+    if (job['kind'] !== 'hook' && job['kind'] !== 'task' && job['kind'] !== 'accountResend') {
+      throw new Error(`${code}_JOB_${index}_KIND`);
+    }
     requireString(job['id'], `${code}_JOB_${index}_ID`);
     requireBoundaryInteger(job['dueAt'], `${code}_JOB_${index}_DUE_AT`);
   });

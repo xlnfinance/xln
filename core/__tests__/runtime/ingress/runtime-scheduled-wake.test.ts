@@ -50,6 +50,7 @@ import {
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import { makeAccount } from '../../helpers/cross-j';
+import { validateEntityTx } from '../../../entity/tx-validation';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
@@ -167,6 +168,8 @@ describe('runtime scheduled wake', () => {
       data: { version: 1, proposerSignerId: proposer, dueAt, jobs: [{ kind: 'accountResend', id: counterparty, dueAt }] },
     };
     expect(() => assertScheduledWakeMatchesState(state, tx)).not.toThrow();
+    // The wire/history schema must accept the same job kind the proposer emits.
+    expect(validateEntityTx(tx, 'TEST_WAKE')).toEqual(tx);
     expect(() => assertScheduledWakeMatchesState(state, {
       ...tx, data: { ...tx.data, dueAt: dueAt - 1, jobs: [{ kind: 'accountResend', id: counterparty, dueAt: dueAt - 1 }] },
     })).toThrow('SCHEDULED_WAKE_RESEND_DEADLINE_MISMATCH');
