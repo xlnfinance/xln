@@ -49,6 +49,21 @@ pub fn load_profile(id: u64, profile: &str, revision: u64, locks: Vec<AbiValue>)
     )
 }
 
+pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
+    tuple(vec![
+        AbiValue::Bytes(vec![id_byte; 32]),
+        AbiValue::Bytes(entity_bytes(1).to_vec()),
+        AbiValue::Bytes(entity_bytes(1).to_vec()),
+        AbiValue::Bytes(entity_bytes(2).to_vec()),
+        AbiValue::Integer(31_337),
+        AbiValue::Bytes(vec![0x88; 20]),
+        AbiValue::Bytes(vec![0x99; 32]),
+        tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
+        tuple(vec![delta()]),
+        tuple(locks),
+    ])
+}
+
 fn account(locks: Vec<AbiValue>) -> AbiValue {
     tuple(vec![
         AbiValue::Bytes(account_id().to_vec()),

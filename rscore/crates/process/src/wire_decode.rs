@@ -39,6 +39,9 @@ pub enum Command {
         limit: usize,
         token_ids: Vec<xln_rscore_engine::TokenId>,
     },
+    UpsertAccounts {
+        accounts: Vec<AccountSeed>,
+    },
 }
 
 pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
@@ -53,6 +56,7 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::Shutdown => decode_shutdown(payload),
         OpTag::ReadCapacityBatch => decode_capacity_batch(payload),
         OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
+        OpTag::UpsertAccounts => decode_upsert_accounts(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
 }
@@ -81,6 +85,16 @@ fn decode_restore(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     Ok(Command::Restore {
         revision: unsigned(&fields[1], "revision")?,
         accounts: tuple(&fields[2])?
+            .iter()
+            .map(decode_seed_account)
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn decode_upsert_accounts(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "upsertAccounts")?;
+    Ok(Command::UpsertAccounts {
+        accounts: tuple(&fields[0])?
             .iter()
             .map(decode_seed_account)
             .collect::<Result<_, _>>()?,

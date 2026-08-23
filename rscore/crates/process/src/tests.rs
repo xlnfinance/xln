@@ -248,6 +248,57 @@ fn assert_error(envelope: Envelope, expected: &str) {
 }
 
 #[test]
+fn upsert_accounts_creates_between_waves_and_is_refused_while_pending() {
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello(0)).envelope);
+    let loaded = session.handle(load(1, 0, Vec::new())).envelope;
+    assert_ok(loaded.clone());
+    let root_after_restore = body_bytes(&loaded, 1);
+
+    // Create a fresh account between waves: the accounts root must move.
+    let upserted = session
+        .handle(request(
+            2,
+            OpTag::UpsertAccounts,
+            vec![tuple_of(vec![crate::test_fixture::account_with_id(
+                0x7a,
+                Vec::new(),
+            )])],
+        ))
+        .envelope;
+    assert_ok(upserted.clone());
+    let root_after_upsert = body_bytes(&upserted, 1);
+    assert_ne!(root_after_restore, root_after_upsert);
+
+    // While a prepare is pending the upsert is refused: a candidate must
+    // never straddle a membership change.
+    assert_ok(session.handle(crate::test_fixture::prepare(3, 5)).envelope);
+    assert_error(
+        session
+            .handle(request(
+                4,
+                OpTag::UpsertAccounts,
+                vec![tuple_of(vec![crate::test_fixture::account_with_id(
+                    0x7b,
+                    Vec::new(),
+                )])],
+            ))
+            .envelope,
+        "RSCORE_PROCESS_PREPARE_PENDING",
+    );
+}
+
+fn body_bytes(envelope: &Envelope, index: usize) -> Vec<u8> {
+    let AbiValue::Tuple(payload) = &envelope.body.fields()[0] else {
+        panic!("payload tuple expected");
+    };
+    let AbiValue::Bytes(bytes) = &payload.fields()[index] else {
+        panic!("bytes expected at {index}");
+    };
+    bytes.clone()
+}
+
+#[test]
 fn capacity_batch_and_summary_page_read_committed_state() {
     let mut session = ProcessSession::new();
     assert_ok(session.handle(hello(0)).envelope);

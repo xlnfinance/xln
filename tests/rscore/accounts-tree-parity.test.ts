@@ -35,6 +35,7 @@ const ACCOUNT_IDS = [
   `0x${'00'.repeat(28)}00000002`,
   `0x${'00'.repeat(28)}01000000`,
   `0x80${'00'.repeat(27)}00000001`,
+  `0x${'00'.repeat(28)}00000003`,
 ] as const;
 
 const hexBytes = (value: string): Uint8Array => {
@@ -129,7 +130,7 @@ const referenceRoot = (accounts: readonly AccountReplica[]): Uint8Array => {
 
 describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
   test('restore and commit report the TS-identical radix-16 accounts root', async () => {
-    const accounts = ACCOUNT_IDS.map((_, index) => makeTsAccount(index));
+    const accounts = ACCOUNT_IDS.slice(0, 4).map((_, index) => makeTsAccount(index));
     const client = new RscoreProcessClient(BINARY, {
       engineGeneration: Buffer.alloc(8, 0xa0),
       runtimeId: Buffer.alloc(20, 0x10),
@@ -162,6 +163,14 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
       expect(committed[0]).toBe(1); // revision
       expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
+
+      // Account creation between waves: UpsertAccounts must rebranch to the
+      // same root the TS model computes with the added leaf.
+      const bornIndex = accounts.length;
+      const born = makeTsAccount(bornIndex);
+      const upserted = (await client.upsertAccounts([seedWire(bornIndex, born)])) as unknown[];
+      const grown = [...accounts, born];
+      expect(new Uint8Array(upserted[1] as Uint8Array)).toEqual(referenceRoot(grown));
 
       await client.shutdown();
     } finally {

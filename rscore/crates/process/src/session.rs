@@ -130,6 +130,7 @@ impl ProcessSession {
             Command::Commit { prepare_request_id } => self.commit(prepare_request_id),
             Command::Abort { prepare_request_id } => self.abort(prepare_request_id),
             Command::Shutdown => self.shutdown(),
+            Command::UpsertAccounts { accounts } => self.upsert_accounts(accounts),
             Command::ReadCapacityBatch { requests } => self.capacity_batch(&requests),
             Command::ReadAccountSummaryPage {
                 cursor,
@@ -185,6 +186,18 @@ impl ProcessSession {
         let accounts_root = engine.accounts_root();
         self.engine = Some(engine);
         Ok((wire_encode::loaded(revision, accounts_root), false))
+    }
+
+    fn upsert_accounts(
+        &mut self,
+        accounts: Vec<xln_rscore_batch::AccountSeed>,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
+        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
+        let accounts_root = engine.upsert_accounts(accounts)?;
+        Ok((wire_encode::upserted(engine.revision(), accounts_root), false))
     }
 
     fn prepare(

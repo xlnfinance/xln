@@ -92,6 +92,7 @@ pub enum OpTag {
     AbortRuntime = 11,
     ReadAccountSummaryPage = 12,
     Shutdown = 13,
+    UpsertAccounts = 14,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -113,6 +114,7 @@ impl TryFrom<u64> for OpTag {
             11 => Ok(Self::AbortRuntime),
             12 => Ok(Self::ReadAccountSummaryPage),
             13 => Ok(Self::Shutdown),
+            14 => Ok(Self::UpsertAccounts),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

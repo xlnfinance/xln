@@ -42,6 +42,10 @@ pub fn committed(response: &BatchResponse) -> BodyTuple {
     ])
 }
 
+pub fn upserted(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
+    body(vec![integer(revision), AbiValue::Bytes(accounts_root.to_vec())])
+}
+
 pub fn aborted(revision: u64) -> BodyTuple {
     body(vec![integer(revision)])
 }

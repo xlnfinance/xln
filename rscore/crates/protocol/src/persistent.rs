@@ -55,7 +55,7 @@ pub struct PersistentRadixMap<V> {
     len: usize,
 }
 
-impl<V: Clone + PartialEq> PersistentRadixMap<V> {
+impl<V: Clone> PersistentRadixMap<V> {
     pub fn empty() -> Self {
         Self { root: None, len: 0 }
     }
@@ -129,5 +129,60 @@ impl<V: Clone + PartialEq> PersistentRadixMap<V> {
 
     pub fn root_hash(&self) -> [u8; 32] {
         self.root.as_ref().map_or(EMPTY_RADIX_ROOT, node_hash)
+    }
+
+    /// Structural statistics: (branch nodes, leaves, max branch depth from the
+    /// root). Extension compression means depth counts actual branch hops, not
+    /// nibbles — long shared prefixes collapse into single edges.
+    pub fn node_stats(&self) -> (usize, usize, usize) {
+        fn walk<V>(node: &Node<V>, depth: usize, stats: &mut (usize, usize, usize)) {
+            match node {
+                Node::Leaf { .. } => stats.1 += 1,
+                Node::Branch { children, .. } => {
+                    stats.0 += 1;
+                    stats.2 = stats.2.max(depth);
+                    for child in children.iter().flatten() {
+                        walk(child, depth + 1, stats);
+                    }
+                }
+            }
+        }
+        let mut stats = (0, 0, 0);
+        if let Some(root) = &self.root {
+            walk(root, 1, &mut stats);
+        }
+        stats
+    }
+
+    /// Ordered traversal (lexicographic by key bytes — nibble slot order).
+    pub fn iter(&self) -> PersistentRadixIter<'_, V> {
+        PersistentRadixIter {
+            stack: self.root.iter().map(Arc::as_ref).collect(),
+        }
+    }
+}
+
+/// Depth-first walk pushing branch children in reverse slot order, so leaves
+/// surface in ascending key order — the canonical iteration the engine and
+/// paging reads rely on.
+pub struct PersistentRadixIter<'a, V> {
+    stack: Vec<&'a Node<V>>,
+}
+
+impl<'a, V> Iterator for PersistentRadixIter<'a, V> {
+    type Item = (&'a [u8], &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(node) = self.stack.pop() {
+            match node {
+                Node::Leaf { key, value, .. } => return Some((key.as_slice(), value)),
+                Node::Branch { children, .. } => {
+                    for child in children.iter().rev().flatten() {
+                        self.stack.push(child);
+                    }
+                }
+            }
+        }
+        None
     }
 }

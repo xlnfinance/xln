@@ -40,6 +40,7 @@ export const RSCORE_OP = {
   abortRuntime: 11,
   readAccountSummaryPage: 12,
   shutdown: 13,
+  upsertAccounts: 14,
 } as const;
 
 const MESSAGE_KIND_REQUEST = 0;
@@ -370,6 +371,11 @@ export class RscoreProcessClient {
 
   async abort(prepareRequestId: Buffer): Promise<unknown> {
     return this.request(RSCORE_OP.abortRuntime, [prepareRequestId]);
+  }
+
+  /** Create or replace accounts between waves; replies [revision, accountsRoot]. */
+  async upsertAccounts(accounts: RscoreWireValue[]): Promise<unknown> {
+    return this.request(RSCORE_OP.upsertAccounts, [accounts]);
   }
 
   async readCapacityBatch(rows: Array<[Uint8Array, number, number]>): Promise<unknown> {

@@ -2,10 +2,10 @@
 #[allow(dead_code)]
 mod common;
 
-use xln_rscore_batch::StatefulBatchEngine;
+use xln_rscore_batch::{BatchError, StatefulBatchEngine};
 use xln_rscore_protocol::{EMPTY_RADIX_ROOT, PersistentRadixMap};
 
-use common::{direct_job, generation, seed};
+use common::{account_id, direct_job, generation, seed};
 
 /// Independent O(n) oracle: rebuild the accounts tree from scratch out of the
 /// committed replicas. Any incremental rebranch bug in the engine's path-copy
@@ -96,4 +96,52 @@ fn commit_rebranches_only_touched_leaves_and_reports_the_new_root() {
     assert_ne!(after, before);
     assert_eq!(response.accounts_root, after);
     assert_eq!(after, cold_accounts_root(&engine));
+}
+
+#[test]
+fn thousand_accounts_form_a_multi_level_patricia_tree() {
+    let engine = StatefulBatchEngine::new(
+        generation(),
+        4,
+        (0..1000).map(seed).collect(),
+    )
+    .expect("batch engine");
+    let (branches, leaves, depth) = engine.accounts_tree_stats();
+    assert_eq!(leaves, 1000);
+    // u32-indexed ids share a 56-nibble zero prefix; the live spread sits in
+    // the last nibbles, which needs at least 3 branch levels for 1000 leaves
+    // (16^2 = 256 < 1000) while extension compression keeps depth far below
+    // the 64-nibble key length.
+    assert!(depth >= 3, "depth {depth} too shallow for 1000 leaves");
+    assert!(depth <= 8, "depth {depth}: extension compression broken");
+    assert!(branches >= 64, "branches {branches} too few for 1000 leaves");
+    assert_eq!(engine.accounts_root(), cold_accounts_root(&engine));
+}
+
+#[test]
+fn upsert_creates_and_replaces_accounts_atomically() {
+    let mut engine = StatefulBatchEngine::new(
+        generation(),
+        1,
+        vec![seed(1), seed(2)],
+    )
+    .expect("batch engine");
+    let before = engine.accounts_root();
+
+    // Create a brand-new account.
+    let root = engine.upsert_accounts(vec![seed(3)]).expect("upsert new");
+    assert_ne!(root, before);
+    assert_eq!(root, engine.accounts_root());
+    assert_eq!(root, cold_accounts_root(&engine));
+    assert!(engine.account(&account_id(3)).is_some());
+
+    // Replacing an account with identical state is a no-op for the root.
+    let replaced = engine.upsert_accounts(vec![seed(2)]).expect("upsert same");
+    assert_eq!(replaced, root);
+
+    // Empty upsert is refused loudly.
+    assert!(matches!(
+        engine.upsert_accounts(Vec::new()),
+        Err(BatchError::EmptyBatch)
+    ));
 }

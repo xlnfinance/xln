@@ -89,12 +89,12 @@ impl StatefulBatchEngine {
         let mut next_cursor = None;
         for (account_id, replica) in self.accounts_after(cursor) {
             if rows.len() == limit {
-                next_cursor = Some(*account_id);
+                next_cursor = Some(account_id);
                 break;
             }
             let state = replica.state();
             rows.push(AccountSummaryRow {
-                account_id: *account_id,
+                account_id,
                 owner_side: replica.owner_side(),
                 delta_rows: state.delta_count() as u64,
                 htlc_locks: state.htlc_count() as u64,

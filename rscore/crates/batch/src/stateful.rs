@@ -18,12 +18,12 @@ pub struct StatefulBatchEngine {
     engine_generation: EngineGeneration,
     revision: u64,
     pool: ThreadPool,
-    accounts: BTreeMap<AccountId, AccountReplica>,
-    // The account module owns the accounts-level Merkle commitment: one
-    // radix-16 Patricia tree keyed by the 32-byte account id whose leaf digest
-    // is that account's payment-profile state root. `accounts_root()` is the
-    // single 32-byte summary the entity machine consumes.
-    accounts_tree: PersistentRadixMap<[u8; 32]>,
+    // The one canonical account store: a radix-16 Patricia tree keyed by the
+    // 32-byte account id, replicas living in the leaves, leaf digest = that
+    // account's payment-profile state root. Values and the Merkle commitment
+    // can never diverge because they are the same structure; `accounts_root()`
+    // is the single 32-byte summary the entity machine consumes.
+    accounts: PersistentRadixMap<AccountReplica>,
 }
 
 impl StatefulBatchEngine {
@@ -44,37 +44,27 @@ impl StatefulBatchEngine {
         if worker_count == 0 || worker_count > MAX_BATCH_WORKERS {
             return Err(BatchError::InvalidWorkerCount(worker_count));
         }
-        let accounts = collect_accounts(seeds)?;
+        let seeded = collect_accounts(seeds)?;
         let pool = ThreadPoolBuilder::new()
             .num_threads(worker_count)
             .thread_name(|index| format!("rscore-account-{index}"))
             .build()
             .map_err(|error| BatchError::ThreadPoolBuild(error.to_string()))?;
         let roots = pool.install(|| {
-            accounts
+            seeded
                 .par_iter()
-                .map(|(account_id, replica)| {
-                    replica
-                        .state()
-                        .payment_profile_account_state_root()
-                        .map(|root| (*account_id, root))
-                        .map_err(|error| BatchError::AccountsTree {
-                            account_id: *account_id,
-                            detail: error.to_string(),
-                        })
-                })
+                .map(|(account_id, replica)| leaf_root(*account_id, replica))
                 .collect::<Result<Vec<_>, BatchError>>()
         })?;
-        let mut accounts_tree = PersistentRadixMap::empty();
-        for (account_id, root) in roots {
-            accounts_tree = put_accounts_tree(&accounts_tree, account_id, root)?;
+        let mut accounts = PersistentRadixMap::empty();
+        for ((account_id, replica), (_, root)) in seeded.into_iter().zip(roots) {
+            accounts = put_account(&accounts, account_id, replica, root)?;
         }
         Ok(Self {
             engine_generation,
             revision,
             pool,
             accounts,
-            accounts_tree,
         })
     }
 
@@ -86,7 +76,36 @@ impl StatefulBatchEngine {
     /// per-account payment-profile state root). This is the account module's
     /// whole-state commitment handed up to the entity machine.
     pub fn accounts_root(&self) -> [u8; 32] {
-        self.accounts_tree.root_hash()
+        self.accounts.root_hash()
+    }
+
+    /// (branch nodes, leaves, max branch depth) of the canonical account tree.
+    pub fn accounts_tree_stats(&self) -> (usize, usize, usize) {
+        self.accounts.node_stats()
+    }
+
+    /// Create or replace accounts between waves. The whole call is atomic:
+    /// leaf digests are computed on the pool first, then the tree and the map
+    /// swap together. Revision is untouched — waves own it; the session layer
+    /// refuses upserts while a prepare is pending, so a candidate can never
+    /// straddle an upsert.
+    pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
+        let incoming = collect_accounts(seeds)?;
+        if incoming.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        let roots = self.pool.install(|| {
+            incoming
+                .par_iter()
+                .map(|(account_id, replica)| leaf_root(*account_id, replica))
+                .collect::<Result<Vec<_>, BatchError>>()
+        })?;
+        let mut accounts = self.accounts.clone();
+        for ((account_id, replica), (_, root)) in incoming.into_iter().zip(roots) {
+            accounts = put_account(&accounts, account_id, replica, root)?;
+        }
+        self.accounts = accounts;
+        Ok(self.accounts.root_hash())
     }
 
     pub const fn revision(&self) -> u64 {
@@ -94,7 +113,7 @@ impl StatefulBatchEngine {
     }
 
     pub fn account(&self, account_id: &AccountId) -> Option<&AccountReplica> {
-        self.accounts.get(account_id)
+        self.accounts.get(account_id.as_bytes())
     }
 
     pub(crate) fn pool(&self) -> &ThreadPool {
@@ -106,13 +125,17 @@ impl StatefulBatchEngine {
     pub fn accounts_after(
         &self,
         cursor: Option<AccountId>,
-    ) -> impl Iterator<Item = (&AccountId, &AccountReplica)> {
-        use std::ops::Bound;
-        let lower = match cursor {
-            Some(id) => Bound::Excluded(id),
-            None => Bound::Unbounded,
-        };
-        self.accounts.range((lower, Bound::Unbounded))
+    ) -> impl Iterator<Item = (AccountId, &AccountReplica)> {
+        self.accounts
+            .iter()
+            .map(|(key, replica)| {
+                let mut bytes = [0_u8; 32];
+                bytes.copy_from_slice(key);
+                (AccountId::from_bytes(bytes), replica)
+            })
+            .skip_while(move |(account_id, _)| {
+                cursor.is_some_and(|cursor| *account_id <= cursor)
+            })
     }
 
     pub fn prepare(&self, jobs: &[BatchJob]) -> Result<PreparedBatch, BatchError> {
@@ -147,38 +170,28 @@ impl StatefulBatchEngine {
             });
         }
         self.validate_update_bases(&prepared)?;
-        // Rebranch the accounts tree fully before mutating the map so a failed
-        // root computation leaves the engine untouched (commit stays atomic).
-        // Leaf digests are independent per account — compute them on the pool;
-        // only the cheap path-copy fold below is sequential.
+        // Rebranch fully before publishing so a failed root computation leaves
+        // the engine untouched (commit stays atomic). Leaf digests are
+        // independent per account — compute them on the pool; only the cheap
+        // path-copy fold below is sequential.
         let leaf_roots = self.pool.install(|| {
             prepared
                 .updates
                 .par_iter()
-                .map(|(account_id, _, candidate)| {
-                    candidate
-                        .state()
-                        .payment_profile_account_state_root()
-                        .map(|root| (*account_id, root))
-                        .map_err(|error| BatchError::AccountsTree {
-                            account_id: *account_id,
-                            detail: error.to_string(),
-                        })
-                })
+                .map(|(account_id, _, candidate)| leaf_root(*account_id, candidate))
                 .collect::<Result<Vec<_>, BatchError>>()
         })?;
-        let mut tree = self.accounts_tree.clone();
-        for (account_id, root) in leaf_roots {
-            tree = put_accounts_tree(&tree, account_id, root)?;
+        let mut accounts = self.accounts.clone();
+        for ((account_id, _, candidate), (_, root)) in
+            prepared.updates.into_iter().zip(leaf_roots)
+        {
+            accounts = put_account(&accounts, account_id, candidate, root)?;
         }
-        for (account_id, _, candidate) in prepared.updates {
-            self.accounts.insert(account_id, candidate);
-        }
-        self.accounts_tree = tree;
+        self.accounts = accounts;
         self.revision = prepared.next_revision;
         Ok(BatchResponse {
             committed_revision: self.revision,
-            accounts_root: self.accounts_tree.root_hash(),
+            accounts_root: self.accounts.root_hash(),
             results: prepared.results,
             outputs: prepared.outputs,
         })
@@ -188,7 +201,7 @@ impl StatefulBatchEngine {
         for (account_id, expected, _) in &prepared.updates {
             let account = self
                 .accounts
-                .get(account_id)
+                .get(account_id.as_bytes())
                 .ok_or(BatchError::CandidateAccountNotFound(*account_id))?;
             let actual = replica_fingerprint(*account_id, account)?;
             if actual != *expected {
@@ -219,7 +232,7 @@ impl StatefulBatchEngine {
                     expected,
                 });
             }
-            if !self.accounts.contains_key(&job.account_id) {
+            if self.accounts.get(job.account_id.as_bytes()).is_none() {
                 return Err(BatchError::AccountNotFound {
                     input_index: job.input_index,
                     account_id: job.account_id,
@@ -249,7 +262,7 @@ impl StatefulBatchEngine {
                     .ok_or(BatchError::EmptyBatch)?;
                 let base = self
                     .accounts
-                    .get(&account_id)
+                    .get(account_id.as_bytes())
                     .ok_or(BatchError::AccountNotFound {
                         input_index,
                         account_id,
@@ -315,12 +328,28 @@ fn build_prepared(
     }
 }
 
-fn put_accounts_tree(
-    tree: &PersistentRadixMap<[u8; 32]>,
+fn leaf_root(
     account_id: AccountId,
+    replica: &AccountReplica,
+) -> Result<(AccountId, [u8; 32]), BatchError> {
+    replica
+        .state()
+        .payment_profile_account_state_root()
+        .map(|root| (account_id, root))
+        .map_err(|error| BatchError::AccountsTree {
+            account_id,
+            detail: error.to_string(),
+        })
+}
+
+fn put_account(
+    accounts: &PersistentRadixMap<AccountReplica>,
+    account_id: AccountId,
+    replica: AccountReplica,
     root: [u8; 32],
-) -> Result<PersistentRadixMap<[u8; 32]>, BatchError> {
-    tree.updated(account_id.as_bytes().to_vec(), root, root)
+) -> Result<PersistentRadixMap<AccountReplica>, BatchError> {
+    accounts
+        .updated(account_id.as_bytes().to_vec(), replica, root)
         .map_err(|error: xln_rscore_protocol::PersistentRadixMapError| BatchError::AccountsTree {
             account_id,
             detail: error.to_string(),

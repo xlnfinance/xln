@@ -126,7 +126,7 @@ pub(super) fn edge_hash<V>(parent_path: &[u8], child: &NodeRef<V>) -> [u8; 32] {
     }
 }
 
-pub(super) fn put_node<V: PartialEq>(
+pub(super) fn put_node<V>(
     node: Option<&NodeRef<V>>,
     leaf: NodeRef<V>,
 ) -> Result<(NodeRef<V>, bool), PersistentRadixMapError> {
@@ -137,10 +137,9 @@ pub(super) fn put_node<V: PartialEq>(
         Node::Leaf {
             key,
             path,
-            value,
             value_digest,
             ..
-        } => put_against_leaf(node, leaf, key, path, value, value_digest),
+        } => put_against_leaf(node, leaf, key, path, value_digest),
         Node::Branch { path, children, .. } => {
             let leaf_path = node_path(&leaf);
             let shared = common_prefix(path, leaf_path);
@@ -174,18 +173,16 @@ pub(super) fn put_node<V: PartialEq>(
     }
 }
 
-fn put_against_leaf<V: PartialEq>(
+fn put_against_leaf<V>(
     node: &NodeRef<V>,
     leaf: NodeRef<V>,
     key: &[u8],
     path: &[u8],
-    value: &V,
     value_digest: &[u8; 32],
 ) -> Result<(NodeRef<V>, bool), PersistentRadixMapError> {
     let Node::Leaf {
         key: leaf_key,
         path: leaf_path,
-        value: leaf_value,
         value_digest: leaf_digest,
         ..
     } = &*leaf
@@ -193,7 +190,9 @@ fn put_against_leaf<V: PartialEq>(
         unreachable!()
     };
     if key == leaf_key {
-        return if value_digest == leaf_digest && value == leaf_value {
+        // The digest is the canonical identity of the value: equal digests
+        // mean canonically equal values, so the put is a no-op.
+        return if value_digest == leaf_digest {
             Ok((Arc::clone(node), false))
         } else {
             Ok((leaf, false))
