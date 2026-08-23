@@ -147,6 +147,16 @@ export const storeCounterpartyDisputeSeal = (
   account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
 };
 
+/**
+ * Dispute seals (a second ECDSA per Account frame plus a proof-body build and
+ * hash on both sides) can be switched off for load measurement with
+ * XLN_ACCOUNT_DISPUTE_SEALS=0. Production keeps them on: without a fresh seal
+ * the counterparty cannot exit on-chain with the latest state.
+ */
+const nodeProcessEnv: Record<string, string | undefined> | undefined =
+  typeof process === 'undefined' ? undefined : process.env;
+export const accountDisputeSealsEnabled = (): boolean => nodeProcessEnv?.['XLN_ACCOUNT_DISPUTE_SEALS'] !== '0';
+
 export const getDisputeSealRequirementError = (
   expectedProofBodyHash: string | undefined,
   previousCounterpartyProofBodyHash: string | undefined,
@@ -154,6 +164,7 @@ export const getDisputeSealRequirementError = (
   jNonce: number,
   seal: ValidatedCounterpartyDisputeSeal | undefined,
 ): string | undefined => {
+  if (!seal && !accountDisputeSealsEnabled()) return undefined;
   if (!expectedProofBodyHash) {
     return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
   }

@@ -74,6 +74,7 @@ import { accountInputAck, accountInputProposal, accountInputReferenceHeight } fr
 import { handleBoardReseal } from './incoming/board-reseal';
 import { handlePendingFrameAck } from './incoming/ack-commit';
 import {
+  accountDisputeSealsEnabled,
   getDisputeSealRequirementError,
   replaceLocalDisputeDraft,
   storeCounterpartyDisputeSeal,
@@ -103,6 +104,8 @@ import { countOp } from '../../support/performance/op-counters';
 export { proposeAccountFrame } from './proposal/propose';
 export type { HandleAccountInputResult } from './types';
 
+const DISPUTE_SEALS_DISABLED_PROOF = { proofBodyHash: `0x${'00'.repeat(32)}` } as const;
+
 const accountLog = createStructuredLogger('account');
 
 export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
@@ -117,7 +120,7 @@ type AccountSwapCancelRequest = { offerId: string; accountId: string };
 
 type IncomingFrameValidation = {
   clonedMachine: AccountReplica;
-  proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
+  proofResult: Pick<ReturnType<typeof buildAccountProofBodyFromJurisdictions>, 'proofBodyHash'>;
   candidateEffects: AccountOutput[];
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   processEvents: string[];
@@ -422,10 +425,12 @@ async function validateIncomingFrameOnDraft(
       events,
     );
     if (stateMismatch) return { kind: 'return', result: stateMismatch };
-    const proofResult = timePerfPhase(
-      'account.receive.proofBody',
-      () => buildAccountProofBodyFromJurisdictions(context, validatedMachine),
-    );
+    const proofResult = accountDisputeSealsEnabled()
+      ? timePerfPhase(
+          'account.receive.proofBody',
+          () => buildAccountProofBodyFromJurisdictions(context, validatedMachine),
+        )
+      : DISPUTE_SEALS_DISABLED_PROOF;
     const localProofBodyHash = proofResult.proofBodyHash;
     const frameSealError = getDisputeSealRequirementError(
       localProofBodyHash,
@@ -574,6 +579,7 @@ const selectAckDisputeSeal = (
     };
   }
   const reusable =
+    accountDisputeSealsEnabled() &&
     account.currentDisputeProofHanko &&
     account.currentDisputeHash &&
     account.currentDisputeProofBodyHash?.toLowerCase() === proofBodyHash.toLowerCase() &&
@@ -593,7 +599,7 @@ async function buildIncomingFrameAckMaterial(
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
-  ackProofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
+  ackProofResult: Pick<ReturnType<typeof buildAccountProofBodyFromJurisdictions>, 'proofBodyHash'>,
   events: string[],
 ): Promise<IncomingFrameAckMaterialResult> {
   const ackEntityId = account.proofHeader.fromEntity;
@@ -603,10 +609,10 @@ async function buildIncomingFrameAckMaterial(
   });
 
   const ackHankoDomain = getAccountStateDomain(account.state);
-  const proofChanged =
+  const proofChanged = accountDisputeSealsEnabled() && (
     ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
     account.currentDisputeProofProposerIsLeft !== receivedFrame.byLeft ||
-    Number(account.currentDisputeProofNonce ?? 0) <= Number(account.state.jNonce ?? 0);
+    Number(account.currentDisputeProofNonce ?? 0) <= Number(account.state.jNonce ?? 0));
   const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.state.jNonce ?? 0) + 1);
   const ackDisputeHash = proofChanged
     ? createDisputeProofHashWithNonce(

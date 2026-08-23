@@ -15,6 +15,7 @@ import type {
   ProposalTransactionEffects,
 } from './transactions';
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
+import { accountDisputeSealsEnabled } from '../dispute/seal';
 
 type DisputeSeal = NonNullable<
   Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeSeal']
@@ -34,6 +35,7 @@ const resolveDisputeSeal = (
     };
   }
   if (
+    accountDisputeSealsEnabled() &&
     hasLocalCertifiedDisputeProof(account) &&
     account.currentDisputeProofBodyHash.toLowerCase() ===
       proof.proof.proofBodyHash.toLowerCase() &&
