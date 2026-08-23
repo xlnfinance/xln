@@ -72,6 +72,8 @@ export type ApplyEntityInputContext = {
   usePersistedReplayContext: boolean;
   canonicalAppliedInput?: EntityInput;
   entityContext?: EntityInfraContext;
+  /** Pool Hanko recovery for the proposal candidates, started at proposal start. */
+  hankoPriming?: Promise<number> | null;
 };
 
 export const commitEntityConsensusInput = (

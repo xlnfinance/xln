@@ -18,6 +18,10 @@ import {
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
+import { preparedCommitKey, takePreparedProposalCommit } from '../proposal/prepared-commit';
+import { publishAccountOverlay } from '../../state/candidate-overlay';
+import { assertLiveCommitMatchesFrame } from './commit-root';
+import { countOp } from '../../../support/performance/op-counters';
 import { timePerfPhase } from '../../../support/performance/profile';
 
 const ackLog = createStructuredLogger('account.ack');
@@ -142,6 +146,22 @@ const applyPendingFrameTransactions = async (
   timedOutHashlocks: string[],
   candidateEffects: AccountOutput[],
 ): Promise<void> => {
+  const prepared = takePreparedProposalCommit(preparedCommitKey(account, pendingFrame.stateHash), account.state);
+  if (prepared) {
+    publishAccountOverlay(account, prepared.candidate);
+    assertLiveCommitMatchesFrame(
+      account,
+      pendingFrame.accountStateRoot,
+      'proposer',
+      pendingFrame.height,
+      prepared.candidate,
+      prepared.accountStateRoot,
+    );
+    candidateEffects.push(...prepared.candidateEffects);
+    timedOutHashlocks.push(...prepared.timedOutHashlocks);
+    countOp('account.ack.preparedCommit');
+    return;
+  }
   const committed = await commitAccountFrameTransition({
     context,
     account,

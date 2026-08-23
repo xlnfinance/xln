@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
-import type { AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountOutput, AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountDraftReplica } from '../../state/account-state-draft';
 import type { AccountConsensusContext } from '../context';
 import {
@@ -37,6 +37,9 @@ export type ProposalTransactionEffects = {
   swapCancelRequests: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled: Array<{ offerId: string; accountId: string }>;
   failedHtlcLocks: AccountFailedHtlcLock[];
+  /** Commit-time effects of the validated txs, kept for the prepared ACK commit. */
+  candidateEffects: AccountOutput[];
+  timedOutHashlocks: string[];
 };
 
 export type ValidatedProposalTransactions = ProposalTransactionEffects & {
@@ -70,6 +73,8 @@ const createTransactionEffects = (): ProposalTransactionEffects => ({
   swapCancelRequests: [],
   swapOffersCancelled: [],
   failedHtlcLocks: [],
+  candidateEffects: [],
+  timedOutHashlocks: [],
 });
 
 /**
@@ -154,6 +159,7 @@ const collectSuccessfulTransaction = (
   validTxs.push(preparedTx);
   validMempoolTxs.push(tx);
   effects.events.push(...result.events);
+  effects.candidateEffects.push(...(result.candidateEffects ?? []));
   if (HEAVY_LOGS) {
     accountLog.debug('tx.result', {
       type: tx.type,
@@ -167,6 +173,7 @@ const collectSuccessfulTransaction = (
       effects.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
       return;
     case 'htlc_error':
+      effects.timedOutHashlocks.push(result.hashlock);
       return;
     case 'swap_offer_created':
       effects.swapOffersCreated.push(result.swapOfferCreated);

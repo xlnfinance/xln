@@ -43,6 +43,11 @@ export class RecencyMemo<K, V> {
     this.#fresh.set(key, value);
   }
 
+  delete(key: K): void {
+    this.#fresh.delete(key);
+    this.#stale.delete(key);
+  }
+
   get size(): number {
     return this.#fresh.size + this.#stale.size;
   }

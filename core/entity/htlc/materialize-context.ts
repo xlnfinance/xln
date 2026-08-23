@@ -309,7 +309,39 @@ const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcE
  * in parallel and warms the layer memo, so the synchronous walk below only
  * unwraps plaintext. Failures are left to the synchronous path to classify.
  */
-const primeInboundLayerDecryption = async (input: MaterializeHtlcPreparedContextInput): Promise<void> => {
+type LayerPrimingInput = Pick<MaterializeHtlcPreparedContextInput, 'state' | 'proposalTxs' | 'entityEncryptionPublicKey' | 'entityEncryptionPrivateKey'>;
+
+// Priming started at proposal start overlaps selection and fit; materialize
+// awaits it and then primes only what that pass did not cover.
+let inflightLayerPriming: { txs: readonly EntityTx[]; done: Promise<void> } | null = null;
+
+/** Fire-and-forget: decrypt this proposal's inbound layers on the pool while the main thread selects/fits. */
+export const startInboundLayerPriming = (input: LayerPrimingInput): void => {
+  if (!cryptoPoolEnabled()) return;
+  const effective = { ...input, proposalTxs: getEffectiveHtlcFrameTxs(input.state, input.proposalTxs) };
+  const done = primeInboundLayerDecryption(effective).catch(() => undefined);
+  const entry = { txs: effective.proposalTxs, done };
+  inflightLayerPriming = entry;
+  void done.finally(() => {
+    if (inflightLayerPriming === entry) inflightLayerPriming = null;
+  });
+};
+
+/**
+ * Ingress priming: inputs arrive while the main thread is still applying the
+ * previous frame, so pool decryption started here overlaps real work. Results
+ * only warm the layer memo; nothing is awaited.
+ */
+export const primeInboundLayersAtIngress = (input: LayerPrimingInput): void => {
+  if (!cryptoPoolEnabled()) return;
+  void primeInboundLayerDecryption({ ...input, proposalTxs: getEffectiveHtlcFrameTxs(input.state, input.proposalTxs) })
+    .catch(() => undefined);
+};
+
+const isPrefixOf = (prefix: readonly EntityTx[], whole: readonly EntityTx[]): boolean =>
+  prefix.length <= whole.length && prefix.every((tx, index) => whole[index] === tx);
+
+const primeInboundLayerDecryption = async (input: LayerPrimingInput): Promise<void> => {
   if (!cryptoPoolEnabled()) return;
   const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const items: OnionJobItem[] = [];
@@ -361,7 +393,12 @@ export const materializeHtlcPreparedInfraContext = async (
   // Validate once, outside the attacker-controlled envelope loop, and fail loud.
   assertEntityEncryptionKeypair(input.entityEncryptionPublicKey, input.entityEncryptionPrivateKey);
   const effectiveInput = { ...input, proposalTxs: getEffectiveHtlcFrameTxs(input.state, input.proposalTxs) };
-  await primeInboundLayerDecryption(effectiveInput);
+  const inflight = inflightLayerPriming;
+  if (inflight) await inflight.done;
+  // A fitted prefix of the candidate set is already covered by that pass.
+  if (!inflight || !isPrefixOf(effectiveInput.proposalTxs, inflight.txs)) {
+    await primeInboundLayerDecryption(effectiveInput);
+  }
   const entries = canonicalizeInboundEntries(collectInboundEntries(effectiveInput));
   const originated = await materializeOriginatedHtlcPayments({
     state: effectiveInput.state,

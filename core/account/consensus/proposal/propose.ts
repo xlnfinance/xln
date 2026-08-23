@@ -3,6 +3,8 @@
  * frame construction, and the hash manifest that Entity consensus certifies.
  */
 
+import { peekAccountStateRoot } from '../../commitment/state-root';
+import { preparedCommitCoversTxs, preparedCommitKey, rememberPreparedProposalCommit } from './prepared-commit';
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
@@ -159,6 +161,16 @@ export async function proposeAccountFrame(
   );
   if (!frameBuild.ok) return frameBuild.result;
   const { frame: newFrame } = frameBuild;
+  const baseRoot = preparedCommitCoversTxs(newFrame.accountTxs) ? peekAccountStateRoot(account.state) : undefined;
+  if (baseRoot !== undefined) {
+    rememberPreparedProposalCommit(preparedCommitKey(account, newFrame.stateHash), {
+      baseRoot,
+      candidate: clonedMachine,
+      accountStateRoot: newFrame.accountStateRoot,
+      candidateEffects: validation.candidateEffects,
+      timedOutHashlocks: validation.timedOutHashlocks,
+    });
+  }
 
   const proof = await prepareProposalProof(
     context,

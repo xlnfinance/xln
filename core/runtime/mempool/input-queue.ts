@@ -3,6 +3,7 @@
  * Key entrypoints: enqueue and drain validated work for the single-writer loop.
  * Human-audit importance: 96/100 — queue drift changes replayed transaction order.
  */
+import { primeEntityInputsAtIngress } from '../admit/ingress-priming';
 import { LIMITS, TIMING } from '../../config/constants';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../types';
@@ -124,6 +125,7 @@ export const enqueueRuntimeInputsWithDeps = (
   }
   if (inputs && inputs.length > 0) {
     mempool.entityInputs.push(...inputs);
+    primeEntityInputsAtIngress(env, inputs);
   }
   if (jInputs && jInputs.length > 0) {
     mempool.jInputs = [...(mempool.jInputs ?? []), ...jInputs];

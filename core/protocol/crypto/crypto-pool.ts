@@ -129,65 +129,89 @@ if (scope && process.env['XLN_CRYPTO_POOL_WORKER'] === '1') {
   });
 }
 
-let pool: Worker[] | null | undefined;
 let nextJobId = 0;
-let nextSlot = 0;
 const pending = new Map<number, (result: JobResult['result']) => void>();
 
-const poolSize = (): number => {
-  const raw = process.env['XLN_CRYPTO_POOL_WORKERS'];
+const configuredSize = (name: string, fallback: number): number => {
+  const raw = process.env[name];
   const configured = raw === undefined || raw === '' ? NaN : Number(raw);
   if (Number.isSafeInteger(configured) && configured >= 0) return configured;
-  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 0;
-  return Math.max(0, Math.min(8, (cores || 2) - 2));
+  return fallback;
 };
 
-/** A dead worker fails every in-flight job closed: callers fall back to the sync path. */
-const retirePool = (): void => {
-  for (const worker of pool ?? []) worker.terminate();
-  pool = null;
-  const failed = [...pending.values()];
-  pending.clear();
-  for (const resolve of failed) resolve(new Uint8Array(0));
-};
+const cores = (): number => (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 0) || 2;
 
-const getPool = (): Worker[] | null => {
-  if (pool !== undefined) return pool;
-  const size = poolSize();
-  if (size === 0 || bunRuntime()?.isMainThread !== true || typeof Worker === 'undefined') {
-    pool = null;
-    return pool;
+/**
+ * Two lanes of workers: bulk memo priming (recover, onion) streams in from
+ * ingress all frame long, while manifest signing sits on the proposal's
+ * critical path and must not queue behind it.
+ */
+class WorkerLane {
+  #workers: Worker[] | null | undefined;
+  #nextSlot = 0;
+  readonly #size: () => number;
+
+  constructor(size: () => number) {
+    this.#size = size;
   }
-  pool = Array.from({ length: size }, () => {
-    const worker = new Worker(new URL(import.meta.url), {
-      env: { ...process.env, XLN_CRYPTO_POOL_WORKER: '1' },
-    } as WorkerOptions);
-    worker.onmessage = event => {
-      const { id, result } = event.data as JobResult;
-      const resolve = pending.get(id);
-      if (!resolve) return;
-      pending.delete(id);
-      resolve(result);
-    };
-    worker.onerror = retirePool;
-    worker.addEventListener('close', retirePool);
-    const unref = Reflect.get(worker, 'unref');
-    if (typeof unref === 'function') Reflect.apply(unref, worker, []);
-    return worker;
-  });
-  return pool;
-};
+
+  /** A dead worker fails every in-flight job closed: callers fall back to the sync path. */
+  #retire(): void {
+    for (const worker of this.#workers ?? []) worker.terminate();
+    this.#workers = null;
+    const failed = [...pending.values()];
+    pending.clear();
+    for (const resolve of failed) resolve(new Uint8Array(0));
+  }
+
+  workers(): Worker[] | null {
+    if (this.#workers !== undefined) return this.#workers;
+    const size = this.#size();
+    if (size === 0 || bunRuntime()?.isMainThread !== true || typeof Worker === 'undefined') {
+      this.#workers = null;
+      return null;
+    }
+    this.#workers = Array.from({ length: size }, () => {
+      const worker = new Worker(new URL(import.meta.url), {
+        env: { ...process.env, XLN_CRYPTO_POOL_WORKER: '1' },
+      } as WorkerOptions);
+      worker.onmessage = event => {
+        const { id, result } = event.data as JobResult;
+        const resolve = pending.get(id);
+        if (!resolve) return;
+        pending.delete(id);
+        resolve(result);
+      };
+      worker.onerror = () => this.#retire();
+      worker.addEventListener('close', () => this.#retire());
+      const unref = Reflect.get(worker, 'unref');
+      if (typeof unref === 'function') Reflect.apply(unref, worker, []);
+      return worker;
+    });
+    return this.#workers;
+  }
+
+  submit(job: Job, transfer?: Transferable[]): Promise<JobResult['result']> {
+    const workers = this.workers();
+    if (!workers) return Promise.resolve(new Uint8Array(0));
+    return new Promise(resolve => {
+      const worker = workers[this.#nextSlot % workers.length];
+      this.#nextSlot += 1;
+      if (!worker) throw new Error('CRYPTO_POOL_WORKER_SLOT_MISSING');
+      pending.set(job.id, resolve);
+      worker.postMessage(job, transfer ?? []);
+    });
+  }
+}
+
+const bulkLane = new WorkerLane(() =>
+  configuredSize('XLN_CRYPTO_POOL_WORKERS', Math.max(0, Math.min(8, cores() - 2))));
+const signLane = new WorkerLane(() =>
+  configuredSize('XLN_CRYPTO_SIGN_WORKERS', Math.max(0, Math.min(2, cores() - 2))));
+
+const getPool = (): Worker[] | null => bulkLane.workers();
 
 export const cryptoPoolEnabled = (): boolean => getPool() !== null;
-
-const submit = (workers: Worker[], job: Job, transfer?: Transferable[]): Promise<JobResult['result']> =>
-  new Promise(resolve => {
-    const worker = workers[nextSlot % workers.length];
-    nextSlot += 1;
-    if (!worker) throw new Error('CRYPTO_POOL_WORKER_SLOT_MISSING');
-    pending.set(job.id, resolve);
-    worker.postMessage(job, transfer ?? []);
-  });
 
 const isBytes = (value: JobResult['result']): value is Uint8Array => value instanceof Uint8Array;
 
@@ -207,7 +231,7 @@ export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8A
     // Own buffer per job so the transfer list detaches only this slice.
     const slice = records.slice(start * ECDSA_RECOVER_RECORD_BYTES, end * ECDSA_RECOVER_RECORD_BYTES);
     const id = nextJobId += 1;
-    parts.push(submit(workers, { id, kind: 'recover', records: slice }, [slice.buffer as ArrayBuffer])
+    parts.push(bulkLane.submit({ id, kind: 'recover', records: slice }, [slice.buffer as ArrayBuffer])
       .then(result => ({ offset: start, result })));
   }
   const out = new Uint8Array(count * ECDSA_RECOVER_RESULT_BYTES);
@@ -220,7 +244,7 @@ export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8A
 
 /** Sign N digests with one key; 65-byte recoverable signatures in input order, or null. */
 export const signDigestsBatch = async (privateKey: Uint8Array, digests: Uint8Array): Promise<Uint8Array | null> => {
-  const workers = getPool();
+  const workers = signLane.workers() ?? getPool();
   if (!workers) return null;
   const count = Math.floor(digests.length / 32);
   if (count === 0) return new Uint8Array(0);
@@ -230,7 +254,7 @@ export const signDigestsBatch = async (privateKey: Uint8Array, digests: Uint8Arr
     const end = Math.min(count, start + perWorker);
     const slice = digests.slice(start * 32, end * 32);
     const id = nextJobId += 1;
-    parts.push(submit(workers, { id, kind: 'sign', privateKey: privateKey.slice(), digests: slice }, [slice.buffer as ArrayBuffer])
+    parts.push((signLane.workers() ? signLane : bulkLane).submit({ id, kind: 'sign', privateKey: privateKey.slice(), digests: slice }, [slice.buffer as ArrayBuffer])
       .then(result => ({ offset: start, result })));
   }
   const out = new Uint8Array(count * ECDSA_SIGNATURE_BYTES);
@@ -249,7 +273,7 @@ export const decryptOnionLayersBatch = async (items: readonly OnionJobItem[]): P
   const parts: Promise<{ offset: number; result: JobResult['result'] }>[] = [];
   for (let start = 0; start < items.length; start += perWorker) {
     const id = nextJobId += 1;
-    parts.push(submit(workers, { id, kind: 'onion', items: items.slice(start, start + perWorker) })
+    parts.push(bulkLane.submit({ id, kind: 'onion', items: items.slice(start, start + perWorker) })
       .then(result => ({ offset: start, result })));
   }
   const out: OnionJobResult[] = new Array(items.length);

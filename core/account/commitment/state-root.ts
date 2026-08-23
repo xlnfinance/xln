@@ -387,6 +387,16 @@ export const transferAccountStateRootMemo = (
   });
 };
 
+/** Memoized root only: undefined when the state has changed since it was last hashed. */
+export const peekAccountStateRoot = (account: AccountState): string | undefined => {
+  const memo = readAccountStateRootMemo(account);
+  if (!memo) return undefined;
+  return sameCollections(memo.collections, accountRootCollectionIdentities(account))
+    && sameScalarIdentities(memo.scalars, account)
+    ? memo.root
+    : undefined;
+};
+
 export const computeAccountStateRoot = (
   account: AccountState,
   timing?: AccountStateRootTiming,

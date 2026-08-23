@@ -179,6 +179,7 @@ import {
   prepareRuntimeOutputPayloadRows,
 } from './wal/outbox-payload';
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
+import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
 export { resolveStorageRuntimeConfig } from './database/config';
 export {
@@ -1181,6 +1182,9 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   ) as RuntimeInput;
   const planningMs = options.getPerfMs() - planningStartedAt;
   const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
+  if (OP_COUNTERS_ENABLED) {
+    for (const [stage, ms] of Object.entries(planningStages)) countOp(`storage.planning.${stage}`, 0, Math.round(ms * 1_000));
+  }
   return {
     config,
     state,
@@ -1628,6 +1632,8 @@ const buildStorageRuntimeFrame = (
   };
 };
 
+const WAL_SYNC_ENABLED = process.env['XLN_STORAGE_WAL_SYNC'] !== '0';
+
 const buildStorageFrameRecordPlan = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
@@ -1943,10 +1949,15 @@ const commitStorageFrame = async (
   const prepareStartedAt = options.getPerfMs();
   const prepareMs = prepareStartedAt - writeStartedAt;
   const prepareStages = cumulativeMarksToDurations(prepareMarks, prepareMs);
+  if (OP_COUNTERS_ENABLED) {
+    for (const [stage, ms] of Object.entries(prepareStages)) countOp(`storage.prepare.${stage}`, 0, Math.round(ms * 1_000));
+  }
   options.onPersistenceProgress?.('authoritative-write-start');
   // This synced WAL batch is the only frame commit point. Everything before it
   // is discardable planning; everything after it must recover forward.
-  await writeBatch(batches.walBatch, { sync: true });
+  // Load-test user Runtimes may trade durability for I/O (XLN_STORAGE_WAL_SYNC=0);
+  // a Hub keeps the fsync.
+  await writeBatch(batches.walBatch, { sync: WAL_SYNC_ENABLED });
   const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');

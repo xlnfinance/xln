@@ -4,6 +4,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 import { MAX_HTLC_BINARY_LAYER_BYTES } from './codec/binary';
+import { RecencyMemo } from '../../support/recency-memo';
+import { countOp } from '../../support/performance/op-counters';
 
 export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:v1' as const;
 export type OpaqueHtlcCiphertext = Readonly<{
@@ -172,8 +174,9 @@ export const encryptOpaqueHtlcBytes = (
  * implied by the public key inside one process, so the key never enters the
  * memo key. Bounded to recent layers.
  */
-const decryptedLayerMemo = new Map<string, Uint8Array>();
-const DECRYPTED_LAYER_MEMO_MAX = 4096;
+// Generation ≈ a few Hub frames of inbound layers; a flat map that cleared at
+// a fixed size dropped the layers the pool had just primed for this frame.
+const decryptedLayerMemo = new RecencyMemo<string, Uint8Array>(16_384);
 
 const decryptedLayerMemoKey = (ciphertext: OpaqueHtlcCiphertext, entityPublicKey: string, contextHash: string): string =>
   `${ciphertext.ciphertext}|${entityPublicKey}|${contextHash}`;
@@ -185,7 +188,6 @@ export const primeDecryptedOpaqueHtlcLayer = (
   contextHash: string,
   plaintext: Uint8Array,
 ): void => {
-  if (decryptedLayerMemo.size >= DECRYPTED_LAYER_MEMO_MAX) decryptedLayerMemo.clear();
   decryptedLayerMemo.set(decryptedLayerMemoKey(ciphertext, entityPublicKey, contextHash), plaintext.slice());
 };
 
@@ -204,11 +206,12 @@ export const decryptOpaqueHtlcBytes = (
   const memoKey = decryptedLayerMemoKey(ciphertext, entityPublicKey, contextHash);
   const memoized = decryptedLayerMemo.get(memoKey);
   if (memoized !== undefined) {
+    countOp('htlc.layer.memoHit');
     assertEntityEncryptionKeypair(entityPublicKey, entityPrivateKey);
     return memoized.slice();
   }
+  countOp('htlc.layer.memoMiss');
   const plaintext = decryptOpaqueHtlcBytesUncached(ciphertext, entityPublicKey, entityPrivateKey, contextHash);
-  if (decryptedLayerMemo.size >= DECRYPTED_LAYER_MEMO_MAX) decryptedLayerMemo.clear();
   decryptedLayerMemo.set(memoKey, plaintext.slice());
   return plaintext;
 };

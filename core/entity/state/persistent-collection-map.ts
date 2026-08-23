@@ -148,6 +148,9 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
   readonly #forkValue: (value: Value) => Value;
   readonly #changes = new Map<string, Value>();
   readonly #deleted = new Set<string>();
+  // Base membership per key is immutable for the candidate's lifetime; a
+  // cancel-then-delete-then-size sequence asked the Patricia root three times.
+  readonly #baseHas = new Map<string, boolean>();
   #projection: PersistentEntityCollectionMap<Value> | undefined;
   #cleared = false;
   #sealed = false;
@@ -157,10 +160,18 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
     this.#forkValue = forkValue;
   }
 
+  #inBase(key: string): boolean {
+    const memo = this.#baseHas.get(key);
+    if (memo !== undefined) return memo;
+    const present = this.#base.has(key);
+    this.#baseHas.set(key, present);
+    return present;
+  }
+
   get size(): number {
     if (this.#cleared) return this.#changes.size;
     let size = this.#base.size - this.#deleted.size;
-    for (const key of this.#changes.keys()) if (!this.#base.has(key)) size += 1;
+    for (const key of this.#changes.keys()) if (!this.#inBase(key)) size += 1;
     return size;
   }
 
@@ -196,7 +207,7 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
 
   has(key: string): boolean {
     return !this.#deleted.has(key) && (
-      this.#changes.has(key) || (!this.#cleared && this.#base.has(key))
+      this.#changes.has(key) || (!this.#cleared && this.#inBase(key))
     );
   }
 
@@ -225,7 +236,7 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
     this.#requireActive();
     const existed = this.has(key);
     this.#changes.delete(key);
-    if (!this.#cleared && this.#base.has(key)) this.#deleted.add(key);
+    if (!this.#cleared && this.#inBase(key)) this.#deleted.add(key);
     this.#projection = undefined;
     return existed;
   }

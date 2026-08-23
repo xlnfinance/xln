@@ -51,7 +51,7 @@ import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
 import { countOp } from '../../../support/performance/op-counters';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
-import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
+import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 import {
@@ -359,9 +359,9 @@ const fitAndApplyEntityProposal = async (
   });
   if (fitted.txs.length !== selection.proposalTxs.length) selection.proposalTxs = fitted.txs;
   profile.checkpoint('wireFit');
-  // Only the fitted prefix is applied; recover its Hanko signatures on the
-  // worker pool before the synchronous verifiers need them.
-  await primeProposalHankos(selection.proposalTxs);
+  // Hanko recovery for the candidate set started at proposal start; the
+  // synchronous verifiers below hit the memo once it lands.
+  await (context.hankoPriming ?? primeProposalHankos(selection.proposalTxs));
   const applyFrame = context.promoteCandidateState && selection.isSingleSigner
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;
@@ -603,6 +603,15 @@ export const startEntityProposalIfReady = async (
     txs: selection.proposalTxs.map(tx => tx.type),
   });
   const priorState = workingReplica.state;
+  // Pool work for the whole candidate set starts now and overlaps selection,
+  // fitting and context materialization on the main thread.
+  startInboundLayerPriming({
+    state: workingReplica.state,
+    proposalTxs: selection.proposalTxs,
+    entityEncryptionPublicKey: workingReplica.state.entityEncryptionPublicKey,
+    entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(context.env, workingReplica.entityId),
+  });
+  context.hankoPriming = primeProposalHankos(selection.proposalTxs);
   const sealed = await buildEntityProposalEvictingRejected(context, selection, profile);
   if (!sealed) return null;
   const { frame } = sealed;
