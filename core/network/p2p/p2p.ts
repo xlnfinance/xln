@@ -16,6 +16,8 @@ import { RuntimeWsClient } from './ws-client';
 import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-protocol';
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
+import type { EntityState } from '../../entity/types';
+import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import {
   computeProfileHash,
   signProfileRuntimeRoute,
@@ -331,6 +333,13 @@ const GOSSIP_ROUTE_FETCH_RETRY_DELAYS_MS = [60, 120, 240];
 const PROFILE_PREFETCH_COALESCE_MS = 10;
 
 /** Everything a peer needs from a non-hub profile except live capacities. */
+type AnnounceStateTopology = Readonly<{
+  accountsKey: string;
+  profile: EntityState['profile'];
+  config: EntityState['config'];
+  hubConfig: EntityState['hubRebalanceConfig'];
+}>;
+
 const profileTopologyKey = (profile: Profile): string => safeStringify([
   profile.entityId,
   profile.entityEncryptionPublicKey,
@@ -360,7 +369,11 @@ export class RuntimeP2P {
   private gossipPollMs: number;
   private gossipSet: P2PGossipSet;
   private profileHeartbeatMs: number;
-  private lastAnnouncedProfiles = new Map<string, { topologyKey: string; at: number }>();
+  private lastAnnouncedProfiles = new Map<string, {
+    topologyKey: string;
+    stateTopology: AnnounceStateTopology | undefined;
+    at: number;
+  }>();
   private onEntityInputs: (
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -1444,8 +1457,43 @@ export class RuntimeP2P {
   private rememberAnnouncedProfile(profile: Profile): void {
     this.lastAnnouncedProfiles.set(normalizeId(profile.entityId), {
       topologyKey: profileTopologyKey(profile),
+      stateTopology: this.announceStateTopology(profile.entityId),
       at: Date.now(),
     });
+  }
+
+  /**
+   * Cheap pre-check from the replica State itself: a profile whose routing
+   * topology cannot have changed since the last announcement, inside the
+   * heartbeat window, is not even built. Building and re-certifying the
+   * profile on every debounce tick was most of a user Runtime's frame cost.
+   */
+  private announceStateTopology(entityId: string): AnnounceStateTopology | undefined {
+    const replica = getEntityReplicaById(this.env, entityId);
+    if (!replica) return undefined;
+    const state = replica.state;
+    const accounts: string[] = [];
+    for (const [counterpartyId, account] of state.accounts) {
+      accounts.push(`${counterpartyId}:${account.state.deltas.size}`);
+    }
+    return {
+      accountsKey: `${state.entityEncryptionPublicKey}|${accounts.sort(compareStableText).join(',')}`,
+      profile: state.profile,
+      config: state.config,
+      hubConfig: state.hubRebalanceConfig,
+    };
+  }
+
+  private announceTopologyUnchanged(entityId: string): boolean {
+    const previous = this.lastAnnouncedProfiles.get(normalizeId(entityId))?.stateTopology;
+    if (!previous) return false;
+    const current = this.announceStateTopology(entityId);
+    if (!current) return false;
+    return previous.accountsKey === current.accountsKey
+      && previous.profile === current.profile
+      && previous.config === current.config
+      && previous.hubConfig === current.hubConfig
+      && Date.now() - (this.lastAnnouncedProfiles.get(normalizeId(entityId))?.at ?? 0) < this.profileHeartbeatMs;
   }
 
   /**
@@ -1463,7 +1511,9 @@ export class RuntimeP2P {
 
   private async announceProfilesNow(entityIds: string[], reason: string) {
     if (this.closing || this.closed || this.backgroundIoPaused) return;
-    const builtProfiles = await this.getLocalProfilesForEntities(entityIds);
+    const candidates = entityIds.filter(entityId => !this.announceTopologyUnchanged(entityId));
+    if (candidates.length === 0) return;
+    const builtProfiles = await this.getLocalProfilesForEntities(candidates);
     if (this.closing || this.closed) return;
     // The freshest certified profile always lands in the local cache (local
     // routing/UI see live capacities); only the network announce is gated.

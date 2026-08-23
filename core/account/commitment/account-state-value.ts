@@ -38,14 +38,15 @@ const rlpLengthBytes = (length: number): Uint8Array => {
     throw new Error(`ACCOUNT_STATE_RLP_LENGTH_INVALID:${String(length)}`);
   }
   if (length === 0) return Uint8Array.of(0);
-  const bytes: number[] = [];
+  let count = 0;
+  for (let remaining = length; remaining > 0; remaining = Math.floor(remaining / 256)) count += 1;
+  const bytes = new Uint8Array(count);
   let remaining = length;
-  while (remaining > 0) {
-    bytes.push(remaining & 0xff);
+  for (let index = count - 1; index >= 0; index -= 1) {
+    bytes[index] = remaining & 0xff;
     remaining = Math.floor(remaining / 256);
   }
-  bytes.reverse();
-  return Uint8Array.from(bytes);
+  return bytes;
 };
 
 const concatBytes = (parts: readonly Uint8Array[], totalLength: number): Uint8Array => {
@@ -112,13 +113,18 @@ const encodeText = (value: string): Uint8Array => {
   return encoded;
 };
 
+const HEX_NIBBLE = new Int8Array(128).fill(-1);
+for (let index = 0; index < 16; index += 1) HEX_NIBBLE['0123456789abcdef'.charCodeAt(index)] = index;
+
 const bigintMagnitudeBytes = (magnitude: bigint): Uint8Array => {
   if (magnitude === 0n) return Uint8Array.of(0);
   const hex = magnitude.toString(16);
-  const padded = hex.length % 2 ? `0${hex}` : hex;
-  const bytes = new Uint8Array(padded.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(padded.slice(index * 2, index * 2 + 2), 16);
+  const odd = hex.length & 1;
+  const bytes = new Uint8Array((hex.length + odd) >> 1);
+  let out = 0;
+  if (odd) bytes[out++] = HEX_NIBBLE[hex.charCodeAt(0)]!;
+  for (let index = odd; index < hex.length; index += 2) {
+    bytes[out++] = (HEX_NIBBLE[hex.charCodeAt(index)]! << 4) | HEX_NIBBLE[hex.charCodeAt(index + 1)]!;
   }
   return bytes;
 };
@@ -208,5 +214,174 @@ const encodeAccountStateValueDirect = (value: unknown): Uint8Array => {
 export const encodeAccountStateValueOracle = (value: unknown): Uint8Array =>
   encodeRlpNode(canonicalRlpNode(value));
 
-export const encodeAccountStateValue = (value: unknown): Uint8Array =>
+/**
+ * Single-pass writer: children are appended first, then the list header is
+ * inserted with one copyWithin. Byte-identical to the node encoder above,
+ * without an allocation per scalar, per list and per concatenation.
+ */
+class RlpWriter {
+  buf = new Uint8Array(4_096);
+  len = 0;
+
+  ensure(extra: number): void {
+    const needed = this.len + extra;
+    if (needed <= this.buf.byteLength) return;
+    let size = this.buf.byteLength * 2;
+    while (size < needed) size *= 2;
+    const next = new Uint8Array(size);
+    next.set(this.buf.subarray(0, this.len));
+    this.buf = next;
+  }
+
+  byte(value: number): void {
+    this.ensure(1);
+    this.buf[this.len] = value;
+    this.len += 1;
+  }
+
+  bytes(value: Uint8Array): void {
+    const length = value.byteLength;
+    this.ensure(length);
+    const buf = this.buf;
+    let offset = this.len;
+    // TypedArray.set has a fixed call cost that dominates for the short
+    // tags, keys and scalars that make up almost every item.
+    if (length <= 64) {
+      for (let index = 0; index < length; index += 1) buf[offset++] = value[index]!;
+    } else {
+      buf.set(value, offset);
+      offset += length;
+    }
+    this.len = offset;
+  }
+
+  /** RLP string item. */
+  payload(value: Uint8Array): void {
+    if (value.byteLength === 1 && value[0]! < 0x80) { this.byte(value[0]!); return; }
+    this.header(0x80, 0xb7, value.byteLength);
+    this.bytes(value);
+  }
+
+  header(shortBase: number, longBase: number, payloadLength: number): void {
+    if (payloadLength <= 55) { this.byte(shortBase + payloadLength); return; }
+    const lengthBytes = rlpLengthBytes(payloadLength);
+    this.byte(longBase + lengthBytes.byteLength);
+    this.bytes(lengthBytes);
+  }
+
+  /**
+   * RLP list item: one header byte is reserved before the body; only a body
+   * longer than 55 bytes (rare: whole maps) shifts to make room for a length.
+   */
+  list(body: () => void): void {
+    this.ensure(1);
+    const start = this.len;
+    this.len += 1;
+    body();
+    const payloadLength = this.len - start - 1;
+    if (payloadLength <= 55) {
+      this.buf[start] = 0xc0 + payloadLength;
+      return;
+    }
+    const lengthBytes = rlpLengthBytes(payloadLength);
+    const extra = lengthBytes.byteLength;
+    this.ensure(extra);
+    this.buf.copyWithin(start + 1 + extra, start + 1, this.len);
+    this.buf[start] = 0xf7 + extra;
+    for (let index = 0; index < extra; index += 1) this.buf[start + 1 + index] = lengthBytes[index]!;
+    this.len += extra;
+  }
+
+  take(): Uint8Array {
+    return this.buf.slice(0, this.len);
+  }
+}
+
+const TYPE_TAGS = {
+  null: encodeText('null'), bool: encodeText('bool'), number: encodeText('number'),
+  bigint: encodeText('bigint'), string: encodeText('string'), array: encodeText('array'),
+  map: encodeText('map'), set: encodeText('set'), object: encodeText('object'),
+} as const;
+const RLP_BYTE_0 = Uint8Array.of(0);
+const RLP_BYTE_1 = Uint8Array.of(1);
+
+// Writers are reused: Map keys and Set members encode on a nested writer.
+const writerPool: RlpWriter[] = [];
+const encodeStandalone = (value: unknown): Uint8Array => {
+  const writer = writerPool.pop() ?? new RlpWriter();
+  writer.len = 0;
+  try {
+    writeAccountStateValue(writer, value);
+    return writer.take();
+  } finally {
+    writerPool.push(writer);
+  }
+};
+
+const writeAccountStateValue = (w: RlpWriter, value: unknown): void => {
+  if (value === null) { w.list(() => w.bytes(TYPE_TAGS.null)); return; }
+  switch (typeof value) {
+    case 'boolean':
+      w.list(() => { w.bytes(TYPE_TAGS.bool); w.payload(value ? RLP_BYTE_1 : RLP_BYTE_0); });
+      return;
+    case 'number':
+      if (!Number.isFinite(value)) throw new Error(`ACCOUNT_STATE_RLP_NON_FINITE_NUMBER:${String(value)}`);
+      w.list(() => { w.bytes(TYPE_TAGS.number); w.bytes(encodeText(String(value))); });
+      return;
+    case 'bigint':
+      w.list(() => {
+        w.bytes(TYPE_TAGS.bigint);
+        w.payload(value < 0n ? RLP_BYTE_1 : RLP_BYTE_0);
+        w.payload(bigintMagnitudeBytes(value < 0n ? -value : value));
+      });
+      return;
+    case 'string':
+      w.list(() => { w.bytes(TYPE_TAGS.string); w.bytes(encodeText(value)); });
+      return;
+    case 'object':
+      break;
+    default:
+      throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
+  }
+  if (Array.isArray(value)) {
+    w.list(() => {
+      w.bytes(TYPE_TAGS.array);
+      for (const entry of value) writeAccountStateValue(w, entry);
+    });
+    return;
+  }
+  if (value instanceof Map) {
+    const entries = Array.from(value.entries(), ([key, entry]) => ({ encodedKey: encodeStandalone(key), entry }))
+      .sort((left, right) => compareBytes(left.encodedKey, right.encodedKey));
+    w.list(() => {
+      w.bytes(TYPE_TAGS.map);
+      for (const { encodedKey, entry } of entries) {
+        w.list(() => { w.bytes(encodedKey); writeAccountStateValue(w, entry); });
+      }
+    });
+    return;
+  }
+  if (value instanceof Set) {
+    const entries = Array.from(value.values(), encodeStandalone).sort(compareBytes);
+    w.list(() => {
+      w.bytes(TYPE_TAGS.set);
+      for (const entry of entries) w.bytes(entry);
+    });
+    return;
+  }
+  const keys = Object.keys(value as Record<string, unknown>).sort(compareStableText);
+  w.list(() => {
+    w.bytes(TYPE_TAGS.object);
+    for (const key of keys) {
+      const entry = (value as Record<string, unknown>)[key];
+      if (entry === undefined) continue;
+      w.list(() => { w.bytes(encodeText(key)); writeAccountStateValue(w, entry); });
+    }
+  });
+};
+
+export const encodeAccountStateValue = (value: unknown): Uint8Array => encodeStandalone(value);
+
+/** Legacy node-free encoder kept as a second oracle for equivalence tests. */
+export const encodeAccountStateValueLegacy = (value: unknown): Uint8Array =>
   encodeAccountStateValueDirect(value);

@@ -29,6 +29,7 @@ import { normalizeAccountStateDomain } from '../../account/commitment/state-root
 import { cryptoPoolEnabled, decryptOnionLayersBatch, type OnionJobItem } from '../../protocol/crypto/crypto-pool';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
+import { timePerfPhase } from '../../support/performance/profile';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
   state: EntityState;
@@ -394,19 +395,20 @@ export const materializeHtlcPreparedInfraContext = async (
   assertEntityEncryptionKeypair(input.entityEncryptionPublicKey, input.entityEncryptionPrivateKey);
   const effectiveInput = { ...input, proposalTxs: getEffectiveHtlcFrameTxs(input.state, input.proposalTxs) };
   const inflight = inflightLayerPriming;
-  if (inflight) await inflight.done;
+  if (inflight) await timePerfPhase('htlc.materialize.awaitPrime', () => inflight.done);
   // A fitted prefix of the candidate set is already covered by that pass.
   if (!inflight || !isPrefixOf(effectiveInput.proposalTxs, inflight.txs)) {
-    await primeInboundLayerDecryption(effectiveInput);
+    await timePerfPhase('htlc.materialize.prime', () => primeInboundLayerDecryption(effectiveInput));
   }
-  const entries = canonicalizeInboundEntries(collectInboundEntries(effectiveInput));
-  const originated = await materializeOriginatedHtlcPayments({
+  const entries = timePerfPhase('htlc.materialize.collect', () =>
+    canonicalizeInboundEntries(collectInboundEntries(effectiveInput)));
+  const originated = await timePerfPhase('htlc.materialize.originated', () => materializeOriginatedHtlcPayments({
     state: effectiveInput.state,
     proposalTxs: effectiveInput.proposalTxs,
     profiles: effectiveInput.profiles,
     height: effectiveInput.height,
     resolveRoute: effectiveInput.resolveRoute,
-  });
+  }));
   return { version: 1, entries, originated };
 };
 

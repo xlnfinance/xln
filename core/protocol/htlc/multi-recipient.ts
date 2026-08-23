@@ -58,14 +58,18 @@ const derivePublicKeyHex = (entityPrivateKey: string): string => {
   return derived;
 };
 
+// A Hub checks its own keypair once per inbound layer; the pair is constant.
+let verifiedKeypair: { publicKey: string; privateKey: string } | undefined;
 export const assertEntityEncryptionKeypair = (
   entityPublicKey: string,
   entityPrivateKey: string,
 ): void => {
+  if (verifiedKeypair?.publicKey === entityPublicKey && verifiedKeypair.privateKey === entityPrivateKey) return;
   const publicKey = keyBytes(entityPublicKey, 'HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID');
   if (derivePublicKeyHex(entityPrivateKey) !== keyHex(publicKey)) {
     throw new Error('HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH');
   }
+  verifiedKeypair = { publicKey: entityPublicKey, privateKey: entityPrivateKey };
 };
 
 const aeadKey = (shared: Uint8Array, context: Uint8Array): Uint8Array => {
@@ -112,20 +116,28 @@ export const assertOpaqueHtlcCiphertext = (value: unknown): OpaqueHtlcCiphertext
     throw new Error(`HTLC_OPAQUE_CIPHERTEXT_INVALID:${opaqueHtlcCiphertextShape(value)}`);
   }
   const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
   if (
-    Object.keys(record).sort().join(',') !== 'ciphertext,version' ||
+    keys.length !== 2 || !keys.includes('ciphertext') || !keys.includes('version') ||
     record['version'] !== HTLC_OPAQUE_CIPHERTEXT_VERSION ||
     typeof record['ciphertext'] !== 'string' ||
     record['ciphertext'].length === 0 ||
     record['ciphertext'].length > Math.ceil(MAX_PACKED_BYTES / 3) * 4
   ) throw new Error(`HTLC_OPAQUE_CIPHERTEXT_INVALID:${opaqueHtlcCiphertextShape(value)}`);
-  const packed = decodeBase64Bytes(record['ciphertext'], 'HTLC_OPAQUE_CIPHERTEXT_BASE64_INVALID');
-  if (packed.length < EPHEMERAL_PUBLIC_KEY_BYTES + AUTH_TAG_BYTES || packed.length > MAX_PACKED_BYTES) {
-    throw new Error('HTLC_OPAQUE_CIPHERTEXT_SIZE_INVALID');
+  const ciphertext = record['ciphertext'];
+  // The same layer text is asserted by ingress validation, onion decoding and
+  // context materialization; a string that decoded canonically once still does.
+  if (!canonicalCiphertexts.has(ciphertext)) {
+    const packed = decodeBase64Bytes(ciphertext, 'HTLC_OPAQUE_CIPHERTEXT_BASE64_INVALID');
+    if (packed.length < EPHEMERAL_PUBLIC_KEY_BYTES + AUTH_TAG_BYTES || packed.length > MAX_PACKED_BYTES) {
+      throw new Error('HTLC_OPAQUE_CIPHERTEXT_SIZE_INVALID');
+    }
+    if (encodeBase64Bytes(packed) !== ciphertext) throw new Error('HTLC_OPAQUE_CIPHERTEXT_NON_CANONICAL');
+    canonicalCiphertexts.set(ciphertext, true);
   }
-  if (encodeBase64Bytes(packed) !== record['ciphertext']) throw new Error('HTLC_OPAQUE_CIPHERTEXT_NON_CANONICAL');
-  return { version: HTLC_OPAQUE_CIPHERTEXT_VERSION, ciphertext: record['ciphertext'] };
+  return { version: HTLC_OPAQUE_CIPHERTEXT_VERSION, ciphertext };
 };
+const canonicalCiphertexts = new RecencyMemo<string, true>(4_096);
 
 const opaqueCiphertextHashMemo = new Map<string, string>();
 const OPAQUE_CIPHERTEXT_HASH_MEMO_MAX = 8192;

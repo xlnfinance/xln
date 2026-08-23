@@ -233,7 +233,15 @@ export const spawnBunChild = (
         `--cpu-prof-name=${name.replace(/[^A-Za-z0-9._-]/g, '_')}-${process.pid}.md`,
       ]
     : [];
-  const proc = spawn('bun', [...profileArgs, ...args], {
+  // Load lanes stand in for remote user machines; on one box they must not
+  // starve the Hub under test of CPU. Opt-in niceness keeps the measurement
+  // about the Hub rather than about the scheduler.
+  const niceness = Number(env['XLN_CHILD_NICE'] ?? '');
+  const command = Number.isSafeInteger(niceness) && niceness > 0 ? 'nice' : 'bun';
+  const commandArgs = command === 'nice'
+    ? ['-n', String(niceness), 'bun', ...profileArgs, ...args]
+    : [...profileArgs, ...args];
+  const proc = spawn(command, commandArgs, {
     cwd: process.cwd(),
     env: {
       ...buildManagedRuntimeChildSecretEnv(process.env, false),

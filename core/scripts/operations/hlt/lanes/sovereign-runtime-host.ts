@@ -54,6 +54,10 @@ import { decodeRuntimeInput } from '../../../../runtime/decode';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { JReplica } from '../../../../types/jurisdiction-runtime';
 import { startParentLivenessWatch } from '../../../../support/process/parent-watch';
+import {
+  dumpRuntimeSamplingProfile,
+  startRuntimeSamplingProfiler,
+} from '../../../../support/performance/sampling-profiler';
 import { readInheritedChildSecrets } from '../../../../support/process/child-secrets';
 import {
   dumpOpCounters,
@@ -579,6 +583,7 @@ const stop = async (exitCode: number): Promise<void> => {
   await Promise.allSettled(envs.map(env => stopRuntimeLoopAndWait(env, 5_000)));
   await Promise.allSettled(envs.flatMap(env => [closeRuntimeDb(env), closeInfraDb(env)]));
   dumpOpCounters(opCounterLabel, 'shutdown');
+  dumpRuntimeSamplingProfile('shutdown');
   if (isShardWorker) {
     postShardStatus({ type: 'stopped', firstPort, runtimes: runtimes.size });
     // End the worker by closing its control port after every owned N-API
@@ -593,6 +598,11 @@ const stop = async (exitCode: number): Promise<void> => {
 
 const run = async (): Promise<void> => {
   await installGlobalOpCounters(opCounterLabel);
+  if (await startRuntimeSamplingProfiler(opCounterLabel)) {
+    // Workers rarely reach a clean stop under the harness; each dump is a
+    // superset of the previous one, so a periodic dump loses nothing.
+    setInterval(() => dumpRuntimeSamplingProfile('interval'), 5_000).unref();
+  }
   await bootAll();
   const servers = runtimeSlots.map(({ env, runtimeId, port }) => Bun.serve<HostSocketData>({
     port,

@@ -157,6 +157,23 @@ export async function inspectHankoForHash(
   };
 }
 
+// One ABI board encode + keccak per proposal for the same signer was pure
+// repetition on a Hub; the single-signer board hash is a function of the address.
+const singleSignerBoardHashMemo = new Map<string, string>();
+const singleSignerBoardHashFor = (signerAddress: string): string => {
+  const cached = singleSignerBoardHashMemo.get(signerAddress);
+  if (cached !== undefined) return cached;
+  const hash = hashBoard(encodeBoard({
+    mode: 'proposer-based',
+    threshold: 1n,
+    validators: [signerAddress],
+    shares: { [signerAddress]: 1n },
+  })).toLowerCase();
+  if (singleSignerBoardHashMemo.size >= 4_096) singleSignerBoardHashMemo.clear();
+  singleSignerBoardHashMemo.set(signerAddress, hash);
+  return hash;
+};
+
 /**
  * Sign hashes on behalf of an entity using one validator's key
  *
@@ -178,12 +195,7 @@ const resolveSingleSignerHankoClaim = (
   if (!signerAddress) {
     throw new Error(`HANKO_SIGNER_ADDRESS_MISSING: entityId=${entityId} signerId=${signerId}`);
   }
-  const singleSignerBoardHash = hashBoard(encodeBoard({
-    mode: 'proposer-based',
-    threshold: 1n,
-    validators: [signerAddress],
-    shares: { [signerAddress]: 1n },
-  })).toLowerCase();
+  const singleSignerBoardHash = singleSignerBoardHashFor(signerAddress);
   const normalizedEntityId = encodeQuorumEntityId(entityId);
   // This board hash is both the authority check and the exact lazy Entity
   // reconstruction. Rebuilding the same ABI board a second time was pure

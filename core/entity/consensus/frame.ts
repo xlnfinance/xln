@@ -146,10 +146,20 @@ type CanonicalFrameTxs = {
 };
 // Only the frames in flight (candidate, last committed) are ever re-encoded.
 const canonicalTxsByFrameTxs = new RecencyMemo<EntityTx[], CanonicalFrameTxs>(64);
+// Wire fitting, the frame hash and validation each see a different array of
+// the same tx objects; the per-tx bytes are what is expensive to produce.
+const canonicalTxBytes = new RecencyMemo<EntityTx, Uint8Array>(65_536);
+const encodeCanonicalFrameTx = (tx: EntityTx): Uint8Array => {
+  const hit = canonicalTxBytes.get(tx);
+  if (hit) return hit;
+  const bytes = encodeBinaryPayload(canonicalEntityTxForFrameHash(tx));
+  canonicalTxBytes.set(tx, bytes);
+  return bytes;
+};
 const canonicalFrameTxs = (txs: EntityTx[]): CanonicalFrameTxs => {
   const hit = canonicalTxsByFrameTxs.get(txs);
   if (hit && hit.length === txs.length) return hit;
-  const encoded = txs.map(tx => encodeBinaryPayload(canonicalEntityTxForFrameHash(tx)));
+  const encoded = txs.map(encodeCanonicalFrameTx);
   const perTxBytes = encoded.map(bytes => bytes.byteLength);
   const prefixBytes = [0];
   for (const [index, bytes] of perTxBytes.entries()) {

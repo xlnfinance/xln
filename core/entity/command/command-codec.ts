@@ -1,3 +1,4 @@
+import { RecencyMemo } from '../../support/recency-memo';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { ethers } from 'ethers';
 
@@ -141,7 +142,19 @@ const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBo
   return body;
 };
 
+// One signed command is hashed by admission, disposition, signature check
+// and nonce advance; the body is immutable once signed.
+const commandHashMemo = new RecencyMemo<EntityCommandBody, string>(4_096);
+
 export const hashEntityCommand = (command: EntityCommandBody): string => {
+  const memoized = commandHashMemo.get(command);
+  if (memoized !== undefined) return memoized;
+  const hash = hashEntityCommandUncached(command);
+  commandHashMemo.set(command, hash);
+  return hash;
+};
+
+const hashEntityCommandUncached = (command: EntityCommandBody): string => {
   const body = normalizeEntityCommandBody(command);
   return ethers
     .keccak256(

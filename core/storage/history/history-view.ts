@@ -3,6 +3,8 @@ import type { RuntimeHistoryRecord } from '../../runtime/types';
 import type { AccountTx } from '../../types/account';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from '../codec/codec';
 import { iterateKeys, readRawOrNull } from '../database/level';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 import {
   BOUNDED_STORAGE_DELETE_BATCH_SIZE,
   boundedStorageRowsBytes,
@@ -211,8 +213,14 @@ export const readHistoryViewHead = async (
   db: RuntimeDbLike,
   config: Required<StorageRuntimeConfig>,
 ): Promise<StorageHistoryViewHead> => {
+  const readAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const raw = await readRawOrNull(db, KEY_HISTORY_VIEW_HEAD);
+  const decodeAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const decoded = raw ? decodeValidatedBuffer(raw, validateHistoryViewHeadValue) : null;
+  if (OP_COUNTERS_ENABLED) {
+    countOp('storage.historyViewHead.read', raw?.byteLength ?? 0, Math.round((decodeAt - readAt) * 1_000));
+    countOp('storage.historyViewHead.decode', raw?.byteLength ?? 0, Math.round((getPerfMs() - decodeAt) * 1_000));
+  }
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: decoded?.latestHeight ?? 0,

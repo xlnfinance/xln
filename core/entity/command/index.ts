@@ -36,6 +36,7 @@ import {
   UNREGISTERED_ENTITY_COMMAND_STACK_KEY,
 } from './command-codec';
 import { encodeBoard, hashBoard } from '../factory';
+import { RecencyMemo } from '../../support/recency-memo';
 import {
   assertIndividualEntityCommandTxs,
   buildCollectiveEntityProposalTx,
@@ -81,15 +82,23 @@ const resolveEntityBoardMembers = (
     }
     return { signerId, signer, share: canonicalShares.bySigner.get(signerId)! };
   });
-  const resolvedConfig = {
-    mode: state.config.mode,
-    threshold: state.config.threshold,
-    validators: members.map(member => member.signer),
-    shares: Object.fromEntries(members.map(member => [member.signer, member.share])),
-  };
-  const boardHash = hashBoard(encodeBoard(resolvedConfig)).toLowerCase();
+  // ABI-encoding and hashing the board is a function of the resolved
+  // members only; it ran several times per frame on every user Runtime.
+  const boardKey = `${state.config.mode}|${state.config.threshold}|${
+    members.map(member => `${member.signer}:${member.share}`).join(',')}`;
+  let boardHash = resolvedBoardHashes.get(boardKey);
+  if (boardHash === undefined) {
+    boardHash = hashBoard(encodeBoard({
+      mode: state.config.mode,
+      threshold: state.config.threshold,
+      validators: members.map(member => member.signer),
+      shares: Object.fromEntries(members.map(member => [member.signer, member.share])),
+    })).toLowerCase();
+    resolvedBoardHashes.set(boardKey, boardHash);
+  }
   return { boardHash, members };
 };
+const resolvedBoardHashes = new RecencyMemo<string, string>(1_024);
 
 export const resolveEntityCommandBoard = (
   env: EntityRuntimeContext,

@@ -399,7 +399,14 @@ const spawnSovereignRuntimeHost = async (options: {
       ...(process.env['XLN_HEAVY_LOGS'] ? { XLN_HEAVY_LOGS: '1' } : {}),
       ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),
       ...(process.env['XLN_RUNTIME_APPLY_PROFILE'] ? { XLN_RUNTIME_APPLY_PROFILE: '1' } : {}),
+      ...(process.env['XLN_HLT_LANE_NICE'] ? { XLN_CHILD_NICE: process.env['XLN_HLT_LANE_NICE'] } : {}),
       ...(process.env['XLN_RUNTIME_OP_COUNTERS'] ? { XLN_RUNTIME_OP_COUNTERS: '1' } : {}),
+      ...(process.env['XLN_RUNTIME_SAMPLING_PROFILE'] === '1'
+        ? {
+            XLN_RUNTIME_SAMPLING_PROFILE: '1',
+            XLN_RUNTIME_SAMPLING_PROFILE_DIR: process.env['XLN_RUNTIME_SAMPLING_PROFILE_DIR'] || '/tmp/xln-sampling-profile',
+          }
+        : {}),
       ...(process.env['XLN_RUNTIME_OP_COUNTERS_DIR']
         ? { XLN_RUNTIME_OP_COUNTERS_DIR: process.env['XLN_RUNTIME_OP_COUNTERS_DIR'] }
         : {}),

@@ -48,7 +48,7 @@ import {
 import { fitEntityProposalToWireBudget } from './wire-budget';
 import { primeProposalHankos } from './prime-hankos';
 import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
-import { countOp } from '../../../support/performance/op-counters';
+import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../htlc/materialize-context';
@@ -262,12 +262,14 @@ const signProposalManifest = async (
   state: EntityState,
   hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
 ): Promise<string[]> => {
+  const authorityAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   await assertEntityConfigBoardAuthority(
     env,
     replica.state.entityId,
     state.config,
     state,
   );
+  countOp('entity.proposal.boardAuthority', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - authorityAt) * 1_000) : 0);
   // Same deterministic secp256k1 bytes either way; the pool takes the batch
   // off the main thread on a Hub, a single-runtime host signs inline.
   const pooled = await signDigestsBatch(env, replica.signerId, hashesToSign.map(hash => hash.hash));

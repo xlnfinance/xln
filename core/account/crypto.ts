@@ -4,6 +4,7 @@
  */
 
 import { cryptoPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatch as signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
+import { RecencyMemo } from '../support/recency-memo';
 import * as secp256k1 from '@noble/secp256k1';
 import { countOpWithSite, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { getPerfMs } from '../support/time';
@@ -122,10 +123,24 @@ const seedFromScope = (scope: SignerKeyScope): Uint8Array | string | null => {
   return scope?.runtimeSeed ?? null;
 };
 
-const optionalScopeKey = (scope: SignerKeyScope): string | null => {
+const optionalScopeKeyUncached = (scope: SignerKeyScope): string | null => {
   const seed = seedFromScope(scope);
   if (seed === null || seed === undefined || toSeedBytes(seed).length === 0) return null;
   return bytesToHex(sha256(toSeedBytes(seed)));
+};
+
+// Every signer lookup hashed the seed again. The memo is keyed by the scope
+// object (the Runtime context), never by the raw seed text, and re-derives if
+// that object's seed field changes.
+const scopeKeyMemo = new RecencyMemo<object, { seed: Uint8Array | string | null; key: string | null }>(256);
+const optionalScopeKey = (scope: SignerKeyScope): string | null => {
+  if (typeof scope === 'string' || scope === null || scope === undefined) return optionalScopeKeyUncached(scope);
+  const seed = seedFromScope(scope);
+  const hit = scopeKeyMemo.get(scope);
+  if (hit && hit.seed === seed) return hit.key;
+  const key = optionalScopeKeyUncached(scope);
+  scopeKeyMemo.set(scope, { seed, key });
+  return key;
 };
 
 const scopeKey = (scope: SignerKeyScope): string => {
@@ -628,9 +643,10 @@ export async function signDigestsBatch(
     if (bytes.length !== 32) throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${bytes.length}`);
     digests.set(bytes, index * 32);
   });
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const signatures = await signDigestsBatchOnPool(privateKey, digests);
   if (!signatures) return null;
-  countOpWithSite('ecdsa.sign.pool', digestsHex.length, 3);
+  countOpWithSite('ecdsa.sign.pool', digestsHex.length, 3, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0);
   return digestsHex.map((_, index) => {
     const signature = signatures.subarray(index * ECDSA_SIGNATURE_BYTES, (index + 1) * ECDSA_SIGNATURE_BYTES);
     return `0x${Buffer.from(signature.subarray(0, 64)).toString('hex')}${(signature[64] ?? 0).toString(16).padStart(2, '0')}`;

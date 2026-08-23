@@ -612,10 +612,10 @@ const projectEntityConsensusState = (
       .filter((field) => Object.hasOwn(state, field))
       .map((field) => [field, state[field]]),
   );
-  const orderbookExt = projectOrderbookConsensusState(state.orderbookExt);
+  const orderbookExt = timePerfPhase('entity.proj.orderbook', () => projectOrderbookConsensusState(state.orderbookExt));
   return {
     ...projected,
-    config: projectConsensusConfigCommitment(state.config),
+    config: timePerfPhase('entity.proj.config', () => projectConsensusConfigCommitment(state.config)),
     accounts: expandAccounts
       ? new Map(
           Array.from(state.accounts.entries()).map(([counterpartyId, account]) => [
@@ -624,13 +624,13 @@ const projectEntityConsensusState = (
           ]),
         )
       : state.accounts,
-    htlcRoutes: entityCollectionCommitment(state.htlcRoutes, cold),
-    lockBook: entityCollectionCommitment(state.lockBook, cold),
+    htlcRoutes: timePerfPhase('entity.proj.htlcRoutes', () => entityCollectionCommitment(state.htlcRoutes, cold)),
+    lockBook: timePerfPhase('entity.proj.lockBook', () => entityCollectionCommitment(state.lockBook, cold)),
     ...(state.crontabState
       ? {
           crontabState: {
             tasks: state.crontabState.tasks,
-            hooks: entityCollectionCommitment(state.crontabState.hooks, cold),
+            hooks: timePerfPhase('entity.proj.hooks', () => entityCollectionCommitment(state.crontabState!.hooks, cold)),
           },
         }
       : {}),
@@ -739,9 +739,7 @@ const commitEntityConsensusSections = (
       // The Account Patricia root was the only material section in the
       // measured H1 profile. Keep that surgical timer; wrapping every scalar
       // section added dozens of environment checks to every production root.
-      const encoded = field === 'accounts'
-        ? timePerfPhase('entity.stateRoot.section.accounts', encodeSection)
-        : encodeSection();
+      const encoded = timePerfPhase(`entity.stateRoot.section.${field}`, encodeSection);
       return {
         field,
         digest: computeIntegrityDigest(UTF8.encode(encoded)),
