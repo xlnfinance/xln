@@ -1,6 +1,5 @@
 use num_bigint::BigInt;
 
-use crate::delta::max_payment_amount;
 use crate::htlc::boundary::MAX_SAFE_INTEGER;
 use crate::{HtlcHashlock, OpaqueHtlcCiphertext, Side, StateError, TokenId};
 
@@ -107,8 +106,8 @@ impl HtlcLock {
 
     pub(crate) fn validate_for_restore(&self) -> Result<(), StateError> {
         require_bytes32("lockId", &self.lock_id)?;
-        require_positive("timelock", &self.timelock, None)?;
-        require_positive("amount", &self.amount, Some(&max_payment_amount()))?;
+        require_positive("timelock", &self.timelock)?;
+        require_positive("amount", &self.amount)?;
         if self.token_id.get() == 0 {
             return Err(invalid_restore("tokenId", self.token_id.to_string()));
         }
@@ -163,12 +162,8 @@ fn require_bytes32(field: &'static str, value: &str) -> Result<(), StateError> {
     }
 }
 
-fn require_positive(
-    field: &'static str,
-    value: &BigInt,
-    maximum: Option<&BigInt>,
-) -> Result<(), StateError> {
-    if value <= &BigInt::from(0) || maximum.is_some_and(|maximum| value > maximum) {
+fn require_positive(field: &'static str, value: &BigInt) -> Result<(), StateError> {
+    if value <= &BigInt::from(0) {
         return Err(invalid_restore(field, value.to_string()));
     }
     Ok(())

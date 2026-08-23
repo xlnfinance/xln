@@ -1,3 +1,4 @@
+use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
     AccountState, AccountTx, Delta, DepositoryAddress, EntityId, HtlcHashlock, HtlcLock,
@@ -11,6 +12,12 @@ const TS_LOCKED_PAYMENT_PROFILE_ROOT: &str =
 const TS_DELTA_ROOT: &str = "3f4b15cebab6c1e8df774ffa2aad3c47ade3f7bd0e61a99f19a8b413720649af";
 const TS_HELD_DELTA_ROOT: &str = "74061e9b344976c34dada6fe39151673651d6e8f35cf57369a4b0363c3030ea2";
 const TS_LOCK_ROOT: &str = "c87f54349f8b45ee5ff828f1d59304676ec25a28815a1b99ab73cf18e4e079d5";
+const TS_OVERSIZED_DELTA_ROOT: &str =
+    "47022f06006fe5cee3c1fda11e8461b4f7efca67f63826b1875293dd37117e1b";
+const TS_OVERSIZED_LOCK_ROOT: &str =
+    "212475fa8fe9fc483eefcbb22ab471f8082af76d9ec20c7efc78d3be6e0dc8c7";
+const TS_OVERSIZED_PAYMENT_PROFILE_ROOT: &str =
+    "eee654eea35a97668c455967625fb4b0b417e7a690c26cda7ae9a07c951d60e6";
 
 fn entity(byte: u8) -> EntityId {
     EntityId::parse(&format!("0x{}", format!("{byte:02x}").repeat(32))).expect("literal entity")
@@ -36,10 +43,10 @@ fn identity() -> AccountIdentity {
 }
 
 fn delta() -> Delta {
-    delta_with_left_hold(0)
+    delta_with_left_hold(0.into())
 }
 
-fn delta_with_left_hold(left_hold: i64) -> Delta {
+fn delta_with_left_hold(left_hold: BigInt) -> Delta {
     Delta::new(
         token(1),
         1_000.into(),
@@ -56,12 +63,16 @@ fn delta_with_left_hold(left_hold: i64) -> Delta {
 }
 
 fn lock() -> HtlcLock {
+    lock_with_amount(7.into())
+}
+
+fn lock_with_amount(amount: BigInt) -> HtlcLock {
     HtlcLock::restore(
         format!("0x{}", "66".repeat(32)),
         HtlcHashlock::parse(&format!("0x{}", "77".repeat(32))).expect("literal hashlock"),
         60_000.into(),
         10,
-        7.into(),
+        amount,
         token(1),
         Side::Left,
         0,
@@ -124,7 +135,7 @@ fn exact_payment_profile_root_matches_typescript_with_committed_htlc() {
     let restored = AccountState::restore(
         identity(),
         dispute_config(),
-        vec![delta_with_left_hold(7)],
+        vec![delta_with_left_hold(7.into())],
         vec![lock()],
     )
     .expect("restored payment state");
@@ -154,6 +165,29 @@ fn exact_payment_profile_root_matches_typescript_with_committed_htlc() {
             .state()
             .payment_profile_account_state_root()
             .expect("transitioned payment-profile root"),
+    );
+}
+
+#[test]
+fn restore_accepts_positive_amount_above_live_payment_limit() {
+    let amount: BigInt = BigInt::from(1_u8) << 128_usize;
+    let state = AccountState::restore(
+        identity(),
+        dispute_config(),
+        vec![delta_with_left_hold(amount.clone())],
+        vec![lock_with_amount(amount)],
+    )
+    .expect("durable state accepts positive bigint above live admission limit");
+
+    assert_eq!(hex::encode(state.deltas_root()), TS_OVERSIZED_DELTA_ROOT);
+    assert_eq!(hex::encode(state.htlc_locks_root()), TS_OVERSIZED_LOCK_ROOT);
+    assert_eq!(
+        hex::encode(
+            state
+                .payment_profile_account_state_root()
+                .expect("oversized payment-profile state root"),
+        ),
+        TS_OVERSIZED_PAYMENT_PROFILE_ROOT,
     );
 }
 
