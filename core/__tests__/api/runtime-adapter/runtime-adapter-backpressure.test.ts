@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { describe, expect, test } from 'bun:test';
 
 import {
@@ -21,7 +22,7 @@ describe('runtime adapter socket backpressure', () => {
     };
     await handleRuntimeAdapterMessage(
       ws,
-      { v: 1, id: 'bp', op: 'read', path: 'head' },
+      { v: XLN_PROTOCOL_VERSION, id: 'bp', op: 'read', path: 'head' },
       createEmptyEnv('adapter-backpressure'),
       { enqueueRuntimeInput: () => {} },
     );
@@ -45,7 +46,7 @@ describe('runtime adapter socket backpressure', () => {
     try {
       await handleRuntimeAdapterMessage(
         ws,
-        { v: 1, id: 'queued', op: 'read', path: 'head' },
+        { v: XLN_PROTOCOL_VERSION, id: 'queued', op: 'read', path: 'head' },
         createEmptyEnv('adapter-queued-backpressure'),
         { enqueueRuntimeInput: () => {} },
       );

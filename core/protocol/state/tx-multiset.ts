@@ -28,7 +28,14 @@ type CompactAccountInput = {
   domain?: unknown;
   disputeConfig?: unknown;
   watchSeed?: unknown;
-  proposal?: { frame: { height: number; stateHash: string }; frameHanko?: string; disputeSeal?: { hash: string; hanko?: string } };
+  proposal?: {
+    frame: {
+      height: number; stateHash: string; prevFrameHash: string; accountStateRoot: string;
+      timestamp: number; jHeight: number; byLeft: boolean; accountTxs: readonly unknown[]; deltas: readonly unknown[];
+    };
+    frameHanko?: string;
+    disputeSeal?: { hash: string; hanko?: string };
+  };
   ack?: { height: number; frameHash: string; frameHanko?: string; disputeSeal?: { hash: string; hanko?: string } };
 };
 
@@ -49,7 +56,11 @@ const compactAccountInputFingerprint = (data: unknown): string | undefined => {
   const ack = input.kind === 'frame' ? undefined : input.ack;
   const envelope = safeStringify([input.domain ?? null, input.disputeConfig ?? null, input.watchSeed ?? null]);
   return `accountInput:${input.kind}|${input.fromEntityId}|${input.toEntityId}|${envelope}` +
-    `|${proposal ? `${proposal.frame.height}:${proposal.frame.stateHash}:${proposal.frameHanko ?? ''}:${sealKey(proposal.disputeSeal)}` : ''}` +
+    `|${proposal
+      ? `${proposal.frame.height}:${proposal.frame.stateHash}:${proposal.frameHanko ?? ''}:${sealKey(proposal.disputeSeal)}`
+        + `:${proposal.frame.prevFrameHash}:${proposal.frame.accountStateRoot}:${proposal.frame.timestamp}:${proposal.frame.jHeight}`
+        + `:${proposal.frame.byLeft}:${proposal.frame.accountTxs.length}:${proposal.frame.deltas.length}`
+      : ''}` +
     `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${sealKey(ack.disputeSeal)}` : ''}`;
 };
 

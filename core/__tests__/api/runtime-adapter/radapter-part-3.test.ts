@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { readFileSync } from 'node:fs';
 
 import { expect, test } from 'bun:test';
@@ -466,7 +467,7 @@ test('remote runtime adapter does not reconnect after unauthorized auth', async 
       setTimeout(() => {
         this.onmessage?.({
           data: encodeRuntimeAdapterMessage({
-            v: 1,
+            v: XLN_PROTOCOL_VERSION,
             inReplyTo: request.id,
             ok: false,
             error: {

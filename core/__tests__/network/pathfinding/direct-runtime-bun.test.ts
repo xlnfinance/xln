@@ -468,7 +468,7 @@ describe('direct runtime websocket route', () => {
     route.websocket.open(ws);
     await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     await route.websocket.message(ws, encodeBinaryPayload({
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       type: 'entity_inputs',
       id: 'client-to-server-plaintext',
       from: clientRuntimeId,

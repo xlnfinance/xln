@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { readFileSync } from 'node:fs';
 
 import { expect, test } from 'bun:test';
@@ -748,13 +749,13 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     { atHeight: env.state.height - 1 },
   );
   const encodedLiveEntity = encodeRuntimeAdapterMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     inReplyTo: 'direct-entity',
     ok: true,
     payload: liveEntity,
   });
   const encodedLiveAccount = encodeRuntimeAdapterMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     inReplyTo: 'direct-account',
     ok: true,
     payload: liveAccount,
@@ -2596,7 +2597,7 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
     { entityId, atHeight: 1, accountsLimit: 10, booksLimit: 10 },
   );
   const elapsedMs = Date.now() - startedAt;
-  const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'budget', ok: true, payload: frame });
+  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'budget', ok: true, payload: frame });
 
   expect(loaderCalls).toBe(2);
   expect(elapsedMs).toBeLessThan(100);
@@ -2663,7 +2664,7 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
       };
     } | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', { accountsLimit: 1, booksLimit: 1 });
-  const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'route-budget', ok: true, payload: frame });
+  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'route-budget', ok: true, payload: frame });
   const core = frame.activeEntity?.core;
 
   expect(encoded.byteLength).toBeLessThan(1_048_576);
@@ -2725,7 +2726,7 @@ test('runtime adapter view-frame excludes unbounded core internals from remote s
       };
     } | null;
   }>({ env }, 'view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
-  const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'core-budget', ok: true, payload: frame });
+  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'core-budget', ok: true, payload: frame });
   const core = frame.activeEntity?.core;
 
   expect(encoded.byteLength).toBeLessThan(1_048_576);
@@ -2769,7 +2770,7 @@ test('remote runtime adapter rejects a tampered server identity proof', async ()
         () =>
           this.onmessage?.({
             data: encodeRuntimeAdapterMessage({
-              v: 1,
+              v: XLN_PROTOCOL_VERSION,
               inReplyTo: request.id,
               ok: true,
               payload: {

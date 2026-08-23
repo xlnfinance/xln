@@ -104,7 +104,16 @@ const compactEntityTxSortKey = (tx: EntityTx): unknown => {
     input.kind,
     input.fromEntityId.toLowerCase(),
     input.toEntityId.toLowerCase(),
-    proposal ? [proposal.frame.height, proposal.frame.stateHash, proposal.frameHanko ?? '', proposal.disputeSeal?.hash ?? '', proposal.disputeSeal?.hanko ?? ''] : null,
+    proposal
+      ? [
+          proposal.frame.height, proposal.frame.stateHash, proposal.frameHanko ?? '',
+          proposal.disputeSeal?.hash ?? '', proposal.disputeSeal?.hanko ?? '',
+          // Body scalars: two envelopes claiming one hash over different bodies
+          // still sort apart, without rendering the txs.
+          proposal.frame.prevFrameHash, proposal.frame.accountStateRoot, proposal.frame.timestamp,
+          proposal.frame.jHeight, proposal.frame.byLeft, proposal.frame.accountTxs.length, proposal.frame.deltas.length,
+        ]
+      : null,
     ack ? [ack.height, ack.frameHash, ack.frameHanko ?? '', ack.disputeSeal?.hash ?? '', ack.disputeSeal?.hanko ?? ''] : null,
     input.kind === 'dispute' || input.kind === 'frame' || input.kind === 'frame_ack' || input.kind === 'ack' ? null : safeStringify(input),
   ];

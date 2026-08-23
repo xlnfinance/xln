@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { expect, test } from 'bun:test';
 
 import { BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/primitives/spec';
@@ -48,7 +49,7 @@ const pushTick = (
   commandReady = true,
   commandReadyReason: string | null = null,
 ): void => socket?.onmessage?.({ data: encodeRuntimeAdapterMessage({
-  v: 1, op: 'tick', height, commandReady, commandReadyReason,
+  v: XLN_PROTOCOL_VERSION, op: 'tick', height, commandReady, commandReadyReason,
 }) });
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
@@ -118,7 +119,7 @@ test('remote adapter refreshes authority and catches up durable payments across 
 
     private respond(inReplyTo: string, payload: unknown, delay = 0): void {
       setTimeout(() => this.onmessage?.({ data: encodeRuntimeAdapterMessage({
-        v: 1, inReplyTo, ok: true, payload,
+        v: XLN_PROTOCOL_VERSION, inReplyTo, ok: true, payload,
       }) }), delay);
     }
 

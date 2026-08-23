@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { keccak256 } from 'ethers';
 
@@ -50,20 +51,20 @@ describe('WebSocket trusted decode boundary', () => {
       pong: { type: 'pong' },
     } satisfies Record<string, RuntimeWsMessage>;
     const expected = {
-      hello: '0x423cfb7fbf1b9cf067bd5d3f89afbeb3c6f19c03e8f9410bae38b3d43e2529cb',
-      hello_challenge: '0xc10b5010baae570e9d9b22524042a6611c572ef98203a454a05186e69b058b74',
-      hello_ack: '0x01c85fe2130cce80700f27ad3a4b9c5ce3f03c044b0502b7903d0d21558ee2ad',
-      entity_inputs: '0x196e6cc5fed7b364daf4ce08f46824b05a9e450d85cb81805a4240df43dd2f55',
-      debug_event: '0x7cd307e43d877b5741a93f7ca02fdcddd13a91489798f133b65be0cbb0dfc897',
-      gossip_request: '0xf1126cf381505dc8dd42ecda121c95d4675e4a8a5176928e8fac42c473b7b3bf',
-      gossip_response: '0xa8de6f8857c4490cce9289bd2829403604caebf22d841dc6cc864b8fe1d6cad0',
-      gossip_announce: '0xf91813f0d50b84d94e47f04f4bddb6ed08c01b84c61be3a62cda24415d2d7d01',
-      gossip_update: '0x4eb5ebe01f3aa759444cebf17a81f18eb7202cfd28737a3e97710bc013f09ea2',
-      recovery_bundle_request: '0x56c5ce3b060f62ed509f751a5b938385d8c2541fa3efe1790f03cdc937fb7ded',
-      recovery_bundle_response: '0xf1324220d5bdac3a61d556fd7ff3ace257ae8e7e8697494da8de2099b987b66a',
-      error: '0xeec28762c01f7fd689b790dbbe6ef362abda04903e6239709f537c6d48244786',
-      ping: '0xa4a1dd1fc521b9aa2a877c49824449939935958667d2cc1dbdc1259f39912939',
-      pong: '0x297d17ac72508a386d27ca0dd57dbe46ab5a8617354a3af1339b45ae1c0df0d5',
+      hello: '0x67d058920f988427e97f542a0054e8ae827687ef3f547df973d0e5f8d305acb6',
+      hello_challenge: '0x62b8fdfd5f31a09e987ae22f2c88beca6dcd52194dfd400779aceae1f22cde72',
+      hello_ack: '0x22213cebb281dd0ec4f73cfd5472407165eea5670e61f7b798be3d728b4b0a7c',
+      entity_inputs: '0x49df4b993bbf08ed80de3cd4644e57d71168cd58d5daaaf457464bd0497dd0fe',
+      debug_event: '0x3da2b0a0683b15b73e8dc7d281a38575ec17bb14914adb390bdd7e81a90cea7d',
+      gossip_request: '0xa83f38f3ff5b2bbd53398c703be1024996617454a4dd278d59e9bbd53cd14ddc',
+      gossip_response: '0x4ca3d895f8665ad057b10cb53de8af87132e81f10c27de4bc076021f08d0bc61',
+      gossip_announce: '0xd164f639b9e542b71e7f6bf09566a6c914fc43ba41fc180333d235a6cdec2e96',
+      gossip_update: '0x93b16b1e875a71a2ec1dc1f707afb0ec6148f741cd63dd6e7fd6861a91ca3ff7',
+      recovery_bundle_request: '0x2294aa1138c5754bde0eb02ec30abd2ca8ad8eacfd59d1b1558d914f384e88c0',
+      recovery_bundle_response: '0x6e629c6fad93dab7f464719bc4d2fc1fb859e05e654354b32f9438335815afec',
+      error: '0x5ae6818aa95c44ffa90f4e91c65a9b56a8666e2819d7e0f7125335afe8437623',
+      ping: '0xe646fbf1a2276f9ae7baad5fac2de7183563fcd5d12808325ef4f0d064a514ed',
+      pong: '0x830408a848d44936f39d56f8ec6f4c887da1e072a86c2a932fe6fa1ab0732e97',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [
@@ -80,7 +81,7 @@ describe('WebSocket trusted decode boundary', () => {
   });
 
   test('rejects a debug JSON binary envelope before peer payload decoding', () => {
-    const debugEnvelope = encodeBinaryPayload({ v: 1, type: 'ping' }, 'json');
+    const debugEnvelope = encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, type: 'ping' }, 'json');
 
     expect(debugEnvelope[0]).toBe(0x02);
     expect(() => deserializeWsMessage(debugEnvelope))
@@ -123,32 +124,32 @@ describe('WebSocket trusted decode boundary', () => {
 describe('rAdapter trusted decode boundary', () => {
   test('pins every canonical envelope variant to an independent golden hash', () => {
     const variants = {
-      auth: { v: 1, id: 'a', op: 'auth', challenge: `0x${'11'.repeat(32)}` },
-      read: { v: 1, id: 'r', op: 'read', path: 'head', query: { atHeight: 1 } },
+      auth: { v: XLN_PROTOCOL_VERSION, id: 'a', op: 'auth', challenge: `0x${'11'.repeat(32)}` },
+      read: { v: XLN_PROTOCOL_VERSION, id: 'r', op: 'read', path: 'head', query: { atHeight: 1 } },
       send: {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: 's',
         op: 'send',
         commandId: 'command-00000001',
         commandSequence: 1,
         input: { runtimeTxs: [], entityInputs: [] },
       },
-      ok: { v: 1, inReplyTo: 'r', ok: true, payload: { height: 1 } },
+      ok: { v: XLN_PROTOCOL_VERSION, inReplyTo: 'r', ok: true, payload: { height: 1 } },
       error: {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         inReplyTo: 'r',
         ok: false,
         error: { code: 'E_BAD_QUERY', message: 'bad', retryable: false },
       },
-      tick: { v: 1, op: 'tick', height: 1, commandReady: true, commandReadyReason: null },
+      tick: { v: XLN_PROTOCOL_VERSION, op: 'tick', height: 1, commandReady: true, commandReadyReason: null },
     } satisfies Record<string, RuntimeAdapterWireMessage>;
     const expected = {
-      auth: '0x815bbc35b560e10d2e786331870725f223a394f86715911f3de984bdd1daa8f8',
-      read: '0xec4ebd09994412a9b889327d4a9fd251ec476a1d3c2d586a24289260e2f20403',
-      send: '0x710ca84bb36e77be6e6362c8039ace7b53fe26c1a7f4e6e5b3e58051b4633078',
-      ok: '0x2130fe297611af9f54e231850d447eae7c1d39e9357a970e291f0f900363b42d',
-      error: '0x6aaee897bbac946f5a952c2321086eab0b7f7d7ae841c9973a8e0d9a82b556af',
-      tick: '0x266ba5fbb38e955c1cdeb40209dadc2bcd64a3673363737e5e9753011d37608d',
+      auth: '0xd39ae58ff43fa6f0289e6295ad771d1c3806d868ba3b9fadec9ff7620dc20979',
+      read: '0xcd2dd43e3d67fd18fe3787525bf7216dec22d3c5bd0b62b82e9c83da0363fcc2',
+      send: '0x952b54e205f756f931246a2e428adf26e0c114304d138fcda257ec51d42b36c6',
+      ok: '0x3cd4ebc63318e341632394598f7b4e4da591bf3bb1b148d5966a3b0153c3ed6b',
+      error: '0xda58018ed9c462325c818bac21545d6cf561a46408c96411beff403864550511',
+      tick: '0x7201ac738a520fc81d70ee83c813c1e50b65f449f1cb6554555fc47588ea72ec',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [
@@ -159,10 +160,10 @@ describe('rAdapter trusted decode boundary', () => {
 
   test('accepts exact request, response, and push variants', () => {
     const messages = [
-      { v: 1 as const, id: 'auth-1', op: 'auth' as const, challenge: `0x${'11'.repeat(32)}` },
-      { v: 1 as const, inReplyTo: 'auth-1', ok: true as const, payload: { authLevel: 'inspect' } },
+      { v: XLN_PROTOCOL_VERSION as const, id: 'auth-1', op: 'auth' as const, challenge: `0x${'11'.repeat(32)}` },
+      { v: XLN_PROTOCOL_VERSION as const, inReplyTo: 'auth-1', ok: true as const, payload: { authLevel: 'inspect' } },
       {
-        v: 1 as const,
+        v: XLN_PROTOCOL_VERSION as const,
         op: 'tick' as const,
         height: 9,
         commandReady: false,
@@ -176,7 +177,7 @@ describe('rAdapter trusted decode boundary', () => {
 
   test('rejects a debug JSON binary envelope before rAdapter payload decoding', () => {
     const debugEnvelope = encodeBinaryPayload({
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'read-1',
       op: 'read',
       path: 'head',
@@ -191,14 +192,14 @@ describe('rAdapter trusted decode boundary', () => {
     ['JSON text', '{"v":1,"id":"x","op":"read","path":"head"}'],
     ['null', encodeBinaryPayload(null, 'msgpack')],
     ['array', encodeBinaryPayload([], 'msgpack')],
-    ['unknown op', encodeBinaryPayload({ v: 1, id: 'x', op: 'wat' }, 'msgpack')],
-    ['missing request id', encodeBinaryPayload({ v: 1, op: 'read', path: 'head' }, 'msgpack')],
-    ['missing read path', encodeBinaryPayload({ v: 1, id: 'x', op: 'read' }, 'msgpack')],
-    ['type-confused tick height', encodeBinaryPayload({ v: 1, op: 'tick', height: '9' }, 'msgpack')],
-    ['missing tick readiness', encodeBinaryPayload({ v: 1, op: 'tick', height: 9 }, 'msgpack')],
-    ['type-confused response status', encodeBinaryPayload({ v: 1, inReplyTo: 'x', ok: 'true', payload: null }, 'msgpack')],
+    ['unknown op', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, id: 'x', op: 'wat' }, 'msgpack')],
+    ['missing request id', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'read', path: 'head' }, 'msgpack')],
+    ['missing read path', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, id: 'x', op: 'read' }, 'msgpack')],
+    ['type-confused tick height', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'tick', height: '9' }, 'msgpack')],
+    ['missing tick readiness', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, op: 'tick', height: 9 }, 'msgpack')],
+    ['type-confused response status', encodeBinaryPayload({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'x', ok: 'true', payload: null }, 'msgpack')],
     ['missing send input arrays', encodeBinaryPayload({
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'x',
       op: 'send',
       commandId: 'command-00000001',
@@ -206,7 +207,7 @@ describe('rAdapter trusted decode boundary', () => {
       input: {},
     }, 'msgpack')],
     ['unknown request field', encodeBinaryPayload({
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'x',
       op: 'read',
       path: 'head',
@@ -237,7 +238,7 @@ describe('rAdapter trusted decode boundary', () => {
     const decoded = decodeRuntimeAdapterMessage<{
       payload: { attemptedMarker: RuntimeTx };
     }>(encodeRuntimeAdapterMessage({
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       inReplyTo: 'send-1',
       ok: true,
       payload: { attemptedMarker: plainMarker },

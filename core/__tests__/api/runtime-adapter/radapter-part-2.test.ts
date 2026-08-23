@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'bun:test';
 
@@ -541,7 +542,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
       };
     } | null;
   }>({ env }, 'view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
-  const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'account-budget', ok: true, payload: frame });
+  const encoded = encodeRuntimeAdapterMessage({ v: XLN_PROTOCOL_VERSION, inReplyTo: 'account-budget', ok: true, payload: frame });
   const compact = frame.activeEntity?.accounts.items[0];
 
   expect(encoded.byteLength).toBeLessThan(1_048_576);
@@ -806,7 +807,7 @@ test('runtime adapter compact book view preserves full level depth while trimmin
 
 test('runtime adapter binary codec preserves structured payloads', () => {
   const encoded = encodeRuntimeAdapterMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     id: 'send-1',
     op: 'send',
     commandId: 'binary-command-0001',
@@ -875,7 +876,7 @@ test('runtime adapter websocket handler gates reads behind inspect auth', async 
   };
   const env = makeEnv();
 
-  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-1', op: 'read', path: 'head' }, env, {
+  await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'read-1', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
   const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
@@ -884,7 +885,7 @@ test('runtime adapter websocket handler gates reads behind inspect auth', async 
 
   await handleRuntimeAdapterMessage(
     socket,
-    { v: 1, id: 'auth-1', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+    { v: XLN_PROTOCOL_VERSION, id: 'auth-1', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
     env,
     {
       enqueueRuntimeInput: () => {},
@@ -894,7 +895,7 @@ test('runtime adapter websocket handler gates reads behind inspect auth', async 
   expect(authed.ok).toBe(true);
   expect(authed.payload.authLevel).toBe('inspect');
 
-  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-2', op: 'read', path: 'head' }, env, {
+  await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'read-2', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
   const read = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { latestHeight: number } }>(messages.pop());
@@ -914,7 +915,7 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
 
   await handleRuntimeAdapterMessage(
     socket,
-    { v: 1, id: 'auth-1', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+    { v: XLN_PROTOCOL_VERSION, id: 'auth-1', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
     env,
     {
       enqueueRuntimeInput: () => {
@@ -929,7 +930,7 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-1',
       op: 'send',
       commandId: 'inspect-command-0001',
@@ -982,7 +983,7 @@ test('runtime adapter cross-j intent requires admin and bypasses the durable com
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-inspect',
       op: 'auth',
       key: inspectToken(),
@@ -995,7 +996,7 @@ test('runtime adapter cross-j intent requires admin and bypasses the durable com
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'cross-j-denied',
       op: 'cross-j-intent',
       route,
@@ -1011,7 +1012,7 @@ test('runtime adapter cross-j intent requires admin and bypasses the durable com
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-admin',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
@@ -1024,7 +1025,7 @@ test('runtime adapter cross-j intent requires admin and bypasses the durable com
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'cross-j-delivered',
       op: 'cross-j-intent',
       route,
@@ -1064,7 +1065,7 @@ test('runtime adapter rejects send and cross-j before either reaches a halted ru
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-admin-halted',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
@@ -1079,7 +1080,7 @@ test('runtime adapter rejects send and cross-j before either reaches a halted ru
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-halted',
       op: 'send',
       commandId: 'halted-command-0001',
@@ -1103,7 +1104,7 @@ test('runtime adapter rejects send and cross-j before either reaches a halted ru
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'cross-j-halted',
       op: 'cross-j-intent',
       route: { orderId: 'halted-cross-j' } as CrossJurisdictionSwapRoute,
@@ -1144,7 +1145,7 @@ test('runtime adapter keeps one command retryable until startup J catch-up compl
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-admin',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
@@ -1155,7 +1156,7 @@ test('runtime adapter keeps one command retryable until startup J catch-up compl
   );
   messages.length = 0;
   const command = {
-    v: 1 as const,
+    v: XLN_PROTOCOL_VERSION as const,
     op: 'send' as const,
     commandId: 'startup-catchup-command-0001',
     commandSequence: 1,
@@ -1203,7 +1204,7 @@ test('runtime adapter send commandId deduplicates retries and rejects payload ch
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-admin',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
@@ -1214,7 +1215,7 @@ test('runtime adapter send commandId deduplicates retries and rejects payload ch
   );
   messages.length = 0;
   const command = {
-    v: 1 as const,
+    v: XLN_PROTOCOL_VERSION as const,
     op: 'send' as const,
     commandId: 'retry-command-0001',
     commandSequence: 1,
@@ -1277,7 +1278,7 @@ test('vault-owner command retry survives capability token rotation without a sec
     await handleRuntimeAdapterMessage(
       socket,
       {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: `auth-owner-${suffix}`,
         op: 'auth',
         key,
@@ -1294,7 +1295,7 @@ test('vault-owner command retry survives capability token rotation without a sec
     await handleRuntimeAdapterMessage(
       socket,
       {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: `send-owner-${suffix}`,
         op: 'send',
         commandId: 'owner-rotation-command-0001',
@@ -1358,7 +1359,7 @@ test('vault-owner command frontier survives capability expiry and durable restor
     await handleRuntimeAdapterMessage(
       socket,
       {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: `auth-owner-expiry-${suffix}`,
         op: 'auth',
         key,
@@ -1372,7 +1373,7 @@ test('vault-owner command frontier survives capability expiry and durable restor
     await handleRuntimeAdapterMessage(
       socket,
       {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: `send-owner-expiry-${suffix}`,
         op: 'send',
         commandId: 'owner-expiry-command-0001',
@@ -1424,7 +1425,7 @@ test('invalid vault-owner proof rejects auth instead of falling back to a capabi
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-invalid-owner-proof',
       op: 'auth',
       key,
@@ -1441,7 +1442,7 @@ test('invalid vault-owner proof rejects auth instead of falling back to a capabi
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-after-invalid-owner-proof',
       op: 'send',
       commandId: 'invalid-owner-proof-command-0001',
@@ -1492,7 +1493,7 @@ test('runtime adapter command replay stays rejected after the bounded result cac
     await handleRuntimeAdapterMessage(
       socket,
       {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: 'auth-frontier-horizon',
         op: 'auth',
         key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
@@ -1509,7 +1510,7 @@ test('runtime adapter command replay stays rejected after the bounded result cac
       await handleRuntimeAdapterMessage(
         socket,
         {
-          v: 1,
+          v: XLN_PROTOCOL_VERSION,
           id: `send-frontier-${sequence}`,
           op: 'send',
           commandId: `frontier-command-${String(sequence).padStart(6, '0')}`,
@@ -1524,7 +1525,7 @@ test('runtime adapter command replay stays rejected after the bounded result cac
     await handleRuntimeAdapterMessage(
       socket,
       {
-        v: 1,
+        v: XLN_PROTOCOL_VERSION,
         id: 'send-frontier-replay',
         op: 'send',
         commandId: 'frontier-command-000001',
@@ -1568,7 +1569,7 @@ test('runtime adapter command sequence rejects equivocation and gaps before enqu
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-frontier-order',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
@@ -1584,7 +1585,7 @@ test('runtime adapter command sequence rejects equivocation and gaps before enqu
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-sequence-one',
       op: 'send',
       commandId: 'frontier-order-command-0001',
@@ -1598,7 +1599,7 @@ test('runtime adapter command sequence rejects equivocation and gaps before enqu
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-sequence-equivocation',
       op: 'send',
       commandId: 'frontier-order-command-0001',
@@ -1615,7 +1616,7 @@ test('runtime adapter command sequence rejects equivocation and gaps before enqu
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-sequence-gap',
       op: 'send',
       commandId: 'frontier-order-command-0003',
@@ -1668,7 +1669,7 @@ test('runtime adapter rejects a new command lane before enqueue when active capa
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-frontier-capacity',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', expiresAtMs, {
@@ -1684,7 +1685,7 @@ test('runtime adapter rejects a new command lane before enqueue when active capa
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'send-frontier-capacity',
       op: 'send',
       commandId: 'frontier-capacity-command-0001',
@@ -1720,7 +1721,7 @@ test('runtime adapter auth proves the runtime identity against a client challeng
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-identity',
       op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, { audience: runtimeId }),
@@ -1771,7 +1772,7 @@ test('runtime adapter rejects auth without a client challenge before granting ac
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'auth-without-challenge',
       op: 'auth',
       key: inspectToken(),
@@ -1786,7 +1787,7 @@ test('runtime adapter rejects auth without a client challenge before granting ac
   await handleRuntimeAdapterMessage(
     socket,
     {
-      v: 1,
+      v: XLN_PROTOCOL_VERSION,
       id: 'read-after-rejected-auth',
       op: 'read',
       path: 'head',
@@ -1813,7 +1814,7 @@ test('runtime adapter read rate limit is configurable', async () => {
   try {
     await handleRuntimeAdapterMessage(
       socket,
-      { v: 1, id: 'auth', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+      { v: XLN_PROTOCOL_VERSION, id: 'auth', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
       env,
       {
         enqueueRuntimeInput: () => {},
@@ -1821,10 +1822,10 @@ test('runtime adapter read rate limit is configurable', async () => {
     );
     messages.length = 0;
 
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-1', op: 'read', path: 'head' }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'read-1', op: 'read', path: 'head' }, env, {
       enqueueRuntimeInput: () => {},
     });
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-2', op: 'read', path: 'head' }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'read-2', op: 'read', path: 'head' }, env, {
       enqueueRuntimeInput: () => {},
     });
 
@@ -1860,12 +1861,12 @@ test('BrainVault mnemonic export is owner-lane only and redacts the secret', asy
   env.runtimeId = runtimeId;
   const unregister = registerStructuredLogSink(event => auditEvents.push(event));
   try {
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-admin-brainvault', op: 'auth',
+    await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'auth-admin-brainvault', op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
       challenge: adapterAuthChallenge,
     }, env, { enqueueRuntimeInput: () => {} });
     messages.length = 0;
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'brainvault-reveal-denied', op: 'brainvault-reveal' }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'brainvault-reveal-denied', op: 'brainvault-reveal' }, env, {
       enqueueRuntimeInput: () => {},
       revealBrainVaultMnemonic: async () => ({ mnemonic24 }),
     });
@@ -1877,14 +1878,14 @@ test('BrainVault mnemonic export is owner-lane only and redacts the secret', asy
       audience: runtimeId,
     });
     await handleRuntimeAdapterMessage(socket, {
-      v: 1, id: 'auth-owner-brainvault', op: 'auth',
+      v: XLN_PROTOCOL_VERSION, id: 'auth-owner-brainvault', op: 'auth',
       key: ownerKey,
       challenge: adapterAuthChallenge,
       ownerSignature: ownerBindingSignature(runtimeId, adapterAuthChallenge, ownerKey),
     }, env, { enqueueRuntimeInput: () => {} });
     messages.length = 0;
     auditEvents.length = 0;
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'brainvault-reveal-audit', op: 'brainvault-reveal' }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'brainvault-reveal-audit', op: 'brainvault-reveal' }, env, {
       enqueueRuntimeInput: () => {},
       revealBrainVaultMnemonic: async () => ({ mnemonic24 }),
     });
@@ -1914,14 +1915,14 @@ test('runtime adapter ticks only go to authenticated clients', async () => {
     },
   };
 
-  await handleRuntimeAdapterMessage(unauthSocket, { v: 1, id: 'read-unauth', op: 'read', path: 'head' }, env, {
+  await handleRuntimeAdapterMessage(unauthSocket, { v: XLN_PROTOCOL_VERSION, id: 'read-unauth', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
   unauthMessages.length = 0;
 
   await handleRuntimeAdapterMessage(
     inspectSocket,
-    { v: 1, id: 'auth-inspect', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+    { v: XLN_PROTOCOL_VERSION, id: 'auth-inspect', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
     env,
     {
       enqueueRuntimeInput: () => {},
@@ -1950,13 +1951,13 @@ test('runtime adapter ticks stay isolated across Runtime replicas in one process
   try {
     await handleRuntimeAdapterMessage(
       firstSocket,
-      { v: 1, id: 'auth-first-runtime', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+      { v: XLN_PROTOCOL_VERSION, id: 'auth-first-runtime', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
       firstEnv,
       { enqueueRuntimeInput: () => {} },
     );
     await handleRuntimeAdapterMessage(
       secondSocket,
-      { v: 1, id: 'auth-second-runtime', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+      { v: XLN_PROTOCOL_VERSION, id: 'auth-second-runtime', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
       secondEnv,
       { enqueueRuntimeInput: () => {} },
     );
@@ -1985,7 +1986,7 @@ test('runtime adapter drops expired clients before broadcasting ticks', async ()
 
   await handleRuntimeAdapterMessage(
     socket,
-    { v: 1, id: 'auth-expired', op: 'auth', key: expiredToken, challenge: adapterAuthChallenge },
+    { v: XLN_PROTOCOL_VERSION, id: 'auth-expired', op: 'auth', key: expiredToken, challenge: adapterAuthChallenge },
     env,
     {
       enqueueRuntimeInput: () => {},
@@ -1997,7 +1998,7 @@ test('runtime adapter drops expired clients before broadcasting ticks', async ()
   const liveToken = deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 5);
   await handleRuntimeAdapterMessage(
     socket,
-    { v: 1, id: 'auth-live', op: 'auth', key: liveToken, challenge: adapterAuthChallenge },
+    { v: XLN_PROTOCOL_VERSION, id: 'auth-live', op: 'auth', key: liveToken, challenge: adapterAuthChallenge },
     env,
     {
       enqueueRuntimeInput: () => {},
@@ -2030,14 +2031,14 @@ test('runtime adapter caps outgoing responses and leaves the socket open for a s
   try {
     await handleRuntimeAdapterMessage(
       socket,
-      { v: 1, id: 'auth', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
+      { v: XLN_PROTOCOL_VERSION, id: 'auth', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge },
       env,
       {
         enqueueRuntimeInput: () => {},
       },
     );
     messages.length = 0;
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'big-read', op: 'read', path: `entity/${entityId}` }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: XLN_PROTOCOL_VERSION, id: 'big-read', op: 'read', path: `entity/${entityId}` }, env, {
       enqueueRuntimeInput: () => {},
     });
     const response = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages[0]);
@@ -2482,7 +2483,7 @@ test('a superseded connection failure cannot close the newer authenticated socke
       const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
       queueMicrotask(() => this.onmessage?.({
         data: encodeRuntimeAdapterMessage({
-          v: 1,
+          v: XLN_PROTOCOL_VERSION,
           inReplyTo: request.id,
           ok: true,
           payload: {

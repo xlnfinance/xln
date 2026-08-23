@@ -1,3 +1,4 @@
+import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { expect, test } from 'bun:test';
 
 import { decodeRuntimeAdapterBrowserMessage, decodeRuntimeAdapterMessage } from '../../../api/runtime-adapter/codec';
@@ -201,13 +202,13 @@ test('settlement queue counters never traverse signed payload bodies', async () 
 
 test('settlement evidence control is admin-authenticated and exact on the wire', async () => {
   expect(() => validateRuntimeAdapterWireMessage({
-    v: 1, id: 'settlement-invalid', op: 'control',
+    v: XLN_PROTOCOL_VERSION, id: 'settlement-invalid', op: 'control',
     action: { ...request, accounts: [{ ...request.accounts[0], unknown: true }] },
   })).toThrow('RADAPTER_SETTLEMENT_ACCOUNT_FIELDS_INVALID:0');
 
   const messages: unknown[] = [];
   await handleRuntimeAdapterMessage({ send: message => messages.push(message) }, {
-    v: 1, id: 'settlement-denied', op: 'control', action: request,
+    v: XLN_PROTOCOL_VERSION, id: 'settlement-denied', op: 'control', action: request,
   }, makeSettlementEnv(), {
     enqueueRuntimeInput: () => {},
     controlRuntime: async (env, action) => {
