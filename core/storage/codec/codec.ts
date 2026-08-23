@@ -1,3 +1,4 @@
+import { XLN_BINARY_MSGPACK_MAGIC } from '../../protocol/serialization/binary-codec';
 import {
   decodeBinaryPayload,
   decodeValidatedBinaryPayload,
@@ -46,7 +47,7 @@ export const encodeBufferPrepared = (
 };
 
 const requireStorageMsgpack = (buffer: Buffer): void => {
-  if (buffer[0] !== 0x01) {
+  if (buffer[0] !== XLN_BINARY_MSGPACK_MAGIC) {
     throw new Error(`STORAGE_CODEC_MSGPACK_REQUIRED:magic=${buffer[0] ?? 'none'}`);
   }
 };

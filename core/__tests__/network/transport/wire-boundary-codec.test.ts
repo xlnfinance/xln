@@ -51,20 +51,20 @@ describe('WebSocket trusted decode boundary', () => {
       pong: { type: 'pong' },
     } satisfies Record<string, RuntimeWsMessage>;
     const expected = {
-      hello: '0x67d058920f988427e97f542a0054e8ae827687ef3f547df973d0e5f8d305acb6',
-      hello_challenge: '0x62b8fdfd5f31a09e987ae22f2c88beca6dcd52194dfd400779aceae1f22cde72',
-      hello_ack: '0x22213cebb281dd0ec4f73cfd5472407165eea5670e61f7b798be3d728b4b0a7c',
-      entity_inputs: '0x49df4b993bbf08ed80de3cd4644e57d71168cd58d5daaaf457464bd0497dd0fe',
-      debug_event: '0x3da2b0a0683b15b73e8dc7d281a38575ec17bb14914adb390bdd7e81a90cea7d',
-      gossip_request: '0xa83f38f3ff5b2bbd53398c703be1024996617454a4dd278d59e9bbd53cd14ddc',
-      gossip_response: '0x4ca3d895f8665ad057b10cb53de8af87132e81f10c27de4bc076021f08d0bc61',
-      gossip_announce: '0xd164f639b9e542b71e7f6bf09566a6c914fc43ba41fc180333d235a6cdec2e96',
-      gossip_update: '0x93b16b1e875a71a2ec1dc1f707afb0ec6148f741cd63dd6e7fd6861a91ca3ff7',
-      recovery_bundle_request: '0x2294aa1138c5754bde0eb02ec30abd2ca8ad8eacfd59d1b1558d914f384e88c0',
-      recovery_bundle_response: '0x6e629c6fad93dab7f464719bc4d2fc1fb859e05e654354b32f9438335815afec',
-      error: '0x5ae6818aa95c44ffa90f4e91c65a9b56a8666e2819d7e0f7125335afe8437623',
-      ping: '0xe646fbf1a2276f9ae7baad5fac2de7183563fcd5d12808325ef4f0d064a514ed',
-      pong: '0x830408a848d44936f39d56f8ec6f4c887da1e072a86c2a932fe6fa1ab0732e97',
+      hello: '0xa2266ac52550c7a6572f2683a59cec61e35401706454dfd6e283017ab87ca126',
+      hello_challenge: '0xb7ad3b3c5416530d7afd5cf502a756ea0f6314e25466e192a67679ae002a2c2c',
+      hello_ack: '0xdb53ed3863ce99f39f991074cf39302aed0a85a7ee73e9a723015a7a26046f3e',
+      entity_inputs: '0x5b6669d6114c03ed23d8eefdae3eba77f6e3c37d9465fdb620bbf2e89299a5d1',
+      debug_event: '0xb7e04662f033f749a826f5610e6348eeac94d16cc9ee5cbde5b686d146ad5014',
+      gossip_request: '0xe45579eefa154d217f4ecbac4828bd18dfe279bc2cba09060c22f78fe269cef2',
+      gossip_response: '0xebac1b909b787e80f7ef97ba52f82b858e9bb00a72c15c2275ef747f0ef485eb',
+      gossip_announce: '0xefcc260b1131872ae709039176921f74649af90351b442835dccb47d24d2d398',
+      gossip_update: '0xac0e00c6926e1802e5b45214e8a89c2da535a5bcc0fdfa9f02e6aeac4f254cf5',
+      recovery_bundle_request: '0x1718ab0de51643a4b606c34388a39227552fb7d675eddf772bf40341dd8ebb87',
+      recovery_bundle_response: '0x47143e51336159e65cbc0235843a5cf3ceda2d4048ee62677e6d00aec98c5772',
+      error: '0x7c5fe99f0d2b7bebe414579183923c7dc9a4d32a3896c67a859be2fdd051651e',
+      ping: '0x2aa10d25163a8b043acacbb6836997c886adaf9f97ae32c3a078d62a347ef210',
+      pong: '0x542d7c0b98506d78307da43a2db88c2f6196525f80f4b0d69c94a9776f3daf07',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [
@@ -144,12 +144,12 @@ describe('rAdapter trusted decode boundary', () => {
       tick: { v: XLN_PROTOCOL_VERSION, op: 'tick', height: 1, commandReady: true, commandReadyReason: null },
     } satisfies Record<string, RuntimeAdapterWireMessage>;
     const expected = {
-      auth: '0xd39ae58ff43fa6f0289e6295ad771d1c3806d868ba3b9fadec9ff7620dc20979',
-      read: '0xcd2dd43e3d67fd18fe3787525bf7216dec22d3c5bd0b62b82e9c83da0363fcc2',
-      send: '0x952b54e205f756f931246a2e428adf26e0c114304d138fcda257ec51d42b36c6',
-      ok: '0x3cd4ebc63318e341632394598f7b4e4da591bf3bb1b148d5966a3b0153c3ed6b',
-      error: '0xda58018ed9c462325c818bac21545d6cf561a46408c96411beff403864550511',
-      tick: '0x7201ac738a520fc81d70ee83c813c1e50b65f449f1cb6554555fc47588ea72ec',
+      auth: '0x867117905ba13a6f04316fd2ec383c5aa7930d6471922845bec02b17db12a11b',
+      read: '0x26cef89a17b9effd99fc9549d5bd262a434991a49300ec38002c5ce9545a9d88',
+      send: '0x90bf7cc4bcc5b5ebe8ebb23ff5d9d828b76707da75ad42b1559e1dd2617f0476',
+      ok: '0x16382c2a91f2683231b1fe278dd04a18f300450e4d364d583aceb3c23ab04e1b',
+      error: '0x8361152a205ab89bde0114f3a69f683718cd2d2c4d57efc66065079b3b431be1',
+      tick: '0xef45dd9834b3fbd4fd19e1ff475bc8eb1807e8041fdd4401031c212cba983fa0',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [

@@ -1,6 +1,7 @@
 import type { AccountOutput, AccountReplica, AccountState, AccountTx } from '../../../types/account';
 import { RecencyMemo } from '../../../support/collections/recency-memo';
 import { peekAccountStateRoot } from '../../commitment/state-root';
+import { ACCOUNT_LIVE_ENVELOPE } from '../../state/candidate-overlay';
 
 /**
  * The transition a proposer validated while building its frame is the exact
@@ -35,18 +36,37 @@ const PREPARED_COMMIT_TX_TYPES: ReadonlySet<AccountTx['type']> = new Set<Account
 export const preparedCommitCoversTxs = (txs: readonly AccountTx[]): boolean =>
   txs.every(tx => PREPARED_COMMIT_TX_TYPES.has(tx.type));
 
+const sameByIdentity = (left: object, right: object, skip: ReadonlySet<string>): boolean => {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if (skip.has(key)) continue;
+    if (Reflect.get(left, key) !== Reflect.get(right, key)) return false;
+  }
+  return true;
+};
+
+const SHADOW_REBALANCE_KEY: ReadonlySet<string> = new Set(['rebalance']);
+const STATE_KEY: ReadonlySet<string> = new Set(['state', 'shadow']);
+const NO_KEYS: ReadonlySet<string> = new Set();
+
 /**
- * Untouched draft collections keep the committed wrapper identity, so a
- * replaced Entity-private collection proves the transition wrote outside the
- * bilateral state and must not be replayed from the cache.
+ * Every replica field outside the live frame envelope must be the same
+ * object on the candidate as on the base (the draft shell copies references;
+ * untouched persistent collections keep their wrapper identity). Any replaced
+ * field proves the transition wrote outside the bilateral state — forwards,
+ * dispute drafts, shadow quotes — and the transition must not be replayed
+ * from the cache. Derived from the envelope, so a new replica field fails
+ * closed instead of being silently overwritten at ACK.
  */
 export const preparedCommitLeavesPrivateStateUntouched = (
   base: AccountReplica,
   candidate: AccountReplica,
-): boolean =>
-  candidate.pendingWithdrawals === base.pendingWithdrawals
-  && candidate.shadow.rebalance.policy === base.shadow.rebalance.policy
-  && candidate.shadow.rebalance.submittedAtByToken === base.shadow.rebalance.submittedAtByToken;
+): boolean => {
+  const skip = new Set<string>([...ACCOUNT_LIVE_ENVELOPE, ...STATE_KEY]);
+  if (!sameByIdentity(base, candidate, skip)) return false;
+  if (!sameByIdentity(base.shadow, candidate.shadow, SHADOW_REBALANCE_KEY)) return false;
+  return sameByIdentity(base.shadow.rebalance, candidate.shadow.rebalance, NO_KEYS);
+};
 
 const preparedCommits = new RecencyMemo<string, PreparedProposalCommit>(8_192);
 

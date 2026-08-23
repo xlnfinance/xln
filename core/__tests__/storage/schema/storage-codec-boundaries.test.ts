@@ -41,24 +41,27 @@ const zeroHash = `0x${'00'.repeat(32)}`;
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
 
-// XLN_BINARY_FORMAT_V1 is pinned independently from the implementation.
+// XLN_BINARY_FORMAT_V2 (magic 0x03): standard MessagePack via msgpackr with
+// moreTypes and WITHOUT structured-clone reference markers, Buffer folded into
+// Uint8Array. Pinned bytes: changing a literal requires a new codec magic plus
+// a storage schema bump; never "refresh" these after a refactor.
 // Changing a literal requires a new codec magic/storage schema version plus an
 // independently reviewed vector; never "refresh" these after a refactor.
 const GOLDEN_MSGPACK_V1_HEX =
-  '01d4724098a6626967696e74a6627566666572a464617465a36d6170a66f626a656374a3736574a57479706564a776657273696f6e' +
-  'cfab54a98ceb1f0ad2c4040001feffd7ffa1a5d60065937d2582a161d30000000000000001a17ad30000000000000002d4724192' +
+  '03d4724098a6626967696e74a6627566666572a464617465a36d6170a66f626a656374a3736574a57479706564a776657273696f6e' +
+  'cfab54a98ceb1f0ad2c70574010001feffd7ffa1a5d60065937d2582a161d30000000000000001a17ad30000000000000002d4724192' +
   'a161a17aa17802d4730092a161a17ac704740109080701';
 const GOLDEN_JSON_V1_BODY =
   '{"bigint":{"__xlnType":"BigInt","value":"12345678901234567890"},' +
-  '"buffer":{"__xlnType":"Buffer","value":[0,1,254,255]},' +
+  '"buffer":{"__xlnType":"TypedArray","kind":"Uint8Array","value":"AAH+/w=="},' +
   '"date":{"__xlnType":"Date","value":"2024-01-02T03:04:05.678Z"},' +
   '"map":{"__xlnType":"Map","value":[["a",{"__xlnType":"BigInt","value":"1"}],["z",{"__xlnType":"BigInt","value":"2"}]]},' +
   '"object":{"a":"x","z":2},"set":{"__xlnType":"Set","value":["a","z"]},' +
   '"typed":{"__xlnType":"TypedArray","kind":"Uint8Array","value":"CQgH"},"version":1}';
 const GOLDEN_HASHES_V1 = {
-  msgpack: '0x2155da9edd8ffde80d3a2f4a52b40995ed89a9680979e25c18b998359fe2832f',
-  json: '0x36b7663b235d64db039ba8736fa82d9f3f830c1e7d4e351f554f4464b6ba27d6',
-  frameMsgpack: '0x30b36234718ca0624e8fdb67e45746f3a6dd6c06beadf989797acda5c99fcf03',
+  msgpack: '0x6a2608adeb9078a0bec8693b5a8a72827d7f1a0324d3ee3a001f74c8348dd080',
+  json: '0x03aad9703a471b8347d48e6f13e00d6eb3a3ddc165de9bf9e13c2e08809ae6b7',
+  frameMsgpack: '0x2535f1b32ce8e1e368534afa3df6f40578806848dd708e71c7d3106d6fb5dd1d',
   frameJson: '0x863eef139d80887612e7291b04bfec5cbb8f596ef028bbd42610866d672fed7b',
 } as const;
 

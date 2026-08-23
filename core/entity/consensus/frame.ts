@@ -148,12 +148,14 @@ type CanonicalFrameTxs = {
 const canonicalTxsByFrameTxs = new RecencyMemo<EntityTx[], CanonicalFrameTxs>(64);
 // Wire fitting, the frame hash and validation each see a different array of
 // the same tx objects; the per-tx bytes are what is expensive to produce.
-const canonicalTxBytes = new RecencyMemo<EntityTx, Uint8Array>(65_536);
+// Hanko witness attachment replaces `tx.data` in place after commit
+// (hanko-witness.ts); the memo is valid only for the exact body it encoded.
+const canonicalTxBytes = new RecencyMemo<EntityTx, { data: unknown; bytes: Uint8Array }>(65_536);
 const encodeCanonicalFrameTx = (tx: EntityTx): Uint8Array => {
   const hit = canonicalTxBytes.get(tx);
-  if (hit) return hit;
+  if (hit && hit.data === tx.data) return hit.bytes;
   const bytes = encodeBinaryPayload(canonicalEntityTxForFrameHash(tx));
-  canonicalTxBytes.set(tx, bytes);
+  canonicalTxBytes.set(tx, { data: tx.data, bytes });
   return bytes;
 };
 const canonicalFrameTxs = (txs: EntityTx[]): CanonicalFrameTxs => {
@@ -169,8 +171,9 @@ const canonicalFrameTxs = (txs: EntityTx[]): CanonicalFrameTxs => {
   const preimage = new Uint8Array(domain.byteLength + prefixAt(prefixBytes, txs.length));
   preimage.set(domain, 0);
   let offset = domain.byteLength;
+  const view = new DataView(preimage.buffer);
   for (const bytes of encoded) {
-    new DataView(preimage.buffer).setUint32(offset, bytes.byteLength);
+    view.setUint32(offset, bytes.byteLength);
     preimage.set(bytes, offset + TX_LENGTH_PREFIX_BYTES);
     offset += TX_LENGTH_PREFIX_BYTES + bytes.byteLength;
   }
