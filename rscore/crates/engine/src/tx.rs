@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 
-use crate::TokenId;
+use crate::{HtlcLockTx, HtlcResolveTx, TokenId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliveryMode {
@@ -101,4 +101,6 @@ pub enum AccountTx {
         block_number: i64,
         transaction_hash: String,
     },
+    HtlcLock(HtlcLockTx),
+    HtlcResolve(HtlcResolveTx),
 }

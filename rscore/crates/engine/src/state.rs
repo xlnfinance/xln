@@ -7,7 +7,7 @@ use xln_rscore_protocol::{
 };
 
 use crate::delta::MAX_ACCOUNT_TOKEN_ROWS;
-use crate::{AccountIdentity, Delta, EntityId, Side, StateError, TokenId};
+use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LendingIntentKind {
@@ -38,6 +38,7 @@ impl LendingIntentKind {
 pub struct AccountState {
     identity: AccountIdentity,
     deltas: PersistentRadixMap<Delta>,
+    locks: PersistentRadixMap<HtlcLock>,
     lending_intents: Option<PersistentRadixMap<LendingIntentKind>>,
 }
 
@@ -61,6 +62,7 @@ impl AccountState {
         Ok(Self {
             identity,
             deltas: map,
+            locks: PersistentRadixMap::empty(),
             lending_intents: None,
         })
     }
@@ -87,6 +89,19 @@ impl AccountState {
             .map(PersistentRadixMap::root_hash)
     }
 
+    pub fn htlc_lock(&self, lock_id: &str) -> Option<&HtlcLock> {
+        let raw_key = encode_raw_text_key(lock_id).ok()?;
+        self.locks.get(&raw_key)
+    }
+
+    pub fn htlc_count(&self) -> usize {
+        self.locks.len()
+    }
+
+    pub fn htlc_locks_root(&self) -> [u8; 32] {
+        self.locks.root_hash()
+    }
+
     pub fn lending_intent(&self, key: &str) -> Option<LendingIntentKind> {
         let raw_key = encode_raw_text_key(key).ok()?;
         self.lending_intents
@@ -109,6 +124,10 @@ impl AccountState {
         current.node_changes_since(prior)
     }
 
+    pub fn htlc_node_changes_since(&self, previous: &Self) -> PersistentNodeChanges<HtlcLock> {
+        self.locks.node_changes_since(&previous.locks)
+    }
+
     pub(crate) fn delta_or_zero(&self, token_id: TokenId) -> Result<Delta, StateError> {
         if let Some(delta) = self.delta(token_id) {
             return Ok(delta.clone());
@@ -125,6 +144,22 @@ impl AccountState {
 
     pub(crate) fn put_delta(&mut self, delta: Delta) -> Result<(), StateError> {
         self.deltas = put_delta_map(&self.deltas, delta)?;
+        Ok(())
+    }
+
+    pub(crate) fn put_htlc_lock(&mut self, lock: HtlcLock) -> Result<(), StateError> {
+        let key = crate::htlc_lock_radix_key(lock.lock_id())?;
+        let digest = crate::htlc_lock_value_digest(&lock)?;
+        self.locks = self
+            .locks
+            .updated(key, lock, digest)
+            .map_err(|error| StateError::PersistentMap(error.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn remove_htlc_lock(&mut self, lock_id: &str) -> Result<(), StateError> {
+        let key = crate::htlc_lock_radix_key(lock_id)?;
+        self.locks = self.locks.removed(&key);
         Ok(())
     }
 

@@ -129,6 +129,20 @@ impl Delta {
         &self.right_credit_limit
     }
 
+    pub fn hold(&self, side: Side) -> &BigInt {
+        match side {
+            Side::Left => &self.left_hold,
+            Side::Right => &self.right_hold,
+        }
+    }
+
+    pub fn allowance(&self, side: Side) -> &BigInt {
+        match side {
+            Side::Left => &self.left_allowance,
+            Side::Right => &self.right_allowance,
+        }
+    }
+
     pub(crate) fn set_credit_limit(&mut self, proposer: Side, amount: BigInt) {
         match proposer {
             Side::Left => self.right_credit_limit = amount,
@@ -147,6 +161,34 @@ impl Delta {
         };
         signed("offdelta", &next, 256)?;
         self.offdelta = next;
+        Ok(())
+    }
+
+    pub(crate) fn add_hold(&mut self, side: Side, amount: &BigInt) -> Result<(), StateError> {
+        let next = self.hold(side) + amount;
+        let field = match side {
+            Side::Left => "leftHold",
+            Side::Right => "rightHold",
+        };
+        unsigned(field, &next, &uint_max(256))?;
+        match side {
+            Side::Left => self.left_hold = next,
+            Side::Right => self.right_hold = next,
+        }
+        Ok(())
+    }
+
+    pub(crate) fn release_hold(&mut self, side: Side, amount: &BigInt) -> Result<(), StateError> {
+        let next = self.hold(side) - amount;
+        let field = match side {
+            Side::Left => "leftHold",
+            Side::Right => "rightHold",
+        };
+        unsigned(field, &next, &uint_max(256))?;
+        match side {
+            Side::Left => self.left_hold = next,
+            Side::Right => self.right_hold = next,
+        }
         Ok(())
     }
 

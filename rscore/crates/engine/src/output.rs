@@ -12,4 +12,18 @@ pub enum AccountOutput {
         delivery_mode: DeliveryMode,
         trusted_gateway_entity_id: String,
     },
+    HtlcSecret {
+        lock_id: String,
+        hashlock: String,
+        secret: String,
+        token_id: TokenId,
+        amount: BigInt,
+    },
+    HtlcError {
+        lock_id: String,
+        hashlock: String,
+        token_id: TokenId,
+        amount: BigInt,
+        reason: Option<String>,
+    },
 }

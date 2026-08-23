@@ -1,6 +1,11 @@
 use crate::balance::{self, DirectPayment};
 use crate::mutation::MutationDecision;
-use crate::{AccountOutput, AccountRejection, AccountReplica, AccountTx, Side, TransitionError};
+use crate::{
+    AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, Side,
+    TransitionError,
+};
+
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountVerdict {
@@ -68,7 +73,19 @@ impl SequentialAccountEngine {
         tx: &AccountTx,
     ) -> Result<AccountTransition, TransitionError> {
         let mut candidate = base.clone();
-        let decision = apply_to_candidate(&mut candidate, proposer, tx)?;
+        let decision = apply_to_candidate(&mut candidate, proposer, tx, None)?;
+        Ok(transition_from_decision(candidate, decision))
+    }
+
+    pub fn apply_with_context(
+        base: &AccountReplica,
+        proposer: Side,
+        tx: &AccountTx,
+        context: &AccountExecutionContext,
+    ) -> Result<AccountTransition, TransitionError> {
+        validate_context(context)?;
+        let mut candidate = base.clone();
+        let decision = apply_to_candidate(&mut candidate, proposer, tx, Some(context))?;
         Ok(transition_from_decision(candidate, decision))
     }
 
@@ -80,7 +97,33 @@ impl SequentialAccountEngine {
         let mut events = Vec::new();
         let mut outputs = Vec::new();
         for (proposer, tx) in transactions {
-            match apply_to_candidate(&mut candidate, *proposer, tx)? {
+            match apply_to_candidate(&mut candidate, *proposer, tx, None)? {
+                MutationDecision::Applied {
+                    events: next_events,
+                    outputs: next_outputs,
+                } => {
+                    events.extend(next_events);
+                    outputs.extend(next_outputs);
+                }
+                MutationDecision::Rejected { rejection, events } => {
+                    return Ok(AccountTransition::rejected(rejection, events));
+                }
+            }
+        }
+        Ok(AccountTransition::applied(candidate, events, outputs))
+    }
+
+    pub fn apply_atomic_with_context(
+        base: &AccountReplica,
+        transactions: &[(Side, AccountTx)],
+        context: &AccountExecutionContext,
+    ) -> Result<AccountTransition, TransitionError> {
+        validate_context(context)?;
+        let mut candidate = base.clone();
+        let mut events = Vec::new();
+        let mut outputs = Vec::new();
+        for (proposer, tx) in transactions {
+            match apply_to_candidate(&mut candidate, *proposer, tx, Some(context))? {
                 MutationDecision::Applied {
                     events: next_events,
                     outputs: next_outputs,
@@ -115,6 +158,7 @@ fn apply_to_candidate(
     candidate: &mut AccountReplica,
     proposer: Side,
     tx: &AccountTx,
+    context: Option<&AccountExecutionContext>,
 ) -> Result<MutationDecision, TransitionError> {
     match tx {
         AccountTx::AddDelta { token_id } => balance::add_delta(candidate, *token_id),
@@ -151,5 +195,28 @@ fn apply_to_candidate(
         | AccountTx::LendingCloseRequest { .. }
         | AccountTx::LendingClosePayout { .. } => crate::lending::apply(candidate, tx, proposer),
         AccountTx::ReserveToCollateral { .. } => Ok(balance::reserve_to_collateral()),
+        AccountTx::HtlcLock(tx) => {
+            let context = context.ok_or(TransitionError::ExecutionContextRequired("htlc_lock"))?;
+            crate::htlc::apply_lock(candidate, proposer, tx, context)
+        }
+        AccountTx::HtlcResolve(tx) => {
+            let context =
+                context.ok_or(TransitionError::ExecutionContextRequired("htlc_resolve"))?;
+            crate::htlc::apply_resolve(candidate, proposer, tx, context)
+        }
     }
+}
+
+fn validate_context(context: &AccountExecutionContext) -> Result<(), TransitionError> {
+    for (field, value) in [
+        ("committedTimestamp", context.committed_timestamp),
+        ("enforcementTimestamp", context.enforcement_timestamp),
+        ("enforcementJHeight", context.enforcement_j_height),
+        ("currentAccountHeight", context.current_account_height),
+    ] {
+        if value > MAX_SAFE_INTEGER {
+            return Err(TransitionError::ExecutionContextOutOfRange { field, value });
+        }
+    }
+    Ok(())
 }

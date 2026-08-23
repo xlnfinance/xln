@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use thiserror::Error;
 
-use crate::TokenId;
+use crate::{HtlcBoundaryError, HtlcRejection, TokenId};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum StateError {
@@ -29,6 +29,8 @@ pub enum StateError {
     DeltaFieldOutOfRange { field: &'static str, value: BigInt },
     #[error("ACCOUNT_STATE_PERSISTENT_MAP:{0}")]
     PersistentMap(String),
+    #[error("ACCOUNT_STATE_LEAF_TOO_LARGE:{actual}:{maximum}")]
+    AccountStateLeafTooLarge { actual: usize, maximum: usize },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +62,7 @@ pub enum ValidationRejection {
         available: BigInt,
     },
     ReserveToCollateralBlocked,
+    Htlc(HtlcRejection),
 }
 
 impl ValidationRejection {
@@ -86,6 +89,7 @@ impl ValidationRejection {
             Self::ReserveToCollateralBlocked => {
                 "SECURITY: reserve_to_collateral blocked - must use j_event_claim bilateral consensus".into()
             }
+            Self::Htlc(reason) => reason.message(),
         }
     }
 }
@@ -94,6 +98,7 @@ impl ValidationRejection {
 pub enum AccountRejection {
     Validation(ValidationRejection),
     DeltaRowLimitExceeded { attempted: usize, maximum: usize },
+    HtlcLockCapacity { maximum: usize },
 }
 
 impl AccountRejection {
@@ -101,6 +106,7 @@ impl AccountRejection {
         match self {
             Self::Validation(_) => "ACCOUNT_TX_VALIDATION",
             Self::DeltaRowLimitExceeded { .. } => "ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED",
+            Self::HtlcLockCapacity { .. } => "ACCOUNT_HTLC_LOCK_CAPACITY",
         }
     }
 
@@ -110,6 +116,9 @@ impl AccountRejection {
             Self::DeltaRowLimitExceeded { attempted, maximum } => {
                 format!("ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:{attempted}:{maximum}")
             }
+            Self::HtlcLockCapacity { maximum } => {
+                format!("Too many active HTLC locks: max {maximum}")
+            }
         }
     }
 }
@@ -118,6 +127,8 @@ impl AccountRejection {
 pub enum TransitionError {
     #[error(transparent)]
     InvalidState(#[from] StateError),
+    #[error(transparent)]
+    HtlcBoundary(#[from] HtlcBoundaryError),
     #[error("TRUSTED_PAYMENT_FORWARD_CONTEXT_MISSING")]
     TrustedPaymentForwardContextMissing,
     #[error("TRUSTED_PAYMENT_FORWARD_GATEWAY_MISMATCH")]
@@ -146,4 +157,8 @@ pub enum TransitionError {
     LendingCreditLimitNegative(BigInt),
     #[error("ACCOUNT_TX_ROUTE_MISMATCH:lending")]
     LendingRouteMismatch,
+    #[error("ACCOUNT_EXECUTION_CONTEXT_REQUIRED:{0}")]
+    ExecutionContextRequired(&'static str),
+    #[error("ACCOUNT_EXECUTION_CONTEXT_OUT_OF_RANGE:{field}:{value}")]
+    ExecutionContextOutOfRange { field: &'static str, value: u64 },
 }
