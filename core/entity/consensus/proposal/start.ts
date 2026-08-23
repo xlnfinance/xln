@@ -256,11 +256,37 @@ const buildProposalState = (
   };
 };
 
+/**
+ * Account digests (frame/ack/seal hankos) are final once the frame is applied,
+ * before the Entity state root, frame hash and output hashes exist. Start
+ * that batch on the pool first so secp256k1 overlaps the Patricia root walk;
+ * the remainder is signed after the frame hash. Bytes and order are exactly
+ * those of one batch over the manifest.
+ */
+type EarlyManifestSignatures = Readonly<{
+  hashes: readonly string[];
+  signatures: Promise<string[] | null>;
+}>;
+
+const startEarlyManifestSignatures = (
+  env: EntityRuntimeContext,
+  replica: EntityReplica,
+  collectedHashes: ReadonlyArray<{ hash: string }> | undefined,
+): EarlyManifestSignatures | null => {
+  if (!collectedHashes || collectedHashes.length === 0) return null;
+  const hashes = collectedHashes.map(entry => entry.hash);
+  const signatures = signDigestsBatch(env, replica.signerId, hashes);
+  // The rejection (if any) surfaces at the await in signProposalManifest.
+  signatures.catch(() => undefined);
+  return { hashes, signatures };
+};
+
 const signProposalManifest = async (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   state: EntityState,
   hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
+  early: EarlyManifestSignatures | null,
 ): Promise<string[]> => {
   const authorityAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   await assertEntityConfigBoardAuthority(
@@ -270,6 +296,22 @@ const signProposalManifest = async (
     state,
   );
   countOp('entity.proposal.boardAuthority', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - authorityAt) * 1_000) : 0);
+  const earlySigned = early ? await early.signatures : null;
+  if (earlySigned) {
+    const byHash = new Map<string, string>();
+    early!.hashes.forEach((hash, index) => byHash.set(hash, earlySigned[index]!));
+    const remaining = hashesToSign.filter(entry => !byHash.has(entry.hash)).map(entry => entry.hash);
+    const lateSigned = remaining.length === 0
+      ? []
+      : (await signDigestsBatch(env, replica.signerId, remaining))
+        ?? remaining.map(hash => signAccountFrame(env, replica.signerId, hash));
+    remaining.forEach((hash, index) => byHash.set(hash, lateSigned[index]!));
+    return hashesToSign.map(entry => {
+      const signature = byHash.get(entry.hash);
+      if (signature === undefined) throw new Error(`ENTITY_MANIFEST_SIGNATURE_MISSING:${entry.hash}`);
+      return signature;
+    });
+  }
   // Same deterministic secp256k1 bytes either way; the pool takes the batch
   // off the main thread on a Hub, a single-runtime host signs inline.
   const pooled = await signDigestsBatch(env, replica.signerId, hashesToSign.map(hash => hash.hash));
@@ -399,6 +441,7 @@ const sealEntityProposal = async (
   const state = buildProposalState(env, workingReplica, applied.newState, txs, height, timestamp, leader.view);
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
   profile.checkpoint('proposalState');
+  const earlySignatures = startEarlyManifestSignatures(env, workingReplica, applied.collectedHashes);
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
   profile.checkpoint('stateRoot');
   const authority = buildEntityFrameAuthority(state);
@@ -444,7 +487,7 @@ const sealEntityProposal = async (
       : txs.length < 32 ? '8-31' : txs.length < 128 ? '32-127' : '128+'
   }`);
   profile.checkpoint('wireEstimate');
-  const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
+  const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign, earlySignatures);
   profile.checkpoint('manifestSignatures');
   const localCommitHankos = selection.isSingleSigner
     ? encodeSingleSignerEntityHankos(

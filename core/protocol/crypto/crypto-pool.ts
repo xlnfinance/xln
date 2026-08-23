@@ -221,7 +221,7 @@ class WorkerLane {
 const bulkLane = new WorkerLane(() =>
   configuredSize('XLN_CRYPTO_POOL_WORKERS', Math.max(0, Math.min(8, cores() - 2))));
 const signLane = new WorkerLane(() =>
-  configuredSize('XLN_CRYPTO_SIGN_WORKERS', Math.max(0, Math.min(2, cores() - 2))));
+  configuredSize('XLN_CRYPTO_SIGN_WORKERS', Math.max(0, Math.min(4, cores() - 2))));
 
 const getPool = (): Worker[] | null => bulkLane.workers();
 
