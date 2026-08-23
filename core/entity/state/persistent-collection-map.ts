@@ -1,6 +1,8 @@
 /** Persistent radix-16 storage for potentially large Entity string-keyed collections. */
 
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { encodeRawRadixTextKey } from '../../protocol/state/radix-merkle';
 import {
@@ -285,6 +287,7 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
 
   #project(): PersistentEntityCollectionMap<Value> {
     if (this.#projection) return this.#projection;
+    const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const mutations: RadixFoldMutation<string, Value>[] = [
       ...[...this.#deleted].sort().map(key => ({ kind: 'delete' as const, key })),
       ...[...this.#changes]
@@ -292,6 +295,7 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
         .map(([key, value]) => ({ kind: 'put' as const, key, value })),
     ];
     this.#projection = this.#base.foldDirty(mutations, this.#cleared);
+    countOp('entity.collection.fold', mutations.length, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0);
     return this.#projection;
   }
 
@@ -335,11 +339,14 @@ export const entityCollectionCommitment = <Value>(source: ReadonlyMap<string, Va
   root: string;
 }> => {
   const persistent = source instanceof EntityCollectionCandidateMap
-    ? source
+    ? source.snapshotCandidate()
     : PersistentEntityCollectionMap.from(source);
+  const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+  const root = cold ? persistent.coldRootHash() : persistent.rootHash();
+  countOp('entity.collection.seal', persistent.size, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - startedAt) * 1_000) : 0);
   return {
     radix: 16,
     leafCount: persistent.size,
-    root: cold ? persistent.coldRootHash() : persistent.rootHash(),
+    root,
   };
 };

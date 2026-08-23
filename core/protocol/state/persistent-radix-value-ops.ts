@@ -228,9 +228,9 @@ export const sealRadixNode = <K, V>(
     if (node.edgeHashes[slot] === undefined) {
       node.edgeHashes[slot] = computeRadixMerkleEdgeHash(
         options.radix,
-        [...node.path],
+        node.path,
         child.kind,
-        [...child.path],
+        child.path,
         childHash,
       );
     }
@@ -317,12 +317,11 @@ const foldLeaf = <K, V>(
   leaf: ValueLeaf<K, V>,
   items: readonly FoldItem<K, V>[],
 ): FoldResult<K, V> => {
-  const hex = radixBytesKey(leaf.keyBytes);
   const others: FoldItem<K, V>[] = [];
   let current: ValueNode<K, V> | null = leaf;
   let delta = 0;
   for (const item of items) {
-    if (item.hex !== hex) {
+    if (!radixBytesEqual(item.keyBytes, leaf.keyBytes)) {
       others.push(item);
       continue;
     }
@@ -357,11 +356,13 @@ const foldBranch = <K, V>(
   branch: ValueBranch<K, V>,
   items: readonly FoldItem<K, V>[],
 ): FoldResult<K, V> => {
+  // Items arrive sorted by key, so their agreement with one fixed path rises
+  // then falls: the shortest shared prefix is at one of the two ends.
   let splitAt = branch.path.length;
-  for (const item of items) {
-    const shared = radixCommonPrefixLength(item.path, branch.path);
-    if (shared < splitAt) splitAt = shared;
-  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (first) splitAt = Math.min(splitAt, radixCommonPrefixLength(first.path, branch.path));
+  if (last) splitAt = Math.min(splitAt, radixCommonPrefixLength(last.path, branch.path));
   if (splitAt < branch.path.length) {
     const slotOfBranch = branch.path[splitAt];
     if (slotOfBranch === undefined) throw new Error('PERSISTENT_RADIX_CHILD_SLOT_MISSING');

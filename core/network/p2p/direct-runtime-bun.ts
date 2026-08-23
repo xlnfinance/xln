@@ -30,7 +30,8 @@ import {
   serializeWsMessage,
   type RuntimeWsMessage,
 } from './ws-protocol';
-import { countOp, recordOpEvent } from '../../support/performance/op-counters';
+import { countOp, OP_COUNTERS_ENABLED, recordOpEvent } from '../../support/performance/op-counters';
+import { getPerfMs } from '../../support/time';
 import { isRuntimeId, normalizeRuntimeId } from './auth/runtime-id';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from './auth/hello-auth';
 import { createHelloChallengeRegistry } from './auth/hello-challenge';
@@ -712,11 +713,16 @@ const handleEntityInputs = async (
   const sessionKeys = session.sessionKeys;
   try {
     if (sessionKeys && msg.encSeq === undefined) throw new Error('Direct session entity_inputs must carry encSeq');
-    envelope = decodeRuntimeEntityInputsEnvelope(
-      sessionKeys && msg.encSeq !== undefined
-        ? decryptSessionPayload(msg.payload, sessionKeys.c2s, msg.encSeq)
-        : decryptPayload(msg.payload, context.keyPair.privateKey),
-    );
+    const decryptAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+    const plaintext = sessionKeys && msg.encSeq !== undefined
+      ? decryptSessionPayload(msg.payload, sessionKeys.c2s, msg.encSeq)
+      : decryptPayload(msg.payload, context.keyPair.privateKey);
+    const decodeAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
+    envelope = decodeRuntimeEntityInputsEnvelope(plaintext);
+    if (OP_COUNTERS_ENABLED) {
+      countOp('socket.directServer.in.decrypt', msg.payload.byteLength, Math.round((decodeAt - decryptAt) * 1_000));
+      countOp('socket.directServer.in.decodeEnvelope', 0, Math.round((getPerfMs() - decodeAt) * 1_000));
+    }
     countEntityInputEnvelopeKinds('socket.directServer.in', envelope, {
       fromRuntimeId,
       toRuntimeId: context.serverRuntimeId,
@@ -733,12 +739,14 @@ const handleEntityInputs = async (
       messageId: msg.id,
       encSeq: msg.encSeq ?? null,
     });
+    const admitAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     await context.options.onEntityInputs(
       fromRuntimeId,
       envelope,
       typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
       Boolean(sessionKeys && msg.encSeq !== undefined),
     );
+    countOp('socket.directServer.in.onEntityInputs', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - admitAt) * 1_000) : 0);
     traceAccountDeliveryHop('direct-admitted', envelope, {
       runtimeId: context.serverRuntimeId,
       peerRuntimeId: fromRuntimeId,
@@ -796,10 +804,12 @@ const handleDirectMessage = async (
   // must be drained through normal replay fences. Returning here used to erase
   // committed Account ACKs without either admission or a negative signal.
   let msg: RuntimeWsMessage;
+  const receivedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   try {
     msg = deserializeWsMessage(raw);
     const wireBytes = typeof raw === 'string' ? raw.length : raw.byteLength;
     countOp(`socket.directServer.in.${msg.type}`, wireBytes);
+    countOp('socket.directServer.in.deserialize', wireBytes, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - receivedAt) * 1_000) : 0);
     recordOpEvent('socket.directServer.in.wire', {
       type: msg.type,
       fromRuntimeId: String(msg.from ?? ''),
@@ -815,6 +825,7 @@ const handleDirectMessage = async (
     return;
   }
   if (handleHandshake(context, ws, session, msg)) return;
+  const verifyAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
   const verifiedError = peerKey !== session.peerEncryptionPubKey
     ? 'Direct session encryption key mismatch'
@@ -827,6 +838,7 @@ const handleDirectMessage = async (
         session.lastAuthTimestamp,
         session.sessionKeys?.c2s,
       );
+  countOp('socket.directServer.in.verifyAuth', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - verifyAt) * 1_000) : 0);
   if (verifiedError) {
     rejectDirectMessage(context, session, msg, verifiedError);
     ws.close(4003, 'session-auth-invalid');
@@ -842,7 +854,9 @@ const handleDirectMessage = async (
   session.lastSeen = Date.now();
   if (handlePeerDeliveryFailure(context, session, msg)) return;
   if (await handleRecoveryRequest(context, session, msg)) return;
+  const inputsAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   await handleEntityInputs(context, session, msg);
+  countOp('socket.directServer.in.handleEntityInputs', 0, OP_COUNTERS_ENABLED ? Math.round((getPerfMs() - inputsAt) * 1_000) : 0);
 };
 
 export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {

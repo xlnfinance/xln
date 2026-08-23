@@ -29,6 +29,7 @@ import { normalizeAccountStateDomain } from '../../account/commitment/state-root
 import { cryptoPoolEnabled, decryptOnionLayersBatch, type OnionJobItem } from '../../protocol/crypto/crypto-pool';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
+import { RecencyMemo } from '../../support/recency-memo';
 import { timePerfPhase } from '../../support/performance/profile';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
@@ -90,6 +91,37 @@ type AccountInputTx = Extract<EntityTx, { type: 'accountInput' }>;
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
 type PreparedEnvelope = ReturnType<typeof unwrapEnvelope>;
 
+// Ingress priming, wire fitting and materialization all derive the same
+// binding and AAD context hash from one lock tx object; derive once per object.
+type InboundBindingMemo = { binding: PreparedHtlcEntry['binding']; contextHash: string };
+const inboundBindingMemos = new RecencyMemo<HtlcLockTx, InboundBindingMemo>(16_384);
+
+const inboundBindingWithContext = (
+  tx: AccountInputTx,
+  proposal: NonNullable<ReturnType<typeof accountInputProposal>>,
+  accountTx: HtlcLockTx,
+): InboundBindingMemo => {
+  const hit = inboundBindingMemos.get(accountTx);
+  if (
+    hit
+    && hit.binding.accountFrameHash === proposal.frame.stateHash.toLowerCase()
+    && hit.binding.fromEntityId === tx.data.fromEntityId.toLowerCase()
+  ) {
+    // Every entry owns its binding (see buildInboundBinding on shared references).
+    return { binding: { ...hit.binding, domain: { ...hit.binding.domain } }, contextHash: hit.contextHash };
+  }
+  const binding = buildInboundBinding(tx, proposal, accountTx);
+  const contextHash = computeHtlcEnvelopeContextHash({
+    fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
+    domain: binding.domain, lockId: binding.lockId, hashlock: binding.hashlock,
+    tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
+    revealBeforeHeight: binding.revealBeforeHeight,
+  });
+  const entry = { binding, contextHash };
+  inboundBindingMemos.set(accountTx, entry);
+  return entry;
+};
+
 const buildInboundBinding = (
   tx: AccountInputTx,
   proposal: NonNullable<ReturnType<typeof accountInputProposal>>,
@@ -128,13 +160,8 @@ const decryptInboundEnvelope = (
   input: MaterializeHtlcPreparedContextInput,
   accountTx: HtlcLockTx,
   binding: PreparedHtlcEntry['binding'],
+  contextHash: string,
 ): PreparedEnvelope | PreparedHtlcEntry => {
-  const contextHash = computeHtlcEnvelopeContextHash({
-    fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
-    domain: binding.domain, lockId: binding.lockId, hashlock: binding.hashlock,
-    tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
-    revealBeforeHeight: binding.revealBeforeHeight,
-  });
   const key = `${input.entityEncryptionPublicKey}|${binding.envelopeHash}|${contextHash}`;
   let result = decryptedInboundEnvelopes.get(key);
   if (result === undefined) {
@@ -224,8 +251,8 @@ const materializeInboundEntry = (
   proposal: NonNullable<ReturnType<typeof accountInputProposal>>,
   accountTx: HtlcLockTx,
 ): PreparedHtlcEntry => {
-  const binding = buildInboundBinding(tx, proposal, accountTx);
-  const envelope = decryptInboundEnvelope(input, accountTx, binding);
+  const { binding, contextHash } = inboundBindingWithContext(tx, proposal, accountTx);
+  const envelope = decryptInboundEnvelope(input, accountTx, binding, contextHash);
   if ('binding' in envelope) return envelope;
   if ('finalRecipient' in envelope) {
     return {
@@ -267,7 +294,7 @@ export const collectInboundHtlcBindingKeys = (
     if (!proposal) return [];
     return proposal.frame.accountTxs.flatMap(accountTx =>
       accountTx.type === 'htlc_lock' && accountTx.data.envelope !== undefined
-        ? [preparedHtlcBindingKey(buildInboundBinding(tx, proposal, accountTx))]
+        ? [preparedHtlcBindingKey(inboundBindingWithContext(tx, proposal, accountTx).binding)]
         : []);
   });
   return [...new Set(keys)].sort((left, right) => left.localeCompare(right));
@@ -354,13 +381,7 @@ const primeInboundLayerDecryption = async (input: LayerPrimingInput): Promise<vo
       if (accountTx.type !== 'htlc_lock' || accountTx.data.envelope === undefined) continue;
       const layer = encryptedHtlcLayer(accountTx.data.envelope);
       if (!layer) continue;
-      const binding = buildInboundBinding(tx, proposal, accountTx);
-      const contextHash = computeHtlcEnvelopeContextHash({
-        fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
-        domain: binding.domain, lockId: binding.lockId, hashlock: binding.hashlock,
-        tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
-        revealBeforeHeight: binding.revealBeforeHeight,
-      });
+      const { contextHash } = inboundBindingWithContext(tx, proposal, accountTx);
       if (isDecryptedOpaqueHtlcLayerPrimed(layer, input.entityEncryptionPublicKey, contextHash)) continue;
       items.push({
         ciphertext: layer,

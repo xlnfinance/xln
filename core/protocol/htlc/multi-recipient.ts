@@ -5,6 +5,7 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 import { MAX_HTLC_BINARY_LAYER_BYTES } from './codec/binary';
 import { RecencyMemo } from '../../support/recency-memo';
+import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { countOp } from '../../support/performance/op-counters';
 
 export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:v1' as const;
@@ -146,9 +147,7 @@ export const hashOpaqueHtlcCiphertext = (value: OpaqueHtlcCiphertext): string =>
   const ciphertext = assertOpaqueHtlcCiphertext(value).ciphertext;
   const memoized = opaqueCiphertextHashMemo.get(ciphertext);
   if (memoized !== undefined) return memoized;
-  const packed = decodeBase64Bytes(ciphertext);
-  const digest = sha256(packed);
-  const hash = `0x${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  const hash = computeIntegrityDigest(decodeBase64Bytes(ciphertext));
   if (opaqueCiphertextHashMemo.size >= OPAQUE_CIPHERTEXT_HASH_MEMO_MAX) opaqueCiphertextHashMemo.clear();
   opaqueCiphertextHashMemo.set(ciphertext, hash);
   return hash;

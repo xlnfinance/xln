@@ -209,10 +209,43 @@ export const buildHistoryViewPuts = (options: {
   return puts;
 };
 
+// This module is the only writer of the head; the value a frame just wrote
+// is the value the next frame reads. Three LevelDB gets per Hub frame queued
+// behind the multi-megabyte batch writes for milliseconds each.
+const historyViewHeads = new Map<RuntimeDbLike, StorageHistoryViewHead>();
+
+const rememberHistoryViewHead = (db: RuntimeDbLike, head: StorageHistoryViewHead): void => {
+  historyViewHeads.set(db, head);
+};
+
+/** Write a head-bearing batch; the cache follows only a durable write. */
+const writeHistoryViewBatch = async (
+  db: RuntimeDbLike,
+  batch: { write: (options?: { sync?: boolean }) => Promise<void> },
+  head: StorageHistoryViewHead,
+  options?: { sync?: boolean },
+): Promise<void> => {
+  try {
+    await writeBatch(batch, options);
+  } catch (error) {
+    historyViewHeads.delete(db);
+    throw error;
+  }
+  rememberHistoryViewHead(db, head);
+};
+
 export const readHistoryViewHead = async (
   db: RuntimeDbLike,
   config: Required<StorageRuntimeConfig>,
 ): Promise<StorageHistoryViewHead> => {
+  const remembered = historyViewHeads.get(db);
+  if (remembered) {
+    return {
+      ...remembered,
+      maxBytes: config.historyViewMaxBytes,
+      retainFrames: config.historyViewRetainFrames,
+    };
+  }
   const readAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const raw = await readRawOrNull(db, KEY_HISTORY_VIEW_HEAD);
   const decodeAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
@@ -221,7 +254,7 @@ export const readHistoryViewHead = async (
     countOp('storage.historyViewHead.read', raw?.byteLength ?? 0, Math.round((decodeAt - readAt) * 1_000));
     countOp('storage.historyViewHead.decode', raw?.byteLength ?? 0, Math.round((getPerfMs() - decodeAt) * 1_000));
   }
-  return {
+  const head: StorageHistoryViewHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: decoded?.latestHeight ?? 0,
     latestPrunedRuntimeHeight: decoded?.latestPrunedRuntimeHeight ?? 0,
@@ -229,6 +262,8 @@ export const readHistoryViewHead = async (
     maxBytes: config.historyViewMaxBytes,
     retainFrames: config.historyViewRetainFrames,
   };
+  rememberHistoryViewHead(db, head);
+  return head;
 };
 
 const writeHistoryViewHead = async (
@@ -238,11 +273,12 @@ const writeHistoryViewHead = async (
 ): Promise<void> => {
   const batch = db.batch();
   batch.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer(head));
-  await writeBatch(batch);
+  await writeHistoryViewBatch(db, batch, head);
   await onPersistenceBoundary?.('after-history-view-prune');
 };
 
 export type HistoryViewCommitPlan = {
+  db: RuntimeDbLike;
   puts: HistoryViewPut[];
   writtenBytes: number;
   nextHead: StorageHistoryViewHead;
@@ -269,13 +305,16 @@ export const prepareHistoryViewCommit = async (options: {
   };
 
   return {
+    db: options.db,
     puts,
     writtenBytes,
     nextHead,
   };
 };
 
+/** A caller-owned batch commits at a time this module cannot see: forget the head until it is read back. */
 export const putHistoryViewCommit = (batch: RuntimeHistoryViewBatch, plan: HistoryViewCommitPlan): void => {
+  historyViewHeads.delete(plan.db);
   for (const item of plan.puts) batch.put(item.key, item.value);
   batch.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer(plan.nextHead));
 };
@@ -310,7 +349,7 @@ export const reconcileHistoryViews = async (options: {
     });
     const batch = options.viewDb.batch();
     putHistoryViewCommit(batch, plan);
-    await writeBatch(batch, { sync: false });
+    await writeHistoryViewBatch(options.viewDb, batch, plan.nextHead, { sync: false });
     return { materializedThroughRuntimeHeight: latestWalHeight, writtenBytes: plan.writtenBytes };
   }
   const firstWalHeight = Math.max(1, Math.floor(Number(
@@ -375,7 +414,7 @@ export const reconcileHistoryViews = async (options: {
     });
     const batch = options.viewDb.batch();
     putHistoryViewCommit(batch, plan);
-    await writeBatch(batch, { sync: false });
+    await writeHistoryViewBatch(options.viewDb, batch, plan.nextHead, { sync: false });
     writtenBytes += plan.writtenBytes;
   }
   return {

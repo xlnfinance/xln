@@ -166,18 +166,33 @@ export const computeRadixMerkleLeafHash = (
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => leafHash({ key, value }, hashAlgorithm);
 
+/** Decode `0x` hex straight into a preimage buffer; returns the byte count. */
+const writeHexInto = (target: Uint8Array, offset: number, hex: string): number => {
+  const bytes = hexToBytes(hex);
+  target.set(bytes, offset);
+  return bytes.length;
+};
+
 const branchHashOrdered = (
   radix: RadixMerkleRadix,
   children: Array<[number, string]>,
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (children.length === 0) return EMPTY_RADIX_MERKLE_ROOT;
-  const parts: Uint8Array[] = [Uint8Array.of(radixTag(radix))];
+  // One preimage buffer per branch: a Hub seals thousands of dirty branches a
+  // frame, and a part list plus concat allocated ~35 small arrays for each.
+  let size = BRANCH_DOMAIN.length + 1;
+  for (const [, hash] of children) size += 1 + (hash.length - 2) / 2;
+  const payload = new Uint8Array(size);
+  payload.set(BRANCH_DOMAIN, 0);
+  let offset = BRANCH_DOMAIN.length;
+  payload[offset++] = radixTag(radix);
   for (const [slot, hash] of children) {
-    parts.push(Uint8Array.of(slot));
-    parts.push(hexToBytes(hash));
+    payload[offset++] = slot;
+    offset += writeHexInto(payload, offset, hash);
   }
-  return hashParts(BRANCH_DOMAIN, parts, hashAlgorithm);
+  if (offset !== size) throw new Error('RADIX_MERKLE_BRANCH_PREIMAGE_SIZE');
+  return hashAlgorithm === 'keccak256' ? ethers.keccak256(payload) : computeIntegrityDigest(payload);
 };
 
 const branchHash = (
@@ -266,9 +281,9 @@ const extensionHash = (
 
 export const computeRadixMerkleEdgeHash = (
   radix: RadixMerkleRadix,
-  parentPath: number[],
+  parentPath: readonly number[],
   childKind: 'branch' | 'leaf',
-  childPath: number[],
+  childPath: readonly number[],
   childNodeHash: string,
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
