@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /** Fail before a dev shell can mutate state unless the singleton launched it. */
 
-import { DEV_CAPABILITY_HEADER } from './run-dev';
+import { DEV_CAPABILITY_HEADER } from '../run-dev';
 
 const portText = process.env['XLN_DEV_LAUNCHER_PORT'] ?? '';
 const token = process.env['XLN_DEV_LAUNCHER_TOKEN'] ?? '';

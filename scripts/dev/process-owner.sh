@@ -2,7 +2,7 @@
 
 assert_dev_launcher_capability() {
   local repo_root="$1"
-  bun "$repo_root/scripts/dev/verify-launcher-capability.ts"
+  bun "$repo_root/scripts/dev/launcher/verify-capability.ts"
 }
 
 read_dev_process_start_identity() {

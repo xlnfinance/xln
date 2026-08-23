@@ -30,7 +30,7 @@ describe('docs catalog architecture grounding', () => {
     expect(FEATURED_DOC_IDS).not.toContain('mainnet');
   });
 
-  test('keeps evidence, launch snapshots, legacy ids, and unknown docs out of architecture grounding', () => {
+  test('keeps evidence, launch snapshots, retired ids, and unknown docs out of architecture grounding', () => {
     expect(getSectionKind(classifyDoc('audit/advisor-scorecard'))).toBe('archive');
     expect(getSectionKind(classifyDoc('releases/0.1.31'))).toBe('archive');
     expect(getSectionKind(classifyDoc('security/consensus-hanko-scan'))).toBe('archive');

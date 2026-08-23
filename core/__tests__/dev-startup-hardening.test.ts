@@ -217,11 +217,11 @@ test('dev shell capability is exact and direct shell entrypoints fail before mut
 
   const lease = acquireDevSingleton(0);
   try {
-    const accepted = await run('bun', ['scripts/dev/verify-launcher-capability.ts'], {
+    const accepted = await run('bun', ['scripts/dev/launcher/verify-capability.ts'], {
       env: capabilityEnv(lease),
     });
     expect(accepted.code).toBe(0);
-    const rejected = await run('bun', ['scripts/dev/verify-launcher-capability.ts'], {
+    const rejected = await run('bun', ['scripts/dev/launcher/verify-capability.ts'], {
       env: {
         XLN_DEV_LAUNCHER_PORT: String(lease.port),
         XLN_DEV_LAUNCHER_TOKEN: '0'.repeat(64),
