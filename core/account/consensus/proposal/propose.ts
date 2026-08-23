@@ -5,7 +5,7 @@
 
 import { peekAccountStateRoot } from '../../commitment/state-root';
 import { preparedCommitCoversTxs, preparedCommitKey, rememberPreparedProposalCommit } from './prepared-commit';
-import type { AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountFrame, AccountOutput, AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import { getPerfMs } from '../../../support/time';
@@ -96,6 +96,24 @@ const logProposalAdmission = (
   });
 };
 
+/** The proposer's own validated transition is reused at ACK when the live root still matches. */
+const rememberProposalForAck = (
+  account: AccountReplica,
+  candidate: AccountReplica,
+  newFrame: AccountFrame,
+  validation: { candidateEffects: AccountOutput[]; timedOutHashlocks: string[] },
+): void => {
+  const baseRoot = preparedCommitCoversTxs(newFrame.accountTxs) ? peekAccountStateRoot(account.state) : undefined;
+  if (baseRoot === undefined) return;
+  rememberPreparedProposalCommit(preparedCommitKey(account, newFrame.stateHash), {
+    baseRoot,
+    candidate,
+    accountStateRoot: newFrame.accountStateRoot,
+    candidateEffects: validation.candidateEffects,
+    timedOutHashlocks: validation.timedOutHashlocks,
+  });
+};
+
 export async function proposeAccountFrame(
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -161,16 +179,7 @@ export async function proposeAccountFrame(
   );
   if (!frameBuild.ok) return frameBuild.result;
   const { frame: newFrame } = frameBuild;
-  const baseRoot = preparedCommitCoversTxs(newFrame.accountTxs) ? peekAccountStateRoot(account.state) : undefined;
-  if (baseRoot !== undefined) {
-    rememberPreparedProposalCommit(preparedCommitKey(account, newFrame.stateHash), {
-      baseRoot,
-      candidate: clonedMachine,
-      accountStateRoot: newFrame.accountStateRoot,
-      candidateEffects: validation.candidateEffects,
-      timedOutHashlocks: validation.timedOutHashlocks,
-    });
-  }
+  rememberProposalForAck(account, clonedMachine, newFrame, validation);
 
   const proof = await prepareProposalProof(
     context,
