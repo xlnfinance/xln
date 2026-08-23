@@ -12,13 +12,14 @@ type NativeHasherStatic = {
   hash(algorithm: string, data: Uint8Array): Uint8Array;
 };
 
+const isNativeHasherStatic = (value: unknown): value is NativeHasherStatic =>
+  typeof value === 'function' && typeof Reflect.get(value, 'hash') === 'function';
+
 const nativeHasher = ((): NativeHasherStatic | undefined => {
   const bunRuntime: unknown = Reflect.get(globalThis, 'Bun');
   if (!bunRuntime || typeof bunRuntime !== 'object') return undefined;
   const constructor: unknown = Reflect.get(bunRuntime, 'CryptoHasher');
-  return typeof constructor === 'function' && typeof Reflect.get(constructor, 'hash') === 'function'
-    ? constructor as unknown as NativeHasherStatic
-    : undefined;
+  return isNativeHasherStatic(constructor) ? constructor : undefined;
 })();
 
 const computeIntegrityDigestBytes = (bytes: Uint8Array): Uint8Array =>

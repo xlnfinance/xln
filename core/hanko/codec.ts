@@ -242,7 +242,12 @@ export const packHankoSignatures = (signatures: readonly Uint8Array[]): HankoHex
   signatures.forEach(assertCanonicalSignature);
   const recoveryBits = new Uint8Array(Math.ceil(signatures.length / 8));
   signatures.forEach((signature, index) => {
-    if (signature[64] === 28) recoveryBits[Math.floor(index / 8)]! |= 1 << (index % 8);
+    if (signature[64] === 28) {
+      const byteIndex = Math.floor(index / 8);
+      const current = recoveryBits[byteIndex];
+      if (current === undefined) throw new Error(`HANKO_RECOVERY_BIT_INDEX_INVALID:${byteIndex}`);
+      recoveryBits[byteIndex] = current | (1 << (index % 8));
+    }
   });
   return ethers.hexlify(ethers.concat([
     ...signatures.map((signature) => signature.slice(0, 64)),
@@ -256,11 +261,14 @@ export const unpackHankoSignatures = (packed: string): readonly HankoHex[] => {
   if (count === 0) return [];
   const recoveryOffset = count * 64;
   const usedBits = count % 8;
-  if (usedBits !== 0 && (bytes[bytes.length - 1]! >> usedBits) !== 0) {
+  const finalRecoveryByte = bytes.at(-1);
+  if (finalRecoveryByte === undefined) invalidHanko('HANKO_PACKED_SIGNATURE_BYTES_MISSING');
+  if (usedBits !== 0 && (finalRecoveryByte >> usedBits) !== 0) {
     invalidHanko('HANKO_PACKED_SIGNATURE_PADDING_NONZERO');
   }
   return Array.from({ length: count }, (_, index) => {
-    const recoveryByte = bytes[recoveryOffset + Math.floor(index / 8)]!;
+    const recoveryByte = bytes[recoveryOffset + Math.floor(index / 8)];
+    if (recoveryByte === undefined) invalidHanko(`HANKO_RECOVERY_BYTE_MISSING:${index}`);
     const recovery = ((recoveryByte >> (index % 8)) & 1) === 0 ? 27 : 28;
     const signature = ethers.getBytes(ethers.concat([
       bytes.slice(index * 64, (index + 1) * 64),

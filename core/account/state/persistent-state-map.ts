@@ -12,6 +12,7 @@ import {
   type PersistentRadixValueMapOptions,
 } from '../../protocol/state/persistent-radix-value-map';
 import { encodeAccountStateValue } from '../commitment/account-state-value';
+import { RecencyMemo } from '../../support/recency-memo';
 
 export const ACCOUNT_STATE_MAP_NAMESPACES = [
   'deltas',
@@ -104,7 +105,8 @@ const commitmentValue = (
 // One encode per leaf: the put-time size bound and the seal-time leaf hash
 // are derived from the same bytes. Sealed leaf values are immutable objects,
 // so the digest memo is exact by identity.
-const leafDigests = new WeakMap<object, string>();
+// A put-time digest is normally consumed by the seal of the same frame.
+const leafDigests = new RecencyMemo<object, string>(65_536);
 const encodeLeafForCommit = (namespace: AccountStateMapNamespace, value: unknown): string => {
   const encoded = encodeAccountStateValue(commitmentValue(namespace, value));
   if (encoded.byteLength > MAX_ACCOUNT_STATE_LEAF_BYTES) {

@@ -114,7 +114,9 @@ const fitTxsToPersistedWireContext = (
   let compatiblePrefixCount = 0;
   let completePrefixCount = persistedKeys.size === 0 ? 0 : -1;
   for (let index = 0; index < allTxs.length; index += 1) {
-    const keys = collectInboundHtlcBindingKeys(replica.state, [allTxs[index]!]);
+    const tx = allTxs[index];
+    if (!tx) throw new Error(`ENTITY_REPLAY_TX_PREFIX_GAP:${index}`);
+    const keys = collectInboundHtlcBindingKeys(replica.state, [tx]);
     if (keys.some(key => !persistedKeys.has(key))) break;
     for (const key of keys) observedKeys.add(key);
     compatiblePrefixCount = index + 1;

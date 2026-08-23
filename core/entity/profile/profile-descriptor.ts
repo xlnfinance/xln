@@ -7,6 +7,7 @@ import { compareStableText, serializeTaggedJson } from '../../protocol/serializa
 import { LIMITS } from '../../config/constants';
 import { HANKO_MAX_BYTES } from '../../hanko/codec';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { RecencyMemo } from '../../support/recency-memo';
 import type {
   Profile,
   ProfileAccount,
@@ -263,7 +264,7 @@ export const computeEntityProfileDescriptorHash = (descriptor: EntityProfileDesc
  * descriptor reads; a live candidate map is never cached.
  */
 type ProfileHashMemo = { accounts: unknown; profile: unknown; hubConfig: unknown; config: unknown; key: unknown; hash: string };
-const profileHashMemos = new WeakMap<EntityState, ProfileHashMemo>();
+const profileHashMemos = new RecencyMemo<EntityState, ProfileHashMemo>(256);
 
 export const computeEntityProfileHash = (state: EntityState): string => {
   const accounts = state.accounts;

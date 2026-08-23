@@ -18,8 +18,23 @@ import { keccak256Bytes } from './fast-keccak';
 // built-ins at load time (the browser bundle resolves them to empty shims).
 type BunGlobal = { isMainThread?: boolean };
 const bunRuntime = (): BunGlobal | undefined => (globalThis as { Bun?: BunGlobal }).Bun;
-const workerScope = (): (Worker & { postMessage: (value: unknown, transfer?: Transferable[]) => void }) | undefined =>
-  typeof self !== 'undefined' && bunRuntime()?.isMainThread === false ? (self as unknown as Worker & { postMessage: (value: unknown, transfer?: Transferable[]) => void }) : undefined;
+type EcdsaWorkerScope = {
+  setOnMessage: (listener: (event: MessageEvent<Job>) => void) => void;
+  postMessage: (value: unknown, transfer?: Transferable[]) => void;
+};
+const workerScope = (): EcdsaWorkerScope | undefined => {
+  if (typeof self === 'undefined' || bunRuntime()?.isMainThread !== false) return undefined;
+  const target: unknown = Reflect.get(globalThis, 'self');
+  if (target === null || typeof target !== 'object') return undefined;
+  const postMessage: unknown = Reflect.get(target, 'postMessage');
+  if (typeof postMessage !== 'function') return undefined;
+  return {
+    setOnMessage: listener => { Reflect.set(target, 'onmessage', listener); },
+    postMessage: (value, transfer) => {
+      Reflect.apply(postMessage, target, transfer ? [value, transfer] : [value]);
+    },
+  };
+};
 
 export const ECDSA_RECOVER_RECORD_BYTES = 97;
 export const ECDSA_RECOVER_RESULT_BYTES = 20;
@@ -41,7 +56,7 @@ export const recoverBatchSync = (native: NativeSecp256k1, records: Uint8Array): 
   const out = new Uint8Array(count * ECDSA_RECOVER_RESULT_BYTES);
   for (let index = 0; index < count; index += 1) {
     const base = index * ECDSA_RECOVER_RECORD_BYTES;
-    const recovery = records[base + 96]!;
+    const recovery = records[base + 96];
     if (recovery !== 0 && recovery !== 1) continue;
     try {
       const publicKey = native.ecdsaRecover(
@@ -63,11 +78,11 @@ type Job = { id: number; records: Uint8Array };
 const scope = workerScope();
 if (scope && process.env['XLN_ECDSA_RECOVER_WORKER'] === '1') {
   const native = loadNative();
-  scope.onmessage = (event: MessageEvent<Job>) => {
+  scope.setOnMessage((event: MessageEvent<Job>) => {
     const job = event.data;
     const result = native ? recoverBatchSync(native, job.records) : new Uint8Array(0);
     scope.postMessage({ id: job.id, result }, [result.buffer as ArrayBuffer]);
-  };
+  });
 }
 
 let pool: Worker[] | null | undefined;
@@ -111,7 +126,8 @@ const getPool = (): Worker[] | null => {
     };
     worker.onerror = retirePool;
     worker.addEventListener('close', retirePool);
-    (worker as unknown as { unref?: () => void }).unref?.();
+    const unref = Reflect.get(worker, 'unref');
+    if (typeof unref === 'function') Reflect.apply(unref, worker, []);
     return worker;
   });
   return pool;
@@ -135,7 +151,8 @@ export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8A
     // Own buffer per job so the transfer list detaches only this slice.
     const slice = records.slice(start * ECDSA_RECOVER_RECORD_BYTES, end * ECDSA_RECOVER_RECORD_BYTES);
     const id = nextJobId += 1;
-    const worker = workers[slot % workers.length]!;
+    const worker = workers[slot % workers.length];
+    if (!worker) throw new Error('ECDSA_RECOVER_WORKER_SLOT_MISSING');
     parts.push(new Promise(resolve => {
       pending.set(id, result => resolve({ offset: start, result }));
       worker.postMessage({ id, records: slice } satisfies Job, [slice.buffer as ArrayBuffer]);

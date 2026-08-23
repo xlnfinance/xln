@@ -19,6 +19,7 @@ import { assertEntityFrameTotalByteBudget } from '../frame';
 import { LIMITS } from '../../../config/constants';
 import { encodeCanonicalArrayOnce, encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { toFrameHash, toStateHash, type FrameHash, type StateHash } from '../../../protocol/hashes';
+import { RecencySet } from '../../../support/recency-memo';
 import {
   toEntityHeight,
   toUnixMs,
@@ -441,7 +442,7 @@ export const assertEstimatedSealedEntityFrameWire = (
  * the full structural + byte-budget validator on every one of them before put;
  * data read back from disk or received from peers never enters this set.
  */
-const locallyCertifiedFrames = new WeakSet<object>();
+const locallyCertifiedFrames = new RecencySet<object>(256);
 export const trustLocallyCertifiedEntityFrame = (frame: EntityFrame): void => {
   locallyCertifiedFrames.add(frame);
 };

@@ -18,6 +18,7 @@ import { LIMITS } from '../../config/constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { readEntityFrameEvents } from '../frame-events';
 import { assertEntityFrameEventByteBudget } from './frame/events';
+import { RecencyMemo } from '../../support/recency-memo';
 
 // Txs may fill only half of the wire frame: the frame also carries events, the
 // entity infra context and the J-prefix certificate, and a Hub frame that
@@ -134,7 +135,8 @@ const encodeEntityFrameTxsPayload = (canonicalTxs: unknown[]): string =>
 // Sealed frame txs are immutable; the commitment projection and its canonical
 // bytes are computed once per tx array and reused by every meter and hash.
 type CanonicalFrameTxs = { length: number; canonical: unknown[]; perTxBytes: number[] };
-const canonicalTxsByFrameTxs = new WeakMap<EntityTx[], CanonicalFrameTxs>();
+// Only the frames in flight (candidate, last committed) are ever re-encoded.
+const canonicalTxsByFrameTxs = new RecencyMemo<EntityTx[], CanonicalFrameTxs>(64);
 const canonicalFrameTxs = (txs: EntityTx[]): CanonicalFrameTxs => {
   const hit = canonicalTxsByFrameTxs.get(txs);
   if (hit && hit.length === txs.length) return hit;

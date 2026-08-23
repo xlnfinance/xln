@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { countOpWithSite, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
+import { RecencyMemo } from '../../support/recency-memo';
 
 import { compareStableText } from './';
 
@@ -85,7 +86,7 @@ const newStack = (): CanonicalStack => ({ ancestors: new Map(), segments: [] });
  * length guards the one cheap mutation we can detect. Callers only register
  * arrays that are immutable by protocol (sealed frame txs).
  */
-const preEncodedArrays = new WeakMap<readonly unknown[], { length: number; encoded: string }>();
+const preEncodedArrays = new RecencyMemo<readonly unknown[], { length: number; encoded: string }>(64);
 
 export const rememberCanonicalArrayEncoding = (array: readonly unknown[], encoded: string): void => {
   // The registered array is frozen so its element set cannot drift behind the

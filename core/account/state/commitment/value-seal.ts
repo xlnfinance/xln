@@ -1,5 +1,6 @@
 import type { AccountReplica, AccountState } from '../../../types/account';
 import { isPersistentAccountStateMap } from '../persistent-state-map';
+import { RecencySet } from '../../../support/recency-memo';
 
 /** Top-level AccountState maps only. Nested graphs are not walked. */
 const ACCOUNT_STATE_MAP_FIELDS = [
@@ -32,7 +33,8 @@ const requirePersistentCollections = (state: AccountState): void => {
 // Subtrees this module already sealed (post-order, so membership means the
 // whole subtree is frozen). A committed Account keeps most of its graph from
 // the previous commit; re-walking it on every put was ~40 us per Account.
-const sealedGraphs = new WeakSet<object>();
+// Generation ≈ the top-level objects replaced across a few hub frames.
+const sealedGraphs = new RecencySet<object>(65_536);
 
 const describeSealPath = (trail: readonly (string | object)[]): string =>
   trail.filter((part): part is string => typeof part === 'string').join('.');

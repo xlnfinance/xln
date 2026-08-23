@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { toLowerAddressOrNull } from '../../protocol/crypto/address-cache';
+import { RecencyMemo } from '../../support/recency-memo';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -45,7 +46,7 @@ const requireDurableAddress = (name: string, value: unknown): string => {
  */
 // The stack is a pure function of the persisted `contracts` record; every
 // Account proof body resolved it again with four checksum conversions.
-const durableStacks = new WeakMap<object, DurableJurisdictionStack>();
+const durableStacks = new RecencyMemo<object, DurableJurisdictionStack>(64);
 
 export const requireDurableJurisdictionStack = (replica: JReplica): DurableJurisdictionStack => {
   const chainId = Number(replica.chainId);
