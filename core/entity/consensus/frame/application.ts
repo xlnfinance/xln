@@ -1,4 +1,4 @@
-import { isProposalResendDue } from '../../scheduler/proposal-resend';
+import { isProposalResendDue } from '../../scheduler/wake/proposal-resend';
 import { FailureDispositionError, haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 /**
@@ -30,7 +30,7 @@ import { normalizeSwapOfferForOrderbook, swapKey, type WorkingOrderbookOffer } f
 import { mergeStorageOverlayRecords } from '../../../protocol/state/overlay';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
-import { assertScheduledWakeFrameOrder } from '../../scheduler/scheduled-wake-validation';
+import { assertScheduledWakeFrameOrder } from '../../scheduler/wake/scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../../state-clone';
 import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import { getAccountPerspective } from '../../../account/state/perspective';

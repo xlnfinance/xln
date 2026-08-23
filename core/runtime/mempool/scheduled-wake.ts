@@ -1,4 +1,4 @@
-import { collectDueProposalResends, nextProposalResendDeadline } from '../../entity/scheduler/proposal-resend';
+import { collectDueProposalResends, nextProposalResendDeadline } from '../../entity/scheduler/wake/proposal-resend';
 import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
@@ -7,7 +7,7 @@ import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeJob,
   type ScheduledWakeTx,
-} from '../../entity/scheduler/scheduled-wake-validation';
+} from '../../entity/scheduler/wake/scheduled-wake-validation';
 import { compareStableText } from '../../protocol/serialization';
 import {
   buildEntityLeaderVoteBody,

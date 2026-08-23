@@ -32,8 +32,8 @@ import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   assertScheduledWakeMatchesState,
   type ScheduledWakeTx,
-} from '../../../entity/scheduler/scheduled-wake-validation';
-import { nextProposalResendDeadline } from '../../../entity/scheduler/proposal-resend';
+} from '../../../entity/scheduler/wake/scheduled-wake-validation';
+import { nextProposalResendDeadline } from '../../../entity/scheduler/wake/proposal-resend';
 import { ACCOUNT_PROPOSAL_RESEND_MS } from '../../../account/consensus/constants';
 import { safeStringify } from '../../../protocol/serialization';
 import {

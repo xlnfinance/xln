@@ -1,7 +1,7 @@
-import { compareStableText, safeStringify } from '../../protocol/serialization';
-import type { EntityState } from '../types';
-import type { EntityTx } from '../../types/entity-tx';
-import { getEntityLeaderState } from '../consensus/leader';
+import { compareStableText, safeStringify } from '../../../protocol/serialization';
+import type { EntityState } from '../../types';
+import type { EntityTx } from '../../../types/entity-tx';
+import { getEntityLeaderState } from '../../consensus/leader';
 import { proposalResendDueAt } from './proposal-resend';
 
 export type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;

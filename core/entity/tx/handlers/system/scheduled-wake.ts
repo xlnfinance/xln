@@ -2,9 +2,9 @@ import type { EntityCandidateEffect, EntityState, HashToSign } from '../../../ty
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { executeCrontab } from '../../../scheduler';
-import { assertScheduledWakeMatchesState } from '../../../scheduler/scheduled-wake-validation';
+import { assertScheduledWakeMatchesState } from '../../../scheduler/wake/scheduled-wake-validation';
 import { isCollectiveEntityActionTx } from '../../../auth/authorization';
-import { collectDueProposalResends } from '../../../scheduler/proposal-resend';
+import { collectDueProposalResends } from '../../../scheduler/wake/proposal-resend';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 

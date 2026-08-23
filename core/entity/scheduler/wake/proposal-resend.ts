@@ -3,9 +3,9 @@
  * committed EntityState and the Entity clock so that the proposer's scheduled
  * wake, the forced flush and every validator agree on the same due set.
  */
-import type { EntityState } from '../types';
-import { ACCOUNT_PROPOSAL_RESEND_MS } from '../../account/consensus/constants';
-import { compareStableText } from '../../protocol/serialization';
+import type { EntityState } from '../../types';
+import { ACCOUNT_PROPOSAL_RESEND_MS } from '../../../account/consensus/constants';
+import { compareStableText } from '../../../protocol/serialization';
 
 export const proposalResendDueAt = (sentAt: number): number => sentAt + ACCOUNT_PROPOSAL_RESEND_MS;
 
