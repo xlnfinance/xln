@@ -148,7 +148,11 @@ const applyPendingFrameTransactions = async (
 ): Promise<void> => {
   const prepared = takePreparedProposalCommit(preparedCommitKey(account, pendingFrame.stateHash), account.state);
   if (prepared) {
-    publishAccountOverlay(account, prepared.candidate);
+    // Only the transition's AccountState is prepared. Shell fields outside the
+    // live envelope (dispute proof hash/nonce, proof header) moved on when the
+    // proposal was finalized after the candidate was captured; folding the
+    // whole captured shell rewound the dispute nonce and the next seal reused it.
+    publishAccountOverlay(account, { ...account, state: prepared.candidate.state });
     assertLiveCommitMatchesFrame(
       account,
       pendingFrame.accountStateRoot,
