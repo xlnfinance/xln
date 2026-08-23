@@ -763,6 +763,21 @@ const maintainSteadyCrossQuotes = async (
     targetTokenIds,
   );
   if (desiredOffers.length === 0) return false;
+  if (process.env['XLN_MM_CROSS_QUOTE_DEBUG'] === '1') {
+    const lookup = createPendingCrossRequestLookup(env);
+    const counts = { desired: desiredOffers.length, committed: 0, pending: 0, registered: 0, requested: 0, free: 0 };
+    const sampleFree: string[] = [];
+    for (const spec of desiredOffers) {
+      const route = spec.crossJurisdiction;
+      if (!route) continue;
+      if (hasFinalizedMarketMakerCrossOffer(env, spec)) counts.committed += 1;
+      else if (hasCrossSpecBootstrapProgress(env, spec, lookup)) counts.pending += 1;
+      else if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) counts.registered += 1;
+      else if (lookup(route.source.entityId).has(route.orderId)) counts.requested += 1;
+      else { counts.free += 1; if (sampleFree.length < 2) sampleFree.push(route.orderId); }
+    }
+    console.log(`[mm-cross-debug] steady ${context.direction} ${JSON.stringify(counts)} free=${sampleFree.join(',')}`);
+  }
   const grouped = new Map<string, MarketMakerOfferSpec[]>();
   for (const spec of desiredOffers) {
     const specs = grouped.get(spec.hubEntityId) ?? [];

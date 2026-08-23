@@ -1198,6 +1198,12 @@ describe('production startup wiring', () => {
     expect(driveStart).toBeGreaterThan(quotePipelineStart);
     expect(quotePipelineEnd).toBeGreaterThan(driveStart);
     expect(mmNode).toContain('if (!MARKET_MAKER_STEADY_QUOTES_ENABLED) return;');
+    // Regression (2026-08-24): publishReady keeps a frozen cross health
+    // section once it ever read complete, so the steady loop must decide from
+    // a live snapshot — otherwise a fully filled cross route reads depth-ready
+    // forever and the maker never requotes.
+    expect(mmNode).toContain('const before = deps.health.publish({ includeCross: true });');
+    expect(mmNode).not.toContain('const before = deps.health.publishReady();');
 
     const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
     const quotePipeline = mmNode.slice(quotePipelineStart, quotePipelineEnd);

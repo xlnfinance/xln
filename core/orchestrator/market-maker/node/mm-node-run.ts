@@ -1635,13 +1635,18 @@ const createMarketMakerMaintenanceLoops = (deps: MarketMakerMaintenanceLoopDeps)
       // HLT may intentionally freeze the bootstrap snapshot. Bootstrap still
       // follows the canonical quote path; only post-ready replenishment stops.
       if (!MARKET_MAKER_STEADY_QUOTES_ENABLED) return;
-      const before = deps.health.publishReady();
-      if (isMarketMakerFullDepthComplete(before)) return;
-      await deps.driveQuotes('steady');
-      const after = deps.health.publishReady();
-      if (!isMarketMakerFullDepthComplete(after)) {
-        deps.health.publish({ includeCross: true });
+      // Replenishment must see the live book: publishReady keeps a frozen
+      // cross section once it ever read complete, so a fully filled cross
+      // route would otherwise read as depth-ready forever and never requote.
+      const before = deps.health.publish({ includeCross: true });
+      const fullDepth = isMarketMakerFullDepthComplete(before);
+      if (process.env['XLN_MM_CROSS_QUOTE_DEBUG'] === '1') {
+        const cross = before?.cross;
+        console.log(`[mm-cross-debug] tick fullDepth=${fullDepth} crossOk=${cross?.ok} routes=${cross?.routes.map(route => `${route.offers}/${route.pairs.length}`).join(',')}`);
       }
+      if (fullDepth) return;
+      await deps.driveQuotes('steady');
+      deps.health.publish({ includeCross: true });
       return;
     }
     const enqueued = await deps.driveQuotes();

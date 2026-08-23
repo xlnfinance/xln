@@ -394,7 +394,12 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   // an empty population and report a rate over zero participants.
   if (isPopulationMode && lanes < 1) throw new Error(`HLT_MODE_POPULATION_EMPTY:${mode}`);
   if (!isPopulationMode && lanes !== 1) throw new Error('PRODUCTION_SWAP_LOAD_NON_SAME_LANES_UNSUPPORTED');
-  if (!isPopulationMode && (rounds !== 1 || cadenceMs !== 1_000)) {
+  // Cross volleys repeat the burst against fresh MM quotes; other non-population
+  // modes still prove exactly one settlement, so extra rounds stay rejected.
+  if (!isPopulationMode && mode !== 'cross' && rounds !== 1) {
+    throw new Error('PRODUCTION_SWAP_LOAD_NON_SAME_CADENCE_UNSUPPORTED');
+  }
+  if (!isPopulationMode && cadenceMs !== 1_000) {
     throw new Error('PRODUCTION_SWAP_LOAD_NON_SAME_CADENCE_UNSUPPORTED');
   }
   const beforePid = values.get('--server-pid-before-restart');

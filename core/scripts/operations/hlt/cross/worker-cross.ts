@@ -105,6 +105,9 @@ const importJurisdiction = async (
 
 export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
   const burstSize = args.swaps;
+  const rounds = args.rounds;
+  // Credit covers every round: each volley fully fills one MM level per pair.
+  const creditUnits = SETUP_CREDIT_MULTIPLIER * BigInt(rounds);
   process.env['XLN_JURISDICTIONS_PATH'] = join(args.workDir, 'prod-main', 'jurisdictions.json');
   const meshRootSeed = readFileSync(join(args.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
   if (!meshRootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
@@ -176,8 +179,8 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
         targetJurisdiction,
         sourceTokenId: level.source.tokenId,
         targetTokenId: level.target.tokenId,
-        sourceCredit: level.source.amount * SETUP_CREDIT_MULTIPLIER,
-        targetCredit: level.target.amount * SETUP_CREDIT_MULTIPLIER,
+        sourceCredit: level.source.amount * creditUnits,
+        targetCredit: level.target.amount * creditUnits,
         custodyRuntimeSeed,
       });
       await sendObserved(hub, `prod-cross-credit-${index}-${targetHub.entityId.slice(-8)}`, {
@@ -190,7 +193,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
             data: {
               counterpartyEntityId: cohort.target.entityId,
               tokenId: level.target.tokenId,
-              amount: level.target.amount * SETUP_CREDIT_MULTIPLIER,
+              amount: level.target.amount * creditUnits,
             },
           }],
         }],
@@ -208,11 +211,14 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     await exportReplayBaseSnapshotIfConfigured(hub);
     const hubBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
     const loadBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest'));
-    const now = Date.now();
-    const buildRoute = (index: number) => {
-      const { level, cohort: pairCohort, sourceAccount, targetAccount } = prepared[index]!;
+    type LevelEntry = (typeof levels)[number];
+    const pairKeyOf = (level: Pick<LevelEntry, 'source' | 'target'>): string =>
+      `${level.source.tokenId}>${level.target.tokenId}`;
+    const cohortByPair = new Map(prepared.map(entry => [pairKeyOf(entry.level), entry] as const));
+    const buildVolleyRoute = (entry: PreparedCohort, level: LevelEntry, tag: string, now: number) => {
+      const { cohort: pairCohort, sourceAccount, targetAccount } = entry;
       return withCanonicalCrossJurisdictionRouteHash({
-        orderId: `prod-cross-${hubBefore.height}-${index}-${level.orderId}`,
+        orderId: `prod-cross-${hubBefore.height}-${tag}-${level.orderId}`,
         makerEntityId: pairCohort.target.entityId,
         hubEntityId: targetHub.entityId,
         ...(level.bookOwnerEntityId ? { bookOwnerEntityId: level.bookOwnerEntityId } : {}),
@@ -242,41 +248,130 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
         status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 10 * 60_000,
       });
     };
-    const routes = Array.from({ length: burstSize }, (_, index) => buildRoute(index));
-    const loadOrderId = routes[0]!.orderId;
+    // Fresh maker levels for the next volley: after a round fully fills every
+    // pair's resting mmx- order, the steady-quote loop must post replacements
+    // before routes can be built again.
+    const requoteTimeoutMs = Math.max(10_000, Number(process.env['XLN_CROSS_LOAD_REQUOTE_TIMEOUT_MS'] || '60000'));
+    let nudgeSeq = 0;
+    let nextNudgeAt = 0;
+    const readFreshLevels = async (consumedOrderIds: ReadonlySet<string>): Promise<Map<string, LevelEntry>> => {
+      const deadline = performance.now() + requoteTimeoutMs;
+      const graceDeadline = performance.now() + Math.min(requoteTimeoutMs, 5_000);
+      let nextLogAt = 0;
+      for (;;) {
+        const committed = decodeCommittedCrossRoutes(await readWithRateLimitRetry<unknown>(hub, `entity/${sourceHub.entityId}`));
+        if (performance.now() >= nextLogAt) {
+          nextLogAt = performance.now() + 10_000;
+          const histogram = new Map<string, number>();
+          for (const route of committed) {
+            if (!route.orderId.startsWith('mmx-')) continue;
+            const key = `${route.status}${consumedOrderIds.has(route.orderId) ? ':consumed' : ':fresh'}`;
+            histogram.set(key, (histogram.get(key) ?? 0) + 1);
+          }
+          console.log(`[load] cross requote poll mmx status=${JSON.stringify(Object.fromEntries(histogram))}`);
+        }
+        let live: LevelEntry[] = [];
+        try {
+          live = selectMarketMakerCrossRoutes(committed, sourceHub.entityId, targetHub.entityId);
+        } catch (error) {
+          // Zero live routes is a legitimate requote window, not a failure.
+          if (!(error instanceof Error) || !error.message.startsWith('PRODUCTION_SWAP_LOAD_CROSS_MM_ROUTE_MISSING')) throw error;
+        }
+        const byPair = new Map<string, LevelEntry>();
+        for (const level of live) {
+          const key = pairKeyOf(level);
+          if (!cohortByPair.has(key) || byPair.has(key) || consumedOrderIds.has(level.orderId)) continue;
+          byPair.set(key, level);
+        }
+        // Steady replenishment lands pair by pair (and some replacements go to
+        // other hubs' books), so a volley proceeds with whatever fresh levels
+        // this hub already shows instead of stalling for the full set.
+        if (byPair.size === prepared.length) return byPair;
+        if (byPair.size > 0 && performance.now() > graceDeadline) return byPair;
+        if (performance.now() > deadline) {
+          throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_REQUOTE_TIMEOUT:${byPair.size}:${prepared.length}`);
+        }
+        // Suspended maker fill-acks flush on the book owner's next entity
+        // frame; a quiescent hub never produces one. A minimal credit bump
+        // keeps the book-owner entities framing while the maker requotes.
+        if (process.env['XLN_CROSS_LOAD_REQUOTE_NUDGE'] === '1' && performance.now() >= nextNudgeAt) {
+          nextNudgeAt = performance.now() + 1_000;
+          nudgeSeq += 1;
+          await sendObserved(hub, `prod-cross-requote-nudge-${nudgeSeq}`, {
+            runtimeTxs: [],
+            entityInputs: [{
+              entityId: targetHub.entityId,
+              signerId: targetHub.signerId,
+              entityTxs: [{
+                type: 'extendCredit',
+                data: {
+                  counterpartyEntityId: prepared[0]!.cohort.target.entityId,
+                  tokenId: prepared[0]!.level.target.tokenId,
+                  amount: 1n,
+                },
+              }],
+            }],
+          });
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    };
     const hubWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'h1'));
     const loadWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'custody', 'daemon-db'));
     const hubWalBytesBefore = directoryBytes(hubWal);
     const loadWalBytesBefore = directoryBytes(loadWal);
     const startedAt = performance.now();
-    // One burst: every route is one atomic pair envelope (the cross-j pair
-    // cohort admits exactly two legs per envelope), submitted back to back;
-    // then every route must reach committed full fill on both hub entities.
+    // Volley mode: each round submits one atomic pair envelope per prepared
+    // pair (the cross-j pair cohort admits exactly two legs per envelope),
+    // waits until every route reaches committed full fill on both hub
+    // entities, then re-reads the maker's fresh steady-quote levels. Economic
+    // tps is total settled routes over the whole wall clock — requote latency
+    // included, so the number is sustained, not burst.
     let observed = { enqueueAckElapsedMs: 0, commandObservedElapsedMs: 0 };
-    for (const [index, route] of routes.entries()) {
-      const pairCohort = prepared[index]!.cohort;
-      const routeObserved = await sendObserved(load, route.orderId, {
-        runtimeTxs: [],
-        entityInputs: [
-          { entityId: pairCohort.target.entityId, signerId: pairCohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-          { entityId: pairCohort.source.entityId, signerId: pairCohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-        ],
+    let totalSettled = 0;
+    let lastSettled: Awaited<ReturnType<typeof waitForSettledCrossRoute>> | undefined;
+    let loadOrderId = '';
+    let roundLevels = new Map(prepared.map(entry => [pairKeyOf(entry.level), entry.level]));
+    for (let round = 0; round < rounds; round += 1) {
+      const now = Date.now();
+      const volley = prepared.flatMap((entry, index) => {
+        const level = roundLevels.get(pairKeyOf(entry.level));
+        if (!level) return [];
+        return [{ entry, level, route: buildVolleyRoute(entry, level, `r${round}-${index}`, now) }];
       });
-      observed = {
-        enqueueAckElapsedMs: Math.max(observed.enqueueAckElapsedMs, routeObserved.enqueueAckElapsedMs),
-        commandObservedElapsedMs: Math.max(observed.commandObservedElapsedMs, routeObserved.commandObservedElapsedMs),
-      };
+      if (volley.length === 0) throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_ROUND_LEVEL_MISSING:${round}`);
+      if (round === 0) loadOrderId = volley[0]!.route.orderId;
+      for (const { entry, route } of volley) {
+        const routeObserved = await sendObserved(load, route.orderId, {
+          runtimeTxs: [],
+          entityInputs: [
+            { entityId: entry.cohort.target.entityId, signerId: entry.cohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
+            { entityId: entry.cohort.source.entityId, signerId: entry.cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
+          ],
+        });
+        observed = {
+          enqueueAckElapsedMs: Math.max(observed.enqueueAckElapsedMs, routeObserved.enqueueAckElapsedMs),
+          commandObservedElapsedMs: Math.max(observed.commandObservedElapsedMs, routeObserved.commandObservedElapsedMs),
+        };
+      }
+      const settledRound = await Promise.all(volley.map(({ level, route }) => waitForSettledCrossRoute(
+        hub, sourceHub.entityId, targetHub.entityId, route.orderId,
+        level.target.amount, level.source.amount,
+      )));
+      totalSettled += settledRound.length;
+      lastSettled = settledRound[settledRound.length - 1]!;
+      console.log(`[load] cross volley round=${round + 1}/${rounds} settled=${totalSettled} elapsedMs=${Math.ceil(performance.now() - startedAt)}`);
+      if (round + 1 < rounds) {
+        roundLevels = await readFreshLevels(new Set(volley.map(({ level }) => level.orderId)));
+      }
     }
-    const settledRoutes = await Promise.all(routes.map((route, index) => waitForSettledCrossRoute(
-      hub, sourceHub.entityId, targetHub.entityId, route.orderId,
-      prepared[index]!.level.target.amount, prepared[index]!.level.source.amount,
-    )));
-    const settled = settledRoutes[0]!;
+    const settled = lastSettled!;
     const economicCompletionElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const report = decodeCrossLoadReport({
       schema: 'xln-production-cross-swap-load-v1', mode: 'cross', configuredBurstSize: burstSize,
-      settledRoutes: settledRoutes.length,
-      economicTps: settledRoutes.length * 1_000 / Math.max(1, Math.ceil(performance.now() - startedAt)),
+      configuredRounds: rounds,
+      settledRoutes: totalSettled,
+      economicTps: totalSettled * 1_000 / Math.max(1, Math.ceil(performance.now() - startedAt)),
       completionAuthority: 'committed_cross_route_full_fill',
       marketMakerOrderId: marketMakerRoute.orderId, loadOrderId,
       sourceAmount: settled.filledSourceAmount!.toString(),
