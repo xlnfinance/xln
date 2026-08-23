@@ -9,6 +9,7 @@
  * key stores and relay sessions, so every hop crosses the real P2P path.
  */
 
+import { collectHltEnvironmentManifest } from '../environment-manifest';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { decodeSettlementEvidenceResponse } from '../../../../api/runtime-adapter/control/settlement-evidence';
@@ -500,6 +501,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       walBytesAfter: directoryBytes(walPath),
       hubDurableBefore,
       hubDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest')),
+      environment: collectHltEnvironmentManifest(),
     });
     persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
     publishHltDashboardReport('payment', report);

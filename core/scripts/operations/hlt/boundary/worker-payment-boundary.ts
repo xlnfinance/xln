@@ -1,5 +1,6 @@
 /** Exact decode boundary for the payment workload's durable report. */
 
+import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from '../environment-manifest';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -38,6 +39,7 @@ export type LoadPaymentReport = Readonly<{
   walBytesAfter: number;
   hubDurableBefore: Readonly<{ height: number; canonicalStateHash: string }>;
   hubDurableAfter: Readonly<{ height: number; canonicalStateHash: string }>;
+  environment: HltEnvironmentManifest;
 }>;
 
 export type PaymentSettlementSample = Readonly<{
@@ -120,6 +122,7 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     'hubCompletedPaymentsBefore', 'hubCompletedPaymentsAfter',
     'hubAcceptedPaymentsBefore', 'hubAcceptedPaymentsAfter', 'hubIngressElapsedMs', 'settlementSamples',
     'roundSubmissionLagMs', 'walBytesBefore', 'walBytesAfter', 'hubDurableBefore', 'hubDurableAfter',
+    'environment',
   ], [], 'HLT_PAYMENT_REPORT_FIELDS_INVALID');
   if (record['schema'] !== 'xln-hlt-payment-load-v1') throw new Error('HLT_PAYMENT_REPORT_SCHEMA_INVALID');
   if (record['mode'] !== 'payments') throw new Error('HLT_PAYMENT_REPORT_MODE_INVALID');
@@ -229,5 +232,6 @@ export const decodeLoadPaymentReport = (value: unknown): LoadPaymentReport => {
     walBytesAfter: requireBoundaryInteger(record['walBytesAfter'], 'HLT_PAYMENT_REPORT_WAL_AFTER_INVALID', 0),
     hubDurableBefore: decodeFrame(record['hubDurableBefore'], 'HLT_PAYMENT_REPORT_HUB_BEFORE'),
     hubDurableAfter: decodeFrame(record['hubDurableAfter'], 'HLT_PAYMENT_REPORT_HUB_AFTER'),
+    environment: decodeHltEnvironmentManifest(record['environment'], 'HLT_PAYMENT_REPORT_ENVIRONMENT'),
   };
 };
