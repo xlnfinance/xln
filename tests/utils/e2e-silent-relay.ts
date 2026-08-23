@@ -106,7 +106,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	              bumpStat('snapshotDispatches');
 	              socket.dispatchEvent(new MessageEvent('message', {
                 data: JSON.stringify({
-                  v: 1,
+                  v: 2,
                   type: 'market_snapshot',
                   id: 'synthetic_market_snapshot',
                   timestamp: now,
@@ -241,7 +241,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
               socket.sentMessages.push(rawData);
               if (window.__relayErrorOnSubscribe && rawData.includes('"market_subscribe"')) {
                 const errorMessage = {
-                  v: 1,
+                  v: 2,
                   type: 'error',
                   inReplyTo: 'market_subscribe',
                   code: 'E_UNKNOWN_HUB',

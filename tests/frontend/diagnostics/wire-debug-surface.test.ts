@@ -10,14 +10,14 @@ describe('browser wire debug surface', () => {
     expect(wireDebug.decodeWs(peer)).toEqual({ type: 'ping' });
 
     const adapter = wireDebug.encodeRadapter({
-      v: 1,
+      v: 2,
       op: 'tick',
       height: 9,
       commandReady: true,
       commandReadyReason: null,
     });
     expect(wireDebug.decodeRadapter(adapter)).toEqual({
-      v: 1,
+      v: 2,
       op: 'tick',
       height: 9,
       commandReady: true,
