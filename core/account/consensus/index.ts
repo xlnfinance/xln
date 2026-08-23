@@ -14,7 +14,7 @@ import type {
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import {
-  cloneIsolatedAccountFrame as cloneAccountFrame,
+  cloneIsolatedAccountFrame,
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../protocol/state/account-input-clone';
@@ -507,7 +507,7 @@ async function commitIncomingFrameOnRealState(
     });
   }
 
-  account.currentFrame = cloneAccountFrame(receivedFrame);
+  account.currentFrame = cloneIsolatedAccountFrame(receivedFrame);
   account.currentHeight = receivedFrame.height;
   const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;
   if (!acceptedFrameHanko) throw new Error('ACCEPTED_ACCOUNT_FRAME_HANKO_MISSING');

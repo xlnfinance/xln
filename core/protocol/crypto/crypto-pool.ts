@@ -257,7 +257,7 @@ export const recoverAddressesBatch = async (records: Uint8Array): Promise<Uint8A
 };
 
 /** Sign N digests with one key; 65-byte recoverable signatures in input order, or null. */
-export const signDigestsBatch = async (privateKey: Uint8Array, digests: Uint8Array): Promise<Uint8Array | null> => {
+export const signDigestsBatchOnPool = async (privateKey: Uint8Array, digests: Uint8Array): Promise<Uint8Array | null> => {
   const workers = signLane.workers() ?? getPool();
   if (!workers) return null;
   const count = Math.floor(digests.length / 32);

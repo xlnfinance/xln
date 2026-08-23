@@ -1,7 +1,7 @@
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import {
-  cloneIsolatedAccountFrame as cloneAccountFrame,
+  cloneIsolatedAccountFrame,
   cloneIsolatedAccountInput,
   copyAccountDisputeConfig,
   copyAccountStateDomain,
@@ -65,7 +65,7 @@ const buildOutboundAccountInput = (
     Number(account.currentHeight) === Number(reusableAck!.height);
   const disputeSeal = resolveDisputeSeal(account, candidate, proof);
   const proposal = {
-    frame: cloneAccountFrame(frame),
+    frame: cloneIsolatedAccountFrame(frame),
     ...(disputeSeal ? { disputeSeal } : {}),
   };
   const shared = {

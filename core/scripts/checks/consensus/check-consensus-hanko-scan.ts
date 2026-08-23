@@ -200,7 +200,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
   'publishAccountOverlay(account, validation.clonedMachine);',
   'ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH',
-  'account.currentFrame = cloneAccountFrame(receivedFrame);',
+  'account.currentFrame = cloneIsolatedAccountFrame(receivedFrame);',
   'committedFrames.push({ frame: account.currentFrame, committedViaNewFrame: true });',
 ]);
 assertNotMatches(

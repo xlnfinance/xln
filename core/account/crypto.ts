@@ -3,7 +3,7 @@
  * Canonical signerId is EOA address (lowercase). Keys are loaded via registerSignerKey.
  */
 
-import { cryptoPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatch as signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
+import { cryptoPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
 import { RecencyMemo } from '../support/collections/recency-memo';
 import * as secp256k1 from '@noble/secp256k1';
 import { countOpWithSite, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';

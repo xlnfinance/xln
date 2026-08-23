@@ -4,7 +4,7 @@
  * Human-audit importance: 99/100 — roots bind large state without iteration ambiguity.
  */
 import { ethers } from 'ethers';
-import { hexToBytes as decodeHexBytes } from '../../support/bytes/hex-bytes';
+import { hexToBytes } from '../../support/bytes/hex-bytes';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 
 export const RADIX_MERKLE_RADICES = [2, 4, 16, 256] as const;
@@ -62,9 +62,9 @@ export type RadixMerkleMaterializedResult = RadixMerkleResult & {
 export const EMPTY_RADIX_MERKLE_ROOT = `0x${'00'.repeat(32)}`;
 
 const UTF8_ENCODER = new TextEncoder();
-const hexToBytes = (hex: string): Uint8Array => {
+const hashHexToBytes = (hex: string): Uint8Array => {
   try {
-    const bytes = decodeHexBytes(hex);
+    const bytes = hexToBytes(hex);
     if (bytes.length === 0) throw new Error('empty');
     return bytes;
   } catch {
@@ -168,7 +168,7 @@ export const computeRadixMerkleLeafHash = (
 
 /** Decode `0x` hex straight into a preimage buffer; returns the byte count. */
 const writeHexInto = (target: Uint8Array, offset: number, hex: string): number => {
-  const bytes = hexToBytes(hex);
+  const bytes = hashHexToBytes(hex);
   target.set(bytes, offset);
   return bytes.length;
 };
@@ -276,7 +276,7 @@ const extensionHash = (
   hashParts(EXTENSION_DOMAIN, [
     Uint8Array.of(radixTag(radix)),
     encodePathSegment(radix, path),
-    hexToBytes(childHash),
+    hashHexToBytes(childHash),
   ], hashAlgorithm);
 
 export const computeRadixMerkleEdgeHash = (
@@ -656,7 +656,7 @@ export const buildHexKeyedMerkle = (
 ): RadixMerkleResult => {
   return buildRadixMerkle(
     leaves.map((leaf) => ({
-      key: hexToBytes(leaf.hexKey),
+      key: hashHexToBytes(leaf.hexKey),
       value: leaf.value,
     })),
     options,

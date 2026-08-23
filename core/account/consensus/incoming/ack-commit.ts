@@ -2,7 +2,7 @@ import type { AccountFrame, AccountOutput, AccountPeerInput, AccountReplica } fr
 import type { AccountConsensusContext } from '../context';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
-import { cloneIsolatedAccountFrame as cloneAccountFrame } from '../../../protocol/state/account-input-clone';
+import { cloneIsolatedAccountFrame } from '../../../protocol/state/account-input-clone';
 import { getAccountPerspective } from '../../state/perspective';
 import { deriveAccountFrameTokenIds } from '../../state/frame';
 import { appendAccountMempoolTxs } from '../../input/mempool';
@@ -182,7 +182,7 @@ const installPendingFrameCommit = (
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
 ): number => {
-  account.currentFrame = cloneAccountFrame(pendingFrame);
+  account.currentFrame = cloneIsolatedAccountFrame(pendingFrame);
   account.currentHeight = pendingFrame.height;
   // The ACK is the second half of this bilateral certificate. It must survive
   // so a later board rotation can prove that both parties committed the frame.
