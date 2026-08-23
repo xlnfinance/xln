@@ -100,7 +100,7 @@ export const commitAccountTransition = (
  * Bilateral money, proofs, and dispute lifecycle fold into `live`.
  * Frame coordination stays on the live replica until ACK/accept installs it.
  */
-const ACCOUNT_LIVE_ENVELOPE = new Set<keyof AccountReplica>([
+export const ACCOUNT_LIVE_ENVELOPE: ReadonlySet<keyof AccountReplica> = new Set<keyof AccountReplica>([
   'mempool',
   'currentFrame',
   'currentHeight',

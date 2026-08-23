@@ -14,6 +14,7 @@
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
 
+import { XLN_BINARY_MSGPACK_MAGIC } from '../../protocol/serialization/binary-codec';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hkdf } from '@noble/hashes/hkdf.js';
@@ -297,7 +298,7 @@ export const resolveRuntimeWsMaxMessageBytes = (): number => {
 
 const assertRuntimeWsMessagePack = (bytes: Uint8Array): void => {
   const magic = bytes[0];
-  if (magic !== 0x01) throw new Error(`WS_WIRE_MESSAGEPACK_REQUIRED:magic=${magic ?? 'none'}`);
+  if (magic !== XLN_BINARY_MSGPACK_MAGIC) throw new Error(`WS_WIRE_MESSAGEPACK_REQUIRED:magic=${magic ?? 'none'}`);
 };
 
 const runtimeWsEnvelopeCodec: Codec<RuntimeWsEnvelope> = {

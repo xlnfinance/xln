@@ -297,7 +297,7 @@ describe('direct runtime websocket route', () => {
     const binary = serializeWsMessage(message);
 
     expect(binary).toBeInstanceOf(Uint8Array);
-    expect(binary[0]).toBe(0x01);
+    expect(binary[0]).toBe(0x03);
     expect(deserializeWsMessage(binary)).toEqual(message);
     expect(serializeWsMessageForDebug(message)).toContain('debug_event');
     expect(() => deserializeWsMessage(serializeWsMessageForDebug(message))).toThrow('WS_WIRE_BINARY_REQUIRED');

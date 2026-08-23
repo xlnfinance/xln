@@ -1,3 +1,4 @@
+import { XLN_BINARY_MSGPACK_MAGIC } from '../../protocol/serialization/binary-codec';
 import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
 import { LIMITS } from '../../config/constants';
 import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
@@ -40,7 +41,7 @@ export const assertRuntimeAdapterMessageSize = (raw: unknown): void => {
 
 const assertRuntimeAdapterMessagePack = (bytes: Uint8Array): void => {
   const magic = bytes[0];
-  if (magic !== 0x01) throw new Error(`RADAPTER_WIRE_MESSAGEPACK_REQUIRED:magic=${magic ?? 'none'}`);
+  if (magic !== XLN_BINARY_MSGPACK_MAGIC) throw new Error(`RADAPTER_WIRE_MESSAGEPACK_REQUIRED:magic=${magic ?? 'none'}`);
 };
 
 const runtimeAdapterWireCodec: Codec<RuntimeAdapterWireMessage> = {

@@ -6,10 +6,15 @@ import {
 
 export type XlnBinaryCodecName = 'json' | 'msgpack';
 
+// 0x01 was msgpack with structured-clone reference markers (XLN_BINARY_FORMAT_V1);
+// 0x03 is value-only msgpack (moreTypes, Buffer folded into Uint8Array). A V1
+// payload is refused by magic rather than decoded into a different value graph.
 const XLN_BINARY_CODEC_MAGIC: Record<XlnBinaryCodecName, number> = {
-  msgpack: 0x01,
+  msgpack: 0x03,
   json: 0x02,
 };
+
+export const XLN_BINARY_MSGPACK_MAGIC = XLN_BINARY_CODEC_MAGIC.msgpack;
 
 const XLN_BINARY_CODEC_BY_MAGIC = new Map<number, XlnBinaryCodecName>(
   Object.entries(XLN_BINARY_CODEC_MAGIC).map(([codec, magic]) => [magic, codec as XlnBinaryCodecName]),
@@ -42,9 +47,12 @@ const SUPPORTED_TYPED_ARRAYS = new Set([
   'BigInt64Array',
   'BigUint64Array',
 ]);
+// moreTypes keeps Map/Set/typed arrays/undefined round-tripping exactly.
+// structuredClone was NOT used: it adds reference markers for repeated object
+// instances, so bytes depended on object sharing rather than value.
 const msgpackCodec = new Packr({
   mapsAsObjects: false,
-  structuredClone: true,
+  moreTypes: true,
 });
 
 type BinaryPayloadValidator<T> = (value: unknown) => T;
@@ -98,7 +106,8 @@ const canonicalize = (
     if (!Number.isFinite(value.getTime())) return unsupported(path, 'invalid-date');
     return new Date(value.getTime());
   }
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return Buffer.from(value);
+  // Buffer and Uint8Array are the same bytes; one msgpack form for both.
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return new Uint8Array(value);
   if (value instanceof ArrayBuffer) return unsupported(path, 'array-buffer-use-uint8array');
   if (ArrayBuffer.isView(value)) {
     if (value instanceof DataView) return unsupported(path, 'data-view');
