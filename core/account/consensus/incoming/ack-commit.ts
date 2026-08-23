@@ -19,23 +19,22 @@ import {
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
+import { timePerfPhase } from '../../../support/performance/profile';
 
 const ackLog = createStructuredLogger('account.ack');
 
 export type PendingFrameAckResult =
-  | { kind: 'not_applicable' }
-  | { kind: 'fallthrough' }
-  | { kind: 'return'; result: HandleAccountInputResult };
+  { kind: 'not_applicable' } | { kind: 'fallthrough' } | { kind: 'return'; result: HandleAccountInputResult };
 
 type AccountFrameAck = NonNullable<ReturnType<typeof accountInputAck>>;
 
 type PendingAckCertificateResult =
   | {
-    kind: 'continue';
-    ack: AccountFrameAck;
-    ackHanko: string;
-    frameHash: string;
-  }
+      kind: 'continue';
+      ack: AccountFrameAck;
+      ackHanko: string;
+      frameHash: string;
+    }
   | { kind: 'return'; result: HandleAccountInputResult };
 
 const verifyPendingAckCertificate = async (
@@ -62,10 +61,7 @@ const verifyPendingAckCertificate = async (
 
   const pendingFrame = account.pendingFrame!;
   const frameHash = pendingFrame.stateHash;
-  if (
-    typeof ack.frameHash !== 'string'
-    || ack.frameHash.toLowerCase() !== frameHash.toLowerCase()
-  ) {
+  if (typeof ack.frameHash !== 'string' || ack.frameHash.toLowerCase() !== frameHash.toLowerCase()) {
     return {
       kind: 'return',
       result: rejectAccountPeerInput(
@@ -78,11 +74,7 @@ const verifyPendingAckCertificate = async (
   if (!ack.frameHanko) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
-        'Missing ACK hanko',
-        events,
-      ),
+      result: rejectAccountPeerInput('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID', 'Missing ACK hanko', events),
     };
   }
 
@@ -102,23 +94,15 @@ const verifyPendingAckCertificate = async (
   if (!verified.valid) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
-        'Invalid ACK hanko signature',
-        events,
-      ),
+      result: rejectAccountPeerInput('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID', 'Invalid ACK hanko signature', events),
     };
   }
-  if (
-    !verified.entityId
-    || verified.entityId.toLowerCase() !== expectedEntity.toLowerCase()
-  ) {
+  if (!verified.entityId || verified.entityId.toLowerCase() !== expectedEntity.toLowerCase()) {
     return {
       kind: 'return',
       result: rejectAccountPeerInput(
         'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
-        `ACK hanko entityId mismatch: got ${verified.entityId?.slice(-4)}, ` +
-          `expected ${expectedEntity.slice(-4)}`,
+        `ACK hanko entityId mismatch: got ${verified.entityId?.slice(-4)}, ` + `expected ${expectedEntity.slice(-4)}`,
         events,
       ),
     };
@@ -147,12 +131,7 @@ const applyPendingFrameTransactions = async (
   });
   candidateEffects.push(...committed.candidateEffects);
   timedOutHashlocks.push(...committed.timedOutHashlocks);
-  assertLiveCommitMatchesFrame(
-    account,
-    pendingFrame.accountStateRoot,
-    'proposer',
-    pendingFrame.height,
-  );
+  assertLiveCommitMatchesFrame(account, pendingFrame.accountStateRoot, 'proposer', pendingFrame.height);
 };
 
 const installPendingFrameCommit = (
@@ -183,10 +162,7 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  if (
-    account.lastOutboundFrameAck
-    && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)
-  ) {
+  if (account.lastOutboundFrameAck && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)) {
     delete account.lastOutboundFrameAck;
   }
   account.rollbackCount = Math.max(0, account.rollbackCount - 1);
@@ -241,13 +217,8 @@ export const handlePendingFrameAck = async (
       to: shortId(input.toEntityId),
     });
   }
-  const certificate = await verifyPendingAckCertificate(
-    account,
-    ack,
-    ackHeight,
-    validatedSeal,
-    events,
-    securityContext,
+  const certificate = await timePerfPhase('account.ack.verifyHanko', () =>
+    verifyPendingAckCertificate(account, ack, ackHeight, validatedSeal, events, securityContext),
   );
   if (certificate.kind === 'return') return certificate;
 
@@ -258,17 +229,16 @@ export const handlePendingFrameAck = async (
     tokens: tokenIds,
     state: shortHash(certificate.frameHash),
   });
-  const { counterparty } = getAccountPerspective(
-    account.state,
-    account.proofHeader.fromEntity,
-  );
-  await applyPendingFrameTransactions(
-    context,
-    account,
-    pendingFrame,
-    committedJClaims,
-    timedOutHashlocks,
-    candidateEffects,
+  const { counterparty } = getAccountPerspective(account.state, account.proofHeader.fromEntity);
+  await timePerfPhase('account.ack.commitTransition', () =>
+    applyPendingFrameTransactions(
+      context,
+      account,
+      pendingFrame,
+      committedJClaims,
+      timedOutHashlocks,
+      candidateEffects,
+    ),
   );
   ackLog.debug('frame.commit.complete', {
     side: 'proposer',
@@ -276,23 +246,12 @@ export const handlePendingFrameAck = async (
     height: pendingFrame.height,
     tokens: account.state.deltas.size,
   });
-  const committedHeight = installPendingFrameCommit(
-    account,
-    input,
-    pendingFrame,
-    ack,
-    certificate.ackHanko,
-    validatedSeal,
-    committedFrames,
+  const committedHeight = timePerfPhase('account.ack.installCommit', () =>
+    installPendingFrameCommit(account, input, pendingFrame, ack, certificate.ackHanko, validatedSeal, committedFrames),
   );
   events.push(`✅ Frame ${ackHeight} confirmed and committed`);
-  await queuePostAckWork(
-    account,
-    input,
-    committedHeight,
-    securityContext,
-    candidateEffects,
-    events,
+  await timePerfPhase('account.ack.postAckWork', () =>
+    queuePostAckWork(account, input, committedHeight, securityContext, candidateEffects, events),
   );
   // Entity consensus owns proposal flushing; ACK commit never creates a second
   // proposal path while the parent frame is still being finalized.
