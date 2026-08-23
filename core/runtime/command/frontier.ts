@@ -55,22 +55,6 @@ export const validateRuntimeAdapterCommandMarker = (
   return { laneId, sequence, commandId, inputHash, expiresAtMs };
 };
 
-const runtimeAdapterCommandMarkerExpired = (
-  data: RuntimeAdapterCommandMarkerData,
-  nowMs: number,
-): boolean => {
-  const expiresAtMs = data.expiresAtMs === null ? null : Number(data.expiresAtMs);
-  return expiresAtMs !== null && Number.isSafeInteger(expiresAtMs) && expiresAtMs <= nowMs;
-};
-
-export const runtimeInputHasExpiredAdapterCommand = (
-  runtimeTxs: readonly RuntimeTx[],
-  nowMs: number,
-): boolean =>
-  runtimeTxs.some(tx =>
-    tx.type === 'recordRuntimeAdapterCommand' &&
-    runtimeAdapterCommandMarkerExpired(tx.data, nowMs));
-
 export const readRuntimeAdapterCommandFrontier = (
   env: RuntimeReplica,
   laneId: string,
@@ -95,8 +79,10 @@ export const countActiveRuntimeAdapterCommandLanes = (env: RuntimeReplica): numb
 const pruneExpiredCommandFrontiers = (
   frontiers: Map<string, RuntimeAdapterCommandFrontier>,
   nowMs: number,
+  preservedLaneId: string,
 ): void => {
   for (const [laneId, frontier] of frontiers) {
+    if (laneId === preservedLaneId) continue;
     if (frontier.expiresAtMs !== null && frontier.expiresAtMs <= nowMs) frontiers.delete(laneId);
   }
 };
@@ -109,11 +95,14 @@ export const applyRuntimeAdapterCommandMarker = (
   const nowMs = Math.max(0, Number(env.state.timestamp || 0));
   env.infrastructure ??= {};
   const frontiers = env.infrastructure.runtimeAdapterCommandFrontiers ?? new Map();
-  pruneExpiredCommandFrontiers(frontiers, nowMs);
+  // Authentication expiry is enforced before admission. Once accepted, the
+  // command and its marker are indivisible durable work: expiry may reject a
+  // later command, but it must never erase this marker or neighbouring inputs
+  // that happened to share its Runtime frame. Preserve this lane long enough
+  // to prove sequence continuity, then retain the expired frontier as replay
+  // evidence while readRuntimeAdapterCommandFrontier keeps it unauthorized.
+  pruneExpiredCommandFrontiers(frontiers, nowMs, data.laneId);
   env.infrastructure.runtimeAdapterCommandFrontiers = frontiers;
-  // Expired markers must not halt: after prune, seq>1 looks noncontiguous.
-  // Paired Entity txs are dropped in frame prepare.
-  if (runtimeAdapterCommandMarkerExpired(data, nowMs)) return;
   const prior = frontiers.get(data.laneId);
   const expectedSequence = (prior?.lastContiguousSequence ?? 0) + 1;
   if (data.sequence !== expectedSequence) {
