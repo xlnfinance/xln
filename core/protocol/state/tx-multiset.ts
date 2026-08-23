@@ -47,8 +47,8 @@ const sealKey = (seal: { hash: string; hanko?: string } | undefined): string =>
 const accountInputBodyDigests = new RecencyMemo<object, string>(16_384);
 
 /**
- * Content digest of one complete Account input body (canonical binary form),
- * computed once per queued object. Peer-claimed hashes and Hankos are not an
+ * Content digest of one complete tx body (canonical binary form), computed
+ * once per queued object. Peer-claimed hashes and Hankos are not an
  * identity before body validation: two envelopes claiming one `stateHash`
  * over different txs must never share a mempool key.
  */
@@ -89,13 +89,11 @@ const txFingerprintUncached = (tx: FingerprintableTx): string => {
     const compact = compactAccountInputFingerprint(tx.data);
     if (compact !== undefined) return compact;
   }
-  if (
-    tx.type !== 'consensusOutput' ||
-    !tx.data ||
-    typeof tx.data !== 'object' ||
-    Array.isArray(tx.data)
-  ) {
+  if (!tx.data || typeof tx.data !== 'object' || Array.isArray(tx.data)) {
     return `${tx.type}:${safeStringify(tx.data)}`;
+  }
+  if (tx.type !== 'consensusOutput') {
+    return `${tx.type}:${accountInputBodyDigest(tx.data)}`;
   }
 
   /*
@@ -108,7 +106,7 @@ const txFingerprintUncached = (tx: FingerprintableTx): string => {
     consumptionProof: _targetWitness,
     ...certifiedOutput
   } = tx.data as Record<string, unknown>;
-  return `${tx.type}:${safeStringify(certifiedOutput)}`;
+  return `${tx.type}:${keccakBytesHash(encodeBinaryPayload(certifiedOutput, 'msgpack', { omitSymbolKeys: true }))}`;
 };
 
 /**

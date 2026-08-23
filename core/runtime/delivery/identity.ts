@@ -79,18 +79,12 @@ export const accountProposalOutputIdentity = (output: RoutedEntityInput): string
     return proposal ? [{ accountInput: tx.data, proposal }] : [];
   });
   if (proposals.length !== txs.length) return null;
-  return safeStringify({
-    runtimeId: normalizeRuntimeId(output.runtimeId),
-    entityId: output.entityId.toLowerCase(),
-    signerId: normalizeRouteText(output.signerId),
-    from: normalizeRuntimeId(output.from),
-    proposals: proposals.map(({ accountInput, proposal }) => ({
-      fromEntityId: accountInput.fromEntityId.toLowerCase(),
-      toEntityId: accountInput.toEntityId.toLowerCase(),
-      height: proposal.frame.height,
-      stateHash: proposal.frame.stateHash.toLowerCase(),
-    })),
-  });
+  // Scalars only; a flat joined key is the same identity as the former JSON.
+  return `ap|${normalizeRuntimeId(output.runtimeId)}|${output.entityId.toLowerCase()}|${normalizeRouteText(output.signerId)}` +
+    `|${normalizeRuntimeId(output.from)}|` +
+    proposals.map(({ accountInput, proposal }) =>
+      `${accountInput.fromEntityId.toLowerCase()}:${accountInput.toEntityId.toLowerCase()}:${proposal.frame.height}:${proposal.frame.stateHash.toLowerCase()}`,
+    ).join(',');
 };
 
 export const accountProposalEvidenceRank = (output: RoutedEntityInput): number =>
@@ -160,20 +154,13 @@ export const accountProposalSettledBySender = (env: RuntimeReplica, output: Rout
 export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   const accountProposalIdentity = accountProposalOutputIdentity(output);
   if (accountProposalIdentity) return accountProposalIdentity;
-  return safeStringify({
-    runtimeId: output.runtimeId ?? '',
-    sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
-    entityId: output.entityId.toLowerCase(),
-    signerId: normalizeRouteText(output.signerId),
-    from: output.from ?? '',
-    frame: output.proposedFrame ? { height: output.proposedFrame.height, hash: output.proposedFrame.hash } : null,
-    precommit: output.hashPrecommitFrame
-      ? { ...output.hashPrecommitFrame, signers: [...(output.hashPrecommits?.keys() ?? [])].sort() }
-      : null,
-    vote: output.leaderTimeoutVote
-      ? { voterId: output.leaderTimeoutVote.voterId.toLowerCase(), hash: hashEntityLeaderVoteBody(output.leaderTimeoutVote) }
-      : null,
-    attestations: [...(output.jPrefixAttestations?.keys() ?? [])].sort(),
-    txs: (output.entityTxs || []).map(tx => txFingerprint(tx)),
-  });
+  const frame = output.sourceRuntimeFrame;
+  const precommit = output.hashPrecommitFrame;
+  return `ro|${output.runtimeId ?? ''}|${frame ? `${frame.height}:${frame.timestamp}` : ''}` +
+    `|${output.entityId.toLowerCase()}|${normalizeRouteText(output.signerId)}|${output.from ?? ''}` +
+    `|${output.proposedFrame ? `${output.proposedFrame.height}:${output.proposedFrame.hash}` : ''}` +
+    `|${precommit ? `${precommit.height}:${precommit.frameHash}:${[...(output.hashPrecommits?.keys() ?? [])].sort().join(',')}` : ''}` +
+    `|${output.leaderTimeoutVote ? `${output.leaderTimeoutVote.voterId.toLowerCase()}:${hashEntityLeaderVoteBody(output.leaderTimeoutVote)}` : ''}` +
+    `|${[...(output.jPrefixAttestations?.keys() ?? [])].sort().join(',')}` +
+    `|${(output.entityTxs || []).map(tx => txFingerprint(tx)).join('\u0001')}`;
 };

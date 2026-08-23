@@ -1,5 +1,5 @@
 import { LIMITS } from '../../../config/constants';
-import { safeStringify } from '../../../protocol/serialization';
+import { encodeBinaryPayload } from '../../../protocol/serialization/binary-codec';
 import type { EntityFrameEvent } from '../../types';
 
 /**
@@ -9,8 +9,10 @@ import type { EntityFrameEvent } from '../../types';
  */
 export const MAX_ENTITY_FRAME_EVENT_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 
+// The budget is a wire/history bound; the canonical binary form is what is
+// stored and hashed, and it is measured without a JSON text detour.
 const getEntityFrameEventByteLength = (events: EntityFrameEvent[]): number =>
-  new TextEncoder().encode(safeStringify(events)).byteLength;
+  events.length === 0 ? 0 : encodeBinaryPayload(events).byteLength;
 
 export const assertEntityFrameEventByteBudget = (events: EntityFrameEvent[]): void => {
   const byteLength = getEntityFrameEventByteLength(events);
