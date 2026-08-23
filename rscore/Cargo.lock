@@ -187,6 +187,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "xln-rscore-abi"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "xln-rscore-protocol"
 version = "0.1.0"
 dependencies = [

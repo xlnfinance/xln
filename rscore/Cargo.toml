@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/protocol"]
+members = ["crates/abi", "crates/protocol"]
 resolver = "2"
 
 [workspace.package]
@@ -18,5 +18,4 @@ thiserror = "2.0.16"
 [profile.release]
 codegen-units = 1
 lto = "thin"
-panic = "abort"
-
+panic = "unwind"
