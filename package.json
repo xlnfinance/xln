@@ -243,6 +243,7 @@
     "@nomicfoundation/hardhat-ethers": "^4.0.15",
     "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.11",
     "@nomicfoundation/hardhat-ignition": "^3.1.8",
+    "@openzeppelin/contracts": "^5.0.2",
     "@nomicfoundation/hardhat-ignition-ethers": "^3.1.6",
     "@nomicfoundation/hardhat-keystore": "^3.0.13",
     "@nomicfoundation/hardhat-mocha": "^3.1.0",
