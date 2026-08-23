@@ -56,7 +56,7 @@ fn delta_with_left_hold(left_hold: BigInt) -> Delta {
         200.into(),
         0.into(),
         0.into(),
-        left_hold.into(),
+        left_hold,
         0.into(),
     )
     .expect("literal delta")
