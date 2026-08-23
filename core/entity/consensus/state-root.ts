@@ -48,9 +48,7 @@ import {
 } from '../state/persistent-account-map';
 import { entityCollectionCommitment } from '../state/persistent-collection-map';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
-import { computeRadixMerkleLeafHash } from '../../protocol/state/radix-merkle';
-import { ethers } from 'ethers';
-import { hexToBytes } from '../../support/hex-bytes';
+import { RecencyMemo } from '../../support/recency-memo';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -266,6 +264,27 @@ const ACCOUNT_LEAF_BODY_FIELDS = [
   'shadow',
 ] as const satisfies readonly (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number][];
 
+/**
+ * Counterparty Hankos are ~1.4 KB of hex each and were three quarters of every
+ * leaf preimage. The leaf commits to their digest; the Hanko string itself is
+ * immutable, so the digest memo is exact by identity.
+ */
+const ACCOUNT_LEAF_HANKO_FIELDS = [
+  'counterpartyFrameHanko',
+  'counterpartyDisputeProofHanko',
+  'counterpartySettlementHanko',
+] as const satisfies readonly (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number][];
+const ACCOUNT_LEAF_HANKO_FIELD_SET: ReadonlySet<string> = new Set(ACCOUNT_LEAF_HANKO_FIELDS);
+const hankoLeafDigests = new RecencyMemo<string, string>(8_192);
+const hankoLeafDigestUtf8 = new TextEncoder();
+const hankoLeafDigest = (hanko: string, cold: boolean): string => {
+  const hit = cold ? undefined : hankoLeafDigests.get(hanko);
+  if (hit) return hit;
+  const digest = computeIntegrityDigest(hankoLeafDigestUtf8.encode(hanko));
+  if (!cold) hankoLeafDigests.set(hanko, digest);
+  return digest;
+};
+
 /** Hoisted: the projection runs once per account leaf on every root computation. */
 const ACCOUNT_LEAF_BODY_FIELD_SET: ReadonlySet<string> = new Set(ACCOUNT_LEAF_BODY_FIELDS);
 
@@ -286,70 +305,27 @@ export const ENTITY_ACCOUNT_LEAF_FIELDS = [
   ...ENTITY_ACCOUNT_LEAF_DERIVED_FIELDS,
 ] as const;
 const ENTITY_ACCOUNT_LEAF_UTF8 = new TextEncoder();
-const ENTITY_ACCOUNT_LEAF_KEYS: ReadonlyMap<string, string> = new Map(
-  ENTITY_ACCOUNT_LEAF_FIELDS.map(field => [
-    field,
-    computeIntegrityDigest(ENTITY_ACCOUNT_LEAF_UTF8.encode(`xln.entity.account-leaf.${field}`)),
-  ]),
-);
-
-export const entityAccountLeafMerkleKey = (field: string): string => {
-  const hexKey = ENTITY_ACCOUNT_LEAF_KEYS.get(field);
-  if (!hexKey) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
-  return hexKey;
-};
-
-const ENTITY_ACCOUNT_LEAF_KEY_BYTES: ReadonlyMap<string, Uint8Array> = new Map(
-  Array.from(ENTITY_ACCOUNT_LEAF_KEYS, ([field, hexKey]) => [field, ethers.getBytes(hexKey)]),
-);
-
-/**
- * Per-Account memo of field leaf hashes keyed by value identity. A payment
- * touches roughly half of an Account leaf's ~25 fields; the untouched half
- * (proof header, credit config, seals of the other side, ...) was re-encoded
- * and re-hashed on every commit. Identity is exact for frozen/replaced values;
- * a mutated-in-place object would be a consensus bug long before it reached
- * this cache. Bounded by live Accounts; evicted wholesale when oversized.
- */
-type LeafFieldMemo = Map<string, { value: unknown; hash: string }>;
-const LEAF_MEMO_MAX_ACCOUNTS = 65_536;
-const leafFieldMemos = new Map<string, LeafFieldMemo>();
+const ENTITY_ACCOUNT_LEAF_KEYS: ReadonlySet<string> = new Set(ENTITY_ACCOUNT_LEAF_FIELDS);
 
 const ENTITY_ACCOUNT_LEAF_DOMAIN = ENTITY_ACCOUNT_LEAF_UTF8.encode('xln.entity.account-leaf.v3');
-const ENTITY_ACCOUNT_LEAF_ENTRY_BYTES = 64;
 
 /**
- * Account leaf digest: one hash over the sorted (fieldKey ‖ fieldHash) pairs.
- * Nothing proves a single Account field against the Entity root, so the
- * per-Account radix Merkle (path slots, buckets, ~20 branch hashes) bought
- * nothing but ~57 µs per touched Account per frame.
+ * Account leaf digest: one encode of the sorted projection, one hash. Nothing
+ * proves a single Account field against the Entity root, and per-field memos
+ * missed on every shell fork, so 25 separate hashes per touched Account were
+ * pure overhead (~57 µs per Account per frame before, ~28 µs after the flat
+ * digest, ~5 µs now).
  */
-const computeEntityAccountLeafMerkleRoot = (
-  accountKey: string,
+const computeEntityAccountLeafDigest = (
   entries: ReadonlyArray<readonly [string, unknown]>,
-  cold = false,
 ): string => {
-  let memo = leafFieldMemos.get(accountKey);
-  if (!memo) {
-    if (leafFieldMemos.size >= LEAF_MEMO_MAX_ACCOUNTS) leafFieldMemos.clear();
-    memo = new Map();
-    leafFieldMemos.set(accountKey, memo);
+  for (const [field] of entries) {
+    if (!ENTITY_ACCOUNT_LEAF_KEYS.has(field)) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
   }
-  const preimage = new Uint8Array(ENTITY_ACCOUNT_LEAF_DOMAIN.length + entries.length * ENTITY_ACCOUNT_LEAF_ENTRY_BYTES);
+  const encoded = encodeAccountStateValue(Object.fromEntries(entries));
+  const preimage = new Uint8Array(ENTITY_ACCOUNT_LEAF_DOMAIN.length + encoded.length);
   preimage.set(ENTITY_ACCOUNT_LEAF_DOMAIN, 0);
-  let offset = ENTITY_ACCOUNT_LEAF_DOMAIN.length;
-  for (const [field, value] of entries) {
-    const keyBytes = ENTITY_ACCOUNT_LEAF_KEY_BYTES.get(field);
-    if (!keyBytes) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
-    const cached = cold ? undefined : memo.get(field);
-    const hash = cached && cached.value === value
-      ? cached.hash
-      : computeRadixMerkleLeafHash(keyBytes, encodeAccountStateValue(value), 'integrity');
-    if (!cold && (!cached || cached.value !== value)) memo.set(field, { value, hash });
-    preimage.set(keyBytes, offset);
-    preimage.set(hexToBytes(hash), offset + 32);
-    offset += ENTITY_ACCOUNT_LEAF_ENTRY_BYTES;
-  }
+  preimage.set(encoded, ENTITY_ACCOUNT_LEAF_DOMAIN.length);
   return computeIntegrityDigest(preimage);
 };
 
@@ -400,13 +376,46 @@ const compactAccountInputBinding = (input: AccountPeerInput): Record<string, unk
   };
 };
 
-const mempoolRoot = (mempool: readonly AccountTx[]): string => {
+// Projection memos keyed by source identity. Inputs and ACK records are
+// replaced wholesale when they change (Hankos attached later are not part of
+// the binding); the mempool array is appended in place, so its length joins
+// the key. Fresh projection objects defeated the per-field leaf memo and
+// re-encoded every binding on every root.
+const mempoolRootMemos = new RecencyMemo<readonly AccountTx[], { length: number; root: string }>(4_096);
+const mempoolRoot = (mempool: readonly AccountTx[], cold: boolean): string => {
   if (mempool.length === 0) return EMPTY_ACCOUNT_STATE_ROOT;
-  return computeCanonicalMerkleRoot(
+  const memo = cold ? undefined : mempoolRootMemos.get(mempool);
+  if (memo && memo.length === mempool.length) return memo.root;
+  const root = computeCanonicalMerkleRoot(
     'entity.account-mempool',
     mempool.map((tx, index) => [String(index), canonicalAccountTxForFrameHash(tx)] as const),
     'integrity',
   );
+  mempoolRootMemos.set(mempool, { length: mempool.length, root });
+  return root;
+};
+
+const inputBindingMemos = new RecencyMemo<AccountPeerInput, Record<string, unknown>>(4_096);
+const compactAccountInputBindingMemo = (input: AccountPeerInput): Record<string, unknown> => {
+  const hit = inputBindingMemos.get(input);
+  if (hit) return hit;
+  const binding = compactAccountInputBinding(input);
+  inputBindingMemos.set(input, binding);
+  return binding;
+};
+
+type OutboundAck = NonNullable<AccountReplica['lastOutboundFrameAck']>;
+const outboundAckMemos = new RecencyMemo<OutboundAck, Record<string, unknown>>(4_096);
+const outboundAckBinding = (ack: OutboundAck): Record<string, unknown> => {
+  const hit = outboundAckMemos.get(ack);
+  if (hit) return hit;
+  const binding = {
+    height: ack.height,
+    counterpartyEntityId: ack.counterpartyEntityId.toLowerCase(),
+    response: compactAccountInputBinding(ack.response),
+  };
+  outboundAckMemos.set(ack, binding);
+  return binding;
 };
 
 const frameHashBinding = (frame: AccountFrame | undefined): string | undefined =>
@@ -422,12 +431,15 @@ const projectAccountConsensusState = (account: CoveredAccountReplica, cold = fal
   for (const field of ACCOUNT_ENTITY_COMMITTED_FIELDS) {
     if (ACCOUNT_LEAF_BODY_FIELD_SET.has(field)) continue;
     const value: unknown = account[field];
-    if (value !== undefined) projected[field] = value;
+    if (value === undefined) continue;
+    projected[field] = ACCOUNT_LEAF_HANKO_FIELD_SET.has(field) && typeof value === 'string'
+      ? hankoLeafDigest(value, cold)
+      : value;
   }
   projected['accountStateRoot'] = cold
     ? computeAccountStateRootCold(account.state)
     : computeAccountStateRoot(account.state, undefined, 'entityLeaf');
-  projected['mempoolRoot'] = mempoolRoot(account.mempool);
+  projected['mempoolRoot'] = mempoolRoot(account.mempool, cold);
   const currentFrameHash = frameHashBinding(account.currentFrame);
   if (currentFrameHash !== undefined) projected['currentFrameHash'] = currentFrameHash;
   const pendingFrameHash = frameHashBinding(account.pendingFrame);
@@ -443,14 +455,18 @@ const projectAccountConsensusState = (account: CoveredAccountReplica, cold = fal
   projected['pendingWithdrawals'] = envelopeCollections['pendingWithdrawalsRoot'];
   projected['shadow'] = envelopeCollections['shadow'];
   if (account.pendingAccountInput) {
-    projected['pendingAccountInput'] = compactAccountInputBinding(account.pendingAccountInput);
+    projected['pendingAccountInput'] = cold
+      ? compactAccountInputBinding(account.pendingAccountInput)
+      : compactAccountInputBindingMemo(account.pendingAccountInput);
   }
   if (account.lastOutboundFrameAck) {
-    projected['lastOutboundFrameAck'] = {
-      height: account.lastOutboundFrameAck.height,
-      counterpartyEntityId: account.lastOutboundFrameAck.counterpartyEntityId.toLowerCase(),
-      response: compactAccountInputBinding(account.lastOutboundFrameAck.response),
-    };
+    projected['lastOutboundFrameAck'] = cold
+      ? {
+          height: account.lastOutboundFrameAck.height,
+          counterpartyEntityId: account.lastOutboundFrameAck.counterpartyEntityId.toLowerCase(),
+          response: compactAccountInputBinding(account.lastOutboundFrameAck.response),
+        }
+      : outboundAckBinding(account.lastOutboundFrameAck);
   }
   return projected;
 };
@@ -639,10 +655,7 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
   const projectedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const digest = timePerfPhase(
     'entity.accountLeaf.merkle',
-    () => computeEntityAccountLeafMerkleRoot(
-      `${account.state.leftEntity}|${account.state.rightEntity}|${account.proofHeader.fromEntity}`,
-      entries,
-    ),
+    () => computeEntityAccountLeafDigest(entries),
   );
   if (OP_COUNTERS_ENABLED) {
     const endedAt = getPerfMs();
@@ -656,11 +669,7 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
 const computeEntityAccountValueHashCold = (account: AccountReplica): string => {
   const entries = Object.entries(projectAccountConsensusState(account, true))
     .sort(([left], [right]) => compareStableText(left, right));
-  return computeEntityAccountLeafMerkleRoot(
-    `${account.state.leftEntity}|${account.state.rightEntity}|${account.proofHeader.fromEntity}`,
-    entries,
-    true,
-  );
+  return computeEntityAccountLeafDigest(entries);
 };
 
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
