@@ -32,18 +32,18 @@ const copyFrame = (frame: AccountFrame): AccountFrame => ({ ...frame });
 
 /** Shell of a cached outbound input: witnesses are attached on the shell's own proposal/ack records. */
 const forkAccountInputShell = <T extends AccountInput>(input: T): T => {
-  const shell = { ...input } as T & { proposal?: { frame: AccountFrame; disputeSeal?: object }; ack?: { disputeSeal?: object } };
+  const shell = { ...input } as T & { proposal?: { frame: AccountFrame; disputeHanko?: object }; ack?: { disputeHanko?: object } };
   if ('proposal' in shell && shell.proposal) {
     shell.proposal = {
       ...shell.proposal,
       frame: copyFrame(shell.proposal.frame),
-      ...(shell.proposal.disputeSeal ? { disputeSeal: { ...shell.proposal.disputeSeal } } : {}),
+      ...(shell.proposal.disputeHanko ? { disputeHanko: { ...shell.proposal.disputeHanko } } : {}),
     };
   }
   if ('ack' in shell && shell.ack) {
     shell.ack = {
       ...shell.ack,
-      ...(shell.ack.disputeSeal ? { disputeSeal: { ...shell.ack.disputeSeal } } : {}),
+      ...(shell.ack.disputeHanko ? { disputeHanko: { ...shell.ack.disputeHanko } } : {}),
     };
   }
   return shell as T;
@@ -140,8 +140,8 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
       response: forkAccountInputShell(base.lastOutboundFrameAck.response),
     };
   }
-  if (base.boardResealMigration) shell.boardResealMigration = copyRecord(base.boardResealMigration);
-  if (base.counterpartyBoardReseal) shell.counterpartyBoardReseal = copyRecord(base.counterpartyBoardReseal);
+  if (base.boardHankoRefreshMigration) shell.boardHankoRefreshMigration = copyRecord(base.boardHankoRefreshMigration);
+  if (base.counterpartyBoardHankoRefresh) shell.counterpartyBoardHankoRefresh = copyRecord(base.counterpartyBoardHankoRefresh);
   if (base.disputePrepare) {
     shell.disputePrepare = {
       ...base.disputePrepare,
@@ -175,12 +175,6 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
             },
           }),
     };
-  }
-  if (base.pendingForwards) {
-    shell.pendingForwards = base.pendingForwards.map(forward => ({
-      ...forward,
-      route: copyArray(forward.route),
-    }));
   }
   shellLog.debug('replica.forked', {
     from: base.proofHeader.fromEntity.slice(-8),

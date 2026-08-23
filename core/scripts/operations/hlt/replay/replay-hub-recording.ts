@@ -76,7 +76,7 @@ type ReplayFrameProfile = Readonly<{
 type ReplayAmplificationTotals = Readonly<{
   canonicalEncodeBytes: number;
   storageEncodeBytes: number;
-  sealedEntityFrameBytes: number;
+  certifiedEntityFrameBytes: number;
   ecdsaSigns: number;
   ecdsaRecovers: number;
 }>;
@@ -114,7 +114,7 @@ type ReplayTrial = Readonly<{
 const amplificationTotals = (operations: OpCounterSnapshot): ReplayAmplificationTotals => ({
   canonicalEncodeBytes: operations['canonical.encode']?.bytes ?? 0,
   storageEncodeBytes: operations['storage.encode']?.bytes ?? 0,
-  sealedEntityFrameBytes: operations['entity.frame.sealed']?.bytes ?? 0,
+  certifiedEntityFrameBytes: operations['entity.frame.certified']?.bytes ?? 0,
   ecdsaSigns: operations['ecdsa.sign']?.calls ?? 0,
   ecdsaRecovers: operations['ecdsa.recover']?.calls ?? 0,
 });
@@ -125,7 +125,7 @@ const divideAmplification = (
 ): ReplayAmplificationTotals => ({
   canonicalEncodeBytes: totals.canonicalEncodeBytes / units,
   storageEncodeBytes: totals.storageEncodeBytes / units,
-  sealedEntityFrameBytes: totals.sealedEntityFrameBytes / units,
+  certifiedEntityFrameBytes: totals.certifiedEntityFrameBytes / units,
   ecdsaSigns: totals.ecdsaSigns / units,
   ecdsaRecovers: totals.ecdsaRecovers / units,
 });

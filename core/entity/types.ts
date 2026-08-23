@@ -477,7 +477,7 @@ export interface CertifiedEntityLineageAnchor {
 
 
 export type EntityCandidateEffect =
-  | AccountOutput
+  | Extract<AccountOutput, { kind: 'runtimeEvent' | 'debug' }>
   | {
       kind: 'entityFrameHistory';
       entityId: string;
@@ -493,21 +493,12 @@ export type EntityCandidateEffect =
       frame: AccountFrame;
     }
   | {
-      kind: 'runtimeEvent';
-      eventName: string;
-      data: Record<string, unknown>;
-    }
-  | {
       kind: 'securityIncidentRecord';
       identity: RuntimeSecurityIncidentIdentity;
     }
   | {
       kind: 'securityIncidentResolve';
       identity: RuntimeSecurityIncidentIdentity;
-    }
-  | {
-      kind: 'debug';
-      payload: Record<string, unknown>;
     };
 
 
@@ -531,7 +522,7 @@ export interface EntityCandidate {
   candidateEffects: EntityCandidateEffect[];
   /** Storage invalidations interpreted only after this exact frame commits. */
   storageChanges: RuntimeOverlayRecord[];
-  /** Proposal-envelope Account ids; unioned with storageChanges at Hanko seal. */
+  /** Proposal-envelope Account ids; unioned with storageChanges at Hanko attachment. */
   proposableAccounts?: readonly string[];
   /** Authority already computed by the proposer; lets the certified link skip a recompute. */
   authority?: EntityFrameAuthority;

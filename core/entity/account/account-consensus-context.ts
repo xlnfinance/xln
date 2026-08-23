@@ -22,7 +22,7 @@ const resolveSettlementBoardAuthority = async (
     ).toLowerCase())),
   );
   if (configured.size !== 1) {
-    throw new Error(`SETTLEMENT_SEAL_LOCAL_BOARD_DIVERGENCE:${sourceEntityId}`);
+    throw new Error(`SETTLEMENT_HANKO_LOCAL_BOARD_DIVERGENCE:${sourceEntityId}`);
   }
   const configuredBoardHash = [...configured][0]!;
   if (configuredBoardHash === source) return undefined;
@@ -33,11 +33,11 @@ const resolveSettlementBoardAuthority = async (
     jurisdiction,
   );
   if (!certified) {
-    throw new Error(`SETTLEMENT_SEAL_BOARD_AUTHORITY_MISSING:${sourceEntityId}`);
+    throw new Error(`SETTLEMENT_HANKO_BOARD_AUTHORITY_MISSING:${sourceEntityId}`);
   }
   if (certified.toLowerCase() !== configuredBoardHash) {
     throw new Error(
-      `SETTLEMENT_SEAL_BOARD_AUTHORITY_MISMATCH:` +
+      `SETTLEMENT_HANKO_BOARD_AUTHORITY_MISMATCH:` +
       `${sourceEntityId}:${certified}:${configuredBoardHash}`,
     );
   }

@@ -26,7 +26,7 @@ import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../en
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { validateEntityState } from '../../../entity/state/state-validation';
-import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
 import {
   isProposedAccountFrame,
   proposeAccountFrameMessage,
@@ -301,13 +301,13 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   if (!isProposedAccountFrame(proposed) || !proposed.accountInput.proposal) {
     throw new Error(proposeAccountFrameMessage(proposed) || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
   }
-  const sealedProposal = await sealAccountDraftAsEntity(
+  const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(
     env,
     sourceEntityId,
     sourceSignerId,
     proposed,
   );
-  const invalidInput = structuredClone(sealedProposal);
+  const invalidInput = structuredClone(hankoAttachedProposal);
   invalidInput.proposal.frame.accountStateRoot = `0x${'99'.repeat(32)}`;
   invalidInput.proposal.frame.stateHash = computeFrameHash(invalidInput.proposal.frame);
   const [frameHanko] = await signEntityHashes(
@@ -330,7 +330,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
 
   await applyAccountInputToEntity(
     targetState,
-    sealedProposal,
+    hankoAttachedProposal,
     env,
     accountConsensusContext,
   );

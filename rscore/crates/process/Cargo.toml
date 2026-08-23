@@ -1,0 +1,21 @@
+[package]
+name = "xln-rscore-process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+num-bigint.workspace = true
+thiserror.workspace = true
+xln-rscore-abi = { path = "../abi" }
+xln-rscore-batch = { path = "../batch" }
+xln-rscore-engine = { path = "../engine" }
+
+[dev-dependencies]
+hex.workspace = true
+
+[[bin]]
+name = "xln-rscore"
+path = "src/main.rs"

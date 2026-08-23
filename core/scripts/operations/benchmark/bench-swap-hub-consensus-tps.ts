@@ -29,7 +29,7 @@ import {
   requirePersistentAccountStateMap,
 } from '../../../account/state/persistent-state-map';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
-import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { safeStringify } from '../../../protocol/serialization';
@@ -511,9 +511,9 @@ const makeCrossCase = (
 
 const emptyPhaseMetrics = (): Record<keyof HubConsensusPhaseMetrics, number> => ({
   propose: 0,
-  proposalSeal: 0,
+  proposalHanko: 0,
   receive: 0,
-  ackSeal: 0,
+  ackHanko: 0,
   commit: 0,
 });
 
@@ -538,18 +538,18 @@ const runConsensusRoundTrip = async (
   const proposerSigner = benchCase.proposerEnv.state.eReplicas.values().next().value?.signerId;
   if (!proposerSigner) throw new Error(`${benchCase.kind}:proposer_signer_missing`);
   phaseStartedAt = getPerfMs();
-  const sealedProposal = await sealAccountDraftAsEntity(
+  const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(
     benchCase.proposerEnv,
     proposerEntity,
     proposerSigner,
     proposed,
   );
-  phases.proposalSeal = getPerfMs() - phaseStartedAt;
+  phases.proposalHanko = getPerfMs() - phaseStartedAt;
   phaseStartedAt = getPerfMs();
   const received = await applyAccountInput(
     receiverContext,
     benchCase.receiver,
-    sealedProposal,
+    hankoAttachedProposal,
   );
   if (!received.ok) throw new Error(`${benchCase.kind}:receive_failed:${accountInputFailureMessage(received)}`);
   if (!received.response || !received.hashesToSign?.length) {
@@ -559,7 +559,7 @@ const runConsensusRoundTrip = async (
   const receiverSigner = benchCase.receiverEnv.state.eReplicas.values().next().value?.signerId;
   if (!receiverSigner) throw new Error(`${benchCase.kind}:receiver_signer_missing`);
   phaseStartedAt = getPerfMs();
-  const sealedAck = await sealAccountDraftAsEntity(
+  const hankoAttachedAck = await attachAccountDraftHankosAsEntity(
     benchCase.receiverEnv,
     benchCase.receiver.proofHeader.fromEntity,
     receiverSigner,
@@ -568,12 +568,12 @@ const runConsensusRoundTrip = async (
       hashesToSign: received.hashesToSign,
     },
   );
-  phases.ackSeal = getPerfMs() - phaseStartedAt;
+  phases.ackHanko = getPerfMs() - phaseStartedAt;
   phaseStartedAt = getPerfMs();
   const committed = await applyAccountInput(
     proposerContext,
     benchCase.proposer,
-    sealedAck,
+    hankoAttachedAck,
   );
   if (!committed.ok) throw new Error(`${benchCase.kind}:commit_failed:${accountInputFailureMessage(committed)}`);
   if (benchCase.proposer.currentHeight !== 1 || benchCase.receiver.currentHeight !== 1) {

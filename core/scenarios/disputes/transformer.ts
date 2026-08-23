@@ -425,7 +425,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     }]);
     await converge(env, 8);
 
-    // Capture one genuine, quorum-sealed ACK and let the original delivery
+    // Capture one genuine, quorum-certified ACK and let the original delivery
     // settle normally. Replaying this exact ACK after disputeStart proves the
     // frozen Account gate rejects late/retried transport input, not merely a
     // hand-written test fixture.

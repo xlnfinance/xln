@@ -348,6 +348,19 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { object(doc.pendingWithdrawals.get('withdraw-1'))['amount'] = 0n; },
   },
   {
+    name: 'retired pending payment-forward side channel',
+    expected: 'reject',
+    mutate: ({ doc, owner, counterparty }) => {
+      object(doc)['pendingForwards'] = [{
+        tokenId: 1,
+        amount: 1n,
+        route: [owner, counterparty],
+        deliveryMode: 'trusted',
+        trustedGatewayEntityId: owner,
+      }];
+    },
+  },
+  {
     name: 'invalid watchSeed',
     expected: 'reject',
     mutate: ({ doc }) => { object(doc.state)['watchSeed'] = { nested: true }; },
@@ -438,9 +451,9 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 38 rejects plus 1 design-valid accept', () => {
-    expect(mutations).toHaveLength(39);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(38);
+  test('the audited matrix remains 39 rejects plus 1 design-valid accept', () => {
+    expect(mutations).toHaveLength(40);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(39);
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(1);
   });
 

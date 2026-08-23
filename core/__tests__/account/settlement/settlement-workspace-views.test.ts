@@ -4,7 +4,7 @@ import type { SettlementWorkspace } from '../../../types/account';
 import {
   assertSettlementWorkspacePhase,
   isReadySettlementWorkspace,
-  isSealingSettlementWorkspace,
+  isHankoPendingSettlementWorkspace,
   isSubmittedSettlementWorkspace,
   isUnsignedSettlementWorkspace,
 } from '../../../account/tx/handlers/settlement/workspace-views';
@@ -52,10 +52,10 @@ const replace = (
 ): SettlementWorkspace => ({ ...workspace, ...patch }) as SettlementWorkspace;
 
 describe('FinTS settlement workspace phases', () => {
-  test('recognizes unsigned and partially sealed workspace phases', () => {
+  test('recognizes unsigned and partially Hanko-authorized workspace phases', () => {
     expect(isUnsignedSettlementWorkspace(unsigned())).toBe(true);
     expect(isUnsignedSettlementWorkspace({ ...unsigned(), status: 'draft' })).toBe(true);
-    expect(isSealingSettlementWorkspace(pinned())).toBe(true);
+    expect(isHankoPendingSettlementWorkspace(pinned())).toBe(true);
     expect(assertSettlementWorkspacePhase(unsigned(), 'TEST')).toEqual(unsigned());
     expect(assertSettlementWorkspacePhase(pinned(), 'TEST')).toEqual(pinned());
   });
@@ -103,7 +103,7 @@ describe('FinTS settlement workspace phases', () => {
       ['post-proof-missing', { postSettlementDisputeProof: undefined }],
     ];
     for (const [label, patch] of invalidPatches) {
-      expect(isSealingSettlementWorkspace(replace(pinned(), patch)), label).toBe(false);
+      expect(isHankoPendingSettlementWorkspace(replace(pinned(), patch)), label).toBe(false);
       expect(isReadySettlementWorkspace(replace(ready(true), patch)), label).toBe(false);
     }
     const noPostHanko = replace(pinned(), {
@@ -112,8 +112,8 @@ describe('FinTS settlement workspace phases', () => {
         leftHanko: undefined,
       },
     });
-    expect(isSealingSettlementWorkspace(noPostHanko)).toBe(false);
-    expect(isSealingSettlementWorkspace({ ...pinned(), status: 'draft' })).toBe(false);
+    expect(isHankoPendingSettlementWorkspace(noPostHanko)).toBe(false);
+    expect(isHankoPendingSettlementWorkspace({ ...pinned(), status: 'draft' })).toBe(false);
   });
 
   test('ready and submitted phases bind status, both post proofs, and exact non-executor Hanko', () => {

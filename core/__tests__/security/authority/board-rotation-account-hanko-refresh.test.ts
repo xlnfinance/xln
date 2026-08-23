@@ -11,9 +11,9 @@ import { computeAccountStateRoot } from '../../../account/commitment/state-root'
 import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
 import {
-  applyBoardRotationResealMigrations,
-  buildBoardRotationResealDrafts,
-} from '../../../entity/tx/state-effects/board-rotation-reseal';
+  applyBoardRotationHankoRefreshMigrations,
+  buildBoardRotationHankoRefreshDrafts,
+} from '../../../entity/tx/state-effects/board-rotation-hanko-refresh';
 import { buildQuorumHanko } from '../../../hanko/signing';
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
@@ -33,8 +33,8 @@ import {
   PersistentEntityAccountMap,
 } from '../../../entity/state/persistent-account-map';
 import {
-  COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
-  counterpartyBoardResealDeadlineHookId,
+  COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
+  counterpartyBoardHankoRefreshDeadlineHookId,
 } from '../../../entity/tx/j-events-board';
 import { addr, makeAccount, makeState } from '../../helpers/cross-j';
 import {
@@ -55,7 +55,7 @@ const putAccount = (state: EntityState, counterpartyId: string, account: ReturnT
   state.accounts = state.accounts.updated(counterpartyId, account);
 };
 
-const certifiedResealContext = (
+const certifiedHankoRefreshContext = (
   env: ReturnType<typeof createEmptyEnv>,
   boardHash: string,
   activatedAtJHeight: number,
@@ -71,10 +71,10 @@ const certifiedResealContext = (
   };
 };
 
-test('board reseal replaces only the exact current counterparty Hanko', async () => {
-  const env = createEmptyEnv('board-rotation-account-reseal');
-  const signerId = deriveSignerAddressSync('board-rotation-account-reseal', '1').toLowerCase();
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-rotation-account-reseal', '1'));
+test('board Hanko refresh replaces only the exact current counterparty Hanko', async () => {
+  const env = createEmptyEnv('board-rotation-account-boardHankoRefresh');
+  const signerId = deriveSignerAddressSync('board-rotation-account-boardHankoRefresh', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-rotation-account-boardHankoRefresh', '1'));
   const sourceEntityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const receiverEntityId = digest('77');
   const frameHash = digest('a1');
@@ -99,12 +99,12 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   const beforeFrame = structuredClone(account.currentFrame);
 
   const input = {
-    kind: 'board_reseal',
+    kind: 'board_hanko_refresh',
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
     domain: { ...account.state.domain },
     disputeConfig: { ...account.state.disputeConfig },
-    reseal: {
+    boardHankoRefresh: {
       height: 7,
       frameHash,
       frameHanko,
@@ -120,7 +120,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
       observedAuthorities.push(authority);
       return baseContext.verifyHanko(hanko, hash, expectedEntityId, authority);
     },
-  }, account, input, certifiedResealContext(env, sourceEntityId, 19, 2));
+  }, account, input, certifiedHankoRefreshContext(env, sourceEntityId, 19, 2));
 
   expect(applied.ok, accountInputFailureMessage(applied)).toBe(true);
   expect(observedAuthorities[0]).toEqual({
@@ -131,14 +131,14 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(account.currentFrame).toEqual(beforeFrame);
   expect(account.currentHeight).toBe(7);
   expect(account.state.jNonce).toBe(0);
-  expect(account.counterpartyBoardReseal).toEqual({
+  expect(account.counterpartyBoardHankoRefresh).toEqual({
     activationJHeight: 19,
     activationLogIndex: 2,
     frameHeight: 7,
     frameHash,
   });
   const restored = hydrateAccountDocFromStorage(projectAccountDoc(account));
-  expect(restored.counterpartyBoardReseal).toEqual(account.counterpartyBoardReseal);
+  expect(restored.counterpartyBoardHankoRefresh).toEqual(account.counterpartyBoardHankoRefresh);
   expect(restored.counterpartyFrameHanko).toBe(frameHanko);
 
   const beforeExactRetry = projectAccountDoc(account);
@@ -146,40 +146,40 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     createAccountConsensusContext(env),
     account,
     structuredClone(input),
-    certifiedResealContext(env, sourceEntityId, 19, 2),
+    certifiedHankoRefreshContext(env, sourceEntityId, 19, 2),
   )).ok).toBe(true);
   expect(projectAccountDoc(account)).toEqual(beforeExactRetry);
 
   const sameBlockSuccessor = structuredClone(input);
-  sameBlockSuccessor.reseal.boardActivationLogIndex = 3;
+  sameBlockSuccessor.boardHankoRefresh.boardActivationLogIndex = 3;
   const successorRejected = await applyAccountInput(
     createAccountConsensusContext(env),
     account,
     sameBlockSuccessor,
-    certifiedResealContext(env, sourceEntityId, 19, 2),
+    certifiedHankoRefreshContext(env, sourceEntityId, 19, 2),
   );
   expect(successorRejected.ok).toBe(false);
-  expect(accountInputFailureMessage(successorRejected)).toContain('ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH');
+  expect(accountInputFailureMessage(successorRejected)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH');
 
   const beforeRejected = projectAccountDoc(account);
   const tampered = structuredClone(input);
-  tampered.reseal.boardActivationJHeight = Number.MAX_SAFE_INTEGER;
-  tampered.reseal.boardActivationLogIndex = Number.MAX_SAFE_INTEGER;
+  tampered.boardHankoRefresh.boardActivationJHeight = Number.MAX_SAFE_INTEGER;
+  tampered.boardHankoRefresh.boardActivationLogIndex = Number.MAX_SAFE_INTEGER;
   const rejected = await applyAccountInput(
     createAccountConsensusContext(env),
     account,
     tampered,
-    certifiedResealContext(env, sourceEntityId, 19, 2),
+    certifiedHankoRefreshContext(env, sourceEntityId, 19, 2),
   );
   expect(rejected.ok).toBe(false);
-  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH');
+  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH');
   expect(projectAccountDoc(account)).toEqual(beforeRejected);
 });
 
-test('ACK commit retains the counterparty Hanko needed for later board reseal', async () => {
-  const env = createEmptyEnv('board-reseal-ack-retention');
-  const peerSigner = deriveSignerAddressSync('board-reseal-ack-retention', '1').toLowerCase();
-  registerSignerKey(env, peerSigner, deriveSignerKeySync('board-reseal-ack-retention', '1'));
+test('ACK commit retains the counterparty Hanko needed for later board Hanko refresh', async () => {
+  const env = createEmptyEnv('board-hanko-refresh-ack-retention');
+  const peerSigner = deriveSignerAddressSync('board-hanko-refresh-ack-retention', '1').toLowerCase();
+  registerSignerKey(env, peerSigner, deriveSignerKeySync('board-hanko-refresh-ack-retention', '1'));
   const peerEntityId = generateLazyEntityId([peerSigner], 1n).toLowerCase();
   const localEntityId = digest('66');
   const frameHash = digest('b1');
@@ -217,10 +217,10 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
   expect(account.counterpartyFrameHanko).toBe(peerHanko);
 });
 
-test('board reseal routing is identical with sparse and populated validator topology', async () => {
-  const targetSigner = deriveSignerAddressSync('board-reseal-topology-target', '1').toLowerCase();
-  const targetKey = deriveSignerKeySync('board-reseal-topology-target', '1');
-  const sourceSigner = deriveSignerAddressSync('board-reseal-topology-source', '1').toLowerCase();
+test('board Hanko refresh routing is identical with sparse and populated validator topology', async () => {
+  const targetSigner = deriveSignerAddressSync('board-hanko-refresh-topology-target', '1').toLowerCase();
+  const targetKey = deriveSignerKeySync('board-hanko-refresh-topology-target', '1');
+  const sourceSigner = deriveSignerAddressSync('board-hanko-refresh-topology-source', '1').toLowerCase();
   const targetConfig = {
     mode: 'proposer-based' as const,
     threshold: 1n,
@@ -230,7 +230,7 @@ test('board reseal routing is identical with sparse and populated validator topo
   const targetEntityId = generateLazyEntityId([targetSigner], 1n).toLowerCase();
   const sourceEntityId = generateLazyEntityId([sourceSigner], 1n).toLowerCase();
   const frameHash = digest('f1');
-  const populated = createEmptyEnv('board-reseal-topology-populated');
+  const populated = createEmptyEnv('board-hanko-refresh-topology-populated');
   registerSignerKey(populated, targetSigner, targetKey);
   const counterpartyHanko = await buildQuorumHanko(populated, targetEntityId, frameHash, [{
     signerId: targetSigner,
@@ -254,7 +254,7 @@ test('board reseal routing is identical with sparse and populated validator topo
     mempool: [],
     isProposer: true,
   } as EntityReplica);
-  const sparse = createEmptyEnv('board-reseal-topology-sparse');
+  const sparse = createEmptyEnv('board-hanko-refresh-topology-sparse');
   const activation = {
     type: 'BoardActivated',
     blockNumber: 24,
@@ -269,8 +269,8 @@ test('board reseal routing is identical with sparse and populated validator topo
     },
   } satisfies JurisdictionEvent;
 
-  const populatedDraft = buildBoardRotationResealDrafts(structuredClone(state), populated, activation);
-  const sparseDraft = buildBoardRotationResealDrafts(structuredClone(state), sparse, activation);
+  const populatedDraft = buildBoardRotationHankoRefreshDrafts(structuredClone(state), populated, activation);
+  const sparseDraft = buildBoardRotationHankoRefreshDrafts(structuredClone(state), sparse, activation);
 
   expect(sparse.state.eReplicas.size).toBe(0);
   expect(sparseDraft).toEqual(populatedDraft);
@@ -292,12 +292,12 @@ test('board reseal routing is identical with sparse and populated validator topo
   }]);
 });
 
-test('one uncertified Account cannot block BoardActivated reseals for certified peers', async () => {
-  const env = createEmptyEnv('board-reseal-missing-bilateral-hanko');
+test('one uncertified Account cannot block BoardActivated Hanko refreshes for certified peers', async () => {
+  const env = createEmptyEnv('board-hanko-refresh-missing-bilateral-hanko');
   const sourceEntityId = digest('91');
   const uncertifiedId = digest('90');
-  const signerId = deriveSignerAddressSync('board-reseal-certified-peer', '1').toLowerCase();
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-reseal-certified-peer', '1'));
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-certified-peer', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-hanko-refresh-certified-peer', '1'));
   const certifiedId = generateLazyEntityId([signerId], 1n).toLowerCase();
 
   const uncertified = makeAccount(sourceEntityId, uncertifiedId);
@@ -316,7 +316,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
     validators: [signerId],
     shares: { [signerId]: 1n },
   });
-  certified.boardResealMigration = {
+  certified.boardHankoRefreshMigration = {
     activationJHeight: 6,
     activationLogIndex: 9,
     reason: 'bilateral-frame-uncertified',
@@ -353,7 +353,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
     },
   } satisfies JurisdictionEvent;
 
-  const result = buildBoardRotationResealDrafts(state, env, activation);
+  const result = buildBoardRotationHankoRefreshDrafts(state, env, activation);
   expect(result.outputs).toHaveLength(1);
   expect(result.outputs[0]?.entityId).toBe(certifiedId);
   expect(result.hashesToSign).toEqual([expect.objectContaining({
@@ -385,29 +385,29 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
     },
   ].sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId)));
   const candidate = createEntityFrameCandidateState(state);
-  applyBoardRotationResealMigrations(candidate, result.accountMigrations);
+  applyBoardRotationHankoRefreshMigrations(candidate, result.accountMigrations);
   const migratedUncertified = candidate.accounts.get(uncertifiedId)!;
   const migratedCertified = candidate.accounts.get(certifiedId)!;
-  expect(migratedUncertified.boardResealMigration).toEqual(
+  expect(migratedUncertified.boardHankoRefreshMigration).toEqual(
     result.accountMigrations.find(update => update.counterpartyId === uncertifiedId)?.marker,
   );
-  expect(migratedCertified.boardResealMigration).toEqual(
+  expect(migratedCertified.boardHankoRefreshMigration).toEqual(
     result.accountMigrations.find(update => update.counterpartyId === certifiedId)?.marker,
   );
   expect(migratedUncertified.currentHeight).toBe(uncertified.currentHeight);
   expect(migratedUncertified.currentFrame).toEqual(uncertified.currentFrame);
   expect(migratedUncertified.state.jNonce).toBe(uncertified.state.jNonce);
   const restored = hydrateAccountDocFromStorage(projectAccountDoc(migratedUncertified));
-  expect(restored.boardResealMigration).toEqual(migratedUncertified.boardResealMigration);
+  expect(restored.boardHankoRefreshMigration).toEqual(migratedUncertified.boardHankoRefreshMigration);
   expect(restored.currentFrame).toEqual(migratedUncertified.currentFrame);
   expect(restored.state.jNonce).toBe(migratedUncertified.state.jNonce);
 });
 
-test('partial bilateral dispute evidence never emits a frame-only board reseal', () => {
-  const env = createEmptyEnv('board-reseal-partial-dispute');
+test('partial bilateral dispute evidence never emits a frame-only board Hanko refresh', () => {
+  const env = createEmptyEnv('board-hanko-refresh-partial-dispute');
   const sourceEntityId = digest('a4');
   const counterpartyId = digest('a5');
-  const signerId = deriveSignerAddressSync('board-reseal-partial-dispute-peer', '1').toLowerCase();
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-partial-dispute-peer', '1').toLowerCase();
   const account = makeAccount(sourceEntityId, counterpartyId);
   account.currentHeight = 3;
   account.currentFrame = { ...account.currentFrame, height: 3, stateHash: digest('e1') };
@@ -449,7 +449,7 @@ test('partial bilateral dispute evidence never emits a frame-only board reseal',
     },
   } satisfies JurisdictionEvent;
 
-  const result = buildBoardRotationResealDrafts(state, env, activation);
+  const result = buildBoardRotationHankoRefreshDrafts(state, env, activation);
   expect(result.outputs).toEqual([]);
   expect(result.hashesToSign).toEqual([]);
   expect(result.accountMigrations).toEqual([{
@@ -462,11 +462,11 @@ test('partial bilateral dispute evidence never emits a frame-only board reseal',
   }]);
 });
 
-test('one board reseal pass emits at most 32 deterministic Accounts', async () => {
-  const env = createEmptyEnv('board-reseal-bounded-pass');
+test('one board Hanko refresh pass emits at most 32 deterministic Accounts', async () => {
+  const env = createEmptyEnv('board-hanko-refresh-bounded-pass');
   const sourceEntityId = digest('b4');
-  const signerId = deriveSignerAddressSync('board-reseal-bounded-pass-peer', '1').toLowerCase();
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-reseal-bounded-pass-peer', '1'));
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-bounded-pass-peer', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-hanko-refresh-bounded-pass-peer', '1'));
   const accounts = new Map<string, ReturnType<typeof makeAccount>>();
   for (let index = 0; index < 33; index += 1) {
     const weight = BigInt(index + 1);
@@ -518,19 +518,19 @@ test('one board reseal pass emits at most 32 deterministic Accounts', async () =
     },
   } satisfies JurisdictionEvent;
 
-  const result = buildBoardRotationResealDrafts(state, env, activation);
+  const result = buildBoardRotationHankoRefreshDrafts(state, env, activation);
   expect(result.outputs).toHaveLength(32);
   expect(result.hashesToSign).toHaveLength(32);
   expect(result.outputs.map(output => output.entityId)).toEqual([...accounts.keys()].sort().slice(0, 32));
 });
 
-test('two board rotations in one finalized J range collapse to the latest reseal wake', async () => {
-  const env = createEmptyEnv('board-reseal-same-range-rotations');
-  const signerId = deriveSignerAddressSync('board-reseal-same-range-rotations', '1').toLowerCase();
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-reseal-same-range-rotations', '1'));
+test('two board rotations in one finalized J range collapse to the latest board Hanko refresh wake', async () => {
+  const env = createEmptyEnv('board-hanko-refresh-same-range-rotations');
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-same-range-rotations', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-hanko-refresh-same-range-rotations', '1'));
   const sourceEntityId = `0x${'0'.repeat(63)}2`;
   const jurisdiction = {
-    name: 'board-reseal-same-range',
+    name: 'board-hanko-refresh-same-range',
     address: 'http://127.0.0.1:8545',
     chainId: 31_337,
     depositoryAddress: addr('d1'),
@@ -636,27 +636,27 @@ test('two board rotations in one finalized J range collapse to the latest reseal
 
   expect(applied.outputs).toEqual([]);
   expect(applied.hashesToSign).toBeUndefined();
-  expect(applied.newState.accounts.get(counterpartyId)?.boardResealMigration).toEqual({
+  expect(applied.newState.accounts.get(counterpartyId)?.boardHankoRefreshMigration).toEqual({
     activationJHeight: 3,
     activationLogIndex: 9,
     reason: 'pending',
   });
-  expect(applied.newState.crontabState?.hooks).toEqual(new Map([['board-reseal', {
-    id: 'board-reseal',
+  expect([...(applied.newState.crontabState?.hooks.entries() ?? [])]).toEqual([['board-hanko-refresh', {
+    id: 'board-hanko-refresh',
     triggerAt: state.timestamp,
-    type: 'board_reseal',
+    type: 'board_hanko_refresh',
     data: { activationJHeight: 3, activationLogIndex: 9, afterCounterpartyId: '' },
-  }]]));
+  }]]);
 });
 
-test('certified counterparty board activation arms an exact 24-hour reseal deadline', async () => {
-  const env = createEmptyEnv('counterparty-board-reseal-deadline-event');
-  const signerId = deriveSignerAddressSync('counterparty-board-reseal-deadline-event', '1').toLowerCase();
-  registerSignerKey(env, signerId, deriveSignerKeySync('counterparty-board-reseal-deadline-event', '1'));
+test('certified counterparty board activation arms an exact 24-hour board Hanko refresh deadline', async () => {
+  const env = createEmptyEnv('counterparty-board-hanko-refresh-deadline-event');
+  const signerId = deriveSignerAddressSync('counterparty-board-hanko-refresh-deadline-event', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('counterparty-board-hanko-refresh-deadline-event', '1'));
   const ownerEntityId = digest('81');
   const counterpartyId = `0x${'0'.repeat(63)}2`;
   const jurisdiction = {
-    name: 'counterparty-board-reseal-deadline-event',
+    name: 'counterparty-board-hanko-refresh-deadline-event',
     address: 'http://127.0.0.1:8545',
     chainId: 31_337,
     depositoryAddress: addr('d1'),
@@ -737,12 +737,12 @@ test('certified counterparty board activation arms an exact 24-hour reseal deadl
     blockHash: rotation.blockHash,
   }, env);
 
-  const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 3, 7);
+  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 3, 7);
   expect(applied.newState.crontabState?.hooks.get(hookId)).toEqual({
     id: hookId,
-    triggerAt: state.timestamp + COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
-    type: 'counterparty_board_reseal_deadline',
+    triggerAt: state.timestamp + COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
+    type: 'counterparty_board_hanko_refresh_deadline',
     data: { accountId: counterpartyId, activationJHeight: 3, activationLogIndex: 7 },
   });
-  expect(applied.newState.accounts.get(counterpartyId)?.boardResealMigration).toBeUndefined();
+  expect(applied.newState.accounts.get(counterpartyId)?.boardHankoRefreshMigration).toBeUndefined();
 });

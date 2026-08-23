@@ -92,7 +92,7 @@ export const accountProposalEvidenceRank = (output: RoutedEntityInput): number =
     if (tx.type !== 'accountInput') return rank;
     const proposal = accountInputProposal(tx.data);
     if (!proposal) return rank;
-    return rank + Number(Boolean(proposal.frameHanko)) + Number(Boolean(proposal.disputeSeal));
+    return rank + Number(Boolean(proposal.frameHanko)) + Number(Boolean(proposal.disputeHanko));
   }, 0);
 
 const senderAccountForProposal = (

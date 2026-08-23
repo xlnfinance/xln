@@ -99,7 +99,7 @@
     <text x="354" y="84" class="micro">kind: frame | ack | frame_ack</text>
     <text x="354" y="106" class="micro">fromEntityId, toEntityId</text>
     <text x="354" y="128" class="micro">newAccountFrame / prevHanko</text>
-    <text x="354" y="150" class="micro">settleAction / dispute seal</text>
+    <text x="354" y="150" class="micro">settleAction / dispute Hanko</text>
     <rect x="718" y="24" width="326" height="140" class="box2"/>
     <text x="742" y="55" class="code">EntityInput</text>
     <text x="742" y="84" class="micro">entityId, signerId, runtimeId</text>

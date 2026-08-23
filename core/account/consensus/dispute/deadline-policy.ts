@@ -103,7 +103,10 @@ const inspectHtlcDeadline = (
       senderIsLeft: scan.proposerIsLeft,
       createdHeight: scan.frame.height,
       createdTimestamp: scan.frame.timestamp,
-      ...(tx.data.envelope !== undefined ? { envelope: tx.data.envelope } : {}),
+      // This speculative scan needs only deadline/authority fields. The real
+      // transition validates and hashes the encrypted envelope into
+      // `envelopeHash`; copying raw ciphertext into a synthetic HtlcLock would
+      // invent a non-canonical durable-state field.
     });
     return undefined;
   }

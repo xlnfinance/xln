@@ -1167,14 +1167,14 @@ describe('registered Entity certified board authority', () => {
     expect(committedAccount.currentDisputeHash).toBe(certifiedDisputeHash);
     expect(committedAccount.currentDisputeProofBodyHash).toBe(certifiedProofBodyHash);
     expect(committedAccount.currentDisputeProofNonce).toBe(certifiedProofNonce);
-    expect(committedAccount.boardResealMigration).toEqual({
+    expect(committedAccount.boardHankoRefreshMigration).toEqual({
       activationJHeight: 3,
       activationLogIndex: 0,
       reason: 'pending',
     });
-    expect(committed.workingReplica.state.crontabState?.hooks.get('board-reseal')).toMatchObject({
-      id: 'board-reseal',
-      type: 'board_reseal',
+    expect(committed.workingReplica.state.crontabState?.hooks.get('board-hanko-refresh')).toMatchObject({
+      id: 'board-hanko-refresh',
+      type: 'board_hanko_refresh',
       data: {
         activationJHeight: 3,
         activationLogIndex: 0,
@@ -1217,26 +1217,26 @@ describe('registered Entity certified board authority', () => {
     );
     const wakeValidatorPrefix = buildLocalJPrefixAttestation(env, wakeValidatorReplica, wakeValidatorReplica.jHistory);
     if (!wakeProposerPrefix || !wakeValidatorPrefix) {
-      throw new Error('TEST_BOARD_ROTATION_RESEAL_J_PREFIX_MISSING');
+      throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESH_J_PREFIX_MISSING');
     }
     const wakeInput = createDueScheduledWakeInputs(env, committed.workingReplica.state.timestamp)
       .find(input => input.entityId.toLowerCase() === registeredEntityId);
-    if (!wakeInput) throw new Error('TEST_BOARD_ROTATION_RESEAL_WAKE_MISSING');
+    if (!wakeInput) throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESH_WAKE_MISSING');
     wakeInput.jPrefixAttestations = new Map([
       [signerA, wakeProposerPrefix],
       [signerB, wakeValidatorPrefix],
     ]);
     const wakeTx = wakeInput.entityTxs?.[0];
-    if (!wakeTx || wakeTx.type !== 'scheduledWake') throw new Error('TEST_BOARD_RESEAL_SCHEDULED_WAKE_TX_MISSING');
-    expect(wakeTx.data.jobs.some(job => job.kind === 'hook' && job.id === 'board-reseal')).toBe(true);
+    if (!wakeTx || wakeTx.type !== 'scheduledWake') throw new Error('TEST_BOARD_HANKO_REFRESH_SCHEDULED_WAKE_TX_MISSING');
+    expect(wakeTx.data.jobs.some(job => job.kind === 'hook' && job.id === 'board-hanko-refresh')).toBe(true);
     const wakeProposed = await applyEntityInput(env, committed.workingReplica, wakeInput);
     const wakeProposal = wakeProposed.workingReplica.proposal;
     if (!wakeProposal) {
       throw new Error(
-        `TEST_BOARD_ROTATION_RESEAL_PROPOSAL_MISSING:` +
+        `TEST_BOARD_ROTATION_HANKO_REFRESH_PROPOSAL_MISSING:` +
         `outcome=${wakeProposed.outcome.kind}:outputs=${wakeProposed.outputs.length}:` +
         `height=${wakeProposed.workingReplica.state.height}:` +
-        `marker=${wakeProposed.workingReplica.state.accounts.get(counterpartyEntityId)?.boardResealMigration?.reason ?? 'none'}:` +
+        `marker=${wakeProposed.workingReplica.state.accounts.get(counterpartyEntityId)?.boardHankoRefreshMigration?.reason ?? 'none'}:` +
         `hooks=${wakeProposed.workingReplica.state.crontabState?.hooks.size ?? -1}`,
       );
     }
@@ -1262,50 +1262,50 @@ describe('registered Entity certified board authority', () => {
       proposedFrame: structuredClone(wakeProposal),
     });
     const wakePrecommit = wakePrepared.outputs.find(output => output.hashPrecommits?.has(signerB));
-    if (!wakePrecommit) throw new Error('TEST_BOARD_ROTATION_RESEAL_PRECOMMIT_MISSING');
-    const resealCommitted = await applyEntityInput(env, wakeProposed.workingReplica, structuredClone(wakePrecommit));
-    const resealedAccount = resealCommitted.workingReplica.state.accounts.get(counterpartyEntityId);
-    if (!resealedAccount) throw new Error('TEST_BOARD_ROTATION_RESEALED_ACCOUNT_MISSING');
-    expect(resealedAccount.boardResealMigration).toEqual({
+    if (!wakePrecommit) throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESH_PRECOMMIT_MISSING');
+    const hankoRefreshCommitted = await applyEntityInput(env, wakeProposed.workingReplica, structuredClone(wakePrecommit));
+    const hankoRefreshedAccount = hankoRefreshCommitted.workingReplica.state.accounts.get(counterpartyEntityId);
+    if (!hankoRefreshedAccount) throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESHED_ACCOUNT_MISSING');
+    expect(hankoRefreshedAccount.boardHankoRefreshMigration).toEqual({
       activationJHeight: 3,
       activationLogIndex: 0,
       reason: 'issued',
       issuedFrameHeight: 7,
       issuedFrameHash: certifiedFrameHash,
     });
-    const rawReseal = resealCommitted.outputs
+    const rawBoardHankoRefresh = hankoRefreshCommitted.outputs
       .flatMap(output => output.entityTxs ?? [])
-      .find(tx => tx.type === 'accountInput' && tx.data.kind === 'board_reseal');
-    if (!rawReseal || rawReseal.type !== 'accountInput' || rawReseal.data.kind !== 'board_reseal') {
-      throw new Error('TEST_BOARD_ROTATION_RESEAL_INPUT_MISSING');
+      .find(tx => tx.type === 'accountInput' && tx.data.kind === 'board_hanko_refresh');
+    if (!rawBoardHankoRefresh || rawBoardHankoRefresh.type !== 'accountInput' || rawBoardHankoRefresh.data.kind !== 'board_hanko_refresh') {
+      throw new Error('TEST_BOARD_ROTATION_HANKO_REFRESH_INPUT_MISSING');
     }
-    expect(rawReseal.data.reseal).toEqual(expect.objectContaining({
+    expect(rawBoardHankoRefresh.data.boardHankoRefresh).toEqual(expect.objectContaining({
       boardActivationJHeight: 3,
       boardActivationLogIndex: 0,
       height: 7,
       frameHash: certifiedFrameHash,
       frameHanko: expect.any(String),
-      disputeSeal: expect.objectContaining({
+      disputeHanko: expect.objectContaining({
         hash: certifiedDisputeHash,
         proofBodyHash: certifiedProofBodyHash,
         proofNonce: certifiedProofNonce,
         hanko: expect.any(String),
       }),
     }));
-    expect(resealedAccount.currentFrameHanko).toBe(rawReseal.data.reseal.frameHanko);
-    expect(resealedAccount.currentDisputeProofHanko).toBe(
-      rawReseal.data.reseal.disputeSeal!.hanko,
+    expect(hankoRefreshedAccount.currentFrameHanko).toBe(rawBoardHankoRefresh.data.boardHankoRefresh.frameHanko);
+    expect(hankoRefreshedAccount.currentDisputeProofHanko).toBe(
+      rawBoardHankoRefresh.data.boardHankoRefresh.disputeHanko!.hanko,
     );
-    env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, resealCommitted.workingReplica);
+    env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, hankoRefreshCommitted.workingReplica);
     expect((await verifyHankoForHash(
-      rawReseal.data.reseal.frameHanko!,
+      rawBoardHankoRefresh.data.boardHankoRefresh.frameHanko!,
       certifiedFrameHash,
       registeredEntityId,
       env,
       { registeredBoardHash: newBoard, allowPreviousBoard: false },
     )).valid).toBe(true);
     expect((await verifyHankoForHash(
-      rawReseal.data.reseal.disputeSeal!.hanko!,
+      rawBoardHankoRefresh.data.boardHankoRefresh.disputeHanko!.hanko!,
       certifiedDisputeHash,
       registeredEntityId,
       env,

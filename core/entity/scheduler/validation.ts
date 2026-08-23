@@ -27,8 +27,8 @@ const isHookType = (value: unknown): value is ScheduledHookType =>
   value === 'settlement_window' ||
   value === 'watchdog' ||
   value === 'hub_rebalance_kick' ||
-  value === 'board_reseal' ||
-  value === 'counterparty_board_reseal_deadline' ||
+  value === 'board_hanko_refresh' ||
+  value === 'counterparty_board_hanko_refresh_deadline' ||
   value === 'cross_j_orderbook_sweep';
 
 const rejectUnexpectedKeys = (
@@ -76,10 +76,10 @@ const validateTask = (value: unknown, context: string): CrontabTaskState => {
   };
 };
 
-const validateBoardResealData = (
+const validateBoardHankoRefreshData = (
   data: Record<string, unknown>,
   context: string,
-): Extract<ScheduledHook, { type: 'board_reseal' }>['data'] => {
+): Extract<ScheduledHook, { type: 'board_hanko_refresh' }>['data'] => {
   rejectUnexpectedKeys(
     data,
     ['activationJHeight', 'activationLogIndex', 'afterCounterpartyId'],
@@ -118,10 +118,10 @@ const validateBoardResealData = (
   };
 };
 
-const validateCounterpartyBoardResealDeadlineData = (
+const validateCounterpartyBoardHankoRefreshDeadlineData = (
   data: Record<string, unknown>,
   context: string,
-): Extract<ScheduledHook, { type: 'counterparty_board_reseal_deadline' }>['data'] => {
+): Extract<ScheduledHook, { type: 'counterparty_board_hanko_refresh_deadline' }>['data'] => {
   rejectUnexpectedKeys(
     data,
     ['accountId', 'activationJHeight', 'activationLogIndex'],
@@ -194,10 +194,10 @@ const validateHookData = (
           `${context}.counterpartyId`,
         ),
       };
-    case 'board_reseal':
-      return validateBoardResealData(data, context);
-    case 'counterparty_board_reseal_deadline':
-      return validateCounterpartyBoardResealDeadlineData(data, context);
+    case 'board_hanko_refresh':
+      return validateBoardHankoRefreshData(data, context);
+    case 'counterparty_board_hanko_refresh_deadline':
+      return validateCounterpartyBoardHankoRefreshDeadlineData(data, context);
     case 'cross_j_orderbook_sweep':
       rejectUnexpectedKeys(data, ['reason'], context);
       return {

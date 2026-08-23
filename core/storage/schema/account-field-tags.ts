@@ -18,7 +18,7 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   currentHeight: 15, pendingFrame: 16,
   // Tag 17 belonged to retired pendingSignatures. Never reuse persisted tags.
   pendingAccountInput: 18, lastOutboundFrameAck: 20,
-  pendingForwards: 21,
+  // Tag 21 belonged to retired payment-forward side-channel state.
   // Tag 22 belonged to a never-used generic Account Hanko cache.
   rollbackCount: 23, lastRollbackFrameHash: 24,
   'state.leftPendingJClaims': 25, 'state.rightPendingJClaims': 26,
@@ -26,8 +26,8 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   proofHeader: 28,
   // Tags 29-30 belonged to derived ProofBody caches. Never reuse persisted tags.
   'state.disputeConfig': 31,
-  currentFrameHanko: 32, counterpartyFrameHanko: 33, boardResealMigration: 34,
-  counterpartyBoardReseal: 35, currentDisputeProofHanko: 36, currentDisputeProofNonce: 37,
+  currentFrameHanko: 32, counterpartyFrameHanko: 33, boardHankoRefreshMigration: 34,
+  counterpartyBoardHankoRefresh: 35, currentDisputeProofHanko: 36, currentDisputeProofNonce: 37,
   currentDisputeProofBodyHash: 38, currentDisputeHash: 39, counterpartyDisputeProofHanko: 40,
   counterpartyDisputeProofNonce: 41, counterpartyDisputeProofBodyHash: 42,
   counterpartyDisputeHash: 43, counterpartySettlementHanko: 44,

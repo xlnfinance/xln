@@ -1,57 +1,57 @@
 import type {
-  AccountDisputeSeal,
+  AccountDisputeHanko,
   AccountFrameAck,
   AccountFrameProposal,
 } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
 
-type CertifiedDisputeSeal = AccountDisputeSeal & { hanko: HankoString };
+type CertifiedDisputeHanko = AccountDisputeHanko & { hanko: HankoString };
 
 export type DraftAccountFrameProposal = AccountFrameProposal & {
   frameHanko?: never;
-  disputeSeal?: (AccountDisputeSeal & { hanko?: never });
+  disputeHanko?: (AccountDisputeHanko & { hanko?: never });
 };
 
 export type CertifiedAccountFrameProposal = AccountFrameProposal & {
   frameHanko: HankoString;
-  disputeSeal?: CertifiedDisputeSeal;
+  disputeHanko?: CertifiedDisputeHanko;
 };
 
 export type DraftAccountFrameAck = AccountFrameAck & {
   frameHanko?: never;
-  disputeSeal?: (AccountDisputeSeal & { hanko?: never });
+  disputeHanko?: (AccountDisputeHanko & { hanko?: never });
 };
 
 export type CertifiedAccountFrameAck = AccountFrameAck & {
   frameHanko: HankoString;
-  disputeSeal?: CertifiedDisputeSeal;
+  disputeHanko?: CertifiedDisputeHanko;
 };
 
 const hasText = (value: string | undefined): value is HankoString =>
   typeof value === 'string' && value.length > 0;
 
-const hasCertifiedOptionalDisputeSeal = (seal: AccountDisputeSeal | undefined): boolean =>
-  seal === undefined || hasText(seal.hanko);
+const hasCertifiedOptionalDisputeHanko = (disputeHanko: AccountDisputeHanko | undefined): boolean =>
+  disputeHanko === undefined || hasText(disputeHanko.hanko);
 
 export const isDraftAccountFrameProposal = (
   proposal: AccountFrameProposal,
 ): proposal is DraftAccountFrameProposal => proposal.frameHanko === undefined
-  && proposal.disputeSeal?.hanko === undefined;
+  && proposal.disputeHanko?.hanko === undefined;
 
 export const isCertifiedAccountFrameProposal = (
   proposal: AccountFrameProposal,
 ): proposal is CertifiedAccountFrameProposal => hasText(proposal.frameHanko)
-  && hasCertifiedOptionalDisputeSeal(proposal.disputeSeal);
+  && hasCertifiedOptionalDisputeHanko(proposal.disputeHanko);
 
 export const isDraftAccountFrameAck = (
   ack: AccountFrameAck,
 ): ack is DraftAccountFrameAck => ack.frameHanko === undefined
-  && ack.disputeSeal?.hanko === undefined;
+  && ack.disputeHanko?.hanko === undefined;
 
 export const isCertifiedAccountFrameAck = (
   ack: AccountFrameAck,
 ): ack is CertifiedAccountFrameAck => hasText(ack.frameHanko)
-  && hasCertifiedOptionalDisputeSeal(ack.disputeSeal);
+  && hasCertifiedOptionalDisputeHanko(ack.disputeHanko);
 
 export const requireCertifiedAccountFrameProposal = (
   proposal: AccountFrameProposal,

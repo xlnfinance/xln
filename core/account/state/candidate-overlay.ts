@@ -111,8 +111,8 @@ export const ACCOUNT_LIVE_ENVELOPE: ReadonlySet<keyof AccountReplica> = new Set<
   'counterpartyFrameHanko',
   'rollbackCount',
   'lastRollbackFrameHash',
-  'boardResealMigration',
-  'counterpartyBoardReseal',
+  'boardHankoRefreshMigration',
+  'counterpartyBoardHankoRefresh',
   'publicPinned',
 ]);
 

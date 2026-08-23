@@ -41,7 +41,7 @@ tests, formal vectors, or independent review.
   verification helpers. Current consensus callers are statically imported, but
   the helper internals should be reviewed before treating this path as fully
   static.
-- Entity-frame v4 payloads and consensus state roots still use the tagged
+- Entity-frame v5 payloads and consensus state roots still use the tagged
   canonical JSON codec. Binary canonical encoding remains a separate protocol
   migration.
 - Multi-validator M-of-N Hanko collection should still be adversarially tested

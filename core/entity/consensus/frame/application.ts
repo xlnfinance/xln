@@ -77,7 +77,7 @@ import {
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
 } from '../../tx/handlers/account';
-import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
+import { buildSettlementHankoDraft } from '../../tx/handlers/payments/settle';
 import {
   assertOriginatedHtlcRoutesHaveLiveLocks,
   failOriginatedHtlcRoute,
@@ -125,8 +125,8 @@ import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-
 import { isSelfBoardAuthorityTransitionFrame } from '../proposal/policy';
 import { getBoardHandoverFrameConfig } from '../authority/board-handover';
 import { admitOrderbookAccountTxBatch } from '../account/orderbook-account-admission';
-import { scheduleChangedAccountBoardReseals } from '../../scheduler/board-reseal-hook';
-import { captureAccountBoardResealEvidence } from '../../tx/state-effects/board-rotation-reseal';
+import { scheduleChangedAccountBoardHankoRefreshes } from '../../scheduler/board-hanko-refresh-hook';
+import { captureAccountBoardHankoRefreshEvidence } from '../../tx/state-effects/board-rotation-hanko-refresh';
 import {
   collectTouchedAccountIds,
   copyProposableAccounts,
@@ -525,26 +525,26 @@ async function materializeDeferredSettlementApprovals(
       addMessages(state, [`⚠️ Settlement approval expired because the workspace changed`]);
       continue;
     }
-    const peerSealPinsAccountState = Boolean(
+    const peerHankoPinsAccountState = Boolean(
       workspace.settlementHash || workspace.leftHanko || workspace.rightHanko || workspace.postSettlementDisputeProof,
     );
     // An unsigned workspace must wait for ordinary Account work to drain: that
     // work can change the post-settlement proof we are about to sign. Once a
-    // peer seal pins the proof, however, ordinary financial txs are frozen and
+    // peer Hanko pins the proof, however, ordinary financial txs are frozen and
     // cannot drain. Waiting for an empty mempool then deadlocks the only exact
-    // counter-seal that can finalize the settlement. Keep those txs queued;
-    // proposeAccountFrame skips them and applies the counter-seal unchanged.
-    if (visible.mempool.length > 0 && !peerSealPinsAccountState) continue;
+    // counter-Hanko that can finalize the settlement. Keep those txs queued;
+    // proposeAccountFrame skips them and applies the counter-Hanko unchanged.
+    if (visible.mempool.length > 0 && !peerHankoPinsAccountState) continue;
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
-    const draft = buildSettlementSealDraft(account, state, accountId, env);
+    const draft = buildSettlementHankoDraft(account, state, accountId, env);
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
       { kind: 'enqueue', txs: [draft.tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount !== 1) {
-      throw new Error(`SETTLEMENT_DEFERRED_SEAL_NOT_ADMITTED:${accountId}`);
+      throw new Error(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${accountId}`);
     }
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     collectedHashes.push(...draft.hashesToSign);
@@ -554,23 +554,23 @@ async function materializeDeferredSettlementApprovals(
 }
 
 type SettlementTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
-type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
-  data: Extract<SettlementTransitionTx['data'], { kind: 'seal' }>;
+type SettlementHankoTx = Omit<SettlementTransitionTx, 'data'> & {
+  data: Extract<SettlementTransitionTx['data'], { kind: 'hanko' }>;
 };
 
-const isStaleUncommittedSettlementSeal = (
+const isStaleUncommittedSettlementHanko = (
   tx: AccountTx,
   revision: number,
   workspaceHash: string,
   expectedNonce: number,
-): tx is SettlementSealTx =>
+): tx is SettlementHankoTx =>
   tx.type === 'settle_transition'
-  && tx.data.kind === 'seal'
+  && tx.data.kind === 'hanko'
   && tx.data.revision === revision
   && tx.data.workspaceHash.toLowerCase() === workspaceHash
   && tx.data.settlementNonce !== expectedNonce;
 
-function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
+function refreshStaleUncommittedSettlementHankos(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
   for (const accountId of [...getQueuedAccountIds(state)].sort(compareStableText)) {
     const visible = state.accounts.get(accountId);
     if (!visible) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
@@ -578,21 +578,21 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
     if (!workspace || workspace.nonceAtSign !== undefined || visible.pendingFrame) continue;
     const workspaceHash = assertCanonicalSettlementWorkspace(visible.state, workspace);
     const expectedNonce = getNextSettlementNonce(visible);
-    if (!visible.mempool.some(tx => isStaleUncommittedSettlementSeal(tx, workspace.revision, workspaceHash, expectedNonce))) {
+    if (!visible.mempool.some(tx => isStaleUncommittedSettlementHanko(tx, workspace.revision, workspaceHash, expectedNonce))) {
       continue;
     }
 
-    // A same-height Account tiebreaker can restore our uncommitted seal after
+    // A same-height Account tiebreaker can restore our uncommitted Hanko after
     // the winning peer frame has advanced the exact proof frontier. Never
-    // mutate or tolerate that signed seal: discard only the local intent and
+    // mutate or tolerate that signed Hanko: discard only the local intent and
     // deterministically request a fresh Entity-quorum witness for this exact
-    // workspace at the new nonce. Filter by seal fields, not object identity:
+    // workspace at the new nonce. Filter by Hanko fields, not object identity:
     // getForWrite clones mempool txs.
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
     const staleNonces: number[] = [];
     account.mempool = account.mempool.filter(tx => {
-      if (!isStaleUncommittedSettlementSeal(tx, workspace.revision, workspaceHash, expectedNonce)) return true;
+      if (!isStaleUncommittedSettlementHanko(tx, workspace.revision, workspaceHash, expectedNonce)) return true;
       staleNonces.push(tx.data.settlementNonce);
       return false;
     });
@@ -603,7 +603,7 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
       throw new Error(`SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${accountId}:${existing}:${workspaceHash}`);
     }
     state.deferredAccountProposals.set(accountId, workspaceHash);
-    entityLog.info('settlement.stale_seal_refreshed', {
+    entityLog.info('settlement.stale_hanko_refreshed', {
       account: shortId(accountId),
       expectedNonce,
       staleNonces: staleNonces.sort((left, right) => left - right),
@@ -620,7 +620,7 @@ const proposeAccountFrameCandidate = async (
   crossJOpeningProposalTxs: AccountTx[] | undefined,
   scheduleAccount: (accountId: string) => void,
 ): Promise<AccountFrameProposal | undefined> => {
-  const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
+  const { currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
   if (!accountHasProposableMempool(account, state)) return undefined;
   const proposal = await proposeAccountFrame(
     context.accountConsensusContext,
@@ -631,10 +631,6 @@ const proposeAccountFrameCandidate = async (
   );
   if ('accountChanged' in proposal && proposal.accountChanged) {
     recordFrameAccountChange(storageChanges, state.entityId, accountKey);
-  }
-  if (isProposedAccountFrame(proposal) && proposal.swapOffersCancelled?.length) {
-    const cancels = proposal.swapOffersCancelled.map(({ offerId }) => ({ accountId: accountKey, offerId }));
-    applyCommittedSwapCancelsToOrderbook(env, state, cancels, storageChanges);
   }
   if (isProposedAccountFrame(proposal) && proposal.hashesToSign) {
     collectedHashes.push(...proposal.hashesToSign);
@@ -1501,9 +1497,9 @@ const refreshChangedAccountCommitments = (
   for (const accountId of changedAccountIds) {
     invalidateEntityAccountCommitment(state, accountId);
   }
-  scheduleChangedAccountBoardReseals(
+  scheduleChangedAccountBoardHankoRefreshes(
     state,
-    captureAccountBoardResealEvidence(state, changedAccountIds),
+    captureAccountBoardHankoRefreshEvidence(state, changedAccountIds),
     changedAccountIds,
   );
 };
@@ -1558,7 +1554,7 @@ const applyPostEntityTxPhases = async (
     context.storageChanges,
     context.allOutputs,
   );
-  refreshStaleUncommittedSettlementSeals(currentEntityState, context.storageChanges);
+  refreshStaleUncommittedSettlementHankos(currentEntityState, context.storageChanges);
   await materializeDeferredSettlementApprovals(
     context.env,
     context.accountConsensusContext,

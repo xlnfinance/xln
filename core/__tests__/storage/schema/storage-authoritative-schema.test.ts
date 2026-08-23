@@ -371,7 +371,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       ack: {
         height: 1,
         frameHash: hash,
-        disputeSeal: {
+        disputeHanko: {
           hash,
           proofBodyHash: hash,
           proofNonce: 1,
@@ -391,14 +391,14 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
         ...validAck,
         ack: {
           ...validAck.ack,
-          disputeSeal: {
-            ...validAck.ack.disputeSeal,
+          disputeHanko: {
+            ...validAck.ack.disputeHanko,
             proofNonce: '1',
           },
         },
       },
     }, 'ACCOUNT_INPUT_WAL')).toThrow(
-      'ACCOUNT_INPUT_WAL_DATA_ACK_DISPUTE_SEAL_PROOF_NONCE',
+      'ACCOUNT_INPUT_WAL_DATA_ACK_DISPUTE_HANKO_PROOF_NONCE',
     );
 
     expect(() => validateEntityTx({

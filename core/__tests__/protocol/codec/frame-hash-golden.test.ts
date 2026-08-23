@@ -101,7 +101,7 @@ describe('frame hash golden fixtures', () => {
     const settlement = {
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         revision: 1,
         workspaceHash: `0x${'61'.repeat(32)}`,
         settlementNonce: 2,
@@ -119,15 +119,15 @@ describe('frame hash golden fixtures', () => {
     const first = makeAccountFrameFixture();
     first.accountTxs = [settlement];
     const second = structuredClone(first);
-    const secondSeal = second.accountTxs[0];
-    if (secondSeal?.type !== 'settle_transition' || secondSeal.data.kind !== 'seal') {
-      throw new Error('SETTLEMENT_SEAL_FIXTURE_INVALID');
+    const secondHankoTx = second.accountTxs[0];
+    if (secondHankoTx?.type !== 'settle_transition' || secondHankoTx.data.kind !== 'hanko') {
+      throw new Error('SETTLEMENT_HANKO_FIXTURE_INVALID');
     }
-    secondSeal.data.settlementHanko = '0xsecond-quorum';
-    secondSeal.data.postProof.hanko = '0xsecond-proof-quorum';
+    secondHankoTx.data.settlementHanko = '0xsecond-quorum';
+    secondHankoTx.data.postProof.hanko = '0xsecond-proof-quorum';
     expect(computeFrameHash(second)).toBe(computeFrameHash(first));
 
-    secondSeal.data.settlementHash = `0x${'65'.repeat(32)}`;
+    secondHankoTx.data.settlementHash = `0x${'65'.repeat(32)}`;
     expect(computeFrameHash(second)).not.toBe(computeFrameHash(first));
   });
 
@@ -136,7 +136,7 @@ describe('frame hash golden fixtures', () => {
     peerFrame.accountTxs = [{
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         revision: 1,
         workspaceHash: `0x${'71'.repeat(32)}`,
         settlementNonce: 1,
@@ -177,11 +177,11 @@ describe('frame hash golden fixtures', () => {
     if (changedInput?.type !== 'accountInput' || changedInput.data.kind !== 'frame') {
       throw new Error('EXTERNAL_SETTLEMENT_HANKO_FIXTURE_INVALID');
     }
-    const seal = changedInput.data.proposal.frame.accountTxs[0];
-    if (seal?.type !== 'settle_transition' || seal.data.kind !== 'seal') {
-      throw new Error('EXTERNAL_SETTLEMENT_SEAL_FIXTURE_INVALID');
+    const hankoTx = changedInput.data.proposal.frame.accountTxs[0];
+    if (hankoTx?.type !== 'settle_transition' || hankoTx.data.kind !== 'hanko') {
+      throw new Error('EXTERNAL_SETTLEMENT_HANKO_FIXTURE_INVALID');
     }
-    seal.data.settlementHanko = '0xpeer-subset-b';
+    hankoTx.data.settlementHanko = '0xpeer-subset-b';
     expect(hash(changed)).not.toBe(hash(txs));
   });
 

@@ -17,6 +17,7 @@ import {
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
 import { withAccountTxCandidateEffects } from './apply-result';
+import { collectSameJurisdictionSwapOutputs } from './same-j-swap-output';
 
 export async function applyAccountTx(
   account: AccountDraftReplica,
@@ -44,6 +45,9 @@ export async function applyAccountTx(
     candidateEffects,
     htlcEnforcementClock,
   );
+  if (result.ok) {
+    candidateEffects.push(...collectSameJurisdictionSwapOutputs(account, accountTx));
+  }
   return withAccountTxCandidateEffects(result, candidateEffects);
 }
 

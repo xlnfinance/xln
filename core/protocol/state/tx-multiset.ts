@@ -10,7 +10,7 @@ export type FingerprintableTx = {
 
 // The same mempool tx object is fingerprinted at admission, on every proposal
 // window selection and again on removal. Queued tx objects are immutable,
-// except settlement transitions, whose seal Hankos are attached in place by
+// except settlement transitions, whose disputeHanko Hankos are attached in place by
 // the Entity witness pass; those always re-render.
 const fingerprintMemos = new RecencyMemo<FingerprintableTx, string>(16_384);
 
@@ -36,13 +36,13 @@ type CompactAccountInput = {
       timestamp: number; jHeight: number; byLeft: boolean; accountTxs: readonly unknown[]; deltas: readonly unknown[];
     };
     frameHanko?: string;
-    disputeSeal?: { hash: string; hanko?: string };
+    disputeHanko?: { hash: string; hanko?: string };
   };
-  ack?: { height: number; frameHash: string; frameHanko?: string; disputeSeal?: { hash: string; hanko?: string } };
+  ack?: { height: number; frameHash: string; frameHanko?: string; disputeHanko?: { hash: string; hanko?: string } };
 };
 
-const sealKey = (seal: { hash: string; hanko?: string } | undefined): string =>
-  seal ? `${seal.hash}:${seal.hanko ?? ''}` : '';
+const hankoKey = (disputeHanko: { hash: string; hanko?: string } | undefined): string =>
+  disputeHanko ? `${disputeHanko.hash}:${disputeHanko.hanko ?? ''}` : '';
 
 const accountInputBodyDigests = new RecencyMemo<object, string>(16_384);
 
@@ -76,11 +76,11 @@ const compactAccountInputFingerprint = (data: unknown): string | undefined => {
   const envelope = safeStringify([input.domain ?? null, input.disputeConfig ?? null, input.watchSeed ?? null]);
   return `accountInput:${input.kind}|${input.fromEntityId}|${input.toEntityId}|${envelope}` +
     `|${proposal
-      ? `${proposal.frame.height}:${proposal.frame.stateHash}:${proposal.frameHanko ?? ''}:${sealKey(proposal.disputeSeal)}`
+      ? `${proposal.frame.height}:${proposal.frame.stateHash}:${proposal.frameHanko ?? ''}:${hankoKey(proposal.disputeHanko)}`
         + `:${proposal.frame.prevFrameHash}:${proposal.frame.accountStateRoot}:${proposal.frame.timestamp}:${proposal.frame.jHeight}`
         + `:${proposal.frame.byLeft}:${proposal.frame.accountTxs.length}:${proposal.frame.deltas.length}`
       : ''}` +
-    `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${sealKey(ack.disputeSeal)}` : ''}` +
+    `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${hankoKey(ack.disputeHanko)}` : ''}` +
     `|${accountInputBodyDigest(input)}`;
 };
 

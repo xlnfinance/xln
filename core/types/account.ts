@@ -265,9 +265,9 @@ export interface AccountReplica {
   // HANKO SYSTEM: Frame consensus + Dispute proofs
   currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
   counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
-  /** One bounded, consensus-visible reminder that this Account still needs the active board seal. */
-  boardResealMigration?: AccountBoardResealMigration;
-  counterpartyBoardReseal?: {
+  /** One bounded, consensus-visible reminder that this Account still needs the active board Hanko. */
+  boardHankoRefreshMigration?: AccountBoardHankoRefreshMigration;
+  counterpartyBoardHankoRefresh?: {
     activationJHeight: number;
     activationLogIndex: number;
     frameHeight: number;
@@ -337,18 +337,6 @@ export interface AccountReplica {
     crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
   };
 
-  // Payment routing: locally derived follow-ups for every routed payment in a
-  // committed Account frame. This must remain an ordered list: byte-identical
-  // payments are independent signed intents and must never be deduplicated.
-  pendingForwards?: Array<{
-    tokenId: number;
-    amount: bigint;
-    route: string[];
-    description?: string;
-    deliveryMode: 'trusted';
-    trustedGatewayEntityId: string;
-  }>;
-
   // Withdrawal tracking (Phase 2: C→R)
   pendingWithdrawals: AccountStateCollection<string, {
     requestId: string;
@@ -369,10 +357,10 @@ export interface AccountReplica {
   };
 }
 
-export type AccountBoardResealMigration = {
+export type AccountBoardHankoRefreshMigration = {
   activationJHeight: number;
   activationLogIndex: number;
-  /** Latest Account frame for which a durable reseal output was issued. */
+  /** Latest Account frame for which a durable board Hanko refresh output was issued. */
   issuedFrameHeight?: number;
   issuedFrameHash?: string;
   reason:
@@ -427,10 +415,10 @@ type AccountInputBase = {
   watchSeed?: string;
 };
 
-export type AccountDisputeSeal = {
+export type AccountDisputeHanko = {
   /**
    * Absent only while the Account output is an internal Entity-consensus draft.
-   * Any routed AccountInput must be sealed before it leaves the committing
+   * Any routed AccountInput must have its Hanko attached before it leaves the committing
    * Entity replica; inbound validation rejects an absent Hanko.
    */
   hanko?: HankoString;
@@ -446,7 +434,7 @@ export type AccountFrameAck = {
   frameHash: string;
   /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
   frameHanko?: HankoString;
-  disputeSeal?: AccountDisputeSeal;
+  disputeHanko?: AccountDisputeHanko;
 };
 
 /**
@@ -454,7 +442,7 @@ export type AccountFrameAck = {
  * state. It must never manufacture a new Account frame or consume a dispute
  * nonce, so the exact certified hashes travel in a separate control input.
  */
-export type AccountBoardReseal = AccountFrameAck & {
+export type AccountBoardHankoRefresh = AccountFrameAck & {
   /** Exact ordered EVM log position of the on-chain board activation. */
   boardActivationJHeight: number;
   boardActivationLogIndex: number;
@@ -464,12 +452,12 @@ export type AccountFrameProposal = {
   frame: AccountFrame;
   /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
   frameHanko?: HankoString;
-  disputeSeal?: AccountDisputeSeal;
+  disputeHanko?: AccountDisputeHanko;
 };
 
 // Channel.ts flush semantics: one delivery may acknowledge the previous frame
 // and propose the next frame. Each state epoch carries its own frame Hanko and
-// optional dispute seal. Sharing one seal across ACK + proposal is invalid
+// optional dispute Hanko. Sharing one Hanko across ACK + proposal is invalid
 // because the two parts commit different account states.
 export type AccountEnqueueInput = {
   /** Local Entity command. It never crosses an Entity or transport boundary. */
@@ -527,11 +515,11 @@ export type AccountPeerInput =
     })
   | (AccountInputBase & {
       kind: 'dispute';
-      disputeSeal: AccountDisputeSeal;
+      disputeHanko: AccountDisputeHanko;
     })
   | (AccountInputBase & {
-      kind: 'board_reseal';
-      reseal: AccountBoardReseal;
+      kind: 'board_hanko_refresh';
+      boardHankoRefresh: AccountBoardHankoRefresh;
     });
 
 /** Every command accepted by an Account replica enters this one boundary. */
@@ -541,6 +529,33 @@ export type AccountInput =
   | AccountPeerInput;
 
 /**
+ * Complete same-jurisdiction resting-offer projection returned to Entity.
+ *
+ * Account state is the sole authority for these values. Entity/orderbook must
+ * never reconstruct a partial-fill remainder from the signed transaction or a
+ * stale book row, because that would create a second financial formula.
+ */
+export type AccountSwapOfferSnapshot = Readonly<{
+  offerId: string;
+  leftEntity: string;
+  rightEntity: string;
+  giveTokenId: number;
+  giveTokenDecimals: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantTokenDecimals: number;
+  wantAmount: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
+  priceTicks: bigint;
+  timeInForce?: 0 | 1 | 2;
+  makerIsLeft: boolean;
+  createdHeight: number;
+  quantizedGive: bigint;
+  quantizedWant: bigint;
+}>;
+
+/**
  * Deterministic messages emitted by the Account machine to its parent Entity.
  *
  * Account never publishes these directly. Entity collects them in its
@@ -548,15 +563,44 @@ export type AccountInput =
  * Runtime WAL commit.
  */
 export type AccountOutput =
-  | {
+  | Readonly<{
+      /**
+       * Ordered follow-up emitted only when a trusted payment commits at its
+       * gateway. Byte-identical values are distinct signed payment intents and
+       * must never be deduplicated by Account, Entity, or Runtime batching.
+       */
+      kind: 'directPaymentForward';
+      tokenId: number;
+      amount: bigint;
+      route: readonly string[];
+      description?: string;
+      deliveryMode: 'trusted';
+      trustedGatewayEntityId: string;
+    }>
+  | Readonly<{
+      /** Full same-j resting row after offer creation or partial resolution. */
+      kind: 'swapOfferUpsert';
+      offer: AccountSwapOfferSnapshot;
+    }>
+  | Readonly<{
+      /** Same-j resting row removed by a committed full/cancel remainder resolution. */
+      kind: 'swapOfferRemove';
+      offerId: string;
+    }>
+  | Readonly<{
+      /** Maker's committed same-j request for the orderbook owner to resolve. */
+      kind: 'swapCancelRequest';
+      offerId: string;
+    }>
+  | Readonly<{
       kind: 'runtimeEvent';
       eventName: string;
       data: Record<string, unknown>;
-    }
-  | {
+    }>
+  | Readonly<{
       kind: 'debug';
       payload: Record<string, unknown>;
-    };
+    }>;
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
@@ -615,7 +659,7 @@ export type SettlementOp =
  *
  * Flow:
  * 1. An Account settle_transition atomically creates/updates workspace + holds.
- * 2. Each side seals the post-proof; only the non-executor seals settlementHash.
+ * 2. Each side authorizes the post-proof; only the non-executor authorizes settlementHash.
  * 3. Executor submit is an exact hash/revision Account transition.
  * 4. Submit releases workspace holds; AccountSettled finality clears the body.
  */
@@ -629,7 +673,7 @@ export interface SettlementWorkspace {
   // Hanko signatures
   leftHanko?: HankoString;                    // Left's signature on settlement
   rightHanko?: HankoString;                   // Right's signature on settlement
-  settlementHash?: string;                    // Exact digest sealed by the Entity quorum
+  settlementHash?: string;                    // Exact digest authorized by the Entity quorum
 
   // Metadata
   lastModifiedByLeft: boolean;                // Who last proposed/updated
@@ -960,7 +1004,7 @@ export type AccountTx =
              * consensus. The elected executor never signs settlementHash; it
              * signs only the post-settlement dispute proof.
              */
-            kind: 'seal';
+            kind: 'hanko';
             revision: number;
             workspaceHash: string;
             settlementNonce: number;

@@ -12,7 +12,7 @@ import { scheduleHook } from './hook-state';
 import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
-import { processBoardResealHook } from './board-reseal-hook';
+import { processBoardHankoRefreshHook } from './board-hanko-refresh-hook';
 import { isDisputeReadyHtlcRoute } from '../htlc/route-views';
 
 const crontabLog = createStructuredLogger('entity.crontab');
@@ -103,26 +103,26 @@ const processDueHook = (
       }
       return;
     }
-    case 'board_reseal':
-      processBoardResealHook(env, hook, replica, context, plan);
+    case 'board_hanko_refresh':
+      processBoardHankoRefreshHook(env, hook, replica, context, plan);
       return;
-    case 'counterparty_board_reseal_deadline': {
+    case 'counterparty_board_hanko_refresh_deadline': {
       const account = replica.state.accounts.get(hook.data.accountId);
       if (!account || Number(account.currentHeight) < 1) return;
-      const reseal = account.counterpartyBoardReseal;
-      const hasCurrentReseal = Boolean(reseal && (
-        reseal.activationJHeight > hook.data.activationJHeight ||
+      const boardHankoRefresh = account.counterpartyBoardHankoRefresh;
+      const hasCurrentBoardHankoRefresh = Boolean(boardHankoRefresh && (
+        boardHankoRefresh.activationJHeight > hook.data.activationJHeight ||
         (
-          reseal.activationJHeight === hook.data.activationJHeight &&
-          reseal.activationLogIndex >= hook.data.activationLogIndex
+          boardHankoRefresh.activationJHeight === hook.data.activationJHeight &&
+          boardHankoRefresh.activationLogIndex >= hook.data.activationLogIndex
         )
       ));
-      if (hasCurrentReseal || account.activeDispute || account.disputePrepare) return;
+      if (hasCurrentBoardHankoRefresh || account.activeDispute || account.disputePrepare) return;
       plan.disputePrepareCounterparties.set(
         hook.data.accountId,
-        'counterparty-board-reseal-deadline-expired',
+        'counterparty-board-hanko-refresh-deadline-expired',
       );
-      crontabLog.warn('counterparty_board_reseal_deadline.expired', {
+      crontabLog.warn('counterparty_board_hanko_refresh_deadline.expired', {
         counterparty: shortId(hook.data.accountId),
         activationJHeight: hook.data.activationJHeight,
         activationLogIndex: hook.data.activationLogIndex,

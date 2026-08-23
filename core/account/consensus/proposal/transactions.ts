@@ -100,14 +100,14 @@ export const proposalWindowCanUseOptimisticBatch = (txs: readonly AccountTx[]): 
 const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
   proposalWindowCanUseOptimisticBatch(txs);
 
-const isRefreshableStaleSettlementSeal = (
+const isRefreshableStaleSettlementHanko = (
   account: AccountReplica,
   tx: AccountTx,
   rejection: AccountTxRejection,
 ): boolean => {
-  if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
+  if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') return false;
   if (
-    rejection.kind !== 'settlement_seal_nonce_mismatch' ||
+    rejection.kind !== 'settlement_hanko_nonce_mismatch' ||
     rejection.basis !== 'account'
   ) {
     return false;
@@ -237,7 +237,7 @@ const proposalFailureDisposition = (
   if (
     rejection.kind === 'settlement_signed_account_frozen' ||
     rejection.kind === 'htlc_lock_capacity' ||
-    isRefreshableStaleSettlementSeal(account, tx, rejection)
+    isRefreshableStaleSettlementHanko(account, tx, rejection)
   ) {
     return ACCOUNT_TX_FAILURE_DISPOSITIONS.retry;
   }

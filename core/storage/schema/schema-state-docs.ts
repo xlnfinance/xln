@@ -152,9 +152,9 @@ const ACCOUNT_REPLICA_REQUIRED = [
 
 const ACCOUNT_REPLICA_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput',
-  'lastOutboundFrameAck', 'pendingForwards', 'lastRollbackFrameHash',
-  'currentFrameHanko', 'counterpartyFrameHanko', 'boardResealMigration',
-  'counterpartyBoardReseal', 'currentDisputeProofHanko', 'currentDisputeProofNonce',
+  'lastOutboundFrameAck', 'lastRollbackFrameHash',
+  'currentFrameHanko', 'counterpartyFrameHanko', 'boardHankoRefreshMigration',
+  'counterpartyBoardHankoRefresh', 'currentDisputeProofHanko', 'currentDisputeProofNonce',
   'currentDisputeProofBodyHash', 'currentDisputeHash', 'counterpartyDisputeProofHanko',
   'counterpartyDisputeProofNonce', 'counterpartyDisputeProofBodyHash',
   'currentDisputeProofProposerIsLeft', 'counterpartyDisputeProofProposerIsLeft',

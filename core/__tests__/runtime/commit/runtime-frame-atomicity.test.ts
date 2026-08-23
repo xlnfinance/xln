@@ -555,7 +555,7 @@ describe('runtime frame atomicity', () => {
             depositoryAddress: `0x${'dd'.repeat(20)}`,
           },
           disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-          disputeSeal: {
+          disputeHanko: {
             hanko: '0x01',
             hash: hash('41'),
             proofBodyHash: hash('42'),

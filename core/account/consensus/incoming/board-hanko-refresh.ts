@@ -1,16 +1,16 @@
 import type { AccountPeerInput, AccountReplica } from '../../../types/account';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
-import { accountInputBoardReseal } from '../flush';
+import { accountInputBoardHankoRefresh } from '../flush';
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerEvidenceError, rejectAccountPeerInput } from '../result';
 import {
-  type ValidatedCounterpartyDisputeSeal,
-  validateCounterpartyDisputeSeal,
-} from '../dispute/seal';
+  type ValidatedCounterpartyDisputeHanko,
+  validateCounterpartyDisputeHanko,
+} from '../dispute/hanko';
 
-type BoardResealPayload = NonNullable<ReturnType<typeof accountInputBoardReseal>>;
+type BoardHankoRefreshPayload = NonNullable<ReturnType<typeof accountInputBoardHankoRefresh>>;
 
-type ValidatedBoardResealMetadata = {
+type ValidatedBoardHankoRefreshMetadata = {
   expectedFrom: string;
   activationJHeight: number;
   activationLogIndex: number;
@@ -18,46 +18,46 @@ type ValidatedBoardResealMetadata = {
   currentFrameHash: string;
 };
 
-const rejectBoardReseal = (
+const rejectBoardHankoRefresh = (
   error: string,
   events: string[],
 ): HandleAccountInputResult =>
-  rejectAccountPeerInput('ACCOUNT_PEER_BOARD_RESEAL_INVALID', error, events);
+  rejectAccountPeerInput('ACCOUNT_PEER_BOARD_HANKO_REFRESH_INVALID', error, events);
 
-type BoardResealActivation = Pick<
-  ValidatedBoardResealMetadata,
+type BoardHankoRefreshActivation = Pick<
+  ValidatedBoardHankoRefreshMetadata,
   'activationJHeight' | 'activationLogIndex'
 >;
 
-const validateBoardResealActivation = (
-  reseal: BoardResealPayload,
+const validateBoardHankoRefreshActivation = (
+  boardHankoRefresh: BoardHankoRefreshPayload,
   securityContext: AccountInputSecurityContext,
   events: string[],
-): HandleAccountInputResult | BoardResealActivation => {
-  const activationJHeight = Number(reseal.boardActivationJHeight);
-  const activationLogIndex = Number(reseal.boardActivationLogIndex);
+): HandleAccountInputResult | BoardHankoRefreshActivation => {
+  const activationJHeight = Number(boardHankoRefresh.boardActivationJHeight);
+  const activationLogIndex = Number(boardHankoRefresh.boardActivationLogIndex);
   if (!Number.isSafeInteger(activationJHeight) || activationJHeight < 1) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_HEIGHT_INVALID:${activationJHeight}`,
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_HEIGHT_INVALID:${activationJHeight}`,
       events,
     );
   }
   if (!Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
       events,
     );
   }
   const certifiedBoard = securityContext.counterpartyCertifiedBoard;
   if (!certifiedBoard) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_CERTIFIED_BOARD_MISSING', events);
+    return rejectBoardHankoRefresh('ACCOUNT_BOARD_HANKO_REFRESH_CERTIFIED_BOARD_MISSING', events);
   }
   if (
     activationJHeight !== certifiedBoard.activatedAtJHeight
     || activationLogIndex !== certifiedBoard.logIndex
   ) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH:`
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH:`
         + `${activationJHeight}:${activationLogIndex}:`
         + `${certifiedBoard.activatedAtJHeight}:${certifiedBoard.logIndex}`,
       events,
@@ -66,15 +66,15 @@ const validateBoardResealActivation = (
   return { activationJHeight, activationLogIndex };
 };
 
-const validateBoardResealFrame = (
+const validateBoardHankoRefreshFrame = (
   account: AccountReplica,
-  reseal: BoardResealPayload,
-  activation: BoardResealActivation,
+  boardHankoRefresh: BoardHankoRefreshPayload,
+  activation: BoardHankoRefreshActivation,
   events: string[],
-): HandleAccountInputResult | Pick<ValidatedBoardResealMetadata, 'frameHeight' | 'currentFrameHash'> => {
+): HandleAccountInputResult | Pick<ValidatedBoardHankoRefreshMetadata, 'frameHeight' | 'currentFrameHash'> => {
   const { activationJHeight, activationLogIndex } = activation;
-  const frameHeight = Number(reseal.height);
-  const previous = account.counterpartyBoardReseal;
+  const frameHeight = Number(boardHankoRefresh.height);
+  const previous = account.counterpartyBoardHankoRefresh;
   const notNewer = previous && (
     activationJHeight < previous.activationJHeight
     || (activationJHeight === previous.activationJHeight && activationLogIndex <= previous.activationLogIndex)
@@ -83,11 +83,11 @@ const validateBoardResealFrame = (
     activationJHeight === previous.activationJHeight
     && activationLogIndex === previous.activationLogIndex
     && frameHeight === previous.frameHeight
-    && String(reseal.frameHash).toLowerCase() === previous.frameHash
+    && String(boardHankoRefresh.frameHash).toLowerCase() === previous.frameHash
   );
   if (notNewer && !exactRetry) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_ORDER_INVALID:`
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_ORDER_INVALID:`
         + `${activationJHeight}:${activationLogIndex}:`
         + `${previous.activationJHeight}:${previous.activationLogIndex}`,
       events,
@@ -100,47 +100,47 @@ const validateBoardResealFrame = (
     || frameHeight !== currentHeight
     || frameHeight !== Number(account.currentFrame.height)
   ) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_HEIGHT_MISMATCH:${frameHeight}:${currentHeight}`,
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_HEIGHT_MISMATCH:${frameHeight}:${currentHeight}`,
       events,
     );
   }
   const currentFrameHash = String(account.currentFrame.stateHash || '').toLowerCase();
-  const resealFrameHash = String(reseal.frameHash || '').toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(resealFrameHash) || resealFrameHash !== currentFrameHash) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH:`
-        + `${resealFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
+  const boardHankoRefreshFrameHash = String(boardHankoRefresh.frameHash || '').toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(boardHankoRefreshFrameHash) || boardHankoRefreshFrameHash !== currentFrameHash) {
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_FRAME_HASH_MISMATCH:`
+        + `${boardHankoRefreshFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
       events,
     );
   }
-  if (!reseal.frameHanko) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_MISSING', events);
+  if (!boardHankoRefresh.frameHanko) {
+    return rejectBoardHankoRefresh('ACCOUNT_BOARD_HANKO_REFRESH_FRAME_HANKO_MISSING', events);
   }
   return { frameHeight, currentFrameHash };
 };
 
-const validateBoardResealMetadata = (
+const validateBoardHankoRefreshMetadata = (
   account: AccountReplica,
   input: AccountPeerInput,
-  reseal: BoardResealPayload,
+  boardHankoRefresh: BoardHankoRefreshPayload,
   securityContext: AccountInputSecurityContext,
   events: string[],
-): HandleAccountInputResult | ValidatedBoardResealMetadata => {
+): HandleAccountInputResult | ValidatedBoardHankoRefreshMetadata => {
   const expectedFrom = account.proofHeader.toEntity.toLowerCase();
   const expectedTo = account.proofHeader.fromEntity.toLowerCase();
   if (
     input.fromEntityId.toLowerCase() !== expectedFrom
     || input.toEntityId.toLowerCase() !== expectedTo
   ) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
+    return rejectBoardHankoRefresh(
+      `ACCOUNT_BOARD_HANKO_REFRESH_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
       events,
     );
   }
-  const activation = validateBoardResealActivation(reseal, securityContext, events);
+  const activation = validateBoardHankoRefreshActivation(boardHankoRefresh, securityContext, events);
   if ('ok' in activation) return activation;
-  const frame = validateBoardResealFrame(account, reseal, activation, events);
+  const frame = validateBoardHankoRefreshFrame(account, boardHankoRefresh, activation, events);
   if ('ok' in frame) return frame;
   return {
     expectedFrom,
@@ -149,16 +149,16 @@ const validateBoardResealMetadata = (
   };
 };
 
-const verifyBoardResealWitnesses = async (
+const verifyBoardHankoRefreshWitnesses = async (
   account: AccountReplica,
   input: AccountPeerInput,
-  reseal: BoardResealPayload,
-  metadata: ValidatedBoardResealMetadata,
+  boardHankoRefresh: BoardHankoRefreshPayload,
+  metadata: ValidatedBoardHankoRefreshMetadata,
   securityContext: AccountInputSecurityContext,
   events: string[],
 ): Promise<
   HandleAccountInputResult
-  | { verifiedDispute?: ValidatedCounterpartyDisputeSeal }
+  | { verifiedDispute?: ValidatedCounterpartyDisputeHanko }
 > => {
   const frameAuthority = {
     ...(securityContext.counterpartyCertifiedBoard
@@ -167,7 +167,7 @@ const verifyBoardResealWitnesses = async (
     allowPreviousBoard: false,
   };
   const verifiedFrame = await securityContext.verifyHanko(
-    reseal.frameHanko!,
+    boardHankoRefresh.frameHanko!,
     metadata.currentFrameHash,
     input.fromEntityId,
     frameAuthority,
@@ -176,9 +176,9 @@ const verifyBoardResealWitnesses = async (
     !verifiedFrame.valid
     || verifiedFrame.entityId?.toLowerCase() !== metadata.expectedFrom
   ) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_INVALID', events);
+    return rejectBoardHankoRefresh('ACCOUNT_BOARD_HANKO_REFRESH_FRAME_HANKO_INVALID', events);
   }
-  if (!reseal.disputeSeal) return {};
+  if (!boardHankoRefresh.disputeHanko) return {};
 
   const expectedHash = account.counterpartyDisputeHash?.toLowerCase();
   const expectedBodyHash = account.counterpartyDisputeProofBodyHash?.toLowerCase();
@@ -189,19 +189,19 @@ const verifyBoardResealWitnesses = async (
     || !expectedBodyHash
     || expectedNonce === undefined
     || expectedProposerIsLeft === undefined
-    || reseal.disputeSeal.hash.toLowerCase() !== expectedHash
-    || reseal.disputeSeal.proofBodyHash.toLowerCase() !== expectedBodyHash
-    || reseal.disputeSeal.proofNonce !== expectedNonce
-    || reseal.disputeSeal.proposerIsLeft !== expectedProposerIsLeft
+    || boardHankoRefresh.disputeHanko.hash.toLowerCase() !== expectedHash
+    || boardHankoRefresh.disputeHanko.proofBodyHash.toLowerCase() !== expectedBodyHash
+    || boardHankoRefresh.disputeHanko.proofNonce !== expectedNonce
+    || boardHankoRefresh.disputeHanko.proposerIsLeft !== expectedProposerIsLeft
   ) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_DISPUTE_MISMATCH', events);
+    return rejectBoardHankoRefresh('ACCOUNT_BOARD_HANKO_REFRESH_DISPUTE_MISMATCH', events);
   }
   try {
-    const verifiedDispute = await validateCounterpartyDisputeSeal(
+    const verifiedDispute = await validateCounterpartyDisputeHanko(
       account,
       input,
-      reseal.disputeSeal,
-      'ACCOUNT_BOARD_RESEAL',
+      boardHankoRefresh.disputeHanko,
+      'ACCOUNT_BOARD_HANKO_REFRESH',
       securityContext,
       false,
     );
@@ -211,20 +211,20 @@ const verifyBoardResealWitnesses = async (
   }
 };
 
-export const handleBoardReseal = async (
+export const handleBoardHankoRefresh = async (
   account: AccountReplica,
   input: AccountPeerInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | undefined> => {
-  const reseal = accountInputBoardReseal(input);
-  if (!reseal) return undefined;
+  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
+  if (!boardHankoRefresh) return undefined;
   const events: string[] = [];
-  const metadata = validateBoardResealMetadata(account, input, reseal, securityContext, events);
+  const metadata = validateBoardHankoRefreshMetadata(account, input, boardHankoRefresh, securityContext, events);
   if ('ok' in metadata) return metadata;
-  const witnesses = await verifyBoardResealWitnesses(
+  const witnesses = await verifyBoardHankoRefreshWitnesses(
     account,
     input,
-    reseal,
+    boardHankoRefresh,
     metadata,
     securityContext,
     events,
@@ -233,16 +233,16 @@ export const handleBoardReseal = async (
 
   // Witness rotation never changes bilateral money or the on-chain nonce.
   // Install authority metadata only after every supplied hash is verified.
-  account.counterpartyFrameHanko = reseal.frameHanko!;
+  account.counterpartyFrameHanko = boardHankoRefresh.frameHanko!;
   if (witnesses.verifiedDispute) {
     account.counterpartyDisputeProofHanko = witnesses.verifiedDispute.hanko;
   }
-  account.counterpartyBoardReseal = {
+  account.counterpartyBoardHankoRefresh = {
     activationJHeight: metadata.activationJHeight,
     activationLogIndex: metadata.activationLogIndex,
     frameHeight: metadata.frameHeight,
     frameHash: metadata.currentFrameHash,
   };
-  events.push(`🔐 Re-sealed Account frame ${metadata.frameHeight} under the current board`);
+  events.push(`🔐 Refreshed Account frame ${metadata.frameHeight} Hankos under the current board`);
   return accountInputApplied({ events });
 };

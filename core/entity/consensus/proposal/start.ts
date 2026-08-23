@@ -49,7 +49,7 @@ import { fitEntityProposalToWireBudget } from './wire-budget';
 import { primeProposalHankos } from './hanko/prime-hankos';
 import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
 import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
-import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
+import { assertEstimatedCertifiedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext, startInboundLayerPriming } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
@@ -257,7 +257,7 @@ const buildProposalState = (
 };
 
 /**
- * Account digests (frame/ack/seal hankos) are final once the frame is applied,
+ * Account digests (frame/ack/dispute Hankos) are final once the frame is applied,
  * before the Entity state root, frame hash and output hashes exist. Start
  * that batch on the pool first so secp256k1 overlaps the Patricia root walk;
  * the remainder is signed after the frame hash. Bytes and order are exactly
@@ -377,7 +377,7 @@ type PreparedEntityProposal = Readonly<{
   jPrefixCertificate: EntityFrame['jPrefixCertificate'] | undefined;
 }>;
 
-type SealedEntityProposal = Readonly<{
+type CertifiedEntityProposal = Readonly<{
   frame: EntityFrame;
   /** Full secondary proof material lives only across this local commit call. */
   localCommitHankos?: readonly HankoString[];
@@ -436,12 +436,12 @@ const fitAndApplyEntityProposal = async (
   };
 };
 
-const sealEntityProposal = async (
+const certifyEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   prepared: PreparedEntityProposal,
   profile: ProposalProfile,
-): Promise<SealedEntityProposal> => {
+): Promise<CertifiedEntityProposal> => {
   const { env, workingReplica } = context;
   const { txs, entityContext, applied, leader, jPrefixCertificate } = prepared;
   const height = workingReplica.state.height + 1;
@@ -481,15 +481,15 @@ const sealEntityProposal = async (
     view: leader.view,
     ...(workingReplica.pendingLeaderCertificate ? { certificate: workingReplica.pendingLeaderCertificate } : {}),
   };
-  const sealedContext = selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame';
-  const estimatedWireBytes = assertEstimatedSealedEntityFrameWire({
+  const certifiedContext = selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame';
+  const estimatedWireBytes = assertEstimatedCertifiedEntityFrameWire({
     height, parentFrameHash, stateRoot, authorityRoot, entityContext,
     txs: [...txs], events: applied.events, hash: frameHash, timestamp,
     leader: leaderBody,
     ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     hashesToSign,
-  }, workingReplica.signerId, selection.isSingleSigner, sealedContext);
-  countOp('entity.frame.sealed', estimatedWireBytes);
+  }, workingReplica.signerId, selection.isSingleSigner, certifiedContext);
+  countOp('entity.frame.certified', estimatedWireBytes);
   countOp(`entity.frame.txs.${
     txs.length === 0 ? '0' : txs.length === 1 ? '1' : txs.length < 8 ? '2-7'
       : txs.length < 32 ? '8-31' : txs.length < 128 ? '32-127' : '128+'
@@ -522,7 +522,7 @@ const sealEntityProposal = async (
   };
   // This is the owning constructor, not an untrusted wire boundary. The body
   // was already canonically encoded and bounded by createEntityFrameHash*, and
-  // the conservative sealed-size template above includes every fixed-size
+  // the conservative certified-size template above includes every fixed-size
   // signature and a larger-than-canonical single-signer Hanko. Re-decoding the
   // object here encoded the multi-megabyte frame twice more per proposal.
   // Remote/recovered frames still use validateProposedEntityFrame at ingress.
@@ -536,16 +536,16 @@ const sealEntityProposal = async (
 /**
  * Build the next Entity frame from the selected mempool txs: fit to wire,
  * apply, hash, sign own manifest. Same for every board size; a single-signer
- * board additionally seals its own quorum hankos here since no precommit
+ * board additionally creates its own quorum Hankos here since no precommit
  * round follows.
  */
 const buildEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   profile: ProposalProfile,
-): Promise<SealedEntityProposal | null> => {
+): Promise<CertifiedEntityProposal | null> => {
   const prepared = await fitAndApplyEntityProposal(context, selection, profile);
-  return prepared ? sealEntityProposal(context, selection, prepared, profile) : null;
+  return prepared ? certifyEntityProposal(context, selection, prepared, profile) : null;
 };
 
 const isFrameByteLimitError = (error: unknown): boolean => {
@@ -566,7 +566,7 @@ const buildEntityProposalEvictingRejected = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   profile: ProposalProfile,
-): Promise<SealedEntityProposal | null> => {
+): Promise<CertifiedEntityProposal | null> => {
   for (let round = 0; round <= selection.proposalTxs.length; round += 1) {
     try {
       return await buildEntityProposal(context, selection, profile);
@@ -665,9 +665,9 @@ export const startEntityProposalIfReady = async (
     entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(context.env, workingReplica.entityId),
   });
   context.hankoPriming = primeProposalHankos(selection.proposalTxs);
-  const sealed = await buildEntityProposalEvictingRejected(context, selection, profile);
-  if (!sealed) return null;
-  const { frame } = sealed;
+  const certified = await buildEntityProposalEvictingRejected(context, selection, profile);
+  if (!certified) return null;
+  const { frame } = certified;
   const candidate = workingReplica.candidate;
   if (!candidate) throw new Error('ENTITY_PROPOSAL_CANDIDATE_MISSING');
   if (selection.isSingleSigner) {
@@ -676,7 +676,7 @@ export const startEntityProposalIfReady = async (
     const handoverConfig = getBoardHandoverFrameConfig(context.env, priorState, frame.txs);
     const result = await finalizeCommitNotification(context, frame, candidate, frame.collectedSigs ?? new Map(), {
       localProposal: true,
-      ...(sealed.localCommitHankos ? { localCommitHankos: sealed.localCommitHankos } : {}),
+      ...(certified.localCommitHankos ? { localCommitHankos: certified.localCommitHankos } : {}),
       ...(handoverConfig ? { broadcastCommit: true, broadcastValidators: priorState.config.validators } : {}),
     });
     profile.checkpoint('commit');

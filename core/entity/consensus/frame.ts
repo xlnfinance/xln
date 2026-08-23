@@ -230,7 +230,7 @@ export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
 };
 
 // Events are not known before apply. 500 users needed 1.7 MB beyond a 256 KB
-// slack. Mixed 1000e sealed 11.5 MB at 208 txs after a 2 MB event reserve —
+// slack. Mixed 1000e certified 11.5 MB at 208 txs after a 2 MB event reserve —
 // events+hankos still overflowed validateProposedEntityFrame. Reserve a third.
 export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 3);
 

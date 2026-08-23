@@ -16,15 +16,15 @@ import type {
 } from './transactions';
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 
-type DisputeSeal = NonNullable<
-  Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeSeal']
+type DisputeHanko = NonNullable<
+  Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeHanko']
 >;
 
-const resolveDisputeSeal = (
+const resolveDisputeHanko = (
   account: AccountReplica,
   candidate: AccountReplica,
   proof: PreparedProposalProof,
-): DisputeSeal | undefined => {
+): DisputeHanko | undefined => {
   if (proof.disputeHash) {
     return {
       hash: proof.disputeHash,
@@ -63,10 +63,10 @@ const buildOutboundAccountInput = (
     reusableAck!.counterpartyEntityId.toLowerCase() === account.proofHeader.toEntity.toLowerCase() &&
     Number(reusableAck!.height) === Number(frame.height) - 1 &&
     Number(account.currentHeight) === Number(reusableAck!.height);
-  const disputeSeal = resolveDisputeSeal(account, candidate, proof);
+  const disputeHanko = resolveDisputeHanko(account, candidate, proof);
   const proposal = {
     frame: cloneIsolatedAccountFrame(frame),
-    ...(disputeSeal ? { disputeSeal } : {}),
+    ...(disputeHanko ? { disputeHanko } : {}),
   };
   const shared = {
     fromEntityId: account.proofHeader.fromEntity,

@@ -33,11 +33,11 @@ describe('FinTS Account frame certification views', () => {
     expect(isCertifiedAccountFrameAck(ack)).toBe(true);
   });
 
-  test('rejects a partially certified optional dispute seal', () => {
+  test('rejects a partially certified optional dispute Hanko', () => {
     const proposal: AccountFrameProposal = {
       frame: frame(),
       frameHanko: '0x01',
-      disputeSeal: {
+      disputeHanko: {
         hash: `0x${'33'.repeat(32)}`,
         proofBodyHash: `0x${'44'.repeat(32)}`,
         proofNonce: 1,

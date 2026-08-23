@@ -1,0 +1,13 @@
+[package]
+name = "xln-rscore-differential"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+[dependencies]
+num-bigint = "0.4.6"
+xln-rscore-abi = { path = "../../rscore/crates/abi" }
+xln-rscore-engine = { path = "../../rscore/crates/engine" }
+
+[workspace]

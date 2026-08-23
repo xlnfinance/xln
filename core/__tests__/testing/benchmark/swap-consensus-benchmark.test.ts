@@ -31,9 +31,9 @@ const workerResult = (): Record<string, unknown> => ({
   independentHubCohorts: 1,
   meanPhaseMsPerAccountFrame: {
     propose: 1,
-    proposalSeal: 2,
+    proposalHanko: 2,
     receive: 3,
-    ackSeal: 2,
+    ackHanko: 2,
     commit: 1,
   },
   scope: 'test worker',

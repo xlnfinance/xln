@@ -39,7 +39,7 @@ export const collectTouchedAccountIds = (
 export const copyProposableAccounts = (proposableAccounts: Iterable<string> | undefined): string[] =>
   [...(proposableAccounts ?? [])].map(accountId => accountId.toLowerCase());
 
-export const touchedAccountIdsForHankoSeal = (
+export const touchedAccountIdsForHankoAttachment = (
   state: EntityState,
   proposableAccounts: Iterable<string> | undefined,
   storageChanges: readonly RuntimeOverlayRecord[],

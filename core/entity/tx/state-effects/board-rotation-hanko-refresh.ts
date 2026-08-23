@@ -1,9 +1,4 @@
-import type {
-  AccountBoardResealMigration,
-  AccountDisputeSeal,
-  AccountPeerInput,
-  AccountReplica,
-} from '../../../types/account';
+import type { AccountBoardHankoRefreshMigration, AccountDisputeHanko, AccountReplica } from '../../../types/account';
 import type { EntityInput, EntityState, HashToSign } from '../../types';
 import type { CertifiedBoardNodeStore } from '../../../types/entity-board-registry';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
@@ -13,24 +8,19 @@ import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
 import { createStructuredLogger } from '../../../support/logger';
 import { EntityAccountCandidateMap, getEntityAccountForWrite } from '../../state/persistent-account-map';
 import {
-  cloneIsolatedAccountInput,
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../../protocol/state/account-input-clone';
-import {
-  accountInputAck,
-  accountInputProposal,
-} from '../../../account/consensus/flush';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 
-export type BoardResealActivation = {
+export type BoardHankoRefreshActivation = {
   entityId: string;
   jHeight: number;
   logIndex: number;
 };
 
-export type BoardRotationResealDrafts = {
+export type BoardRotationHankoRefreshDrafts = {
   outputs: EntityInput[];
   hashesToSign: HashToSign[];
   accountMigrations: BoardRotationAccountMigration[];
@@ -41,14 +31,10 @@ export type BoardRotationResealDrafts = {
 
 export type BoardRotationAccountMigration = {
   counterpartyId: string;
-  marker: AccountBoardResealMigration | null;
-  reHanko?: {
-    target: 'pendingAccountInput' | 'lastOutboundFrameAck';
-    input: AccountPeerInput;
-  };
+  marker: AccountBoardHankoRefreshMigration | null;
 };
 
-type AccountResealDraft = {
+type AccountHankoRefreshDraft = {
   output?: EntityInput;
   hashesToSign: HashToSign[];
   migration: BoardRotationAccountMigration;
@@ -56,14 +42,14 @@ type AccountResealDraft = {
 
 type ActivationPosition = readonly [jHeight: number, logIndex: number];
 
-const MAX_BOARD_RESEALS_PER_FRAME = 32;
-export const BOARD_RESEAL_HOOK_ID = 'board-reseal';
-export const BOARD_RESEAL_RETRY_MS = 60_000;
-const resealLog = createStructuredLogger('entity.board-reseal');
+const MAX_BOARD_HANKO_REFRESHES_PER_FRAME = 32;
+export const BOARD_HANKO_REFRESH_HOOK_ID = 'board-hanko-refresh';
+export const BOARD_HANKO_REFRESH_RETRY_MS = 60_000;
+const boardHankoRefreshLog = createStructuredLogger('entity.board-hanko-refresh');
 
 const bytes32 = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value.toLowerCase());
 
-const hasAnyDisputeSealEvidence = (account: AccountReplica): boolean => Boolean(
+const hasAnyDisputeHankoEvidence = (account: AccountReplica): boolean => Boolean(
   account.currentDisputeProofHanko ||
   account.counterpartyDisputeProofHanko ||
   account.currentDisputeHash ||
@@ -76,13 +62,13 @@ const hasAnyDisputeSealEvidence = (account: AccountReplica): boolean => Boolean(
   account.counterpartyDisputeProofProposerIsLeft !== undefined
 );
 
-type DisputeSealDraft = {
-  seal?: AccountDisputeSeal;
-  issue?: AccountBoardResealMigration['reason'];
+type DisputeHankoDraft = {
+  hanko?: AccountDisputeHanko;
+  issue?: AccountBoardHankoRefreshMigration['reason'];
 };
 
-const exactBilateralDisputeSeal = (account: AccountReplica): DisputeSealDraft => {
-  if (!hasAnyDisputeSealEvidence(account)) return {};
+const exactBilateralDisputeHanko = (account: AccountReplica): DisputeHankoDraft => {
+  if (!hasAnyDisputeHankoEvidence(account)) return {};
   const localHash = account.currentDisputeHash?.toLowerCase();
   const remoteHash = account.counterpartyDisputeHash?.toLowerCase();
   const localBody = account.currentDisputeProofBodyHash?.toLowerCase();
@@ -106,7 +92,7 @@ const exactBilateralDisputeSeal = (account: AccountReplica): DisputeSealDraft =>
     return { issue: 'certified-dispute-invalid' };
   }
   return {
-    seal: {
+    hanko: {
       hash: localHash,
       proofBodyHash: localBody,
       proofNonce: localNonce!,
@@ -119,7 +105,7 @@ const accountFrameIssue = (
   state: EntityState,
   counterpartyId: string,
   account: AccountReplica,
-): AccountBoardResealMigration['reason'] | undefined => {
+): AccountBoardHankoRefreshMigration['reason'] | undefined => {
   if (
     account.proofHeader.fromEntity.toLowerCase() !== state.entityId.toLowerCase() ||
     account.proofHeader.toEntity.toLowerCase() !== counterpartyId
@@ -141,9 +127,8 @@ const migration = (
   counterpartyId: string,
   activationJHeight: number,
   activationLogIndex: number,
-  reason: AccountBoardResealMigration['reason'] | null,
+  reason: AccountBoardHankoRefreshMigration['reason'] | null,
   issued?: { height: number; frameHash: string },
-  reHanko?: BoardRotationAccountMigration['reHanko'],
 ): BoardRotationAccountMigration => ({
   counterpartyId,
   marker: reason ? {
@@ -155,14 +140,13 @@ const migration = (
       issuedFrameHash: issued.frameHash,
     } : {}),
   } : null,
-  ...(reHanko ? { reHanko } : {}),
 });
 
-export const accountNeedsBoardResealForActivation = (
+export const accountNeedsBoardHankoRefreshForActivation = (
   account: AccountReplica,
-  activation: Pick<BoardResealActivation, 'jHeight' | 'logIndex'>,
+  activation: Pick<BoardHankoRefreshActivation, 'jHeight' | 'logIndex'>,
 ): boolean => {
-  const marker = account.boardResealMigration;
+  const marker = account.boardHankoRefreshMigration;
   if (
     !marker ||
     marker.activationJHeight !== activation.jHeight ||
@@ -173,11 +157,11 @@ export const accountNeedsBoardResealForActivation = (
     marker.issuedFrameHash?.toLowerCase() !== String(account.currentFrame.stateHash || '').toLowerCase();
 };
 
-type BoardResealEvidence = ReadonlyArray<string | number | bigint | boolean | undefined>;
+type BoardHankoRefreshEvidence = ReadonlyArray<string | number | bigint | boolean | undefined>;
 
-const boardResealEvidence = (
+const boardHankoRefreshEvidence = (
   account: AccountReplica,
-): BoardResealEvidence => [
+): BoardHankoRefreshEvidence => [
   account.currentHeight,
   account.currentFrame.height,
   account.currentFrame.stateHash,
@@ -195,44 +179,44 @@ const boardResealEvidence = (
   account.counterpartyDisputeProofProposerIsLeft,
 ];
 
-/** Capture only Account bytes whose change can make a fresh reseal possible. */
-export const captureAccountBoardResealEvidence = (
+/** Capture only Account bytes whose change can make a fresh board Hanko refresh possible. */
+export const captureAccountBoardHankoRefreshEvidence = (
   state: Pick<EntityState, 'accounts'>,
   accountIds: ReadonlySet<string>,
-): ReadonlyMap<string, BoardResealEvidence> => {
-  const evidence = new Map<string, BoardResealEvidence>();
+): ReadonlyMap<string, BoardHankoRefreshEvidence> => {
+  const evidence = new Map<string, BoardHankoRefreshEvidence>();
   for (const rawAccountId of accountIds) {
     const accountId = rawAccountId.toLowerCase();
     const account = state.accounts instanceof EntityAccountCandidateMap
       ? state.accounts.getCertifiedBase(accountId)
       : state.accounts.get(accountId);
-    if (account) evidence.set(accountId, boardResealEvidence(account));
+    if (account) evidence.set(accountId, boardHankoRefreshEvidence(account));
   }
   return evidence;
 };
 
 /** A marker-only mutation must never schedule another consensus frame. */
-export const accountBoardResealEvidenceChanged = (
-  previous: BoardResealEvidence | undefined,
+export const accountBoardHankoRefreshEvidenceChanged = (
+  previous: BoardHankoRefreshEvidence | undefined,
   current: AccountReplica,
 ): boolean => {
   if (!previous) return true;
-  return boardResealEvidence(current).some((value, index) => value !== previous[index]);
+  return boardHankoRefreshEvidence(current).some((value, index) => value !== previous[index]);
 };
 
 const activationPosition = (event: BoardActivatedEvent): ActivationPosition => {
   const jHeight = Number(event.blockNumber);
   if (!Number.isSafeInteger(jHeight) || jHeight < 1) {
-    throw new Error(`BOARD_RESEAL_ACTIVATION_HEIGHT_INVALID:${String(event.blockNumber)}`);
+    throw new Error(`BOARD_HANKO_REFRESH_ACTIVATION_HEIGHT_INVALID:${String(event.blockNumber)}`);
   }
   const logIndex = Number(event.logIndex);
   if (!Number.isSafeInteger(logIndex) || logIndex < 0) {
-    throw new Error(`BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID:${String(event.logIndex)}`);
+    throw new Error(`BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:${String(event.logIndex)}`);
   }
   return [jHeight, logIndex];
 };
 
-const boardResealActivation = (event: BoardActivatedEvent): BoardResealActivation => {
+const boardHankoRefreshActivation = (event: BoardActivatedEvent): BoardHankoRefreshActivation => {
   const [jHeight, logIndex] = activationPosition(event);
   return {
     entityId: event.data.entityId.toLowerCase(),
@@ -241,11 +225,11 @@ const boardResealActivation = (event: BoardActivatedEvent): BoardResealActivatio
   };
 };
 
-export const markBoardRotationResealsPending = (
+export const markBoardRotationHankoRefreshesPending = (
   state: EntityState,
   event: BoardActivatedEvent,
-): { activation: BoardResealActivation; dirtyAccounts: string[] } => {
-  const activation = boardResealActivation(event);
+): { activation: BoardHankoRefreshActivation; dirtyAccounts: string[] } => {
+  const activation = boardHankoRefreshActivation(event);
   if (activation.entityId !== state.entityId.toLowerCase()) return { activation, dirtyAccounts: [] };
   const dirtyAccounts: string[] = [];
   for (const rawCounterpartyId of state.accounts.keys()) {
@@ -253,13 +237,13 @@ export const markBoardRotationResealsPending = (
     if (!account) continue;
     const counterpartyId = rawCounterpartyId.toLowerCase();
     if (Number(account.currentHeight) < 1) {
-      if (account.boardResealMigration) {
-        delete account.boardResealMigration;
+      if (account.boardHankoRefreshMigration) {
+        delete account.boardHankoRefreshMigration;
         dirtyAccounts.push(counterpartyId);
       }
       continue;
     }
-    account.boardResealMigration = {
+    account.boardHankoRefreshMigration = {
       activationJHeight: activation.jHeight,
       activationLogIndex: activation.logIndex,
       reason: 'pending',
@@ -269,7 +253,7 @@ export const markBoardRotationResealsPending = (
   return { activation, dirtyAccounts: dirtyAccounts.sort() };
 };
 
-const buildResealOutput = (
+const buildHankoRefreshOutput = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
   counterpartyId: string,
@@ -284,7 +268,7 @@ const buildResealOutput = (
       counterpartyId,
     );
     if (!signerId) {
-      resealLog.warn('route.unavailable', {
+      boardHankoRefreshLog.warn('route.unavailable', {
         counterpartyId,
         reason: account.counterpartyFrameHanko ? 'proposer-unresolved' : 'counterparty-frame-hanko-missing',
       });
@@ -295,7 +279,7 @@ const buildResealOutput = (
     // An absent/non-authoritative bilateral witness is retryable. Corrupt
     // Account identity, frame hashes, or certified Patricia nodes remain loud.
     if (error instanceof HankoValidationError) {
-      resealLog.warn('route.unavailable', {
+      boardHankoRefreshLog.warn('route.unavailable', {
         counterpartyId,
         reason: error.message,
       });
@@ -305,191 +289,47 @@ const buildResealOutput = (
   }
 };
 
-type InFlightReHankoDraft = {
-  input: AccountPeerInput;
-  target: NonNullable<BoardRotationAccountMigration['reHanko']>['target'];
-  issued: { height: number; frameHash: string };
-  hashesToSign: HashToSign[];
-};
-
-const appendReHankoHash = (
-  hashes: HashToSign[],
-  seen: Set<string>,
-  hash: string,
-  type: HashToSign['type'],
-  context: string,
-): void => {
-  const normalized = hash.toLowerCase();
-  if (!bytes32(normalized)) throw new Error(`BOARD_REHANKO_HASH_INVALID:${context}:${hash}`);
-  if (seen.has(normalized)) return;
-  seen.add(normalized);
-  hashes.push({ hash: normalized, type, context });
-};
-
-const clearLocalHankosAndCollectHashes = (
-  input: AccountPeerInput,
-  context: string,
-): { issued: InFlightReHankoDraft['issued']; hashesToSign: HashToSign[] } => {
-  const hashesToSign: HashToSign[] = [];
-  const seen = new Set<string>();
-  const ack = accountInputAck(input);
-  if (ack) {
-    appendReHankoHash(hashesToSign, seen, ack.frameHash, 'accountFrame', `${context}:ack`);
-    delete ack.frameHanko;
-    if (ack.disputeSeal) {
-      appendReHankoHash(hashesToSign, seen, ack.disputeSeal.hash, 'dispute', `${context}:ack-dispute`);
-      delete ack.disputeSeal.hanko;
-    }
-  }
-  const proposal = accountInputProposal(input);
-  if (proposal) {
-    appendReHankoHash(
-      hashesToSign,
-      seen,
-      proposal.frame.stateHash,
-      'accountFrame',
-      `${context}:proposal`,
-    );
-    delete proposal.frameHanko;
-    if (proposal.disputeSeal) {
-      appendReHankoHash(
-        hashesToSign,
-        seen,
-        proposal.disputeSeal.hash,
-        'dispute',
-        `${context}:proposal-dispute`,
-      );
-      delete proposal.disputeSeal.hanko;
-    }
-  }
-  const issued = proposal
-    ? { height: Number(proposal.frame.height), frameHash: proposal.frame.stateHash.toLowerCase() }
-    : ack
-      ? { height: Number(ack.height), frameHash: ack.frameHash.toLowerCase() }
-      : undefined;
-  if (!issued || !Number.isSafeInteger(issued.height) || issued.height < 1) {
-    throw new Error(`BOARD_REHANKO_FRAME_MISSING:${context}`);
-  }
-  return { issued, hashesToSign };
-};
-
-const buildInFlightReHankoDraft = (
-  state: EntityState,
-  counterpartyId: string,
-  account: AccountReplica,
-  activation: BoardResealActivation,
-): InFlightReHankoDraft | undefined => {
-  let source: AccountPeerInput | undefined;
-  let target: InFlightReHankoDraft['target'] | undefined;
-  if (account.pendingFrame) {
-    if (!account.pendingAccountInput) {
-      throw new Error(`BOARD_REHANKO_PENDING_INPUT_MISSING:${counterpartyId}:${account.pendingFrame.height}`);
-    }
-    const proposal = accountInputProposal(account.pendingAccountInput);
-    if (
-      !proposal ||
-      Number(proposal.frame.height) !== Number(account.pendingFrame.height) ||
-      proposal.frame.stateHash.toLowerCase() !== account.pendingFrame.stateHash.toLowerCase()
-    ) {
-      throw new Error(`BOARD_REHANKO_PENDING_INPUT_MISMATCH:${counterpartyId}:${account.pendingFrame.height}`);
-    }
-    source = account.pendingAccountInput;
-    target = 'pendingAccountInput';
-  } else {
-    const cached = account.lastOutboundFrameAck;
-    if (
-      cached &&
-      Number(cached.height) === Number(account.currentHeight) &&
-      cached.counterpartyEntityId.toLowerCase() === counterpartyId
-    ) {
-      source = cached.response;
-      target = 'lastOutboundFrameAck';
-    }
-  }
-  if (!source || !target) return undefined;
-  if (
-    source.fromEntityId.toLowerCase() !== state.entityId.toLowerCase() ||
-    source.toEntityId.toLowerCase() !== counterpartyId
-  ) {
-    throw new Error(`BOARD_REHANKO_PARTY_MISMATCH:${counterpartyId}`);
-  }
-  const input = cloneIsolatedAccountInput(source);
-  const context = `board-rehanko:${activation.jHeight}:${activation.logIndex}:${counterpartyId}`;
-  const { issued, hashesToSign } = clearLocalHankosAndCollectHashes(input, context);
-  return { input, target, issued, hashesToSign };
-};
-
-const buildInFlightAccountReHankoDraft = (
+const buildCertifiedAccountHankoRefreshDraft = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
-  activation: BoardResealActivation,
+  activation: BoardHankoRefreshActivation,
   counterpartyId: string,
   account: AccountReplica,
   position: ActivationPosition,
-): AccountResealDraft | undefined => {
-  const draft = buildInFlightReHankoDraft(state, counterpartyId, account, activation);
-  if (!draft) return undefined;
-  const output = buildResealOutput(state, store, counterpartyId, account, [{
-    type: 'accountInput',
-    data: cloneIsolatedAccountInput(draft.input),
-  }]);
-  return {
-    ...(output ? { output } : {}),
-    hashesToSign: output ? draft.hashesToSign : [],
-    migration: migration(
-      counterpartyId,
-      ...position,
-      output ? 'issued' : 'output-route-unavailable',
-      output ? draft.issued : undefined,
-      output ? {
-        target: draft.target,
-        input: cloneIsolatedAccountInput(draft.input),
-      } : undefined,
-    ),
-  };
-};
-
-const buildCertifiedAccountResealDraft = (
-  state: EntityState,
-  store: CertifiedBoardNodeStore,
-  activation: BoardResealActivation,
-  counterpartyId: string,
-  account: AccountReplica,
-  position: ActivationPosition,
-): AccountResealDraft => {
+): AccountHankoRefreshDraft => {
   const frameHash = account.currentFrame.stateHash.toLowerCase();
-  const dispute = exactBilateralDisputeSeal(account);
+  const dispute = exactBilateralDisputeHanko(account);
   if (dispute.issue) {
     return {
       hashesToSign: [],
       migration: migration(counterpartyId, ...position, dispute.issue),
     };
   }
-  const reseal = {
+  const boardHankoRefresh = {
     height: account.currentHeight,
     frameHash,
     boardActivationJHeight: position[0],
     boardActivationLogIndex: position[1],
-    ...(dispute.seal ? { disputeSeal: dispute.seal } : {}),
+    ...(dispute.hanko ? { disputeHanko: dispute.hanko } : {}),
   };
-  const output = buildResealOutput(state, store, counterpartyId, account, [{
+  const output = buildHankoRefreshOutput(state, store, counterpartyId, account, [{
     type: 'accountInput',
     data: {
-      kind: 'board_reseal',
+      kind: 'board_hanko_refresh',
       fromEntityId: state.entityId,
       toEntityId: counterpartyId,
       domain: copyAccountStateDomain(account.state.domain),
       disputeConfig: copyAccountDisputeConfig(account.state.disputeConfig),
-      reseal,
+      boardHankoRefresh,
     },
   }]);
   const issue = output ? 'issued' : 'output-route-unavailable';
-  const context = `board-reseal:${activation.jHeight}:${activation.logIndex}:${counterpartyId}`;
+  const context = `board-hanko-refresh:${activation.jHeight}:${activation.logIndex}:${counterpartyId}`;
   const hashesToSign: HashToSign[] = output
     ? [{ hash: frameHash, type: 'accountFrame', context: `${context}:frame` }]
     : [];
-  if (output && dispute.seal) {
-    hashesToSign.push({ hash: dispute.seal.hash, type: 'dispute', context: `${context}:dispute` });
+  if (output && dispute.hanko) {
+    hashesToSign.push({ hash: dispute.hanko.hash, type: 'dispute', context: `${context}:dispute` });
   }
   return {
     ...(output ? { output } : {}),
@@ -503,94 +343,46 @@ const buildCertifiedAccountResealDraft = (
   };
 };
 
-const buildAccountResealDraft = (
+const buildAccountHankoRefreshDraft = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
-  activation: BoardResealActivation,
+  activation: BoardHankoRefreshActivation,
   counterpartyId: string,
   account: AccountReplica,
   position: ActivationPosition,
-): AccountResealDraft => {
+): AccountHankoRefreshDraft => {
   if (Number(account.currentHeight) < 1) {
     return { hashesToSign: [], migration: migration(counterpartyId, ...position, null) };
   }
-  const inFlight = buildInFlightAccountReHankoDraft(
-    state,
-    store,
-    activation,
-    counterpartyId,
-    account,
-    position,
-  );
-  if (inFlight) return inFlight;
   const issue = accountFrameIssue(state, counterpartyId, account);
   if (issue) return { hashesToSign: [], migration: migration(counterpartyId, ...position, issue) };
-  return buildCertifiedAccountResealDraft(state, store, activation, counterpartyId, account, position);
+  return buildCertifiedAccountHankoRefreshDraft(state, store, activation, counterpartyId, account, position);
 };
 
-export const applyBoardRotationResealMigrations = (
+export const applyBoardRotationHankoRefreshMigrations = (
   state: EntityState,
   updates: readonly BoardRotationAccountMigration[],
 ): void => {
   if (!(state.accounts instanceof EntityAccountCandidateMap)) {
-    throw new Error('BOARD_RESEAL_MIGRATION_CANDIDATE_REQUIRED');
+    throw new Error('BOARD_HANKO_REFRESH_MIGRATION_CANDIDATE_REQUIRED');
   }
   for (const update of updates) {
     const account = getEntityAccountForWrite(state.accounts, update.counterpartyId);
-    if (!account) throw new Error(`BOARD_RESEAL_MIGRATION_ACCOUNT_MISSING:${update.counterpartyId}`);
-    if (update.reHanko?.target === 'pendingAccountInput') {
-      const pendingInput = update.reHanko.input;
-      const proposal = accountInputProposal(pendingInput);
-      if (
-        !account.pendingFrame ||
-        (pendingInput.kind !== 'frame' && pendingInput.kind !== 'frame_ack') ||
-        !proposal ||
-        proposal.frame.stateHash.toLowerCase() !== account.pendingFrame.stateHash.toLowerCase()
-      ) {
-        throw new Error(`BOARD_REHANKO_PENDING_MIGRATION_MISMATCH:${update.counterpartyId}`);
-      }
-      account.pendingAccountInput = cloneIsolatedAccountInput(pendingInput);
-      const bundledAck = accountInputAck(pendingInput);
-      if (bundledAck && account.lastOutboundFrameAck) {
-        const cachedAck = accountInputAck(account.lastOutboundFrameAck.response);
-        if (
-          !cachedAck ||
-          Number(cachedAck.height) !== Number(bundledAck.height) ||
-          cachedAck.frameHash.toLowerCase() !== bundledAck.frameHash.toLowerCase()
-        ) {
-          throw new Error(`BOARD_REHANKO_BUNDLED_ACK_CACHE_MISMATCH:${update.counterpartyId}`);
-        }
-        const refreshedAck = cloneIsolatedAccountInput(account.lastOutboundFrameAck.response);
-        delete refreshedAck.ack.frameHanko;
-        if (refreshedAck.ack.disputeSeal) delete refreshedAck.ack.disputeSeal.hanko;
-        account.lastOutboundFrameAck.response = refreshedAck;
-      }
-    } else if (update.reHanko?.target === 'lastOutboundFrameAck') {
-      const ack = accountInputAck(update.reHanko.input);
-      if (
-        !account.lastOutboundFrameAck ||
-        !ack ||
-        Number(ack.height) !== Number(account.lastOutboundFrameAck.height)
-      ) {
-        throw new Error(`BOARD_REHANKO_ACK_MIGRATION_MISMATCH:${update.counterpartyId}`);
-      }
-      account.lastOutboundFrameAck.response = cloneIsolatedAccountInput(update.reHanko.input) as
-        typeof account.lastOutboundFrameAck.response;
-    }
-    if (update.marker) account.boardResealMigration = { ...update.marker };
-    else delete account.boardResealMigration;
+    if (!account) throw new Error(`BOARD_HANKO_REFRESH_MIGRATION_ACCOUNT_MISSING:${update.counterpartyId}`);
+    if (update.marker) account.boardHankoRefreshMigration = { ...update.marker };
+    else delete account.boardHankoRefreshMigration;
   }
 };
 
-const buildBoardRotationResealDraftsForActivation = (
+const buildBoardRotationHankoRefreshDraftsForActivation = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
-  activation: BoardResealActivation,
+  activation: BoardHankoRefreshActivation,
   options: {
     afterCounterpartyId?: string;
     pendingOnly?: boolean;
   } = {},
-): BoardRotationResealDrafts => {
+): BoardRotationHankoRefreshDrafts => {
   if (activation.entityId !== state.entityId.toLowerCase()) {
     return {
       outputs: [],
@@ -610,14 +402,14 @@ const buildBoardRotationResealDraftsForActivation = (
     .filter(([counterpartyId, account]) => {
       if (counterpartyId <= String(options.afterCounterpartyId ?? '').toLowerCase()) return false;
       if (!options.pendingOnly) return true;
-      return accountNeedsBoardResealForActivation(account, activation);
+      return accountNeedsBoardHankoRefreshForActivation(account, activation);
     })
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
 
-  const batch = orderedAccounts.slice(0, MAX_BOARD_RESEALS_PER_FRAME);
+  const batch = orderedAccounts.slice(0, MAX_BOARD_HANKO_REFRESHES_PER_FRAME);
 
   for (const [counterpartyId, account] of batch) {
-    const draft = buildAccountResealDraft(state, store, activation, counterpartyId, account, position);
+    const draft = buildAccountHankoRefreshDraft(state, store, activation, counterpartyId, account, position);
     if (draft.output) outputs.push(draft.output);
     hashesToSign.push(...draft.hashesToSign);
     accountMigrations.push(draft.migration);
@@ -629,7 +421,7 @@ const buildBoardRotationResealDraftsForActivation = (
     hasMore: orderedAccounts.length > batch.length,
     // Only transport discovery can improve without an Account transition.
     // Structural/certification issues remain visible in the bounded marker
-    // and are re-armed by scheduleChangedAccountBoardReseals when that Account
+    // and are re-armed by scheduleChangedAccountBoardHankoRefreshes when that Account
     // actually changes. Polling them every second creates an infinite wake
     // loop while adding no new evidence.
     retryRequired: accountMigrations.some(update =>
@@ -639,7 +431,7 @@ const buildBoardRotationResealDraftsForActivation = (
 };
 
 /** Build at most one bounded frame of Account hashes already certified by both parties. */
-export const buildBoardRotationResealDrafts = (
+export const buildBoardRotationHankoRefreshDrafts = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
   event: BoardActivatedEvent,
@@ -647,19 +439,19 @@ export const buildBoardRotationResealDrafts = (
     afterCounterpartyId?: string;
     pendingOnly?: boolean;
   } = {},
-): BoardRotationResealDrafts => buildBoardRotationResealDraftsForActivation(
+): BoardRotationHankoRefreshDrafts => buildBoardRotationHankoRefreshDraftsForActivation(
   state,
   store,
-  boardResealActivation(event),
+  boardHankoRefreshActivation(event),
   options,
 );
 
-export const buildPendingBoardRotationResealDrafts = (
+export const buildPendingBoardRotationHankoRefreshDrafts = (
   state: EntityState,
   store: CertifiedBoardNodeStore,
-  activation: BoardResealActivation,
+  activation: BoardHankoRefreshActivation,
   afterCounterpartyId = '',
-): BoardRotationResealDrafts => buildBoardRotationResealDraftsForActivation(state, store, activation, {
+): BoardRotationHankoRefreshDrafts => buildBoardRotationHankoRefreshDraftsForActivation(state, store, activation, {
   afterCounterpartyId,
   pendingOnly: true,
 });

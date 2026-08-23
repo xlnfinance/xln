@@ -66,7 +66,7 @@ export const currentQuorumInteractions: readonly QuorumInteraction[] = [
     reviewerId: 'claude-opus-performance', reviewer: 'Opus', model: 'Claude Opus 5 High', family: 'Claude',
     score: 890, verdict: 'verified', category: 'performance', sourceSha: SOURCE_SHA,
     scope: 'Replay and H1 hot-path audit',
-    summary: 'Confirmed idle frame delay, Account leaf hashing and repeated sealed-frame encoding as P0 candidates.',
+    summary: 'Confirmed idle frame delay, Account leaf hashing and repeated certified-frame encoding as P0 candidates.',
     evidence: 'Findings matched profiling; the idle delay and encoding work alone did not close the live TPS gap.',
     responseMinutes: 73, verifiedImpact: 45,
   },

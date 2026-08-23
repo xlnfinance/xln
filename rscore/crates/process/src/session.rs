@@ -1,0 +1,277 @@
+use xln_rscore_abi::{EngineIdentity, Envelope, MessageKind, ProtocolBinding};
+use xln_rscore_batch::{EngineGeneration, PreparedBatch, StatefulBatchEngine};
+
+use crate::wire_decode::{Command, decode_command};
+use crate::{ProcessError, wire_encode};
+
+pub struct ProcessReply {
+    pub envelope: Envelope,
+    pub shutdown: bool,
+}
+
+pub struct ProcessSession {
+    binding: Option<SessionBinding>,
+    worker_count: usize,
+    last_request_id: Option<u64>,
+    engine: Option<StatefulBatchEngine>,
+    pending: Option<PendingBatch>,
+    stopped: bool,
+}
+
+struct SessionBinding {
+    protocol: ProtocolBinding,
+    engine_generation: [u8; 8],
+    runtime_id: [u8; 20],
+    session_id: [u8; 16],
+}
+
+struct PendingBatch {
+    prepare_request_id: [u8; 8],
+    candidate: PreparedBatch,
+}
+
+impl ProcessSession {
+    pub const fn new() -> Self {
+        Self {
+            binding: None,
+            worker_count: 0,
+            last_request_id: None,
+            engine: None,
+            pending: None,
+            stopped: false,
+        }
+    }
+
+    pub fn handle(&mut self, request: Envelope) -> ProcessReply {
+        let handled = self.dispatch_envelope(&request);
+        let (message_kind, body, shutdown) = match handled {
+            Ok((body, shutdown)) => (MessageKind::Ok, body, shutdown),
+            Err(error) => (MessageKind::Error, wire_encode::error(&error), self.stopped),
+        };
+        ProcessReply {
+            envelope: Envelope {
+                binding: request.binding,
+                identity: request.identity,
+                op_tag: request.op_tag,
+                message_kind,
+                body,
+            },
+            shutdown,
+        }
+    }
+
+    fn dispatch_envelope(
+        &mut self,
+        request: &Envelope,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.stopped {
+            return Err(ProcessError::Stopped);
+        }
+        if request.message_kind != MessageKind::Request {
+            return Err(ProcessError::RequestKind);
+        }
+        if self.binding.is_none() {
+            return self.start(request, decode_command(request)?);
+        }
+        self.validate_bound_request(request)?;
+        self.last_request_id = Some(request_id(&request.identity));
+        self.dispatch(request.identity.request_id, decode_command(request)?)
+    }
+
+    fn start(
+        &mut self,
+        request: &Envelope,
+        command: Command,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let Command::Hello { worker_count } = command else {
+            return Err(ProcessError::HelloRequired);
+        };
+        validate_payment_profile_binding(&request.binding)?;
+        let actual = request_id(&request.identity);
+        if actual != 0 {
+            return Err(ProcessError::RequestId {
+                actual,
+                expected: 0,
+            });
+        }
+        if !(1..=xln_rscore_batch::MAX_BATCH_WORKERS).contains(&worker_count) {
+            return Err(xln_rscore_batch::BatchError::InvalidWorkerCount(worker_count).into());
+        }
+        self.binding = Some(SessionBinding::from_request(request));
+        self.worker_count = worker_count;
+        self.last_request_id = Some(0);
+        Ok((wire_encode::hello(worker_count), false))
+    }
+
+    fn validate_bound_request(&self, request: &Envelope) -> Result<(), ProcessError> {
+        let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
+        binding.validate(request)?;
+        let expected = self
+            .last_request_id
+            .ok_or(ProcessError::HelloRequired)?
+            .checked_add(1)
+            .ok_or(ProcessError::RequestIdOverflow)?;
+        let actual = request_id(&request.identity);
+        if actual != expected {
+            return Err(ProcessError::RequestId { actual, expected });
+        }
+        Ok(())
+    }
+
+    fn dispatch(
+        &mut self,
+        request_id: [u8; 8],
+        command: Command,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        match command {
+            Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
+            Command::Restore { revision, accounts } => self.load(revision, accounts),
+            Command::Prepare { jobs } => self.prepare(request_id, &jobs),
+            Command::Commit { prepare_request_id } => self.commit(prepare_request_id),
+            Command::Abort { prepare_request_id } => self.abort(prepare_request_id),
+            Command::Shutdown => self.shutdown(),
+        }
+    }
+
+    fn load(
+        &mut self,
+        revision: u64,
+        accounts: Vec<xln_rscore_batch::AccountSeed>,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.engine.is_some() {
+            return Err(ProcessError::EngineAlreadyLoaded);
+        }
+        let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
+        self.engine = Some(StatefulBatchEngine::restore(
+            EngineGeneration::from_bytes(binding.engine_generation),
+            self.worker_count,
+            revision,
+            accounts,
+        )?);
+        Ok((wire_encode::loaded(revision), false))
+    }
+
+    fn prepare(
+        &mut self,
+        request_id: [u8; 8],
+        jobs: &[xln_rscore_batch::BatchJob],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
+        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
+        let candidate = engine.prepare(jobs)?;
+        let response = wire_encode::prepared(&candidate)?;
+        self.pending = Some(PendingBatch {
+            prepare_request_id: request_id,
+            candidate,
+        });
+        Ok((response, false))
+    }
+
+    fn commit(
+        &mut self,
+        prepare_request_id: [u8; 8],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.validate_pending_id(prepare_request_id)?;
+        let pending = self.pending.take().ok_or(ProcessError::PrepareNotPending)?;
+        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
+        match engine.commit(pending.candidate) {
+            Ok(response) => Ok((wire_encode::committed(&response), false)),
+            Err(error) => {
+                self.stopped = true;
+                Err(error.into())
+            }
+        }
+    }
+
+    fn abort(
+        &mut self,
+        prepare_request_id: [u8; 8],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.validate_pending_id(prepare_request_id)?;
+        self.pending = None;
+        let revision = self
+            .engine
+            .as_ref()
+            .ok_or(ProcessError::EngineNotLoaded)?
+            .revision();
+        Ok((wire_encode::aborted(revision), false))
+    }
+
+    fn validate_pending_id(&self, actual: [u8; 8]) -> Result<(), ProcessError> {
+        let pending = self
+            .pending
+            .as_ref()
+            .ok_or(ProcessError::PrepareNotPending)?;
+        if pending.prepare_request_id != actual {
+            return Err(ProcessError::PrepareIdMismatch);
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
+        self.stopped = true;
+        Ok((wire_encode::shutdown(), true))
+    }
+}
+
+impl Default for ProcessSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SessionBinding {
+    fn from_request(request: &Envelope) -> Self {
+        Self {
+            protocol: request.binding.clone(),
+            engine_generation: request.identity.engine_generation,
+            runtime_id: request.identity.runtime_id,
+            session_id: request.identity.session_id,
+        }
+    }
+
+    fn validate(&self, request: &Envelope) -> Result<(), ProcessError> {
+        if self.protocol != request.binding {
+            return Err(ProcessError::BindingMismatch);
+        }
+        if self.engine_generation != request.identity.engine_generation
+            || self.runtime_id != request.identity.runtime_id
+            || self.session_id != request.identity.session_id
+        {
+            return Err(ProcessError::IdentityMismatch);
+        }
+        Ok(())
+    }
+}
+
+fn request_id(identity: &EngineIdentity) -> u64 {
+    u64::from_be_bytes(identity.request_id)
+}
+
+fn validate_payment_profile_binding(binding: &ProtocolBinding) -> Result<(), ProcessError> {
+    let expected = &crate::PAYMENT_PROFILE_BINDING;
+    if binding.protocol_version != expected.protocol_version {
+        return Err(ProcessError::ProtocolVersion {
+            actual: binding.protocol_version,
+            expected: expected.protocol_version,
+        });
+    }
+    if binding.storage_schema_version != expected.storage_schema_version {
+        return Err(ProcessError::StorageSchemaVersion {
+            actual: binding.storage_schema_version,
+            expected: expected.storage_schema_version,
+        });
+    }
+    if binding.protocol_fingerprint != expected.protocol_fingerprint {
+        return Err(ProcessError::ProtocolFingerprint {
+            actual: binding.protocol_fingerprint,
+            expected: expected.protocol_fingerprint,
+        });
+    }
+    Ok(())
+}

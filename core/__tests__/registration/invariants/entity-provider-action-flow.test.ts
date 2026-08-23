@@ -864,7 +864,7 @@ describe('EntityProvider action flow', () => {
     expect(hydrated.entityProviderActionState).toEqual(fixture.replica.state.entityProviderActionState);
   });
 
-  test('isolated validators recompute one action hash and only real board quorum seals it', async () => {
+  test('isolated validators recompute one action hash and only real board quorum certifies it', async () => {
     const seed = 'entity-provider-action:multisig';
     const signers = ['a', 'b', 'c'].map((label) =>
       deriveSignerAddressSync(seed, label).toLowerCase());
@@ -1063,13 +1063,13 @@ describe('EntityProvider action flow', () => {
       leader = await applyEntityInput(proposer.env, leader.workingReplica, structuredClone(precommit));
     }
     expect(leader.workingReplica.state.height).toBe(twoVotes.newState.height + 1);
-    const sealed = requireActionJTx(leader.jOutputs[0]?.jTxs[0]);
-    expect(sealed.data.intent.actionHash).toBe(actionManifest.hash);
-    expect(sealed.data.signerId).toBe(proposer.signerId);
-    expect(sealed.data.hankoSignature).toBeDefined();
+    const certified = requireActionJTx(leader.jOutputs[0]?.jTxs[0]);
+    expect(certified.data.intent.actionHash).toBe(actionManifest.hash);
+    expect(certified.data.signerId).toBe(proposer.signerId);
+    expect(certified.data.hankoSignature).toBeDefined();
     expect((await verifyHankoForHash(
-      sealed.data.hankoSignature!,
-      sealed.data.intent.actionHash,
+      certified.data.hankoSignature!,
+      certified.data.intent.actionHash,
       entityId,
       proposer.env,
     )).valid).toBe(true);
@@ -1093,7 +1093,7 @@ describe('EntityProvider action flow', () => {
     expect(() => assertEntityProviderActionRuntimeTxAuthorized(marked, false)).not.toThrow();
   });
 
-  test('BrowserVM executes and reconciles real quorum-sealed transfer/release/cancel', async () => {
+  test('BrowserVM executes and reconciles real quorum-certified transfer/release/cancel', async () => {
     const chainId = 31_337;
     const adapter = await createJAdapter({ mode: 'browservm', chainId });
     try {

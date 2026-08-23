@@ -39,6 +39,7 @@
     "frontend/**"
   ],
   "ignoreDependencies": [
+    "@openzeppelin/contracts",
     "buffer",
     "dockview",
     "chai-as-promised",

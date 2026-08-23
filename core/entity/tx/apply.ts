@@ -237,7 +237,7 @@ const accountHandlerResultToEntityTxResult = (
     outputs: result.outputs,
     accountTxs: result.accountTxs,
     // Rejected unknown-peer genesis never created an Account. Marking it dirty
-    // made Hanko seal look up a missing leaf and halt the next honest frame.
+    // made Hanko attachment look up a missing leaf and halt the next honest frame.
     accountChanges: result.newState.accounts.has(counterpartyId)
       ? [counterpartyId]
       : [],

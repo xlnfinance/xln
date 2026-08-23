@@ -153,14 +153,14 @@ export const settlementFrozenRejection = (
   txType,
 });
 
-export const settlementSealNonceRejection = (
+export const settlementHankoNonceRejection = (
   message: string,
   suppliedNonce: number,
   requiredNonce: number,
   basis: 'workspace' | 'account',
-): Extract<AccountTxRejection, { kind: 'settlement_seal_nonce_mismatch' }> => ({
-  kind: 'settlement_seal_nonce_mismatch',
-  code: ACCOUNT_TX_REJECTION_CODES.settlementSealNonceMismatch,
+): Extract<AccountTxRejection, { kind: 'settlement_hanko_nonce_mismatch' }> => ({
+  kind: 'settlement_hanko_nonce_mismatch',
+  code: ACCOUNT_TX_REJECTION_CODES.settlementHankoNonceMismatch,
   message,
   suppliedNonce,
   requiredNonce,

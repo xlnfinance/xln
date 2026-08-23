@@ -24,6 +24,11 @@ import {
 } from '../../../protocol/units';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { createDefaultDelta } from '../../../account/state/delta';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  discardAccountTransition,
+} from '../../../account/state/candidate-overlay';
 import { LIMITS, TOKENS } from '../../../config/constants';
 import type { AccountTx } from '../../../types/account';
 import { entity, makeAccount } from '../../helpers/cross-j';
@@ -82,11 +87,13 @@ describe('ApplyAccountTxResult units', () => {
 describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
   test('add_delta rejects an over-capacity token without mutation', () => {
     const account = makeAccount(LEFT, RIGHT);
+    const transition = beginAccountTransition(account);
+    const draft = accountTransitionView(transition);
     for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
-      account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+      draft.state.deltas.put(tokenId, createDefaultDelta(tokenId));
     }
-    expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
-    const result = handleAddDelta(account.state, {
+    expect(draft.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    const result = handleAddDelta(draft.state, {
       type: 'add_delta',
       data: { tokenId: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1 },
     });
@@ -99,7 +106,8 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
         `${LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
     });
     expect(result.events).toEqual([rejection.message]);
-    expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    expect(draft.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    discardAccountTransition(transition);
   });
 
   test('add_delta rejects a token id outside the canonical domain', () => {
@@ -120,28 +128,33 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
 
   test('direct_payment applies and rejects forged direction without mutation', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    const applied = handleDirectPayment(account, payment(), true);
+    const transition = beginAccountTransition(account);
+    const draft = accountTransitionView(transition);
+    const applied = handleDirectPayment(draft, payment(), true);
     expect(applied.ok).toBe(true);
     if (!applied.ok) throw new Error('ACCOUNT_TX_TEST_EXPECTED_APPLIED');
     expect(applied.outcome).toBe('applied');
-    expect(account.state.deltas.get(1)?.offdelta).toBe(-7n);
+    expect(draft.state.deltas.get(1)?.offdelta).toBe(-7n);
 
-    const forged = handleDirectPayment(account, {
+    const forged = handleDirectPayment(draft, {
       ...payment(1n),
       data: { ...payment(1n).data, fromEntityId: RIGHT, toEntityId: LEFT },
     }, true);
     const rejection = rejectionOf(forged);
     expect(rejection.kind).toBe('validation');
     expect(rejection.message).toContain('must match the frame proposer');
-    expect(account.state.deltas.get(1)?.offdelta).toBe(-7n);
+    expect(draft.state.deltas.get(1)?.offdelta).toBe(-7n);
+    discardAccountTransition(transition);
   });
 
   test('htlc lock then secret resolve returns branded htlc_secret without leftover lock', async () => {
     const account = makeAccount(LEFT, RIGHT);
+    const transition = beginAccountTransition(account);
+    const draft = accountTransitionView(transition);
     const secret = HEX32('44');
     const hashlock = hashHtlcSecret(secret);
     const lockId = 'lock-secret-ok';
-    const locked = await handleHtlcLock(account, {
+    const locked = await handleHtlcLock(draft, {
       type: 'htlc_lock',
       data: {
         lockId,
@@ -157,11 +170,11 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       enforcementJHeight: 0,
     });
     expect(locked.ok).toBe(true);
-    expect(account.state.locks.has(lockId)).toBe(true);
-    expect(account.state.deltas.get(1)?.leftHold).toBe(7n);
+    expect(draft.state.locks.has(lockId)).toBe(true);
+    expect(draft.state.deltas.get(1)?.leftHold).toBe(7n);
 
     const revealed = await handleHtlcResolve(
-      account.state,
+      draft.state,
       { type: 'htlc_resolve', data: { lockId, outcome: 'secret', secret } },
       false,
       1,
@@ -175,16 +188,19 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
     expect(revealed.hashlock).toBe(hashlock);
     expect(revealed.amount).toBe(7n);
     expect(revealed.tokenId).toBe(1);
-    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
-    expect(account.state.deltas.get(1)?.offdelta).toBe(-7n);
+    expect(draft.state.deltas.get(1)?.leftHold).toBe(0n);
+    expect(draft.state.deltas.get(1)?.offdelta).toBe(-7n);
+    discardAccountTransition(transition);
   });
 
   test('htlc timeout returns htlc_error and releases the hold', async () => {
     const account = makeAccount(LEFT, RIGHT);
+    const transition = beginAccountTransition(account);
+    const draft = accountTransitionView(transition);
     const lockId = 'lock-timeout-boundary';
     const hashlock = HEX32('21');
-    account.state.deltas.get(1)!.leftHold = 7n;
-    account.state.locks.set(lockId, {
+    draft.state.deltas.edit(1, delta => ({ ...delta, leftHold: 7n }));
+    draft.state.locks.put(lockId, {
       lockId,
       tokenId: 1,
       amount: 7n,
@@ -196,7 +212,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       createdTimestamp: 0,
     });
     const result = await handleHtlcResolve(
-      account.state,
+      draft.state,
       { type: 'htlc_resolve', data: { lockId, outcome: 'error', reason: 'timeout' } },
       true,
       1,
@@ -207,8 +223,9 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       throw new Error('ACCOUNT_TX_TEST_EXPECTED_HTLC_ERROR');
     }
     expect(result.hashlock).toBe(hashlock);
-    expect(account.state.locks.has(lockId)).toBe(false);
-    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
+    expect(draft.state.locks.has(lockId)).toBe(false);
+    expect(draft.state.deltas.get(1)?.leftHold).toBe(0n);
+    discardAccountTransition(transition);
   });
 
   test('signed settlement workspace freezes direct_payment with typed rejection', async () => {
@@ -239,7 +256,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       .toBe(account.state.settlementWorkspace!.workspaceHash);
   });
 
-  test('settlement seal nonce mismatch is typed and leaves the workspace unsigned', async () => {
+  test('settlement Hanko nonce mismatch is typed and leaves the workspace unsigned', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const upserted = await applyAccountTx(account, {
       type: 'settle_transition',
@@ -256,7 +273,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
     const result = await applyAccountTx(account, {
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         revision: 1,
         workspaceHash,
         settlementNonce: 6,
@@ -271,10 +288,10 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       },
     }, true, 2_000, 0, false, consensusContext());
     const rejection = rejectionOf(result);
-    expect(rejection.kind).toBe('settlement_seal_nonce_mismatch');
-    if (rejection.kind !== 'settlement_seal_nonce_mismatch') throw new Error('ACCOUNT_TX_TEST_SEAL_KIND');
-    expect(rejection.code).toBe(ACCOUNT_TX_REJECTION_CODES.settlementSealNonceMismatch);
-    expect(rejection.message).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:6:5');
+    expect(rejection.kind).toBe('settlement_hanko_nonce_mismatch');
+    if (rejection.kind !== 'settlement_hanko_nonce_mismatch') throw new Error('ACCOUNT_TX_TEST_HANKO_KIND');
+    expect(rejection.code).toBe(ACCOUNT_TX_REJECTION_CODES.settlementHankoNonceMismatch);
+    expect(rejection.message).toContain('SETTLEMENT_HANKO_NONCE_MISMATCH:6:5');
     expect(rejection.suppliedNonce).toBe(6);
     expect(rejection.requiredNonce).toBe(5);
     expect(rejection.basis).toBe('account');

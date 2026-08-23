@@ -1,5 +1,5 @@
 /**
- * Deterministic Entity replay for a proposer-sealed HTLC payment.
+ * Deterministic Entity replay for a proposer-authorized HTLC payment.
  *
  * Route discovery, preimage generation, and onion construction happen once
  * during proposer frame assembly. Validators never receive the preimage; they

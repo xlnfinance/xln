@@ -1,0 +1,227 @@
+use std::fmt;
+
+use crate::StateError;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    pub const fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EntityId([u8; 32]);
+
+impl EntityId {
+    pub fn parse(value: &str) -> Result<Self, StateError> {
+        if value != value.trim().to_ascii_lowercase() {
+            return Err(StateError::InvalidEntityId(value.into()));
+        }
+        let normalized = value.to_ascii_lowercase();
+        let payload = normalized
+            .strip_prefix("0x")
+            .ok_or_else(|| StateError::InvalidEntityId(value.into()))?;
+        if payload.len() != 64 || !payload.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(StateError::InvalidEntityId(value.into()));
+        }
+        let mut bytes = [0_u8; 32];
+        hex_decode(payload.as_bytes(), &mut bytes)
+            .ok_or_else(|| StateError::InvalidEntityId(value.into()))?;
+        Ok(Self(bytes))
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn as_hex(&self) -> String {
+        let mut output = String::with_capacity(66);
+        output.push_str("0x");
+        for byte in self.0 {
+            use std::fmt::Write;
+            let _ = write!(output, "{byte:02x}");
+        }
+        output
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DepositoryAddress([u8; 20]);
+
+impl DepositoryAddress {
+    pub fn parse(value: &str) -> Result<Self, StateError> {
+        if value != value.to_ascii_lowercase() {
+            return Err(StateError::InvalidDepositoryAddress(value.into()));
+        }
+        parse_fixed_hex(value)
+            .map(Self)
+            .ok_or_else(|| StateError::InvalidDepositoryAddress(value.into()))
+    }
+
+    pub fn as_hex(&self) -> String {
+        render_hex(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WatchSeed([u8; 32]);
+
+impl WatchSeed {
+    pub fn parse(value: &str) -> Result<Self, StateError> {
+        if value != value.to_ascii_lowercase() {
+            return Err(StateError::InvalidWatchSeed(value.into()));
+        }
+        parse_fixed_hex(value)
+            .map(Self)
+            .ok_or_else(|| StateError::InvalidWatchSeed(value.into()))
+    }
+
+    pub fn as_hex(&self) -> String {
+        render_hex(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountDomain {
+    chain_id: u64,
+    depository_address: DepositoryAddress,
+}
+
+impl AccountDomain {
+    pub fn new(chain_id: u64, depository_address: DepositoryAddress) -> Result<Self, StateError> {
+        if chain_id == 0 || chain_id > 9_007_199_254_740_991 {
+            return Err(StateError::InvalidChainId(chain_id));
+        }
+        Ok(Self {
+            chain_id,
+            depository_address,
+        })
+    }
+
+    pub const fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+
+    pub const fn depository_address(&self) -> &DepositoryAddress {
+        &self.depository_address
+    }
+}
+
+impl fmt::Debug for EntityId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.as_hex())
+    }
+}
+
+impl fmt::Display for EntityId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.as_hex())
+    }
+}
+
+fn hex_decode<const N: usize>(input: &[u8], output: &mut [u8; N]) -> Option<()> {
+    for (index, pair) in input.chunks_exact(2).enumerate() {
+        output[index] = (hex_digit(pair[0])? << 4) | hex_digit(pair[1])?;
+    }
+    Some(())
+}
+
+fn parse_fixed_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
+    let payload = value.strip_prefix("0x")?;
+    if payload.len() != N * 2 || !payload.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut bytes = [0_u8; N];
+    hex_decode(payload.as_bytes(), &mut bytes)?;
+    Some(bytes)
+}
+
+fn render_hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2 + 2);
+    output.push_str("0x");
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
+const fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountIdentity {
+    domain: AccountDomain,
+    left: EntityId,
+    right: EntityId,
+    watch_seed: WatchSeed,
+}
+
+impl AccountIdentity {
+    pub fn new(
+        domain: AccountDomain,
+        left: EntityId,
+        right: EntityId,
+        watch_seed: WatchSeed,
+    ) -> Result<Self, StateError> {
+        if left >= right {
+            return Err(StateError::NonCanonicalAccountParties {
+                left: left.to_string(),
+                right: right.to_string(),
+            });
+        }
+        Ok(Self {
+            domain,
+            left,
+            right,
+            watch_seed,
+        })
+    }
+
+    pub const fn domain(&self) -> &AccountDomain {
+        &self.domain
+    }
+
+    pub const fn left(&self) -> &EntityId {
+        &self.left
+    }
+
+    pub const fn right(&self) -> &EntityId {
+        &self.right
+    }
+
+    pub const fn watch_seed(&self) -> &WatchSeed {
+        &self.watch_seed
+    }
+
+    pub const fn entity(&self, side: Side) -> &EntityId {
+        match side {
+            Side::Left => &self.left,
+            Side::Right => &self.right,
+        }
+    }
+
+    pub fn side_of(&self, entity: &EntityId) -> Option<Side> {
+        if entity == &self.left {
+            Some(Side::Left)
+        } else if entity == &self.right {
+            Some(Side::Right)
+        } else {
+            None
+        }
+    }
+}

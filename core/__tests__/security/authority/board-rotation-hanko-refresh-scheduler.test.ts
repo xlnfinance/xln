@@ -9,37 +9,33 @@ import {
 import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import {
-  accountNeedsBoardResealForActivation,
-  BOARD_RESEAL_HOOK_ID,
-  captureAccountBoardResealEvidence,
-  markBoardRotationResealsPending,
-} from '../../../entity/tx/state-effects/board-rotation-reseal';
-import { scheduleChangedAccountBoardReseals } from '../../../entity/scheduler/board-reseal-hook';
+  accountNeedsBoardHankoRefreshForActivation,
+  BOARD_HANKO_REFRESH_HOOK_ID,
+  captureAccountBoardHankoRefreshEvidence,
+  markBoardRotationHankoRefreshesPending,
+} from '../../../entity/tx/state-effects/board-rotation-hanko-refresh';
+import { scheduleChangedAccountBoardHankoRefreshes } from '../../../entity/scheduler/board-hanko-refresh-hook';
 import { buildQuorumHanko } from '../../../hanko/signing';
 import { handleScheduledWakeEntityTx } from '../../../entity/tx/handlers/system/scheduled-wake';
 import {
-  COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
-  counterpartyBoardResealDeadlineHookId,
+  COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
+  counterpartyBoardHankoRefreshDeadlineHookId,
 } from '../../../entity/tx/j-events-board';
 import { safeStringify } from '../../../protocol/serialization';
 import { createEmptyEnv } from '../../../runtime';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import {
   hydrateEntityStateFromStorage,
-  projectAccountDoc,
+  projectPortableAccountDoc,
   projectEntityCoreDoc,
 } from '../../../storage/read/projections';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
-import { addr, makeAccount, makeState } from '../../helpers/cross-j';
+import { addr, makeAccount, makeState, openWritableEntityAccounts } from '../../helpers/cross-j';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
-import {
-  sealHankoWitnessInState,
-  type HankoWitnessEntry,
-} from '../../../entity/consensus/input/hanko-witness';
 
 const putCommittedAccount = (
   state: EntityState,
@@ -55,7 +51,7 @@ const putCommittedAccount = (
 const digest = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
 
 const jurisdiction = {
-  name: 'board-reseal-scheduler',
+  name: 'board-hanko-refresh-scheduler',
   address: 'http://127.0.0.1:8545',
   chainId: 31_337,
   depositoryAddress: addr('d1'),
@@ -78,13 +74,14 @@ const activation = (entityId: string, logIndex = 2): Extract<JurisdictionEvent, 
   },
 });
 
-const installBoardResealHook = (state: EntityState, event: ReturnType<typeof activation>): void => {
-  const pending = markBoardRotationResealsPending(state, event);
-  if (!state.crontabState) throw new Error('TEST_BOARD_RESEAL_CRONTAB_MISSING');
+const installBoardHankoRefreshHook = (state: EntityState, event: ReturnType<typeof activation>): void => {
+  openWritableEntityAccounts(state);
+  const pending = markBoardRotationHankoRefreshesPending(state, event);
+  if (!state.crontabState) throw new Error('TEST_BOARD_HANKO_REFRESH_CRONTAB_MISSING');
   scheduleHook(state.crontabState, {
-    id: BOARD_RESEAL_HOOK_ID,
+    id: BOARD_HANKO_REFRESH_HOOK_ID,
     triggerAt: state.timestamp,
-    type: 'board_reseal',
+    type: 'board_hanko_refresh',
     data: {
       activationJHeight: pending.activation.jHeight,
       activationLogIndex: pending.activation.logIndex,
@@ -97,8 +94,8 @@ const scheduledWakeForHook = (
   state: EntityState,
   proposerSignerId: string,
 ): Extract<EntityTx, { type: 'scheduledWake' }> => {
-  const hook = state.crontabState?.hooks.get(BOARD_RESEAL_HOOK_ID);
-  if (!hook || hook.type !== 'board_reseal') throw new Error('TEST_BOARD_RESEAL_HOOK_MISSING');
+  const hook = state.crontabState?.hooks.get(BOARD_HANKO_REFRESH_HOOK_ID);
+  if (!hook || hook.type !== 'board_hanko_refresh') throw new Error('TEST_BOARD_HANKO_REFRESH_HOOK_MISSING');
   return {
     type: 'scheduledWake',
     data: {
@@ -168,11 +165,11 @@ const makeCertifiedCounterpartyAccount = async (
   return { counterpartyId, account };
 };
 
-test('bad board reseal account cannot block good output and re-arms only after Account evidence changes', async () => {
-  const signerId = deriveSignerAddressSync('board-reseal-bad-good', '1').toLowerCase();
+test('bad board Hanko refresh account cannot block good output and re-arms only after Account evidence changes', async () => {
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-bad-good', '1').toLowerCase();
   const sourceEntityId = digest(100);
-  const env = createEmptyEnv('board-reseal-bad-good');
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-reseal-bad-good', '1'));
+  const env = createEmptyEnv('board-hanko-refresh-bad-good');
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-hanko-refresh-bad-good', '1'));
   const state = makeState(sourceEntityId, signerId, jurisdiction);
   state.timestamp = 1_000;
   state.crontabState = initCrontab();
@@ -188,9 +185,9 @@ test('bad board reseal account cannot block good output and re-arms only after A
   bad.currentDisputeProofHanko = '0x03';
   putCommittedAccount(state, badId, bad);
   putCommittedAccount(state, goodId, good);
-  installBoardResealHook(state, activation(sourceEntityId));
+  installBoardHankoRefreshHook(state, activation(sourceEntityId));
 
-  const evidenceBeforeFirst = captureAccountBoardResealEvidence(state, new Set([badId]));
+  const evidenceBeforeFirst = captureAccountBoardHankoRefreshEvidence(state, new Set([badId]));
   const first = await handleScheduledWakeEntityTx(
     env,
     createEntityFrameCandidateState(state),
@@ -200,24 +197,24 @@ test('bad board reseal account cannot block good output and re-arms only after A
   expect(first.outputs.map(output => output.entityId)).toEqual([goodId]);
   expect(first.accountChanges).toEqual([badId, goodId].sort());
   expect(first.hashesToSign).toEqual([expect.objectContaining({ hash: digest(202), type: 'accountFrame' })]);
-  expect(first.newState.accounts.get(goodId)?.boardResealMigration).toEqual({
+  expect(first.newState.accounts.get(goodId)?.boardHankoRefreshMigration).toEqual({
     activationJHeight: 44,
     activationLogIndex: 2,
     reason: 'issued',
     issuedFrameHeight: 1,
     issuedFrameHash: digest(202),
   });
-  expect(first.newState.accounts.get(badId)?.boardResealMigration?.reason)
+  expect(first.newState.accounts.get(badId)?.boardHankoRefreshMigration?.reason)
     .toBe('bilateral-dispute-uncertified');
-  expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
-  scheduleChangedAccountBoardReseals(
+  expect(first.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(false);
+  scheduleChangedAccountBoardHankoRefreshes(
     first.newState,
     evidenceBeforeFirst,
     new Set([badId]),
   );
-  expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
+  expect(first.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(false);
 
-  const evidenceBeforeCertification = captureAccountBoardResealEvidence(
+  const evidenceBeforeCertification = captureAccountBoardHankoRefreshEvidence(
     first.newState,
     new Set([badId]),
   );
@@ -227,12 +224,12 @@ test('bad board reseal account cannot block good output and re-arms only after A
   updatedBad.counterpartyDisputeProofNonce = updatedBad.currentDisputeProofNonce;
   updatedBad.counterpartyDisputeProofProposerIsLeft = updatedBad.currentDisputeProofProposerIsLeft;
   updatedBad.counterpartyDisputeProofHanko = '0x04';
-  scheduleChangedAccountBoardReseals(
+  scheduleChangedAccountBoardHankoRefreshes(
     first.newState,
     evidenceBeforeCertification,
     new Set([badId]),
   );
-  expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(true);
+  expect(first.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(true);
   const second = await handleScheduledWakeEntityTx(
     env,
     first.newState,
@@ -242,21 +239,21 @@ test('bad board reseal account cannot block good output and re-arms only after A
   expect(second.outputs.map(output => output.entityId)).toEqual([badId]);
   expect(second.accountChanges).toEqual([badId]);
   expect(second.hashesToSign?.map(entry => entry.hash).sort()).toEqual([digest(201), digest(211)].sort());
-  expect(second.newState.accounts.get(badId)?.boardResealMigration).toEqual({
+  expect(second.newState.accounts.get(badId)?.boardHankoRefreshMigration).toEqual({
     activationJHeight: 44,
     activationLogIndex: 2,
     reason: 'issued',
     issuedFrameHeight: 1,
     issuedFrameHash: digest(201),
   });
-  expect(second.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
+  expect(second.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(false);
 });
 
-test('Account advance re-arms the same activation and issues the current frame reseal', async () => {
-  const signerId = deriveSignerAddressSync('board-reseal-frame-race', '1').toLowerCase();
+test('Account advance re-arms the same activation and issues the current frame board Hanko refresh', async () => {
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-frame-race', '1').toLowerCase();
   const sourceEntityId = digest(250);
-  const env = createEmptyEnv('board-reseal-frame-race');
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-reseal-frame-race', '1'));
+  const env = createEmptyEnv('board-hanko-refresh-frame-race');
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-hanko-refresh-frame-race', '1'));
   const state = makeState(sourceEntityId, signerId, jurisdiction);
   state.timestamp = 3_000;
   state.crontabState = initCrontab();
@@ -269,7 +266,7 @@ test('Account advance re-arms the same activation and issues the current frame r
     digest(251),
   );
   putCommittedAccount(state, fixture.counterpartyId, fixture.account);
-  installBoardResealHook(state, activation(sourceEntityId, 7));
+  installBoardHankoRefreshHook(state, activation(sourceEntityId, 7));
 
   const first = await handleScheduledWakeEntityTx(
     env,
@@ -278,9 +275,9 @@ test('Account advance re-arms the same activation and issues the current frame r
     false,
   );
   expect(first.outputs).toHaveLength(1);
-  expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
+  expect(first.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(false);
 
-  const evidenceBeforeAdvance = captureAccountBoardResealEvidence(
+  const evidenceBeforeAdvance = captureAccountBoardHankoRefreshEvidence(
     first.newState,
     new Set([fixture.counterpartyId]),
   );
@@ -308,12 +305,12 @@ test('Account advance re-arms the same activation and issues the current frame r
       shares: { [signerId]: 1n },
     },
   );
-  scheduleChangedAccountBoardReseals(
+  scheduleChangedAccountBoardHankoRefreshes(
     first.newState,
     evidenceBeforeAdvance,
     new Set([fixture.counterpartyId]),
   );
-  expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(true);
+  expect(first.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(true);
 
   const second = await handleScheduledWakeEntityTx(
     env,
@@ -325,166 +322,21 @@ test('Account advance re-arms the same activation and issues the current frame r
   expect(accountInput).toMatchObject({
     type: 'accountInput',
     data: {
-      kind: 'board_reseal',
-      reseal: { height: 2, frameHash: digest(252) },
+      kind: 'board_hanko_refresh',
+      boardHankoRefresh: { height: 2, frameHash: digest(252) },
     },
   });
-  expect(second.newState.accounts.get(fixture.counterpartyId)?.boardResealMigration)
+  expect(second.newState.accounts.get(fixture.counterpartyId)?.boardHankoRefreshMigration)
     .toMatchObject({ reason: 'issued', issuedFrameHeight: 2, issuedFrameHash: digest(252) });
-  expect(second.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
+  expect(second.newState.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)).toBe(false);
 });
 
-test('local board rotation re-Hankos the exact pending proposal once', async () => {
-  const signerId = deriveSignerAddressSync('board-rehanko-pending', '1').toLowerCase();
-  const sourceEntityId = digest(260);
-  const env = createEmptyEnv('board-rehanko-pending');
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-rehanko-pending', '1'));
-  const state = createEntityFrameCandidateState(makeState(sourceEntityId, signerId, jurisdiction));
-  state.timestamp = 3_000;
-  state.crontabState = initCrontab();
-  state.leaderState = { activeValidatorId: signerId, view: 0, changedAtHeight: 0 };
-  const fixture = await makeCertifiedCounterpartyAccount(
-    env,
-    sourceEntityId,
-    signerId,
-    1n,
-    digest(261),
-  );
-  const pendingFrame = {
-    ...fixture.account.currentFrame,
-    height: 2,
-    prevFrameHash: digest(261),
-    stateHash: digest(262),
-  };
-  fixture.account.lastOutboundFrameAck = {
-    height: 1,
-    counterpartyEntityId: fixture.counterpartyId,
-    response: {
-      kind: 'ack',
-      fromEntityId: sourceEntityId,
-      toEntityId: fixture.counterpartyId,
-      domain: fixture.account.state.domain,
-      disputeConfig: fixture.account.state.disputeConfig,
-      ack: { height: 1, frameHash: digest(261), frameHanko: '0xold-ack' as never },
-    },
-  };
-  fixture.account.pendingFrame = pendingFrame;
-  fixture.account.pendingAccountInput = {
-    kind: 'frame_ack',
-    fromEntityId: sourceEntityId,
-    toEntityId: fixture.counterpartyId,
-    domain: fixture.account.state.domain,
-    disputeConfig: fixture.account.state.disputeConfig,
-    ack: { height: 1, frameHash: digest(261), frameHanko: '0xold-ack' as never },
-    proposal: { frame: structuredClone(pendingFrame), frameHanko: '0xold' as never },
-  };
-  state.accounts.set(fixture.counterpartyId, fixture.account);
-  installBoardResealHook(state, activation(sourceEntityId, 8));
-
-  const result = await handleScheduledWakeEntityTx(
-    env,
-    state,
-    scheduledWakeForHook(state, signerId),
-    false,
-  );
-  const tx = result.outputs[0]?.entityTxs?.[0];
-  expect(tx).toMatchObject({
-    type: 'accountInput',
-    data: {
-      kind: 'frame_ack',
-      ack: { height: 1, frameHash: digest(261) },
-      proposal: { frame: { height: 2, stateHash: digest(262) } },
-    },
-  });
-  if (tx?.type !== 'accountInput' || tx.data.kind !== 'frame_ack') {
-    throw new Error('TEST_BOARD_REHANKO_PENDING_OUTPUT_MISSING');
-  }
-  expect(tx.data.ack.frameHanko).toBeUndefined();
-  expect(tx.data.proposal.frameHanko).toBeUndefined();
-  expect(result.hashesToSign?.map(entry => entry.hash)).toEqual([digest(261), digest(262)]);
-  expect(result.newState.accounts.get(fixture.counterpartyId)?.pendingAccountInput?.proposal.frameHanko)
-    .toBeUndefined();
-  expect(result.newState.accounts.get(fixture.counterpartyId)?.lastOutboundFrameAck?.response.ack.frameHanko)
-    .toBeUndefined();
-  const newAckHanko = '0xnew-ack' as HankoWitnessEntry['hanko'];
-  const newProposalHanko = '0xnew-proposal' as HankoWitnessEntry['hanko'];
-  sealHankoWitnessInState(result.newState, new Map([
-    [digest(261), {
-      hanko: newAckHanko,
-      type: 'accountFrame' as const,
-      entityHeight: 1,
-      createdAt: result.newState.timestamp,
-    }],
-    [digest(262), {
-      hanko: newProposalHanko,
-      type: 'accountFrame' as const,
-      entityHeight: 1,
-      createdAt: result.newState.timestamp,
-    }],
-  ]), 1, [fixture.counterpartyId]);
-  const migrated = result.newState.accounts.get(fixture.counterpartyId);
-  expect(migrated?.lastOutboundFrameAck?.response.ack.frameHanko).toBe(newAckHanko);
-  expect(migrated?.pendingAccountInput?.ack.frameHanko).toBe(newAckHanko);
-  expect(migrated?.pendingAccountInput?.proposal.frameHanko).toBe(newProposalHanko);
-});
-
-test('local board rotation re-Hankos the exact held ACK instead of mismatched current-frame reseal', async () => {
-  const signerId = deriveSignerAddressSync('board-rehanko-ack', '1').toLowerCase();
-  const sourceEntityId = digest(270);
-  const env = createEmptyEnv('board-rehanko-ack');
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-rehanko-ack', '1'));
-  const state = createEntityFrameCandidateState(makeState(sourceEntityId, signerId, jurisdiction));
-  state.timestamp = 3_000;
-  state.crontabState = initCrontab();
-  state.leaderState = { activeValidatorId: signerId, view: 0, changedAtHeight: 0 };
-  const fixture = await makeCertifiedCounterpartyAccount(
-    env,
-    sourceEntityId,
-    signerId,
-    1n,
-    digest(271),
-  );
-  fixture.account.lastOutboundFrameAck = {
-    height: 1,
-    counterpartyEntityId: fixture.counterpartyId,
-    response: {
-      kind: 'ack',
-      fromEntityId: sourceEntityId,
-      toEntityId: fixture.counterpartyId,
-      domain: fixture.account.state.domain,
-      disputeConfig: fixture.account.state.disputeConfig,
-      ack: { height: 1, frameHash: digest(271), frameHanko: '0xold' as never },
-    },
-  };
-  state.accounts.set(fixture.counterpartyId, fixture.account);
-  installBoardResealHook(state, activation(sourceEntityId, 9));
-
-  const result = await handleScheduledWakeEntityTx(
-    env,
-    state,
-    scheduledWakeForHook(state, signerId),
-    false,
-  );
-  const tx = result.outputs[0]?.entityTxs?.[0];
-  expect(tx).toMatchObject({
-    type: 'accountInput',
-    data: { kind: 'ack', ack: { height: 1, frameHash: digest(271) } },
-  });
-  if (tx?.type !== 'accountInput' || tx.data.kind !== 'ack') {
-    throw new Error('TEST_BOARD_REHANKO_ACK_OUTPUT_MISSING');
-  }
-  expect(tx.data.ack.frameHanko).toBeUndefined();
-  expect(result.hashesToSign?.map(entry => entry.hash)).toEqual([digest(271)]);
-  expect(result.newState.accounts.get(fixture.counterpartyId)?.lastOutboundFrameAck?.response.ack.frameHanko)
-    .toBeUndefined();
-});
-
-test('1000 board reseals drain in deterministic 32-account frames across restart', async () => {
-  const signerId = deriveSignerAddressSync('board-reseal-1000', '1').toLowerCase();
+test('1000 board Hanko refreshes drain in deterministic 32-account frames across restart', async () => {
+  const signerId = deriveSignerAddressSync('board-hanko-refresh-1000', '1').toLowerCase();
   const sourceEntityId = digest(300);
-  let env = createEmptyEnv('board-reseal-1000');
+  let env = createEmptyEnv('board-hanko-refresh-1000');
   env.runtimeId = signerId;
-  registerSignerKey(env, signerId, deriveSignerKeySync('board-reseal-1000', '1'));
+  registerSignerKey(env, signerId, deriveSignerKeySync('board-hanko-refresh-1000', '1'));
   let state = makeState(sourceEntityId, signerId, jurisdiction);
   state.timestamp = 10_000;
   state.crontabState = initCrontab();
@@ -499,7 +351,7 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
     );
     putCommittedAccount(state, fixture.counterpartyId, fixture.account);
   }
-  installBoardResealHook(state, activation(sourceEntityId, 5));
+  installBoardHankoRefreshHook(state, activation(sourceEntityId, 5));
   const sourceReplica = {
     entityId: sourceEntityId,
     signerId,
@@ -511,13 +363,13 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
 
   const delivered: string[] = [];
   let batches = 0;
-  while (state.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)) {
-    const hook = state.crontabState.hooks.get(BOARD_RESEAL_HOOK_ID);
-    if (!hook || hook.type !== 'board_reseal') throw new Error('TEST_BOARD_RESEAL_1000_HOOK_INVALID');
+  while (state.crontabState?.hooks.has(BOARD_HANKO_REFRESH_HOOK_ID)) {
+    const hook = state.crontabState.hooks.get(BOARD_HANKO_REFRESH_HOOK_ID);
+    if (!hook || hook.type !== 'board_hanko_refresh') throw new Error('TEST_BOARD_HANKO_REFRESH_1000_HOOK_INVALID');
     const nextIds = [...state.accounts.entries()]
       .filter(([counterpartyId, account]) =>
         counterpartyId > hook.data.afterCounterpartyId &&
-        accountNeedsBoardResealForActivation(account, {
+        accountNeedsBoardHankoRefreshForActivation(account, {
           jHeight: hook.data.activationJHeight,
           logIndex: hook.data.activationLogIndex,
         }))
@@ -546,15 +398,15 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
       );
       const accounts = new Map([...state.accounts].map(([counterpartyId, account]) => [
         counterpartyId,
-        decodeBuffer<ReturnType<typeof projectAccountDoc>>(encodeBuffer(projectAccountDoc(account))),
+        decodeBuffer<ReturnType<typeof projectPortableAccountDoc>>(encodeBuffer(projectPortableAccountDoc(account))),
       ]));
       state = hydrateEntityStateFromStorage({ core, accounts, books: new Map() });
       sourceReplica.state = state;
       env.state.eReplicas.set(`${sourceEntityId}:${signerId}`, sourceReplica);
-      expect(state.crontabState?.hooks.get(BOARD_RESEAL_HOOK_ID)).toEqual(
-        result.newState.crontabState?.hooks.get(BOARD_RESEAL_HOOK_ID),
+      expect(state.crontabState?.hooks.get(BOARD_HANKO_REFRESH_HOOK_ID)).toEqual(
+        result.newState.crontabState?.hooks.get(BOARD_HANKO_REFRESH_HOOK_ID),
       );
-      expect([...state.accounts.values()].filter(account => accountNeedsBoardResealForActivation(account, {
+      expect([...state.accounts.values()].filter(account => accountNeedsBoardHankoRefreshForActivation(account, {
         jHeight: 44,
         logIndex: 5,
       })).length).toBe(968);
@@ -563,17 +415,17 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
 
   expect(batches).toBe(32);
   expect(delivered).toEqual([...state.accounts.keys()].sort());
-  expect([...state.accounts.values()].some(account => accountNeedsBoardResealForActivation(account, {
+  expect([...state.accounts.values()].some(account => accountNeedsBoardHankoRefreshForActivation(account, {
     jHeight: 44,
     logIndex: 5,
   }))).toBe(false);
 });
 
-test('missing counterparty reseal starts canonical dispute preparation after 24 hours', async () => {
-  const signerId = deriveSignerAddressSync('counterparty-reseal-deadline', '1').toLowerCase();
+test('missing counterparty board Hanko refresh starts canonical dispute preparation after 24 hours', async () => {
+  const signerId = deriveSignerAddressSync('counterparty-boardHankoRefresh-deadline', '1').toLowerCase();
   const sourceEntityId = digest(30_001);
   const counterpartyId = digest(30_002);
-  const env = createEmptyEnv('counterparty-reseal-deadline');
+  const env = createEmptyEnv('counterparty-boardHankoRefresh-deadline');
   const state = makeState(sourceEntityId, signerId, jurisdiction);
   state.timestamp = 50_000;
   state.crontabState = initCrontab();
@@ -582,14 +434,14 @@ test('missing counterparty reseal starts canonical dispute preparation after 24 
     counterpartyId,
     makeCommittedAccount(sourceEntityId, counterpartyId, digest(30_003)),
   );
-  const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 44, 3);
+  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 44, 3);
   scheduleHook(state.crontabState, {
     id: hookId,
-    triggerAt: state.timestamp + COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
-    type: 'counterparty_board_reseal_deadline',
+    triggerAt: state.timestamp + COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
+    type: 'counterparty_board_hanko_refresh_deadline',
     data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: 3 },
   });
-  state.timestamp += COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS;
+  state.timestamp += COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS;
 
   const result = await handleScheduledWakeEntityTx(
     env,
@@ -603,33 +455,33 @@ test('missing counterparty reseal starts canonical dispute preparation after 24 
     type: 'prepareDispute',
     data: {
       counterpartyEntityId: counterpartyId,
-      description: 'counterparty-board-reseal-deadline-expired',
+      description: 'counterparty-board-hanko-refresh-deadline-expired',
     },
   }]);
   expect(result.newState.crontabState?.hooks.has(hookId)).toBe(false);
 });
 
-test('fresh counterparty reseal satisfies every older activation deadline', async () => {
-  const signerId = deriveSignerAddressSync('counterparty-reseal-satisfied', '1').toLowerCase();
+test('fresh counterparty board Hanko refresh satisfies every older activation deadline', async () => {
+  const signerId = deriveSignerAddressSync('counterparty-boardHankoRefresh-satisfied', '1').toLowerCase();
   const sourceEntityId = digest(31_001);
   const counterpartyId = digest(31_002);
-  const env = createEmptyEnv('counterparty-reseal-satisfied');
+  const env = createEmptyEnv('counterparty-boardHankoRefresh-satisfied');
   const state = makeState(sourceEntityId, signerId, jurisdiction);
   state.timestamp = 60_000;
   state.crontabState = initCrontab();
   const account = makeCommittedAccount(sourceEntityId, counterpartyId, digest(31_003));
-  account.counterpartyBoardReseal = {
+  account.counterpartyBoardHankoRefresh = {
     activationJHeight: 45,
     activationLogIndex: 0,
     frameHeight: 1,
     frameHash: digest(31_003),
   };
   putCommittedAccount(state, counterpartyId, account);
-  const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 44, 9);
+  const hookId = counterpartyBoardHankoRefreshDeadlineHookId(counterpartyId, 44, 9);
   scheduleHook(state.crontabState, {
     id: hookId,
     triggerAt: state.timestamp,
-    type: 'counterparty_board_reseal_deadline',
+    type: 'counterparty_board_hanko_refresh_deadline',
     data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: 9 },
   });
 

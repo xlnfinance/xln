@@ -40,11 +40,11 @@ test('post-commit Hanko attachment isolates a readonly Account output payload', 
     { accounts: new Map([[input.toEntityId, readonlyAccount]]) } as never,
   )).toBe(1);
 
-  const sealed = output.entityTxs?.[0];
-  if (sealed?.type !== 'accountInput' || sealed.data.kind !== 'ack') {
-    throw new Error('TEST_SEALED_ACCOUNT_ACK_REQUIRED');
+  const hankoAttached = output.entityTxs?.[0];
+  if (hankoAttached?.type !== 'accountInput' || hankoAttached.data.kind !== 'ack') {
+    throw new Error('TEST_HANKO_ATTACHED_ACCOUNT_ACK_REQUIRED');
   }
-  expect(sealed.data).not.toBe(input);
-  expect(sealed.data.ack.frameHanko).toBe(hanko);
+  expect(hankoAttached.data).not.toBe(input);
+  expect(hankoAttached.data.ack.frameHanko).toBe(hanko);
   expect(input.ack.frameHanko).toBeUndefined();
 });

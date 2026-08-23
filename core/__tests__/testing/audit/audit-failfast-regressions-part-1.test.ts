@@ -128,7 +128,7 @@ import { handleJRebroadcast } from '../../../entity/tx/handlers/j-batch/j-rebroa
 
 import { handleSetHubConfigEntityTx, handleSetRebalancePolicyEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
 
-import { buildSettlementSealDraft, processCommittedSettlementTransitionFollowup } from '../../../entity/tx/handlers/payments/settle';
+import { buildSettlementHankoDraft, processCommittedSettlementTransitionFollowup } from '../../../entity/tx/handlers/payments/settle';
 
 import { applyJEvent } from '../../../entity/tx/j-events';
 

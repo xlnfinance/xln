@@ -1347,7 +1347,7 @@ describe('signed Entity command admission', () => {
         fromEntityId: sourceUser,
         toEntityId: sourceHub,
         domain: { chainId: 31_337, depositoryAddress: `0x${'dd'.repeat(20)}` },
-        disputeSeal: {
+        disputeHanko: {
           hanko: '0x01',
           hash: `0x${'88'.repeat(32)}`,
           proofBodyHash: `0x${'99'.repeat(32)}`,

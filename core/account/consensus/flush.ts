@@ -1,4 +1,4 @@
-import type { AccountDisputeSeal, AccountFrameAck, AccountFrameProposal, AccountBoardReseal, AccountInput } from '../../types/account';
+import type { AccountDisputeHanko, AccountFrameAck, AccountFrameProposal, AccountBoardHankoRefresh, AccountInput } from '../../types/account';
 
 export const accountInputAck = (input: AccountInput): AccountFrameAck | undefined =>
   input.kind === 'ack' || input.kind === 'frame_ack' ? input.ack : undefined;
@@ -6,17 +6,17 @@ export const accountInputAck = (input: AccountInput): AccountFrameAck | undefine
 export const accountInputProposal = (input: AccountInput): AccountFrameProposal | undefined =>
   input.kind === 'frame' || input.kind === 'frame_ack' ? input.proposal : undefined;
 
-export const accountInputDisputeSeal = (input: AccountInput): AccountDisputeSeal | undefined =>
+export const accountInputDisputeHanko = (input: AccountInput): AccountDisputeHanko | undefined =>
   input.kind === 'dispute'
-    ? input.disputeSeal
-    : input.kind === 'board_reseal'
-      ? input.reseal.disputeSeal
+    ? input.disputeHanko
+    : input.kind === 'board_hanko_refresh'
+      ? input.boardHankoRefresh.disputeHanko
       : undefined;
 
-export const accountInputBoardReseal = (input: AccountInput): AccountBoardReseal | undefined =>
-  input.kind === 'board_reseal' ? input.reseal : undefined;
+export const accountInputBoardHankoRefresh = (input: AccountInput): AccountBoardHankoRefresh | undefined =>
+  input.kind === 'board_hanko_refresh' ? input.boardHankoRefresh : undefined;
 
 export const accountInputReferenceHeight = (input: AccountInput): number | undefined =>
   accountInputAck(input)?.height ??
   accountInputProposal(input)?.frame.height ??
-  accountInputBoardReseal(input)?.height;
+  accountInputBoardHankoRefresh(input)?.height;

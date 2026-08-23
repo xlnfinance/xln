@@ -14,7 +14,6 @@
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
 
-import { XLN_BINARY_MSGPACK_MAGIC } from '../../protocol/serialization/binary-codec';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hkdf } from '@noble/hashes/hkdf.js';
@@ -25,6 +24,7 @@ import {
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,
   packPreorderedBinaryPayload,
+  XLN_BINARY_MSGPACK_MAGIC,
 } from '../../protocol/serialization/binary-codec';
 import type { Codec } from '../../protocol/serialization/codec';
 import { LIMITS } from '../../config/constants';

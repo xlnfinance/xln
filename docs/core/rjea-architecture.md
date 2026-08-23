@@ -88,7 +88,7 @@ EntityTx
   ├─ Entity-owned operation
   ├─ accountInput
   │    └─ exact child AccountPeerInput
-  │         └─ frame | ack | frame_ack | dispute | board_reseal | settle
+  │         └─ frame | ack | frame_ack | dispute | board_hanko_refresh | settle
   └─ financial intent
        └─ produces AccountInput.txs(AccountTx[]) locally for a future AccountFrame
 ```

@@ -54,16 +54,16 @@ frame_ack
 |-- ack
 |   |-- height
 |   |-- frameHanko
-|   `-- optional disputeSeal
+|   `-- optional disputeHanko
 `-- proposal
     |-- frame
     |-- frameHanko
-    `-- optional disputeSeal
+    `-- optional disputeHanko
 ```
 
-A dispute seal is `{hanko, hash, proofBodyHash, proofNonce}`. It is regenerated
+A dispute Hanko is `{hanko, hash, proofBodyHash, proofNonce}`. It is regenerated
 only when the Solidity ProofBody changes or its nonce has been consumed on-chain.
-An unchanged seal is transported beside later frame Hankos without incrementing
+An unchanged dispute Hanko is transported beside later frame Hankos without incrementing
 the proof nonce.
 
 `nextProofNonce` is the next locally reserved nonce for a fresh dispute proof.

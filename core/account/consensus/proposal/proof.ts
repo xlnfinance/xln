@@ -13,7 +13,7 @@ import {
 } from '../helpers';
 import type { ProposeAccountFrameResult } from '../types';
 import { proposeAccountFrameRejected } from '../result';
-import { replaceLocalDisputeDraft } from '../dispute/seal';
+import { replaceLocalDisputeDraft } from '../dispute/hanko';
 
 type DisputeProjection = {
   proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
@@ -131,7 +131,7 @@ export const prepareProposalProof = async (
   checkpointProfile('disputeProof');
   // Account consensus is deliberately signer-blind. It commits the exact
   // hashes that require authority; Entity consensus later creates either a
-  // single-validator or quorum Hanko and seals the Account output. Keeping one
+  // single-validator or quorum Hanko and certifies the Account output. Keeping one
   // path prevents single-signer accounts from having stronger privileges than
   // otherwise identical multi-validator entities.
   persistDisputeProjection(account, candidate, projection);

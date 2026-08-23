@@ -73,7 +73,7 @@ describe('Entity Account work indexes', () => {
       disputeConfig: account.state.disputeConfig,
       proposal: {
         frame: pendingFrame,
-        disputeSeal: {
+        disputeHanko: {
           hash: `0x${'33'.repeat(32)}`,
           proofBodyHash: `0x${'44'.repeat(32)}`,
           proofNonce: 1,

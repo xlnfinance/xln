@@ -1,4 +1,4 @@
-import type { AccountDisputeSeal, AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountDisputeHanko, AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import {
   copyAccountDisputeConfig,
@@ -6,7 +6,7 @@ import {
 } from '../../../protocol/state/account-input-clone';
 import {
   accountInputAck,
-  accountInputDisputeSeal,
+  accountInputDisputeHanko,
   accountInputProposal,
   accountInputReferenceHeight,
 } from '../flush';
@@ -39,15 +39,15 @@ export const normalizeAccountInputHeight = (
 export const getDisputeHankoShapeError = (
   input: AccountPeerInput,
 ): string | undefined => {
-  const seals = [
-    accountInputAck(input)?.disputeSeal,
-    accountInputProposal(input)?.disputeSeal,
-    accountInputDisputeSeal(input),
+  const disputeHankos = [
+    accountInputAck(input)?.disputeHanko,
+    accountInputProposal(input)?.disputeHanko,
+    accountInputDisputeHanko(input),
   ];
-  for (const seal of seals) {
-    if (!seal) continue;
-    if (typeof seal.hanko !== 'string') return 'Invalid dispute hanko type';
-    const hankoHex = seal.hanko.toLowerCase();
+  for (const disputeHanko of disputeHankos) {
+    if (!disputeHanko) continue;
+    if (typeof disputeHanko.hanko !== 'string') return 'Invalid dispute hanko type';
+    const hankoHex = disputeHanko.hanko.toLowerCase();
     const normalized = hankoHex.startsWith('0x') ? hankoHex.slice(2) : hankoHex;
     if (normalized.length === 0) return 'Invalid dispute hanko (empty)';
     if (normalized.length % 2 !== 0) return 'Invalid dispute hanko (odd length)';
@@ -168,7 +168,7 @@ const cacheAckOnlyResponse = (
   return response;
 };
 
-const reusableCertifiedAckSeal = (account: AccountReplica): AccountDisputeSeal | undefined => {
+const reusableCertifiedAckHanko = (account: AccountReplica): AccountDisputeHanko | undefined => {
   if (!hasLocalCertifiedDisputeProof(account)) return undefined;
   if (Number(account.currentDisputeProofNonce) <= Number(account.state.jNonce ?? 0)) return undefined;
   return {
@@ -187,7 +187,7 @@ const rebuildDuplicateCommittedFrameAck = (
   receivedHeight: number,
   events: string[],
 ): HandleAccountInputResult => {
-  const disputeSeal = reusableCertifiedAckSeal(account);
+  const disputeHanko = reusableCertifiedAckHanko(account);
   const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
     kind: 'ack',
     fromEntityId: account.proofHeader.fromEntity,
@@ -198,7 +198,7 @@ const rebuildDuplicateCommittedFrameAck = (
     ack: {
       height: receivedHeight,
       frameHash: account.currentFrame.stateHash,
-      ...(disputeSeal ? { disputeSeal } : {}),
+      ...(disputeHanko ? { disputeHanko } : {}),
     },
   };
   account.lastOutboundFrameAck = {

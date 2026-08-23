@@ -5,13 +5,13 @@ import { shortId } from '../../../support/logger';
 import type { AccountInputSecurityContext } from './deadline-policy';
 import {
   accountInputAck,
-  accountInputDisputeSeal,
+  accountInputDisputeHanko,
   accountInputProposal,
 } from '../flush';
 import { getAccountStateDomain } from '../helpers';
 import { AccountPeerEvidenceError } from '../../input/peer-rejection';
 
-export type ValidatedCounterpartyDisputeSeal = {
+export type ValidatedCounterpartyDisputeHanko = {
   hanko: string;
   nonce: number;
   hash: string;
@@ -53,55 +53,55 @@ export const replaceLocalDisputeDraft = (
  * Depository.sol. Rebuilding the message here binds the Account, proof body,
  * domain and nonce before any witness is retained.
  */
-export const validateCounterpartyDisputeSeal = async (
+export const validateCounterpartyDisputeHanko = async (
   account: AccountReplica,
   input: AccountPeerInput,
-  seal: ReturnType<typeof accountInputDisputeSeal>,
+  disputeHanko: ReturnType<typeof accountInputDisputeHanko>,
   context: string,
   securityContext: AccountInputSecurityContext,
   allowPreviousBoard = true,
-): Promise<ValidatedCounterpartyDisputeSeal | undefined> => {
-  if (!seal) return undefined;
-  if (!seal.hanko) {
+): Promise<ValidatedCounterpartyDisputeHanko | undefined> => {
+  if (!disputeHanko) return undefined;
+  if (!disputeHanko.hanko) {
     throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
-      `${context}:DISPUTE_SEAL_HANKO_MISSING`,
+      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+      `${context}:DISPUTE_HANKO_HANKO_MISSING`,
     );
   }
   if (
-    !/^0x[0-9a-fA-F]{64}$/.test(seal.hash)
-    || !/^0x[0-9a-fA-F]{64}$/.test(seal.proofBodyHash)
-    || !Number.isSafeInteger(seal.proofNonce)
-    || seal.proofNonce < 0
-    || typeof seal.proposerIsLeft !== 'boolean'
+    !/^0x[0-9a-fA-F]{64}$/.test(disputeHanko.hash)
+    || !/^0x[0-9a-fA-F]{64}$/.test(disputeHanko.proofBodyHash)
+    || !Number.isSafeInteger(disputeHanko.proofNonce)
+    || disputeHanko.proofNonce < 0
+    || typeof disputeHanko.proposerIsLeft !== 'boolean'
   ) {
     throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
-      `${context}:DISPUTE_SEAL_SHAPE_INVALID`,
+      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+      `${context}:DISPUTE_HANKO_SHAPE_INVALID`,
     );
   }
 
   const expectedHash = createDisputeProofHashWithNonce(
     account.state,
-    seal.proofBodyHash,
+    disputeHanko.proofBodyHash,
     getAccountStateDomain(account.state),
-    seal.proofNonce,
-    seal.proposerIsLeft,
+    disputeHanko.proofNonce,
+    disputeHanko.proposerIsLeft,
   );
-  if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
+  if (String(disputeHanko.hash).toLowerCase() !== expectedHash.toLowerCase()) {
     throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
-      `${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
+      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+      `${context}:DISPUTE_HANKO_HASH_MISMATCH:${safeStringify({
         kind: input.kind,
         currentHeight: account.currentHeight,
         pendingHeight: account.pendingFrame?.height ?? null,
         inputHeight: accountInputAck(input)?.height ?? null,
         newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
         localNonce: account.proofHeader.nextProofNonce,
-        signedNonce: seal.proofNonce,
-        proofBodyHash: seal.proofBodyHash,
+        signedNonce: disputeHanko.proofNonce,
+        proofBodyHash: disputeHanko.proofBodyHash,
         expected: expectedHash,
-        received: seal.hash,
+        received: disputeHanko.hash,
         from: shortId(input.fromEntityId),
         to: shortId(input.toEntityId),
       })}`,
@@ -109,7 +109,7 @@ export const validateCounterpartyDisputeSeal = async (
   }
 
   const { valid } = await securityContext.verifyHanko(
-    seal.hanko,
+    disputeHanko.hanko,
     expectedHash,
     input.fromEntityId,
     {
@@ -121,69 +121,69 @@ export const validateCounterpartyDisputeSeal = async (
   );
   if (!valid) {
     throw new AccountPeerEvidenceError(
-      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
-      `${context}:DISPUTE_SEAL_HANKO_INVALID`,
+      'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+      `${context}:DISPUTE_HANKO_HANKO_INVALID`,
     );
   }
 
   return {
-    hanko: seal.hanko,
-    nonce: seal.proofNonce,
+    hanko: disputeHanko.hanko,
+    nonce: disputeHanko.proofNonce,
     hash: expectedHash,
-    proofBodyHash: seal.proofBodyHash,
-    proposerIsLeft: seal.proposerIsLeft,
+    proofBodyHash: disputeHanko.proofBodyHash,
+    proposerIsLeft: disputeHanko.proposerIsLeft,
   };
 };
 
-export const storeCounterpartyDisputeSeal = (
+export const storeCounterpartyDisputeHanko = (
   account: AccountReplica,
-  seal: ValidatedCounterpartyDisputeSeal | undefined,
+  disputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
 ): void => {
-  if (!seal) return;
-  account.counterpartyDisputeProofHanko = seal.hanko;
-  account.counterpartyDisputeProofNonce = seal.nonce;
-  account.counterpartyDisputeProofProposerIsLeft = seal.proposerIsLeft;
-  account.counterpartyDisputeHash = seal.hash;
-  account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
+  if (!disputeHanko) return;
+  account.counterpartyDisputeProofHanko = disputeHanko.hanko;
+  account.counterpartyDisputeProofNonce = disputeHanko.nonce;
+  account.counterpartyDisputeProofProposerIsLeft = disputeHanko.proposerIsLeft;
+  account.counterpartyDisputeHash = disputeHanko.hash;
+  account.counterpartyDisputeProofBodyHash = disputeHanko.proofBodyHash;
 };
 
-export const getDisputeSealRequirementError = (
+export const getDisputeHankoRequirementError = (
   expectedProofBodyHash: string | undefined,
   previousCounterpartyProofBodyHash: string | undefined,
   previousCounterpartyProofNonce: number | undefined,
   jNonce: number,
-  seal: ValidatedCounterpartyDisputeSeal | undefined,
+  disputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
 ): string | undefined => {
   if (!expectedProofBodyHash) {
-    return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
+    return disputeHanko ? 'DISPUTE_HANKO_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
   }
-  if (seal && seal.nonce <= jNonce) {
-    return `DISPUTE_SEAL_NONCE_ALREADY_FINALIZED: received=${seal.nonce} jNonce=${jNonce}`;
+  if (disputeHanko && disputeHanko.nonce <= jNonce) {
+    return `DISPUTE_HANKO_NONCE_ALREADY_FINALIZED: received=${disputeHanko.nonce} jNonce=${jNonce}`;
   }
   if (
-    seal
+    disputeHanko
     && previousCounterpartyProofNonce !== undefined
-    && seal.nonce < previousCounterpartyProofNonce
+    && disputeHanko.nonce < previousCounterpartyProofNonce
   ) {
-    return `DISPUTE_SEAL_NONCE_REGRESSION: received=${seal.nonce} previous=${previousCounterpartyProofNonce}`;
+    return `DISPUTE_HANKO_NONCE_REGRESSION: received=${disputeHanko.nonce} previous=${previousCounterpartyProofNonce}`;
   }
   if (
-    seal
+    disputeHanko
     && previousCounterpartyProofNonce !== undefined
-    && seal.nonce === previousCounterpartyProofNonce
+    && disputeHanko.nonce === previousCounterpartyProofNonce
     && previousCounterpartyProofBodyHash !== undefined
-    && seal.proofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash.toLowerCase()
+    && disputeHanko.proofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash.toLowerCase()
   ) {
-    return `DISPUTE_SEAL_NONCE_REUSE: nonce=${seal.nonce}`;
+    return `DISPUTE_HANKO_NONCE_REUSE: nonce=${disputeHanko.nonce}`;
   }
-  if (seal && seal.proofBodyHash.toLowerCase() !== expectedProofBodyHash.toLowerCase()) {
-    return `DISPUTE_SEAL_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${seal.proofBodyHash}`;
+  if (disputeHanko && disputeHanko.proofBodyHash.toLowerCase() !== expectedProofBodyHash.toLowerCase()) {
+    return `DISPUTE_HANKO_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${disputeHanko.proofBodyHash}`;
   }
   const proofChanged = expectedProofBodyHash.toLowerCase()
     !== previousCounterpartyProofBodyHash?.toLowerCase();
   const proofNonceConsumed = Number(previousCounterpartyProofNonce ?? 0) <= jNonce;
-  if ((proofChanged || proofNonceConsumed) && !seal) {
-    return `DISPUTE_SEAL_REQUIRED: proofBodyHash=${expectedProofBodyHash} jNonce=${jNonce}`;
+  if ((proofChanged || proofNonceConsumed) && !disputeHanko) {
+    return `DISPUTE_HANKO_REQUIRED: proofBodyHash=${expectedProofBodyHash} jNonce=${jNonce}`;
   }
   return undefined;
 };

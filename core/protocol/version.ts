@@ -4,6 +4,12 @@
 // v3 (2026-08-23): msgpack codec without structured-clone reference markers
 // (bytes depend on value only), Buffer/Uint8Array one form, consensus roots
 // and command hashes over canonical bytes.
-export const XLN_PROTOCOL_VERSION = 3 as const;
+// v4 (2026-08-23): committed trusted-payment forwarding is an ordered typed
+// Account output; the persisted pendingForwards side channel is retired under
+// storage schema 9.
+// v5 (2026-08-23): Account and settlement authority use canonical Hanko names;
+// board rotations carry `board_hanko_refresh` / `boardHankoRefresh`, with no
+// retired aliases. Persisted names move atomically to storage schema 10.
+export const XLN_PROTOCOL_VERSION = 5 as const;
 
 export type XlnProtocolVersion = typeof XLN_PROTOCOL_VERSION;

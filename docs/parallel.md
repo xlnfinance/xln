@@ -29,7 +29,7 @@ input, F ≈ 1.1 s per frame**. The "fixed" part is O(touched accounts): every
 frame touches ~800 of the 1000 accounts (18.6k entity leaf hashes / 23 frames),
 and for each touched account the hub validates the peer frame, applies on a
 draft overlay, computes the account state root (2–3×: validation, commit,
-proposal), builds+signs the next outbound frame (frame hanko + dispute seal),
+proposal), builds+signs the next outbound frame (frame hanko + dispute Hanko),
 seals the shell, rehashes the entity leaf, and later persists it.
 
 So throughput grows with inputs-per-account-per-frame (that is why 3/s per user
@@ -42,9 +42,9 @@ be parallelised; nothing else on the main thread is big enough.**
 Protocol-neutral unless stated.
 
 - Wire-fit slow start (×1.15 cap per frame) removed; first attempt predicted from
-  the last sealed wire/tx byte ratio; the measured loop stays the authority.
+  the last certified wire/tx byte ratio; the measured loop stays the authority.
 - Batch ECDSA recover on a Bun worker pool (`core/protocol/crypto/crypto-pool.ts`,
-  `core/entity/consensus/proposal/hanko/prime-hankos.ts`): inbound frame/seal hanko
+  `core/entity/consensus/proposal/hanko/prime-hankos.ts`): inbound frame/dispute Hankos
   signatures are recovered by bytes (97-byte records, transferable) for the fitted
   tx prefix, warming the codec memo; verifiers unchanged. Main-thread recovers
   21k → 46 per 10k payments. Pool is Bun-only at runtime, fails closed to the
@@ -53,7 +53,7 @@ Protocol-neutral unless stated.
   already binds the peer); sealed-box relay delivery still signs/verifies.
 - **Wire format**: entity_inputs payload = MessagePack plaintext → raw ciphertext
   bytes in the MessagePack ws envelope (no JSON, no base64). 12.4 → 8.4 KB/envelope.
-- Encode-once: sealed frame txs (commitment projection and raw) canonical-encoded
+- Encode-once: certified frame txs (commitment projection and raw) canonical-encoded
   once per frame and reused by wire fit, frame hash, wire estimate, storage
   validation (`rememberCanonicalArrayEncoding`, frozen arrays).
 - Storage: live replica meta commits to the certified head instead of the frame
@@ -79,7 +79,7 @@ Protocol-neutral unless stated.
 |---|---|---|
 | manifest signatures → worker by bytes | ~1 s / 12k | `signProposalManifest` is a sync `Promise.all`; ship (digest, signer) records like the recover pool; keys live in the worker |
 | HTLC onion decrypt → worker | ~0.8 s | `decryptInboundEnvelopeUncached` is pure (ciphertext, AAD, key); prime like hankos |
-| dispute seal hash via ethers `solidityPacked` | ~0.4 s | hand ABI encoder like `core/hanko/abi.ts` |
+| dispute Hanko hash via ethers `solidityPacked` | ~0.4 s | hand ABI encoder like `core/hanko/abi.ts` |
 | ACK re-execution of own txs | ~0.7 s | proposal runs txs with `isValidation=true`, ACK with `false`; effects are produced at ACK. Not a deletion: requires validation-mode semantics change. Guard script forbids a "pending-proposal replica stash". Skipped. |
 | consensus preimage: canonical JSON text → binary | ~1–1.5 s | 100 call sites + golden hashes; protocol change (all hashes). Owner wants it; gain is small |
 | entity root only at checkpoint | ~0.25 ms/payment | protocol change: `frame.stateRoot` per entity frame is what validators compare |
@@ -104,7 +104,7 @@ user runtimes keep the in-process path. Off ⇒ byte-identical behaviour.
 2. Main → shard: `{frameHeight, frameTimestamp, entityContext (htlc prepared
    entries for that shard's accounts), inputs: AccountInput[] (msgpack bytes)}`.
 3. Shard applies each input exactly as `applyPeerAccountInput` does today,
-   proposes the next outbound frame, signs frame hanko + seal (keys derived in
+   proposes the next outbound frame, signs frame + dispute Hankos (keys derived in
    the worker from the runtime seed), seals the shell.
 4. Shard → main (bytes): per touched account `{counterpartyId, leafHash
    (computeEntityAccountValueHash), summary}` + `candidateEffects`/`AccountOutput`s
@@ -112,7 +112,7 @@ user runtimes keep the in-process path. Off ⇒ byte-identical behaviour.
    (msgpack) + hashesToSign entries (so main's manifest is unchanged) + events.
 5. Main folds leaf hashes into the accounts radix tree (needs a
    `PersistentEntityAccountMap` variant keyed by leaf hash, not by replica), runs
-   the rest of the frame (orderbook, htlc routes, crontab) and seals the entity
+   the rest of the frame (orderbook, htlc routes, crontab) and certifies the Entity
    frame. The entity frame bytes/hash are identical to the unsharded path by
    construction (same inputs, same outputs, same leaf hashes, same order).
 
@@ -132,7 +132,7 @@ outputs to the next frame — changes latency and frame contents; not preferred.
 `grep -rn "accounts.get(\|getEntityAccountForWrite(" core/entity` = **113 sites in
 ~40 modules** (orderbook queue/cancels/helpers, payments settle/lending/swap
 requests, htlc payment-admission + forward capacity, cross-J, dispute, j-batch,
-rebalance scheduler, board reseal, j-events). Each either:
+rebalance scheduler, board Hanko refresh, j-events). Each either:
 - needs a **summary** (capacity per token = deltas/credit/holds; pendingFrame
   height; proofHeader; mempool length) → the shard returns it after every frame
   and main keeps a `Map<counterpartyId, AccountSummary>`; or
@@ -190,7 +190,7 @@ next wall; then dispatch.
    rounds; checkpoint rows on demand; restore.
 5. Feature flag + equivalence test: run a recorded 1000-user payments frame set
    with shards off and on, assert identical entity frame hashes.
-6. Then the §3 leftovers (manifest sign offload, onion decrypt offload, seal hash
+6. Then the §3 leftovers (manifest sign offload, onion decrypt offload, dispute Hanko hash
    codec), binary preimage, cross-J load harness (same pair as same-J swaps, see
    `core/scripts/operations/hlt/cross/worker-cross.ts` and the mixed generator's
    unmatched-tail bug).
