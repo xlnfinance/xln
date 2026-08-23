@@ -160,6 +160,10 @@ impl BodyTuple {
         Self(Vec::from(fields))
     }
 
+    pub fn from_vec(fields: Vec<AbiValue>) -> Self {
+        Self(fields)
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -177,7 +181,7 @@ impl BodyTuple {
     }
 
     pub(crate) fn decoded(fields: Vec<AbiValue>) -> Self {
-        Self(fields)
+        Self::from_vec(fields)
     }
 }
 
