@@ -78,30 +78,32 @@ export const dispatchCommittedEntityOutputs = async (
   // Profile supplies the endpoint; the actual socket is established lazily at
   // the send boundary. Hub servers already own inbound user sessions and must
   // not dial every user back.
-  let transportReady = true;
   if (p2p && !env.infrastructure?.directEntityInputsDispatch && plan.remoteOutputs.length > 0) {
     const targetEntityIds = Array.from(new Set(
       plan.remoteOutputs.map(({ output }) => output.entityId.toLowerCase()),
     ));
+    let transportReady: boolean;
     try {
       transportReady = await p2p.bootstrapDirectEntityRoutes(targetEntityIds, DIRECT_OUTPUT_CONNECT_TIMEOUT_MS);
     } catch (error) {
-      transportReady = false;
-      env.warn('network', 'DIRECT_OUTPUT_CONNECT_FAILED', {
+      env.error('network', 'DIRECT_OUTPUT_CONNECT_FAILED', {
         targetEntityIds,
         error: error instanceof Error ? error.message : String(error),
       });
+      throw error;
     }
     if (!transportReady) {
-      env.warn('network', 'DIRECT_OUTPUT_NOT_SENT', {
+      const error = new Error(
+        `DIRECT_OUTPUT_ROUTE_NOT_READY:targets=${targetEntityIds.join(',')}:outputs=${plan.remoteOutputs.length}`,
+      );
+      env.error('network', 'DIRECT_OUTPUT_CONNECT_FAILED', {
         targetEntityIds,
         remoteOutputs: plan.remoteOutputs.length,
       });
+      throw error;
     }
   }
-  if (transportReady) {
-    dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
-  }
+  dispatchEntityOutputs(env, plan.remoteOutputs, routing, plan.preparedOutputGraph);
   // The outbox is retained across every failure path. Clear it only after the
   // transport synchronously accepts every envelope; there is no timer retry.
   env.pendingNetworkOutputs = [];
