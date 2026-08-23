@@ -181,6 +181,7 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
+  delete account.pendingProposalSentHeight;
   if (
     account.lastOutboundFrameAck
     && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)
@@ -201,7 +202,7 @@ const queuePostAckWork = async (
   events: string[],
 ): Promise<void> => {
   // Rebalance sees committed state only after pendingFrame has been cleared.
-  const txs = await runPostFrameAutoRebalanceCheck(
+  const txs = runPostFrameAutoRebalanceCheck(
     account,
     account.proofHeader.fromEntity,
     input.fromEntityId,

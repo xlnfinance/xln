@@ -48,8 +48,9 @@ import {
 } from '../state/persistent-account-map';
 import { entityCollectionCommitment } from '../state/persistent-collection-map';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
-import { buildRadixMerkle, computeRadixMerkleLeafHash } from '../../protocol/state/radix-merkle';
+import { computeRadixMerkleLeafHash } from '../../protocol/state/radix-merkle';
 import { ethers } from 'ethers';
+import { hexToBytes } from '../../support/hex-bytes';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -201,6 +202,7 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
 const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'status',
   'publicPinned',
+  'pendingProposalSentHeight',
   'mempool',
   'currentFrame',
   'currentHeight',
@@ -297,7 +299,6 @@ export const entityAccountLeafMerkleKey = (field: string): string => {
   return hexKey;
 };
 
-const EMPTY_LEAF_VALUE = new Uint8Array(0);
 const ENTITY_ACCOUNT_LEAF_KEY_BYTES: ReadonlyMap<string, Uint8Array> = new Map(
   Array.from(ENTITY_ACCOUNT_LEAF_KEYS, ([field, hexKey]) => [field, ethers.getBytes(hexKey)]),
 );
@@ -314,6 +315,15 @@ type LeafFieldMemo = Map<string, { value: unknown; hash: string }>;
 const LEAF_MEMO_MAX_ACCOUNTS = 65_536;
 const leafFieldMemos = new Map<string, LeafFieldMemo>();
 
+const ENTITY_ACCOUNT_LEAF_DOMAIN = ENTITY_ACCOUNT_LEAF_UTF8.encode('xln.entity.account-leaf.v3');
+const ENTITY_ACCOUNT_LEAF_ENTRY_BYTES = 64;
+
+/**
+ * Account leaf digest: one hash over the sorted (fieldKey ‖ fieldHash) pairs.
+ * Nothing proves a single Account field against the Entity root, so the
+ * per-Account radix Merkle (path slots, buckets, ~20 branch hashes) bought
+ * nothing but ~57 µs per touched Account per frame.
+ */
 const computeEntityAccountLeafMerkleRoot = (
   accountKey: string,
   entries: ReadonlyArray<readonly [string, unknown]>,
@@ -325,7 +335,10 @@ const computeEntityAccountLeafMerkleRoot = (
     memo = new Map();
     leafFieldMemos.set(accountKey, memo);
   }
-  const leaves = entries.map(([field, value]) => {
+  const preimage = new Uint8Array(ENTITY_ACCOUNT_LEAF_DOMAIN.length + entries.length * ENTITY_ACCOUNT_LEAF_ENTRY_BYTES);
+  preimage.set(ENTITY_ACCOUNT_LEAF_DOMAIN, 0);
+  let offset = ENTITY_ACCOUNT_LEAF_DOMAIN.length;
+  for (const [field, value] of entries) {
     const keyBytes = ENTITY_ACCOUNT_LEAF_KEY_BYTES.get(field);
     if (!keyBytes) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
     const cached = cold ? undefined : memo.get(field);
@@ -333,9 +346,11 @@ const computeEntityAccountLeafMerkleRoot = (
       ? cached.hash
       : computeRadixMerkleLeafHash(keyBytes, encodeAccountStateValue(value), 'integrity');
     if (!cold && (!cached || cached.value !== value)) memo.set(field, { value, hash });
-    return { key: keyBytes, value: EMPTY_LEAF_VALUE, hash };
-  });
-  return buildRadixMerkle(leaves, { hashAlgorithm: 'integrity' }).root;
+    preimage.set(keyBytes, offset);
+    preimage.set(hexToBytes(hash), offset + 32);
+    offset += ENTITY_ACCOUNT_LEAF_ENTRY_BYTES;
+  }
+  return computeIntegrityDigest(preimage);
 };
 
 const compactDisputeSeal = (seal: AccountDisputeSeal): Record<string, unknown> => ({

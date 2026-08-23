@@ -526,7 +526,7 @@ async function commitIncomingFrameOnRealState(
   events.push(...validation.processEvents);
   events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
 
-  const postCommitAutoRebalanceTxs = await runPostFrameAutoRebalanceCheck(
+  const postCommitAutoRebalanceTxs = runPostFrameAutoRebalanceCheck(
     account,
     ourEntityId,
     input.fromEntityId,

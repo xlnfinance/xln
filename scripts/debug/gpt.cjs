@@ -215,7 +215,8 @@ const CORE_FILES = {
     'account/crypto.ts',     // Account frame signing/verification (CRITICAL)
 
     // Utilities (support functions)
-    'account/state/state-clone.ts', // Account candidate/snapshot isolation
+    'account/state/account-replica-shell.ts', // Account envelope isolation
+    'account/state/candidate-overlay.ts', // Account transition candidate isolation
     'entity/state-clone.ts',  // Entity candidate/snapshot isolation
     'entity/replica/replica-clone.ts', // Validator-local replica isolation
     'storage/codec/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
@@ -327,7 +328,8 @@ const CROSS_FILES = {
     'account/utils.ts',
     'protocol/serialization/index.ts',
     'account/crypto.ts',
-    'account/state/state-clone.ts',
+    'account/state/account-replica-shell.ts',
+    'account/state/candidate-overlay.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime.ts',
@@ -526,7 +528,8 @@ const RUNTIME_FILES = {
     'account/state/frame.ts',
     'protocol/serialization/index.ts',
     'storage/codec/snapshot-coder.ts',
-    'account/state/state-clone.ts',
+    'account/state/account-replica-shell.ts',
+    'account/state/candidate-overlay.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime/observability/env-events.ts',
@@ -572,6 +575,107 @@ const COMPLETE_RUNTIME_FILES = {
   ]),
 };
 
+// Measured H1 payment/swap hot path. Keep this list explicit: the complete
+// runtime pack discovers every production source, but a performance auditor
+// must receive the causal ingress -> Account -> Entity -> WAL -> dispatch path
+// together in one focused pack instead of finding it across unrelated chunks.
+const PERFORMANCE_FILES = {
+  contracts: [],
+  root: ['AGENTS.md'],
+  runtime: uniqueFiles([
+    'runtime/types.ts',
+    'runtime/frame/process.ts',
+    'runtime/frame/process-profile.ts',
+    'runtime/frame/plan.ts',
+    'runtime/frame/transaction.ts',
+    'runtime/frame/apply.ts',
+    'runtime/frame/dispatch.ts',
+    'runtime/frame/lifecycle/prepare.ts',
+    'runtime/frame/lifecycle/start.ts',
+    'runtime/frame/lifecycle/finish.ts',
+    'runtime/frame/lifecycle/post-commit.ts',
+    'runtime/frame/intake/reducer.ts',
+    'runtime/mempool/input-queue.ts',
+    'runtime/delivery/dispatch.ts',
+    'runtime/delivery/topology/entity-routing.ts',
+    'runtime/delivery/topology/output-routing.ts',
+    'network/p2p/direct-runtime-bun.ts',
+    'network/p2p/p2p.ts',
+    'network/p2p/ws-client.ts',
+    'entity/consensus/index.ts',
+    'entity/consensus/frame.ts',
+    'entity/consensus/frame/application.ts',
+    'entity/consensus/frame/tx-effects.ts',
+    'entity/consensus/frame/profile.ts',
+    'entity/consensus/frame/validation.ts',
+    'entity/consensus/input/merge.ts',
+    'entity/consensus/input/hanko-witness.ts',
+    'entity/consensus/state-root.ts',
+    'entity/consensus/account/canonical-worklist.ts',
+    'entity/consensus/account/mempool-eligibility.ts',
+    'entity/tx/apply.ts',
+    'entity/tx/handlers/account/index.ts',
+    'entity/tx/handlers/account/input-phases.ts',
+    'entity/tx/handlers/account/committed-input.ts',
+    'entity/tx/handlers/account/committed-frame-followups.ts',
+    'entity/tx/handlers/account/committed-htlc-followups.ts',
+    'account/consensus/index.ts',
+    'account/consensus/flush.ts',
+    'account/consensus/incoming/preflight.ts',
+    'account/consensus/incoming/collision.ts',
+    'account/consensus/incoming/replay.ts',
+    'account/consensus/incoming/ack-commit.ts',
+    'account/consensus/proposal/admission.ts',
+    'account/consensus/proposal/propose.ts',
+    'account/consensus/proposal/finalize.ts',
+    'account/commitment/state-root.ts',
+    'account/state/persistent-state-map.ts',
+    'account/state/commitment/value-seal.ts',
+    'entity/state/persistent-account-map.ts',
+    'protocol/state/persistent-radix-value-map.ts',
+    'protocol/state/persistent-radix-value-ops.ts',
+    'protocol/state/radix-merkle.ts',
+    'protocol/serialization/canonical-consensus-value.ts',
+    'storage/index.ts',
+    'storage/hashes.ts',
+    'storage/codec/binary-codec.ts',
+    'storage/history/history-view.ts',
+    'storage/wal/outbox-payload.ts',
+    'runtime/delivery/identity.ts',
+    'protocol/crypto/ecdsa-recover-pool.ts',
+    'hanko/codec.ts',
+    'hanko/signing.ts',
+    'orderbook/core.ts',
+    'orderbook/book-overlay.ts',
+    'orderbook/pages/page.ts',
+    'orderbook/commitment.ts',
+    'support/integrity-checksum.ts',
+    'support/recency-memo.ts',
+    'support/performance/op-counters.ts',
+    'support/performance/account-delivery-trace.ts',
+  ]),
+  docs: [
+    'parallel.md',
+    'fints.md',
+    'wal.md',
+    'merkle.md',
+    'consensus-invariants.md',
+    'audit-protocol.md',
+  ],
+  swapUi: [],
+  tests: [
+    'core/scripts/operations/hlt/hlt.ts',
+    'core/scripts/operations/hlt/metrics.ts',
+    'core/scripts/operations/hlt/replay/payment-work-ledger.ts',
+    'core/scripts/operations/hlt/replay/replay-hub-recording.ts',
+    'core/scripts/operations/benchmark/hlt-profile-report.ts',
+    'core/__tests__/operations/hlt/hlt-payments.test.ts',
+    'core/__tests__/operations/hlt/hlt-report.test.ts',
+    'core/__tests__/runtime/transport/runtime-output-routing.test.ts',
+  ],
+  frontend: [],
+};
+
 const ORDERBOOK_FILES = {
   contracts: [],
   runtime: [
@@ -581,7 +685,8 @@ const ORDERBOOK_FILES = {
     'protocol/identity/index.ts',
     'account/utils.ts',
     'protocol/serialization/index.ts',
-    'account/state/state-clone.ts',
+    'account/state/account-replica-shell.ts',
+    'account/state/candidate-overlay.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime/swap-cmd/swap-pairs.ts',
@@ -649,7 +754,8 @@ const SWAP_FILES = {
     'protocol/identity/index.ts',
     'account/utils.ts',
     'protocol/serialization/index.ts',
-    'account/state/state-clone.ts',
+    'account/state/account-replica-shell.ts',
+    'account/state/candidate-overlay.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime/swap-cmd/swap-pairs.ts',
@@ -704,6 +810,11 @@ const SWAP_FILES = {
 };
 
 const PROFILE_DESCRIPTIONS = {
+  performance: {
+    title: 'XLN H1 Performance Context',
+    description: 'Measured ingress-to-ACK hot path for authoritative live payment/swap TPS, replay comparison, cryptography, Merkle commitments, WAL, dispatch, and duplicate proposal diagnosis.',
+    prompt: 'Trace unique payments and swaps end to end, reconcile every encode/hash/sign/verify with live counters, rank bottlenecks by Amdahl impact, and propose byte-identical simplifications that can move authoritative H1 TPS toward 3000.',
+  },
   runtime: {
     title: 'XLN Runtime Context',
     description: 'Focused pack for R/E/A/J state machines, consensus, transaction dispatch, serialization, persistence hashes, and jurisdiction integration.',
@@ -1290,7 +1401,8 @@ xln/
       graph.ts                   ${fileSizes['core/pathfinding/graph.ts'] || '?'} lines - Network graph
       pathfinding.ts             ${fileSizes['core/pathfinding/pathfinding.ts'] || '?'} lines - Dijkstra routing
 
-    account/state/state-clone.ts ${fileSizes['core/account/state/state-clone.ts'] || '?'} lines - Account candidate isolation
+    account/state/account-replica-shell.ts ${fileSizes['core/account/state/account-replica-shell.ts'] || '?'} lines - Account envelope isolation
+    account/state/candidate-overlay.ts     ${fileSizes['core/account/state/candidate-overlay.ts'] || '?'} lines - Account candidate isolation
     entity/state-clone.ts        ${fileSizes['core/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
     entity/replica/replica-clone.ts      ${fileSizes['core/entity/replica/replica-clone.ts'] || '?'} lines - Replica-local isolation
     storage/codec/snapshot-coder.ts            ${fileSizes['core/storage/codec/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
@@ -1674,6 +1786,13 @@ const PROFILE_CONFIGS = {
     flag: '--runtime',
     outputFilename: 'llms_runtime.txt',
     fileGroups: COMPLETE_RUNTIME_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+  performance: {
+    flag: '--performance',
+    outputFilename: 'llms_performance.txt',
+    fileGroups: PERFORMANCE_FILES,
     includeFrontend: false,
     solOnly: false,
   },

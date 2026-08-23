@@ -247,6 +247,13 @@ export interface AccountReplica {
    * advertises the thousands of users that opened toward it.
    */
   publicPinned?: boolean;
+  /**
+   * Entity height at which `pendingAccountInput` was last put on the wire.
+   * A flush re-bundles the pending proposal only when it was never sent, when
+   * a LEFT-wins collision demands the exact resend, or after a resend window
+   * without ACK; otherwise only the newest ACK goes out.
+   */
+  pendingProposalSentHeight?: number;
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;

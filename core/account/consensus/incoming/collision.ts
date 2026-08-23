@@ -185,6 +185,8 @@ export const resolveSameHeightIncomingFrame = (
       throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
     }
     // Resend exact signed bytes. Rebuilding could change nonce, body or Hanko.
+    // RIGHT discarded its own frame and must adopt ours: the flush re-bundles.
+    delete account.pendingProposalSentHeight;
     return accountInputApplied({
       response: structuredClone(response),
       events,
@@ -224,6 +226,7 @@ export const applySameHeightIncomingFrameRollback = (
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
+  delete account.pendingProposalSentHeight;
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedFrame.stateHash;
   if (account.rollbackCount > 1) {

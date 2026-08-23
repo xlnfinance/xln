@@ -180,6 +180,9 @@ const outputPath = resolve(optionalArgument('output') ?? `${recordingPath}.repla
 const mode = parseMode();
 const rates = parseRates(mode);
 const frameProfileEnabled = process.argv.includes('--frame-profile');
+// Hash-format changes (leaf/preimage encoding) legitimately diverge from the
+// recorded frame hashes; terminal equivalence (height, outbox, payments) still holds.
+const proposalOracleEnabled = !process.argv.includes('--no-oracle');
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
@@ -275,7 +278,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
   // Runtime logs are an envelope-side external effect and are intentionally
   // excluded alongside sockets and durable writes.
   env.quietRuntimeLogs = true;
-  if (artifact.entityProposalOracle) {
+  if (artifact.entityProposalOracle && proposalOracleEnabled) {
     if (!env.infrastructure) throw new Error('HLT_REPLAY_INFRASTRUCTURE_MISSING');
     env.infrastructure.replayEntityProposalOracle = buildEntityProposalReplayOracleMap(
       artifact.entityProposalOracle,

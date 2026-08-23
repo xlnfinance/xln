@@ -2,6 +2,7 @@
  * Overlay-first Patricia node ops: own keys/values, path-copy, one-shot fold, lazy seal.
  * Hash work exists only at the root/storage boundary.
  */
+import { hexToBytes } from '../../support/hex-bytes';
 import {
   computeRadixMerkleBranchHashFromSlots,
   computeRadixMerkleEdgeHash,
@@ -78,16 +79,6 @@ const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
   return left.length - right.length;
 };
 
-const strictHexBytes = (value: string): Uint8Array => {
-  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(value)) {
-    throw new Error(`PERSISTENT_RADIX_VALUE_HASH_INVALID:${value}`);
-  }
-  const output = new Uint8Array((value.length - 2) / 2);
-  for (let index = 0; index < output.length; index += 1) {
-    output[index] = Number.parseInt(value.slice(2 + index * 2, 4 + index * 2), 16);
-  }
-  return output;
-};
 
 const childSlot = <K, V>(parentPath: readonly number[], child: ValueNode<K, V>): number => {
   const slot = child.path[parentPath.length];
@@ -222,7 +213,7 @@ export const sealRadixNode = <K, V>(
     stats.valueHashes += 1;
     const digest = options.valueHash(node.value);
     stats.leafHashes += 1;
-    node.hash = computeRadixMerkleLeafHash(node.keyBytes, strictHexBytes(digest));
+    node.hash = computeRadixMerkleLeafHash(node.keyBytes, hexToBytes(digest));
     return node.hash;
   }
   for (let slot = 0; slot < node.children.length; slot += 1) {

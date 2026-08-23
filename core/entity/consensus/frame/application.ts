@@ -693,13 +693,17 @@ const liveOutboundAck = (
  * cache. XLN does the same, retaining only exact Hanko-bearing proposal/ACK
  * bytes in the AccountReplica so a mandatory flush cannot invent new bytes.
  */
+/** Frames without ACK after which a pending proposal is put on the wire again. */
+const PENDING_PROPOSAL_RESEND_FRAMES = 3;
+
 const resolveForcedAccountInput = (
   account: AccountReplica,
   accountKey: string,
+  entityHeight: number,
 ): AccountPeerInput => {
   const pendingFrame = account.pendingFrame;
+  const ack = liveOutboundAck(account, accountKey);
   if (!pendingFrame) {
-    const ack = liveOutboundAck(account, accountKey);
     if (!ack) throw new Error(`ACCOUNT_FORCED_RESPONSE_MISSING:${accountKey}:${account.currentHeight}`);
     return ack;
   }
@@ -716,20 +720,18 @@ const resolveForcedAccountInput = (
     throw new Error(`ACCOUNT_FORCED_PENDING_INPUT_DIVERGED:${accountKey}:${pendingFrame.height}`);
   }
 
-  const savedAck = account.lastOutboundFrameAck;
-  if (!savedAck) return structuredClone(pending);
-  const ack = liveOutboundAck(account, accountKey);
-  if (!ack) throw new Error(`ACCOUNT_FORCED_ACK_MISSING:${accountKey}`);
-  const pendingAck = accountInputAck(pending);
-  if (pendingAck && safeStringify(pendingAck) === safeStringify(ack.ack)) {
-    return structuredClone(pending);
+  // Already on the wire and still inside the ACK window: only the newest ACK
+  // goes out. Re-bundling the proposal on every unrelated flush made the peer
+  // re-verify it and echo its own cached response, ~23% of proposal traffic.
+  const sentAt = account.pendingProposalSentHeight;
+  if (sentAt !== undefined && entityHeight - sentAt < PENDING_PROPOSAL_RESEND_FRAMES && ack) {
+    return ack;
   }
-  return {
-    ...structuredClone(pending),
-    kind: 'frame_ack',
-    ack: structuredClone(ack.ack),
-    proposal: structuredClone(proposal),
-  };
+  account.pendingProposalSentHeight = entityHeight;
+  if (!ack) return structuredClone(pending);
+  const pendingAck = accountInputAck(pending);
+  if (pendingAck && safeStringify(pendingAck) === safeStringify(ack.ack)) return structuredClone(pending);
+  return { ...structuredClone(pending), kind: 'frame_ack', ack: ack.ack, proposal: structuredClone(proposal) };
 };
 
 const assertForcedAccountInputPreserved = (
@@ -827,7 +829,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     }
 
     const requiredResponse = force
-      ? resolveForcedAccountInput(account, accountKey)
+      ? resolveForcedAccountInput(account, accountKey, currentEntityState.height)
       : undefined;
     traceAccountFlushHop(
       'entity-flush-start',
@@ -851,7 +853,10 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     // committed work keeps an otherwise empty Entity preview alive, advances
     // Entity height, and immediately schedules the same impossible attempt
     // again. Only an actual Account proposal is causal work worth certifying.
-    if (proposal && isProposedAccountFrame(proposal)) proposedFrames += 1;
+    if (proposal && isProposedAccountFrame(proposal)) {
+      proposedFrames += 1;
+      account.pendingProposalSentHeight = currentEntityState.height;
+    }
 
     const finalAccountInput = proposal && isProposedAccountFrame(proposal)
       ? proposal.accountInput

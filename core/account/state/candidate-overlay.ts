@@ -114,6 +114,7 @@ const ACCOUNT_LIVE_ENVELOPE = new Set<keyof AccountReplica>([
   'boardResealMigration',
   'counterpartyBoardReseal',
   'publicPinned',
+  'pendingProposalSentHeight',
 ]);
 
 export const publishAccountOverlay = (

@@ -50,7 +50,7 @@ import { primeProposalHankos } from './prime-hankos';
 import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
 import { countOp } from '../../../support/performance/op-counters';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';
-import { cumulativeMarksToPhases, snapshotPerfPhases, timePerfPhase } from '../../../support/performance/profile';
+import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
@@ -357,14 +357,6 @@ const fitAndApplyEntityProposal = async (
   });
   if (fitted.txs.length !== selection.proposalTxs.length) selection.proposalTxs = fitted.txs;
   profile.checkpoint('wireFit');
-  if (fitted.replayed) {
-    await timePerfPhase('entity.proposal.assertHtlc', () => assertHtlcPreparedInfraContext({
-      state: workingReplica.state,
-      proposalTxs: selection.proposalTxs,
-      context: fitted.entityContext,
-      entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
-    }));
-  }
   // Only the fitted prefix is applied; recover its Hanko signatures on the
   // worker pool before the synchronous verifiers need them.
   await primeProposalHankos(selection.proposalTxs);

@@ -4,6 +4,7 @@
  * Human-audit importance: 99/100 — roots bind large state without iteration ambiguity.
  */
 import { ethers } from 'ethers';
+import { hexToBytes as decodeHexBytes } from '../../support/hex-bytes';
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
 
 export const RADIX_MERKLE_RADICES = [2, 4, 16, 256] as const;
@@ -61,20 +62,19 @@ export type RadixMerkleMaterializedResult = RadixMerkleResult & {
 export const EMPTY_RADIX_MERKLE_ROOT = `0x${'00'.repeat(32)}`;
 
 const UTF8_ENCODER = new TextEncoder();
+const hexToBytes = (hex: string): Uint8Array => {
+  try {
+    const bytes = decodeHexBytes(hex);
+    if (bytes.length === 0) throw new Error('empty');
+    return bytes;
+  } catch {
+    throw new Error(`RADIX_MERKLE_HASH_HEX_INVALID:${hex}`);
+  }
+};
 const HEX_BYTE_TEXT = Array.from(
   { length: 256 },
   (_, value) => value.toString(16).padStart(2, '0'),
 );
-const HEX_NIBBLES = (() => {
-  const values = new Int8Array(128);
-  values.fill(-1);
-  for (let value = 0; value < 10; value += 1) values[48 + value] = value;
-  for (let value = 0; value < 6; value += 1) {
-    values[65 + value] = 10 + value;
-    values[97 + value] = 10 + value;
-  }
-  return values;
-})();
 
 const concatBytes = (...parts: Uint8Array[]): Uint8Array => {
   const joined = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
@@ -124,24 +124,6 @@ export const encodeRawRadixTextKey = (value: string): Uint8Array => {
   return concatBytes(uint16Bytes(raw.length), raw);
 };
 
-const hexToBytes = (hex: string): Uint8Array => {
-  const normalized = String(hex);
-  const offset = normalized.startsWith('0x') ? 2 : 0;
-  const length = normalized.length - offset;
-  if (length === 0 || (length & 1) !== 0) {
-    throw new Error(`RADIX_MERKLE_HASH_HEX_INVALID:${hex}`);
-  }
-  const output = new Uint8Array(length / 2);
-  for (let index = 0; index < output.length; index += 1) {
-    const high = HEX_NIBBLES[normalized.charCodeAt(offset + index * 2)];
-    const low = HEX_NIBBLES[normalized.charCodeAt(offset + index * 2 + 1)];
-    if (high === undefined || low === undefined || high < 0 || low < 0) {
-      throw new Error(`RADIX_MERKLE_HASH_HEX_INVALID:${hex}`);
-    }
-    output[index] = (high << 4) | low;
-  }
-  return output;
-};
 
 const radixMerkleBitsPerSlot = (radix: RadixMerkleRadix): number =>
   Math.log2(radix);

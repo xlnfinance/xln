@@ -1,6 +1,5 @@
 import type { AccountReplica, AccountTx, Delta , AccountOutput } from '../../types/account';
 import type { JReplica } from '../../types/jurisdiction-runtime';
-import { createStructuredLogger } from '../../support/logger';
 import { txFingerprint } from '../../protocol/state/tx-multiset';
 import {
   checkAutoRebalance,
@@ -14,7 +13,6 @@ import {
 } from '../../jurisdiction/machine/contract-address';
 import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
 
-const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -160,72 +158,40 @@ type TokenizedAccountTx = AccountTx & {
 
 export { resolveAutoRebalanceFeePolicy };
 
-export async function runPostFrameAutoRebalanceCheck(
+/**
+ * Auto-rebalance is user-driven by soft limit; the hub never initiates it.
+ * Pure skips emit nothing: a debug output per committed Account frame was
+ * hub-side noise in every candidate effect list.
+ */
+export function runPostFrameAutoRebalanceCheck(
   account: AccountReplica,
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,
   owningEntityIsHub: boolean,
   candidateEffects: AccountOutput[] = [],
-): Promise<AccountTx[]> {
-  try {
-    const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-      candidateEffects.push({
-        kind: 'debug',
-        payload: {
-          level: 'info',
-          code: 'REB_STEP',
-          step: 1,
-          accountId: counterpartyEntityId,
-          frameHeight,
-          ...payload,
-        },
-      });
-    };
-    const emitSkip = (reason: string) => {
-      emitRebalanceDebug({
-        status: 'skipped',
-        event: 'request_not_queued',
-        reason,
-        policyCount: account.shadow.rebalance.policy.size,
-        hasPendingFrame: !!account.pendingFrame,
-      });
-    };
-
-    if (owningEntityIsHub) {
-      emitSkip('our-entity-is-hub');
-      return [];
-    }
-
-    const hasCounterpartyPolicy = Array.from(account.shadow.rebalance.policy.keys())
-      .some((tokenId) => resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId));
-    if (!hasCounterpartyPolicy) {
-      emitSkip('counterparty-fee-policy-missing');
-      return [];
-    }
-
-    const rebalanceTxs = checkAutoRebalance(
-      account,
-      ourEntityId,
-      counterpartyEntityId,
-    );
-    if (rebalanceTxs.length > 0) {
-      emitRebalanceDebug({
-        status: 'ok',
-        event: 'request_queued',
-        txCount: rebalanceTxs.length,
-        tokenIds: rebalanceTxs
-          .map((tx: TokenizedAccountTx) => tx.data?.tokenId)
-          .filter((v: unknown) => typeof v === 'number'),
-      });
-      return rebalanceTxs;
-    }
-    emitSkip('fee-policy-or-threshold');
-    return [];
-  } catch (rebalanceErr) {
-    accountConsensusHelperLog.error('auto_rebalance_check.failed', {
-      error: rebalanceErr instanceof Error ? rebalanceErr.message : String(rebalanceErr),
-    });
-    throw rebalanceErr;
-  }
+): AccountTx[] {
+  if (owningEntityIsHub) return [];
+  const hasCounterpartyPolicy = Array.from(account.shadow.rebalance.policy.keys())
+    .some((tokenId) => resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId));
+  if (!hasCounterpartyPolicy) return [];
+  const rebalanceTxs = checkAutoRebalance(account, ourEntityId, counterpartyEntityId);
+  if (rebalanceTxs.length === 0) return [];
+  candidateEffects.push({
+    kind: 'debug',
+    payload: {
+      level: 'info',
+      code: 'REB_STEP',
+      step: 1,
+      accountId: counterpartyEntityId,
+      frameHeight,
+      status: 'ok',
+      event: 'request_queued',
+      txCount: rebalanceTxs.length,
+      tokenIds: rebalanceTxs
+        .map((tx: TokenizedAccountTx) => tx.data?.tokenId)
+        .filter((v: unknown) => typeof v === 'number'),
+    },
+  });
+  return rebalanceTxs;
 }
