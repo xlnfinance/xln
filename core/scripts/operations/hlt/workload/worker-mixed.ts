@@ -8,6 +8,7 @@
  * therefore mean exactly N payments + N offers = N/2 economic swaps per tick.
  */
 
+import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -303,6 +304,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       loadDurableBefore: hubDurableBefore,
       loadDurableAfter: hubDurableAfter,
       settlementEvidence,
+      environment: collectHltEnvironmentManifest(),
     });
     persistReport(join(args.workDir, 'production-swap-load-report.json'), swapReport);
     publishHltDashboardReport('swap', swapReport);

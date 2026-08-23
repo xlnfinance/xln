@@ -7,14 +7,16 @@ import { peekAccountStateRoot } from '../../commitment/state-root';
  * transition its ACK later commits: `isValidation` changes nothing in the
  * Account transition and the live state cannot move while the frame is
  * pending. Re-executing every tx at ACK time doubled the proposer-side
- * Account work. The prepared replica is kept here, keyed by the frame it
- * certifies, and published at ACK when the base state is still the same
- * object; otherwise ACK falls back to re-execution.
+ * Account work. Only the bilateral AccountState transition is kept here,
+ * keyed by the frame it certifies, and published at ACK when the live
+ * bilateral root is still the base root; otherwise ACK re-executes.
+ * Entity-private replica fields (shadow, dispute draft, proof nonce) keep
+ * moving while the ACK is outstanding and are never part of the cache.
  */
 export type PreparedProposalCommit = Readonly<{
   /** Root of the live AccountState the candidate was prepared from. */
   baseRoot: string;
-  candidate: AccountReplica;
+  state: AccountState;
   accountStateRoot: string;
   candidateEffects: readonly AccountOutput[];
   timedOutHashlocks: readonly string[];
@@ -32,6 +34,19 @@ const PREPARED_COMMIT_TX_TYPES: ReadonlySet<AccountTx['type']> = new Set<Account
 /** Only transitions whose handlers read nothing outside AccountState may skip re-execution. */
 export const preparedCommitCoversTxs = (txs: readonly AccountTx[]): boolean =>
   txs.every(tx => PREPARED_COMMIT_TX_TYPES.has(tx.type));
+
+/**
+ * Untouched draft collections keep the committed wrapper identity, so a
+ * replaced Entity-private collection proves the transition wrote outside the
+ * bilateral state and must not be replayed from the cache.
+ */
+export const preparedCommitLeavesPrivateStateUntouched = (
+  base: AccountReplica,
+  candidate: AccountReplica,
+): boolean =>
+  candidate.pendingWithdrawals === base.pendingWithdrawals
+  && candidate.shadow.rebalance.policy === base.shadow.rebalance.policy
+  && candidate.shadow.rebalance.submittedAtByToken === base.shadow.rebalance.submittedAtByToken;
 
 const preparedCommits = new RecencyMemo<string, PreparedProposalCommit>(8_192);
 

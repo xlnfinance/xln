@@ -8,6 +8,8 @@ export type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
 
 export type ResolveRecord = {
   fillRatio: number;
+  fillNumerator: bigint | null;
+  fillDenominator: bigint | null;
   cancelRemainder: boolean;
   height: number;
   executionGiveAmount: bigint | null;
@@ -170,8 +172,11 @@ const requireBigInt = (value: unknown, code: string): bigint => {
 const decodeResolveRecord = (value: unknown, index: number): ResolveRecord => {
   const record = requireRecord(value, `SWAP_HISTORY_RESOLVE_INVALID:${index}`);
   requireExactKeys(record, [
-    'fillRatio', 'cancelRemainder', 'height', 'executionGiveAmount', 'executionWantAmount', 'feeTokenId', 'feeAmount', 'comment',
+    'fillRatio', 'fillNumerator', 'fillDenominator', 'cancelRemainder', 'height',
+    'executionGiveAmount', 'executionWantAmount', 'feeTokenId', 'feeAmount', 'comment',
   ], `SWAP_HISTORY_RESOLVE_FIELDS_INVALID:${index}`);
+  const fillNumerator = record['fillNumerator'];
+  const fillDenominator = record['fillDenominator'];
   const executionGiveAmount = record['executionGiveAmount'];
   const executionWantAmount = record['executionWantAmount'];
   const feeTokenId = record['feeTokenId'];
@@ -181,6 +186,8 @@ const decodeResolveRecord = (value: unknown, index: number): ResolveRecord => {
   }
   return {
     fillRatio: requireUint(record['fillRatio'], `SWAP_HISTORY_RESOLVE_RATIO_INVALID:${index}`, 65535),
+    fillNumerator: fillNumerator === null ? null : requireBigInt(fillNumerator, `SWAP_HISTORY_RESOLVE_FILL_NUMERATOR_INVALID:${index}`),
+    fillDenominator: fillDenominator === null ? null : requireBigInt(fillDenominator, `SWAP_HISTORY_RESOLVE_FILL_DENOMINATOR_INVALID:${index}`),
     cancelRemainder: record['cancelRemainder'],
     height: requireUint(record['height'], `SWAP_HISTORY_RESOLVE_HEIGHT_INVALID:${index}`),
     executionGiveAmount: executionGiveAmount === null ? null : requireBigInt(executionGiveAmount, `SWAP_HISTORY_RESOLVE_GIVE_INVALID:${index}`),

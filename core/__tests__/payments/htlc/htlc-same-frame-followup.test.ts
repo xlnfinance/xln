@@ -9,7 +9,7 @@ import { EntityCollectionCandidateMap } from '../../../entity/state/persistent-c
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const domain = { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` };
-const opaque = { version: 'xln:htlc-opaque:v1' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
+const opaque = { version: 'xln:htlc-opaque:aes-gcm' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
 
 type SetupOverrides = {
   from?: string;

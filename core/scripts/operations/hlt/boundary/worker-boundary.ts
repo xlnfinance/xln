@@ -5,6 +5,7 @@
  */
 
 import type { RuntimeAdapterEntitySummary } from '../../../../api/runtime-adapter/types';
+import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from './environment-manifest';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
 import { validateAccountDeltas } from '../../../../account/validation/delta-validation';
 import { decodeAccountFrame } from '../../../../account/validation/frame-validation';
@@ -72,6 +73,7 @@ export type LoadSustainedReport = Readonly<{
   loadDurableBefore: LoadFrame;
   loadDurableAfter: LoadFrame;
   settlementEvidence: ProductionSwapSettlementEvidence;
+  environment: HltEnvironmentManifest;
 }>;
 
 export type LoadExchangeDistribution = Readonly<{
@@ -468,7 +470,7 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     'driverRssBefore', 'driverRssAfter',
     'walBytesBefore', 'walBytesAfter', 'crossedBookAfterRun',
     'durableBefore', 'durableAfter', 'loadDurableBefore', 'loadDurableAfter',
-    'settlementEvidence',
+    'settlementEvidence', 'environment',
   ], [], 'PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
   if (report['schema'] !== 'xln-production-swap-load-sustained-v1' || report['mode'] !== 'same') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEMA_INVALID');
   const schedule = report['schedule'];
@@ -599,5 +601,6 @@ export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport =
     driverRssAfter: Number(report['driverRssAfter']), walBytesBefore: Number(report['walBytesBefore']),
     walBytesAfter: Number(report['walBytesAfter']), crossedBookAfterRun: false,
     durableBefore, durableAfter, loadDurableBefore, loadDurableAfter, settlementEvidence,
+    environment: decodeHltEnvironmentManifest(report['environment'], 'PRODUCTION_SWAP_LOAD_REPORT_ENVIRONMENT'),
   };
 };

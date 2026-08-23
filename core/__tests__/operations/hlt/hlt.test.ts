@@ -584,6 +584,10 @@ describe('production swap load evidence', () => {
       loadDurableBefore: { height: 30, canonicalStateHash: root },
       loadDurableAfter: { height: 31, canonicalStateHash: root },
       settlementEvidence,
+      environment: {
+        disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, laneWalSync: true,
+        laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
+      },
     });
     expect(report.matchedTps).toBe(40);
     expect(report.fullySettledTps).toBe(40);

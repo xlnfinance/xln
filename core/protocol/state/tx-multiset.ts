@@ -1,4 +1,6 @@
 import { safeStringify } from '../serialization';
+import { encodeBinaryPayload } from '../serialization/binary-codec';
+import { keccakBytesHash } from '../crypto/keccak-text';
 import { RecencyMemo } from '../../support/collections/recency-memo';
 
 export type FingerprintableTx = {
@@ -42,10 +44,27 @@ type CompactAccountInput = {
 const sealKey = (seal: { hash: string; hanko?: string } | undefined): string =>
   seal ? `${seal.hash}:${seal.hanko ?? ''}` : '';
 
+const accountInputBodyDigests = new RecencyMemo<object, string>(16_384);
+
 /**
- * A Hub mempool is mostly Account inputs whose identity is fixed by their
- * endpoints, heights, hashes and Hankos; rendering the whole frame body (every
- * onion layer) to JSON for a multiset key was most of fingerprinting.
+ * Content digest of one complete Account input body (canonical binary form),
+ * computed once per queued object. Peer-claimed hashes and Hankos are not an
+ * identity before body validation: two envelopes claiming one `stateHash`
+ * over different txs must never share a mempool key.
+ */
+export const accountInputBodyDigest = (input: object): string => {
+  const hit = accountInputBodyDigests.get(input);
+  if (hit !== undefined) return hit;
+  const digest = keccakBytesHash(encodeBinaryPayload(input, 'msgpack', { omitSymbolKeys: true }));
+  accountInputBodyDigests.set(input, digest);
+  return digest;
+};
+
+/**
+ * A Hub mempool is mostly Account inputs. The key carries the routing scalars
+ * for readable diagnostics and the verified body digest for identity; the
+ * canonical binary walk is far cheaper than rendering every onion layer to
+ * JSON and runs once per queued object.
  */
 const compactAccountInputFingerprint = (data: unknown): string | undefined => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
@@ -61,7 +80,8 @@ const compactAccountInputFingerprint = (data: unknown): string | undefined => {
         + `:${proposal.frame.prevFrameHash}:${proposal.frame.accountStateRoot}:${proposal.frame.timestamp}:${proposal.frame.jHeight}`
         + `:${proposal.frame.byLeft}:${proposal.frame.accountTxs.length}:${proposal.frame.deltas.length}`
       : ''}` +
-    `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${sealKey(ack.disputeSeal)}` : ''}`;
+    `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${sealKey(ack.disputeSeal)}` : ''}` +
+    `|${accountInputBodyDigest(input)}`;
 };
 
 const txFingerprintUncached = (tx: FingerprintableTx): string => {

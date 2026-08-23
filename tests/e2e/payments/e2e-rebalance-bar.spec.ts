@@ -539,46 +539,8 @@ type OffchainFaucetResponse = {
   success?: boolean;
   status?: string;
   requestId?: string;
-  statusUrl?: string;
-  receipt?: {
-    id?: string;
-    status?: string;
-    enqueuedHeight?: number;
-    observedHeight?: number;
-    expiresAt?: number;
-  };
 };
 
-async function waitForRuntimeInputObserved(
-  page: Page,
-  statusUrl: string,
-  label: string,
-  timeoutMs = 30_000,
-): Promise<OffchainFaucetResponse['receipt']> {
-  const statusEndpoint = new URL(statusUrl, API_BASE_URL).toString();
-  const deadline = Date.now() + timeoutMs;
-  let lastBody: any = null;
-  let lastStatus = 0;
-  while (Date.now() < deadline) {
-    const response = await page.request.get(statusEndpoint);
-    const body = await response.json().catch(() => ({}));
-    lastBody = body;
-    lastStatus = response.status();
-    if (response.ok()) {
-      const receipt = body?.receipt;
-      const status = String(receipt?.status || '');
-      if (status === 'observed') return receipt;
-      if (status === 'expired') {
-        throw new Error(`${label} receipt expired before observation: ${JSON.stringify(body)}`);
-      }
-    }
-    await page.waitForTimeout(250);
-  }
-  throw new Error(
-    `${label} receipt was not observed within ${timeoutMs}ms: ` +
-      `status=${lastStatus} body=${JSON.stringify(lastBody)}`,
-  );
-}
 
 async function faucet(page: Page, userEntityId: string, hubEntityId: string): Promise<OffchainFaucetResponse> {
   const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
@@ -592,10 +554,11 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
     });
     const body = await resp.json().catch(() => ({}));
     if (resp.ok()) {
-      if (!body?.requestId || !body?.statusUrl) {
-        throw new Error(`faucet accepted without receipt metadata: ${JSON.stringify(body)}`);
+      if (!body?.requestId) {
+        throw new Error(`faucet accepted without requestId: ${JSON.stringify(body)}`);
       }
-      await waitForRuntimeInputObserved(page, body.statusUrl, `faucet ${body.requestId}`);
+      // Settlement is observed by callers through Account state progress; the
+      // faucet response carries no receipt polling URL.
       return body as OffchainFaucetResponse;
     }
     lastBody = body;

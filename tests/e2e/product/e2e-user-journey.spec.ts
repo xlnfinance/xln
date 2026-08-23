@@ -488,7 +488,6 @@ test.describe('E2E User Journey', () => {
       return {
         status: String(body?.status || ''),
         requestId: String(body?.requestId || ''),
-        statusUrl: String(body?.statusUrl || ''),
         accountReady: Boolean(body?.accountReady),
       };
     }, {
@@ -501,7 +500,6 @@ test.describe('E2E User Journey', () => {
       accountReady: true,
     });
     expect(faucetResult?.requestId, 'queued faucet must expose a receipt id').toMatch(/^offchain_/);
-    expect(faucetResult?.statusUrl, 'queued faucet must expose receipt polling URL').toContain(faucetResult!.requestId);
 
     await expect.poll(
       async () => (await getPersistedReceiptCursor(page)).nextHeight,

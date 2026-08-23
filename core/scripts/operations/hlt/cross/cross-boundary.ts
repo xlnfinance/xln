@@ -8,6 +8,7 @@ import {
 } from '../../../../protocol/boundary-validation';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import { decodeHubCoreRecord, type LoadFrame } from '../boundary/worker-boundary';
+import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from '../boundary/environment-manifest';
 
 export type CrossLoadReport = Readonly<{
   schema: 'xln-production-cross-swap-load-v1';
@@ -30,6 +31,7 @@ export type CrossLoadReport = Readonly<{
   hubDurableAfter: LoadFrame;
   loadDurableBefore: LoadFrame;
   loadDurableAfter: LoadFrame;
+  environment: HltEnvironmentManifest;
 }>;
 
 const requireText = (value: unknown, code: string): string => {
@@ -55,7 +57,7 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
     'loadOrderId', 'sourceAmount', 'targetAmount', 'routeStatus', 'enqueueAckElapsedMs',
     'commandObservedElapsedMs', 'economicCompletionElapsedMs', 'hubWalBytesBefore',
     'hubWalBytesAfter', 'loadWalBytesBefore', 'loadWalBytesAfter', 'hubDurableBefore',
-    'hubDurableAfter', 'loadDurableBefore', 'loadDurableAfter',
+    'hubDurableAfter', 'loadDurableBefore', 'loadDurableAfter', 'environment',
   ], [], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_FIELDS_INVALID');
   if (
     report['schema'] !== 'xln-production-cross-swap-load-v1' ||
@@ -89,6 +91,7 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
     hubDurableAfter: decodeReportFrame(report['hubDurableAfter']),
     loadDurableBefore: decodeReportFrame(report['loadDurableBefore']),
     loadDurableAfter: decodeReportFrame(report['loadDurableAfter']),
+    environment: decodeHltEnvironmentManifest(report['environment'], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_ENVIRONMENT'),
   };
 };
 

@@ -1,4 +1,5 @@
 /** One truthful cross-j economic fill on the production local stack. */
+import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/cross-j';
@@ -238,6 +239,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       hubWalBytesBefore, hubWalBytesAfter: directoryBytes(hubWal),
       loadWalBytesBefore, loadWalBytesAfter: directoryBytes(loadWal),
       hubDurableBefore: hubBefore, hubDurableAfter: decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest')),
+      environment: collectHltEnvironmentManifest(),
       loadDurableBefore: loadBefore, loadDurableAfter: decodeLoadFrame(await load.adapter.read<unknown>('frame/latest')),
     });
     persistReport(join(args.workDir, 'production-cross-swap-load-report.json'), report, decodeCrossLoadReport);

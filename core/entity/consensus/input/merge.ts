@@ -8,6 +8,7 @@ import { hashEntityLeaderVoteBody } from '../leader';
 import { hashJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { getEffectiveEntityInputTxs } from '../output/envelope';
 import { accountInputAck, accountInputProposal } from '../../../account/consensus/flush';
+import { accountInputBodyDigest } from '../../../protocol/state/tx-multiset';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
@@ -91,9 +92,9 @@ const canonicalEntityInputSortKey = (input: EntityConsensusInput): string => saf
 
 /**
  * Tie-break identity of one tx. Account inputs are the bulk of a Hub frame;
- * their exact bytes are determined by (kind, endpoints, heights, hashes,
- * Hankos), so rendering the full frame body to JSON for the sort was pure
- * overhead. Other tx kinds keep the exact canonical form.
+ * the routing scalars order them cheaply and the memoized canonical body
+ * digest breaks every remaining tie by content. Other tx kinds keep the
+ * exact canonical form.
  */
 const compactEntityTxSortKey = (tx: EntityTx): unknown => {
   if (tx.type !== 'accountInput') return tx;
@@ -108,14 +109,14 @@ const compactEntityTxSortKey = (tx: EntityTx): unknown => {
       ? [
           proposal.frame.height, proposal.frame.stateHash, proposal.frameHanko ?? '',
           proposal.disputeSeal?.hash ?? '', proposal.disputeSeal?.hanko ?? '',
-          // Body scalars: two envelopes claiming one hash over different bodies
-          // still sort apart, without rendering the txs.
           proposal.frame.prevFrameHash, proposal.frame.accountStateRoot, proposal.frame.timestamp,
-          proposal.frame.jHeight, proposal.frame.byLeft, proposal.frame.accountTxs.length, proposal.frame.deltas.length,
+          proposal.frame.jHeight, proposal.frame.byLeft,
         ]
       : null,
     ack ? [ack.height, ack.frameHash, ack.frameHanko ?? '', ack.disputeSeal?.hash ?? '', ack.disputeSeal?.hanko ?? ''] : null,
-    input.kind === 'dispute' || input.kind === 'frame' || input.kind === 'frame_ack' || input.kind === 'ack' ? null : safeStringify(input),
+    // Verified body digest: two envelopes claiming one hash over different
+    // bodies sort apart by content, not by a claimed scalar.
+    accountInputBodyDigest(input),
   ];
 };
 

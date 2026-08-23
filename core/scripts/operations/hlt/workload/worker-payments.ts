@@ -9,7 +9,7 @@
  * key stores and relay sessions, so every hop crosses the real P2P path.
  */
 
-import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
+import { collectHltEnvironmentManifest, isProductionEquivalentHltEnvironment } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { decodeSettlementEvidenceResponse } from '../../../../api/runtime-adapter/control/settlement-evidence';
@@ -507,6 +507,11 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     publishHltDashboardReport('payment', report);
     publishHltDashboardPerfFromWorkDir(args.workDir);
     console.log(safeStringify(report));
+    console.log(
+      `[load] verdict deliveredTps=${report.deliveredTps.toFixed(1)} ` +
+      `${isProductionEquivalentHltEnvironment(report.environment) ? 'production-equivalent' : 'DIAGNOSTIC (isolated/fast environment)'} ` +
+      `laneNice=${report.environment.laneNice} certifiedHistory=${report.environment.certifiedHistory} hubWalSync=${report.environment.hubWalSync}`,
+    );
   } finally {
     await stopLaneRuntimes(users);
     hub.adapter.disconnect();

@@ -152,7 +152,7 @@
     try {
       const response = await qaFetch('/api/qa/runs?limit=50', { cache: 'no-store' });
       const payload = requireUnknownRecord(await readJsonUnknown(response), 'RUNS_RESPONSE_INVALID');
-      rejectExtraKeys(payload, ['ok', 'error', 'qaAuth', 'ledger'], 'RUNS_RESPONSE_EXTRA_FIELD');
+      rejectExtraKeys(payload, ['ok', 'error', 'qaAuth', 'runs', 'ledger', 'testLedger', 'regression', 'verdict'], 'RUNS_RESPONSE_EXTRA_FIELD');
       if (payload['ok'] !== true) throw new Error(typeof payload['error'] === 'string' ? payload['error'] : `QA runs HTTP ${response.status}`);
       const qaAuth = decodeQaAuthInfo(payload['qaAuth']);
       qaAuthLabel = qaAuth?.disabled ? 'open' : qaAuth?.scope ?? 'locked';

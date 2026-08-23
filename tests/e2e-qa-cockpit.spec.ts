@@ -459,6 +459,10 @@ const QA_FIXTURE_RUN = {
 const QA_FIXTURE_SUMMARY = {
   ...QA_FIXTURE_RUN,
   shards: undefined,
+  suiteKey: 'fixture-suite',
+  suiteLabel: 'qa.cockpit-fixture',
+  category: 'e2e',
+  testCategory: 'functional',
   failingTargets: ['qa.cockpit-fixture'],
 };
 
@@ -489,6 +493,8 @@ const QA_FAST_SUMMARY = {
     reason: 'Within thresholds vs baseline',
     metrics: [],
   },
+  suiteKey: 'fixture-fast-suite',
+  suiteLabel: 'qa.cockpit-fast',
   failingTargets: [],
 };
 
@@ -774,6 +780,7 @@ const QA_HISTORY = [
     browserWarningCount: QA_FIXTURE_BROWSER_HEALTH.warningCount,
     networkFailureCount: QA_FIXTURE_BROWSER_HEALTH.networkFailureCount,
     httpErrorCount: QA_FIXTURE_BROWSER_HEALTH.httpErrorCount,
+    logsDir: '/Users/zigota/xln/.logs/qa/fixture',
   },
   {
     runId: QA_FAST_RUN_ID,
@@ -805,6 +812,7 @@ const QA_HISTORY = [
     browserWarningCount: 0,
     networkFailureCount: 0,
     httpErrorCount: 0,
+    logsDir: '/Users/zigota/xln/.logs/qa/fixture',
   },
 ];
 

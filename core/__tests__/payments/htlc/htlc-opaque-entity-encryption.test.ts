@@ -86,14 +86,14 @@ describe('opaque Entity HTLC encryption', () => {
   test('throws loud for local shared-key mismatch', () => {
     const publicKey = hex(x25519.getPublicKey(getBytes(`0x${'21'.repeat(32)}`)));
     expect(() => decryptOpaqueHtlcBytes(
-      { version: 'xln:htlc-opaque:v1', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+      { version: 'xln:htlc-opaque:aes-gcm', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
       publicKey, `0x${'31'.repeat(32)}`, `0x${'41'.repeat(32)}`,
     )).toThrow('HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH');
   });
 
   test('content-keyed hash memos are byte-identical to a cold hash', () => {
     const opaque = {
-      version: 'xln:htlc-opaque:v1' as const,
+      version: 'xln:htlc-opaque:aes-gcm' as const,
       ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     };
     const context = {

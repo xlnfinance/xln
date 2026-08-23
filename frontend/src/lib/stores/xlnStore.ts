@@ -895,6 +895,8 @@ const createEmbeddedRuntimeAdapter = async (
       loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
       listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
       readActivityPage: (opts) => xln.readPersistedRuntimeActivityPage(env, opts),
+      readAccountSwapHistoryPage: (entityId, counterpartyId, opts) =>
+        xln.readPersistedAccountSwapHistoryPage(env, entityId, counterpartyId, opts),
     }),
   });
 };

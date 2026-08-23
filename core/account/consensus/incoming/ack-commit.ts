@@ -26,15 +26,6 @@ import { timePerfPhase } from '../../../support/performance/profile';
 
 const ackLog = createStructuredLogger('account.ack');
 
-/** Proposer-side dispute proof fields written by finalize after the candidate was captured. */
-const LOCAL_PROOF_FIELDS = [
-  'currentDisputeHash',
-  'currentDisputeProofBodyHash',
-  'currentDisputeProofNonce',
-  'currentDisputeProofProposerIsLeft',
-  'currentDisputeProofHanko',
-] as const satisfies readonly (keyof AccountReplica)[];
-
 export type PendingFrameAckResult =
   | { kind: 'not_applicable' }
   | { kind: 'fallthrough' }
@@ -157,22 +148,16 @@ const applyPendingFrameTransactions = async (
 ): Promise<void> => {
   const prepared = takePreparedProposalCommit(preparedCommitKey(account, pendingFrame.stateHash), account.state);
   if (prepared) {
-    // The candidate was captured before the proposal was finalized: the local
-    // dispute seal draft and proof nonce moved on afterwards. Fold the
-    // transition (state, withdrawals, shadow) but keep those live proof fields;
-    // folding the whole captured shell rewound the nonce and the next seal reused it.
-    const folded: AccountReplica = { ...prepared.candidate, proofHeader: account.proofHeader };
-    for (const field of LOCAL_PROOF_FIELDS) {
-      if (account[field] === undefined) delete folded[field];
-      else Reflect.set(folded, field, account[field]);
-    }
-    publishAccountOverlay(account, folded);
+    // Only the bilateral transition is replayed. Everything Entity-private on
+    // the live replica (shadow, dispute draft, proof nonce) kept moving while
+    // the ACK was outstanding and stays as it is.
+    publishAccountOverlay(account, { ...account, state: prepared.state });
     assertLiveCommitMatchesFrame(
       account,
       pendingFrame.accountStateRoot,
       'proposer',
       pendingFrame.height,
-      prepared.candidate,
+      undefined,
       prepared.accountStateRoot,
     );
     candidateEffects.push(...prepared.candidateEffects);

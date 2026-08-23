@@ -1,5 +1,6 @@
 /** Same-j production workload and durable economic completion report. */
 
+import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -177,6 +178,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
         canonicalStateHash: laneFinalFrames[0]!.canonicalStateHash,
       },
       settlementEvidence,
+      environment: collectHltEnvironmentManifest(),
     });
     persistReport(join(args.workDir, 'production-swap-load-report.json'), report);
     publishHltDashboardReport('swap', report);

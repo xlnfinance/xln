@@ -8,6 +8,7 @@ import type {
   QaRetentionPurgeResult,
   QaRestartAuditEntry,
   QaRun,
+  QaShard,
   QaRunLedgerEntry,
   QaStoryScreenshot,
   QaSummary,
@@ -26,7 +27,8 @@ const isStringArray = (value: unknown): value is string[] => Array.isArray(value
 export const decodeQaAuthInfo = (value: unknown): QaAuthInfo | undefined => {
   if (value === undefined) return undefined;
   const record = requireUnknownRecord(value, 'QA_AUTH_INVALID');
-  rejectExtraKeys(record, ['scope', 'disabled'], 'QA_AUTH_EXTRA_FIELD');
+  rejectExtraKeys(record, ['scope', 'disabled', 'actorKeyId'], 'QA_AUTH_EXTRA_FIELD');
+  if (record['actorKeyId'] !== undefined && typeof record['actorKeyId'] !== 'string') throw new Error('QA_AUTH_ACTOR_INVALID');
   if (record['scope'] !== undefined && record['scope'] !== 'read' && record['scope'] !== 'admin') throw new Error('QA_AUTH_SCOPE_INVALID');
   const disabled = optionalBoolean(record['disabled'], 'QA_AUTH_DISABLED_INVALID');
   return {
@@ -42,10 +44,27 @@ export const isQaSummary = (value: unknown): value is QaSummary =>
   isFiniteNumber(value['createdAt']) && isNullableFiniteNumber(value['completedAt']) && typeof value['suiteKey'] === 'string' &&
   typeof value['suiteLabel'] === 'string' && typeof value['category'] === 'string' && isStringArray(value['failingTargets']);
 
+const isShardStatus = (value: unknown): boolean =>
+  value === 'passed' || value === 'failed' || value === 'cancelled' || value === 'unknown';
+
+const isQaArtifact = (value: unknown): boolean =>
+  isUnknownRecord(value) && typeof value['name'] === 'string' && typeof value['relativePath'] === 'string';
+
+export const isQaShard = (value: unknown): value is QaShard =>
+  isUnknownRecord(value) && isFiniteNumber(value['shard']) && isShardStatus(value['status']) &&
+  isNullableFiniteNumber(value['durationMs']) && isNullableString(value['handle']) && isNullableString(value['target']) &&
+  isNullableString(value['title']) && isNullableString(value['error']) && typeof value['hasVideo'] === 'boolean' &&
+  typeof value['hasTrace'] === 'boolean' && Array.isArray(value['artifacts']) && value['artifacts'].every(isQaArtifact) &&
+  Array.isArray(value['timelineSteps']) && Array.isArray(value['slowSteps']);
+
 export const isQaRun = (value: unknown): value is QaRun => {
   if (!isUnknownRecord(value)) return false;
   const shards = value['shards'];
-  return isQaSummary(value) && Array.isArray(shards) && shards.every(isUnknownRecord);
+  // A run view is the manifest shape: suite/category fields belong to the
+  // ledger summary and are not part of the per-run manifest.
+  return typeof value['runId'] === 'string' && isRunStatus(value['status']) && isFiniteNumber(value['createdAt']) &&
+    isNullableFiniteNumber(value['completedAt']) && isFiniteNumber(value['totalShards']) &&
+    Array.isArray(shards) && shards.every(isQaShard);
 };
 
 export const isQaRunLedgerEntry = (value: unknown): value is QaRunLedgerEntry =>

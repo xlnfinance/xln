@@ -7,7 +7,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityState } from '../../../entity/types';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
-const envelope = { version: 'xln:htlc-opaque:v1' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
+const envelope = { version: 'xln:htlc-opaque:aes-gcm' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
 
 describe('HTLC prepared Entity context boundary', () => {
   test('discovers a payment inside its signed Entity command wrapper', () => {

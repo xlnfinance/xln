@@ -4,7 +4,12 @@
  */
 
 import { peekAccountStateRoot } from '../../commitment/state-root';
-import { preparedCommitCoversTxs, preparedCommitKey, rememberPreparedProposalCommit } from './prepared-commit';
+import {
+  preparedCommitCoversTxs,
+  preparedCommitKey,
+  preparedCommitLeavesPrivateStateUntouched,
+  rememberPreparedProposalCommit,
+} from './prepared-commit';
 import type { AccountFrame, AccountOutput, AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
@@ -103,11 +108,13 @@ const rememberProposalForAck = (
   newFrame: AccountFrame,
   validation: { candidateEffects: AccountOutput[]; timedOutHashlocks: string[] },
 ): void => {
-  const baseRoot = preparedCommitCoversTxs(newFrame.accountTxs) ? peekAccountStateRoot(account.state) : undefined;
+  if (!preparedCommitCoversTxs(newFrame.accountTxs)) return;
+  if (!preparedCommitLeavesPrivateStateUntouched(account, candidate)) return;
+  const baseRoot = peekAccountStateRoot(account.state);
   if (baseRoot === undefined) return;
   rememberPreparedProposalCommit(preparedCommitKey(account, newFrame.stateHash), {
     baseRoot,
-    candidate,
+    state: candidate.state,
     accountStateRoot: newFrame.accountStateRoot,
     candidateEffects: validation.candidateEffects,
     timedOutHashlocks: validation.timedOutHashlocks,

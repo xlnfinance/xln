@@ -810,6 +810,14 @@ async function faucetSwapTokenUntilOutCapacity(
   );
 }
 
+async function readClosedOrderTabCount(page: Page): Promise<number> {
+  const tab = page.getByTestId('swap-orders-tab-closed').first();
+  if ((await tab.count()) === 0) return 0;
+  const text = String(await tab.textContent() || '');
+  const match = /\((\d+)\)/.exec(text);
+  return match ? Number(match[1]) : 0;
+}
+
 async function readSwapState(
   page: Page,
   entityId: string,
@@ -1485,6 +1493,7 @@ async function executeOrderbookClickFill(
     expect(fillTokenIds.every(tokenId => Number.isInteger(tokenId) && tokenId > 0)).toBe(true);
     expect(new Set(fillTokenIds).size).toBe(2);
     const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+    const closedCountBefore = await readClosedOrderTabCount(page);
     await page.evaluate(({ entityId, signerId, counterpartyId }) => {
       const runtimeProcess = (globalThis as any).process;
       if (runtimeProcess?.env) {
@@ -1573,7 +1582,7 @@ async function executeOrderbookClickFill(
           const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
           return (
             state.accountHistoryResolveCount > swapStateBefore.accountHistoryResolveCount
-            || state.accountSwapClosedOrdersSize > swapStateBefore.accountSwapClosedOrdersSize
+            || (await readClosedOrderTabCount(page)) > closedCountBefore
           );
         },
         { timeout: 30_000, intervals: [100, 250, 500, 1000] },
@@ -1690,8 +1699,7 @@ async function executeOrderbookClickFill(
     await expect(closedOrdersTable).toBeVisible({ timeout: 10_000 });
     await expect
       .poll(async () => {
-        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
-        return state.accountSwapClosedOrdersSize;
+        return await readClosedOrderTabCount(page);
       }, {
         timeout: 15_000,
         intervals: [100, 250, 500],
@@ -1871,7 +1879,7 @@ async function configureRestingBuyFromBestAsk(
   expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
   await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, options?.maxQuote ?? 25)));
 
-  const restingPrice = shiftDisplayedPrice(bestAskText, -0.0001);
+  const restingPrice = shiftDisplayedPrice(bestAskText, -0.01);
   await priceInput.fill(restingPrice);
   await expect(priceInput).toHaveValue(restingPrice);
   await expect(placeButton).toBeEnabled({ timeout: 10_000 });
@@ -2256,7 +2264,9 @@ test.describe('E2E Swap Flow', () => {
       await expectSelectedUiRuntimeIdentity(page, accountRef);
       const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
       expect(state.accountSwapOffersSize).toBe(0);
-      expect(state.accountSwapClosedOrdersSize, 'terminal closed-order store must contain canceled order').toBeGreaterThan(0);
+      await expect
+        .poll(async () => await readClosedOrderTabCount(page), { timeout: 20_000 })
+        .toBeGreaterThan(0);
     });
 
     await timedStep('swap.assert_closed_tab_canceled_row', async () => {
@@ -2467,7 +2477,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
     await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, 25)));
     await expect(priceInput).toHaveValue(normalizeDisplayedPriceText(clickedAskText), { timeout: 10_000 });
-    const editedPrice = shiftDisplayedPrice(clickedAskText, -0.0001);
+    const editedPrice = shiftDisplayedPrice(clickedAskText, -0.01);
     await priceInput.fill(editedPrice);
     await expect(priceInput).toHaveValue(editedPrice);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });

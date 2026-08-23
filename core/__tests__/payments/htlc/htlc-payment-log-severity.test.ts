@@ -68,7 +68,7 @@ test('HTLC admission rejects atomically instead of committing a fail-soft no-op'
     timelock: 1_000n,
     revealBeforeHeight: 10,
     nextHopEntityId: nextHop,
-    envelope: { version: 'xln:htlc-opaque:v1' as const, ciphertext: 'A'.repeat(64) },
+    envelope: { version: 'xln:htlc-opaque:aes-gcm' as const, ciphertext: 'A'.repeat(64) },
   };
   const context = { htlc: { version: 1 as const, entries: [], originated: [prepared] } } as any;
 

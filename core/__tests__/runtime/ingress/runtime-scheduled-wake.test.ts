@@ -50,6 +50,9 @@ import {
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import { makeAccount } from '../../helpers/cross-j';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { hubRebalanceTaskAlreadyRanAtTimestamp } from '../../../entity/tx/handlers/account/committed-input';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -76,7 +79,7 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
     jurisdiction: commandJurisdiction,
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(id, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'wake-test', isHub: false, avatar: '', bio: '', website: '' },
@@ -86,6 +89,11 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
+
+const accountsWith = (state: EntityState, counterparty: string, account: ReturnType<typeof makeAccount>) => {
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) throw new Error('TEST_ACCOUNTS_NOT_COMMITTED_GRAPH');
+  return state.accounts.updated(counterparty, account);
+};
 
 const makeReplica = (state: EntityState, signer: string, isProposer: boolean): EntityReplica => ({
   entityId: state.entityId,
@@ -127,7 +135,7 @@ describe('runtime scheduled wake', () => {
     state.hubRebalanceConfig = {} as never;
     const account = makeAccount(id, counterparty);
     account.pendingFrame = { ...account.currentFrame, height: 1, timestamp: 0, accountTxs: [] };
-    state.accounts.set(counterparty, account);
+    state.accounts = accountsWith(state, counterparty, account);
     const replica = makeReplica(state, proposer, true);
 
     expect(entityNeedsPeriodicWake(replica)).toBe(false);
@@ -142,7 +150,7 @@ describe('runtime scheduled wake', () => {
     const account = makeAccount(id, counterparty);
     account.pendingFrame = { ...account.currentFrame, height: 1, timestamp: 0, accountTxs: [] };
     account.pendingProposalSentAt = 1_000;
-    state.accounts.set(counterparty, account);
+    state.accounts = accountsWith(state, counterparty, account);
     const dueAt = 1_000 + ACCOUNT_PROPOSAL_RESEND_MS;
 
     // Old rule counted Entity frames: many frames in a burst resent early and an
@@ -162,7 +170,8 @@ describe('runtime scheduled wake', () => {
     expect(() => assertScheduledWakeMatchesState(state, {
       ...tx, data: { ...tx.data, dueAt: dueAt - 1, jobs: [{ kind: 'accountResend', id: counterparty, dueAt: dueAt - 1 }] },
     })).toThrow('SCHEDULED_WAKE_RESEND_DEADLINE_MISMATCH');
-    delete account.pendingFrame;
+    const { pendingFrame: _pending, pendingProposalSentAt: _sentAt, ...idle } = account;
+    state.accounts = accountsWith(state, counterparty, idle as typeof account);
     expect(() => assertScheduledWakeMatchesState(state, tx)).toThrow('SCHEDULED_WAKE_RESEND_NOT_PENDING');
     expect(nextProposalResendDeadline(state)).toBeNull();
   });
@@ -174,8 +183,8 @@ describe('runtime scheduled wake', () => {
     const state = makeState(id, proposer, 0);
     state.hubRebalanceConfig = {} as never;
     const account = makeAccount(id, counterparty);
-    account.state.requestedRebalance = new Map([[1, 1n]]);
-    state.accounts.set(counterparty, account);
+    account.state.requestedRebalance = PersistentAccountStateMap.fromEntries('requestedRebalance', [[1, 1n]]);
+    state.accounts = accountsWith(state, counterparty, account);
     const replica = makeReplica(state, proposer, true);
 
     expect(entityNeedsPeriodicWake(replica)).toBe(true);
@@ -337,7 +346,7 @@ describe('runtime scheduled wake', () => {
     const proposer = signerId('41');
     const validator = signerId('42');
     const proposerState = makeState(id, proposer, env.state.timestamp);
-    const validatorState = structuredClone(proposerState);
+    const validatorState = makeState(id, proposer, env.state.timestamp);
     scheduleHook(proposerState.crontabState!, {
       id: 'watchdog:due',
       triggerAt: 9_000,

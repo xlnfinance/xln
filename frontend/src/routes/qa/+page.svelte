@@ -706,7 +706,7 @@
       const catalogPayload = decodeQaEnvelope(await readJsonUnknown(catalogResponse), ['ok', 'qaAuth', 'catalog', 'restart', 'restartAllowed', 'error']);
       const historyPayload = decodeQaEnvelope(await readJsonUnknown(historyResponse), ['ok', 'qaAuth', 'history', 'restart', 'restartAllowed', 'error']);
       const auditPayload = decodeQaEnvelope(await readJsonUnknown(auditResponse), ['ok', 'qaAuth', 'audit', 'error']);
-      const storiesPayload = decodeQaEnvelope(await readJsonUnknown(storiesResponse), ['ok', 'qaAuth', 'stories', 'releasePack', 'error']);
+      const storiesPayload = decodeQaEnvelope(await readJsonUnknown(storiesResponse), ['ok', 'qaAuth', 'total', 'stories', 'releasePack', 'error']);
       if (!catalogResponse.ok || !historyResponse.ok || !auditResponse.ok || !storiesResponse.ok) throw new Error('Failed to load QA metadata');
       applyDecodedQaAuth(catalogPayload['qaAuth']);
       applyDecodedQaAuth(historyPayload['qaAuth']);
@@ -770,7 +770,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ runId: selectedRun.runId, shard: selectedShard.shard }),
       });
-      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'command', 'expectedGitHead', 'codeHash', 'dirty', 'error']);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'mode', 'target', 'title', 'command', 'expectedGitHead', 'gitBranch', 'codeHash', 'dirty', 'restart', 'restartAllowed', 'error']);
       if (!response.ok || !Array.isArray(payload['command']) || !payload['command'].every((entry) => typeof entry === 'string')) throw new Error('Failed to plan QA restart');
       if (payload['expectedGitHead'] !== undefined && payload['expectedGitHead'] !== null && typeof payload['expectedGitHead'] !== 'string') throw new Error('QA_RESTART_PLAN_HEAD_INVALID');
       if (payload['codeHash'] !== undefined && typeof payload['codeHash'] !== 'string') throw new Error('QA_RESTART_PLAN_HASH_INVALID');
@@ -801,7 +801,7 @@
           expectedGitHead: restartExpectedGitHead.trim(),
         }),
       });
-      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'restart', 'error']);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'restart', 'restartAllowed', 'error']);
       const nextRestart = optionalDecoded(payload['restart'], 'QA_RESTART_INVALID', isRestartStatus);
       if (!response.ok || !nextRestart) throw new Error('Failed to start QA restart');
       restart = nextRestart;
@@ -822,7 +822,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: retentionConfirm.trim() }),
       });
-      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'result', 'error']);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'result', 'error']);
       const result = optionalDecoded(payload['result'], 'QA_RETENTION_RESULT_INVALID', isQaRetentionPurgeResult);
       if (!response.ok || !result) throw new Error('Failed to purge old QA runs');
       retentionResult = result;
@@ -846,7 +846,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: historyBackfillConfirm.trim(), limit: 500 }),
       });
-      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'result', 'error']);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'result', 'error']);
       const result = optionalDecoded(payload['result'], 'QA_HISTORY_BACKFILL_RESULT_INVALID', isQaHistoryBackfillResult);
       if (!response.ok || !result) throw new Error('Failed to backfill QA history');
       historyBackfillResult = result;
@@ -869,7 +869,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: restartAbortConfirm.trim() }),
       });
-      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'restart', 'error']);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'restart', 'restartAllowed', 'error']);
       const nextRestart = optionalDecoded(payload['restart'], 'QA_RESTART_ABORT_INVALID', isRestartStatus);
       if (!response.ok || !nextRestart) throw new Error('Failed to abort QA restart');
       restart = nextRestart;

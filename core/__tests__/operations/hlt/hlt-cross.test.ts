@@ -143,6 +143,10 @@ describe('production cross-j swap load boundaries', () => {
       enqueueAckElapsedMs: 1, commandObservedElapsedMs: 2, economicCompletionElapsedMs: 3,
       hubWalBytesBefore: 10, hubWalBytesAfter: 20, loadWalBytesBefore: 30, loadWalBytesAfter: 40,
       hubDurableBefore: frame, hubDurableAfter: frame, loadDurableBefore: frame, loadDurableAfter: frame,
+      environment: {
+        disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, laneWalSync: true,
+        laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
+      },
     };
     expect(decodeCrossLoadReport(report).routeStatus).toBe('settled');
     expect(() => decodeCrossLoadReport({ ...report, routeStatus: 'cancelled' }))

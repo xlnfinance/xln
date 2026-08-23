@@ -19,7 +19,7 @@ describe('htlc envelope validation', () => {
       validateEnvelope({
         nextHop: '0x' + '1'.repeat(64),
         innerEnvelope: {
-          version: 'xln:htlc-opaque:v1',
+          version: 'xln:htlc-opaque:aes-gcm',
           ciphertext: 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES + 1),
         },
         forwardAmount: '1',

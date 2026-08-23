@@ -8,7 +8,7 @@ import { RecencyMemo } from '../../support/collections/recency-memo';
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { countOp } from '../../support/performance/op-counters';
 
-export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:v1' as const;
+export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:aes-gcm' as const;
 export type OpaqueHtlcCiphertext = Readonly<{
   version: typeof HTLC_OPAQUE_CIPHERTEXT_VERSION;
   /** ephemeral X25519 public key || AES-256-GCM ciphertext+tag */
