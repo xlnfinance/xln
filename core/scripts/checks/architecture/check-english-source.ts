@@ -14,9 +14,6 @@ const MULTILINGUAL_FILES = new Set([
   'frontend/src/lib/components/Landing/content.ts',
   'frontend/src/lib/i18n/index.ts',
   'frontend/src/lib/i18n/locales/ru.json',
-  'frontend/static/XLN_RCPAN_Doctrine_and_Pilot_Brief_v3_RU.md',
-  'frontend/static/XLN_RCPAN_LLM_Statecraft_Brief_RU.md',
-  'frontend/static/docs-static/guide-ru.md',
 ]);
 
 // Bundled browser runtime embeds compressed BIP39 tables whose opaque byte

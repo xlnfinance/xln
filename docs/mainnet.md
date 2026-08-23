@@ -207,7 +207,3 @@ Keep these files aligned before launch:
 - [deployment/deployment.md](deployment/deployment.md)
 - [docs/security/external-audit-brief.md](security/external-audit-brief.md)
 - [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md)
-
-## Historical Reference
-
-Older readiness snapshots are preserved under [archive/](archive/) for context.

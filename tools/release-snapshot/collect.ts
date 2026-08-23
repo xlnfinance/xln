@@ -35,7 +35,6 @@ const GENERATED_PREFIXES = [
   'jurisdictions/typechain',
   'frontend/static/contracts/',
   'frontend/static/docs-catalog/',
-  'frontend/static/docs-static/',
   'frontend/static/hash-wasm-',
   'frontend/.svelte-kit/',
   'frontend/build/',

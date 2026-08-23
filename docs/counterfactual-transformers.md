@@ -186,7 +186,7 @@ Gas economics:
 Wallet pre-checks `eth_getCode(clauseAddress)` and shows “already deployed → dispute
 needs no deploy” badge.
 
-### 2.5 The single Depository decision (consensus change, pre-mainnet)
+### 2.5 The single Depository decision (consensus change)
 
 Today `_applyTransformer` forwards all gas and a clause revert bricks the entire
 `disputeFinalize` — a malicious/buggy clause can freeze the account forever.
@@ -203,7 +203,7 @@ Rationale: a skipped clause degrades to the raw offdeltas both parties signed an
 max swing already bounded by allowances; removes the only liveness-DoS vector.
 Alternative (policy S): ship strict for v1, rely on wallet simulation + lints —
 acceptable only if redeploying Depository later is acceptable. Decide before Phase 1
-lands. Pre-mainnet ⇒ K is cheap now.
+lands.
 
 ## 3. Runtime layer
 
@@ -333,7 +333,7 @@ Active clause card: params summary, expiry countdown, “outcome if disputed now
 
 ## 5. Phases
 
-**P0 — decide policy K vs S** (only consensus decision; blocks prod, not prototype).
+**P0 — decide policy K vs S** (only consensus decision).
 
 **P1 — contracts:** ClauseBase.sol, CallOption.sol, Escrow.sol; canonical deployer on
 anvil/BrowserVM genesis; full dispute e2e test on an unmodified Depository (install →

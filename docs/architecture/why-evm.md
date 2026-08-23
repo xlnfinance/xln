@@ -384,9 +384,9 @@ This is not a limitation. It's a design principle.
 
 ## References
 
-- [FIFO Debt Enforcement](/docs/readme.md#rcpe-primitive)
-- [J-Machine Architecture](/docs/jea.md)
-- [Prior Art: Why Not Lightning?](/docs/priorart.md)
+- [FIFO debt enforcement](../constraints.md)
+- [Jurisdiction Machine](../core/11_Jurisdiction_Machine.md)
+- [Architecture comparison](../competitors.md)
 - [Depository.sol Implementation](/jurisdictions/contracts/Depository.sol)
 # Jurisdiction Requirement
 

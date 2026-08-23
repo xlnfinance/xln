@@ -1,9 +1,8 @@
 # Changelog
 
-All notable XLN changes are documented here.
-
-The project is still pre-mainnet. Version `0.1.7` adds frozen-core integrity and
-xln Foundation Hanko attestations to the release-observability baseline.
+All notable xln changes are documented here. The current release identity is
+defined by [VERSION](VERSION); signed immutable release history is indexed by
+[docs/releases/manifest.json](docs/releases/manifest.json).
 
 ## [0.1.7] - 2026-07-11
 

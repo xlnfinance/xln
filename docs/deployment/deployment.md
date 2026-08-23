@@ -1,13 +1,6 @@
-# XLN Deployment
+# xln deployment
 
-This is the canonical deployment doc for XLN.
-
-It replaces the older split between:
-- `server-setup.md`
-- `relay-deployment.md`
-- `testnet-setup.md`
-
-Those files were moved to `docs/archive/deployment/`.
+This is the canonical deployment document for xln.
 
 ## Scope
 
@@ -218,11 +211,3 @@ Expected result: `101 Switching Protocols`.
 4. disk pressure and log growth
 5. anvil/RPC responsiveness
 6. relay connectivity only if relay is still a separate concern
-
-## Historical Sources
-
-If you need the old step-by-step or exact legacy wording:
-
-- `docs/archive/deployment/server-setup-legacy.md`
-- `docs/archive/deployment/relay-deployment-legacy.md`
-- `docs/archive/deployment/testnet-setup-legacy.md`

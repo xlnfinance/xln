@@ -1,12 +1,10 @@
 export const FEATURED_DOC_IDS = [
   'readme',
   'constraints',
+  'competitors',
   'intro',
   'core/12_invariant',
   'core/rjea-architecture',
-  'status',
-  'mainnet',
-  'roadmap',
   'implementation/payment-spec',
   'recovery-watchtower-protocol',
 ];
@@ -14,75 +12,51 @@ export const FEATURED_DOC_IDS = [
 export const READING_PATHS = [
   {
     id: 'new-to-xln',
-    title: 'New to XLN',
-    description: 'Problem, invariant, architecture, then the current truth.',
+    title: 'New to xln',
+    description: 'Constraints, comparison, invariant, then the implementation cascade.',
     items: [
       'readme',
       'constraints',
+      'competitors',
       'intro',
       'core/12_invariant',
       'core/rjea-architecture',
-      'status',
     ],
   },
   {
     id: 'launch-and-risk',
-    title: 'Launch and Risk',
-    description: 'What blocks launch, what the release bar is, and where recovery fits.',
-    items: [
-      'status',
-      'mainnet',
-      'consensus-invariants',
-      'implementation/payment-spec',
-      'recovery-watchtower-protocol',
-      'deployment/deployment',
-      'deployment/ops-runbook',
-    ],
+    title: 'Launch and risk',
+    description: 'Current blockers and release gates, separate from architecture scoring.',
+    items: ['status', 'mainnet', 'mainnet-acceptance-gate', 'testnet-flow-coverage'],
   },
   {
     id: 'runtime-and-storage',
-    title: 'Runtime and Storage',
-    description: 'Core implementation surfaces for state, transport, and proofs.',
-    items: [
-      'core/rjea-architecture',
-      'merkle',
-      'radapter',
-      'implementation/payment-spec',
-      'debug',
-    ],
+    title: 'Runtime and storage',
+    description: 'Deterministic execution, persistence, transport, and proofs.',
+    items: ['core/rjea-architecture', 'runtime/overview', 'merkle', 'wal', 'radapter'],
   },
 ];
 
 const SECTION_DEFS = [
   {
     id: 'start-here',
-    title: 'Start Here',
-    description: 'The shortest path to understanding XLN and the current project state.',
+    title: 'Start here',
+    description: 'The shortest architecture-first path into xln.',
     kind: 'live',
     order: 0,
-    items: [
-      'readme',
-      'constraints',
-      'intro',
-      'core/12_invariant',
-      'core/rjea-architecture',
-      'status',
-      'mainnet',
-      'roadmap',
-    ],
+    items: ['readme', 'constraints', 'intro', 'core/12_invariant', 'core/rjea-architecture'],
   },
   {
     id: 'theory',
-    title: 'Theory and Narrative',
-    description: 'Core theory, conceptual models, and long-form explanation.',
+    title: 'Theory',
+    description: 'Economic constraints, RCPAN, bilaterality, and jurisdiction theory.',
     kind: 'live',
     order: 1,
     items: [
+      'competitors',
       'core/00_QA',
       'core/10_UFT',
       'core/11_Jurisdiction_Machine',
-      'essay',
-      'insights/bilateral',
       'architecture/bilaterality',
       'architecture/why-evm',
     ],
@@ -90,121 +64,121 @@ const SECTION_DEFS = [
   {
     id: 'architecture',
     title: 'Architecture',
-    description: 'Protocol structure, contract surface, durable state, and runtime boundaries.',
+    description: 'The canonical cascade, authority, contracts, and durable commitments.',
     kind: 'live',
     order: 2,
     items: [
+      'architecture/runtime-reaj',
       'architecture/contracts',
       'architecture/hanko',
       'merkle',
-      'radapter',
+      'protocol-codecs',
+      'parallel',
     ],
   },
   {
     id: 'specs',
     title: 'Specifications',
-    description: 'Mechanism-level specs for payments, custody, rebalance, recovery, and code safety.',
+    description: 'Mechanism-level financial and protocol specifications.',
     kind: 'live',
     order: 3,
     items: [
       'implementation/payment-spec',
+      'counterfactual-transformers',
+      'hashladder-registry-spec',
       'custody',
       'rebalance',
+      'lend',
       'recovery-watchtower-protocol',
+      'watchtower-services',
       'fintech-type-safety-protocol',
-      'native-wallet-product-plan',
+      'fints',
+    ],
+  },
+  {
+    id: 'runtime',
+    title: 'Runtime and client',
+    description: 'Runtime state, networking, storage, adapters, and client boundaries.',
+    kind: 'live',
+    order: 4,
+    items: [
+      'runtime/overview',
+      'runtime/runtime',
+      'runtime/entity',
+      'runtime/entity-transactions',
+      'runtime/account',
+      'runtime/account-transactions',
+      'runtime/jurisdiction',
+      'runtime/jadapter',
+      'runtime/networking',
+      'runtime/storage',
+      'runtime/recovery',
+      'runtime/watchtower',
+      'runtime/server',
+      'runtime/protocol',
+      'runtime/extensions',
+      'wal',
+      'radapter',
+      'external-wallet-state',
+    ],
+  },
+  {
+    id: 'security',
+    title: 'Security',
+    description: 'Current invariants and security policy, not dated audit evidence.',
+    kind: 'live',
+    order: 5,
+    items: [
+      'consensus-invariants',
+      'mainnet-engineering-principles',
+      'security/dispute-two-arguments-spec',
+      'security/frozen-core',
+      'audit-protocol',
     ],
   },
   {
     id: 'ops',
-    title: 'Ops and Debugging',
-    description: 'Consensus footguns, debug surfaces, E2E triage, deployment, and operator guidance.',
+    title: 'Operations and QA',
+    description: 'Debugging, QA, deployment, and distribution surfaces.',
     kind: 'live',
-    order: 4,
+    order: 6,
     items: [
-      'consensus-invariants',
       'debug',
       'debugging/consensus-debugging-guide',
       'e2e-debug-protocol',
+      'qa-cockpit',
       'deployment/deployment',
       'deployment/ops-runbook',
-      'code-cleanup-plan',
+      'native-wallet-product-plan',
+      'platform-distribution-plan',
     ],
   },
   {
-    id: 'archive-guide',
-    title: 'Archive Guide',
-    description: 'What the archive is for and how to use it without treating it as live truth.',
-    kind: 'archive',
-    order: 10,
-    items: ['archive/README'],
+    id: 'launch-and-risk',
+    title: 'Launch and risk',
+    description: 'Current launch state and release criteria; never an architecture score.',
+    kind: 'live',
+    order: 7,
+    items: ['status', 'mainnet', 'mainnet-acceptance-gate', 'testnet-flow-coverage', 'roadmap'],
   },
   {
-    id: 'archive-history',
-    title: 'Archive: History',
-    description: 'Historical explanations, evolution notes, and superseded reference material.',
+    id: 'evidence',
+    title: 'Audit and release evidence',
+    description: 'Dated or byte-specific evidence excluded from live architecture grounding.',
     kind: 'archive',
-    order: 11,
-    items: [
-      'archive/evolution-analysis-2019-2025',
-      'archive/fixed-supply-analysis',
-      'archive/htlc-onion-routing',
-      'archive/insurance',
-      'archive/novelty',
-      'archive/transaction-flow-specification',
-      'archive/visual-debugger',
-      'archive/architecture/unified-server-design',
-    ],
+    order: 20,
+    prefixes: ['audit/', 'releases/', 'security/'],
   },
   {
-    id: 'archive-planning',
-    title: 'Archive: Planning Snapshots',
-    description: 'Older status, MVP, launch, and roadmap snapshots preserved for context.',
+    id: 'uncatalogued',
+    title: 'Uncatalogued reference',
+    description: 'Documents require explicit classification before becoming live authority.',
     kind: 'archive',
-    order: 12,
-    prefixes: [
-      'archive/planning/',
-      'archive/old-planning/',
-    ],
-  },
-  {
-    id: 'archive-research',
-    title: 'Archive: Research',
-    description: 'Older research branches, insurance explorations, and rollup/depository position notes.',
-    kind: 'archive',
-    order: 13,
-    prefixes: ['archive/old-research/'],
-  },
-  {
-    id: 'archive-philosophy',
-    title: 'Archive: Philosophy',
-    description: 'Brand voice, positioning, and old philosophical narratives.',
-    kind: 'archive',
-    order: 14,
-    prefixes: ['archive/old-philosophy/'],
-  },
-  {
-    id: 'archive-deployment',
-    title: 'Archive: Deployment',
-    description: 'Legacy deploy guides preserved for exact old wording.',
-    kind: 'archive',
-    order: 15,
-    prefixes: ['archive/deployment/'],
-  },
-  {
-    id: 'archive-audits',
-    title: 'Archive: Audits and Logs',
-    description: 'Historical audits, done logs, and session-level operational records.',
-    kind: 'archive',
-    order: 16,
-    prefixes: [
-      'archive/audits/',
-      'archive/logs/',
-    ],
+    order: 21,
   },
 ];
 
-const SECTION_BY_ID = new Map(SECTION_DEFS.map((section) => [section.id, section]));
+const SECTION_BY_ID = new Map(SECTION_DEFS.map(section => [section.id, section]));
 const DOC_TO_SECTION = new Map();
 const DOC_ORDER = new Map();
 
@@ -233,7 +207,7 @@ export function getSectionOrder(sectionId) {
 }
 
 export function getSectionKind(sectionId) {
-  return getSectionMeta(sectionId)?.kind || 'live';
+  return getSectionMeta(sectionId)?.kind || 'archive';
 }
 
 export function getDocOrder(docId) {
@@ -244,23 +218,18 @@ export function isFeaturedDoc(docId) {
   return FEATURED_DOC_IDS.includes(docId);
 }
 
+const isDatedEvidence = docId => /(?:^|\/)[^/]*\d{4}-\d{2}(?:-\d{2})?(?:$|\/)/.test(docId);
+
 export function classifyDoc(docId) {
   const normalized = normalizeDocId(docId);
-  if (DOC_TO_SECTION.has(normalized)) {
-    return DOC_TO_SECTION.get(normalized);
-  }
-
+  if (DOC_TO_SECTION.has(normalized)) return DOC_TO_SECTION.get(normalized);
   for (const section of SECTION_DEFS) {
-    if (!section.prefixes) continue;
-    if (section.prefixes.some((prefix) => normalized.startsWith(prefix))) {
-      return section.id;
-    }
+    if (section.prefixes?.some(prefix => normalized.startsWith(prefix))) return section.id;
   }
-
-  if (normalized.startsWith('archive/')) return 'archive-history';
-  return 'ops';
+  if (isDatedEvidence(normalized)) return 'evidence';
+  return 'uncatalogued';
 }
 
 export function getSectionDefinitions() {
-  return SECTION_DEFS.map((section) => ({ ...section }));
+  return SECTION_DEFS.map(section => ({ ...section }));
 }

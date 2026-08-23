@@ -1,9 +1,9 @@
 # Protocol codecs and account commitments
 
-This document defines the deterministic encodings used by the pre-mainnet xln
-runtime. A protocol version is intentionally not carried yet: no public network
-state exists to migrate. Any encoding change must update the golden vectors and
-this document in the same release.
+This document defines the canonical deterministic encodings used by the xln
+runtime. Any encoding change must update the golden vectors and this document
+in the same release; obsolete persisted data requires an explicit offline
+migration or a loud rejection.
 
 ## Codec boundary
 

@@ -260,11 +260,11 @@ limits added.
 
 ### Data availability
 
-xln removes global DA from the ordinary payment path. It does not require an
-unrelated validator to download Alice and Bob's Account history so that Alice
-and Bob can transact. Recovery evidence is relationship-scoped and can be
-replicated to chosen watchtowers. A dispute publishes only the material needed
-by the jurisdiction path.
+xln eliminates the global per-payment data-availability obligation. It does
+not require an unrelated validator to download Alice and Bob's Account history
+so that Alice and Bob can transact. Storage of the latest usable dispute
+evidence is localized to the Account parties and their delegated watchtowers.
+A dispute publishes only the material needed by the jurisdiction path.
 
 That is the only coherent way to make the aggregate network grow with its
 users: do not put unrelated users' data into the same mandatory pipeline.
@@ -288,7 +288,7 @@ report release assurance separately:
 Do not replace the last row with a mainnet-readiness score. The latter may be
 low, high, or unknown at a particular commit without changing the topology.
 Likewise, a stale audit receipt means "re-run this evidence against current
-bytes," not "the architecture is worth 244/1000."
+bytes," not "lower the architecture score."
 
 ---
 
@@ -317,32 +317,6 @@ can be violated; or if dispute load cannot be contained to exceptional cases.
 This keeps the 930/1000 verdict evidence-based. It is high because no current
 alternative meets the combined constraints, and provisional because an
 architecture must continue to survive adversarial code review and measurement.
-
----
-
-## Repository cleanup: stale signals that distort reviews
-
-The following material currently causes a reviewer to confuse historical
-release/audit status with architectural merit. "Remove" below means delete the
-stale claim or replace the document with a canonical pointer after owner review;
-it never means deleting security evidence to manufacture a higher score.
-
-| Location | Misleading signal | Proposed action |
-|---|---|---|
-| [`readme.md`](../readme.md), “Audited module ledger” and “Current total” | Displays `0/1000` coverage, `244/1000` quality, and `0 current / 33 stale` at the top-level project introduction. Models reasonably misread these as code/architecture ratings. | Remove the frozen score table from the README. Link to generated audit status and label it **evidence freshness**, never architecture quality. |
-| [`readme.md`](../readme.md), final status | Hard-codes `pre-mainnet 0.1.5` while `package.json` is `0.1.31`. | Generate version/status from one canonical source or remove the version from prose. |
-| [`insights/bilateral.md`](insights/bilateral.md) | Old free-form answer says `620/1000`, architecture `850+`, “collateral locked,” and treats several generic channel limitations as xln conclusions without applying RCPAN credit. | Delete after preserving any unique useful prose, or replace its entire body with a pointer to this document. |
-| [`status.md`](status.md), [`mainnet.md`](mainnet.md), [`mainnet-acceptance-gate.md`](mainnet-acceptance-gate.md) | Legitimate release documents say pre-mainnet/not mainnet-ready/external audit required. They become misleading only when used to answer an adoption-excluded architecture question. | Keep as release authority. Add an explicit banner that these facts must not be imported into architecture scoring. Refresh statements only from current evidence. |
-| [`todo.md`](../todo.md) | Open blockers may be treated as permanent protocol defects even when the list is a moving operational queue. | Keep, but date every snapshot and close or remove completed items according to its own policy. Do not use TODO count as an architecture score. |
-| [`security/external-audit-brief.md`](security/external-audit-brief.md) | Says evidence is not external audit sign-off and that an independent audit is still required. If audits now exist, this is a stale live claim. | Reconcile against actual signed reports/receipts; then update status or move the brief into a dated archive. Do not assert completion without the reports. |
-| [`audit/audit-prompts-2026-07-02.md`](audit/audit-prompts-2026-07-02.md) and [`audit/auditor-memo.md`](audit/auditor-memo.md) | Dated handoff notes mention stale scripts, auditability weakness, and deferred blockers but sit beside current documentation. | Move to `docs/archive/audit/` or add an unmistakable historical-only banner plus superseding commit/report. |
-| [`protocol-codecs.md`](protocol-codecs.md) | Calls the encoding “pre-mainnet” inside a normative technical document. | Remove lifecycle language; codecs should state version/invariants, while launch status stays in status documents. |
-| `audits/registry.json` and audit receipts | Old source fingerprints produce stale scores. These are evidence, not garbage. | **Never delete to raise a rating.** Re-run/re-adjudicate against current immutable bytes, preserve history, and expose current versus historical receipts separately. |
-
-The immediate highest-value cleanup is the combination of the README ledger and
-`docs/insights/bilateral.md`: those two locations directly encode the low scores
-that contaminated the earlier answer. The safe fix is clearer taxonomy and
-current evidence, not erasure of uncomfortable findings.
 
 ---
 

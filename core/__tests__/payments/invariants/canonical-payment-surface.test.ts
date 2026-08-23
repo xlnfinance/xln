@@ -28,7 +28,7 @@ const removedAccountTxs = [
   ['pull', 'cancel'].join('_'),
   ['reopen', 'disputed'].join('_'),
 ];
-const historicalPrefixes = ['.archive/', 'audits/', 'docs/archive/', 'docs/audit/', 'docs/releases/'];
+const historicalPrefixes = ['.archive/', 'audits/', 'docs/audit/', 'docs/releases/'];
 
 const trackedFiles = (): string[] => execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
   cwd: repoRoot,

@@ -237,9 +237,3 @@ blocker list:
 - Gate both bundle manifests for required critical files, exact source hashes and
   deterministic output. Audit comment quality separately from protocol code so
   documentation changes cannot silently alter the clean-code evidence bundle.
-
-## Historical Reference
-
-The older, more detailed roadmap snapshot was preserved at:
-
-- [archive/planning/roadmap-legacy-2026-05.md](archive/planning/roadmap-legacy-2026-05.md)

@@ -216,8 +216,3 @@ When docs disagree, use this order:
 - `1-of-1` is configuration, not a separate auth model;
 - J-batch auth moves to strict entity quorum semantics;
 - complex-board tests must exist, not just happy-path single-signer tests.
-
-## Historical Reference
-
-Historical snapshots remain in `docs/archive/`. They are useful for context but
-must not be treated as active TODOs.

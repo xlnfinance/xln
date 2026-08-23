@@ -5,7 +5,7 @@
   import { browser } from '$app/environment';
   import { marked } from 'marked';
   import { sanitizeRenderedHtml } from '$lib/security/safe-markdown';
-  import { Archive, BookOpen, Compass, ExternalLink, FileText, Menu, Search, Shield, Wrench, X } from 'lucide-svelte';
+  import { BookOpen, ExternalLink, FileText, Menu, Search, Wrench, X } from 'lucide-svelte';
   import { readJsonUnknown, requireBoolean, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '$lib/utils/boundary';
 
   interface DocEntry {
@@ -112,7 +112,6 @@
 
   let manifest = $state<DocsManifest | null>(null);
   let searchQuery = $state('');
-  let showArchive = $state(false);
   let isLoadingManifest = $state(true);
   let isLoadingDoc = $state(false);
   let currentDoc = $state<DocEntry | null>(null);
@@ -153,13 +152,17 @@
       .trim();
   }
 
+  function normalizeProse(value: string): string {
+    return stripMarkdown(value).replace(/\s+/g, ' ').toLocaleLowerCase();
+  }
+
   function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error || 'Unknown error');
   }
 
   function getDocById(docId: string): DocEntry | null {
     if (!manifest) return null;
-    return manifest.items.find((item) => item.id === docId) || null;
+    return manifest.items.find((item) => item.id === docId && item.kind === 'live') || null;
   }
 
   function resolveDocLink(currentPath: string, href: string) {
@@ -179,9 +182,7 @@
 
     let resolvedDocId = '';
     if (hrefWithoutHash.endsWith('.md')) {
-      if (hrefWithoutHash.startsWith('/docs-static/')) {
-        resolvedDocId = normalizeDocId(hrefWithoutHash.slice('/docs-static/'.length));
-      } else if (hrefWithoutHash.startsWith('/docs-catalog/')) {
+      if (hrefWithoutHash.startsWith('/docs-catalog/')) {
         resolvedDocId = normalizeDocId(hrefWithoutHash.slice('/docs-catalog/'.length));
       } else if (hrefWithoutHash.startsWith('/docs/')) {
         resolvedDocId = normalizeDocId(hrefWithoutHash.slice('/docs/'.length));
@@ -245,6 +246,24 @@
       /((?:\.\.\/)+)frontend\/static\//g,
       '/',
     );
+    const lines = preparedMarkdown.split(/\r?\n/);
+    const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
+    const firstHeading = firstContentIndex >= 0 ? lines[firstContentIndex]?.match(/^#\s+(.+)$/) : null;
+    if (firstHeading && stripMarkdown(firstHeading[1] || '').toLocaleLowerCase() === doc.title.toLocaleLowerCase()) {
+      lines.splice(firstContentIndex, 1);
+    }
+    const firstParagraphIndex = lines.findIndex((line) => line.trim().length > 0);
+    if (doc.summary && firstParagraphIndex >= 0 && !/^\s*(?:#|[-*+] |\d+\. |```|>)/.test(lines[firstParagraphIndex] || '')) {
+      let paragraphEnd = firstParagraphIndex;
+      while (paragraphEnd < lines.length && lines[paragraphEnd]?.trim()) paragraphEnd += 1;
+      const firstParagraph = lines.slice(firstParagraphIndex, paragraphEnd).join(' ');
+      const normalizedParagraph = normalizeProse(firstParagraph);
+      const normalizedSummary = normalizeProse(doc.summary).replace(/(?:\.\.\.|…)$/, '');
+      if (normalizedParagraph === normalizedSummary || normalizedParagraph.startsWith(normalizedSummary)) {
+        lines.splice(firstParagraphIndex, paragraphEnd - firstParagraphIndex);
+      }
+    }
+    const articleMarkdown = lines.join('\n');
 
     const renderer = new marked.Renderer();
 
@@ -280,7 +299,7 @@
       return `<img src="${src}" alt="${alt}" loading="lazy"${title}>`;
     };
 
-    return sanitizeRenderedHtml(marked.parse(preparedMarkdown, {
+    return sanitizeRenderedHtml(marked.parse(articleMarkdown, {
       renderer,
       gfm: true,
       breaks: false,
@@ -352,15 +371,9 @@
     });
   }
 
-  function openReadingPath(path: ReadingPath) {
-    if (path.items[0]) {
-      void openDoc(path.items[0].id);
-    }
-  }
-
   const visibleSections = $derived.by(() => {
     if (!manifest) return [] as DocSection[];
-    const baseSections = manifest.sections.filter((section) => showArchive || section.kind === 'live');
+    const baseSections = manifest.sections.filter((section) => section.kind === 'live');
 
     if (!searchQuery.trim()) return baseSections;
 
@@ -382,15 +395,11 @@
       .filter((section) => section.items.length > 0);
   });
 
-  const featuredDocs = $derived.by<DocEntry[]>(() => manifest?.featured || []);
-
   const currentSection = $derived.by<DocSection | null>(() => {
     if (!manifest || !currentDoc) return null;
     const activeDoc = currentDoc;
     return manifest.sections.find((section) => section.id === activeDoc.sectionId) || null;
   });
-
-  const totalVisibleDocs = $derived(visibleSections.reduce((sum, section) => sum + section.items.length, 0));
 
   onMount(async () => {
     await loadManifest();
@@ -436,20 +445,13 @@
       <div class="header-row">
         <div class="header-mark">
           <BookOpen size={18} />
-          <span>XLN Docs</span>
+          <span>xln docs</span>
         </div>
         <button class="mobile-close" type="button" aria-label="Close docs navigation" onclick={() => (isNavOpen = false)}>
           <X size={16} />
         </button>
       </div>
-      <p class="header-copy">Canonical theory, live specs, launch status, and historical context.</p>
-      {#if manifest}
-        <div class="header-stats">
-          <span>{manifest.counts.live} live</span>
-          <span>{manifest.counts.archive} archive</span>
-          <span>{manifest.counts.total} total</span>
-        </div>
-      {/if}
+      <p class="header-copy">Canonical architecture, protocol, security, and operations.</p>
     </div>
 
     <label class="search-field" aria-label="Search docs">
@@ -458,72 +460,22 @@
         data-testid="docs-search"
         type="search"
         bind:value={searchQuery}
-        placeholder="Search titles, paths, summaries"
+        placeholder="Search docs"
       />
     </label>
 
-    <div class="sidebar-controls">
-      <button class:active={!showArchive} class="control-pill" onclick={() => (showArchive = false)}>
-        <Compass size={14} />
-        <span>Live</span>
-      </button>
-      <button class:active={showArchive} class="control-pill" onclick={() => (showArchive = true)} data-testid="archive-toggle">
-        <Archive size={14} />
-        <span>Live + Archive</span>
-      </button>
-    </div>
-
     {#if manifest}
-      <section class="sidebar-section">
-        <div class="section-label">
-          <Compass size={14} />
-          <span>Reading Paths</span>
-        </div>
-        <div class="path-list">
-          {#each manifest.readingPaths as path}
-            <button class="path-card" onclick={() => openReadingPath(path)}>
-              <strong>{path.title}</strong>
-              <span>{path.description}</span>
-            </button>
-          {/each}
-        </div>
-      </section>
-
-      {#if featuredDocs.length > 0}
-        <section class="sidebar-section">
-          <div class="section-label">
-            <Shield size={14} />
-            <span>Featured</span>
-          </div>
-          <div class="doc-list compact">
-            {#each featuredDocs as doc}
-              <button
-                class="doc-link"
-                class:active={currentDocId === doc.id}
-                onclick={() => openDoc(doc.id)}
-              >
-                <span class="doc-link-title">{doc.title}</span>
-                <span class="doc-link-path">{doc.id}</span>
-              </button>
-            {/each}
-          </div>
-        </section>
-      {/if}
-
       <nav class="sidebar-nav">
         {#each visibleSections as section}
           <section class="sidebar-section" data-testid={`section-${section.id}`}>
             <div class="section-label">
-              {#if section.kind === 'archive'}
-                <Archive size={14} />
-              {:else if section.id === 'ops'}
+              {#if section.id === 'ops'}
                 <Wrench size={14} />
               {:else}
                 <FileText size={14} />
               {/if}
               <span>{section.title}</span>
             </div>
-            <p class="section-copy">{section.description}</p>
             <div class="doc-list">
               {#each section.items as doc}
                 <button
@@ -533,7 +485,6 @@
                   onclick={() => openDoc(doc.id)}
                 >
                   <span class="doc-link-title">{doc.title}</span>
-                  <span class="doc-link-path">{doc.id}</span>
                 </button>
               {/each}
             </div>
@@ -554,27 +505,6 @@
       {/if}
     </div>
 
-    <section class="docs-hero">
-      <div>
-        <p class="hero-eyebrow">Documentation</p>
-        <h1>Full XLN Project Docs</h1>
-        <p class="hero-copy">
-          Start with the live docs. Use archive only when you need historical wording,
-          superseded plans, or research branches.
-        </p>
-      </div>
-      <div class="hero-metrics">
-        <div class="metric">
-          <span class="metric-label">Visible docs</span>
-          <strong>{manifest ? totalVisibleDocs : 0}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Current source of truth</span>
-          <strong>Status + Mainnet</strong>
-        </div>
-      </div>
-    </section>
-
     {#if loadError}
       <div class="state-box error" data-testid="docs-error">{loadError}</div>
     {:else if isLoadingManifest || isLoadingDoc || !currentDoc}
@@ -584,33 +514,32 @@
         <article class="docs-article-wrap">
           <header class="doc-header">
             <div class="doc-meta-row">
-              <span class="doc-badge" class:archive={currentDoc.kind === 'archive'}>
-                {currentDoc.kind === 'archive' ? 'Archive' : 'Live'}
-              </span>
-              <span class="doc-path">{currentDoc.id}</span>
               {#if currentSection}
                 <span class="doc-section">{currentSection.title}</span>
               {/if}
+              <span class="doc-path">{currentDoc.id}</span>
+              <a href={`/docs-catalog/${currentDoc.path}`} target="_blank" rel="noreferrer" class="raw-link">
+                <ExternalLink size={14} />
+                <span>Markdown</span>
+              </a>
             </div>
-            <h2 class="doc-title">{currentDoc.title}</h2>
+            <h1 class="doc-title">{currentDoc.title}</h1>
             {#if currentDoc.summary}
               <p class="doc-summary">{currentDoc.summary}</p>
             {/if}
-            <div class="doc-facts">
-              {#if currentDoc.role}
-                <span><strong>Role:</strong> {currentDoc.role}</span>
-              {/if}
-              {#if currentDoc.status}
-                <span><strong>Status:</strong> {currentDoc.status}</span>
-              {/if}
-              {#if currentDoc.audience}
-                <span><strong>Audience:</strong> {currentDoc.audience}</span>
-              {/if}
-              <a href={`/docs-catalog/${currentDoc.path}`} target="_blank" rel="noreferrer" class="raw-link">
-                <ExternalLink size={14} />
-                <span>Raw markdown</span>
-              </a>
-            </div>
+            {#if currentDoc.role || currentDoc.status || currentDoc.audience}
+              <div class="doc-facts">
+                {#if currentDoc.role}
+                  <span><strong>Role:</strong> {currentDoc.role}</span>
+                {/if}
+                {#if currentDoc.status}
+                  <span><strong>Status:</strong> {currentDoc.status}</span>
+                {/if}
+                {#if currentDoc.audience}
+                  <span><strong>Audience:</strong> {currentDoc.audience}</span>
+                {/if}
+              </div>
+            {/if}
           </header>
 
           <div
@@ -662,6 +591,7 @@
     top: 56px;
     align-self: start;
     height: calc(100dvh - 56px);
+    box-sizing: border-box;
     overflow-y: auto;
     border-right: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(7, 10, 8, 0.92);
@@ -707,21 +637,6 @@
     line-height: 1.5;
   }
 
-  .header-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  .header-stats span {
-    padding: 5px 9px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(231, 236, 233, 0.75);
-    font-size: 0.72rem;
-  }
-
   .search-field {
     display: flex;
     align-items: center;
@@ -747,39 +662,15 @@
     color: rgba(231, 236, 233, 0.42);
   }
 
-  .sidebar-controls {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .control-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 36px;
-    padding: 0 12px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: transparent;
-    color: rgba(231, 236, 233, 0.78);
-    cursor: pointer;
-    font-size: 0.82rem;
-  }
-
-  .control-pill.active {
-    background: rgba(79, 209, 139, 0.14);
-    border-color: rgba(79, 209, 139, 0.35);
-    color: #8ee8b4;
-  }
-
   .sidebar-nav,
-  .path-list,
   .doc-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .sidebar-nav {
+    margin-top: 18px;
   }
 
   .sidebar-section {
@@ -797,45 +688,18 @@
     text-transform: uppercase;
   }
 
-  .section-copy {
-    margin: 8px 0 10px;
-    color: rgba(231, 236, 233, 0.52);
-    font-size: 0.8rem;
-    line-height: 1.45;
-  }
-
-  .path-card,
   .doc-link {
     width: 100%;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid transparent;
+    background: transparent;
     color: inherit;
     border-radius: 8px;
     text-align: left;
     cursor: pointer;
   }
 
-  .path-card {
-    padding: 12px;
-  }
-
-  .path-card strong {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 0.87rem;
-    color: #f4faf7;
-  }
-
-  .path-card span {
-    display: block;
-    color: rgba(231, 236, 233, 0.58);
-    font-size: 0.79rem;
-    line-height: 1.45;
-  }
-
-  .path-card:hover,
   .doc-link:hover {
-    border-color: rgba(79, 209, 139, 0.3);
+    border-color: rgba(79, 209, 139, 0.14);
     background: rgba(79, 209, 139, 0.08);
   }
 
@@ -855,14 +719,6 @@
     line-height: 1.35;
   }
 
-  .doc-link-path {
-    display: block;
-    margin-top: 5px;
-    color: rgba(231, 236, 233, 0.5);
-    font-size: 0.74rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  }
-
   .docs-main {
     min-width: 0;
     padding: 28px 32px 40px;
@@ -874,6 +730,7 @@
 
   .catalog-button {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 8px;
     border: 1px solid rgba(127, 224, 170, 0.24);
@@ -884,6 +741,7 @@
     font: inherit;
     font-size: 0.86rem;
     font-weight: 600;
+    white-space: nowrap;
   }
 
   .mobile-current-doc {
@@ -893,66 +751,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .docs-hero {
-    display: flex;
-    justify-content: space-between;
-    gap: 24px;
-    margin-bottom: 24px;
-    padding-bottom: 18px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .hero-eyebrow {
-    margin: 0 0 10px;
-    color: #89dcb1;
-    font-size: 0.76rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .docs-hero h1 {
-    margin: 0;
-    font-size: 2rem;
-    line-height: 1.1;
-    color: #f4faf7;
-  }
-
-  .hero-copy {
-    max-width: 760px;
-    margin: 12px 0 0;
-    color: rgba(231, 236, 233, 0.7);
-    line-height: 1.6;
-  }
-
-  .hero-metrics {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    min-width: 280px;
-  }
-
-  .metric {
-    padding: 14px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .metric-label {
-    display: block;
-    margin-bottom: 6px;
-    color: rgba(231, 236, 233, 0.58);
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .metric strong {
-    color: #f3faf6;
-    font-size: 1rem;
   }
 
   .state-box {
@@ -981,34 +779,23 @@
 
   .doc-header {
     margin-bottom: 28px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .doc-meta-row {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 16px;
   }
 
-  .doc-badge,
   .doc-path,
   .doc-section {
     display: inline-flex;
     align-items: center;
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.03);
     font-size: 0.76rem;
-  }
-
-  .doc-badge {
-    color: #8be1b0;
-  }
-
-  .doc-badge.archive {
-    color: #f3c272;
   }
 
   .doc-path {
@@ -1017,7 +804,10 @@
   }
 
   .doc-section {
-    color: rgba(231, 236, 233, 0.74);
+    color: #8be1b0;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
 
   .doc-title {
@@ -1055,6 +845,7 @@
     gap: 6px;
     color: #8adfb0;
     text-decoration: none;
+    margin-left: auto;
   }
 
   .toc-rail {
@@ -1189,7 +980,11 @@
   }
 
   .markdown-body :global(table) {
+    display: block;
     width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
     border-collapse: collapse;
     margin: 1.5rem 0;
     font-size: 0.9rem;
@@ -1258,11 +1053,16 @@
       position: fixed;
       top: 56px;
       left: 0;
-      bottom: 0;
+      bottom: auto;
       z-index: 40;
       width: min(360px, 86vw);
-      height: auto;
+      height: calc(100dvh - 56px);
+      max-height: calc(100dvh - 56px);
+      min-height: 0;
+      box-sizing: border-box;
+      overscroll-behavior: contain;
       border-right: 1px solid rgba(255, 255, 255, 0.08);
+      background: #070b08;
       transform: translateX(-105%);
       transition: transform 180ms ease;
       box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
@@ -1278,7 +1078,11 @@
 
     .docs-backdrop {
       position: fixed;
-      inset: 56px 0 0;
+      top: 56px;
+      right: 0;
+      bottom: auto;
+      left: 0;
+      height: calc(100dvh - 56px);
       z-index: 30;
       background: rgba(2, 4, 3, 0.62);
     }
@@ -1298,25 +1102,12 @@
       margin-bottom: 16px;
     }
 
-    .docs-hero {
-      flex-direction: column;
-    }
-
-    .hero-metrics {
-      grid-template-columns: 1fr 1fr;
-      min-width: 0;
+    :global(html:has(.docs-sidebar.open)) {
+      overflow: hidden;
     }
   }
 
   @media (max-width: 640px) {
-    .sidebar-controls {
-      flex-direction: column;
-    }
-
-    .hero-metrics {
-      grid-template-columns: 1fr;
-    }
-
     .doc-title {
       font-size: 1.7rem;
     }

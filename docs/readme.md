@@ -1,92 +1,78 @@
-# xln Documentation
+# xln documentation
 
-**Reserve-Credit Provable Account Network** — bilateral finance with provable
-credit, collateral enforcement, and EVM dispute resolution.
+This is the canonical documentation index. Architecture, security evidence,
+and launch status are separate surfaces and should not be scored as one thing.
 
-Start with [constraints.md](constraints.md). It explains why xln is not "one
-more L2", but a consequence of the scaling and enforcement constraints. Then
-read [competitors.md](competitors.md) for the architecture-only comparison with
-big-block chains, sharding, rollups, channels, and bilateral systems.
+## New to xln
 
-## Quick Start
-
-**New to xln**
-
-1. [constraints.md](constraints.md) — why broadcast finance cannot scale
-2. [competitors.md](competitors.md) — xln versus big blocks, sharding, rollups, and channels
-3. [intro.md](intro.md) — xln in 5 minutes
+1. [constraints.md](constraints.md) — the constraints behind bilateral finance
+2. [competitors.md](competitors.md) — architecture matrix, DA analysis, and falsification tests
+3. [intro.md](intro.md) — xln in five minutes
 4. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
-5. [core/rjea-architecture.md](core/rjea-architecture.md) — the core/entity/account/jurisdiction stack
-6. [architecture/reactive-network.html](architecture/reactive-network.html) — the reactive cascade diagram
-7. [status.md](status.md) — the current source of truth
-8. [../todo.md](../todo.md) — the active TODO/NEXT backlog
+5. [core/rjea-architecture.md](core/rjea-architecture.md) — canonical Runtime → Entity → Account → Jurisdiction cascade
 
-**Developers**
+## Theory
 
-- [implementation/payment-spec.md](implementation/payment-spec.md) — payments, HTLCs, onion routing
-- [radapter.md](radapter.md) — canonical frontend/runtime adapter spec
-- [merkle.md](merkle.md) — storage and proof layout
-- [consensus-invariants.md](consensus-invariants.md) — bilateral consensus footguns
-- [audit-protocol.md](audit-protocol.md) — canonical evidence-driven modular audit workflow
-- [debug.md](debug.md) — the required core/network debug surface
-
-## Core Protocol
-
-| Document | Description |
-|----------|-------------|
-| [core/00_QA.md](core/00_QA.md) | motivation, objections, and framing |
-| [core/10_UFT.md](core/10_UFT.md) | Unified Financial Theory |
-| [core/11_Jurisdiction_Machine.md](core/11_Jurisdiction_Machine.md) | J-machine conceptual model |
-| [core/12_invariant.md](core/12_invariant.md) | `−Lₗ ≤ Δ ≤ C + Lᵣ` |
-| [core/rjea-architecture.md](core/rjea-architecture.md) | canonical system architecture |
+- [constraints.md](constraints.md)
+- [competitors.md](competitors.md)
+- [core/00_QA.md](core/00_QA.md)
+- [core/10_UFT.md](core/10_UFT.md)
+- [core/11_Jurisdiction_Machine.md](core/11_Jurisdiction_Machine.md)
+- [architecture/bilaterality.md](architecture/bilaterality.md)
+- [architecture/why-evm.md](architecture/why-evm.md)
 
 ## Architecture
 
-| Document | Description |
-|----------|-------------|
-| [competitors.md](competitors.md) | architecture-only comparison with global ledgers, sharding, rollups, and channels |
-| [architecture/bilaterality.md](architecture/bilaterality.md) | why bilateral topology is necessary |
-| [architecture/reactive-network.html](architecture/reactive-network.html) | visual cascade of account/entity/core/cross-runtime reactions |
-| [architecture/why-evm.md](architecture/why-evm.md) | why xln needs EVM enforcement |
-| [architecture/hanko.md](architecture/hanko.md) | hierarchical entity signatures |
-| [architecture/contracts.md](architecture/contracts.md) | on-chain contract surface |
-| [merkle.md](merkle.md) | durable state and Merkle roots |
-| [radapter.md](radapter.md) | production runtime adapter |
+- [core/rjea-architecture.md](core/rjea-architecture.md)
+- [architecture/contracts.md](architecture/contracts.md)
+- [architecture/hanko.md](architecture/hanko.md)
+- [architecture/reactive-network.html](architecture/reactive-network.html)
+- [merkle.md](merkle.md)
+- [protocol-codecs.md](protocol-codecs.md)
 
-## Specs
+## Specifications
 
-| Document | Description |
-|----------|-------------|
-| [implementation/payment-spec.md](implementation/payment-spec.md) | direct payments, HTLCs, onion routing |
-| [custody.md](custody.md) | custody balance for prepaid fees |
-| [rebalance.md](rebalance.md) | hub auto-rebalance |
-| [lend.md](lend.md) | Lend/Borrow product and runtime design |
-| [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md) | recovery, peer refresh, watchtower storage |
-| [watchtower-services.md](watchtower-services.md) | encrypted backup and last-resort dispute operations |
-| [fintech-type-safety-protocol.md](fintech-type-safety-protocol.md) | type-safety rules for money-moving code |
+- [implementation/payment-spec.md](implementation/payment-spec.md)
+- [consensus-invariants.md](consensus-invariants.md)
+- [custody.md](custody.md)
+- [rebalance.md](rebalance.md)
+- [lend.md](lend.md)
+- [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md)
+- [watchtower-services.md](watchtower-services.md)
+- [fintech-type-safety-protocol.md](fintech-type-safety-protocol.md)
 
-## Status
+## Runtime and client
 
-| Document | Description |
-|----------|-------------|
-| [status.md](status.md) | canonical current blockers and workstreams |
-| [mainnet.md](mainnet.md) | release bar for real-user-fund launch |
-| [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md) | strict capped-testnet / pre-mainnet acceptance loop |
-| [roadmap.md](roadmap.md) | phased rollout and strategic direction |
-| [../todo.md](../todo.md) | active TODO/NEXT backlog |
+- [radapter.md](radapter.md)
+- [runtime/jadapter.md](runtime/jadapter.md)
+- [debug.md](debug.md)
+- [debugging/consensus-debugging-guide.md](debugging/consensus-debugging-guide.md)
+- [e2e-debug-protocol.md](e2e-debug-protocol.md)
 
-## Ops and Debugging
+## Security
 
-| Document | Description |
-|----------|-------------|
-| [debug.md](debug.md) | single-source event debugging |
-| [debugging/consensus-debugging-guide.md](debugging/consensus-debugging-guide.md) | consensus debugging patterns |
-| [e2e-debug-protocol.md](e2e-debug-protocol.md) | E2E triage protocol |
-| [deployment/deployment.md](deployment/deployment.md) | canonical deploy surface |
-| [deployment/ops-runbook.md](deployment/ops-runbook.md) | health, alerts, recovery |
+- [audit-protocol.md](audit-protocol.md) — canonical audit workflow
+- [security/](security/) — current security policy, required scans, and review briefs
+- [audit/advisor-scorecard.md](audit/advisor-scorecard.md) — evidence-based advisor history
 
-## Archive
+Security reports describe reviewed bytes and evidence freshness. They are not
+architecture ratings.
 
-- [archive/](archive/) — historical planning, research, philosophy, and logs
+## Operations
 
-**Last updated:** 2026-08-21
+- [deployment/deployment.md](deployment/deployment.md)
+- [deployment/ops-runbook.md](deployment/ops-runbook.md)
+- [testnet-flow-coverage.md](testnet-flow-coverage.md)
+
+## Release and launch status
+
+- [../todo.md](../todo.md) — active work and blockers
+- [status.md](status.md) — current operational status
+- [mainnet.md](mainnet.md) — real-user-fund release bar
+- [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md) — executable acceptance loop
+- [releases/manifest.json](releases/manifest.json) — signed immutable release history
+
+Launch readiness is intentionally not imported into the architecture score in
+[competitors.md](competitors.md).
+
+**Last updated:** 2026-08-23

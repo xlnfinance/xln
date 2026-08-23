@@ -17,9 +17,17 @@ const STOP_WORDS = new Set([
 ]);
 
 const ROUTE_HINTS: Record<string, readonly string[]> = {
-  '/app': ['intro', 'core/12_invariant', 'architecture/bilaterality', 'core/11_jurisdiction_machine'],
-  '/rcpan': ['intro', 'core/12_invariant', 'architecture/bilaterality', 'architecture/why-evm'],
+  '/app': ['competitors', 'constraints', 'core/12_invariant', 'core/rjea-architecture'],
+  '/rcpan': ['competitors', 'constraints', 'core/12_invariant', 'architecture/bilaterality'],
 };
+
+const ARCHITECTURE_QUERY_TOKENS = new Set([
+  'architecture', 'bilateral', 'broadcast', 'competitor', 'data', 'availability',
+  'rollup', 'scaling', 'sharding', 'topology', 'архитектура', 'масштабирование',
+]);
+const LAUNCH_ONLY_DOC_IDS = new Set([
+  'status', 'mainnet', 'mainnet-acceptance-gate', 'testnet-flow-coverage', 'roadmap',
+]);
 
 function tokens(value: string): string[] {
   return (value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])
@@ -33,9 +41,10 @@ export function rankXlnGuideDocs(
   limit = 2,
 ): DocsEntry[] {
   const queryTokens = tokens(query);
+  const architectureQuery = queryTokens.some(token => ARCHITECTURE_QUERY_TOKENS.has(token));
   const hints = ROUTE_HINTS[pathname] ?? ROUTE_HINTS['/app']!;
   return entries
-    .filter(entry => entry.kind === 'live')
+    .filter(entry => entry.kind === 'live' && !(architectureQuery && LAUNCH_ONLY_DOC_IDS.has(entry.id)))
     .map(entry => {
       const title = entry.title.toLocaleLowerCase();
       const summary = entry.summary.toLocaleLowerCase();
