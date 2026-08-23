@@ -22,7 +22,7 @@ import {
   toEntityContextPayloadHash,
   type EntityContextPayloadHash,
 } from '../../protocol/hashes';
-import { decodeBuffer, encodeBuffer } from '../codec/codec';
+import { decodeBuffer, encodeBufferAsIs } from '../codec/codec';
 import { keyEntityContextPayload } from '../keys';
 import type {
   RuntimeDbLike,
@@ -173,7 +173,7 @@ const prepareRow = (
   payload: StoredEntityContextRow,
   rowsByHash: Map<EntityContextPayloadHash, PayloadRow>,
 ): EntityContextPayloadHash => {
-  const value = encodeBuffer(payload, { omitSymbolKeys: true });
+  const value = encodeBufferAsIs(payload);
   if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
     throw new Error(
       `STORAGE_ENTITY_CONTEXT_PAYLOAD_TOO_LARGE:${value.byteLength}:` +

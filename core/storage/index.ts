@@ -5,7 +5,7 @@
  */
 import { getPerfMs } from '../support/time';
 import { auditEntityStateRootAtCheckpoint } from '../entity/consensus/state-root';
-import { decodeValidatedBuffer, encodeBuffer, encodeBufferPrepared, writeBatch } from './codec/codec';
+import { decodeValidatedBuffer, encodeBuffer, encodeBufferAsIs, encodeBufferPrepared, writeBatch } from './codec/codec';
 import { canonicalizeBinaryPayload } from '../protocol/serialization/binary-codec';
 import {
   boundedStorageRowsBytes,
@@ -1686,7 +1686,9 @@ const buildStorageFrameRecordPlan = (
   } satisfies RuntimeFrame;
   mark('frameEncode.frameHash');
   const frameKey = keyFrame(options.env.state.height);
-  const frameBuffer = encodeBuffer(frameRecord, { omitSymbolKeys: true });
+  // frameBase is already a canonical (marked) tree; the row is decoded back
+  // into a record and its hash is computed above, never over these bytes.
+  const frameBuffer = encodeBufferAsIs(frameRecord);
   const frameRows = prepareBoundedStorageValueRows(frameKey, frameBuffer);
   mark('frameEncode.frameBuffer');
   const nodeBytes =

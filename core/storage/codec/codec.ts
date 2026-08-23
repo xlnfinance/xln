@@ -3,6 +3,7 @@ import {
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,
   encodeBinaryPayloadWithCanonical,
+  packPreorderedBinaryPayload,
 } from '../../protocol/serialization/binary-codec';
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
 
@@ -18,6 +19,19 @@ export const encodeBuffer = (
   options: { omitSymbolKeys?: boolean } = {},
 ): Buffer => {
   const buffer = Buffer.from(encodeBinaryPayload(value, 'msgpack', options));
+  countOpWithSite('storage.encode', buffer.byteLength, 1);
+  return buffer;
+};
+
+/**
+ * Row bytes that are only ever decoded back into objects (content-addressed
+ * payload rows, the frame record, activity rows) skip the canonical walk:
+ * the same code path emits the same key order, and every hash over these
+ * rows is taken over the stored bytes themselves. Commitments that must
+ * match across processes (frame hash, replica meta, heads) stay canonical.
+ */
+export const encodeBufferAsIs = (value: unknown): Buffer => {
+  const buffer = Buffer.from(packPreorderedBinaryPayload(value));
   countOpWithSite('storage.encode', buffer.byteLength, 1);
   return buffer;
 };

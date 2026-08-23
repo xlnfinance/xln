@@ -1,7 +1,7 @@
 import type { FrameLogEntry } from '../../types/logging';
 import type { RuntimeHistoryRecord } from '../../runtime/types';
 import type { AccountTx } from '../../types/account';
-import { decodeValidatedBuffer, encodeBuffer, writeBatch } from '../codec/codec';
+import { decodeValidatedBuffer, encodeBuffer, encodeBufferAsIs, writeBatch } from '../codec/codec';
 import { iterateKeys, readRawOrNull } from '../database/level';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
@@ -204,7 +204,7 @@ export const buildHistoryViewPuts = (options: {
     touchedBookEntities: options.touchedBookEntities,
   };
   validateStoredRuntimeActivityValue(runtimeActivity, options.height);
-  puts.push({ key: keyHistoryViewRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
+  puts.push({ key: keyHistoryViewRuntimeActivity(options.height), value: encodeBufferAsIs(runtimeActivity) });
 
   return puts;
 };

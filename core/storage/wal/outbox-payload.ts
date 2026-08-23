@@ -15,7 +15,7 @@ import {
   toRuntimeOutputPayloadHash,
   type RuntimeOutputPayloadHash,
 } from '../../protocol/hashes';
-import { decodeBuffer, encodeBuffer } from '../codec/codec';
+import { decodeBuffer, encodeBufferAsIs } from '../codec/codec';
 import { keyRuntimeOutputPayload } from '../keys';
 import type {
   RuntimeDbLike,
@@ -117,7 +117,7 @@ const prepareRow = (
 ): RuntimeOutputPayloadRow => {
   let value: Buffer;
   try {
-    value = encodeBuffer(payload, { omitSymbolKeys: true });
+    value = encodeBufferAsIs(payload);
   } catch (error) {
     throw new Error(
       `STORAGE_RUNTIME_OUTPUT_PAYLOAD_ENCODE_FAILED:${payloadBudgetLabel(payload)}:` +
@@ -231,10 +231,10 @@ const prepareEntityTxRow = (
     && (tx.data.kind === 'frame' || tx.data.kind === 'frame_ack')
     && tx.data.proposal.frame.accountTxs.length <= 2
   ) {
-    const whole = encodeBuffer({
+    const whole = encodeBufferAsIs({
       kind: 'entityTx', version: 1, entityTxPath: 'none', accountTxPath: 'none',
       header: tx, entityTxPageRefs: [], accountTxPageRefs: [],
-    } satisfies StoredEntityTx, { omitSymbolKeys: true });
+    } satisfies StoredEntityTx);
     if (whole.byteLength < WHOLE_ROW_MAX_BYTES) {
       const hash = hashPayload(whole);
       rowsByHash.set(hash, { hash, key: keyRuntimeOutputPayload(hash), value: whole });
