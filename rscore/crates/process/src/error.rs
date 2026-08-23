@@ -38,6 +38,15 @@ pub enum ProcessError {
     Version { actual: u64, expected: u64 },
     #[error("RSCORE_PROCESS_PROFILE:{0}")]
     Profile(String),
+    #[error("RSCORE_PROCESS_PROTOCOL_VERSION:{actual}:{expected}")]
+    ProtocolVersion { actual: u32, expected: u32 },
+    #[error("RSCORE_PROCESS_STORAGE_SCHEMA_VERSION:{actual}:{expected}")]
+    StorageSchemaVersion { actual: u32, expected: u32 },
+    #[error("RSCORE_PROCESS_PROTOCOL_FINGERPRINT:{actual:?}:{expected:?}")]
+    ProtocolFingerprint {
+        actual: [u8; 32],
+        expected: [u8; 32],
+    },
     #[error("RSCORE_PROCESS_BINDING_MISMATCH")]
     BindingMismatch,
     #[error("RSCORE_PROCESS_IDENTITY_MISMATCH")]
@@ -87,6 +96,9 @@ impl ProcessError {
             Self::HelloDuplicate => "RSCORE_PROCESS_HELLO_DUPLICATE",
             Self::Version { .. } => "RSCORE_PROCESS_VERSION",
             Self::Profile(_) => "RSCORE_PROCESS_PROFILE",
+            Self::ProtocolVersion { .. } => "RSCORE_PROCESS_PROTOCOL_VERSION",
+            Self::StorageSchemaVersion { .. } => "RSCORE_PROCESS_STORAGE_SCHEMA_VERSION",
+            Self::ProtocolFingerprint { .. } => "RSCORE_PROCESS_PROTOCOL_FINGERPRINT",
             Self::BindingMismatch => "RSCORE_PROCESS_BINDING_MISMATCH",
             Self::IdentityMismatch => "RSCORE_PROCESS_IDENTITY_MISMATCH",
             Self::RequestId { .. } => "RSCORE_PROCESS_REQUEST_ID",

@@ -86,6 +86,7 @@ impl ProcessSession {
         let Command::Hello { worker_count } = command else {
             return Err(ProcessError::HelloRequired);
         };
+        validate_payment_profile_binding(&request.binding)?;
         let actual = request_id(&request.identity);
         if actual != 0 {
             return Err(ProcessError::RequestId {
@@ -250,4 +251,27 @@ impl SessionBinding {
 
 fn request_id(identity: &EngineIdentity) -> u64 {
     u64::from_be_bytes(identity.request_id)
+}
+
+fn validate_payment_profile_binding(binding: &ProtocolBinding) -> Result<(), ProcessError> {
+    let expected = &crate::PAYMENT_PROFILE_BINDING;
+    if binding.protocol_version != expected.protocol_version {
+        return Err(ProcessError::ProtocolVersion {
+            actual: binding.protocol_version,
+            expected: expected.protocol_version,
+        });
+    }
+    if binding.storage_schema_version != expected.storage_schema_version {
+        return Err(ProcessError::StorageSchemaVersion {
+            actual: binding.storage_schema_version,
+            expected: expected.storage_schema_version,
+        });
+    }
+    if binding.protocol_fingerprint != expected.protocol_fingerprint {
+        return Err(ProcessError::ProtocolFingerprint {
+            actual: binding.protocol_fingerprint,
+            expected: expected.protocol_fingerprint,
+        });
+    }
+    Ok(())
 }

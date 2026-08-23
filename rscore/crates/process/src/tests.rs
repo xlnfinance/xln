@@ -9,6 +9,38 @@ use crate::test_fixture::{
 use crate::{ProcessSession, read_frame, serve, write_frame};
 
 #[test]
+fn hello_requires_exact_build_owned_payment_profile_binding() {
+    assert_eq!(
+        hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
+        "c7fff9072a2953c654b05ca29551e2aa23f410fbd58ce2472ae1ed63accd771f"
+    );
+
+    let mut session = ProcessSession::new();
+    let mut wrong_protocol = hello(0);
+    wrong_protocol.binding.protocol_version -= 1;
+    assert_error(
+        session.handle(wrong_protocol).envelope,
+        "RSCORE_PROCESS_PROTOCOL_VERSION:4:5",
+    );
+
+    let mut wrong_schema = hello(0);
+    wrong_schema.binding.storage_schema_version -= 1;
+    assert_error(
+        session.handle(wrong_schema).envelope,
+        "RSCORE_PROCESS_STORAGE_SCHEMA_VERSION:9:10",
+    );
+
+    let mut wrong_fingerprint = hello(0);
+    wrong_fingerprint.binding.protocol_fingerprint[31] ^= 1;
+    assert_error(
+        session.handle(wrong_fingerprint).envelope,
+        "RSCORE_PROCESS_PROTOCOL_FINGERPRINT",
+    );
+
+    assert_ok(session.handle(hello(0)).envelope);
+}
+
+#[test]
 fn revision_zero_restore_prepare_abort_reprepare_commit_is_atomic() {
     let mut session = ProcessSession::new();
     assert_ok(session.handle(hello(0)).envelope);

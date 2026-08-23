@@ -22,11 +22,7 @@ pub fn request(id: u64, op_tag: OpTag, payload: Vec<AbiValue>) -> Envelope {
 }
 
 fn binding() -> ProtocolBinding {
-    ProtocolBinding {
-        protocol_version: 5,
-        storage_schema_version: 10,
-        protocol_fingerprint: [0x33; 32],
-    }
+    crate::PAYMENT_PROFILE_BINDING
 }
 
 pub fn hello(id: u64) -> Envelope {
