@@ -22,6 +22,8 @@ const httpBaseForRuntimeWsUrl = (wsUrl: string): string => {
 export const setupCrossLoadCohort = async (options: {
   runtime: ConnectedRuntime;
   relayUrl: string;
+  /** Distinct suffix per parallel cohort; one custody signer per entity. */
+  labelSuffix?: string;
   sourceHubEntityId: string;
   targetHubEntityId: string;
   sourceJurisdiction: JurisdictionConfig;
@@ -37,10 +39,12 @@ export const setupCrossLoadCohort = async (options: {
     authKey: options.runtime.entry.token,
     timeoutMs: 30_000,
   });
+  const sourceLabel = `${SOURCE_SIGNER_LABEL}${options.labelSuffix ?? ''}`;
+  const targetLabel = `${TARGET_SIGNER_LABEL}${options.labelSuffix ?? ''}`;
   const source = await setupCustody(client, {
-    name: 'Production Load Source',
-    seed: deriveManagedSignerSeed(options.custodyRuntimeSeed, SOURCE_SIGNER_LABEL),
-    signerLabel: SOURCE_SIGNER_LABEL,
+    name: `Production Load Source${options.labelSuffix ?? ''}`,
+    seed: deriveManagedSignerSeed(options.custodyRuntimeSeed, sourceLabel),
+    signerLabel: sourceLabel,
     jurisdiction: options.sourceJurisdiction,
     relayUrl: options.relayUrl,
     gossipPollMs: 250,
@@ -49,9 +53,9 @@ export const setupCrossLoadCohort = async (options: {
     creditAmount: options.sourceCredit,
   });
   const target = await setupCustody(client, {
-    name: 'Production Load Target',
-    seed: deriveManagedSignerSeed(options.custodyRuntimeSeed, TARGET_SIGNER_LABEL),
-    signerLabel: TARGET_SIGNER_LABEL,
+    name: `Production Load Target${options.labelSuffix ?? ''}`,
+    seed: deriveManagedSignerSeed(options.custodyRuntimeSeed, targetLabel),
+    signerLabel: targetLabel,
     jurisdiction: options.targetJurisdiction,
     relayUrl: options.relayUrl,
     gossipPollMs: 250,

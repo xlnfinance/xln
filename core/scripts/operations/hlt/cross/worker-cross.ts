@@ -127,19 +127,22 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       sourceHub.entityId,
       targetHub.entityId,
     );
-    // One cohort funds one token pair; the ladder is that pair's levels only.
-    const pairAnchor = marketMakerLevels[0]!;
-    const samePairLevels = marketMakerLevels.filter(level =>
-      level.source.tokenId === pairAnchor.source.tokenId &&
-      level.target.tokenId === pairAnchor.target.tokenId);
-    if (samePairLevels.length < burstSize) {
-      throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_DEPTH_INSUFFICIENT:${samePairLevels.length}:${burstSize}`);
+    // The byte-budget selector quotes one level per token pair per directed
+    // route, so parallel fills come from parallel pairs: one funded cohort per
+    // pair, each burst route matching that pair's single MM level.
+    const seenPairs = new Set<string>();
+    const pairLevels = marketMakerLevels.filter(level => {
+      const key = `${level.source.tokenId}>${level.target.tokenId}`;
+      if (seenPairs.has(key)) return false;
+      seenPairs.add(key);
+      return true;
+    });
+    if (pairLevels.length < burstSize) {
+      throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_DEPTH_INSUFFICIENT:${pairLevels.length}:${burstSize}`);
     }
-    const marketMakerRoute = pairAnchor;
-    const totalSourceCredit = samePairLevels.slice(0, burstSize)
-      .reduce((sum, level) => sum + level.source.amount, 0n);
-    const totalTargetCredit = samePairLevels.slice(0, burstSize)
-      .reduce((sum, level) => sum + level.target.amount, 0n);
+    const levels = pairLevels.slice(0, burstSize);
+    const marketMakerRoute = levels[0]!;
+    console.log(`[load] cross pairs available=${pairLevels.length} burst=${burstSize}`);
     const apiBaseUrl = `http://127.0.0.1:${args.portBase + 4}`;
     const sourceJ = resolveMeshJurisdictionConfig(`${apiBaseUrl}/rpc`);
     const targetJConfig = resolveSecondaryJurisdictions(sourceJ.rpc).find(value => value.chainId === TARGET_CHAIN_ID);
@@ -155,76 +158,88 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       getJurisdictionStackId(targetJurisdiction) !== marketMakerRoute.target.jurisdiction
     ) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_JURISDICTION_ROUTE_MISMATCH');
     await importJurisdiction(load, targetJ);
-    const cohort = await setupCrossLoadCohort({
-      runtime: load,
-      relayUrl: `ws://127.0.0.1:${args.portBase + 4}/relay`,
-      sourceHubEntityId: sourceHub.entityId,
-      targetHubEntityId: targetHub.entityId,
-      sourceJurisdiction,
-      targetJurisdiction,
-      sourceTokenId: marketMakerRoute.source.tokenId,
-      targetTokenId: marketMakerRoute.target.tokenId,
-      sourceCredit: totalSourceCredit * SETUP_CREDIT_MULTIPLIER,
-      targetCredit: totalTargetCredit * SETUP_CREDIT_MULTIPLIER,
-      custodyRuntimeSeed,
-    });
-    await sendObserved(hub, `prod-cross-credit-${targetHub.entityId.slice(-8)}`, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: targetHub.entityId,
-        signerId: targetHub.signerId,
-        entityTxs: [{
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: cohort.target.entityId,
-            tokenId: marketMakerRoute.target.tokenId,
-            amount: totalTargetCredit * SETUP_CREDIT_MULTIPLIER,
-          },
+    type PreparedCohort = {
+      level: (typeof levels)[number];
+      cohort: Awaited<ReturnType<typeof setupCrossLoadCohort>>;
+      sourceAccount: NonNullable<Awaited<ReturnType<typeof readLoadAccount>>>;
+      targetAccount: NonNullable<Awaited<ReturnType<typeof readLoadAccount>>>;
+    };
+    const prepared: PreparedCohort[] = [];
+    for (const [index, level] of levels.entries()) {
+      const cohort = await setupCrossLoadCohort({
+        runtime: load,
+        relayUrl: `ws://127.0.0.1:${args.portBase + 4}/relay`,
+        labelSuffix: `-${index}`,
+        sourceHubEntityId: sourceHub.entityId,
+        targetHubEntityId: targetHub.entityId,
+        sourceJurisdiction,
+        targetJurisdiction,
+        sourceTokenId: level.source.tokenId,
+        targetTokenId: level.target.tokenId,
+        sourceCredit: level.source.amount * SETUP_CREDIT_MULTIPLIER,
+        targetCredit: level.target.amount * SETUP_CREDIT_MULTIPLIER,
+        custodyRuntimeSeed,
+      });
+      await sendObserved(hub, `prod-cross-credit-${index}-${targetHub.entityId.slice(-8)}`, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: targetHub.entityId,
+          signerId: targetHub.signerId,
+          entityTxs: [{
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: cohort.target.entityId,
+              tokenId: level.target.tokenId,
+              amount: level.target.amount * SETUP_CREDIT_MULTIPLIER,
+            },
+          }],
         }],
-      }],
-    });
-    await waitForCredit(
-      load, cohort.target.entityId, targetHub.entityId,
-      marketMakerRoute.target.tokenId, marketMakerRoute.target.amount,
-    );
-    const sourceAccount = await readLoadAccount(load, cohort.source.entityId, sourceHub.entityId);
-    const targetAccount = await readLoadAccount(load, cohort.target.entityId, targetHub.entityId);
-    if (!sourceAccount || !targetAccount) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ACCOUNT_MISSING');
+      });
+      await waitForCredit(
+        load, cohort.target.entityId, targetHub.entityId,
+        level.target.tokenId, level.target.amount,
+      );
+      const sourceAccount = await readLoadAccount(load, cohort.source.entityId, sourceHub.entityId);
+      const targetAccount = await readLoadAccount(load, cohort.target.entityId, targetHub.entityId);
+      if (!sourceAccount || !targetAccount) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ACCOUNT_MISSING');
+      prepared.push({ level, cohort, sourceAccount, targetAccount });
+    }
+
     await exportReplayBaseSnapshotIfConfigured(hub);
     const hubBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
     const loadBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest'));
     const now = Date.now();
     const buildRoute = (index: number) => {
-      const level = samePairLevels[index]!;
+      const { level, cohort: pairCohort, sourceAccount, targetAccount } = prepared[index]!;
       return withCanonicalCrossJurisdictionRouteHash({
-      orderId: `prod-cross-${hubBefore.height}-${index}-${level.orderId}`,
-      makerEntityId: cohort.target.entityId,
-      hubEntityId: targetHub.entityId,
-      ...(level.bookOwnerEntityId ? { bookOwnerEntityId: level.bookOwnerEntityId } : {}),
-      sourceSignerId: cohort.target.signerId,
-      sourceHubSignerId: targetHub.signerId,
-      targetHubSignerId: sourceHub.signerId,
-      targetSignerId: cohort.source.signerId,
-      ...(level.bookHubSignerId ? { bookHubSignerId: level.bookHubSignerId } : {}),
-      source: {
-        jurisdiction: level.target.jurisdiction,
-        entityId: cohort.target.entityId,
-        counterpartyEntityId: targetHub.entityId,
-        tokenId: level.target.tokenId,
-        amount: level.target.amount,
-      },
-      target: {
-        jurisdiction: level.source.jurisdiction,
-        entityId: sourceHub.entityId,
-        counterpartyEntityId: cohort.source.entityId,
-        tokenId: level.source.tokenId,
-        amount: level.source.amount,
-      },
-      sourceDisputeConfig: { ...targetAccount.state.disputeConfig },
-      targetDisputeConfig: { ...sourceAccount.state.disputeConfig },
-      ...(level.priceTicks !== undefined ? { priceTicks: level.priceTicks } : {}),
-      riskMode: 'fully_collateralized',
-      status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 10 * 60_000,
+        orderId: `prod-cross-${hubBefore.height}-${index}-${level.orderId}`,
+        makerEntityId: pairCohort.target.entityId,
+        hubEntityId: targetHub.entityId,
+        ...(level.bookOwnerEntityId ? { bookOwnerEntityId: level.bookOwnerEntityId } : {}),
+        sourceSignerId: pairCohort.target.signerId,
+        sourceHubSignerId: targetHub.signerId,
+        targetHubSignerId: sourceHub.signerId,
+        targetSignerId: pairCohort.source.signerId,
+        ...(level.bookHubSignerId ? { bookHubSignerId: level.bookHubSignerId } : {}),
+        source: {
+          jurisdiction: level.target.jurisdiction,
+          entityId: pairCohort.target.entityId,
+          counterpartyEntityId: targetHub.entityId,
+          tokenId: level.target.tokenId,
+          amount: level.target.amount,
+        },
+        target: {
+          jurisdiction: level.source.jurisdiction,
+          entityId: sourceHub.entityId,
+          counterpartyEntityId: pairCohort.source.entityId,
+          tokenId: level.source.tokenId,
+          amount: level.source.amount,
+        },
+        sourceDisputeConfig: { ...targetAccount.state.disputeConfig },
+        targetDisputeConfig: { ...sourceAccount.state.disputeConfig },
+        ...(level.priceTicks !== undefined ? { priceTicks: level.priceTicks } : {}),
+        riskMode: 'fully_collateralized',
+        status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 10 * 60_000,
       });
     };
     const routes = Array.from({ length: burstSize }, (_, index) => buildRoute(index));
@@ -238,12 +253,13 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     // cohort admits exactly two legs per envelope), submitted back to back;
     // then every route must reach committed full fill on both hub entities.
     let observed = { enqueueAckElapsedMs: 0, commandObservedElapsedMs: 0 };
-    for (const route of routes) {
+    for (const [index, route] of routes.entries()) {
+      const pairCohort = prepared[index]!.cohort;
       const routeObserved = await sendObserved(load, route.orderId, {
         runtimeTxs: [],
         entityInputs: [
-          { entityId: cohort.target.entityId, signerId: cohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-          { entityId: cohort.source.entityId, signerId: cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
+          { entityId: pairCohort.target.entityId, signerId: pairCohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
+          { entityId: pairCohort.source.entityId, signerId: pairCohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
         ],
       });
       observed = {
@@ -253,7 +269,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     }
     const settledRoutes = await Promise.all(routes.map((route, index) => waitForSettledCrossRoute(
       hub, sourceHub.entityId, targetHub.entityId, route.orderId,
-      samePairLevels[index]!.target.amount, samePairLevels[index]!.source.amount,
+      prepared[index]!.level.target.amount, prepared[index]!.level.source.amount,
     )));
     const settled = settledRoutes[0]!;
     const economicCompletionElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
