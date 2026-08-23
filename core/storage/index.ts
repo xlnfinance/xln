@@ -1181,10 +1181,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     { omitSymbolKeys: true },
   ) as RuntimeInput;
   const planningMs = options.getPerfMs() - planningStartedAt;
-  const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
-  if (OP_COUNTERS_ENABLED) {
-    for (const [stage, ms] of Object.entries(planningStages)) countOp(`storage.planning.${stage}`, 0, Math.round(ms * 1_000));
-  }
+  const planningStages = countStorageStages('planning', planningMarks, planningMs);
   return {
     config,
     state,
@@ -1643,6 +1640,19 @@ const buildStorageRuntimeFrame = (
 
 const WAL_SYNC_ENABLED = process.env['XLN_STORAGE_WAL_SYNC'] !== '0';
 
+/** Stage durations become op-counters so a load run can split save time. */
+const countStorageStages = (
+  family: 'planning' | 'prepare',
+  marks: Record<string, number>,
+  totalMs: number,
+): Record<string, number> => {
+  const stages = cumulativeMarksToDurations(marks, totalMs);
+  if (OP_COUNTERS_ENABLED) {
+    for (const [stage, ms] of Object.entries(stages)) countOp(`storage.${family}.${stage}`, 0, Math.round(ms * 1_000));
+  }
+  return stages;
+};
+
 const buildStorageFrameRecordPlan = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
@@ -1948,6 +1958,11 @@ const buildStorageCommitBatches = (
 
 type StorageCommitBatches = ReturnType<typeof buildStorageCommitBatches>;
 
+// Load-test user Runtimes may trade durability for I/O (XLN_STORAGE_WAL_SYNC=0);
+// a Hub keeps the fsync.
+const writeAuthoritativeWalBatch = (batches: StorageCommitBatches): Promise<void> =>
+  writeBatch(batches.walBatch, { sync: WAL_SYNC_ENABLED });
+
 const commitStorageFrame = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
@@ -1959,16 +1974,11 @@ const commitStorageFrame = async (
 ) => {
   const prepareStartedAt = options.getPerfMs();
   const prepareMs = prepareStartedAt - writeStartedAt;
-  const prepareStages = cumulativeMarksToDurations(prepareMarks, prepareMs);
-  if (OP_COUNTERS_ENABLED) {
-    for (const [stage, ms] of Object.entries(prepareStages)) countOp(`storage.prepare.${stage}`, 0, Math.round(ms * 1_000));
-  }
+  const prepareStages = countStorageStages('prepare', prepareMarks, prepareMs);
   options.onPersistenceProgress?.('authoritative-write-start');
   // This synced WAL batch is the only frame commit point. Everything before it
   // is discardable planning; everything after it must recover forward.
-  // Load-test user Runtimes may trade durability for I/O (XLN_STORAGE_WAL_SYNC=0);
-  // a Hub keeps the fsync.
-  await writeBatch(batches.walBatch, { sync: WAL_SYNC_ENABLED });
+  await writeAuthoritativeWalBatch(batches);
   const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');
