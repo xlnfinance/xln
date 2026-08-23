@@ -133,6 +133,7 @@ test('DisputeStarted enters Account through the same external-finality boundary'
     starterEntityId: leftEntity,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 7,
+    initialProposerIsLeft: true,
     disputeTimeout: 1700000020,
     disputeStartTimestamp: 1700000000,
     leftResponseSeconds: 10,
@@ -165,6 +166,7 @@ test('DisputeStarted enters Account through the same external-finality boundary'
     startedByLeft: true,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 7,
+    initialProposerIsLeft: true,
     disputeTimeout: 1700000020,
     disputeStartTimestamp: 1700000000,
     jNonce: 9,
@@ -188,6 +190,7 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
     starterEntityId: rightEntity,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 1,
+    initialProposerIsLeft: false,
     disputeTimeout: 100,
     disputeStartTimestamp: 100,
     leftResponseSeconds: 10,
@@ -195,7 +198,7 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
     jNonce: 1,
     starterInitialArguments: '0x',
     starterCounterArguments: '0x',
-        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedBlockNumber: 100,
   });
 
@@ -219,6 +222,7 @@ test('zero-window DisputeStarted accepts the exact same-second deadline', async 
     starterEntityId: leftEntity,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 1,
+    initialProposerIsLeft: true,
     disputeTimeout: 100,
     disputeStartTimestamp: 100,
     leftResponseSeconds: 0,
@@ -226,7 +230,7 @@ test('zero-window DisputeStarted accepts the exact same-second deadline', async 
     jNonce: 1,
     starterInitialArguments: '0x',
     starterCounterArguments: '0x',
-        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedBlockNumber: 100,
   });
 
@@ -259,6 +263,7 @@ test('DisputeStarted atomically moves cross-j recovery into the active phase', a
     starterEntityId: leftEntity,
     initialProofbodyHash: `0x${'55'.repeat(32)}`,
     initialNonce: 7,
+    initialProposerIsLeft: true,
     disputeTimeout: 1700000020,
     disputeStartTimestamp: 1700000000,
     leftResponseSeconds: 10,
@@ -266,7 +271,7 @@ test('DisputeStarted atomically moves cross-j recovery into the active phase', a
     jNonce: 9,
     starterInitialArguments: '0x',
     starterCounterArguments: '0x',
-        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedBlockNumber: 100,
   });
 
