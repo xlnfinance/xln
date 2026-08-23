@@ -4,7 +4,7 @@ import type { JurisdictionConfig } from '../../../../protocol/config/jurisdictio
 import { DaemonControlClient, setupCustody } from '../../../../orchestrator/daemon-control';
 import { deriveManagedSignerSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { decodeCommittedCrossRoutes } from './cross-boundary';
-import type { ConnectedRuntime } from '../worker-runtime';
+import { readWithRateLimitRetry, type ConnectedRuntime } from '../worker-runtime';
 
 const SOURCE_SIGNER_LABEL = 'production-load-source';
 const TARGET_SIGNER_LABEL = 'production-load-target';
@@ -78,10 +78,10 @@ export const waitForSettledCrossRoute = async (
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     const sourceRoutes = decodeCommittedCrossRoutes(
-      await hub.adapter.read<unknown>(`entity/${sourceHubEntityId}`),
+      await readWithRateLimitRetry<unknown>(hub, `entity/${sourceHubEntityId}`),
     );
     const targetRoutes = decodeCommittedCrossRoutes(
-      await hub.adapter.read<unknown>(`entity/${targetHubEntityId}`),
+      await readWithRateLimitRetry<unknown>(hub, `entity/${targetHubEntityId}`),
     );
     const source = sourceRoutes.find(route => route.orderId === orderId);
     const target = targetRoutes.find(route => route.orderId === orderId);

@@ -41,6 +41,7 @@ import {
   waitForRuntimeHeight,
   type ConnectedRuntime,
   type WorkerArgs,
+  readWithRateLimitRetry,
 } from '../worker-runtime';
 import { setupCrossLoadCohort, waitForSettledCrossRoute } from './worker-cross-state';
 
@@ -118,21 +119,26 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
   const hub = await connectRuntime(entryByLabel(entries, 'H1'));
   const load = await connectRuntime(entryByLabel(entries, 'Custody'), `ws://127.0.0.1:${args.portBase + 8}/rpc`);
   try {
-    const entities = decodeEntitySummaries(await hub.adapter.read<unknown>('entities'));
+    const entities = decodeEntitySummaries(await readWithRateLimitRetry<unknown>(hub, 'entities'));
     const sourceHub = selectLocalHubIdentity(entities, hub.adapter.runtimeId, SOURCE_CHAIN_ID);
     const targetHub = selectLocalHubIdentity(entities, hub.adapter.runtimeId, TARGET_CHAIN_ID);
     const marketMakerLevels = selectMarketMakerCrossRoutes(
-      decodeCommittedCrossRoutes(await hub.adapter.read<unknown>(`entity/${sourceHub.entityId}`)),
+      decodeCommittedCrossRoutes(await readWithRateLimitRetry<unknown>(hub, `entity/${sourceHub.entityId}`)),
       sourceHub.entityId,
       targetHub.entityId,
     );
-    if (marketMakerLevels.length < burstSize) {
-      throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_DEPTH_INSUFFICIENT:${marketMakerLevels.length}:${burstSize}`);
+    // One cohort funds one token pair; the ladder is that pair's levels only.
+    const pairAnchor = marketMakerLevels[0]!;
+    const samePairLevels = marketMakerLevels.filter(level =>
+      level.source.tokenId === pairAnchor.source.tokenId &&
+      level.target.tokenId === pairAnchor.target.tokenId);
+    if (samePairLevels.length < burstSize) {
+      throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_DEPTH_INSUFFICIENT:${samePairLevels.length}:${burstSize}`);
     }
-    const marketMakerRoute = marketMakerLevels[0]!;
-    const totalSourceCredit = marketMakerLevels.slice(0, burstSize)
+    const marketMakerRoute = pairAnchor;
+    const totalSourceCredit = samePairLevels.slice(0, burstSize)
       .reduce((sum, level) => sum + level.source.amount, 0n);
-    const totalTargetCredit = marketMakerLevels.slice(0, burstSize)
+    const totalTargetCredit = samePairLevels.slice(0, burstSize)
       .reduce((sum, level) => sum + level.target.amount, 0n);
     const apiBaseUrl = `http://127.0.0.1:${args.portBase + 4}`;
     const sourceJ = resolveMeshJurisdictionConfig(`${apiBaseUrl}/rpc`);
@@ -185,11 +191,11 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     const targetAccount = await readLoadAccount(load, cohort.target.entityId, targetHub.entityId);
     if (!sourceAccount || !targetAccount) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ACCOUNT_MISSING');
     await exportReplayBaseSnapshotIfConfigured(hub);
-    const hubBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
-    const loadBefore = decodeLoadFrame(await load.adapter.read<unknown>('frame/latest'));
+    const hubBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
+    const loadBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest'));
     const now = Date.now();
     const buildRoute = (index: number) => {
-      const level = marketMakerLevels[index]!;
+      const level = samePairLevels[index]!;
       return withCanonicalCrossJurisdictionRouteHash({
       orderId: `prod-cross-${hubBefore.height}-${index}-${level.orderId}`,
       makerEntityId: cohort.target.entityId,
@@ -247,7 +253,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     }
     const settledRoutes = await Promise.all(routes.map((route, index) => waitForSettledCrossRoute(
       hub, sourceHub.entityId, targetHub.entityId, route.orderId,
-      marketMakerLevels[index]!.target.amount, marketMakerLevels[index]!.source.amount,
+      samePairLevels[index]!.target.amount, samePairLevels[index]!.source.amount,
     )));
     const settled = settledRoutes[0]!;
     const economicCompletionElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
@@ -264,9 +270,9 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       economicCompletionElapsedMs,
       hubWalBytesBefore, hubWalBytesAfter: directoryBytes(hubWal),
       loadWalBytesBefore, loadWalBytesAfter: directoryBytes(loadWal),
-      hubDurableBefore: hubBefore, hubDurableAfter: decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest')),
+      hubDurableBefore: hubBefore, hubDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest')),
       environment: collectHltEnvironmentManifest(),
-      loadDurableBefore: loadBefore, loadDurableAfter: decodeLoadFrame(await load.adapter.read<unknown>('frame/latest')),
+      loadDurableBefore: loadBefore, loadDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(load, 'frame/latest')),
     });
     persistReport(join(args.workDir, 'production-cross-swap-load-report.json'), report, decodeCrossLoadReport);
     publishHltDashboardReport('cross', report);
