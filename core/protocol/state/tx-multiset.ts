@@ -1,11 +1,27 @@
 import { safeStringify } from '../serialization';
+import { RecencyMemo } from '../../support/recency-memo';
 
 export type FingerprintableTx = {
   type: string;
   data?: unknown;
 };
 
+// The same mempool tx object is fingerprinted at admission, on every proposal
+// window selection and again on removal. Queued tx objects are immutable,
+// except settlement transitions, whose seal Hankos are attached in place by
+// the Entity witness pass; those always re-render.
+const fingerprintMemos = new RecencyMemo<FingerprintableTx, string>(16_384);
+
 export const txFingerprint = (tx: FingerprintableTx): string => {
+  if (tx.type === 'settle_transition') return txFingerprintUncached(tx);
+  const hit = fingerprintMemos.get(tx);
+  if (hit !== undefined) return hit;
+  const fingerprint = txFingerprintUncached(tx);
+  fingerprintMemos.set(tx, fingerprint);
+  return fingerprint;
+};
+
+const txFingerprintUncached = (tx: FingerprintableTx): string => {
   if (
     tx.type !== 'consensusOutput' ||
     !tx.data ||

@@ -122,7 +122,11 @@ try {
       requestedFrames.set(key, { entityId, entityHeight: context.height });
     }
   }
-  const entityProposalOracle = await Promise.all(
+  // Certified-frame history feeds the proposal oracle. Load runs may switch
+  // that history off (XLN_STORAGE_CERTIFIED_HISTORY=0); the recording then
+  // carries no oracle and replay proves equivalence by terminal state only.
+  const oracleEnabled = process.env['XLN_STORAGE_CERTIFIED_HISTORY'] !== '0';
+  const entityProposalOracle = !oracleEnabled ? undefined : await Promise.all(
     Array.from(requestedFrames.values())
       .sort((left, right) => left.entityId.localeCompare(right.entityId) || left.entityHeight - right.entityHeight)
       .map(async ({ entityId, entityHeight }) => {
@@ -149,7 +153,7 @@ try {
     source: { workDir, users, workload },
     recording,
     totals: summarizeHltHubFrames(frames),
-    entityProposalOracle,
+    ...(entityProposalOracle ? { entityProposalOracle } : {}),
   };
   mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
   writeHltHubRecording(outputPath, artifact);

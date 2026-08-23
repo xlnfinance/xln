@@ -388,6 +388,9 @@ const spawnSovereignRuntimeHost = async (options: {
       ...(process.env['XLN_ACCOUNT_DISPUTE_SEALS'] !== undefined
         ? { XLN_ACCOUNT_DISPUTE_SEALS: process.env['XLN_ACCOUNT_DISPUTE_SEALS'] }
         : {}),
+      ...(process.env['XLN_STORAGE_CERTIFIED_HISTORY'] !== undefined
+        ? { XLN_STORAGE_CERTIFIED_HISTORY: process.env['XLN_STORAGE_CERTIFIED_HISTORY'] }
+        : {}),
       ...(process.env['XLN_P2P_DELIVERY_TRACE'] === '1' ? { XLN_P2P_DELIVERY_TRACE: '1' } : {}),
       ...(process.env['XLN_HEAVY_LOGS'] ? { XLN_HEAVY_LOGS: '1' } : {}),
       ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),

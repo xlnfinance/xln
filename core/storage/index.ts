@@ -1706,6 +1706,10 @@ const buildStorageFrameRecordPlan = (
     touchedAccounts: touches.touchedAccounts,
     touchedBookEntities: touches.touchedBookEntities,
     certifiedHistoryPuts: (() => {
+      // Certified-frame history serves API pages (account frame / swap history);
+      // it re-encodes every Entity and Account frame per Runtime frame. Load
+      // runs switch it off with XLN_STORAGE_CERTIFIED_HISTORY=0.
+      if (process.env['XLN_STORAGE_CERTIFIED_HISTORY'] === '0') return [];
       const puts = buildCertifiedFramePuts({
         height: options.env.state.height,
         timestamp: options.env.state.timestamp,

@@ -7,7 +7,7 @@ import { createStructuredLogger, shortHash, shortId } from '../../../support/log
 import { hashEntityLeaderVoteBody } from '../leader';
 import { hashJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { getEffectiveEntityInputTxs } from '../output/envelope';
-import { accountInputProposal } from '../../../account/consensus/flush';
+import { accountInputAck, accountInputProposal } from '../../../account/consensus/flush';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
@@ -86,8 +86,29 @@ const canonicalEntityInputSortKey = (input: EntityConsensusInput): string => saf
         hash: jPrefixAttestationHash(attestation),
       }))
     : null,
-  entityTxs: input.entityTxs ?? [],
+  entityTxs: (input.entityTxs ?? []).map(compactEntityTxSortKey),
 });
+
+/**
+ * Tie-break identity of one tx. Account inputs are the bulk of a Hub frame;
+ * their exact bytes are determined by (kind, endpoints, heights, hashes,
+ * Hankos), so rendering the full frame body to JSON for the sort was pure
+ * overhead. Other tx kinds keep the exact canonical form.
+ */
+const compactEntityTxSortKey = (tx: EntityTx): unknown => {
+  if (tx.type !== 'accountInput') return tx;
+  const input = tx.data;
+  const proposal = accountInputProposal(input);
+  const ack = accountInputAck(input);
+  return [
+    input.kind,
+    input.fromEntityId.toLowerCase(),
+    input.toEntityId.toLowerCase(),
+    proposal ? [proposal.frame.height, proposal.frame.stateHash, proposal.frameHanko ?? '', proposal.disputeSeal?.hash ?? '', proposal.disputeSeal?.hanko ?? ''] : null,
+    ack ? [ack.height, ack.frameHash, ack.frameHanko ?? '', ack.disputeSeal?.hash ?? '', ack.disputeSeal?.hanko ?? ''] : null,
+    input.kind === 'dispute' || input.kind === 'frame' || input.kind === 'frame_ack' || input.kind === 'ack' ? null : safeStringify(input),
+  ];
+};
 
 type ConsensusInputOrder = Readonly<{
   targetHeight: number;
