@@ -36,7 +36,7 @@ const TARGET = entity('cc');
 const WATCH_SEED = entity('99');
 const DEPOSITORY = addr('88');
 const PROTOCOL_FINGERPRINT = Buffer.from(
-  sha256(new TextEncoder().encode('xln.rscore.account:v1:protocol=5:storage=10:hanko:payment-v1')),
+  sha256(new TextEncoder().encode('xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1')),
 );
 const ENGINE_GENERATION = Buffer.from({ length: 8 }, (_, index) => 0xa0 + index);
 const RUNTIME_ID = Buffer.from({ length: 20 }, (_, index) => 0x10 + index);

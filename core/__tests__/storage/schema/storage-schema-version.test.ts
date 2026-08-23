@@ -65,8 +65,8 @@ const memoryDbWithHead = (head: StorageHead): RuntimeDbLike => memoryDb([[KEY_HE
 
 describe('storage schema boundary', () => {
   test('rejects retired command and incomplete-checkpoint schemas before hydrating entity state', async () => {
-    await expect(readStorageHead(memoryDbWithHead(currentHead(1)))).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`,
+    await expect(readStorageHead(memoryDbWithHead(currentHead(3)))).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=3:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(readStorageHead(memoryDbWithHead(currentHead(2)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
@@ -77,12 +77,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(5)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=5:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(10);
+    expect(STORAGE_SCHEMA_VERSION).toBe(1);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 10,
+      schemaVersion: 1,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',
@@ -113,7 +113,7 @@ describe('storage schema boundary', () => {
 
   test('rejects retired frame-journal heads instead of relabelling them current', async () => {
     const obsoleteHead: StorageHistoryViewHead = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       latestHeight: 7,
       latestPrunedRuntimeHeight: 0,
       retainedBytes: 1_024,
@@ -121,21 +121,21 @@ describe('storage schema boundary', () => {
       retainFrames: storageConfig.historyViewRetainFrames,
     };
     await expect(readHistoryViewHead(memoryDb([[KEY_HISTORY_VIEW_HEAD, obsoleteHead]]), storageConfig)).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}:boundary=history-view-head`,
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}:boundary=history-view-head`,
     );
   });
 
   test('rejects retired heads at recovery, verification, rotation, and inspection boundaries', async () => {
-    const obsoleteDb = memoryDbWithHead(currentHead(1));
+    const obsoleteDb = memoryDbWithHead(currentHead(2));
     await expect(
       recoverStorageDbFromHistory({
         db: memoryDb(),
         walDb: obsoleteDb,
         config: storageConfig,
       }),
-    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`);
+    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
     await expect(verifyStorageTailIntegrity(obsoleteDb)).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`,
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(
       seedFreshStorageEpoch({
@@ -143,13 +143,13 @@ describe('storage schema boundary', () => {
         targetDb: memoryDb(),
         snapshotHeight: 7,
       }),
-    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`);
+    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
     await expect(
       inspectStorage({
         env: {} as RuntimeReplica,
         tryOpenDb: async () => true,
         getRuntimeDb: () => obsoleteDb,
       }),
-    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`);
+    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
   });
 });

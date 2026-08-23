@@ -12,7 +12,7 @@ use crate::{ProcessSession, read_frame, serve, write_frame};
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "c7fff9072a2953c654b05ca29551e2aa23f410fbd58ce2472ae1ed63accd771f"
+        "883bd6650cbc2fdd9ff73ada850f1b876c976f53d3721b987b615e9304333d4f"
     );
 
     let mut session = ProcessSession::new();
@@ -20,14 +20,14 @@ fn hello_requires_exact_build_owned_payment_profile_binding() {
     wrong_protocol.binding.protocol_version -= 1;
     assert_error(
         session.handle(wrong_protocol).envelope,
-        "RSCORE_PROCESS_PROTOCOL_VERSION:4:5",
+        "RSCORE_PROCESS_PROTOCOL_VERSION:0:1",
     );
 
     let mut wrong_schema = hello(0);
     wrong_schema.binding.storage_schema_version -= 1;
     assert_error(
         session.handle(wrong_schema).envelope,
-        "RSCORE_PROCESS_STORAGE_SCHEMA_VERSION:9:10",
+        "RSCORE_PROCESS_STORAGE_SCHEMA_VERSION:0:1",
     );
 
     let mut wrong_fingerprint = hello(0);

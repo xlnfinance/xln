@@ -38,18 +38,15 @@ describe('mergeEntityInputs', () => {
     const accountConsensus: RoutedEntityInput = {
       entityId: entityId('2'),
       signerId: '2',
+      // AccountInput is routed raw after source Entity + Runtime WAL commit;
+      // nesting it inside a consensusOutput envelope is a protocol violation.
       entityTxs: [{
-        type: 'consensusOutput',
+        type: 'accountInput',
         data: {
-          entityTxs: [{
-            type: 'accountInput',
-            data: {
-              kind: 'ack',
-              fromEntityId: entityId('3'),
-              toEntityId: entityId('2'),
-              ack: { height: 7, frameHash: `0x${'ab'.repeat(32)}`, frameHanko: '0x01' },
-            },
-          }],
+          kind: 'ack',
+          fromEntityId: entityId('3'),
+          toEntityId: entityId('2'),
+          ack: { height: 7, frameHash: `0x${'ab'.repeat(32)}`, frameHanko: '0x01' },
         },
       } as never],
     };
