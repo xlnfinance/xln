@@ -64,13 +64,42 @@ fn decoder_boundaries_are_canonical_and_fail_loudly() {
     let canonical = OpaqueHtlcCiphertext::parse("xln:htlc-opaque:aes-gcm", &"A".repeat(64))
         .expect("canonical 48-byte envelope");
     assert_eq!(canonical.packed(), &[0; 48]);
+}
+
+#[test]
+fn reveal_height_boundary_matches_typescript_safe_integer_range() {
+    const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
     let base = left_base(100);
+    let mut maximum_height = lock_tx("maximum-safe-height", 10.into());
+    let AccountTx::HtlcLock(lock) = &mut maximum_height else {
+        unreachable!("fixture is an HTLC lock")
+    };
+    lock.reveal_before_height = MAX_SAFE_INTEGER;
+    let accepted = SequentialAccountEngine::apply_with_context(
+        &base,
+        Side::Left,
+        &maximum_height,
+        &execution_context(1_000, 10),
+    )
+    .expect("Number.MAX_SAFE_INTEGER is a valid TypeScript integer boundary");
+    assert_eq!(accepted.verdict(), &AccountVerdict::Applied);
+    assert_eq!(
+        accepted
+            .candidate()
+            .expect("accepted lock candidate")
+            .state()
+            .htlc_lock("maximum-safe-height")
+            .expect("committed maximum-height lock")
+            .reveal_before_height(),
+        MAX_SAFE_INTEGER,
+    );
+
     let mut unsafe_height = lock_tx("unsafe-height", 10.into());
     let AccountTx::HtlcLock(lock) = &mut unsafe_height else {
         unreachable!("fixture is an HTLC lock")
     };
-    lock.reveal_before_height = 9_007_199_254_740_992;
+    lock.reveal_before_height = MAX_SAFE_INTEGER + 1;
     let before_delta_root = base.state().deltas_root();
     let before_locks_root = base.state().htlc_locks_root();
     let result = SequentialAccountEngine::apply_with_context(
@@ -83,10 +112,10 @@ fn decoder_boundaries_are_canonical_and_fail_loudly() {
         result,
         Err(TransitionError::HtlcBoundary(
             HtlcBoundaryError::RevealBeforeHeightUnsafe {
-                value: 9_007_199_254_740_992,
-                maximum: 9_007_199_254_740_991,
+                value,
+                maximum: MAX_SAFE_INTEGER,
             }
-        ))
+        )) if value == MAX_SAFE_INTEGER + 1
     ));
     assert_eq!(base.state().deltas_root(), before_delta_root);
     assert_eq!(base.state().htlc_locks_root(), before_locks_root);
