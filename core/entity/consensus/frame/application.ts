@@ -1,3 +1,4 @@
+import { isProposalResendDue } from '../../scheduler/proposal-resend';
 import { FailureDispositionError, haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 /**
@@ -306,6 +307,12 @@ const collectEntityTxResult = (
     if (!context.accountJClaimNewNodes.delete(hash)) {
       context.accountJClaimReplacedNodeHashes.add(hash);
     }
+  }
+  for (const accountId of result.accountResendWork ?? []) {
+    if (!result.newState.accounts.has(accountId)) throw new Error(`ACCOUNT_RESEND_WORK_ACCOUNT_MISSING:${accountId}`);
+    // The wake is the idle-Entity half of the resend rule; the forced flush
+    // below re-bundles the exact pending proposal because its deadline passed.
+    setProposableAccountForce(context.proposableAccounts, accountId, true);
   }
   if (result.accountInputWork) {
     const accountId = result.accountInputWork.accountId.toLowerCase();
@@ -693,13 +700,10 @@ const liveOutboundAck = (
  * cache. XLN does the same, retaining only exact Hanko-bearing proposal/ACK
  * bytes in the AccountReplica so a mandatory flush cannot invent new bytes.
  */
-/** Frames without ACK after which a pending proposal is put on the wire again. */
-const PENDING_PROPOSAL_RESEND_FRAMES = 3;
-
 const resolveForcedAccountInput = (
   account: AccountReplica,
   accountKey: string,
-  entityHeight: number,
+  entityTimestamp: number,
 ): AccountPeerInput => {
   const pendingFrame = account.pendingFrame;
   const ack = liveOutboundAck(account, accountKey);
@@ -723,11 +727,11 @@ const resolveForcedAccountInput = (
   // Already on the wire and still inside the ACK window: only the newest ACK
   // goes out. Re-bundling the proposal on every unrelated flush made the peer
   // re-verify it and echo its own cached response, ~23% of proposal traffic.
-  const sentAt = account.pendingProposalSentHeight;
-  if (sentAt !== undefined && entityHeight - sentAt < PENDING_PROPOSAL_RESEND_FRAMES && ack) {
+  const sentAt = account.pendingProposalSentAt;
+  if (sentAt !== undefined && !isProposalResendDue(sentAt, entityTimestamp) && ack) {
     return ack;
   }
-  account.pendingProposalSentHeight = entityHeight;
+  account.pendingProposalSentAt = entityTimestamp;
   if (!ack) return structuredClone(pending);
   const pendingAck = accountInputAck(pending);
   if (pendingAck && safeStringify(pendingAck) === safeStringify(ack.ack)) return structuredClone(pending);
@@ -829,7 +833,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     }
 
     const requiredResponse = force
-      ? resolveForcedAccountInput(account, accountKey, currentEntityState.height)
+      ? resolveForcedAccountInput(account, accountKey, currentEntityState.timestamp)
       : undefined;
     traceAccountFlushHop(
       'entity-flush-start',
@@ -855,7 +859,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     // again. Only an actual Account proposal is causal work worth certifying.
     if (proposal && isProposedAccountFrame(proposal)) {
       proposedFrames += 1;
-      account.pendingProposalSentHeight = currentEntityState.height;
+      account.pendingProposalSentAt = currentEntityState.timestamp;
     }
 
     const finalAccountInput = proposal && isProposedAccountFrame(proposal)

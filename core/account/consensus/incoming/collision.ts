@@ -186,7 +186,7 @@ export const resolveSameHeightIncomingFrame = (
     }
     // Resend exact signed bytes. Rebuilding could change nonce, body or Hanko.
     // RIGHT discarded its own frame and must adopt ours: the flush re-bundles.
-    delete account.pendingProposalSentHeight;
+    delete account.pendingProposalSentAt;
     return accountInputApplied({
       response: structuredClone(response),
       events,
@@ -226,7 +226,7 @@ export const applySameHeightIncomingFrameRollback = (
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  delete account.pendingProposalSentHeight;
+  delete account.pendingProposalSentAt;
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedFrame.stateHash;
   if (account.rollbackCount > 1) {

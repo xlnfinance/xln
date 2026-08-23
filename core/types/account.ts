@@ -248,12 +248,14 @@ export interface AccountReplica {
    */
   publicPinned?: boolean;
   /**
-   * Entity height at which `pendingAccountInput` was last put on the wire.
-   * A flush re-bundles the pending proposal only when it was never sent, when
-   * a LEFT-wins collision demands the exact resend, or after a resend window
-   * without ACK; otherwise only the newest ACK goes out.
+   * Entity timestamp (ms) at which `pendingAccountInput` was last put on the
+   * wire. A flush re-bundles the pending proposal only when it was never sent,
+   * when a LEFT-wins collision demands the exact resend, or once
+   * ACCOUNT_PROPOSAL_RESEND_MS have passed without ACK; otherwise only the
+   * newest ACK goes out. The scheduled wake turns the same deadline into a
+   * forced flush on an otherwise idle Entity.
    */
-  pendingProposalSentHeight?: number;
+  pendingProposalSentAt?: number;
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;

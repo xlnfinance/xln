@@ -155,7 +155,8 @@ type EntityTxPayload =
         proposerSignerId: string;
         dueAt: number;
         jobs: Array<{
-          kind: 'hook' | 'task';
+          /** `accountResend`: a pending Account proposal has waited a full resend window; id = counterparty key. */
+          kind: 'hook' | 'task' | 'accountResend';
           id: string;
           dueAt: number;
         }>;

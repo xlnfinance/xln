@@ -30,8 +30,11 @@ import {
 } from '../../../runtime/mempool/scheduled-wake';
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
+  assertScheduledWakeMatchesState,
   type ScheduledWakeTx,
 } from '../../../entity/scheduler/scheduled-wake-validation';
+import { nextProposalResendDeadline } from '../../../entity/scheduler/proposal-resend';
+import { ACCOUNT_PROPOSAL_RESEND_MS } from '../../../account/consensus/constants';
 import { safeStringify } from '../../../protocol/serialization';
 import {
   computeCanonicalEntityHash,
@@ -129,6 +132,39 @@ describe('runtime scheduled wake', () => {
 
     expect(entityNeedsPeriodicWake(replica)).toBe(false);
     expect(collectDueScheduledWakeJobs(state, HUB_REBALANCE_INTERVAL_MS, true)).toEqual([]);
+  });
+
+  test('a sent proposal without ACK resends only after the resend window, on the exact deadline', () => {
+    const id = entityId('2a');
+    const proposer = signerId('3a');
+    const counterparty = entityId('2b');
+    const state = makeState(id, proposer, 0);
+    const account = makeAccount(id, counterparty);
+    account.pendingFrame = { ...account.currentFrame, height: 1, timestamp: 0, accountTxs: [] };
+    account.pendingProposalSentAt = 1_000;
+    state.accounts.set(counterparty, account);
+    const dueAt = 1_000 + ACCOUNT_PROPOSAL_RESEND_MS;
+
+    // Old rule counted Entity frames: many frames in a burst resent early and an
+    // idle Entity never resent. The clock rule is silent inside the window...
+    expect(collectDueScheduledWakeJobs(state, dueAt - 1, false)).toEqual([]);
+    expect(nextProposalResendDeadline(state)).toBe(dueAt);
+    // ...and names the exact account and deadline once it passes.
+    expect(collectDueScheduledWakeJobs(state, dueAt, false)).toEqual([
+      { kind: 'accountResend', id: counterparty, dueAt },
+    ]);
+    state.timestamp = dueAt;
+    const tx: ScheduledWakeTx = {
+      type: 'scheduledWake',
+      data: { version: 1, proposerSignerId: proposer, dueAt, jobs: [{ kind: 'accountResend', id: counterparty, dueAt }] },
+    };
+    expect(() => assertScheduledWakeMatchesState(state, tx)).not.toThrow();
+    expect(() => assertScheduledWakeMatchesState(state, {
+      ...tx, data: { ...tx.data, dueAt: dueAt - 1, jobs: [{ kind: 'accountResend', id: counterparty, dueAt: dueAt - 1 }] },
+    })).toThrow('SCHEDULED_WAKE_RESEND_DEADLINE_MISMATCH');
+    delete account.pendingFrame;
+    expect(() => assertScheduledWakeMatchesState(state, tx)).toThrow('SCHEDULED_WAKE_RESEND_NOT_PENDING');
+    expect(nextProposalResendDeadline(state)).toBeNull();
   });
 
   test('real rebalance demand still activates the one-second hub task', () => {

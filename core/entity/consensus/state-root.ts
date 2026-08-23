@@ -200,7 +200,7 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
 const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'status',
   'publicPinned',
-  'pendingProposalSentHeight',
+  'pendingProposalSentAt',
   'mempool',
   'currentFrame',
   'currentHeight',

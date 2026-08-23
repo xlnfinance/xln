@@ -201,7 +201,7 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  delete account.pendingProposalSentHeight;
+  delete account.pendingProposalSentAt;
   if (
     account.lastOutboundFrameAck
     && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)

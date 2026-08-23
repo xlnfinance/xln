@@ -2,6 +2,7 @@ import { compareStableText, safeStringify } from '../../protocol/serialization';
 import type { EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import { getEntityLeaderState } from '../consensus/leader';
+import { proposalResendDueAt } from './proposal-resend';
 
 export type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 export type ScheduledWakeJob = ScheduledWakeTx['data']['jobs'][number];
@@ -39,7 +40,7 @@ export const assertScheduledWakeMatchesState = (
   const actualIsCanonical = safeStringify(actual) === safeStringify(tx.data.jobs);
   const actualIsUnique = new Set(actualKeys).size === actualKeys.length;
   const actualIsStructurallyValid = actual.every(job =>
-    (job.kind === 'hook' || job.kind === 'task') &&
+    (job.kind === 'hook' || job.kind === 'task' || job.kind === 'accountResend') &&
     typeof job.id === 'string' &&
     job.id.length > 0 &&
     job.id.length <= 256 &&
@@ -53,6 +54,18 @@ export const assertScheduledWakeMatchesState = (
     !actualIsStructurallyValid
   ) {
     throw new Error(`SCHEDULED_WAKE_INVALID_PAYLOAD: jobs=${safeStringify(tx.data.jobs)}`);
+  }
+  // A resend job must name a real unacknowledged proposal and its exact
+  // deadline; validators derive both from the same committed Account state.
+  for (const job of actual) {
+    if (job.kind !== 'accountResend') continue;
+    const account = state.accounts.get(job.id);
+    if (!account?.pendingFrame || account.pendingProposalSentAt === undefined) {
+      throw new Error(`SCHEDULED_WAKE_RESEND_NOT_PENDING:${job.id}`);
+    }
+    if (proposalResendDueAt(account.pendingProposalSentAt) !== job.dueAt) {
+      throw new Error(`SCHEDULED_WAKE_RESEND_DEADLINE_MISMATCH:${job.id}`);
+    }
   }
 };
 
