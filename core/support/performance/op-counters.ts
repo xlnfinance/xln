@@ -216,7 +216,7 @@ let globalHooksInstalled = false;
  * Counter hooks remain idempotent and no-op when disabled.
  */
 export const installGlobalOpCounters = async (label = 'runtime'): Promise<void> => {
-  const { installFastKeccak, keccak256Bytes } = await import('../../protocol/crypto/fast-keccak');
+  const { installFastKeccak, keccak256Bytes } = await import('../../protocol/crypto/fast/fast-keccak');
   await installFastKeccak();
   if (!OP_COUNTERS_ENABLED || globalHooksInstalled) return;
   globalHooksInstalled = true;

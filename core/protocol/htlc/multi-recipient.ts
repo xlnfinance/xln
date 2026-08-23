@@ -1,11 +1,11 @@
-import { aead } from '../crypto/fast-aead';
-import { x25519PublicKey, x25519SharedSecret } from '../crypto/fast-x25519';
+import { aead } from '../crypto/fast/fast-aead';
+import { x25519PublicKey, x25519SharedSecret } from '../crypto/fast/fast-x25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 import { MAX_HTLC_BINARY_LAYER_BYTES } from './codec/binary';
-import { RecencyMemo } from '../../support/recency-memo';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { RecencyMemo } from '../../support/collections/recency-memo';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { countOp } from '../../support/performance/op-counters';
 
 export const HTLC_OPAQUE_CIPHERTEXT_VERSION = 'xln:htlc-opaque:v1' as const;

@@ -2,7 +2,7 @@ import type { RuntimeReplica } from '../types';
 import type { EntityInput } from '../../entity/types';
 import { cryptoPoolEnabled } from '../../protocol/crypto/crypto-pool';
 import { primeInboundLayersAtIngress } from '../../entity/htlc/materialize-context';
-import { primeProposalHankos } from '../../entity/consensus/proposal/prime-hankos';
+import { primeProposalHankos } from '../../entity/consensus/proposal/hanko/prime-hankos';
 import { requireEntityEncryptionPrivateKey } from '../../entity/auth/crypto';
 
 /**

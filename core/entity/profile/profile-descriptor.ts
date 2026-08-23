@@ -7,7 +7,7 @@ import { compareStableText, serializeTaggedJson } from '../../protocol/serializa
 import { LIMITS } from '../../config/constants';
 import { HANKO_MAX_BYTES } from '../../hanko/codec';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 import type {
   Profile,
   ProfileAccount,

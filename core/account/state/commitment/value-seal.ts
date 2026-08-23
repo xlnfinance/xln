@@ -1,6 +1,6 @@
 import type { AccountReplica, AccountState } from '../../../types/account';
 import { isPersistentAccountStateMap } from '../persistent-state-map';
-import { RecencySet } from '../../../support/recency-memo';
+import { RecencySet } from '../../../support/collections/recency-memo';
 
 /** Top-level AccountState maps only. Nested graphs are not walked. */
 const ACCOUNT_STATE_MAP_FIELDS = [

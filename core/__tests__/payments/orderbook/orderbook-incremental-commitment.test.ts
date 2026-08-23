@@ -8,7 +8,7 @@ import {
 import { applyCommand, createBook, type BookState } from '../../../orderbook/core';
 import { commitBookOverlay } from '../../../orderbook/book-overlay';
 import { getPerfMs } from '../../../support/time';
-import { computeIntegrityChecksum, computeIntegrityDigest } from '../../../support/integrity-checksum';
+import { computeIntegrityChecksum, computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import {
   decodeBookPricePageTree,
   projectBookPricePageTree,

@@ -11,7 +11,7 @@
  * the shortcut. Bun-only: the module is imported by shared core and must not
  * touch node built-ins at load time.
  */
-import { keccak256Bytes } from './fast-keccak';
+import { keccak256Bytes } from './fast/fast-keccak';
 import {
   decryptOpaqueHtlcBytes,
   HtlcCiphertextAuthenticationError,

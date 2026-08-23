@@ -9,7 +9,7 @@
  * key stores and relay sessions, so every hop crosses the real P2P path.
  */
 
-import { collectHltEnvironmentManifest } from '../environment-manifest';
+import { collectHltEnvironmentManifest } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { decodeSettlementEvidenceResponse } from '../../../../api/runtime-adapter/control/settlement-evidence';

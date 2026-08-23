@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { computeIntegrityDigest } from '../../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import { createEmptyEnv } from '../../../runtime';
 import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
 

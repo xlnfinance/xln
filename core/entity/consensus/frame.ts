@@ -1,5 +1,5 @@
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import type { EntityFrameEvent, EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
@@ -19,7 +19,7 @@ import { LIMITS } from '../../config/constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { readEntityFrameEvents } from '../frame-events';
 import { assertEntityFrameEventByteBudget } from './frame/events';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 
 // Txs may fill only half of the wire frame: the frame also carries events, the
 // entity infra context and the J-prefix certificate, and a Hub frame that

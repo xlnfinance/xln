@@ -24,7 +24,7 @@ import type {
   RuntimeFrame,
   StorageHead,
 } from '../../storage/types';
-import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/sorted-map-index';
+import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/collections/sorted-map-index';
 import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes , detachRuntimeAdapterPayload } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';

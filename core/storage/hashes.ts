@@ -5,7 +5,7 @@
  * Key functions: canonical Runtime, Entity, WAL, and outbox commitment hashes.
  * Human-audit importance: 100/100 — these hashes identify crash replay state.
  */
-import { computeIntegrityDigest } from '../support/integrity-checksum';
+import { computeIntegrityDigest } from '../support/bytes/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
 import type { RuntimeReplica } from '../runtime/types';
 import {

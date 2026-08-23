@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { computeIntegrityDigest } from '../../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import { PersistentRadixValueMap } from '../../../protocol/state/persistent-radix-value-map';
 
 const keyBytes = (key: string): Uint8Array => Uint8Array.from(

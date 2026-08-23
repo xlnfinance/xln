@@ -8,7 +8,7 @@ import {
   type EntityHeight,
   type RuntimeHeight,
 } from '../protocol/units';
-import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/integrity-checksum';
+import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/bytes/integrity-checksum';
 
 /**
  * xln testnet has one canonical storage format. We deliberately do not carry

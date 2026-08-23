@@ -3,7 +3,7 @@
  * value, not a machine blob. Containers become typed Patricia paths and only
  * bounded atoms live in leaves; the frame commits one root and leaf count.
  */
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { createStructuredLogger } from '../../support/logger';
 import { isRuntimePerfProfileEnabled } from '../../support/performance/runtime-flags';
 

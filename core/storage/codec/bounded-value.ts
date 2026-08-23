@@ -1,6 +1,6 @@
 /** Bounded physical rows for large authoritative WAL and history values. */
 
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import type { RuntimeDbLike } from '../types';
 import { keyBoundedValueChunk } from '../keys';
 import {

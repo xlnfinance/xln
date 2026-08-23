@@ -3,7 +3,7 @@
  * Raw branded keys select Patricia paths; values are sealed before commitment.
  * Human-audit importance: 100/100 — this keeps Account updates O(dirty path).
  */
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { encodeRawRadixTextKey } from '../../protocol/state/radix-merkle';
 import {
   PersistentRadixValueMap,
@@ -12,7 +12,7 @@ import {
   type PersistentRadixValueMapOptions,
 } from '../../protocol/state/persistent-radix-value-map';
 import { encodeAccountStateValue } from '../commitment/account-state-value';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 
 export const ACCOUNT_STATE_MAP_NAMESPACES = [
   'deltas',

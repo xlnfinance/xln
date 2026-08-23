@@ -2,7 +2,7 @@
  * Overlay-first Patricia node ops: own keys/values, path-copy, one-shot fold, lazy seal.
  * Hash work exists only at the root/storage boundary.
  */
-import { hexToBytes } from '../../support/hex-bytes';
+import { hexToBytes } from '../../support/bytes/hex-bytes';
 import {
   computeRadixMerkleBranchHashFromSlots,
   computeRadixMerkleEdgeHash,

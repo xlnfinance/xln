@@ -1,5 +1,5 @@
 import { pubKeyToHex } from '../../protocol/crypto/p2p-crypto';
-import { x25519PublicKey } from '../../protocol/crypto/fast-x25519';
+import { x25519PublicKey } from '../../protocol/crypto/fast/fast-x25519';
 import { getBytes } from 'ethers';
 import type { EntityRuntimeContext } from '../runtime-context';
 

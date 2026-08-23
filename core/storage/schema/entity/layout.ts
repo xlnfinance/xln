@@ -7,7 +7,7 @@
  * tree. One outer Runtime WAL batch atomically installs every row.
  */
 import type { EntityState } from '../../../entity/types';
-import { computeIntegrityDigest } from '../../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import { decodeBuffer, encodeBuffer } from '../../codec/codec';
 import { iterateKeys, readRawOrNull } from '../../database/level';
 import {

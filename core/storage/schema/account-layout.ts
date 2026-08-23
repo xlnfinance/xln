@@ -5,7 +5,7 @@
  * Static field keys are intentional: a checkpoint overwrites exactly the
  * changed values instead of accumulating content-addressed live-state nodes.
  */
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { readRawOrNull , iterateKeys } from '../database/level';
 import type { RuntimeDbLike, StorageAccountDoc } from '../types';

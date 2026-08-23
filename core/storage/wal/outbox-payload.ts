@@ -10,7 +10,7 @@ import { validateEntityTx } from '../../entity/tx-validation';
 import type { EntityTx } from '../../types/entity-tx';
 import { decodeAccountTx } from '../../account/tx-validation';
 import type { AccountTx } from '../../types/account';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import {
   toRuntimeOutputPayloadHash,
   type RuntimeOutputPayloadHash,

@@ -41,7 +41,7 @@ import {
 } from '../database/snapshot-graph-view';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
-import { compareAscii } from '../../support/sorted-map-index';
+import { compareAscii } from '../../support/collections/sorted-map-index';
 import { hydrateEntityStateFromStorage } from './projections';
 import { requireStorageDbOpen } from '../commit/availability';
 import {

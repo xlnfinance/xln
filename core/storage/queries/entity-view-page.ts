@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../../entity/types';
-import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/sorted-map-index';
+import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/collections/sorted-map-index';
 import { normalizeEntityId } from '../keys';
 import { projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
 import type { StorageEntityViewPage } from '../read/read';

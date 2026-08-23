@@ -4,8 +4,8 @@
  * Human-audit importance: 99/100 — roots bind large state without iteration ambiguity.
  */
 import { ethers } from 'ethers';
-import { hexToBytes as decodeHexBytes } from '../../support/hex-bytes';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { hexToBytes as decodeHexBytes } from '../../support/bytes/hex-bytes';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 
 export const RADIX_MERKLE_RADICES = [2, 4, 16, 256] as const;
 export type RadixMerkleRadix = (typeof RADIX_MERKLE_RADICES)[number];

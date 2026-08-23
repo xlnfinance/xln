@@ -1,6 +1,6 @@
 /** Exact decode boundary for the payment workload's durable report. */
 
-import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from '../environment-manifest';
+import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from './environment-manifest';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,

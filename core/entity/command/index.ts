@@ -36,7 +36,7 @@ import {
   UNREGISTERED_ENTITY_COMMAND_STACK_KEY,
 } from './command-codec';
 import { encodeBoard, hashBoard } from '../factory';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 import {
   assertIndividualEntityCommandTxs,
   buildCollectiveEntityProposalTx,

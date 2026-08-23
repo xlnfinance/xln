@@ -4,7 +4,7 @@ import {
   removeSortedStringMapEntry,
   sortedStringMapKeys,
   upsertSortedStringMapEntry,
-} from '../../../support/sorted-map-index';
+} from '../../../support/collections/sorted-map-index';
 
 test('sorted string map index tracks delete plus insert without stale keys', () => {
   const map = new Map<string, number>([

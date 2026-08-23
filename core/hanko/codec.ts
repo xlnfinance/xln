@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { hexToBytes } from '../support/hex-bytes';
+import { hexToBytes } from '../support/bytes/hex-bytes';
 import { FailureDispositionError } from '../protocol/errors/failure-taxonomy';
 
 import { decodeHankoAbi, encodeHankoAbi, type HankoAbiClaim } from './abi';

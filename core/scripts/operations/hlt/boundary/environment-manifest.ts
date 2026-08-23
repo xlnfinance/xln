@@ -5,7 +5,7 @@
  * production-equivalent run (history on, hub WAL fsync on, lanes at nice 0)
  * from an isolated-Hub measurement (lanes niced) at a glance.
  */
-import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
 
 export type HltEnvironmentManifest = Readonly<{
   /** Account dispute seals are unconditional consensus; recorded so a reader never has to wonder. */

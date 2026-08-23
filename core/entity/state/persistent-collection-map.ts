@@ -1,6 +1,6 @@
 /** Persistent radix-16 storage for potentially large Entity string-keyed collections. */
 
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';

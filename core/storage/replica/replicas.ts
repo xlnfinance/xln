@@ -11,7 +11,7 @@ import { keyLiveReplicaMeta, normalizeEntityId } from '../keys';
 import { encodeReplicaMeta } from '../read/projections';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import type { StorageReplicaLookup } from '../types';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { computeCanonicalEntityConsensusStateHash } from '../../entity/consensus/state-root';
 
 /**

@@ -1,4 +1,4 @@
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import {
   PersistentRadixValueMap,
   type PersistentRadixNodeRecord,

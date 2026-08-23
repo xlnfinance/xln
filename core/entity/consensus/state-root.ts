@@ -38,7 +38,7 @@ import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import { createStructuredLogger } from '../../support/logger';
 import { readRuntimeEnv } from '../../support/process/runtime-process';
 import { getPerfMs } from '../../support/time';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { timePerfPhase } from '../../support/performance/profile';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import {
@@ -48,7 +48,7 @@ import {
 } from '../state/persistent-account-map';
 import { entityCollectionCommitment } from '../state/persistent-collection-map';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 

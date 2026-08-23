@@ -7,9 +7,9 @@
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data + 16 tag)
  */
 
-import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast-x25519';
-export { x25519SharedSecret } from './fast-x25519';
-import { aead } from './fast-aead';
+import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast/fast-x25519';
+export { x25519SharedSecret } from './fast/fast-x25519';
+import { aead } from './fast/fast-aead';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { packTransportValue, unpackTransportValue } from '../serialization/binary-codec';
 

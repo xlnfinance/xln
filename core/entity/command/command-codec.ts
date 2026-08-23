@@ -1,4 +1,4 @@
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { ethers } from 'ethers';
 

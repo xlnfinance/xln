@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { computeIntegrityDigest } from '../../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../../support/bytes/integrity-checksum';
 import { buildRadixMerkle } from '../../../protocol/state/radix-merkle';
 import { ethers } from 'ethers';
 import {

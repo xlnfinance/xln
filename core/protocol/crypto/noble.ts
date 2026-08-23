@@ -10,8 +10,8 @@
  */
 
 import type { CryptoProvider, CryptoKeyPair } from './provider';
-import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast-x25519';
-import { aead } from './fast-aead';
+import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast/fast-x25519';
+import { aead } from './fast/fast-aead';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 
 export type NobleCryptoProviderOptions = {

@@ -29,7 +29,7 @@ import { normalizeAccountStateDomain } from '../../account/commitment/state-root
 import { cryptoPoolEnabled, decryptOnionLayersBatch, type OnionJobItem } from '../../protocol/crypto/crypto-pool';
 import { countOp, OP_COUNTERS_ENABLED } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 import { timePerfPhase } from '../../support/performance/profile';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{

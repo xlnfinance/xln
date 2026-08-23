@@ -8,8 +8,8 @@
  * between call sites.
  */
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
-import { hexToBytes } from '../../support/hex-bytes';
-import { keccak256Bytes } from './fast-keccak';
+import { hexToBytes } from '../../support/bytes/hex-bytes';
+import { keccak256Bytes } from './fast/fast-keccak';
 
 const textEncoder = new TextEncoder();
 const HEX_BYTE = Array.from({ length: 256 }, (_, value) => value.toString(16).padStart(2, '0'));

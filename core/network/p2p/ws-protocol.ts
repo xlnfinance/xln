@@ -19,7 +19,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { hmacSha256 } from '../../protocol/crypto/fast-sha256';
+import { hmacSha256 } from '../../protocol/crypto/fast/fast-sha256';
 import {
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,

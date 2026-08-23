@@ -18,7 +18,7 @@ import { assertEntityFrameTotalByteBudget } from '../frame';
 import { LIMITS } from '../../../config/constants';
 import { packTransportValue } from '../../../protocol/serialization/binary-codec';
 import { toFrameHash, toStateHash, type FrameHash, type StateHash } from '../../../protocol/hashes';
-import { RecencySet } from '../../../support/recency-memo';
+import { RecencySet } from '../../../support/collections/recency-memo';
 import {
   toEntityHeight,
   toUnixMs,

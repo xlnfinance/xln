@@ -6,7 +6,7 @@
  * per hop, so this was ~4% of Hub CPU at 500 users. Browsers fall back to noble.
  */
 import { x25519 } from '@noble/curves/ed25519.js';
-import { isBrowserRuntime } from '../../support/platform-crypto';
+import { isBrowserRuntime } from '../../../support/platform-crypto';
 
 type NodeCrypto = typeof import('node:crypto');
 type KeyObject = import('node:crypto').KeyObject;

@@ -1,5 +1,5 @@
 import type { AccountOutput, AccountReplica, AccountState, AccountTx } from '../../../types/account';
-import { RecencyMemo } from '../../../support/recency-memo';
+import { RecencyMemo } from '../../../support/collections/recency-memo';
 import { peekAccountStateRoot } from '../../commitment/state-root';
 
 /**

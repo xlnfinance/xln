@@ -17,7 +17,7 @@ import type {
 } from '../../types/entity/htlc-infra-context';
 import type { Profile } from '../../entity/profile';
 import { validateEntityInfraContext } from '../../entity/consensus/frame/infra-context-validation';
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import {
   toEntityContextPayloadHash,
   type EntityContextPayloadHash,

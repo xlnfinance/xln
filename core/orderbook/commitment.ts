@@ -3,7 +3,7 @@ import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
 import type { BookState } from './core';
 import {
   computeIntegrityChecksum,
-} from '../support/integrity-checksum';
+} from '../support/bytes/integrity-checksum';
 
 const UTF8 = new TextEncoder();
 

@@ -1,5 +1,5 @@
 import { safeStringify } from '../serialization';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 
 export type FingerprintableTx = {
   type: string;

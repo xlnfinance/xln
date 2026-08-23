@@ -17,7 +17,7 @@
  */
 
 import { keccakBytesHash } from '../../crypto/keccak-text';
-import { hexToBytes } from '../../../support/hex-bytes';
+import { hexToBytes } from '../../../support/bytes/hex-bytes';
 import { HTLC, LIMITS } from '../../../config/constants';
 import { safeStringify } from '../../serialization';
 import { encryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../multi-recipient';

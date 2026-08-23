@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { computeIntegrityDigest } from '../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeBinaryPayload } from '../../protocol/serialization/binary-codec';
 

@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { toLowerAddressOrNull } from '../../protocol/crypto/address-cache';
-import { RecencyMemo } from '../../support/recency-memo';
+import { RecencyMemo } from '../../support/collections/recency-memo';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';

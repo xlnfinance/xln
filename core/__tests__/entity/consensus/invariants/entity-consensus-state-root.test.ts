@@ -20,7 +20,7 @@ import { PersistentEntityAccountMap } from '../../../../entity/state/persistent-
 import { createBook } from '../../../../orderbook/core';
 import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 import { initCrontab } from '../../../../entity/scheduler';
-import { computeIntegrityDigest } from '../../../../support/integrity-checksum';
+import { computeIntegrityDigest } from '../../../../support/bytes/integrity-checksum';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;

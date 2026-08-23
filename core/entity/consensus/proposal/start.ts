@@ -46,7 +46,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
 import { fitEntityProposalToWireBudget } from './wire-budget';
-import { primeProposalHankos } from './prime-hankos';
+import { primeProposalHankos } from './hanko/prime-hankos';
 import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
 import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
 import { assertEstimatedSealedEntityFrameWire } from '../frame/validation';

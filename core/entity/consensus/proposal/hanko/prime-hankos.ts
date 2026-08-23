@@ -1,7 +1,7 @@
-import { accountInputAck, accountInputDisputeSeal, accountInputProposal } from '../../../account/consensus/flush';
-import { primeRecoveredHankoSignatures } from '../../../hanko/codec';
-import { cryptoPoolEnabled } from '../../../protocol/crypto/crypto-pool';
-import type { EntityTx } from '../../../types/entity-tx';
+import { accountInputAck, accountInputDisputeSeal, accountInputProposal } from '../../../../account/consensus/flush';
+import { primeRecoveredHankoSignatures } from '../../../../hanko/codec';
+import { cryptoPoolEnabled } from '../../../../protocol/crypto/crypto-pool';
+import type { EntityTx } from '../../../../types/entity-tx';
 
 /**
  * Every inbound Account input carries the digests its Hankos sign (frame

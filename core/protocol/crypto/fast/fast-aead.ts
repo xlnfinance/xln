@@ -9,7 +9,7 @@
  * nonce (12), AAD and the 16-byte trailing tag keep the exact wire layout.
  */
 import { gcm } from '@noble/ciphers/aes.js';
-import { isBrowserRuntime } from '../../support/platform-crypto';
+import { isBrowserRuntime } from '../../../support/platform-crypto';
 
 type NodeCrypto = typeof import('node:crypto');
 
