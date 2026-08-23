@@ -1,10 +1,10 @@
-import { XLN_BINARY_MSGPACK_MAGIC } from '../../protocol/serialization/binary-codec';
 import {
   decodeBinaryPayload,
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,
   encodeBinaryPayloadWithCanonical,
   packPreorderedBinaryPayload,
+  XLN_BINARY_MSGPACK_MAGIC,
 } from '../../protocol/serialization/binary-codec';
 import { countOp, countOpWithSite } from '../../support/performance/op-counters';
 
