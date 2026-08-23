@@ -365,7 +365,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     const existing = this.#shells.get(entityId);
     if (existing) {
       this.#bumpRevision(entityId);
-      if (existing === this.#base.get(entityId)) {
+      if (existing === this.#base.get(entityId) || Object.isFrozen(existing)) {
         const shell = forkAccountReplicaShell(existing);
         this.#shells.set(entityId, shell);
         candidateLog.debug('account.claimed_resealed', { entityId: entityId.slice(-8) });

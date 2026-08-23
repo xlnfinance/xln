@@ -641,12 +641,12 @@ test('two board rotations in one finalized J range collapse to the latest reseal
     activationLogIndex: 9,
     reason: 'pending',
   });
-  expect(applied.newState.crontabState?.hooks).toEqual(new Map([['board-reseal', {
+  expect([...(applied.newState.crontabState?.hooks.entries() ?? [])]).toEqual([['board-reseal', {
     id: 'board-reseal',
     triggerAt: state.timestamp,
     type: 'board_reseal',
     data: { activationJHeight: 3, activationLogIndex: 9, afterCounterpartyId: '' },
-  }]]));
+  }]]);
 });
 
 test('certified counterparty board activation arms an exact 24-hour reseal deadline', async () => {

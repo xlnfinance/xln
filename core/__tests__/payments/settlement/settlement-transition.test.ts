@@ -596,8 +596,12 @@ describe('atomic settlement Account transition', () => {
       });
     });
     expect(sealHankoWitnessInState(execution.newState, witness, 1, [leftEntity])).toBe(2);
-    expect(seal.data.settlementHanko).toBeDefined();
-    expect(seal.data.postProof.hanko).toBeDefined();
+    const attached = execution.newState.accounts.get(leftEntity)?.mempool[0];
+    if (attached?.type !== 'settle_transition' || attached.data.kind !== 'seal') {
+      throw new Error('TEST_ATTACHED_SETTLEMENT_HANKO_MISSING');
+    }
+    expect(attached.data.settlementHanko).toBeDefined();
+    expect(attached.data.postProof.hanko).toBeDefined();
     expect(computeCanonicalEntityConsensusStateHash(execution.newState)).toBe(unsignedEntityStateRoot);
 
     const nextExecution = await applyEntityFrameWithMaterializedTestInfraContext(env, execution.newState, [], 2_001);
@@ -607,7 +611,7 @@ describe('atomic settlement Account transition', () => {
     const proposed = nextExecution.newState.accounts.get(leftEntity)!;
     expect(proposed.mempool).toHaveLength(0);
     expect(proposed.pendingFrame?.accountTxs).toHaveLength(1);
-    expect(proposed.pendingFrame?.accountTxs[0]).toEqual(seal);
+    expect(proposed.pendingFrame?.accountTxs[0]).toEqual(attached);
   });
 
   test('materializes an exact approval only after earlier Account work drains and uses the first unused nonce', async () => {

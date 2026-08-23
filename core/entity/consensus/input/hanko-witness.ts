@@ -10,7 +10,10 @@ import {
   accountInputDisputeSeal,
   accountInputProposal,
 } from '../../../account/consensus/flush';
-import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
+import {
+  cloneIsolatedAccountInput,
+  cloneIsolatedAccountTx,
+} from '../../../protocol/state/account-input-clone';
 import {
   requireCertifiedAccountFrameAck,
   requireCertifiedAccountFrameProposal,
@@ -274,6 +277,27 @@ const sealSettlementAccountTx = (
   return sealed + 1;
 };
 
+const sealSettlementAccountMempool = (
+  account: AccountReplica,
+  state: EntityState,
+  witness: Map<string, HankoWitnessEntry>,
+  entityHeight: number,
+): number => {
+  if (!account.mempool.some(
+    tx => tx.type === 'settle_transition' && tx.data.kind === 'seal',
+  )) return 0;
+  let sealed = 0;
+  account.mempool = account.mempool.map(tx => {
+    if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return tx;
+    // Persistent projection may freeze the array and its bounded values. Fork
+    // only the touched tx; post-commit Hankos are excluded from its leaf hash.
+    const writableTx = cloneIsolatedAccountTx(tx);
+    sealed += sealSettlementAccountTx(writableTx, account, state, witness, entityHeight);
+    return writableTx;
+  });
+  return sealed;
+};
+
 /**
  * A settlement seal is created while replaying an Entity frame, but its Hanko
  * exists only after that frame reaches board quorum. Feeding the unsigned
@@ -382,9 +406,7 @@ export const sealHankoWitnessInState = (
     // change bytes behind the already cached leaf hash.
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) throw new Error(`HANKO_SEAL_TOUCHED_ACCOUNT_MISSING:${accountId}`);
-    for (const tx of account.mempool) {
-      sealed += sealSettlementAccountTx(tx, account, state, hankoWitness, entityHeight);
-    }
+    sealed += sealSettlementAccountMempool(account, state, hankoWitness, entityHeight);
     // Seal the reusable ACK cache first. A bundled pending frame_ack is newer
     // and must leave currentFrameHanko on its proposal, not on the old ACK.
     if (account.lastOutboundFrameAck) {
