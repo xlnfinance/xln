@@ -615,7 +615,7 @@ const proposeAccountFrameCandidate = async (
   crossJOpeningProposalTxs: AccountTx[] | undefined,
   scheduleAccount: (accountId: string) => void,
 ): Promise<AccountFrameProposal | undefined> => {
-  const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
+  const { currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
   if (!accountHasProposableMempool(account, state)) return undefined;
   const proposal = await proposeAccountFrame(
     context.accountConsensusContext,
@@ -626,10 +626,6 @@ const proposeAccountFrameCandidate = async (
   );
   if ('accountChanged' in proposal && proposal.accountChanged) {
     recordFrameAccountChange(storageChanges, state.entityId, accountKey);
-  }
-  if (isProposedAccountFrame(proposal) && proposal.swapOffersCancelled?.length) {
-    const cancels = proposal.swapOffersCancelled.map(({ offerId }) => ({ accountId: accountKey, offerId }));
-    applyCommittedSwapCancelsToOrderbook(env, state, cancels, storageChanges);
   }
   if (isProposedAccountFrame(proposal) && proposal.hashesToSign) {
     collectedHashes.push(...proposal.hashesToSign);

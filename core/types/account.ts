@@ -529,6 +529,33 @@ export type AccountInput =
   | AccountPeerInput;
 
 /**
+ * Complete same-jurisdiction resting-offer projection returned to Entity.
+ *
+ * Account state is the sole authority for these values. Entity/orderbook must
+ * never reconstruct a partial-fill remainder from the signed transaction or a
+ * stale book row, because that would create a second financial formula.
+ */
+export type AccountSwapOfferSnapshot = Readonly<{
+  offerId: string;
+  leftEntity: string;
+  rightEntity: string;
+  giveTokenId: number;
+  giveTokenDecimals: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantTokenDecimals: number;
+  wantAmount: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
+  priceTicks: bigint;
+  timeInForce?: 0 | 1 | 2;
+  makerIsLeft: boolean;
+  createdHeight: number;
+  quantizedGive: bigint;
+  quantizedWant: bigint;
+}>;
+
+/**
  * Deterministic messages emitted by the Account machine to its parent Entity.
  *
  * Account never publishes these directly. Entity collects them in its
@@ -549,6 +576,21 @@ export type AccountOutput =
       description?: string;
       deliveryMode: 'trusted';
       trustedGatewayEntityId: string;
+    }>
+  | Readonly<{
+      /** Full same-j resting row after offer creation or partial resolution. */
+      kind: 'swapOfferUpsert';
+      offer: AccountSwapOfferSnapshot;
+    }>
+  | Readonly<{
+      /** Same-j resting row removed by a committed full/cancel remainder resolution. */
+      kind: 'swapOfferRemove';
+      offerId: string;
+    }>
+  | Readonly<{
+      /** Maker's committed same-j request for the orderbook owner to resolve. */
+      kind: 'swapCancelRequest';
+      offerId: string;
     }>
   | Readonly<{
       kind: 'runtimeEvent';

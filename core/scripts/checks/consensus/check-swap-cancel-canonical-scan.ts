@@ -50,6 +50,14 @@ assertNotIncludes(handler, 'console.error', handlerPath);
 assertNotIncludes(handler, 'return { newState: entityState, outputs: [] };', handlerPath);
 assertIncludes(handler, 'throw haltRuntimeFailure(', handlerPath);
 
+const frameApplicationPath = 'core/entity/consensus/frame/application.ts';
+const frameApplication = readText(frameApplicationPath);
+assertNotIncludes(
+  frameApplication,
+  'proposal.swapOffersCancelled',
+  frameApplicationPath,
+);
+
 const frontendPath = 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte';
 const frontend = readText(frontendPath);
 assertIncludes(frontend, "type: 'proposeCancelSwap'", frontendPath);

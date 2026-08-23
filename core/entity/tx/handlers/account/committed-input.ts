@@ -2,6 +2,7 @@ import type {
   AccountOutput,
   AccountPeerInput,
   AccountReplica,
+  AccountSwapOfferSnapshot,
   AccountTx,
 } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
@@ -39,6 +40,18 @@ import type {
 const accountHandlerLog = createStructuredLogger('account.handler');
 
 type DirectPaymentForward = Extract<AccountOutput, { kind: 'directPaymentForward' }>;
+type SameJurisdictionSwapOutput = Extract<
+  AccountOutput,
+  { kind: 'swapOfferUpsert' | 'swapOfferRemove' | 'swapCancelRequest' }
+>;
+type CommittedAccountOutputs = Readonly<{
+  directPaymentForwards: readonly DirectPaymentForward[];
+  sameJurisdictionSwaps: readonly SameJurisdictionSwapOutput[];
+}>;
+type SameJurisdictionSwapCursor = {
+  outputs: readonly SameJurisdictionSwapOutput[];
+  index: number;
+};
 
 type AccountHashToSign = {
   hash: string;
@@ -96,6 +109,28 @@ const buildCommittedSwapOfferEvent = (
     ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
   };
 };
+
+const buildSameJurisdictionSwapOfferEvent = (
+  counterpartyId: string,
+  offer: AccountSwapOfferSnapshot,
+): SwapOfferEvent => ({
+  offerId: offer.offerId,
+  accountId: counterpartyId,
+  makerIsLeft: offer.makerIsLeft,
+  fromEntity: offer.leftEntity,
+  toEntity: offer.rightEntity,
+  createdHeight: offer.createdHeight,
+  giveTokenId: offer.giveTokenId,
+  giveTokenDecimals: offer.giveTokenDecimals,
+  giveAmount: offer.giveAmount,
+  wantTokenId: offer.wantTokenId,
+  wantTokenDecimals: offer.wantTokenDecimals,
+  wantAmount: offer.wantAmount,
+  maxFee: offer.maxFee,
+  minNetReceive: offer.minNetReceive,
+  priceTicks: offer.priceTicks,
+  ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
+});
 
 export const hubRebalanceTaskAlreadyRanAtTimestamp = (
   state: Pick<EntityState, 'timestamp' | 'crontabState'>,
@@ -155,15 +190,122 @@ const recordCommittedFrames = (
   }
 };
 
-const applyCommittedSwapFollowup = (
+const sameJurisdictionSwapOutputOfferId = (
+  output: SameJurisdictionSwapOutput,
+): string => output.kind === 'swapOfferUpsert' ? output.offer.offerId : output.offerId;
+
+const takeSameJurisdictionSwapOutput = (
+  cursor: SameJurisdictionSwapCursor,
+  offerId: string,
+  allowedKinds: readonly SameJurisdictionSwapOutput['kind'][],
+): SameJurisdictionSwapOutput => {
+  const output = cursor.outputs[cursor.index];
+  if (!output) throw new Error(`ACCOUNT_SWAP_OUTPUT_MISSING:${offerId}`);
+  if (!allowedKinds.includes(output.kind)) {
+    throw new Error(`ACCOUNT_SWAP_OUTPUT_KIND_MISMATCH:${offerId}:${output.kind}`);
+  }
+  const outputOfferId = sameJurisdictionSwapOutputOfferId(output);
+  if (outputOfferId !== offerId) {
+    throw new Error(`ACCOUNT_SWAP_OUTPUT_ID_MISMATCH:${offerId}:${outputOfferId}`);
+  }
+  cursor.index += 1;
+  return output;
+};
+
+const applySameJurisdictionSwapOutput = (
+  context: SuccessfulAccountInputContext,
+  output: SameJurisdictionSwapOutput,
+): void => {
+  const { counterpartyId, effects } = context;
+  if (output.kind === 'swapOfferUpsert') {
+    effects.swapOffersCreated.push(
+      buildSameJurisdictionSwapOfferEvent(counterpartyId, output.offer),
+    );
+  } else if (output.kind === 'swapOfferRemove') {
+    effects.swapOffersCancelled.push({ offerId: output.offerId, accountId: counterpartyId });
+  } else {
+    effects.swapCancelRequests.push({ offerId: output.offerId, accountId: counterpartyId });
+  }
+};
+
+const consumeSameJurisdictionSwapOutput = (
+  context: SuccessfulAccountInputContext,
+  accountTx: AccountTx,
+  cursor: SameJurisdictionSwapCursor,
+  sameJurisdictionCancel: boolean | undefined,
+): boolean => {
+  let output: SameJurisdictionSwapOutput;
+  if (accountTx.type === 'swap_offer' && !accountTx.data.crossJurisdiction) {
+    output = takeSameJurisdictionSwapOutput(cursor, accountTx.data.offerId, ['swapOfferUpsert']);
+  } else if (accountTx.type === 'swap_resolve') {
+    output = takeSameJurisdictionSwapOutput(
+      cursor,
+      accountTx.data.offerId,
+      ['swapOfferUpsert', 'swapOfferRemove'],
+    );
+  } else if (accountTx.type === 'swap_cancel_request') {
+    if (sameJurisdictionCancel === undefined) {
+      throw new Error(`ACCOUNT_SWAP_CANCEL_SCOPE_MISSING:${accountTx.data.offerId}`);
+    }
+    if (!sameJurisdictionCancel) return false;
+    output = takeSameJurisdictionSwapOutput(cursor, accountTx.data.offerId, ['swapCancelRequest']);
+  } else {
+    return false;
+  }
+  applySameJurisdictionSwapOutput(context, output);
+  return true;
+};
+
+const finalSwapCancelScope = (
+  account: AccountReplica,
+  offerId: string,
+): boolean => {
+  const offer = account.state.swapOffers.get(offerId);
+  if (!offer) throw new Error(`ACCOUNT_SWAP_CANCEL_SCOPE_UNRESOLVED:${offerId}`);
+  return !offer.crossJurisdiction;
+};
+
+const classifyCommittedSwapCancels = (
+  account: AccountReplica,
+  accountTxs: readonly AccountTx[],
+): readonly (boolean | undefined)[] => {
+  // `swap_cancel_request` deliberately carries only offerId. Never infer its
+  // jurisdiction from whether a typed output happens to exist: a missing
+  // same-j output would then silently enter the cross-j projection path. Walk
+  // backward from committed state instead. A later resolver/ACK identifies an
+  // offer removed after the request; otherwise the still-live committed offer
+  // is the authority. If neither exists, the committed sequence is malformed.
+  const sameJurisdictionByIndex: Array<boolean | undefined> = Array(accountTxs.length);
+  const futureScopeByOffer = new Map<string, boolean>();
+  for (let index = accountTxs.length - 1; index >= 0; index -= 1) {
+    const tx = accountTxs[index];
+    if (!tx) throw new Error(`ACCOUNT_COMMITTED_TX_INDEX_MISSING:${index}`);
+    if (tx.type === 'swap_cancel_request') {
+      sameJurisdictionByIndex[index] = futureScopeByOffer.get(tx.data.offerId) ??
+        finalSwapCancelScope(account, tx.data.offerId);
+    } else if (tx.type === 'swap_resolve') {
+      futureScopeByOffer.set(tx.data.offerId, true);
+    } else if (tx.type === 'cross_swap_fill_ack') {
+      futureScopeByOffer.set(tx.data.offerId, false);
+    } else if (tx.type === 'swap_offer') {
+      futureScopeByOffer.set(tx.data.offerId, !tx.data.crossJurisdiction);
+    }
+  }
+  return sameJurisdictionByIndex;
+};
+
+const applyCommittedCrossJurisdictionSwapFollowup = (
   context: SuccessfulAccountInputContext,
   accountTx: AccountTx,
 ): void => {
   const { account, counterpartyId, effects } = context;
   if (accountTx.type === 'swap_offer') {
+    if (!accountTx.data.crossJurisdiction) {
+      throw new Error(`ACCOUNT_SAME_J_SWAP_OUTPUT_BYPASSED:${accountTx.data.offerId}`);
+    }
     const event = buildCommittedSwapOfferEvent(account, counterpartyId, accountTx.data.offerId);
     if (event) effects.swapOffersCreated.push(event);
-  } else if (accountTx.type === 'swap_resolve' || accountTx.type === 'cross_swap_fill_ack') {
+  } else if (accountTx.type === 'cross_swap_fill_ack') {
     const event = buildCommittedSwapOfferEvent(account, counterpartyId, accountTx.data.offerId);
     if (event) {
       effects.swapOffersCreated.push(event);
@@ -177,9 +319,14 @@ const applyCommittedSwapFollowup = (
 
 const applyCommittedFrameTransactions = async (
   context: SuccessfulAccountInputContext,
+  swapCursor: SameJurisdictionSwapCursor,
 ): Promise<void> => {
   const { env, state, input, account, counterpartyId, result, effects, options } = context;
   const consumedPreparedHtlcBindings = new Set<string>();
+  const committedAccountTxs = (result.committedFrames ?? [])
+    .flatMap(({ frame }) => frame.accountTxs ?? []);
+  const sameJurisdictionCancels = classifyCommittedSwapCancels(account, committedAccountTxs);
+  let committedAccountTxIndex = 0;
   for (const { frame, committedViaNewFrame } of result.committedFrames ?? []) {
     applyCommittedAccountFrameFollowups(
       state,
@@ -234,9 +381,19 @@ const applyCommittedFrameTransactions = async (
           committedViaNewFrame,
         );
       }
-      applyCommittedSwapFollowup(context, accountTx);
+      if (!consumeSameJurisdictionSwapOutput(
+        context,
+        accountTx,
+        swapCursor,
+        sameJurisdictionCancels[committedAccountTxIndex],
+      )) {
+        applyCommittedCrossJurisdictionSwapFollowup(context, accountTx);
+      }
+      committedAccountTxIndex += 1;
     }
   }
+  const unconsumed = swapCursor.outputs.length - swapCursor.index;
+  if (unconsumed !== 0) throw new Error(`ACCOUNT_SWAP_OUTPUT_UNCONSUMED:${unconsumed}`);
 };
 
 const queueInitialHubPolicies = (
@@ -281,12 +438,18 @@ const applyCommittedHtlcFollowups = (
 const collectCommittedAccountOutputs = (
   effects: CommittedAccountEffects,
   outputs: readonly AccountOutput[],
-): DirectPaymentForward[] => {
+): CommittedAccountOutputs => {
   const directPaymentForwards: DirectPaymentForward[] = [];
+  const sameJurisdictionSwaps: SameJurisdictionSwapOutput[] = [];
   for (const output of outputs) {
     switch (output.kind) {
       case 'directPaymentForward':
         directPaymentForwards.push(output);
+        break;
+      case 'swapOfferUpsert':
+      case 'swapOfferRemove':
+      case 'swapCancelRequest':
+        sameJurisdictionSwaps.push(output);
         break;
       case 'runtimeEvent':
       case 'debug':
@@ -298,7 +461,7 @@ const collectCommittedAccountOutputs = (
       }
     }
   }
-  return directPaymentForwards;
+  return { directPaymentForwards, sameJurisdictionSwaps };
 };
 
 const logCommittedSwapEffects = (effects: CommittedAccountEffects): void => {
@@ -321,7 +484,7 @@ export const applySuccessfulAccountInput = async (
   context: SuccessfulAccountInputContext,
 ): Promise<boolean | undefined> => {
   const { env, state, input, account, counterpartyId, createdAccount, result, effects } = context;
-  const directPaymentForwards = collectCommittedAccountOutputs(
+  const accountOutputs = collectCommittedAccountOutputs(
     effects,
     result.candidateEffects ?? [],
   );
@@ -352,9 +515,12 @@ export const applySuccessfulAccountInput = async (
     accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
   }
 
-  await applyCommittedFrameTransactions(context);
+  await applyCommittedFrameTransactions(context, {
+    outputs: accountOutputs.sameJurisdictionSwaps,
+    index: 0,
+  });
   queueInitialHubPolicies(context, committedInboundGenesis);
-  applyCommittedHtlcFollowups(context, directPaymentForwards);
+  applyCommittedHtlcFollowups(context, accountOutputs.directPaymentForwards);
   scheduleCommittedAccountWork(state, counterpartyId);
   context.checkpointProfile('committedFollowups');
   logCommittedSwapEffects(effects);
