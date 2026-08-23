@@ -9,18 +9,18 @@ import {
 } from '../../jurisdiction/machine/board-registry';
 import { cancelHook, scheduleHook } from '../scheduler';
 import {
-  BOARD_RESEAL_HOOK_ID,
-  markBoardRotationResealsPending,
-} from './state-effects/board-rotation-reseal';
+  BOARD_HANKO_REFRESH_HOOK_ID,
+  markBoardRotationHankoRefreshesPending,
+} from './state-effects/board-rotation-hanko-refresh';
 import type { FinalizedJEventContext } from './j-events';
 
-export const COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS = 24 * 60 * 60 * 1_000;
+export const COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 
-export const counterpartyBoardResealDeadlineHookId = (
+export const counterpartyBoardHankoRefreshDeadlineHookId = (
   counterpartyId: string,
   activationJHeight: number,
   activationLogIndex: number,
-): string => `counterparty-board-reseal:${counterpartyId.toLowerCase()}:${activationJHeight}:${activationLogIndex}`;
+): string => `counterparty-board-hanko-refresh:${counterpartyId.toLowerCase()}:${activationJHeight}:${activationLogIndex}`;
 
 /**
  * Applies the three events that advance certified board authority. Pending
@@ -75,45 +75,45 @@ export const applyCertifiedBoardJEvent = (
     }
   }
 
-  const reseal = markBoardRotationResealsPending(newState, event);
-  for (const accountId of reseal.dirtyAccounts) dirtyAccounts.add(accountId);
+  const boardHankoRefresh = markBoardRotationHankoRefreshesPending(newState, event);
+  for (const accountId of boardHankoRefresh.dirtyAccounts) dirtyAccounts.add(accountId);
   if (!isLocalEntity) {
     const counterpartyId = event.data.entityId.toLowerCase();
     const account = newState.accounts.get(counterpartyId);
     if (!account || Number(account.currentHeight) < 1) return;
-    if (!newState.crontabState) throw new Error('COUNTERPARTY_BOARD_RESEAL_CRONTAB_MISSING');
+    if (!newState.crontabState) throw new Error('COUNTERPARTY_BOARD_HANKO_REFRESH_CRONTAB_MISSING');
     scheduleHook(newState.crontabState, {
-      id: counterpartyBoardResealDeadlineHookId(
+      id: counterpartyBoardHankoRefreshDeadlineHookId(
         counterpartyId,
-        reseal.activation.jHeight,
-        reseal.activation.logIndex,
+        boardHankoRefresh.activation.jHeight,
+        boardHankoRefresh.activation.logIndex,
       ),
-      triggerAt: newState.timestamp + COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
-      type: 'counterparty_board_reseal_deadline',
+      triggerAt: newState.timestamp + COUNTERPARTY_BOARD_HANKO_REFRESH_DEADLINE_MS,
+      type: 'counterparty_board_hanko_refresh_deadline',
       data: {
         accountId: counterpartyId,
-        activationJHeight: reseal.activation.jHeight,
-        activationLogIndex: reseal.activation.logIndex,
+        activationJHeight: boardHankoRefresh.activation.jHeight,
+        activationLogIndex: boardHankoRefresh.activation.logIndex,
       },
     });
     addMessage(
       newState,
-      `⏳ Awaiting current-board Account reseal from ${counterpartyId.slice(-4)} within 24h`,
+      `⏳ Awaiting current-board Account Hanko refresh from ${counterpartyId.slice(-4)} within 24h`,
     );
     return;
   }
-  if (reseal.dirtyAccounts.length === 0) {
-    if (newState.crontabState) cancelHook(newState.crontabState, BOARD_RESEAL_HOOK_ID);
+  if (boardHankoRefresh.dirtyAccounts.length === 0) {
+    if (newState.crontabState) cancelHook(newState.crontabState, BOARD_HANKO_REFRESH_HOOK_ID);
     return;
   }
-  if (!newState.crontabState) throw new Error('BOARD_RESEAL_CRONTAB_MISSING');
+  if (!newState.crontabState) throw new Error('BOARD_HANKO_REFRESH_CRONTAB_MISSING');
   scheduleHook(newState.crontabState, {
-    id: BOARD_RESEAL_HOOK_ID,
+    id: BOARD_HANKO_REFRESH_HOOK_ID,
     triggerAt: newState.timestamp,
-    type: 'board_reseal',
+    type: 'board_hanko_refresh',
     data: {
-      activationJHeight: reseal.activation.jHeight,
-      activationLogIndex: reseal.activation.logIndex,
+      activationJHeight: boardHankoRefresh.activation.jHeight,
+      activationLogIndex: boardHankoRefresh.activation.logIndex,
       afterCounterpartyId: '',
     },
   });

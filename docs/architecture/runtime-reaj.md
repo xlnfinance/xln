@@ -19,7 +19,7 @@ Execution flow:
    `AccountInput.txs`.
 4. The Account machine applies one `AccountInput` union. The local `txs`
    branch carries `AccountTx[]` for a future Account frame; peer
-   `frame/ack/frame_ack/dispute/board_reseal/settle` branches carry bilateral
+   `frame/ack/frame_ack/dispute/board_hanko_refresh/settle` branches carry bilateral
    consensus evidence. Every branch enters the same `applyAccountInput`
    boundary.
 5. Entity queues J batches for jurisdiction settlement.

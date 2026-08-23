@@ -29,7 +29,7 @@ export type HubConsensusBenchmarkResult = {
 };
 
 export const HUB_CONSENSUS_PHASES = [
-  'propose', 'proposalSeal', 'receive', 'ackSeal', 'commit',
+  'propose', 'proposalHanko', 'receive', 'ackHanko', 'commit',
 ] as const;
 export type HubConsensusPhase = (typeof HUB_CONSENSUS_PHASES)[number];
 export type HubConsensusPhaseMetrics = Readonly<Record<HubConsensusPhase, number>>;

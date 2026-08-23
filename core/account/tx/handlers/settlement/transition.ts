@@ -25,7 +25,7 @@ import type {
 import {
   accountTxApplied,
   accountTxRejected,
-  settlementSealNonceRejection,
+  settlementHankoNonceRejection,
 } from '../../apply-result';
 import {
   assertSettlementWorkspacePhase,
@@ -40,9 +40,9 @@ import { requirePersistentAccountStateMap } from '../../../state/persistent-stat
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
-type SettlementSealNonceRejection = Extract<
+type SettlementHankoNonceRejection = Extract<
   AccountTxRejection,
-  { kind: 'settlement_seal_nonce_mismatch' }
+  { kind: 'settlement_hanko_nonce_mismatch' }
 >;
 
 export const hasPendingSettlementTransition = (
@@ -60,17 +60,17 @@ type HoldPlan = Readonly<{
 const transitionLog = createStructuredLogger('account.settle');
 const WORKSPACE_DOMAIN = 'xln:settlement-workspace:v1';
 
-class SettlementSealNonceMismatchError extends Error {
-  readonly rejection: SettlementSealNonceRejection;
+class SettlementHankoNonceMismatchError extends Error {
+  readonly rejection: SettlementHankoNonceRejection;
 
   constructor(
     message: string,
     suppliedNonce: number,
     requiredNonce: number,
-    basis: SettlementSealNonceRejection['basis'],
+    basis: SettlementHankoNonceRejection['basis'],
   ) {
     super(message);
-    this.rejection = settlementSealNonceRejection(
+    this.rejection = settlementHankoNonceRejection(
       message,
       suppliedNonce,
       requiredNonce,
@@ -283,7 +283,7 @@ const assertSameOptionalHanko = (
   }
 };
 
-const assertSettlementSealNonce = (
+const assertSettlementHankoNonce = (
   draft: AccountReplica,
   workspace: SettlementWorkspace,
   settlementNonce: number,
@@ -291,8 +291,8 @@ const assertSettlementSealNonce = (
   const minimumSafeNonce = getMinimumSafeSettlementNonce(draft);
   if (workspace.nonceAtSign !== undefined) {
     if (workspace.nonceAtSign !== settlementNonce) {
-      throw new SettlementSealNonceMismatchError(
-        `SETTLEMENT_SEAL_NONCE_MISMATCH:${workspace.nonceAtSign}:${settlementNonce}`,
+      throw new SettlementHankoNonceMismatchError(
+        `SETTLEMENT_HANKO_NONCE_MISMATCH:${workspace.nonceAtSign}:${settlementNonce}`,
         settlementNonce,
         workspace.nonceAtSign,
         'workspace',
@@ -300,11 +300,11 @@ const assertSettlementSealNonce = (
     }
     return;
   }
-  // A bilateral seal must use the exact locally derived nonce. Tolerance here
+  // A bilateral Hanko must use the exact locally derived nonce. Tolerance here
   // would turn a replica/catch-up bug into two valid on-chain authorizations.
   if (settlementNonce !== minimumSafeNonce) {
-    throw new SettlementSealNonceMismatchError(
-      `SETTLEMENT_SEAL_NONCE_MISMATCH:${settlementNonce}:${minimumSafeNonce}` +
+    throw new SettlementHankoNonceMismatchError(
+      `SETTLEMENT_HANKO_NONCE_MISMATCH:${settlementNonce}:${minimumSafeNonce}` +
       `:j=${Number(draft.state.jNonce ?? 0)}` +
       `:next=${Number(draft.proofHeader.nextProofNonce ?? 0)}` +
       `:local=${Number(draft.currentDisputeProofNonce ?? 0)}` +
@@ -316,18 +316,18 @@ const assertSettlementSealNonce = (
   }
 };
 
-const prepareSettlementSeal = (
+const prepareSettlementHanko = (
   draft: AccountReplica,
-  transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
+  transition: Extract<SettleTransitionTx['data'], { kind: 'hanko' }>,
   context: AccountConsensusContext,
 ) => {
   const workspace = assertCurrentWorkspace(draft, transition.revision, transition.workspaceHash);
-  if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
+  if (workspace.status === 'submitted') throw new Error('SETTLEMENT_HANKO_SUBMITTED_FORBIDDEN');
   const settlementNonce = assertSettlementNonce(
     transition.settlementNonce,
-    'SETTLEMENT_SEAL_NONCE_INVALID',
+    'SETTLEMENT_HANKO_NONCE_INVALID',
   );
-  assertSettlementSealNonce(draft, workspace, settlementNonce);
+  assertSettlementHankoNonce(draft, workspace, settlementNonce);
 
   const domain = getAccountStateDomain(draft.state);
   const { diffs, forgiveTokenIds } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
@@ -340,16 +340,16 @@ const prepareSettlementSeal = (
   );
   const suppliedSettlementHash = assertWorkspaceHash(
     transition.settlementHash,
-    'SETTLEMENT_SEAL_HASH_INVALID',
+    'SETTLEMENT_HANKO_HASH_INVALID',
   );
   if (suppliedSettlementHash !== expectedSettlementHash.toLowerCase()) {
-    throw new Error(`SETTLEMENT_SEAL_HASH_MISMATCH:${suppliedSettlementHash}:${expectedSettlementHash}`);
+    throw new Error(`SETTLEMENT_HANKO_HASH_MISMATCH:${suppliedSettlementHash}:${expectedSettlementHash}`);
   }
   if (
     workspace.settlementHash !== undefined &&
     workspace.settlementHash.toLowerCase() !== expectedSettlementHash.toLowerCase()
   ) {
-    throw new Error(`SETTLEMENT_SEAL_PINNED_HASH_MISMATCH:${workspace.settlementHash}:${expectedSettlementHash}`);
+    throw new Error(`SETTLEMENT_HANKO_PINNED_HASH_MISMATCH:${workspace.settlementHash}:${expectedSettlementHash}`);
   }
 
   const postNonce = assertSettlementNonce(
@@ -412,18 +412,18 @@ const prepareSettlementSeal = (
   };
 };
 
-type PreparedSettlementSeal = ReturnType<typeof prepareSettlementSeal>;
+type PreparedSettlementHanko = ReturnType<typeof prepareSettlementHanko>;
 
-const verifySettlementSealHankos = async (
+const verifySettlementHankoHankos = async (
   draft: AccountReplica,
-  transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
+  transition: Extract<SettleTransitionTx['data'], { kind: 'hanko' }>,
   byLeft: boolean,
   context: AccountConsensusContext,
-  prepared: PreparedSettlementSeal,
+  prepared: PreparedSettlementHanko,
   registeredBoardHash?: string,
 ): Promise<{ postHanko: string; settlementHanko?: string }> => {
   const sourceEntity = byLeft ? draft.state.leftEntity : draft.state.rightEntity;
-  const sealBoardHash = await context.resolveSettlementBoardAuthority(
+  const hankoBoardHash = await context.resolveSettlementBoardAuthority(
     sourceEntity,
     registeredBoardHash,
   );
@@ -438,7 +438,7 @@ const verifySettlementSealHankos = async (
     prepared.expectedDisputeHash,
     sourceEntity,
     {
-      ...(sealBoardHash ? { registeredBoardHash: sealBoardHash } : {}),
+      ...(hankoBoardHash ? { registeredBoardHash: hankoBoardHash } : {}),
       allowPreviousBoard: true,
     },
   );
@@ -459,14 +459,14 @@ const verifySettlementSealHankos = async (
     );
     // Cooperative settlement creates fresh financial state. `Account.sol:894`
     // verifies it with `verifyCurrentHankoSignature`, so a rotated-out board
-    // must not seal it here either - otherwise the bilateral state advances
+    // must not attach it here either - otherwise the bilateral state advances
     // off-chain on a signature the jurisdiction will reject.
     const verifiedSettlement = await context.verifyHanko(
       settlementHanko,
       prepared.expectedSettlementHash,
       sourceEntity,
       {
-        ...(sealBoardHash ? { registeredBoardHash: sealBoardHash } : {}),
+        ...(hankoBoardHash ? { registeredBoardHash: hankoBoardHash } : {}),
         allowPreviousBoard: false,
       },
     );
@@ -477,11 +477,11 @@ const verifySettlementSealHankos = async (
   return { postHanko, ...(settlementHanko ? { settlementHanko } : {}) };
 };
 
-const commitSettlementSeal = (
+const commitSettlementHanko = (
   draft: AccountDraftReplica,
   byLeft: boolean,
   timestamp: number,
-  prepared: PreparedSettlementSeal,
+  prepared: PreparedSettlementHanko,
   verified: { postHanko: string; settlementHanko?: string },
 ): void => {
   const {
@@ -515,7 +515,7 @@ const commitSettlementSeal = (
   assertSameOptionalHanko(sourcePostHanko, postHanko, 'POST_SETTLEMENT_PROOF_EQUIVOCATION');
   const sourceSettlementHanko = byLeft ? nextWorkspace.leftHanko : nextWorkspace.rightHanko;
   if (settlementHanko) {
-    assertSameOptionalHanko(sourceSettlementHanko, settlementHanko, 'SETTLEMENT_SEAL_EQUIVOCATION');
+    assertSameOptionalHanko(sourceSettlementHanko, settlementHanko, 'SETTLEMENT_HANKO_EQUIVOCATION');
   }
 
   nextWorkspace.compiledDiffs = diffs;
@@ -548,17 +548,17 @@ const commitSettlementSeal = (
   draft.state.settlementWorkspace = nextWorkspace;
 };
 
-const applySettlementSeal = async (
+const applySettlementHanko = async (
   draft: AccountDraftReplica,
-  transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
+  transition: Extract<SettleTransitionTx['data'], { kind: 'hanko' }>,
   byLeft: boolean,
   timestamp: number,
   context: AccountConsensusContext | undefined,
   registeredBoardHash?: string,
 ): Promise<void> => {
-  if (!context) throw new Error('SETTLEMENT_SEAL_CONTEXT_MISSING');
-  const prepared = prepareSettlementSeal(draft, transition, context);
-  const verified = await verifySettlementSealHankos(
+  if (!context) throw new Error('SETTLEMENT_HANKO_CONTEXT_MISSING');
+  const prepared = prepareSettlementHanko(draft, transition, context);
+  const verified = await verifySettlementHankoHankos(
     draft,
     transition,
     byLeft,
@@ -567,8 +567,8 @@ const applySettlementSeal = async (
     registeredBoardHash,
   );
   // All hashes and both authority domains are proven before the first write.
-  // This ordering is the Account-level atomicity boundary for settlement seals.
-  commitSettlementSeal(draft, byLeft, timestamp, prepared, verified);
+  // This ordering is the Account-level atomicity boundary for settlement Hankos.
+  commitSettlementHanko(draft, byLeft, timestamp, prepared, verified);
 };
 
 const buildUpsertWorkspace = (
@@ -643,7 +643,7 @@ export const getSignedSettlementWorkspaceTxError = (
     (!workspace.settlementHash && !workspace.leftHanko && !workspace.rightHanko && !workspace.postSettlementDisputeProof)
   ) return undefined;
   if (tx.type === 'j_event_claim') return undefined;
-  if (tx.type === 'settle_transition' && (tx.data.kind === 'seal' || tx.data.kind === 'submit')) return undefined;
+  if (tx.type === 'settle_transition' && (tx.data.kind === 'hanko' || tx.data.kind === 'submit')) return undefined;
   return `SETTLEMENT_SIGNED_ACCOUNT_FROZEN:${tx.type}`;
 };
 
@@ -671,9 +671,9 @@ export async function handleSettleTransition(
       return accountTxApplied([`Settlement workspace v${next.revision} committed`]);
     }
 
-    if (transition.kind === 'seal') {
-      await applySettlementSeal(account, transition, byLeft, timestamp, context, registeredBoardHash);
-      return accountTxApplied([`Settlement workspace v${transition.revision} sealed`]);
+    if (transition.kind === 'hanko') {
+      await applySettlementHanko(account, transition, byLeft, timestamp, context, registeredBoardHash);
+      return accountTxApplied([`Settlement workspace v${transition.revision} Hanko attached`]);
     }
 
     const workspace = assertCurrentWorkspace(account, transition.revision, transition.workspaceHash);
@@ -714,7 +714,7 @@ export async function handleSettleTransition(
     const message = error instanceof Error ? error.message : String(error);
     transitionLog.warn('workspace.transition_rejected', { kind: tx.data.kind, error: message });
     return accountTxRejected(
-      error instanceof SettlementSealNonceMismatchError
+      error instanceof SettlementHankoNonceMismatchError
         ? error.rejection
         : {
             kind: 'validation',

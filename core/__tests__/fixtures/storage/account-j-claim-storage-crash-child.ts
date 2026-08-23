@@ -46,7 +46,7 @@ import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { getPerfMs } from '../../../support/time';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
-import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
 import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
@@ -210,21 +210,21 @@ const proposed = await proposeAccountFrame(
 if (!isProposedAccountFrame(proposed)) {
   throw new Error(`ACCOUNT_J_CRASH_PROPOSAL_FAILED:${proposeAccountFrameMessage(proposed) ?? 'unknown'}`);
 }
-const sealedProposal = await sealAccountDraftAsEntity(env, entityId, signerA, proposed);
-account.pendingAccountInput = sealedProposal;
-if (sealedProposal.kind !== 'frame') throw new Error('ACCOUNT_J_CRASH_FRAME_PROPOSAL_REQUIRED');
-account.currentFrameHanko = sealedProposal.proposal.frameHanko;
-account.currentDisputeProofHanko = sealedProposal.proposal.disputeSeal?.hanko;
+const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(env, entityId, signerA, proposed);
+account.pendingAccountInput = hankoAttachedProposal;
+if (hankoAttachedProposal.kind !== 'frame') throw new Error('ACCOUNT_J_CRASH_FRAME_PROPOSAL_REQUIRED');
+account.currentFrameHanko = hankoAttachedProposal.proposal.frameHanko;
+account.currentDisputeProofHanko = hankoAttachedProposal.proposal.disputeHanko?.hanko;
 const peerValidation = await applyAccountInput(
   createAccountConsensusContext(env, new Map()),
   forkAccountReplicaShell(counterpartyAccount),
-  sealedProposal,
+  hankoAttachedProposal,
   { entityTimestamp: env.state.timestamp, finalizedJHeight: 7 },
 );
 if (!peerValidation.ok || !peerValidation.response) {
   throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${accountInputFailureMessage(peerValidation) ?? 'missing-response'}`);
 }
-const claimAck = await sealAccountDraftAsEntity(
+const claimAck = await attachAccountDraftHankosAsEntity(
   env,
   counterpartyId,
   signerB,

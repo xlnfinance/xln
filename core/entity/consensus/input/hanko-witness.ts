@@ -6,8 +6,8 @@ import { compareCanonicalText } from '../../../orderbook/swap-execution';
 import { normalizeSignatureMap } from '../../auth/signatures';
 import {
   accountInputAck,
-  accountInputBoardReseal,
-  accountInputDisputeSeal,
+  accountInputBoardHankoRefresh,
+  accountInputDisputeHanko,
   accountInputProposal,
 } from '../../../account/consensus/flush';
 import {
@@ -126,7 +126,7 @@ const requireDraftWitness = (
         `HANKO_WITNESS_VALUE_MISMATCH:hash=${hash}:type=${type}:entityHeight=${entry.entityHeight}`,
       );
     }
-    // This field was sealed by an earlier committed Entity frame. The Hanko
+    // This field was attached by an earlier committed Entity frame. The Hanko
     // signs the exact secondary hash, not every later frame that merely keeps
     // the cached ACK/proposal in state. Requiring the old witness to acquire
     // the current height makes any unrelated next frame fail after restore.
@@ -134,7 +134,7 @@ const requireDraftWitness = (
   }
   const entry = getTypedWitness(witness, hash, type, entityHeight);
   if (entry) return entry.hanko;
-  throw new Error(`HANKO_DRAFT_UNSEALED:hash=${hash}:type=${type}:entityHeight=${entityHeight}`);
+  throw new Error(`HANKO_DRAFT_WITNESS_MISSING:hash=${hash}:type=${type}:entityHeight=${entityHeight}`);
 };
 
 const getOutboundAccount = (state: EntityState | undefined, input: AccountPeerInput): AccountReplica | undefined =>
@@ -160,17 +160,17 @@ const getAckFrameHash = (state: EntityState | undefined, input: AccountPeerInput
   return ack.frameHash;
 };
 
-const sealDispute = (
-  seal: ReturnType<typeof accountInputDisputeSeal>,
+const attachDisputeHanko = (
+  disputeHanko: ReturnType<typeof accountInputDisputeHanko>,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
 ): HankoString | undefined => {
-  if (!seal) return undefined;
-  seal.hanko = requireDraftWitness(witness, seal.hash, 'dispute', entityHeight, seal.hanko);
-  return seal.hanko;
+  if (!disputeHanko) return undefined;
+  disputeHanko.hanko = requireDraftWitness(witness, disputeHanko.hash, 'dispute', entityHeight, disputeHanko.hanko);
+  return disputeHanko.hanko;
 };
 
-const sealAccountInput = (
+const attachAccountInputHankos = (
   input: AccountPeerInput,
   state: EntityState | undefined,
   witness: Map<string, HankoWitnessEntry>,
@@ -178,22 +178,22 @@ const sealAccountInput = (
   persistAccountWitness: boolean,
   writableAccount?: AccountReplica,
 ): number => {
-  let sealed = 0;
+  let attached = 0;
   const accountForWrite = persistAccountWitness ? writableAccount : undefined;
   if (persistAccountWitness && !accountForWrite) {
-    throw new Error(`HANKO_SEAL_WRITABLE_ACCOUNT_REQUIRED:${input.toEntityId}`);
+    throw new Error(`HANKO_ATTACHMENT_WRITABLE_ACCOUNT_REQUIRED:${input.toEntityId}`);
   }
-  const reseal = accountInputBoardReseal(input);
-  if (reseal) {
-    reseal.frameHanko = requireDraftWitness(
+  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
+  if (boardHankoRefresh) {
+    boardHankoRefresh.frameHanko = requireDraftWitness(
       witness,
-      reseal.frameHash,
+      boardHankoRefresh.frameHash,
       'accountFrame',
       entityHeight,
-      reseal.frameHanko,
+      boardHankoRefresh.frameHanko,
     );
-    if (accountForWrite) accountForWrite.currentFrameHanko = reseal.frameHanko;
-    sealed += 1;
+    if (accountForWrite) accountForWrite.currentFrameHanko = boardHankoRefresh.frameHanko;
+    attached += 1;
   }
   const ack = accountInputAck(input);
   if (ack) {
@@ -204,14 +204,14 @@ const sealAccountInput = (
     if (ackHash) {
       ack.frameHanko = requireDraftWitness(witness, ackHash, 'accountFrame', entityHeight, ack.frameHanko);
       if (accountForWrite) accountForWrite.currentFrameHanko = ack.frameHanko;
-      sealed += 1;
+      attached += 1;
     }
   }
 
   // A frame_ack first acknowledges the committed current frame and then opens
   // the next pending proposal. Preserve that semantic order: currentFrameHanko
   // must end on the new proposal exactly as proposeAccountFrame did before the
-  // multisig two-phase sealing path existed.
+  // multisig two-phase Hanko attachment path existed.
   const proposal = accountInputProposal(input);
   if (proposal?.frame.stateHash) {
     proposal.frameHanko = requireDraftWitness(
@@ -222,38 +222,38 @@ const sealAccountInput = (
       proposal.frameHanko,
     );
     if (accountForWrite) accountForWrite.currentFrameHanko = proposal.frameHanko;
-    sealed += 1;
+    attached += 1;
   }
 
-  const seals = [ack?.disputeSeal, proposal?.disputeSeal, accountInputDisputeSeal(input)];
-  for (const seal of seals) {
-    const hanko = sealDispute(seal, witness, entityHeight);
+  const disputeHankos = [ack?.disputeHanko, proposal?.disputeHanko, accountInputDisputeHanko(input)];
+  for (const disputeHanko of disputeHankos) {
+    const hanko = attachDisputeHanko(disputeHanko, witness, entityHeight);
     if (!hanko) continue;
     if (accountForWrite) accountForWrite.currentDisputeProofHanko = hanko;
-    sealed += 1;
+    attached += 1;
   }
 
   if (ack) requireCertifiedAccountFrameAck(ack);
   if (proposal) requireCertifiedAccountFrameProposal(proposal);
 
-  return sealed;
+  return attached;
 };
 
-const sealSettlementAccountTx = (
+const attachSettlementAccountTxHankos = (
   tx: AccountTx,
   account: AccountReplica,
   state: EntityState,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
 ): number => {
-  if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return 0;
+  if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') return 0;
   const localIsLeft = state.entityId.toLowerCase() === account.state.leftEntity.toLowerCase();
   if (!localIsLeft && state.entityId.toLowerCase() !== account.state.rightEntity.toLowerCase()) {
-    throw new Error(`SETTLEMENT_SEAL_LOCAL_ENTITY_MISMATCH:${state.entityId}`);
+    throw new Error(`SETTLEMENT_HANKO_LOCAL_ENTITY_MISMATCH:${state.entityId}`);
   }
-  let sealed = 0;
+  let attached = 0;
   const workspace = account.state.settlementWorkspace;
-  if (!workspace) throw new Error('SETTLEMENT_SEAL_WORKSPACE_MISSING');
+  if (!workspace) throw new Error('SETTLEMENT_HANKO_WORKSPACE_MISSING');
   const localIsExecutor = workspace.executorIsLeft === localIsLeft;
   if (localIsExecutor) {
     if (tx.data.settlementHanko !== undefined) throw new Error('SETTLEMENT_EXECUTOR_HANKO_FORBIDDEN');
@@ -265,7 +265,7 @@ const sealSettlementAccountTx = (
       entityHeight,
       tx.data.settlementHanko,
     );
-    sealed += 1;
+    attached += 1;
   }
   tx.data.postProof.hanko = requireDraftWitness(
     witness,
@@ -274,32 +274,32 @@ const sealSettlementAccountTx = (
     entityHeight,
     tx.data.postProof.hanko,
   );
-  return sealed + 1;
+  return attached + 1;
 };
 
-const sealSettlementAccountMempool = (
+const attachSettlementAccountMempoolHankos = (
   account: AccountReplica,
   state: EntityState,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
 ): number => {
   if (!account.mempool.some(
-    tx => tx.type === 'settle_transition' && tx.data.kind === 'seal',
+    tx => tx.type === 'settle_transition' && tx.data.kind === 'hanko',
   )) return 0;
-  let sealed = 0;
+  let attached = 0;
   account.mempool = account.mempool.map(tx => {
-    if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return tx;
+    if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') return tx;
     // Persistent projection may freeze the array and its bounded values. Fork
     // only the touched tx; post-commit Hankos are excluded from its leaf hash.
     const writableTx = cloneIsolatedAccountTx(tx);
-    sealed += sealSettlementAccountTx(writableTx, account, state, witness, entityHeight);
+    attached += attachSettlementAccountTxHankos(writableTx, account, state, witness, entityHeight);
     return writableTx;
   });
-  return sealed;
+  return attached;
 };
 
 /**
- * A settlement seal is created while replaying an Entity frame, but its Hanko
+ * A settlement Hanko is created while replaying an Entity frame, but its Hanko
  * exists only after that frame reaches board quorum. Feeding the unsigned
  * draft into bilateral Account consensus in the same frame would consume it
  * as an invalid transaction before the commit path can attach the witness.
@@ -309,7 +309,7 @@ export const accountTxAwaitsPostCommitHanko = (
   account: AccountReplica,
   state: EntityState,
 ): boolean => {
-  if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
+  if (tx.type !== 'settle_transition' || tx.data.kind !== 'hanko') return false;
   if (!tx.data.postProof.hanko) return true;
   const workspace = account.state.settlementWorkspace;
   if (!workspace) return false;
@@ -335,12 +335,12 @@ export const attachHankoWitnessToOutputs = (
       const accountInput = tx.data;
       if (!accountInput) continue;
       // Account consensus may expose the same certified payload through a
-      // sealed persistent Account value and an outbound Entity output. Hanko
+      // attached persistent Account value and an outbound Entity output. Hanko
       // attachment is post-commit witness material, so mutate an isolated
       // bounded protocol copy instead of writing through the readonly alias.
-      const sealedInput = cloneIsolatedAccountInput(accountInput);
-      attachedCount += sealAccountInput(sealedInput, state, hankoWitness, entityHeight, false);
-      tx.data = sealedInput;
+      const hankoAttachedInput = cloneIsolatedAccountInput(accountInput);
+      attachedCount += attachAccountInputHankos(hankoAttachedInput, state, hankoWitness, entityHeight, false);
+      tx.data = hankoAttachedInput;
     }
   }
 
@@ -392,25 +392,25 @@ export const attachHankoWitnessToOutputs = (
   return attachedCount;
 };
 
-export const sealHankoWitnessInState = (
+export const attachHankoWitnessesToState = (
   state: EntityState,
   hankoWitness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
   touchedAccountIds: readonly string[],
 ): number => {
-  let sealed = 0;
+  let attached = 0;
   for (const accountId of [...new Set(touchedAccountIds.map(value => value.toLowerCase()))].sort()) {
     // Witness attachment changes the Account envelope, even when the Account
     // transition itself was read-only. Claim its Entity-frame shell explicitly:
     // mutating the committed Patricia leaf would either throw (frozen base) or
     // change bytes behind the already cached leaf hash.
     const account = getEntityAccountForWrite(state.accounts, accountId);
-    if (!account) throw new Error(`HANKO_SEAL_TOUCHED_ACCOUNT_MISSING:${accountId}`);
-    sealed += sealSettlementAccountMempool(account, state, hankoWitness, entityHeight);
-    // Seal the reusable ACK cache first. A bundled pending frame_ack is newer
+    if (!account) throw new Error(`HANKO_ATTACHMENT_TOUCHED_ACCOUNT_MISSING:${accountId}`);
+    attached += attachSettlementAccountMempoolHankos(account, state, hankoWitness, entityHeight);
+    // Attach the reusable ACK cache first. A bundled pending frame_ack is newer
     // and must leave currentFrameHanko on its proposal, not on the old ACK.
     if (account.lastOutboundFrameAck) {
-      sealed += sealAccountInput(
+      attached += attachAccountInputHankos(
         account.lastOutboundFrameAck.response,
         state,
         hankoWitness,
@@ -420,7 +420,7 @@ export const sealHankoWitnessInState = (
       );
     }
     if (account.pendingAccountInput) {
-      sealed += sealAccountInput(
+      attached += attachAccountInputHankos(
         account.pendingAccountInput,
         state,
         hankoWitness,
@@ -429,12 +429,12 @@ export const sealHankoWitnessInState = (
         account,
       );
     }
-    // Settlement witnesses are sealed only into an exact AccountTx `seal`
+    // Settlement witnesses are attached only into an exact AccountTx `hanko`
     // above. Mutating the workspace directly here would bypass bilateral
     // Account ordering and let an Entity frame appear approved before its peer
     // has committed the same authorization.
   }
-  return sealed;
+  return attached;
 };
 
 export const buildEntityHashesToSign = (

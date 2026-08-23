@@ -5,7 +5,7 @@
 
 import type {
   AccountReplica,
-  AccountDisputeSeal,
+  AccountDisputeHanko,
   AccountFrame,
   AccountInput,
   AccountOutput,
@@ -71,15 +71,15 @@ import {
   type AccountInputSecurityContext,
 } from './dispute/deadline-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
-import { handleBoardReseal } from './incoming/board-reseal';
+import { handleBoardHankoRefresh } from './incoming/board-hanko-refresh';
 import { handlePendingFrameAck } from './incoming/ack-commit';
 import {
-  getDisputeSealRequirementError,
+  getDisputeHankoRequirementError,
   replaceLocalDisputeDraft,
-  storeCounterpartyDisputeSeal,
-  type ValidatedCounterpartyDisputeSeal,
-  validateCounterpartyDisputeSeal,
-} from './dispute/seal';
+  storeCounterpartyDisputeHanko,
+  type ValidatedCounterpartyDisputeHanko,
+  validateCounterpartyDisputeHanko,
+} from './dispute/hanko';
 import {
   classifyAccountInputReplay,
   getDisputeHankoShapeError,
@@ -133,13 +133,13 @@ type IncomingFrameValidationResult =
 
 type IncomingFrameResult = { kind: 'not_applicable' } | { kind: 'return'; result: HandleAccountInputResult };
 
-const isRefreshableStaleIncomingSettlementSeal = (
+const isRefreshableStaleIncomingSettlementHanko = (
   account: AccountReplica,
   frame: AccountFrame,
   rejection: AccountTxRejection | undefined,
 ): boolean => {
   if (
-    rejection?.kind !== 'settlement_seal_nonce_mismatch' ||
+    rejection?.kind !== 'settlement_hanko_nonce_mismatch' ||
     rejection.basis !== 'account' ||
     rejection.suppliedNonce >= rejection.requiredNonce ||
     rejection.requiredNonce !== getMinimumSafeSettlementNonce(account)
@@ -149,15 +149,15 @@ const isRefreshableStaleIncomingSettlementSeal = (
 
   const workspace = account.state.settlementWorkspace;
   if (!workspace || workspace.nonceAtSign !== undefined) return false;
-  const matchingSeals = frame.accountTxs.filter(
+  const matchingHankos = frame.accountTxs.filter(
     tx =>
       tx.type === 'settle_transition' &&
-      tx.data.kind === 'seal' &&
+      tx.data.kind === 'hanko' &&
       tx.data.settlementNonce === rejection.suppliedNonce &&
       tx.data.revision === workspace.revision &&
       tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase(),
   );
-  return matchingSeals.length === 1;
+  return matchingHankos.length === 1;
 };
 
 function collectReceiverValidationDeltas(clonedMachine: AccountReplica): {
@@ -363,7 +363,7 @@ async function validateIncomingFrameOnDraft(
   receivedFrame: AccountFrame,
   frameJHeight: number,
   events: string[],
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   accountJClaimNodeStore: AccountJClaimNodeStore,
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameValidationResult> {
@@ -427,15 +427,15 @@ async function validateIncomingFrameOnDraft(
       () => buildAccountProofBodyFromJurisdictions(context, validatedMachine),
     );
     const localProofBodyHash = proofResult.proofBodyHash;
-    const frameSealError = getDisputeSealRequirementError(
+    const frameHankoError = getDisputeHankoRequirementError(
       localProofBodyHash,
       account.counterpartyDisputeProofBodyHash,
       account.counterpartyDisputeProofNonce,
       Number(validatedMachine.state.jNonce ?? account.state.jNonce ?? 0),
-      validatedCounterpartyDisputeSeal,
+      validatedCounterpartyDisputeHanko,
     );
-    if (frameSealError) {
-      return { kind: 'return', result: accountInputValidationRejected(frameSealError, events) };
+    if (frameHankoError) {
+      return { kind: 'return', result: accountInputValidationRejected(frameHankoError, events) };
     }
 
     logAcceptedIncomingFrame(input, receivedFrame);
@@ -462,7 +462,7 @@ async function commitIncomingFrameOnRealState(
   receivedFrame: AccountFrame,
   validation: IncomingFrameValidation,
   ourEntityId: string,
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
@@ -505,8 +505,8 @@ async function commitIncomingFrameOnRealState(
   const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;
   if (!acceptedFrameHanko) throw new Error('ACCEPTED_ACCOUNT_FRAME_HANKO_MISSING');
   account.counterpartyFrameHanko = acceptedFrameHanko;
-  if (accountInputProposal(input)?.disputeSeal) {
-    storeCounterpartyDisputeSeal(account, validatedCounterpartyDisputeSeal);
+  if (accountInputProposal(input)?.disputeHanko) {
+    storeCounterpartyDisputeHanko(account, validatedCounterpartyDisputeHanko);
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
   }
 
@@ -550,14 +550,14 @@ type IncomingFrameAckMaterial = {
 type IncomingFrameAckMaterialResult =
   { kind: 'continue'; material: IncomingFrameAckMaterial } | { kind: 'return'; result: HandleAccountInputResult };
 
-const selectAckDisputeSeal = (
+const selectAckDisputeHanko = (
   account: AccountReplica,
   proofBodyHash: string,
   signedNonce: number,
   proofChanged: boolean,
   disputeHash: string | undefined,
   proposerIsLeft: boolean,
-): AccountDisputeSeal | undefined => {
+): AccountDisputeHanko | undefined => {
   if (proofChanged && disputeHash) {
     return {
       hash: disputeHash,
@@ -616,7 +616,7 @@ async function buildIncomingFrameAckMaterial(
     }
   }
 
-  const ackDisputeSeal = selectAckDisputeSeal(
+  const ackDisputeHanko = selectAckDisputeHanko(
     account,
     ackProofResult.proofBodyHash,
     ackSignedNonce,
@@ -635,7 +635,7 @@ async function buildIncomingFrameAckMaterial(
     ack: {
       height: receivedFrame.height,
       frameHash: receivedFrame.stateHash,
-      ...(ackDisputeSeal ? { disputeSeal: ackDisputeSeal } : {}),
+      ...(ackDisputeHanko ? { disputeHanko: ackDisputeHanko } : {}),
     },
   };
 
@@ -788,16 +788,16 @@ const classifyIncomingValidationFailure = (
     ? result.rejection.tx
     : undefined;
   const failureMessage = accountInputFailureMessage(result);
-  if (isRefreshableStaleIncomingSettlementSeal(account, receivedFrame, txRejection)) {
-    accountLog.warn('frame.stale_settlement_seal_rejected', {
+  if (isRefreshableStaleIncomingSettlementHanko(account, receivedFrame, txRejection)) {
+    accountLog.warn('frame.stale_settlement_hanko_rejected', {
       height: receivedFrame.height,
       error: failureMessage,
     });
     return {
       kind: 'return',
       result: rejectAccountPeerInput(
-        'ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_SEAL',
-        failureMessage || 'Stale settlement seal rejected',
+        'ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_HANKO',
+        failureMessage || 'Stale settlement Hanko rejected',
         result.events,
       ),
     };
@@ -828,7 +828,7 @@ async function handleIncomingAccountFrame(
   input: AccountPeerInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
@@ -860,7 +860,7 @@ async function handleIncomingAccountFrame(
     preflight.receivedFrame,
     preflight.frameJHeight,
     events,
-    validatedCounterpartyDisputeSeal,
+    validatedCounterpartyDisputeHanko,
     committedJClaims.store,
     securityContext,
   );
@@ -879,7 +879,7 @@ async function handleIncomingAccountFrame(
     preflight.receivedFrame,
     validationResult.validation,
     preflight.ourEntityId,
-    validatedCounterpartyDisputeSeal,
+    validatedCounterpartyDisputeHanko,
     events,
     committedFrames,
     committedJClaims,
@@ -947,12 +947,12 @@ const handleAccountAckPhase = async (
     committedJClaims,
     candidateEffects,
   } = session;
-  let disputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  let disputeHanko: ValidatedCounterpartyDisputeHanko | undefined;
   try {
-    disputeSeal = await validateCounterpartyDisputeSeal(
+    disputeHanko = await validateCounterpartyDisputeHanko(
       account,
       input,
-      accountInputAck(input)?.disputeSeal,
+      accountInputAck(input)?.disputeHanko,
       'ACCOUNT_ACK',
       securityContext,
     );
@@ -968,7 +968,7 @@ const handleAccountAckPhase = async (
     account,
     input,
     ackHeight,
-    disputeSeal,
+    disputeHanko,
     events,
     timedOutHashlocks,
     committedFrames,
@@ -997,28 +997,28 @@ const handleStandaloneDispute = async (
   events: string[],
 ): Promise<HandleAccountInputResult> => {
   try {
-    const seal = await validateCounterpartyDisputeSeal(
+    const disputeHanko = await validateCounterpartyDisputeHanko(
       account,
       input,
-      input.disputeSeal,
+      input.disputeHanko,
       'ACCOUNT_DISPUTE',
       securityContext,
     );
-    const sealError = getDisputeSealRequirementError(
+    const hankoError = getDisputeHankoRequirementError(
       account.currentDisputeProofBodyHash,
       account.counterpartyDisputeProofBodyHash,
       account.counterpartyDisputeProofNonce,
       Number(account.state.jNonce ?? 0),
-      seal,
+      disputeHanko,
     );
-    if (sealError) {
+    if (hankoError) {
       return rejectAccountPeerInput(
-        'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
-        sealError,
+        'ACCOUNT_PEER_DISPUTE_HANKO_INVALID',
+        hankoError,
         events,
       );
     }
-    storeCounterpartyDisputeSeal(account, seal);
+    storeCounterpartyDisputeHanko(account, disputeHanko);
     return accountInputApplied({ events });
   } catch (error) {
     return rejectAccountPeerEvidenceError(error, events);
@@ -1042,12 +1042,12 @@ const handleAccountProposalPhase = async (
     committedJClaims,
     candidateEffects,
   } = session;
-  let disputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  let disputeHanko: ValidatedCounterpartyDisputeHanko | undefined;
   try {
-    disputeSeal = await validateCounterpartyDisputeSeal(
+    disputeHanko = await validateCounterpartyDisputeHanko(
       account,
       input,
-      accountInputProposal(input)?.disputeSeal,
+      accountInputProposal(input)?.disputeHanko,
       'ACCOUNT_PROPOSAL',
       securityContext,
     );
@@ -1060,7 +1060,7 @@ const handleAccountProposalPhase = async (
     input,
     normalizedInputHeight,
     replay.currentHeight,
-    disputeSeal,
+    disputeHanko,
     events,
     timedOutHashlocks,
     committedFrames,
@@ -1179,8 +1179,8 @@ const applyPeerAccountInput = async (
       events,
     );
   }
-  const boardReseal = await handleBoardReseal(account, input, securityContext);
-  if (boardReseal) {
+  const boardHankoRefresh = await handleBoardHankoRefresh(account, input, securityContext);
+  if (boardHankoRefresh) {
     const session = {
       context,
       account,
@@ -1194,7 +1194,7 @@ const applyPeerAccountInput = async (
       committedJClaims: createAccountJClaimSession(accountJClaimNodeStore),
       candidateEffects: [],
     };
-    return finishAccountInput(session, boardReseal);
+    return finishAccountInput(session, boardHankoRefresh);
   }
   const replay = classifyAccountInputReplay(account, input);
   const replayGateResult = await handleReplayOrObsoleteAccountInput(account, input, replay, events);

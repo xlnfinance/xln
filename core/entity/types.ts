@@ -522,7 +522,7 @@ export interface EntityCandidate {
   candidateEffects: EntityCandidateEffect[];
   /** Storage invalidations interpreted only after this exact frame commits. */
   storageChanges: RuntimeOverlayRecord[];
-  /** Proposal-envelope Account ids; unioned with storageChanges at Hanko seal. */
+  /** Proposal-envelope Account ids; unioned with storageChanges at Hanko attachment. */
   proposableAccounts?: readonly string[];
   /** Authority already computed by the proposer; lets the certified link skip a recompute. */
   authority?: EntityFrameAuthority;

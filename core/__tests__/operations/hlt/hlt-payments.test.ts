@@ -357,7 +357,7 @@ describe('hlt payment report boundary', () => {
     walBytesBefore: 100, walBytesAfter: 200,
     hubDurableBefore: frame, hubDurableAfter: { ...frame, height: 40 },
     environment: {
-      disputeSeals: 'always', certifiedHistory: true, hubWalSync: true, lanePersistence: true, laneWalSync: true,
+      disputeHankos: 'always', certifiedHistory: true, hubWalSync: true, lanePersistence: true, laneWalSync: true,
       laneNice: 0, cryptoPoolWorkers: 'default', cryptoSignWorkers: 'default',
     },
   };
@@ -370,8 +370,8 @@ describe('hlt payment report boundary', () => {
   test('a report without its environment manifest is not a result', () => {
     const { environment: _environment, ...bare } = report;
     expect(() => decodeLoadPaymentReport(bare)).toThrow('HLT_PAYMENT_REPORT_FIELDS_INVALID');
-    expect(() => decodeLoadPaymentReport({ ...report, environment: { ...report.environment, disputeSeals: 'off' } }))
-      .toThrow('HLT_PAYMENT_REPORT_ENVIRONMENT_DISPUTE_SEALS_INVALID');
+    expect(() => decodeLoadPaymentReport({ ...report, environment: { ...report.environment, disputeHankos: 'off' } }))
+      .toThrow('HLT_PAYMENT_REPORT_ENVIRONMENT_DISPUTE_HANKOS_INVALID');
   });
 
   test('a partially delivered run is rejected, not averaged', () => {

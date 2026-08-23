@@ -36,7 +36,7 @@ export const ACCOUNT_TX_REJECTION_CODES = {
   validation: 'ACCOUNT_TX_VALIDATION',
   closedForDispute: 'ACCOUNT_CLOSED_FOR_DISPUTE',
   settlementSignedAccountFrozen: 'SETTLEMENT_SIGNED_ACCOUNT_FROZEN',
-  settlementSealNonceMismatch: 'SETTLEMENT_SEAL_NONCE_MISMATCH',
+  settlementHankoNonceMismatch: 'SETTLEMENT_HANKO_NONCE_MISMATCH',
   deltaTokenInvalid: 'ACCOUNT_DELTA_TOKEN_INVALID',
   deltaRowCountInvalid: 'ACCOUNT_DELTA_ROW_COUNT_INVALID',
   deltaRowLimitExceeded: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
@@ -69,8 +69,8 @@ export type AccountTxRejection =
       txType: AccountTx['type'];
     }>
   | Readonly<{
-      kind: 'settlement_seal_nonce_mismatch';
-      code: typeof ACCOUNT_TX_REJECTION_CODES.settlementSealNonceMismatch;
+      kind: 'settlement_hanko_nonce_mismatch';
+      code: typeof ACCOUNT_TX_REJECTION_CODES.settlementHankoNonceMismatch;
       message: string;
       suppliedNonce: number;
       requiredNonce: number;

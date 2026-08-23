@@ -108,12 +108,12 @@ const compactEntityTxSortKey = (tx: EntityTx): unknown => {
     proposal
       ? [
           proposal.frame.height, proposal.frame.stateHash, proposal.frameHanko ?? '',
-          proposal.disputeSeal?.hash ?? '', proposal.disputeSeal?.hanko ?? '',
+          proposal.disputeHanko?.hash ?? '', proposal.disputeHanko?.hanko ?? '',
           proposal.frame.prevFrameHash, proposal.frame.accountStateRoot, proposal.frame.timestamp,
           proposal.frame.jHeight, proposal.frame.byLeft,
         ]
       : null,
-    ack ? [ack.height, ack.frameHash, ack.frameHanko ?? '', ack.disputeSeal?.hash ?? '', ack.disputeSeal?.hanko ?? ''] : null,
+    ack ? [ack.height, ack.frameHash, ack.frameHanko ?? '', ack.disputeHanko?.hash ?? '', ack.disputeHanko?.hanko ?? ''] : null,
     // Verified body digest: two envelopes claiming one hash over different
     // bodies sort apart by content, not by a claimed scalar.
     accountInputBodyDigest(input),

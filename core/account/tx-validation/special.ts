@@ -116,7 +116,7 @@ const validateSettlementTransition = (value: unknown, code: string): void => {
     );
     return;
   }
-  if (data['kind'] !== 'seal') throw new Error(`${code}_KIND`);
+  if (data['kind'] !== 'hanko') throw new Error(`${code}_KIND`);
   validateAccountTxDataFields(data, {
     required: {
       kind: 'string', revision: 'integer', workspaceHash: 'string',

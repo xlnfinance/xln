@@ -125,7 +125,7 @@ test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle 
   frame.accountTxs.push({
     type: 'settle_transition',
     data: {
-      kind: 'seal',
+      kind: 'hanko',
       revision: 1,
       workspaceHash: HASH_A,
       settlementNonce: 1,
@@ -142,11 +142,11 @@ test('Entity frame hash binds inbound settlement Hanko bytes the Account merkle 
   } as AccountFrame['accountTxs'][number]);
   frame.stateHash = computeFrameHash(frame);
   const changed = structuredClone(frame);
-  const seal = changed.accountTxs[1];
-  if (seal?.type !== 'settle_transition' || seal.data.kind !== 'seal') {
-    throw new Error('SETTLEMENT_SEAL_FIXTURE_INVALID');
+  const hankoTx = changed.accountTxs[1];
+  if (hankoTx?.type !== 'settle_transition' || hankoTx.data.kind !== 'hanko') {
+    throw new Error('SETTLEMENT_HANKO_FIXTURE_INVALID');
   }
-  seal.data.settlementHanko = '0xpeer-subset-b';
+  hankoTx.data.settlementHanko = '0xpeer-subset-b';
   expect(computeFrameHash(changed)).toBe(frame.stateHash);
   expect(entityHash([frameInput(changed)])).not.toBe(entityHash([frameInput(frame)]));
 });

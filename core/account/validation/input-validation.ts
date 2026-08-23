@@ -4,8 +4,8 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 import type {
-  AccountBoardReseal,
-  AccountDisputeSeal,
+  AccountBoardHankoRefresh,
+  AccountDisputeHanko,
   AccountFrameAck,
   AccountFrameProposal,
   AccountPeerInput,
@@ -58,22 +58,22 @@ const decodeAccountDisputeConfig = (
   });
 };
 
-const decodeDisputeSeal = (value: unknown, code: string): AccountDisputeSeal => {
-  const seal = requireBoundaryRecord(value, code);
+const decodeDisputeHanko = (value: unknown, code: string): AccountDisputeHanko => {
+  const disputeHanko = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
-    seal,
+    disputeHanko,
     ['hash', 'proofBodyHash', 'proofNonce', 'proposerIsLeft'],
     ['hanko'],
     `${code}_FIELDS`,
   );
-  const hanko = seal['hanko'];
+  const hanko = disputeHanko['hanko'];
   if (hanko !== undefined && typeof hanko !== 'string') throw new Error(`${code}_HANKO`);
   return {
     ...(hanko === undefined ? {} : { hanko }),
-    hash: requireString(seal['hash'], `${code}_HASH`),
-    proofBodyHash: requireString(seal['proofBodyHash'], `${code}_PROOF_BODY_HASH`),
-    proofNonce: requireBoundaryInteger(seal['proofNonce'], `${code}_PROOF_NONCE`),
-    proposerIsLeft: requireBoolean(seal['proposerIsLeft'], `${code}_PROPOSER_IS_LEFT`),
+    hash: requireString(disputeHanko['hash'], `${code}_HASH`),
+    proofBodyHash: requireString(disputeHanko['proofBodyHash'], `${code}_PROOF_BODY_HASH`),
+    proofNonce: requireBoundaryInteger(disputeHanko['proofNonce'], `${code}_PROOF_NONCE`),
+    proposerIsLeft: requireBoolean(disputeHanko['proposerIsLeft'], `${code}_PROPOSER_IS_LEFT`),
   };
 };
 
@@ -82,7 +82,7 @@ const decodeFrameAck = (value: unknown, code: string): AccountFrameAck => {
   requireExactBoundaryKeys(
     ack,
     ['height', 'frameHash'],
-    ['frameHanko', 'disputeSeal'],
+    ['frameHanko', 'disputeHanko'],
     `${code}_FIELDS`,
   );
   const frameHanko = ack['frameHanko'];
@@ -91,9 +91,9 @@ const decodeFrameAck = (value: unknown, code: string): AccountFrameAck => {
     height: requireBoundaryInteger(ack['height'], `${code}_HEIGHT`),
     frameHash: requireString(ack['frameHash'], `${code}_FRAME_HASH`),
     ...(frameHanko === undefined ? {} : { frameHanko }),
-    ...(ack['disputeSeal'] === undefined
+    ...(ack['disputeHanko'] === undefined
       ? {}
-      : { disputeSeal: decodeDisputeSeal(ack['disputeSeal'], `${code}_DISPUTE_SEAL`) }),
+      : { disputeHanko: decodeDisputeHanko(ack['disputeHanko'], `${code}_DISPUTE_HANKO`) }),
   };
 };
 
@@ -102,7 +102,7 @@ const decodeFrameProposal = (value: unknown, code: string): AccountFrameProposal
   requireExactBoundaryKeys(
     proposal,
     ['frame'],
-    ['frameHanko', 'disputeSeal'],
+    ['frameHanko', 'disputeHanko'],
     `${code}_FIELDS`,
   );
   const frameHanko = proposal['frameHanko'];
@@ -112,37 +112,37 @@ const decodeFrameProposal = (value: unknown, code: string): AccountFrameProposal
   return {
     frame: decodeAccountFrame(proposal['frame'], `${code}_FRAME`),
     ...(frameHanko === undefined ? {} : { frameHanko }),
-    ...(proposal['disputeSeal'] === undefined
+    ...(proposal['disputeHanko'] === undefined
       ? {}
-      : { disputeSeal: decodeDisputeSeal(proposal['disputeSeal'], `${code}_DISPUTE_SEAL`) }),
+      : { disputeHanko: decodeDisputeHanko(proposal['disputeHanko'], `${code}_DISPUTE_HANKO`) }),
   };
 };
 
-const decodeBoardReseal = (value: unknown, code: string): AccountBoardReseal => {
-  const reseal = requireBoundaryRecord(value, code);
+const decodeBoardHankoRefresh = (value: unknown, code: string): AccountBoardHankoRefresh => {
+  const boardHankoRefresh = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
-    reseal,
+    boardHankoRefresh,
     ['height', 'frameHash', 'boardActivationJHeight', 'boardActivationLogIndex'],
-    ['frameHanko', 'disputeSeal'],
+    ['frameHanko', 'disputeHanko'],
     `${code}_FIELDS`,
   );
   const ack = decodeFrameAck(
     {
-      height: reseal['height'],
-      frameHash: reseal['frameHash'],
-      ...(reseal['frameHanko'] === undefined ? {} : { frameHanko: reseal['frameHanko'] }),
-      ...(reseal['disputeSeal'] === undefined ? {} : { disputeSeal: reseal['disputeSeal'] }),
+      height: boardHankoRefresh['height'],
+      frameHash: boardHankoRefresh['frameHash'],
+      ...(boardHankoRefresh['frameHanko'] === undefined ? {} : { frameHanko: boardHankoRefresh['frameHanko'] }),
+      ...(boardHankoRefresh['disputeHanko'] === undefined ? {} : { disputeHanko: boardHankoRefresh['disputeHanko'] }),
     },
     `${code}_ACK`,
   );
   return {
     ...ack,
     boardActivationJHeight: requireBoundaryInteger(
-      reseal['boardActivationJHeight'],
+      boardHankoRefresh['boardActivationJHeight'],
       `${code}_J_HEIGHT`,
     ),
     boardActivationLogIndex: requireBoundaryInteger(
-      reseal['boardActivationLogIndex'],
+      boardHankoRefresh['boardActivationLogIndex'],
       `${code}_LOG_INDEX`,
     ),
   };
@@ -153,7 +153,7 @@ const decodeBoardReseal = (value: unknown, code: string): AccountBoardReseal => 
  *
  * A signed Account frame is still untrusted bytes at a storage or transport
  * boundary. Exact decoding here prevents a valid outer EntityTx tag from
- * smuggling malformed ACK, proposal, dispute, or board-reseal data into the
+ * smuggling malformed ACK, proposal, dispute, or board-hanko-refresh data into the
  * bilateral reducer.
  */
 export const decodeAccountPeerInput = (value: unknown, code: string): AccountPeerInput => {
@@ -198,18 +198,18 @@ export const decodeAccountPeerInput = (value: unknown, code: string): AccountPee
     case 'dispute':
       requireExactBoundaryKeys(
         input,
-        [...baseKeys, 'disputeSeal'],
+        [...baseKeys, 'disputeHanko'],
         optionalBaseKeys,
         `${code}_FIELDS`,
       );
       return {
         ...base,
         kind,
-        disputeSeal: decodeDisputeSeal(input['disputeSeal'], `${code}_DISPUTE_SEAL`),
+        disputeHanko: decodeDisputeHanko(input['disputeHanko'], `${code}_DISPUTE_HANKO`),
       };
-    case 'board_reseal':
-      requireExactBoundaryKeys(input, [...baseKeys, 'reseal'], optionalBaseKeys, `${code}_FIELDS`);
-      return { ...base, kind, reseal: decodeBoardReseal(input['reseal'], `${code}_RESEAL`) };
+    case 'board_hanko_refresh':
+      requireExactBoundaryKeys(input, [...baseKeys, 'boardHankoRefresh'], optionalBaseKeys, `${code}_FIELDS`);
+      return { ...base, kind, boardHankoRefresh: decodeBoardHankoRefresh(input['boardHankoRefresh'], `${code}_BOARD_HANKO_REFRESH`) };
     case 'txs':
       throw new Error(`${code}_LOCAL_INPUT_FORBIDDEN`);
     default:

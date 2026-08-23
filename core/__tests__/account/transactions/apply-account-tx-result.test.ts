@@ -239,7 +239,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       .toBe(account.state.settlementWorkspace!.workspaceHash);
   });
 
-  test('settlement seal nonce mismatch is typed and leaves the workspace unsigned', async () => {
+  test('settlement Hanko nonce mismatch is typed and leaves the workspace unsigned', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const upserted = await applyAccountTx(account, {
       type: 'settle_transition',
@@ -256,7 +256,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
     const result = await applyAccountTx(account, {
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         revision: 1,
         workspaceHash,
         settlementNonce: 6,
@@ -271,10 +271,10 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
       },
     }, true, 2_000, 0, false, consensusContext());
     const rejection = rejectionOf(result);
-    expect(rejection.kind).toBe('settlement_seal_nonce_mismatch');
-    if (rejection.kind !== 'settlement_seal_nonce_mismatch') throw new Error('ACCOUNT_TX_TEST_SEAL_KIND');
-    expect(rejection.code).toBe(ACCOUNT_TX_REJECTION_CODES.settlementSealNonceMismatch);
-    expect(rejection.message).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:6:5');
+    expect(rejection.kind).toBe('settlement_hanko_nonce_mismatch');
+    if (rejection.kind !== 'settlement_hanko_nonce_mismatch') throw new Error('ACCOUNT_TX_TEST_HANKO_KIND');
+    expect(rejection.code).toBe(ACCOUNT_TX_REJECTION_CODES.settlementHankoNonceMismatch);
+    expect(rejection.message).toContain('SETTLEMENT_HANKO_NONCE_MISMATCH:6:5');
     expect(rejection.suppliedNonce).toBe(6);
     expect(rejection.requiredNonce).toBe(5);
     expect(rejection.basis).toBe('account');

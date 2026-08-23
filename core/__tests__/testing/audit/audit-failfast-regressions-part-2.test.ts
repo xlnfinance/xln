@@ -131,7 +131,7 @@ import { handleJRebroadcast } from '../../../entity/tx/handlers/j-batch/j-rebroa
 
 import { handleSetHubConfigEntityTx, handleSetRebalancePolicyEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
 
-import { buildSettlementSealDraft, processCommittedSettlementTransitionFollowup } from '../../../entity/tx/handlers/payments/settle';
+import { buildSettlementHankoDraft, processCommittedSettlementTransitionFollowup } from '../../../entity/tx/handlers/payments/settle';
 
 import { applyJEvent } from '../../../entity/tx/j-events';
 
@@ -219,7 +219,7 @@ import { encodeSignedHanko } from '../../../hanko/codec';
 import { resolveHankoBoardDelays } from '../../../hanko/claims';
 
 import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
-import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
 
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
@@ -762,8 +762,8 @@ describe('audit fail-fast regressions', () => {
 
     const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 9);
     if (!isProposedAccountFrame(proposal)) throw new Error(proposeAccountFrameMessage(proposal) || 'proposal failed');
-    const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
-    const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
+    const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(env, left.entityId, left.signerId, proposal);
+    const result = await applyAccountInput(createAccountConsensusContext(env), receiver, hankoAttachedProposal, {
       entityTimestamp: env.state.timestamp + 10 * 60_000,
       finalizedJHeight: 10,
     });
@@ -812,8 +812,8 @@ describe('audit fail-fast regressions', () => {
 
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 7);
     if (!isProposedAccountFrame(proposed)) throw new Error(proposeAccountFrameMessage(proposed) || 'proposal failed');
-    const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposed);
-    const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
+    const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(env, left.entityId, left.signerId, proposed);
+    const result = await applyAccountInput(createAccountConsensusContext(env), receiver, hankoAttachedProposal, {
       entityTimestamp: env.state.timestamp,
       finalizedJHeight: 7,
     });
@@ -957,7 +957,7 @@ describe('audit fail-fast regressions', () => {
     }
     const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 1);
     if (!isProposedAccountFrame(proposal)) throw new Error(proposeAccountFrameMessage(proposal) || 'proposal failed');
-    const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
+    const hankoAttachedProposal = await attachAccountDraftHankosAsEntity(env, left.entityId, left.signerId, proposal);
 
     const receiverState = provisionEntityState(env, makeEntityState(right.entityId));
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
@@ -976,7 +976,7 @@ describe('audit fail-fast regressions', () => {
     });
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
-      data: sealedProposal,
+      data: hankoAttachedProposal,
     });
 
     const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
@@ -1090,8 +1090,8 @@ describe('audit fail-fast regressions', () => {
     });
   });
 
-  test('signed stale settlement seal is rejected without mutating or disputing the account', async () => {
-    const seed = 'signed-stale-settlement-seal';
+  test('signed stale settlement Hanko is rejected without mutating or disputing the account', async () => {
+    const seed = 'signed-stale-settlement-hanko';
     const env = createEmptyEnv(seed);
     env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
@@ -1125,10 +1125,10 @@ describe('audit fail-fast regressions', () => {
     expect(workspaceResult.ok).toBe(true);
     receiver.proofHeader.nextProofNonce = 9;
     const workspaceHash = receiver.state.settlementWorkspace!.workspaceHash;
-    const staleSeal: AccountTx = {
+    const staleHankoTx: AccountTx = {
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         revision: 1,
         workspaceHash,
         settlementNonce: 8,
@@ -1142,7 +1142,7 @@ describe('audit fail-fast regressions', () => {
         settlementHanko: '0x5678',
       },
     };
-    const staleFrame = makeIncomingAccountFrame(receiver, staleSeal, true, env.state.timestamp, 0);
+    const staleFrame = makeIncomingAccountFrame(receiver, staleHankoTx, true, env.state.timestamp, 0);
     staleFrame.prevFrameHash = 'genesis';
     staleFrame.stateHash = computeFrameHash(staleFrame);
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [staleFrame.stateHash]);
@@ -1162,7 +1162,7 @@ describe('audit fail-fast regressions', () => {
       finalizedJHeight: 0,
     });
     expect(accountResult.ok).toBe(false);
-    expect(accountInputFailureMessage(accountResult)).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:8:9');
+    expect(accountInputFailureMessage(accountResult)).toContain('SETTLEMENT_HANKO_NONCE_MISMATCH:8:9');
     expect(accountResult.disputeRequired).toBeUndefined();
     expect(safeStringify(receiver)).toBe(before);
 
@@ -2004,7 +2004,7 @@ describe('audit fail-fast regressions', () => {
         throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposeAccountFrameMessage(proposed) || 'missing input'}`);
       }
       return {
-        input: await sealAccountDraftAsEntity(env, identity.entityId, identity.signerId, proposed),
+        input: await attachAccountDraftHankosAsEntity(env, identity.entityId, identity.signerId, proposed),
         hubAccount: fundedAccount(hub.entityId, identity.entityId),
       };
     };

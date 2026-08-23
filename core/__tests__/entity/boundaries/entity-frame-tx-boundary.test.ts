@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { validateProposedEntityFrame, assertEstimatedSealedEntityFrameWire } from '../../../entity/consensus/frame/validation';
+import { validateProposedEntityFrame, assertEstimatedCertifiedEntityFrameWire } from '../../../entity/consensus/frame/validation';
 import { assertEntityFrameTotalByteBudget, createEntityFrameWirePrefixMeter, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
 import { packTransportValue } from '../../../protocol/serialization/binary-codec';
@@ -124,7 +124,7 @@ test('Entity frame wire fit reserves a third of the 10 MB limit for apply-time e
   expect(ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES).toBe(Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 3));
 });
 
-test('sealed Entity frame wire errors name hashesToSign separately from the hash payload', () => {
+test('certified Entity frame wire errors name hashesToSign separately from the hash payload', () => {
   const pad = 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES);
   const frame = {
     height: 1,
@@ -143,7 +143,7 @@ test('sealed Entity frame wire errors name hashesToSign separately from the hash
   expect(() => validateProposedEntityFrame(frame, 'EntityFrame')).toThrow(/hankos=-?\d+:collectedSigs=\d+/);
 });
 
-test('unsigned Entity frames estimate sealed bytes before sign', () => {
+test('unsigned Entity frames estimate certified bytes before sign', () => {
   const pad = 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES);
   const frame = {
     height: 1,
@@ -158,11 +158,11 @@ test('unsigned Entity frames estimate sealed bytes before sign', () => {
     leader: { proposerSignerId: signerId, view: 0 },
     hashesToSign: [{ hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: pad }],
   };
-  expect(() => assertEstimatedSealedEntityFrameWire(frame, signerId, true, 'SingleSignerEntityFrame'))
+  expect(() => assertEstimatedCertifiedEntityFrameWire(frame, signerId, true, 'SingleSignerEntityFrame'))
     .toThrow(/hankos=-?\d+:collectedSigs=\d+/);
 });
 
-test('unsigned Entity frame estimate exactly matches every conservative sealed template branch', () => {
+test('unsigned Entity frame estimate exactly matches every conservative certified template branch', () => {
   const availableHashes = [
     { hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: 'frame' },
     { hash: `0x${'55'.repeat(32)}`, type: 'entityOutput', context: 'output' },
@@ -193,12 +193,12 @@ test('unsigned Entity frame estimate exactly matches every conservative sealed t
       collectedSigs: new Map([[signerId.toLowerCase(), hashesToSign.map(() => signature)]]),
       ...(includeHankos ? { hankos: [hanko] } : {}),
     }).byteLength;
-    expect(assertEstimatedSealedEntityFrameWire(frame, signerId, includeHankos, 'EntityFrame'))
+    expect(assertEstimatedCertifiedEntityFrameWire(frame, signerId, includeHankos, 'EntityFrame'))
       .toBe(exact);
   }
 });
 
-test('single-signer sealed estimate keeps one EntityFrame Hanko across 2000 exact digests', () => {
+test('single-signer certified estimate keeps one EntityFrame Hanko across 2000 exact digests', () => {
   const hashesToSign = Array.from({ length: 2_000 }, (_, index) => ({
     hash: `0x${index.toString(16).padStart(64, '0')}`,
     type: index === 0 ? 'entityFrame' : 'accountFrame',
@@ -219,7 +219,7 @@ test('single-signer sealed estimate keeps one EntityFrame Hanko across 2000 exac
     leader: { proposerSignerId: signerId, view: 0 },
     hashesToSign,
   };
-  expect(assertEstimatedSealedEntityFrameWire(
+  expect(assertEstimatedCertifiedEntityFrameWire(
     frame,
     signerId,
     true,
@@ -227,9 +227,9 @@ test('single-signer sealed estimate keeps one EntityFrame Hanko across 2000 exac
   )).toBeLessThan(10_000_000);
 });
 
-test('proposal signs only after the estimated sealed wire fits', () => {
+test('proposal signs only after the estimated certified wire fits', () => {
   const start = readFileSync(join(import.meta.dir, '../../../entity/consensus/proposal/start.ts'), 'utf8');
-  const estimateAt = start.indexOf('assertEstimatedSealedEntityFrameWire');
+  const estimateAt = start.indexOf('assertEstimatedCertifiedEntityFrameWire');
   const signAt = start.indexOf('signProposalManifest');
   expect(estimateAt).toBeGreaterThan(0);
   expect(estimateAt).toBeLessThan(signAt);

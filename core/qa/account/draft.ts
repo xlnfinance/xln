@@ -13,10 +13,10 @@ type AccountDraft = {
 
 /**
  * Account consensus is signer-blind: it returns hashes, then Entity authority
- * seals the draft. QA and benchmarks entering below Entity consensus must
+ * attaches the draft Hankos. QA and benchmarks entering below Entity consensus must
  * reproduce that boundary instead of feeding an impossible unsigned input.
  */
-export const sealAccountDraftAsEntity = async (
+export const attachAccountDraftHankosAsEntity = async (
   env: RuntimeReplica,
   entityId: string,
   signerId: string,
@@ -47,12 +47,12 @@ export const sealAccountDraftAsEntity = async (
 
   if (input.kind === 'ack' || input.kind === 'frame_ack') {
     input.ack.frameHanko = requireWitness(input.ack.frameHash);
-    if (input.ack.disputeSeal) input.ack.disputeSeal.hanko = requireWitness(input.ack.disputeSeal.hash);
+    if (input.ack.disputeHanko) input.ack.disputeHanko.hanko = requireWitness(input.ack.disputeHanko.hash);
   }
   if (input.kind === 'frame' || input.kind === 'frame_ack') {
     input.proposal.frameHanko = requireWitness(input.proposal.frame.stateHash);
-    if (input.proposal.disputeSeal) {
-      input.proposal.disputeSeal.hanko = requireWitness(input.proposal.disputeSeal.hash);
+    if (input.proposal.disputeHanko) {
+      input.proposal.disputeHanko.hanko = requireWitness(input.proposal.disputeHanko.hash);
     }
   }
   return input;

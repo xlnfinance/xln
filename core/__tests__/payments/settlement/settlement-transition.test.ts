@@ -22,14 +22,14 @@ import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
 import {
-  sealHankoWitnessInState,
+  attachHankoWitnessesToState,
   type HankoWitnessEntry,
 } from '../../../entity/consensus/input/hanko-witness';
 import { signEntityHashes } from '../../../hanko/signing';
 import { generateLazyEntityId, generateNumberedEntityId } from '../../../entity/factory';
 import {
   canAutoApproveWorkspace,
-  buildSettlementSealDraft,
+  buildSettlementHankoDraft,
   handleSettleApprove,
   handleSettleExecute,
   handleSettlePropose,
@@ -327,7 +327,7 @@ const installProofStack = (env: RuntimeReplica, state: EntityState): void => {
   });
 };
 
-const attachSettlementSealWitness = async (
+const attachSettlementHankoWitness = async (
   env: RuntimeReplica,
   state: EntityState,
   counterpartyId: string,
@@ -358,7 +358,7 @@ const attachSettlementSealWitness = async (
   });
   const account = writableAccount(state, counterpartyId);
   account.mempool.push(tx);
-  expect(sealHankoWitnessInState(state, witness, entityHeight, [counterpartyId])).toBe(hashesToSign.length);
+  expect(attachHankoWitnessesToState(state, witness, entityHeight, [counterpartyId])).toBe(hashesToSign.length);
   return account.mempool.at(-1) as Extract<AccountTx, { type: 'settle_transition' }>;
 };
 
@@ -431,10 +431,10 @@ describe('atomic settlement Account transition', () => {
     expect(account.shadow.rebalance.submittedAtByToken.size).toBe(0);
   });
 
-  test('hub scheduler waits for the fully sealed settlement state before execute', async () => {
-    const env = createEmptyEnv('settlement-transition-scheduler-awaiting-seal');
+  test('hub scheduler waits for the fully Hanko-authorized settlement state before execute', async () => {
+    const env = createEmptyEnv('settlement-transition-scheduler-awaiting-hanko');
     const jurisdiction = makeJurisdiction('settlement-transition-scheduler', 31337, 'a1', 'b2');
-    const signer = registerTestSigner(env, 'settlement-transition-scheduler-awaiting-seal', '1');
+    const signer = registerTestSigner(env, 'settlement-transition-scheduler-awaiting-hanko', '1');
     const state = makeState(LEFT, signer, jurisdiction, RIGHT);
     state.timestamp = HUB_REBALANCE_INTERVAL_MS;
     state.hubRebalanceConfig = {
@@ -521,11 +521,11 @@ describe('atomic settlement Account transition', () => {
     expect(state.jBatchState).toEqual(batchBefore);
   });
 
-  test('keeps an unsigned settlement seal queued until its Entity quorum Hanko exists', async () => {
-    const env = createEmptyEnv('settlement-transition-two-phase-seal');
+  test('keeps an unsigned settlement Hanko queued until its Entity quorum Hanko exists', async () => {
+    const env = createEmptyEnv('settlement-transition-two-phase-hanko');
     const jurisdiction = makeJurisdiction('settlement-transition-two-phase', 31337, 'a5', 'b6');
-    const signerA = registerTestSigner(env, 'settlement-transition-two-phase-seal', '1');
-    const signerB = registerTestSigner(env, 'settlement-transition-two-phase-seal', '2');
+    const signerA = registerTestSigner(env, 'settlement-transition-two-phase-hanko', '1');
+    const signerB = registerTestSigner(env, 'settlement-transition-two-phase-hanko', '2');
     const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
     const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
     const [leftEntity, rightEntity] = entityA < entityB ? [entityA, entityB] : [entityB, entityA];
@@ -564,13 +564,13 @@ describe('atomic settlement Account transition', () => {
     expect(queued.mempool).toHaveLength(1);
     expect(queued.mempool[0]).toMatchObject({
       type: 'settle_transition',
-      data: { kind: 'seal' },
+      data: { kind: 'hanko' },
     });
-    const seal = queued.mempool[0];
-    if (seal?.type !== 'settle_transition' || seal.data.kind !== 'seal') {
-      throw new Error('TEST_UNSIGNED_SETTLEMENT_SEAL_MISSING');
+    const hankoTx = queued.mempool[0];
+    if (hankoTx?.type !== 'settle_transition' || hankoTx.data.kind !== 'hanko') {
+      throw new Error('TEST_UNSIGNED_SETTLEMENT_HANKO_MISSING');
     }
-    expect(seal.data.postProof.hanko).toBeUndefined();
+    expect(hankoTx.data.postProof.hanko).toBeUndefined();
     expect(queued.pendingFrame).toBeUndefined();
     const unsignedEntityStateRoot = computeCanonicalEntityConsensusStateHash(execution.newState);
 
@@ -595,9 +595,9 @@ describe('atomic settlement Account transition', () => {
         createdAt: 2_000,
       });
     });
-    expect(sealHankoWitnessInState(execution.newState, witness, 1, [leftEntity])).toBe(2);
+    expect(attachHankoWitnessesToState(execution.newState, witness, 1, [leftEntity])).toBe(2);
     const attached = execution.newState.accounts.get(leftEntity)?.mempool[0];
-    if (attached?.type !== 'settle_transition' || attached.data.kind !== 'seal') {
+    if (attached?.type !== 'settle_transition' || attached.data.kind !== 'hanko') {
       throw new Error('TEST_ATTACHED_SETTLEMENT_HANKO_MISSING');
     }
     expect(attached.data.settlementHanko).toBeDefined();
@@ -655,12 +655,12 @@ describe('atomic settlement Account transition', () => {
     drainedAccount.proofHeader.nextProofNonce = 6;
     sealWritableAccounts(approved.newState);
     const materialized = await applyEntityFrameWithMaterializedTestInfraContext(env, approved.newState, [], 2_000);
-    const seal = materialized.newState.accounts.get(counterparty)?.mempool[0];
+    const hankoTx = materialized.newState.accounts.get(counterparty)?.mempool[0];
     expect(materialized.newState.deferredAccountProposals?.has(counterparty)).toBe(false);
     expect(materialized.collectedHashes?.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
-    expect(seal).toMatchObject({
+    expect(hankoTx).toMatchObject({
       type: 'settle_transition',
-      data: { kind: 'seal', settlementNonce: 6, postProof: { nonce: 7 } },
+      data: { kind: 'hanko', settlementNonce: 6, postProof: { nonce: 7 } },
     });
 
     writableAccount(materialized.newState, counterparty).proofHeader.nextProofNonce = 7;
@@ -681,15 +681,15 @@ describe('atomic settlement Account transition', () => {
     expect(refreshedAccount.mempool).toHaveLength(1);
     expect(refreshedAccount.mempool[0]).toMatchObject({
       type: 'settle_transition',
-      data: { kind: 'seal', settlementNonce: 7, postProof: { nonce: 8 } },
+      data: { kind: 'hanko', settlementNonce: 7, postProof: { nonce: 8 } },
     });
   });
 
-  test('materializes a deferred counter-seal beside an ordinary tx frozen by the peer-signed workspace', async () => {
-    const env = createEmptyEnv('settlement-transition-frozen-counter-seal');
-    const jurisdiction = makeJurisdiction('settlement-transition-frozen-counter-seal', 31337, 'a7', 'b8');
-    const signerA = registerTestSigner(env, 'settlement-transition-frozen-counter-seal', '1');
-    const signerB = registerTestSigner(env, 'settlement-transition-frozen-counter-seal', '2');
+  test('materializes a deferred counter-Hanko beside an ordinary tx frozen by the peer-signed workspace', async () => {
+    const env = createEmptyEnv('settlement-transition-frozen-counter-hanko');
+    const jurisdiction = makeJurisdiction('settlement-transition-frozen-counter-hanko', 31337, 'a7', 'b8');
+    const signerA = registerTestSigner(env, 'settlement-transition-frozen-counter-hanko', '1');
+    const signerB = registerTestSigner(env, 'settlement-transition-frozen-counter-hanko', '2');
     const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
     const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
     const [leftEntity, rightEntity] = entityA < entityB ? [entityA, entityB] : [entityB, entityA];
@@ -711,8 +711,8 @@ describe('atomic settlement Account transition', () => {
     const leftAccount = writableAccount(leftState, rightEntity);
     const rightAccount = writableAccount(rightState, leftEntity);
 
-    const peerDraft = buildSettlementSealDraft(rightAccount, rightState, leftEntity, env);
-    const peerSeal = await attachSettlementSealWitness(
+    const peerDraft = buildSettlementHankoDraft(rightAccount, rightState, leftEntity, env);
+    const peerHankoTx = await attachSettlementHankoWitness(
       env,
       rightState,
       leftEntity,
@@ -723,32 +723,32 @@ describe('atomic settlement Account transition', () => {
     expect((await applyEntityAccountTx(
       leftState,
       rightEntity,
-      peerSeal,
+      peerHankoTx,
       false,
       2_000,
       createAccountConsensusContext(env),
     )).ok).toBe(true);
-    const leftAccountAfterSeal = writableAccount(leftState, rightEntity);
-    expect(leftAccountAfterSeal.state.settlementWorkspace?.rightHanko).toBeDefined();
-    expect(leftAccountAfterSeal.state.settlementWorkspace?.postSettlementDisputeProof?.rightHanko).toBeDefined();
+    const leftAccountAfterHanko = writableAccount(leftState, rightEntity);
+    expect(leftAccountAfterHanko.state.settlementWorkspace?.rightHanko).toBeDefined();
+    expect(leftAccountAfterHanko.state.settlementWorkspace?.postSettlementDisputeProof?.rightHanko).toBeDefined();
 
     await processCommittedSettlementTransitionFollowup(
-      leftAccountAfterSeal,
-      peerSeal,
+      leftAccountAfterHanko,
+      peerHankoTx,
       {
-        ...leftAccountAfterSeal.currentFrame,
+        ...leftAccountAfterHanko.currentFrame,
         height: 1,
         timestamp: 2_000,
-        accountTxs: [peerSeal],
+        accountTxs: [peerHankoTx],
         byLeft: false,
       },
       rightEntity,
       leftState,
       env,
     );
-    const workspaceHash = leftAccountAfterSeal.state.settlementWorkspace!.workspaceHash;
+    const workspaceHash = leftAccountAfterHanko.state.settlementWorkspace!.workspaceHash;
     expect(leftState.deferredAccountProposals?.get(rightEntity)).toBe(workspaceHash);
-    leftAccountAfterSeal.mempool.push({
+    leftAccountAfterHanko.mempool.push({
       type: 'direct_payment',
       data: {
         tokenId: 1,
@@ -772,7 +772,7 @@ describe('atomic settlement Account transition', () => {
     expect(materializedAccount.mempool[1]).toMatchObject({
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         workspaceHash,
         settlementNonce: 1,
         postProof: { nonce: 2 },
@@ -790,7 +790,7 @@ describe('atomic settlement Account transition', () => {
     account.proofHeader.nextProofNonce = 5;
     const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
     const result = await applyAccountTxToMutableReplica(account, transition({
-      kind: 'seal',
+      kind: 'hanko',
       revision: 1,
       workspaceHash,
       settlementNonce: 6,
@@ -805,11 +805,11 @@ describe('atomic settlement Account transition', () => {
     }), true, 2_000, 0, false, createEmptyEnv('settlement-exact-nonce-reject'));
 
     expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('expected settlement seal nonce rejection');
+    if (result.ok) throw new Error('expected settlement Hanko nonce rejection');
     expect(result.rejection).toEqual({
-      kind: 'settlement_seal_nonce_mismatch',
-      code: 'SETTLEMENT_SEAL_NONCE_MISMATCH',
-      message: 'SETTLEMENT_SEAL_NONCE_MISMATCH:6:5:j=0:next=5:local=0:peer=0',
+      kind: 'settlement_hanko_nonce_mismatch',
+      code: 'SETTLEMENT_HANKO_NONCE_MISMATCH',
+      message: 'SETTLEMENT_HANKO_NONCE_MISMATCH:6:5:j=0:next=5:local=0:peer=0',
       suppliedNonce: 6,
       requiredNonce: 5,
       basis: 'account',
@@ -1050,7 +1050,7 @@ describe('atomic settlement Account transition', () => {
     expect(canAutoApproveWorkspace(pureForgiveness.state.settlementWorkspace!, false)).toBe(false);
   });
 
-  test('a committed rawDiff never auto-seals for its counterparty', async () => {
+  test('a committed rawDiff never auto-attaches a Hanko for its counterparty', async () => {
     const env = createEmptyEnv('settlement-transition-raw-diff-manual-only');
     const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
     const leftSigner = registerTestSigner(env, 'settlement-transition-raw-diff-manual-only', '1');
@@ -1143,9 +1143,9 @@ describe('atomic settlement Account transition', () => {
 
     const env = createEmptyEnv('settlement-forgiveness-proof');
     installProofStack(env, state);
-    const draft = buildSettlementSealDraft(account, state, RIGHT, env).tx;
-    if (draft.type !== 'settle_transition' || draft.data.kind !== 'seal') {
-      throw new Error('TEST_FORGIVENESS_SETTLEMENT_SEAL_MISSING');
+    const draft = buildSettlementHankoDraft(account, state, RIGHT, env).tx;
+    if (draft.type !== 'settle_transition' || draft.data.kind !== 'hanko') {
+      throw new Error('TEST_FORGIVENESS_SETTLEMENT_HANKO_MISSING');
     }
     const expected = forkAccountReplicaShell(account);
     putDelta(expected, createDefaultDelta(tokenId));
@@ -1167,9 +1167,9 @@ describe('atomic settlement Account transition', () => {
     const account = writableAccount(state, RIGHT);
     const env = createEmptyEnv('settlement-forgiveness-finality');
     installProofStack(env, state);
-    const draft = buildSettlementSealDraft(account, state, RIGHT, env).tx;
-    if (draft.type !== 'settle_transition' || draft.data.kind !== 'seal') {
-      throw new Error('TEST_FORGIVENESS_SETTLEMENT_SEAL_MISSING');
+    const draft = buildSettlementHankoDraft(account, state, RIGHT, env).tx;
+    if (draft.type !== 'settle_transition' || draft.data.kind !== 'hanko') {
+      throw new Error('TEST_FORGIVENESS_SETTLEMENT_HANKO_MISSING');
     }
     const workspace = account.state.settlementWorkspace!;
     workspace.nonceAtSign = draft.data.settlementNonce;
@@ -1279,7 +1279,7 @@ describe('atomic settlement Account transition', () => {
     expect(account.mempool).toHaveLength(0);
   });
 
-  test('bilateral Account seals carry role-aware settlement and post-proof Hankos', async () => {
+  test('bilateral Account Hankos carry role-aware settlement and post-proof Hankos', async () => {
     const rightEnv = createEmptyEnv('settlement-transition-post-proof-wire');
     const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
     const signerA = registerTestSigner(rightEnv, 'settlement-transition-post-proof-wire', '1');
@@ -1316,16 +1316,16 @@ describe('atomic settlement Account transition', () => {
     expect(rightApproval.outputs).toEqual([]);
     expect(rightApproval.newState.deferredAccountProposals?.get(leftEntity))
       .toBe(rightAccount.state.settlementWorkspace!.workspaceHash);
-    const rightSealDraft = buildSettlementSealDraft(
+    const rightHankoDraft = buildSettlementHankoDraft(
       rightApproval.newState.accounts.get(leftEntity)!,
       rightApproval.newState,
       leftEntity,
       rightEnv,
     );
-    expect(rightSealDraft.hashesToSign.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
-    const rightDraft = rightSealDraft.tx;
-    if (rightDraft?.type !== 'settle_transition' || rightDraft.data.kind !== 'seal') {
-      throw new Error('TEST_RIGHT_SETTLEMENT_SEAL_MISSING');
+    expect(rightHankoDraft.hashesToSign.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
+    const rightDraft = rightHankoDraft.tx;
+    if (rightDraft?.type !== 'settle_transition' || rightDraft.data.kind !== 'hanko') {
+      throw new Error('TEST_RIGHT_SETTLEMENT_HANKO_MISSING');
     }
     expect(rightDraft.data).toMatchObject({
       settlementNonce: 1,
@@ -1333,22 +1333,22 @@ describe('atomic settlement Account transition', () => {
     });
     expect(rightDraft.data.settlementHanko).toBeUndefined();
     expect(rightDraft.data.postProof.hanko).toBeUndefined();
-    const rightSealingState = rightApproval.newState;
-    const sealedRightTx = await attachSettlementSealWitness(
+    const rightHankoState = rightApproval.newState;
+    const rightHankoTx = await attachSettlementHankoWitness(
       rightEnv,
-      rightSealingState,
+      rightHankoState,
       leftEntity,
       rightDraft,
-      rightSealDraft.hashesToSign,
+      rightHankoDraft.hashesToSign,
       1,
     );
-    if (sealedRightTx.data.kind !== 'seal') throw new Error('TEST_RIGHT_SETTLEMENT_SEAL_INVALID');
-    expect(sealedRightTx.data.settlementHanko).toBeDefined();
-    expect(sealedRightTx.data.postProof.hanko).toBeDefined();
+    if (rightHankoTx.data.kind !== 'hanko') throw new Error('TEST_RIGHT_SETTLEMENT_HANKO_INVALID');
+    expect(rightHankoTx.data.settlementHanko).toBeDefined();
+    expect(rightHankoTx.data.postProof.hanko).toBeDefined();
     expect((await applyEntityAccountTx(
-      rightSealingState,
+      rightHankoState,
       leftEntity,
-      sealedRightTx,
+      rightHankoTx,
       false,
       2_000,
       createAccountConsensusContext(rightEnv),
@@ -1356,7 +1356,7 @@ describe('atomic settlement Account transition', () => {
     expect((await applyEntityAccountTx(
       leftState,
       rightEntity,
-      sealedRightTx,
+      rightHankoTx,
       false,
       2_000,
       createAccountConsensusContext(rightEnv),
@@ -1373,48 +1373,48 @@ describe('atomic settlement Account transition', () => {
       },
       rightEnv,
     );
-    const leftSealDraft = buildSettlementSealDraft(
+    const leftHankoDraft = buildSettlementHankoDraft(
       leftApproval.newState.accounts.get(rightEntity)!,
       leftApproval.newState,
       rightEntity,
       rightEnv,
     );
-    expect(leftSealDraft.hashesToSign.map(({ type }) => type)).toEqual(['dispute']);
-    const leftDraft = leftSealDraft.tx;
-    if (leftDraft?.type !== 'settle_transition' || leftDraft.data.kind !== 'seal') {
-      throw new Error('TEST_LEFT_SETTLEMENT_SEAL_MISSING');
+    expect(leftHankoDraft.hashesToSign.map(({ type }) => type)).toEqual(['dispute']);
+    const leftDraft = leftHankoDraft.tx;
+    if (leftDraft?.type !== 'settle_transition' || leftDraft.data.kind !== 'hanko') {
+      throw new Error('TEST_LEFT_SETTLEMENT_HANKO_MISSING');
     }
-    const leftSealingState = leftApproval.newState;
-    const sealedLeftTx = await attachSettlementSealWitness(
+    const leftHankoState = leftApproval.newState;
+    const leftHankoTx = await attachSettlementHankoWitness(
       rightEnv,
-      leftSealingState,
+      leftHankoState,
       rightEntity,
       leftDraft,
-      leftSealDraft.hashesToSign,
+      leftHankoDraft.hashesToSign,
       2,
     );
-    if (sealedLeftTx.data.kind !== 'seal') throw new Error('TEST_LEFT_SETTLEMENT_SEAL_INVALID');
-    expect(sealedLeftTx.data.settlementHanko).toBeUndefined();
-    expect(sealedLeftTx.data.postProof.hanko).toBeDefined();
+    if (leftHankoTx.data.kind !== 'hanko') throw new Error('TEST_LEFT_SETTLEMENT_HANKO_INVALID');
+    expect(leftHankoTx.data.settlementHanko).toBeUndefined();
+    expect(leftHankoTx.data.postProof.hanko).toBeDefined();
     expect((await applyEntityAccountTx(
-      leftSealingState,
+      leftHankoState,
       rightEntity,
-      sealedLeftTx,
+      leftHankoTx,
       true,
       3_000,
       createAccountConsensusContext(rightEnv),
     )).ok).toBe(true);
     expect((await applyEntityAccountTx(
-      rightSealingState,
+      rightHankoState,
       leftEntity,
-      sealedLeftTx,
+      leftHankoTx,
       true,
       3_000,
       createAccountConsensusContext(rightEnv),
     )).ok).toBe(true);
 
-    const finalizedLeftWorkspace = leftSealingState.accounts.get(rightEntity)!.state.settlementWorkspace!;
-    const finalizedRightWorkspace = rightSealingState.accounts.get(leftEntity)!.state.settlementWorkspace!;
+    const finalizedLeftWorkspace = leftHankoState.accounts.get(rightEntity)!.state.settlementWorkspace!;
+    const finalizedRightWorkspace = rightHankoState.accounts.get(leftEntity)!.state.settlementWorkspace!;
     expect(finalizedLeftWorkspace.status).toBe('ready_to_submit');
     expect(finalizedRightWorkspace.status).toBe('ready_to_submit');
     expect(finalizedLeftWorkspace.leftHanko).toBeUndefined();
@@ -1424,11 +1424,11 @@ describe('atomic settlement Account transition', () => {
     expect(finalizedRightWorkspace).toEqual(finalizedLeftWorkspace);
   });
 
-  test('a registered local proposer verifies its seal against certified board authority', async () => {
-    const env = createEmptyEnv('settlement-transition-registered-seal');
+  test('a registered local proposer verifies its Hanko against certified board authority', async () => {
+    const env = createEmptyEnv('settlement-transition-registered-hanko');
     const jurisdiction = makeJurisdiction('settlement-transition-registered', 31337, 'a3', 'b4');
-    const leftSigner = registerTestSigner(env, 'settlement-transition-registered-seal', '1');
-    const rightSigner = registerTestSigner(env, 'settlement-transition-registered-seal', '2');
+    const leftSigner = registerTestSigner(env, 'settlement-transition-registered-hanko', '1');
+    const rightSigner = registerTestSigner(env, 'settlement-transition-registered-hanko', '2');
     const leftEntity = generateNumberedEntityId(2).toLowerCase();
     const rightEntity = generateLazyEntityId([rightSigner], 1n).toLowerCase();
     const leftState = makeState(leftEntity, leftSigner, jurisdiction, rightEntity);
@@ -1476,39 +1476,39 @@ describe('atomic settlement Account transition', () => {
       },
       env,
     );
-    const sealDraft = buildSettlementSealDraft(
+    const hankoDraft = buildSettlementHankoDraft(
       approval.newState.accounts.get(rightEntity)!,
       approval.newState,
       rightEntity,
       env,
     );
-    const draft = sealDraft.tx;
-    if (draft?.type !== 'settle_transition' || draft.data.kind !== 'seal') {
-      throw new Error('TEST_REGISTERED_SETTLEMENT_SEAL_MISSING');
+    const draft = hankoDraft.tx;
+    if (draft?.type !== 'settle_transition' || draft.data.kind !== 'hanko') {
+      throw new Error('TEST_REGISTERED_SETTLEMENT_HANKO_MISSING');
     }
-    const sealingState = approval.newState;
-    const sealedTx = await attachSettlementSealWitness(
+    const hankoState = approval.newState;
+    const hankoTx = await attachSettlementHankoWitness(
       env,
-      sealingState,
+      hankoState,
       rightEntity,
       draft,
-      sealDraft.hashesToSign,
+      hankoDraft.hashesToSign,
       1,
     );
     const result = await applyEntityAccountTx(
-      sealingState,
+      hankoState,
       rightEntity,
-      sealedTx,
+      hankoTx,
       true,
       2_000,
-      createAccountConsensusContext(env, getAccountJClaimNodeStore(env), sealingState),
+      createAccountConsensusContext(env, getAccountJClaimNodeStore(env), hankoState),
     );
     expect(result).toMatchObject({ ok: true });
-    expect(sealingState.accounts.get(rightEntity)!.state.settlementWorkspace?.leftHanko).toBeDefined();
+    expect(hankoState.accounts.get(rightEntity)!.state.settlementWorkspace?.leftHanko).toBeDefined();
     const receiverResult = await applyEntityAccountTx(
       rightState,
       leftEntity,
-      sealedTx,
+      hankoTx,
       true,
       2_000,
       createAccountConsensusContext(env, getAccountJClaimNodeStore(env), rightState),
@@ -2266,32 +2266,32 @@ describe('atomic settlement Account transition', () => {
    * the money path would advance the bilateral state off-chain on a signature
    * the jurisdiction rejects.
    */
-  test('settlement seal is current-board-only while its dispute proof keeps board grace', () => {
+  test('settlement Hanko is current-board-only while its dispute proof keeps board grace', () => {
     const repoRoot = process.cwd();
-    const accountSeal = readFileSync(
+    const accountHankoSource = readFileSync(
       join(repoRoot, 'core/account/tx/handlers/settlement/transition.ts'),
       'utf8',
     );
-    const entitySeal = readFileSync(
+    const entityHankoSource = readFileSync(
       join(repoRoot, 'core/entity/tx/handlers/payments/settle.ts'),
       'utf8',
     );
 
-    const postProofCall = accountSeal.indexOf('prepared.expectedDisputeHash');
-    const settlementCall = accountSeal.indexOf('prepared.expectedSettlementHash');
+    const postProofCall = accountHankoSource.indexOf('prepared.expectedDisputeHash');
+    const settlementCall = accountHankoSource.indexOf('prepared.expectedSettlementHash');
     expect(postProofCall).toBeGreaterThanOrEqual(0);
     expect(settlementCall).toBeGreaterThan(postProofCall);
-    expect(accountSeal.slice(postProofCall, settlementCall)).toContain('allowPreviousBoard: true');
-    expect(accountSeal.slice(settlementCall)).toContain('allowPreviousBoard: false');
+    expect(accountHankoSource.slice(postProofCall, settlementCall)).toContain('allowPreviousBoard: true');
+    expect(accountHankoSource.slice(settlementCall)).toContain('allowPreviousBoard: false');
 
     // The Entity helper is shared by both, so the split lives in its argument.
-    expect(entitySeal).toContain("allowPreviousBoard = authority === 'historicalEvidence'");
-    const nonExecutor = entitySeal.indexOf("'SETTLEMENT_NONEXECUTOR',");
-    const postLeft = entitySeal.indexOf("'POST_SETTLEMENT_LEFT',");
-    const postRight = entitySeal.indexOf("'POST_SETTLEMENT_RIGHT',");
+    expect(entityHankoSource).toContain("allowPreviousBoard = authority === 'historicalEvidence'");
+    const nonExecutor = entityHankoSource.indexOf("'SETTLEMENT_NONEXECUTOR',");
+    const postLeft = entityHankoSource.indexOf("'POST_SETTLEMENT_LEFT',");
+    const postRight = entityHankoSource.indexOf("'POST_SETTLEMENT_RIGHT',");
     expect(nonExecutor).toBeGreaterThanOrEqual(0);
-    expect(entitySeal.slice(nonExecutor, nonExecutor + 80)).toContain("'freshMovement'");
-    expect(entitySeal.slice(postLeft, postLeft + 80)).toContain("'historicalEvidence'");
-    expect(entitySeal.slice(postRight, postRight + 80)).toContain("'historicalEvidence'");
+    expect(entityHankoSource.slice(nonExecutor, nonExecutor + 80)).toContain("'freshMovement'");
+    expect(entityHankoSource.slice(postLeft, postLeft + 80)).toContain("'historicalEvidence'");
+    expect(entityHankoSource.slice(postRight, postRight + 80)).toContain("'historicalEvidence'");
   });
 });

@@ -175,7 +175,7 @@ type EntityProposalWireBudgetParams = {
   requiredPrefixCount?: number;
 };
 
-/** Last sealed wire bytes / tx bytes per Entity; a prediction, never a bound. */
+/** Last certified wire bytes / tx bytes per Entity; a prediction, never a bound. */
 const lastWireToTxByteRatio = new Map<string, number>();
 
 const fitLiveEntityProposal = async (
@@ -200,11 +200,11 @@ const fitLiveEntityProposal = async (
     const measurePrefix = params.wirePrefixMeter ?? createEntityFrameWirePrefixMeter(allTxs);
     measurePrefix.txBytes(allTxs.length);
     // Always start from the whole mempool: the byte measurement below is the
-    // only authority on what fits. A "last sealed count" hint once capped the
+    // only authority on what fits. A "last certified count" hint once capped the
     // first attempt at 1.15x the previous frame, which turned every lull into
     // a 30-frame slow start while hundreds of inputs waited (2026-08-22).
     // Each extra attempt re-materializes the whole HTLC context. The measured
-    // wire/tx byte ratio of this Entity's last sealed frame predicts where the
+    // wire/tx byte ratio of this Entity's last certified frame predicts where the
     // first attempt will land; tx bytes are exact from the prefix meter and the
     // loop below remains the only authority, so this is never a cap.
     let candidate = allTxs.length;

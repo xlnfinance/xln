@@ -126,7 +126,7 @@ describe('persisted EntityTx decoder', () => {
         domain: { chainId: 31_337, depositoryAddress: `0x${'44'.repeat(20)}` },
         disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         watchSeed: hash,
-        disputeSeal: {
+        disputeHanko: {
           hash,
           proofBodyHash: hash,
           proofNonce: 1,

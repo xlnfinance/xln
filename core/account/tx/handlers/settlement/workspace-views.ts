@@ -27,7 +27,7 @@ export type UnsignedSettlementWorkspace = SettlementWorkspace & {
   postSettlementDisputeProof?: never;
 };
 
-export type SealingSettlementWorkspace = PinnedSettlementWorkspace & {
+export type HankoPendingSettlementWorkspace = PinnedSettlementWorkspace & {
   status: 'awaiting_counterparty';
 };
 
@@ -55,7 +55,7 @@ export type SubmittedSettlementWorkspace = Omit<
 
 export type ValidSettlementWorkspacePhase =
   | UnsignedSettlementWorkspace
-  | SealingSettlementWorkspace
+  | HankoPendingSettlementWorkspace
   | ReadySettlementWorkspace
   | SubmittedSettlementWorkspace;
 
@@ -82,9 +82,9 @@ export const isUnsignedSettlementWorkspace = (
   && workspace.nonceAtSign === undefined
   && workspace.postSettlementDisputeProof === undefined;
 
-export const isSealingSettlementWorkspace = (
+export const isHankoPendingSettlementWorkspace = (
   workspace: SettlementWorkspace,
-): workspace is SealingSettlementWorkspace => workspace.status === 'awaiting_counterparty'
+): workspace is HankoPendingSettlementWorkspace => workspace.status === 'awaiting_counterparty'
   && hasPinnedBody(workspace)
   && (
     hasText(workspace.postSettlementDisputeProof.leftHanko)
@@ -123,7 +123,7 @@ export const assertSettlementWorkspacePhase = (
 ): ValidSettlementWorkspacePhase => {
   if (
     isUnsignedSettlementWorkspace(workspace)
-    || isSealingSettlementWorkspace(workspace)
+    || isHankoPendingSettlementWorkspace(workspace)
     || isReadySettlementWorkspace(workspace)
     || isSubmittedSettlementWorkspace(workspace)
   ) return workspace;

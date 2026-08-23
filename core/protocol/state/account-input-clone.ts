@@ -1,5 +1,5 @@
 import type {
-  AccountDisputeSeal,
+  AccountDisputeHanko,
   AccountFrame,
   AccountFrameAck,
   AccountFrameProposal,
@@ -37,17 +37,17 @@ export const cloneIsolatedAccountFrame = (frame: AccountFrame): AccountFrame => 
   deltas: frame.deltas.map(delta => ({ ...delta })),
 });
 
-const cloneDisputeSeal = (seal: AccountDisputeSeal): AccountDisputeSeal => ({ ...seal });
+const cloneDisputeHanko = (disputeHanko: AccountDisputeHanko): AccountDisputeHanko => ({ ...disputeHanko });
 
 const cloneFrameAck = <T extends AccountFrameAck>(ack: T): T => ({
   ...ack,
-  ...(ack.disputeSeal ? { disputeSeal: cloneDisputeSeal(ack.disputeSeal) } : {}),
+  ...(ack.disputeHanko ? { disputeHanko: cloneDisputeHanko(ack.disputeHanko) } : {}),
 });
 
 const cloneFrameProposal = (proposal: AccountFrameProposal): AccountFrameProposal => ({
   ...proposal,
   frame: cloneIsolatedAccountFrame(proposal.frame),
-  ...(proposal.disputeSeal ? { disputeSeal: cloneDisputeSeal(proposal.disputeSeal) } : {}),
+  ...(proposal.disputeHanko ? { disputeHanko: cloneDisputeHanko(proposal.disputeHanko) } : {}),
 });
 
 export function cloneIsolatedAccountInput<T extends AccountInput>(input: T): T;
@@ -87,8 +87,8 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
         proposal: cloneFrameProposal(input.proposal),
       };
     case 'dispute':
-      return { ...base, kind: input.kind, disputeSeal: cloneDisputeSeal(input.disputeSeal) };
-    case 'board_reseal':
-      return { ...base, kind: input.kind, reseal: cloneFrameAck(input.reseal) };
+      return { ...base, kind: input.kind, disputeHanko: cloneDisputeHanko(input.disputeHanko) };
+    case 'board_hanko_refresh':
+      return { ...base, kind: input.kind, boardHankoRefresh: cloneFrameAck(input.boardHankoRefresh) };
   }
 }

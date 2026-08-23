@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyAccountInput } from '../../../account/consensus';
-import { getDisputeSealRequirementError } from '../../../account/consensus/dispute/seal';
+import { getDisputeHankoRequirementError } from '../../../account/consensus/dispute/hanko';
 import { accountInputPeerRejectionCode } from '../../../account/consensus/result';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
@@ -10,7 +10,7 @@ import { entity, makeAccount } from '../../helpers/cross-j';
 
 const body = `0x${'11'.repeat(32)}`;
 const otherBody = `0x${'22'.repeat(32)}`;
-const seal = (nonce: number, proofBodyHash = body) => ({
+const disputeHanko = (nonce: number, proofBodyHash = body) => ({
   hanko: '0x01',
   nonce,
   hash: `0x${'33'.repeat(32)}`,
@@ -18,19 +18,19 @@ const seal = (nonce: number, proofBodyHash = body) => ({
   proposerIsLeft: true,
 });
 
-describe('counterparty dispute seal monotonicity', () => {
-  test('accepts a fresh seal and an exact unconsumed retry', () => {
-    expect(getDisputeSealRequirementError(body, undefined, undefined, 4, seal(5))).toBeUndefined();
-    expect(getDisputeSealRequirementError(body, body, 5, 4, seal(5))).toBeUndefined();
+describe('counterparty dispute Hanko monotonicity', () => {
+  test('accepts a fresh Hanko and an exact unconsumed retry', () => {
+    expect(getDisputeHankoRequirementError(body, undefined, undefined, 4, disputeHanko(5))).toBeUndefined();
+    expect(getDisputeHankoRequirementError(body, body, 5, 4, disputeHanko(5))).toBeUndefined();
   });
 
-  test('rejects finalized, regressing, and same-nonce retargeted seals', () => {
-    expect(getDisputeSealRequirementError(body, body, 5, 5, seal(5)))
-      .toContain('DISPUTE_SEAL_NONCE_ALREADY_FINALIZED');
-    expect(getDisputeSealRequirementError(body, body, 7, 4, seal(6)))
-      .toContain('DISPUTE_SEAL_NONCE_REGRESSION');
-    expect(getDisputeSealRequirementError(otherBody, body, 5, 4, seal(5, otherBody)))
-      .toContain('DISPUTE_SEAL_NONCE_REUSE');
+  test('rejects finalized, regressing, and same-nonce retargeted Hankos', () => {
+    expect(getDisputeHankoRequirementError(body, body, 5, 5, disputeHanko(5)))
+      .toContain('DISPUTE_HANKO_NONCE_ALREADY_FINALIZED');
+    expect(getDisputeHankoRequirementError(body, body, 7, 4, disputeHanko(6)))
+      .toContain('DISPUTE_HANKO_NONCE_REGRESSION');
+    expect(getDisputeHankoRequirementError(otherBody, body, 5, 4, disputeHanko(5, otherBody)))
+      .toContain('DISPUTE_HANKO_NONCE_REUSE');
   });
 
   test('routes the heightless peer lane by proof nonce without halting Runtime', async () => {
@@ -63,7 +63,7 @@ describe('counterparty dispute seal monotonicity', () => {
       domain: account.state.domain,
       disputeConfig: account.state.disputeConfig,
       watchSeed: account.state.watchSeed,
-      disputeSeal: {
+      disputeHanko: {
         hanko: '0x01',
         hash,
         proofBodyHash: body,

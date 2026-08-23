@@ -200,7 +200,7 @@ function isLockedEntityFrame(frame: EntityFrame): frame is LockedEntityFrame {
 - A verified/certified type may be constructed only by its verifier.
 
 Account proposals and ACKs follow the same rule. Their draft/certified views
-MUST refine the existing `frameHanko` and optional dispute-seal Hanko fields;
+MUST refine the existing `frameHanko` and optional dispute-hanko Hanko fields;
 they MUST NOT add a second status or clone the frame to claim certification.
 
 ### 4.4 Lifecycle state

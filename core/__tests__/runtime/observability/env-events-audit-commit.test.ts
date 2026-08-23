@@ -183,7 +183,7 @@ test('candidate Account history stores one semantic frame across valid Hanko sub
     accountTxs: [{
       type: 'settle_transition' as const,
       data: {
-        kind: 'seal' as const,
+        kind: 'hanko' as const,
         revision: 1,
         workspaceHash: '0xworkspace',
         settlementNonce: 2,
@@ -222,7 +222,7 @@ test('candidate Account history stores one semantic frame across valid Hanko sub
   const stored = records[0];
   if (stored?.kind !== 'accountFrame') throw new Error('TEST_ACCOUNT_HISTORY_MISSING');
   const storedTx = stored.frame.accountTxs[0];
-  if (storedTx?.type !== 'settle_transition' || storedTx.data.kind !== 'seal') {
+  if (storedTx?.type !== 'settle_transition' || storedTx.data.kind !== 'hanko') {
     throw new Error('TEST_SETTLEMENT_FRAME_MISSING');
   }
   expect(storedTx.data.settlementHanko).toBeUndefined();

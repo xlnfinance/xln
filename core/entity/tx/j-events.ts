@@ -1356,7 +1356,7 @@ const applyResolvedDisputeFinality = async (
   syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, batchNonce);
   dirtyAccounts.add(counterpartyId.toLowerCase());
   // A finalized dispute changes the authoritative Account epoch. Any
-  // settlement drafted or sealed against the previous epoch is unusable even
+  // settlement drafted or Hanko-authorized against the previous epoch is unusable even
   // when its numeric nonce is higher; retaining it would strand holds or let a
   // delayed retry resurrect pre-dispute state.
   // Capture exact Pull economics before Account external finality retires the

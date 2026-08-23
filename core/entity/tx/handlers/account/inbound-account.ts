@@ -108,20 +108,20 @@ const assertUnknownAccountGenesis = (
   hasProposal: boolean,
 ): void => {
   const runtimeKind = (input as { kind?: unknown }).kind;
-  if (!['frame', 'ack', 'frame_ack', 'dispute', 'board_reseal'].includes(String(runtimeKind))) {
+  if (!['frame', 'ack', 'frame_ack', 'dispute', 'board_hanko_refresh'].includes(String(runtimeKind))) {
     const error =
       `ACCOUNT_GENESIS_FRAME_REQUIRED: entity=${shortId(state.entityId)} ` +
       `counterparty=${shortId(counterpartyId)} inputHeight=0`;
     addMessage(state, error);
     throw new Error(error);
   }
-  if ((hasAck && !hasProposal) || input.kind === 'board_reseal') {
-    const code = input.kind === 'board_reseal'
-      ? 'ACCOUNT_BOARD_RESEAL_UNKNOWN_ACCOUNT'
+  if ((hasAck && !hasProposal) || input.kind === 'board_hanko_refresh') {
+    const code = input.kind === 'board_hanko_refresh'
+      ? 'ACCOUNT_BOARD_HANKO_REFRESH_UNKNOWN_ACCOUNT'
       : 'ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT';
     return rejectPeerInput(
-      input.kind === 'board_reseal'
-        ? 'ACCOUNT_PEER_BOARD_RESEAL_INVALID'
+      input.kind === 'board_hanko_refresh'
+        ? 'ACCOUNT_PEER_BOARD_HANKO_REFRESH_INVALID'
         : 'ACCOUNT_PEER_ACK_UNMATCHED',
       `${code}: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`,
     );

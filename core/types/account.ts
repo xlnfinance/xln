@@ -265,9 +265,9 @@ export interface AccountReplica {
   // HANKO SYSTEM: Frame consensus + Dispute proofs
   currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
   counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
-  /** One bounded, consensus-visible reminder that this Account still needs the active board seal. */
-  boardResealMigration?: AccountBoardResealMigration;
-  counterpartyBoardReseal?: {
+  /** One bounded, consensus-visible reminder that this Account still needs the active board Hanko. */
+  boardHankoRefreshMigration?: AccountBoardHankoRefreshMigration;
+  counterpartyBoardHankoRefresh?: {
     activationJHeight: number;
     activationLogIndex: number;
     frameHeight: number;
@@ -357,10 +357,10 @@ export interface AccountReplica {
   };
 }
 
-export type AccountBoardResealMigration = {
+export type AccountBoardHankoRefreshMigration = {
   activationJHeight: number;
   activationLogIndex: number;
-  /** Latest Account frame for which a durable reseal output was issued. */
+  /** Latest Account frame for which a durable board Hanko refresh output was issued. */
   issuedFrameHeight?: number;
   issuedFrameHash?: string;
   reason:
@@ -415,10 +415,10 @@ type AccountInputBase = {
   watchSeed?: string;
 };
 
-export type AccountDisputeSeal = {
+export type AccountDisputeHanko = {
   /**
    * Absent only while the Account output is an internal Entity-consensus draft.
-   * Any routed AccountInput must be sealed before it leaves the committing
+   * Any routed AccountInput must have its Hanko attached before it leaves the committing
    * Entity replica; inbound validation rejects an absent Hanko.
    */
   hanko?: HankoString;
@@ -434,7 +434,7 @@ export type AccountFrameAck = {
   frameHash: string;
   /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
   frameHanko?: HankoString;
-  disputeSeal?: AccountDisputeSeal;
+  disputeHanko?: AccountDisputeHanko;
 };
 
 /**
@@ -442,7 +442,7 @@ export type AccountFrameAck = {
  * state. It must never manufacture a new Account frame or consume a dispute
  * nonce, so the exact certified hashes travel in a separate control input.
  */
-export type AccountBoardReseal = AccountFrameAck & {
+export type AccountBoardHankoRefresh = AccountFrameAck & {
   /** Exact ordered EVM log position of the on-chain board activation. */
   boardActivationJHeight: number;
   boardActivationLogIndex: number;
@@ -452,12 +452,12 @@ export type AccountFrameProposal = {
   frame: AccountFrame;
   /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
   frameHanko?: HankoString;
-  disputeSeal?: AccountDisputeSeal;
+  disputeHanko?: AccountDisputeHanko;
 };
 
 // Channel.ts flush semantics: one delivery may acknowledge the previous frame
 // and propose the next frame. Each state epoch carries its own frame Hanko and
-// optional dispute seal. Sharing one seal across ACK + proposal is invalid
+// optional dispute Hanko. Sharing one Hanko across ACK + proposal is invalid
 // because the two parts commit different account states.
 export type AccountEnqueueInput = {
   /** Local Entity command. It never crosses an Entity or transport boundary. */
@@ -515,11 +515,11 @@ export type AccountPeerInput =
     })
   | (AccountInputBase & {
       kind: 'dispute';
-      disputeSeal: AccountDisputeSeal;
+      disputeHanko: AccountDisputeHanko;
     })
   | (AccountInputBase & {
-      kind: 'board_reseal';
-      reseal: AccountBoardReseal;
+      kind: 'board_hanko_refresh';
+      boardHankoRefresh: AccountBoardHankoRefresh;
     });
 
 /** Every command accepted by an Account replica enters this one boundary. */
@@ -617,7 +617,7 @@ export type SettlementOp =
  *
  * Flow:
  * 1. An Account settle_transition atomically creates/updates workspace + holds.
- * 2. Each side seals the post-proof; only the non-executor seals settlementHash.
+ * 2. Each side authorizes the post-proof; only the non-executor authorizes settlementHash.
  * 3. Executor submit is an exact hash/revision Account transition.
  * 4. Submit releases workspace holds; AccountSettled finality clears the body.
  */
@@ -631,7 +631,7 @@ export interface SettlementWorkspace {
   // Hanko signatures
   leftHanko?: HankoString;                    // Left's signature on settlement
   rightHanko?: HankoString;                   // Right's signature on settlement
-  settlementHash?: string;                    // Exact digest sealed by the Entity quorum
+  settlementHash?: string;                    // Exact digest authorized by the Entity quorum
 
   // Metadata
   lastModifiedByLeft: boolean;                // Who last proposed/updated
@@ -962,7 +962,7 @@ export type AccountTx =
              * consensus. The elected executor never signs settlementHash; it
              * signs only the post-settlement dispute proof.
              */
-            kind: 'seal';
+            kind: 'hanko';
             revision: number;
             workspaceHash: string;
             settlementNonce: number;

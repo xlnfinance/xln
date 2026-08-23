@@ -386,12 +386,12 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
   right.accounts = persistentAccounts([[counterpartyId, disputed]]);
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 
-  const reseal = { ...makeAccountReplica(entityId, counterpartyId), boardResealMigration: {
+  const boardHankoRefresh = { ...makeAccountReplica(entityId, counterpartyId), boardHankoRefreshMigration: {
     activationJHeight: 9,
     activationLogIndex: 2,
     reason: 'bilateral-frame-uncertified' as const,
   } };
-  right.accounts = persistentAccounts([[counterpartyId, reseal]]);
+  right.accounts = persistentAccounts([[counterpartyId, boardHankoRefresh]]);
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 });
 
@@ -475,7 +475,7 @@ test('Entity consensus root commits peer Hankos while own post-quorum subsets st
       accountTxs: [{
         type: 'settle_transition' as const,
         data: {
-          kind: 'seal' as const,
+          kind: 'hanko' as const,
           revision: 1,
           workspaceHash: `0x${'71'.repeat(32)}`,
           settlementNonce: 1,
@@ -672,7 +672,7 @@ test('certified Entity frame link fingerprint ignores nested tx bodies', () => {
   );
 });
 
-test('100 fat Account leaves reseal in under 100ms including cached repeats', () => {
+test('100 fat Account leaves with board Hanko refresh in under 100ms including cached repeats', () => {
   const frameHash = `0x${'ab'.repeat(32)}`;
   const entries: Array<readonly [string, ReturnType<typeof makeAccountReplica>]> = [];
   for (let index = 0; index < 100; index += 1) {

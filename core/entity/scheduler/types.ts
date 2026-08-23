@@ -29,8 +29,8 @@ export type ScheduledHookType =
   | 'settlement_window'
   | 'watchdog'
   | 'hub_rebalance_kick'
-  | 'board_reseal'
-  | 'counterparty_board_reseal_deadline'
+  | 'board_hanko_refresh'
+  | 'counterparty_board_hanko_refresh_deadline'
   | 'cross_j_orderbook_sweep';
 
 type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<string, unknown>> = {
@@ -64,13 +64,13 @@ type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
   counterpartyId: string;
 }>;
 
-type BoardResealHook = ScheduledHookBase<'board_reseal', {
+type BoardHankoRefreshHook = ScheduledHookBase<'board_hanko_refresh', {
   activationJHeight: number;
   activationLogIndex: number;
   afterCounterpartyId: string;
 }>;
 
-type CounterpartyBoardResealDeadlineHook = ScheduledHookBase<'counterparty_board_reseal_deadline', {
+type CounterpartyBoardHankoRefreshDeadlineHook = ScheduledHookBase<'counterparty_board_hanko_refresh_deadline', {
   accountId: string;
   activationJHeight: number;
   activationLogIndex: number;
@@ -87,8 +87,8 @@ export type ScheduledHook =
   | SettlementWindowHook
   | WatchdogHook
   | HubRebalanceKickHook
-  | BoardResealHook
-  | CounterpartyBoardResealDeadlineHook
+  | BoardHankoRefreshHook
+  | CounterpartyBoardHankoRefreshDeadlineHook
   | CrossJurisdictionOrderbookSweepHook;
 
 export interface CrontabState {

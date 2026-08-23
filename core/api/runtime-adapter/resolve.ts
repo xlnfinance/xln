@@ -1006,7 +1006,7 @@ const compactAccountDocForView = (
   if (doc.lastRollbackFrameHash) compact.lastRollbackFrameHash = doc.lastRollbackFrameHash;
   if (doc.currentFrameHanko) compact.currentFrameHanko = doc.currentFrameHanko;
   if (doc.counterpartyFrameHanko) compact.counterpartyFrameHanko = doc.counterpartyFrameHanko;
-  if (doc.boardResealMigration) compact.boardResealMigration = { ...doc.boardResealMigration };
+  if (doc.boardHankoRefreshMigration) compact.boardHankoRefreshMigration = { ...doc.boardHankoRefreshMigration };
   if (doc.currentDisputeProofHanko) compact.currentDisputeProofHanko = doc.currentDisputeProofHanko;
   if (doc.currentDisputeProofNonce !== undefined) compact.currentDisputeProofNonce = doc.currentDisputeProofNonce;
   if (doc.currentDisputeProofBodyHash) compact.currentDisputeProofBodyHash = doc.currentDisputeProofBodyHash;

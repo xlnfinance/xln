@@ -27,9 +27,9 @@ import {
   getEntityHashManifestMismatch,
   isWitnessHashType,
   pruneHankoWitnessToReachableState,
-  sealHankoWitnessInState,
+  attachHankoWitnessesToState,
 } from '../input/hanko-witness';
-import { touchedAccountIdsForHankoSeal } from '../account/touched-accounts';
+import { touchedAccountIdsForHankoAttachment } from '../account/touched-accounts';
 import {
   commitEntityConsensusInput,
   rejectEntityConsensusInput,
@@ -53,7 +53,7 @@ const buildCommitHankos = async (
   const { env, workingReplica } = context;
   const hashes = execution.hashesToSign;
   // The single-signer proposer built every exact secondary Hanko once while
-  // sealing. Keep that full list on the local stack only: the certified frame
+  // certification. Keep that full list on the local stack only: the certified frame
   // persists just its own Hanko after Account/output witnesses are attached.
   if (localProposal) {
     if (
@@ -152,11 +152,11 @@ const attachCommitProofsAndOutputs = (
       createdAt: env.state.timestamp,
     });
   });
-  sealHankoWitnessInState(
+  attachHankoWitnessesToState(
     execution.state,
     workingReplica.hankoWitness,
     frame.height,
-    touchedAccountIdsForHankoSeal(
+    touchedAccountIdsForHankoAttachment(
       execution.state,
       execution.proposableAccounts,
       execution.storageChanges,
@@ -226,7 +226,7 @@ const installCommittedState = (
   if (!entityFrameHanko) {
     throw new Error(`ENTITY_FRAME_COMMIT_HANKO_MISSING:${frame.height}:${frame.hash}`);
   }
-  // Secondary Hankos are already sealed into their exact latest Account,
+  // Secondary Hankos are already attached to their exact latest Account,
   // dispute, Entity-output or J payload. Retaining them again in lineage made
   // one 292 KB signature manifest occupy 8.84 MB without adding authority.
   frame.hankos = [entityFrameHanko];

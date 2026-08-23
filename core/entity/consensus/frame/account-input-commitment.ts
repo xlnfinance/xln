@@ -48,7 +48,7 @@ const inboundSettlementWitnesses = (txs: unknown): Array<Record<string, unknown>
   const witnesses: Array<Record<string, unknown>> = [];
   for (const raw of txs) {
     const tx = raw as AccountTx;
-    if (tx?.type !== 'settle_transition' || tx.data.kind !== 'seal') continue;
+    if (tx?.type !== 'settle_transition' || tx.data.kind !== 'hanko') continue;
     if (!tx.data.settlementHanko && !tx.data.postProof.hanko) continue;
     witnesses.push({
       settlementHash: requireBytes32(tx.data.settlementHash, 'ACCOUNT_FRAME_COMMITMENT_SETTLEMENT_HASH'),
@@ -100,6 +100,6 @@ export const canonicalAccountInputCommitment = (value: unknown): Record<string, 
   const projected: Record<string, unknown> = { ...data };
   if (data['proposal'] !== undefined) projected['proposal'] = projectProposal(data['proposal']);
   if (data['ack'] !== undefined) projected['ack'] = projectAck(data['ack']);
-  if (data['reseal'] !== undefined) projected['reseal'] = projectAck(data['reseal']);
+  if (data['boardHankoRefresh'] !== undefined) projected['boardHankoRefresh'] = projectAck(data['boardHankoRefresh']);
   return projected;
 };

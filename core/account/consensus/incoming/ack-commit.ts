@@ -11,10 +11,10 @@ import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { accountInputAck, accountInputProposal } from '../flush';
 import { runPostFrameAutoRebalanceCheck } from '../helpers';
 import {
-  getDisputeSealRequirementError,
-  storeCounterpartyDisputeSeal,
-  type ValidatedCounterpartyDisputeSeal,
-} from '../dispute/seal';
+  getDisputeHankoRequirementError,
+  storeCounterpartyDisputeHanko,
+  type ValidatedCounterpartyDisputeHanko,
+} from '../dispute/hanko';
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
@@ -46,21 +46,21 @@ const verifyPendingAckCertificate = async (
   account: AccountReplica,
   ack: AccountFrameAck,
   ackHeight: number,
-  validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
   securityContext: AccountInputSecurityContext,
 ): Promise<PendingAckCertificateResult> => {
-  const sealError = getDisputeSealRequirementError(
+  const hankoError = getDisputeHankoRequirementError(
     account.currentDisputeProofBodyHash,
     account.counterpartyDisputeProofBodyHash,
     account.counterpartyDisputeProofNonce,
     Number(account.state.jNonce ?? 0),
-    validatedSeal,
+    validatedDisputeHanko,
   );
-  if (sealError) {
+  if (hankoError) {
     return {
       kind: 'return',
-      result: rejectAccountPeerInput('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID', sealError, events),
+      result: rejectAccountPeerInput('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID', hankoError, events),
     };
   }
 
@@ -182,7 +182,7 @@ const installPendingFrameCommit = (
   pendingFrame: AccountFrame,
   ack: AccountFrameAck,
   ackHanko: string,
-  validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
 ): number => {
   account.currentFrame = cloneIsolatedAccountFrame(pendingFrame);
@@ -190,10 +190,10 @@ const installPendingFrameCommit = (
   // The ACK is the second half of this bilateral certificate. It must survive
   // so a later board rotation can prove that both parties committed the frame.
   account.counterpartyFrameHanko = ackHanko;
-  if (ack.disputeSeal) {
-    storeCounterpartyDisputeSeal(account, validatedSeal);
+  if (ack.disputeHanko) {
+    storeCounterpartyDisputeHanko(account, validatedDisputeHanko);
     ackLog.debug('hanko.dispute_stored', {
-      nonce: ack.disputeSeal.proofNonce,
+      nonce: ack.disputeHanko.proofNonce,
       from: shortId(input.fromEntityId),
     });
   }
@@ -242,7 +242,7 @@ export const handlePendingFrameAck = async (
   account: AccountReplica,
   input: AccountPeerInput,
   ackHeight: number | undefined,
-  validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
   timedOutHashlocks: string[],
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
@@ -266,7 +266,7 @@ export const handlePendingFrameAck = async (
     account,
     ack,
     ackHeight,
-    validatedSeal,
+    validatedDisputeHanko,
     events,
     securityContext,
   );
@@ -303,7 +303,7 @@ export const handlePendingFrameAck = async (
     pendingFrame,
     ack,
     certificate.ackHanko,
-    validatedSeal,
+    validatedDisputeHanko,
     committedFrames,
   );
   events.push(`✅ Frame ${ackHeight} confirmed and committed`);

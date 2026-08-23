@@ -243,7 +243,7 @@ const ACCOUNT_VIEW_REQUIRED = [
 const ACCOUNT_VIEW_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput', 'lastOutboundFrameAck',
   'lastRollbackFrameHash', 'currentFrameHanko',
-  'counterpartyFrameHanko', 'boardResealMigration', 'counterpartyBoardReseal',
+  'counterpartyFrameHanko', 'boardHankoRefreshMigration', 'counterpartyBoardHankoRefresh',
   'currentDisputeProofHanko', 'currentDisputeProofNonce', 'currentDisputeProofBodyHash',
   'currentDisputeHash', 'counterpartyDisputeProofHanko', 'counterpartyDisputeProofNonce',
   'counterpartyDisputeProofBodyHash', 'currentDisputeProofProposerIsLeft',

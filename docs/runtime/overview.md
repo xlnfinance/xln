@@ -32,7 +32,7 @@ that drives them. Read the cascade before the services around it.
 ### 3. Certification and failure
 
 14. `core/entity/consensus/proposal/start.ts` — one canonical proposal builder;
-    a one-member board seals its own quorum without a second implementation.
+    a one-member board certifies its own quorum without a second implementation.
 15. `core/entity/consensus/proposal/precommit-input.ts` — multi-validator
     precommit collection and threshold certification.
 16. `core/account/consensus/incoming/collision.ts` — deterministic same-height

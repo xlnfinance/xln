@@ -208,7 +208,7 @@ export const prepareAccountConsensusRun = (
     Boolean(incomingAck) ||
     Boolean(incomingProposal) ||
     input.kind === 'dispute' ||
-    input.kind === 'board_reseal';
+    input.kind === 'board_hanko_refresh';
   if (!hasConsensusInput) {
     rejectEmptyAccountInput(context);
   }

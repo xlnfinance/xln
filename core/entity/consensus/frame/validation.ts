@@ -342,15 +342,15 @@ const validateHashManifest = (value: unknown, context: string): void => {
 
 const PLACEHOLDER_ECDSA_SIG = `0x${'11'.repeat(65)}`;
 // A certified EntityFrame retains only its own Hanko. Secondary Hankos are
-// sealed into their exact Account/dispute/output payloads before commit.
+// attached to their exact Account/dispute/output payloads before commit.
 const PLACEHOLDER_HANKO = `0x${'22'.repeat(2_200)}`;
 
 /**
- * Wire bytes of the unsigned frame plus the signature/Hanko fields a sealed
+ * Wire bytes of the unsigned frame plus the signature/Hanko fields a certified
  * frame gains, measured on the MessagePack transport encoding the frame
  * actually travels in. Placeholders stand in for bytes not yet known.
  */
-const estimateSealedEntityFrameWireBytes = (
+const estimateCertifiedEntityFrameWireBytes = (
   frame: Record<string, unknown>,
   signerId: string,
   hashCount: number,
@@ -359,15 +359,15 @@ const estimateSealedEntityFrameWireBytes = (
   if (Object.hasOwn(frame, 'collectedSigs') || Object.hasOwn(frame, 'hankos')) {
     throw new FinancialDataCorruptionError('ENTITY_FRAME_WIRE_ESTIMATE_REQUIRES_UNSIGNED_FRAME');
   }
-  const sealed = {
+  const certified = {
     ...frame,
     collectedSigs: new Map([[signerId.toLowerCase(), Array.from({ length: hashCount }, () => PLACEHOLDER_ECDSA_SIG)]]),
     ...(includeHankos ? { hankos: [PLACEHOLDER_HANKO] } : {}),
   };
-  return packTransportValue(sealed).byteLength;
+  return packTransportValue(certified).byteLength;
 };
 
-const assertEntityFrameSealedWireBudget = (
+const assertEntityFrameCertifiedWireBudget = (
   frame: Record<string, unknown>,
   context: string,
 ): number => {
@@ -383,9 +383,9 @@ const assertEntityFrameSealedWireBudget = (
   );
 };
 
-/** Sealed bytes include hashesToSign + sigs + the EntityFrame Hanko. Fit measured empty events;
- *  throw here after apply, before sign, so eviction does not pay for a doomed seal. */
-export const assertEstimatedSealedEntityFrameWire = (
+/** Certified bytes include hashesToSign + sigs + the EntityFrame Hanko. Fit measured empty events;
+ *  throw here after apply, before sign, so eviction does not pay for a doomed certification. */
+export const assertEstimatedCertifiedEntityFrameWire = (
   frame: Record<string, unknown>,
   signerId: string,
   includeHankos: boolean,
@@ -395,7 +395,7 @@ export const assertEstimatedSealedEntityFrameWire = (
   if (!Array.isArray(hashes) || hashes.length === 0) {
     throw new FinancialDataCorruptionError(`${context}.hashesToSign cannot be empty`);
   }
-  const estimatedBytes = estimateSealedEntityFrameWireBytes(
+  const estimatedBytes = estimateCertifiedEntityFrameWireBytes(
     frame,
     signerId,
     hashes.length,
@@ -405,7 +405,7 @@ export const assertEstimatedSealedEntityFrameWire = (
   // Failure path retains the exact historical diagnostics. The hot path uses
   // byte arithmetic and never builds or encodes thousands of placeholder
   // Hanko strings merely to prove the same conservative bound.
-  return assertEntityFrameSealedWireBudget({
+  return assertEntityFrameCertifiedWireBudget({
     ...frame,
     collectedSigs: new Map([[signerId.toLowerCase(), hashes.map(() => PLACEHOLDER_ECDSA_SIG)]]),
     ...(includeHankos ? { hankos: [PLACEHOLDER_HANKO] } : {}),
@@ -450,6 +450,6 @@ export const validateProposedEntityFrame = (
       `${context} total byte limit invalid: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  assertEntityFrameSealedWireBudget(frame, context);
+  assertEntityFrameCertifiedWireBudget(frame, context);
   return frame;
 };

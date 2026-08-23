@@ -33,7 +33,7 @@ export const resolveCertifiedAccountCounterpartyProposer = async (
     );
   } catch (error) {
     // A certified board rotation intentionally invalidates the old transport
-    // signer before the Account reseal arrives. Let Runtime resolve the fresh,
+    // signer before the Account boardHankoRefresh arrives. Let Runtime resolve the fresh,
     // current-board-certified Gossip profile; never route to the retired board.
     if (error instanceof HankoValidationError) return null;
     throw error;

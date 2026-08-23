@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   collectTouchedAccountIds,
-  touchedAccountIdsForHankoSeal,
+  touchedAccountIdsForHankoAttachment,
 } from '../../../entity/consensus/account/touched-accounts';
-import { sealHankoWitnessInState } from '../../../entity/consensus/input/hanko-witness';
+import { attachHankoWitnessesToState } from '../../../entity/consensus/input/hanko-witness';
 import type { EntityState } from '../../../entity/types';
 import type { RuntimeOverlayRecord } from '../../../types/account';
 import { makeAccount } from '../../helpers/cross-j';
@@ -36,14 +36,14 @@ describe('Hanko touched Account set', () => {
       .toEqual([counterpartyId]);
   });
 
-  test('Hanko seal includes a proposable Account with no storage-change', () => {
+  test('Hanko attachment includes a proposable Account with no storage-change', () => {
     const state = emptyState();
     const storageChanges: RuntimeOverlayRecord[] = [];
-    const touched = touchedAccountIdsForHankoSeal(state, [counterpartyId], storageChanges);
+    const touched = touchedAccountIdsForHankoAttachment(state, [counterpartyId], storageChanges);
     expect(touched).toEqual([counterpartyId]);
-    expect(sealHankoWitnessInState(state, new Map(), 1, [])).toBe(0);
-    expect(() => sealHankoWitnessInState(state, new Map(), 1, touched))
-      .toThrow(`HANKO_SEAL_TOUCHED_ACCOUNT_MISSING:${counterpartyId}`);
+    expect(attachHankoWitnessesToState(state, new Map(), 1, [])).toBe(0);
+    expect(() => attachHankoWitnessesToState(state, new Map(), 1, touched))
+      .toThrow(`HANKO_ATTACHMENT_TOUCHED_ACCOUNT_MISSING:${counterpartyId}`);
   });
 
   test('claims a writable Account shell before attaching a post-quorum Hanko', () => {
@@ -79,7 +79,7 @@ describe('Hanko touched Account set', () => {
     const consensusRootBeforeWitness = candidate.rootHash();
 
     expect(committed.get(counterpartyId)?.currentFrameHanko).toBeUndefined();
-    expect(sealHankoWitnessInState(state, witness, 1, [counterpartyId])).toBe(1);
+    expect(attachHankoWitnessesToState(state, witness, 1, [counterpartyId])).toBe(1);
     const claimed = candidate.get(counterpartyId);
     expect(claimed?.currentFrameHanko).toBe(hanko);
     expect(candidate.getForWrite(counterpartyId)).toBe(claimed);

@@ -624,9 +624,9 @@ const throwScenarioConvergenceTimeout = (
       ? tx.data.jobs.map(job => `${input.entityId.slice(-4)}:${job.kind}:${job.id}@${job.dueAt}`)
       : [`${input.entityId.slice(-4)}:${tx.type}`])
   ).sort();
-  const boardResealMarkers = [...env.state.eReplicas.values()].flatMap(replica =>
+  const boardHankoRefreshMarkers = [...env.state.eReplicas.values()].flatMap(replica =>
     [...replica.state.accounts.entries()].flatMap(([counterpartyId, account]) => {
-      const marker = account.boardResealMigration;
+      const marker = account.boardHankoRefreshMigration;
       return marker
         ? [`${replica.entityId.slice(-4)}@${replica.signerId.slice(-4)}>${counterpartyId.slice(-4)}:${marker.reason}`]
         : [];
@@ -653,7 +653,7 @@ const throwScenarioConvergenceTimeout = (
     `outputs=${env.pendingOutputs?.length ?? 0},network=${env.pendingNetworkOutputs?.length ?? 0},` +
     `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeMempool?.entityInputs?.length ?? 0},` +
     `inputJobs=[${pendingInputJobs.join(',')}],` +
-    `boardReseals=[${boardResealMarkers.join(',')}],` +
+    `boardHankoRefreshes=[${boardHankoRefreshMarkers.join(',')}],` +
     `networkLanes=[${pendingNetworkDiagnostics(env)}],entities=[${entityBacklog.join(';')}]`,
   );
 };

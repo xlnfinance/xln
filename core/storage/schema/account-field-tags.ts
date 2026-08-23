@@ -26,8 +26,8 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   proofHeader: 28,
   // Tags 29-30 belonged to derived ProofBody caches. Never reuse persisted tags.
   'state.disputeConfig': 31,
-  currentFrameHanko: 32, counterpartyFrameHanko: 33, boardResealMigration: 34,
-  counterpartyBoardReseal: 35, currentDisputeProofHanko: 36, currentDisputeProofNonce: 37,
+  currentFrameHanko: 32, counterpartyFrameHanko: 33, boardHankoRefreshMigration: 34,
+  counterpartyBoardHankoRefresh: 35, currentDisputeProofHanko: 36, currentDisputeProofNonce: 37,
   currentDisputeProofBodyHash: 38, currentDisputeHash: 39, counterpartyDisputeProofHanko: 40,
   counterpartyDisputeProofNonce: 41, counterpartyDisputeProofBodyHash: 42,
   counterpartyDisputeHash: 43, counterpartySettlementHanko: 44,

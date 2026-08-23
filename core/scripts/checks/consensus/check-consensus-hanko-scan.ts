@@ -172,7 +172,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const proofResult = timePerfPhase(',
   '() => buildAccountProofBodyFromJurisdictions(context, validatedMachine)',
   'const localProofBodyHash = proofResult.proofBodyHash;',
-  'const frameSealError = getDisputeSealRequirementError(',
+  'const frameHankoError = getDisputeHankoRequirementError(',
 ]);
 
 assertOrder(accountCommitTransition, accountCommitTransitionPath, [

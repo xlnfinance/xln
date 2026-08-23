@@ -431,7 +431,7 @@ describe('typed Account peer rejection', () => {
       proposal: {
         frame,
         frameHanko: `0x${'66'.repeat(65)}`,
-        disputeSeal: {
+        disputeHanko: {
           hanko: `0x${'77'.repeat(65)}`,
           hash: createDisputeProofHashWithNonce(account.state, proofBodyHash, account.state.domain, 0, true),
           proofBodyHash,

@@ -39,20 +39,20 @@ export const resolveStoredDisputeStartNonce = (
   account: AccountReplica,
   proofBodyHash: string,
 ): { signedNonce: number; nonceSource: string } => {
-  const sealedProofBodyHash = account.counterpartyDisputeProofBodyHash;
-  if (!sealedProofBodyHash || sealedProofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase()) {
+  const counterpartyHankoProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  if (!counterpartyHankoProofBodyHash || counterpartyHankoProofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase()) {
     throw new Error(
-      `DISPUTE_START_SEAL_PROOFBODY_MISMATCH:${String(sealedProofBodyHash)}:${proofBodyHash}`,
+      `DISPUTE_START_HANKO_PROOFBODY_MISMATCH:${String(counterpartyHankoProofBodyHash)}:${proofBodyHash}`,
     );
   }
   const signedNonce = account.counterpartyDisputeProofNonce;
   if (!Number.isSafeInteger(signedNonce) || signedNonce === undefined || signedNonce <= 0) {
-    throw new Error(`DISPUTE_START_SEAL_NONCE_INVALID:${String(signedNonce)}`);
+    throw new Error(`DISPUTE_START_HANKO_NONCE_INVALID:${String(signedNonce)}`);
   }
   // A Hanko is bound to the nonce stored alongside that exact counterparty
-  // seal; mixing the local nonce with the peer Hanko makes valid evidence
+  // proof; mixing the local nonce with the peer Hanko makes valid evidence
   // unverifiable and can halt dispute preparation.
-  return { signedNonce, nonceSource: 'counterpartySeal' };
+  return { signedNonce, nonceSource: 'counterpartyHanko' };
 };
 
 const selectCounterDisputeProof = (

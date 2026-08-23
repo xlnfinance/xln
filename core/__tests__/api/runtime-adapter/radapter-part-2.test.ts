@@ -487,7 +487,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)! as any;
   account.state.watchSeed = `0x${'11'.repeat(32)}`;
-  account.boardResealMigration = {
+  account.boardHankoRefreshMigration = {
     activationJHeight: 9,
     activationLogIndex: 2,
     reason: 'bilateral-frame-uncertified',
@@ -533,7 +533,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
           swapClosedOrders?: Map<string, unknown>;
           leftPendingJClaims: { root: string; count: bigint };
           rightPendingJClaims: { root: string; count: bigint };
-          boardResealMigration?: {
+          boardHankoRefreshMigration?: {
             activationJHeight: number;
             activationLogIndex: number;
             reason: string;
@@ -557,7 +557,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.swapClosedOrders).toBeUndefined();
   expect(compact?.state.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.state.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
-  expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);
+  expect(compact?.boardHankoRefreshMigration).toEqual(account.boardHankoRefreshMigration);
 });
 
 test('runtime adapter returns an owned projection after releasing the committed-read lease', async () => {

@@ -303,7 +303,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   console.log('\n--- TEST 4: Settle Reject ---');
   console.log = quietLog;
 
-  // Hub proposes taking Alice's reserve. That cannot auto-seal on Alice's
+  // Hub proposes taking Alice's reserve. That cannot auto-authorize on Alice's
   // behalf, so the unsigned workspace remains explicitly rejectable.
   const hubTakeOps: SettlementOp[] = [{
     type: 'rawDiff',

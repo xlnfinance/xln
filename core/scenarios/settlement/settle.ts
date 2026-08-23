@@ -359,7 +359,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   // a distinct manual negotiation on the now-settled Account.
   assert(
     aliceAccount.state.settlementWorkspace.status === 'ready_to_submit',
-    'Auto-approved workspace should be fully sealed before execution',
+    'Auto-approved workspace should be fully Hanko-authorized before execution',
     env,
   );
   await process(env, [{
@@ -523,7 +523,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   );
   assert(
     aliceAccount3.state.settlementWorkspace.status === 'ready_to_submit',
-    'Settlement should be ready after both role-aware seals',
+    'Settlement should be ready after both role-aware Hankos',
     env,
   );
 

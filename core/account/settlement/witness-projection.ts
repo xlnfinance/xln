@@ -49,11 +49,11 @@ export const counterpartySettlementHankos = (
   };
 };
 
-/** Read-only projection: only a sealing settle_transition has hankos to strip, so only it is cloned. */
+/** Read-only projection: only a `hanko` settle_transition has Hankos to strip, so only it is cloned. */
 export const accountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
-  if (!(tx.type === 'settle_transition' && tx.data.kind === 'seal')) return tx;
+  if (!(tx.type === 'settle_transition' && tx.data.kind === 'hanko')) return tx;
   const unsigned = cloneIsolatedAccountTx(tx);
-  if (unsigned.type === 'settle_transition' && unsigned.data.kind === 'seal') {
+  if (unsigned.type === 'settle_transition' && unsigned.data.kind === 'hanko') {
     delete unsigned.data.settlementHanko;
     delete unsigned.data.postProof.hanko;
   }

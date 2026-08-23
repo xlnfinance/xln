@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 
 import { accountInputProposal } from '../../../account/consensus/flush';
-import { replaceLocalDisputeDraft } from '../../../account/consensus/dispute/seal';
+import { replaceLocalDisputeDraft } from '../../../account/consensus/dispute/hanko';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
@@ -27,7 +27,7 @@ import {
 } from '../../../entity/consensus/output/certification';
 import {
   attachHankoWitnessToOutputs,
-  sealHankoWitnessInState,
+  attachHankoWitnessesToState,
   type HankoWitnessEntry,
 } from '../../../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../../../entity/factory';
@@ -115,14 +115,14 @@ const buildGenericOrigin = (
   };
 };
 
-const buildUnverifiedBoardResealTx = (
+const buildUnverifiedBoardHankoRefreshTx = (
   sourceEntityId: string,
   targetEntityId: string,
   sequence: bigint = 1n,
 ): EntityTx => ({
   type: 'accountInput',
   data: {
-    kind: 'board_reseal',
+    kind: 'board_hanko_refresh',
     fromEntityId: sourceEntityId,
     toEntityId: targetEntityId,
     domain: {
@@ -130,7 +130,7 @@ const buildUnverifiedBoardResealTx = (
       depositoryAddress: `0x${'dd'.repeat(20)}`,
     },
     disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-    reseal: {
+    boardHankoRefresh: {
       height: 1,
       frameHash: digest('0'),
       frameHanko: '0x01',
@@ -465,7 +465,7 @@ describe('multisig secondary Hanko production', () => {
     )).rejects.toThrow('BUILD_QUORUM_HANKO_INSUFFICIENT_QUORUM');
   });
 
-  test('single-signer routes the exact Hanko-sealed Account output before target replay', async () => {
+  test('single-signer routes the exact Hanko-certified Account output before target replay', async () => {
     const source = createMultisigAccountState(validators[0], {
       validators: [validators[0]!],
       threshold: 1n,
@@ -514,7 +514,7 @@ describe('multisig secondary Hanko production', () => {
     expect(getConsumptionNodeStore(source.env).size).toBe(0);
   });
 
-  test('applies a raw Hanko-sealed heightless dispute through the target Entity frame', async () => {
+  test('applies a raw Hanko-certified heightless dispute through the target Entity frame', async () => {
     const source = createMultisigAccountState(validators[0]);
     const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
@@ -549,7 +549,7 @@ describe('multisig secondary Hanko production', () => {
         domain: account.state.domain,
         disputeConfig: account.state.disputeConfig,
         watchSeed: account.state.watchSeed,
-        disputeSeal: {
+        disputeHanko: {
           hanko: await buildExactQuorumHanko(source, disputeHash),
           hash: disputeHash,
           proofBodyHash,
@@ -829,7 +829,7 @@ describe('multisig secondary Hanko production', () => {
     expect(secretRejected.outputs).toEqual([]);
   });
 
-  test('account proposal produces unsigned drafts for the Entity quorum to seal', async () => {
+  test('account proposal produces unsigned drafts for the Entity quorum to certify', async () => {
     const { env, state, counterpartyId } = createMultisigAccountState();
 
     const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [], env.state.timestamp);
@@ -844,10 +844,10 @@ describe('multisig secondary Hanko production', () => {
     expect(proposedAccount.currentFrameHanko).toBeUndefined();
     expect(proposedAccount.currentDisputeProofHanko).toBeUndefined();
     expect(outboundProposal.frameHanko).toBeUndefined();
-    expect(outboundProposal.disputeSeal?.hanko).toBeUndefined();
+    expect(outboundProposal.disputeHanko?.hanko).toBeUndefined();
   });
 
-  test('isolated validators replay, sign, and quorum-seal the exact Account draft', async () => {
+  test('isolated validators replay, sign, and quorum-certify the exact Account draft', async () => {
     const proposerSetup = createMultisigAccountState(validators[0]);
     const proposed = await applyEntityInput(proposerSetup.env, proposerSetup.replica, {
       entityId: proposerSetup.entityId,
@@ -895,24 +895,24 @@ describe('multisig secondary Hanko production', () => {
     const outbound = leader.outputs
       .flatMap(output => output.entityTxs ?? [])
       .find(tx => tx.type === 'accountInput');
-    const sealedProposal = outbound?.type === 'accountInput' ? accountInputProposal(outbound.data) : undefined;
-    if (!sealedProposal?.frameHanko || !sealedProposal.disputeSeal?.hanko) {
-      throw new Error('TEST_QUORUM_SEALED_OUTPUT_MISSING');
+    const hankoAttachedProposal = outbound?.type === 'accountInput' ? accountInputProposal(outbound.data) : undefined;
+    if (!hankoAttachedProposal?.frameHanko || !hankoAttachedProposal.disputeHanko?.hanko) {
+      throw new Error('TEST_QUORUM_HANKO_OUTPUT_MISSING');
     }
     const persisted = leader.workingReplica.state.accounts.get(proposerSetup.counterpartyId);
-    expect(persisted?.currentFrameHanko).toBe(sealedProposal.frameHanko);
-    expect(persisted?.currentDisputeProofHanko).toBe(sealedProposal.disputeSeal.hanko);
-    expect(accountInputProposal(persisted?.pendingAccountInput)?.frameHanko).toBe(sealedProposal.frameHanko);
+    expect(persisted?.currentFrameHanko).toBe(hankoAttachedProposal.frameHanko);
+    expect(persisted?.currentDisputeProofHanko).toBe(hankoAttachedProposal.disputeHanko.hanko);
+    expect(accountInputProposal(persisted?.pendingAccountInput)?.frameHanko).toBe(hankoAttachedProposal.frameHanko);
 
     expect((await verifyHankoForHash(
-      sealedProposal.frameHanko,
-      sealedProposal.frame.stateHash,
+      hankoAttachedProposal.frameHanko,
+      hankoAttachedProposal.frame.stateHash,
       proposerSetup.entityId,
       proposerSetup.env,
     )).valid).toBe(true);
     expect((await verifyHankoForHash(
-      sealedProposal.disputeSeal.hanko,
-      sealedProposal.disputeSeal.hash,
+      hankoAttachedProposal.disputeHanko.hanko,
+      hankoAttachedProposal.disputeHanko.hash,
       proposerSetup.entityId,
       proposerSetup.env,
     )).valid).toBe(true);
@@ -1303,7 +1303,7 @@ describe('multisig secondary Hanko production', () => {
           depositoryAddress: `0x${'dd'.repeat(20)}`,
         },
         disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-        disputeSeal: {
+        disputeHanko: {
           hanko: '0x01',
           hash: digest('8'),
           proofBodyHash: digest('9'),
@@ -1408,7 +1408,7 @@ describe('multisig secondary Hanko production', () => {
     expect(safeStringify(proposed.workingReplica.candidate)).toBe(candidateBeforeRejections);
   });
 
-  test('seals ACK and next proposal drafts in semantic order with exact frame and dispute Hankos', async () => {
+  test('attaches ACK and next proposal Hankos in semantic order', async () => {
     const setup = createMultisigAccountState();
     setup.state = createEntityFrameCandidateState(setup.state);
     setup.replica.state = setup.state;
@@ -1429,7 +1429,7 @@ describe('multisig secondary Hanko production', () => {
       ack: {
         height: 1,
         frameHash: ackFrameHash,
-        disputeSeal: {
+        disputeHanko: {
           hash: ackDisputeHash,
           proofBodyHash: digest('1'),
           proofNonce: 1,
@@ -1437,7 +1437,7 @@ describe('multisig secondary Hanko production', () => {
       },
       proposal: {
         frame: { ...account.currentFrame, height: 2, stateHash: proposalFrameHash },
-        disputeSeal: {
+        disputeHanko: {
           hash: proposalDisputeHash,
           proofBodyHash: digest('2'),
           proofNonce: 2,
@@ -1479,17 +1479,17 @@ describe('multisig secondary Hanko production', () => {
       entityTxs: [{ type: 'accountInput' as const, data: routed }],
     }];
     expect(attachHankoWitnessToOutputs(outputs, [], hankos, 1, setup.state)).toBe(4);
-    const sealedTx = outputs[0]?.entityTxs?.[0];
-    if (sealedTx?.type !== 'accountInput') throw new Error('TEST_SEALED_ACCOUNT_OUTPUT_MISSING');
-    const sealedRouted = sealedTx.data;
-    if (sealedRouted.kind !== 'frame_ack') throw new Error('TEST_SEALED_FRAME_ACK_MISSING');
+    const hankoAttachedTx = outputs[0]?.entityTxs?.[0];
+    if (hankoAttachedTx?.type !== 'accountInput') throw new Error('TEST_HANKO_ATTACHED_ACCOUNT_OUTPUT_MISSING');
+    const hankoAttachedRouted = hankoAttachedTx.data;
+    if (hankoAttachedRouted.kind !== 'frame_ack') throw new Error('TEST_HANKO_ATTACHED_FRAME_ACK_MISSING');
     expect(routed.ack.frameHanko).toBeUndefined();
-    expect(sealedRouted.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
-    expect(sealedRouted.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
-    expect(sealedRouted.ack.disputeSeal?.hanko).toBe(hankos.get(ackDisputeHash)?.hanko);
-    expect(sealedRouted.proposal.disputeSeal?.hanko).toBe(hankos.get(proposalDisputeHash)?.hanko);
+    expect(hankoAttachedRouted.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
+    expect(hankoAttachedRouted.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
+    expect(hankoAttachedRouted.ack.disputeHanko?.hanko).toBe(hankos.get(ackDisputeHash)?.hanko);
+    expect(hankoAttachedRouted.proposal.disputeHanko?.hanko).toBe(hankos.get(proposalDisputeHash)?.hanko);
 
-    sealHankoWitnessInState(setup.state, hankos, 1, [setup.counterpartyId]);
+    attachHankoWitnessesToState(setup.state, hankos, 1, [setup.counterpartyId]);
     expect(account.lastOutboundFrameAck.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(account.pendingAccountInput.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
     expect(account.currentFrameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
@@ -1498,7 +1498,7 @@ describe('multisig secondary Hanko production', () => {
     // A later Entity frame may leave the same already-certified ACK/proposal in
     // state. It must reuse that exact older witness instead of pretending the
     // secondary hash was signed again at the new Entity height.
-    expect(() => sealHankoWitnessInState(setup.state, hankos, 2, [setup.counterpartyId])).not.toThrow();
+    expect(() => attachHankoWitnessesToState(setup.state, hankos, 2, [setup.counterpartyId])).not.toThrow();
     expect(account.lastOutboundFrameAck.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(account.pendingAccountInput.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
 
@@ -1508,10 +1508,10 @@ describe('multisig secondary Hanko production', () => {
       ...originalAckWitness,
       hanko: `${originalAckWitness.hanko}00` as HankoWitnessEntry['hanko'],
     });
-    expect(() => sealHankoWitnessInState(setup.state, hankos, 2, [setup.counterpartyId]))
+    expect(() => attachHankoWitnessesToState(setup.state, hankos, 2, [setup.counterpartyId]))
       .toThrow('HANKO_WITNESS_VALUE_MISMATCH');
     hankos.set(ackFrameHash, { ...originalAckWitness, entityHeight: 3 });
-    expect(() => sealHankoWitnessInState(setup.state, hankos, 2, [setup.counterpartyId]))
+    expect(() => attachHankoWitnessesToState(setup.state, hankos, 2, [setup.counterpartyId]))
       .toThrow('HANKO_WITNESS_BINDING_MISMATCH');
     hankos.set(ackFrameHash, originalAckWitness);
   });
@@ -1557,14 +1557,14 @@ describe('multisig secondary Hanko production', () => {
     secondAccount.state.settlementWorkspace = workspace(secondAccount);
     const firstPostHash = digest('1');
     const secondPostHash = digest('2');
-    const settlementSeal = (
+    const settlementHanko = (
       account: AccountState,
       settlementHash: string,
       disputeHash: string,
     ): Extract<AccountTx, { type: 'settle_transition' }> => ({
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         revision: 1,
         workspaceHash: account.state.settlementWorkspace!.workspaceHash,
         settlementNonce: 1,
@@ -1576,10 +1576,10 @@ describe('multisig secondary Hanko production', () => {
         },
       },
     });
-    const firstSeal = settlementSeal(firstAccount, firstHash, firstPostHash);
-    const secondSeal = settlementSeal(secondAccount, secondHash, secondPostHash);
-    firstAccount.mempool.push(firstSeal);
-    secondAccount.mempool.push(secondSeal);
+    const firstHankoTx = settlementHanko(firstAccount, firstHash, firstPostHash);
+    const secondHankoTx = settlementHanko(secondAccount, secondHash, secondPostHash);
+    firstAccount.mempool.push(firstHankoTx);
+    secondAccount.mempool.push(secondHankoTx);
     const witness = new Map<string, HankoWitnessEntry>();
     for (const [hash, type] of [
       [firstHash, 'settlement'],
@@ -1595,20 +1595,20 @@ describe('multisig secondary Hanko production', () => {
       });
     }
 
-    expect(sealHankoWitnessInState(
+    expect(attachHankoWitnessesToState(
       setup.state,
       witness,
       1,
       [setup.counterpartyId, secondCounterpartyId],
     )).toBe(4);
-    if (firstSeal.data.kind !== 'seal' || secondSeal.data.kind !== 'seal') {
-      throw new Error('TEST_SETTLEMENT_SEAL_INVALID');
+    if (firstHankoTx.data.kind !== 'hanko' || secondHankoTx.data.kind !== 'hanko') {
+      throw new Error('TEST_SETTLEMENT_HANKO_INVALID');
     }
-    expect(firstSeal.data.settlementHanko).toBe(witness.get(firstHash)?.hanko);
-    expect(secondSeal.data.settlementHanko).toBe(witness.get(secondHash)?.hanko);
-    expect(firstSeal.data.settlementHanko).not.toBe(secondSeal.data.settlementHanko);
-    expect(firstSeal.data.postProof.hanko).toBe(witness.get(firstPostHash)?.hanko);
-    expect(secondSeal.data.postProof.hanko).toBe(witness.get(secondPostHash)?.hanko);
+    expect(firstHankoTx.data.settlementHanko).toBe(witness.get(firstHash)?.hanko);
+    expect(secondHankoTx.data.settlementHanko).toBe(witness.get(secondHash)?.hanko);
+    expect(firstHankoTx.data.settlementHanko).not.toBe(secondHankoTx.data.settlementHanko);
+    expect(firstHankoTx.data.postProof.hanko).toBe(witness.get(firstPostHash)?.hanko);
+    expect(secondHankoTx.data.postProof.hanko).toBe(witness.get(secondPostHash)?.hanko);
     expect(firstAccount.state.settlementWorkspace.leftHanko).toBeUndefined();
     expect(firstAccount.state.settlementWorkspace.rightHanko).toBeUndefined();
   });

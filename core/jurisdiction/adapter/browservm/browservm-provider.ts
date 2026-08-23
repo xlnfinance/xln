@@ -1597,7 +1597,7 @@ export class BrowserVMProvider {
     return events;
   }
 
-  /** Execute one already quorum-sealed EntityProvider action. */
+  /** Execute one already quorum-certified EntityProvider action. */
   async submitEntityProviderAction(
     intent: EntityProviderActionIntent,
     hankoData: string,

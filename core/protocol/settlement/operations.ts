@@ -53,7 +53,7 @@ export const getMinimumSafeSettlementNonce = (account: AccountReplica): number =
 export const getNextSettlementNonce = (account: AccountReplica): number => {
   // `nextProofNonce` is already the first unused bilateral proof nonce. Adding
   // one here silently skipped a nonce on one replica and was the root cause of
-  // the settlement-seal divergence. The exact candidate must be derived from
+  // the settlement-hanko divergence. The exact candidate must be derived from
   // committed cursors only and then agreed byte-for-byte by both Account sides.
   return getMinimumSafeSettlementNonce(account);
 };

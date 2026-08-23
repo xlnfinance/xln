@@ -8,8 +8,8 @@
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
 
 export type HltEnvironmentManifest = Readonly<{
-  /** Account dispute seals are unconditional consensus; recorded so a reader never has to wonder. */
-  disputeSeals: 'always';
+  /** Account dispute Hankos are unconditional consensus; recorded so a reader never has to wonder. */
+  disputeHankos: 'always';
   certifiedHistory: boolean;
   hubWalSync: boolean;
   /** Sovereign load-user Runtime frames are durable. False means intentional in-memory clients. */
@@ -42,7 +42,7 @@ export const collectHltEnvironmentManifest = (): HltEnvironmentManifest => {
     throw new Error(`HLT_ENV_MANIFEST_LANE_NICE_INVALID:${String(laneNiceRaw)}`);
   }
   return {
-    disputeSeals: 'always',
+    disputeHankos: 'always',
     certifiedHistory: flagOn('XLN_STORAGE_CERTIFIED_HISTORY', true),
     hubWalSync: flagOn('XLN_STORAGE_WAL_SYNC', true),
     lanePersistence: flagOn('XLN_HLT_LANE_PERSISTENCE', false),
@@ -58,9 +58,9 @@ export const collectHltEnvironmentManifest = (): HltEnvironmentManifest => {
 export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltEnvironmentManifest => {
   const record = requireBoundaryRecord(value, `${code}_INVALID`);
   requireExactBoundaryKeys(record, [
-    'disputeSeals', 'certifiedHistory', 'hubWalSync', 'lanePersistence', 'laneWalSync', 'laneNice', 'cryptoPoolWorkers', 'cryptoSignWorkers',
+    'disputeHankos', 'certifiedHistory', 'hubWalSync', 'lanePersistence', 'laneWalSync', 'laneNice', 'cryptoPoolWorkers', 'cryptoSignWorkers',
   ], [], `${code}_FIELDS_INVALID`);
-  if (record['disputeSeals'] !== 'always') throw new Error(`${code}_DISPUTE_SEALS_INVALID`);
+  if (record['disputeHankos'] !== 'always') throw new Error(`${code}_DISPUTE_HANKOS_INVALID`);
   const bool = (key: string): boolean => {
     const raw = record[key];
     if (typeof raw !== 'boolean') throw new Error(`${code}_${key.toUpperCase()}_INVALID`);
@@ -77,7 +77,7 @@ export const decodeHltEnvironmentManifest = (value: unknown, code: string): HltE
     throw new Error(`${code}_LANE_NICE_INVALID`);
   }
   return {
-    disputeSeals: 'always',
+    disputeHankos: 'always',
     certifiedHistory: bool('certifiedHistory'),
     hubWalSync: bool('hubWalSync'),
     lanePersistence: bool('lanePersistence'),

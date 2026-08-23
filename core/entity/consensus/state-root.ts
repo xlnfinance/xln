@@ -7,8 +7,8 @@
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import type {
-  AccountBoardReseal,
-  AccountDisputeSeal,
+  AccountBoardHankoRefresh,
+  AccountDisputeHanko,
   AccountFrame,
   AccountPeerInput,
   AccountReplica,
@@ -22,8 +22,8 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 import { encodeCanonicalConsensusBytes } from '../../protocol/serialization/binary-codec';
 import {
   accountInputAck,
-  accountInputBoardReseal,
-  accountInputDisputeSeal,
+  accountInputBoardHankoRefresh,
+  accountInputDisputeHanko,
   accountInputProposal,
 } from '../../account/consensus/flush';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
@@ -210,8 +210,8 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'rollbackCount',
   'lastRollbackFrameHash',
   'proofHeader',
-  'boardResealMigration',
-  'counterpartyBoardReseal',
+  'boardHankoRefreshMigration',
+  'counterpartyBoardHankoRefresh',
   'counterpartyFrameHanko',
   'counterpartyDisputeProofHanko',
   'counterpartySettlementHanko',
@@ -328,26 +328,26 @@ const computeEntityAccountLeafDigest = (
   return computeIntegrityDigest(preimage);
 };
 
-const compactDisputeSeal = (seal: AccountDisputeSeal): Record<string, unknown> => ({
-  hash: seal.hash,
-  proofBodyHash: seal.proofBodyHash,
-  proofNonce: seal.proofNonce,
-  proposerIsLeft: seal.proposerIsLeft,
+const compactDisputeHanko = (disputeHanko: AccountDisputeHanko): Record<string, unknown> => ({
+  hash: disputeHanko.hash,
+  proofBodyHash: disputeHanko.proofBodyHash,
+  proofNonce: disputeHanko.proofNonce,
+  proposerIsLeft: disputeHanko.proposerIsLeft,
 });
 
-const compactBoardReseal = (reseal: AccountBoardReseal): Record<string, unknown> => ({
-  height: reseal.height,
-  frameHash: reseal.frameHash,
-  boardActivationJHeight: reseal.boardActivationJHeight,
-  boardActivationLogIndex: reseal.boardActivationLogIndex,
-  ...(reseal.disputeSeal ? { disputeSeal: compactDisputeSeal(reseal.disputeSeal) } : {}),
+const compactBoardHankoRefresh = (boardHankoRefresh: AccountBoardHankoRefresh): Record<string, unknown> => ({
+  height: boardHankoRefresh.height,
+  frameHash: boardHankoRefresh.frameHash,
+  boardActivationJHeight: boardHankoRefresh.boardActivationJHeight,
+  boardActivationLogIndex: boardHankoRefresh.boardActivationLogIndex,
+  ...(boardHankoRefresh.disputeHanko ? { disputeHanko: compactDisputeHanko(boardHankoRefresh.disputeHanko) } : {}),
 });
 
 const compactAccountInputBinding = (input: AccountPeerInput): Record<string, unknown> => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
-  const disputeSeal = input.kind === 'dispute' ? accountInputDisputeSeal(input) : undefined;
-  const reseal = accountInputBoardReseal(input);
+  const disputeHanko = input.kind === 'dispute' ? accountInputDisputeHanko(input) : undefined;
+  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
   return {
     kind: input.kind,
     fromEntityId: input.fromEntityId.toLowerCase(),
@@ -357,7 +357,7 @@ const compactAccountInputBinding = (input: AccountPeerInput): Record<string, unk
           proposal: {
             height: proposal.frame.height,
             frameHash: proposal.frame.stateHash,
-            ...(proposal.disputeSeal ? { disputeSeal: compactDisputeSeal(proposal.disputeSeal) } : {}),
+            ...(proposal.disputeHanko ? { disputeHanko: compactDisputeHanko(proposal.disputeHanko) } : {}),
           },
         }
       : {}),
@@ -366,12 +366,12 @@ const compactAccountInputBinding = (input: AccountPeerInput): Record<string, unk
           ack: {
             height: ack.height,
             frameHash: ack.frameHash,
-            ...(ack.disputeSeal ? { disputeSeal: compactDisputeSeal(ack.disputeSeal) } : {}),
+            ...(ack.disputeHanko ? { disputeHanko: compactDisputeHanko(ack.disputeHanko) } : {}),
           },
         }
       : {}),
-    ...(disputeSeal ? { disputeSeal: compactDisputeSeal(disputeSeal) } : {}),
-    ...(reseal ? { reseal: compactBoardReseal(reseal) } : {}),
+    ...(disputeHanko ? { disputeHanko: compactDisputeHanko(disputeHanko) } : {}),
+    ...(boardHankoRefresh ? { boardHankoRefresh: compactBoardHankoRefresh(boardHankoRefresh) } : {}),
   };
 };
 
@@ -401,15 +401,15 @@ const mempoolRoot = (mempool: readonly AccountTx[], cold: boolean): string => {
 const inputBindingKey = (input: AccountPeerInput): string => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
-  const seal = input.kind === 'dispute' ? accountInputDisputeSeal(input) : undefined;
-  const reseal = accountInputBoardReseal(input);
-  const sealKey = (value: AccountDisputeSeal | undefined): string =>
+  const disputeHanko = input.kind === 'dispute' ? accountInputDisputeHanko(input) : undefined;
+  const boardHankoRefresh = accountInputBoardHankoRefresh(input);
+  const hankoKey = (value: AccountDisputeHanko | undefined): string =>
     value ? `${value.hash}:${value.proofBodyHash}:${value.proofNonce}:${value.proposerIsLeft}` : '';
   return `${input.kind}|${input.fromEntityId}|${input.toEntityId}` +
-    `|${proposal ? `${proposal.frame.height}:${proposal.frame.stateHash}:${sealKey(proposal.disputeSeal)}` : ''}` +
-    `|${ack ? `${ack.height}:${ack.frameHash}:${sealKey(ack.disputeSeal)}` : ''}` +
-    `|${sealKey(seal)}` +
-    `|${reseal ? `${reseal.height}:${reseal.frameHash}:${reseal.boardActivationJHeight}:${reseal.boardActivationLogIndex}:${sealKey(reseal.disputeSeal)}` : ''}`;
+    `|${proposal ? `${proposal.frame.height}:${proposal.frame.stateHash}:${hankoKey(proposal.disputeHanko)}` : ''}` +
+    `|${ack ? `${ack.height}:${ack.frameHash}:${hankoKey(ack.disputeHanko)}` : ''}` +
+    `|${hankoKey(disputeHanko)}` +
+    `|${boardHankoRefresh ? `${boardHankoRefresh.height}:${boardHankoRefresh.frameHash}:${boardHankoRefresh.boardActivationJHeight}:${boardHankoRefresh.boardActivationLogIndex}:${hankoKey(boardHankoRefresh.disputeHanko)}` : ''}`;
 };
 const inputBindingMemos = new RecencyMemo<string, Record<string, unknown>>(8_192);
 const compactAccountInputBindingMemo = (input: AccountPeerInput): Record<string, unknown> => {

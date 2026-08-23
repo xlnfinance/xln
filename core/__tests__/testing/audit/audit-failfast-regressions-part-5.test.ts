@@ -126,7 +126,7 @@ import { handleJRebroadcast } from '../../../entity/tx/handlers/j-batch/j-rebroa
 
 import { handleSetHubConfigEntityTx, handleSetRebalancePolicyEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
 
-import { buildSettlementSealDraft, processCommittedSettlementTransitionFollowup } from '../../../entity/tx/handlers/payments/settle';
+import { buildSettlementHankoDraft, processCommittedSettlementTransitionFollowup } from '../../../entity/tx/handlers/payments/settle';
 
 import { applyJEvent } from '../../../entity/tx/j-events';
 
@@ -213,7 +213,7 @@ import { encodeSignedHanko } from '../../../hanko/codec';
 import { resolveHankoBoardDelays } from '../../../hanko/claims';
 
 import { verifyHankoForHash } from '../../../hanko/signing';
-import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import { attachAccountDraftHankosAsEntity } from '../../../qa/account/draft';
 
 import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 
@@ -800,15 +800,15 @@ describe('audit fail-fast regressions', () => {
     if (!isProposedAccountFrame(rightProposal)) {
       throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${proposeAccountFrameMessage(rightProposal) ?? 'missing input'}`);
     }
-    const leftInput = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, leftProposal);
-    const rightInput = await sealAccountDraftAsEntity(env, right.entityId, right.signerId, rightProposal);
+    const leftInput = await attachAccountDraftHankosAsEntity(env, left.entityId, left.signerId, leftProposal);
+    const rightInput = await attachAccountDraftHankosAsEntity(env, right.entityId, right.signerId, rightProposal);
     if (leftInput.kind !== 'frame') throw new Error('LEFT_SIMULTANEOUS_FRAME_REQUIRED');
     // This collision begins after LEFT has already emitted its signed proposal.
     // Persist the same witnesses that Entity finalization would attach before
     // the peer's competing frame can arrive.
     leftAccount.pendingAccountInput = structuredClone(leftInput);
     leftAccount.currentFrameHanko = leftInput.proposal.frameHanko;
-    leftAccount.currentDisputeProofHanko = leftInput.proposal.disputeSeal?.hanko;
+    leftAccount.currentDisputeProofHanko = leftInput.proposal.disputeHanko?.hanko;
 
     const leftState = makeEntityState(left.entityId);
     leftState.config = makeSingleSignerConfigFor(left.signerId);
@@ -1460,10 +1460,10 @@ describe('audit fail-fast regressions', () => {
     expect(result.outputs).toEqual([]);
     expect(result.accountTxs).toEqual([]);
     expect(userState.deferredAccountProposals?.get(hub.entityId)).toBe(account.state.settlementWorkspace?.workspaceHash);
-    expect(buildSettlementSealDraft(account, userState, hub.entityId, env).tx).toMatchObject({
+    expect(buildSettlementHankoDraft(account, userState, hub.entityId, env).tx).toMatchObject({
       type: 'settle_transition',
       data: {
-        kind: 'seal',
+        kind: 'hanko',
         settlementNonce: 50,
         postProof: { nonce: 51 },
       },

@@ -2,7 +2,7 @@
 
 [Up: entity machine](./entity.md) | [Transactions](./account-transactions.md) | [Protocol primitives](./protocol.md) | [Dispute arguments](../security/dispute-two-arguments-spec.md)
 
-The A-machine is bilateral state between two entities. `leftEntity` is always the lexicographically lower ID. A frame may carry an ACK plus an optional new proposal; frame Hanko and optional dispute seal are separate commitments.
+The A-machine is bilateral state between two entities. `leftEntity` is always the lexicographically lower ID. A frame may carry an ACK plus an optional new proposal; frame Hanko and optional dispute Hanko are separate commitments.
 
 ## Source
 

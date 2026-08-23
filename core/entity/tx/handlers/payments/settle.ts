@@ -72,33 +72,33 @@ const buildPostSettlementDisputeProof = (
   return { proofBodyHash, disputeHash, nonce, proposerIsLeft };
 };
 
-type SettlementSealTx = Extract<
+type SettlementHankoTx = Extract<
   Extract<AccountTx, { type: 'settle_transition' }>['data'],
-  { kind: 'seal' }
+  { kind: 'hanko' }
 >;
 
 type SettlementHashToSign = HashToSign & { type: 'settlement' | 'dispute' };
 
-type SettlementSealDraft = {
+type SettlementHankoDraft = {
   tx: Extract<AccountTx, { type: 'settle_transition' }>;
   hashesToSign: SettlementHashToSign[];
 };
 
-export const buildSettlementSealDraft = (
+export const buildSettlementHankoDraft = (
   account: AccountReplica,
   entityState: EntityState,
   counterpartyEntityId: string,
   env: EntityRuntimeContext,
-): SettlementSealDraft => {
+): SettlementHankoDraft => {
   const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
   const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
-  if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
+  if (workspace.status === 'submitted') throw new Error('SETTLEMENT_HANKO_SUBMITTED_FORBIDDEN');
   const { iAmLeft } = getAccountPerspective(account.state, entityState.entityId);
   const existingPostHanko = iAmLeft
     ? workspace.postSettlementDisputeProof?.leftHanko
     : workspace.postSettlementDisputeProof?.rightHanko;
-  if (existingPostHanko) throw new Error('SETTLEMENT_SIDE_ALREADY_SEALED');
+  if (existingPostHanko) throw new Error('SETTLEMENT_SIDE_HANKO_ALREADY_ATTACHED');
 
   const settlementNonce = workspace.nonceAtSign ?? getNextSettlementNonce(account);
   if (!Number.isSafeInteger(settlementNonce) || settlementNonce < 1) {
@@ -139,8 +139,8 @@ export const buildSettlementSealDraft = (
   }
 
   const sourceIsExecutor = workspace.executorIsLeft === iAmLeft;
-  const data: SettlementSealTx = {
-    kind: 'seal',
+  const data: SettlementHankoTx = {
+    kind: 'hanko',
     revision: workspace.revision,
     workspaceHash,
     settlementNonce,
@@ -456,7 +456,7 @@ const prepareSettlementExecution = (
     );
   }
   if (workspace.status !== 'ready_to_submit') {
-    throw new Error(`SETTLEMENT_NOT_FULLY_SEALED:${workspace.status}`);
+    throw new Error(`SETTLEMENT_HANKOS_INCOMPLETE:${workspace.status}`);
   }
   const postProof = workspace.postSettlementDisputeProof;
   if (!postProof || postProof.nonce !== signedNonce + 1) {
@@ -778,7 +778,7 @@ export async function processCommittedSettlementTransitionFollowup(
   const empty = (): CommittedSettlementFollowup => ({ outputs: [], accountTxs: [], hashesToSign: [] });
   if (
     accountTx.type !== 'settle_transition' ||
-    (accountTx.data.kind !== 'upsert' && accountTx.data.kind !== 'seal')
+    (accountTx.data.kind !== 'upsert' && accountTx.data.kind !== 'hanko')
   ) return empty();
   const transitionIndex = committedFrame.accountTxs.indexOf(accountTx);
   if (transitionIndex < 0) throw new Error('SETTLEMENT_COMMITTED_TX_NOT_IN_FRAME');
@@ -804,13 +804,13 @@ export async function processCommittedSettlementTransitionFollowup(
     : workspace.postSettlementDisputeProof?.rightHanko;
   if (localPostHanko || hasPendingSettlementTransition(account)) return empty();
 
-  // A side may seal automatically only when the exact ops are locally safe, or
+  // A side may attach its Hanko automatically only when the exact ops are locally safe, or
   // when that side authored the already-committed workspace body. Forgiveness
   // therefore always waits for one explicit counterparty approval.
   const locallyAuthored = workspace.lastModifiedByLeft === iAmLeft;
   if (!locallyAuthored && !canAutoApproveWorkspace(workspace, iAmLeft)) return empty();
 
-  settleLog.debug('committed.auto_seal.start', {
+  settleLog.debug('committed.auto_hanko.start', {
     from: shortId(counterpartyEntityId),
     revision: workspace.revision,
     workspaceHash,
