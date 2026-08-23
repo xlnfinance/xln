@@ -104,6 +104,8 @@ export const buildCertifiedFramePuts = (options: {
   height: number;
   timestamp: number;
   historyRecords?: RuntimeHistoryRecord[];
+  /** Records emitted by the just-applied canonical machine transition. */
+  validatedInProcess?: boolean;
 }): HistoryViewPut[] => {
   const puts: HistoryViewPut[] = [];
   const recencyByKey = new Map<string, HistoryViewPut>();
@@ -120,7 +122,9 @@ export const buildCertifiedFramePuts = (options: {
         runtimeHeight: record.runtimeHeight ?? options.height,
         timestamp: record.timestamp ?? options.timestamp,
       };
-      validateStoredEntityFrameValue(stored, entityHeight);
+      if (options.validatedInProcess !== true) {
+        validateStoredEntityFrameValue(stored, entityHeight);
+      }
       puts.push({ key: keyHistoryViewEntityFrame(entityId, entityHeight), value: encodeBuffer(stored) });
       continue;
     }
@@ -137,7 +141,9 @@ export const buildCertifiedFramePuts = (options: {
       runtimeHeight: record.runtimeHeight ?? options.height,
       timestamp: record.timestamp ?? options.timestamp,
     };
-    validateStoredAccountFrameValue(stored, accountHeight);
+    if (options.validatedInProcess !== true) {
+      validateStoredAccountFrameValue(stored, accountHeight);
+    }
     puts.push({
       key: keyHistoryViewAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
       value: encodeBuffer(stored),

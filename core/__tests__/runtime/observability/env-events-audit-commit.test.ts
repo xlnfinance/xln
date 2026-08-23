@@ -62,6 +62,18 @@ test('machine events stay in durable Runtime history without relay duplication',
   expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
 });
 
+test('diagnostic info and log messages stay transient while machine events are durable', () => {
+  const env = createEmptyEnv('env-events-transient-diagnostics-seed');
+  env.state.timestamp = 321;
+
+  env.log('loop narration');
+  env.info('network', 'INBOUND_ENTITY_INPUTS', { count: 200 });
+  expect(readRuntimeFrameEvents(env)).toHaveLength(0);
+
+  env.emit('HtlcFinalized', { lockId: 'lock-1' });
+  expect(readRuntimeFrameEvents(env).map(entry => entry.message)).toEqual(['HtlcFinalized']);
+});
+
 test('ordinary machine emits never enter the relay audit buffer', () => {
   const env = createEmptyEnv('env-events-audit-clear-seed');
   const forwarded: Array<Record<string, unknown>> = [];

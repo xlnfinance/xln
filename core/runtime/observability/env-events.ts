@@ -153,17 +153,21 @@ const queueStructuredAuditEvent = (
 const attachStructuredLogger =
   (env: RuntimeReplica, level: 'info' | 'warn' | 'error', cleanLevel: 'INFO' | 'WARN' | 'ERR') =>
   (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string): void => {
-    appendFrameLog(
-      env,
-      {
-        level,
-        category,
-        message,
-        ...(entityId && { entityId }),
-        ...(data && { data }),
-      },
-      cleanLevel,
-    );
+    if (level === 'info') {
+      addCleanLog(env, cleanLevel, message);
+    } else {
+      appendFrameLog(
+        env,
+        {
+          level,
+          category,
+          message,
+          ...(entityId && { entityId }),
+          ...(data && { data }),
+        },
+        cleanLevel,
+      );
+    }
 
     if (level === 'warn') console.warn(`[${category}]`, message, data || '');
     if (level === 'error') console.error(`[${category}]`, message, data || '');
@@ -471,15 +475,7 @@ export const dropOverlay = (env: RuntimeReplica, keys: readonly string[]): void 
  */
 export function attachEventEmitters(env: RuntimeReplica): void {
   env.log = (message: string) => {
-    appendFrameLog(
-      env,
-      {
-        level: 'info',
-        category: 'system',
-        message,
-      },
-      'LOG',
-    );
+    addCleanLog(env, 'LOG', message);
   };
 
   env.info = attachStructuredLogger(env, 'info', 'INFO');

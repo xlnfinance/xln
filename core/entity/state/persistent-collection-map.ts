@@ -96,6 +96,11 @@ export class PersistentEntityCollectionMap<Value> implements Map<string, Value> 
 
   rootHash(): string { return this.#values.rootHash(); }
 
+  /** Independent O(n) oracle for checkpoint-time cache validation. */
+  coldRootHash(): string {
+    return PersistentRadixValueMap.fromMap(this.#values, options<Value>()).rootHash();
+  }
+
   /** Full traversal is reserved for a first checkpoint or cold snapshot. */
   nodeRecords(): Generator<PersistentRadixNodeRecord<string, Value>> {
     return this.#values.nodeRecords();
@@ -255,6 +260,8 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
 
   rootHash(): string { return this.#project().rootHash(); }
 
+  coldRootHash(): string { return this.#project().coldRootHash(); }
+
   get hash(): string { return this.rootHash(); }
 
   snapshotCandidate(): PersistentEntityCollectionMap<Value> { return this.#project(); }
@@ -311,7 +318,7 @@ export const ensureEntityCollectionCandidate = <Value>(
   throw new Error('ENTITY_COLLECTION_WRITE_OUTSIDE_CANDIDATE');
 };
 
-export const entityCollectionCommitment = <Value>(source: ReadonlyMap<string, Value>): Readonly<{
+export const entityCollectionCommitment = <Value>(source: ReadonlyMap<string, Value>, cold = false): Readonly<{
   radix: 16;
   leafCount: number;
   root: string;
@@ -319,5 +326,9 @@ export const entityCollectionCommitment = <Value>(source: ReadonlyMap<string, Va
   const persistent = source instanceof EntityCollectionCandidateMap
     ? source
     : PersistentEntityCollectionMap.from(source);
-  return { radix: 16, leafCount: persistent.size, root: persistent.rootHash() };
+  return {
+    radix: 16,
+    leafCount: persistent.size,
+    root: cold ? persistent.coldRootHash() : persistent.rootHash(),
+  };
 };

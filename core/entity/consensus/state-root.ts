@@ -28,6 +28,7 @@ import {
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
 import {
   computeAccountStateRoot,
+  computeAccountStateRootCold,
   computeCanonicalMerkleRoot,
   EMPTY_ACCOUNT_STATE_ROOT,
   encodeAccountStateValue,
@@ -108,21 +109,21 @@ type CoveredEntityState = Covered<EntityState, AssertNever<Exclude<
   | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
 >>>;
 
-const projectAccountEnvelopeCollections = (account: AccountReplica): Record<string, unknown> => ({
+const projectAccountEnvelopeCollections = (account: AccountReplica, cold = false): Record<string, unknown> => ({
   pendingWithdrawalsRoot: requirePersistentAccountStateMap(
     account.pendingWithdrawals,
     'pendingWithdrawals',
-  ).rootHash(),
+  )[cold ? 'coldRootHash' : 'rootHash'](),
   shadow: {
     rebalance: {
       policyRoot: requirePersistentAccountStateMap(
         account.shadow.rebalance.policy,
         'rebalanceShadowPolicy',
-      ).rootHash(),
+      )[cold ? 'coldRootHash' : 'rootHash'](),
       submittedAtByTokenRoot: requirePersistentAccountStateMap(
         account.shadow.rebalance.submittedAtByToken,
         'rebalanceShadowSubmitted',
-      ).rootHash(),
+      )[cold ? 'coldRootHash' : 'rootHash'](),
       ...(account.shadow.rebalance.activeQuote === undefined
         ? {}
         : { activeQuote: account.shadow.rebalance.activeQuote }),
@@ -316,6 +317,7 @@ const leafFieldMemos = new Map<string, LeafFieldMemo>();
 const computeEntityAccountLeafMerkleRoot = (
   accountKey: string,
   entries: ReadonlyArray<readonly [string, unknown]>,
+  cold = false,
 ): string => {
   let memo = leafFieldMemos.get(accountKey);
   if (!memo) {
@@ -326,11 +328,11 @@ const computeEntityAccountLeafMerkleRoot = (
   const leaves = entries.map(([field, value]) => {
     const keyBytes = ENTITY_ACCOUNT_LEAF_KEY_BYTES.get(field);
     if (!keyBytes) throw new Error(`ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:${field}`);
-    const cached = memo.get(field);
+    const cached = cold ? undefined : memo.get(field);
     const hash = cached && cached.value === value
       ? cached.hash
       : computeRadixMerkleLeafHash(keyBytes, encodeAccountStateValue(value), 'integrity');
-    if (!cached || cached.value !== value) memo.set(field, { value, hash });
+    if (!cold && (!cached || cached.value !== value)) memo.set(field, { value, hash });
     return { key: keyBytes, value: EMPTY_LEAF_VALUE, hash };
   });
   return buildRadixMerkle(leaves, { hashAlgorithm: 'integrity' }).root;
@@ -395,7 +397,7 @@ const mempoolRoot = (mempool: readonly AccountTx[]): string => {
 const frameHashBinding = (frame: AccountFrame | undefined): string | undefined =>
   frame ? frame.stateHash : undefined;
 
-const projectAccountConsensusState = (account: CoveredAccountReplica): Record<string, unknown> => {
+const projectAccountConsensusState = (account: CoveredAccountReplica, cold = false): Record<string, unknown> => {
   const projected: Record<string, unknown> = {};
   const localEntityId = account.proofHeader.fromEntity.toLowerCase();
   const localIsLeft = localEntityId === account.state.leftEntity.toLowerCase();
@@ -407,7 +409,9 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
     const value: unknown = account[field];
     if (value !== undefined) projected[field] = value;
   }
-  projected['accountStateRoot'] = computeAccountStateRoot(account.state, undefined, 'entityLeaf');
+  projected['accountStateRoot'] = cold
+    ? computeAccountStateRootCold(account.state)
+    : computeAccountStateRoot(account.state, undefined, 'entityLeaf');
   projected['mempoolRoot'] = mempoolRoot(account.mempool);
   const currentFrameHash = frameHashBinding(account.currentFrame);
   if (currentFrameHash !== undefined) projected['currentFrameHash'] = currentFrameHash;
@@ -420,7 +424,7 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
   if (peerSettlementHankos) {
     projected['counterpartySettlementHankos'] = peerSettlementHankos;
   }
-  const envelopeCollections = projectAccountEnvelopeCollections(account);
+  const envelopeCollections = projectAccountEnvelopeCollections(account, cold);
   projected['pendingWithdrawals'] = envelopeCollections['pendingWithdrawalsRoot'];
   projected['shadow'] = envelopeCollections['shadow'];
   if (account.pendingAccountInput) {
@@ -535,7 +539,11 @@ const projectConsensusConfigCommitment = (config: ConsensusConfig): Record<strin
   };
 };
 
-const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts = true): Record<string, unknown> => {
+const projectEntityConsensusState = (
+  state: CoveredEntityState,
+  expandAccounts = true,
+  cold = false,
+): Record<string, unknown> => {
   // Preserve property presence exactly: optional fields that are absent from
   // the live State must remain absent from the signed projection. Symbols such
   // as the frame-local event collector cannot enter through this string-key
@@ -562,31 +570,31 @@ const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts =
       ? new Map(
           Array.from(state.accounts.entries()).map(([counterpartyId, account]) => [
             counterpartyId,
-            projectAccountConsensusState(account),
+            projectAccountConsensusState(account, cold),
           ]),
         )
       : state.accounts,
-    htlcRoutes: entityCollectionCommitment(state.htlcRoutes),
-    lockBook: entityCollectionCommitment(state.lockBook),
+    htlcRoutes: entityCollectionCommitment(state.htlcRoutes, cold),
+    lockBook: entityCollectionCommitment(state.lockBook, cold),
     ...(state.crontabState
       ? {
           crontabState: {
             tasks: state.crontabState.tasks,
-            hooks: entityCollectionCommitment(state.crontabState.hooks),
+            hooks: entityCollectionCommitment(state.crontabState.hooks, cold),
           },
         }
       : {}),
     ...(state.crossJurisdictionSwaps
-      ? { crossJurisdictionSwaps: entityCollectionCommitment(state.crossJurisdictionSwaps) }
+      ? { crossJurisdictionSwaps: entityCollectionCommitment(state.crossJurisdictionSwaps, cold) }
       : {}),
     ...(state.crossJurisdictionAuthorizations
-      ? { crossJurisdictionAuthorizations: entityCollectionCommitment(state.crossJurisdictionAuthorizations) }
+      ? { crossJurisdictionAuthorizations: entityCollectionCommitment(state.crossJurisdictionAuthorizations, cold) }
       : {}),
     ...(state.pendingCrossJurisdictionFillAcks
-      ? { pendingCrossJurisdictionFillAcks: entityCollectionCommitment(state.pendingCrossJurisdictionFillAcks) }
+      ? { pendingCrossJurisdictionFillAcks: entityCollectionCommitment(state.pendingCrossJurisdictionFillAcks, cold) }
       : {}),
     ...(state.crossJurisdictionBookAdmissions
-      ? { crossJurisdictionBookAdmissions: entityCollectionCommitment(state.crossJurisdictionBookAdmissions) }
+      ? { crossJurisdictionBookAdmissions: entityCollectionCommitment(state.crossJurisdictionBookAdmissions, cold) }
       : {}),
     ...(orderbookExt ? { orderbookExt } : {}),
   };
@@ -630,6 +638,16 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
   return digest;
 };
 
+const computeEntityAccountValueHashCold = (account: AccountReplica): string => {
+  const entries = Object.entries(projectAccountConsensusState(account, true))
+    .sort(([left], [right]) => compareStableText(left, right));
+  return computeEntityAccountLeafMerkleRoot(
+    `${account.state.leftEntity}|${account.state.rightEntity}|${account.proofHeader.fromEntity}`,
+    entries,
+    true,
+  );
+};
+
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
   if (state.accounts instanceof EntityAccountCandidateMap) {
     state.accounts.dropCachedProjection();
@@ -640,13 +658,20 @@ export const invalidateEntityAccountCommitment = (state: EntityState, counterpar
   }
 };
 
-const encodeEntityAccountsSection = (state: EntityState, _cold: boolean): string => {
+const encodeEntityAccountsSection = (state: EntityState, cold: boolean): string => {
+  const root = cold
+    ? PersistentEntityAccountMap.fromEntries(
+        state.accounts,
+        state.entityId,
+        computeEntityAccountValueHashCold,
+      ).rootHash()
+    : state.accounts.rootHash();
   return encodeCanonicalConsensusValue({
     domain: 'xln.entity.accounts.radix-merkle.v2',
     radix: ENTITY_ACCOUNT_VALUE_MAP_RADIX,
     hashAlgorithm: 'integrity',
     leafCount: state.accounts.size,
-    root: state.accounts.rootHash(),
+    root,
   });
 };
 
@@ -689,16 +714,8 @@ const computeEntityRootFromSections = (sections: readonly EntitySectionCommitmen
     }),
   );
 
-const assertEntityRootAudit = (state: EntityState, root: string, enabled: boolean): void => {
-  if (!enabled) return;
-  const cold = computeCanonicalEntityConsensusStateHashCold(state);
-  if (root !== cold) throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${root}:cold=${cold}`);
-};
-
-const entityRootDebugFlags = (): Readonly<{ audit: boolean; profile: boolean }> => ({
-  audit: readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') === '1',
-  profile: readRuntimeEnv('XLN_ENTITY_STATE_ROOT_PROFILE') === '1',
-});
+const entityRootProfileEnabled = (): boolean =>
+  readRuntimeEnv('XLN_ENTITY_STATE_ROOT_PROFILE') === '1';
 
 export const computeCanonicalEntityConsensusStateHash = (state: EntityState): string => {
   // EntityState is intentionally plain deterministic data, not an observable
@@ -710,7 +727,7 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
   // Opt-in only: the audit recomputes the cold root and the byte breakdown
   // re-encodes the whole projection; either would distort a frame-level
   // process profile that enabled it implicitly.
-  const { audit, profile } = entityRootDebugFlags();
+  const profile = entityRootProfileEnabled();
   const startedAt = getPerfMs();
   const projected = timePerfPhase(
     'entity.stateRoot.projection',
@@ -727,7 +744,6 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
     () => computeEntityRootFromSections(sections),
   );
   const endedAt = getPerfMs();
-  assertEntityRootAudit(state, root, audit);
   if (!profile) return root;
   const profileProjected = projectEntityConsensusState(state);
   const topSectionBytes = sections
@@ -803,7 +819,19 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
 
 /** Cold test/restore oracle: never trusts an in-memory Account leaf cache. */
 export const computeCanonicalEntityConsensusStateHashCold = (state: EntityState): string =>
-  computeEntityRootFromSections(commitEntityConsensusSections(projectEntityConsensusState(state, false), state, true));
+  computeEntityRootFromSections(
+    commitEntityConsensusSections(projectEntityConsensusState(state, false, true), state, true),
+  );
+
+/** Expensive O(all Accounts) oracle, invoked only by the Runtime checkpoint path. */
+export const auditEntityStateRootAtCheckpoint = (state: EntityState): void => {
+  if (readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') !== '1') return;
+  const incremental = computeCanonicalEntityConsensusStateHash(state);
+  const cold = computeCanonicalEntityConsensusStateHashCold(state);
+  if (incremental !== cold) {
+    throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${incremental}:cold=${cold}`);
+  }
+};
 
 /**
  * Compact cold-oracle evidence for diagnosing a consensus-root mismatch.
@@ -813,7 +841,7 @@ export const computeCanonicalEntityConsensusStateHashCold = (state: EntityState)
 export const computeEntityConsensusSectionDigestsCold = (
   state: EntityState,
 ): ReadonlyArray<Readonly<{ field: string; digest: string }>> =>
-  commitEntityConsensusSections(projectEntityConsensusState(state, false), state, true)
+  commitEntityConsensusSections(projectEntityConsensusState(state, false, true), state, true)
     .map(({ field, digest }) => ({ field, digest }));
 
 export const computeEntityAccountDigests = (

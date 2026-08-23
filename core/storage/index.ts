@@ -4,6 +4,7 @@
  * Human-audit importance: 100/100 — this is the crash-consistency boundary.
  */
 import { getPerfMs } from '../support/time';
+import { auditEntityStateRootAtCheckpoint } from '../entity/consensus/state-root';
 import { decodeValidatedBuffer, encodeBuffer, encodeBufferPrepared, writeBatch } from './codec/codec';
 import { canonicalizeBinaryPayload } from './codec/binary-codec';
 import {
@@ -1120,13 +1121,20 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const head = await readHead(walDb, config);
   const appliedRuntimeInput =
     options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
-  const appliedRuntimeInputEncoded = encodeBufferPrepared(appliedRuntimeInput, { omitSymbolKeys: true });
+  const canonicalAppliedRuntimeInput = canonicalizeBinaryPayload(
+    appliedRuntimeInput,
+    { omitSymbolKeys: true },
+  ) as RuntimeInput;
+  const finiteEpochByteBudget = config.epochMaxBytes !== Number.MAX_SAFE_INTEGER;
+  const appliedRuntimeInputBytes = finiteEpochByteBudget
+    ? encodeBufferPrepared(canonicalAppliedRuntimeInput, { omitSymbolKeys: true }).buffer.byteLength
+    : 0;
   const snapshotRequested =
     options.env.state.height === 1 ||
     options.env.state.height - head.latestSnapshotHeight >= config.snapshotPeriodFrames;
   const snapshotRequiredByBytesRequested =
-    head.epochReplayBytes + appliedRuntimeInputEncoded.buffer.byteLength >=
-    config.epochMaxBytes;
+    finiteEpochByteBudget &&
+    head.epochReplayBytes + appliedRuntimeInputBytes >= config.epochMaxBytes;
   const materializationRequested =
     options.env.state.height === 1 ||
     options.env.state.height - head.latestMaterializedHeight >= config.materializePeriodFrames ||
@@ -1152,6 +1160,11 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const checkpointedLineagePlan = shouldMaterialize
     ? buildRuntimeCheckpointLineagePlan(options.env)
     : null;
+  if (shouldMaterialize) {
+    for (const replica of options.env.state.eReplicas.values()) {
+      auditEntityStateRootAtCheckpoint(replica.state);
+    }
+  }
   const lineagePlan =
     checkpointedLineagePlan ?? buildLiveReplicaMetaPlan(options.env);
   // Both plans carry the sorted live-replica lookup; building it a second
@@ -1174,7 +1187,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     db,
     walDb,
     head,
-    appliedRuntimeInput: appliedRuntimeInputEncoded.canonical as RuntimeInput,
+    appliedRuntimeInput: canonicalAppliedRuntimeInput,
     durablePendingInput,
     snapshotDue,
     snapshotRequiredByBytes,
@@ -1697,6 +1710,10 @@ const buildStorageFrameRecordPlan = (
         height: options.env.state.height,
         timestamp: options.env.state.timestamp,
         historyRecords: options.historyRecords ?? [],
+        // These records are outputs of the canonical Entity/Account transitions
+        // applied above. Foreign and recovered bytes still pass the full schema
+        // validators on every read and conflict comparison.
+        validatedInProcess: true,
       });
       mark('frameEncode.certifiedPuts');
       return puts;
