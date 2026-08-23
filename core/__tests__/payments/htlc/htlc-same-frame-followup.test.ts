@@ -3,6 +3,7 @@ import { applyCommittedHtlcLockFollowup, applyHtlcSecretFollowups } from '../../
 import { hashOpaqueHtlcCiphertext } from '../../../protocol/htlc/multi-recipient';
 import { quoteHtlcPaymentRoute } from '../../../pathfinding/htlc-quote';
 import { initCrontab } from '../../../entity/scheduler';
+import { failOriginatedHtlcRoute } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { EntityCollectionCandidateMap } from '../../../entity/state/persistent-collection-map';
@@ -274,5 +275,33 @@ describe('same-frame incoming HTLC followup', () => {
       secretAckDeadlineAt: durableAckDeadline,
     });
     expect(state.crontabState.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(true);
+  });
+
+  test('originated lock rejection emits one terminal failure before removing the route', () => {
+    const hashlock = id('5');
+    const lockId = id('4');
+    const state = withEntityCollectionCandidates({
+      entityId: id('2'), timestamp: 10,
+      htlcRoutes: new Map([[hashlock, {
+        hashlock, originated: true as const, outboundEntity: id('3'), outboundLockId: lockId,
+        createdTimestamp: 1,
+      }]]),
+      lockBook: new Map([[lockId, { lockId, hashlock }]]),
+    });
+    const candidateEffects: Array<{ kind: 'runtimeEvent'; eventName: string; data: Record<string, unknown> }> = [];
+
+    expect(failOriginatedHtlcRoute(
+      state as never,
+      candidateEffects,
+      hashlock,
+      'insufficient_capacity',
+    )).toBe(true);
+    expect(candidateEffects).toEqual([{
+      kind: 'runtimeEvent',
+      eventName: 'HtlcFailed',
+      data: { hashlock, lockId, reason: 'insufficient_capacity', entityId: state.entityId },
+    }]);
+    expect(state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(state.lockBook.has(lockId)).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import type { AccountTx, HtlcLock, HtlcRoute } from '../../../types/account';
-import type { EntityState } from '../../types';
+import type { EntityCandidateEffect, EntityState } from '../../types';
 import { cancelHook, scheduleHook } from '../../scheduler/hook-state';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
@@ -105,6 +105,29 @@ export function terminateHtlcRoute(
     cancelHook(state.crontabState, `htlc-secret-ack:${route.hashlock}`);
   }
   state.htlcRoutes.delete(hashlock);
+}
+
+export function failOriginatedHtlcRoute(
+  state: EntityState,
+  candidateEffects: EntityCandidateEffect[],
+  hashlock: string,
+  reason: string,
+): boolean {
+  const route = state.htlcRoutes.get(hashlock);
+  if (!route || hasInboundHtlcRoute(route)) return false;
+  candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcFailed',
+    data: {
+      hashlock,
+      ...(route.outboundLockId ? { lockId: route.outboundLockId } : {}),
+      reason,
+      entityId: state.entityId,
+    },
+  });
+  if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
+  terminateHtlcRoute(state, hashlock, state.timestamp);
+  return true;
 }
 
 function accountFrameHasLock(txs: AccountTx[] | undefined, lockId: string): boolean {

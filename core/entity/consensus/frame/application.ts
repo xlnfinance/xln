@@ -78,7 +78,11 @@ import {
   type SwapOfferEvent,
 } from '../../tx/handlers/account';
 import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
-import { assertOriginatedHtlcRoutesHaveLiveLocks, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
+import {
+  assertOriginatedHtlcRoutesHaveLiveLocks,
+  failOriginatedHtlcRoute,
+  terminateHtlcRoute,
+} from '../../tx/j-events-htlc/route-lifecycle';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
@@ -487,6 +491,7 @@ type ProposePendingAccountFramesContext = {
   currentEntityState: EntityState;
   proposableAccounts: ProposableAccountMap;
   allOutputs: EntityOutput[];
+  candidateEffects: EntityCandidateEffect[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
   storageChanges: RuntimeOverlayRecord[];
@@ -637,28 +642,44 @@ const proposeAccountFrameCandidate = async (
   for (const { hashlock, reason } of ('failedHtlcLocks' in proposal ? proposal.failedHtlcLocks : undefined) ?? []) {
     const route = state.htlcRoutes.get(hashlock);
     if (!route) continue;
-    if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
-    if (hasInboundHtlcRoute(route)) {
-      const inboundAccount = getEntityAccountForWrite(state.accounts, route.inboundEntity);
-      if (inboundAccount) {
-        const admission = await applyAccountInput(
-          context.accountConsensusContext,
-          inboundAccount,
-          { kind: 'enqueue', txs: [{
-          type: 'htlc_resolve',
-          data: {
-            lockId: route.inboundLockId,
-            outcome: 'error',
-            reason: `forward_failed:${reason}`,
-          },
-          }] },
+    if (!hasInboundHtlcRoute(route)) {
+      if (!failOriginatedHtlcRoute(state, context.candidateEffects, hashlock, reason)) {
+        throw haltRuntimeFailure(
+          'HTLC_ORIGINATED_FAILURE_ROUTE_REQUIRED',
+          `HTLC_ORIGINATED_FAILURE_ROUTE_REQUIRED:${hashlock}`,
         );
-        if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
-        recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
-        markProposableAccount(proposableAccounts, route.inboundEntity);
-        scheduleAccount(route.inboundEntity);
       }
+      continue;
     }
+    const inboundAccount = getEntityAccountForWrite(state.accounts, route.inboundEntity);
+    if (!inboundAccount) {
+      throw haltRuntimeFailure(
+        'HTLC_FORWARD_FAILURE_ACCOUNT_MISSING',
+        `HTLC_FORWARD_FAILURE_ACCOUNT_MISSING:${hashlock}:${route.inboundEntity}`,
+      );
+    }
+    const admission = await applyAccountInput(
+      context.accountConsensusContext,
+      inboundAccount,
+      { kind: 'enqueue', txs: [{
+        type: 'htlc_resolve',
+        data: {
+          lockId: route.inboundLockId,
+          outcome: 'error',
+          reason: `forward_failed:${reason}`,
+        },
+      }] },
+    );
+    if (!admission.ok || admission.admittedAccountTxCount === 0) {
+      throw haltRuntimeFailure(
+        'HTLC_FORWARD_FAILURE_RESOLVE_NOT_ADMITTED',
+        `HTLC_FORWARD_FAILURE_RESOLVE_NOT_ADMITTED:${hashlock}:${reason}`,
+      );
+    }
+    recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
+    markProposableAccount(proposableAccounts, route.inboundEntity);
+    scheduleAccount(route.inboundEntity);
+    if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
     terminateHtlcRoute(state, hashlock, state.timestamp);
   }
   return proposal;
@@ -1554,6 +1575,7 @@ const applyPostEntityTxPhases = async (
         currentEntityState,
         proposableAccounts: context.proposableAccounts,
         allOutputs: context.allOutputs,
+        candidateEffects: context.candidateEffects,
         collectedHashes: context.collectedHashes,
         accountJClaimNodeStore: context.accountJClaimNodeStore,
         storageChanges: context.storageChanges,
