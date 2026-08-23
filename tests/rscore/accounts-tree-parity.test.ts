@@ -63,6 +63,10 @@ const makeTsAccount = (index: number): AccountReplica => {
   });
   account.state.watchSeed = WATCH_SEED;
   account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, initialDelta()]]);
+  // Post-faucet shape: the J journal counters are committed verbatim, so a
+  // snapshot taken after J events must restore root-identically.
+  account.state.jNonce = index;
+  account.state.lastFinalizedJHeight = index * 7;
   return account;
 };
 
@@ -90,6 +94,7 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   RESPONSE_SECONDS,
   [...account.state.deltas.values()].map(deltaWire),
   [],
+  [account.state.jNonce, account.state.lastFinalizedJHeight],
 ];
 
 const paymentTx = (index: number, amount: bigint): AccountTx => ({

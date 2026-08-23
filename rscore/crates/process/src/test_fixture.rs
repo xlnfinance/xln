@@ -61,6 +61,7 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
         tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
         tuple(vec![delta()]),
         tuple(locks),
+        tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
     ])
 }
 
@@ -76,6 +77,7 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
         tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
         tuple(vec![delta()]),
         tuple(locks),
+        tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
     ])
 }
 

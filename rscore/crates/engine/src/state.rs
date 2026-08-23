@@ -76,6 +76,8 @@ pub struct AccountState {
     deltas: PersistentRadixMap<Delta>,
     locks: PersistentRadixMap<HtlcLock>,
     lending_intents: Option<PersistentRadixMap<LendingIntentKind>>,
+    j_nonce: u64,
+    last_finalized_j_height: u64,
 }
 
 impl AccountState {
@@ -92,6 +94,20 @@ impl AccountState {
         dispute_config: AccountDisputeConfig,
         deltas: Vec<Delta>,
         locks: Vec<HtlcLock>,
+    ) -> Result<Self, StateError> {
+        Self::restore_with_journal(identity, dispute_config, deltas, locks, 0, 0)
+    }
+
+    /// Restore with the bilateral J journal counters. The payment profile
+    /// commits them verbatim; snapshots taken after J events (faucet
+    /// reserve-to-collateral, settlements) restore root-identically.
+    pub fn restore_with_journal(
+        identity: AccountIdentity,
+        dispute_config: AccountDisputeConfig,
+        deltas: Vec<Delta>,
+        locks: Vec<HtlcLock>,
+        j_nonce: u64,
+        last_finalized_j_height: u64,
     ) -> Result<Self, StateError> {
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
@@ -129,6 +145,8 @@ impl AccountState {
             deltas: map,
             locks: lock_map,
             lending_intents: None,
+            j_nonce,
+            last_finalized_j_height,
         })
     }
 
@@ -142,10 +160,12 @@ impl AccountState {
 
     /// Exact TypeScript AccountStateRoot for the isolated payment profile.
     ///
-    /// This state type cannot represent swaps, pulls, rebalance policy, J-claim
-    /// progress, settlement workspaces, or a non-zero J nonce/height. Those
-    /// sections are therefore committed at their canonical genesis values;
-    /// callers must reject a wider Account snapshot instead of projecting it.
+    /// This state type cannot represent swaps, pulls, rebalance policy,
+    /// J-claim progress, or settlement workspaces — those sections are
+    /// committed at their canonical genesis values and callers must reject a
+    /// wider Account snapshot instead of projecting it. The J journal counters
+    /// (`jNonce`, `lastFinalizedJHeight`) ARE represented and committed
+    /// verbatim.
     pub fn payment_profile_account_state_root(&self) -> Result<[u8; 32], StateError> {
         crate::commitment::payment_account_state_root(
             &self.identity,
@@ -157,6 +177,10 @@ impl AccountState {
                     .lending_intents
                     .as_ref()
                     .map_or([0; 32], PersistentRadixMap::root_hash),
+            },
+            crate::commitment::AccountJournal {
+                j_nonce: self.j_nonce,
+                last_finalized_j_height: self.last_finalized_j_height,
             },
         )
     }

@@ -174,7 +174,7 @@ fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
-    let fields = exact(tuple(value)?, 10, "accountSeed")?;
+    let fields = exact(tuple(value)?, 11, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
     let identity = AccountIdentity::new(
@@ -199,9 +199,17 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
         .iter()
         .map(decode_lock)
         .collect::<Result<_, _>>()?;
+    let journal = exact(tuple(&fields[10])?, 2, "journal")?;
     let replica = AccountReplica::new(
         owner,
-        AccountState::restore(identity, dispute_config, deltas, locks)?,
+        AccountState::restore_with_journal(
+            identity,
+            dispute_config,
+            deltas,
+            locks,
+            unsigned(&journal[0], "jNonce")?,
+            unsigned(&journal[1], "lastFinalizedJHeight")?,
+        )?,
     )?;
     Ok(AccountSeed {
         account_id,

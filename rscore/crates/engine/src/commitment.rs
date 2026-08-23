@@ -14,14 +14,20 @@ pub(crate) struct PaymentAccountRoots {
     pub lending_intents: [u8; 32],
 }
 
+pub(crate) struct AccountJournal {
+    pub j_nonce: u64,
+    pub last_finalized_j_height: u64,
+}
+
 pub(crate) fn payment_account_state_root(
     identity: &AccountIdentity,
     dispute_config: AccountDisputeConfig,
     roots: PaymentAccountRoots,
+    journal: AccountJournal,
 ) -> Result<[u8; 32], StateError> {
     compute_flat_integrity_root(
         ACCOUNT_STATE_NAMESPACE,
-        &account_state_entries(identity, dispute_config, roots),
+        &account_state_entries(identity, dispute_config, roots, journal),
     )
     .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
@@ -30,6 +36,7 @@ fn account_state_entries(
     identity: &AccountIdentity,
     dispute_config: AccountDisputeConfig,
     roots: PaymentAccountRoots,
+    journal: AccountJournal,
 ) -> Vec<(String, CanonicalValue)> {
     let zero = root_value(&EMPTY_ROOT);
     vec![
@@ -38,7 +45,7 @@ fn account_state_entries(
             "financial".into(),
             object(vec![
                 ("deltasRoot", root_value(&roots.deltas)),
-                ("jNonce", number(0)),
+                ("jNonce", number(journal.j_nonce)),
                 ("disputeConfig", dispute_config_value(dispute_config)),
             ]),
         ),
@@ -55,7 +62,7 @@ fn account_state_entries(
         (
             "jurisdiction".into(),
             object(vec![
-                ("lastFinalizedJHeight", number(0)),
+                ("lastFinalizedJHeight", number(journal.last_finalized_j_height)),
                 ("leftPendingJClaims", empty_claim_value()),
                 ("rightPendingJClaims", empty_claim_value()),
             ]),
