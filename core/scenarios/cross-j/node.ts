@@ -28,6 +28,7 @@ import {
   startP2P,
   startRuntimeLoop,
 } from '../../runtime.ts';
+import { createHubDirectRuntimeRoute } from '../../orchestrator/hub/hub-runtime-transport';
 import { startStandaloneRelayServer } from '../../network/relay/standalone-server';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { getEntityReplicaById } from '../../api/server/entities/lookup';
@@ -42,7 +43,9 @@ import type { RuntimeReplica } from '../../runtime/types';
 import { readCliOption } from '../../config/cli';
 import { buildCrossJurisdictionSwapSubmission } from '../../runtime/j-submit/api';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
-import { advanceScenarioTime } from '../harness/helpers';
+const syncScenarioClockToWall = (env: RuntimeReplica): void => {
+  env.state.timestamp = Math.max(Number(env.state.timestamp || 0), Date.now());
+};
 import {
   bindScenarioJReplica,
   createJReplica,
@@ -108,6 +111,36 @@ const reservePort = async (): Promise<number> =>
       server.close(() => resolve(port));
     });
   });
+
+
+/**
+ * Account outputs travel only over authenticated direct Runtime sessions; the
+ * relay carries gossip. A scenario hub therefore hosts the production hub
+ * inbound route (users dial it; it answers over their session) and advertises
+ * the endpoint in its profile.
+ */
+const startDirectIngress = async (env: RuntimeReplica): Promise<string> => {
+  const port = await reservePort();
+  const route = createHubDirectRuntimeRoute(env, seed, () => true, { lastSeen: null, lastError: null });
+  type Socket = Parameters<typeof route.websocket.open>[0];
+  Bun.serve<{ type?: string }>({
+    hostname: '127.0.0.1',
+    port,
+    fetch(request, serverRef) {
+      const upgrade = route.maybeUpgrade(request, serverRef);
+      if (upgrade.handled) return upgrade.response;
+      return new Response('not found', { status: 404 });
+    },
+    websocket: {
+      maxPayloadLength: route.websocket.maxPayloadLength,
+      open(ws) { route.websocket.open(ws as Socket); },
+      message(ws, raw) { return route.websocket.message(ws as Socket, raw); },
+      drain(ws) { route.websocket.drain(ws as Socket); },
+      close(ws, code, reason) { route.websocket.close(ws as Socket, code, reason); },
+    },
+  });
+  return `ws://127.0.0.1:${port}/ws`;
+};
 
 const registerSigner = (env: RuntimeReplica, label: string): string => {
   const seedBytes = new TextEncoder().encode(seed);
@@ -217,11 +250,11 @@ const waitUntil = async (
 ): Promise<void> => {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    // Both child Runtimes advance by the same bounded tick. Jumping one child
-    // directly to its private retry deadline can move a signed cross-j route
-    // into the future of its sibling; fixed ticks preserve clock parity while
-    // still making durable transport retries become due.
-    advanceScenarioTime(env, 100, true);
+    // Both child Runtimes are separate processes with real sockets; they
+    // share the wall clock the way production Runtimes do. Private tick
+    // counts diverged (one node loops more than the other) and moved a signed
+    // cross-j route into the sibling's future.
+    syncScenarioClockToWall(env);
     await processRuntime(env);
     if (await pred()) return;
     await sleep(100);
@@ -400,8 +433,10 @@ const runHubs = async (): Promise<void> => {
   await fund(targetAdapter, hubTgt.id, WETH, usd(2_000_000));
   await processRuntime(env);
 
+  const directWsUrl = await startDirectIngress(env);
   const p2p = startP2P(env, {
     relayUrls: [relayUrl],
+    wsUrl: directWsUrl,
     seedRuntimeIds: [],
     advertiseEntityIds: [hubSrc.id, hubTgt.id],
   });

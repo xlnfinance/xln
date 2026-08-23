@@ -63,14 +63,25 @@ const collectCrossJProfileIds = (
   }),
 ))];
 
+const hasLocalEntityReplica = (env: RuntimeReplica, entityId: string): boolean => {
+  const wanted = entityId.toLowerCase();
+  for (const key of env.state.eReplicas.keys()) {
+    if (key.split(':')[0]?.toLowerCase() === wanted) return true;
+  }
+  return false;
+};
+
 const warmCrossJProfileRoutes = async (
   env: RuntimeReplica,
   envelope: import('../../runtime/types').RuntimeEntityInputsEnvelope,
 ): Promise<void> => {
   const required = collectCrossJProfileIds(envelope);
   if (required.length === 0) return;
+  // Entities this Runtime itself signs for never arrive through gossip; their
+  // route is local. Only remote parties need a verified profile route.
   const missing = required.filter(entityId =>
-    !env.infrastructure?.verifiedProfileRoutes?.has(entityId));
+    !env.infrastructure?.verifiedProfileRoutes?.has(entityId)
+    && !hasLocalEntityReplica(env, entityId));
   if (missing.length === 0) return;
   const p2p = env.infrastructure?.p2p;
   if (!p2p) throw new Error(`CROSS_J_PROFILE_WARMUP_UNAVAILABLE:${missing.join(',')}`);
