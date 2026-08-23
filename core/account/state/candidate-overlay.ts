@@ -115,17 +115,6 @@ const counterpartyForOwner = (account: AccountReplica, owner: EntityId): EntityI
   throw new Error(`ACCOUNT_TRANSITION_OWNER_MISMATCH:${owner}:${left}:${right}`);
 };
 
-const createAccountTransitionKey = (account: AccountReplica, orderedInputPrefix: unknown): AccountTransitionKey => {
-  const entityId = toEntityId(account.proofHeader.fromEntity.toLowerCase());
-  const counterparty = counterpartyForOwner(account, entityId);
-  return {
-    entityId,
-    accountId: createAccountPairKey(entityId, counterparty),
-    baseRoot: toStateHash(computeAccountStateRoot(account.state)),
-    orderedInputPrefixHash: orderedInputHash(orderedInputPrefix),
-  };
-};
-
 /**
  * Lazy transition key. `baseRoot` (computeAccountStateRoot) and
  * `orderedInputPrefixHash` (canonical.encode + keccak) are only needed when

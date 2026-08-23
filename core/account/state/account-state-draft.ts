@@ -27,11 +27,8 @@ import {
   type PreparedAccountCollection,
 } from './account-overlay-map';
 import { isAccountCollectionDraft } from './account-overlay-map';
-import { forkAccountReplicaShell } from './account-replica-shell';
-import {
-  PersistentAccountStateMap,
-  type AccountStateCollection,
-} from './persistent-state-map';
+import { forkAccountDraftShell } from './account-replica-shell';
+import { PersistentAccountStateMap, type AccountStateCollection } from './persistent-state-map';
 
 type DraftCollectionNames =
   | 'deltas'
@@ -137,16 +134,30 @@ export const beginAccountStateDraft = (base: AccountReplica): AccountStateDraftO
     locks: beginAccountCollectionOverlay(persistent<string, HtlcLock>(base.state.locks, 'locks')),
     swapOffers: beginAccountCollectionOverlay(persistent<string, SwapOffer>(base.state.swapOffers, 'swapOffers')),
     pulls: beginAccountCollectionOverlay(persistent<string, PullCommitment>(base.state.pulls, 'pulls')),
-    subcontracts: beginAccountCollectionOverlay(persistent<string, AccountSubcontract>(base.state.subcontracts, 'subcontracts')),
-    lendingIntents: beginAccountCollectionOverlay(persistent<string, AccountLendingIntentKind>(base.state.lendingIntents, 'lendingIntents')),
-    requestedRebalance: beginAccountCollectionOverlay(persistent<number, bigint>(base.state.requestedRebalance, 'requestedRebalance')),
-    requestedRebalanceFeeState: beginAccountCollectionOverlay(persistent<number, RebalanceRequestFeeState>(base.state.requestedRebalanceFeeState, 'requestedRebalanceFeeState')),
-    rebalanceFeePolicies: beginAccountCollectionOverlay(persistent<number, BilateralRebalanceFeePolicy>(base.state.rebalanceFeePolicies, 'rebalanceFeePolicies')),
+    subcontracts: beginAccountCollectionOverlay(
+      persistent<string, AccountSubcontract>(base.state.subcontracts, 'subcontracts'),
+    ),
+    lendingIntents: beginAccountCollectionOverlay(
+      persistent<string, AccountLendingIntentKind>(base.state.lendingIntents, 'lendingIntents'),
+    ),
+    requestedRebalance: beginAccountCollectionOverlay(
+      persistent<number, bigint>(base.state.requestedRebalance, 'requestedRebalance'),
+    ),
+    requestedRebalanceFeeState: beginAccountCollectionOverlay(
+      persistent<number, RebalanceRequestFeeState>(base.state.requestedRebalanceFeeState, 'requestedRebalanceFeeState'),
+    ),
+    rebalanceFeePolicies: beginAccountCollectionOverlay(
+      persistent<number, BilateralRebalanceFeePolicy>(base.state.rebalanceFeePolicies, 'rebalanceFeePolicies'),
+    ),
     pendingWithdrawals: beginAccountCollectionOverlay(persistent(base.pendingWithdrawals, 'pendingWithdrawals')),
-    rebalanceShadowPolicy: beginAccountCollectionOverlay(persistent(base.shadow.rebalance.policy, 'rebalanceShadowPolicy')),
-    rebalanceShadowSubmitted: beginAccountCollectionOverlay(persistent(base.shadow.rebalance.submittedAtByToken, 'rebalanceShadowSubmitted')),
+    rebalanceShadowPolicy: beginAccountCollectionOverlay(
+      persistent(base.shadow.rebalance.policy, 'rebalanceShadowPolicy'),
+    ),
+    rebalanceShadowSubmitted: beginAccountCollectionOverlay(
+      persistent(base.shadow.rebalance.submittedAtByToken, 'rebalanceShadowSubmitted'),
+    ),
   };
-  const shell = forkAccountReplicaShell(base);
+  const shell = forkAccountDraftShell(base);
   const draft: AccountDraftReplica = {
     ...shell,
     state: {
@@ -218,9 +229,15 @@ export const prepareAccountStateDraft = (
     requestedRebalance: requestedRebalance.values,
     requestedRebalanceFeeState: requestedRebalanceFeeState.values,
     ...(owner.optionalPresence.pulls || pulls.values.size > 0 ? { pulls: pulls.values } : {}),
-    ...(owner.optionalPresence.subcontracts || subcontracts.values.size > 0 ? { subcontracts: subcontracts.values } : {}),
-    ...(owner.optionalPresence.lendingIntents || lendingIntents.values.size > 0 ? { lendingIntents: lendingIntents.values } : {}),
-    ...(owner.optionalPresence.rebalanceFeePolicies || rebalanceFeePolicies.values.size > 0 ? { rebalanceFeePolicies: rebalanceFeePolicies.values } : {}),
+    ...(owner.optionalPresence.subcontracts || subcontracts.values.size > 0
+      ? { subcontracts: subcontracts.values }
+      : {}),
+    ...(owner.optionalPresence.lendingIntents || lendingIntents.values.size > 0
+      ? { lendingIntents: lendingIntents.values }
+      : {}),
+    ...(owner.optionalPresence.rebalanceFeePolicies || rebalanceFeePolicies.values.size > 0
+      ? { rebalanceFeePolicies: rebalanceFeePolicies.values }
+      : {}),
   };
   return Object.freeze({
     account: {

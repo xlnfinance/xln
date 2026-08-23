@@ -81,9 +81,7 @@ const forkShadow = (shadow: AccountReplica['shadow']): AccountReplica['shadow'] 
     rebalance: {
       policy: shadow.rebalance.policy,
       submittedAtByToken: shadow.rebalance.submittedAtByToken,
-      ...(shadow.rebalance.activeQuote === undefined
-        ? {}
-        : { activeQuote: copyRecord(shadow.rebalance.activeQuote) }),
+      ...(shadow.rebalance.activeQuote === undefined ? {} : { activeQuote: copyRecord(shadow.rebalance.activeQuote) }),
       ...(shadow.rebalance.pendingRequest === undefined
         ? {}
         : { pendingRequest: copyRecord(shadow.rebalance.pendingRequest) }),
@@ -176,5 +174,47 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
     to: base.proofHeader.toEntity.slice(-8),
     height: base.currentHeight,
   });
+  return shell;
+};
+
+/**
+ * Lightweight draft shell for Account tx application overlays.
+ *
+ * `forkAccountReplicaShell` deep-clones `mempool`, `currentFrame`, and
+ * `pendingFrame` because the Entity-frame COW boundary must isolate the
+ * committed replica from any mutation. A draft overlay only mutates
+ * collection overlays plus a few scalar fields (`settlementWorkspace`,
+ * `leftPendingJClaims`, `proofHeader.nextProofNonce`, `pendingForwards`,
+ * dispute-proof fields). Frame bodies and mempool entries are read-only
+ * inside `applyAccountTx` and consensus `finalize` replaces them by
+ * reference assignment, never in-place mutation. Sharing those references
+ * avoids ~10,000 `cloneIsolatedAccountTx`/`cloneIsolatedAccountFrame` calls
+ * per runtime frame (~40% of `frameApply` cost in payment load).
+ */
+export const forkAccountDraftShell = (base: AccountReplica): AccountReplica => {
+  if (!base.state || typeof base.state !== 'object') return { ...base };
+  rejectUnexpectedMaps(base, 'account');
+  if (!isPersistentAccountStateMap(base.pendingWithdrawals)) {
+    throw new Error('ACCOUNT_ENVELOPE_COLLECTION_NOT_PERSISTENT:pendingWithdrawals');
+  }
+  if (!isPersistentAccountStateMap(base.shadow.rebalance.policy)) {
+    throw new Error('ACCOUNT_ENVELOPE_COLLECTION_NOT_PERSISTENT:rebalanceShadowPolicy');
+  }
+  if (!isPersistentAccountStateMap(base.shadow.rebalance.submittedAtByToken)) {
+    throw new Error('ACCOUNT_ENVELOPE_COLLECTION_NOT_PERSISTENT:rebalanceShadowSubmitted');
+  }
+  const shell: AccountReplica = {
+    ...base,
+    state: forkAccountStateShell(base.state),
+    proofHeader: copyRecord(base.proofHeader),
+    shadow: forkShadow(base.shadow),
+    pendingWithdrawals: base.pendingWithdrawals,
+  };
+  if (base.pendingForwards) {
+    shell.pendingForwards = base.pendingForwards.map(forward => ({
+      ...forward,
+      route: copyArray(forward.route),
+    }));
+  }
   return shell;
 };
