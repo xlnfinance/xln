@@ -137,7 +137,7 @@ describe('production cross-j swap load boundaries', () => {
     const root = `0x${'ab'.repeat(32)}`;
     const frame = { height: 10, canonicalStateHash: root };
     const report = {
-      schema: 'xln-production-cross-swap-load-v1', mode: 'cross', configuredBurstSize: 1,
+      schema: 'xln-production-cross-swap-load-v1', mode: 'cross', configuredBurstSize: 1, settledRoutes: 1, economicTps: 333.3,
       completionAuthority: 'committed_cross_route_full_fill', marketMakerOrderId: 'mmx-1',
       loadOrderId: 'load-1', sourceAmount: '100', targetAmount: '90', routeStatus: 'settled',
       enqueueAckElapsedMs: 1, commandObservedElapsedMs: 2, economicCompletionElapsedMs: 3,

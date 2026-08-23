@@ -46,6 +46,7 @@ import { setupCrossLoadCohort, waitForSettledCrossRoute } from './worker-cross-s
 
 const SOURCE_CHAIN_ID = 31_337;
 const TARGET_CHAIN_ID = 31_338;
+// Credit covers the whole burst: every route in flight holds its full amount.
 const SETUP_CREDIT_MULTIPLIER = 4n;
 
 export const resolveLoadJurisdictionRpc = (rpc: string, apiBaseUrl: string): string => {
@@ -102,7 +103,7 @@ const importJurisdiction = async (
 };
 
 export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
-  if (args.swaps !== 1) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ONLY_N1_IMPLEMENTED');
+  const burstSize = args.swaps;
   process.env['XLN_JURISDICTIONS_PATH'] = join(args.workDir, 'prod-main', 'jurisdictions.json');
   const meshRootSeed = readFileSync(join(args.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
   if (!meshRootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
@@ -149,8 +150,8 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       targetJurisdiction,
       sourceTokenId: marketMakerRoute.source.tokenId,
       targetTokenId: marketMakerRoute.target.tokenId,
-      sourceCredit: marketMakerRoute.source.amount * SETUP_CREDIT_MULTIPLIER,
-      targetCredit: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER,
+      sourceCredit: marketMakerRoute.source.amount * SETUP_CREDIT_MULTIPLIER * BigInt(burstSize),
+      targetCredit: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER * BigInt(burstSize),
       custodyRuntimeSeed,
     });
     await sendObserved(hub, `prod-cross-credit-${targetHub.entityId.slice(-8)}`, {
@@ -163,7 +164,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
           data: {
             counterpartyEntityId: cohort.target.entityId,
             tokenId: marketMakerRoute.target.tokenId,
-            amount: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER,
+            amount: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER * BigInt(burstSize),
           },
         }],
       }],
@@ -178,10 +179,9 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     await exportReplayBaseSnapshotIfConfigured(hub);
     const hubBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const loadBefore = decodeLoadFrame(await load.adapter.read<unknown>('frame/latest'));
-    const loadOrderId = `prod-cross-${hubBefore.height}-${marketMakerRoute.orderId}`;
     const now = Date.now();
-    const route = withCanonicalCrossJurisdictionRouteHash({
-      orderId: loadOrderId,
+    const buildRoute = (index: number) => withCanonicalCrossJurisdictionRouteHash({
+      orderId: `prod-cross-${hubBefore.height}-${index}-${marketMakerRoute.orderId}`,
       makerEntityId: cohort.target.entityId,
       hubEntityId: targetHub.entityId,
       ...(marketMakerRoute.bookOwnerEntityId ? { bookOwnerEntityId: marketMakerRoute.bookOwnerEntityId } : {}),
@@ -210,25 +210,32 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       riskMode: 'fully_collateralized',
       status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 10 * 60_000,
     });
+    const routes = Array.from({ length: burstSize }, (_, index) => buildRoute(index));
+    const loadOrderId = routes[0]!.orderId;
     const hubWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'h1'));
     const loadWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'custody', 'daemon-db'));
     const hubWalBytesBefore = directoryBytes(hubWal);
     const loadWalBytesBefore = directoryBytes(loadWal);
     const startedAt = performance.now();
+    // One burst: every route is submitted in one Runtime input, then all of
+    // them must reach committed full fill on both hub entities.
     const observed = await sendObserved(load, loadOrderId, {
       runtimeTxs: [],
-      entityInputs: [
+      entityInputs: routes.flatMap(route => [
         { entityId: cohort.target.entityId, signerId: cohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
         { entityId: cohort.source.entityId, signerId: cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-      ],
+      ]),
     });
-    const settled = await waitForSettledCrossRoute(
-      hub, sourceHub.entityId, targetHub.entityId, loadOrderId,
+    const settledRoutes = await Promise.all(routes.map(route => waitForSettledCrossRoute(
+      hub, sourceHub.entityId, targetHub.entityId, route.orderId,
       marketMakerRoute.target.amount, marketMakerRoute.source.amount,
-    );
+    )));
+    const settled = settledRoutes[0]!;
     const economicCompletionElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const report = decodeCrossLoadReport({
-      schema: 'xln-production-cross-swap-load-v1', mode: 'cross', configuredBurstSize: 1,
+      schema: 'xln-production-cross-swap-load-v1', mode: 'cross', configuredBurstSize: burstSize,
+      settledRoutes: settledRoutes.length,
+      economicTps: settledRoutes.length * 1_000 / Math.max(1, Math.ceil(performance.now() - startedAt)),
       completionAuthority: 'committed_cross_route_full_fill',
       marketMakerOrderId: marketMakerRoute.orderId, loadOrderId,
       sourceAmount: settled.filledSourceAmount!.toString(),

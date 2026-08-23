@@ -13,7 +13,10 @@ import { decodeHltEnvironmentManifest, type HltEnvironmentManifest } from '../bo
 export type CrossLoadReport = Readonly<{
   schema: 'xln-production-cross-swap-load-v1';
   mode: 'cross';
-  configuredBurstSize: 1;
+  configuredBurstSize: number;
+  settledRoutes: number;
+  /** settled routes / wall time from burst submission to the last committed full fill. */
+  economicTps: number;
   completionAuthority: 'committed_cross_route_full_fill';
   marketMakerOrderId: string;
   loadOrderId: string;
@@ -53,7 +56,7 @@ const decodeReportFrame = (value: unknown): LoadFrame => {
 export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
   const report = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_INVALID');
   requireExactBoundaryKeys(report, [
-    'schema', 'mode', 'configuredBurstSize', 'completionAuthority', 'marketMakerOrderId',
+    'schema', 'mode', 'configuredBurstSize', 'settledRoutes', 'economicTps', 'completionAuthority', 'marketMakerOrderId',
     'loadOrderId', 'sourceAmount', 'targetAmount', 'routeStatus', 'enqueueAckElapsedMs',
     'commandObservedElapsedMs', 'economicCompletionElapsedMs', 'hubWalBytesBefore',
     'hubWalBytesAfter', 'loadWalBytesBefore', 'loadWalBytesAfter', 'hubDurableBefore',
@@ -61,7 +64,7 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
   ], [], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_FIELDS_INVALID');
   if (
     report['schema'] !== 'xln-production-cross-swap-load-v1' ||
-    report['mode'] !== 'cross' || report['configuredBurstSize'] !== 1 ||
+    report['mode'] !== 'cross' ||
     report['completionAuthority'] !== 'committed_cross_route_full_fill' ||
     report['routeStatus'] !== 'settled'
   ) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_REPORT_SCHEMA_INVALID');
@@ -70,6 +73,13 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
     'hubWalBytesBefore', 'hubWalBytesAfter', 'loadWalBytesBefore', 'loadWalBytesAfter',
   ] as const;
   for (const field of numeric) requireBoundaryInteger(report[field], `PRODUCTION_SWAP_LOAD_CROSS_REPORT_${field}`);
+  const configuredBurstSize = requireBoundaryInteger(report['configuredBurstSize'], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_BURST', 1);
+  const settledRoutes = requireBoundaryInteger(report['settledRoutes'], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_SETTLED', 0);
+  if (settledRoutes !== configuredBurstSize) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_REPORT_BURST_INCOMPLETE');
+  const economicTps = report['economicTps'];
+  if (typeof economicTps !== 'number' || !Number.isFinite(economicTps) || economicTps < 0) {
+    throw new Error('PRODUCTION_SWAP_LOAD_CROSS_REPORT_TPS_INVALID');
+  }
   const enqueueAckElapsedMs = Number(report['enqueueAckElapsedMs']);
   const commandObservedElapsedMs = Number(report['commandObservedElapsedMs']);
   const economicCompletionElapsedMs = Number(report['economicCompletionElapsedMs']);
@@ -77,7 +87,7 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
     throw new Error('PRODUCTION_SWAP_LOAD_CROSS_REPORT_TIMING_INVALID');
   }
   return {
-    schema: report['schema'], mode: report['mode'], configuredBurstSize: 1,
+    schema: report['schema'], mode: report['mode'], configuredBurstSize, settledRoutes, economicTps,
     completionAuthority: report['completionAuthority'],
     marketMakerOrderId: requireText(report['marketMakerOrderId'], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_MM_ORDER_INVALID'),
     loadOrderId: requireText(report['loadOrderId'], 'PRODUCTION_SWAP_LOAD_CROSS_REPORT_LOAD_ORDER_INVALID'),
