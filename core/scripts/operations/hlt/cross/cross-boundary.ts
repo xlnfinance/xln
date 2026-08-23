@@ -131,11 +131,11 @@ export const decodeCommittedCrossRoutes = (value: unknown): CrossJurisdictionSwa
   return routes;
 };
 
-export const selectMarketMakerCrossRoute = (
+export const selectMarketMakerCrossRoutes = (
   routes: readonly CrossJurisdictionSwapRoute[],
   sourceHubEntityId: string,
   targetHubEntityId: string,
-): CrossJurisdictionSwapRoute => {
+): CrossJurisdictionSwapRoute[] => {
   const sourceHub = sourceHubEntityId.toLowerCase();
   const targetHub = targetHubEntityId.toLowerCase();
   const matches = routes.filter(route =>
@@ -150,5 +150,12 @@ export const selectMarketMakerCrossRoute = (
     const rightPrice = right.priceTicks ?? 0n;
     if (leftPrice !== rightPrice) return leftPrice < rightPrice ? -1 : 1;
     return left.orderId.localeCompare(right.orderId);
-  })[0]!;
+  });
 };
+
+export const selectMarketMakerCrossRoute = (
+  routes: readonly CrossJurisdictionSwapRoute[],
+  sourceHubEntityId: string,
+  targetHubEntityId: string,
+): CrossJurisdictionSwapRoute =>
+  selectMarketMakerCrossRoutes(routes, sourceHubEntityId, targetHubEntityId)[0]!;

@@ -19,7 +19,7 @@ import {
 import {
   decodeCrossLoadReport,
   decodeCommittedCrossRoutes,
-  selectMarketMakerCrossRoute,
+  selectMarketMakerCrossRoutes,
 } from './cross-boundary';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
@@ -121,11 +121,19 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     const entities = decodeEntitySummaries(await hub.adapter.read<unknown>('entities'));
     const sourceHub = selectLocalHubIdentity(entities, hub.adapter.runtimeId, SOURCE_CHAIN_ID);
     const targetHub = selectLocalHubIdentity(entities, hub.adapter.runtimeId, TARGET_CHAIN_ID);
-    const marketMakerRoute = selectMarketMakerCrossRoute(
+    const marketMakerLevels = selectMarketMakerCrossRoutes(
       decodeCommittedCrossRoutes(await hub.adapter.read<unknown>(`entity/${sourceHub.entityId}`)),
       sourceHub.entityId,
       targetHub.entityId,
     );
+    if (marketMakerLevels.length < burstSize) {
+      throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_MM_DEPTH_INSUFFICIENT:${marketMakerLevels.length}:${burstSize}`);
+    }
+    const marketMakerRoute = marketMakerLevels[0]!;
+    const totalSourceCredit = marketMakerLevels.slice(0, burstSize)
+      .reduce((sum, level) => sum + level.source.amount, 0n);
+    const totalTargetCredit = marketMakerLevels.slice(0, burstSize)
+      .reduce((sum, level) => sum + level.target.amount, 0n);
     const apiBaseUrl = `http://127.0.0.1:${args.portBase + 4}`;
     const sourceJ = resolveMeshJurisdictionConfig(`${apiBaseUrl}/rpc`);
     const targetJConfig = resolveSecondaryJurisdictions(sourceJ.rpc).find(value => value.chainId === TARGET_CHAIN_ID);
@@ -150,8 +158,8 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       targetJurisdiction,
       sourceTokenId: marketMakerRoute.source.tokenId,
       targetTokenId: marketMakerRoute.target.tokenId,
-      sourceCredit: marketMakerRoute.source.amount * SETUP_CREDIT_MULTIPLIER * BigInt(burstSize),
-      targetCredit: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER * BigInt(burstSize),
+      sourceCredit: totalSourceCredit * SETUP_CREDIT_MULTIPLIER,
+      targetCredit: totalTargetCredit * SETUP_CREDIT_MULTIPLIER,
       custodyRuntimeSeed,
     });
     await sendObserved(hub, `prod-cross-credit-${targetHub.entityId.slice(-8)}`, {
@@ -164,7 +172,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
           data: {
             counterpartyEntityId: cohort.target.entityId,
             tokenId: marketMakerRoute.target.tokenId,
-            amount: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER * BigInt(burstSize),
+            amount: totalTargetCredit * SETUP_CREDIT_MULTIPLIER,
           },
         }],
       }],
@@ -180,36 +188,39 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     const hubBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const loadBefore = decodeLoadFrame(await load.adapter.read<unknown>('frame/latest'));
     const now = Date.now();
-    const buildRoute = (index: number) => withCanonicalCrossJurisdictionRouteHash({
-      orderId: `prod-cross-${hubBefore.height}-${index}-${marketMakerRoute.orderId}`,
+    const buildRoute = (index: number) => {
+      const level = marketMakerLevels[index]!;
+      return withCanonicalCrossJurisdictionRouteHash({
+      orderId: `prod-cross-${hubBefore.height}-${index}-${level.orderId}`,
       makerEntityId: cohort.target.entityId,
       hubEntityId: targetHub.entityId,
-      ...(marketMakerRoute.bookOwnerEntityId ? { bookOwnerEntityId: marketMakerRoute.bookOwnerEntityId } : {}),
+      ...(level.bookOwnerEntityId ? { bookOwnerEntityId: level.bookOwnerEntityId } : {}),
       sourceSignerId: cohort.target.signerId,
       sourceHubSignerId: targetHub.signerId,
       targetHubSignerId: sourceHub.signerId,
       targetSignerId: cohort.source.signerId,
-      ...(marketMakerRoute.bookHubSignerId ? { bookHubSignerId: marketMakerRoute.bookHubSignerId } : {}),
+      ...(level.bookHubSignerId ? { bookHubSignerId: level.bookHubSignerId } : {}),
       source: {
-        jurisdiction: marketMakerRoute.target.jurisdiction,
+        jurisdiction: level.target.jurisdiction,
         entityId: cohort.target.entityId,
         counterpartyEntityId: targetHub.entityId,
-        tokenId: marketMakerRoute.target.tokenId,
-        amount: marketMakerRoute.target.amount,
+        tokenId: level.target.tokenId,
+        amount: level.target.amount,
       },
       target: {
-        jurisdiction: marketMakerRoute.source.jurisdiction,
+        jurisdiction: level.source.jurisdiction,
         entityId: sourceHub.entityId,
         counterpartyEntityId: cohort.source.entityId,
-        tokenId: marketMakerRoute.source.tokenId,
-        amount: marketMakerRoute.source.amount,
+        tokenId: level.source.tokenId,
+        amount: level.source.amount,
       },
       sourceDisputeConfig: { ...targetAccount.state.disputeConfig },
       targetDisputeConfig: { ...sourceAccount.state.disputeConfig },
-      ...(marketMakerRoute.priceTicks !== undefined ? { priceTicks: marketMakerRoute.priceTicks } : {}),
+      ...(level.priceTicks !== undefined ? { priceTicks: level.priceTicks } : {}),
       riskMode: 'fully_collateralized',
       status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 10 * 60_000,
-    });
+      });
+    };
     const routes = Array.from({ length: burstSize }, (_, index) => buildRoute(index));
     const loadOrderId = routes[0]!.orderId;
     const hubWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'h1'));
@@ -217,18 +228,26 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     const hubWalBytesBefore = directoryBytes(hubWal);
     const loadWalBytesBefore = directoryBytes(loadWal);
     const startedAt = performance.now();
-    // One burst: every route is submitted in one Runtime input, then all of
-    // them must reach committed full fill on both hub entities.
-    const observed = await sendObserved(load, loadOrderId, {
-      runtimeTxs: [],
-      entityInputs: routes.flatMap(route => [
-        { entityId: cohort.target.entityId, signerId: cohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-        { entityId: cohort.source.entityId, signerId: cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-      ]),
-    });
-    const settledRoutes = await Promise.all(routes.map(route => waitForSettledCrossRoute(
+    // One burst: every route is one atomic pair envelope (the cross-j pair
+    // cohort admits exactly two legs per envelope), submitted back to back;
+    // then every route must reach committed full fill on both hub entities.
+    let observed = { enqueueAckElapsedMs: 0, commandObservedElapsedMs: 0 };
+    for (const route of routes) {
+      const routeObserved = await sendObserved(load, route.orderId, {
+        runtimeTxs: [],
+        entityInputs: [
+          { entityId: cohort.target.entityId, signerId: cohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
+          { entityId: cohort.source.entityId, signerId: cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
+        ],
+      });
+      observed = {
+        enqueueAckElapsedMs: Math.max(observed.enqueueAckElapsedMs, routeObserved.enqueueAckElapsedMs),
+        commandObservedElapsedMs: Math.max(observed.commandObservedElapsedMs, routeObserved.commandObservedElapsedMs),
+      };
+    }
+    const settledRoutes = await Promise.all(routes.map((route, index) => waitForSettledCrossRoute(
       hub, sourceHub.entityId, targetHub.entityId, route.orderId,
-      marketMakerRoute.target.amount, marketMakerRoute.source.amount,
+      marketMakerLevels[index]!.target.amount, marketMakerLevels[index]!.source.amount,
     )));
     const settled = settledRoutes[0]!;
     const economicCompletionElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
