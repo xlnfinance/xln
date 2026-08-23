@@ -9,6 +9,7 @@
  * key stores and relay sessions, so every hop crosses the real P2P path.
  */
 
+import { forEachLimited } from '../../../../support/collections/for-each-limited';
 import { collectHltEnvironmentManifest, isProductionEquivalentHltEnvironment } from '../boundary/environment-manifest';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -115,17 +116,6 @@ const withReadTimeout = <T>(promise: Promise<T>, timeoutMs: number, label: strin
 // Cap is process-global, not per daemon: 1000 users at 2/runtime is 500
 // daemons × 16 = 8000 sockets and FailedToOpenSocket on localhost.
 const READ_CONCURRENCY = 16;
-const forEachLimited = async <T>(items: readonly T[], fn: (item: T) => Promise<void>): Promise<void> => {
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const item = items[cursor]!;
-      cursor += 1;
-      await fn(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, items.length) }, worker));
-};
 
 const isTransientGossipSocketError = (error: unknown): boolean => {
   const text = error instanceof Error ? error.message : String(error);
@@ -157,7 +147,7 @@ export const waitForRoutableReceivers = async (
     const pendingReads = confirmed.flatMap((settled, daemonIndex) =>
       settled.size === required[daemonIndex]!.length ? [] : [daemonIndex]);
     let socketErrors = 0;
-    await forEachLimited(pendingReads, async daemonIndex => {
+    await forEachLimited(pendingReads, READ_CONCURRENCY, async daemonIndex => {
       try {
         const unsettled = required[daemonIndex]!.filter(receiverId => !confirmed[daemonIndex]!.has(receiverId));
         const profiles = await senders[daemonIndex]!.runtime.control.gossipProfilesCounterparties(unsettled);

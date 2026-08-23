@@ -1,5 +1,6 @@
 /** Deterministic setup of real user Entity/Account lanes, one sovereign Runtime per user. */
 
+import { forEachLimited } from '../../../../support/collections/for-each-limited';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ethers } from 'ethers';
@@ -22,6 +23,8 @@ import { importEntity } from '../../../../runtime/registration/entity-creation';
 import type { RuntimeInput } from '../../../../runtime/types';
 import { decodeEntitySummaries, type LoadIdentity } from '../boundary/worker-boundary';
 import { sendObserved, type ConnectedRuntime } from '../worker-runtime';
+
+const P2P_CONFIGURE_CONCURRENCY = 32;
 
 const VISIBILITY_TIMEOUT_MS = 60_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -352,10 +355,12 @@ const provisionLoadPopulation = async (options: {
   })));
   await waitForPopulationEntities(runtimes);
 
-  await Promise.all(runtimes.map(lane => lane.runtime.control.configureP2P({
+  // One control POST per runtime against 1000 distinct daemon ports: unbounded
+  // fan-out exhausted ephemeral ports (FailedToOpenSocket) before load began.
+  await forEachLimited(runtimes, P2P_CONFIGURE_CONCURRENCY, lane => lane.runtime.control.configureP2P({
     relayUrls: [lane.relayUrl],
     advertiseEntityIds: [lane.identity.entityId],
-  })));
+  }).then(() => undefined));
   // First every user learns H1 and completes its direct handshake. Only then
   // may H1 fetch user profiles: the prior concurrent barrier repeatedly asked
   // for users whose later host processes had not announced yet, exhausting

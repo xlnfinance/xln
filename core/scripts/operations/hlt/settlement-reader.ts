@@ -4,6 +4,7 @@
  * completion from the orderbook counter alone.
  */
 
+import { forEachLimited } from '../../../support/collections/for-each-limited';
 import {
   decodeSettlementEvidenceResponse,
   MAX_PENDING_ACCOUNT_SAMPLE,
@@ -39,22 +40,6 @@ const LOAD_EVIDENCE_CONCURRENCY = 8;
 const settlementPollMs = (pairCount: number): number =>
   pairCount > 64 ? SETTLEMENT_POLL_WIDE_MS : SETTLEMENT_POLL_MS;
 
-const forEachLimited = async <T>(
-  items: readonly T[],
-  concurrency: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> => {
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const item = items[cursor];
-      if (item === undefined) throw new Error(`PRODUCTION_SWAP_SETTLEMENT_CURSOR_INVALID:${cursor}`);
-      cursor += 1;
-      await fn(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-};
 type AccountResponse = SettlementEvidenceResponse['accounts'][number];
 
 export const sameBilateralAccountHead = (
