@@ -154,6 +154,8 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::CheckpointIncomplete { .. } => "RSCORE_BATCH_CHECKPOINT_INCOMPLETE",
         BatchError::CheckpointAccountLeaf { .. } => "RSCORE_BATCH_CHECKPOINT_ACCOUNT_LEAF",
         BatchError::CheckpointRoot { .. } => "RSCORE_BATCH_CHECKPOINT_ROOT",
+        BatchError::CheckpointSignerDigest { .. } => "RSCORE_BATCH_CHECKPOINT_SIGNER_DIGEST",
+        BatchError::CheckpointToken { .. } => "RSCORE_BATCH_CHECKPOINT_TOKEN",
         BatchError::SignerRequired => "RSCORE_BATCH_SIGNER_REQUIRED",
         BatchError::SignerUnknownEntity { .. } => "RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY",
         BatchError::Signing(_) => "RSCORE_BATCH_SIGNING",

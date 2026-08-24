@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use fixture::{clock, engine, payment, round, stand};
 use xln_rscore_batch::{
     AccountCheckpointRows, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
-    AccountRestore, AccountsCheckpoint, BatchError, CheckpointExpectation,
+    AccountRestore, AccountsCheckpoint, BatchError, CheckpointExpectation, CheckpointToken,
 };
 use xln_rscore_engine::{
     AccountReplica, AccountState, AccountStateSeed, AckOutcome, ConsensusSnapshot, Delta,
@@ -83,12 +83,11 @@ struct AccountRow {
 #[derive(Default)]
 struct Database {
     accounts: BTreeMap<AccountId, AccountRow>,
-    /// The revision the last durable write covered — what the runtime would
-    /// pass back to `commit_checkpoint`.
-    written_revision: u64,
-    /// The tree root that revision produced. A real store keeps it for the
-    /// same reason this one does: without it a partial load looks valid.
-    accounts_root: [u8; 32],
+    /// The token of the last durable write — what the runtime passes back to
+    /// `commit_checkpoint`, and what a restore must reproduce. A real store
+    /// keeps it for the same reason this one does: without it a partial load,
+    /// or one with a swapped signer, looks valid.
+    token: Option<CheckpointToken>,
 }
 
 impl Database {
@@ -107,16 +106,11 @@ impl Database {
         for account_id in &checkpoint.removed {
             self.accounts.remove(account_id);
         }
-        self.written_revision = checkpoint.revision;
-        self.accounts_root = checkpoint.accounts_root;
+        self.token = Some(checkpoint.token);
     }
 
     fn expectation(&self) -> CheckpointExpectation {
-        CheckpointExpectation {
-            revision: self.written_revision,
-            accounts_root: self.accounts_root,
-            account_count: self.accounts.len(),
-        }
+        self.token.expect("a checkpoint was written")
     }
 
     fn restore_rows(&self) -> Vec<AccountRestore> {
@@ -169,11 +163,11 @@ fn rows_for<'a>(
 fn the_first_checkpoint_carries_every_account() {
     let stand = stand(4);
     let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
-    assert_eq!(checkpoint.base_revision, 0);
-    assert_eq!(checkpoint.revision, stand.payer.revision());
+    assert_eq!(checkpoint.base_revision(), 0);
+    assert_eq!(checkpoint.revision(), stand.payer.revision());
     assert_eq!(checkpoint.accounts.len(), 4);
     assert!(checkpoint.removed.is_empty());
-    assert_eq!(checkpoint.accounts_root, stand.payer.accounts_root());
+    assert_eq!(checkpoint.accounts_root(), stand.payer.accounts_root());
     for rows in &checkpoint.accounts {
         assert!(
             rows.deltas
@@ -197,12 +191,12 @@ fn a_committed_checkpoint_leaves_nothing_behind() {
     let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
     stand
         .payer
-        .commit_checkpoint(checkpoint.revision)
+        .commit_checkpoint(&checkpoint.token)
         .expect("commit");
     let next = stand.payer.checkpoint_changes().expect("checkpoint");
     assert!(next.is_empty(), "{next:?}");
-    assert_eq!(next.base_revision, checkpoint.revision);
-    assert_eq!(next.revision, checkpoint.revision);
+    assert_eq!(next.base_revision(), checkpoint.revision());
+    assert_eq!(next.revision(), checkpoint.revision());
 }
 
 /// Only the accounts that moved are in the next checkpoint, and only the
@@ -211,10 +205,7 @@ fn a_committed_checkpoint_leaves_nothing_behind() {
 fn only_what_moved_is_shipped() {
     let mut stand = stand(3);
     let first = stand.payer.checkpoint_changes().expect("checkpoint");
-    stand
-        .payer
-        .commit_checkpoint(first.revision)
-        .expect("commit");
+    stand.payer.commit_checkpoint(&first.token).expect("commit");
 
     let moved = stand.pairs[1].payer_account;
     stand
@@ -247,10 +238,7 @@ fn only_what_moved_is_shipped() {
 fn a_committed_payment_moves_one_delta_leaf() {
     let mut stand = stand(2);
     let first = stand.payer.checkpoint_changes().expect("checkpoint");
-    stand
-        .payer
-        .commit_checkpoint(first.revision)
-        .expect("commit");
+    stand.payer.commit_checkpoint(&first.token).expect("commit");
     round(&mut stand, 1_700_000_000_000, 25);
 
     let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
@@ -282,7 +270,7 @@ fn an_engine_restored_from_the_database_reproduces_the_accounts_root() {
         database.write(&checkpoint);
         stand
             .payer
-            .commit_checkpoint(checkpoint.revision)
+            .commit_checkpoint(&checkpoint.token)
             .expect("commit");
     }
 
@@ -315,10 +303,7 @@ fn an_engine_restored_from_the_database_reproduces_the_accounts_root() {
 fn an_unacknowledged_checkpoint_is_carried_into_the_next_one() {
     let mut stand = stand(2);
     let first = stand.payer.checkpoint_changes().expect("checkpoint");
-    stand
-        .payer
-        .commit_checkpoint(first.revision)
-        .expect("commit");
+    stand.payer.commit_checkpoint(&first.token).expect("commit");
     let mut written = Database::default();
     written.write(&first);
 
@@ -329,8 +314,8 @@ fn an_unacknowledged_checkpoint_is_carried_into_the_next_one() {
 
     round(&mut stand, 1_700_000_000_001, 30);
     let recovered = stand.payer.checkpoint_changes().expect("checkpoint");
-    assert_eq!(recovered.base_revision, first.revision);
-    assert!(recovered.revision > lost.revision);
+    assert_eq!(recovered.base_revision(), first.revision());
+    assert!(recovered.revision() > lost.revision());
 
     written.write(&recovered);
     let mut restored = engine();
@@ -340,30 +325,45 @@ fn an_unacknowledged_checkpoint_is_carried_into_the_next_one() {
     assert_eq!(root, stand.payer.accounts_root());
 }
 
-/// Only the revision that was read may be acknowledged.
+/// Only the checkpoint that was read may be acknowledged — and a revision
+/// alone does not name one: the same number can stand for different accounts,
+/// or for the same accounts signed by someone else.
 #[test]
-fn commit_checkpoint_refuses_any_other_revision() {
+fn commit_checkpoint_refuses_any_other_checkpoint() {
     let mut stand = stand(2);
     let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
+
+    let mut wrong_revision = checkpoint.token;
+    wrong_revision.revision += 1;
     assert!(matches!(
-        stand.payer.commit_checkpoint(checkpoint.revision - 1),
-        Err(BatchError::CheckpointRevision { .. }),
+        stand.payer.commit_checkpoint(&wrong_revision),
+        Err(BatchError::CheckpointToken { .. }),
     ));
+
+    let mut wrong_root = checkpoint.token;
+    wrong_root.accounts_root[0] ^= 0x01;
     assert!(matches!(
-        stand.payer.commit_checkpoint(checkpoint.revision + 1),
-        Err(BatchError::CheckpointRevision { .. }),
+        stand.payer.commit_checkpoint(&wrong_root),
+        Err(BatchError::CheckpointToken { .. }),
     ));
+
+    // Same accounts, same root, different signers: the accounts root cannot
+    // see this, so the token has to.
+    let mut wrong_signers = checkpoint.token;
+    wrong_signers.signer_digest[0] ^= 0x01;
+    assert!(matches!(
+        stand.payer.commit_checkpoint(&wrong_signers),
+        Err(BatchError::CheckpointToken { .. }),
+    ));
+
     // The engine moves on, and the stale read may no longer be acknowledged.
     round(&mut stand, 1_700_000_000_000, 25);
     assert!(matches!(
-        stand.payer.commit_checkpoint(checkpoint.revision),
-        Err(BatchError::CheckpointRevision { .. }),
+        stand.payer.commit_checkpoint(&checkpoint.token),
+        Err(BatchError::CheckpointToken { .. }),
     ));
     let fresh = stand.payer.checkpoint_changes().expect("checkpoint");
-    stand
-        .payer
-        .commit_checkpoint(fresh.revision)
-        .expect("commit");
+    stand.payer.commit_checkpoint(&fresh.token).expect("commit");
 }
 
 /// A frame in flight survives the restart: the restored engine holds the same
@@ -398,7 +398,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
     database.write(&checkpoint);
     stand
         .payer
-        .commit_checkpoint(checkpoint.revision)
+        .commit_checkpoint(&checkpoint.token)
         .expect("commit");
 
     // The payer process dies here. Everything below runs on the rebuilt one.
@@ -626,4 +626,84 @@ fn a_wave_with_two_rows_for_one_account_keeps_both() {
         .find(|row| row.account_id == account_id)
         .expect("row");
     assert_eq!(rows.frame.txs.len(), 2);
+}
+
+/// A restore that fails must leave the engine exactly as it was. Half a load
+/// is worse than none: the accounts would be from the database and the
+/// signers from wherever the failure stopped.
+#[test]
+fn a_failed_restore_changes_nothing() {
+    let mut live = stand(3);
+    round(&mut live, 1_700_000_000_000, 25);
+    let root_before = live.payer.accounts_root();
+    let revision_before = live.payer.revision();
+    let token_before = live.payer.checkpoint_token().expect("token");
+
+    // A database from a different engine, offered under a wrong root.
+    let mut source = stand(1);
+    round(&mut source, 1_700_000_000_000, 25);
+    let mut database = Database::default();
+    database.write(&source.payer.checkpoint_changes().expect("checkpoint"));
+    let mut wrong_root = database.expectation();
+    wrong_root.accounts_root[0] ^= 0x01;
+    assert!(matches!(
+        live.payer
+            .restore_accounts(database.restore_rows(), &wrong_root),
+        Err(BatchError::CheckpointRoot { .. }),
+    ));
+    assert_eq!(live.payer.accounts_root(), root_before);
+    assert_eq!(live.payer.revision(), revision_before);
+    assert_eq!(live.payer.checkpoint_token().expect("token"), token_before);
+    assert_eq!(live.payer.account_count(), 3);
+
+    // Same rows, right root, wrong signer digest: refused just as hard, and
+    // the signers the engine already had are untouched.
+    let mut wrong_signers = database.expectation();
+    wrong_signers.signer_digest[0] ^= 0x01;
+    assert!(matches!(
+        live.payer
+            .restore_accounts(database.restore_rows(), &wrong_signers),
+        Err(BatchError::CheckpointSignerDigest { .. }),
+    ));
+    assert_eq!(live.payer.checkpoint_token().expect("token"), token_before);
+
+    // A row claiming a signer that is not its owner's is refused before
+    // anything is built.
+    let mut rows = database.restore_rows();
+    rows[0].signer_id = "payer-9".to_string();
+    assert!(matches!(
+        live.payer.restore_accounts(rows, &database.expectation()),
+        Err(BatchError::SignerUnknownEntity { .. }),
+    ));
+    assert_eq!(live.payer.checkpoint_token().expect("token"), token_before);
+
+    // And the honest database still loads.
+    let root = live
+        .payer
+        .restore_accounts(database.restore_rows(), &database.expectation())
+        .expect("restore");
+    assert_eq!(root, source.payer.accounts_root());
+    assert_eq!(live.payer.revision(), database.expectation().revision);
+}
+
+/// An engine comes up at the revision it was restored to, not one past it:
+/// seeding accounts is not a state change the runtime ever wrote.
+#[test]
+fn seeding_does_not_advance_the_restored_revision() {
+    // One process serves one owner entity, so the constructor path seeds
+    // accounts that all belong to the session's own signer.
+    let mut source = stand(1);
+    round(&mut source, 1_700_000_000_000, 25);
+    let mut database = Database::default();
+    database.write(&source.payer.checkpoint_changes().expect("checkpoint"));
+    let expectation = database.expectation();
+
+    // The same accounts, handed to a fresh engine as its restore seeds.
+    let rows = database.restore_rows();
+    let seeded = fixture::seeded_engine(expectation.revision, &rows, &rows[0].signer_id);
+    assert_eq!(seeded.revision(), expectation.revision);
+    // A later upsert is a state change, and does advance it.
+    let mut seeded = seeded;
+    assert!(seeded.upsert_accounts(Vec::new()).is_ok());
+    assert_eq!(seeded.revision(), expectation.revision);
 }

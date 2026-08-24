@@ -14,7 +14,7 @@ mod types;
 
 pub use checkpoint::{
     AccountCheckpointHeader, AccountCheckpointRows, AccountRestore, AccountsCheckpoint,
-    CheckpointExpectation,
+    CheckpointExpectation, CheckpointToken,
 };
 pub use consensus::{
     AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict, ProposalRow,

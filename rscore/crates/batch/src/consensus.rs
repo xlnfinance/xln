@@ -17,7 +17,9 @@ use xln_rscore_engine::{
 };
 use xln_rscore_protocol::{PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap};
 
-use crate::checkpoint::{AccountRestore, AccountsCheckpoint, CheckpointExpectation, account_rows};
+use crate::checkpoint::{
+    AccountRestore, AccountsCheckpoint, CheckpointExpectation, CheckpointToken, account_rows,
+};
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, EngineGeneration};
 
@@ -154,6 +156,11 @@ impl StatefulConsensusEngine {
             pending: None,
         };
         engine.upsert_accounts(seeds)?;
+        // Seeding is not a state change: the engine comes up at the revision
+        // it was restored to, not one past it, or every restart would report a
+        // revision the runtime never wrote.
+        engine.revision = revision;
+        engine.checkpoint_revision = revision;
         Ok(engine)
     }
 
@@ -516,15 +523,7 @@ impl StatefulConsensusEngine {
         entity_id: [u8; 32],
         signer_id: &str,
     ) -> Result<(), BatchError> {
-        let identity = SigningIdentity::from_seed(
-            &self.seed,
-            signer_id,
-            entity_id,
-            1,
-            1,
-            BoardDelays::default(),
-        )
-        .map_err(|error| BatchError::Signing(error.to_string()))?;
+        let identity = self.derive_identity(entity_id, signer_id)?;
         self.identities.insert(entity_id, identity);
         Ok(())
     }
@@ -569,27 +568,61 @@ impl StatefulConsensusEngine {
             }
         }
         Ok(AccountsCheckpoint {
-            base_revision: self.checkpoint_revision,
-            revision: self.revision,
-            accounts_root: self.accounts.root_hash(),
+            token: self.checkpoint_token()?,
             accounts,
             removed,
         })
     }
 
-    /// Accept a checkpoint the runtime has made durable. Only the exact
-    /// revision that was read may be committed: anything else would leave the
-    /// database missing the rows written in between.
-    pub fn commit_checkpoint(&mut self, revision: u64) -> Result<(), BatchError> {
+    /// The token for the state as it stands: what a restore must reproduce.
+    pub fn checkpoint_token(&self) -> Result<CheckpointToken, BatchError> {
+        Ok(CheckpointToken {
+            base_revision: self.checkpoint_revision,
+            revision: self.revision,
+            accounts_root: self.accounts.root_hash(),
+            signer_digest: self.signer_digest()?,
+            account_count: self.accounts.len(),
+        })
+    }
+
+    fn signer_digest(&self) -> Result<[u8; 32], BatchError> {
+        let mut rows = Vec::with_capacity(self.accounts.len());
+        for (key, account) in self.accounts.iter() {
+            let owner = account.replica().owner();
+            let signer_id = self
+                .signer_of(owner.as_bytes())
+                .ok_or(BatchError::SignerRequired)?;
+            rows.push((account_id_of(key)?, *owner.as_bytes(), signer_id));
+        }
+        Ok(crate::checkpoint::signer_digest(rows.into_iter()))
+    }
+
+    /// Accept a checkpoint the runtime has made durable.
+    ///
+    /// The token must be the one that was read: a revision alone would let an
+    /// acknowledgement land on a different checkpoint — same number, different
+    /// accounts, or the same accounts signed by someone else.
+    pub fn commit_checkpoint(&mut self, token: &CheckpointToken) -> Result<(), BatchError> {
         self.assert_no_pending_wave()?;
-        if revision != self.revision {
-            return Err(BatchError::CheckpointRevision {
-                actual: revision,
-                expected: self.revision,
+        let current = self.checkpoint_token()?;
+        if *token != current {
+            return Err(BatchError::CheckpointToken {
+                actual: format!(
+                    "{}:{}:{}",
+                    token.revision,
+                    hex_of(&token.accounts_root),
+                    hex_of(&token.signer_digest)
+                ),
+                expected: format!(
+                    "{}:{}:{}",
+                    current.revision,
+                    hex_of(&current.accounts_root),
+                    hex_of(&current.signer_digest)
+                ),
             });
         }
         self.checkpoint = self.accounts.clone();
-        self.checkpoint_revision = revision;
+        self.checkpoint_revision = current.revision;
         Ok(())
     }
 
@@ -613,9 +646,16 @@ impl StatefulConsensusEngine {
                 expected: expected.account_count,
             });
         }
+        // Everything is built beside the live store. A restore that fails must
+        // leave this engine exactly as it was, not half-loaded from a database
+        // that turned out not to match.
+        let mut identities: BTreeMap<[u8; 32], SigningIdentity> = BTreeMap::new();
+        let mut signer_rows = Vec::with_capacity(rows.len());
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            self.register_signer(*row.replica.owner().as_bytes(), &row.signer_id)?;
+            let owner = *row.replica.owner().as_bytes();
+            let identity = self.derive_identity(owner, &row.signer_id)?;
+            identities.insert(owner, identity);
             let account = AccountConsensus::restore_from_checkpoint(row.replica, row.consensus)
                 .map_err(|error| state_error(row.account_id, &error))?;
             let leaf = leaf_root(row.account_id, &account)?;
@@ -626,28 +666,35 @@ impl StatefulConsensusEngine {
                     expected: hex_of(&row.account_leaf),
                 });
             }
+            signer_rows.push((row.account_id, owner, row.signer_id));
             entries.push((row.account_id.as_bytes().to_vec(), account, leaf));
         }
-        let mut restored = StatefulConsensusEngine::empty_accounts();
-        std::mem::swap(&mut self.accounts, &mut restored);
-        if !entries.is_empty() {
-            self.accounts = self.put_accounts(entries)?;
-        }
-        let root = self.accounts.root_hash();
+        let restored = self.put_into(&PersistentRadixMap::empty(), entries)?;
+        let root = restored.root_hash();
         if root != expected.accounts_root {
             return Err(BatchError::CheckpointRoot {
                 actual: hex_of(&root),
                 expected: hex_of(&expected.accounts_root),
             });
         }
+        let digest = crate::checkpoint::signer_digest(
+            signer_rows
+                .iter()
+                .map(|(account_id, owner, signer_id)| (*account_id, *owner, signer_id.as_str())),
+        );
+        if digest != expected.signer_digest {
+            return Err(BatchError::CheckpointSignerDigest {
+                actual: hex_of(&digest),
+                expected: hex_of(&expected.signer_digest),
+            });
+        }
+        // Only now, with every check passed, does this become the engine.
+        self.accounts = restored;
+        self.identities = identities;
         self.revision = expected.revision;
         self.checkpoint = self.accounts.clone();
-        self.checkpoint_revision = self.revision;
+        self.checkpoint_revision = expected.revision;
         Ok(root)
-    }
-
-    fn empty_accounts() -> PersistentRadixMap<AccountConsensus> {
-        PersistentRadixMap::empty()
     }
 
     /// Resolve the signer for an entity we host. The session's default signer
@@ -660,10 +707,23 @@ impl StatefulConsensusEngine {
             return Ok(());
         }
         let signer_id = self.signer_id.clone();
+        let identity = self.derive_identity(*entity_id, &signer_id)?;
+        self.identities.insert(*entity_id, identity);
+        Ok(())
+    }
+
+    /// Derive the key for one entity and prove it belongs to it. The proof is
+    /// the lazy entity id: it is the hash of the board this key alone defines,
+    /// so a signer id that is not this entity's cannot pass.
+    fn derive_identity(
+        &self,
+        entity_id: [u8; 32],
+        signer_id: &str,
+    ) -> Result<SigningIdentity, BatchError> {
         let identity = SigningIdentity::from_seed(
             &self.seed,
-            &signer_id,
-            *entity_id,
+            signer_id,
+            entity_id,
             1,
             1,
             BoardDelays::default(),
@@ -671,11 +731,10 @@ impl StatefulConsensusEngine {
         .map_err(|error| BatchError::Signing(error.to_string()))?;
         if !identity.binds_lazy_entity() {
             return Err(BatchError::SignerUnknownEntity {
-                entity_id: hex_of(entity_id),
+                entity_id: hex_of(&entity_id),
             });
         }
-        self.identities.insert(*entity_id, identity);
-        Ok(())
+        Ok(identity)
     }
 
     /// The signer id bound to an entity, so a checkpoint can carry it and a
@@ -690,25 +749,34 @@ impl StatefulConsensusEngine {
         &self,
         entries: Vec<(Vec<u8>, AccountConsensus, [u8; 32])>,
     ) -> Result<PersistentRadixMap<AccountConsensus>, BatchError> {
-        self.accounts
-            .updated_batch(entries, |slots| {
-                self.pool.install(|| {
-                    let mut results = slots
-                        .into_par_iter()
-                        .map(xln_rscore_protocol::SlotWork::apply)
-                        .collect::<Vec<_>>()
-                        .into_iter();
-                    std::array::from_fn(|_| {
-                        results.next().unwrap_or_else(|| {
-                            Err(xln_rscore_protocol::PersistentRadixMapError::EmptyKey)
-                        })
+        self.put_into(&self.accounts, entries)
+    }
+
+    /// The same batched write against any base, so a restore can build its
+    /// tree without the live one having to be replaced first.
+    fn put_into(
+        &self,
+        base: &PersistentRadixMap<AccountConsensus>,
+        entries: Vec<(Vec<u8>, AccountConsensus, [u8; 32])>,
+    ) -> Result<PersistentRadixMap<AccountConsensus>, BatchError> {
+        base.updated_batch(entries, |slots| {
+            self.pool.install(|| {
+                let mut results = slots
+                    .into_par_iter()
+                    .map(xln_rscore_protocol::SlotWork::apply)
+                    .collect::<Vec<_>>()
+                    .into_iter();
+                std::array::from_fn(|_| {
+                    results.next().unwrap_or_else(|| {
+                        Err(xln_rscore_protocol::PersistentRadixMapError::EmptyKey)
                     })
                 })
             })
-            .map_err(|error| BatchError::AccountsTree {
-                account_id: AccountId::from_bytes([0; 32]),
-                detail: error.to_string(),
-            })
+        })
+        .map_err(|error| BatchError::AccountsTree {
+            account_id: AccountId::from_bytes([0; 32]),
+            detail: error.to_string(),
+        })
     }
 }
 

@@ -99,6 +99,32 @@ pub fn engine() -> StatefulConsensusEngine {
     .expect("engine")
 }
 
+/// An engine restored with accounts already in it, the way a process comes up
+/// from a checkpoint: the replicas are handed to the constructor rather than
+/// upserted afterwards.
+pub fn seeded_engine(
+    revision: u64,
+    rows: &[xln_rscore_batch::AccountRestore],
+    signer_id: &str,
+) -> StatefulConsensusEngine {
+    let seeds = rows
+        .iter()
+        .map(|row| AccountSeed {
+            account_id: row.account_id,
+            replica: row.replica.clone(),
+        })
+        .collect();
+    StatefulConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x42; 8]),
+        WORKERS,
+        revision,
+        SEED.to_string(),
+        signer_id.to_string(),
+        seeds,
+    )
+    .expect("seeded engine")
+}
+
 pub fn stand(accounts: usize) -> Stand {
     let mut payer_engine = engine();
     let mut payee_engine = engine();

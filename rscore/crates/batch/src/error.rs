@@ -85,6 +85,10 @@ pub enum BatchError {
     },
     #[error("RSCORE_BATCH_CHECKPOINT_ROOT:{actual}:{expected}")]
     CheckpointRoot { actual: String, expected: String },
+    #[error("RSCORE_BATCH_CHECKPOINT_SIGNER_DIGEST:{actual}:{expected}")]
+    CheckpointSignerDigest { actual: String, expected: String },
+    #[error("RSCORE_BATCH_CHECKPOINT_TOKEN:{actual}:{expected}")]
+    CheckpointToken { actual: String, expected: String },
     #[error("RSCORE_BATCH_SIGNER_REQUIRED")]
     SignerRequired,
     #[error("RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY:{entity_id}")]
