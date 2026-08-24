@@ -37,6 +37,15 @@ const MAX_QUEUE = 50_000;
 const DEFAULT_MAX_OWNERS = 1;
 /** Progress reporting cadence, in compared frames. */
 const PROGRESS_EVERY = 500;
+/**
+ * Whole-tree reconciliation cadence, in compared frames. Per-frame comparison
+ * only covers frames the mirror replayed; a periodic full diff also catches an
+ * account that silently stopped being mirrored. 0 disables it.
+ */
+const RECONCILE_EVERY = Number(
+  (typeof process === 'undefined' ? undefined : process.env['XLN_RSCORE_SHADOW_RECONCILE_EVERY'])
+  ?? '0',
+);
 
 export type ShadowFrameInput = Readonly<{
   ownerEntityId: string;
@@ -89,11 +98,16 @@ export type ShadowStats = {
   matches: number;
   mismatches: number;
   reseeds: number;
+  /** Frames carrying no account txs: nothing to replay, nothing to compare. */
+  emptyFrames: number;
   skippedIneligible: number;
   /** Why accounts were refused, by out-of-profile section. */
   ineligibleReasons: Record<string, number>;
   skippedUnboundOwner: number;
   dropped: number;
+  /** Whole-tree diffs run mid-flight, and how many found a gap. */
+  reconciliations: number;
+  reconcileFailures: number;
   disabledReason: string | null;
 };
 
@@ -122,10 +136,13 @@ export class RscoreShadowMirror {
     matches: 0,
     mismatches: 0,
     reseeds: 0,
+    emptyFrames: 0,
     skippedIneligible: 0,
     ineligibleReasons: {},
     skippedUnboundOwner: 0,
     dropped: 0,
+    reconciliations: 0,
+    reconcileFailures: 0,
     disabledReason: null,
   };
   #onProgress: (() => void) | null = null;
@@ -293,8 +310,9 @@ export class RscoreShadowMirror {
         ]);
       }
       if (jobs.length === 0) {
-        // Empty frames commit no state change worth a wave; verify via reseed
-        // no-op instead of an empty (refused) batch.
+        // Ack-only frames carry no account txs: there is nothing to replay and
+        // nothing to compare. Counted so framesSeen always adds up.
+        this.#stats.emptyFrames += 1;
         return;
       }
       this.#remember(ownerKey, input.counterpartyEntityId, input.account);
@@ -356,6 +374,28 @@ export class RscoreShadowMirror {
         this.#stats.framesCompared += 1;
         if (this.#stats.framesCompared % PROGRESS_EVERY === 0) {
           try { this.#onProgress?.(); } catch { /* observer-only */ }
+        }
+        // Only meaningful once the queue has drained: TypeScript mutates its
+        // replicas in place, so while waves are still pending the engine is
+        // legitimately behind and every diff would be a false alarm.
+        if (RECONCILE_EVERY > 0
+          && this.#stats.framesCompared % RECONCILE_EVERY === 0
+          && this.#queue.length === 0) {
+          const owned = this.#mirrored.get(entry.ownerKey);
+          if (owned) {
+            const report = await this.reconcile(entry.ownerKey, owned);
+            this.#stats.reconciliations += 1;
+            const gap = report.mismatched.length > 0 || report.missingInEngine.length > 0
+              || report.extraInEngine.length > 0;
+            // A frame that arrived while the diff was running puts the engine
+            // behind again; only a still-quiet queue makes the gap real.
+            if (gap && this.#queue.length === 0) this.#stats.reconcileFailures += 1;
+            try {
+              console.error(`RSCORE_SHADOW_RECONCILE matched=${report.matched} mismatched=${
+                report.mismatched.length} missing=${report.missingInEngine.length} extra=${
+                report.extraInEngine.length}`);
+            } catch { /* observer-only */ }
+          }
         }
         if (rejected.length > 0) {
           this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
