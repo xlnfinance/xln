@@ -19,15 +19,15 @@ mod tx;
 pub use commitment::{CarriedSections, JClaimAccumulator};
 pub use consensus::context::AccountExecutionContext;
 pub use consensus::frame::hash::{
-    AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value, is_frame_hashable, parse_root_hex,
-    unsupported_kind as unsupported_frame_tx_kind,
+    AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_digest, canonical_tx_value,
+    is_frame_hashable, parse_root_hex, unsupported_kind as unsupported_frame_tx_kind,
 };
 pub use consensus::incoming::apply::{
     AckOutcome, IncomingFrame, IncomingOutcome, ReceiverClock, apply_incoming_ack,
     apply_incoming_frame,
 };
 pub use consensus::proposal::propose::{
-    DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
+    Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
 };
 pub use consensus::replica::{
     AccountConsensus, CommittedFrame, ConsensusSnapshot, PendingFrame, PendingFrameSnapshot,

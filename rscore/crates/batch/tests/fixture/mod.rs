@@ -88,12 +88,41 @@ pub struct Stand {
 }
 
 pub fn engine() -> StatefulConsensusEngine {
+    engine_with_market(std::sync::Arc::default())
+}
+
+/// The registry tables the runtime installs with Hello. They are not account
+/// state, so an engine that never received them prices swaps differently from
+/// TypeScript — which is why the market is a constructor argument and not a
+/// default.
+pub fn market() -> std::sync::Arc<xln_rscore_engine::SwapMarketPolicy> {
+    std::sync::Arc::new(xln_rscore_engine::SwapMarketPolicy::new(
+        vec![
+            xln_rscore_engine::SwapToken {
+                token_id: 1,
+                decimals: 6,
+                liquid: false,
+            },
+            xln_rscore_engine::SwapToken {
+                token_id: 2,
+                decimals: 6,
+                liquid: true,
+            },
+        ],
+        Vec::new(),
+    ))
+}
+
+pub fn engine_with_market(
+    swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
+) -> StatefulConsensusEngine {
     StatefulConsensusEngine::restore(
         EngineGeneration::from_bytes([0x42; 8]),
         WORKERS,
         0,
         SEED.to_string(),
         "1".to_string(),
+        swap_market,
         Vec::new(),
     )
     .expect("engine")
@@ -120,14 +149,22 @@ pub fn seeded_engine(
         revision,
         SEED.to_string(),
         signer_id.to_string(),
+        std::sync::Arc::default(),
         seeds,
     )
     .expect("seeded engine")
 }
 
 pub fn stand(accounts: usize) -> Stand {
-    let mut payer_engine = engine();
-    let mut payee_engine = engine();
+    stand_with_market(accounts, std::sync::Arc::default())
+}
+
+pub fn stand_with_market(
+    accounts: usize,
+    swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
+) -> Stand {
+    let mut payer_engine = engine_with_market(std::sync::Arc::clone(&swap_market));
+    let mut payee_engine = engine_with_market(swap_market);
     let mut payer_seeds = Vec::with_capacity(accounts);
     let mut payee_seeds = Vec::with_capacity(accounts);
     let mut pairs = Vec::with_capacity(accounts);
@@ -198,6 +235,27 @@ pub fn payment(pair: &Pair, amount: i64) -> (AccountId, Vec<AccountTx>) {
             to_entity_id: pair.payee.to_string(),
             delivery_mode: DeliveryMode::Direct,
             trusted_gateway_entity_id: None,
+        }],
+    )
+}
+
+/// A maker offer on the funded token. Six decimals so one lot is one unit:
+/// the point of the transaction is which market priced it, not its size.
+pub fn swap_offer(pair: &Pair) -> (AccountId, Vec<AccountTx>) {
+    (
+        pair.payer_account,
+        vec![AccountTx::SwapOffer {
+            offer_id: "offer-1".to_string(),
+            give_token_id: 1,
+            give_token_decimals: 6,
+            give_amount: BigInt::from(1_000_000),
+            want_token_id: 2,
+            want_token_decimals: 6,
+            want_amount: BigInt::from(2_000_000),
+            max_fee: BigInt::from(0),
+            min_net_receive: BigInt::from(1_900_000),
+            time_in_force: None,
+            price_ticks: None,
         }],
     )
 }

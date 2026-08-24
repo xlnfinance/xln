@@ -127,8 +127,9 @@ impl ProcessSession {
         self.last_request_id = Some(0);
         let digest = swap_market.digest();
         self.swap_market = std::sync::Arc::new(swap_market);
+        let identity = authority.as_ref().map(authority_identity).transpose()?;
         self.authority_config = authority;
-        Ok((wire_encode::hello(worker_count, digest), false))
+        Ok((wire_encode::hello(worker_count, digest, identity), false))
     }
 
     fn validate_bound_request(&self, request: &Envelope) -> Result<(), ProcessError> {
@@ -303,6 +304,7 @@ impl ProcessSession {
                 revision,
                 config.seed.clone(),
                 config.signer_id.clone(),
+                std::sync::Arc::clone(&self.swap_market),
                 accounts,
             )?;
             let accounts_root = engine.accounts_root();
@@ -520,4 +522,26 @@ fn validate_payment_profile_binding(binding: &ProtocolBinding) -> Result<(), Pro
         });
     }
     Ok(())
+}
+
+/// The identity an authoritative session will sign with, derived at Hello so
+/// the runtime can check it before handing over any account. Same derivation
+/// the engine uses per account (weight and threshold one, default delays):
+/// the key alone defines the lazy entity, and the entity id is that board's
+/// own hash.
+fn authority_identity(config: &AuthorityConfig) -> Result<([u8; 20], [u8; 32]), ProcessError> {
+    let identity = xln_rscore_engine::SigningIdentity::lazy_from_seed(
+        &config.seed,
+        &config.signer_id,
+        1,
+        1,
+        xln_rscore_engine::BoardDelays::default(),
+    )
+    .map_err(|error| {
+        ProcessError::Batch(xln_rscore_batch::BatchError::Signing(error.to_string()))
+    })?;
+    let address = identity.signer_address().map_err(|error| {
+        ProcessError::Batch(xln_rscore_batch::BatchError::Signing(error.to_string()))
+    })?;
+    Ok((address, *identity.entity_id()))
 }

@@ -115,6 +115,7 @@ pub fn apply_incoming_frame(
     counterparty_entity_id: &[u8; 32],
     clock: ReceiverClock,
     incoming: IncomingFrame,
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<IncomingOutcome, StateError> {
     // SECURITY: the signer must be this account's counterparty. A Hanko only
     // proves who signed; without this, any entity that can sign could author
@@ -220,12 +221,13 @@ pub fn apply_incoming_frame(
     // The committed clock is the peer's — it is what they signed — but
     // enforcement is judged on our own clock, so a backdated frame cannot
     // decide our timeouts for us.
-    let context = AccountExecutionContext::new(
+    let context = AccountExecutionContext::with_market(
         incoming.timestamp,
         clock.entity_timestamp,
         clock.finalized_j_height,
         current_height,
         incoming.j_height,
+        std::sync::Arc::clone(swap_market),
     );
     let proposer = account.replica().owner_side().opposite();
     let execution = execute_window(

@@ -17,8 +17,8 @@ pub use checkpoint::{
     CheckpointExpectation, CheckpointToken,
 };
 pub use consensus::{
-    AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict, ProposalRow,
-    StatefulConsensusEngine, WaveRequest, WaveResult,
+    AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict, DroppedRow,
+    ProposalRow, StatefulConsensusEngine, WaveRequest, WaveResult,
 };
 pub use error::BatchError;
 // The receiver clock is part of this layer's boundary: a caller cannot apply

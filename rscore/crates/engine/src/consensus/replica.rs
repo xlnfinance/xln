@@ -332,6 +332,7 @@ impl AccountConsensus {
     pub fn restore_from_checkpoint(
         replica: AccountReplica,
         snapshot: ConsensusSnapshot,
+        swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
     ) -> Result<Self, StateError> {
         let ConsensusSnapshot {
             mempool,
@@ -378,7 +379,7 @@ impl AccountConsensus {
         }
         // The replay reproduces the effects too, so a restart does not lose
         // what the pending frame will release when it is acked.
-        let (candidate, outputs) = replay_pending(&account.replica, &pending)?;
+        let (candidate, outputs) = replay_pending(&account.replica, &pending, swap_market)?;
         account.pending = Some(PendingFrame {
             frame: pending.frame,
             state_hash: pending.state_hash,
@@ -395,13 +396,15 @@ impl AccountConsensus {
 fn replay_pending(
     replica: &AccountReplica,
     pending: &PendingFrameSnapshot,
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<(AccountReplica, Vec<crate::AccountOutput>), StateError> {
-    let context = crate::AccountExecutionContext::new(
+    let context = crate::AccountExecutionContext::with_market(
         pending.frame.timestamp,
         pending.frame.timestamp,
         pending.frame.j_height,
         pending.frame.height.saturating_sub(1),
         pending.frame.j_height,
+        std::sync::Arc::clone(swap_market),
     );
     let proposer = replica.owner_side();
     let WindowExecution {

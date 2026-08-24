@@ -40,7 +40,7 @@ const REQUEST_TIMEOUT_MS = requestTimeoutMs();
 export const RSCORE_ABI_VERSION = 1;
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An engine built against the old Hello fails at Hello, not later.
-export const RSCORE_PROCESS_ABI_VERSION = 2;
+export const RSCORE_PROCESS_ABI_VERSION = 3;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;

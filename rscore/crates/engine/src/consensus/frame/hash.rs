@@ -344,6 +344,16 @@ fn push_optional(
 
 /// The transaction kinds the engine leaves to TypeScript, named the way the
 /// wire names them so a rejection points at the right handler.
+/// The digest of one transaction's canonical form — what the frame hash
+/// commits for it, on its own. A caller comparing two engines names a
+/// transaction by this rather than by its position in a queue.
+pub fn canonical_tx_digest(tx: &AccountTx) -> Result<[u8; 32], StateError> {
+    use sha2::{Digest, Sha256};
+    let encoded = xln_rscore_protocol::encode_account_state_value(&canonical_tx_value(tx)?)
+        .map_err(|error| StateError::AccountStateRoot(error.to_string()))?;
+    Ok(Sha256::digest(&encoded).into())
+}
+
 /// Whether this transaction can be hashed into a frame at all.
 ///
 /// A queued transaction the frame hash cannot express would wedge the account

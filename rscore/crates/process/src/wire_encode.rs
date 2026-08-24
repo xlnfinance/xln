@@ -2,7 +2,16 @@ use xln_rscore_abi::{AbiValue, BodyTuple};
 use xln_rscore_batch::{BatchResponse, BatchVerdict, IndexedOutput, IndexedResult, PreparedBatch};
 use xln_rscore_engine::{AccountOutput, DeliveryMode};
 
-pub fn hello(worker_count: usize, swap_market_digest: [u8; 32]) -> BodyTuple {
+pub fn hello(
+    worker_count: usize,
+    swap_market_digest: [u8; 32],
+    // The identity an authoritative session derived from the seed it was
+    // given: the signer address and the lazy entity that address alone
+    // defines. The runtime holds the account seeds, so it must be able to
+    // check that the engine derived the entity it is about to be handed
+    // accounts for, before any frame is signed.
+    authority_identity: Option<([u8; 20], [u8; 32])>,
+) -> BodyTuple {
     body(vec![
         integer(crate::PROCESS_ABI_VERSION),
         AbiValue::Text(crate::PROCESS_PROFILE.into()),
@@ -10,6 +19,12 @@ pub fn hello(worker_count: usize, swap_market_digest: [u8; 32]) -> BodyTuple {
         // The caller compares this against the digest of the tables it sent,
         // so a registry that moved under the engine is loud, not silent.
         AbiValue::Bytes(swap_market_digest.to_vec()),
+        authority_identity.map_or(AbiValue::Nil, |(address, _)| {
+            AbiValue::Bytes(address.to_vec())
+        }),
+        authority_identity.map_or(AbiValue::Nil, |(_, entity_id)| {
+            AbiValue::Bytes(entity_id.to_vec())
+        }),
     ])
 }
 
@@ -286,6 +301,19 @@ pub fn wave(result: &xln_rscore_batch::WaveResult) -> Result<BodyTuple, crate::P
         AbiValue::Bytes(result.accounts_root.to_vec()),
         tuple(result.applied.iter().map(input_result).collect()),
         tuple(proposals),
+        tuple(
+            result
+                .touched
+                .iter()
+                .map(|(account_id, leaf)| {
+                    tuple(vec![
+                        AbiValue::Bytes(account_id.as_bytes().to_vec()),
+                        AbiValue::Bytes(leaf.to_vec()),
+                    ])
+                })
+                .collect(),
+        ),
+        AbiValue::Bytes(result.parity_digest.to_vec()),
     ]))
 }
 
@@ -319,10 +347,46 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
         AbiValue::Text(row.frame.prev_frame_hash.clone()),
         AbiValue::Bytes(row.frame.account_state_root.to_vec()),
         AbiValue::Bool(row.frame.by_left),
+        tuple(row.frame.deltas.iter().map(delta).collect()),
         AbiValue::Bytes(row.state_hash.to_vec()),
         AbiValue::Bytes(row.hanko.clone()),
-        integer(row.dropped),
+        tuple(row.dropped.iter().map(dropped).collect()),
     ]))
+}
+
+/// One delta as the frame commits it. Same field order as `decode_delta`
+/// (wire_decode.rs), which is the order the frame hash reads them in.
+fn delta(value: &xln_rscore_engine::Delta) -> AbiValue {
+    use xln_rscore_engine::Side;
+    tuple(vec![
+        integer(value.token_id().get()),
+        big(value.collateral()),
+        big(value.ondelta()),
+        big(value.offdelta()),
+        big(value.left_credit_limit()),
+        big(value.right_credit_limit()),
+        big(value.allowance(Side::Left)),
+        big(value.allowance(Side::Right)),
+        big(value.hold(Side::Left)),
+        big(value.hold(Side::Right)),
+    ])
+}
+
+/// A transaction the proposer did not put in the frame, and why. A count
+/// would say that the engines disagree; this says which transaction and
+/// whether it is coming back.
+fn dropped(value: &xln_rscore_batch::DroppedRow) -> AbiValue {
+    use xln_rscore_engine::Disposition;
+    tuple(vec![
+        integer(value.index),
+        AbiValue::Bytes(value.tx_digest.to_vec()),
+        AbiValue::Text(value.code.to_string()),
+        AbiValue::Text(value.message.clone()),
+        AbiValue::Integer(match value.disposition {
+            Disposition::Deferred => 0,
+            Disposition::Removed => 1,
+        }),
+    ])
 }
 
 fn input_result(value: &xln_rscore_batch::AccountInputResult) -> AbiValue {

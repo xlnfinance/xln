@@ -160,6 +160,7 @@ fn main() {
         0,
         SEED.to_string(),
         "1".to_string(),
+        std::sync::Arc::default(),
         Vec::new(),
     )
     .expect("payer engine");
@@ -169,6 +170,7 @@ fn main() {
         0,
         SEED.to_string(),
         "1".to_string(),
+        std::sync::Arc::default(),
         Vec::new(),
     )
     .expect("payee engine");

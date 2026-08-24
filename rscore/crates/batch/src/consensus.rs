@@ -11,9 +11,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
-    AccountConsensus, AccountFrame, AckOutcome, BoardDelays, IncomingFrame, IncomingOutcome,
-    ProposalOutcome, ReceiverClock, SigningIdentity, StateError, apply_incoming_ack,
-    apply_incoming_frame, propose_account_frame,
+    AccountConsensus, AccountFrame, AckOutcome, BoardDelays, Disposition, IncomingFrame,
+    IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
+    apply_incoming_ack, apply_incoming_frame, canonical_tx_digest, propose_account_frame,
 };
 use xln_rscore_protocol::{PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap};
 
@@ -81,6 +81,18 @@ pub struct WaveResult {
     pub accounts_root: [u8; 32],
     pub applied: Vec<AccountInputResult>,
     pub proposals: Vec<ProposalRow>,
+    /// Every account the wave moved, with the leaf it now commits. The root
+    /// alone says that something differs; these say which account does.
+    pub touched: Vec<(AccountId, [u8; 32])>,
+    /// One digest over everything this wave produced — the root, the touched
+    /// leaves, the frame hashes, the verdicts in order, the effects in order,
+    /// and the dropped rows. A double-run compares this and nothing else
+    /// until it differs, which is what keeps a differential affordable.
+    ///
+    /// Effects are in it deliberately: they are not part of any account state
+    /// root, so an engine that lost a forward or a revealed secret would
+    /// otherwise agree on every root it publishes.
+    pub parity_digest: [u8; 32],
 }
 
 /// The committed store as it was before the wave, kept until the runtime says
@@ -97,7 +109,186 @@ pub struct ProposalRow {
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
-    pub dropped: usize,
+    /// Every transaction the window could not include, named by the digest of
+    /// its canonical form. A count would say that something was dropped
+    /// without saying what, which is not enough to compare two engines.
+    pub dropped: Vec<DroppedRow>,
+}
+
+/// One transaction the proposal window rejected.
+pub struct DroppedRow {
+    pub index: usize,
+    pub tx_digest: [u8; 32],
+    pub code: &'static str,
+    pub message: String,
+    pub disposition: Disposition,
+}
+
+/// The wave's whole result in one hash. Ordered by construction: the leaves
+/// are in account order, the verdicts in input order, the proposals in
+/// account order.
+fn parity_digest(
+    accounts_root: [u8; 32],
+    leaves: &[(AccountId, [u8; 32])],
+    applied: &[AccountInputResult],
+    proposals: &[ProposalRow],
+) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    digest.update(b"xln.rscore.wave-parity.v1");
+    digest.update(accounts_root);
+    digest.update(
+        u32::try_from(leaves.len())
+            .unwrap_or(u32::MAX)
+            .to_be_bytes(),
+    );
+    for (account_id, leaf) in leaves {
+        digest.update(account_id.as_bytes());
+        digest.update(leaf);
+    }
+    digest.update(
+        u32::try_from(applied.len())
+            .unwrap_or(u32::MAX)
+            .to_be_bytes(),
+    );
+    for row in applied {
+        digest.update(row.input_index.to_be_bytes());
+        digest.update(row.account_id.as_bytes());
+        digest.update(verdict_digest(&row.verdict));
+    }
+    digest.update(
+        u32::try_from(proposals.len())
+            .unwrap_or(u32::MAX)
+            .to_be_bytes(),
+    );
+    for row in proposals {
+        digest.update(row.account_id.as_bytes());
+        digest.update(row.state_hash);
+        digest.update(
+            u32::try_from(row.dropped.len())
+                .unwrap_or(u32::MAX)
+                .to_be_bytes(),
+        );
+        for dropped in &row.dropped {
+            digest.update(
+                u32::try_from(dropped.index)
+                    .unwrap_or(u32::MAX)
+                    .to_be_bytes(),
+            );
+            digest.update(dropped.tx_digest);
+            digest.update(dropped.code.as_bytes());
+            digest.update([match dropped.disposition {
+                Disposition::Deferred => 0,
+                Disposition::Removed => 1,
+            }]);
+        }
+    }
+    digest.finalize().into()
+}
+
+/// One verdict, effects included. The effects are the part no state root
+/// covers, so they are the part this digest exists for.
+fn verdict_digest(verdict: &AccountInputVerdict) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    match verdict {
+        AccountInputVerdict::Frame(IncomingOutcome::Committed {
+            height,
+            state_hash,
+            outputs,
+            rolled_back_txs,
+            ..
+        }) => {
+            digest.update([0]);
+            digest.update(height.to_be_bytes());
+            digest.update(state_hash);
+            digest.update(
+                u64::try_from(*rolled_back_txs)
+                    .unwrap_or(u64::MAX)
+                    .to_be_bytes(),
+            );
+            digest.update(outputs_digest(outputs));
+        }
+        AccountInputVerdict::Frame(IncomingOutcome::CollisionIgnored { height }) => {
+            digest.update([1]);
+            digest.update(height.to_be_bytes());
+        }
+        AccountInputVerdict::Frame(IncomingOutcome::Duplicate {
+            height, state_hash, ..
+        }) => {
+            digest.update([2]);
+            digest.update(height.to_be_bytes());
+            digest.update(state_hash);
+        }
+        AccountInputVerdict::Frame(IncomingOutcome::Stale {
+            height,
+            current_height,
+        }) => {
+            digest.update([3]);
+            digest.update(height.to_be_bytes());
+            digest.update(current_height.to_be_bytes());
+        }
+        AccountInputVerdict::Frame(IncomingOutcome::Rejected { reason }) => {
+            digest.update([4]);
+            digest.update(reason.as_bytes());
+        }
+        AccountInputVerdict::Ack(AckOutcome::Committed {
+            height,
+            state_hash,
+            outputs,
+        }) => {
+            digest.update([5]);
+            digest.update(height.to_be_bytes());
+            digest.update(state_hash);
+            digest.update(outputs_digest(outputs));
+        }
+        AccountInputVerdict::Ack(AckOutcome::Stale { height }) => {
+            digest.update([6]);
+            digest.update(height.to_be_bytes());
+        }
+        AccountInputVerdict::Ack(AckOutcome::Rejected { reason }) => {
+            digest.update([7]);
+            digest.update(reason.as_bytes());
+        }
+        AccountInputVerdict::Failed(message) => {
+            digest.update([8]);
+            digest.update(message.as_bytes());
+        }
+    }
+    digest.finalize().into()
+}
+
+fn outputs_digest(outputs: &[xln_rscore_engine::AccountOutput]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    digest.update(
+        u32::try_from(outputs.len())
+            .unwrap_or(u32::MAX)
+            .to_be_bytes(),
+    );
+    for output in outputs {
+        digest.update(format!("{output:?}").as_bytes());
+    }
+    digest.finalize().into()
+}
+
+fn dropped_rows(
+    account_id: AccountId,
+    dropped: &[xln_rscore_engine::DroppedTx],
+) -> Result<Vec<DroppedRow>, BatchError> {
+    dropped
+        .iter()
+        .map(|dropped| {
+            Ok(DroppedRow {
+                index: dropped.index,
+                tx_digest: canonical_tx_digest(&dropped.tx)
+                    .map_err(|error| state_error(account_id, &error))?,
+                code: dropped.rejection.code(),
+                message: dropped.rejection.message(),
+                disposition: dropped.disposition,
+            })
+        })
+        .collect()
 }
 
 /// One account's work returned from the pool: the account it belongs to, the
@@ -120,6 +311,11 @@ pub struct StatefulConsensusEngine {
     seed: String,
     signer_id: String,
     identities: BTreeMap<[u8; 32], SigningIdentity>,
+    /// Registry market tables, installed by the runtime with Hello. Not
+    /// account state: they cannot be derived from the tree, and a frame priced
+    /// against the wrong tables is a divergence the roots would not catch
+    /// until after it is signed.
+    swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     pending: Option<PendingWave>,
 }
 
@@ -130,6 +326,7 @@ impl StatefulConsensusEngine {
         revision: u64,
         seed: String,
         signer_id: String,
+        swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
         seeds: Vec<AccountSeed>,
     ) -> Result<Self, BatchError> {
         if worker_count == 0 || worker_count > MAX_BATCH_WORKERS {
@@ -153,6 +350,7 @@ impl StatefulConsensusEngine {
             seed,
             signer_id,
             identities: BTreeMap::new(),
+            swap_market,
             pending: None,
         };
         engine.upsert_accounts(seeds)?;
@@ -283,6 +481,7 @@ impl StatefulConsensusEngine {
             return Ok(Vec::new());
         }
         let identities = &self.identities;
+        let swap_market = &self.swap_market;
         let proposals: Vec<ProposalWork> = self.pool.install(|| {
             candidates
                 .into_par_iter()
@@ -290,9 +489,14 @@ impl StatefulConsensusEngine {
                     let identity = identities
                         .get(account.replica().owner().as_bytes())
                         .ok_or(BatchError::SignerRequired)?;
-                    let outcome =
-                        propose_account_frame(&mut account, identity, timestamp, j_height)
-                            .map_err(|error| state_error(account_id, &error))?;
+                    let outcome = propose_account_frame(
+                        &mut account,
+                        identity,
+                        timestamp,
+                        j_height,
+                        swap_market,
+                    )
+                    .map_err(|error| state_error(account_id, &error))?;
                     let row = match outcome {
                         ProposalOutcome::Idle { .. } => None,
                         ProposalOutcome::Proposed(proposed) => Some(ProposalRow {
@@ -300,7 +504,7 @@ impl StatefulConsensusEngine {
                             frame: proposed.frame,
                             state_hash: proposed.state_hash,
                             hanko: proposed.hanko,
-                            dropped: proposed.dropped.len(),
+                            dropped: dropped_rows(account_id, &proposed.dropped)?,
                         }),
                     };
                     Ok((account_id, account, row))
@@ -366,6 +570,7 @@ impl StatefulConsensusEngine {
             })
             .collect();
         let identities = &self.identities;
+        let swap_market = &self.swap_market;
         let applied: Vec<InputWork> = self.pool.install(|| {
             work.into_par_iter()
                 .map(|(account_id, mut account, rows)| {
@@ -374,8 +579,14 @@ impl StatefulConsensusEngine {
                         .ok_or(BatchError::SignerRequired)?;
                     let mut results = Vec::with_capacity(rows.len());
                     for row in rows {
-                        let verdict =
-                            apply_one(&mut account, identity, &row.from_entity_id, clock, row.kind);
+                        let verdict = apply_one(
+                            &mut account,
+                            identity,
+                            &row.from_entity_id,
+                            clock,
+                            row.kind,
+                            swap_market,
+                        );
                         results.push(AccountInputResult {
                             input_index: row.input_index,
                             account_id,
@@ -445,6 +656,9 @@ impl StatefulConsensusEngine {
             inputs,
             propose,
         } = request;
+        let mut touched: BTreeSet<AccountId> = BTreeSet::new();
+        touched.extend(admissions.iter().map(|(account_id, _)| *account_id));
+        touched.extend(inputs.iter().map(|row| row.account_id));
         if !admissions.is_empty() {
             self.admit_txs(admissions)?;
         }
@@ -458,11 +672,25 @@ impl StatefulConsensusEngine {
         } else {
             Vec::new()
         };
+        touched.extend(proposals.iter().map(|row| row.account_id));
+        let mut leaves = Vec::with_capacity(touched.len());
+        for account_id in touched {
+            let Some(account) = self.accounts.get(account_id.as_bytes()) else {
+                // An input for an account this engine does not hold is
+                // reported as a verdict, not as a leaf.
+                continue;
+            };
+            leaves.push((account_id, leaf_root(account_id, account)?));
+        }
+        let accounts_root = self.accounts.root_hash();
+        let parity_digest = parity_digest(accounts_root, &leaves, &applied, &proposals);
         Ok(WaveResult {
             revision: self.revision,
-            accounts_root: self.accounts.root_hash(),
+            accounts_root,
             applied,
             proposals,
+            touched: leaves,
+            parity_digest,
         })
     }
 
@@ -656,8 +884,12 @@ impl StatefulConsensusEngine {
             let owner = *row.replica.owner().as_bytes();
             let identity = self.derive_identity(owner, &row.signer_id)?;
             identities.insert(owner, identity);
-            let account = AccountConsensus::restore_from_checkpoint(row.replica, row.consensus)
-                .map_err(|error| state_error(row.account_id, &error))?;
+            let account = AccountConsensus::restore_from_checkpoint(
+                row.replica,
+                row.consensus,
+                &self.swap_market,
+            )
+            .map_err(|error| state_error(row.account_id, &error))?;
             let leaf = leaf_root(row.account_id, &account)?;
             if leaf != row.account_leaf {
                 return Err(BatchError::CheckpointAccountLeaf {
@@ -786,10 +1018,18 @@ fn apply_one(
     from_entity_id: &[u8; 32],
     clock: ReceiverClock,
     kind: AccountInputKind,
+    swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
 ) -> AccountInputVerdict {
     match kind {
         AccountInputKind::Frame(frame) => {
-            match apply_incoming_frame(account, identity, from_entity_id, clock, *frame) {
+            match apply_incoming_frame(
+                account,
+                identity,
+                from_entity_id,
+                clock,
+                *frame,
+                swap_market,
+            ) {
                 Ok(outcome) => AccountInputVerdict::Frame(outcome),
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
             }

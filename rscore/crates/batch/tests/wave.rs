@@ -8,11 +8,19 @@ use xln_rscore_batch::{AccountInputVerdict, BatchError, WaveRequest, WaveResult}
 use xln_rscore_engine::{AckOutcome, IncomingOutcome};
 
 fn wave(stand: &Stand, timestamp: u64) -> WaveRequest {
+    wave_amount(stand, timestamp, 25)
+}
+
+fn wave_amount(stand: &Stand, timestamp: u64, amount: i64) -> WaveRequest {
     WaveRequest {
         timestamp,
         j_height: 100,
         clock: clock(timestamp),
-        admissions: stand.pairs.iter().map(|pair| payment(pair, 25)).collect(),
+        admissions: stand
+            .pairs
+            .iter()
+            .map(|pair| payment(pair, amount))
+            .collect(),
         inputs: Vec::new(),
         propose: true,
     }
@@ -193,4 +201,73 @@ fn two_engines_settle_a_payment_in_three_waves() {
                 .expect("payee root"),
         );
     }
+}
+
+/// The market tables arrive with Hello and belong to the frame, not to the
+/// account tree. An engine that never received them cannot propose a swap at
+/// all — which is the check that catches a runtime that forgot to install
+/// them, instead of a frame priced against an empty registry.
+#[test]
+fn the_market_from_hello_reaches_the_proposal() {
+    let mut without = fixture::stand(1);
+    without
+        .payer
+        .admit_txs(vec![fixture::swap_offer(&without.pairs[0])])
+        .expect("admit");
+    let Err(error) = without.payer.propose_frames(1_700_000_000_000, 100, None) else {
+        panic!("an empty market cannot price an offer");
+    };
+    assert!(
+        error.to_string().contains("SWAP_MARKET_POLICY_MISSING"),
+        "{error}"
+    );
+
+    let mut with = fixture::stand_with_market(1, fixture::market());
+    with.payer
+        .admit_txs(vec![fixture::swap_offer(&with.pairs[0])])
+        .expect("admit");
+    let proposals = with
+        .payer
+        .propose_frames(1_700_000_000_000, 100, None)
+        .expect("propose");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0].frame.txs.len(), 1);
+    assert!(proposals[0].dropped.is_empty());
+}
+
+/// A wave reports the accounts it moved, each with the leaf the Entity tree
+/// would commit for it, and one digest over everything it produced. The root
+/// says that two engines differ; these say where.
+#[test]
+fn a_wave_reports_the_leaves_it_moved_and_a_digest_over_all_of_it() {
+    let mut stand = stand(2);
+    let request = wave(&stand, 1_700_000_000_000);
+    let first = stand.payer.prepare_wave(request).expect("wave");
+
+    assert_eq!(first.touched.len(), 2);
+    for (account_id, leaf) in &first.touched {
+        let account = stand.payer.account(account_id).expect("account");
+        assert_eq!(*leaf, account.entity_account_leaf().expect("leaf"));
+    }
+    assert!(
+        first.touched.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "leaves are in account order, so the digest over them is stable"
+    );
+
+    // The same wave against the same state is the same digest; a different
+    // amount is a different digest even though nothing else changed.
+    stand.payer.abort_wave(first.revision).expect("abort");
+    let again = stand
+        .payer
+        .prepare_wave(wave(&stand, 1_700_000_000_000))
+        .expect("wave");
+    assert_eq!(again.parity_digest, first.parity_digest);
+    assert_eq!(again.accounts_root, first.accounts_root);
+    stand.payer.abort_wave(again.revision).expect("abort");
+
+    let other = stand
+        .payer
+        .prepare_wave(wave_amount(&stand, 1_700_000_000_000, 26))
+        .expect("wave");
+    assert_ne!(other.parity_digest, first.parity_digest);
 }

@@ -141,8 +141,14 @@ fn a_signed_frame_commits_on_both_sides() {
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
         .expect("admit");
 
-    let proposal = propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-        .expect("propose");
+    let proposal = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose");
     let ProposalOutcome::Proposed(proposed) = proposal else {
         panic!("expected a proposal");
     };
@@ -162,6 +168,7 @@ fn a_signed_frame_commits_on_both_sides() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&frame, state_hash, hanko),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Committed {
@@ -218,10 +225,14 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     let ProposedFrame {
@@ -245,6 +256,7 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
             claimed,
             CLOCK,
             incoming_of(&frame, state_hash, hanko.clone()),
+            &market(),
         )
         .expect("a non-party is a rejection, not a fault");
         let IncomingOutcome::Rejected { reason } = outcome else {
@@ -266,6 +278,7 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
         left.identity.entity_id(),
         CLOCK,
         forged,
+        &market(),
     )
     .expect_err("wrong signer");
     assert!(
@@ -286,6 +299,7 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
         left.identity.entity_id(),
         CLOCK,
         tampered,
+        &market(),
     )
     .expect("tampered frame is a rejection, not a fault");
     let IncomingOutcome::Rejected { reason } = outcome else {
@@ -308,10 +322,14 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
         .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 10)], "test")
         .expect("admit right");
 
-    let ProposalOutcome::Proposed(left_proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose left")
-    else {
+    let ProposalOutcome::Proposed(left_proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose left") else {
         panic!("expected LEFT to propose");
     };
     let ProposedFrame {
@@ -320,10 +338,14 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
         hanko: left_hanko,
         ..
     } = *left_proposed;
-    let ProposalOutcome::Proposed(right_proposed) =
-        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_001, 7)
-            .expect("propose right")
-    else {
+    let ProposalOutcome::Proposed(right_proposed) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose right") else {
         panic!("expected RIGHT to propose");
     };
     let ProposedFrame {
@@ -341,6 +363,7 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
         right.identity.entity_id(),
         CLOCK,
         incoming_of(&right_frame, right_hash, right_hanko),
+        &market(),
     )
     .expect("left applies");
     assert!(matches!(
@@ -358,6 +381,7 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&left_frame, left_hash, left_hanko),
+        &market(),
     )
     .expect("right applies");
     let IncomingOutcome::Committed {
@@ -383,10 +407,14 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
     assert_eq!(left.account.current_height(), 1);
 
     // The restored payment proposes cleanly on top of the accepted frame.
-    let ProposalOutcome::Proposed(second) =
-        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_002, 7)
-            .expect("propose again")
-    else {
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_002,
+        7,
+        &market(),
+    )
+    .expect("propose again") else {
         panic!("expected a second proposal");
     };
     assert_eq!(second.frame.height, 2);
@@ -407,10 +435,14 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     let ProposedFrame {
@@ -441,9 +473,12 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
         hanko: hanko.clone(),
     };
 
-    let restored =
-        AccountConsensus::restore_from_checkpoint(committed.clone(), snapshot(Some(saved.clone())))
-            .expect("restore");
+    let restored = AccountConsensus::restore_from_checkpoint(
+        committed.clone(),
+        snapshot(Some(saved.clone())),
+        &market(),
+    )
+    .expect("restore");
     assert_eq!(restored.current_height(), 0);
     let pending = restored.pending().expect("pending");
     assert_eq!(pending.state_hash, state_hash);
@@ -456,9 +491,12 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
     // with the signature over it.
     let mut tampered = saved.clone();
     tampered.frame.account_state_root[0] ^= 0x01;
-    let error =
-        AccountConsensus::restore_from_checkpoint(committed.clone(), snapshot(Some(tampered)))
-            .expect_err("tampered root");
+    let error = AccountConsensus::restore_from_checkpoint(
+        committed.clone(),
+        snapshot(Some(tampered)),
+        &market(),
+    )
+    .expect_err("tampered root");
     assert_eq!(
         error.to_string(),
         "ACCOUNT_CHECKPOINT_RESTORE:PENDING_STATE_ROOT_MISMATCH",
@@ -467,9 +505,12 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
     // A frame that does not chain to the committed head is not ours to hold.
     let mut wrong_height = saved.clone();
     wrong_height.frame.height = 4;
-    let error =
-        AccountConsensus::restore_from_checkpoint(committed.clone(), snapshot(Some(wrong_height)))
-            .expect_err("wrong height");
+    let error = AccountConsensus::restore_from_checkpoint(
+        committed.clone(),
+        snapshot(Some(wrong_height)),
+        &market(),
+    )
+    .expect_err("wrong height");
     assert_eq!(
         error.to_string(),
         "ACCOUNT_CHECKPOINT_RESTORE:PENDING_HEIGHT:4:1"
@@ -478,8 +519,9 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
     // The hash the signature covers must be the hash of the frame beside it.
     let mut wrong_hash = saved;
     wrong_hash.state_hash[0] ^= 0x01;
-    let error = AccountConsensus::restore_from_checkpoint(committed, snapshot(Some(wrong_hash)))
-        .expect_err("wrong hash");
+    let error =
+        AccountConsensus::restore_from_checkpoint(committed, snapshot(Some(wrong_hash)), &market())
+            .expect_err("wrong hash");
     assert_eq!(
         error.to_string(),
         "ACCOUNT_CHECKPOINT_RESTORE:PENDING_FRAME_HASH_MISMATCH",
@@ -507,10 +549,14 @@ fn enforcement_is_judged_on_the_receiver_clock() {
         envelope: None,
     });
     left.account.admit_txs(vec![lock], "test").expect("admit");
-    let ProposalOutcome::Proposed(proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     let ProposedFrame {
@@ -529,6 +575,7 @@ fn enforcement_is_judged_on_the_receiver_clock() {
             finalized_j_height: 7,
         },
         incoming_of(&frame, state_hash, hanko.clone()),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Rejected { reason } = outcome else {
@@ -549,6 +596,7 @@ fn enforcement_is_judged_on_the_receiver_clock() {
             finalized_j_height: 7,
         },
         incoming_of(&frame, state_hash, hanko),
+        &market(),
     )
     .expect("apply");
     assert!(matches!(
@@ -565,10 +613,14 @@ fn a_frame_from_the_future_is_refused() {
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     let ProposedFrame {
@@ -588,6 +640,7 @@ fn a_frame_from_the_future_is_refused() {
             finalized_j_height: 7,
         },
         incoming_of(&frame, state_hash, hanko.clone()),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Rejected { reason } = outcome else {
@@ -609,6 +662,7 @@ fn a_frame_from_the_future_is_refused() {
             finalized_j_height: 7,
         },
         incoming_of(&frame, state_hash, hanko),
+        &market(),
     )
     .expect("apply");
     assert!(matches!(
@@ -625,10 +679,14 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(first) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     let first = *first;
@@ -638,6 +696,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&first.frame, first.state_hash, first.hanko.clone()),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Committed { ack_hanko, .. } = committed else {
@@ -656,10 +715,14 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 5)], "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(second) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_001, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a second proposal");
     };
     let second = *second;
@@ -669,6 +732,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&second.frame, second.state_hash, second.hanko),
+        &market(),
     )
     .expect("apply");
     assert_eq!(right.account.current_height(), 2);
@@ -679,6 +743,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&first.frame, first.state_hash, first.hanko),
+        &market(),
     )
     .expect("apply");
     assert!(
@@ -706,16 +771,24 @@ fn a_failing_frame_leaves_our_own_proposal_standing() {
         .account
         .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 10)], "test")
         .expect("admit right");
-    let ProposalOutcome::Proposed(left_proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose left")
-    else {
+    let ProposalOutcome::Proposed(left_proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose left") else {
         panic!("expected LEFT to propose");
     };
-    let ProposalOutcome::Proposed(right_proposed) =
-        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_001, 7)
-            .expect("propose right")
-    else {
+    let ProposalOutcome::Proposed(right_proposed) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose right") else {
         panic!("expected RIGHT to propose");
     };
     let left_proposed = *left_proposed;
@@ -734,6 +807,7 @@ fn a_failing_frame_leaves_our_own_proposal_standing() {
         left.identity.entity_id(),
         CLOCK,
         broken,
+        &market(),
     )
     .expect("apply");
     assert!(
@@ -756,6 +830,7 @@ fn a_failing_frame_leaves_our_own_proposal_standing() {
             left_proposed.state_hash,
             left_proposed.hanko,
         ),
+        &market(),
     )
     .expect("apply");
     assert!(
@@ -783,16 +858,24 @@ fn a_rollback_is_settled_by_our_next_acked_frame() {
         .account
         .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 10)], "test")
         .expect("admit right");
-    let ProposalOutcome::Proposed(left_proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose left")
-    else {
+    let ProposalOutcome::Proposed(left_proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose left") else {
         panic!("expected LEFT to propose");
     };
-    let ProposalOutcome::Proposed(_right_proposed) =
-        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_001, 7)
-            .expect("propose right")
-    else {
+    let ProposalOutcome::Proposed(_right_proposed) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose right") else {
         panic!("expected RIGHT to propose");
     };
     let left_proposed = *left_proposed;
@@ -806,6 +889,7 @@ fn a_rollback_is_settled_by_our_next_acked_frame() {
             left_proposed.state_hash,
             left_proposed.hanko,
         ),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
@@ -823,10 +907,14 @@ fn a_rollback_is_settled_by_our_next_acked_frame() {
     .expect("left commits");
 
     // RIGHT re-proposes its own payment; LEFT accepts and acks it.
-    let ProposalOutcome::Proposed(second) =
-        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_002, 7)
-            .expect("propose again")
-    else {
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_002,
+        7,
+        &market(),
+    )
+    .expect("propose again") else {
         panic!("expected a second proposal");
     };
     let second = *second;
@@ -836,6 +924,7 @@ fn a_rollback_is_settled_by_our_next_acked_frame() {
         right.identity.entity_id(),
         CLOCK,
         incoming_of(&second.frame, second.state_hash, second.hanko),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
@@ -864,10 +953,14 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     let proposed = *proposed;
@@ -877,6 +970,7 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko),
+        &market(),
     )
     .expect("apply");
     let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
@@ -900,6 +994,7 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
             counterparty_frame_hanko: None,
             ..snapshot
         },
+        &market(),
     )
     .expect("restore without the certificate");
     assert_ne!(
@@ -970,10 +1065,14 @@ fn the_proposal_window_defers_a_capacity_rejection() {
     left.account
         .admit_txs((0..33).map(lock).collect(), "test")
         .expect("admit");
-    let ProposalOutcome::Proposed(proposed) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose")
-    else {
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
         panic!("expected a proposal");
     };
     assert_eq!(proposed.frame.txs.len(), 32);
@@ -1020,10 +1119,14 @@ fn outputs_are_held_until_the_peer_acks() {
             "test",
         )
         .expect("admit lock");
-    let ProposalOutcome::Proposed(lock_frame) =
-        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
-            .expect("propose lock")
-    else {
+    let ProposalOutcome::Proposed(lock_frame) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose lock") else {
         panic!("expected a proposal");
     };
     let lock_frame = *lock_frame;
@@ -1033,6 +1136,7 @@ fn outputs_are_held_until_the_peer_acks() {
         left.identity.entity_id(),
         CLOCK,
         incoming_of(&lock_frame.frame, lock_frame.state_hash, lock_frame.hanko),
+        &market(),
     )
     .expect("apply lock");
     let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
@@ -1059,10 +1163,14 @@ fn outputs_are_held_until_the_peer_acks() {
             "test",
         )
         .expect("admit resolve");
-    let ProposalOutcome::Proposed(resolve) =
-        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_001, 7)
-            .expect("propose resolve")
-    else {
+    let ProposalOutcome::Proposed(resolve) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose resolve") else {
         panic!("expected a proposal");
     };
     let resolve = *resolve;
@@ -1075,6 +1183,7 @@ fn outputs_are_held_until_the_peer_acks() {
         right.identity.entity_id(),
         CLOCK,
         incoming_of(&resolve.frame, resolve.state_hash, resolve.hanko),
+        &market(),
     )
     .expect("apply resolve");
     let IncomingOutcome::Committed {
@@ -1109,4 +1218,8 @@ fn outputs_are_held_until_the_peer_acks() {
             .any(|output| matches!(output, AccountOutput::HtlcSecret { .. })),
         "{outputs:?}",
     );
+}
+
+fn market() -> std::sync::Arc<xln_rscore_engine::SwapMarketPolicy> {
+    std::sync::Arc::default()
 }

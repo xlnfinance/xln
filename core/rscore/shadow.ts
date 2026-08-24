@@ -1804,7 +1804,7 @@ export class RscoreShadowMirror {
    */
   async #hello(client: RscoreProcessClient): Promise<void> {
     const market = swapMarketPolicyWire();
-    const reply = wireTuple(await client.hello(this.#workers, market), 'SHADOW_HELLO', 4);
+    const reply = wireTuple(await client.hello(this.#workers, market), 'SHADOW_HELLO', 6);
     const digest = `0x${Buffer.from(wireBytes(reply[3], 'SHADOW_HELLO_MARKET', 32)).toString('hex')}`;
     const expected = swapMarketPolicyDigest(market);
     if (digest !== expected) throw new Error(`SHADOW_HELLO_MARKET_DIGEST:${digest}:${expected}`);

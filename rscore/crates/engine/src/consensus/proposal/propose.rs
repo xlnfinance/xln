@@ -23,6 +23,18 @@ pub struct DroppedTx {
     pub index: usize,
     pub tx: AccountTx,
     pub rejection: AccountRejection,
+    /// What became of it: back on the queue, or gone.
+    pub disposition: Disposition,
+}
+
+/// Parity target: `ACCOUNT_TX_FAILURE_DISPOSITIONS`
+/// (core/account/consensus/proposal/transactions.ts).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Disposition {
+    /// Requeued for the next frame — the rejection was a "not yet".
+    Deferred,
+    /// Dropped from the queue: the rejection was about the transaction.
+    Removed,
 }
 
 /// Whether a rejected transaction goes back on the queue or is dropped.
@@ -126,10 +138,16 @@ pub(crate) fn execute_window(
             }
             AccountVerdict::Rejected(rejection) => {
                 let rejection = rejection.clone();
+                let disposition = if is_retryable(&rejection) {
+                    Disposition::Deferred
+                } else {
+                    Disposition::Removed
+                };
                 dropped.push(DroppedTx {
                     index,
                     tx,
                     rejection,
+                    disposition,
                 });
                 if stop_on_rejection {
                     return Ok(WindowExecution {
@@ -156,6 +174,10 @@ pub fn propose_account_frame(
     identity: &SigningIdentity,
     timestamp: u64,
     j_height: u64,
+    // Registry tables, not account state: the caller installs the same market
+    // the runtime would, or a swap would price itself differently here than
+    // in TypeScript.
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<ProposalOutcome, StateError> {
     if account.pending().is_some() {
         // One proposal per height. The peer either acks it or wins the
@@ -171,12 +193,13 @@ pub fn propose_account_frame(
         });
     }
     let height = account.current_height() + 1;
-    let context = AccountExecutionContext::new(
+    let context = AccountExecutionContext::with_market(
         timestamp,
         timestamp,
         j_height,
         account.current_height(),
         j_height,
+        std::sync::Arc::clone(swap_market),
     );
     let proposer = account.replica().owner_side();
     let execution = execute_window(account.replica(), proposer, window, &context, false)?;
@@ -201,7 +224,7 @@ pub fn propose_account_frame(
     // ahead of anything admitted since, so the next frame retries them.
     let deferred: Vec<AccountTx> = dropped
         .iter()
-        .filter(|dropped| is_retryable(&dropped.rejection))
+        .filter(|dropped| dropped.disposition == Disposition::Deferred)
         .map(|dropped| dropped.tx.clone())
         .collect();
     if !deferred.is_empty() {
