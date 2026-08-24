@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha256};
 
-use crate::{CanonicalValue, ValueEncodingError, encode_account_state_value};
+use crate::rlp::RlpWriter;
+use crate::{CanonicalValue, ValueEncodingError, write_account_state_value};
 
 const FLAT_DIGEST_DOMAIN: &[u8] = b"xln.flat-digest.v1";
 
@@ -12,13 +13,21 @@ pub fn compute_flat_integrity_root(
     namespace: &str,
     entries: &[(String, CanonicalValue)],
 ) -> Result<[u8; 32], ValueEncodingError> {
+    let mut writer = RlpWriter::with_capacity(512);
+    let mut label = String::with_capacity(64);
     let mut leaves = Vec::with_capacity(entries.len());
     for (path, value) in entries {
-        let label = format!("xln.{namespace}.{path}");
-        leaves.push((
-            sha256(label.as_bytes()),
-            sha256(&encode_account_state_value(value)?),
-        ));
+        // One reused buffer for the label and one for the value: this runs
+        // once per committed account, and a fresh String plus a Vec per node
+        // was the largest single cost in the engine profile.
+        label.clear();
+        label.push_str("xln.");
+        label.push_str(namespace);
+        label.push('.');
+        label.push_str(path);
+        writer.clear();
+        write_account_state_value(&mut writer, value)?;
+        leaves.push((sha256(label.as_bytes()), sha256(writer.as_slice())));
     }
     leaves.sort_unstable_by_key(|(key, _)| *key);
     let mut digest = Sha256::new();

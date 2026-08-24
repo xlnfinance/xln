@@ -20,6 +20,12 @@ const accounts = Number(process.argv[2] ?? '1000');
 const waves = Number(process.argv[3] ?? '20');
 const txsPerWave = Number(process.argv[4] ?? '10000');
 const workers = Number(process.argv[5] ?? '8');
+/**
+ * Attach a realistic replica shell to every seed and every job, so the engine
+ * commits the Entity's account leaf rather than the bare financial root. This
+ * is what parity mode actually costs.
+ */
+const withShell = process.argv[6] === 'shell';
 
 
 
@@ -49,6 +55,7 @@ const seed = (index: number): RscoreWireValue[] => {
     [],
     [0, 0],
     EMPTY_CARRIED,
+    withShell ? shellWire(index, 0) : null,
   ];
 };
 
@@ -73,6 +80,35 @@ const EMPTY_CARRIED: RscoreWireValue[] = [
   EMPTY_CLAIM, EMPTY_CLAIM,
 ];
 
+/** A hub account's shell, in the shape the Entity projects it. */
+const shellWire = (accountIndex: number, height: number): RscoreWireValue => {
+  const text = (value: string): RscoreWireValue => [4, value];
+  const number = (value: number): RscoreWireValue => [2, String(value)];
+  const digest = `0x${(accountIndex + height).toString(16).padStart(64, '0')}`;
+  return [
+    [8, [
+      ['status', text('active')],
+      ['currentHeight', number(height)],
+      ['rollbackCount', number(0)],
+      ['currentFrameHash', text(digest)],
+      ['counterpartyFrameHanko', text(digest)],
+      ['pendingWithdrawals', text(`0x${'00'.repeat(32)}`)],
+      ['proofHeader', [8, [
+        ['fromEntity', text(HUB)],
+        ['toEntity', text(userHex(accountIndex))],
+        ['nextProofNonce', number(height)],
+      ]]],
+      ['shadow', [8, [
+        ['rebalance', [8, [
+          ['policyRoot', text(`0x${'00'.repeat(32)}`)],
+          ['submittedAtByTokenRoot', text(`0x${'00'.repeat(32)}`)],
+        ]]],
+      ]]],
+    ]],
+    [],
+  ];
+};
+
 const directPayment = (
   inputIndex: number,
   accountIndex: number,
@@ -88,6 +124,7 @@ const directPayment = (
     leftPays ? 0 : 1, // proposer side
     [1_700_000_000_000 + inputIndex, 1_700_000_000_000 + inputIndex, 100, 0, 100],
     [0, 1, amount.toString(), [to], null, from, to, 0, null],
+    withShell ? shellWire(accountIndex, inputIndex) : null,
   ];
 };
 
@@ -104,6 +141,8 @@ const main = async (): Promise<void> => {
   console.log(`restore accounts=${accounts} ms=${Math.ceil(performance.now() - restoreStarted)}`);
 
   let applied = 0;
+  let engineUs = 0;
+  let commitMs = 0;
   const started = performance.now();
   for (let wave = 0; wave < waves; wave += 1) {
     const jobs = Array.from({ length: txsPerWave }, (_, index) =>
@@ -118,13 +157,18 @@ const main = async (): Promise<void> => {
       const verdict = (row as unknown[])[2] as unknown[];
       if (Number((verdict as unknown[])[0]) === 0) applied += 1;
     }
+    engineUs += Number(prepared[5]);
+    const commitStarted = performance.now();
     await client.commit(client.requestIdBytes(client.lastRequestId));
+    commitMs += performance.now() - commitStarted;
   }
   const elapsedMs = performance.now() - started;
   const total = waves * txsPerWave;
   console.log(
     `waves=${waves} txs=${total} applied=${applied} elapsedMs=${Math.ceil(elapsedMs)} ` +
-    `txPerSec=${Math.round(total / (elapsedMs / 1_000))} workers=${workers}`,
+    `txPerSec=${Math.round(total / (elapsedMs / 1_000))} workers=${workers} ` +
+    `engineMs=${Math.round(engineUs / 1000)} commitMs=${Math.round(commitMs)} ` +
+    `engineUsPerTx=${(engineUs / total).toFixed(2)} shell=${withShell}`,
   );
   await client.shutdown();
 };

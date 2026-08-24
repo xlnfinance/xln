@@ -189,12 +189,5 @@ fn root_value(root: &[u8; 32]) -> CanonicalValue {
 }
 
 fn hex_32(bytes: &[u8; 32]) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = String::with_capacity(66);
-    output.push_str("0x");
-    for byte in bytes {
-        let _ = write!(output, "{byte:02x}");
-    }
-    output
+    crate::identity::render_hex(bytes)
 }

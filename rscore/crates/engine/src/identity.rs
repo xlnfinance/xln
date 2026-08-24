@@ -43,13 +43,7 @@ impl EntityId {
     }
 
     pub fn as_hex(&self) -> String {
-        let mut output = String::with_capacity(66);
-        output.push_str("0x");
-        for byte in self.0 {
-            use std::fmt::Write;
-            let _ = write!(output, "{byte:02x}");
-        }
-        output
+        render_hex(&self.0)
     }
 }
 
@@ -144,12 +138,19 @@ fn parse_fixed_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
     Some(bytes)
 }
 
-fn render_hex(bytes: &[u8]) -> String {
+/// Table-driven `0x…` rendering.
+///
+/// The commitment path renders roughly fifteen 32-byte roots per account state
+/// root; going through `core::fmt` for each byte was the single largest cost in
+/// the engine profile (formatting outweighed SHA-256).
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+pub(crate) fn render_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len() * 2 + 2);
     output.push_str("0x");
     for byte in bytes {
-        use std::fmt::Write;
-        let _ = write!(output, "{byte:02x}");
+        output.push(HEX_DIGITS[usize::from(byte >> 4)] as char);
+        output.push(HEX_DIGITS[usize::from(byte & 0x0f)] as char);
     }
     output
 }

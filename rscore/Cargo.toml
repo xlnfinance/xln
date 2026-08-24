@@ -15,11 +15,13 @@ num-bigint = "0.4.6"
 num-integer = "0.1.46"
 rayon = "1.12.0"
 ryu-js = "1.0.2"
-sha2 = "0.10.9"
-sha3 = "0.10.8"
+sha2 = { version = "0.10.9", features = ["asm"] }
+sha3 = { version = "0.10.8", features = ["asm"] }
 thiserror = "2.0.16"
 
 [profile.release]
 codegen-units = 1
 lto = "thin"
 panic = "unwind"
+# Symbols only; they cost nothing at runtime and make a profile readable.
+debug = "line-tables-only"

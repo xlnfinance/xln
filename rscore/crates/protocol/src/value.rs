@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use num_bigint::{BigInt, Sign};
 use thiserror::Error;
 
-use crate::rlp::{RlpError, encode_list, encode_payload};
+use crate::rlp::{RlpError, RlpWriter, encode_list, encode_payload};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CanonicalValue {
@@ -120,6 +120,89 @@ fn encode_object(entries: &[(String, CanonicalValue)]) -> Result<Vec<u8>, ValueE
         ])?);
     }
     Ok(encode_list(&children)?)
+}
+
+/// Same bytes as `encode_account_state_value`, written into one buffer.
+///
+/// The account state root hashes five of these per account per commit, so the
+/// allocating encoder's malloc-per-node showed up as the single largest cost
+/// in the engine profile.
+pub fn write_account_state_value(
+    writer: &mut RlpWriter,
+    value: &CanonicalValue,
+) -> Result<(), ValueEncodingError> {
+    match value {
+        CanonicalValue::Null => write_scalar(writer, "null", |_| Ok(())),
+        CanonicalValue::Bool(flag) => write_scalar(writer, "bool", |writer| {
+            Ok(writer.push_payload(&[u8::from(*flag)])?)
+        }),
+        CanonicalValue::Number(number) => {
+            if !number.is_finite() {
+                return Err(ValueEncodingError::NonFiniteNumber);
+            }
+            let mut buffer = ryu_js::Buffer::new();
+            let rendered = buffer.format(*number).to_owned();
+            write_scalar(writer, "number", |writer| {
+                Ok(writer.push_payload(rendered.as_bytes())?)
+            })
+        }
+        CanonicalValue::BigInt(value) => {
+            let (sign, magnitude) = magnitude_bytes(value);
+            write_scalar(writer, "bigint", |writer| {
+                writer.push_payload(&[sign])?;
+                Ok(writer.push_payload(&magnitude)?)
+            })
+        }
+        CanonicalValue::String(value) => write_scalar(writer, "string", |writer| {
+            Ok(writer.push_payload(value.as_bytes())?)
+        }),
+        CanonicalValue::Array(entries) => write_scalar(writer, "array", |writer| {
+            for entry in entries {
+                write_account_state_value(writer, entry)?;
+            }
+            Ok(())
+        }),
+        CanonicalValue::Object(entries) => {
+            // Ordering and duplicate detection are the encoder's contract, so
+            // the fast path keeps them: sort by UTF-16 key exactly as JavaScript
+            // does, and refuse a duplicate instead of committing one of two.
+            let mut ordered = entries.iter().collect::<Vec<_>>();
+            ordered.sort_unstable_by(|left, right| cmp_utf16(&left.0, &right.0));
+            for pair in ordered.windows(2) {
+                if pair[0].0 == pair[1].0 {
+                    return Err(ValueEncodingError::DuplicateObjectKey(pair[0].0.clone()));
+                }
+            }
+            write_scalar(writer, "object", |writer| {
+                for (key, value) in ordered {
+                    let mark = writer.open_list();
+                    writer.push_payload(key.as_bytes())?;
+                    write_account_state_value(writer, value)?;
+                    writer.close_list(mark)?;
+                }
+                Ok(())
+            })
+        }
+        // Map and Set order by ENCODED bytes, which the streaming writer cannot
+        // know before it writes them. They are rare in committed account state,
+        // so they fall back to the allocating encoder.
+        CanonicalValue::Map(_) | CanonicalValue::Set(_) => {
+            let encoded = encode_account_state_value(value)?;
+            writer.push_encoded(&encoded);
+            Ok(())
+        }
+    }
+}
+
+fn write_scalar(
+    writer: &mut RlpWriter,
+    tag: &str,
+    body: impl FnOnce(&mut RlpWriter) -> Result<(), ValueEncodingError>,
+) -> Result<(), ValueEncodingError> {
+    let mark = writer.open_list();
+    writer.push_payload(tag.as_bytes())?;
+    body(writer)?;
+    Ok(writer.close_list(mark)?)
 }
 
 pub fn encode_account_state_value(value: &CanonicalValue) -> Result<Vec<u8>, ValueEncodingError> {
