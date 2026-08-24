@@ -59,6 +59,28 @@ type EconomicCounters = Readonly<{
  * recovery read) used to sit on the machine for hours holding its engine
  * children. Every replayed frame is progress; nothing else counts.
  */
+/**
+ * How much of the replay the main JS thread was busy, measured by a 1 ms
+ * heartbeat that can only tick when the thread is free. Concurrency tricks on
+ * the main thread (Promise.all over accounts) can only buy back the idle part,
+ * so this number is the ceiling of that whole class of optimization.
+ */
+const startMainThreadBusyProbe = (): (() => { busyFraction: number; sampledMs: number }) => {
+  const intervalMs = 1;
+  const startedAt = performance.now();
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, intervalMs);
+  return () => {
+    clearInterval(timer);
+    const sampledMs = performance.now() - startedAt;
+    const expected = sampledMs / intervalMs;
+    return {
+      busyFraction: expected <= 0 ? 0 : Math.max(0, Math.min(1, 1 - ticks / expected)),
+      sampledMs,
+    };
+  };
+};
+
 const replayIdleWatch = startIdleShutdownWatch('hlt-replay-hub-recording', idleMs => {
   console.error(`HLT_REPLAY_IDLE_EXIT idleMs=${String(idleMs)} pid=${String(process.pid)}`);
   process.exit(1);
@@ -110,6 +132,12 @@ type ReplayTrial = Readonly<{
   frames: number;
   runtimeEntityInputs: number;
   entityInputsPerFrame: number;
+  /** Account-consensus admissions by kind, e.g. `accountInput:ack`. */
+  accountInputKinds: Readonly<Record<string, number>>;
+  /** Those admissions per wall-clock second — the hub's real consensus rate. */
+  accountInputsPerSecond: number;
+  /** Share of replay wall time the main JS thread was not free to run a timer. */
+  mainThreadBusyFraction: number;
   outboxEnvelopes: number;
   elapsedMs: number;
   cpuMs: number;
@@ -317,6 +345,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
   const operationsBefore = snapshotOpCounters();
   const startedAt = performance.now();
   const cpuStarted = process.cpuUsage();
+  const stopBusyProbe = startMainThreadBusyProbe();
   let cumulativeUnits = 0;
   const frameProfile: ReplayFrameProfile[] = [];
   try {
@@ -351,7 +380,13 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
         }
       }
     }
+    const mainThread = stopBusyProbe();
     const elapsedMs = performance.now() - startedAt;
+    // Account-consensus admission rate, the number the hub actually lives on:
+    // every ack and every proposal an Entity had to take in, per second. A
+    // payment is several of these, so pay/s hides how much consensus traffic
+    // the machine really moved.
+    const admission = countEntityInputTxKinds(frames.flatMap(frame => frame.runtimeInput.entityInputs)).txKinds;
     const cpu = process.cpuUsage(cpuStarted);
     const cpuMs = (cpu.user + cpu.system) / 1_000;
     const seconds = Math.max(elapsedMs / 1_000, Number.EPSILON);
@@ -362,6 +397,11 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       frames: artifact.totals.runtimeFrames,
       runtimeEntityInputs: artifact.totals.runtimeEntityInputs,
       entityInputsPerFrame: artifact.totals.runtimeEntityInputs / artifact.totals.runtimeFrames,
+      accountInputKinds: admission,
+      mainThreadBusyFraction: mainThread.busyFraction,
+      accountInputsPerSecond: Object.entries(admission)
+        .filter(([kind]) => kind.startsWith('accountInput:'))
+        .reduce((total, [, count]) => total + count, 0) / Math.max(elapsedMs / 1_000, Number.EPSILON),
       outboxEnvelopes: artifact.totals.outboxEnvelopes,
       elapsedMs,
       cpuMs,
@@ -398,6 +438,12 @@ for (const rate of rates) {
     `payments=${trial.deliveredPayments}/${trial.deliveredPaymentTps.toFixed(2)}tps ` +
     `swaps=${trial.matchedEconomicSwaps}/${trial.matchedEconomicSwapTps.toFixed(2)}tps ` +
     `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
+    `mainThreadBusy=${(trial.mainThreadBusyFraction * 100).toFixed(1)}% ` +
+    `accountInputs=${trial.accountInputsPerSecond.toFixed(1)}/s${
+      Object.entries(trial.accountInputKinds)
+        .filter(([kind]) => kind.startsWith('accountInput:'))
+        .map(([kind, count]) => ` ${kind.slice('accountInput:'.length)}=${String(count)}`)
+        .join('')} ` +
     `height=${trial.finalHeight} pendingOutbox=${trial.finalPendingOutbox}`,
   );
 }
