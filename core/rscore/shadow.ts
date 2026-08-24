@@ -174,6 +174,9 @@ export const engineOutputProjection = (
     decodeEngineOutput(fields[3]),
   ]);
 
+/** Root of an empty radix map on both sides. */
+const EMPTY_RADIX_ROOT = `0x${'00'.repeat(32)}`;
+
 const MAX_QUEUE = 50_000;
 /**
  * One engine process per owner entity means an unbounded stand (a lane with a
@@ -516,7 +519,7 @@ export class RscoreShadowMirror {
         throw new Error(`SHADOW_RECONCILE_REVISION_CHANGED:${pageRevision}:${revision}`);
       }
       for (const row of wireTuple(page[1], 'SHADOW_SUMMARY_ROWS')) {
-        const fields = wireTuple(row, 'SHADOW_SUMMARY_ROW', 7);
+        const fields = wireTuple(row, 'SHADOW_SUMMARY_ROW', 9);
         const side = wireInteger(fields[1], 'SHADOW_SUMMARY_OWNER_SIDE');
         if (side !== 0 && side !== 1) throw new Error(`SHADOW_SUMMARY_OWNER_SIDE:${side}`);
         engineRows.set(`0x${Buffer.from(
@@ -978,6 +981,22 @@ export class RscoreShadowMirror {
           typescript: requirePersistentAccountStateMap(account.state.locks, 'locks')
             .rootHash().toLowerCase(),
           rust: engine(5),
+        },
+        swapOffers: {
+          typescript: requirePersistentAccountStateMap(account.state.swapOffers, 'swapOffers')
+            .rootHash().toLowerCase(),
+          rust: engine(7),
+        },
+        rebalanceFeePolicies: {
+          // Absent on an account that never carried a policy; the engine
+          // commits the empty-map root for that case.
+          typescript: account.state.rebalanceFeePolicies === undefined
+            ? EMPTY_RADIX_ROOT
+            : requirePersistentAccountStateMap(
+              account.state.rebalanceFeePolicies,
+              'rebalanceFeePolicies',
+            ).rootHash().toLowerCase(),
+          rust: engine(8),
         },
       };
     } catch {

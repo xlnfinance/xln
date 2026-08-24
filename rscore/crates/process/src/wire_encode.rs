@@ -107,6 +107,8 @@ pub fn summary_page(
                         AbiValue::Bytes(row.deltas_root.to_vec()),
                         AbiValue::Bytes(row.htlc_locks_root.to_vec()),
                         AbiValue::Bytes(row.account_state_root.to_vec()),
+                        AbiValue::Bytes(row.swap_offers_root.to_vec()),
+                        AbiValue::Bytes(row.rebalance_fee_policies_root.to_vec()),
                     ])
                 })
                 .collect(),

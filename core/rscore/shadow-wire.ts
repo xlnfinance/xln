@@ -83,6 +83,17 @@ export const shadowIneligibilityReason = (account: AccountReplica): string | nul
   const state = account.state;
   if ((state.lendingIntents?.size ?? 0) > 0) return 'LENDING_INTENTS';
   if (state.settlementWorkspace !== undefined) return 'SETTLEMENT_WORKSPACE';
+  // The engine owns the offer rows now, so it can only import offers it can
+  // represent: same-j offers whose committed price and quantized amounts are
+  // present and equal to the resting amounts. Anything else would be re-encoded
+  // lossily into a root that happens to look right.
+  for (const offer of (state.swapOffers ?? new Map<string, SwapOffer>()).values()) {
+    if (offer.crossJurisdiction) return 'CROSS_J_SWAP_OFFER';
+    if (offer.priceTicks === undefined) return 'SWAP_OFFER_WITHOUT_PRICE';
+    if (offer.quantizedGive !== offer.giveAmount || offer.quantizedWant !== offer.wantAmount) {
+      return 'SWAP_OFFER_QUANTIZED_MISMATCH';
+    }
+  }
   return null;
 };
 

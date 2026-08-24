@@ -31,6 +31,10 @@ pub struct AccountSummaryRow {
     /// every section — not just the two financial maps. Comparing only the
     /// map roots left carried sections and counters unverified.
     pub account_state_root: [u8; 32],
+    /// Engine-owned sections beyond the two financial maps, so a divergence
+    /// dump names the section instead of one opaque leaf hash.
+    pub swap_offers_root: [u8; 32],
+    pub rebalance_fee_policies_root: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +114,8 @@ impl StatefulBatchEngine {
                 account_state_root: state
                     .payment_profile_account_state_root()
                     .unwrap_or([0; 32]),
+                swap_offers_root: state.swap_offers_root(),
+                rebalance_fee_policies_root: state.rebalance_fee_policies_root(),
             });
         }
         (rows, next_cursor)
