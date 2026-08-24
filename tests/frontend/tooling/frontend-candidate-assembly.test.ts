@@ -1,21 +1,49 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { safeStringify } from '../../../core/protocol/serialization';
+import type { CopyGeneratedInputDefinition } from '../../../frontend/config/generated-inputs';
 import { SURFACE_IDS, type SurfaceId } from '../../../frontend/config/surfaces';
 import {
   assembleCandidateRelease,
   planCandidateRelease,
 } from '../../../frontend/scripts/candidate-release';
+import { prepareGeneratedInputs } from '../../../frontend/scripts/generated-inputs';
 
 const temporaryRoots: string[] = [];
 
 const createFrontendRoot = async (): Promise<string> => {
-  const root = await mkdtemp(join(tmpdir(), 'xln-candidate-release-'));
-  temporaryRoots.push(root);
-  return root;
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'xln-candidate-release-'));
+  temporaryRoots.push(repositoryRoot);
+  const frontendRoot = join(repositoryRoot, 'frontend');
+  await mkdir(frontendRoot, { recursive: true });
+  return frontendRoot;
+};
+
+const writeInputSource = async (frontendRoot: string, pathname: string, contents = pathname): Promise<void> => {
+  const output = join(frontendRoot, pathname);
+  await mkdir(dirname(output), { recursive: true });
+  await writeFile(output, contents);
+};
+
+const writeGeneratedInputSources = async (frontendRoot: string): Promise<void> => {
+  for (const pathname of [
+    'static/install.sh',
+    'static/favicon.ico',
+    'static/favicon-16x16.png',
+    'static/favicon-32x32.png',
+    'static/apple-touch-icon.png',
+    'static/android-chrome-192x192.png',
+    'static/android-chrome-512x512.png',
+    'static/site.webmanifest',
+    'static/comparative-results.json',
+  ]) await writeInputSource(frontendRoot, pathname);
+  await writeInputSource(frontendRoot, 'static/img/logo.png', 'logo');
+  await writeInputSource(frontendRoot, 'static/img/RCPAN.png', 'uppercase');
+  await writeInputSource(frontendRoot, 'static/bikes/rcpan.svg', 'bike');
+  await prepareGeneratedInputs(join(frontendRoot, '..'), frontendRoot, ['site', 'ops']);
 };
 
 const writeSurfaceArtifact = async (frontendRoot: string, surfaceId: SurfaceId): Promise<void> => {
@@ -36,6 +64,7 @@ const writeSurfaceArtifact = async (frontendRoot: string, surfaceId: SurfaceId):
 
 const writeCompleteArtifacts = async (frontendRoot: string): Promise<void> => {
   for (const surfaceId of SURFACE_IDS) await writeSurfaceArtifact(frontendRoot, surfaceId);
+  await writeGeneratedInputSources(frontendRoot);
 };
 
 afterEach(async () => {
@@ -58,6 +87,11 @@ describe('React candidate release assembly', () => {
     });
     expect(first.manifest.edgeRoutes).toContainEqual({ kind: 'exact', pathname: '/runtime.js' });
     expect(first.manifest.files.map(({ path }) => path)).toContain('assets/docs/index.js');
+    expect(first.manifest.files.map(({ path }) => path)).toContain('install.sh');
+    expect(first.manifest.generatedInputs.map(({ id }) => id)).toEqual([
+      'site-public-static',
+      'ops-comparative-results',
+    ]);
   });
 
   test('writes a versioned candidate without touching the canonical build directory', async () => {
@@ -90,6 +124,18 @@ describe('React candidate release assembly', () => {
     expect(after.releaseId).not.toBe(before.releaseId);
   });
 
+  test('changes the release identity when a prepared public input changes', async () => {
+    const frontendRoot = await createFrontendRoot();
+    await writeCompleteArtifacts(frontendRoot);
+    const before = await planCandidateRelease(frontendRoot);
+
+    await writeFile(join(frontendRoot, 'static/install.sh'), 'changed install input\n');
+    await prepareGeneratedInputs(join(frontendRoot, '..'), frontendRoot, ['site']);
+    const after = await planCandidateRelease(frontendRoot);
+
+    expect(after.releaseId).not.toBe(before.releaseId);
+  });
+
   test('rejects corrupted bytes in an existing content-addressed release', async () => {
     const frontendRoot = await createFrontendRoot();
     await writeCompleteArtifacts(frontendRoot);
@@ -110,6 +156,30 @@ describe('React candidate release assembly', () => {
 
     await expect(planCandidateRelease(frontendRoot)).rejects.toThrow(
       'CANDIDATE_ARTIFACT_PATH_UNOWNED:docs:assets/site/foreign.js',
+    );
+  });
+
+  test('rejects a generated input that collides with an application artifact', async () => {
+    const frontendRoot = await createFrontendRoot();
+    await writeCompleteArtifacts(frontendRoot);
+    await writeInputSource(frontendRoot, 'static/collision.js', 'collision');
+    const collision: CopyGeneratedInputDefinition = {
+      id: 'candidate-collision-fixture',
+      owner: 'site',
+      sourcePaths: ['frontend/static/collision.js'],
+      outputNamespace: 'candidate-collision-fixture',
+      producer: {
+        kind: 'copy',
+        entries: [{
+          sourcePath: 'frontend/static/collision.js',
+          destinationPath: 'assets/site/index.js',
+        }],
+      },
+    };
+    await prepareGeneratedInputs(join(frontendRoot, '..'), frontendRoot, ['site'], [collision]);
+
+    await expect(planCandidateRelease(frontendRoot, [collision])).rejects.toThrow(
+      'CANDIDATE_DESTINATION_COLLISION:assets/site/index.js',
     );
   });
 

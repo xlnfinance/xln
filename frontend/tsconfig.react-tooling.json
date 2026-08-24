@@ -6,6 +6,7 @@
   "include": [
     "apps/*/vite.config.ts",
     "config/development-gateway.ts",
+    "config/generated-inputs.ts",
     "scripts/assemble.ts",
     "config/create-react-app-config.ts",
     "config/surfaces.ts",
@@ -15,6 +16,8 @@
     "scripts/command-runner.ts",
     "scripts/dev-gateway.ts",
     "scripts/dev.ts",
+    "scripts/generated-inputs.ts",
+    "scripts/prepare.ts",
     "scripts/run-dev-gateway.ts",
     "scripts/surface-selection.ts"
   ]

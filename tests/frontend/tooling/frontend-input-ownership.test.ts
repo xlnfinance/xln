@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { GENERATED_INPUTS } from '../../../frontend/config/generated-inputs';
+import {
+  COPY_GENERATED_INPUTS,
+  GENERATED_INPUTS,
+} from '../../../frontend/config/generated-inputs';
 import { SURFACE_IDS } from '../../../frontend/config/surfaces';
 
 describe('frontend generated input ownership', () => {
@@ -21,6 +24,18 @@ describe('frontend generated input ownership', () => {
     for (const input of GENERATED_INPUTS) {
       expect(input.sourcePaths.length).toBeGreaterThan(0);
       expect(input.sourcePaths.every((sourcePath) => sourcePath.length > 0)).toBe(true);
+    }
+  });
+
+  test('keeps implemented copy producers aligned with their source inventory', () => {
+    expect(COPY_GENERATED_INPUTS.map(({ id }) => id)).toEqual([
+      'site-public-static',
+      'ops-comparative-results',
+    ]);
+    for (const input of COPY_GENERATED_INPUTS) {
+      expect(input.producer.entries.map(({ sourcePath }) => sourcePath)).toEqual(input.sourcePaths);
+      const destinations = input.producer.entries.map(({ destinationPath }) => destinationPath);
+      expect(new Set(destinations).size).toBe(destinations.length);
     }
   });
 });

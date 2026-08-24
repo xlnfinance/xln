@@ -1,18 +1,16 @@
 import { fileURLToPath } from 'node:url';
 
-import { SURFACE_IDS } from '../config/surfaces';
-import { assembleCandidateRelease } from './candidate-release';
 import { prepareGeneratedInputs } from './generated-inputs';
+import { parseSurfaceSelection } from './surface-selection';
 
 const FRONTEND_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 const run = async (): Promise<void> => {
-  if (Bun.argv.length > 2) throw new Error(`FRONTEND_ASSEMBLY_ARGUMENT_UNSUPPORTED:${Bun.argv[2]}`);
-  await prepareGeneratedInputs(REPOSITORY_ROOT, FRONTEND_ROOT, SURFACE_IDS);
-  const plan = await assembleCandidateRelease(FRONTEND_ROOT);
+  const surfaceIds = parseSurfaceSelection(Bun.argv.slice(2));
+  const manifests = await prepareGeneratedInputs(REPOSITORY_ROOT, FRONTEND_ROOT, surfaceIds);
   console.info(
-    `FRONTEND_ASSEMBLY_OK release=${plan.releaseId} files=${plan.files.length} path=${plan.releaseDirectory}`,
+    `FRONTEND_PREPARE_OK surfaces=${surfaceIds.join(',')} inputs=${manifests.map(({ id }) => id).join(',')}`,
   );
 };
 

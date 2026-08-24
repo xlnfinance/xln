@@ -235,7 +235,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `IN PROGRESS — CANDIDATE ASSEMBLY AND SAME-ORIGIN DEV GATEWAY VERIFIED`
+**Status:** `IN PROGRESS — FIRST SOURCE-CONTROLLED GENERATED INPUTS ASSEMBLED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -383,9 +383,9 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Split the first generated-input producers into their declared namespaces and
-   feed them into candidate assembly with collision checks.
-2. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
+1. Move docs catalog, docs-static, and `llms*` generation into a deterministic
+   docs-owned producer without writing canonical Svelte static output.
+2. Split Runtime bundle, BrainVault worker, and contract browser artifacts into
+   wallet-owned candidate inputs without editing their backend/contract sources.
+3. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
    Runtime-client packages deferred until their first real flow needs them.
-3. Capture the remaining missing-asset and CSP behavior as the first generated
-   inputs are attached to their owning candidate applications.

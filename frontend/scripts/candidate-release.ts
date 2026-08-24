@@ -13,9 +13,15 @@ import {
 import { dirname, join, relative, sep } from 'node:path';
 
 import { safeStringify } from '../../core/protocol/serialization';
+import {
+  COPY_GENERATED_INPUTS,
+  type CopyGeneratedInputDefinition,
+  type GeneratedInputOwner,
+} from '../config/generated-inputs';
 import { EDGE_ROUTES, SURFACES, type RouteRule, type SurfaceId } from '../config/surfaces';
+import { readPreparedGeneratedInputs } from './generated-inputs';
 
-const RELEASE_SCHEMA_VERSION = 1 as const;
+const RELEASE_SCHEMA_VERSION = 2 as const;
 
 type CandidateFile = Readonly<{
   sourcePath: string;
@@ -33,10 +39,18 @@ type CandidateApplication = Readonly<{
   assetRoutes: readonly RouteRule[];
 }>;
 
+type CandidateGeneratedInput = Readonly<{
+  id: string;
+  owner: GeneratedInputOwner;
+  outputNamespace: string;
+  files: readonly string[];
+}>;
+
 export type CandidateReleaseManifest = Readonly<{
   schemaVersion: typeof RELEASE_SCHEMA_VERSION;
   releaseId: `sha256-${string}`;
   applications: readonly CandidateApplication[];
+  generatedInputs: readonly CandidateGeneratedInput[];
   edgeRoutes: readonly RouteRule[];
   files: readonly Readonly<{
     path: string;
@@ -56,6 +70,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const toPortablePath = (pathname: string): string => pathname.split(sep).join('/');
+const comparePaths = (left: string, right: string): number => left.localeCompare(right);
 
 const hashBytes = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -75,7 +90,7 @@ const readArtifactFile = async (
 const walkRegularFiles = async (root: string, current = root): Promise<readonly string[]> => {
   const entries = await readdir(current, { withFileTypes: true });
   const paths: string[] = [];
-  entries.sort(({ name: left }, { name: right }) => left.localeCompare(right));
+  entries.sort(({ name: left }, { name: right }) => comparePaths(left, right));
   for (const entry of entries) {
     const pathname = join(current, entry.name);
     if (entry.isSymbolicLink()) throw new Error(`CANDIDATE_ARTIFACT_SYMLINK:${pathname}`);
@@ -121,7 +136,7 @@ const readViteManifestReferences = async (
       references.push(...items as string[]);
     }
   }
-  return [...new Set(references)].sort();
+  return [...new Set(references)].sort(comparePaths);
 };
 
 const assertOwnedArtifactPath = (surfaceId: SurfaceId, pathname: string): void => {
@@ -179,16 +194,30 @@ const createApplications = (): readonly CandidateApplication[] => SURFACES.map((
   assetRoutes: surface.assetRoutes,
 }));
 
-export const planCandidateRelease = async (frontendRoot: string): Promise<CandidateReleasePlan> => {
-  const files = (await Promise.all(SURFACES.map(({ id }) => collectSurfaceFiles(frontendRoot, id)))).flat();
-  files.sort(({ destinationPath: left }, { destinationPath: right }) => left.localeCompare(right));
+export const planCandidateRelease = async (
+  frontendRoot: string,
+  inputDefinitions: readonly CopyGeneratedInputDefinition[] = COPY_GENERATED_INPUTS,
+): Promise<CandidateReleasePlan> => {
+  const applicationFiles = (await Promise.all(
+    SURFACES.map(({ id }) => collectSurfaceFiles(frontendRoot, id)),
+  )).flat();
+  const preparedInputs = await readPreparedGeneratedInputs(frontendRoot, inputDefinitions);
+  const files = [...applicationFiles, ...preparedInputs.flatMap(({ files: inputFiles }) => inputFiles)];
+  files.sort(({ destinationPath: left }, { destinationPath: right }) => comparePaths(left, right));
   assertCollisionFree(files);
 
   const applications = createApplications();
+  const generatedInputs: readonly CandidateGeneratedInput[] = preparedInputs.map(({ manifest }) => ({
+    id: manifest.id,
+    owner: manifest.owner,
+    outputNamespace: manifest.outputNamespace,
+    files: manifest.files.map(({ destinationPath }) => destinationPath).sort(comparePaths),
+  }));
   const publicFiles = files.map(({ destinationPath: path, sha256, size }) => ({ path, sha256, size }));
   const identityInput = safeStringify({
     schemaVersion: RELEASE_SCHEMA_VERSION,
     applications,
+    generatedInputs,
     edgeRoutes: EDGE_ROUTES,
     files: publicFiles,
   });
@@ -202,6 +231,7 @@ export const planCandidateRelease = async (frontendRoot: string): Promise<Candid
       schemaVersion: RELEASE_SCHEMA_VERSION,
       releaseId,
       applications,
+      generatedInputs,
       edgeRoutes: EDGE_ROUTES,
       files: publicFiles,
     },
@@ -225,7 +255,10 @@ const validateExistingRelease = async (plan: CandidateReleasePlan): Promise<void
   if (actual !== expected) throw new Error(`CANDIDATE_RELEASE_ID_CONFLICT:${plan.releaseId}`);
 
   const actualPaths = await walkRegularFiles(plan.releaseDirectory);
-  const expectedPaths = [...plan.files.map(({ destinationPath }) => destinationPath), 'release-manifest.json'].sort();
+  const expectedPaths = [
+    ...plan.files.map(({ destinationPath }) => destinationPath),
+    'release-manifest.json',
+  ].sort(comparePaths);
   if (
     actualPaths.length !== expectedPaths.length ||
     actualPaths.some((pathname, index) => pathname !== expectedPaths[index])
@@ -250,8 +283,11 @@ const copyAndVerify = async (file: CandidateFile, releaseRoot: string): Promise<
   }
 };
 
-export const assembleCandidateRelease = async (frontendRoot: string): Promise<CandidateReleasePlan> => {
-  const plan = await planCandidateRelease(frontendRoot);
+export const assembleCandidateRelease = async (
+  frontendRoot: string,
+  inputDefinitions: readonly CopyGeneratedInputDefinition[] = COPY_GENERATED_INPUTS,
+): Promise<CandidateReleasePlan> => {
+  const plan = await planCandidateRelease(frontendRoot, inputDefinitions);
   if (await pathExists(plan.releaseDirectory)) {
     await validateExistingRelease(plan);
     return plan;

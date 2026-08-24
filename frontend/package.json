@@ -16,6 +16,7 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "bun run check:unsafe-types && bun copy-static-files.js && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && bun scripts/vite-build-check.ts",
 		"check:react": "bun scripts/check.ts --all --level=local",
+		"prepare:react": "bun scripts/prepare.ts --all",
 		"build:react": "bun scripts/build.ts --all",
 		"assemble:react": "bun scripts/assemble.ts",
 		"dev:react": "bun scripts/dev.ts",
