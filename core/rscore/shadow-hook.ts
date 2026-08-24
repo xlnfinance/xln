@@ -66,8 +66,13 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
         const printStats = (): void => {
           try { console.error(`RSCORE_SHADOW_STATS ${JSON.stringify(started.stats())}`); } catch { /* observer-only */ }
         };
+        // A hub runtime is killed with a signal and never reaches 'exit', so
+        // exit-only reporting silently looks identical to "shadow never ran".
+        printStats();
+        started.onProgress(printStats);
         process.once('beforeExit', printStats);
         process.once('exit', printStats);
+        for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, printStats);
       } catch (error) {
         pending = null;
         mirror = null;

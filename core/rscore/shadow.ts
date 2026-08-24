@@ -34,6 +34,8 @@ const MAX_QUEUE = 50_000;
  * a hub-only run is the intended shape (N=1).
  */
 const DEFAULT_MAX_OWNERS = 1;
+/** Progress reporting cadence, in compared frames. */
+const PROGRESS_EVERY = 500;
 
 export type ShadowFrameInput = Readonly<{
   ownerEntityId: string;
@@ -102,6 +104,7 @@ export class RscoreShadowMirror {
     dropped: 0,
     disabledReason: null,
   };
+  #onProgress: (() => void) | null = null;
   #idle: Promise<void> = Promise.resolve();
   #idleResolve: (() => void) | null = null;
 
@@ -115,6 +118,11 @@ export class RscoreShadowMirror {
     this.#workers = options.workers;
     this.#maxOwners = options.maxOwners ?? DEFAULT_MAX_OWNERS;
     this.#makeClient = options.makeClient;
+  }
+
+  /** Observer hook: called every PROGRESS_EVERY compared frames. */
+  onProgress(callback: () => void): void {
+    this.#onProgress = callback;
   }
 
   stats(): ShadowStats {
@@ -251,6 +259,9 @@ export class RscoreShadowMirror {
           .filter(({ verdict }) => Number(verdict[0]) !== 0);
         await client.commit(client.requestIdBytes(client.lastRequestId));
         this.#stats.framesCompared += 1;
+        if (this.#stats.framesCompared % PROGRESS_EVERY === 0) {
+          try { this.#onProgress?.(); } catch { /* observer-only */ }
+        }
         if (rejected.length > 0) {
           this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
           continue;
