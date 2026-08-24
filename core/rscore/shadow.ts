@@ -371,7 +371,6 @@ export class RscoreShadowMirror {
           .map((row, index) => ({ verdict: (row as unknown[])[2] as unknown[], index }))
           .filter(({ verdict }) => Number(verdict[0]) !== 0);
         await client.commit(client.requestIdBytes(client.lastRequestId));
-        this.#stats.framesCompared += 1;
         if (this.#stats.framesCompared % PROGRESS_EVERY === 0) {
           try { this.#onProgress?.(); } catch { /* observer-only */ }
         }
@@ -397,6 +396,10 @@ export class RscoreShadowMirror {
             } catch { /* observer-only */ }
           }
         }
+        // Counted only once a verdict exists, so framesCompared always equals
+        // matches + mismatches; incrementing first let a stats snapshot taken
+        // mid-frame report a comparison with no outcome.
+        this.#stats.framesCompared += 1;
         if (rejected.length > 0) {
           this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
           continue;

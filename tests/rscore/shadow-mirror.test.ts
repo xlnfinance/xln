@@ -141,6 +141,14 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     expect(stats.matches).toBe(5);
     expect(stats.dropped).toBe(0);
     expect(stats.skippedUnboundOwner).toBe(0);
+    // Every compared frame must carry a verdict; a compared frame with no
+    // outcome means a stats snapshot raced the drain loop.
+    expect(stats.matches + stats.mismatches).toBe(stats.framesCompared);
+    // And every seen frame is accounted for by exactly one disposition.
+    expect(
+      stats.framesCompared + stats.reseeds + stats.emptyFrames
+      + stats.skippedIneligible + stats.skippedUnboundOwner + stats.dropped,
+    ).toBe(stats.framesSeen);
   }, 30_000);
 
   // Whole-tree reconciliation after a deterministic run: every account the
