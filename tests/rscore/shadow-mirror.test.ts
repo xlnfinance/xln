@@ -103,6 +103,9 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: jHeight,
         accountTxs: txs,
+        // Direct-mode payments emit no forward; the secret-resolve signal is
+        // derived from the frame's txs on both sides.
+        outputs: [],
         committedStateRoot: overrides.expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });

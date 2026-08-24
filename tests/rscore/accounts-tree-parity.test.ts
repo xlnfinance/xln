@@ -72,6 +72,28 @@ const makeTsAccount = (index: number): AccountReplica => {
   return account;
 };
 
+/**
+ * uint64 claim counters that a JS number cannot hold. The engine commits the
+ * counter into the jurisdiction section, so a lossy wire integer produces a
+ * different account state root — these are the exact boundary values.
+ */
+const LARGE_CLAIM_COUNTS = [
+  2n ** 53n,
+  2n ** 53n + 1n,
+  2n ** 64n - 1n,
+] as const;
+
+// A non-zero counter requires a non-genesis root (the two are checked
+// against each other), so the vector carries a concrete accumulated root.
+const CLAIM_ROOT = entity('c1');
+
+const makeTsAccountWithClaims = (index: number, count: bigint): AccountReplica => {
+  const account = makeTsAccount(index);
+  account.state.leftPendingJClaims = { version: 1, root: CLAIM_ROOT, count };
+  account.state.rightPendingJClaims = { version: 1, root: CLAIM_ROOT, count: count - 1n };
+  return account;
+};
+
 
 // Sections the engine carries but never interprets; all empty for a fresh
 // payment-profile account (roots zero, J-claim accumulators at genesis).
@@ -96,6 +118,9 @@ const deltaWire = (delta: Delta): RscoreWireValue[] => [
   delta.rightHold.toString(),
 ];
 
+const claimWire = (accumulator: { root: string; count: bigint }): RscoreWireValue[] =>
+  [hexBytes(accumulator.root), accumulator.count];
+
 const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => [
   hexBytes(ACCOUNT_IDS[index]!),
   hexBytes(LEFT),
@@ -108,7 +133,13 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   [...account.state.deltas.values()].map(deltaWire),
   [],
   [account.state.jNonce, account.state.lastFinalizedJHeight],
-  EMPTY_CARRIED,
+  [
+    new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+    new Uint8Array(32), new Uint8Array(32),
+    [],
+    claimWire(account.state.leftPendingJClaims),
+    claimWire(account.state.rightPendingJClaims),
+  ],
 ];
 
 const paymentTx = (account: AccountReplica, index: number, amount: bigint): AccountTx => ({
@@ -211,4 +242,81 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       client.kill();
     }
   }, 30_000);
+
+  test.each(LARGE_CLAIM_COUNTS.map(count => [count.toString()] as const))(
+    'carries a uint64 J-claim counter losslessly (%s)',
+    async (countText: string) => {
+      const count = BigInt(countText);
+      const accounts = ACCOUNT_IDS.slice(0, 3)
+        .map((_, index) => makeTsAccountWithClaims(index, count));
+      const client = new RscoreProcessClient(BINARY, {
+        engineGeneration: Buffer.alloc(8, 0xa0),
+        runtimeId: Buffer.alloc(20, 0x10),
+        sessionId: Buffer.alloc(16, 0x20),
+      });
+      try {
+        await client.hello(2);
+        const loaded = (await client.restore(
+          0,
+          accounts.map((account, index) => seedWire(index, account)),
+        )) as unknown[];
+        // A lossy counter changes the jurisdiction section and therefore every
+        // leaf digest, so the forest root is the assertion that pins it.
+        expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(referenceRoot(accounts));
+      } finally {
+        client.kill();
+      }
+    },
+  );
+
+  /**
+   * Every field the seed carries must reach the committed root. A field that
+   * the engine silently ignores would let a wrong value pass reconciliation,
+   * so each perturbation is asserted to move the root.
+   */
+  const PERTURBATIONS: ReadonlyArray<readonly [string, (wire: RscoreWireValue[]) => void]> = [
+    ['jNonce', wire => { (wire[10] as RscoreWireValue[])[0] = 4_242; }],
+    ['lastFinalizedJHeight', wire => { (wire[10] as RscoreWireValue[])[1] = 9_999; }],
+    ['disputeLeftSeconds', wire => { (wire[7] as RscoreWireValue[])[0] = 11; }],
+    ['disputeRightSeconds', wire => { (wire[7] as RscoreWireValue[])[1] = 13; }],
+    ['pullsRoot', wire => { (wire[11] as RscoreWireValue[])[0] = hexBytes(entity('a1')); }],
+    ['swapOffersRoot', wire => { (wire[11] as RscoreWireValue[])[1] = hexBytes(entity('a2')); }],
+    ['subcontractsRoot', wire => { (wire[11] as RscoreWireValue[])[2] = hexBytes(entity('a3')); }],
+    ['requestedRebalanceRoot', wire => { (wire[11] as RscoreWireValue[])[3] = hexBytes(entity('a4')); }],
+    ['requestedRebalanceFeeStateRoot', wire => { (wire[11] as RscoreWireValue[])[4] = hexBytes(entity('a5')); }],
+    ['rebalanceFeePolicies', wire => {
+      (wire[11] as RscoreWireValue[])[5] = [[1, [3, '7', '11', '13', 1_700_000_000_000], []]];
+    }],
+    ['leftPendingJClaimsCount', wire => {
+      ((wire[11] as RscoreWireValue[])[6] as RscoreWireValue[])[1] = 5n;
+    }],
+    ['rightPendingJClaimsRoot', wire => {
+      ((wire[11] as RscoreWireValue[])[7] as RscoreWireValue[])[0] = hexBytes(entity('a6'));
+    }],
+    ['watchSeed', wire => { wire[6] = hexBytes(entity('a7')); }],
+    ['chainId', wire => { wire[4] = 31_338; }],
+  ];
+
+  test.each(PERTURBATIONS.map(([name]) => [name] as const))(
+    'a wrong %s moves the committed root',
+    async (name: string) => {
+      const perturb = PERTURBATIONS.find(([label]) => label === name)?.[1];
+      if (!perturb) throw new Error(`PERTURBATION_MISSING:${name}`);
+      const accounts = ACCOUNT_IDS.slice(0, 3).map((_, index) => makeTsAccount(index));
+      const client = new RscoreProcessClient(BINARY, {
+        engineGeneration: Buffer.alloc(8, 0xa0),
+        runtimeId: Buffer.alloc(20, 0x10),
+        sessionId: Buffer.alloc(16, 0x20),
+      });
+      try {
+        await client.hello(2);
+        const seeds = accounts.map((account, index) => seedWire(index, account));
+        perturb(seeds[0]!);
+        const loaded = (await client.restore(0, seeds)) as unknown[];
+        expect(new Uint8Array(loaded[1] as Uint8Array)).not.toEqual(referenceRoot(accounts));
+      } finally {
+        client.kill();
+      }
+    },
+  );
 });

@@ -70,6 +70,20 @@ export const shadowIneligibilityReason = (account: AccountReplica): string | nul
   return null;
 };
 
+/**
+ * The accumulator counter is a full uint64 on both sides. It travels as a
+ * bigint, not a JS number: msgpack encodes it as uint64 and the engine decodes
+ * it as u64, so the whole range survives. Coercing through Number() rounded
+ * anything past 2^53 into a different jurisdiction section; refusing the value
+ * instead would just have narrowed the profile.
+ */
+const jClaimCount = (count: bigint): bigint => {
+  if (count < 0n || count > 0xffff_ffff_ffff_ffffn) {
+    throw new Error(`SHADOW_J_CLAIM_COUNT_OUT_OF_RANGE:${count}`);
+  }
+  return count;
+};
+
 const collectionRoot = (
   namespace: AccountStateMapNamespace,
   map: AccountStateCollection<never, never> | undefined,
@@ -82,7 +96,7 @@ const carriedSectionsWire = (account: AccountReplica): RscoreWireValue[] => {
   const state = account.state;
   const claim = (accumulator: { root: string; count: bigint }): RscoreWireValue[] => [
     hexToWireBytes(accumulator.root, 32, 'SHADOW_J_CLAIM_ROOT'),
-    Number(accumulator.count),
+    jClaimCount(accumulator.count),
   ];
   const root = (
     namespace: AccountStateMapNamespace,

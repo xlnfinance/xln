@@ -113,6 +113,7 @@ export const commitAccountFrameTransition = async (
       enforcementTimestamp: options.htlcEnforcementClock?.timestamp ?? frame.timestamp,
       enforcementJHeight: options.htlcEnforcementClock?.jHeight ?? jHeight,
       accountTxs: frame.accountTxs,
+      outputs: candidateEffects,
       committedStateRoot: committed.accountStateRoot,
       account,
     });

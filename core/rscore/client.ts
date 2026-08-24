@@ -275,18 +275,63 @@ type DecodedReply = Readonly<{
   body: unknown;
 }>;
 
-const decodeEnvelope = (frame: Buffer): DecodedReply => {
+/**
+ * Decode one reply and bind it to the request it answers.
+ *
+ * The engine validates every request field (digest, declared length, canonical
+ * bytes, trailing bytes); replies were only checked for magic, arity and
+ * domain, so a stale, cross-session or truncated-but-decodable frame would be
+ * accepted as the answer to whatever request happened to be first in the FIFO.
+ * Everything the request bound is re-checked here.
+ */
+const decodeEnvelope = (
+  frame: Buffer,
+  expected: Readonly<{
+    identity: RscoreSessionIdentity;
+    requestId: bigint;
+    opTag: number;
+  }>,
+): DecodedReply => {
   if (frame[0] !== RSCORE_ABI_MAGIC) throw new Error(`RSCORE_CLIENT_MAGIC_INVALID:${frame[0]}`);
-  const outer = readValue({ buffer: Buffer.from(frame.subarray(1)), offset: 0 }) as unknown[];
-  if (!Array.isArray(outer) || outer.length !== 14) {
-    throw new Error(`RSCORE_CLIENT_ENVELOPE_ARITY:${Array.isArray(outer) ? outer.length : typeof outer}`);
+  if (frame[1] !== 0x9e) throw new Error(`RSCORE_CLIENT_ENVELOPE_HEADER:${frame[1]}`);
+  const cursor: ReadCursor = { buffer: frame, offset: 2 };
+  const head: unknown[] = [];
+  for (let index = 0; index < 13; index += 1) head.push(readValue(cursor));
+  const bodyBytes = frame.subarray(cursor.offset);
+
+  const bytesEqual = (value: unknown, want: Buffer): boolean =>
+    Buffer.isBuffer(value) && value.equals(want);
+  const requestIdBytes = Buffer.alloc(8);
+  requestIdBytes.writeBigUInt64BE(expected.requestId);
+
+  if (head[0] !== RSCORE_ABI_DOMAIN) throw new Error('RSCORE_CLIENT_DOMAIN_INVALID');
+  if (Number(head[1]) !== RSCORE_ABI_VERSION) throw new Error(`RSCORE_CLIENT_ABI_VERSION:${head[1]}`);
+  if (Number(head[2]) !== RSCORE_PROTOCOL_VERSION) throw new Error(`RSCORE_CLIENT_PROTOCOL_VERSION:${head[2]}`);
+  if (Number(head[3]) !== RSCORE_STORAGE_SCHEMA_VERSION) {
+    throw new Error(`RSCORE_CLIENT_STORAGE_VERSION:${head[3]}`);
   }
-  if (outer[0] !== RSCORE_ABI_DOMAIN) throw new Error('RSCORE_CLIENT_DOMAIN_INVALID');
-  return {
-    opTag: Number(outer[9]),
-    messageKind: Number(outer[10]),
-    body: outer[13],
-  };
+  if (!bytesEqual(head[4], RSCORE_PROTOCOL_FINGERPRINT)) throw new Error('RSCORE_CLIENT_FINGERPRINT');
+  if (!bytesEqual(head[5], expected.identity.engineGeneration)) throw new Error('RSCORE_CLIENT_GENERATION');
+  if (!bytesEqual(head[6], expected.identity.runtimeId)) throw new Error('RSCORE_CLIENT_RUNTIME_ID');
+  if (!bytesEqual(head[7], expected.identity.sessionId)) throw new Error('RSCORE_CLIENT_SESSION_ID');
+  if (!bytesEqual(head[8], requestIdBytes)) {
+    throw new Error(`RSCORE_CLIENT_REQUEST_ID:${Buffer.isBuffer(head[8]) ? head[8].toString('hex') : 'invalid'}`);
+  }
+  const opTag = Number(head[9]);
+  if (opTag !== expected.opTag) throw new Error(`RSCORE_CLIENT_OP_TAG:${opTag}`);
+  const messageKind = Number(head[10]);
+  if (Number(head[11]) !== bodyBytes.length) {
+    throw new Error(`RSCORE_CLIENT_BODY_LENGTH:${head[11]}!=${bodyBytes.length}`);
+  }
+  const digest = bodyDigest(expected.identity.runtimeId, opTag, messageKind, bodyBytes);
+  if (!bytesEqual(head[12], digest)) throw new Error('RSCORE_CLIENT_BODY_DIGEST');
+
+  const bodyCursor: ReadCursor = { buffer: bodyBytes, offset: 0 };
+  const body = readValue(bodyCursor);
+  if (bodyCursor.offset !== bodyBytes.length) {
+    throw new Error(`RSCORE_CLIENT_BODY_TRAILING:${bodyBytes.length - bodyCursor.offset}`);
+  }
+  return { opTag, messageKind, body };
 };
 
 export class RscoreProcessClient {
@@ -355,7 +400,11 @@ export class RscoreProcessClient {
       this.#waiters.push({ resolve, reject });
     });
     if (!this.#child.stdin.write(framed)) await once(this.#child.stdin, 'drain');
-    const decoded = decodeEnvelope(await reply);
+    const decoded = decodeEnvelope(await reply, {
+      identity: this.#identity,
+      requestId,
+      opTag,
+    });
     if (decoded.messageKind !== MESSAGE_KIND_OK) {
       const body = decoded.body as unknown[];
       const error = Array.isArray(body) && Array.isArray(body[0]) ? body[0] : body;

@@ -19,6 +19,7 @@ import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
 import { preparedCommitKey, takePreparedProposalCommit } from '../proposal/prepared-commit';
+import { noteAccountFrameForShadow } from '../../../rscore/shadow-hook';
 import { publishAccountOverlay } from '../../state/candidate-overlay';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import { countOp } from '../../../support/performance/op-counters';
@@ -147,6 +148,9 @@ const applyPendingFrameTransactions = async (
   candidateEffects: AccountOutput[],
 ): Promise<void> => {
   const prepared = takePreparedProposalCommit(preparedCommitKey(account, pendingFrame.stateHash), account.state);
+  // Same derivation commitAccountFrameTransition uses, so both commit paths
+  // hand the mirror the identical execution clock.
+  const preparedJHeight = pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
   if (prepared) {
     // Only the bilateral transition is replayed. Everything Entity-private on
     // the live replica (shadow, dispute draft, proof nonce) kept moving while
@@ -163,6 +167,24 @@ const applyPendingFrameTransactions = async (
     candidateEffects.push(...prepared.candidateEffects);
     timedOutHashlocks.push(...prepared.timedOutHashlocks);
     countOp('account.ack.preparedCommit');
+    // This path commits a frame without going through
+    // commitAccountFrameTransition, so it must mirror it itself: otherwise
+    // every proposer-side frame that hits the prepared cache is invisible to
+    // the shadow engine and its account silently falls behind.
+    noteAccountFrameForShadow({
+      ownerEntityId: account.proofHeader.fromEntity,
+      counterpartyEntityId: account.proofHeader.toEntity,
+      frameHeight: pendingFrame.height,
+      byLeft: pendingFrame.byLeft,
+      timestamp: pendingFrame.timestamp,
+      jHeight: preparedJHeight,
+      enforcementTimestamp: pendingFrame.timestamp,
+      enforcementJHeight: preparedJHeight,
+      accountTxs: pendingFrame.accountTxs,
+      outputs: prepared.candidateEffects,
+      committedStateRoot: prepared.accountStateRoot,
+      account,
+    });
     return;
   }
   const committed = await commitAccountFrameTransition({

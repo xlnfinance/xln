@@ -5,20 +5,17 @@
  * loaded dynamically only when XLN_RSCORE_SHADOW=1 in a Bun/Node runtime, so
  * browser bundles and non-shadow servers pay one env check per frame.
  */
-import type { ShadowFrameInput, ShadowGap } from './shadow';
+import type { ShadowFrameInput, ShadowGap, ShadowReconciliation, ShadowStats } from './shadow';
+
+type ShadowStatsLike = ShadowStats;
 
 type MirrorLike = Readonly<{
   noteCommittedFrame(input: ShadowFrameInput): void;
   onGap(callback: (gap: ShadowGap) => void): void;
   settled(): Promise<void>;
   shutdown(): Promise<void>;
-  stats(): unknown;
-  selfReconcile(): Promise<Map<string, {
-    matched: number;
-    mismatched: readonly unknown[];
-    missingInEngine: readonly string[];
-    extraInEngine: readonly string[];
-  }>>;
+  stats(): ShadowStatsLike;
+  selfReconcile(): Promise<Map<string, ShadowReconciliation>>;
 }>;
 
 let mirror: MirrorLike | null | undefined;
@@ -138,6 +135,26 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   }
   const reports = await active.selfReconcile();
   const failures: string[] = [];
+  // Coverage first: a run where the engine executed nothing, or where every
+  // gap was papered over with a reseed, produces a clean reconciliation and
+  // proves nothing. These counters are the difference between "the two
+  // engines agree" and "the mirror never disagreed with itself".
+  const stats = active.stats();
+  if (stats.disabledReason !== null) failures.push(`disabled=${stats.disabledReason}`);
+  if (stats.framesCompared === 0) failures.push('framesCompared=0');
+  if (stats.matches !== stats.framesCompared) {
+    failures.push(`matches=${stats.matches}!=compared=${stats.framesCompared}`);
+  }
+  if (stats.mismatches > 0) failures.push(`mismatches=${stats.mismatches}`);
+  if (stats.reseedsRepair > 0) failures.push(`reseedsRepair=${stats.reseedsRepair}`);
+  if (stats.dropped > 0) failures.push(`dropped=${stats.dropped}`);
+  if (stats.skippedIneligible > 0) {
+    failures.push(`skippedIneligible=${stats.skippedIneligible}:${JSON.stringify(stats.ineligibleReasons)}`);
+  }
+  if (Object.keys(stats.unsupportedTxTypes).length > 0) {
+    failures.push(`unsupportedTxTypes=${JSON.stringify(stats.unsupportedTxTypes)}`);
+  }
+  if (reports.size === 0) failures.push('reconciledOwners=0');
   for (const [owner, report] of reports) {
     if (report.mismatched.length > 0) {
       failures.push(`${owner}:mismatched=${JSON.stringify(report.mismatched).slice(0, 400)}`);
@@ -148,12 +165,25 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
     if (report.extraInEngine.length > 0) {
       failures.push(`${owner}:extraInEngine=${report.extraInEngine.length}`);
     }
+    // The whole tree, not only leaf-by-leaf agreement: a divergent forest root
+    // over identical leaves means the two radix implementations disagree.
+    if (!report.forestRoot.equal) {
+      failures.push(
+        `${owner}:forestRoot ts=${report.forestRoot.typescript} rust=${report.forestRoot.rust}`,
+      );
+    }
+  }
+  for (const [owner, report] of reports) {
+    if (report.matched === 0) failures.push(`${owner}:matchedAccounts=0`);
   }
   const summary = [...reports].map(([owner, report]) => `${owner.slice(0, 10)}:${report.matched}`).join(' ');
   if (failures.length > 0) {
     throw new Error(`RSCORE_SHADOW_PARITY_FAILED:${label}:${failures.join('|')}`);
   }
-  console.error(`RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}]`);
+  console.error(
+    `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
+    `reseeds=${stats.reseeds}`,
+  );
 };
 
 /** Test/shutdown access to the live mirror (null when disabled or not started). */

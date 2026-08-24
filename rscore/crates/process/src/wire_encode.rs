@@ -97,6 +97,7 @@ pub fn summary_page(
                         integer(row.htlc_locks),
                         AbiValue::Bytes(row.deltas_root.to_vec()),
                         AbiValue::Bytes(row.htlc_locks_root.to_vec()),
+                        AbiValue::Bytes(row.account_state_root.to_vec()),
                     ])
                 })
                 .collect(),

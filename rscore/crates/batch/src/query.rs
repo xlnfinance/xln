@@ -27,6 +27,10 @@ pub struct AccountSummaryRow {
     pub htlc_locks: u64,
     pub deltas_root: [u8; 32],
     pub htlc_locks_root: [u8; 32],
+    /// The whole account leaf: identity, dispute config, journal counters and
+    /// every section — not just the two financial maps. Comparing only the
+    /// map roots left carried sections and counters unverified.
+    pub account_state_root: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +107,9 @@ impl StatefulBatchEngine {
                 htlc_locks: state.htlc_count() as u64,
                 deltas_root: state.deltas_root(),
                 htlc_locks_root: state.htlc_locks_root(),
+                account_state_root: state
+                    .payment_profile_account_state_root()
+                    .unwrap_or([0; 32]),
             });
         }
         (rows, next_cursor)

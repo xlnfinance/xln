@@ -503,6 +503,7 @@ async function commitIncomingFrameOnRealState(
       enforcementTimestamp: receivedFrame.timestamp,
       enforcementJHeight: shadowJHeight,
       accountTxs: receivedFrame.accountTxs,
+      outputs: validation.candidateEffects,
       committedStateRoot: receivedFrame.accountStateRoot,
       account,
     });

@@ -14,8 +14,10 @@
  * comparison resumes from the next frame.
  */
 import { createStructuredLogger } from '../support/logger';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
+import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
-import type { AccountReplica, AccountTx } from '../types/account';
+import type { AccountOutput, AccountReplica, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
   SHADOW_SUPPORTED_TX_TYPES,
@@ -26,6 +28,58 @@ import {
 } from './shadow-wire';
 
 const shadowLog = createStructuredLogger('rscore.shadow');
+
+/**
+ * Output-channel parity, as a canonical ordered list of strings.
+ *
+ * Both engines emit two comparable signals for the payment profile: the
+ * trusted-payment forward, and the HTLC secret released by a resolve. The
+ * account state root says nothing about either — a lost or invented forward
+ * keeps the same balances — so they are compared explicitly.
+ */
+const expectedOutputProjection = (input: ShadowFrameInput): string[] => {
+  const rows: string[] = [];
+  for (const output of input.outputs) {
+    if (output.kind !== 'directPaymentForward') continue;
+    rows.push([
+      'forward',
+      output.tokenId,
+      output.amount.toString(),
+      output.route.join('>'),
+      output.description ?? '',
+      output.trustedGatewayEntityId,
+    ].join('|'));
+  }
+  for (const tx of input.accountTxs) {
+    if (tx.type !== 'htlc_resolve' || tx.data.outcome !== 'secret') continue;
+    rows.push(['secret', tx.data.lockId].join('|'));
+  }
+  return rows;
+};
+
+/** Same projection, read back from the engine's typed outputs. */
+const engineOutputProjection = (outputs: readonly unknown[], accountKey: string): string[] => {
+  const rows: string[] = [];
+  for (const entry of outputs) {
+    const fields = entry as unknown[];
+    if (Buffer.from(fields[2] as Uint8Array).toString('hex') !== accountKey) continue;
+    const output = fields[3] as unknown[];
+    const tag = Number(output[0]);
+    if (tag === 0) {
+      rows.push([
+        'forward',
+        Number(output[1]),
+        String(output[2]),
+        (output[3] as string[]).join('>'),
+        (output[4] as string | null) ?? '',
+        String(output[6]),
+      ].join('|'));
+      continue;
+    }
+    if (tag === 1) rows.push(['secret', String(output[1])].join('|'));
+  }
+  return rows;
+};
 
 const MAX_QUEUE = 50_000;
 /**
@@ -57,6 +111,8 @@ export type ShadowFrameInput = Readonly<{
   enforcementTimestamp: number;
   enforcementJHeight: number;
   accountTxs: readonly AccountTx[];
+  /** Effects the committed frame produced (the TS authority's output channel). */
+  outputs: readonly AccountOutput[];
   /** TS authority root committed by this frame (hex). */
   committedStateRoot: string;
   /** Committed post-frame replica, read synchronously at note time. */
@@ -71,6 +127,8 @@ type QueueEntry = Readonly<{
   expectedRootHex: string;
   frameHeight: number;
   txTypes: readonly string[];
+  /** Canonical projection of the TS outputs this frame must reproduce. */
+  expectedOutputs: readonly string[];
 }> | Readonly<{
   kind: 'reseed';
   ownerKey: string;
@@ -82,12 +140,23 @@ type QueueEntry = Readonly<{
 
 export type ShadowReconciliationMismatch = Readonly<{
   accountId: string;
+  /** The whole leaf: identity, dispute config, journal counters, every section. */
+  accountStateRoot: Readonly<{ typescript: string; rust: string }>;
+  /** Which section moved, when the full root differs. */
   deltasRoot: Readonly<{ typescript: string; rust: string }>;
   locksRoot: Readonly<{ typescript: string; rust: string }>;
+  ownerSide: Readonly<{ typescript: string; rust: string }>;
 }>;
 
 export type ShadowReconciliation = Readonly<{
   matched: number;
+  /**
+   * Radix-16 forest over the payment-profile account state roots — the tree
+   * the Rust engine commits. This is NOT the production Entity accounts root:
+   * the Entity leaf additionally commits the replica envelope (mempool,
+   * current/pending frames, acks, hankos, withdrawals).
+   */
+  forestRoot: Readonly<{ typescript: string; rust: string; equal: boolean }>;
   mismatched: readonly ShadowReconciliationMismatch[];
   missingInEngine: readonly string[];
   extraInEngine: readonly string[];
@@ -152,6 +221,9 @@ export class RscoreShadowMirror {
    */
   readonly #mirrored = new Map<string, Map<string, AccountReplica>>();
   readonly #needsReseed = new Set<string>();
+  /** Last accounts-forest root and revision the engine reported per owner. */
+  readonly #lastCommittedRoot = new Map<string, string>();
+  readonly #lastRevision = new Map<string, number>();
   readonly #queue: QueueEntry[] = [];
   #draining = false;
   #disabledReason: string | null = null;
@@ -226,15 +298,22 @@ export class RscoreShadowMirror {
   ): Promise<ShadowReconciliation> {
     const ownerKey = ownerEntityId.trim().toLowerCase();
     const client = await this.#ensureClient(ownerKey);
-    const engineRows = new Map<string, { deltasRoot: string; locksRoot: string }>();
+    const engineRows = new Map<string, {
+      ownerSide: string;
+      deltasRoot: string;
+      locksRoot: string;
+      accountStateRoot: string;
+    }>();
     let cursor: Uint8Array | null = null;
     for (;;) {
       const page = (await client.readAccountSummaryPage(cursor, 512, [])) as unknown[];
       for (const row of page[1] as unknown[]) {
         const fields = row as unknown[];
         engineRows.set(`0x${Buffer.from(fields[0] as Uint8Array).toString('hex')}`, {
+          ownerSide: Number(fields[1]) === 0 ? 'left' : 'right',
           deltasRoot: `0x${Buffer.from(fields[4] as Uint8Array).toString('hex')}`,
           locksRoot: `0x${Buffer.from(fields[5] as Uint8Array).toString('hex')}`,
+          accountStateRoot: `0x${Buffer.from(fields[6] as Uint8Array).toString('hex')}`,
         });
       }
       const next = page[2];
@@ -257,18 +336,44 @@ export class RscoreShadowMirror {
         .rootHash().toLowerCase();
       const locksRoot = requirePersistentAccountStateMap(account.state.locks, 'locks')
         .rootHash().toLowerCase();
-      if (engine.deltasRoot === deltasRoot && engine.locksRoot === locksRoot) {
+      // The authority value: the root the last committed frame certified.
+      // Comparing the two map roots alone left identity, dispute config, the
+      // journal counters and every carried section unverified.
+      const accountStateRoot = computeAccountStateRoot(account.state).toLowerCase();
+      const ownerSide = account.state.leftEntity.trim().toLowerCase() === ownerKey ? 'left' : 'right';
+      if (engine.accountStateRoot === accountStateRoot && engine.ownerSide === ownerSide) {
         matched.push(key);
         continue;
       }
       mismatched.push({
         accountId: key,
+        accountStateRoot: { typescript: accountStateRoot, rust: engine.accountStateRoot },
         deltasRoot: { typescript: deltasRoot, rust: engine.deltasRoot },
         locksRoot: { typescript: locksRoot, rust: engine.locksRoot },
+        ownerSide: { typescript: ownerSide, rust: engine.ownerSide },
       });
     }
+    // Same data model as the engine's tree: key = 32-byte counterparty id,
+    // leaf = payment-profile account state root.
+    let forest = PersistentRadixValueMap.empty<string, AccountReplica>({
+      radix: 16,
+      ownKey: (key: string): string => key,
+      keyBytes: (key: string): Uint8Array => hexToWireBytes(key, 32, 'SHADOW_FOREST_KEY'),
+      valueHash: (account: AccountReplica): string => computeAccountStateRoot(account.state),
+      ownValue: (account: AccountReplica): AccountReplica => account,
+    });
+    for (const [counterpartyId, account] of accounts) {
+      forest = forest.updated(counterpartyId.trim().toLowerCase(), account);
+    }
+    const typescriptForest = forest.rootHash().toLowerCase();
+    const rustForest = (this.#lastCommittedRoot.get(ownerKey) ?? '').toLowerCase();
     return {
       matched: matched.length,
+      forestRoot: {
+        typescript: typescriptForest,
+        rust: rustForest,
+        equal: rustForest !== '' && rustForest === typescriptForest,
+      },
       mismatched,
       missingInEngine,
       extraInEngine: [...engineRows.keys()],
@@ -385,6 +490,7 @@ export class RscoreShadowMirror {
         expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
         frameHeight: input.frameHeight,
         txTypes: input.accountTxs.map(tx => tx.type),
+        expectedOutputs: expectedOutputProjection(input),
       });
     } catch (error) {
       this.#disable(`note:${error instanceof Error ? error.message : String(error)}`);
@@ -423,7 +529,8 @@ export class RscoreShadowMirror {
         lastEntry = entry;
         const client = await this.#ensureClient(entry.ownerKey);
         if (entry.kind === 'reseed') {
-          await client.upsertAccounts([entry.seed]);
+          const upserted = (await client.upsertAccounts([entry.seed])) as unknown[];
+          this.#noteRevision(entry.ownerKey, upserted);
           this.#stats.reseeds += 1;
           continue;
         }
@@ -432,7 +539,16 @@ export class RscoreShadowMirror {
         const rejected = results
           .map((row, index) => ({ verdict: (row as unknown[])[2] as unknown[], index }))
           .filter(({ verdict }) => Number(verdict[0]) !== 0);
-        await client.commit(client.requestIdBytes(client.lastRequestId));
+        const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+        // The engine's revision must advance by exactly one per commit; a gap
+        // means a candidate was silently dropped or replayed.
+        const expectedRevision = (this.#lastRevision.get(entry.ownerKey) ?? 0) + 1;
+        if (Number(committed[0]) !== expectedRevision) {
+          await this.#recordMismatch(entry, `revision:${committed[0]}!=${expectedRevision}`);
+          this.#noteRevision(entry.ownerKey, committed);
+          continue;
+        }
+        this.#noteRevision(entry.ownerKey, committed);
         if (this.#stats.framesCompared % PROGRESS_EVERY === 0) {
           try { this.#onProgress?.(); } catch { /* observer-only */ }
         }
@@ -464,6 +580,14 @@ export class RscoreShadowMirror {
         this.#stats.framesCompared += 1;
         if (rejected.length > 0) {
           await this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
+          continue;
+        }
+        const engineOutputs = engineOutputProjection(prepared[3] as unknown[], entry.accountKey);
+        if (engineOutputs.join('\n') !== entry.expectedOutputs.join('\n')) {
+          await this.#recordMismatch(
+            entry,
+            `outputs:ts=${JSON.stringify(entry.expectedOutputs)}:rust=${JSON.stringify(engineOutputs)}`,
+          );
           continue;
         }
         const roots = prepared[4] as unknown[];
@@ -564,6 +688,15 @@ export class RscoreShadowMirror {
     } catch {
       return undefined;
     }
+  }
+
+  /** Reply shape for commit/upsert alike: [revision, accountsRoot]. */
+  #noteRevision(ownerKey: string, reply: readonly unknown[]): void {
+    this.#lastRevision.set(ownerKey, Number(reply[0]));
+    this.#lastCommittedRoot.set(
+      ownerKey,
+      `0x${Buffer.from(reply[1] as Uint8Array).toString('hex')}`,
+    );
   }
 
   #reportGap(gap: ShadowGap): void {
