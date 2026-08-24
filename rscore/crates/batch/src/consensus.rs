@@ -59,6 +59,35 @@ pub struct AccountInputResult {
 }
 
 #[derive(Debug)]
+/// Everything one runtime frame asks of the accounts.
+pub struct WaveRequest {
+    /// The clock the proposed frames are stamped with.
+    pub timestamp: u64,
+    pub j_height: u64,
+    /// The runtime's own clock, which decides what has expired.
+    pub clock: ReceiverClock,
+    pub admissions: Vec<(AccountId, Vec<xln_rscore_engine::AccountTx>)>,
+    pub inputs: Vec<AccountInputRow>,
+    /// Whether to propose after applying. A runtime that only wants to drain
+    /// its inbox says no.
+    pub propose: bool,
+}
+
+/// What the wave produced, against a candidate that is not yet committed.
+pub struct WaveResult {
+    pub revision: u64,
+    pub accounts_root: [u8; 32],
+    pub applied: Vec<AccountInputResult>,
+    pub proposals: Vec<ProposalRow>,
+}
+
+/// The committed store as it was before the wave, kept until the runtime says
+/// its own record is durable.
+struct PendingWave {
+    base_accounts: PersistentRadixMap<AccountConsensus>,
+    base_revision: u64,
+}
+
 /// A proposal to send. It carries no outputs: what the frame produced is
 /// released with the peer's ack, never before.
 pub struct ProposalRow {
@@ -89,6 +118,7 @@ pub struct StatefulConsensusEngine {
     seed: String,
     signer_id: String,
     identities: BTreeMap<[u8; 32], SigningIdentity>,
+    pending: Option<PendingWave>,
 }
 
 impl StatefulConsensusEngine {
@@ -121,6 +151,7 @@ impl StatefulConsensusEngine {
             seed,
             signer_id,
             identities: BTreeMap::new(),
+            pending: None,
         };
         engine.upsert_accounts(seeds)?;
         Ok(engine)
@@ -153,6 +184,7 @@ impl StatefulConsensusEngine {
     /// Seed or replace accounts. Their consensus state starts empty: a fresh
     /// account has no frames and no queue.
     pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
+        self.assert_no_pending_wave()?;
         let mut entries = Vec::with_capacity(seeds.len());
         let mut seen = BTreeSet::new();
         for seed in seeds {
@@ -184,6 +216,7 @@ impl StatefulConsensusEngine {
         &mut self,
         requests: Vec<(AccountId, Vec<xln_rscore_engine::AccountTx>)>,
     ) -> Result<[u8; 32], BatchError> {
+        self.assert_no_pending_wave()?;
         let mut merged: BTreeMap<AccountId, Vec<xln_rscore_engine::AccountTx>> = BTreeMap::new();
         for (account_id, txs) in requests {
             merged.entry(account_id).or_default().extend(txs);
@@ -221,6 +254,7 @@ impl StatefulConsensusEngine {
         j_height: u64,
         selected: Option<&[AccountId]>,
     ) -> Result<Vec<ProposalRow>, BatchError> {
+        self.assert_no_pending_wave()?;
         let candidates: Vec<(AccountId, AccountConsensus)> = match selected {
             Some(ids) => ids
                 .iter()
@@ -293,6 +327,7 @@ impl StatefulConsensusEngine {
         clock: ReceiverClock,
         rows: Vec<AccountInputRow>,
     ) -> Result<Vec<AccountInputResult>, BatchError> {
+        self.assert_no_pending_wave()?;
         if rows.is_empty() {
             return Ok(Vec::new());
         }
@@ -358,6 +393,121 @@ impl StatefulConsensusEngine {
         Ok(results)
     }
 
+    /// One runtime wave, applied to a candidate the caller can still abort.
+    ///
+    /// This is the whole conversation for a runtime frame: admit what the
+    /// Entity queued, apply what the peers sent, propose what is now
+    /// proposable — one call, one crossing of the process boundary, with the
+    /// pool loaded once instead of three times.
+    ///
+    /// Nothing here is durable. The committed store is kept aside until
+    /// `commit_wave`, so the runtime can write its own log first and
+    /// `abort_wave` if that write fails. Effects released by an ack ride back
+    /// in the result and belong to the caller only once it has committed.
+    pub fn prepare_wave(&mut self, request: WaveRequest) -> Result<WaveResult, BatchError> {
+        if self.pending.is_some() {
+            return Err(BatchError::WavePending);
+        }
+        let base_accounts = self.accounts.clone();
+        let base_revision = self.revision;
+        let outcome = self.run_wave(request);
+        match outcome {
+            Ok(result) => {
+                self.pending = Some(PendingWave {
+                    base_accounts,
+                    base_revision,
+                });
+                Ok(result)
+            }
+            Err(error) => {
+                // A wave that failed halfway leaves nothing behind: the caller
+                // sees the error against the state it started from.
+                self.accounts = base_accounts;
+                self.revision = base_revision;
+                Err(error)
+            }
+        }
+    }
+
+    fn run_wave(&mut self, request: WaveRequest) -> Result<WaveResult, BatchError> {
+        let WaveRequest {
+            timestamp,
+            j_height,
+            clock,
+            admissions,
+            inputs,
+            propose,
+        } = request;
+        if !admissions.is_empty() {
+            self.admit_txs(admissions)?;
+        }
+        let applied = if inputs.is_empty() {
+            Vec::new()
+        } else {
+            self.apply_inputs(clock, inputs)?
+        };
+        let proposals = if propose {
+            self.propose_frames(timestamp, j_height, None)?
+        } else {
+            Vec::new()
+        };
+        Ok(WaveResult {
+            revision: self.revision,
+            accounts_root: self.accounts.root_hash(),
+            applied,
+            proposals,
+        })
+    }
+
+    /// Keep the wave: the runtime has made its own record of it durable.
+    pub fn commit_wave(&mut self, revision: u64) -> Result<[u8; 32], BatchError> {
+        if self.pending.is_none() {
+            return Err(BatchError::WaveMissing);
+        }
+        if revision != self.revision {
+            return Err(BatchError::WaveRevision {
+                actual: revision,
+                expected: self.revision,
+            });
+        }
+        self.pending = None;
+        Ok(self.accounts.root_hash())
+    }
+
+    /// Drop the wave and everything it touched. The caller could not make its
+    /// own record durable, so this engine must not be ahead of it.
+    pub fn abort_wave(&mut self, revision: u64) -> Result<u64, BatchError> {
+        let Some(pending) = self.pending.take() else {
+            return Err(BatchError::WaveMissing);
+        };
+        if revision != self.revision {
+            let expected = self.revision;
+            self.pending = Some(pending);
+            return Err(BatchError::WaveRevision {
+                actual: revision,
+                expected,
+            });
+        }
+        self.accounts = pending.base_accounts;
+        self.revision = pending.base_revision;
+        Ok(self.revision)
+    }
+
+    /// Whether a wave is waiting for the runtime's word.
+    pub const fn wave_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Every other entry point is closed while a wave is uncommitted: the
+    /// engine holds exactly one candidate, and a second mutation on top of it
+    /// could not be rolled back to the state the runtime agreed on.
+    fn assert_no_pending_wave(&self) -> Result<(), BatchError> {
+        if self.pending.is_some() {
+            return Err(BatchError::WavePending);
+        }
+        Ok(())
+    }
+
     /// Bind an entity this runtime signs for to its signer id. A runtime that
     /// hosts several entities derives a different key for each; without this
     /// they would all sign as the session's default signer.
@@ -384,6 +534,9 @@ impl StatefulConsensusEngine {
     /// `commit_checkpoint` once the write is durable; nothing is dropped until
     /// then, so a crash in between replays from the previous checkpoint.
     pub fn checkpoint_changes(&self) -> Result<AccountsCheckpoint, BatchError> {
+        // A wave the runtime has not committed is not part of the world yet,
+        // so it must not reach the database that outlives this process.
+        self.assert_no_pending_wave()?;
         let diff = self.accounts.node_changes_since(&self.checkpoint);
         let mut accounts = Vec::new();
         for record in &diff.puts {
@@ -428,6 +581,7 @@ impl StatefulConsensusEngine {
     /// revision that was read may be committed: anything else would leave the
     /// database missing the rows written in between.
     pub fn commit_checkpoint(&mut self, revision: u64) -> Result<(), BatchError> {
+        self.assert_no_pending_wave()?;
         if revision != self.revision {
             return Err(BatchError::CheckpointRevision {
                 actual: revision,
@@ -452,6 +606,7 @@ impl StatefulConsensusEngine {
         rows: Vec<AccountRestore>,
         expected: &CheckpointExpectation,
     ) -> Result<[u8; 32], BatchError> {
+        self.assert_no_pending_wave()?;
         if rows.len() != expected.account_count {
             return Err(BatchError::CheckpointIncomplete {
                 actual: rows.len(),

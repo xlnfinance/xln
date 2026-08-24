@@ -65,6 +65,12 @@ pub enum BatchError {
         input_index: u32,
         account_id: AccountId,
     },
+    #[error("RSCORE_BATCH_WAVE_PENDING")]
+    WavePending,
+    #[error("RSCORE_BATCH_WAVE_MISSING")]
+    WaveMissing,
+    #[error("RSCORE_BATCH_WAVE_REVISION:{actual}:{expected}")]
+    WaveRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_CHECKPOINT_REVISION:{actual}:{expected}")]
     CheckpointRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY:{width}")]
