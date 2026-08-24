@@ -383,26 +383,48 @@ pub fn load_accounts(id: u64, revision: u64, accounts: Vec<AbiValue>) -> Envelop
     )
 }
 
-/// One runtime frame: admissions, arriving inputs, and whether to propose.
+/// One runtime frame for one owner Entity: what it queued, what arrived for
+/// it, and whether it proposes. The wire carries a group per Entity, each with
+/// its own clocks and its own ordered operations.
 pub fn prepare_wave(
     id: u64,
+    owner_entity_id: [u8; 32],
     timestamp: u64,
     admissions: Vec<AbiValue>,
     inputs: Vec<AbiValue>,
     propose: bool,
 ) -> Envelope {
+    let ops = admissions
+        .into_iter()
+        .map(|admission| {
+            let AbiValue::Tuple(fields) = admission else {
+                panic!("an admission is [accountId, txs]")
+            };
+            let fields = fields.fields().to_vec();
+            tuple(vec![
+                AbiValue::Integer(0),
+                fields[0].clone(),
+                fields[1].clone(),
+            ])
+        })
+        .chain(
+            inputs
+                .into_iter()
+                .map(|input| tuple(vec![AbiValue::Integer(1), input])),
+        )
+        .collect();
     request(
         id,
         OpTag::PrepareAccountWave,
-        vec![
+        vec![tuple(vec![tuple(vec![
+            AbiValue::Bytes(owner_entity_id.to_vec()),
             AbiValue::Integer(i128::from(timestamp)),
             AbiValue::Integer(100),
             AbiValue::Integer(i128::from(timestamp)),
             AbiValue::Integer(100),
             AbiValue::Bool(propose),
-            tuple(admissions),
-            tuple(inputs),
-        ],
+            tuple(ops),
+        ])])],
     )
 }
 

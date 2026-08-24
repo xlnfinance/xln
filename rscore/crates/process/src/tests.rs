@@ -494,6 +494,7 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
     let prepared = session
         .handle(prepare_wave(
             2,
+            owner,
             1_700_000_000_000,
             vec![wave_payment(peer, owner, peer, 25)],
             Vec::new(),
@@ -543,6 +544,7 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
         session
             .handle(prepare_wave(
                 3,
+                owner,
                 1_700_000_000_001,
                 Vec::new(),
                 Vec::new(),
@@ -589,6 +591,7 @@ fn an_aborted_wave_puts_the_authority_engine_back() {
     let first = session
         .handle(prepare_wave(
             2,
+            owner,
             1_700_000_000_000,
             vec![wave_payment(peer, owner, peer, 25)],
             Vec::new(),
@@ -609,6 +612,7 @@ fn an_aborted_wave_puts_the_authority_engine_back() {
     let second = session
         .handle(prepare_wave(
             4,
+            owner,
             1_700_000_000_000,
             vec![wave_payment(peer, owner, peer, 25)],
             Vec::new(),

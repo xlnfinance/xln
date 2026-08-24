@@ -40,7 +40,7 @@ const REQUEST_TIMEOUT_MS = requestTimeoutMs();
 export const RSCORE_ABI_VERSION = 1;
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An engine built against the old Hello fails at Hello, not later.
-export const RSCORE_PROCESS_ABI_VERSION = 3;
+export const RSCORE_PROCESS_ABI_VERSION = 4;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -513,28 +513,40 @@ export class RscoreProcessClient {
   }
 
   /**
-   * One runtime frame for an authoritative session: what to queue, what
-   * arrived from counterparties, and whether to propose afterwards. The reply
-   * is a candidate — it is only kept once `commit` names this request.
+   * One runtime frame for an authoritative session, grouped by the Entity that
+   * owns the work. The reply is a candidate — it is only kept once `commit`
+   * names this request.
+   *
+   * Each group carries its own clocks because each Entity has its own: a
+   * runtime frame that stamped every Entity's proposal with one timestamp, or
+   * judged every arrival against one finalized J height, would settle one
+   * Entity's locks by its neighbour's clock. Operations stay in the order the
+   * authority performed them: admissions and peer inputs interleave, and the
+   * order decides what a rolled-back proposal puts back in the queue.
    */
   async prepareAccountWave(wave: Readonly<{
-    timestamp: number;
-    jHeight: number;
-    entityTimestamp: number;
-    finalizedJHeight: number;
-    propose: boolean;
-    admissions: RscoreWireValue[];
-    inputs: RscoreWireValue[];
+    entities: readonly Readonly<{
+      ownerEntityId: Uint8Array;
+      timestamp: number;
+      jHeight: number;
+      entityTimestamp: number;
+      finalizedJHeight: number;
+      propose: boolean;
+      /** `[0, accountId, txs]` to queue, `[1, inputRow]` for an arrival. */
+      ops: readonly RscoreWireValue[];
+    }>[];
   }>): Promise<{ result: unknown; token: Buffer }> {
     const token = this.requestIdBytes(this.#nextRequestId);
     const result = await this.request(RSCORE_OP.prepareAccountWave, [
-      wave.timestamp,
-      wave.jHeight,
-      wave.entityTimestamp,
-      wave.finalizedJHeight,
-      wave.propose,
-      wave.admissions,
-      wave.inputs,
+      wave.entities.map(entity => [
+        entity.ownerEntityId,
+        entity.timestamp,
+        entity.jHeight,
+        entity.entityTimestamp,
+        entity.finalizedJHeight,
+        entity.propose,
+        [...entity.ops],
+      ]),
     ]);
     return { result, token };
   }

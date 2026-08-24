@@ -123,6 +123,19 @@ const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRo
  * account tree leaf is the Entity's account leaf, so the two accounts roots
  * are directly comparable.
  */
+/**
+ * One operation of a wave, in the order the authority performed it.
+ *
+ * Admissions and peer inputs interleave inside a single Runtime frame, and the
+ * order is load-bearing: a proposal that loses a height collision returns its
+ * transactions to the front of the queue and drops the ones already there, so
+ * whether our own admission had landed yet decides what survives.
+ */
+export const waveAdmitOp = (accountId: string, txs: RscoreWireValue[]): RscoreWireValue =>
+  [0, hexToWireBytes(accountId, 32, 'RSCORE_WAVE_ACCOUNT_ID'), txs];
+
+export const waveInputOp = (row: RscoreWireValue): RscoreWireValue => [1, row];
+
 export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue => {
   const projected = projectEntityAccountLeaf(account);
   for (const field of ENGINE_DERIVED_LEAF_FIELDS) {

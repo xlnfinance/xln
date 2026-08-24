@@ -65,6 +65,17 @@ pub enum BatchError {
         input_index: u32,
         account_id: AccountId,
     },
+    /// Two groups in one wave claiming the same owner Entity, which would give
+    /// that Entity two clocks and the wave no single answer about expiry.
+    #[error("RSCORE_BATCH_WAVE_ENTITY_DUPLICATE:{entity_id}")]
+    WaveEntityDuplicate { entity_id: String },
+    /// An Entity's group naming an account owned by someone else. The account
+    /// says who owns it; the group is not trusted to.
+    #[error("RSCORE_BATCH_WAVE_ACCOUNT_OWNER:{account_id}:{entity_id}")]
+    WaveAccountOwner {
+        account_id: AccountId,
+        entity_id: String,
+    },
     #[error("RSCORE_BATCH_WAVE_PENDING")]
     WavePending,
     #[error("RSCORE_BATCH_WAVE_MISSING")]

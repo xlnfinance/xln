@@ -63,15 +63,57 @@ pub struct AccountInputResult {
 #[derive(Debug)]
 /// Everything one runtime frame asks of the accounts.
 pub struct WaveRequest {
-    /// The clock the proposed frames are stamped with.
+    /// One group per owner Entity, each with its own clocks and its own work.
+    /// The whole wave is still one candidate: prepared together, committed or
+    /// aborted together, under one accounts root.
+    pub entities: Vec<EntityWave>,
+}
+
+/// One thing the authority did to one account, in the order it did it.
+///
+/// Measured, not assumed: in a same-jurisdiction swap recording, 10 of 40
+/// Runtime frames admit a transaction to an account *after* a peer input for
+/// that same account was already applied (payments: 0 of 60). A wave that put
+/// every admission ahead of every input would build a different mempool out of
+/// identical traffic, and the two engines would sign different frames.
+#[derive(Clone, Debug)]
+pub enum WaveOp {
+    Admit {
+        account_id: AccountId,
+        txs: Vec<xln_rscore_engine::AccountTx>,
+    },
+    Input(AccountInputRow),
+}
+
+impl WaveOp {
+    pub const fn account_id(&self) -> AccountId {
+        match self {
+            Self::Admit { account_id, .. } => *account_id,
+            Self::Input(row) => row.account_id,
+        }
+    }
+}
+
+/// One Entity's part of a wave: its own clocks, its own ordered work, and its
+/// own decision whether to propose.
+///
+/// A runtime hosts several Entities, and each judges expiry with its own
+/// entity timestamp and finalized J height. One clock for the whole runtime
+/// frame would settle one Entity's HTLC against a neighbour's J height, which
+/// is a divergence no root would catch until the frame was already signed.
+#[derive(Clone, Debug)]
+pub struct EntityWave {
+    /// The Entity that owns every account named in `ops`. Checked against each
+    /// account's own owner, never trusted.
+    pub owner_entity_id: [u8; 32],
+    /// The clock this Entity stamps the frames it proposes with.
     pub timestamp: u64,
     pub j_height: u64,
-    /// The runtime's own clock, which decides what has expired.
+    /// The clock this Entity judges arrivals with.
     pub clock: ReceiverClock,
-    pub admissions: Vec<(AccountId, Vec<xln_rscore_engine::AccountTx>)>,
-    pub inputs: Vec<AccountInputRow>,
-    /// Whether to propose after applying. A runtime that only wants to drain
-    /// its inbox says no.
+    pub ops: Vec<WaveOp>,
+    /// Whether this Entity proposes once its work is applied. An Entity that
+    /// only wants to drain its inbox says no.
     pub propose: bool,
 }
 
@@ -352,6 +394,18 @@ impl StatefulConsensusEngine {
                 .map(|(key, account)| (AccountId::from_key(key), account.clone()))
                 .collect(),
         };
+        self.propose_candidates(candidates, timestamp, j_height)
+    }
+
+    /// Build, hash and sign one clock's worth of proposals. Split out of
+    /// `propose_frames` because a wave proposes per Entity: the accounts are
+    /// selected once, then each Entity's group is stamped with its own clock.
+    fn propose_candidates(
+        &mut self,
+        candidates: Vec<(AccountId, AccountConsensus)>,
+        timestamp: u64,
+        j_height: u64,
+    ) -> Result<Vec<ProposalRow>, BatchError> {
         if candidates.is_empty() {
             return Ok(Vec::new());
         }
@@ -504,6 +558,207 @@ impl StatefulConsensusEngine {
         Ok(results)
     }
 
+    /// Apply every Entity's ordered work, one account per core.
+    ///
+    /// The order is per account and comes from the request: admissions and
+    /// peer inputs interleave inside one runtime frame, so they run in the
+    /// sequence the authority observed rather than in two phases. Accounts are
+    /// independent of one another, which is where signature verification
+    /// parallelises.
+    fn run_entity_ops(
+        &mut self,
+        entities: &[EntityWave],
+    ) -> Result<Vec<AccountInputResult>, BatchError> {
+        // A second group for the same Entity carries a second clock for it,
+        // and the wave would have no single answer about what has expired.
+        let mut owners: BTreeSet<[u8; 32]> = BTreeSet::new();
+        for entity in entities {
+            if !owners.insert(entity.owner_entity_id) {
+                return Err(BatchError::WaveEntityDuplicate {
+                    entity_id: hex_of(&entity.owner_entity_id),
+                });
+            }
+        }
+        // The driver matches its own Nth raw input against the Nth verdict, so
+        // the indices must be exactly 0..n-1 in the order they were sent. A
+        // duplicate would make two verdicts collide in that map and a gap
+        // would shift every later one — either way the comparison would still
+        // line up somewhere and report agreement about the wrong input.
+        let mut expected: u32 = 0;
+        for entity in entities {
+            for op in &entity.ops {
+                let WaveOp::Input(row) = op else { continue };
+                if row.input_index != expected {
+                    return Err(BatchError::InputIndex {
+                        actual: row.input_index,
+                        expected,
+                    });
+                }
+                expected = expected.saturating_add(1);
+            }
+        }
+        struct AccountWork {
+            clock: ReceiverClock,
+            ops: Vec<WaveOp>,
+        }
+        let mut work: BTreeMap<AccountId, AccountWork> = BTreeMap::new();
+        let mut missing: Vec<AccountInputResult> = Vec::new();
+        for entity in entities {
+            for op in &entity.ops {
+                let account_id = op.account_id();
+                let Some(account) = self.accounts.get(account_id.as_bytes()) else {
+                    match op {
+                        // An input for an account this engine does not hold is
+                        // reported as a verdict; the runtime decides what to do
+                        // with it.
+                        WaveOp::Input(row) => {
+                            missing.push(AccountInputResult {
+                                input_index: row.input_index,
+                                account_id,
+                                verdict: AccountInputVerdict::Failed(format!(
+                                    "RSCORE_CONSENSUS_ACCOUNT_NOT_FOUND:{}",
+                                    hex_of(account_id.as_bytes())
+                                )),
+                            });
+                            continue;
+                        }
+                        // Nothing could have queued a transaction for an
+                        // account that does not exist: that is a driver bug,
+                        // not a rejected input.
+                        WaveOp::Admit { .. } => {
+                            return Err(BatchError::AccountNotFound {
+                                input_index: 0,
+                                account_id,
+                            });
+                        }
+                    }
+                };
+                // The group says who owns this account, and so does the
+                // account. The engine believes the account.
+                if account.replica().owner().as_bytes() != &entity.owner_entity_id {
+                    return Err(BatchError::WaveAccountOwner {
+                        account_id,
+                        entity_id: hex_of(&entity.owner_entity_id),
+                    });
+                }
+                work.entry(account_id)
+                    .or_insert_with(|| AccountWork {
+                        clock: entity.clock,
+                        ops: Vec::new(),
+                    })
+                    .ops
+                    .push(op.clone());
+            }
+        }
+        if work.is_empty() {
+            return Ok(missing);
+        }
+        let units: Vec<(AccountId, AccountConsensus, AccountWork)> = work
+            .into_iter()
+            .map(|(account_id, unit)| {
+                let account = self
+                    .accounts
+                    .get(account_id.as_bytes())
+                    .expect("presence checked above")
+                    .clone();
+                (account_id, account, unit)
+            })
+            .collect();
+        let identities = &self.identities;
+        let swap_market = &self.swap_market;
+        let applied: Vec<InputWork> = self.pool.install(|| {
+            units
+                .into_par_iter()
+                .map(|(account_id, mut account, unit)| {
+                    let identity = identities
+                        .get(account.replica().owner().as_bytes())
+                        .ok_or(BatchError::SignerRequired)?;
+                    let AccountWork { clock, ops } = unit;
+                    let mut results = Vec::new();
+                    for op in ops {
+                        match op {
+                            WaveOp::Admit { txs, .. } => account
+                                .admit_txs(txs, "rscoreConsensus:admit")
+                                .map_err(|error| state_error(account_id, &error))?,
+                            WaveOp::Input(row) => {
+                                let verdict = apply_one(
+                                    &mut account,
+                                    identity,
+                                    &row.from_entity_id,
+                                    clock,
+                                    row.kind,
+                                    swap_market,
+                                );
+                                results.push(AccountInputResult {
+                                    input_index: row.input_index,
+                                    account_id,
+                                    verdict,
+                                });
+                            }
+                        }
+                    }
+                    Ok((account_id, account, results))
+                })
+                .collect()
+        });
+        let mut entries = Vec::with_capacity(applied.len());
+        let mut results = missing;
+        for outcome in applied {
+            let (account_id, account, rows) = outcome?;
+            let leaf = leaf_root(account_id, &account)?;
+            entries.push((account_id.as_bytes().to_vec(), account, leaf));
+            results.extend(rows);
+        }
+        if !entries.is_empty() {
+            self.accounts = self.put_accounts(entries)?;
+            self.revision += 1;
+        }
+        results.sort_by_key(|result| result.input_index);
+        Ok(results)
+    }
+
+    /// Propose for every Entity in the wave that asked to, each stamped with
+    /// its own clock. An Entity that is not in this wave carries no clock here
+    /// and proposes nothing, however proposable its accounts look.
+    fn propose_for_entities(
+        &mut self,
+        entities: &[EntityWave],
+    ) -> Result<Vec<ProposalRow>, BatchError> {
+        let mut clocks: BTreeMap<[u8; 32], (u64, u64)> = BTreeMap::new();
+        for entity in entities {
+            if entity.propose {
+                clocks.insert(entity.owner_entity_id, (entity.timestamp, entity.j_height));
+            }
+        }
+        if clocks.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut by_owner: BTreeMap<[u8; 32], Vec<(AccountId, AccountConsensus)>> = BTreeMap::new();
+        for (key, account) in self.accounts.iter() {
+            if !proposable(account) {
+                continue;
+            }
+            let owner = *account.replica().owner().as_bytes();
+            if !clocks.contains_key(&owner) {
+                continue;
+            }
+            by_owner
+                .entry(owner)
+                .or_default()
+                .push((AccountId::from_key(key), account.clone()));
+        }
+        let mut rows = Vec::new();
+        for (owner, candidates) in by_owner {
+            let (timestamp, j_height) = clocks
+                .get(&owner)
+                .copied()
+                .expect("owner selected from the same map");
+            rows.extend(self.propose_candidates(candidates, timestamp, j_height)?);
+        }
+        rows.sort_by_key(|row| *row.account_id.as_bytes());
+        Ok(rows)
+    }
+
     /// One runtime wave, applied to a candidate the caller can still abort.
     ///
     /// This is the whole conversation for a runtime frame: admit what the
@@ -541,30 +796,13 @@ impl StatefulConsensusEngine {
     }
 
     fn run_wave(&mut self, request: WaveRequest) -> Result<WaveResult, BatchError> {
-        let WaveRequest {
-            timestamp,
-            j_height,
-            clock,
-            admissions,
-            inputs,
-            propose,
-        } = request;
+        let WaveRequest { entities } = request;
         let mut touched: BTreeSet<AccountId> = BTreeSet::new();
-        touched.extend(admissions.iter().map(|(account_id, _)| *account_id));
-        touched.extend(inputs.iter().map(|row| row.account_id));
-        if !admissions.is_empty() {
-            self.admit_txs(admissions)?;
+        for entity in &entities {
+            touched.extend(entity.ops.iter().map(WaveOp::account_id));
         }
-        let applied = if inputs.is_empty() {
-            Vec::new()
-        } else {
-            self.apply_inputs(clock, inputs)?
-        };
-        let proposals = if propose {
-            self.propose_frames(timestamp, j_height, None)?
-        } else {
-            Vec::new()
-        };
+        let applied = self.run_entity_ops(&entities)?;
+        let proposals = self.propose_for_entities(&entities)?;
         touched.extend(proposals.iter().map(|row| row.account_id));
         let mut leaves = Vec::with_capacity(touched.len());
         for account_id in touched {

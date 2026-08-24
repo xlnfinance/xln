@@ -5,7 +5,8 @@ mod fixture;
 
 use fixture::{Stand, clock, payment, stand};
 use xln_rscore_batch::{
-    AccountInputKind, AccountInputRow, AccountInputVerdict, BatchError, WaveRequest, WaveResult,
+    AccountInputKind, AccountInputRow, AccountInputVerdict, BatchError, EntityWave, WaveOp,
+    WaveRequest, WaveResult,
 };
 use xln_rscore_engine::{AckOutcome, IncomingOutcome};
 
@@ -14,18 +15,7 @@ fn wave(stand: &Stand, timestamp: u64) -> WaveRequest {
 }
 
 fn wave_amount(stand: &Stand, timestamp: u64, amount: i64) -> WaveRequest {
-    WaveRequest {
-        timestamp,
-        j_height: 100,
-        clock: clock(timestamp),
-        admissions: stand
-            .pairs
-            .iter()
-            .map(|pair| payment(pair, amount))
-            .collect(),
-        inputs: Vec::new(),
-        propose: true,
-    }
+    fixture::wave_of(fixture::admit_ops(stand, amount), timestamp, true)
 }
 
 /// The wave does all three steps and reports what each produced.
@@ -125,17 +115,10 @@ fn two_engines_settle_a_payment_in_three_waves() {
         .commit_wave(proposed.revision)
         .expect("commit propose");
 
-    let frames = fixture::frames_for(&stand, &proposed.proposals);
+    let frames = fixture::frame_ops(&stand, &proposed.proposals);
     let applied: WaveResult = stand
         .payee
-        .prepare_wave(WaveRequest {
-            timestamp,
-            j_height: 100,
-            clock: clock(timestamp),
-            admissions: Vec::new(),
-            inputs: frames,
-            propose: false,
-        })
+        .prepare_wave(fixture::wave_of(frames, timestamp, false))
         .expect("apply wave");
     stand
         .payee
@@ -153,17 +136,10 @@ fn two_engines_settle_a_payment_in_three_waves() {
         );
     }
 
-    let acks = fixture::acks_for(&stand, &applied.applied);
+    let acks = fixture::ack_ops(&stand, &applied.applied);
     let acked = stand
         .payer
-        .prepare_wave(WaveRequest {
-            timestamp,
-            j_height: 100,
-            clock: clock(timestamp),
-            admissions: Vec::new(),
-            inputs: acks,
-            propose: false,
-        })
+        .prepare_wave(fixture::wave_of(acks, timestamp, false))
         .expect("ack wave");
     stand.payer.commit_wave(acked.revision).expect("commit ack");
     for row in &acked.applied {
@@ -284,14 +260,10 @@ fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
 
     let result = stand
         .payer
-        .prepare_wave(WaveRequest {
-            timestamp: 1_700_000_000_000,
-            j_height: 100,
-            clock: clock(1_700_000_000_000),
-            admissions: Vec::new(),
-            inputs: Vec::new(),
-            propose: true,
-        })
+        .prepare_wave(fixture::propose_only_wave(
+            stand.pairs[0].payer_entity,
+            1_700_000_000_000,
+        ))
         .expect("wave");
 
     assert_eq!(result.proposals.len(), 1, "the attempt is reported");
@@ -354,4 +326,258 @@ fn input_indices_must_be_unique_and_sequential() {
         ),
         "{gap:?}"
     );
+}
+
+/// Every Entity stamps its own proposals. A wave that carried one timestamp
+/// for the whole runtime frame would sign one Entity's frame with another
+/// Entity's clock, and the frame hash is what both engines are compared on.
+#[test]
+fn each_entity_stamps_its_proposals_with_its_own_clock() {
+    let mut stand = stand(2);
+    let first = 1_700_000_000_000;
+    let second = first + 4_000;
+    let ops = fixture::admit_ops(&stand, 25);
+    let mut request = fixture::wave_of(ops, first, true);
+    assert_eq!(request.entities.len(), 2, "one group per owner Entity");
+    request.entities[1].timestamp = second;
+    request.entities[1].clock = clock(second);
+
+    let result = stand.payer.prepare_wave(request).expect("wave");
+    assert_eq!(result.proposals.len(), 2);
+    for row in &result.proposals {
+        let proposed = row.proposed.as_ref().expect("frame");
+        let owner = if row.account_id == stand.pairs[0].payer_account {
+            first
+        } else {
+            second
+        };
+        assert_eq!(proposed.frame.timestamp, owner, "{:?}", row.account_id);
+    }
+}
+
+/// And every Entity judges arrivals on its own clock. Here one Entity's clock
+/// is far enough behind the frame it receives to reject it for skew while its
+/// neighbour, in the same wave, commits the same kind of frame.
+#[test]
+fn each_entity_judges_arrivals_with_its_own_clock() {
+    let mut stand = stand(2);
+    let timestamp = 1_700_000_000_000;
+    let proposed = stand
+        .payer
+        .prepare_wave(wave(&stand, timestamp))
+        .expect("propose");
+    stand.payer.commit_wave(proposed.revision).expect("commit");
+
+    let ops = fixture::frame_ops(&stand, &proposed.proposals);
+    let mut request = fixture::wave_of(ops, timestamp, false);
+    assert_eq!(request.entities.len(), 2);
+    // A minute behind the frame it is being handed: past the 30s skew bound.
+    let behind = timestamp - 60_000;
+    request.entities[0].clock = clock(behind);
+    request.entities[0].timestamp = behind;
+
+    let applied = stand.payee.prepare_wave(request).expect("apply");
+    assert_eq!(applied.applied.len(), 2);
+    let stale = applied
+        .applied
+        .iter()
+        .find(|row| row.input_index == 0)
+        .expect("first verdict");
+    let current = applied
+        .applied
+        .iter()
+        .find(|row| row.input_index == 1)
+        .expect("second verdict");
+    match &stale.verdict {
+        AccountInputVerdict::Frame(IncomingOutcome::Rejected { reason }) => {
+            assert!(reason.contains("skew"), "{reason}");
+        }
+        other => panic!("expected a skew rejection, got {other:?}"),
+    }
+    assert!(
+        matches!(
+            current.verdict,
+            AccountInputVerdict::Frame(IncomingOutcome::Committed { .. })
+        ),
+        "{:?}",
+        current.verdict,
+    );
+}
+
+/// Two groups for one Entity would give it two clocks, and the wave would have
+/// no single answer about what has expired for it.
+#[test]
+fn two_groups_for_one_entity_are_refused() {
+    let mut stand = stand(1);
+    let timestamp = 1_700_000_000_000;
+    let (account_id, txs) = payment(&stand.pairs[0], 25);
+    let group = |ops: Vec<WaveOp>, timestamp: u64| EntityWave {
+        owner_entity_id: stand.pairs[0].payer_entity,
+        timestamp,
+        j_height: 100,
+        clock: clock(timestamp),
+        ops,
+        propose: true,
+    };
+    let refused = stand.payer.prepare_wave(WaveRequest {
+        entities: vec![
+            group(vec![WaveOp::Admit { account_id, txs }], timestamp),
+            group(Vec::new(), timestamp + 1_000),
+        ],
+    });
+    assert!(
+        matches!(refused, Err(BatchError::WaveEntityDuplicate { .. })),
+        "{:?}",
+        refused.err()
+    );
+    assert!(!stand.payer.wave_pending(), "nothing was left half-applied");
+}
+
+/// A group naming an account it does not own is refused: the account says who
+/// owns it, and that is not what the group claimed.
+#[test]
+fn an_account_named_by_another_entity_is_refused() {
+    let mut stand = stand(2);
+    let timestamp = 1_700_000_000_000;
+    let (account_id, txs) = payment(&stand.pairs[0], 25);
+    let refused = stand.payer.prepare_wave(WaveRequest {
+        entities: vec![EntityWave {
+            // The second pair's Entity, claiming the first pair's account.
+            owner_entity_id: stand.pairs[1].payer_entity,
+            timestamp,
+            j_height: 100,
+            clock: clock(timestamp),
+            ops: vec![WaveOp::Admit { account_id, txs }],
+            propose: false,
+        }],
+    });
+    assert!(
+        matches!(refused, Err(BatchError::WaveAccountOwner { .. })),
+        "{:?}",
+        refused.err()
+    );
+}
+
+/// Indices are checked across the whole wave, not within a group: the driver
+/// numbers its raw inputs once per runtime frame and matches the Nth verdict
+/// back to the Nth input.
+#[test]
+fn input_indices_are_sequential_across_entity_groups() {
+    let mut stand = stand(2);
+    let timestamp = 1_700_000_000_000;
+    let proposed = stand
+        .payer
+        .prepare_wave(wave(&stand, timestamp))
+        .expect("propose");
+    stand.payer.commit_wave(proposed.revision).expect("commit");
+
+    let mut ops = fixture::frame_ops(&stand, &proposed.proposals);
+    // Both groups now start at zero, which is exactly the collision the check
+    // exists for: two verdicts would answer to the same raw input.
+    if let (_, WaveOp::Input(row)) = &mut ops[1] {
+        row.input_index = 0;
+    }
+    let refused = stand
+        .payee
+        .prepare_wave(fixture::wave_of(ops, timestamp, false));
+    assert!(
+        matches!(
+            refused,
+            Err(BatchError::InputIndex {
+                actual: 0,
+                expected: 1
+            })
+        ),
+        "{:?}",
+        refused.err()
+    );
+}
+
+/// Admissions and peer inputs interleave inside one runtime frame (measured:
+/// 10 of 40 runtime frames in a same-jurisdiction swap recording), and the
+/// order is not cosmetic. A losing proposal returns its transactions to the
+/// front of the queue and drops the ones already queued; whether our own
+/// admission was already there decides how many copies survive.
+#[test]
+fn an_account_replays_its_operations_in_arrival_order() {
+    let queued = |admit_first: bool| -> usize {
+        let mut stand = fixture::stand_with_market(6, fixture::market());
+        let timestamp = 1_700_000_000_000;
+        let index = stand
+            .pairs
+            .iter()
+            .position(|pair| {
+                stand
+                    .payee
+                    .account(&pair.payee_account)
+                    .expect("payee view")
+                    .replica()
+                    .owner_side()
+                    == xln_rscore_engine::Side::Right
+            })
+            .expect("one pair has the payee on the RIGHT side");
+        let pair = &stand.pairs[index];
+        let account_id = pair.payee_account;
+        let (_, offer) = fixture::swap_offer(pair);
+
+        // The payee proposes its own frame carrying the offer: that is the
+        // proposal the LEFT entity's frame will beat.
+        stand
+            .payee
+            .admit_txs(vec![(account_id, offer.clone())])
+            .expect("payee admit");
+        stand
+            .payee
+            .propose_frames(timestamp, 100, Some(&[account_id]))
+            .expect("payee propose");
+
+        // The payer proposes at the same height, which is the collision.
+        let proposed = stand
+            .payer
+            .prepare_wave(wave(&stand, timestamp))
+            .expect("payer wave");
+        stand.payer.commit_wave(proposed.revision).expect("commit");
+        let incoming = fixture::frame_ops(&stand, &proposed.proposals)
+            .into_iter()
+            .find(|(_, op)| op.account_id() == account_id)
+            .expect("the payee's own account");
+
+        let admit = (
+            pair.payee_entity,
+            WaveOp::Admit {
+                account_id,
+                txs: offer,
+            },
+        );
+        let ops = if admit_first {
+            vec![admit, incoming]
+        } else {
+            vec![incoming, admit]
+        };
+        // Indices are per wave, so the input's index depends on where it sits.
+        let mut ops = ops;
+        let mut next = 0;
+        for (_, op) in &mut ops {
+            if let WaveOp::Input(row) = op {
+                row.input_index = next;
+                next += 1;
+            }
+        }
+        let applied = stand
+            .payee
+            .prepare_wave(fixture::wave_of(ops, timestamp, false))
+            .expect("payee wave");
+        stand.payee.commit_wave(applied.revision).expect("commit");
+        stand
+            .payee
+            .account(&account_id)
+            .expect("payee view")
+            .mempool()
+            .len()
+    };
+
+    // Admitted first, the rollback finds the offer already queued and drops
+    // its own copy. Admitted after, there is nothing to match against yet.
+    assert_eq!(queued(true), 1);
+    assert_eq!(queued(false), 2);
 }

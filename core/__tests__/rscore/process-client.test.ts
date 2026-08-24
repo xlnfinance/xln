@@ -8,6 +8,7 @@ import {
   hexToWireBytes,
   swapMarketPolicyDigest,
   swapMarketPolicyWire,
+  waveAdmitOp,
 } from '../../rscore/shadow-wire';
 import { decodeWave, waveParityDigest } from '../../rscore/wave-decode';
 import { deriveSignerAddressSync } from '../../account/crypto';
@@ -86,13 +87,15 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       expect(loaded[0]).toBe(0);
 
       const { result, token } = await client.prepareAccountWave({
-        timestamp: 1_700_000_000_000,
-        jHeight: 100,
-        entityTimestamp: 1_700_000_000_000,
-        finalizedJHeight: 100,
-        propose: true,
-        admissions: [],
-        inputs: [],
+        entities: [{
+          ownerEntityId: hexToWireBytes(`0x${'11'.repeat(32)}`, 32, 'TEST_OWNER'),
+          timestamp: 1_700_000_000_000,
+          jHeight: 100,
+          entityTimestamp: 1_700_000_000_000,
+          finalizedJHeight: 100,
+          propose: true,
+          ops: [],
+        }],
       });
       const wave = result as unknown[];
       // No accounts, so nothing moved and nothing was proposed — but the wave
@@ -103,13 +106,15 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
 
       await expect(
         client.prepareAccountWave({
-          timestamp: 1_700_000_000_001,
-          jHeight: 100,
-          entityTimestamp: 1_700_000_000_001,
-          finalizedJHeight: 100,
-          propose: true,
-          admissions: [],
-          inputs: [],
+          entities: [{
+            ownerEntityId: hexToWireBytes(`0x${'11'.repeat(32)}`, 32, 'TEST_OWNER'),
+            timestamp: 1_700_000_000_001,
+            jHeight: 100,
+            entityTimestamp: 1_700_000_000_001,
+            finalizedJHeight: 100,
+            propose: true,
+            ops: [],
+          }],
         }),
       ).rejects.toThrow('RSCORE_PROCESS_PREPARE_PENDING');
 
@@ -171,13 +176,15 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       expect(wireTx).not.toBeNull();
 
       const request = {
-        timestamp: 1_700_000_000_000,
-        jHeight: 100,
-        entityTimestamp: 1_700_000_000_000,
-        finalizedJHeight: 100,
-        propose: true,
-        admissions: [[hexToWireBytes(counterparty, 32, 'TEST_ACCOUNT_ID'), [wireTx]]],
-        inputs: [],
+        entities: [{
+          ownerEntityId: hexToWireBytes(owner, 32, 'TEST_OWNER'),
+          timestamp: 1_700_000_000_000,
+          jHeight: 100,
+          entityTimestamp: 1_700_000_000_000,
+          finalizedJHeight: 100,
+          propose: true,
+          ops: [waveAdmitOp(counterparty, [wireTx])],
+        }],
       };
       const first = await client.prepareAccountWave(request);
       const wave = decodeWave(first.result);
@@ -297,13 +304,15 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
         },
       };
       const prepared = await client.prepareAccountWave({
-        timestamp: 1_700_000_000_000,
-        jHeight: 100,
-        entityTimestamp: 1_700_000_000_000,
-        finalizedJHeight: 100,
-        propose: true,
-        admissions: [[hexToWireBytes(counterparty, 32, 'TEST_ACCOUNT_ID'), [accountTxWire(tx)]]],
-        inputs: [],
+        entities: [{
+          ownerEntityId: hexToWireBytes(owner, 32, 'TEST_OWNER'),
+          timestamp: 1_700_000_000_000,
+          jHeight: 100,
+          entityTimestamp: 1_700_000_000_000,
+          finalizedJHeight: 100,
+          propose: true,
+          ops: [waveAdmitOp(counterparty, [accountTxWire(tx)] as never)],
+        }],
       });
       const wave = decodeWave(prepared.result);
 

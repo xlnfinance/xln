@@ -14,6 +14,13 @@ import type { AccountTx } from '../../types/account';
  * them, and crates/process/tests/tx_wire_vectors.rs holds Rust to the same
  * file.
  *
+ * Scope: the payment-profile transactions, which is what the two engines
+ * currently both execute — payments, HTLCs, deltas, credit limits, rebalance
+ * policy and same-jurisdiction swaps. Settlement, lending, disputes,
+ * J-events and every cross-jurisdiction transaction are deliberately absent,
+ * because no Rust codec claims them yet. This corpus is not "every
+ * AccountTx", and a transaction missing from it is not a covered one.
+ *
  * Every case appears twice — once with every optional field present, once
  * with none — because absent and present take different branches on both
  * sides, and a codec that only ever sees one shape is only half tested.

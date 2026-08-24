@@ -146,6 +146,8 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::StaleCandidate { .. } => "RSCORE_BATCH_CANDIDATE_STALE",
         BatchError::RevisionOverflow => "RSCORE_BATCH_REVISION_OVERFLOW",
         BatchError::InputSignatureInvalid { .. } => "RSCORE_BATCH_INPUT_SIGNATURE_INVALID",
+        BatchError::WaveEntityDuplicate { .. } => "RSCORE_BATCH_WAVE_ENTITY_DUPLICATE",
+        BatchError::WaveAccountOwner { .. } => "RSCORE_BATCH_WAVE_ACCOUNT_OWNER",
         BatchError::WavePending => "RSCORE_BATCH_WAVE_PENDING",
         BatchError::WaveMissing => "RSCORE_BATCH_WAVE_MISSING",
         BatchError::WaveRevision { .. } => "RSCORE_BATCH_WAVE_REVISION",

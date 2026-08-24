@@ -8,7 +8,8 @@
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountId, AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict,
-    AccountSeed, EngineGeneration, ProposalRow, ReceiverClock, StatefulConsensusEngine,
+    AccountSeed, EngineGeneration, EntityWave, ProposalRow, ReceiverClock, StatefulConsensusEngine,
+    WaveOp, WaveRequest,
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
@@ -345,6 +346,82 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
             result.verdict,
         );
     }
+}
+
+/// One wave out of work already labelled with the Entity that owns it.
+///
+/// Groups keep the order the rows were given, and every row of one Entity
+/// stays in the group it arrived in: that order is the whole point of the
+/// wave, so a helper that sorted it would hide what the tests are checking.
+pub fn wave_of(rows: Vec<([u8; 32], WaveOp)>, timestamp: u64, propose: bool) -> WaveRequest {
+    let mut entities: Vec<EntityWave> = Vec::new();
+    for (owner_entity_id, op) in rows {
+        if let Some(existing) = entities
+            .iter_mut()
+            .find(|entity| entity.owner_entity_id == owner_entity_id)
+        {
+            existing.ops.push(op);
+            continue;
+        }
+        entities.push(EntityWave {
+            owner_entity_id,
+            timestamp,
+            j_height: 100,
+            clock: clock(timestamp),
+            ops: vec![op],
+            propose,
+        });
+    }
+    WaveRequest { entities }
+}
+
+/// A wave in which one Entity queues nothing and only proposes what it
+/// already holds.
+pub fn propose_only_wave(owner_entity_id: [u8; 32], timestamp: u64) -> WaveRequest {
+    WaveRequest {
+        entities: vec![EntityWave {
+            owner_entity_id,
+            timestamp,
+            j_height: 100,
+            clock: clock(timestamp),
+            ops: Vec::new(),
+            propose: true,
+        }],
+    }
+}
+
+/// Local transactions to queue, labelled with the Entity that queued them.
+pub fn admit_ops(stand: &Stand, amount: i64) -> Vec<([u8; 32], WaveOp)> {
+    stand
+        .pairs
+        .iter()
+        .map(|pair| {
+            let (account_id, txs) = payment(pair, amount);
+            (pair.payer_entity, WaveOp::Admit { account_id, txs })
+        })
+        .collect()
+}
+
+/// The payee's view of the payer's proposals, as wave operations.
+pub fn frame_ops(stand: &Stand, proposals: &[ProposalRow]) -> Vec<([u8; 32], WaveOp)> {
+    frames_for(stand, proposals)
+        .into_iter()
+        .map(|row| {
+            let pair = &stand.pairs[pair_by_payee_account(&stand.pairs, &row.account_id)];
+            (pair.payee_entity, WaveOp::Input(row))
+        })
+        .collect()
+}
+
+/// The payer's view of the payee's commits, as wave operations.
+pub fn ack_ops(stand: &Stand, applied: &[AccountInputResult]) -> Vec<([u8; 32], WaveOp)> {
+    acks_for(stand, applied)
+        .into_iter()
+        .map(|row| {
+            let pair = &stand.pairs[pair_by_payer_account(&stand.pairs, &row.account_id)];
+            (pair.payer_entity, WaveOp::Input(row))
+        })
+        .collect()
 }
 
 /// The payee's view of the payer's proposals, as account inputs.

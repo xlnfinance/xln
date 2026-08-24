@@ -213,50 +213,75 @@ fn decode_prepare(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-const MAX_WAVE_ADMISSION_ROWS: usize = 1_000_000;
-const MAX_WAVE_INPUT_ROWS: usize = 1_000_000;
+const MAX_WAVE_ENTITY_ROWS: usize = 4_096;
+const MAX_WAVE_OP_ROWS: usize = 1_000_000;
 
-/// One runtime frame: what to queue, what arrived, and whether to propose.
+/// One runtime frame, grouped by the Entity that owns the work.
+///
+/// Each group carries its own clocks because each Entity has its own: the
+/// timestamp it stamps proposals with, and the entity timestamp and finalized
+/// J height it judges arrivals with. Its operations stay in the order the
+/// authority performed them — admissions and peer inputs interleave.
 fn decode_prepare_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 7, "prepareWave")?;
-    let admissions = tuple(&fields[5])?;
-    if admissions.len() > MAX_WAVE_ADMISSION_ROWS {
-        return Err(ProcessError::Expected("waveAdmissionRows"));
-    }
-    let inputs = tuple(&fields[6])?;
-    if inputs.len() > MAX_WAVE_INPUT_ROWS {
-        return Err(ProcessError::Expected("waveInputRows"));
+    let fields = exact(fields, 1, "prepareWave")?;
+    let entities = tuple(&fields[0])?;
+    if entities.len() > MAX_WAVE_ENTITY_ROWS {
+        return Err(ProcessError::Expected("waveEntityRows"));
     }
     Ok(Command::PrepareAccountWave {
         request: Box::new(xln_rscore_batch::WaveRequest {
-            timestamp: js_number(&fields[0], "timestamp")?,
-            j_height: js_number(&fields[1], "jHeight")?,
-            clock: xln_rscore_batch::ReceiverClock {
-                entity_timestamp: js_number(&fields[2], "entityTimestamp")?,
-                finalized_j_height: js_number(&fields[3], "finalizedJHeight")?,
-            },
-            propose: boolean(&fields[4], "propose")?,
-            admissions: admissions
+            entities: entities
                 .iter()
-                .map(decode_admission)
-                .collect::<Result<_, _>>()?,
-            inputs: inputs
-                .iter()
-                .map(decode_input_row)
+                .map(decode_entity_wave)
                 .collect::<Result<_, _>>()?,
         }),
     })
 }
 
-fn decode_admission(value: &AbiValue) -> Result<(AccountId, Vec<AccountTx>), ProcessError> {
-    let fields = exact(tuple(value)?, 2, "admission")?;
-    Ok((
-        AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?),
-        tuple(&fields[1])?
-            .iter()
-            .map(decode_tx)
-            .collect::<Result<_, _>>()?,
-    ))
+fn decode_entity_wave(value: &AbiValue) -> Result<xln_rscore_batch::EntityWave, ProcessError> {
+    let fields = exact(tuple(value)?, 7, "entityWave")?;
+    let ops = tuple(&fields[6])?;
+    if ops.len() > MAX_WAVE_OP_ROWS {
+        return Err(ProcessError::Expected("waveOpRows"));
+    }
+    Ok(xln_rscore_batch::EntityWave {
+        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+        timestamp: js_number(&fields[1], "timestamp")?,
+        j_height: js_number(&fields[2], "jHeight")?,
+        clock: xln_rscore_batch::ReceiverClock {
+            entity_timestamp: js_number(&fields[3], "entityTimestamp")?,
+            finalized_j_height: js_number(&fields[4], "finalizedJHeight")?,
+        },
+        propose: boolean(&fields[5], "propose")?,
+        ops: ops.iter().map(decode_wave_op).collect::<Result<_, _>>()?,
+    })
+}
+
+fn decode_wave_op(value: &AbiValue) -> Result<xln_rscore_batch::WaveOp, ProcessError> {
+    let fields = tuple(value)?;
+    let tag = fields.first().ok_or(ProcessError::Expected("waveOpTag"))?;
+    match integer(tag)? {
+        0 => {
+            let fields = exact(fields, 3, "waveAdmit")?;
+            Ok(xln_rscore_batch::WaveOp::Admit {
+                account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
+                txs: tuple(&fields[2])?
+                    .iter()
+                    .map(decode_tx)
+                    .collect::<Result<_, _>>()?,
+            })
+        }
+        1 => {
+            let fields = exact(fields, 2, "waveInput")?;
+            Ok(xln_rscore_batch::WaveOp::Input(decode_input_row(
+                &fields[1],
+            )?))
+        }
+        value => Err(ProcessError::Tag {
+            field: "waveOp",
+            value,
+        }),
+    }
 }
 
 fn decode_input_row(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
