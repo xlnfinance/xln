@@ -98,6 +98,7 @@ pub fn direct_job(input_index: u32, account: u32, amount: i64) -> BatchJob {
             trusted_gateway_entity_id: None,
         },
         envelope: None,
+        authority: None,
     }
 }
 
@@ -121,6 +122,7 @@ pub fn trusted_job(input_index: u32, account: u32, amount: i64) -> BatchJob {
             trusted_gateway_entity_id: Some(gateway),
         },
         envelope: None,
+        authority: None,
     }
 }
 
@@ -141,6 +143,7 @@ pub fn htlc_lock_job(input_index: u32, account: u32, lock_id: &str) -> BatchJob 
             envelope: None,
         }),
         envelope: None,
+        authority: None,
     }
 }
 
@@ -157,6 +160,7 @@ pub fn htlc_resolve_job(input_index: u32, account: u32, lock_id: &str) -> BatchJ
             },
         }),
         envelope: None,
+        authority: None,
     }
 }
 

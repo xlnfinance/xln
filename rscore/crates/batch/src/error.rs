@@ -55,6 +55,16 @@ pub enum BatchError {
     StaleCandidate { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_REVISION_OVERFLOW")]
     RevisionOverflow,
+    /// An account input whose signature does not recover the expected signer.
+    ///
+    /// Not a transaction rejection: the authority verifies before it hands the
+    /// input over, so disagreement here is a divergence between the two
+    /// engines (or a forged input) and the whole candidate is refused.
+    #[error("RSCORE_BATCH_INPUT_SIGNATURE_INVALID:{input_index}:{account_id}")]
+    InputSignatureInvalid {
+        input_index: u32,
+        account_id: AccountId,
+    },
     #[error("RSCORE_BATCH_ACCOUNTS_TREE:{account_id}:{detail}")]
     AccountsTree {
         account_id: AccountId,

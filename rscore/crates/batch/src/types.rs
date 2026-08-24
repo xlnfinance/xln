@@ -50,6 +50,20 @@ pub(crate) struct ReplicaFingerprint {
 
 // The carried replica shell holds canonical numbers, so the job is comparable
 // but not Eq.
+/// The proof that an account input came from the counterparty it claims.
+///
+/// One secp256k1 recovery over the frame digest, compared against the signer
+/// the authority expects — the same check TypeScript performs before it admits
+/// an input (`verifyAccountSignature`). Absent only for locally originated
+/// work, which no peer signed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountInputAuthority {
+    pub digest: [u8; 32],
+    /// `r || s || v`, with `v` already normalized to 0/1.
+    pub signature: [u8; 65],
+    pub expected_signer: [u8; 20],
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BatchJob {
     pub input_index: u32,
@@ -61,6 +75,8 @@ pub struct BatchJob {
     /// transition of the frame that produced it. Present until the engine
     /// derives the shell itself; `None` on every other job of the frame.
     pub envelope: Option<xln_rscore_engine::AccountEnvelope>,
+    /// Signature to verify before this job's transaction is applied.
+    pub authority: Option<AccountInputAuthority>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

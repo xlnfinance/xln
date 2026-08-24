@@ -193,6 +193,9 @@ const paymentJob = (
     null,
   ],
   null,
+  // No authority: these vectors drive the engine directly, without a peer
+  // signature to recover.
+  null,
 ];
 
 // Give leg of the swap: token 2 (18 decimals) against token 1 (6 decimals),
@@ -263,6 +266,9 @@ const swapOfferJob = (index: number): RscoreWireValue[] => [
     null, // no explicit price ticks: the engine derives the canonical one
   ],
   null,
+  // No authority: these vectors drive the engine directly, without a peer
+  // signature to recover.
+  null,
 ];
 
 const swapResolveTx = (
@@ -310,6 +316,9 @@ const swapResolveJob = (
     null,
     null,
   ],
+  null,
+  // No authority: these vectors drive the engine directly, without a peer
+  // signature to recover.
   null,
 ];
 

@@ -142,6 +142,7 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::CandidateFingerprint { .. } => "RSCORE_BATCH_CANDIDATE_FINGERPRINT",
         BatchError::StaleCandidate { .. } => "RSCORE_BATCH_CANDIDATE_STALE",
         BatchError::RevisionOverflow => "RSCORE_BATCH_REVISION_OVERFLOW",
+        BatchError::InputSignatureInvalid { .. } => "RSCORE_BATCH_INPUT_SIGNATURE_INVALID",
         BatchError::AccountsTree { .. } => "RSCORE_BATCH_ACCOUNTS_TREE",
     }
 }

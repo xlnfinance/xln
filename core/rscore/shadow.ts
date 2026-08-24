@@ -1201,6 +1201,11 @@ export class RscoreShadowMirror {
           ],
           wire,
           index === wires.length - 1 ? envelope : null,
+          // Authority for this input (frame digest, signature, expected
+          // signer). Null while the mirror observes an authority that has
+          // already verified the Hanko itself; the engine verifies whatever it
+          // is given.
+          null,
         ]);
       }
       if (jobs.length === 0) {

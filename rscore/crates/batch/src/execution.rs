@@ -41,6 +41,18 @@ pub(crate) fn execute_account(work: AccountWork<'_>) -> Result<AccountExecution,
     let mut results = Vec::with_capacity(work.jobs.len());
     let mut outputs = Vec::new();
     for job in work.jobs {
+        // Verify before executing: an input whose signature does not recover
+        // the expected signer is not this counterparty's input at all, and
+        // must never touch the account's state.
+        if let Some(authority) = job.authority
+            && xln_rscore_engine::recover_signer_address(&authority.digest, &authority.signature)
+                != Some(authority.expected_signer)
+        {
+            return Err(BatchError::InputSignatureInvalid {
+                input_index: job.input_index,
+                account_id: job.account_id,
+            });
+        }
         let transition = apply_job_caught(&candidate, job)?;
         let events = transition.events().to_vec();
         let verdict = transition.verdict().clone();

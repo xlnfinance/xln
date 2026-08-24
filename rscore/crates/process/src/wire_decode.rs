@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use xln_rscore_abi::{AbiValue, Envelope, OpTag};
-use xln_rscore_batch::{AccountId, AccountSeed, BatchJob};
+use xln_rscore_batch::{AccountId, AccountInputAuthority, AccountSeed, BatchJob};
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
     AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy, CarriedSections,
@@ -495,7 +495,7 @@ fn decode_delta(value: &AbiValue) -> Result<Delta, ProcessError> {
 }
 
 fn decode_job(value: &AbiValue) -> Result<BatchJob, ProcessError> {
-    let fields = exact(tuple(value)?, 6, "job")?;
+    let fields = exact(tuple(value)?, 7, "job")?;
     Ok(BatchJob {
         input_index: bounded_u32(&fields[0], "inputIndex")?,
         account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
@@ -503,7 +503,29 @@ fn decode_job(value: &AbiValue) -> Result<BatchJob, ProcessError> {
         context: decode_context(&fields[3])?,
         tx: decode_tx(&fields[4])?,
         envelope: crate::canonical::envelope(&fields[5])?,
+        authority: decode_authority(&fields[6])?,
     })
+}
+
+/// `null`, or `(digest, signature, expectedSigner)` — the proof that this input
+/// came from the counterparty it claims. The engine recovers the signer before
+/// the transaction touches the account.
+fn decode_authority(value: &AbiValue) -> Result<Option<AccountInputAuthority>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = exact(tuple(value)?, 3, "authority")?;
+    let mut signature: [u8; 65] = fixed_bytes(&fields[1], "authoritySignature")?;
+    signature[64] =
+        xln_rscore_engine::normalize_recovery_byte(signature[64]).ok_or(ProcessError::Integer {
+            field: "authorityRecovery",
+            value: i128::from(signature[64]),
+        })?;
+    Ok(Some(AccountInputAuthority {
+        digest: fixed_bytes(&fields[0], "authorityDigest")?,
+        signature,
+        expected_signer: fixed_bytes(&fields[2], "authoritySigner")?,
+    }))
 }
 
 fn decode_context(value: &AbiValue) -> Result<AccountExecutionContext, ProcessError> {

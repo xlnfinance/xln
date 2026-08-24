@@ -14,6 +14,6 @@ pub use error::BatchError;
 pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};
 pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};
 pub use types::{
-    AccountId, AccountSeed, BatchJob, BatchResponse, BatchVerdict, EngineGeneration, IndexedOutput,
-    IndexedResult, PreparedBatch, PreparedPaymentProfileRoot,
+    AccountId, AccountInputAuthority, AccountSeed, BatchJob, BatchResponse, BatchVerdict,
+    EngineGeneration, IndexedOutput, IndexedResult, PreparedBatch, PreparedPaymentProfileRoot,
 };

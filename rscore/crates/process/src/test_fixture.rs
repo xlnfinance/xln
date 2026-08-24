@@ -201,6 +201,7 @@ pub fn prepare(id: u64, amount: i64) -> Envelope {
         ]),
         tx,
         AbiValue::Nil,
+        AbiValue::Nil,
     ]);
     request(id, OpTag::ExecuteWave, vec![tuple(vec![job])])
 }
@@ -247,6 +248,9 @@ fn job(input_index: u32, proposer: i128, tx: AbiValue) -> AbiValue {
             AbiValue::Integer(1),
         ]),
         tx,
+        // No replica shell and no authority: these fixtures drive the session
+        // directly rather than mirroring a signed peer input.
+        AbiValue::Nil,
         AbiValue::Nil,
     ])
 }

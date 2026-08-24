@@ -77,6 +77,35 @@ fn seed(value: u32) -> AccountSeed {
     }
 }
 
+/// A signed account input: the digest the peer signed, its signature, and the
+/// signer the authority expects. Produced once and reused across the run — the
+/// engine recovers it every time, which is the cost being measured.
+fn authority(account: u32) -> xln_rscore_batch::AccountInputAuthority {
+    use secp256k1::{Message, Secp256k1, SecretKey};
+    use sha3::{Digest as _, Keccak256};
+    let secp = Secp256k1::new();
+    let mut key_bytes = [0_u8; 32];
+    key_bytes[28..].copy_from_slice(&(account + 1).to_be_bytes());
+    key_bytes[0] = 0x01;
+    let secret = SecretKey::from_byte_array(key_bytes).expect("secret key");
+    let mut digest = [0_u8; 32];
+    digest[24..].copy_from_slice(&u64::from(account).to_be_bytes());
+    let signed = secp.sign_ecdsa_recoverable(Message::from_digest(digest), &secret);
+    let (recovery, compact) = signed.serialize_compact();
+    let mut signature = [0_u8; 65];
+    signature[..64].copy_from_slice(&compact);
+    signature[64] = u8::try_from(i32::from(recovery)).expect("recovery byte");
+    let public_key = secret.public_key(&secp).serialize_uncompressed();
+    let hash = Keccak256::digest(&public_key[1..]);
+    let mut expected_signer = [0_u8; 20];
+    expected_signer.copy_from_slice(&hash[12..]);
+    xln_rscore_batch::AccountInputAuthority {
+        digest,
+        signature,
+        expected_signer,
+    }
+}
+
 fn payment(input_index: u32, account: u32, amount: i64, left_pays: bool) -> BatchJob {
     let left = entity(account * 2 + 1).to_string();
     let right = entity(account * 2 + 2).to_string();
@@ -107,6 +136,8 @@ fn payment(input_index: u32, account: u32, amount: i64, left_pays: bool) -> Batc
             trusted_gateway_entity_id: None,
         },
         envelope: None,
+        // Set by the caller when the run measures signed account inputs.
+        authority: None,
     }
 }
 
@@ -165,6 +196,18 @@ fn main() {
         micro_sha();
         micro(&(0..1).map(seed).collect::<Vec<_>>());
     }
+    // ai/s mode: every job is one signed account input from outside, so the
+    // measured rate includes the secp256k1 recovery the engine must do before
+    // it may touch the account at all.
+    let signed = std::env::var("XLN_BENCH_SIGNED").is_ok();
+    // Signing is the harness's job, not the engine's: produce each account's
+    // signed input once so the measured wall time is recovery plus execution,
+    // never signature production.
+    let authorities: Vec<xln_rscore_batch::AccountInputAuthority> = if signed {
+        (0..accounts).map(authority).collect()
+    } else {
+        Vec::new()
+    };
     let mut prepare_ns = 0_u128;
     let mut commit_ns = 0_u128;
     let mut applied = 0_usize;
@@ -172,12 +215,12 @@ fn main() {
     for wave in 0..waves {
         let jobs: Vec<BatchJob> = (0..per_wave)
             .map(|index| {
-                payment(
-                    index,
-                    (wave as u32 * 7 + index) % accounts,
-                    5,
-                    (wave as u32 + index).is_multiple_of(2),
-                )
+                let account = (wave as u32 * 7 + index) % accounts;
+                let mut job = payment(index, account, 5, (wave as u32 + index).is_multiple_of(2));
+                if signed {
+                    job.authority = Some(authorities[account as usize]);
+                }
+                job
             })
             .collect();
         let prepare_started = Instant::now();
@@ -195,8 +238,9 @@ fn main() {
     let elapsed = started.elapsed();
     let total = waves * per_wave as usize;
     println!(
-        "accounts={accounts} waves={waves} txs={total} applied={applied} workers={workers} \
-         totalMs={:.0} txPerSec={:.0} prepareUsPerTx={:.2} commitUsPerTx={:.2}",
+        "accounts={accounts} waves={waves} inputs={total} applied={applied} workers={workers} \
+         signed={signed} totalMs={:.0} inputsPerSec={:.0} prepareUsPerInput={:.2} \
+         commitUsPerInput={:.2}",
         elapsed.as_secs_f64() * 1000.0,
         total as f64 / elapsed.as_secs_f64(),
         prepare_ns as f64 / 1000.0 / total as f64,

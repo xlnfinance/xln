@@ -7,6 +7,7 @@
 mod balance;
 mod commitment;
 mod context;
+mod crypto;
 mod delta;
 mod engine;
 mod envelope;
@@ -23,6 +24,7 @@ mod tx;
 
 pub use commitment::{CarriedSections, JClaimAccumulator};
 pub use context::AccountExecutionContext;
+pub use crypto::{normalize_recovery_byte, recover_signer_address};
 pub use delta::{Delta, DeltaPerspective, TokenId};
 pub use engine::{AccountTransition, AccountVerdict, SequentialAccountEngine};
 pub use envelope::{AccountEnvelope, EnvelopeError};

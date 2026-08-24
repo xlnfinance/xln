@@ -18,7 +18,10 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=9")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=10")
+        // wire=10: every job carries the authority for its account input
+        // (frame digest, signature, expected signer) or null, and the engine
+        // recovers the signer itself before the transaction touches state.
         // wire=9: RemoveAccounts drops an account the caller stopped
         // mirroring, so an abandoned leaf cannot hold the whole tree apart.
         // wire=8: UpdateAccountShells refreshes a replica shell without
@@ -37,9 +40,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xd8, 0x1d, 0x43, 0xc6, 0x47, 0x6c, 0xf6, 0xe2, 0xae, 0x0f, 0xea, 0xcf, 0xf4, 0xbd,
-            0x20, 0x17, 0x8a, 0x53, 0xba, 0x55, 0xef, 0xc5, 0x94, 0xf3, 0xf1, 0xd1, 0x72, 0x07,
-            0x0a, 0x08, 0x0a, 0xb3,
+            0x41, 0x67, 0x09, 0x84, 0x43, 0x19, 0x32, 0x49, 0xc0, 0x83, 0x0a, 0xaf, 0x37, 0x90,
+            0x42, 0x96, 0x1a, 0x1a, 0x8a, 0x0f, 0x84, 0xfe, 0xf4, 0x8a, 0xfd, 0xae, 0xfa, 0x1e,
+            0x29, 0x7e, 0x40, 0xc0,
         ],
     };
 
