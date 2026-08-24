@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND FIVE SITE ROUTES IMPLEMENTED`
+**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND SIX SITE ROUTES IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -249,7 +249,7 @@ shadowing edge/API routes or changing canonical production selection.
 
 ### WP3 — Migrate site
 
-**Status:** `IN PROGRESS — /, /INSTALL, /RCPAN, /UNICAST, AND /RELEASES IMPLEMENTED`
+**Status:** `IN PROGRESS — /, /INSTALL, /RCPAN, /UNICAST, /RELEASES, AND /REVIEWS IMPLEMENTED`
 
 - Use `/` and `/install` as the architecture pilot.
 - Migrate `/rcpan`, `/unicast`, `/releases`, `/reviews`, and `/market-cap`.
@@ -257,10 +257,10 @@ shadowing edge/API routes or changing canonical production selection.
 - Refine shared UI conventions based on real second consumers.
 
 **Pilot evidence:** the React site candidate now resolves `/`, `/install`,
-`/rcpan`, `/unicast`, and `/releases` with route-specific metadata, preserves the wallet-open
-marker and version-pinned local launcher, publishes all five install channels,
-and reports unimplemented site routes without changing their canonical Svelte
-production paths. `/rcpan` consumes the existing deterministic microscope
+`/rcpan`, `/unicast`, `/releases`, and `/reviews` with route-specific metadata,
+preserves the wallet-open marker and version-pinned local launcher, publishes
+all five install channels, and reports unimplemented site routes without
+changing their canonical Svelte production paths. `/rcpan` consumes the existing deterministic microscope
 timeline and settlement model rather than reproducing account or financial
 logic. `/unicast` preserves the canonical 100-participant device mix, paused
 1–1,000 TPS control, capacity thresholds, broadcast degradation, constant
@@ -269,15 +269,20 @@ deterministic. `/releases` keeps the Foundation trust anchor and Hanko policy
 unchanged, verifies all 22 canonical manifest entries and source snapshots
 before rendering any chart metric, and shares one strict decoder, signature
 binding, chart model, and sanitized Markdown loader with the canonical Svelte
-route. Fifty-nine focused tooling tests, thirteen Foundation Hanko tests, all
-four application builds, the release loading/success/failure states, metric,
-scope, and version interactions, reduced-motion behavior, zero-error/warning
-console inspection, exact document widths, and 390×844, 1366×900, and
-1920×1080 screenshots are green. The four-app candidate assembles as
-`sha256-7ff578797845a453acd0bfa4842f83e6b58a7b9ef2df11e6cc10cc582c2ded0c`
-with 347 files. The site-only typecheck still reaches the unrelated Runtime
-`countOp` unused import blocker; the route build and focused source checks are
-green.
+route. `/reviews` preserves the canonical five-prompt, four-model response
+matrix through one shared Svelte/React content source and keeps prompt changes
+synchronized across all four responses. Sixty-two focused tooling tests,
+thirteen Foundation Hanko tests, all four application builds, release
+loading/success/failure states, route interactions, reduced-motion behavior,
+zero-error/warning console inspection, exact document widths, and 390×844,
+1366×900, and 1920×1080 screenshots are green. The four-app candidate assembles
+as `sha256-269598bbecfcc7c76a2d5a17a64c82125e9d8ad6629e434850469ab0928fc117`
+with 348 files. The site-only typecheck still reaches the unrelated Runtime
+`countOp` unused import blocker, and the legacy Svelte workspace check reports
+30 existing errors in 16 unrelated files; the route build and focused source
+checks are green. The required root gate passes all 26 BrainVault checks before
+the existing contract-sync environment stops at Hardhat `HH19` under unsupported
+Node 25.
 
 **Done:** every site route is served by the site candidate and its relevant
 behavior/browser checks pass.
@@ -411,9 +416,9 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Migrate `/reviews` as the next site slice, then `/market-cap`; retain the
-   pilot's route-local metadata, responsive evidence, and explicit pending-route
-   boundary until each moves.
+2. Migrate `/market-cap` as the final site slice; retain the pilot's route-local
+   metadata, responsive evidence, and explicit pending-route boundary until it
+   moves.
 3. Capture the remaining wallet-owned static/PWA inputs before the first wallet
    flow migrates.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are

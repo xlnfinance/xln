@@ -9,7 +9,7 @@ import {
 import packageJson from '../../../frontend/package.json';
 
 describe('React site pilot', () => {
-  test('resolves the five migrated site routes', () => {
+  test('resolves the six migrated site routes', () => {
     expect(resolveSitePage('/')).toEqual({ kind: 'home' });
     expect(resolveSitePage('/install')).toEqual({ kind: 'install' });
     expect(resolveSitePage('/install/')).toEqual({ kind: 'install' });
@@ -19,6 +19,8 @@ describe('React site pilot', () => {
     expect(resolveSitePage('/unicast/')).toEqual({ kind: 'unicast' });
     expect(resolveSitePage('/releases')).toEqual({ kind: 'releases' });
     expect(resolveSitePage('/releases/')).toEqual({ kind: 'releases' });
+    expect(resolveSitePage('/reviews')).toEqual({ kind: 'reviews' });
+    expect(resolveSitePage('/reviews/')).toEqual({ kind: 'reviews' });
     expect(resolveSitePage('/market-cap')).toEqual({ kind: 'pending', pathname: '/market-cap' });
     expect(() => resolveSitePage('install')).toThrow('SITE_PATHNAME_INVALID');
   });
@@ -32,7 +34,8 @@ describe('React site pilot', () => {
     expect(getSiteMetadata(resolveSitePage('/unicast')).description).toContain('O(1) unicast routing');
     expect(getSiteMetadata(resolveSitePage('/releases')).title).toBe('Releases | xln');
     expect(getSiteMetadata(resolveSitePage('/releases')).description).toContain('verified codebase metrics');
-    expect(getSiteMetadata(resolveSitePage('/reviews')).title).toContain('migration candidate');
+    expect(getSiteMetadata(resolveSitePage('/reviews')).title).toBe('AI Reviews of xln');
+    expect(getSiteMetadata(resolveSitePage('/reviews')).description).toContain('four frontier-model perspectives');
   });
 
   test('keeps the local launcher version-pinned to the frontend release', () => {

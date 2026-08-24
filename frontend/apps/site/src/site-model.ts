@@ -6,6 +6,7 @@ export type SitePage =
   | Readonly<{ kind: 'rcpan' }>
   | Readonly<{ kind: 'unicast' }>
   | Readonly<{ kind: 'releases' }>
+  | Readonly<{ kind: 'reviews' }>
   | Readonly<{ kind: 'pending'; pathname: string }>;
 
 export type PageMetadata = Readonly<{
@@ -41,6 +42,7 @@ export const resolveSitePage = (pathname: string): SitePage => {
   if (normalized === '/rcpan') return { kind: 'rcpan' };
   if (normalized === '/unicast') return { kind: 'unicast' };
   if (normalized === '/releases') return { kind: 'releases' };
+  if (normalized === '/reviews') return { kind: 'reviews' };
   return { kind: 'pending', pathname: normalized };
 };
 
@@ -73,6 +75,12 @@ export const getSiteMetadata = (page: SitePage): PageMetadata => {
     return {
       title: 'Releases | xln',
       description: 'xln release history and verified codebase metrics.',
+    };
+  }
+  if (page.kind === 'reviews') {
+    return {
+      title: 'AI Reviews of xln',
+      description: 'Five xln architecture prompts reviewed from four frontier-model perspectives.',
     };
   }
   return {
