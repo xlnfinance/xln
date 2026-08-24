@@ -4,6 +4,7 @@ export type SitePage =
   | Readonly<{ kind: 'home' }>
   | Readonly<{ kind: 'install' }>
   | Readonly<{ kind: 'rcpan' }>
+  | Readonly<{ kind: 'unicast' }>
   | Readonly<{ kind: 'pending'; pathname: string }>;
 
 export type PageMetadata = Readonly<{
@@ -37,6 +38,7 @@ export const resolveSitePage = (pathname: string): SitePage => {
   if (normalized === '/') return { kind: 'home' };
   if (normalized === '/install') return { kind: 'install' };
   if (normalized === '/rcpan') return { kind: 'rcpan' };
+  if (normalized === '/unicast') return { kind: 'unicast' };
   return { kind: 'pending', pathname: normalized };
 };
 
@@ -57,6 +59,12 @@ export const getSiteMetadata = (page: SitePage): PageMetadata => {
     return {
       title: 'RCPAN — provable bilateral accounts | xln',
       description: 'Explore bilateral account proofs, shared collateral, programmable disputes, and bounded counterparty risk.',
+    };
+  }
+  if (page.kind === 'unicast') {
+    return {
+      title: 'Why broadcast dies at scale | xln',
+      description: 'Visual proof of the O(n) broadcast bottleneck compared with O(1) unicast routing.',
     };
   }
   return {

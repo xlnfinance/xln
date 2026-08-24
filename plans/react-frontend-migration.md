@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND THREE SITE ROUTES IMPLEMENTED`
+**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND FOUR SITE ROUTES IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -249,26 +249,28 @@ shadowing edge/API routes or changing canonical production selection.
 
 ### WP3 — Migrate site
 
-**Status:** `IN PROGRESS — /, /INSTALL, AND /RCPAN IMPLEMENTED`
+**Status:** `IN PROGRESS — /, /INSTALL, /RCPAN, AND /UNICAST IMPLEMENTED`
 
 - Use `/` and `/install` as the architecture pilot.
 - Migrate `/rcpan`, `/unicast`, `/releases`, `/reviews`, and `/market-cap`.
 - Preserve live data, links, assets, responsive states, and failure behavior.
 - Refine shared UI conventions based on real second consumers.
 
-**Pilot evidence:** the React site candidate now resolves `/`, `/install`, and
-`/rcpan` with route-specific metadata, preserves the wallet-open marker and
-version-pinned local launcher, publishes all five install channels, and reports
-unimplemented site routes without changing their canonical Svelte production
-paths. `/rcpan` consumes the existing deterministic microscope timeline and
-settlement model rather than reproducing account or financial logic; it exposes
-the three canonical scenarios, pause/restart, 1–4 asset lanes, speed and phase
-controls, FCUAN/RCPAN evidence, the settlement waterfall, and the architecture
-comparison. Fifty focused tooling tests, the site-only typecheck/build, browser
-interactions, reduced-motion behavior, zero-error/warning console inspection,
-exact document widths, and 390×844, 1366×900, and 1920×1080 screenshots are
-green. The four-app candidate assembles as
-`sha256-88c40980243998afe96ef828c348f235dd985df19dce84a60503a67d1dc67f4f`
+**Pilot evidence:** the React site candidate now resolves `/`, `/install`,
+`/rcpan`, and `/unicast` with route-specific metadata, preserves the wallet-open
+marker and version-pinned local launcher, publishes all five install channels,
+and reports unimplemented site routes without changing their canonical Svelte
+production paths. `/rcpan` consumes the existing deterministic microscope
+timeline and settlement model rather than reproducing account or financial
+logic. `/unicast` preserves the canonical 100-participant device mix, paused
+1–1,000 TPS control, capacity thresholds, broadcast degradation, constant
+one-TPS settlement claim, and responsive comparison while making node placement
+deterministic. Fifty-five focused tooling tests, the site-only typecheck/build,
+the 100→101 TPS boundary, Auto/Pause ramp and anchor interactions,
+reduced-motion behavior, zero-error/warning console inspection, exact document
+widths, and 390×844, 1366×900, and 1920×1080 screenshots are green. The
+four-app candidate assembles as
+`sha256-7088d1aab407281088df1297ff45a111ed4db92566e7e803b8b8455ad5551db0`
 with 346 files.
 
 **Done:** every site route is served by the site candidate and its relevant
@@ -403,7 +405,7 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Migrate `/unicast` as the next site slice, then `/releases`, `/reviews`, and
+2. Migrate `/releases` as the next site slice, then `/reviews` and
    `/market-cap`; retain the pilot's route-local metadata, responsive evidence,
    and explicit pending-route boundary until each moves.
 3. Capture the remaining wallet-owned static/PWA inputs before the first wallet

@@ -9,12 +9,14 @@ import {
 import packageJson from '../../../frontend/package.json';
 
 describe('React site pilot', () => {
-  test('resolves the three pilot routes to migrated pages', () => {
+  test('resolves the four migrated site routes', () => {
     expect(resolveSitePage('/')).toEqual({ kind: 'home' });
     expect(resolveSitePage('/install')).toEqual({ kind: 'install' });
     expect(resolveSitePage('/install/')).toEqual({ kind: 'install' });
     expect(resolveSitePage('/rcpan')).toEqual({ kind: 'rcpan' });
     expect(resolveSitePage('/rcpan/')).toEqual({ kind: 'rcpan' });
+    expect(resolveSitePage('/unicast')).toEqual({ kind: 'unicast' });
+    expect(resolveSitePage('/unicast/')).toEqual({ kind: 'unicast' });
     expect(resolveSitePage('/market-cap')).toEqual({ kind: 'pending', pathname: '/market-cap' });
     expect(() => resolveSitePage('install')).toThrow('SITE_PATHNAME_INVALID');
   });
@@ -24,6 +26,8 @@ describe('React site pilot', () => {
     expect(getSiteMetadata(resolveSitePage('/install')).description).toContain('persistent local runtime');
     expect(getSiteMetadata(resolveSitePage('/rcpan')).title).toBe('RCPAN — provable bilateral accounts | xln');
     expect(getSiteMetadata(resolveSitePage('/rcpan')).description).toContain('bounded counterparty risk');
+    expect(getSiteMetadata(resolveSitePage('/unicast')).title).toBe('Why broadcast dies at scale | xln');
+    expect(getSiteMetadata(resolveSitePage('/unicast')).description).toContain('O(1) unicast routing');
     expect(getSiteMetadata(resolveSitePage('/reviews')).title).toContain('migration candidate');
   });
 

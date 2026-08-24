@@ -3,6 +3,7 @@ import { LandingPage } from './landing-page';
 import { RcpanPage } from './rcpan-page';
 import { Arrow, SiteFooter, SiteShell } from './site-shell';
 import type { SitePage } from './site-model';
+import { UnicastPage } from './unicast-page';
 
 function PendingRoute({ pathname }: Readonly<{ pathname: string }>) {
   return (
@@ -10,7 +11,7 @@ function PendingRoute({ pathname }: Readonly<{ pathname: string }>) {
       <main className="pending-route">
         <p className="kicker">React site migration</p>
         <h1>This route stays canonical for now.</h1>
-        <p><code>{pathname}</code> is outside the `/` and `/install` pilot. The Svelte production route is unchanged.</p>
+        <p><code>{pathname}</code> has not moved into the React site candidate yet. The Svelte production route is unchanged.</p>
         <a className="text-link" href="/">Return to the pilot <Arrow /></a>
       </main>
       <SiteFooter />
@@ -22,5 +23,6 @@ export function SiteApp({ page }: Readonly<{ page: SitePage }>) {
   if (page.kind === 'home') return <LandingPage />;
   if (page.kind === 'install') return <InstallPage />;
   if (page.kind === 'rcpan') return <RcpanPage />;
+  if (page.kind === 'unicast') return <UnicastPage />;
   return <PendingRoute pathname={page.pathname} />;
 }

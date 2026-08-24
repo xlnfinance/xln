@@ -22,8 +22,9 @@ export const CAPABILITIES = [
       'frontend/apps/site/src/landing-page.tsx',
       'frontend/apps/site/src/install-page.tsx',
       'frontend/apps/site/src/rcpan-page.tsx',
+      'frontend/apps/site/src/unicast-page.tsx',
     ],
-    behavior: ['public navigation', 'install detection', 'deterministic RCPAN dispute microscope', 'live market-cap data'],
+    behavior: ['public navigation', 'install detection', 'deterministic RCPAN dispute microscope', 'broadcast/unicast scale visualization', 'live market-cap data'],
     status: 'in_progress',
   },
   {
