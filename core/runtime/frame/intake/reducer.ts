@@ -1,6 +1,7 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
+import { flushAuthorityFrame } from '../../../rscore/authority';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
@@ -306,6 +307,11 @@ const applyRuntimeInputPhases = async (
     batch,
     profile,
   );
+  // Runtime frame boundary for the authoritative engine. It lives here, not at
+  // the live-loop apply, because recovery replays a journal through this
+  // reducer without passing through that path — and a boundary that only fires
+  // in one of the two would report a frame's inputs as belonging to the next.
+  flushAuthorityFrame();
   return { result, profiledRuntimeTxs: ingress.runtimeTxs };
 };
 

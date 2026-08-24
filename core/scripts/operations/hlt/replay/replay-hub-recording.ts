@@ -3,6 +3,7 @@
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
 import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
+import { printAuthorityRecordReport } from '../../../../rscore/authority';
 import {
   assertShadowParity,
   currentShadowMirror,
@@ -507,6 +508,7 @@ const report = {
 };
 writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
 console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
+printAuthorityRecordReport();
 const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
 if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);
 await currentShadowMirror()?.shutdown();

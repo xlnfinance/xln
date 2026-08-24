@@ -133,13 +133,14 @@ describe('storage config', () => {
   });
 });
 
-test('a runtime config written before the dead snapshot knob was removed still decodes', () => {
-  // The field decided nothing, so a recovery must not fail over it — and it
-  // must not come back into the model either.
+test('a runtime config written before the dead snapshot knob was removed replays unchanged', () => {
+  // The runtime machine hash covers this config. Dropping a legacy field would
+  // change that hash and make every journal recorded before the removal fail
+  // to replay, so the field is carried through untouched.
   const decoded = decodeRuntimeConfig(
     { minFrameDelayMs: 25, snapshotIntervalFrames: 7, storage: { snapshotPeriodFrames: 10_000 } },
     'TEST_RUNTIME_CONFIG',
   ) as Record<string, unknown>;
   expect(decoded['minFrameDelayMs']).toBe(25);
-  expect('snapshotIntervalFrames' in decoded).toBe(false);
+  expect(decoded['snapshotIntervalFrames']).toBe(7);
 });

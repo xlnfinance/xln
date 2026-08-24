@@ -4,6 +4,7 @@
  */
 
 import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../rscore/shadow-hook';
+import { noteRawAccountInput } from '../../rscore/authority';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -1157,6 +1158,9 @@ export async function applyAccountInput(
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> {
+  // The authoritative engine is handed the same raw inputs, in this order,
+  // before TypeScript executes them (no-op unless recording is on).
+  noteRawAccountInput(account, input);
   if (input.kind === 'enqueue') return applyAccountEnqueue(account, input);
   const envelopeError = getAccountInputEnvelopeError(account.state, input);
   if (envelopeError) {
