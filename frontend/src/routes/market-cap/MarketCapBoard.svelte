@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ProfileEntityKind, ProfileEntitySector } from '@xln/core/entity/profile';
-  import type { EntityMarketCapEntry, EntityMarketCapStatus } from '@xln/core/network/relay/market/cap/market-cap';
+  import type { EntityMarketCapStatus } from '@xln/core/network/relay/market/cap/market-cap';
   import type {
     MarketCapDirection,
     MarketCapPublicResponse,
@@ -8,6 +8,14 @@
     MarketCapSort,
     MarketCapTaxonomyFilter,
   } from '@xln/core/network/relay/market/cap/market-cap-wire';
+  import {
+    formatMarketCapPrice,
+    formatMarketCapUsd,
+    marketCapAgeLabel,
+    marketCapJurisdictionLabel,
+    marketCapStatusLabel,
+    titleCaseMarketCapValue,
+  } from '$lib/market-cap/market-cap-page-model';
 
   export let data: MarketCapPublicResponse | null;
   export let loading: boolean;
@@ -24,35 +32,6 @@
   export let queueSearch: () => void;
   export let reverseDirection: () => void;
 
-  const statusLabel = (value: EntityMarketCapStatus): string =>
-    value === 'fresh' ? 'Live' : value === 'stale' ? 'Stale' : 'No price';
-  const titleCase = (value: string): string => value.split('-').map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`).join(' ');
-  const jurisdictionLabel = (value: string): string => {
-    const [, chainId, address] = value.split(':');
-    return `Chain ${chainId} · ${address?.slice(0, 6)}…${address?.slice(-4)}`;
-  };
-  const formatUsdTicks = (value: string | null): string => {
-    if (value === null) return '—';
-    const dollars = BigInt(value) / 10_000n;
-    const units = [
-      { threshold: 1_000_000_000_000n, divisor: 1_000_000_000_000n, suffix: 'T' },
-      { threshold: 1_000_000_000n, divisor: 1_000_000_000n, suffix: 'B' },
-      { threshold: 1_000_000n, divisor: 1_000_000n, suffix: 'M' },
-      { threshold: 1_000n, divisor: 1_000n, suffix: 'K' },
-    ];
-    const unit = units.find(candidate => dollars >= candidate.threshold);
-    if (!unit) return `$${dollars.toString()}`;
-    const tenths = (dollars * 10n) / unit.divisor;
-    return `$${tenths / 10n}.${tenths % 10n}${unit.suffix}`;
-  };
-  const formatPrice = (value: string | null): string => value === null
-    ? 'No trade'
-    : `$${BigInt(value) / 10_000n}.${(BigInt(value) % 10_000n).toString().padStart(4, '0')}`;
-  const ageLabel = (entry: EntityMarketCapEntry): string => {
-    if (entry.control.observedAt === null || entry.dividend.observedAt === null || !data) return 'Awaiting both trades';
-    const seconds = Math.max(0, Math.floor((data.generatedAt - Math.min(entry.control.observedAt, entry.dividend.observedAt)) / 1_000));
-    return seconds < 60 ? `Oldest price · ${seconds}s` : `Oldest price · ${Math.floor(seconds / 60)}m`;
-  };
 </script>
 
 <section class="board">
@@ -60,9 +39,9 @@
   <div class="filters">
     <label class="search"><span>Search</span><input bind:value={query} on:input={queueSearch} placeholder="Entity name or number" aria-label="Search Entities" /></label>
     <label><span>Role</span><select bind:value={role} on:change={reload} aria-label="Role"><option value="all">All Entities</option><option value="hub">Hubs only</option><option value="non-hub">Non-hubs</option></select></label>
-    <label><span>Jurisdiction</span><select bind:value={jurisdiction} on:change={reload} aria-label="Jurisdiction"><option value="all">All jurisdictions</option>{#each data?.facets.jurisdictionRefs ?? [] as ref}<option value={ref}>{jurisdictionLabel(ref)}</option>{/each}</select></label>
-    <label><span>Kind</span><select bind:value={entityKind} on:change={reload} aria-label="Entity kind"><option value="all">All kinds</option><option value="unclassified">Unclassified</option>{#each data?.facets.entityKinds ?? [] as kind}<option value={kind}>{titleCase(kind)}</option>{/each}</select></label>
-    <label><span>Sector</span><select bind:value={sector} on:change={reload} aria-label="Sector"><option value="all">All sectors</option><option value="unclassified">Unclassified</option>{#each data?.facets.sectors ?? [] as item}<option value={item}>{titleCase(item)}</option>{/each}</select></label>
+    <label><span>Jurisdiction</span><select bind:value={jurisdiction} on:change={reload} aria-label="Jurisdiction"><option value="all">All jurisdictions</option>{#each data?.facets.jurisdictionRefs ?? [] as ref}<option value={ref}>{marketCapJurisdictionLabel(ref)}</option>{/each}</select></label>
+    <label><span>Kind</span><select bind:value={entityKind} on:change={reload} aria-label="Entity kind"><option value="all">All kinds</option><option value="unclassified">Unclassified</option>{#each data?.facets.entityKinds ?? [] as kind}<option value={kind}>{titleCaseMarketCapValue(kind)}</option>{/each}</select></label>
+    <label><span>Sector</span><select bind:value={sector} on:change={reload} aria-label="Sector"><option value="all">All sectors</option><option value="unclassified">Unclassified</option>{#each data?.facets.sectors ?? [] as item}<option value={item}>{titleCaseMarketCapValue(item)}</option>{/each}</select></label>
     <label><span>Status</span><select bind:value={status} on:change={reload} aria-label="Status"><option value="all">All states</option><option value="fresh">Live</option><option value="stale">Stale</option><option value="no-price">No price</option></select></label>
     <label><span>Sort by</span><select bind:value={sort} on:change={reload} aria-label="Sort by"><option value="valuation">Combined cap</option><option value="control">CONTROL cap</option><option value="dividend">DIVIDEND cap</option><option value="number">Entity number</option><option value="name">Name</option><option value="recent">Last trade</option></select></label>
     <button class="direction" on:click={reverseDirection} aria-label="Reverse sort direction">{direction === 'desc' ? '↓ High to low' : '↑ Low to high'}</button>
@@ -79,11 +58,11 @@
       <thead><tr><th>Rank</th><th>Entity</th><th>CONTROL</th><th>DIVIDEND</th><th>Combined cap</th><th>Price state</th></tr></thead>
       <tbody>{#each data.entries as entry, index}<tr>
         <td class="rank">{index + 1}</td>
-        <td><div class="entity"><i class:online={entry.online}></i><div><strong>{entry.name}</strong><span>#{entry.entityNumber}{entry.isHub ? ' · Hub' : ''}{entry.entityKind ? ` · ${titleCase(entry.entityKind)}` : ''}</span>{#if entry.sectors.length}<small>{entry.sectors.map(titleCase).join(' · ')}</small>{/if}</div></div></td>
-        <td><div class="price"><strong>{formatPrice(entry.control.priceTicks)}</strong><span>{entry.control.sourceHubEntityIds.length} source Hub</span></div></td>
-        <td><div class="price"><strong>{formatPrice(entry.dividend.priceTicks)}</strong><span>{entry.dividend.sourceHubEntityIds.length} source Hub</span></div></td>
-        <td class="cap"><strong>{formatUsdTicks(entry.marketCapUsdTicks)}</strong><span>CONTROL + DIVIDEND</span></td>
-        <td><div class="pill" class:fresh={entry.status === 'fresh'} class:stale={entry.status === 'stale'}>{statusLabel(entry.status)}</div><small>{ageLabel(entry)}</small></td>
+        <td><div class="entity"><i class:online={entry.online}></i><div><strong>{entry.name}</strong><span>#{entry.entityNumber}{entry.isHub ? ' · Hub' : ''}{entry.entityKind ? ` · ${titleCaseMarketCapValue(entry.entityKind)}` : ''}</span>{#if entry.sectors.length}<small>{entry.sectors.map(titleCaseMarketCapValue).join(' · ')}</small>{/if}</div></div></td>
+        <td><div class="price"><strong>{formatMarketCapPrice(entry.control.priceTicks)}</strong><span>{entry.control.sourceHubEntityIds.length} source Hub</span></div></td>
+        <td><div class="price"><strong>{formatMarketCapPrice(entry.dividend.priceTicks)}</strong><span>{entry.dividend.sourceHubEntityIds.length} source Hub</span></div></td>
+        <td class="cap"><strong>{formatMarketCapUsd(entry.marketCapUsdTicks)}</strong><span>CONTROL + DIVIDEND</span></td>
+        <td><div class="pill" class:fresh={entry.status === 'fresh'} class:stale={entry.status === 'stale'}>{marketCapStatusLabel(entry.status)}</div><small>{marketCapAgeLabel(entry, data.generatedAt)}</small></td>
       </tr>{/each}</tbody>
     </table></div>
   {/if}

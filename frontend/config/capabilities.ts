@@ -25,9 +25,10 @@ export const CAPABILITIES = [
       'frontend/apps/site/src/unicast-page.tsx',
       'frontend/apps/site/src/releases-page.tsx',
       'frontend/apps/site/src/reviews-page.tsx',
+      'frontend/apps/site/src/market-cap-page.tsx',
     ],
     behavior: ['public navigation', 'install detection', 'deterministic RCPAN dispute microscope', 'broadcast/unicast scale visualization', 'verified release ledger', 'AI review prompt slideshow', 'live market-cap data'],
-    status: 'in_progress',
+    status: 'implemented',
   },
   {
     id: 'docs-reader',

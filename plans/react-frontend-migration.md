@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND SIX SITE ROUTES IMPLEMENTED`
+**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND ALL SEVEN SITE ROUTES IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -249,7 +249,7 @@ shadowing edge/API routes or changing canonical production selection.
 
 ### WP3 — Migrate site
 
-**Status:** `IN PROGRESS — /, /INSTALL, /RCPAN, /UNICAST, /RELEASES, AND /REVIEWS IMPLEMENTED`
+**Status:** `COMPLETE — ALL SEVEN SITE ROUTES IMPLEMENTED`
 
 - Use `/` and `/install` as the architecture pilot.
 - Migrate `/rcpan`, `/unicast`, `/releases`, `/reviews`, and `/market-cap`.
@@ -257,10 +257,11 @@ shadowing edge/API routes or changing canonical production selection.
 - Refine shared UI conventions based on real second consumers.
 
 **Pilot evidence:** the React site candidate now resolves `/`, `/install`,
-`/rcpan`, `/unicast`, `/releases`, and `/reviews` with route-specific metadata,
-preserves the wallet-open marker and version-pinned local launcher, publishes
-all five install channels, and reports unimplemented site routes without
-changing their canonical Svelte production paths. `/rcpan` consumes the existing deterministic microscope
+`/rcpan`, `/unicast`, `/releases`, `/reviews`, and `/market-cap` with
+route-specific metadata, preserves the wallet-open marker and version-pinned
+local launcher, publishes all five install channels, and keeps unknown paths at
+the explicit pending-route boundary without changing canonical Svelte
+production selection. `/rcpan` consumes the existing deterministic microscope
 timeline and settlement model rather than reproducing account or financial
 logic. `/unicast` preserves the canonical 100-participant device mix, paused
 1–1,000 TPS control, capacity thresholds, broadcast degradation, constant
@@ -271,18 +272,24 @@ before rendering any chart metric, and shares one strict decoder, signature
 binding, chart model, and sanitized Markdown loader with the canonical Svelte
 route. `/reviews` preserves the canonical five-prompt, four-model response
 matrix through one shared Svelte/React content source and keeps prompt changes
-synchronized across all four responses. Sixty-two focused tooling tests,
-thirteen Foundation Hanko tests, all four application builds, release
-loading/success/failure states, route interactions, reduced-motion behavior,
-zero-error/warning console inspection, exact document widths, and 390×844,
-1366×900, and 1920×1080 screenshots are green. The four-app candidate assembles
-as `sha256-269598bbecfcc7c76a2d5a17a64c82125e9d8ad6629e434850469ab0928fc117`
-with 348 files. The site-only typecheck still reaches the unrelated Runtime
-`countOp` unused import blocker, and the legacy Svelte workspace check reports
-30 existing errors in 16 unrelated files; the route build and focused source
-checks are green. The required root gate passes all 26 BrainVault checks before
-the existing contract-sync environment stops at Hardhat `HH19` under unsupported
-Node 25.
+synchronized across all four responses. `/market-cap` shares its strict relay
+response decoder, request builder, integer-tick formatting, and ranking presets
+with Svelte while preserving all five rankings, seven filters, direction,
+250ms search debounce, stale/no-price labels, abort-safe loading, and fail-loud
+retry behavior without adding estimates. Sixty-five focused tooling tests,
+three canonical market-cap invariant tests, thirteen Foundation Hanko tests,
+all four application builds, loading/success/failure/jurisdiction states, route
+interactions, reduced-motion behavior, exact document widths, and 390×844,
+1366×900, and 1920×1080 screenshots are green. The normal market flow has zero
+console errors or warnings; the injected failure flow emits only its expected
+HTTP 503 before recovering. The four-app candidate assembles as
+`sha256-420fba14d39f37003d5ebef852baf83dd1ca1044ab5337a489d77906aa2f3d67`
+with 351 files. The site-only typecheck still reaches unrelated core unused
+import, `.ts` extension, and proof-builder type blockers, and the legacy Svelte
+workspace check reports 30 existing errors in 16 unrelated files; the route
+build and focused source checks are green. The required root gate passes all 26
+BrainVault checks before the existing contract-sync environment stops at
+Hardhat `HH19` under unsupported Node 25.
 
 **Done:** every site route is served by the site candidate and its relevant
 behavior/browser checks pass.
@@ -416,9 +423,8 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Migrate `/market-cap` as the final site slice; retain the pilot's route-local
-   metadata, responsive evidence, and explicit pending-route boundary until it
-   moves.
+2. Begin WP4 with the docs catalog, navigation, reader, deep links, and search;
+   retain the deterministic generated-input owner already used by the docs app.
 3. Capture the remaining wallet-owned static/PWA inputs before the first wallet
    flow migrates.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are

@@ -9,7 +9,7 @@ import {
 import packageJson from '../../../frontend/package.json';
 
 describe('React site pilot', () => {
-  test('resolves the six migrated site routes', () => {
+  test('resolves all seven migrated site routes', () => {
     expect(resolveSitePage('/')).toEqual({ kind: 'home' });
     expect(resolveSitePage('/install')).toEqual({ kind: 'install' });
     expect(resolveSitePage('/install/')).toEqual({ kind: 'install' });
@@ -21,7 +21,8 @@ describe('React site pilot', () => {
     expect(resolveSitePage('/releases/')).toEqual({ kind: 'releases' });
     expect(resolveSitePage('/reviews')).toEqual({ kind: 'reviews' });
     expect(resolveSitePage('/reviews/')).toEqual({ kind: 'reviews' });
-    expect(resolveSitePage('/market-cap')).toEqual({ kind: 'pending', pathname: '/market-cap' });
+    expect(resolveSitePage('/market-cap')).toEqual({ kind: 'market-cap' });
+    expect(resolveSitePage('/market-cap/')).toEqual({ kind: 'market-cap' });
     expect(() => resolveSitePage('install')).toThrow('SITE_PATHNAME_INVALID');
   });
 
@@ -36,6 +37,8 @@ describe('React site pilot', () => {
     expect(getSiteMetadata(resolveSitePage('/releases')).description).toContain('verified codebase metrics');
     expect(getSiteMetadata(resolveSitePage('/reviews')).title).toBe('AI Reviews of xln');
     expect(getSiteMetadata(resolveSitePage('/reviews')).description).toContain('four frontier-model perspectives');
+    expect(getSiteMetadata(resolveSitePage('/market-cap')).title).toBe('xln Market Cap');
+    expect(getSiteMetadata(resolveSitePage('/market-cap')).description).toContain('verified xln relay markets');
   });
 
   test('keeps the local launcher version-pinned to the frontend release', () => {

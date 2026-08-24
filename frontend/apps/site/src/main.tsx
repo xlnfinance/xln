@@ -10,6 +10,7 @@ import './styles/rcpan.css';
 import './styles/unicast.css';
 import './styles/releases.css';
 import './styles/reviews.css';
+import './styles/market-cap.css';
 
 const getRootElement = (): HTMLElement => {
   const rootElement = document.getElementById('root');

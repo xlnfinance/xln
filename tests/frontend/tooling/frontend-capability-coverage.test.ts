@@ -35,15 +35,16 @@ describe('frontend capability inventory', () => {
     }
   });
 
-  test('records the site pilot without claiming the full site capability is complete', () => {
+  test('records the implemented site capability without claiming production cutover', () => {
     const site = CAPABILITIES.find(({ id }) => id === 'site-public-information');
-    expect(site?.status).toBe('in_progress');
+    expect(site?.status).toBe('implemented');
     expect(site?.currentSources).toContain('frontend/apps/site/src/landing-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/install-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/rcpan-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/unicast-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/releases-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/reviews-page.tsx');
+    expect(site?.currentSources).toContain('frontend/apps/site/src/market-cap-page.tsx');
     expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information').every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
