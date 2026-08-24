@@ -13,9 +13,8 @@
  * request per client. The engine is OPTIONAL: nothing in the runtime imports
  * this module unless the rscore flag wiring asks for it.
  */
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
-import type { Readable, Writable } from 'node:stream';
 import { createHash } from 'node:crypto';
 
 export const RSCORE_ABI_MAGIC = 0x03;
@@ -46,6 +45,7 @@ export const RSCORE_OP = {
 const MESSAGE_KIND_REQUEST = 0;
 const MESSAGE_KIND_OK = 1;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+const STDERR_TAIL_BYTES = 4096;
 
 export type RscoreWireValue =
   | null
@@ -290,18 +290,30 @@ const decodeEnvelope = (frame: Buffer): DecodedReply => {
 };
 
 export class RscoreProcessClient {
-  #child: ChildProcessByStdio<Writable, Readable, null>;
+  #child: ChildProcessWithoutNullStreams;
   #identity: RscoreSessionIdentity;
   #nextRequestId = 0n;
   #buffer: Buffer = Buffer.alloc(0);
   #waiters: Array<{ resolve: (frame: Buffer) => void; reject: (error: Error) => void }> = [];
   #dead: Error | null = null;
+  #stderrTail = '';
 
   constructor(binaryPath: string, identity: RscoreSessionIdentity) {
     this.#identity = identity;
-    this.#child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+    // stderr is piped, not inherited: a panic or an abort message is the only
+    // evidence of why the engine died, and inheriting it makes that evidence
+    // unattributable in a busy host log.
+    this.#child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.#child.stdout.on('data', chunk => this.#onData(chunk as Buffer));
-    this.#child.on('exit', code => this.#fail(new Error(`RSCORE_PROCESS_EXITED:${String(code)}`)));
+    this.#child.stderr.on('data', (chunk: Buffer) => {
+      const text = String(chunk);
+      this.#stderrTail = `${this.#stderrTail}${text}`.slice(-STDERR_TAIL_BYTES);
+      try { console.error(`[rscore] ${text.trimEnd()}`); } catch { /* observer-only */ }
+    });
+    this.#child.on('exit', (code, signal) => this.#fail(new Error(
+      `RSCORE_PROCESS_EXITED:code=${String(code)}:signal=${String(signal)}:stderr=${
+        this.#stderrTail.trim() || '<empty>'}`,
+    )));
     this.#child.on('error', error => this.#fail(error as Error));
   }
 
