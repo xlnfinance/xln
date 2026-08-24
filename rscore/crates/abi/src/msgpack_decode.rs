@@ -130,7 +130,11 @@ impl Parser<'_> {
     fn read_nested_tuple(&mut self, marker: u8, depth: usize) -> Result<AbiValue, AbiError> {
         let length = self.array_length(marker)?;
         self.check_tuple_length(length)?;
-        let mut values = Vec::with_capacity(length);
+        // A declared length is a claim, not a payload: reserving it outright
+        // lets a five-byte marker force a multi-megabyte allocation, nested as
+        // deep as the depth limit allows. Reserve what the remaining bytes
+        // could possibly hold and let the vector grow into the rest.
+        let mut values = Vec::with_capacity(length.min(self.remaining()));
         for _ in 0..length {
             values.push(self.read_value(depth + 1)?);
         }

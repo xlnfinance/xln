@@ -23,6 +23,12 @@ pub enum KeyDerivationError {
     Derivation(String),
 }
 
+/// JavaScript's `\s`, which is what `resolveMnemonic` collapses. Rust's own
+/// `is_whitespace` covers all of it except the byte-order mark.
+fn is_js_whitespace(character: char) -> bool {
+    character.is_whitespace() || character == '\u{feff}'
+}
+
 /// `null` in TypeScript: the id is a label, not a board index.
 fn parse_signer_index(signer_id: &str) -> Result<Option<u32>, KeyDerivationError> {
     let trimmed = signer_id.trim();
@@ -39,13 +45,22 @@ fn parse_signer_index(signer_id: &str) -> Result<Option<u32>, KeyDerivationError
     if trimmed.is_empty() || !trimmed.chars().all(|character| character.is_ascii_digit()) {
         return Ok(None);
     }
-    // TypeScript parses through a float, so an id past 2^53 is not finite as an
-    // integer any more; the runtime never mints one, and a parse failure here
-    // is the same rejection.
-    let raw: u64 = trimmed
+    // TypeScript parses the digits through a float. Past ~1e309 that is
+    // `Infinity`, which `Number.isFinite` rejects and the caller then treats as
+    // a label — so an id that long is an HMAC key on both sides, not an error.
+    let raw: f64 = trimmed
         .parse()
         .map_err(|_| KeyDerivationError::Derivation(format!("signer index {trimmed}")))?;
-    let index = if raw > 0 { raw - 1 } else { 0 };
+    if !raw.is_finite() {
+        return Ok(None);
+    }
+    let index = if raw > 0.0 { raw - 1.0 } else { 0.0 };
+    if index > f64::from(u32::MAX) {
+        return Err(KeyDerivationError::Derivation(format!(
+            "signer index {trimmed}"
+        )));
+    }
+    let index = index as u64;
     u32::try_from(index)
         .map(Some)
         .map_err(|_| KeyDerivationError::Derivation(format!("signer index {trimmed}")))
@@ -54,15 +69,20 @@ fn parse_signer_index(signer_id: &str) -> Result<Option<u32>, KeyDerivationError
 /// The mnemonic a seed resolves to: itself when it already is one, otherwise
 /// the phrase encoding `sha256(seed)`.
 fn resolve_mnemonic(seed: &str) -> Result<String, KeyDerivationError> {
-    let normalized = seed.trim().to_lowercase();
-    let normalized = normalized
-        .split_ascii_whitespace()
+    // TypeScript trims the seed text once and derives everything from that
+    // trimmed value, mnemonic or not: a seed read from a file with a trailing
+    // newline must still mint the same key.
+    let seed_text = seed.trim();
+    let lowered = seed_text.to_lowercase();
+    let normalized = lowered
+        .split(is_js_whitespace)
+        .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
     if validate_mnemonic(&normalized) {
         return Ok(normalized);
     }
-    let entropy = Sha256::digest(seed.as_bytes());
+    let entropy = Sha256::digest(seed_text.as_bytes());
     entropy_to_mnemonic(&entropy)
         .ok_or_else(|| KeyDerivationError::Derivation("entropy".to_string()))
 }
@@ -74,14 +94,17 @@ fn indexed_account_path(index: u32) -> String {
 }
 
 pub fn derive_signer_key(seed: &str, signer_id: &str) -> Result<[u8; 32], KeyDerivationError> {
-    if seed.is_empty() {
-        return Err(KeyDerivationError::EmptySeed);
-    }
     let Some(index) = parse_signer_index(signer_id)? else {
+        // The label route never touches the signer keystore, so TypeScript
+        // derives it even for an empty seed. Only the indexed route requires a
+        // scope, and rejects an empty one.
         let material = hmac::<HmacSha256>(seed.as_bytes(), signer_id.as_bytes());
         return <[u8; 32]>::try_from(material.as_slice())
             .map_err(|_| KeyDerivationError::Derivation("hmac".to_string()));
     };
+    if seed.is_empty() {
+        return Err(KeyDerivationError::EmptySeed);
+    }
     let mnemonic = resolve_mnemonic(seed)?;
     let extended = ExtendedKey::from_seed(&mnemonic_to_seed(&mnemonic))
         .ok_or_else(|| KeyDerivationError::Derivation("master".to_string()))?;
@@ -179,6 +202,49 @@ mod tests {
                 "address for {signer_id}",
             );
         }
+    }
+
+    /// Seeds arrive from files and environments with stray whitespace, and a
+    /// mnemonic may be joined by non-breaking spaces. Both sides must land on
+    /// the same key regardless.
+    #[test]
+    fn normalises_the_seed_the_way_typescript_does() {
+        let padded =
+            derive_signer_key("  canonical test seed for xln rscore  ", "1").expect("padded seed");
+        assert_eq!(
+            hex::encode(padded),
+            "106c4c9b9bafdf5fbd2b5967921cc241b49a235172e3de020087561df7c07460",
+        );
+        let spaced = "abandon abandon abandon abandon abandon abandon abandon abandon \
+                      abandon abandon abandon about";
+        let nbsp = spaced.replace(' ', "\u{a0}");
+        // Vectors from the TypeScript deriver (scratchpad/normvec.ts): the
+        // mnemonic route, reached through either spacing.
+        for phrase in [spaced, nbsp.as_str()] {
+            assert_eq!(
+                hex::encode(derive_signer_key(phrase, "1").expect("mnemonic seed")),
+                "1ab42cc412b618bdea3a599e3c9bae199ebf030895b039e9db1e30dafb12b727",
+            );
+        }
+    }
+
+    /// An id too long to be a finite number is a label on both sides, and the
+    /// label route works without a seed scope.
+    #[test]
+    fn falls_back_to_the_label_route_the_way_typescript_does() {
+        let long_id = "9".repeat(400);
+        assert_eq!(
+            hex::encode(derive_signer_key("seed", &long_id).expect("label route")),
+            "ec8ad55efe259ae9ace65776b4c0d7e76bde871e7cb384dc473db9df86998119",
+        );
+        assert_eq!(
+            hex::encode(derive_signer_key("", "alice").expect("empty seed, label route")),
+            "ce3837f76a54a635191b1704ac7672264fc17c3397ff52e7dacfc1ef3603a493",
+        );
+        assert_eq!(
+            derive_signer_key("", "1"),
+            Err(KeyDerivationError::EmptySeed)
+        );
     }
 
     #[test]

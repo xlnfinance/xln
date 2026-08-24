@@ -43,8 +43,17 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Option<Vec<u8>>, ProcessErro
             maximum: MAX_FRAME_BYTES,
         });
     }
-    let mut frame = vec![0_u8; length];
-    read_frame_exact(reader, &mut frame)?;
+    // A declared length is a claim. Grow into it as the bytes actually
+    // arrive, so a stalled or lying writer cannot pin the whole ceiling on a
+    // four-byte header.
+    const CHUNK_BYTES: usize = 4 * 1024 * 1024;
+    let mut frame = Vec::with_capacity(length.min(CHUNK_BYTES));
+    while frame.len() < length {
+        let want = CHUNK_BYTES.min(length - frame.len());
+        let filled = frame.len();
+        frame.resize(filled + want, 0);
+        read_frame_exact(reader, &mut frame[filled..])?;
+    }
     Ok(Some(frame))
 }
 

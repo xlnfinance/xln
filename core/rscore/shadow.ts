@@ -363,16 +363,40 @@ type PendingSubwave = Readonly<{
 }>;
 
 /**
- * Jobs per engine request. A hub commits thousands of account frames in one
- * Runtime frame, and with replica shells attached those requests are large, so
- * the caller chunks rather than discovering the wire limit as a broken pipe.
- * The wire itself now carries 1000 MB frames, so the chunk exists to bound
- * memory per request, not to dodge a 16 MiB ceiling.
+ * How much of one Runtime frame goes into one engine request. A hub commits
+ * thousands of account frames per Runtime frame, and a job that carries a
+ * replica shell is kilobytes rather than bytes, so the job count alone says
+ * nothing about the request size. Both bounds apply: whichever is reached
+ * first closes the chunk.
  */
 const MAX_JOBS_PER_WAVE = Math.max(
   1,
-  Number(process.env['XLN_RSCORE_SHADOW_MAX_JOBS_PER_WAVE'] ?? '131072'),
+  Number(process.env['XLN_RSCORE_SHADOW_MAX_JOBS_PER_WAVE'] ?? '16384'),
 );
+/** Encoded-byte budget per request, well under the wire's own ceiling. */
+const MAX_BYTES_PER_WAVE = Math.max(
+  1,
+  Number(process.env['XLN_RSCORE_SHADOW_MAX_BYTES_PER_WAVE'] ?? String(64 * 1024 * 1024)),
+);
+
+/**
+ * Rough encoded size of one job, without encoding it: strings and byte arrays
+ * dominate, everything else is a few bytes of MessagePack header.
+ */
+const wireValueBytes = (value: RscoreWireValue): number => {
+  if (value === null || typeof value === 'boolean') return 1;
+  if (typeof value === 'number') return 9;
+  if (typeof value === 'string') return value.length + 5;
+  if (value instanceof Uint8Array) return value.length + 5;
+  if (Array.isArray(value)) {
+    let total = 5;
+    for (const entry of value) total += wireValueBytes(entry);
+    return total;
+  }
+  return 9;
+};
+
+const jobBytes = (job: RscoreWireValue[]): number => wireValueBytes(job);
 
 /** Preserve per-account frame order while retaining cross-account parallelism. */
 const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwave[] => {
@@ -380,6 +404,7 @@ const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwa
   // and depths are emitted in order, so per-account order survives chunking
   // while distinct accounts stay independent.
   const byDepth: PendingSubwave[][] = [];
+  const chunkBytes = new Map<PendingSubwave, number>();
   const occurrence = new Map<string, number>();
   for (const pendingFrame of pending) {
     // frame_ack can commit the ACKed frame and the peer's next proposal in one
@@ -389,10 +414,15 @@ const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwa
     const chunks = byDepth[depth] ?? [];
     byDepth[depth] = chunks;
     const open = chunks.at(-1);
-    const subwave = open && open.jobs.length + pendingFrame.jobs.length <= MAX_JOBS_PER_WAVE
-      ? open
-      : { frames: [], jobs: [] };
+    let frameBytes = 0;
+    for (const job of pendingFrame.jobs) frameBytes += jobBytes(job);
+    const openBytes = open ? chunkBytes.get(open) ?? 0 : 0;
+    const fits = open !== undefined
+      && open.jobs.length + pendingFrame.jobs.length <= MAX_JOBS_PER_WAVE
+      && (open.jobs.length === 0 || openBytes + frameBytes <= MAX_BYTES_PER_WAVE);
+    const subwave = fits ? open : { frames: [], jobs: [] };
     if (subwave !== open) chunks.push(subwave);
+    chunkBytes.set(subwave, (chunkBytes.get(subwave) ?? 0) + frameBytes);
     const inputBase = subwave.jobs.length;
     subwave.frames.push({
       ...pendingFrame.frame,
