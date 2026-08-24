@@ -1,3 +1,11 @@
+//! Mirrors `core/account/state`.
+
+pub(crate) mod account_replica_shell;
+pub(crate) mod delta;
+/// No TypeScript twin file: the account's parties, chain and depository live
+/// in `core/types/account.ts`, and this module keeps them validated.
+pub(crate) mod identity;
+
 use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};
@@ -6,9 +14,9 @@ use xln_rscore_protocol::{
     encode_raw_text_key,
 };
 
-use crate::delta::MAX_ACCOUNT_TOKEN_ROWS;
-use crate::rebalance::BilateralRebalanceFeePolicy;
+use crate::state::delta::MAX_ACCOUNT_TOKEN_ROWS;
 use crate::swap::SwapOffer;
+use crate::tx::handlers::rebalance::BilateralRebalanceFeePolicy;
 use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenId};
 
 const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;

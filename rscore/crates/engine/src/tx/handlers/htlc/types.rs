@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 
-use crate::htlc::boundary::MAX_SAFE_INTEGER;
+use crate::tx::handlers::htlc::boundary::MAX_SAFE_INTEGER;
 use crate::{HtlcHashlock, OpaqueHtlcCiphertext, Side, StateError, TokenId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

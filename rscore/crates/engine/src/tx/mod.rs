@@ -1,3 +1,11 @@
+//! Mirrors `core/account/tx`. This file itself carries the `AccountTx` model,
+//! whose TypeScript twin lives in `core/types/account.ts`.
+
+pub(crate) mod apply;
+pub(crate) mod apply_result;
+pub(crate) mod apply_types;
+pub(crate) mod handlers;
+
 use num_bigint::BigInt;
 
 use crate::{HtlcLockTx, HtlcResolveTx, TokenId};

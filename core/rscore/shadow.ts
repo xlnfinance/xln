@@ -364,14 +364,14 @@ type PendingSubwave = Readonly<{
 
 /**
  * Jobs per engine request. A hub commits thousands of account frames in one
- * Runtime frame, and with replica shells attached one such request reached
- * 20 MB against a 16 MiB frame limit — the engine refuses the frame and exits,
- * so the caller has to keep requests bounded rather than discover the limit as
- * a broken pipe.
+ * Runtime frame, and with replica shells attached those requests are large, so
+ * the caller chunks rather than discovering the wire limit as a broken pipe.
+ * The wire itself now carries 1000 MB frames, so the chunk exists to bound
+ * memory per request, not to dodge a 16 MiB ceiling.
  */
 const MAX_JOBS_PER_WAVE = Math.max(
   1,
-  Number(process.env['XLN_RSCORE_SHADOW_MAX_JOBS_PER_WAVE'] ?? '2048'),
+  Number(process.env['XLN_RSCORE_SHADOW_MAX_JOBS_PER_WAVE'] ?? '131072'),
 );
 
 /** Preserve per-account frame order while retaining cross-account parallelism. */

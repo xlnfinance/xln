@@ -40,7 +40,7 @@ pub enum EnvelopeError {
 }
 
 fn hex_32(bytes: &[u8; 32]) -> String {
-    crate::identity::render_hex(bytes)
+    crate::state::identity::render_hex(bytes)
 }
 
 impl AccountEnvelope {

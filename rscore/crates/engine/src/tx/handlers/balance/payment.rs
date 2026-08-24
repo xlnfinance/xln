@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 
-use crate::delta::max_payment_amount;
-use crate::mutation::MutationDecision;
+use crate::state::delta::max_payment_amount;
+use crate::tx::apply_types::MutationDecision;
 use crate::{
     AccountOutput, AccountRejection, AccountReplica, DeliveryMode, Side, TokenId, TransitionError,
     ValidationRejection,

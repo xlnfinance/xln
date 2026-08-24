@@ -5,7 +5,7 @@
 //! only in swap_resolve — so this transition writes no account state and its
 //! whole effect is the emitted request event.
 
-use crate::mutation::MutationDecision;
+use crate::tx::apply_types::MutationDecision;
 use crate::{
     AccountOutput, AccountRejection, AccountReplica, Side, TransitionError, ValidationRejection,
 };
@@ -27,7 +27,7 @@ pub(crate) fn apply_cancel_request(
     Ok(MutationDecision::with_outputs(
         vec![format!(
             "📨 Swap cancel requested: {}...",
-            crate::identity::js_prefix(offer_id, 8)
+            crate::state::identity::js_prefix(offer_id, 8)
         )],
         vec![AccountOutput::SwapCancelRequest {
             offer_id: offer_id.to_owned(),

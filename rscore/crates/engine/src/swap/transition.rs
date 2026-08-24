@@ -10,7 +10,7 @@ use super::offer::{
     MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET, SwapOffer,
 };
 use super::quantization::{PreparedSwapOrder, prepare_swap_order, quote_amount_at_price};
-use crate::mutation::MutationDecision;
+use crate::tx::apply_types::MutationDecision;
 use crate::{
     AccountOutput, AccountRejection, AccountReplica, Side, TokenId, TransitionError,
     ValidationRejection,
@@ -108,7 +108,7 @@ pub(crate) fn apply_offer(
     );
     let events = vec![format!(
         "📊 Swap offer created: {}... give {} token{} for {} token{}",
-        crate::identity::js_prefix(tx.offer_id, 8),
+        crate::state::identity::js_prefix(tx.offer_id, 8),
         prepared.effective_give,
         tx.give_token_id,
         prepared.effective_want,

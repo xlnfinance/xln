@@ -1,5 +1,5 @@
-use crate::balance::{self, DirectPayment};
-use crate::mutation::MutationDecision;
+use crate::tx::apply_types::MutationDecision;
+use crate::tx::handlers::balance::{self, DirectPayment};
 use crate::{
     AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, Side,
     TransitionError,
@@ -175,9 +175,9 @@ fn apply_to_candidate(
             let context = context.ok_or(TransitionError::ExecutionContextRequired(
                 "rebalance_policy",
             ))?;
-            crate::rebalance::apply_policy(
+            crate::tx::handlers::rebalance::apply_policy(
                 candidate,
-                crate::rebalance::RebalancePolicyTx {
+                crate::tx::handlers::rebalance::RebalancePolicyTx {
                     token_id: *token_id,
                     policy_version: *policy_version,
                     base_fee,
@@ -296,16 +296,18 @@ fn apply_to_candidate(
         | AccountTx::LendingRepay { .. }
         | AccountTx::LendingCredit { .. }
         | AccountTx::LendingCloseRequest { .. }
-        | AccountTx::LendingClosePayout { .. } => crate::lending::apply(candidate, tx, proposer),
+        | AccountTx::LendingClosePayout { .. } => {
+            crate::tx::handlers::lending::apply(candidate, tx, proposer)
+        }
         AccountTx::ReserveToCollateral { .. } => Ok(balance::reserve_to_collateral()),
         AccountTx::HtlcLock(tx) => {
             let context = context.ok_or(TransitionError::ExecutionContextRequired("htlc_lock"))?;
-            crate::htlc::apply_lock(candidate, proposer, tx, context)
+            crate::tx::handlers::htlc::apply_lock(candidate, proposer, tx, context)
         }
         AccountTx::HtlcResolve(tx) => {
             let context =
                 context.ok_or(TransitionError::ExecutionContextRequired("htlc_resolve"))?;
-            crate::htlc::apply_resolve(candidate, proposer, tx, context)
+            crate::tx::handlers::htlc::apply_resolve(candidate, proposer, tx, context)
         }
     }
 }

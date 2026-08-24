@@ -1,8 +1,8 @@
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
 
-use crate::delta::max_payment_amount;
-use crate::mutation::MutationDecision;
+use crate::state::delta::max_payment_amount;
+use crate::tx::apply_types::MutationDecision;
 use crate::{
     AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, HtlcHashlock,
     HtlcLock, HtlcLockTx, HtlcRejection, HtlcResolveOutcome, HtlcResolveTx, Side, TransitionError,

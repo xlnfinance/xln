@@ -2,8 +2,8 @@ mod payment;
 
 use num_bigint::BigInt;
 
-use crate::delta::{MAX_ACCOUNT_TOKEN_ROWS, max_credit_limit};
-use crate::mutation::MutationDecision;
+use crate::state::delta::{MAX_ACCOUNT_TOKEN_ROWS, max_credit_limit};
+use crate::tx::apply_types::MutationDecision;
 use crate::{
     AccountRejection, AccountReplica, Side, TokenId, TransitionError, ValidationRejection,
 };

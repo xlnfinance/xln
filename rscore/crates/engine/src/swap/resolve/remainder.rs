@@ -42,7 +42,7 @@ pub(crate) fn apply_swap_resolve_remainder(
     let close = |message: &str| -> String {
         format!(
             "📊 Swap offer {}... {}",
-            crate::identity::js_prefix(resolve.offer.offer_id(), 8),
+            crate::state::identity::js_prefix(resolve.offer.offer_id(), 8),
             message,
         )
     };
@@ -137,7 +137,7 @@ pub(crate) fn apply_swap_resolve_remainder(
     );
     events.push(format!(
         "📊 Swap offer {}... partially filled, {} remaining",
-        crate::identity::js_prefix(resolve.offer.offer_id(), 8),
+        crate::state::identity::js_prefix(resolve.offer.offer_id(), 8),
         requantized.effective_give,
     ));
     let identity = replica.state().identity().clone();

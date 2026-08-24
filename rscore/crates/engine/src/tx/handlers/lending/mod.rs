@@ -3,8 +3,8 @@ mod validation;
 
 use num_bigint::BigInt;
 
-use crate::balance::set_credit_limit;
-use crate::mutation::MutationDecision;
+use crate::tx::apply_types::MutationDecision;
+use crate::tx::handlers::balance::set_credit_limit;
 use crate::{
     AccountReplica, AccountTx, LendingAction, LendingIntentKind, Side, TokenId, TransitionError,
 };

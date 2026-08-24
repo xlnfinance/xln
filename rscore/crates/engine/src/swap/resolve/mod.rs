@@ -10,8 +10,8 @@ pub(crate) mod types;
 mod validation;
 
 use crate::error::{AccountRejection, ValidationRejection};
-use crate::mutation::MutationDecision;
 use crate::swap::market::SwapMarketPolicy;
+use crate::tx::apply_types::MutationDecision;
 use crate::{AccountReplica, Side, TransitionError};
 
 pub(crate) use types::SwapResolveTx;

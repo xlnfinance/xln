@@ -4,18 +4,19 @@ pub const ABI_MAGIC: u8 = 0x03;
 pub const ABI_DOMAIN: &str = "xln.rscore.account";
 pub const ABI_VERSION: u16 = 1;
 
-const DEFAULT_MAX_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
-const DEFAULT_MAX_BODY_BYTES: usize = 15 * 1024 * 1024;
+const DEFAULT_MAX_ENVELOPE_BYTES: usize = 1000 * 1024 * 1024;
+const DEFAULT_MAX_BODY_BYTES: usize = 999 * 1024 * 1024;
 const DEFAULT_MAX_BLOB_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_MAX_TEXT_BYTES: usize = 4 * 1024;
-const DEFAULT_MAX_TUPLE_FIELDS: usize = u16::MAX as usize;
-const DEFAULT_MAX_TOTAL_VALUES: usize = 1_000_000;
+const DEFAULT_MAX_TUPLE_FIELDS: usize = 4_000_000;
+const DEFAULT_MAX_TOTAL_VALUES: usize = 64_000_000;
 const DEFAULT_MAX_NESTING_DEPTH: usize = 32;
-const HARD_MAX_ENVELOPE_BYTES: usize = 64 * 1024 * 1024;
-const HARD_MAX_BODY_BYTES: usize = 63 * 1024 * 1024;
+const HARD_MAX_ENVELOPE_BYTES: usize = 1024 * 1024 * 1024;
+const HARD_MAX_BODY_BYTES: usize = 1023 * 1024 * 1024;
 const HARD_MAX_BLOB_BYTES: usize = 32 * 1024 * 1024;
 const HARD_MAX_TEXT_BYTES: usize = 64 * 1024;
-const HARD_MAX_TOTAL_VALUES: usize = 1_000_000;
+const HARD_MAX_TUPLE_FIELDS: usize = 4_000_000;
+const HARD_MAX_TOTAL_VALUES: usize = 64_000_000;
 const HARD_MAX_NESTING_DEPTH: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +55,7 @@ impl AbiLimits {
             (self.max_blob_bytes <= HARD_MAX_BLOB_BYTES, "maxBlobBytes"),
             (self.max_text_bytes <= HARD_MAX_TEXT_BYTES, "maxTextBytes"),
             (
-                self.max_tuple_fields <= usize::from(u16::MAX),
+                self.max_tuple_fields <= HARD_MAX_TUPLE_FIELDS,
                 "maxTupleFields",
             ),
             (

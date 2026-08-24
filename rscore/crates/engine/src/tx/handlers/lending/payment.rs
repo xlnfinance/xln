@@ -1,8 +1,8 @@
 use num_bigint::BigInt;
 
-use crate::balance::{DirectPayment, direct_payment};
-use crate::lending::validation::consume_intent;
-use crate::mutation::MutationDecision;
+use crate::tx::apply_types::MutationDecision;
+use crate::tx::handlers::balance::{DirectPayment, direct_payment};
+use crate::tx::handlers::lending::validation::consume_intent;
 use crate::{AccountReplica, DeliveryMode, LendingIntentKind, Side, TokenId, TransitionError};
 
 #[allow(clippy::too_many_arguments)]

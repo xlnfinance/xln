@@ -64,7 +64,7 @@ export const RSCORE_OP = {
 
 const MESSAGE_KIND_REQUEST = 0;
 const MESSAGE_KIND_OK = 1;
-const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+const MAX_FRAME_BYTES = 1000 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 4096;
 
 export type RscoreWireValue =

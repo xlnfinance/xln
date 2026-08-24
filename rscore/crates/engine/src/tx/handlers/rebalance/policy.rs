@@ -8,8 +8,8 @@
 use num_bigint::BigInt;
 use xln_rscore_protocol::CanonicalValue;
 
-use crate::delta::MAX_TOKEN_ID;
-use crate::mutation::MutationDecision;
+use crate::state::delta::MAX_TOKEN_ID;
+use crate::tx::apply_types::MutationDecision;
 use crate::{
     AccountRejection, AccountReplica, Side, TokenId, TransitionError, ValidationRejection,
 };
