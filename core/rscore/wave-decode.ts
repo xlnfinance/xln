@@ -19,7 +19,7 @@
 
 import { createHash } from '../support/platform-crypto';
 import { packWireValue, type RscoreWireValue } from './client';
-import { accountTxWire } from './shadow-wire';
+import { accountTxWire, type ShadowOutputRow } from './shadow-wire';
 import type { AccountFrame, AccountTx, Delta } from '../types/account';
 
 const WAVE_PARITY_DOMAIN = 'xln.rscore.wave-parity.v1';
@@ -39,7 +39,68 @@ export type WaveProposal = {
   dropped: WaveDroppedRow[];
 };
 
-export type WaveOutput = readonly unknown[];
+/**
+ * What one applied transaction made observable outside AccountState, decoded
+ * into named fields with an exact arity per variant.
+ *
+ * The runtime publishes these: a forward becomes a payment on the next hop, a
+ * revealed secret settles an upstream lock. A positional `unknown[]` would let
+ * a shifted field travel as a route or an amount, so every variant is read by
+ * name and re-encoded from the same model for the parity digest.
+ *
+ * Parity target: `account_output` in crates/process/src/wire_encode.rs, and
+ * `shadowOutputRows` in shadow-wire.ts, which is the TypeScript projection
+ * these are compared against.
+ */
+export type WaveOutput =
+  | {
+      kind: 'directPaymentForward';
+      tokenId: number;
+      amount: string;
+      route: string[];
+      description: string | null;
+      /**
+       * A forward exists only where a trusted payment commits at its gateway
+       * (`AccountOutput` in types/account.ts, and the Rust handler that builds
+       * it). The wire can spell `direct`; the model cannot, so a `direct`
+       * forward is refused rather than carried into the runtime.
+       */
+      deliveryMode: 'trusted';
+      trustedGatewayEntityId: string;
+    }
+  | { kind: 'htlcSecret'; lockId: string; hashlock: string; secret: string; tokenId: number; amount: string }
+  | {
+      kind: 'htlcError';
+      lockId: string;
+      hashlock: string;
+      tokenId: number;
+      amount: string;
+      reason: string | null;
+    }
+  | { kind: 'swapOfferUpsert'; offer: WaveSwapOffer }
+  | { kind: 'swapOfferRemove'; offerId: string }
+  | { kind: 'swapCancelRequest'; offerId: string };
+
+export type WaveSwapOffer = {
+  offerId: string;
+  leftEntity: string;
+  rightEntity: string;
+  giveTokenId: number;
+  giveTokenDecimals: number;
+  giveAmount: string;
+  wantTokenId: number;
+  wantTokenDecimals: number;
+  wantAmount: string;
+  maxFee: string;
+  minNetReceive: string;
+  priceTicks: string;
+  timeInForce: number | null;
+  /** 0 when the maker is the LEFT entity, 1 when it is the RIGHT one. */
+  makerIsRight: 0 | 1;
+  createdHeight: number;
+  quantizedGive: string;
+  quantizedWant: string;
+};
 
 export type WaveVerdict =
   | { kind: 'frameCommitted'; height: number; stateHash: string; ackHanko: string; outputs: WaveOutput[]; rolledBackTxs: number }
@@ -285,8 +346,140 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
  */
 const decodeOutput = (value: unknown): WaveOutput => {
   const row = list(value, 'output');
-  int(row[0], 'output.tag');
-  return row as WaveOutput;
+  switch (int(row[0], 'output.tag')) {
+    case 0: {
+      const fields = tupleOf(row, 7, 'output.directPaymentForward');
+      return {
+        kind: 'directPaymentForward',
+        tokenId: int(fields[1], 'output.tokenId'),
+        amount: big(fields[2], 'output.amount').toString(),
+        route: list(fields[3], 'output.route').map((hop, index) => text(hop, `output.route.${index}`)),
+        description: optionalText(fields[4], 'output.description'),
+        deliveryMode: int(fields[5], 'output.deliveryMode') === 1
+          ? 'trusted'
+          : fail(`output.deliveryMode:${String(fields[5])}`),
+        trustedGatewayEntityId: text(fields[6], 'output.trustedGatewayEntityId'),
+      };
+    }
+    case 1: {
+      const fields = tupleOf(row, 6, 'output.htlcSecret');
+      return {
+        kind: 'htlcSecret',
+        lockId: text(fields[1], 'output.lockId'),
+        hashlock: text(fields[2], 'output.hashlock'),
+        secret: text(fields[3], 'output.secret'),
+        tokenId: int(fields[4], 'output.tokenId'),
+        amount: big(fields[5], 'output.amount').toString(),
+      };
+    }
+    case 2: {
+      const fields = tupleOf(row, 6, 'output.htlcError');
+      return {
+        kind: 'htlcError',
+        lockId: text(fields[1], 'output.lockId'),
+        hashlock: text(fields[2], 'output.hashlock'),
+        tokenId: int(fields[3], 'output.tokenId'),
+        amount: big(fields[4], 'output.amount').toString(),
+        reason: optionalText(fields[5], 'output.reason'),
+      };
+    }
+    case 3: {
+      const fields = tupleOf(row, 18, 'output.swapOfferUpsert');
+      const makerIsRight = int(fields[14], 'output.makerIsRight');
+      if (makerIsRight !== 0 && makerIsRight !== 1) return fail(`output.makerIsRight:${makerIsRight}`);
+      return {
+        kind: 'swapOfferUpsert',
+        offer: {
+          offerId: text(fields[1], 'output.offerId'),
+          leftEntity: text(fields[2], 'output.leftEntity'),
+          rightEntity: text(fields[3], 'output.rightEntity'),
+          giveTokenId: int(fields[4], 'output.giveTokenId'),
+          giveTokenDecimals: int(fields[5], 'output.giveTokenDecimals'),
+          giveAmount: big(fields[6], 'output.giveAmount').toString(),
+          wantTokenId: int(fields[7], 'output.wantTokenId'),
+          wantTokenDecimals: int(fields[8], 'output.wantTokenDecimals'),
+          wantAmount: big(fields[9], 'output.wantAmount').toString(),
+          maxFee: big(fields[10], 'output.maxFee').toString(),
+          minNetReceive: big(fields[11], 'output.minNetReceive').toString(),
+          priceTicks: big(fields[12], 'output.priceTicks').toString(),
+          timeInForce: fields[13] === null ? null : int(fields[13], 'output.timeInForce'),
+          makerIsRight,
+          createdHeight: int(fields[15], 'output.createdHeight'),
+          quantizedGive: big(fields[16], 'output.quantizedGive').toString(),
+          quantizedWant: big(fields[17], 'output.quantizedWant').toString(),
+        },
+      };
+    }
+    case 4: {
+      const fields = tupleOf(row, 2, 'output.swapOfferRemove');
+      return { kind: 'swapOfferRemove', offerId: text(fields[1], 'output.offerId') };
+    }
+    case 5: {
+      const fields = tupleOf(row, 2, 'output.swapCancelRequest');
+      return { kind: 'swapCancelRequest', offerId: text(fields[1], 'output.offerId') };
+    }
+    default:
+      return fail(`output.tag:${String(row[0])}`);
+  }
+};
+
+/**
+ * The output codec on its own, for the corpus that holds every variant to its
+ * arity and to the bytes it arrived as. The wave path reaches these through
+ * `decodeWave`; nothing else should.
+ */
+export const decodeWaveOutputForTests = (value: unknown): WaveOutput => decodeOutput(value);
+export const waveOutputWireForTests = (output: WaveOutput): RscoreWireValue => outputWire(output);
+
+/**
+ * The same output as the row `shadowOutputRows` builds from the TypeScript
+ * transition, so the driver compares two projections of the same shape rather
+ * than eyeballing two different ones.
+ */
+export const waveOutputRow = (output: WaveOutput): ShadowOutputRow => {
+  switch (output.kind) {
+    case 'directPaymentForward':
+      return [
+        'forward',
+        output.tokenId,
+        output.amount,
+        output.route,
+        output.description,
+        output.deliveryMode,
+        output.trustedGatewayEntityId,
+      ];
+    case 'htlcSecret':
+      return ['secret', output.lockId, output.hashlock, output.secret, output.tokenId, output.amount];
+    case 'htlcError':
+      return ['error', output.lockId, output.hashlock, output.tokenId, output.amount, output.reason];
+    case 'swapOfferUpsert': {
+      const offer = output.offer;
+      return [
+        'offerUpsert',
+        offer.offerId,
+        offer.leftEntity,
+        offer.rightEntity,
+        offer.giveTokenId,
+        offer.giveTokenDecimals,
+        offer.giveAmount,
+        offer.wantTokenId,
+        offer.wantTokenDecimals,
+        offer.wantAmount,
+        offer.maxFee,
+        offer.minNetReceive,
+        offer.priceTicks,
+        offer.timeInForce,
+        offer.makerIsRight,
+        offer.createdHeight,
+        offer.quantizedGive,
+        offer.quantizedWant,
+      ];
+    }
+    case 'swapOfferRemove':
+      return ['offerRemove', output.offerId];
+    case 'swapCancelRequest':
+      return ['cancelRequest', output.offerId];
+  }
 };
 
 // ------------------------------------------------------- the inverse tx codec
@@ -516,7 +709,51 @@ const droppedWire = (row: WaveDroppedRow): RscoreWireValue => [
   row.disposition === 'deferred' ? 0 : 1,
 ];
 
-const outputWire = (output: WaveOutput): RscoreWireValue => output as RscoreWireValue;
+const outputWire = (output: WaveOutput): RscoreWireValue => {
+  switch (output.kind) {
+    case 'directPaymentForward':
+      return [
+        0,
+        output.tokenId,
+        output.amount,
+        [...output.route],
+        output.description,
+        1,
+        output.trustedGatewayEntityId,
+      ];
+    case 'htlcSecret':
+      return [1, output.lockId, output.hashlock, output.secret, output.tokenId, output.amount];
+    case 'htlcError':
+      return [2, output.lockId, output.hashlock, output.tokenId, output.amount, output.reason];
+    case 'swapOfferUpsert': {
+      const offer = output.offer;
+      return [
+        3,
+        offer.offerId,
+        offer.leftEntity,
+        offer.rightEntity,
+        offer.giveTokenId,
+        offer.giveTokenDecimals,
+        offer.giveAmount,
+        offer.wantTokenId,
+        offer.wantTokenDecimals,
+        offer.wantAmount,
+        offer.maxFee,
+        offer.minNetReceive,
+        offer.priceTicks,
+        offer.timeInForce,
+        offer.makerIsRight,
+        offer.createdHeight,
+        offer.quantizedGive,
+        offer.quantizedWant,
+      ];
+    }
+    case 'swapOfferRemove':
+      return [4, output.offerId];
+    case 'swapCancelRequest':
+      return [5, output.offerId];
+  }
+};
 
 const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
   switch (verdict.kind) {
