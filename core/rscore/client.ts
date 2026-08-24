@@ -24,17 +24,24 @@ export const RSCORE_ABI_DOMAIN = 'xln.rscore.account';
  * observed wave, tight enough that a wedged engine fails the run instead of
  * hanging it.
  */
-const REQUEST_TIMEOUT_MS = Number(
-  (typeof process === 'undefined' ? undefined : process.env['XLN_RSCORE_REQUEST_TIMEOUT_MS'])
-  ?? '60000',
-);
+const requestTimeoutMs = (): number => {
+  const value = Number(
+    (typeof process === 'undefined' ? undefined : process.env['XLN_RSCORE_REQUEST_TIMEOUT_MS'])
+    ?? '60000',
+  );
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`RSCORE_REQUEST_TIMEOUT_INVALID:${String(value)}`);
+  }
+  return value;
+};
+const REQUEST_TIMEOUT_MS = requestTimeoutMs();
 
 export const RSCORE_ABI_VERSION = 1;
 export const RSCORE_PROCESS_ABI_VERSION = 1;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=2")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
   '8d08cd9da652b342f3ac3e6c5950f4bb53cdaeabfca13f23431cb2cd8d02902b',
   'hex',

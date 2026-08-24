@@ -2,7 +2,12 @@
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
-import { assertShadowParity, shadowStrictEnabled } from '../../../../rscore/shadow-hook';
+import {
+  assertShadowParity,
+  currentShadowMirror,
+  primeShadowFromRuntimeState,
+  shadowStrictEnabled,
+} from '../../../../rscore/shadow-hook';
 import { configureCryptoPoolEntry } from '../../../../protocol/crypto/crypto-pool';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -294,6 +299,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     );
   }
   prewarmRecordedHubSigners(env);
+  if (shadowStrictEnabled()) await primeShadowFromRuntimeState(env.state);
   const economicBaseline = readEconomicCounters(env);
   await startRuntimeSamplingProfiler('hlt-replay-tail');
   resetPerfPhases();
@@ -413,3 +419,4 @@ writeFileSync(outputPath, `${safeStringify(report, 2)}\n`, { mode: 0o600 });
 console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
 const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
 if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);
+await currentShadowMirror()?.shutdown();

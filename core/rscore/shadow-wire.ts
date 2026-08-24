@@ -176,43 +176,72 @@ export const SHADOW_SUPPORTED_TX_TYPES = new Set([
   'rebalance_policy',
 ]);
 
+export type ShadowOutputRow =
+  | readonly [
+      kind: 'forward',
+      tokenId: number,
+      amount: string,
+      route: readonly string[],
+      description: string | null,
+      deliveryMode: 'trusted',
+      trustedGatewayEntityId: string,
+    ]
+  | readonly [
+      kind: 'secret',
+      lockId: string,
+      hashlock: string,
+      secret: string,
+      tokenId: number,
+      amount: string,
+    ]
+  | readonly [
+      kind: 'error',
+      lockId: string,
+      hashlock: string,
+      tokenId: number,
+      amount: string,
+      reason: string | null,
+    ];
+
 /**
- * Canonical projection of everything one applied tx made observable outside
- * the account state: the trusted-payment forward, and the HTLC secret or
- * timeout outcome with all of their fields. Compared against the engine's
- * typed outputs, so a right balance with a wrong secret, hashlock, token or
- * amount cannot pass.
+ * Canonical projection of everything one successful tx made observable
+ * outside AccountState. HTLC identity and financial fields come exclusively
+ * from the applied result, which captured the stored lock before deleting it;
+ * reconstructing them from the submitted tx would hide a broken transition.
  */
-export const shadowOutputRows = (
-  tx: AccountTx,
-  result: ApplyAccountTxOk,
-): string[] => {
-  const rows: string[] = [];
+export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] => {
+  const rows: ShadowOutputRow[] = [];
   for (const output of result.candidateEffects ?? []) {
     if (output.kind !== 'directPaymentForward') continue;
     rows.push([
       'forward',
       output.tokenId,
       output.amount.toString(),
-      output.route.join('>'),
-      output.description ?? '',
+      [...output.route],
+      output.description ?? null,
       output.deliveryMode,
       output.trustedGatewayEntityId,
-    ].join('|'));
+    ]);
   }
-  const lockId = tx.type === 'htlc_resolve' ? tx.data.lockId : '';
   if (result.outcome === 'htlc_secret') {
     rows.push([
       'secret',
-      lockId,
+      result.lockId,
       result.hashlock,
       result.secret,
       result.tokenId,
       result.amount.toString(),
-    ].join('|'));
+    ]);
   }
   if (result.outcome === 'htlc_error') {
-    rows.push(['error', lockId, result.hashlock].join('|'));
+    rows.push([
+      'error',
+      result.lockId,
+      result.hashlock,
+      result.tokenId,
+      result.amount.toString(),
+      result.reason ?? null,
+    ]);
   }
   return rows;
 };

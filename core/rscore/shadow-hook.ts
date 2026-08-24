@@ -6,13 +6,17 @@
  * browser bundles and non-shadow servers pay one env check per frame.
  */
 import type { ShadowFrameInput, ShadowGap, ShadowReconciliation, ShadowStats } from './shadow';
+import type { RuntimeState } from '../runtime/types';
+import type { AccountReplica } from '../types/account';
 
 type ShadowStatsLike = ShadowStats;
 
 type MirrorLike = Readonly<{
   noteCommittedFrame(input: ShadowFrameInput): void;
+  primeOwner(ownerEntityId: string, accounts: ReadonlyMap<string, AccountReplica>): Promise<void>;
   flushWave(): void;
   onGap(callback: (gap: ShadowGap) => void): void;
+  onProgress(callback: () => void): void;
   settled(): Promise<void>;
   shutdown(): Promise<void>;
   stats(): ShadowStatsLike;
@@ -36,6 +40,58 @@ const entityAllowed = (ownerEntityId: string): boolean => {
   return filter.trim().toLowerCase() === ownerEntityId.trim().toLowerCase();
 };
 
+const attachMirrorReporting = (started: MirrorLike): void => {
+  const printStats = (): void => {
+    try { console.error(`RSCORE_SHADOW_STATS ${JSON.stringify(started.stats())}`); } catch { /* observer-only */ }
+  };
+  started.onGap(gap => { haltOnGap(gap, printStats); });
+  printStats();
+  started.onProgress(printStats);
+  process.once('beforeExit', printStats);
+  process.once('exit', printStats);
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, printStats);
+};
+
+const createMirror = async (): Promise<MirrorLike> => {
+  const [{ RscoreShadowMirror }, { RscoreProcessClient }] = await Promise.all([
+    import('./shadow'),
+    import('./client'),
+  ]);
+  const binaryPath = process.env['XLN_RSCORE_BINARY']
+    ?? new URL('../../rscore/target/release/xln-rscore', import.meta.url).pathname;
+  const started = new RscoreShadowMirror({
+    binaryPath,
+    workers: Number(process.env['XLN_RSCORE_SHADOW_WORKERS'] ?? '4'),
+    maxOwners: Number(process.env['XLN_RSCORE_SHADOW_MAX_ENTITIES'] ?? '1'),
+    strictFrames: process.env['XLN_RSCORE_SHADOW_STRICT'] === '1',
+    makeClient: path => new RscoreProcessClient(path, {
+      engineGeneration: Buffer.alloc(8, 0x5d),
+      runtimeId: Buffer.alloc(20, 0x5d),
+      sessionId: Buffer.alloc(16, 0x5d),
+    }),
+  });
+  attachMirrorReporting(started);
+  return started;
+};
+
+const armMirror = async (prime?: (started: MirrorLike) => Promise<void>): Promise<void> => {
+  let started: MirrorLike | null = null;
+  try {
+    started = await createMirror();
+    if (prime) await prime(started);
+    for (const buffered of pending ?? []) started.noteCommittedFrame(buffered);
+    started.flushWave();
+    pending = null;
+    mirror = started;
+  } catch (error) {
+    if (started) await started.shutdown().catch(() => undefined);
+    pending = null;
+    mirror = null;
+    console.error(`RSCORE_SHADOW_INIT_FAILED:${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+};
+
 export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
   if (mirror === null) return;
   if (mirror === undefined) {
@@ -49,59 +105,27 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
       return;
     }
     pending = [input];
-    arming = (async () => {
-      try {
-        const [{ RscoreShadowMirror }, { RscoreProcessClient }] = await Promise.all([
-          import('./shadow'),
-          import('./client'),
-        ]);
-        const binaryPath = process.env['XLN_RSCORE_BINARY']
-          ?? new URL('../../rscore/target/release/xln-rscore', import.meta.url).pathname;
-        const started = new RscoreShadowMirror({
-          binaryPath,
-          workers: Number(process.env['XLN_RSCORE_SHADOW_WORKERS'] ?? '4'),
-          maxOwners: Number(process.env['XLN_RSCORE_SHADOW_MAX_ENTITIES'] ?? '1'),
-          // Strict runs verify every Account frame on its own wave; otherwise
-          // one wave carries the whole Runtime frame and the engine shards it.
-          strictFrames: process.env['XLN_RSCORE_SHADOW_STRICT'] === '1',
-          makeClient: path => new RscoreProcessClient(path, {
-            engineGeneration: Buffer.alloc(8, 0x5d),
-            runtimeId: Buffer.alloc(20, 0x5d),
-            sessionId: Buffer.alloc(16, 0x5d),
-          }),
-        });
-        const printStats = (): void => {
-          try { console.error(`RSCORE_SHADOW_STATS ${JSON.stringify(started.stats())}`); } catch { /* observer-only */ }
-        };
-        // Armed BEFORE the buffered frames replay: a gap in that first batch
-        // is exactly the case strict mode exists for.
-        started.onGap(gap => { haltOnGap(gap, printStats); });
-        for (const buffered of pending ?? []) started.noteCommittedFrame(buffered);
-        // Runtime boundaries that happened while the dynamic imports were in
-        // flight could not call through to this instance. Flush the buffered
-        // sequence now; the mirror splits repeated accounts into ordered
-        // subwaves and still verifies every intermediate frame root.
-        started.flushWave();
-        pending = null;
-        mirror = started;
-        // A hub runtime is killed with a signal and never reaches 'exit', so
-        // exit-only reporting silently looks identical to "shadow never ran".
-        printStats();
-        started.onProgress(printStats);
-        process.once('beforeExit', printStats);
-        process.once('exit', printStats);
-        for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, printStats);
-      } catch (error) {
-        pending = null;
-        mirror = null;
-        console.error(`RSCORE_SHADOW_INIT_FAILED:${error instanceof Error ? error.message : String(error)}`);
-      }
-    })();
-    void arming;
+    arming = armMirror();
+    void arming.catch(() => undefined);
     return;
   }
   if (!entityAllowed(input.ownerEntityId)) return;
   mirror.noteCommittedFrame(input);
+};
+
+/** Prime the Rust process from the exact recovered Runtime checkpoint. */
+export const primeShadowFromRuntimeState = async (state: RuntimeState): Promise<void> => {
+  if (!shadowEnabled()) return;
+  if (mirror !== undefined || arming !== null) throw new Error('RSCORE_SHADOW_PRIME_TOO_LATE');
+  const owners = [...state.eReplicas.values()]
+    .filter(replica => entityAllowed(replica.entityId))
+    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+  if (owners.length === 0) throw new Error('RSCORE_SHADOW_PRIME_NO_OWNER');
+  pending = [];
+  arming = armMirror(async started => {
+    for (const replica of owners) await started.primeOwner(replica.entityId, replica.state.accounts);
+  });
+  await arming;
 };
 
 /**
@@ -144,9 +168,10 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   if (arming) await arming;
   const active = mirror;
   if (!active) {
-    // Strict mode asks for proof, so an unarmed mirror is itself a failure:
-    // silently verifying nothing is exactly the trap this mode exists to close.
-    if (shadowStrictEnabled()) throw new Error(`RSCORE_SHADOW_PARITY_UNARMED:${label}`);
+    // Any caller asking for parity while shadow is enabled asks for proof.
+    // Returning here after an init failure made the non-strict gate green
+    // without a single Rust transition.
+    if (shadowEnabled()) throw new Error(`RSCORE_SHADOW_PARITY_UNARMED:${label}`);
     return;
   }
   active.flushWave();
@@ -231,5 +256,6 @@ export const resetShadowForTests = async (): Promise<void> => {
   const active = mirror;
   mirror = undefined;
   pending = null;
+  arming = null;
   if (active) await active.shutdown();
 };

@@ -24,6 +24,7 @@ const BINARY = join(import.meta.dir, '../../rscore/target/release/xln-rscore');
 const LEFT = entity('aa');
 const RIGHT = entity('bb');
 const SECRET = `0x${'77'.repeat(32)}`;
+const ERROR_SECRET = `0x${'78'.repeat(32)}`;
 
 const makeMirror = (maxOwners = 1): RscoreShadowMirror => new RscoreShadowMirror({
   binaryPath: BINARY,
@@ -79,6 +80,45 @@ if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
 }
 
 describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
+  test('restores the recovery checkpoint before comparing its first WAL frame', async () => {
+    const account = makeTsAccount();
+    const mirror = makeMirror();
+    await mirror.primeOwner(LEFT, new Map([[RIGHT, account]]));
+    const tx = payment(9n);
+    const timestamp = 1_700_000_000_001;
+    const result = await applyAccountTxToMutableReplica(
+      account, tx, false, timestamp, 0, false, undefined, undefined, undefined,
+      { timestamp, jHeight: 0 },
+    );
+    if (!result.ok) throw new Error(`TS_APPLY_FAILED:${result.rejection.code}`);
+    account.currentHeight = 1;
+    mirror.noteCommittedFrame({
+      ownerEntityId: LEFT,
+      counterpartyEntityId: RIGHT,
+      frameHeight: 1,
+      byLeft: false,
+      timestamp,
+      jHeight: 0,
+      enforcementTimestamp: timestamp,
+      enforcementJHeight: 0,
+      accountTxs: [tx],
+      txResults: [result],
+      committedStateRoot: computeAccountStateRoot(account.state),
+      account,
+    });
+    mirror.flushWave();
+    await mirror.settled();
+    const stats = mirror.stats();
+    const report = await mirror.reconcile(LEFT, new Map([[RIGHT, account]]));
+    await mirror.shutdown();
+    expect(stats.reseeds).toBe(0);
+    expect(stats.seededNeverExecuted).toBe(0);
+    expect(stats.framesCompared).toBe(1);
+    expect(stats.matches).toBe(1);
+    expect(report.matched).toBe(1);
+    expect(report.forestRoot.equal).toBeTrue();
+  });
+
   test('register, match, diverge, reseed, recover — plus HTLC frames', async () => {
     const account = makeTsAccount();
     const mirror = makeMirror();
@@ -97,12 +137,14 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       const byLeft = overrides.byLeft ?? false;
       const timestamp = 1_700_000_000_000 + height;
       const jHeight = overrides.jHeight ?? 0;
+      const txResults: ApplyAccountTxOk[] = [];
       for (const tx of txs) {
         const result = await applyAccountTxToMutableReplica(
           account, tx, byLeft, timestamp, jHeight, false, undefined, undefined, undefined,
           { timestamp, jHeight },
         );
         if (!result.ok) throw new Error(`TS_APPLY_FAILED:${result.rejection.code}`);
+        txResults.push(result);
       }
       account.currentHeight = height; // consensus bumps this at frame commit
       mirror.noteCommittedFrame({
@@ -117,7 +159,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         accountTxs: txs,
         // Direct-mode payments emit no forward; the resolve outcome rows come
         // from the TS apply results, exactly as the commit paths build them.
-        txResults: overrides.txResults ?? [],
+        txResults: overrides.txResults ?? txResults,
         committedStateRoot: overrides.expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });
@@ -138,29 +180,31 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     await commitFrame([payment(15n)]);
     // Frame 6: comparison recovered.
     await commitFrame([payment(16n)]);
-    // Frames 7-8: HTLC lock then secret resolve, proposed by left.
+    // Frames 7-8: two HTLCs then ordered secret+error results in one frame.
+    // This proves output association by input index and compares every field
+    // of both result variants (including an arbitrary delimiter in reason).
     const hashlock = hashHtlcSecret(SECRET);
-    await commitFrame([{
-      type: 'htlc_lock',
-      data: { lockId: 'shadow-lock-1', hashlock, timelock: 9_999_999_999_999n, revealBeforeHeight: 1_000_000, amount: 7n, tokenId: 1 },
-    }], { byLeft: true });
-    await commitFrame([{
-      type: 'htlc_resolve',
-      data: { lockId: 'shadow-lock-1', outcome: 'secret', secret: SECRET },
-    }], {
-      byLeft: false,
-      // The full released-secret envelope: a right balance with a wrong
-      // secret, hashlock, token or amount must not pass.
-      txResults: [{
-        ok: true,
-        outcome: 'htlc_secret',
-        events: [],
-        secret: SECRET,
-        hashlock,
-        amount: 7n,
-        tokenId: 1,
-      }],
-    });
+    const errorHashlock = hashHtlcSecret(ERROR_SECRET);
+    await commitFrame([
+      {
+        type: 'htlc_lock',
+        data: { lockId: 'shadow-lock-1', hashlock, timelock: 9_999_999_999_999n, revealBeforeHeight: 1_000_000, amount: 7n, tokenId: 1 },
+      },
+      {
+        type: 'htlc_lock',
+        data: { lockId: 'shadow-lock-2', hashlock: errorHashlock, timelock: 9_999_999_999_999n, revealBeforeHeight: 1_000_000, amount: 8n, tokenId: 1 },
+      },
+    ], { byLeft: true });
+    await commitFrame([
+      {
+        type: 'htlc_resolve',
+        data: { lockId: 'shadow-lock-1', outcome: 'secret', secret: SECRET },
+      },
+      {
+        type: 'htlc_resolve',
+        data: { lockId: 'shadow-lock-2', outcome: 'error', reason: 'downstream|rejected' },
+      },
+    ], { byLeft: false });
 
     const stats = mirror.stats();
     await mirror.shutdown();
@@ -172,6 +216,12 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     expect(stats.matches).toBe(5);
     expect(stats.dropped).toBe(0);
     expect(stats.skippedUnboundOwner).toBe(0);
+    expect(stats.seededNeverExecuted).toBe(0);
+    expect(stats.executedByType).toEqual({
+      direct_payment: 5,
+      htlc_lock: 2,
+      htlc_resolve: 2,
+    });
     // Every compared frame must carry a verdict; a compared frame with no
     // outcome means a stats snapshot raced the drain loop.
     expect(stats.matches + stats.mismatches).toBe(stats.framesCompared);
@@ -181,6 +231,27 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       + stats.skippedIneligible + stats.skippedUnboundOwner + stats.dropped,
     ).toBe(stats.framesSeen);
   }, 30_000);
+
+  test('fails loudly when a committed tx has no authority result', async () => {
+    const account = makeTsAccount();
+    const mirror = makeMirror();
+    mirror.noteCommittedFrame({
+      ownerEntityId: LEFT,
+      counterpartyEntityId: RIGHT,
+      frameHeight: 1,
+      byLeft: false,
+      timestamp: 1_700_000_000_001,
+      jHeight: 0,
+      enforcementTimestamp: 1_700_000_000_001,
+      enforcementJHeight: 0,
+      accountTxs: [payment(1n)],
+      txResults: [],
+      committedStateRoot: computeAccountStateRoot(account.state),
+      account,
+    });
+    expect(mirror.stats().disabledReason).toBe('note:SHADOW_TX_RESULT_LENGTH:0:1');
+    await mirror.shutdown();
+  });
 
   test('splits frame_ack commits into ordered subwaves and checks the intermediate root', async () => {
     const account = makeTsAccount();
@@ -206,7 +277,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: 0,
         accountTxs: [tx],
-        txResults: [],
+        txResults: [result],
         committedStateRoot: expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });
@@ -273,7 +344,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: 0,
         accountTxs: [tx],
-        txResults: [],
+        txResults: [result],
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });
@@ -322,7 +393,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: 1_700_000_000_000,
         enforcementJHeight: 0,
         accountTxs: [payment(1n)],
-        txResults: [],
+        txResults: [{ ok: true, outcome: 'applied', events: [] }],
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });
