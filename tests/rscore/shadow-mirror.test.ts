@@ -19,7 +19,8 @@ import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j'
 import { RscoreProcessClient } from '../../core/rscore/client';
 import { RscoreShadowMirror } from '../../core/rscore/shadow';
 
-const BINARY = join(import.meta.dir, '../../rscore/target/release/xln-rscore');
+const BINARY = process.env['XLN_RSCORE_BINARY']
+  ?? join(import.meta.dir, '../../rscore/target/release/xln-rscore');
 
 const LEFT = entity('aa');
 const RIGHT = entity('bb');

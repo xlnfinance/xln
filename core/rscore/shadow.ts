@@ -324,8 +324,6 @@ export class RscoreShadowMirror {
   readonly #clients = new Map<string, RscoreProcessClient>();
   readonly #boundOwners = new Set<string>();
   readonly #maxOwners: number;
-  /** Verify each Account frame on its own wave instead of batching. */
-  readonly #strictFrames: boolean;
   readonly #registered = new Set<string>();
   /**
    * Live replica references, per owner, for self-reconciliation. These are the
@@ -381,13 +379,11 @@ export class RscoreShadowMirror {
     binaryPath: string;
     workers: number;
     maxOwners?: number;
-    strictFrames?: boolean;
     makeClient: (binaryPath: string) => RscoreProcessClient;
   }>) {
     this.#binaryPath = options.binaryPath;
     this.#workers = options.workers;
     this.#maxOwners = options.maxOwners ?? DEFAULT_MAX_OWNERS;
-    this.#strictFrames = options.strictFrames ?? false;
     this.#makeClient = options.makeClient;
   }
 
@@ -701,10 +697,9 @@ export class RscoreShadowMirror {
         jobs,
       });
       this.#pendingWave.set(ownerKey, pending);
-      // Strict mode verifies frame by frame, so it never batches: a batched
-      // wave only proves the final per-account root, and an intermediate frame
-      // that lands on the same state would go unnoticed.
-      if (this.#strictFrames) this.flushWave();
+      // Runtime-boundary batching preserves every per-account root: repeated
+      // frames of one account are split into ordered subwaves, while distinct
+      // accounts share one Prepare and fill the Rust worker pool.
     } catch (error) {
       this.#disable(`note:${error instanceof Error ? error.message : String(error)}`);
     }
@@ -835,12 +830,8 @@ export class RscoreShadowMirror {
       }
     } catch (error) {
       const context = lastEntry
-        ? `${lastEntry.kind}:${JSON.stringify(
+        ? `${lastEntry.kind}:${safeStringify(
             lastEntry.kind === 'wave' ? lastEntry.jobs : lastEntry.seed,
-            (_key, value) => {
-              if (value instanceof Uint8Array || Buffer.isBuffer(value)) return `0x${Buffer.from(value as Uint8Array).toString('hex').slice(0, 16)}`;
-              return value;
-            },
           ).slice(0, 600)}`
         : 'idle';
       this.#disable(`drain:${error instanceof Error ? error.message : String(error)}:${context}`);
