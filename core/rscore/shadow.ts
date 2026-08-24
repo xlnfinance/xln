@@ -188,6 +188,19 @@ const DIFF_DIR: string | null = (() => {
   return configured ?? '.logs/rscore-diffs';
 })();
 
+/**
+ * The engine's own tree, computed on the TypeScript side: key = the raw
+ * 32-byte counterparty id, leaf = the payment-profile account state root.
+ */
+const emptyForest = (): PersistentRadixValueMap<string, AccountReplica> =>
+  PersistentRadixValueMap.empty<string, AccountReplica>({
+    radix: 16,
+    ownKey: (key: string): string => key,
+    keyBytes: (key: string): Uint8Array => hexToWireBytes(key, 32, 'SHADOW_FOREST_KEY'),
+    valueHash: (account: AccountReplica): string => computeAccountStateRoot(account.state),
+    ownValue: (account: AccountReplica): AccountReplica => account,
+  });
+
 const MAX_QUEUE = 50_000;
 /**
  * One engine process per owner entity means an unbounded stand (a lane with a
@@ -295,6 +308,16 @@ type QueueEntry = Readonly<{
   frames: readonly WaveFrame[];
   jobs: RscoreWireValue[][];
 }> | Readonly<{
+  /**
+   * Whole-tree checkpoint queued at a Runtime boundary: the engine's committed
+   * accounts root must equal the TypeScript forest root as of the last frame
+   * that entered this flush.
+   */
+  kind: 'verify';
+  ownerKey: string;
+  expectedForestRoot: string;
+  frameCount: number;
+}> | Readonly<{
   kind: 'reseed';
   ownerKey: string;
   accountKey: string;
@@ -333,7 +356,7 @@ export type ShadowReconciliation = Readonly<{
  * instead of proving it, so a strict run must treat them as failures.
  */
 export type ShadowGap = Readonly<{
-  kind: 'divergence' | 'reseed-repair' | 'ineligible';
+  kind: 'divergence' | 'forest-divergence' | 'reseed-repair' | 'ineligible';
   owner: string;
   account: string;
   frameHeight: number;
@@ -385,6 +408,9 @@ export type ShadowStats = {
   rustWireUs: number;
   /** Transitions behind those three numbers. */
   timedTxs: number;
+  /** Whole-tree checkpoints run at Runtime boundaries, and how many disagreed. */
+  forestChecks: number;
+  forestMismatches: number;
   disabledReason: string | null;
 };
 
@@ -403,6 +429,8 @@ export class RscoreShadowMirror {
    * already retained.
    */
   readonly #mirrored = new Map<string, Map<string, AccountReplica>>();
+  /** Incremental TypeScript forest per owner: the engine's tree, computed here. */
+  readonly #forests = new Map<string, PersistentRadixValueMap<string, AccountReplica>>();
   readonly #needsReseed = new Set<string>();
   /** Scoped keys seeded from TypeScript that have not executed a wave yet. */
   readonly #seeded = new Set<string>();
@@ -443,6 +471,8 @@ export class RscoreShadowMirror {
     rustEngineUs: 0,
     rustWireUs: 0,
     timedTxs: 0,
+    forestChecks: 0,
+    forestMismatches: 0,
     disabledReason: null,
   };
   #onProgress: (() => void) | null = null;
@@ -603,13 +633,7 @@ export class RscoreShadowMirror {
     }
     // Same data model as the engine's tree: key = 32-byte counterparty id,
     // leaf = payment-profile account state root.
-    let forest = PersistentRadixValueMap.empty<string, AccountReplica>({
-      radix: 16,
-      ownKey: (key: string): string => key,
-      keyBytes: (key: string): Uint8Array => hexToWireBytes(key, 32, 'SHADOW_FOREST_KEY'),
-      valueHash: (account: AccountReplica): string => computeAccountStateRoot(account.state),
-      ownValue: (account: AccountReplica): AccountReplica => account,
-    });
+    let forest = emptyForest();
     for (const [counterpartyId, account] of accounts) {
       forest = forest.updated(counterpartyId.trim().toLowerCase(), account);
     }
@@ -635,9 +659,21 @@ export class RscoreShadowMirror {
   flushWave(): void {
     if (this.#disabledReason) return;
     for (const [ownerKey, pending] of this.#pendingWave) {
+      let queued = 0;
       for (const subwave of packRuntimeSubwaves(pending)) {
         if (subwave.jobs.length === 0) continue;
         this.#push({ kind: 'wave', ownerKey, frames: subwave.frames, jobs: subwave.jobs });
+        queued += subwave.frames.length;
+      }
+      if (queued === 0) continue;
+      const forest = this.#forests.get(ownerKey);
+      if (forest) {
+        this.#push({
+          kind: 'verify',
+          ownerKey,
+          expectedForestRoot: forest.rootHash().trim().toLowerCase(),
+          frameCount: queued,
+        });
       }
     }
     this.#pendingWave.clear();
@@ -807,7 +843,9 @@ export class RscoreShadowMirror {
       this.#stats.dropped += 1;
       // A dropped wave breaks replay continuity for every account it carried.
       if (entry.kind === 'reseed') this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
-      else for (const frame of entry.frames) this.#needsReseed.add(`${entry.ownerKey}/${frame.accountKey}`);
+      else if (entry.kind === 'wave') {
+        for (const frame of entry.frames) this.#needsReseed.add(`${entry.ownerKey}/${frame.accountKey}`);
+      }
       return;
     }
     this.#queue.push(entry);
@@ -825,6 +863,10 @@ export class RscoreShadowMirror {
         const entry = this.#queue.shift()!;
         lastEntry = entry;
         const client = await this.#ensureClient(entry.ownerKey);
+        if (entry.kind === 'verify') {
+          this.#verifyForest(entry);
+          continue;
+        }
         if (entry.kind === 'reseed') {
           const upserted = (await client.upsertAccounts([entry.seed])) as unknown[];
           this.#noteRevision(entry.ownerKey, upserted);
@@ -923,7 +965,9 @@ export class RscoreShadowMirror {
     } catch (error) {
       const context = lastEntry
         ? `${lastEntry.kind}:${safeStringify(
-            lastEntry.kind === 'wave' ? lastEntry.jobs : lastEntry.seed,
+            lastEntry.kind === 'wave'
+              ? lastEntry.jobs
+              : lastEntry.kind === 'reseed' ? lastEntry.seed : lastEntry.expectedForestRoot,
           ).slice(0, 600)}`
         : 'idle';
       this.#disable(`drain:${error instanceof Error ? error.message : String(error)}:${context}`);
@@ -989,6 +1033,35 @@ export class RscoreShadowMirror {
       detail,
       txTypes: frame.txTypes,
       ...(sections ? { sections } : {}),
+    });
+  }
+
+  /**
+   * Whole-tree checkpoint: the engine's committed accounts root against the
+   * TypeScript forest root taken at the same Runtime boundary. Per-frame
+   * comparison proves each touched leaf; this proves that nothing else in the
+   * tree moved, drifted or was silently dropped.
+   */
+  #verifyForest(entry: Extract<QueueEntry, { kind: 'verify' }>): void {
+    const rust = (this.#lastCommittedRoot.get(entry.ownerKey) ?? '').trim().toLowerCase();
+    this.#stats.forestChecks += 1;
+    if (rust === entry.expectedForestRoot) return;
+    this.#stats.forestMismatches += 1;
+    try {
+      shadowLog.error('shadow.forest-divergence', {
+        owner: entry.ownerKey,
+        frames: entry.frameCount,
+        typescript: entry.expectedForestRoot,
+        rust,
+      });
+    } catch { /* observer-only */ }
+    this.#reportGap({
+      kind: 'forest-divergence',
+      owner: entry.ownerKey,
+      account: '',
+      frameHeight: entry.frameCount,
+      detail: `forest:ts=${entry.expectedForestRoot}:rust=${rust}`,
+      txTypes: [],
     });
   }
 
@@ -1095,9 +1168,15 @@ export class RscoreShadowMirror {
    * accounts of a single owner — exactly the entity machine's own scope.
    */
   #remember(ownerKey: string, counterpartyId: string, account: AccountReplica): void {
+    const key = counterpartyId.trim().toLowerCase();
     const owned = this.#mirrored.get(ownerKey) ?? new Map<string, AccountReplica>();
-    owned.set(counterpartyId.trim().toLowerCase(), account);
+    owned.set(key, account);
     this.#mirrored.set(ownerKey, owned);
+    // The same tree the engine builds, updated leaf by leaf as frames commit:
+    // one path copy per frame instead of an O(accounts) rebuild, so the whole
+    // tree can be compared at every Runtime boundary rather than at the end.
+    const forest = this.#forests.get(ownerKey) ?? emptyForest();
+    this.#forests.set(ownerKey, forest.updated(key, account));
   }
 
   #tryBindOwner(ownerKey: string): boolean {

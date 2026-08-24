@@ -210,6 +210,11 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
     failures.push(`matches=${stats.matches}!=compared=${stats.framesCompared}`);
   }
   if (stats.mismatches > 0) failures.push(`mismatches=${stats.mismatches}`);
+  // Whole-tree checkpoints: every Runtime boundary compares the engine's
+  // committed accounts root against the TypeScript forest, so an account that
+  // drifted outside the frames being replayed cannot hide until the end.
+  if (stats.forestMismatches > 0) failures.push(`forestMismatches=${stats.forestMismatches}`);
+  if (stats.forestChecks === 0) failures.push('forestChecks=0');
   if (stats.reseedsRepair > 0) failures.push(`reseedsRepair=${stats.reseedsRepair}`);
   if (stats.dropped > 0) failures.push(`dropped=${stats.dropped}`);
   // Owners beyond the binding limit never reached the engine at all, so a
@@ -256,7 +261,8 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   }
   console.error(
     `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
-    `reseeds=${stats.reseeds} executed=${JSON.stringify(stats.executedByType)} ${speedSummary(stats)}`,
+    `reseeds=${stats.reseeds} forestChecks=${stats.forestChecks} ` +
+    `executed=${JSON.stringify(stats.executedByType)} ${speedSummary(stats)}`,
   );
 };
 
