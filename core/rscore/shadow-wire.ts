@@ -127,7 +127,9 @@ export const accountSeedWire = (
   ];
 };
 
-export const SHADOW_SUPPORTED_TX_TYPES = new Set(['direct_payment', 'htlc_lock', 'htlc_resolve']);
+export const SHADOW_SUPPORTED_TX_TYPES = new Set([
+  'direct_payment', 'htlc_lock', 'htlc_resolve', 'add_delta', 'set_credit_limit',
+]);
 
 /** Process-wire tx tuple, or null when the tx type is outside the profile. */
 export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
@@ -156,6 +158,10 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         tx.data.deliveryMode === undefined ? null : tx.data.deliveryMode === 'instant' ? 0 : 1,
         tx.data.envelope ? Buffer.from(tx.data.envelope.ciphertext, 'base64') : null,
       ];
+    case 'add_delta':
+      return [3, tx.data.tokenId];
+    case 'set_credit_limit':
+      return [4, tx.data.tokenId, tx.data.amount.toString()];
     case 'htlc_resolve':
       return tx.data.outcome === 'secret'
         ? [2, tx.data.lockId, 0, hexToWireBytes(tx.data.secret, 32, 'SHADOW_SECRET')]

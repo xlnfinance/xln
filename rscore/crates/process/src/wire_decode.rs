@@ -318,8 +318,25 @@ fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         0 => decode_direct(fields),
         1 => decode_htlc_lock(fields),
         2 => decode_htlc_resolve(fields),
+        3 => decode_add_delta(fields),
+        4 => decode_set_credit_limit(fields),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
+}
+
+fn decode_add_delta(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 2, "addDelta")?;
+    Ok(AccountTx::AddDelta {
+        token_id: token(&fields[1])?,
+    })
+}
+
+fn decode_set_credit_limit(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 3, "setCreditLimit")?;
+    Ok(AccountTx::SetCreditLimit {
+        token_id: token(&fields[1])?,
+        amount: bigint(&fields[2], "amount")?,
+    })
 }
 
 fn decode_direct(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {

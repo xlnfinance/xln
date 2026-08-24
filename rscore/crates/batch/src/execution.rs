@@ -120,7 +120,11 @@ fn append_outputs(
 pub(crate) const fn supported(tx: &AccountTx) -> bool {
     matches!(
         tx,
-        AccountTx::DirectPayment { .. } | AccountTx::HtlcLock(_) | AccountTx::HtlcResolve(_)
+        AccountTx::AddDelta { .. }
+            | AccountTx::SetCreditLimit { .. }
+            | AccountTx::DirectPayment { .. }
+            | AccountTx::HtlcLock(_)
+            | AccountTx::HtlcResolve(_)
     )
 }
 

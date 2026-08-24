@@ -103,6 +103,12 @@ export type ShadowStats = {
   skippedIneligible: number;
   /** Why accounts were refused, by out-of-profile section. */
   ineligibleReasons: Record<string, number>;
+  /**
+   * Account tx types the engine cannot replay, by count. These force a reseed
+   * instead of a comparison, so this is the exact remaining port list for
+   * parity across the entity's whole account interface.
+   */
+  unsupportedTxTypes: Record<string, number>;
   skippedUnboundOwner: number;
   dropped: number;
   /** Whole-tree diffs run mid-flight, and how many found a gap. */
@@ -139,6 +145,7 @@ export class RscoreShadowMirror {
     emptyFrames: 0,
     skippedIneligible: 0,
     ineligibleReasons: {},
+    unsupportedTxTypes: {},
     skippedUnboundOwner: 0,
     dropped: 0,
     reconciliations: 0,
@@ -170,6 +177,7 @@ export class RscoreShadowMirror {
     return {
       ...this.#stats,
       ineligibleReasons: { ...this.#stats.ineligibleReasons },
+      unsupportedTxTypes: { ...this.#stats.unsupportedTxTypes },
       disabledReason: this.#disabledReason,
     };
   }
@@ -267,7 +275,11 @@ export class RscoreShadowMirror {
       } catch { /* observer-only */ }
     }
     try {
-      const supported = input.accountTxs.every(tx => SHADOW_SUPPORTED_TX_TYPES.has(tx.type));
+      const unsupported = input.accountTxs.filter(tx => !SHADOW_SUPPORTED_TX_TYPES.has(tx.type));
+      for (const tx of unsupported) {
+        this.#stats.unsupportedTxTypes[tx.type] = (this.#stats.unsupportedTxTypes[tx.type] ?? 0) + 1;
+      }
+      const supported = unsupported.length === 0;
       const fresh = !this.#registered.has(scopedKey) || this.#needsReseed.has(scopedKey);
       if (!supported || fresh) {
         const reason = shadowIneligibilityReason(input.account);

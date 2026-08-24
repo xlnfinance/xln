@@ -202,13 +202,22 @@ fn unsupported_or_malformed_batches_fail_before_any_candidate_publish() {
     let engine = engine(2);
     let base = delta_root(&engine, 0);
     let mut unsupported = direct_job(1, 0, 1);
-    unsupported.tx = AccountTx::AddDelta { token_id: token(2) };
+    // A tx the engine models but cannot execute yet — add_delta and
+    // set_credit_limit are executable now, so they no longer prove this.
+    unsupported.tx = AccountTx::ReserveToCollateral {
+        token_id: token(1),
+        collateral: "0".into(),
+        ondelta: "0".into(),
+        side: xln_rscore_engine::ReserveSide::Receiving,
+        block_number: 1,
+        transaction_hash: format!("0x{}", "ab".repeat(32)),
+    };
     let jobs = [direct_job(0, 0, 1), unsupported];
     assert_eq!(
         prepare_error(&engine, &jobs),
         BatchError::UnsupportedTx {
             input_index: 1,
-            tag: "add_delta"
+            tag: "reserve_to_collateral"
         }
     );
     assert_eq!(engine.revision(), 0);
