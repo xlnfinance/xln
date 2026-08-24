@@ -68,7 +68,9 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
             AbiValue::Bytes(vec![0_u8; 32]),
             AbiValue::Bytes(vec![0_u8; 32]),
             AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
+            // Rebalance fee registers are owned by the engine, so the seed
+            // ships their rows instead of a carried root.
+            tuple(Vec::new()),
             tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
             tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
         ]),
@@ -94,7 +96,9 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
             AbiValue::Bytes(vec![0_u8; 32]),
             AbiValue::Bytes(vec![0_u8; 32]),
             AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
+            // Rebalance fee registers are owned by the engine, so the seed
+            // ships their rows instead of a carried root.
+            tuple(Vec::new()),
             tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
             tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
         ]),
