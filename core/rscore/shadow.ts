@@ -271,6 +271,8 @@ const MAX_QUEUE = 50_000;
 const DEFAULT_MAX_OWNERS = 1;
 /** Progress reporting cadence, in compared frames. */
 const PROGRESS_EVERY = 500;
+/** Field count of one `read_account_summary_page` row; pinned with the wire. */
+const SUMMARY_ROW_FIELDS = 12;
 /**
  * Whole-tree reconciliation cadence, in compared frames. Per-frame comparison
  * only covers frames the mirror replayed; a periodic full diff also catches an
@@ -990,7 +992,18 @@ export class RscoreShadowMirror {
     const candidates: Iterable<readonly [string, AccountReplica]> = changes === null
       ? accounts.entries()
       : changes.changed;
+    // An account the Entity dropped has to leave the engine's tree in the same
+    // boundary. Left behind, it keeps its last leaf in both the engine and the
+    // mirror's forest, so the two agree with each other and disagree with the
+    // Entity — exactly the divergence the forest is supposed to catch.
+    for (const counterpartyId of changes?.removed ?? []) {
+      const key = counterpartyId.trim().toLowerCase();
+      const accountKey = key.replace(/^0x/, '');
+      if (!this.#registered.has(`${ownerKey}/${accountKey}`)) continue;
+      this.#forget(ownerKey, accountKey, counterpartyId);
+    }
     const rows: RscoreWireValue[][] = [];
+    // After the removals: `#forget` rewrites the same forest.
     let forest = this.#forests.get(ownerKey) ?? emptyForest();
     let mirrored = 0;
     for (const [counterpartyId, account] of candidates) {
@@ -1037,8 +1050,9 @@ export class RscoreShadowMirror {
       // a lane holding hundreds of user entities would otherwise halt on its
       // second entity. Every process that is asked to PROVE parity still fails
       // its end-of-run gate while this is non-zero.
-      this.#stats.skippedUnboundOwner += 1;
-      this.#reportedUnbound.add(ownerKey);
+      // Once per owner, not once per frame: the counter answers "how many
+      // owners went unmirrored", and the gate fails while it is non-zero.
+      this.noteUnboundOwner(ownerKey);
       return;
     }
     const accountIdBytes = hexToWireBytes(input.counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID');
@@ -1255,8 +1269,7 @@ export class RscoreShadowMirror {
   async #drain(): Promise<void> {
     let lastEntry: QueueEntry | null = null;
     try {
-      while (this.#queue.length > 0) {
-        const entry = this.#queue.shift()!;
+      for (let entry = this.#queue.shift(); entry !== undefined; entry = this.#queue.shift()) {
         lastEntry = entry;
         const client = await this.#ensureClient(entry.ownerKey);
         if (entry.kind === 'verify') {
@@ -1335,7 +1348,7 @@ export class RscoreShadowMirror {
           if (!rejectionByAccount.has(accountKey)) {
             rejectionByAccount.set(
               accountKey,
-              `rejected:${type}:input=${inputIndex}:${safeStringify(verdict)}`,
+              `rejected:${type}:input=${inputIndex}:${safeStringify(redactSecrets(verdict))}`,
             );
           }
         }
@@ -1449,10 +1462,12 @@ export class RscoreShadowMirror {
     roots: readonly unknown[],
   ): string | null {
     const actualOutputs = engineOutputProjection(engineOutputs, accountKey);
-    const actualText = safeStringify(actualOutputs);
-    const expectedText = safeStringify(expectedOutputs);
-    if (actualText !== expectedText) {
-      return `outputs:ts=${expectedText}:rust=${actualText}`;
+    // Compare the raw values — two different preimages of the same length must
+    // not compare equal — but build the message, which ends up in a durable
+    // dump file, from redacted copies.
+    if (safeStringify(actualOutputs) !== safeStringify(expectedOutputs)) {
+      return `outputs:ts=${safeStringify(redactSecrets(expectedOutputs))}` +
+        `:rust=${safeStringify(redactSecrets(actualOutputs))}`;
     }
     const row = roots.find(candidate =>
       Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === accountKey);
@@ -1589,7 +1604,7 @@ export class RscoreShadowMirror {
           Buffer.from(wireBytes((candidate as unknown[])[0], 'SHADOW_SECTION_ID', 32))
             .toString('hex') === accountKey);
         if (row) {
-          fields = wireTuple(row, 'SHADOW_SECTION_ROW', 9);
+          fields = wireTuple(row, 'SHADOW_SECTION_ROW', SUMMARY_ROW_FIELDS);
           break;
         }
         const next = page[2];
@@ -1607,7 +1622,16 @@ export class RscoreShadowMirror {
         pair('swapOffers', 7),
         pair('rebalanceFeePolicies', 8),
       ]);
-    } catch {
+    } catch (error) {
+      // Diagnostics must never mask the mismatch itself, but a silent failure
+      // here is what made "sections: null" indistinguishable from "the account
+      // was not found".
+      try {
+        console.error(
+          `RSCORE_SHADOW_SECTION_DIFF_FAILED ${accountKey.slice(0, 8)}:` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        );
+      } catch { /* observer-only */ }
       return undefined;
     }
   }
@@ -1657,6 +1681,18 @@ export class RscoreShadowMirror {
     const forest = this.#forests.get(ownerKey);
     if (forest?.get(key) !== undefined) this.#forests.set(ownerKey, forest.removed(key));
     this.#push({ kind: 'remove', ownerKey, accountKeys: [accountKey] });
+  }
+
+  /**
+   * Record an owner this mirror will never follow (more owners than engine
+   * processes). Idempotent per owner, and the end-of-run gate fails while the
+   * count is non-zero.
+   */
+  noteUnboundOwner(ownerEntityId: string): void {
+    const ownerKey = ownerEntityId.trim().toLowerCase();
+    if (this.#boundOwners.has(ownerKey) || this.#reportedUnbound.has(ownerKey)) return;
+    this.#reportedUnbound.add(ownerKey);
+    this.#stats.skippedUnboundOwner += 1;
   }
 
   #tryBindOwner(ownerKey: string): boolean {

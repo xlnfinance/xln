@@ -87,9 +87,10 @@ impl StatefulBatchEngine {
 
     /// Create or replace accounts between waves. The whole call is atomic:
     /// leaf digests are computed on the pool first, then the tree and the map
-    /// swap together. Revision is untouched — waves own it; the session layer
-    /// refuses upserts while a prepare is pending, so a candidate can never
-    /// straddle an upsert.
+    /// swap together. Like every other mutation of the tree this advances the
+    /// revision: a reader paging the accounts detects a tree that moved under
+    /// it by exactly that number. The session layer refuses upserts while a
+    /// prepare is pending, so a candidate can never straddle an upsert.
     pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
         let incoming = collect_accounts(seeds)?;
         if incoming.is_empty() {
@@ -106,6 +107,7 @@ impl StatefulBatchEngine {
             accounts = put_account(&accounts, account_id, replica, root)?;
         }
         self.accounts = accounts;
+        self.revision += 1;
         Ok(self.accounts.root_hash())
     }
 
@@ -134,6 +136,7 @@ impl StatefulBatchEngine {
             accounts = put_account(&accounts, account_id, replica, root)?;
         }
         self.accounts = accounts;
+        self.revision += 1;
         Ok(self.accounts.root_hash())
     }
 
@@ -150,6 +153,7 @@ impl StatefulBatchEngine {
             accounts = accounts.removed(account_id.as_bytes());
         }
         self.accounts = accounts;
+        self.revision += 1;
         Ok(self.accounts.root_hash())
     }
 

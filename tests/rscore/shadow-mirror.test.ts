@@ -18,6 +18,9 @@ import type { AccountReplica, AccountTx } from '../../core/types/account';
 import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j';
 import { RscoreProcessClient } from '../../core/rscore/client';
 import { RscoreShadowMirror } from '../../core/rscore/shadow';
+import { PersistentEntityAccountMap } from '../../core/entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '../../core/entity/consensus/state-root';
+import type { RuntimeState } from '../../core/runtime/types';
 
 const BINARY = process.env['XLN_RSCORE_BINARY']
   ?? join(import.meta.dir, '../../rscore/target/release/xln-rscore');
@@ -436,6 +439,47 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       .not.toBe(report.mismatched[0]?.deltasRoot.rust);
     expect(report.missingInEngine).toEqual([entity('ce')]);
     expect(report.extraInEngine).toEqual([]);
+  }, 30_000);
+
+  // An account the Entity dropped has to leave the engine's tree in the same
+  // boundary. Left behind it keeps its last leaf in both the engine and the
+  // mirror's own forest, so those two agree with each other and disagree with
+  // the Entity — the divergence the whole-tree check exists to catch.
+  test('drops an account the Entity removed from its accounts map', async () => {
+    const other = entity('cc');
+    const kept = makeTsAccount(RIGHT);
+    const dropped = makeTsAccount(other);
+    const mirror = makeMirror();
+    await mirror.primeOwner(LEFT, new Map([[RIGHT, kept], [other, dropped]]));
+    const full = PersistentEntityAccountMap.fromEntries(
+      [[RIGHT, kept], [other, dropped]],
+      LEFT,
+      computeEntityAccountValueHash,
+    );
+    const runtimeState = (accounts: PersistentEntityAccountMap): RuntimeState =>
+      ({ eReplicas: new Map([['e', { entityId: LEFT, state: { accounts } }]]) }) as unknown as RuntimeState;
+
+    mirror.flushWave(runtimeState(full));
+    await mirror.settled();
+    const afterFull = mirror.stats();
+
+    const pruned = full.removed(other);
+    mirror.flushWave(runtimeState(pruned));
+    await mirror.settled();
+    const stats = mirror.stats();
+    const report = await mirror.reconcile(LEFT, new Map([[RIGHT, kept]]));
+    await mirror.shutdown();
+
+    // The Entity's own root is what both sides are compared against, so the
+    // check only counts while the mirror holds every account of that Entity.
+    expect(afterFull.entityRootChecks).toBeGreaterThan(0);
+    expect(stats.entityRootChecks).toBeGreaterThan(afterFull.entityRootChecks);
+    expect(stats.forestMismatches).toBe(0);
+    expect(stats.disabledReason).toBeNull();
+    expect(report.extraInEngine).toEqual([]);
+    expect(report.missingInEngine).toEqual([]);
+    expect(report.matched).toBe(1);
+    expect(report.forestRoot.equal).toBeTrue();
   }, 30_000);
 
   // A stand with many entities must not fork one engine per entity: the

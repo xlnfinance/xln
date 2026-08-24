@@ -24,7 +24,9 @@ pub fn canonical_value(value: &AbiValue) -> Result<CanonicalValue, ProcessError>
 
 /// `[fields, mempool]`: the account-leaf projection minus the derived roots,
 /// and the canonical frame-hash form of every queued tx.
-pub fn envelope(value: &AbiValue) -> Result<Option<xln_rscore_engine::AccountEnvelope>, ProcessError> {
+pub fn envelope(
+    value: &AbiValue,
+) -> Result<Option<xln_rscore_engine::AccountEnvelope>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
@@ -50,10 +52,16 @@ fn decode(value: &AbiValue, depth: usize) -> Result<CanonicalValue, ProcessError
         return Err(ProcessError::Expected("canonicalDepth"));
     }
     let fields = tuple(value)?;
-    let tag = integer(fields.first().ok_or(ProcessError::Expected("canonicalTag"))?)?;
+    let tag = integer(
+        fields
+            .first()
+            .ok_or(ProcessError::Expected("canonicalTag"))?,
+    )?;
     let payload = &fields[1..];
     let one = || -> Result<&AbiValue, ProcessError> {
-        payload.first().ok_or(ProcessError::Expected("canonicalPayload"))
+        payload
+            .first()
+            .ok_or(ProcessError::Expected("canonicalPayload"))
     };
     match tag {
         0 => Ok(CanonicalValue::Null),

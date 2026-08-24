@@ -302,6 +302,54 @@ fn upsert_accounts_creates_between_waves_and_is_refused_while_pending() {
     );
 }
 
+/// Every mutation of the tree moves the revision.
+///
+/// A reader paging the accounts detects a tree that moved under it by exactly
+/// that number, so a membership or shell change that left the revision alone
+/// let a page from before the change and a page from after it be read as one
+/// consistent snapshot.
+#[test]
+fn membership_and_shell_changes_advance_the_revision() {
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello(0)).envelope);
+    assert_ok(session.handle(load(1, 7, Vec::new())).envelope);
+
+    let upserted = session
+        .handle(request(
+            2,
+            OpTag::UpsertAccounts,
+            vec![tuple_of(vec![crate::test_fixture::account_with_id(
+                0x7a,
+                Vec::new(),
+            )])],
+        ))
+        .envelope;
+    assert_ok(upserted.clone());
+    assert_eq!(body_integer(&upserted, 0), 8);
+
+    let mut account_id = [0_u8; 32];
+    account_id[31] = 0x7a;
+    let removed = session
+        .handle(request(
+            3,
+            OpTag::RemoveAccounts,
+            vec![tuple_of(vec![AbiValue::Bytes(account_id.to_vec())])],
+        ))
+        .envelope;
+    assert_ok(removed.clone());
+    assert_eq!(body_integer(&removed, 0), 9);
+}
+
+fn body_integer(envelope: &Envelope, index: usize) -> i128 {
+    let AbiValue::Tuple(payload) = &envelope.body.fields()[0] else {
+        panic!("payload tuple expected");
+    };
+    let AbiValue::Integer(value) = &payload.fields()[index] else {
+        panic!("integer expected at {index}");
+    };
+    *value
+}
+
 fn body_bytes(envelope: &Envelope, index: usize) -> Vec<u8> {
     let AbiValue::Tuple(payload) = &envelope.body.fields()[0] else {
         panic!("payload tuple expected");

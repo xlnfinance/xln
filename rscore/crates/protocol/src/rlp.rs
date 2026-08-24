@@ -126,8 +126,7 @@ impl RlpWriter {
         let length = length_bytes(payload_length)?;
         let length_of_length = u8::try_from(length.len()).map_err(|_| RlpError::PayloadTooLarge)?;
         let header_length = 1 + length.len();
-        self.bytes
-            .resize(self.bytes.len() + header_length, 0);
+        self.bytes.resize(self.bytes.len() + header_length, 0);
         self.bytes
             .copy_within(mark..mark + payload_length, mark + header_length);
         self.bytes[mark] = long_base + length_of_length;

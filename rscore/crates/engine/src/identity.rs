@@ -138,6 +138,24 @@ fn parse_fixed_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
     Some(bytes)
 }
 
+/// The first `limit` UTF-16 code units of `value`, the way `String.prototype
+/// .slice(0, limit)` cuts an offer id for a human-readable event line.
+///
+/// Byte-indexing a `String` panics whenever the cut lands inside a multi-byte
+/// character, and offer ids are caller-supplied text: TypeScript accepts any
+/// id without a colon, `€€€` included. A cut that would split a surrogate pair
+/// yields the replacement character here where JavaScript yields a lone
+/// surrogate — the two disagree only on astral offer ids, and only inside a
+/// diagnostic string.
+pub(crate) fn js_prefix(value: &str, limit: usize) -> String {
+    if value.len() <= limit {
+        // ASCII-or-shorter fast path: byte length bounds UTF-16 length.
+        return value.to_owned();
+    }
+    let units: Vec<u16> = value.encode_utf16().take(limit).collect();
+    String::from_utf16_lossy(&units)
+}
+
 /// Table-driven `0x…` rendering.
 ///
 /// The commitment path renders roughly fifteen 32-byte roots per account state
@@ -224,5 +242,23 @@ impl AccountIdentity {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod js_prefix_tests {
+    use super::js_prefix;
+
+    /// Offer ids are caller-supplied text — TypeScript accepts any id without
+    /// a colon — and the event line cuts them at 8. Byte-indexing panicked on
+    /// every multi-byte id whose cut landed inside a character.
+    #[test]
+    fn cuts_by_utf16_code_units_like_string_slice() {
+        assert_eq!(js_prefix("offer-1234-5678", 8), "offer-12");
+        assert_eq!(js_prefix("short", 8), "short");
+        assert_eq!(js_prefix("€€€€€€€€€€", 8), "€€€€€€€€");
+        assert_eq!(js_prefix("абвгдеёжзи", 8), "абвгдеёж");
+        // One astral character is two UTF-16 units, so eight units is four.
+        assert_eq!(js_prefix("😀😀😀😀😀", 8), "😀😀😀😀");
     }
 }

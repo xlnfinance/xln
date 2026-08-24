@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../account/j-claims/j-claim-codec';
 import { RscoreProcessClient, type RscoreWireValue } from '../../../rscore/client';
 import { swapMarketPolicyWire } from '../../../rscore/shadow-wire';
+import { safeStringify } from '../../../protocol/serialization';
 
 const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
 
@@ -151,7 +152,7 @@ const main = async (): Promise<void> => {
     const results = prepared[2] as unknown[];
     if (wave === 0 && Array.isArray(results[0])) {
       const verdict = (results[0] as unknown[])[2];
-      if (Number((verdict as unknown[])[0]) !== 0) console.log('first reject:', JSON.stringify(verdict));
+      if (Number((verdict as unknown[])[0]) !== 0) console.log('first reject:', safeStringify(verdict));
     }
     for (const row of results) {
       const verdict = (row as unknown[])[2] as unknown[];

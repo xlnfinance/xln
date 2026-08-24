@@ -7,6 +7,7 @@
  */
 import type { ShadowFrameInput, ShadowGap, ShadowReconciliation, ShadowStats } from './shadow';
 import type { RuntimeState } from '../runtime/types';
+import { safeStringify } from '../protocol/serialization';
 import type { AccountReplica } from '../types/account';
 
 type ShadowStatsLike = ShadowStats;
@@ -21,6 +22,7 @@ type MirrorLike = Readonly<{
   settled(): Promise<void>;
   shutdown(): Promise<void>;
   markShuttingDown(): void;
+  noteUnboundOwner(ownerEntityId: string): void;
   stats(): ShadowStatsLike;
   selfReconcile(state?: RuntimeState): Promise<Map<string, ShadowReconciliation>>;
 }>;
@@ -75,7 +77,7 @@ const speedSummary = (stats: ShadowStatsLike): string => {
 
 const attachMirrorReporting = (started: MirrorLike): void => {
   const printStats = (): void => {
-    try { console.error(`RSCORE_SHADOW_STATS ${JSON.stringify(started.stats())}`); } catch { /* observer-only */ }
+    try { console.error(`RSCORE_SHADOW_STATS ${safeStringify(started.stats())}`); } catch { /* observer-only */ }
   };
   started.onGap(gap => { haltOnGap(gap, printStats); });
   printStats();
@@ -207,6 +209,10 @@ const primeOwnerWithinLimit = async (
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.startsWith('SHADOW_PRIME_OWNER_LIMIT')) throw error;
+    // Counted here, not only when a frame of that owner arrives: an owner that
+    // is idle for the whole run would otherwise leave no trace at all and the
+    // gate would call a one-owner mirror of a two-owner Runtime parity.
+    started.noteUnboundOwner(replica.entityId);
   }
 };
 
@@ -284,7 +290,7 @@ const haltOnGap = (gap: ShadowGap, printStats: () => void): void => {
   if (!shadowStrictEnabled()) return;
   if (!HALT_KINDS.has(gap.kind)) return;
   try {
-    console.error(`RSCORE_SHADOW_HALT ${JSON.stringify(gap)}`);
+    console.error(`RSCORE_SHADOW_HALT ${safeStringify(gap)}`);
     printStats();
   } catch { /* observer-only */ }
   process.exit(RSCORE_SHADOW_HALT_EXIT_CODE);
@@ -335,11 +341,18 @@ export const assertShadowParity = async (
   // drifted outside the frames being replayed cannot hide until the end.
   if (stats.forestMismatches > 0) failures.push(`forestMismatches=${stats.forestMismatches}`);
   if (stats.forestChecks === 0) failures.push('forestChecks=0');
+  // A forest check against the mirror's own partial tree only proves the
+  // engine agrees with the subset the mirror chose to follow. Parity is a
+  // claim about the Entity's accounts root, so at least one check must have
+  // been made against the Entity's own root, with every account present.
+  if (stats.entityRootChecks === 0) failures.push('entityRootChecks=0');
   if (stats.reseedsRepair > 0) failures.push(`reseedsRepair=${stats.reseedsRepair}`);
   // Monotonic: an account whose first observed frame was imported instead of
   // executed keeps that hole on the record even after later frames match.
   if (stats.firstFramesSkipped > 0) failures.push(`firstFramesSkipped=${stats.firstFramesSkipped}`);
-  if (stats.droppedFrames > 0) {
+  if (stats.droppedWaves > 0 || stats.droppedFrames > 0) {
+    // A dropped shell/remove/verify entry carries no frame, and skipping it
+    // silently is how the engine's tree drifts from the Entity's.
     failures.push(`dropped=${stats.droppedWaves}waves/${stats.droppedFrames}frames`);
   }
   // Owners beyond the binding limit never reached the engine at all, so a
@@ -357,10 +370,10 @@ export const assertShadowParity = async (
   // (cross-J offers, until that lifecycle is ported) sets the allowance and the
   // count is reported instead.
   if (stats.skippedIneligible > 0 && !allowIneligible()) {
-    failures.push(`skippedIneligible=${stats.skippedIneligible}:${JSON.stringify(stats.ineligibleReasons)}`);
+    failures.push(`skippedIneligible=${stats.skippedIneligible}:${safeStringify(stats.ineligibleReasons)}`);
   }
   if (Object.keys(stats.unsupportedTxTypes).length > 0) {
-    failures.push(`unsupportedTxTypes=${JSON.stringify(stats.unsupportedTxTypes)}`);
+    failures.push(`unsupportedTxTypes=${safeStringify(stats.unsupportedTxTypes)}`);
   }
   if (reports.size === 0) failures.push('reconciledOwners=0');
   for (const [owner, report] of reports) {
@@ -368,10 +381,10 @@ export const assertShadowParity = async (
       // The whole first mismatch, unclipped: every root pair is what says
       // which section moved, and a truncated dump loses exactly that.
       try {
-        console.error(`RSCORE_SHADOW_RECONCILE_MISMATCH ${JSON.stringify(report.mismatched[0])}`);
+        console.error(`RSCORE_SHADOW_RECONCILE_MISMATCH ${safeStringify(report.mismatched[0])}`);
       } catch { /* observer-only */ }
       failures.push(`${owner}:mismatched=${report.mismatched.length}:${
-        JSON.stringify(report.mismatched[0]).slice(0, 400)}`);
+        safeStringify(report.mismatched[0]).slice(0, 400)}`);
     }
     if (report.missingInEngine.length > 0) {
       failures.push(`${owner}:missingInEngine=${report.missingInEngine.length}`);
@@ -394,12 +407,15 @@ export const assertShadowParity = async (
   if (failures.length > 0) {
     throw new Error(`RSCORE_SHADOW_PARITY_FAILED:${label}:${failures.join('|')}`);
   }
+  // A run that accepted a named coverage hole did not prove parity, and saying
+  // so in the same word is what let a partial run read as a full one.
+  const verdict = stats.skippedIneligible > 0 ? 'RSCORE_SHADOW_PARITY_PARTIAL' : 'RSCORE_SHADOW_PARITY_OK';
   console.error(
-    `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
+    `${verdict} ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
     `reseeds=${stats.reseeds} forestChecks=${stats.forestChecks}/${stats.entityRootChecks}entity ` +
     `ineligible=${stats.skippedIneligible} ` +
     `shells=${stats.shellRefreshes} ` +
-    `executed=${JSON.stringify(stats.executedByType)} ${speedSummary(stats)}`,
+    `executed=${safeStringify(stats.executedByType)} ${speedSummary(stats)}`,
   );
 };
 

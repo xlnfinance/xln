@@ -16,6 +16,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
+import { safeStringify } from '../protocol/serialization';
 
 export const RSCORE_ABI_MAGIC = 0x03;
 export const RSCORE_ABI_DOMAIN = 'xln.rscore.account';
@@ -149,8 +150,15 @@ const writeArrayHeader = (out: Buffer[], length: number): void => {
 
 type ReadCursor = { buffer: Buffer; offset: number };
 
+/** One byte of the frame, or a truncation reported as such. */
+const readByte = (cursor: ReadCursor, offset: number): number => {
+  const byte = cursor.buffer[offset];
+  if (byte === undefined) throw new Error(`RSCORE_CLIENT_TRUNCATED:${offset}`);
+  return byte;
+};
+
 const readValue = (cursor: ReadCursor): unknown => {
-  const marker = cursor.buffer[cursor.offset]!;
+  const marker = readByte(cursor, cursor.offset);
   cursor.offset += 1;
   if (marker <= 0x7f) return marker;
   if (marker >= 0xe0) return marker - 256;
@@ -183,7 +191,7 @@ const readValue = (cursor: ReadCursor): unknown => {
 const readUint = (cursor: ReadCursor, bytes: number): number => {
   let value = 0;
   for (let index = 0; index < bytes; index += 1) {
-    value = value * 256 + cursor.buffer[cursor.offset + index]!;
+    value = value * 256 + readByte(cursor, cursor.offset + index);
   }
   cursor.offset += bytes;
   return value;
@@ -197,7 +205,9 @@ const readInt = (cursor: ReadCursor, bytes: number): number => {
 
 const readBigUint = (cursor: ReadCursor): number | bigint => {
   let value = 0n;
-  for (let index = 0; index < 8; index += 1) value = (value << 8n) + BigInt(cursor.buffer[cursor.offset + index]!);
+  for (let index = 0; index < 8; index += 1) {
+    value = (value << 8n) + BigInt(readByte(cursor, cursor.offset + index));
+  }
   cursor.offset += 8;
   return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
 };
@@ -449,7 +459,7 @@ export class RscoreProcessClient {
     if (decoded.messageKind !== MESSAGE_KIND_OK) {
       const body = decoded.body as unknown[];
       const error = Array.isArray(body) && Array.isArray(body[0]) ? body[0] : body;
-      throw new Error(`RSCORE_PROCESS_ERROR:${JSON.stringify(error)}`);
+      throw new Error(`RSCORE_PROCESS_ERROR:${safeStringify(error)}`);
     }
     const body = decoded.body as unknown[];
     return Array.isArray(body) && body.length === 1 ? body[0] : body;

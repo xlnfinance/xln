@@ -157,12 +157,9 @@ fn main() {
     let workers = arg(4, 8);
 
     let seeds: Vec<AccountSeed> = (0..accounts).map(seed).collect();
-    let mut engine = StatefulBatchEngine::new(
-        EngineGeneration::from_bytes([0x42; 8]),
-        workers,
-        seeds,
-    )
-    .expect("engine");
+    let mut engine =
+        StatefulBatchEngine::new(EngineGeneration::from_bytes([0x42; 8]), workers, seeds)
+            .expect("engine");
 
     if std::env::var("XLN_BENCH_MICRO").is_ok() {
         micro_sha();
@@ -179,7 +176,7 @@ fn main() {
                     index,
                     (wave as u32 * 7 + index) % accounts,
                     5,
-                    (wave as u32 + index) % 2 == 0,
+                    (wave as u32 + index).is_multiple_of(2),
                 )
             })
             .collect();

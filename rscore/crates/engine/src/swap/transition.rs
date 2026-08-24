@@ -108,7 +108,7 @@ pub(crate) fn apply_offer(
     );
     let events = vec![format!(
         "📊 Swap offer created: {}... give {} token{} for {} token{}",
-        &tx.offer_id[..tx.offer_id.len().min(8)],
+        crate::identity::js_prefix(tx.offer_id, 8),
         prepared.effective_give,
         tx.give_token_id,
         prepared.effective_want,

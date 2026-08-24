@@ -10,8 +10,8 @@ use xln_rscore_engine::{
 };
 
 use crate::wire_value::{
-    bigint, bounded_u32, entity, exact, fixed_bytes, hex_fixed, integer, js_number, optional_fixed_bytes,
-    optional_text, text, text_list, token, tuple, unsigned,
+    bigint, bounded_u32, entity, exact, fixed_bytes, hex_fixed, integer, js_number,
+    optional_fixed_bytes, optional_text, text, text_list, token, tuple, unsigned,
 };
 use crate::{PROCESS_ABI_VERSION, PROCESS_PROFILE, ProcessError};
 

@@ -28,7 +28,6 @@ pub use engine::{AccountTransition, AccountVerdict, SequentialAccountEngine};
 pub use envelope::{AccountEnvelope, EnvelopeError};
 // The canonical value model is part of the engine's public boundary: the
 // process layer decodes carried replica sections straight into it.
-pub use xln_rscore_protocol::CanonicalValue;
 pub use error::{AccountRejection, StateError, TransitionError, ValidationRejection};
 pub use htlc::{
     HTLC_OPAQUE_CIPHERTEXT_VERSION, HtlcBoundaryError, HtlcDeliveryMode, HtlcHashlock, HtlcLock,
@@ -43,3 +42,4 @@ pub use state::{
 };
 pub use swap::{SwapMarketPolicy, SwapOffer, SwapToken};
 pub use tx::{AccountTx, DeliveryMode, LendingAction, LendingTermId, ReserveSide};
+pub use xln_rscore_protocol::CanonicalValue;

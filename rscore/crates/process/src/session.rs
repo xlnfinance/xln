@@ -219,7 +219,10 @@ impl ProcessSession {
     /// Entity's leaf only at the instant a frame committed.
     fn update_account_shells(
         &mut self,
-        shells: Vec<(xln_rscore_batch::AccountId, xln_rscore_engine::AccountEnvelope)>,
+        shells: Vec<(
+            xln_rscore_batch::AccountId,
+            xln_rscore_engine::AccountEnvelope,
+        )>,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         if self.pending.is_some() {
             return Err(ProcessError::PreparePending);

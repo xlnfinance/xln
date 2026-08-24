@@ -215,23 +215,36 @@ const be32 = (value: number): Buffer => {
   return bytes;
 };
 
+/**
+ * One policy row of exactly `arity` numbers. A short row is a wire defect, and
+ * hashing it with a hole would produce a digest that agrees with nothing.
+ */
+const policyRow = (row: readonly number[], arity: number, label: string): readonly number[] => {
+  if (row.length !== arity || row.some(value => !Number.isFinite(value))) {
+    throw new Error(`SHADOW_POLICY_ROW:${label}:${row.length}`);
+  }
+  return row;
+};
+
 /** Same preimage as SwapMarketPolicy::digest on the engine side. */
 export const swapMarketPolicyDigest = (policy: readonly RscoreWireValue[]): string => {
   const hasher = createHash('sha256');
   hasher.update(Buffer.from('xln.rscore.swap-market-policy.v1'));
   for (const row of policy[0] as number[][]) {
-    hasher.update(be32(row[0]!));
-    hasher.update(be32(row[1]!));
-    hasher.update(Buffer.from([row[2]!]));
+    const [tokenId, decimals, flags] = policyRow(row, 3, 'token');
+    hasher.update(be32(tokenId ?? 0));
+    hasher.update(be32(decimals ?? 0));
+    hasher.update(Buffer.from([flags ?? 0]));
   }
   hasher.update(Buffer.from('steps'));
   // The engine keeps steps in a map keyed by (base, quote); match that order.
-  const steps = [...(policy[1] as number[][])]
-    .sort((left, right) => (left[0]! - right[0]!) || (left[1]! - right[1]!));
-  for (const row of steps) {
-    hasher.update(be32(row[0]!));
-    hasher.update(be32(row[1]!));
-    hasher.update(be32(row[2]!));
+  const steps = (policy[1] as number[][])
+    .map(row => policyRow(row, 3, 'step'))
+    .sort((left, right) => ((left[0] ?? 0) - (right[0] ?? 0)) || ((left[1] ?? 0) - (right[1] ?? 0)));
+  for (const [base, quote, step] of steps) {
+    hasher.update(be32(base ?? 0));
+    hasher.update(be32(quote ?? 0));
+    hasher.update(be32(step ?? 0));
   }
   return `0x${hasher.digest('hex')}`;
 };

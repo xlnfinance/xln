@@ -27,7 +27,7 @@ pub(crate) fn apply_cancel_request(
     Ok(MutationDecision::with_outputs(
         vec![format!(
             "📨 Swap cancel requested: {}...",
-            &offer_id[..offer_id.len().min(8)]
+            crate::identity::js_prefix(offer_id, 8)
         )],
         vec![AccountOutput::SwapCancelRequest {
             offer_id: offer_id.to_owned(),
