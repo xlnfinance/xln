@@ -44,9 +44,6 @@ export const authorityRecordEnabled = (): boolean =>
  */
 const frames = new Map<string, RecordedInput[]>();
 
-/** The Runtime whose frame is open, set by the reducer around each frame. */
-let openRuntimeId: string | null = null;
-
 let report = {
   frames: 0,
   inputs: 0,
@@ -60,6 +57,15 @@ let report = {
   skippedNoFrame: 0,
   /** Frames left open by a throw, dropped rather than merged into the next. */
   abandonedFrames: 0,
+  /**
+   * Runtime frames whose inputs belong to more than one owner Entity. Each
+   * Entity has its own enforcement clock, so such a frame cannot be one wave
+   * with one clock: it is one wave per owner, prepared together and committed
+   * together.
+   */
+  framesWithMultipleOwners: 0,
+  /** The largest number of owner Entities seen in a single Runtime frame. */
+  maxOwnersPerFrame: 0,
   byKind: {} as Record<string, number>,
 };
 
@@ -81,10 +87,14 @@ const classify = (input: AccountInput): RawAccountInputKind => {
  * the Entity whose account map holds this replica — the same key the engine
  * process is bound to.
  */
-export const noteRawAccountInput = (account: AccountReplica, input: AccountInput): void => {
+export const noteRawAccountInput = (
+  /** From the caller's own consensus context, never from module state. */
+  runtimeId: string | undefined,
+  account: AccountReplica,
+  input: AccountInput,
+): void => {
   if (!authorityRecordEnabled()) return;
-  const runtimeId = openRuntimeId;
-  if (runtimeId === null) {
+  if (runtimeId === undefined) {
     // An input outside any Runtime frame belongs to no wave. Counted, because
     // an authority that never saw it would diverge and this is where that
     // would first be visible.
@@ -124,7 +134,6 @@ export const beginAuthorityFrame = (runtimeId: string): void => {
     report.abandonedFrames += 1;
   }
   frames.set(runtimeId, []);
-  openRuntimeId = runtimeId;
 };
 
 /**
@@ -138,14 +147,15 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   if (!authorityRecordEnabled()) return;
   const frame = frames.get(runtimeId) ?? [];
   frames.delete(runtimeId);
-  if (openRuntimeId === runtimeId) openRuntimeId = null;
   if (frame.length === 0) return;
   report.frames += 1;
   report.inputs += frame.length;
   const seenPeerInput = new Set<string>();
   const interleaved = new Set<string>();
+  const owners = new Set<string>();
   for (const row of frame) {
     const key = `${row.ownerEntityId}/${row.counterpartyEntityId}`;
+    owners.add(row.ownerEntityId);
     report.byKind[row.kind] = (report.byKind[row.kind] ?? 0) + 1;
     if (row.kind === 'enqueue') {
       if (seenPeerInput.has(key)) interleaved.add(key);
@@ -153,6 +163,8 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
     }
     seenPeerInput.add(key);
   }
+  if (owners.size > 1) report.framesWithMultipleOwners += 1;
+  report.maxOwnersPerFrame = Math.max(report.maxOwnersPerFrame, owners.size);
   if (interleaved.size > 0) {
     report.framesWithInterleavedAccount += 1;
     report.interleavedAccounts += interleaved.size;
@@ -170,7 +182,6 @@ export const printAuthorityRecordReport = (): void => {
 
 export const resetAuthorityRecordForTests = (): void => {
   frames.clear();
-  openRuntimeId = null;
   report = {
     frames: 0,
     inputs: 0,
@@ -179,6 +190,8 @@ export const resetAuthorityRecordForTests = (): void => {
     skippedNoHeader: 0,
     skippedNoFrame: 0,
     abandonedFrames: 0,
+    framesWithMultipleOwners: 0,
+    maxOwnersPerFrame: 0,
     byKind: {},
   };
 };

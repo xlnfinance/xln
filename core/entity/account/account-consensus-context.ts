@@ -50,6 +50,7 @@ export const createAccountConsensusContext = (
   observerState?: import('../types').EntityState,
 ): AccountConsensusContext => ({
   runtimeTimestamp: env.state.timestamp,
+  ...(env.runtimeId === undefined ? {} : { runtimeId: env.runtimeId }),
   quietLogs: env.quietRuntimeLogs === true,
   emitRuntimeEvents: true,
   jReplicas: env.state.jReplicas,

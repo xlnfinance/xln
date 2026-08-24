@@ -11,6 +11,12 @@ import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claim
  */
 export type AccountConsensusContext = Readonly<{
   runtimeTimestamp: number;
+  /**
+   * The Runtime this context belongs to. One process hosts many, so anything
+   * that accumulates per Runtime frame has to be told which one rather than
+   * inferring it from whichever frame opened last.
+   */
+  runtimeId?: string;
   quietLogs: boolean;
   emitRuntimeEvents: boolean;
   jReplicas: ReadonlyMap<string, JReplica>;

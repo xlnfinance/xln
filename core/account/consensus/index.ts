@@ -1160,7 +1160,7 @@ export async function applyAccountInput(
 ): Promise<HandleAccountInputResult> {
   // The authoritative engine is handed the same raw inputs, in this order,
   // before TypeScript executes them (no-op unless recording is on).
-  noteRawAccountInput(account, input);
+  noteRawAccountInput(context.runtimeId, account, input);
   if (input.kind === 'enqueue') return applyAccountEnqueue(account, input);
   const envelopeError = getAccountInputEnvelopeError(account.state, input);
   if (envelopeError) {

@@ -10,6 +10,7 @@ import {
 } from '../../../storage/keys';
 import { ensureRuntimeConfig } from '../../../runtime/loop/loop-environment.ts';
 import { decodeRuntimeConfig } from '../../../storage/wal/runtime-machine-schema';
+import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
 import { measureRuntimeFrameCloneBytes } from '../../../runtime/frame/clone';
 
 describe('storage config', () => {
@@ -143,4 +144,13 @@ test('a runtime config written before the dead snapshot knob was removed replays
   ) as Record<string, unknown>;
   expect(decoded['minFrameDelayMs']).toBe(25);
   expect(decoded['snapshotIntervalFrames']).toBe(7);
+
+  // And it survives into the next snapshot that Runtime writes, because the
+  // hash covers the config: a Runtime restored from an old checkpoint keeps
+  // the field until an explicit offline migration retires it.
+  const env = createEmptyEnv('legacy-snapshot-knob');
+  env.runtimeConfig = decoded;
+  const snapshot = buildDurableRuntimeMachineSnapshot(env) as Record<string, unknown>;
+  const persisted = snapshot['runtimeConfig'] as Record<string, unknown>;
+  expect(persisted['snapshotIntervalFrames']).toBe(7);
 });
