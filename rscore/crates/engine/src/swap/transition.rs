@@ -3,12 +3,13 @@
 use num_bigint::BigInt;
 
 use super::market::SwapMarketPolicy;
+use super::market::lot_scale;
 use super::net_authorization::{SwapNetAuthorization, assert_offer_authorization, requantize};
 use super::offer::{
     MAX_ACCOUNT_SAME_J_SWAP_OFFERS, MAX_ACCOUNT_SWAP_OFFERS,
     MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET, SwapOffer,
 };
-use super::quantization::prepare_swap_order;
+use super::quantization::{PreparedSwapOrder, prepare_swap_order, quote_amount_at_price};
 use crate::mutation::MutationDecision;
 use crate::{
     AccountOutput, AccountRejection, AccountReplica, Side, TokenId, TransitionError,
@@ -16,6 +17,11 @@ use crate::{
 };
 
 const MAX_TOKEN_DECIMALS: u32 = 255;
+
+/// FINANCIAL.MAX_PAYMENT_AMOUNT (core/config/constants.ts).
+fn max_payment_amount() -> BigInt {
+    (BigInt::from(1) << 128u32) - 1
+}
 
 pub(crate) struct SwapOfferTx<'a> {
     pub offer_id: &'a str,
@@ -28,6 +34,8 @@ pub(crate) struct SwapOfferTx<'a> {
     pub max_fee: &'a BigInt,
     pub min_net_receive: &'a BigInt,
     pub time_in_force: Option<u8>,
+    /// Explicit book level signed by the maker, when it carried one.
+    pub price_ticks: Option<&'a BigInt>,
 }
 
 pub(crate) fn apply_offer(
@@ -43,18 +51,9 @@ pub(crate) fn apply_offer(
     if let Some(reason) = admission(replica, &tx, proposer) {
         return Ok(rejected(reason));
     }
-    let Some(prepared) = prepare_swap_order(
-        policy,
-        tx.give_token_id,
-        tx.want_token_id,
-        tx.give_amount,
-        tx.want_amount,
-        tx.give_token_decimals,
-        tx.want_token_decimals,
-    ) else {
-        return Ok(rejected(ValidationRejection::SwapOfferQuantization {
-            offer_id: tx.offer_id.to_owned(),
-        }));
+    let prepared = match prepare_offer_amounts(policy, &tx) {
+        Ok(prepared) => prepared,
+        Err(rejection) => return Ok(rejected(rejection)),
     };
     let authorization = match requantize(
         tx.give_amount,
@@ -92,8 +91,6 @@ pub(crate) fn apply_offer(
     replica.state_mut().put_delta(delta)?;
 
     let identity = replica.state().identity().clone();
-    let max_fee = authorization.max_fee.clone();
-    let min_net_receive = authorization.min_net_receive.clone();
     let offer = SwapOffer::new(
         tx.offer_id.to_owned(),
         tx.give_token_id,
@@ -117,25 +114,110 @@ pub(crate) fn apply_offer(
         prepared.effective_want,
         tx.want_token_id,
     )];
-    let output = AccountOutput::SwapOfferCreated {
-        offer_id: tx.offer_id.to_owned(),
-        maker_is_left,
-        from_entity: identity.left().as_hex(),
-        to_entity: identity.entity(Side::Right).as_hex(),
-        created_height: current_height,
-        give_token_id: tx.give_token_id,
-        give_token_decimals: tx.give_token_decimals,
-        give_amount: prepared.effective_give,
-        want_token_id: tx.want_token_id,
-        want_token_decimals: tx.want_token_decimals,
-        want_amount: prepared.effective_want,
-        max_fee,
-        min_net_receive,
-        price_ticks: prepared.price_ticks,
-        time_in_force: tx.time_in_force,
+    let output = AccountOutput::SwapOfferUpsert {
+        offer: Box::new(offer.snapshot(
+            identity.left().as_hex(),
+            identity.entity(Side::Right).as_hex(),
+        )),
     };
     replica.state_mut().put_swap_offer(offer)?;
     Ok(MutationDecision::with_outputs(events, vec![output]))
+}
+
+/// Parity target: `prepareSwapOfferAmounts`
+/// (core/account/tx/handlers/swap/offer/quantization.ts).
+///
+/// The canonical order preparation supplies the price and the "too small /
+/// bad ratio" gate, but NOT the amounts: offer creation aligns the base to the
+/// plain lot scale and recomputes the quote at the committed price. The
+/// exact-quote-lot multiple belongs to the remainder path alone.
+fn prepare_offer_amounts(
+    policy: &SwapMarketPolicy,
+    tx: &SwapOfferTx<'_>,
+) -> Result<PreparedSwapOrder, ValidationRejection> {
+    let side = policy.derive_side(tx.give_token_id, tx.want_token_id);
+    let (raw_base, base_decimals, quote_decimals) = if side == 1 {
+        (
+            tx.give_amount,
+            tx.give_token_decimals,
+            tx.want_token_decimals,
+        )
+    } else {
+        (
+            tx.want_amount,
+            tx.want_token_decimals,
+            tx.give_token_decimals,
+        )
+    };
+    let lot = lot_scale(base_decimals);
+    if raw_base < &lot {
+        return Err(ValidationRejection::SwapOfferLotSize { lot: lot.clone() });
+    }
+    let (base_token_id, quote_token_id) = policy.canonical_pair(tx.give_token_id, tx.want_token_id);
+    let step = BigInt::from(
+        policy
+            .price_step_ticks(base_token_id, quote_token_id, base_decimals, quote_decimals)
+            .max(1),
+    );
+    let Some(canonical) = prepare_swap_order(
+        policy,
+        tx.give_token_id,
+        tx.want_token_id,
+        tx.give_amount,
+        tx.want_amount,
+        tx.give_token_decimals,
+        tx.want_token_decimals,
+    ) else {
+        return Err(ValidationRejection::SwapOfferQuantization {
+            offer_id: tx.offer_id.to_owned(),
+        });
+    };
+    // An explicit tick is the signed user intent and owns the final book level,
+    // as long as it is aligned to the step and within one step of the
+    // deterministic price.
+    let price_ticks = match tx.price_ticks {
+        None => canonical.price_ticks,
+        Some(input) => {
+            if input <= &BigInt::from(0) {
+                return Err(ValidationRejection::SwapOfferPriceTicks);
+            }
+            if &((input / &step) * &step) != input {
+                return Err(ValidationRejection::SwapOfferPriceTicks);
+            }
+            let drift = if input > &canonical.price_ticks {
+                input - &canonical.price_ticks
+            } else {
+                &canonical.price_ticks - input
+            };
+            if drift > step {
+                return Err(ValidationRejection::SwapOfferPriceTicks);
+            }
+            input.clone()
+        }
+    };
+    let quantized_base = (raw_base / &lot) * &lot;
+    let recomputed_quote =
+        quote_amount_at_price(base_decimals, quote_decimals, &quantized_base, &price_ticks);
+    let (effective_give, effective_want) = if side == 1 {
+        (quantized_base, recomputed_quote)
+    } else {
+        (recomputed_quote, quantized_base)
+    };
+    // TypeScript bounds-checks the quantized amounts, not only the raw ones.
+    let minimum = BigInt::from(1);
+    let maximum = max_payment_amount();
+    if effective_give < minimum
+        || effective_give > maximum
+        || effective_want < minimum
+        || effective_want > maximum
+    {
+        return Err(ValidationRejection::SwapOfferAmount);
+    }
+    Ok(PreparedSwapOrder {
+        price_ticks,
+        effective_give,
+        effective_want,
+    })
 }
 
 fn admission(
@@ -166,7 +248,7 @@ fn admission(
     }
     // FINANCIAL.MIN_PAYMENT_AMOUNT..=MAX_PAYMENT_AMOUNT (1..=U128 max).
     let zero = BigInt::from(0);
-    let max_amount = (BigInt::from(1) << 128u32) - 1;
+    let max_amount = max_payment_amount();
     if tx.give_amount <= &zero
         || tx.want_amount <= &zero
         || tx.give_amount > &max_amount

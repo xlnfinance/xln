@@ -29,7 +29,7 @@ pub(crate) fn apply_cancel_request(
             "📨 Swap cancel requested: {}...",
             &offer_id[..offer_id.len().min(8)]
         )],
-        vec![AccountOutput::SwapCancelRequested {
+        vec![AccountOutput::SwapCancelRequest {
             offer_id: offer_id.to_owned(),
         }],
     ))

@@ -140,12 +140,19 @@ pub(crate) fn apply_swap_resolve_remainder(
         &resolve.offer.offer_id()[..resolve.offer.offer_id().len().min(8)],
         requantized.effective_give,
     ));
+    let identity = replica.state().identity().clone();
+    let output = AccountOutput::SwapOfferUpsert {
+        offer: Box::new(remaining_offer.snapshot(
+            identity.left().as_hex(),
+            identity.entity(Side::Right).as_hex(),
+        )),
+    };
     replica.state_mut().put_delta(give_delta)?;
     replica.state_mut().put_delta(want_delta)?;
     replica.state_mut().put_swap_offer(remaining_offer)?;
     Ok(Ok(RemainderOutcome {
         events,
-        outputs: Vec::new(),
+        outputs: vec![output],
     }))
 }
 
@@ -172,23 +179,13 @@ fn close_offer(
     offer: &SwapOffer,
     events: Vec<String>,
 ) -> Result<RemainderOutcome, TransitionError> {
-    let maker_entity = replica
-        .state()
-        .identity()
-        .entity(if offer.maker_is_left() {
-            Side::Left
-        } else {
-            Side::Right
-        })
-        .as_hex();
     replica.state_mut().put_delta(give_delta)?;
     replica.state_mut().put_delta(want_delta)?;
     replica.state_mut().remove_swap_offer(offer.offer_id())?;
     Ok(RemainderOutcome {
         events,
-        outputs: vec![AccountOutput::SwapOfferCancelled {
+        outputs: vec![AccountOutput::SwapOfferRemove {
             offer_id: offer.offer_id().to_owned(),
-            account_id: maker_entity,
         }],
     })
 }

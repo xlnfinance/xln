@@ -274,14 +274,6 @@ export const accountSeedWire = (
   ];
 };
 
-export const SHADOW_SUPPORTED_TX_TYPES = new Set([
-  'direct_payment', 'htlc_lock', 'htlc_resolve', 'add_delta', 'set_credit_limit',
-  'rebalance_policy',
-  'swap_offer',
-  'swap_cancel_request',
-  'swap_resolve',
-]);
-
 export type ShadowOutputRow =
   | readonly [
       kind: 'forward',
@@ -301,12 +293,10 @@ export type ShadowOutputRow =
       amount: string,
     ]
   | readonly [
-      kind: 'offer',
+      kind: 'offerUpsert',
       offerId: string,
-      makerSide: number,
-      fromEntity: string,
-      toEntity: string,
-      createdHeight: number,
+      leftEntity: string,
+      rightEntity: string,
       giveTokenId: number,
       giveTokenDecimals: number,
       giveAmount: string,
@@ -317,9 +307,13 @@ export type ShadowOutputRow =
       minNetReceive: string,
       priceTicks: string,
       timeInForce: number | null,
+      makerSide: number,
+      createdHeight: number,
+      quantizedGive: string,
+      quantizedWant: string,
     ]
+  | readonly [kind: 'offerRemove', offerId: string]
   | readonly [kind: 'cancelRequest', offerId: string]
-  | readonly [kind: 'cancelled', offerId: string, accountId: string]
   | readonly [
       kind: 'error',
       lockId: string,
@@ -337,17 +331,54 @@ export type ShadowOutputRow =
  */
 export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] => {
   const rows: ShadowOutputRow[] = [];
+  // Every candidate effect, in order: skipping an unknown kind would compare a
+  // shorter list against the engine's and call the frame a match.
   for (const output of result.candidateEffects ?? []) {
-    if (output.kind !== 'directPaymentForward') continue;
-    rows.push([
-      'forward',
-      output.tokenId,
-      output.amount.toString(),
-      [...output.route],
-      output.description ?? null,
-      output.deliveryMode,
-      output.trustedGatewayEntityId,
-    ]);
+    switch (output.kind) {
+      case 'directPaymentForward':
+        rows.push([
+          'forward',
+          output.tokenId,
+          output.amount.toString(),
+          [...output.route],
+          output.description ?? null,
+          output.deliveryMode,
+          output.trustedGatewayEntityId,
+        ]);
+        break;
+      case 'swapOfferUpsert': {
+        const offer = output.offer;
+        rows.push([
+          'offerUpsert',
+          offer.offerId,
+          offer.leftEntity,
+          offer.rightEntity,
+          offer.giveTokenId,
+          offer.giveTokenDecimals,
+          offer.giveAmount.toString(),
+          offer.wantTokenId,
+          offer.wantTokenDecimals,
+          offer.wantAmount.toString(),
+          offer.maxFee.toString(),
+          offer.minNetReceive.toString(),
+          offer.priceTicks.toString(),
+          offer.timeInForce === undefined ? null : offer.timeInForce,
+          offer.makerIsLeft ? 0 : 1,
+          offer.createdHeight,
+          offer.quantizedGive.toString(),
+          offer.quantizedWant.toString(),
+        ]);
+        break;
+      }
+      case 'swapOfferRemove':
+        rows.push(['offerRemove', output.offerId]);
+        break;
+      case 'swapCancelRequest':
+        rows.push(['cancelRequest', output.offerId]);
+        break;
+      default:
+        throw new Error(`SHADOW_OUTPUT_KIND_UNSUPPORTED:${output.kind}`);
+    }
   }
   if (result.outcome === 'htlc_secret') {
     rows.push([
@@ -358,45 +389,6 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
       result.tokenId,
       result.amount.toString(),
     ]);
-  }
-  if (result.outcome === 'swap_offer_created') {
-    const offer = result.swapOfferCreated;
-    // The offer event type marks priceTicks optional for the cross-j paths;
-    // a same-j offer always carries it, and a missing one is a broken
-    // transition rather than something to paper over with a default.
-    // The event type marks priceTicks and createdHeight optional for the
-    // cross-j paths; a same-j offer always carries both, and a missing one is
-    // a broken transition rather than something to paper over with a default.
-    if (offer.priceTicks === undefined) throw new Error('SHADOW_OFFER_PRICE_TICKS_MISSING');
-    if (offer.createdHeight === undefined) throw new Error('SHADOW_OFFER_HEIGHT_MISSING');
-    rows.push([
-      'offer',
-      offer.offerId,
-      offer.makerIsLeft ? 0 : 1,
-      offer.fromEntity,
-      offer.toEntity,
-      offer.createdHeight,
-      offer.giveTokenId,
-      offer.giveTokenDecimals,
-      offer.giveAmount.toString(),
-      offer.wantTokenId,
-      offer.wantTokenDecimals,
-      offer.wantAmount.toString(),
-      offer.maxFee.toString(),
-      offer.minNetReceive.toString(),
-      offer.priceTicks.toString(),
-      offer.timeInForce === undefined ? null : offer.timeInForce,
-    ]);
-  }
-  if (result.outcome === 'swap_cancelled') {
-    rows.push([
-      'cancelled',
-      result.swapOfferCancelled.offerId,
-      result.swapOfferCancelled.accountId,
-    ]);
-  }
-  if (result.outcome === 'swap_cancel_requested') {
-    rows.push(['cancelRequest', result.swapOfferCancelRequested.offerId]);
   }
   if (result.outcome === 'htlc_error') {
     rows.push([
@@ -410,6 +402,13 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
   }
   return rows;
 };
+
+/**
+ * Support is a property of the payload, not of the tx type: a cross-jurisdiction
+ * swap offer is the same `swap_offer` type as a same-j one and the engine
+ * cannot execute it. Callers must treat a null wire as unsupported.
+ */
+export const shadowTxSupported = (tx: AccountTx): boolean => accountTxWire(tx) !== null;
 
 /** Absent stays absent on the wire: several resolve checks distinguish it from zero. */
 const optionalAmount = (value: bigint | undefined): string | null =>
@@ -472,6 +471,7 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         tx.data.maxFee.toString(),
         tx.data.minNetReceive.toString(),
         tx.data.timeInForce ?? null,
+        optionalAmount(tx.data.priceTicks),
       ];
     case 'swap_cancel_request':
       return [7, tx.data.offerId];

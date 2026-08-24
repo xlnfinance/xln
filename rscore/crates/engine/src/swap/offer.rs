@@ -8,6 +8,29 @@
 use num_bigint::BigInt;
 use xln_rscore_protocol::CanonicalValue;
 
+/// The Entity-visible view of one resting row.
+/// Parity target: `AccountSwapOfferSnapshot` (core/types/account.ts).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwapOfferSnapshot {
+    pub offer_id: String,
+    pub left_entity: String,
+    pub right_entity: String,
+    pub give_token_id: u32,
+    pub give_token_decimals: u32,
+    pub give_amount: BigInt,
+    pub want_token_id: u32,
+    pub want_token_decimals: u32,
+    pub want_amount: BigInt,
+    pub max_fee: BigInt,
+    pub min_net_receive: BigInt,
+    pub price_ticks: BigInt,
+    pub time_in_force: Option<u8>,
+    pub maker_is_left: bool,
+    pub created_height: u64,
+    pub quantized_give: BigInt,
+    pub quantized_want: BigInt,
+}
+
 /// Total, same-j and per-side-per-market ceilings (core/config/constants.ts).
 pub const MAX_ACCOUNT_SWAP_OFFERS: usize = 38;
 pub const MAX_ACCOUNT_SAME_J_SWAP_OFFERS: usize = 20;
@@ -130,6 +153,29 @@ impl SwapOffer {
 
     /// The market this offer rests in, for the per-side ceiling. Same-j only,
     /// so the key is the directed token pair.
+    /// The snapshot the Entity layer consumes, read from the committed row.
+    pub fn snapshot(&self, left_entity: String, right_entity: String) -> SwapOfferSnapshot {
+        SwapOfferSnapshot {
+            offer_id: self.offer_id.clone(),
+            left_entity,
+            right_entity,
+            give_token_id: self.give_token_id,
+            give_token_decimals: self.give_token_decimals,
+            give_amount: self.give_amount.clone(),
+            want_token_id: self.want_token_id,
+            want_token_decimals: self.want_token_decimals,
+            want_amount: self.want_amount.clone(),
+            max_fee: self.max_fee.clone(),
+            min_net_receive: self.min_net_receive.clone(),
+            price_ticks: self.price_ticks.clone(),
+            time_in_force: self.time_in_force,
+            maker_is_left: self.maker_is_left,
+            created_height: self.created_height,
+            quantized_give: self.quantized_give.clone(),
+            quantized_want: self.quantized_want.clone(),
+        }
+    }
+
     pub fn market_key(&self) -> String {
         format!("same:{}>{}", self.give_token_id, self.want_token_id)
     }

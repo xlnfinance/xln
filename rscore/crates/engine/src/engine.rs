@@ -199,6 +199,7 @@ fn apply_to_candidate(
             max_fee,
             min_net_receive,
             time_in_force,
+            price_ticks,
         } => {
             let context = context.ok_or(TransitionError::ExecutionContextRequired("swap_offer"))?;
             crate::swap::apply_offer(
@@ -215,6 +216,7 @@ fn apply_to_candidate(
                     max_fee,
                     min_net_receive,
                     time_in_force: *time_in_force,
+                    price_ticks: price_ticks.as_ref(),
                 },
                 proposer,
                 // core/account/tx/mutation.ts routes swap_offer with the

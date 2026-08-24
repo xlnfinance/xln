@@ -207,51 +207,32 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             AbiValue::Integer(i128::from(token_id.get())),
             AbiValue::Text(amount.to_string()),
         ]),
-        AccountOutput::SwapOfferCreated {
-            offer_id,
-            maker_is_left,
-            from_entity,
-            to_entity,
-            created_height,
-            give_token_id,
-            give_token_decimals,
-            give_amount,
-            want_token_id,
-            want_token_decimals,
-            want_amount,
-            max_fee,
-            min_net_receive,
-            price_ticks,
-            time_in_force,
-        } => tuple(vec![
+        AccountOutput::SwapOfferUpsert { offer } => tuple(vec![
             AbiValue::Integer(3),
-            AbiValue::Text(offer_id.clone()),
-            AbiValue::Integer(i128::from(!*maker_is_left)),
-            AbiValue::Text(from_entity.clone()),
-            AbiValue::Text(to_entity.clone()),
-            integer(*created_height),
-            integer(*give_token_id),
-            integer(*give_token_decimals),
-            AbiValue::Text(give_amount.to_string()),
-            integer(*want_token_id),
-            integer(*want_token_decimals),
-            AbiValue::Text(want_amount.to_string()),
-            AbiValue::Text(max_fee.to_string()),
-            AbiValue::Text(min_net_receive.to_string()),
-            AbiValue::Text(price_ticks.to_string()),
-            time_in_force.map_or(AbiValue::Nil, integer),
+            AbiValue::Text(offer.offer_id.clone()),
+            AbiValue::Text(offer.left_entity.clone()),
+            AbiValue::Text(offer.right_entity.clone()),
+            integer(offer.give_token_id),
+            integer(offer.give_token_decimals),
+            AbiValue::Text(offer.give_amount.to_string()),
+            integer(offer.want_token_id),
+            integer(offer.want_token_decimals),
+            AbiValue::Text(offer.want_amount.to_string()),
+            AbiValue::Text(offer.max_fee.to_string()),
+            AbiValue::Text(offer.min_net_receive.to_string()),
+            AbiValue::Text(offer.price_ticks.to_string()),
+            offer.time_in_force.map_or(AbiValue::Nil, integer),
+            AbiValue::Integer(i128::from(!offer.maker_is_left)),
+            integer(offer.created_height),
+            AbiValue::Text(offer.quantized_give.to_string()),
+            AbiValue::Text(offer.quantized_want.to_string()),
         ]),
-        AccountOutput::SwapCancelRequested { offer_id } => {
+        AccountOutput::SwapOfferRemove { offer_id } => {
             tuple(vec![AbiValue::Integer(4), AbiValue::Text(offer_id.clone())])
         }
-        AccountOutput::SwapOfferCancelled {
-            offer_id,
-            account_id,
-        } => tuple(vec![
-            AbiValue::Integer(5),
-            AbiValue::Text(offer_id.clone()),
-            AbiValue::Text(account_id.clone()),
-        ]),
+        AccountOutput::SwapCancelRequest { offer_id } => {
+            tuple(vec![AbiValue::Integer(5), AbiValue::Text(offer_id.clone())])
+        }
         AccountOutput::HtlcError {
             lock_id,
             hashlock,

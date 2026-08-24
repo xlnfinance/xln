@@ -524,7 +524,7 @@ fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
 }
 
 fn decode_swap_offer(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
-    let fields = exact(fields, 11, "swapOffer")?;
+    let fields = exact(fields, 12, "swapOffer")?;
     Ok(AccountTx::SwapOffer {
         offer_id: text(&fields[1])?.into(),
         give_token_id: bounded_u32(&fields[2], "giveTokenId")?,
@@ -542,6 +542,7 @@ fn decode_swap_offer(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
                     .map_err(|_| ProcessError::Expected("timeInForce"))?,
             ),
         },
+        price_ticks: optional_bigint(&fields[11], "priceTicks")?,
     })
 }
 

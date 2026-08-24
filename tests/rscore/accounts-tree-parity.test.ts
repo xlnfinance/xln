@@ -25,7 +25,11 @@ import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
 } from '../../core/orderbook/swap-execution';
-import { shadowOutputRows, swapMarketPolicyWire } from '../../core/rscore/shadow-wire';
+import {
+  accountTxWire,
+  shadowOutputRows,
+  swapMarketPolicyWire,
+} from '../../core/rscore/shadow-wire';
 
 const BINARY = join(import.meta.dir, '../../rscore/target/release/xln-rscore');
 
@@ -251,6 +255,7 @@ const swapOfferJob = (index: number): RscoreWireValue[] => [
     SWAP_MAX_FEE.toString(),
     (SWAP_WANT - SWAP_MAX_FEE).toString(),
     null,
+    null, // no explicit price ticks: the engine derives the canonical one
   ],
 ];
 
@@ -412,23 +417,26 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         // field, not only the resulting account root.
         if (result.outcome !== 'swap_offer_created') throw new Error(`TS_OUTCOME:${result.outcome}`);
         expect(engineOutputs[index]![0]![2]).toEqual(shadowOutputRows(result)[0]!);
+        const offer = account.state.swapOffers.get(`parity-offer-${index}`)!;
         expect(shadowOutputRows(result)).toEqual([[
-          'offer',
+          'offerUpsert',
           `parity-offer-${index}`,
-          1,
           account.state.leftEntity,
           account.state.rightEntity,
-          SWAP_J_HEIGHT,
           2,
           18,
-          SWAP_GIVE.toString(),
+          offer.giveAmount.toString(),
           1,
           6,
-          SWAP_WANT.toString(),
-          SWAP_MAX_FEE.toString(),
-          (SWAP_WANT - SWAP_MAX_FEE).toString(),
-          result.swapOfferCreated.priceTicks!.toString(),
+          offer.wantAmount.toString(),
+          offer.maxFee.toString(),
+          offer.minNetReceive.toString(),
+          offer.priceTicks!.toString(),
           null,
+          1,
+          SWAP_J_HEIGHT,
+          offer.quantizedGive!.toString(),
+          offer.quantizedWant!.toString(),
         ]]);
       }
 
@@ -437,6 +445,146 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       // both match TypeScript and differ from the pre-offer root.
       expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
       expect(new Uint8Array(committed[1] as Uint8Array)).not.toEqual(new Uint8Array(loaded[1] as Uint8Array));
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  }, 30_000);
+
+  /**
+   * Quantization grid: amounts that are lot-aligned, amounts that are not, and
+   * amounts whose exact-quote-lot multiple exceeds one lot (where the canonical
+   * order preparation and offer creation deliberately disagree). Acceptance
+   * itself is compared, so a rejection on one side only is a failure.
+   */
+  test('offer quantization agrees with TypeScript over an amount grid', async () => {
+    const GRID = [
+      { give: 10n ** 18n, want: 2_000_000n },
+      { give: 15n * 10n ** 12n, want: 40_000n },
+      { give: 102n * 10n ** 17n, want: 25_505_100_000n },
+      { give: 3n * 10n ** 12n + 7n, want: 8_000n },
+      { give: 10n ** 15n, want: 3n },
+    ] as const;
+    const accounts = GRID.map((_, index) => makeTsSwapAccount(index));
+    const client = new RscoreProcessClient(BINARY, {
+      engineGeneration: Buffer.alloc(8, 0xa0),
+      runtimeId: Buffer.alloc(20, 0x10),
+      sessionId: Buffer.alloc(16, 0x20),
+    });
+    try {
+      await client.hello(2, swapMarketPolicyWire());
+      await client.restore(0, accounts.map((account, index) => seedWire(index, account)));
+      const jobs = GRID.map((entry, index) => {
+        const job = swapOfferJob(index);
+        const tx = job[4] as RscoreWireValue[];
+        tx[4] = entry.give.toString();
+        tx[7] = entry.want.toString();
+        tx[8] = '0';
+        tx[9] = entry.want.toString();
+        return job;
+      });
+      const prepared = (await client.prepare(jobs)) as unknown[];
+      const verdicts = (prepared[2] as unknown[])
+        .map(row => Number((((row as unknown[])[2]) as unknown[])[0]));
+
+      const applied: boolean[] = [];
+      for (const [index, entry] of GRID.entries()) {
+        const result = await applyAccountTxToMutableReplica(
+          accounts[index]!,
+          {
+            type: 'swap_offer',
+            data: {
+              offerId: `parity-offer-${index}`,
+              giveTokenId: 2,
+              giveTokenDecimals: 18,
+              giveAmount: entry.give,
+              wantTokenId: 1,
+              wantTokenDecimals: 6,
+              wantAmount: entry.want,
+              maxFee: 0n,
+              minNetReceive: entry.want,
+            },
+          },
+          false,
+          0,
+          SWAP_J_HEIGHT,
+          false,
+        );
+        applied.push(result.ok);
+        if (result.ok) {
+          const engineRows = engineOutputProjection(
+            prepared[3] as unknown[],
+            ACCOUNT_IDS[index]!.slice(2),
+          );
+          expect(engineRows.map(row => row[2])).toEqual(shadowOutputRows(result));
+        }
+      }
+      expect(verdicts.map(verdict => verdict === 0)).toEqual(applied);
+      // At least one grid point must exercise each outcome, or the grid proves
+      // nothing about the boundary.
+      expect(applied.some(Boolean) && applied.some(value => !value)).toBe(true);
+
+      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  }, 30_000);
+
+  test('an explicit price tick is the committed book level in both engines', async () => {
+    const accounts = ACCOUNT_IDS.slice(0, 2).map((_, index) => makeTsSwapAccount(index));
+    const client = new RscoreProcessClient(BINARY, {
+      engineGeneration: Buffer.alloc(8, 0xa0),
+      runtimeId: Buffer.alloc(20, 0x10),
+      sessionId: Buffer.alloc(16, 0x20),
+    });
+    try {
+      await client.hello(2, swapMarketPolicyWire());
+      await client.restore(0, accounts.map((account, index) => seedWire(index, account)));
+      // One step below the deterministic tick: aligned, drift within a step, so
+      // the signed intent owns the level and the quote is recomputed from it.
+      const derived = 20_000n;
+      const explicit = derived - 1n;
+      // The wire must carry the tick, not only the engine honour it.
+      const explicitTx: AccountTx = {
+        type: 'swap_offer',
+        data: {
+          ...(swapOfferTx(0) as Extract<AccountTx, { type: 'swap_offer' }>).data,
+          priceTicks: explicit,
+        },
+      };
+      expect(accountTxWire(explicitTx)?.[11]).toBe(explicit.toString());
+      const jobs = accounts.map((_, index) => {
+        const job = swapOfferJob(index);
+        (job[4] as RscoreWireValue[])[11] = explicit.toString();
+        return job;
+      });
+      const prepared = (await client.prepare(jobs)) as unknown[];
+      expect((prepared[2] as unknown[])
+        .map(row => Number((((row as unknown[])[2]) as unknown[])[0])))
+        .toEqual(accounts.map(() => 0));
+
+      for (const [index, account] of accounts.entries()) {
+        const tx = swapOfferTx(index) as Extract<AccountTx, { type: 'swap_offer' }>;
+        const result = await applyAccountTxToMutableReplica(
+          account,
+          { type: 'swap_offer', data: { ...tx.data, priceTicks: explicit } },
+          false,
+          0,
+          SWAP_J_HEIGHT,
+          false,
+        );
+        if (!result.ok) throw new Error(`TS_OFFER_REJECTED:${index}:${result.rejection.message}`);
+        expect(account.state.swapOffers.get(`parity-offer-${index}`)!.priceTicks).toBe(explicit);
+        const engineRows = engineOutputProjection(
+          prepared[3] as unknown[],
+          ACCOUNT_IDS[index]!.slice(2),
+        );
+        expect(engineRows.map(row => row[2])).toEqual(shadowOutputRows(result));
+      }
+      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
       await client.shutdown();
     } finally {
       client.kill();

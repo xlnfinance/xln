@@ -56,6 +56,7 @@ pub enum AccountTx {
         max_fee: BigInt,
         min_net_receive: BigInt,
         time_in_force: Option<u8>,
+        price_ticks: Option<BigInt>,
     },
     SwapResolve {
         offer_id: String,

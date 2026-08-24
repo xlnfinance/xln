@@ -111,6 +111,10 @@ pub enum ValidationRejection {
         token_id: u32,
     },
     SwapOfferTimeInForce,
+    SwapOfferPriceTicks,
+    SwapOfferLotSize {
+        lot: num_bigint::BigInt,
+    },
     SwapOfferQuantization {
         offer_id: String,
     },
@@ -185,6 +189,10 @@ impl ValidationRejection {
             Self::SwapOfferAmount => "Invalid swap amount".into(),
             Self::SwapOfferSameToken { token_id } => format!("Cannot swap same token: {token_id}"),
             Self::SwapOfferTimeInForce => "Invalid timeInForce".into(),
+            Self::SwapOfferPriceTicks => "Invalid explicit priceTicks".into(),
+            Self::SwapOfferLotSize { lot } => {
+                format!("Order too small for lot size ({lot} base units)")
+            }
             Self::SwapOfferQuantization { offer_id } => format!(
                 "Invalid price ratio or order too small after canonical quantization: {offer_id}"
             ),

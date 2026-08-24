@@ -22,7 +22,6 @@ import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
-  SHADOW_SUPPORTED_TX_TYPES,
   shadowOutputRows,
   accountSeedWire,
   accountTxWire,
@@ -106,41 +105,39 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
     ];
   }
   if (tag === 3) {
-    wireTuple(output, 'SHADOW_ENGINE_OFFER', 16);
-    const makerSide = wireInteger(output[2], 'SHADOW_ENGINE_OFFER_MAKER');
+    wireTuple(output, 'SHADOW_ENGINE_OFFER', 18);
+    const makerSide = wireInteger(output[14], 'SHADOW_ENGINE_OFFER_MAKER');
     if (makerSide !== 0 && makerSide !== 1) throw new Error(`SHADOW_ENGINE_OFFER_MAKER:${makerSide}`);
     return [
-      'offer',
+      'offerUpsert',
       wireText(output[1], 'SHADOW_ENGINE_OFFER_ID'),
-      makerSide,
-      wireText(output[3], 'SHADOW_ENGINE_OFFER_FROM'),
-      wireText(output[4], 'SHADOW_ENGINE_OFFER_TO'),
-      wireInteger(output[5], 'SHADOW_ENGINE_OFFER_HEIGHT'),
-      wireInteger(output[6], 'SHADOW_ENGINE_OFFER_GIVE_TOKEN'),
-      wireInteger(output[7], 'SHADOW_ENGINE_OFFER_GIVE_DECIMALS'),
-      wireText(output[8], 'SHADOW_ENGINE_OFFER_GIVE_AMOUNT'),
-      wireInteger(output[9], 'SHADOW_ENGINE_OFFER_WANT_TOKEN'),
-      wireInteger(output[10], 'SHADOW_ENGINE_OFFER_WANT_DECIMALS'),
-      wireText(output[11], 'SHADOW_ENGINE_OFFER_WANT_AMOUNT'),
-      wireText(output[12], 'SHADOW_ENGINE_OFFER_MAX_FEE'),
-      wireText(output[13], 'SHADOW_ENGINE_OFFER_MIN_NET'),
-      wireText(output[14], 'SHADOW_ENGINE_OFFER_PRICE_TICKS'),
-      output[15] === null || output[15] === undefined
+      wireText(output[2], 'SHADOW_ENGINE_OFFER_LEFT'),
+      wireText(output[3], 'SHADOW_ENGINE_OFFER_RIGHT'),
+      wireInteger(output[4], 'SHADOW_ENGINE_OFFER_GIVE_TOKEN'),
+      wireInteger(output[5], 'SHADOW_ENGINE_OFFER_GIVE_DECIMALS'),
+      wireText(output[6], 'SHADOW_ENGINE_OFFER_GIVE_AMOUNT'),
+      wireInteger(output[7], 'SHADOW_ENGINE_OFFER_WANT_TOKEN'),
+      wireInteger(output[8], 'SHADOW_ENGINE_OFFER_WANT_DECIMALS'),
+      wireText(output[9], 'SHADOW_ENGINE_OFFER_WANT_AMOUNT'),
+      wireText(output[10], 'SHADOW_ENGINE_OFFER_MAX_FEE'),
+      wireText(output[11], 'SHADOW_ENGINE_OFFER_MIN_NET'),
+      wireText(output[12], 'SHADOW_ENGINE_OFFER_PRICE_TICKS'),
+      output[13] === null || output[13] === undefined
         ? null
-        : wireInteger(output[15], 'SHADOW_ENGINE_OFFER_TIF'),
+        : wireInteger(output[13], 'SHADOW_ENGINE_OFFER_TIF'),
+      makerSide,
+      wireInteger(output[15], 'SHADOW_ENGINE_OFFER_HEIGHT'),
+      wireText(output[16], 'SHADOW_ENGINE_OFFER_QUANTIZED_GIVE'),
+      wireText(output[17], 'SHADOW_ENGINE_OFFER_QUANTIZED_WANT'),
     ];
   }
   if (tag === 4) {
-    wireTuple(output, 'SHADOW_ENGINE_CANCEL_REQUEST', 2);
-    return ['cancelRequest', wireText(output[1], 'SHADOW_ENGINE_CANCEL_REQUEST_ID')];
+    wireTuple(output, 'SHADOW_ENGINE_OFFER_REMOVE', 2);
+    return ['offerRemove', wireText(output[1], 'SHADOW_ENGINE_OFFER_REMOVE_ID')];
   }
   if (tag === 5) {
-    wireTuple(output, 'SHADOW_ENGINE_CANCELLED', 3);
-    return [
-      'cancelled',
-      wireText(output[1], 'SHADOW_ENGINE_CANCELLED_ID'),
-      wireText(output[2], 'SHADOW_ENGINE_CANCELLED_ACCOUNT'),
-    ];
+    wireTuple(output, 'SHADOW_ENGINE_CANCEL_REQUEST', 2);
+    return ['cancelRequest', wireText(output[1], 'SHADOW_ENGINE_CANCEL_REQUEST_ID')];
   }
   throw new Error(`SHADOW_ENGINE_OUTPUT_TAG_UNSUPPORTED:${tag}`);
 };
@@ -642,7 +639,10 @@ export class RscoreShadowMirror {
           `SHADOW_TX_RESULT_LENGTH:${input.txResults.length}:${input.accountTxs.length}`,
         );
       }
-      const unsupported = input.accountTxs.filter(tx => !SHADOW_SUPPORTED_TX_TYPES.has(tx.type));
+      // Encoded once: support is decided by the payload, and the same wire is
+      // reused for the jobs below.
+      const wires = input.accountTxs.map(accountTxWire);
+      const unsupported = input.accountTxs.filter((_tx, index) => wires[index] === null);
       for (const tx of unsupported) {
         this.#stats.unsupportedTxTypes[tx.type] = (this.#stats.unsupportedTxTypes[tx.type] ?? 0) + 1;
       }
@@ -703,9 +703,8 @@ export class RscoreShadowMirror {
         return;
       }
       const jobs: RscoreWireValue[][] = [];
-      for (const [index, tx] of input.accountTxs.entries()) {
-        const wire = accountTxWire(tx);
-        if (wire === null) throw new Error(`SHADOW_TX_UNSUPPORTED:${tx.type}`);
+      for (const [index, wire] of wires.entries()) {
+        if (wire === null) throw new Error('SHADOW_TX_UNSUPPORTED_AFTER_ADMISSION');
         jobs.push([
           index,
           accountIdBytes,
