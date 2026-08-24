@@ -566,13 +566,19 @@ export class RscoreShadowMirror {
           expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
           txTypes: input.accountTxs.map(tx => tx.type),
           expectedOutputs: input.accountTxs.flatMap((tx, index) => {
-          const result = input.txResults[index];
-          return result ? shadowOutputRows(tx, result) : [];
-        }),
+            const result = input.txResults[index];
+            return result ? shadowOutputRows(tx, result) : [];
+          }),
         },
         jobs,
       });
       this.#pendingWave.set(ownerKey, pending);
+      // The account is no longer merely imported: this frame's transitions are
+      // about to be executed by the engine and compared.
+      this.#seeded.delete(scopedKey);
+      for (const tx of input.accountTxs) {
+        this.#stats.executedByType[tx.type] = (this.#stats.executedByType[tx.type] ?? 0) + 1;
+      }
       // Strict mode verifies frame by frame, so it never batches: a batched
       // wave only proves the final per-account root, and an intermediate frame
       // that lands on the same state would go unnoticed.
