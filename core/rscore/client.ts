@@ -38,7 +38,9 @@ const requestTimeoutMs = (): number => {
 const REQUEST_TIMEOUT_MS = requestTimeoutMs();
 
 export const RSCORE_ABI_VERSION = 1;
-export const RSCORE_PROCESS_ABI_VERSION = 1;
+// 2: Hello carries the authority config, and the authoritative wave joins the
+// op set. An engine built against the old Hello fails at Hello, not later.
+export const RSCORE_PROCESS_ABI_VERSION = 2;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -60,6 +62,7 @@ export const RSCORE_OP = {
   upsertAccounts: 14,
   updateAccountShells: 15,
   removeAccounts: 16,
+  prepareAccountWave: 17,
 } as const;
 
 const MESSAGE_KIND_REQUEST = 0;
@@ -473,8 +476,49 @@ export class RscoreProcessClient {
     return Array.isArray(body) && body.length === 1 ? body[0] : body;
   }
 
-  async hello(workerCount: number, swapMarket: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.hello, [RSCORE_PROCESS_ABI_VERSION, workerCount, swapMarket]);
+  /**
+   * `authority` turns this session into one that owns its accounts: it derives
+   * its own signer key from the seed and returns signed frames. Without it the
+   * session mirrors what the TypeScript engine already decided.
+   */
+  async hello(
+    workerCount: number,
+    swapMarket: RscoreWireValue[],
+    authority?: Readonly<{ seed: string; signerId: string }>,
+  ): Promise<unknown> {
+    return this.request(RSCORE_OP.hello, [
+      RSCORE_PROCESS_ABI_VERSION,
+      workerCount,
+      swapMarket,
+      authority ? [authority.seed, authority.signerId] : null,
+    ]);
+  }
+
+  /**
+   * One runtime frame for an authoritative session: what to queue, what
+   * arrived from counterparties, and whether to propose afterwards. The reply
+   * is a candidate — it is only kept once `commit` names this request.
+   */
+  async prepareAccountWave(wave: Readonly<{
+    timestamp: number;
+    jHeight: number;
+    entityTimestamp: number;
+    finalizedJHeight: number;
+    propose: boolean;
+    admissions: RscoreWireValue[];
+    inputs: RscoreWireValue[];
+  }>): Promise<{ result: unknown; token: Buffer }> {
+    const token = this.requestIdBytes(this.#nextRequestId);
+    const result = await this.request(RSCORE_OP.prepareAccountWave, [
+      wave.timestamp,
+      wave.jHeight,
+      wave.entityTimestamp,
+      wave.finalizedJHeight,
+      wave.propose,
+      wave.admissions,
+      wave.inputs,
+    ]);
+    return { result, token };
   }
 
   async restore(revision: number, accounts: RscoreWireValue[]): Promise<unknown> {

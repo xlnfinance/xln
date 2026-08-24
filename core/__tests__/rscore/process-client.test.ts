@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { swapMarketPolicyWire } from '../../rscore/shadow-wire';
-import { RscoreProcessClient } from '../../rscore/client';
+import { RSCORE_PROCESS_ABI_VERSION, RscoreProcessClient } from '../../rscore/client';
 
 const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
 
@@ -28,7 +28,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
     const client = new RscoreProcessClient(BINARY, identity());
     try {
       const hello = (await client.hello(4, swapMarketPolicyWire())) as unknown[];
-      expect(hello[0]).toBe(1);
+      expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
       expect(hello[2]).toBe(4);
 
       const loaded = (await client.restore(7, [])) as unknown[];
@@ -44,6 +44,56 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
 
       // Empty waves are refused loudly — no silent no-op commits.
       await expect(client.prepare([])).rejects.toThrow('RSCORE_BATCH_EMPTY');
+
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  });
+
+  test('an authoritative session runs a wave and commits it', async () => {
+    const client = new RscoreProcessClient(BINARY, identity());
+    try {
+      const seed = `0x${'7a'.repeat(32)}`;
+      const hello = (await client.hello(2, swapMarketPolicyWire(), {
+        seed,
+        signerId: '1',
+      })) as unknown[];
+      expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
+
+      const loaded = (await client.restore(0, [])) as unknown[];
+      expect(loaded[0]).toBe(0);
+
+      const { result, token } = await client.prepareAccountWave({
+        timestamp: 1_700_000_000_000,
+        jHeight: 100,
+        entityTimestamp: 1_700_000_000_000,
+        finalizedJHeight: 100,
+        propose: true,
+        admissions: [],
+        inputs: [],
+      });
+      const wave = result as unknown[];
+      // No accounts, so nothing moved and nothing was proposed — but the wave
+      // is still a candidate that must be committed or taken back.
+      expect(wave[0]).toBe(0);
+      expect(wave[2]).toEqual([]);
+      expect(wave[3]).toEqual([]);
+
+      await expect(
+        client.prepareAccountWave({
+          timestamp: 1_700_000_000_001,
+          jHeight: 100,
+          entityTimestamp: 1_700_000_000_001,
+          finalizedJHeight: 100,
+          propose: true,
+          admissions: [],
+          inputs: [],
+        }),
+      ).rejects.toThrow('RSCORE_PROCESS_PREPARE_PENDING');
+
+      const committed = (await client.commit(token)) as unknown[];
+      expect(committed[0]).toBe(0);
 
       await client.shutdown();
     } finally {
