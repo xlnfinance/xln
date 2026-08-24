@@ -20,7 +20,10 @@ pub use consensus::context::AccountExecutionContext;
 pub use consensus::frame::hash::{
     AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value, parse_root_hex,
 };
-pub use crypto::{normalize_recovery_byte, recover_signer_address};
+pub use crypto::{
+    address_of_private_key, derive_signer_address, derive_signer_key, normalize_recovery_byte,
+    recover_signer_address, sign_digest,
+};
 pub use state::account_replica_shell::{AccountEnvelope, EnvelopeError};
 pub use state::delta::{Delta, DeltaPerspective, TokenId};
 pub use tx::apply::{AccountTransition, AccountVerdict, SequentialAccountEngine};

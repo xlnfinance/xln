@@ -1,20 +1,15 @@
 [package]
-name = "xln-rscore-engine"
+name = "xln-rscore-crypto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-base64.workspace = true
-num-bigint.workspace = true
-num-integer.workspace = true
 secp256k1 = { version = "0.31.1", features = ["recovery"] }
 sha2.workspace = true
 sha3.workspace = true
 thiserror.workspace = true
-xln-rscore-crypto = { path = "../crypto" }
-xln-rscore-protocol = { path = "../protocol" }
 
 [dev-dependencies]
 hex.workspace = true

@@ -510,6 +510,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xln-rscore-crypto"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "secp256k1",
+ "sha2",
+ "sha3",
+ "thiserror",
+]
+
+[[package]]
 name = "xln-rscore-engine"
 version = "0.1.0"
 dependencies = [
@@ -521,7 +532,18 @@ dependencies = [
  "sha2",
  "sha3",
  "thiserror",
+ "xln-rscore-crypto",
  "xln-rscore-protocol",
+]
+
+[[package]]
+name = "xln-rscore-hanko"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "sha3",
+ "thiserror",
+ "xln-rscore-crypto",
 ]
 
 [[package]]
