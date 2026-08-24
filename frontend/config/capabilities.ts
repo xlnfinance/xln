@@ -16,9 +16,14 @@ export const CAPABILITIES = [
     id: 'site-public-information',
     owner: 'site',
     routes: ['/', '/install', '/rcpan', '/releases', '/reviews', '/unicast', '/market-cap'],
-    currentSources: ['frontend/src/routes/+page.svelte', 'frontend/src/routes/install/+page.svelte'],
+    currentSources: [
+      'frontend/src/routes/+page.svelte',
+      'frontend/src/routes/install/+page.svelte',
+      'frontend/apps/site/src/landing-page.tsx',
+      'frontend/apps/site/src/install-page.tsx',
+    ],
     behavior: ['public navigation', 'install detection', 'live market-cap data'],
-    status: 'unstarted',
+    status: 'in_progress',
   },
   {
     id: 'docs-reader',

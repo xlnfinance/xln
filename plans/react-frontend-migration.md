@@ -249,12 +249,22 @@ shadowing edge/API routes or changing canonical production selection.
 
 ### WP3 — Migrate site
 
-**Status:** `READY AFTER SITE ROOT`
+**Status:** `IN PROGRESS — / AND /INSTALL PILOT IMPLEMENTED`
 
 - Use `/` and `/install` as the architecture pilot.
 - Migrate `/rcpan`, `/unicast`, `/releases`, `/reviews`, and `/market-cap`.
 - Preserve live data, links, assets, responsive states, and failure behavior.
 - Refine shared UI conventions based on real second consumers.
+
+**Pilot evidence:** the React site candidate now resolves `/` and `/install`
+with route-specific metadata, preserves the wallet-open marker and version-pinned
+local launcher, publishes all five install channels, and reports unimplemented
+site routes without changing their canonical Svelte production paths. Focused
+model tests, the site-only typecheck/build, clipboard interaction, console
+inspection, and 390×844, 1366×900, and 1920×1080 screenshots are green. The
+four-app candidate assembles as
+`sha256-c145ddbba24399c7411917612a68f1db6268b3ba84371b0d0ff384506dd8d069`
+with 346 files.
 
 **Done:** every site route is served by the site candidate and its relevant
 behavior/browser checks pass.
@@ -388,8 +398,9 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
-   Runtime-client packages deferred until their first real flow needs them.
+2. Migrate `/rcpan` as the next site slice, then `/unicast`, `/releases`,
+   `/reviews`, and `/market-cap`; retain the pilot's route-local metadata,
+   responsive evidence, and explicit pending-route boundary until each moves.
 3. Capture the remaining wallet-owned static/PWA inputs before the first wallet
    flow migrates.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are

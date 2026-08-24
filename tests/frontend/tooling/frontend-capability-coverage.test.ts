@@ -25,11 +25,23 @@ describe('frontend capability inventory', () => {
     }
   });
 
-  test('records source and behavior evidence for every seeded capability', () => {
+  test('records source, behavior, and valid migration status for every capability', () => {
     for (const capability of CAPABILITIES) {
       expect(capability.currentSources.length).toBeGreaterThan(0);
       expect(capability.behavior.length).toBeGreaterThan(0);
-      expect(capability.status).toBe('unstarted');
+      expect(['unstarted', 'in_progress', 'implemented', 'verified', 'blocked']).toContain(
+        capability.status,
+      );
     }
+  });
+
+  test('records the site pilot without claiming the full site capability is complete', () => {
+    const site = CAPABILITIES.find(({ id }) => id === 'site-public-information');
+    expect(site?.status).toBe('in_progress');
+    expect(site?.currentSources).toContain('frontend/apps/site/src/landing-page.tsx');
+    expect(site?.currentSources).toContain('frontend/apps/site/src/install-page.tsx');
+    expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information').every(
+      ({ status }) => status === 'unstarted',
+    )).toBe(true);
   });
 });

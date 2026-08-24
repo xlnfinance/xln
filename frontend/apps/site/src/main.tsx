@@ -1,7 +1,36 @@
-import { mountCandidateSurface } from '../../../packages/ui/src/mount-candidate-surface';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 
-mountCandidateSurface('site', {
-  eyebrow: 'Public surface',
-  title: 'Site, independently built.',
-  summary: 'The React entry for xln public routes. Svelte remains canonical while each route moves as a verified slice.',
-});
+import { SiteApp } from './site-app';
+import { getSiteMetadata, resolveSitePage } from './site-model';
+import './styles/site.css';
+import './styles/landing.css';
+import './styles/install.css';
+
+const getRootElement = (): HTMLElement => {
+  const rootElement = document.getElementById('root');
+  if (!rootElement) throw new Error('FRONTEND_REACT_ROOT_MISSING');
+  return rootElement;
+};
+
+const setDescription = (content: string): void => {
+  const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+  if (!description) throw new Error('SITE_DESCRIPTION_META_MISSING');
+  description.content = content;
+};
+
+const page = resolveSitePage(window.location.pathname);
+const metadata = getSiteMetadata(page);
+document.title = metadata.title;
+setDescription(metadata.description);
+
+if (page.kind === 'home' && window.location.hash === '#MML') {
+  window.localStorage.setItem('open', 'true');
+  window.location.replace('/app');
+} else {
+  createRoot(getRootElement()).render(
+    <StrictMode>
+      <SiteApp page={page} />
+    </StrictMode>,
+  );
+}
