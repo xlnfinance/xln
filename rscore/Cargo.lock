@@ -533,6 +533,7 @@ dependencies = [
  "sha3",
  "thiserror",
  "xln-rscore-crypto",
+ "xln-rscore-hanko",
  "xln-rscore-protocol",
 ]
 

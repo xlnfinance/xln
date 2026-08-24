@@ -45,6 +45,22 @@ pub enum StateError {
     HtlcRestoreLimitExceeded { actual: usize, maximum: usize },
     #[error("ACCOUNT_STATE_ROOT:{0}")]
     AccountStateRoot(String),
+    #[error("ACCOUNT_TRANSITION_FAILED:{0}")]
+    TransitionFailed(String),
+    #[error("ACCOUNT_SIGNING:{0}")]
+    Signing(String),
+    #[error("ACCOUNT_PEER_FRAME_HANKO_INVALID:{0}")]
+    FrameHankoInvalid(String),
+    #[error("ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE")]
+    BoardAuthorityUnavailable,
+    #[error("ACCOUNT_FRAME_TX_UNSUPPORTED:{0}")]
+    UnsupportedFrameTx(&'static str),
+    #[error("ACCOUNT_MEMPOOL_LIMIT_EXCEEDED:{context}:{outstanding}:{maximum}")]
+    MempoolLimitExceeded {
+        context: &'static str,
+        outstanding: usize,
+        maximum: usize,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

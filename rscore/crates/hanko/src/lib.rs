@@ -11,7 +11,10 @@ pub mod claims;
 pub mod codec;
 
 pub use batch::build_single_signer_hanko;
-pub use claims::{BoardDelays, VerifiedHanko, hash_hanko_board_claim, verify_canonical_hanko};
+pub use claims::{
+    BoardDelays, BoardMember, SemanticClaim, VerifiedHanko, hash_hanko_board_claim, lazy_entity_id,
+    verify_canonical_hanko,
+};
 pub use codec::{HankoEnvelope, decode_hanko_envelope, encode_hanko_envelope};
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

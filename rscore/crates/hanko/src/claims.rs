@@ -118,6 +118,20 @@ pub fn hash_hanko_board_claim(claim: &SemanticClaim) -> Word {
     Keccak256::digest(&encoded).into()
 }
 
+/// The id of a lazy entity: the hash of the board it is defined by.
+///
+/// Parity target: `generateLazyEntityId` (core/entity/factory.ts), which
+/// encodes and hashes the same board tuple. Such an entity's claims are
+/// self-authorising — the engine can verify them without the registry.
+pub fn lazy_entity_id(members: &[BoardMember], threshold: u128, delays: BoardDelays) -> Word {
+    hash_hanko_board_claim(&SemanticClaim {
+        entity_id: [0_u8; 32],
+        members: members.to_vec(),
+        threshold,
+        delays,
+    })
+}
+
 fn resolve_delays(claim: &crate::codec::WireClaim) -> HankoResult<BoardDelays> {
     for delay in [
         claim.board_change_delay,

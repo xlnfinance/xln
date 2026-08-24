@@ -8,7 +8,10 @@
 
 use xln_rscore_protocol::{CanonicalValue, compute_flat_integrity_root};
 
-use crate::{Delta, StateError};
+use crate::{
+    AccountTx, DeliveryMode, Delta, HTLC_OPAQUE_CIPHERTEXT_VERSION, HtlcDeliveryMode,
+    HtlcResolveOutcome, StateError, TokenId,
+};
 
 const ACCOUNT_FRAME_NAMESPACE: &str = "account.frame";
 /// The first frame of an account chains to this literal, not to a hash.
@@ -21,8 +24,9 @@ pub struct AccountFrame {
     pub height: u64,
     pub timestamp: u64,
     pub j_height: u64,
-    /// Canonical `{type, data}` form of each transaction, in frame order.
-    pub txs: Vec<CanonicalValue>,
+    /// The frame's transactions, in frame order. Their canonical `{type,data}`
+    /// form is derived when the frame is hashed, never carried separately.
+    pub txs: Vec<crate::AccountTx>,
     pub prev_frame_hash: String,
     pub account_state_root: [u8; 32],
     pub by_left: bool,
@@ -59,11 +63,15 @@ impl AccountFrame {
             ),
             ("byLeft".into(), CanonicalValue::Bool(self.by_left)),
         ]);
+        let mut transactions = Vec::with_capacity(self.txs.len());
+        for tx in &self.txs {
+            transactions.push(canonical_tx_value(tx)?);
+        }
         let entries = vec![
             ("transition".to_string(), transition),
             (
                 "transactions".to_string(),
-                CanonicalValue::Array(self.txs.clone()),
+                CanonicalValue::Array(transactions),
             ),
             (
                 "deltas".to_string(),
@@ -81,14 +89,15 @@ impl AccountFrame {
     }
 }
 
-/// Canonical `{type, data}` of one transaction, the form the frame hash and
-/// the mempool root both commit.
+/// Canonical `{type, data}` of one transaction, the form the frame hash
+/// commits.
 ///
 /// Parity target: `canonicalAccountTxForFrameHash` in the same TypeScript
-/// file. Optional fields are omitted, never encoded as null: TypeScript drops
-/// `undefined` object entries before hashing.
-pub fn canonical_tx_value(tx: &crate::AccountTx) -> CanonicalValue {
-    use crate::AccountTx;
+/// file, which hashes `tx.data` as the runtime built it. Optional fields are
+/// omitted, never encoded as null: TypeScript drops `undefined` object entries
+/// before hashing. A transaction the engine does not model natively is an
+/// error, never a silently different hash.
+pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> {
     let (kind, data) = match tx {
         AccountTx::DirectPayment {
             token_id,
@@ -101,59 +110,252 @@ pub fn canonical_tx_value(tx: &crate::AccountTx) -> CanonicalValue {
             trusted_gateway_entity_id,
         } => {
             let mut fields = vec![
-                (
-                    "tokenId".to_string(),
-                    CanonicalValue::Number(f64::from(token_id.get())),
-                ),
-                ("amount".to_string(), CanonicalValue::BigInt(amount.clone())),
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
                 (
                     "route".to_string(),
-                    CanonicalValue::Array(
-                        route
-                            .iter()
-                            .map(|hop| CanonicalValue::String(hop.clone()))
-                            .collect(),
-                    ),
+                    CanonicalValue::Array(route.iter().map(|hop| text(hop)).collect()),
                 ),
             ];
-            if let Some(description) = description {
-                fields.push((
-                    "description".to_string(),
-                    CanonicalValue::String(description.clone()),
-                ));
-            }
-            fields.push((
-                "fromEntityId".to_string(),
-                CanonicalValue::String(from_entity_id.clone()),
-            ));
-            fields.push((
-                "toEntityId".to_string(),
-                CanonicalValue::String(to_entity_id.clone()),
-            ));
+            push_optional(&mut fields, "description", description.as_deref().map(text));
+            fields.push(("fromEntityId".to_string(), text(from_entity_id)));
+            fields.push(("toEntityId".to_string(), text(to_entity_id)));
             fields.push((
                 "deliveryMode".to_string(),
-                CanonicalValue::String(
-                    match delivery_mode {
-                        crate::DeliveryMode::Direct => "direct",
-                        crate::DeliveryMode::Trusted => "trusted",
-                    }
-                    .to_string(),
-                ),
+                text(match delivery_mode {
+                    DeliveryMode::Direct => "direct",
+                    DeliveryMode::Trusted => "trusted",
+                }),
             ));
-            if let Some(gateway) = trusted_gateway_entity_id {
-                fields.push((
-                    "trustedGatewayEntityId".to_string(),
-                    CanonicalValue::String(gateway.clone()),
-                ));
-            }
+            push_optional(
+                &mut fields,
+                "trustedGatewayEntityId",
+                trusted_gateway_entity_id.as_deref().map(text),
+            );
             ("direct_payment", fields)
         }
-        _ => return CanonicalValue::Null,
+        AccountTx::HtlcLock(lock) => {
+            let mut fields = vec![
+                ("lockId".to_string(), text(&lock.lock_id)),
+                ("hashlock".to_string(), text(lock.hashlock.as_str())),
+                ("timelock".to_string(), big(&lock.timelock)),
+                (
+                    "revealBeforeHeight".to_string(),
+                    number(lock.reveal_before_height),
+                ),
+                ("amount".to_string(), big(&lock.amount)),
+                ("tokenId".to_string(), token(lock.token_id)),
+            ];
+            push_optional(
+                &mut fields,
+                "deliveryMode",
+                lock.delivery_mode.map(|mode| {
+                    text(match mode {
+                        HtlcDeliveryMode::Instant => "instant",
+                        HtlcDeliveryMode::Async => "async",
+                    })
+                }),
+            );
+            push_optional(
+                &mut fields,
+                "envelope",
+                lock.envelope.as_ref().map(|envelope| {
+                    CanonicalValue::Object(vec![
+                        ("version".to_string(), text(HTLC_OPAQUE_CIPHERTEXT_VERSION)),
+                        ("ciphertext".to_string(), text(envelope.ciphertext())),
+                    ])
+                }),
+            );
+            ("htlc_lock", fields)
+        }
+        AccountTx::HtlcResolve(resolve) => {
+            let mut fields = vec![("lockId".to_string(), text(&resolve.lock_id))];
+            match &resolve.outcome {
+                HtlcResolveOutcome::Secret { secret } => {
+                    fields.push(("outcome".to_string(), text("secret")));
+                    fields.push(("secret".to_string(), text(secret)));
+                }
+                HtlcResolveOutcome::Error { reason } => {
+                    fields.push(("outcome".to_string(), text("error")));
+                    push_optional(&mut fields, "reason", reason.as_deref().map(text));
+                }
+            }
+            ("htlc_resolve", fields)
+        }
+        AccountTx::SetCreditLimit { token_id, amount } => (
+            "set_credit_limit",
+            vec![
+                ("tokenId".to_string(), token(*token_id)),
+                ("amount".to_string(), big(amount)),
+            ],
+        ),
+        AccountTx::AddDelta { token_id } => {
+            ("add_delta", vec![("tokenId".to_string(), token(*token_id))])
+        }
+        AccountTx::SwapOffer {
+            offer_id,
+            give_token_id,
+            give_token_decimals,
+            give_amount,
+            want_token_id,
+            want_token_decimals,
+            want_amount,
+            max_fee,
+            min_net_receive,
+            time_in_force,
+            price_ticks,
+        } => {
+            let mut fields = vec![
+                ("offerId".to_string(), text(offer_id)),
+                ("giveTokenId".to_string(), number(u64::from(*give_token_id))),
+                (
+                    "giveTokenDecimals".to_string(),
+                    number(u64::from(*give_token_decimals)),
+                ),
+                ("giveAmount".to_string(), big(give_amount)),
+                ("wantTokenId".to_string(), number(u64::from(*want_token_id))),
+                (
+                    "wantTokenDecimals".to_string(),
+                    number(u64::from(*want_token_decimals)),
+                ),
+                ("wantAmount".to_string(), big(want_amount)),
+                ("maxFee".to_string(), big(max_fee)),
+                ("minNetReceive".to_string(), big(min_net_receive)),
+            ];
+            push_optional(
+                &mut fields,
+                "timeInForce",
+                time_in_force.map(|value| number(u64::from(value))),
+            );
+            push_optional(&mut fields, "priceTicks", price_ticks.as_ref().map(big));
+            ("swap_offer", fields)
+        }
+        AccountTx::SwapResolve {
+            offer_id,
+            fill_ratio,
+            fill_numerator,
+            fill_denominator,
+            cancel_remainder,
+            fee_token_id,
+            fee_amount,
+            execution_give_amount,
+            execution_want_amount,
+            resting_price_ticks,
+            resting_give_amount,
+            resting_want_amount,
+            resting_quantized_give,
+            resting_quantized_want,
+        } => {
+            let mut fields = vec![
+                ("offerId".to_string(), text(offer_id)),
+                ("fillRatio".to_string(), number(u64::from(*fill_ratio))),
+            ];
+            push_optional(
+                &mut fields,
+                "fillNumerator",
+                fill_numerator.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "fillDenominator",
+                fill_denominator.as_ref().map(big),
+            );
+            if *cancel_remainder {
+                fields.push(("cancelRemainder".to_string(), CanonicalValue::Bool(true)));
+            }
+            push_optional(
+                &mut fields,
+                "feeTokenId",
+                fee_token_id.map(|value| number(u64::from(value))),
+            );
+            push_optional(&mut fields, "feeAmount", fee_amount.as_ref().map(big));
+            push_optional(
+                &mut fields,
+                "executionGiveAmount",
+                execution_give_amount.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "executionWantAmount",
+                execution_want_amount.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "restingPriceTicks",
+                resting_price_ticks.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "restingGiveAmount",
+                resting_give_amount.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "restingWantAmount",
+                resting_want_amount.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "restingQuantizedGive",
+                resting_quantized_give.as_ref().map(big),
+            );
+            push_optional(
+                &mut fields,
+                "restingQuantizedWant",
+                resting_quantized_want.as_ref().map(big),
+            );
+            ("swap_resolve", fields)
+        }
+        AccountTx::SwapCancelRequest { offer_id } => (
+            "swap_cancel_request",
+            vec![("offerId".to_string(), text(offer_id))],
+        ),
+        other => {
+            return Err(StateError::UnsupportedFrameTx(unsupported_kind(other)));
+        }
     };
-    CanonicalValue::Object(vec![
-        ("type".to_string(), CanonicalValue::String(kind.to_string())),
+    Ok(CanonicalValue::Object(vec![
+        ("type".to_string(), text(kind)),
         ("data".to_string(), CanonicalValue::Object(data)),
-    ])
+    ]))
+}
+
+fn text(value: &str) -> CanonicalValue {
+    CanonicalValue::String(value.to_string())
+}
+
+fn big(value: &num_bigint::BigInt) -> CanonicalValue {
+    CanonicalValue::BigInt(value.clone())
+}
+
+fn token(value: TokenId) -> CanonicalValue {
+    CanonicalValue::Number(f64::from(value.get()))
+}
+
+fn push_optional(
+    fields: &mut Vec<(String, CanonicalValue)>,
+    key: &str,
+    value: Option<CanonicalValue>,
+) {
+    if let Some(value) = value {
+        fields.push((key.to_string(), value));
+    }
+}
+
+/// The transaction kinds the engine leaves to TypeScript, named the way the
+/// wire names them so a rejection points at the right handler.
+fn unsupported_kind(tx: &AccountTx) -> &'static str {
+    match tx {
+        AccountTx::RebalancePolicy { .. } => "rebalance_policy",
+        AccountTx::LendingFund { .. } => "lending_fund",
+        AccountTx::LendingBorrowRequest { .. } => "lending_borrow_request",
+        AccountTx::LendingRepay { .. } => "lending_repay",
+        AccountTx::LendingCredit { .. } => "lending_credit",
+        AccountTx::LendingCloseRequest { .. } => "lending_close_request",
+        AccountTx::LendingClosePayout { .. } => "lending_close_payout",
+        AccountTx::ReserveToCollateral { .. } => "reserve_to_collateral",
+        _ => "unknown",
+    }
 }
 
 /// Big-endian helper for callers that hold a hex account state root.
@@ -174,7 +376,10 @@ mod tests {
     use num_bigint::BigInt;
 
     use super::*;
-    use crate::{AccountTx, DeliveryMode, TokenId};
+    use crate::{
+        AccountTx, DeliveryMode, HtlcDeliveryMode, HtlcResolveOutcome, OpaqueHtlcCiphertext,
+        TokenId,
+    };
 
     /// Vector produced by `computeFrameHash`
     /// (core/account/consensus/frame/hash.ts) over the same frame.
@@ -208,7 +413,7 @@ mod tests {
             height: 1,
             timestamp: 1_700_000_000_000,
             j_height: 7,
-            txs: vec![canonical_tx_value(&tx)],
+            txs: vec![tx],
             prev_frame_hash: GENESIS_PREV_FRAME_HASH.into(),
             account_state_root: parse_root_hex(&format!("0x{}", "cd".repeat(32)))
                 .expect("state root"),
@@ -218,6 +423,215 @@ mod tests {
         assert_eq!(
             hex::encode(frame.hash().expect("frame hash")),
             "924ebfa860055183b8a45e1555308cf206bf8fa9962d9cbd431c796ec8791210",
+        );
+    }
+
+    fn frame_for(tx: AccountTx) -> AccountFrame {
+        let delta = Delta::new(
+            TokenId::new(1).expect("token"),
+            BigInt::from(1_000_000),
+            BigInt::from(0),
+            BigInt::from(-5),
+            BigInt::from(0),
+            BigInt::from(0),
+            BigInt::from(0),
+            BigInt::from(0),
+            BigInt::from(0),
+            BigInt::from(0),
+        )
+        .expect("delta");
+        AccountFrame {
+            height: 3,
+            timestamp: 1_700_000_000_000,
+            j_height: 7,
+            txs: vec![tx],
+            prev_frame_hash: format!("0x{}", "11".repeat(32)),
+            account_state_root: parse_root_hex(&format!("0x{}", "cd".repeat(32))).expect("root"),
+            by_left: true,
+            deltas: vec![delta],
+        }
+    }
+
+    fn lock_id() -> String {
+        format!("0x{}", "ab".repeat(32))
+    }
+
+    fn offer_id() -> String {
+        format!("0x{}", "a1".repeat(32))
+    }
+
+    fn htlc_lock(
+        delivery_mode: Option<HtlcDeliveryMode>,
+        envelope: Option<OpaqueHtlcCiphertext>,
+    ) -> AccountTx {
+        AccountTx::HtlcLock(crate::HtlcLockTx {
+            lock_id: lock_id(),
+            hashlock: crate::HtlcHashlock::parse(&format!("0x{}", "cd".repeat(32)))
+                .expect("hashlock"),
+            timelock: BigInt::from(1_700_000_600_000_u64),
+            reveal_before_height: 42,
+            amount: BigInt::from(2000),
+            token_id: TokenId::new(1).expect("token"),
+            delivery_mode,
+            envelope,
+        })
+    }
+
+    fn swap_offer(full: bool) -> AccountTx {
+        AccountTx::SwapOffer {
+            offer_id: offer_id(),
+            give_token_id: 1,
+            give_token_decimals: 6,
+            give_amount: BigInt::from(1000),
+            want_token_id: 2,
+            want_token_decimals: 18,
+            want_amount: BigInt::from(2000),
+            max_fee: BigInt::from(if full { 5 } else { 0 }),
+            min_net_receive: BigInt::from(if full { 1900 } else { 0 }),
+            time_in_force: if full { Some(1) } else { None },
+            price_ticks: if full {
+                Some(BigInt::from(12345))
+            } else {
+                None
+            },
+        }
+    }
+
+    fn swap_resolve(full: bool) -> AccountTx {
+        let value = |amount: i64| {
+            if full {
+                Some(BigInt::from(amount))
+            } else {
+                None
+            }
+        };
+        AccountTx::SwapResolve {
+            offer_id: offer_id(),
+            fill_ratio: if full { 5000 } else { 10_000 },
+            fill_numerator: value(1),
+            fill_denominator: value(2),
+            cancel_remainder: full,
+            fee_token_id: if full { Some(2) } else { None },
+            fee_amount: value(3),
+            execution_give_amount: value(500),
+            execution_want_amount: value(1000),
+            resting_price_ticks: value(999),
+            resting_give_amount: value(500),
+            resting_want_amount: value(1000),
+            resting_quantized_give: value(500),
+            resting_quantized_want: value(1000),
+        }
+    }
+
+    /// Vectors produced by `computeFrameHash` over one-transaction frames
+    /// (scratchpad/txvec.ts), one per transaction kind the engine hashes
+    /// natively. A renamed or dropped field changes the hash here first.
+    #[test]
+    fn matches_typescript_vectors_for_every_native_transaction() {
+        let ciphertext =
+            OpaqueHtlcCiphertext::parse(HTLC_OPAQUE_CIPHERTEXT_VERSION, &base64_of(&[7_u8; 80]))
+                .expect("envelope");
+        let cases: Vec<(&str, AccountTx)> = vec![
+            (
+                "41f2657fd0e24a2e9e21e286ff85c037e7b9e4ae6cf7d120d5b48864bb8923f1",
+                htlc_lock(Some(HtlcDeliveryMode::Instant), Some(ciphertext)),
+            ),
+            (
+                "690c2191643aa566f05778d8d29ffaa3e887d309bf63a79b5923cf3adf6b9799",
+                htlc_lock(None, None),
+            ),
+            (
+                "1c845b653a9ce37629338938203eb3a15af742d237351682efc711c1f10ba1c9",
+                AccountTx::HtlcResolve(crate::HtlcResolveTx {
+                    lock_id: lock_id(),
+                    outcome: HtlcResolveOutcome::Secret {
+                        secret: format!("0x{}", "01".repeat(32)),
+                    },
+                }),
+            ),
+            (
+                "93acff2dfa08d75f875075d8f3c8d4a86a536e4e80ec0a3a88116a353c9fbae5",
+                AccountTx::HtlcResolve(crate::HtlcResolveTx {
+                    lock_id: lock_id(),
+                    outcome: HtlcResolveOutcome::Error {
+                        reason: Some("expired".to_string()),
+                    },
+                }),
+            ),
+            (
+                "009925438c5a4bcfeaded24d41459047f3dd1ac3b1697daf3823133bc37eefa7",
+                AccountTx::HtlcResolve(crate::HtlcResolveTx {
+                    lock_id: lock_id(),
+                    outcome: HtlcResolveOutcome::Error { reason: None },
+                }),
+            ),
+            (
+                "29c4068e18f6d1600bf9afdf9981fa497eb8972f0a470b61c60e315c5d567a55",
+                AccountTx::SetCreditLimit {
+                    token_id: TokenId::new(2).expect("token"),
+                    amount: BigInt::from(500),
+                },
+            ),
+            (
+                "eda7d70244321a2a3e636c5c306c93fac401dc7bd5575d68dc3f571c4914c134",
+                AccountTx::AddDelta {
+                    token_id: TokenId::new(3).expect("token"),
+                },
+            ),
+            (
+                "c11728fa5bd309b6a5a884ac408425c29c556f7e5a9d5807921493f6dcc00163",
+                swap_offer(true),
+            ),
+            (
+                "bc8b304df7f4f0f8109db6141a4a6bc05e978157ac4668d59675f21fccf9f7ba",
+                swap_offer(false),
+            ),
+            (
+                "6ed9380b7bd252764f1533628ec1e463ad9b0e99ea90562f0fa0bfdcc28409f0",
+                swap_resolve(true),
+            ),
+            (
+                "5430e00527107e26c980598d84110e26398add8f8b705f50eeb69bf46971a7dd",
+                swap_resolve(false),
+            ),
+            (
+                "b2b171664b26860284c22bb46ab47744f29833521d46e131909d46f461706258",
+                AccountTx::SwapCancelRequest {
+                    offer_id: offer_id(),
+                },
+            ),
+        ];
+        for (expected, tx) in cases {
+            let described = format!("{tx:?}");
+            assert_eq!(
+                hex::encode(frame_for(tx).hash().expect("frame hash")),
+                expected,
+                "frame hash for {described}",
+            );
+        }
+    }
+
+    /// Base64 the way TypeScript writes it, so the envelope round-trips.
+    fn base64_of(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    /// A transaction the engine does not model natively must fail loudly: a
+    /// frame hash computed from a guessed shape would be silently wrong.
+    #[test]
+    fn refuses_to_hash_a_transaction_it_does_not_model() {
+        let tx = AccountTx::ReserveToCollateral {
+            token_id: TokenId::new(1).expect("token"),
+            collateral: "1".to_string(),
+            ondelta: "0".to_string(),
+            side: crate::ReserveSide::Receiving,
+            block_number: 1,
+            transaction_hash: format!("0x{}", "ee".repeat(32)),
+        };
+        assert_eq!(
+            frame_for(tx).hash().expect_err("unsupported"),
+            StateError::UnsupportedFrameTx("reserve_to_collateral"),
         );
     }
 }

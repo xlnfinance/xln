@@ -307,6 +307,11 @@ impl AccountState {
         self.deltas.get(&token_id.radix_key())
     }
 
+    /// Every delta row in ascending token order, the order a frame lists them.
+    pub fn deltas(&self) -> impl Iterator<Item = &Delta> {
+        self.deltas.iter().map(|(_, delta)| delta)
+    }
+
     pub fn delta_count(&self) -> usize {
         self.deltas.len()
     }
