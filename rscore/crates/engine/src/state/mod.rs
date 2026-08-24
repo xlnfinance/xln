@@ -409,7 +409,10 @@ impl AccountState {
         self.locks.node_changes_since(&previous.locks)
     }
 
-    pub fn swap_offer_node_changes_since(&self, previous: &Self) -> PersistentNodeChanges<SwapOffer> {
+    pub fn swap_offer_node_changes_since(
+        &self,
+        previous: &Self,
+    ) -> PersistentNodeChanges<SwapOffer> {
         self.swap_offers.node_changes_since(&previous.swap_offers)
     }
 

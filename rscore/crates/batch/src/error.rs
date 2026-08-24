@@ -69,8 +69,20 @@ pub enum BatchError {
     CheckpointRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY:{width}")]
     CheckpointAccountKey { width: usize },
+    #[error("RSCORE_BATCH_CHECKPOINT_INCOMPLETE:{actual}:{expected}")]
+    CheckpointIncomplete { actual: usize, expected: usize },
+    #[error("RSCORE_BATCH_CHECKPOINT_ACCOUNT_LEAF:{account_id}:{actual}:{expected}")]
+    CheckpointAccountLeaf {
+        account_id: AccountId,
+        actual: String,
+        expected: String,
+    },
+    #[error("RSCORE_BATCH_CHECKPOINT_ROOT:{actual}:{expected}")]
+    CheckpointRoot { actual: String, expected: String },
     #[error("RSCORE_BATCH_SIGNER_REQUIRED")]
     SignerRequired,
+    #[error("RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY:{entity_id}")]
+    SignerUnknownEntity { entity_id: String },
     #[error("RSCORE_BATCH_SIGNING:{0}")]
     Signing(String),
     #[error("RSCORE_BATCH_ACCOUNTS_TREE:{account_id}:{detail}")]

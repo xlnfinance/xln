@@ -14,6 +14,7 @@ mod types;
 
 pub use checkpoint::{
     AccountCheckpointHeader, AccountCheckpointRows, AccountRestore, AccountsCheckpoint,
+    CheckpointExpectation,
 };
 pub use consensus::{
     AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict, ProposalRow,
@@ -22,10 +23,10 @@ pub use consensus::{
 pub use error::BatchError;
 // The receiver clock is part of this layer's boundary: a caller cannot apply
 // an input without saying what time it is on its own machine.
-pub use xln_rscore_engine::ReceiverClock;
 pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};
 pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};
 pub use types::{
     AccountId, AccountInputAuthority, AccountSeed, BatchJob, BatchResponse, BatchVerdict,
     EngineGeneration, IndexedOutput, IndexedResult, PreparedBatch, PreparedPaymentProfileRoot,
 };
+pub use xln_rscore_engine::ReceiverClock;

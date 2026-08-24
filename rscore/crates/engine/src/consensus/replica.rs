@@ -38,6 +38,16 @@ pub struct PendingFrame {
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
     pub(crate) candidate: AccountReplica,
+    /// What the frame's transactions produced — forwards, revealed secrets,
+    /// settlement effects. They are held here until the peer acks: an effect
+    /// released before the counterparty commits is one the account cannot
+    /// enforce.
+    ///
+    /// Parity target: `rememberProposalForAck`
+    /// (core/account/consensus/proposal/propose.ts), which keeps
+    /// `candidateEffects` in the prepared commit; the proposal result carries
+    /// none, and the ACK path releases them.
+    pub(crate) outputs: Vec<crate::AccountOutput>,
 }
 
 #[derive(Clone)]
@@ -366,12 +376,15 @@ impl AccountConsensus {
                 pending.frame.prev_frame_hash
             )));
         }
-        let candidate = replay_pending(&account.replica, &pending)?;
+        // The replay reproduces the effects too, so a restart does not lose
+        // what the pending frame will release when it is acked.
+        let (candidate, outputs) = replay_pending(&account.replica, &pending)?;
         account.pending = Some(PendingFrame {
             frame: pending.frame,
             state_hash: pending.state_hash,
             hanko: pending.hanko,
             candidate,
+            outputs,
         });
         Ok(account)
     }
@@ -382,7 +395,7 @@ impl AccountConsensus {
 fn replay_pending(
     replica: &AccountReplica,
     pending: &PendingFrameSnapshot,
-) -> Result<AccountReplica, StateError> {
+) -> Result<(AccountReplica, Vec<crate::AccountOutput>), StateError> {
     let context = crate::AccountExecutionContext::new(
         pending.frame.timestamp,
         pending.frame.timestamp,
@@ -394,14 +407,9 @@ fn replay_pending(
     let WindowExecution {
         mut candidate,
         applied,
+        outputs,
         ..
-    } = execute_window(
-        replica,
-        proposer,
-        pending.frame.txs.clone(),
-        &context,
-        true,
-    )?;
+    } = execute_window(replica, proposer, pending.frame.txs.clone(), &context, true)?;
     if applied.len() != pending.frame.txs.len() {
         return Err(StateError::CheckpointRestore(format!(
             "PENDING_TX_REJECTED:{}:{}",
@@ -420,7 +428,7 @@ fn replay_pending(
             "PENDING_FRAME_HASH_MISMATCH".to_string(),
         ));
     }
-    Ok(candidate)
+    Ok((candidate, outputs))
 }
 
 impl AccountConsensus {
@@ -504,7 +512,10 @@ impl std::fmt::Debug for AccountConsensus {
             .field("owner", &self.replica.owner().to_string())
             .field("currentHeight", &self.current_height())
             .field("mempool", &self.mempool.len())
-            .field("pending", &self.pending.as_ref().map(|frame| frame.frame.height))
+            .field(
+                "pending",
+                &self.pending.as_ref().map(|frame| frame.frame.height),
+            )
             .field("rollbackCount", &self.rollback_count)
             .finish()
     }

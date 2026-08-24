@@ -86,10 +86,12 @@ pub enum IncomingOutcome {
 
 #[derive(Debug)]
 pub enum AckOutcome {
-    /// The peer acknowledged our pending frame; it is committed on both sides.
+    /// The peer acknowledged our pending frame; it is committed on both sides,
+    /// and only now may its effects leave the account.
     Committed {
         height: u64,
         state_hash: [u8; 32],
+        outputs: Vec<AccountOutput>,
     },
     /// Nothing is pending at that height any more — a retransmitted ack.
     Stale {
@@ -136,7 +138,11 @@ pub fn apply_incoming_frame(
             incoming.txs.len()
         )));
     }
-    if incoming.timestamp > clock.entity_timestamp.saturating_add(MAX_FRAME_FUTURE_SKEW_MS) {
+    if incoming.timestamp
+        > clock
+            .entity_timestamp
+            .saturating_add(MAX_FRAME_FUTURE_SKEW_MS)
+    {
         return Ok(rejected(format!(
             "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew:{}",
             incoming.timestamp - clock.entity_timestamp
@@ -326,6 +332,7 @@ pub fn apply_incoming_ack(
     }
     verify_frame_hanko(hanko, state_hash, counterparty_entity_id)?;
     let pending = account.pending().expect("pending checked above").clone();
+    let outputs = pending.outputs;
     account.commit_from_ack(
         pending.candidate,
         &pending.frame,
@@ -335,5 +342,6 @@ pub fn apply_incoming_ack(
     Ok(AckOutcome::Committed {
         height,
         state_hash: pending.state_hash,
+        outputs,
     })
 }

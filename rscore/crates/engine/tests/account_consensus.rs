@@ -6,9 +6,8 @@ use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica,
     AccountState, AccountTx, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId,
-    IncomingFrame, IncomingOutcome, ProposalOutcome, ProposedFrame, ReceiverClock,
-    SigningIdentity, TokenId, WatchSeed, apply_incoming_ack, apply_incoming_frame,
-    propose_account_frame,
+    IncomingFrame, IncomingOutcome, ProposalOutcome, ProposedFrame, ReceiverClock, SigningIdentity,
+    TokenId, WatchSeed, apply_incoming_ack, apply_incoming_frame, propose_account_frame,
 };
 
 /// The receiver's own clock, at the same moment the frames below are proposed.
@@ -257,7 +256,10 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
 
     // The right party, the wrong signature: caught by the Hanko itself.
     let mut forged = incoming_of(&frame, state_hash, hanko.clone());
-    forged.hanko = right.identity.sign_frame(&state_hash).expect("forged hanko");
+    forged.hanko = right
+        .identity
+        .sign_frame(&state_hash)
+        .expect("forged hanko");
     let error = apply_incoming_frame(
         &mut right.account,
         &right.identity,
@@ -439,11 +441,9 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
         hanko: hanko.clone(),
     };
 
-    let restored = AccountConsensus::restore_from_checkpoint(
-        committed.clone(),
-        snapshot(Some(saved.clone())),
-    )
-    .expect("restore");
+    let restored =
+        AccountConsensus::restore_from_checkpoint(committed.clone(), snapshot(Some(saved.clone())))
+            .expect("restore");
     assert_eq!(restored.current_height(), 0);
     let pending = restored.pending().expect("pending");
     assert_eq!(pending.state_hash, state_hash);
@@ -470,7 +470,10 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
     let error =
         AccountConsensus::restore_from_checkpoint(committed.clone(), snapshot(Some(wrong_height)))
             .expect_err("wrong height");
-    assert_eq!(error.to_string(), "ACCOUNT_CHECKPOINT_RESTORE:PENDING_HEIGHT:4:1");
+    assert_eq!(
+        error.to_string(),
+        "ACCOUNT_CHECKPOINT_RESTORE:PENDING_HEIGHT:4:1"
+    );
 
     // The hash the signature covers must be the hash of the frame beside it.
     let mut wrong_hash = saved;
@@ -531,7 +534,10 @@ fn enforcement_is_judged_on_the_receiver_clock() {
     let IncomingOutcome::Rejected { reason } = outcome else {
         panic!("expected a rejection, got {outcome:?}");
     };
-    assert!(reason.starts_with("ACCOUNT_PEER_FRAME_TX_REJECTED"), "{reason}");
+    assert!(
+        reason.starts_with("ACCOUNT_PEER_FRAME_TX_REJECTED"),
+        "{reason}"
+    );
 
     // The same frame, on a clock where the lock is still alive, commits.
     let outcome = apply_incoming_frame(
@@ -545,7 +551,10 @@ fn enforcement_is_judged_on_the_receiver_clock() {
         incoming_of(&frame, state_hash, hanko),
     )
     .expect("apply");
-    assert!(matches!(outcome, IncomingOutcome::Committed { height: 1, .. }));
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Committed { height: 1, .. }
+    ));
 }
 
 /// A frame from the future could satisfy payer-side deadlines early, so it is
@@ -584,7 +593,10 @@ fn a_frame_from_the_future_is_refused() {
     let IncomingOutcome::Rejected { reason } = outcome else {
         panic!("expected a rejection, got {outcome:?}");
     };
-    assert!(reason.starts_with("ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew"), "{reason}");
+    assert!(
+        reason.starts_with("ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew"),
+        "{reason}"
+    );
     assert_eq!(right.account.current_height(), 0);
 
     // Inside the allowance the same frame is fine.
@@ -599,7 +611,10 @@ fn a_frame_from_the_future_is_refused() {
         incoming_of(&frame, state_hash, hanko),
     )
     .expect("apply");
-    assert!(matches!(outcome, IncomingOutcome::Committed { height: 1, .. }));
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Committed { height: 1, .. }
+    ));
 }
 
 /// Delivery is at-least-once: a frame we already committed under, redelivered,
@@ -721,7 +736,10 @@ fn a_failing_frame_leaves_our_own_proposal_standing() {
         broken,
     )
     .expect("apply");
-    assert!(matches!(outcome, IncomingOutcome::Rejected { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, IncomingOutcome::Rejected { .. }),
+        "{outcome:?}"
+    );
     let pending = right.account.pending().expect("our proposal survives");
     assert_eq!(pending.state_hash, right_pending_hash);
     assert_eq!(right.account.rollback_count(), 0);
@@ -910,7 +928,10 @@ fn an_unhashable_transaction_is_refused_at_admission() {
             "test",
         )
         .expect_err("unhashable");
-    assert_eq!(error.to_string(), "ACCOUNT_FRAME_TX_UNSUPPORTED:reserve_to_collateral");
+    assert_eq!(
+        error.to_string(),
+        "ACCOUNT_FRAME_TX_UNSUPPORTED:reserve_to_collateral"
+    );
     assert!(left.account.mempool().is_empty());
     // The account still works.
     left.account
@@ -964,4 +985,128 @@ fn the_proposal_window_defers_a_capacity_rejection() {
     );
 
     let _ = right;
+}
+
+/// A frame's effects do not leave the account until the peer has committed
+/// it. The proposal carries none; the ack carries them.
+#[test]
+fn outputs_are_held_until_the_peer_acks() {
+    use num_bigint::BigInt as Big;
+    use sha3::{Digest as _, Keccak256};
+    use xln_rscore_engine::{
+        AccountOutput, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
+    };
+
+    let (mut left, mut right) = parties();
+    let secret_bytes = [0x5a_u8; 32];
+    let secret = format!("0x{}", hex::encode(secret_bytes));
+    let hashlock_bytes: [u8; 32] = Keccak256::digest(secret_bytes).into();
+    let hashlock =
+        HtlcHashlock::parse(&format!("0x{}", hex::encode(hashlock_bytes))).expect("hashlock");
+
+    // Height 1: LEFT locks, both sides commit.
+    left.account
+        .admit_txs(
+            vec![AccountTx::HtlcLock(HtlcLockTx {
+                lock_id: "lock-1".to_string(),
+                hashlock,
+                timelock: Big::from(1_700_000_900_000_u64),
+                reveal_before_height: 100,
+                amount: Big::from(50),
+                token_id: TokenId::new(1).expect("token"),
+                delivery_mode: None,
+                envelope: None,
+            })],
+            "test",
+        )
+        .expect("admit lock");
+    let ProposalOutcome::Proposed(lock_frame) =
+        propose_account_frame(&mut left.account, &left.identity, 1_700_000_000_000, 7)
+            .expect("propose lock")
+    else {
+        panic!("expected a proposal");
+    };
+    let lock_frame = *lock_frame;
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&lock_frame.frame, lock_frame.state_hash, lock_frame.hanko),
+    )
+    .expect("apply lock");
+    let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
+        panic!("expected a commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &lock_frame.state_hash,
+        &ack_hanko,
+    )
+    .expect("ack lock");
+
+    // Height 2: RIGHT resolves with the secret. Its effect is the secret
+    // itself, which must not escape before LEFT has committed the frame.
+    right
+        .account
+        .admit_txs(
+            vec![AccountTx::HtlcResolve(HtlcResolveTx {
+                lock_id: "lock-1".to_string(),
+                outcome: HtlcResolveOutcome::Secret { secret },
+            })],
+            "test",
+        )
+        .expect("admit resolve");
+    let ProposalOutcome::Proposed(resolve) =
+        propose_account_frame(&mut right.account, &right.identity, 1_700_000_000_001, 7)
+            .expect("propose resolve")
+    else {
+        panic!("expected a proposal");
+    };
+    let resolve = *resolve;
+
+    // LEFT holds the peer's signed frame, so its own effects are released at
+    // commit.
+    let outcome = apply_incoming_frame(
+        &mut left.account,
+        &left.identity,
+        right.identity.entity_id(),
+        CLOCK,
+        incoming_of(&resolve.frame, resolve.state_hash, resolve.hanko),
+    )
+    .expect("apply resolve");
+    let IncomingOutcome::Committed {
+        ack_hanko, outputs, ..
+    } = outcome
+    else {
+        panic!("expected a commit");
+    };
+    assert!(
+        outputs
+            .iter()
+            .any(|output| matches!(output, AccountOutput::HtlcSecret { .. })),
+        "{outputs:?}",
+    );
+
+    // RIGHT only learns the frame is committed when the ack arrives, and that
+    // is when its own copy of the effect is released.
+    let ack = apply_incoming_ack(
+        &mut right.account,
+        left.identity.entity_id(),
+        2,
+        &resolve.state_hash,
+        &ack_hanko,
+    )
+    .expect("ack resolve");
+    let xln_rscore_engine::AckOutcome::Committed { outputs, .. } = ack else {
+        panic!("expected an ack commit, got {ack:?}");
+    };
+    assert!(
+        outputs
+            .iter()
+            .any(|output| matches!(output, AccountOutput::HtlcSecret { .. })),
+        "{outputs:?}",
+    );
 }

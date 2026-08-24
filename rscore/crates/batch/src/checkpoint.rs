@@ -23,6 +23,10 @@ use crate::AccountId;
 #[derive(Clone)]
 pub struct AccountCheckpointHeader {
     pub owner: EntityId,
+    /// The signer id this owner's key was derived from. Without it a restore
+    /// would have to guess, and a wrong guess signs frames the counterparty
+    /// cannot verify.
+    pub signer_id: String,
     pub identity: AccountIdentity,
     pub dispute_config: AccountDisputeConfig,
     pub j_nonce: u64,
@@ -86,11 +90,17 @@ impl AccountsCheckpoint {
     }
 
     pub fn put_count(&self) -> usize {
-        self.accounts.iter().map(AccountCheckpointRows::put_count).sum()
+        self.accounts
+            .iter()
+            .map(AccountCheckpointRows::put_count)
+            .sum()
     }
 
     pub fn del_count(&self) -> usize {
-        self.accounts.iter().map(AccountCheckpointRows::del_count).sum()
+        self.accounts
+            .iter()
+            .map(AccountCheckpointRows::del_count)
+            .sum()
     }
 }
 
@@ -115,6 +125,20 @@ pub struct AccountRestore {
     pub account_id: AccountId,
     pub replica: AccountReplica,
     pub consensus: ConsensusSnapshot,
+    pub signer_id: String,
+    /// The leaf this account had when the checkpoint was written. The restore
+    /// checks it: a row that rebuilds into a different leaf is a corrupt or
+    /// truncated database, not an account.
+    pub account_leaf: [u8; 32],
+}
+
+/// What the whole restore must reproduce. The database holds these beside the
+/// rows; without them a restore cannot tell a complete load from a partial
+/// one, because any subset of accounts rebuilds into a valid tree.
+pub struct CheckpointExpectation {
+    pub revision: u64,
+    pub accounts_root: [u8; 32],
+    pub account_count: usize,
 }
 
 /// The rows for one account, diffed against the checkpoint's own copy of it.
@@ -124,6 +148,7 @@ pub(crate) fn account_rows(
     account: &AccountConsensus,
     previous: Option<&AccountConsensus>,
     account_leaf: [u8; 32],
+    signer_id: &str,
 ) -> AccountCheckpointRows {
     let state = account.replica().state();
     let (deltas, locks, lending_intents, swap_offers, rebalance_fee_policies) = match previous {
@@ -150,6 +175,7 @@ pub(crate) fn account_rows(
         account_leaf,
         header: AccountCheckpointHeader {
             owner: account.replica().owner().clone(),
+            signer_id: signer_id.to_string(),
             identity: state.identity().clone(),
             dispute_config: state.dispute_config(),
             j_nonce: state.j_nonce(),

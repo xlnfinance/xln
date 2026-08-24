@@ -50,12 +50,14 @@ fn critical_kind(tx: &AccountTx) -> Option<&'static str> {
 }
 
 /// A frame this side built, signed, and is waiting to have acknowledged.
+///
+/// It carries no outputs: what the frame's transactions produced stays with
+/// the pending frame until the peer acks it.
 #[derive(Debug)]
 pub struct ProposedFrame {
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
-    pub outputs: Vec<AccountOutput>,
     pub dropped: Vec<DroppedTx>,
 }
 
@@ -226,12 +228,12 @@ pub fn propose_account_frame(
         state_hash,
         hanko: hanko.clone(),
         candidate,
+        outputs,
     });
     Ok(ProposalOutcome::Proposed(Box::new(ProposedFrame {
         frame,
         state_hash,
         hanko,
-        outputs,
         dropped,
     })))
 }

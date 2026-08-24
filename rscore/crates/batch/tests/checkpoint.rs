@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountCheckpointRows, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
-    AccountRestore, AccountSeed, AccountsCheckpoint, BatchError, EngineGeneration, ReceiverClock,
-    StatefulConsensusEngine,
+    AccountRestore, AccountSeed, AccountsCheckpoint, BatchError, CheckpointExpectation,
+    EngineGeneration, ReceiverClock, StatefulConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState,
@@ -75,6 +75,7 @@ impl<V: Clone> Section<V> {
 struct AccountRow {
     header: Option<xln_rscore_batch::AccountCheckpointHeader>,
     consensus: Option<ConsensusSnapshot>,
+    account_leaf: [u8; 32],
     deltas: Section<Delta>,
     locks: Section<xln_rscore_engine::HtlcLock>,
     lending: Section<xln_rscore_engine::LendingIntentKind>,
@@ -89,6 +90,9 @@ struct Database {
     /// The revision the last durable write covered — what the runtime would
     /// pass back to `commit_checkpoint`.
     written_revision: u64,
+    /// The tree root that revision produced. A real store keeps it for the
+    /// same reason this one does: without it a partial load looks valid.
+    accounts_root: [u8; 32],
 }
 
 impl Database {
@@ -97,6 +101,7 @@ impl Database {
             let row = self.accounts.entry(rows.account_id).or_default();
             row.header = Some(rows.header.clone());
             row.consensus = Some(rows.consensus.clone());
+            row.account_leaf = rows.account_leaf;
             row.deltas.apply(&rows.deltas);
             row.locks.apply(&rows.locks);
             row.lending.apply(&rows.lending_intents);
@@ -107,6 +112,15 @@ impl Database {
             self.accounts.remove(account_id);
         }
         self.written_revision = checkpoint.revision;
+        self.accounts_root = checkpoint.accounts_root;
+    }
+
+    fn expectation(&self) -> CheckpointExpectation {
+        CheckpointExpectation {
+            revision: self.written_revision,
+            accounts_root: self.accounts_root,
+            account_count: self.accounts.len(),
+        }
     }
 
     fn restore_rows(&self) -> Vec<AccountRestore> {
@@ -134,6 +148,8 @@ impl Database {
                     account_id: *account_id,
                     replica,
                     consensus: row.consensus.as_ref().expect("consensus").clone(),
+                    signer_id: header.signer_id.clone(),
+                    account_leaf: row.account_leaf,
                 }
             })
             .collect()
@@ -260,8 +276,12 @@ fn stand(accounts: usize) -> Stand {
             payee_entity: payee_bytes,
         });
     }
-    payer_engine.upsert_accounts(payer_seeds).expect("payer seeds");
-    payee_engine.upsert_accounts(payee_seeds).expect("payee seeds");
+    payer_engine
+        .upsert_accounts(payer_seeds)
+        .expect("payer seeds");
+    payee_engine
+        .upsert_accounts(payee_seeds)
+        .expect("payee seeds");
     Stand {
         payer: payer_engine,
         payee: payee_engine,
@@ -309,8 +329,11 @@ fn pair_by_payee_account(pairs: &[Pair], account_id: &AccountId) -> usize {
 
 /// One payment per pair, all the way to both sides committing it.
 fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
-    let admissions: Vec<(AccountId, Vec<AccountTx>)> =
-        stand.pairs.iter().map(|pair| payment(pair, amount)).collect();
+    let admissions: Vec<(AccountId, Vec<AccountTx>)> = stand
+        .pairs
+        .iter()
+        .map(|pair| payment(pair, amount))
+        .collect();
     stand.payer.admit_txs(admissions).expect("admit");
     let proposals = stand
         .payer
@@ -409,10 +432,10 @@ fn the_first_checkpoint_carries_every_account() {
     assert_eq!(checkpoint.accounts_root, stand.payer.accounts_root());
     for rows in &checkpoint.accounts {
         assert!(
-            rows.deltas.puts.iter().any(|record| matches!(
-                record,
-                PersistentNodeRecord::Leaf { .. }
-            )),
+            rows.deltas
+                .puts
+                .iter()
+                .any(|record| matches!(record, PersistentNodeRecord::Leaf { .. })),
             "a seeded account carries its delta leaf",
         );
         assert!(rows.deltas.dels.is_empty());
@@ -465,7 +488,10 @@ fn only_what_moved_is_shipped() {
     let rows = rows_for(&checkpoint, &moved).expect("moved account");
     // The proposal is in flight: the committed state has not moved, so no
     // delta row moved either — but the frame itself must be durable.
-    assert!(rows.deltas.puts.is_empty(), "committed deltas are unchanged");
+    assert!(
+        rows.deltas.puts.is_empty(),
+        "committed deltas are unchanged"
+    );
     let pending = rows.consensus.pending.as_ref().expect("pending frame");
     assert_eq!(pending.frame.height, 1);
     assert_eq!(pending.frame.txs.len(), 1);
@@ -519,7 +545,7 @@ fn an_engine_restored_from_the_database_reproduces_the_accounts_root() {
     let live_root = stand.payer.accounts_root();
     let mut restored = engine();
     let root = restored
-        .restore_accounts(database.restore_rows())
+        .restore_accounts(database.restore_rows(), &database.expectation())
         .expect("restore");
     assert_eq!(root, live_root);
     assert_eq!(restored.account_count(), stand.payer.account_count());
@@ -565,7 +591,7 @@ fn an_unacknowledged_checkpoint_is_carried_into_the_next_one() {
     written.write(&recovered);
     let mut restored = engine();
     let root = restored
-        .restore_accounts(written.restore_rows())
+        .restore_accounts(written.restore_rows(), &written.expectation())
         .expect("restore");
     assert_eq!(root, stand.payer.accounts_root());
 }
@@ -637,7 +663,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .register_signer(stand.pairs[0].payer_entity, "payer-0")
         .expect("signer");
     let root = restored
-        .restore_accounts(database.restore_rows())
+        .restore_accounts(database.restore_rows(), &database.expectation())
         .expect("restore");
     assert_eq!(root, stand.payer.accounts_root());
     let pending = restored
@@ -650,12 +676,15 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
     // The peer never saw the crash: it commits the frame and acks it.
     let applied = stand
         .payee
-        .apply_inputs(clock(1_700_000_000_000), vec![AccountInputRow {
-            input_index: 0,
-            account_id: stand.pairs[0].payee_account,
-            from_entity_id: stand.pairs[0].payer_entity,
-            kind: AccountInputKind::Frame(Box::new(frame)),
-        }])
+        .apply_inputs(
+            clock(1_700_000_000_000),
+            vec![AccountInputRow {
+                input_index: 0,
+                account_id: stand.pairs[0].payee_account,
+                from_entity_id: stand.pairs[0].payer_entity,
+                kind: AccountInputKind::Frame(Box::new(frame)),
+            }],
+        )
         .expect("apply frame");
     let AccountInputVerdict::Frame(IncomingOutcome::Committed {
         height,
@@ -668,41 +697,51 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
     };
 
     let acked = restored
-        .apply_inputs(clock(1_700_000_000_000), vec![AccountInputRow {
-            input_index: 0,
-            account_id: pair_payer_account,
-            from_entity_id: stand.pairs[0].payee_entity,
-            kind: AccountInputKind::Ack {
-                height: *height,
-                state_hash: *state_hash,
-                hanko: ack_hanko.clone(),
-            },
-        }])
+        .apply_inputs(
+            clock(1_700_000_000_000),
+            vec![AccountInputRow {
+                input_index: 0,
+                account_id: pair_payer_account,
+                from_entity_id: stand.pairs[0].payee_entity,
+                kind: AccountInputKind::Ack {
+                    height: *height,
+                    state_hash: *state_hash,
+                    hanko: ack_hanko.clone(),
+                },
+            }],
+        )
         .expect("apply ack");
-    assert!(
-        matches!(
-            acked[0].verdict,
-            AccountInputVerdict::Ack(AckOutcome::Committed { height: 1, .. })
-        ),
-        "{:?}",
-        acked[0].verdict,
-    );
+    let AccountInputVerdict::Ack(AckOutcome::Committed {
+        height, outputs, ..
+    }) = &acked[0].verdict
+    else {
+        panic!("expected an ack commit: {:?}", acked[0].verdict);
+    };
+    assert_eq!(*height, 1);
+    // A one-hop payment has nothing to forward, so this frame's effect list is
+    // empty — the point here is that the ack is what carries it, rebuilt by
+    // the restore's own replay. `outputs_are_held_until_the_peer_acks` in the
+    // engine tests covers a frame that does produce one.
+    assert!(outputs.is_empty());
     assert_eq!(
         restored.accounts_root(),
         {
             // The engine that never crashed, driven the same way.
             let acked_live = stand
                 .payer
-                .apply_inputs(clock(1_700_000_000_000), vec![AccountInputRow {
-                    input_index: 0,
-                    account_id: pair_payer_account,
-                    from_entity_id: stand.pairs[0].payee_entity,
-                    kind: AccountInputKind::Ack {
-                        height: *height,
-                        state_hash: *state_hash,
-                        hanko: ack_hanko.clone(),
-                    },
-                }])
+                .apply_inputs(
+                    clock(1_700_000_000_000),
+                    vec![AccountInputRow {
+                        input_index: 0,
+                        account_id: pair_payer_account,
+                        from_entity_id: stand.pairs[0].payee_entity,
+                        kind: AccountInputKind::Ack {
+                            height: *height,
+                            state_hash: *state_hash,
+                            hanko: ack_hanko.clone(),
+                        },
+                    }],
+                )
                 .expect("apply ack");
             assert!(matches!(
                 acked_live[0].verdict,
@@ -714,10 +753,11 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
     );
 }
 
-/// A database that lost a delta row cannot be restored into a matching engine.
-/// The mismatch surfaces as a different accounts root, not as a silent fork.
+/// A database that lost a delta row cannot be restored at all: the account
+/// rebuilds into a different leaf than the checkpoint recorded, and the
+/// restore says so instead of coming up on a state nobody signed.
 #[test]
-fn a_truncated_database_does_not_reproduce_the_root() {
+fn a_truncated_database_is_refused() {
     let mut stand = stand(2);
     let mut database = Database::default();
     round(&mut stand, 1_700_000_000_000, 25);
@@ -733,8 +773,113 @@ fn a_truncated_database_does_not_reproduce_the_root() {
         .clear();
 
     let mut restored = engine();
-    let root = restored
-        .restore_accounts(database.restore_rows())
+    let error = restored
+        .restore_accounts(database.restore_rows(), &database.expectation())
+        .expect_err("a truncated row is not an account");
+    assert!(
+        matches!(error, BatchError::CheckpointAccountLeaf { .. }),
+        "{error:?}",
+    );
+}
+
+/// A load that is missing whole accounts is refused too: any subset of rows
+/// rebuilds into a perfectly valid tree, so only the recorded count and root
+/// can tell a complete load from a partial one.
+#[test]
+fn a_partial_load_is_refused() {
+    let mut stand = stand(3);
+    let mut database = Database::default();
+    round(&mut stand, 1_700_000_000_000, 25);
+    let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
+    database.write(&checkpoint);
+
+    let expectation = database.expectation();
+    let mut rows = database.restore_rows();
+    rows.pop();
+    let mut restored = engine();
+    let error = restored
+        .restore_accounts(rows, &expectation)
+        .expect_err("a short load is not a checkpoint");
+    assert!(
+        matches!(error, BatchError::CheckpointIncomplete { .. }),
+        "{error:?}",
+    );
+
+    // And a load that is complete but claims the wrong root is refused on the
+    // root, not silently accepted.
+    let mut wrong_root = database.expectation();
+    wrong_root.accounts_root[0] ^= 0x01;
+    let error = restored
+        .restore_accounts(database.restore_rows(), &wrong_root)
+        .expect_err("a root that does not match is not a checkpoint");
+    assert!(
+        matches!(error, BatchError::CheckpointRoot { .. }),
+        "{error:?}"
+    );
+}
+
+/// A restore replaces the store; accounts the database no longer holds do not
+/// survive in memory.
+#[test]
+fn a_restore_replaces_whatever_the_engine_held() {
+    // The database holds one account, taken from an engine that only ever had
+    // that one.
+    let mut source = stand(1);
+    let mut database = Database::default();
+    round(&mut source, 1_700_000_000_000, 25);
+    let checkpoint = source.payer.checkpoint_changes().expect("checkpoint");
+    database.write(&checkpoint);
+
+    // The engine loading it holds three, two of which the database has never
+    // heard of.
+    let mut live = stand(3);
+    round(&mut live, 1_700_000_000_000, 25);
+    assert_eq!(live.payer.account_count(), 3);
+    let root = live
+        .payer
+        .restore_accounts(database.restore_rows(), &database.expectation())
         .expect("restore");
-    assert_ne!(root, stand.payer.accounts_root());
+    assert_eq!(root, source.payer.accounts_root());
+    assert_eq!(live.payer.account_count(), 1);
+    for pair in &live.pairs[1..] {
+        assert!(
+            live.payer.account(&pair.payer_account).is_none(),
+            "an account the database does not hold must not survive",
+        );
+    }
+}
+
+/// Two admissions for one account in a single wave both land: neither row is
+/// silently dropped by the tree write.
+#[test]
+fn a_wave_with_two_rows_for_one_account_keeps_both() {
+    let mut stand = stand(2);
+    let account_id = stand.pairs[0].payer_account;
+    stand
+        .payer
+        .admit_txs(vec![
+            payment(&stand.pairs[0], 5),
+            payment(&stand.pairs[0], 7),
+            payment(&stand.pairs[1], 9),
+        ])
+        .expect("admit");
+    assert_eq!(
+        stand
+            .payer
+            .account(&account_id)
+            .expect("account")
+            .mempool()
+            .len(),
+        2,
+    );
+    let proposals = stand
+        .payer
+        .propose_frames(1_700_000_000_000, 100, None)
+        .expect("propose");
+    assert_eq!(proposals.len(), 2);
+    let rows = proposals
+        .iter()
+        .find(|row| row.account_id == account_id)
+        .expect("row");
+    assert_eq!(rows.frame.txs.len(), 2);
 }

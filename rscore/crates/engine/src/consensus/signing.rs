@@ -20,6 +20,7 @@ pub struct SigningIdentity {
     weight: u128,
     threshold: u128,
     delays: BoardDelays,
+    signer_id: String,
 }
 
 impl std::fmt::Debug for SigningIdentity {
@@ -29,6 +30,7 @@ impl std::fmt::Debug for SigningIdentity {
         formatter
             .debug_struct("SigningIdentity")
             .field("entityId", &hex_of(&self.entity_id))
+            .field("signerId", &self.signer_id)
             .field("weight", &self.weight)
             .field("threshold", &self.threshold)
             .finish_non_exhaustive()
@@ -63,6 +65,7 @@ impl SigningIdentity {
             weight,
             threshold,
             delays,
+            signer_id: signer_id.to_string(),
         })
     }
 
@@ -95,11 +98,38 @@ impl SigningIdentity {
             weight,
             threshold,
             delays,
+            signer_id: signer_id.to_string(),
         })
     }
 
     pub const fn entity_id(&self) -> &[u8; 32] {
         &self.entity_id
+    }
+
+    /// The signer id this key was derived from, so a checkpoint can carry the
+    /// entity-to-signer mapping instead of a restore guessing it.
+    pub fn signer_id(&self) -> &str {
+        &self.signer_id
+    }
+
+    /// Whether this key alone defines the entity it signs for — a lazy entity
+    /// id is the hash of its own board, so the binding is checkable without
+    /// the certified registry. A registered board is not, and returns false.
+    pub fn binds_lazy_entity(&self) -> bool {
+        let Some(address) = crate::address_of_private_key(&self.private_key) else {
+            return false;
+        };
+        let mut member_entity_id = [0_u8; 32];
+        member_entity_id[12..].copy_from_slice(&address);
+        let derived = xln_rscore_hanko::lazy_entity_id(
+            &[xln_rscore_hanko::BoardMember {
+                entity_id: member_entity_id,
+                weight: self.weight,
+            }],
+            self.threshold,
+            self.delays,
+        );
+        derived == self.entity_id
     }
 
     /// The signer address this identity recovers to, which the runtime uses to

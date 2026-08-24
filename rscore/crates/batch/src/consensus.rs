@@ -6,18 +6,18 @@
 //! shell per frame. Both keep the same commitment: a radix-16 Patricia tree
 //! keyed by account id, leaf digest = the Entity's account leaf.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
-    AccountConsensus, AccountFrame, AccountOutput, AckOutcome, BoardDelays, IncomingFrame,
-    IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
-    apply_incoming_ack, apply_incoming_frame, propose_account_frame,
+    AccountConsensus, AccountFrame, AckOutcome, BoardDelays, IncomingFrame, IncomingOutcome,
+    ProposalOutcome, ReceiverClock, SigningIdentity, StateError, apply_incoming_ack,
+    apply_incoming_frame, propose_account_frame,
 };
 use xln_rscore_protocol::{PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap};
 
-use crate::checkpoint::{AccountRestore, AccountsCheckpoint, account_rows};
+use crate::checkpoint::{AccountRestore, AccountsCheckpoint, CheckpointExpectation, account_rows};
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, EngineGeneration};
 
@@ -59,12 +59,13 @@ pub struct AccountInputResult {
 }
 
 #[derive(Debug)]
+/// A proposal to send. It carries no outputs: what the frame produced is
+/// released with the peer's ack, never before.
 pub struct ProposalRow {
     pub account_id: AccountId,
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
-    pub outputs: Vec<AccountOutput>,
     pub dropped: usize,
 }
 
@@ -153,7 +154,13 @@ impl StatefulConsensusEngine {
     /// account has no frames and no queue.
     pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
         let mut entries = Vec::with_capacity(seeds.len());
+        let mut seen = BTreeSet::new();
         for seed in seeds {
+            // Two seeds for one account in a wave is a caller bug: one of them
+            // would be silently discarded by the tree write.
+            if !seen.insert(seed.account_id) {
+                return Err(BatchError::DuplicateAccount(seed.account_id));
+            }
             self.ensure_identity(seed.replica.owner().as_bytes())?;
             let account = AccountConsensus::new(seed.replica);
             let leaf = leaf_root(seed.account_id, &account)?;
@@ -168,12 +175,21 @@ impl StatefulConsensusEngine {
     }
 
     /// Admit local transactions into the accounts' mempools.
+    ///
+    /// A wave may carry several rows for the same account. They are merged in
+    /// row order onto one copy: cloning the pre-wave account per row and
+    /// writing each back would keep only the last row's transactions, and the
+    /// rest would vanish without an error.
     pub fn admit_txs(
         &mut self,
         requests: Vec<(AccountId, Vec<xln_rscore_engine::AccountTx>)>,
     ) -> Result<[u8; 32], BatchError> {
-        let mut entries = Vec::with_capacity(requests.len());
+        let mut merged: BTreeMap<AccountId, Vec<xln_rscore_engine::AccountTx>> = BTreeMap::new();
         for (account_id, txs) in requests {
+            merged.entry(account_id).or_default().extend(txs);
+        }
+        let mut entries = Vec::with_capacity(merged.len());
+        for (account_id, txs) in merged {
             let mut account = self
                 .accounts
                 .get(account_id.as_bytes())
@@ -243,7 +259,6 @@ impl StatefulConsensusEngine {
                             frame: proposed.frame,
                             state_hash: proposed.state_hash,
                             hanko: proposed.hanko,
-                            outputs: proposed.outputs,
                             dropped: proposed.dropped.len(),
                         }),
                     };
@@ -317,13 +332,8 @@ impl StatefulConsensusEngine {
                         .ok_or(BatchError::SignerRequired)?;
                     let mut results = Vec::with_capacity(rows.len());
                     for row in rows {
-                        let verdict = apply_one(
-                            &mut account,
-                            identity,
-                            &row.from_entity_id,
-                            clock,
-                            row.kind,
-                        );
+                        let verdict =
+                            apply_one(&mut account, identity, &row.from_entity_id, clock, row.kind);
                         results.push(AccountInputResult {
                             input_index: row.input_index,
                             account_id,
@@ -381,11 +391,17 @@ impl StatefulConsensusEngine {
                 continue;
             };
             let account_id = account_id_of(key)?;
+            let owner = value.replica().owner().as_bytes();
+            let signer_id = self
+                .signer_of(owner)
+                .ok_or(BatchError::SignerRequired)?
+                .to_string();
             accounts.push(account_rows(
                 account_id,
                 value,
                 self.checkpoint.get(key),
                 leaf_root(account_id, value)?,
+                &signer_id,
             ));
         }
         let mut removed = Vec::new();
@@ -423,31 +439,96 @@ impl StatefulConsensusEngine {
         Ok(())
     }
 
-    /// Load accounts back from a checkpoint the database holds. The restored
-    /// tree is itself the checkpoint: nothing has moved since it was written.
-    pub fn restore_accounts(&mut self, rows: Vec<AccountRestore>) -> Result<[u8; 32], BatchError> {
+    /// Load accounts back from a checkpoint the database holds.
+    ///
+    /// This replaces the store rather than merging into it: a restore is what
+    /// the database says the world is, and an account the database no longer
+    /// has must not survive in memory. The result is checked against what the
+    /// checkpoint recorded — every account leaf, the account count, the tree
+    /// root and the revision — because any subset of rows rebuilds into a
+    /// perfectly valid tree that simply is not this one.
+    pub fn restore_accounts(
+        &mut self,
+        rows: Vec<AccountRestore>,
+        expected: &CheckpointExpectation,
+    ) -> Result<[u8; 32], BatchError> {
+        if rows.len() != expected.account_count {
+            return Err(BatchError::CheckpointIncomplete {
+                actual: rows.len(),
+                expected: expected.account_count,
+            });
+        }
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            self.ensure_identity(row.replica.owner().as_bytes())?;
+            self.register_signer(*row.replica.owner().as_bytes(), &row.signer_id)?;
             let account = AccountConsensus::restore_from_checkpoint(row.replica, row.consensus)
                 .map_err(|error| state_error(row.account_id, &error))?;
             let leaf = leaf_root(row.account_id, &account)?;
+            if leaf != row.account_leaf {
+                return Err(BatchError::CheckpointAccountLeaf {
+                    account_id: row.account_id,
+                    actual: hex_of(&leaf),
+                    expected: hex_of(&row.account_leaf),
+                });
+            }
             entries.push((row.account_id.as_bytes().to_vec(), account, leaf));
         }
+        let mut restored = StatefulConsensusEngine::empty_accounts();
+        std::mem::swap(&mut self.accounts, &mut restored);
         if !entries.is_empty() {
             self.accounts = self.put_accounts(entries)?;
         }
+        let root = self.accounts.root_hash();
+        if root != expected.accounts_root {
+            return Err(BatchError::CheckpointRoot {
+                actual: hex_of(&root),
+                expected: hex_of(&expected.accounts_root),
+            });
+        }
+        self.revision = expected.revision;
         self.checkpoint = self.accounts.clone();
         self.checkpoint_revision = self.revision;
-        Ok(self.accounts.root_hash())
+        Ok(root)
     }
 
+    fn empty_accounts() -> PersistentRadixMap<AccountConsensus> {
+        PersistentRadixMap::empty()
+    }
+
+    /// Resolve the signer for an entity we host. The session's default signer
+    /// is only assumed when it actually is this entity's signer — a lazy
+    /// entity id is the hash of its own board, so that is checkable. Guessing
+    /// wrong would have this engine sign frames the peer cannot verify, and
+    /// the mistake would only surface at the counterparty.
     fn ensure_identity(&mut self, entity_id: &[u8; 32]) -> Result<(), BatchError> {
         if self.identities.contains_key(entity_id) {
             return Ok(());
         }
         let signer_id = self.signer_id.clone();
-        self.register_signer(*entity_id, &signer_id)
+        let identity = SigningIdentity::from_seed(
+            &self.seed,
+            &signer_id,
+            *entity_id,
+            1,
+            1,
+            BoardDelays::default(),
+        )
+        .map_err(|error| BatchError::Signing(error.to_string()))?;
+        if !identity.binds_lazy_entity() {
+            return Err(BatchError::SignerUnknownEntity {
+                entity_id: hex_of(entity_id),
+            });
+        }
+        self.identities.insert(*entity_id, identity);
+        Ok(())
+    }
+
+    /// The signer id bound to an entity, so a checkpoint can carry it and a
+    /// restore can rebuild the mapping instead of guessing.
+    pub fn signer_of(&self, entity_id: &[u8; 32]) -> Option<&str> {
+        self.identities
+            .get(entity_id)
+            .map(|identity| identity.signer_id())
     }
 
     fn put_accounts(

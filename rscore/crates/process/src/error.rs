@@ -145,7 +145,11 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::InputSignatureInvalid { .. } => "RSCORE_BATCH_INPUT_SIGNATURE_INVALID",
         BatchError::CheckpointRevision { .. } => "RSCORE_BATCH_CHECKPOINT_REVISION",
         BatchError::CheckpointAccountKey { .. } => "RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY",
+        BatchError::CheckpointIncomplete { .. } => "RSCORE_BATCH_CHECKPOINT_INCOMPLETE",
+        BatchError::CheckpointAccountLeaf { .. } => "RSCORE_BATCH_CHECKPOINT_ACCOUNT_LEAF",
+        BatchError::CheckpointRoot { .. } => "RSCORE_BATCH_CHECKPOINT_ROOT",
         BatchError::SignerRequired => "RSCORE_BATCH_SIGNER_REQUIRED",
+        BatchError::SignerUnknownEntity { .. } => "RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY",
         BatchError::Signing(_) => "RSCORE_BATCH_SIGNING",
         BatchError::AccountsTree { .. } => "RSCORE_BATCH_ACCOUNTS_TREE",
     }
