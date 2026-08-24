@@ -4,7 +4,10 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { safeStringify } from '../../../core/protocol/serialization';
-import type { CopyGeneratedInputDefinition } from '../../../frontend/config/generated-inputs';
+import {
+  COPY_GENERATED_INPUTS,
+  type CopyGeneratedInputDefinition,
+} from '../../../frontend/config/generated-inputs';
 import { SURFACE_IDS, type SurfaceId } from '../../../frontend/config/surfaces';
 import {
   assembleCandidateRelease,
@@ -13,6 +16,11 @@ import {
 import { prepareGeneratedInputs } from '../../../frontend/scripts/generated-inputs';
 
 const temporaryRoots: string[] = [];
+
+const planTestCandidate = (frontendRoot: string) =>
+  planCandidateRelease(frontendRoot, COPY_GENERATED_INPUTS);
+const assembleTestCandidate = (frontendRoot: string) =>
+  assembleCandidateRelease(frontendRoot, COPY_GENERATED_INPUTS);
 
 const createFrontendRoot = async (): Promise<string> => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'xln-candidate-release-'));
@@ -76,8 +84,8 @@ describe('React candidate release assembly', () => {
     const frontendRoot = await createFrontendRoot();
     await writeCompleteArtifacts(frontendRoot);
 
-    const first = await planCandidateRelease(frontendRoot);
-    const second = await planCandidateRelease(frontendRoot);
+    const first = await planTestCandidate(frontendRoot);
+    const second = await planTestCandidate(frontendRoot);
 
     expect(second.releaseId).toBe(first.releaseId);
     expect(first.manifest.applications.map(({ id }) => id)).toEqual(SURFACE_IDS);
@@ -100,8 +108,8 @@ describe('React candidate release assembly', () => {
     await mkdir(join(frontendRoot, 'build'), { recursive: true });
     await writeFile(join(frontendRoot, 'build', 'sentinel.txt'), 'svelte-canonical\n');
 
-    const first = await assembleCandidateRelease(frontendRoot);
-    const second = await assembleCandidateRelease(frontendRoot);
+    const first = await assembleTestCandidate(frontendRoot);
+    const second = await assembleTestCandidate(frontendRoot);
     const manifest = JSON.parse(await readFile(
       join(first.releaseDirectory, 'release-manifest.json'),
       'utf8',
@@ -116,10 +124,10 @@ describe('React candidate release assembly', () => {
   test('changes the release identity when an artifact changes', async () => {
     const frontendRoot = await createFrontendRoot();
     await writeCompleteArtifacts(frontendRoot);
-    const before = await planCandidateRelease(frontendRoot);
+    const before = await planTestCandidate(frontendRoot);
 
     await writeFile(join(frontendRoot, '.artifacts/site/assets/site/index.js'), 'console.info("changed")\n');
-    const after = await planCandidateRelease(frontendRoot);
+    const after = await planTestCandidate(frontendRoot);
 
     expect(after.releaseId).not.toBe(before.releaseId);
   });
@@ -127,11 +135,11 @@ describe('React candidate release assembly', () => {
   test('changes the release identity when a prepared public input changes', async () => {
     const frontendRoot = await createFrontendRoot();
     await writeCompleteArtifacts(frontendRoot);
-    const before = await planCandidateRelease(frontendRoot);
+    const before = await planTestCandidate(frontendRoot);
 
     await writeFile(join(frontendRoot, 'static/install.sh'), 'changed install input\n');
     await prepareGeneratedInputs(join(frontendRoot, '..'), frontendRoot, ['site']);
-    const after = await planCandidateRelease(frontendRoot);
+    const after = await planTestCandidate(frontendRoot);
 
     expect(after.releaseId).not.toBe(before.releaseId);
   });
@@ -139,10 +147,10 @@ describe('React candidate release assembly', () => {
   test('rejects corrupted bytes in an existing content-addressed release', async () => {
     const frontendRoot = await createFrontendRoot();
     await writeCompleteArtifacts(frontendRoot);
-    const release = await assembleCandidateRelease(frontendRoot);
+    const release = await assembleTestCandidate(frontendRoot);
     await writeFile(join(release.releaseDirectory, 'assets/site/index.js'), 'corrupted\n');
 
-    await expect(assembleCandidateRelease(frontendRoot)).rejects.toThrow(
+    await expect(assembleTestCandidate(frontendRoot)).rejects.toThrow(
       'CANDIDATE_RELEASE_FILE_MISMATCH:assets/site/index.js',
     );
   });
@@ -154,7 +162,7 @@ describe('React candidate release assembly', () => {
     await mkdir(join(foreignPath, '..'), { recursive: true });
     await writeFile(foreignPath, 'foreign\n');
 
-    await expect(planCandidateRelease(frontendRoot)).rejects.toThrow(
+    await expect(planTestCandidate(frontendRoot)).rejects.toThrow(
       'CANDIDATE_ARTIFACT_PATH_UNOWNED:docs:assets/site/foreign.js',
     );
   });
@@ -194,7 +202,7 @@ describe('React candidate release assembly', () => {
       },
     })}\n`);
 
-    await expect(planCandidateRelease(frontendRoot)).rejects.toThrow(
+    await expect(planTestCandidate(frontendRoot)).rejects.toThrow(
       'CANDIDATE_VITE_REFERENCE_MISSING:ops:assets/ops/missing.js',
     );
     await expect(stat(join(frontendRoot, '.artifacts/releases'))).rejects.toThrow();

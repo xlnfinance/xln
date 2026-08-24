@@ -7,6 +7,8 @@ const ts = require('typescript');
 
 const DEFAULT_CHUNK_TOKEN_LIMIT = 180_000;
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const compareText = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+const formatInteger = value => String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 function discoverSourceFiles(baseDir, { excludeDirectories = [], excludeFiles = [] } = {}) {
   const excludedDirectories = new Set(excludeDirectories);
@@ -16,7 +18,7 @@ function discoverSourceFiles(baseDir, { excludeDirectories = [], excludeFiles = 
   function visit(relativeDir = '') {
     const absoluteDir = path.join(baseDir, relativeDir);
     const entries = fs.readdirSync(absoluteDir, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort((left, right) => compareText(left.name, right.name));
 
     for (const entry of entries) {
       const relativePath = path.join(relativeDir, entry.name);
@@ -1040,7 +1042,7 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir
   const gitCommit = readGitCommit(projectRoot);
   const timestamp = profile === 'nocomments'
     ? 'deterministic-source-tree'
-    : new Date().toISOString().replace('T', ' ').substring(0, 19);
+    : process.env.XLN_GENERATED_AT || new Date().toISOString().replace('T', ' ').substring(0, 19);
 
   if (profile === 'cross') {
     return generateCrossSemanticOverview(totalTokens, timestamp, gitCommit, fileSizes, fileGroups);
@@ -1741,18 +1743,18 @@ function buildManifest({ outputFilename, chunkFiles, fileStats, tokenLimit }) {
   const chunkRows = chunkFiles.map((chunk, index) => {
     const tokens = estimateTokens(chunk.content);
     const files = chunk.files.map((file) => file.path).join(', ');
-    return `${index + 1}. ${chunk.filename} - sha256=${sha256(chunk.content)} - ~${tokens.toLocaleString()} tokens - ${files}`;
+    return `${index + 1}. ${chunk.filename} - sha256=${sha256(chunk.content)} - ~${formatInteger(tokens)} tokens - ${files}`;
   }).join('\n');
   const topFiles = fileStats
     .map((file) => ({ ...file, tokens: estimateTokens(file.bytes) }))
     .sort((a, b) => b.tokens - a.tokens)
     .slice(0, 25)
-    .map((file) => `- ${file.file}: ~${file.tokens.toLocaleString()} tokens`)
+    .map((file) => `- ${file.file}: ~${formatInteger(file.tokens)} tokens`)
     .join('\n');
   return `# XLN llms.txt Chunk Manifest
 
 Primary monolithic file: ${outputFilename}
-Chunk token limit: ~${tokenLimit.toLocaleString()} tokens
+Chunk token limit: ~${formatInteger(tokenLimit)} tokens
 
 Use the chunk files below when an LLM cannot load the monolithic file. A report
 based on only the first chunk is invalid; it will mostly see contracts and miss
@@ -1905,7 +1907,7 @@ function writeProfile(profile) {
   })).sort((a, b) => b.tokens - a.tokens);
 
   console.log(`OK ${outputFilename} generated`);
-  console.log(`${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
+  console.log(`${formatInteger(lines)} lines, ${kb} KB, ~${formatInteger(tokensTotal)} tokens`);
   console.log(`xln.finance/${outputFilename}`);
   if (writeChunks) {
     const base = outputFilename.replace(/\.txt$/i, '');
@@ -1914,7 +1916,7 @@ function writeProfile(profile) {
   console.log(counts);
   console.log('Token Breakdown (top 8):');
   fileTokens.slice(0, 8).forEach(f => {
-    const tokStr = f.tokens.toLocaleString().padStart(7);
+    const tokStr = formatInteger(f.tokens).padStart(7);
     const pctStr = f.pct.padStart(4);
     console.log(`  ${tokStr} tok (${pctStr}%) - ${f.file}`);
   });
@@ -1937,6 +1939,6 @@ if (summaries.length > 1) {
   console.log('Generated profiles:');
   summaries.forEach(summary => {
     const chunkLabel = writeChunks ? `, chunks=${summary.chunks}` : '';
-    console.log(`  ${summary.profile}: ${summary.outputFilename}, ~${summary.tokensTotal.toLocaleString()} tokens${chunkLabel}`);
+    console.log(`  ${summary.profile}: ${summary.outputFilename}, ~${formatInteger(summary.tokensTotal)} tokens${chunkLabel}`);
   });
 }

@@ -18,6 +18,10 @@ describe('frontend route ownership', () => {
       kind: 'stem',
       pathname: '/llms',
     });
+    expect(SURFACES.find(({ id }) => id === 'docs')?.assetRoutes).toContainEqual({
+      kind: 'prefix',
+      pathname: '/docs-static',
+    });
   });
 
   test('keeps server routes and unknown paths edge-owned', () => {

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { UserConfig } from 'vite';
 
 import { parseDevelopmentGatewayPort } from './development-gateway';
+import { hasPreparedGeneratedInputs } from './generated-inputs';
 import { getSurface, type SurfaceId } from './surfaces';
 
 const FRONTEND_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -19,13 +20,20 @@ export const getReactAppBase = (
   useDevelopmentGateway: boolean,
 ): '/' | `/__app/${SurfaceId}/` => useDevelopmentGateway ? `/__app/${surfaceId}/` : '/';
 
+export const getReactPublicDirectory = (
+  surfaceId: SurfaceId,
+  useDevelopmentGateway: boolean,
+): string | false => useDevelopmentGateway && hasPreparedGeneratedInputs(surfaceId)
+  ? resolve(FRONTEND_ROOT, '.artifacts/public', surfaceId)
+  : false;
+
 export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfigInput): UserConfig => {
   const surface = getSurface(surfaceId);
   return {
     root: rootDirectory,
     base: getReactAppBase(surfaceId, USE_DEVELOPMENT_GATEWAY),
     appType: 'spa',
-    publicDir: false,
+    publicDir: getReactPublicDirectory(surfaceId, USE_DEVELOPMENT_GATEWAY),
     plugins: [react()],
     cacheDir: resolve(FRONTEND_ROOT, 'node_modules/.vite-react', surfaceId),
     server: {
@@ -40,6 +48,7 @@ export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfi
       },
     },
     build: {
+      copyPublicDir: false,
       outDir: resolve(FRONTEND_ROOT, surface.artifactDirectory),
       assetsDir: surface.assetDirectory,
       emptyOutDir: true,

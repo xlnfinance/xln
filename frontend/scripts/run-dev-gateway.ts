@@ -17,6 +17,13 @@ const runCommand = async (argv: readonly string[]): Promise<void> => {
   if (exitCode !== 0) throw new Error(`FRONTEND_GATEWAY_COMMAND_FAILED:${argv[0]}:${exitCode}`);
 };
 
+export const getGatewayExitFailure = (
+  shutdownRequested: boolean,
+  exitCode: number,
+): Error | undefined => shutdownRequested || exitCode === 0
+  ? undefined
+  : new Error(`FRONTEND_GATEWAY_EXITED:${exitCode}`);
+
 const run = async (): Promise<void> => {
   await mkdir(dirname(GATEWAY_OUTPUT), { recursive: true });
   await runCommand([
@@ -34,11 +41,16 @@ const run = async (): Promise<void> => {
     stdout: 'inherit',
     stderr: 'inherit',
   });
-  const forwardSignal = (signal: NodeJS.Signals): void => gateway.kill(signal);
+  let shutdownRequested = false;
+  const forwardSignal = (signal: NodeJS.Signals): void => {
+    shutdownRequested = true;
+    gateway.kill(signal);
+  };
   process.once('SIGINT', () => forwardSignal('SIGINT'));
   process.once('SIGTERM', () => forwardSignal('SIGTERM'));
   const exitCode = await gateway.exited;
-  if (exitCode !== 0) throw new Error(`FRONTEND_GATEWAY_EXITED:${exitCode}`);
+  const failure = getGatewayExitFailure(shutdownRequested, exitCode);
+  if (failure !== undefined) throw failure;
 };
 
 if (import.meta.main) {

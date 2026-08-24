@@ -1,8 +1,10 @@
 import { fileURLToPath } from 'node:url';
 
 import { SURFACES } from '../config/surfaces';
+import { prepareGeneratedInputs } from './generated-inputs';
 
 const FRONTEND_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 export type DevelopmentProcessSpec = Readonly<{
   label: string;
@@ -23,7 +25,16 @@ export const createDevelopmentProcessSpecs = (): readonly DevelopmentProcessSpec
   },
 ];
 
+export const getDevelopmentExitFailure = (
+  shutdownRequested: boolean,
+  label: string,
+  exitCode: number,
+): Error | undefined => shutdownRequested
+  ? undefined
+  : new Error(`FRONTEND_DEV_PROCESS_EXITED:${label}:${exitCode}`);
+
 const run = async (): Promise<void> => {
+  await prepareGeneratedInputs(REPOSITORY_ROOT, FRONTEND_ROOT, SURFACES.map(({ id }) => id));
   const processes = createDevelopmentProcessSpecs().map((spec) => ({
     spec,
     child: Bun.spawn([...spec.argv], {
@@ -49,12 +60,11 @@ const run = async (): Promise<void> => {
 
   const exits = processes.map(async ({ spec, child }) => ({ spec, exitCode: await child.exited }));
   const first = await Promise.race(exits);
-  const unexpectedExit = !shutdownRequested;
+  const shutdownWasRequested = shutdownRequested;
   stop();
   await Promise.all(exits);
-  if (unexpectedExit || first.exitCode !== 0) {
-    throw new Error(`FRONTEND_DEV_PROCESS_EXITED:${first.spec.label}:${first.exitCode}`);
-  }
+  const failure = getDevelopmentExitFailure(shutdownWasRequested, first.spec.label, first.exitCode);
+  if (failure !== undefined) throw failure;
 };
 
 if (import.meta.main) {

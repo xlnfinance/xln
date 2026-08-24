@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   COPY_GENERATED_INPUTS,
   GENERATED_INPUTS,
+  PREPARED_GENERATED_INPUTS,
 } from '../../../frontend/config/generated-inputs';
 import { SURFACE_IDS } from '../../../frontend/config/surfaces';
 
@@ -37,5 +38,13 @@ describe('frontend generated input ownership', () => {
       const destinations = input.producer.entries.map(({ destinationPath }) => destinationPath);
       expect(new Set(destinations).size).toBe(destinations.length);
     }
+  });
+
+  test('includes the docs command producer in candidate preparation', () => {
+    expect(PREPARED_GENERATED_INPUTS.map(({ id }) => id)).toEqual([
+      'docs-catalog',
+      'site-public-static',
+      'ops-comparative-results',
+    ]);
   });
 });

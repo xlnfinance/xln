@@ -14,9 +14,9 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import { safeStringify } from '../../core/protocol/serialization';
 import {
-  COPY_GENERATED_INPUTS,
-  type CopyGeneratedInputDefinition,
+  PREPARED_GENERATED_INPUTS,
   type GeneratedInputOwner,
+  type PreparedGeneratedInputDefinition,
 } from '../config/generated-inputs';
 import { EDGE_ROUTES, SURFACES, type RouteRule, type SurfaceId } from '../config/surfaces';
 import { readPreparedGeneratedInputs } from './generated-inputs';
@@ -43,6 +43,7 @@ type CandidateGeneratedInput = Readonly<{
   id: string;
   owner: GeneratedInputOwner;
   outputNamespace: string;
+  definitionSha256: string;
   files: readonly string[];
 }>;
 
@@ -101,7 +102,7 @@ const walkRegularFiles = async (root: string, current = root): Promise<readonly 
     if (!entry.isFile()) throw new Error(`CANDIDATE_ARTIFACT_UNSUPPORTED:${pathname}`);
     paths.push(toPortablePath(relative(root, pathname)));
   }
-  return paths;
+  return paths.sort(comparePaths);
 };
 
 const readViteManifestReferences = async (
@@ -196,7 +197,7 @@ const createApplications = (): readonly CandidateApplication[] => SURFACES.map((
 
 export const planCandidateRelease = async (
   frontendRoot: string,
-  inputDefinitions: readonly CopyGeneratedInputDefinition[] = COPY_GENERATED_INPUTS,
+  inputDefinitions: readonly PreparedGeneratedInputDefinition[] = PREPARED_GENERATED_INPUTS,
 ): Promise<CandidateReleasePlan> => {
   const applicationFiles = (await Promise.all(
     SURFACES.map(({ id }) => collectSurfaceFiles(frontendRoot, id)),
@@ -211,6 +212,7 @@ export const planCandidateRelease = async (
     id: manifest.id,
     owner: manifest.owner,
     outputNamespace: manifest.outputNamespace,
+    definitionSha256: manifest.definitionSha256,
     files: manifest.files.map(({ destinationPath }) => destinationPath).sort(comparePaths),
   }));
   const publicFiles = files.map(({ destinationPath: path, sha256, size }) => ({ path, sha256, size }));
@@ -285,7 +287,7 @@ const copyAndVerify = async (file: CandidateFile, releaseRoot: string): Promise<
 
 export const assembleCandidateRelease = async (
   frontendRoot: string,
-  inputDefinitions: readonly CopyGeneratedInputDefinition[] = COPY_GENERATED_INPUTS,
+  inputDefinitions: readonly PreparedGeneratedInputDefinition[] = PREPARED_GENERATED_INPUTS,
 ): Promise<CandidateReleasePlan> => {
   const plan = await planCandidateRelease(frontendRoot, inputDefinitions);
   if (await pathExists(plan.releaseDirectory)) {

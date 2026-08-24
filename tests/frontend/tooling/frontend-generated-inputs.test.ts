@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import {
   COPY_GENERATED_INPUTS,
+  type CommandGeneratedInputDefinition,
   type CopyGeneratedInputDefinition,
 } from '../../../frontend/config/generated-inputs';
 import {
@@ -13,6 +15,7 @@ import {
 } from '../../../frontend/scripts/generated-inputs';
 
 const temporaryRoots: string[] = [];
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 const createWorkspace = async (): Promise<Readonly<{ repositoryRoot: string; frontendRoot: string }>> => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'xln-generated-inputs-'));
@@ -72,6 +75,7 @@ describe('frontend generated input preparation', () => {
       join(frontendRoot, '.artifacts/inputs/site-public-static/files/img/logo.png'),
       'utf8',
     )).toBe('logo');
+    expect(await readFile(join(frontendRoot, '.artifacts/public/site/img/logo.png'), 'utf8')).toBe('logo');
   });
 
   test('prepares only copy producers owned by the selected application', async () => {
@@ -126,5 +130,83 @@ describe('frontend generated input preparation', () => {
       ['site'],
       [collision],
     )).rejects.toThrow('GENERATED_INPUT_DESTINATION_COLLISION:collision-fixture:same.txt');
+  });
+
+  test('runs command producers inside their isolated payload and validates declared routes', async () => {
+    const { repositoryRoot, frontendRoot } = await createWorkspace();
+    await writeSource(repositoryRoot, 'frontend/static/docs-static/legacy.md', 'legacy');
+    const command: CommandGeneratedInputDefinition = {
+      id: 'docs-command-fixture',
+      owner: 'docs',
+      sourcePaths: ['fixture'],
+      outputNamespace: 'docs-command-fixture',
+      producer: {
+        kind: 'command',
+        argv: ['bun', '-e', [
+          "import { mkdir } from 'node:fs/promises'",
+          "const root = process.env['TEST_OUTPUT']",
+          "if (!root) throw new Error('TEST_OUTPUT_MISSING')",
+          "await mkdir(`${root}/docs-catalog/audit`, { recursive: true })",
+          "await Bun.write(`${root}/docs-catalog/audit/advisor.md`, 'advisor')",
+          "await Bun.write(`${root}/docs-catalog/audit-protocol.md`, 'protocol')",
+          "await Bun.write(`${root}/llms.txt`, 'context')",
+        ].join(';')],
+        outputEnvironment: 'TEST_OUTPUT',
+        environment: {},
+        copies: [{
+          sourcePath: 'frontend/static/docs-static',
+          destinationPath: 'docs-static',
+        }],
+        outputRoutes: [
+          { kind: 'prefix', pathname: '/docs-catalog' },
+          { kind: 'prefix', pathname: '/docs-static' },
+          { kind: 'stem', pathname: '/llms' },
+        ],
+      },
+    };
+
+    const first = await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['docs'], [command]);
+    const second = await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['docs'], [command]);
+
+    expect(second).toEqual(first);
+    expect(first[0]?.files.map(({ destinationPath }) => destinationPath)).toEqual([
+      'docs-catalog/audit-protocol.md',
+      'docs-catalog/audit/advisor.md',
+      'docs-static/legacy.md',
+      'llms.txt',
+    ]);
+    expect(await readFile(
+      join(frontendRoot, '.artifacts/public/docs/docs-catalog/audit-protocol.md'),
+      'utf8',
+    )).toBe('protocol');
+  });
+
+  test('keeps the legacy docs generator isolated and accepts a deterministic timestamp', async () => {
+    const { frontendRoot } = await createWorkspace();
+    const outputRoot = join(frontendRoot, 'docs-generator-output');
+    const child = Bun.spawn([
+      'bun',
+      'frontend/copy-static-files.js',
+      '--docs-only',
+      '--skip-llms',
+    ], {
+      cwd: REPOSITORY_ROOT,
+      env: {
+        ...process.env,
+        XLN_STATIC_DIR: outputRoot,
+        XLN_GENERATED_AT: '1970-01-01T00:00:00.000Z',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const exitCode = await child.exited;
+    const manifest = JSON.parse(await readFile(join(outputRoot, 'docs-catalog/manifest.json'), 'utf8')) as {
+      generatedAt: string;
+    };
+
+    expect(exitCode).toBe(0);
+    expect(manifest.generatedAt).toBe('1970-01-01T00:00:00.000Z');
+    expect(await readFile(join(outputRoot, 'docs-catalog/readme.md'), 'utf8')).toContain('#');
+    await expect(readFile(join(outputRoot, 'contracts/Account.json'), 'utf8')).rejects.toThrow();
   });
 });

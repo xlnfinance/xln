@@ -16,6 +16,7 @@
     "scripts/command-runner.ts",
     "scripts/dev-gateway.ts",
     "scripts/dev.ts",
+    "scripts/generated-input-manifest.ts",
     "scripts/generated-inputs.ts",
     "scripts/prepare.ts",
     "scripts/run-dev-gateway.ts",

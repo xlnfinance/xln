@@ -59,7 +59,7 @@ export const SURFACES = [
     artifactDirectory: '.artifacts/docs',
     assetDirectory: 'assets/docs',
     routes: [exact('/docs')],
-    assetRoutes: [prefix('/docs-catalog'), stem('/llms')],
+    assetRoutes: [prefix('/docs-catalog'), prefix('/docs-static'), stem('/llms')],
   },
   {
     id: 'wallet',

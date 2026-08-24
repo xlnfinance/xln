@@ -9,9 +9,16 @@ import {
   rewriteDevelopmentGatewayUrl,
   type GatewayProxyOwner,
 } from '../../../frontend/config/development-gateway';
-import { getReactAppBase } from '../../../frontend/config/create-react-app-config';
+import {
+  getReactAppBase,
+  getReactPublicDirectory,
+} from '../../../frontend/config/create-react-app-config';
 import { createDevelopmentGateway } from '../../../frontend/scripts/dev-gateway';
-import { createDevelopmentProcessSpecs } from '../../../frontend/scripts/dev';
+import {
+  createDevelopmentProcessSpecs,
+  getDevelopmentExitFailure,
+} from '../../../frontend/scripts/dev';
+import { getGatewayExitFailure } from '../../../frontend/scripts/run-dev-gateway';
 
 const servers: Server[] = [];
 const websocketServers: Array<ReturnType<typeof Bun.serve>> = [];
@@ -154,6 +161,9 @@ describe('React development gateway', () => {
     });
     expect(getReactAppBase('site', true)).toBe('/__app/site/');
     expect(getReactAppBase('site', false)).toBe('/');
+    expect(getReactPublicDirectory('docs', true)).toEndWith('/.artifacts/public/docs');
+    expect(getReactPublicDirectory('wallet', true)).toBe(false);
+    expect(getReactPublicDirectory('docs', false)).toBe(false);
     expect(parseDevelopmentGatewayPort('18080')).toBe(18080);
     expect(() => parseDevelopmentGatewayPort('0')).toThrow('DEVELOPMENT_GATEWAY_PORT_INVALID:0');
   });
@@ -242,5 +252,11 @@ describe('React development gateway', () => {
       gatewayAware: false,
     });
     expect(createDevelopmentGatewayTargets().edge).toBe('http://127.0.0.1:8082');
+    expect(getDevelopmentExitFailure(true, 'vite-site', 130)).toBeUndefined();
+    expect(getDevelopmentExitFailure(false, 'vite-site', 0)?.message).toBe(
+      'FRONTEND_DEV_PROCESS_EXITED:vite-site:0',
+    );
+    expect(getGatewayExitFailure(true, 130)).toBeUndefined();
+    expect(getGatewayExitFailure(false, 1)?.message).toBe('FRONTEND_GATEWAY_EXITED:1');
   });
 });

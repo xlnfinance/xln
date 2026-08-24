@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import {
+  copyFile,
   lstat,
   mkdir,
   mkdtemp,
@@ -9,58 +9,34 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 import { safeStringify } from '../../core/protocol/serialization';
 import {
-  COPY_GENERATED_INPUTS,
-  type CopyGeneratedInputDefinition,
+  PREPARED_GENERATED_INPUTS,
+  isCommandGeneratedInput,
+  type CommandGeneratedInputDefinition,
   type GeneratedInputCopy,
   type GeneratedInputOwner,
+  type PreparedGeneratedInputDefinition,
 } from '../config/generated-inputs';
+import {
+  assertCommandOutputs,
+  assertGeneratedInputRelativePath,
+  comparePaths,
+  createPreparedManifest,
+  toPortablePath,
+  validatePreparedInput,
+  walkPreparedPayload,
+  type PreparedGeneratedInputManifest,
+} from './generated-input-manifest';
 
-export const GENERATED_INPUT_SCHEMA_VERSION = 1 as const;
-
-export type PreparedGeneratedInputFile = Readonly<{
-  sourcePath: string;
-  destinationPath: string;
-  sha256: string;
-  size: number;
-}>;
-
-export type PreparedGeneratedInputManifest = Readonly<{
-  schemaVersion: typeof GENERATED_INPUT_SCHEMA_VERSION;
-  id: string;
-  owner: GeneratedInputOwner;
-  outputNamespace: string;
-  files: readonly PreparedGeneratedInputFile[];
-}>;
-
-export type ValidatedGeneratedInput = Readonly<{
-  manifest: PreparedGeneratedInputManifest;
-  files: readonly Readonly<{
-    sourcePath: string;
-    destinationPath: string;
-    sha256: string;
-    size: number;
-  }>[];
-}>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const toPortablePath = (pathname: string): string => pathname.split(sep).join('/');
-const comparePaths = (left: string, right: string): number => left.localeCompare(right);
-
-const assertRelativePath = (pathname: string, label: string): void => {
-  const parts = pathname.split('/');
-  if (
-    pathname.length === 0 || isAbsolute(pathname) || pathname.includes('\\') ||
-    parts.some((part) => part.length === 0 || part === '.' || part === '..')
-  ) {
-    throw new Error(`GENERATED_INPUT_${label}_INVALID:${pathname}`);
-  }
-};
+export {
+  readPreparedGeneratedInputs,
+  type PreparedGeneratedInputFile,
+  type PreparedGeneratedInputManifest,
+  type ValidatedGeneratedInput,
+} from './generated-input-manifest';
 
 const walkSourceFiles = async (current: string): Promise<readonly string[]> => {
   const stats = await lstat(current);
@@ -79,8 +55,8 @@ const expandCopy = async (
   repositoryRoot: string,
   entry: GeneratedInputCopy,
 ): Promise<readonly Readonly<{ sourcePath: string; destinationPath: string }>[]> => {
-  assertRelativePath(entry.sourcePath, 'SOURCE_PATH');
-  assertRelativePath(entry.destinationPath, 'DESTINATION_PATH');
+  assertGeneratedInputRelativePath(entry.sourcePath, 'SOURCE_PATH');
+  assertGeneratedInputRelativePath(entry.destinationPath, 'DESTINATION_PATH');
   const sourceRoot = join(repositoryRoot, entry.sourcePath);
   let files: readonly string[];
   try {
@@ -101,136 +77,106 @@ const expandCopy = async (
   }));
 };
 
-const hashBytes = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
-const parsePreparedFile = (value: unknown, definitionId: string): PreparedGeneratedInputFile => {
-  if (!isRecord(value)) throw new Error(`CANDIDATE_INPUT_FILE_INVALID:${definitionId}`);
-  const sourcePath = value['sourcePath'];
-  const destinationPath = value['destinationPath'];
-  const sha256 = value['sha256'];
-  const size = value['size'];
-  if (
-    typeof sourcePath !== 'string' || sourcePath.length === 0 ||
-    typeof destinationPath !== 'string' || typeof sha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(size) || (size as number) < 0
-  ) {
-    throw new Error(`CANDIDATE_INPUT_FILE_INVALID:${definitionId}`);
-  }
-  assertRelativePath(destinationPath, 'DESTINATION_PATH');
-  return { sourcePath, destinationPath, sha256, size: size as number };
-};
-
-const readPreparedManifest = async (
-  frontendRoot: string,
-  definition: CopyGeneratedInputDefinition,
-): Promise<PreparedGeneratedInputManifest> => {
-  const manifestPath = join(frontendRoot, '.artifacts', 'inputs', definition.id, 'input-manifest.json');
-  let parsed: unknown;
+const pathExists = async (pathname: string): Promise<boolean> => {
   try {
-    parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as unknown;
+    await lstat(pathname);
+    return true;
   } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`CANDIDATE_INPUT_MANIFEST_INVALID:${definition.id}:${detail}`);
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
   }
-  if (
-    !isRecord(parsed) || parsed['schemaVersion'] !== GENERATED_INPUT_SCHEMA_VERSION ||
-    parsed['id'] !== definition.id || parsed['owner'] !== definition.owner ||
-    parsed['outputNamespace'] !== definition.outputNamespace || !Array.isArray(parsed['files'])
-  ) {
-    throw new Error(`CANDIDATE_INPUT_MANIFEST_INVALID:${definition.id}:ROOT`);
-  }
-  return {
-    schemaVersion: GENERATED_INPUT_SCHEMA_VERSION,
-    id: definition.id,
-    owner: definition.owner,
-    outputNamespace: definition.outputNamespace,
-    files: parsed['files'].map((file) => parsePreparedFile(file, definition.id)),
-  };
 };
 
-const walkPreparedPayload = async (root: string, current = root): Promise<readonly string[]> => {
-  const entries = await readdir(current, { withFileTypes: true });
-  entries.sort(({ name: left }, { name: right }) => comparePaths(left, right));
-  const paths: string[] = [];
-  for (const entry of entries) {
-    const pathname = join(current, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`CANDIDATE_INPUT_SYMLINK:${pathname}`);
-    if (entry.isDirectory()) {
-      paths.push(...await walkPreparedPayload(root, pathname));
-      continue;
+const materializeCopies = async (
+  repositoryRoot: string,
+  payloadRoot: string,
+  definitionId: string,
+  entries: readonly GeneratedInputCopy[],
+  sources: Map<string, string>,
+): Promise<void> => {
+  const expanded = (await Promise.all(
+    entries.map((entry) => expandCopy(repositoryRoot, entry)),
+  )).flat();
+  expanded.sort(({ destinationPath: left }, { destinationPath: right }) => left.localeCompare(right));
+  for (const file of expanded) {
+    const outputPath = join(payloadRoot, file.destinationPath);
+    if (sources.has(file.destinationPath) || await pathExists(outputPath)) {
+      throw new Error(`GENERATED_INPUT_DESTINATION_COLLISION:${definitionId}:${file.destinationPath}`);
     }
-    if (!entry.isFile()) throw new Error(`CANDIDATE_INPUT_UNSUPPORTED:${pathname}`);
-    paths.push(toPortablePath(relative(root, pathname)));
+    const bytes = await readFile(file.sourcePath);
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, bytes);
+    sources.set(file.destinationPath, toPortablePath(relative(repositoryRoot, file.sourcePath)));
   }
-  return paths;
 };
 
-const validatePreparedInput = async (
-  frontendRoot: string,
-  definition: CopyGeneratedInputDefinition,
-): Promise<ValidatedGeneratedInput> => {
-  const manifest = await readPreparedManifest(frontendRoot, definition);
-  const payloadRoot = join(frontendRoot, '.artifacts', 'inputs', definition.id, 'files');
-  const actualPaths = await walkPreparedPayload(payloadRoot);
-  const expectedPaths = manifest.files.map(({ destinationPath }) => destinationPath).sort(comparePaths);
-  if (
-    actualPaths.length !== expectedPaths.length ||
-    actualPaths.some((pathname, index) => pathname !== expectedPaths[index])
-  ) {
-    throw new Error(`CANDIDATE_INPUT_FILE_SET_MISMATCH:${definition.id}`);
+const streamText = async (stream: ReadableStream<Uint8Array> | number | null | undefined): Promise<string> =>
+  stream instanceof ReadableStream ? new Response(stream).text() : '';
+
+const runGeneratedCommand = async (
+  repositoryRoot: string,
+  payloadRoot: string,
+  definition: CommandGeneratedInputDefinition,
+): Promise<void> => {
+  await mkdir(payloadRoot, { recursive: true });
+  const child = Bun.spawn([...definition.producer.argv], {
+    cwd: repositoryRoot,
+    env: {
+      ...process.env,
+      ...definition.producer.environment,
+      [definition.producer.outputEnvironment]: payloadRoot,
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    streamText(child.stdout),
+    streamText(child.stderr),
+  ]);
+  if (exitCode !== 0) {
+    const detail = `${stdout}\n${stderr}`.trim().slice(-4_000);
+    throw new Error(`GENERATED_INPUT_COMMAND_FAILED:${definition.id}:${exitCode}:${detail}`);
   }
-  const files = await Promise.all(manifest.files.map(async (expected) => {
-    const sourcePath = join(payloadRoot, expected.destinationPath);
-    const bytes = await readFile(sourcePath);
-    if (bytes.byteLength !== expected.size || hashBytes(bytes) !== expected.sha256) {
-      throw new Error(`CANDIDATE_INPUT_FILE_MISMATCH:${definition.id}:${expected.destinationPath}`);
-    }
-    return { ...expected, sourcePath };
-  }));
-  return { manifest, files };
 };
 
 const prepareOne = async (
   repositoryRoot: string,
   frontendRoot: string,
-  definition: CopyGeneratedInputDefinition,
+  definition: PreparedGeneratedInputDefinition,
 ): Promise<PreparedGeneratedInputManifest> => {
-  const expanded = (await Promise.all(
-    definition.producer.entries.map((entry) => expandCopy(repositoryRoot, entry)),
-  )).flat();
-  expanded.sort(({ destinationPath: left }, { destinationPath: right }) => left.localeCompare(right));
-  const destinations = new Set<string>();
-  for (const file of expanded) {
-    if (destinations.has(file.destinationPath)) {
-      throw new Error(`GENERATED_INPUT_DESTINATION_COLLISION:${definition.id}:${file.destinationPath}`);
-    }
-    destinations.add(file.destinationPath);
-  }
 
   const inputsRoot = join(frontendRoot, '.artifacts', 'inputs');
   await mkdir(inputsRoot, { recursive: true });
   const temporaryRoot = await mkdtemp(join(inputsRoot, `.preparing-${definition.id}-`));
   try {
-    const files: PreparedGeneratedInputFile[] = [];
-    for (const file of expanded) {
-      const bytes = await readFile(file.sourcePath);
-      const outputPath = join(temporaryRoot, 'files', file.destinationPath);
-      await mkdir(dirname(outputPath), { recursive: true });
-      await writeFile(outputPath, bytes);
-      files.push({
-        sourcePath: toPortablePath(relative(repositoryRoot, file.sourcePath)),
-        destinationPath: file.destinationPath,
-        sha256: hashBytes(bytes),
-        size: bytes.byteLength,
-      });
+    const payloadRoot = join(temporaryRoot, 'files');
+    const sources = new Map<string, string>();
+    if (isCommandGeneratedInput(definition)) {
+      await runGeneratedCommand(repositoryRoot, payloadRoot, definition);
+      for (const pathname of await walkPreparedPayload(payloadRoot)) {
+        sources.set(pathname, `command:${definition.id}`);
+      }
+      await materializeCopies(
+        repositoryRoot,
+        payloadRoot,
+        definition.id,
+        definition.producer.copies,
+        sources,
+      );
+      await assertCommandOutputs(payloadRoot, definition);
+    } else {
+      await mkdir(payloadRoot, { recursive: true });
+      await materializeCopies(
+        repositoryRoot,
+        payloadRoot,
+        definition.id,
+        definition.producer.entries,
+        sources,
+      );
     }
-    const manifest: PreparedGeneratedInputManifest = {
-      schemaVersion: GENERATED_INPUT_SCHEMA_VERSION,
-      id: definition.id,
-      owner: definition.owner,
-      outputNamespace: definition.outputNamespace,
-      files,
-    };
+    const manifest = await createPreparedManifest(payloadRoot, definition, sources);
     await writeFile(join(temporaryRoot, 'input-manifest.json'), `${safeStringify(manifest, 2)}\n`);
     const outputRoot = join(inputsRoot, definition.id);
     await rm(outputRoot, { recursive: true, force: true });
@@ -241,23 +187,54 @@ const prepareOne = async (
   }
 };
 
+const publishDevelopmentPublicDirectory = async (
+  frontendRoot: string,
+  owner: Exclude<GeneratedInputOwner, 'assembly'>,
+  definitions: readonly PreparedGeneratedInputDefinition[],
+): Promise<void> => {
+  const publicRoot = join(frontendRoot, '.artifacts', 'public');
+  await mkdir(publicRoot, { recursive: true });
+  const temporaryRoot = await mkdtemp(join(publicRoot, `.preparing-${owner}-`));
+  try {
+    const inputs = await Promise.all(definitions.map((definition) =>
+      validatePreparedInput(frontendRoot, definition)));
+    const destinations = new Set<string>();
+    for (const file of inputs.flatMap(({ files }) => files)) {
+      if (destinations.has(file.destinationPath)) {
+        throw new Error(`GENERATED_INPUT_PUBLIC_COLLISION:${owner}:${file.destinationPath}`);
+      }
+      destinations.add(file.destinationPath);
+      const outputPath = join(temporaryRoot, file.destinationPath);
+      await mkdir(dirname(outputPath), { recursive: true });
+      await copyFile(file.sourcePath, outputPath);
+    }
+    const outputRoot = join(publicRoot, owner);
+    await rm(outputRoot, { recursive: true, force: true });
+    await rename(temporaryRoot, outputRoot);
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+};
+
 export const prepareGeneratedInputs = async (
   repositoryRoot: string,
   frontendRoot: string,
   owners: readonly GeneratedInputOwner[],
-  definitions: readonly CopyGeneratedInputDefinition[] = COPY_GENERATED_INPUTS,
+  definitions: readonly PreparedGeneratedInputDefinition[] = PREPARED_GENERATED_INPUTS,
 ): Promise<readonly PreparedGeneratedInputManifest[]> => {
   const selected = definitions.filter(({ owner }) => owners.includes(owner));
   const ids = selected.map(({ id }) => id);
   if (new Set(ids).size !== ids.length) throw new Error('GENERATED_INPUT_DEFINITION_DUPLICATE');
   const manifests: PreparedGeneratedInputManifest[] = [];
   for (const definition of selected) manifests.push(await prepareOne(repositoryRoot, frontendRoot, definition));
+  const surfaceOwners = [...new Set(selected.map(({ owner }) => owner))]
+    .filter((owner): owner is Exclude<GeneratedInputOwner, 'assembly'> => owner !== 'assembly');
+  for (const owner of surfaceOwners) {
+    await publishDevelopmentPublicDirectory(
+      frontendRoot,
+      owner,
+      selected.filter((definition) => definition.owner === owner),
+    );
+  }
   return manifests;
 };
-
-export const readPreparedGeneratedInputs = async (
-  frontendRoot: string,
-  definitions: readonly CopyGeneratedInputDefinition[] = COPY_GENERATED_INPUTS,
-): Promise<readonly ValidatedGeneratedInput[]> => Promise.all(
-  definitions.map((definition) => validatePreparedInput(frontendRoot, definition)),
-);

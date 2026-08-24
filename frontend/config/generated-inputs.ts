@@ -1,4 +1,4 @@
-import type { SurfaceId } from './surfaces';
+import type { RouteRule, SurfaceId } from './surfaces';
 
 export type GeneratedInputOwner = SurfaceId | 'assembly';
 
@@ -21,6 +21,17 @@ export type CopyGeneratedInputDefinition = GeneratedInputBase & Readonly<{
   }>;
 }>;
 
+export type CommandGeneratedInputDefinition = GeneratedInputBase & Readonly<{
+  producer: Readonly<{
+    kind: 'command';
+    argv: readonly string[];
+    outputEnvironment: string;
+    environment: Readonly<Record<string, string>>;
+    copies: readonly GeneratedInputCopy[];
+    outputRoutes: readonly RouteRule[];
+  }>;
+}>;
+
 type DeferredGeneratedInputDefinition = GeneratedInputBase & Readonly<{
   producer: Readonly<{
     kind: 'deferred';
@@ -29,15 +40,39 @@ type DeferredGeneratedInputDefinition = GeneratedInputBase & Readonly<{
 
 export type GeneratedInputDefinition =
   | CopyGeneratedInputDefinition
+  | CommandGeneratedInputDefinition
   | DeferredGeneratedInputDefinition;
 
 export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
   {
     id: 'docs-catalog',
     owner: 'docs',
-    sourcePaths: ['frontend/docs-catalog.js', 'docs'],
-    outputNamespace: 'docs-catalog',
-    producer: { kind: 'deferred' },
+    sourcePaths: [
+      'frontend/copy-static-files.js',
+      'frontend/docs-catalog.js',
+      'frontend/static/docs-static',
+      'scripts/debug/gpt.cjs',
+      'docs',
+    ],
+    outputNamespace: 'docs-public-assets',
+    producer: {
+      kind: 'command',
+      argv: ['bun', 'frontend/copy-static-files.js', '--docs-only', '--rebuild-llms'],
+      outputEnvironment: 'XLN_STATIC_DIR',
+      environment: {
+        GIT_COMMIT: 'candidate',
+        XLN_GENERATED_AT: '1970-01-01T00:00:00.000Z',
+      },
+      copies: [{
+        sourcePath: 'frontend/static/docs-static',
+        destinationPath: 'docs-static',
+      }],
+      outputRoutes: [
+        { kind: 'prefix', pathname: '/docs-catalog' },
+        { kind: 'prefix', pathname: '/docs-static' },
+        { kind: 'stem', pathname: '/llms' },
+      ],
+    },
   },
   {
     id: 'site-public-static',
@@ -118,3 +153,20 @@ export const isCopyGeneratedInput = (
 ): input is CopyGeneratedInputDefinition => input.producer.kind === 'copy';
 
 export const COPY_GENERATED_INPUTS = GENERATED_INPUTS.filter(isCopyGeneratedInput);
+
+export const isCommandGeneratedInput = (
+  input: GeneratedInputDefinition,
+): input is CommandGeneratedInputDefinition => input.producer.kind === 'command';
+
+export type PreparedGeneratedInputDefinition =
+  | CopyGeneratedInputDefinition
+  | CommandGeneratedInputDefinition;
+
+export const isPreparedGeneratedInput = (
+  input: GeneratedInputDefinition,
+): input is PreparedGeneratedInputDefinition => input.producer.kind !== 'deferred';
+
+export const PREPARED_GENERATED_INPUTS = GENERATED_INPUTS.filter(isPreparedGeneratedInput);
+
+export const hasPreparedGeneratedInputs = (surfaceId: SurfaceId): boolean =>
+  PREPARED_GENERATED_INPUTS.some(({ owner }) => owner === surfaceId);

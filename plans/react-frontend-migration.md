@@ -235,7 +235,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `IN PROGRESS — FIRST SOURCE-CONTROLLED GENERATED INPUTS ASSEMBLED`
+**Status:** `IN PROGRESS — DOCS-OWNED PUBLIC INPUTS ASSEMBLED AND SERVED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -383,9 +383,9 @@ any mismatch. Never compile on production.
 
 ## Current next actions
 
-1. Move docs catalog, docs-static, and `llms*` generation into a deterministic
-   docs-owned producer without writing canonical Svelte static output.
-2. Split Runtime bundle, BrainVault worker, and contract browser artifacts into
+1. Split Runtime bundle, BrainVault worker, and contract browser artifacts into
    wallet-owned candidate inputs without editing their backend/contract sources.
+2. Define the ops scenario catalog/media producer without publishing TypeScript
+   scenario source as a browser artifact.
 3. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
    Runtime-client packages deferred until their first real flow needs them.

@@ -354,7 +354,7 @@ function buildDocsManifest(docsSrc) {
   items.sort((a, b) => {
     if (a.sectionOrder !== b.sectionOrder) return a.sectionOrder - b.sectionOrder;
     if (a.order !== b.order) return a.order - b.order;
-    return a.title.localeCompare(b.title);
+    return a.title < b.title ? -1 : a.title > b.title ? 1 : 0;
   });
 
   const sections = getSectionDefinitions()
@@ -372,7 +372,7 @@ function buildDocsManifest(docsSrc) {
   const archiveCount = items.filter((item) => item.kind === 'archive').length;
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: process.env.XLN_GENERATED_AT || new Date().toISOString(),
     counts: {
       total: items.length,
       live: liveCount,
@@ -448,10 +448,18 @@ function generateLlmsStaticFiles() {
 }
 
 const contractsOnly = process.argv.includes('--contracts-only');
+const docsOnly = process.argv.includes('--docs-only');
+const skipLlms = process.argv.includes('--skip-llms');
 const requireAllContractSources = process.argv.includes('--require-all-contract-sources');
 
-copyContracts(requireAllContractSources);
-if (!contractsOnly) {
+if (contractsOnly && docsOnly) throw new Error('STATIC_COPY_SCOPE_CONFLICT');
+if (docsOnly) {
+  copyDocsAndManifest();
+  if (!skipLlms) generateLlmsStaticFiles();
+} else {
+  copyContracts(requireAllContractSources);
+}
+if (!contractsOnly && !docsOnly) {
   buildBrainvaultWorker();
   copyScenarios();
   copyDocsAndManifest();
