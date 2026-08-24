@@ -15,6 +15,7 @@
  * - Griefing protection (timelock cascade)
  */
 
+import { assertShadowParity } from '../../rscore/shadow-hook';
 import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { EntityInput } from '../../entity/types';
@@ -1610,6 +1611,11 @@ if (import.meta.main) {
   fs.writeFileSync('/tmp/lock-ahb-runtime.json', envJson);
   const sizeMB = (envJson.length / 1024 / 1024).toFixed(1);
   console.log(`  ✅ /tmp/lock-ahb-runtime.json (${sizeMB}MB full RuntimeReplica dump)\n`);
+
+  // Parity gate: when the Rust shadow engine is armed, the deterministic run
+  // must end with both engines holding identical account trees. No-op when
+  // shadow is off.
+  await assertShadowParity();
 
   process.exit(0);
 }

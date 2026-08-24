@@ -12,6 +12,12 @@ type MirrorLike = Readonly<{
   settled(): Promise<void>;
   shutdown(): Promise<void>;
   stats(): unknown;
+  selfReconcile(): Promise<Map<string, {
+    matched: number;
+    mismatched: readonly unknown[];
+    missingInEngine: readonly string[];
+    extraInEngine: readonly string[];
+  }>>;
 }>;
 
 let mirror: MirrorLike | null | undefined;
@@ -83,6 +89,32 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
   }
   if (!entityAllowed(input.ownerEntityId)) return;
   mirror.noteCommittedFrame(input);
+};
+
+/**
+ * End-of-run parity gate: reconcile every mirrored tree and throw when the two
+ * engines disagree or the mirror never covered an account. Returns silently
+ * when shadow is off, so callers can invoke it unconditionally.
+ */
+export const assertShadowParity = async (): Promise<void> => {
+  const active = mirror;
+  if (!active) return;
+  const reports = await active.selfReconcile();
+  const failures: string[] = [];
+  for (const [owner, report] of reports) {
+    if (report.mismatched.length > 0) {
+      failures.push(`${owner}:mismatched=${JSON.stringify(report.mismatched).slice(0, 400)}`);
+    }
+    if (report.missingInEngine.length > 0) {
+      failures.push(`${owner}:missingInEngine=${report.missingInEngine.length}`);
+    }
+    if (report.extraInEngine.length > 0) {
+      failures.push(`${owner}:extraInEngine=${report.extraInEngine.length}`);
+    }
+  }
+  const summary = [...reports].map(([owner, report]) => `${owner.slice(0, 10)}:${report.matched}`).join(' ');
+  if (failures.length > 0) throw new Error(`RSCORE_SHADOW_PARITY_FAILED:${failures.join('|')}`);
+  console.error(`RSCORE_SHADOW_PARITY_OK matched=[${summary}]`);
 };
 
 /** Test/shutdown access to the live mirror (null when disabled or not started). */

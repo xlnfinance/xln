@@ -105,6 +105,13 @@ export class RscoreShadowMirror {
   readonly #boundOwners = new Set<string>();
   readonly #maxOwners: number;
   readonly #registered = new Set<string>();
+  /**
+   * Live replica references, per owner, for self-reconciliation. These are the
+   * very objects the entity owns and mutates in place, so the map stays
+   * current without copying state; it retains nothing the entity has not
+   * already retained.
+   */
+  readonly #mirrored = new Map<string, Map<string, AccountReplica>>();
   readonly #needsReseed = new Set<string>();
   readonly #queue: QueueEntry[] = [];
   #draining = false;
@@ -270,6 +277,7 @@ export class RscoreShadowMirror {
         });
         this.#registered.add(scopedKey);
         this.#needsReseed.delete(scopedKey);
+        this.#remember(ownerKey, input.counterpartyEntityId, input.account);
         return;
       }
       const jobs: RscoreWireValue[][] = [];
@@ -289,6 +297,7 @@ export class RscoreShadowMirror {
         // no-op instead of an empty (refused) batch.
         return;
       }
+      this.#remember(ownerKey, input.counterpartyEntityId, input.account);
       this.#push({
         kind: 'wave',
         ownerKey,
@@ -406,6 +415,26 @@ export class RscoreShadowMirror {
    * the raw counterparty entity id, so a process may only ever hold the
    * accounts of a single owner — exactly the entity machine's own scope.
    */
+  #remember(ownerKey: string, counterpartyId: string, account: AccountReplica): void {
+    const owned = this.#mirrored.get(ownerKey) ?? new Map<string, AccountReplica>();
+    owned.set(counterpartyId.trim().toLowerCase(), account);
+    this.#mirrored.set(ownerKey, owned);
+  }
+
+  /**
+   * Reconcile every owner this mirror bound, against the live replicas it was
+   * fed. Used as an end-of-run gate: identical trees mean the two engines are
+   * interchangeable, and any gap names the exact account.
+   */
+  async selfReconcile(): Promise<Map<string, ShadowReconciliation>> {
+    await this.#idle;
+    const reports = new Map<string, ShadowReconciliation>();
+    for (const [ownerKey, accounts] of this.#mirrored) {
+      reports.set(ownerKey, await this.reconcile(ownerKey, accounts));
+    }
+    return reports;
+  }
+
   async #ensureClient(ownerKey: string): Promise<RscoreProcessClient> {
     const existing = this.#clients.get(ownerKey);
     if (existing) return existing;
