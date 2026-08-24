@@ -22,12 +22,15 @@ pub use consensus::frame::hash::{
     AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value, parse_root_hex,
 };
 pub use consensus::incoming::apply::{
-    AckOutcome, IncomingFrame, IncomingOutcome, apply_incoming_ack, apply_incoming_frame,
+    AckOutcome, IncomingFrame, IncomingOutcome, ReceiverClock, apply_incoming_ack,
+    apply_incoming_frame,
 };
 pub use consensus::proposal::propose::{
     DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
 };
-pub use consensus::replica::{AccountConsensus, CommittedFrame, PendingFrame};
+pub use consensus::replica::{
+    AccountConsensus, CommittedFrame, ConsensusSnapshot, PendingFrame, PendingFrameSnapshot,
+};
 pub use consensus::signing::{SigningIdentity, verify_frame_hanko};
 pub use crypto::{
     address_of_private_key, derive_signer_address, derive_signer_key, normalize_recovery_byte,

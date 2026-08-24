@@ -10,8 +10,8 @@ use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};
 use xln_rscore_protocol::{
-    CanonicalValue, PersistentNodeChanges, PersistentRadixMap, encode_account_state_value,
-    encode_raw_text_key,
+    CanonicalValue, PersistentNodeChanges, PersistentNodeRecord, PersistentRadixMap,
+    encode_account_state_value, encode_raw_text_key,
 };
 
 use crate::state::delta::MAX_ACCOUNT_TOKEN_ROWS;
@@ -116,6 +116,9 @@ pub struct AccountStateSeed {
     pub carried: crate::commitment::CarriedSections,
     pub rebalance_fee_policies: Vec<(TokenId, BilateralRebalanceFeePolicy)>,
     pub swap_offers: Vec<SwapOffer>,
+    /// Open lending intents, keyed the way the handlers key them. Empty for a
+    /// fresh account; a checkpoint restore hands back exactly what it saved.
+    pub lending_intents: Vec<(String, LendingIntentKind)>,
 }
 
 impl AccountState {
@@ -157,6 +160,7 @@ impl AccountState {
             carried: crate::commitment::CarriedSections::default(),
             rebalance_fee_policies: Vec::new(),
             swap_offers: Vec::new(),
+            lending_intents: Vec::new(),
         })
     }
 
@@ -171,6 +175,7 @@ impl AccountState {
             carried,
             rebalance_fee_policies,
             swap_offers,
+            lending_intents,
         } = seed;
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
@@ -214,12 +219,26 @@ impl AccountState {
         for offer in swap_offers {
             offer_map = put_swap_offer_map(&offer_map, offer)?;
         }
+        let mut intent_map = if lending_intents.is_empty() {
+            None
+        } else {
+            Some(PersistentRadixMap::empty())
+        };
+        for (key, kind) in lending_intents {
+            let raw_key = text_key(&key)?;
+            let digest = canonical_digest(CanonicalValue::String(kind.wire_name().into()))?;
+            let map = intent_map.take().unwrap_or_else(PersistentRadixMap::empty);
+            intent_map = Some(
+                map.updated(raw_key, kind, digest)
+                    .map_err(|error| StateError::PersistentMap(error.to_string()))?,
+            );
+        }
         Ok(Self {
             identity,
             dispute_config,
             deltas: map,
             locks: lock_map,
-            lending_intents: None,
+            lending_intents: intent_map,
             rebalance_fee_policies: policy_map,
             swap_offers: offer_map,
             j_nonce,
@@ -388,6 +407,86 @@ impl AccountState {
 
     pub fn htlc_node_changes_since(&self, previous: &Self) -> PersistentNodeChanges<HtlcLock> {
         self.locks.node_changes_since(&previous.locks)
+    }
+
+    pub fn swap_offer_node_changes_since(&self, previous: &Self) -> PersistentNodeChanges<SwapOffer> {
+        self.swap_offers.node_changes_since(&previous.swap_offers)
+    }
+
+    pub fn rebalance_policy_node_changes_since(
+        &self,
+        previous: &Self,
+    ) -> PersistentNodeChanges<BilateralRebalanceFeePolicy> {
+        self.rebalance_fee_policies
+            .node_changes_since(&previous.rebalance_fee_policies)
+    }
+
+    /// Every node of one section, for an account the checkpoint has never
+    /// seen: there is no prior tree to diff against, so the whole tree is the
+    /// change.
+    pub fn delta_node_records(&self) -> Vec<PersistentNodeRecord<Delta>> {
+        self.deltas.node_records()
+    }
+
+    pub fn htlc_node_records(&self) -> Vec<PersistentNodeRecord<HtlcLock>> {
+        self.locks.node_records()
+    }
+
+    pub fn lending_node_records(&self) -> Vec<PersistentNodeRecord<LendingIntentKind>> {
+        self.lending_intents
+            .as_ref()
+            .map(PersistentRadixMap::node_records)
+            .unwrap_or_default()
+    }
+
+    pub fn swap_offer_node_records(&self) -> Vec<PersistentNodeRecord<SwapOffer>> {
+        self.swap_offers.node_records()
+    }
+
+    pub fn rebalance_policy_node_records(
+        &self,
+    ) -> Vec<PersistentNodeRecord<BilateralRebalanceFeePolicy>> {
+        self.rebalance_fee_policies.node_records()
+    }
+
+    pub fn htlc_locks(&self) -> impl Iterator<Item = &HtlcLock> {
+        self.locks.iter().map(|(_, lock)| lock)
+    }
+
+    /// The intents with their original text keys. `encode_raw_text_key` is a
+    /// length prefix over the UTF-8 bytes, so the key a checkpoint restores is
+    /// the key the handler wrote.
+    pub fn lending_intent_entries(&self) -> Result<Vec<(String, LendingIntentKind)>, StateError> {
+        let Some(intents) = self.lending_intents.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let mut entries = Vec::with_capacity(intents.len());
+        for (key, kind) in intents.iter() {
+            entries.push((decode_raw_text_key(key)?, *kind));
+        }
+        Ok(entries)
+    }
+
+    pub fn rebalance_fee_policy_entries(
+        &self,
+    ) -> Result<Vec<(TokenId, BilateralRebalanceFeePolicy)>, StateError> {
+        let mut entries = Vec::with_capacity(self.rebalance_fee_policies.len());
+        for (key, policy) in self.rebalance_fee_policies.iter() {
+            entries.push((decode_token_radix_key(key)?, policy.clone()));
+        }
+        Ok(entries)
+    }
+
+    pub const fn j_nonce(&self) -> u64 {
+        self.j_nonce
+    }
+
+    pub const fn last_finalized_j_height(&self) -> u64 {
+        self.last_finalized_j_height
+    }
+
+    pub const fn carried(&self) -> &crate::commitment::CarriedSections {
+        &self.carried
     }
 
     pub(crate) fn delta_or_zero(&self, token_id: TokenId) -> Result<Delta, StateError> {
@@ -610,4 +709,36 @@ fn text_key(value: &str) -> Result<Vec<u8>, StateError> {
 
 fn response_seconds(side: &'static str, value: u64) -> Result<u32, StateError> {
     u32::try_from(value).map_err(|_| StateError::InvalidDisputeResponseSeconds { side, value })
+}
+
+/// Inverse of `encode_raw_text_key`, for the sections a checkpoint restores by
+/// key rather than by value.
+fn decode_raw_text_key(key: &[u8]) -> Result<String, StateError> {
+    if key.len() < 2 {
+        return Err(StateError::PersistentMap(format!(
+            "TEXT_KEY_TOO_SHORT:{}",
+            key.len()
+        )));
+    }
+    let length = usize::from(u16::from_be_bytes([key[0], key[1]]));
+    if key.len() != length + 2 {
+        return Err(StateError::PersistentMap(format!(
+            "TEXT_KEY_LENGTH:{}:{}",
+            length,
+            key.len() - 2
+        )));
+    }
+    String::from_utf8(key[2..].to_vec())
+        .map_err(|_| StateError::PersistentMap("TEXT_KEY_UTF8".to_string()))
+}
+
+/// Inverse of `TokenId::radix_key`: 32 bytes, the id in the last two.
+fn decode_token_radix_key(key: &[u8]) -> Result<TokenId, StateError> {
+    if key.len() != 32 || key[..30].iter().any(|byte| *byte != 0) {
+        return Err(StateError::PersistentMap(format!(
+            "TOKEN_KEY_SHAPE:{}",
+            key.len()
+        )));
+    }
+    TokenId::new(u32::from(u16::from_be_bytes([key[30], key[31]])))
 }

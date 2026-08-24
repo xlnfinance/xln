@@ -130,7 +130,7 @@ fn ref_order(record: &PersistentNodeRef) -> (&[u8], u8) {
     }
 }
 
-impl<V: Clone + PartialEq> PersistentRadixMap<V> {
+impl<V: Clone> PersistentRadixMap<V> {
     pub fn node_records(&self) -> Vec<PersistentNodeRecord<V>> {
         self.root_hash();
         let mut records = Vec::new();

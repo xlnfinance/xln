@@ -23,6 +23,47 @@ const EMPTY_ROOT: [u8; 32] = [0; 32];
 /// carrying a derived value would make the comparison agree by construction.
 const DERIVED_FIELDS: [&str; 2] = ["accountStateRoot", "mempoolRoot"];
 
+/// Every field the Entity's account leaf may contain.
+///
+/// Parity target: `ENTITY_ACCOUNT_LEAF_FIELDS`
+/// (core/entity/consensus/state-root.ts) — the committed replica fields that
+/// are not carried as bodies, plus the derived ones. It is an allowlist on
+/// both sides for the same reason: a field nobody classified would otherwise
+/// drop silently out of the commitment, and two replicas that differ only in
+/// that field would hash identically.
+const ENTITY_ACCOUNT_LEAF_FIELDS: [&str; 30] = [
+    "status",
+    "publicPinned",
+    "currentHeight",
+    "rollbackCount",
+    "lastRollbackFrameHash",
+    "proofHeader",
+    "boardHankoRefreshMigration",
+    "counterpartyBoardHankoRefresh",
+    "counterpartyFrameHanko",
+    "counterpartyDisputeProofHanko",
+    "counterpartySettlementHanko",
+    "currentDisputeProofNonce",
+    "currentDisputeProofProposerIsLeft",
+    "currentDisputeProofBodyHash",
+    "currentDisputeHash",
+    "counterpartyDisputeProofNonce",
+    "counterpartyDisputeProofProposerIsLeft",
+    "counterpartyDisputeProofBodyHash",
+    "counterpartyDisputeHash",
+    "disputePrepare",
+    "activeDispute",
+    "accountStateRoot",
+    "mempoolRoot",
+    "currentFrameHash",
+    "pendingFrameHash",
+    "counterpartySettlementHankos",
+    "pendingWithdrawals",
+    "shadow",
+    "pendingAccountInput",
+    "lastOutboundFrameAck",
+];
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AccountEnvelope {
     /// The Entity's account-leaf projection minus the derived fields.
@@ -35,6 +76,8 @@ pub struct AccountEnvelope {
 pub enum EnvelopeError {
     #[error("ENTITY_ACCOUNT_LEAF_FIELD_DERIVED:{0}")]
     DerivedField(String),
+    #[error("ENTITY_ACCOUNT_LEAF_FIELD_UNCLASSIFIED:{0}")]
+    UnclassifiedField(String),
     #[error(transparent)]
     Encoding(#[from] ValueEncodingError),
 }
@@ -51,6 +94,9 @@ impl AccountEnvelope {
         for (name, _) in &fields {
             if DERIVED_FIELDS.contains(&name.as_str()) {
                 return Err(EnvelopeError::DerivedField(name.clone()));
+            }
+            if !ENTITY_ACCOUNT_LEAF_FIELDS.contains(&name.as_str()) {
+                return Err(EnvelopeError::UnclassifiedField(name.clone()));
             }
         }
         Ok(Self { fields, mempool })

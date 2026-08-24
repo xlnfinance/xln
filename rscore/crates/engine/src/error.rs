@@ -31,6 +31,13 @@ pub enum StateError {
     DeltaFieldOutOfRange { field: &'static str, value: BigInt },
     #[error("ACCOUNT_STATE_PERSISTENT_MAP:{0}")]
     PersistentMap(String),
+    #[error("ACCOUNT_CHECKPOINT_RESTORE:{0}")]
+    CheckpointRestore(String),
+    #[error("ACCOUNT_CRITICAL_PROPOSAL_FAILED:{kind}:{reason}")]
+    CriticalProposalFailure {
+        kind: &'static str,
+        reason: String,
+    },
     #[error("ACCOUNT_STATE_LEAF_TOO_LARGE:{actual}:{maximum}")]
     AccountStateLeafTooLarge { actual: usize, maximum: usize },
     #[error("ACCOUNT_DISPUTE_{side}_RESPONSE_SECONDS_INVALID:{value}")]

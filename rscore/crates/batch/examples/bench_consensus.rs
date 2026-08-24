@@ -6,6 +6,15 @@
 //! payment, and each one is authenticated before it touches state — that is
 //! what `ai/s` counts here.
 //!
+//! What this number is not: the TypeScript twin
+//! (core/scripts/operations/benchmark/bench-account-inputs.ts) does the same
+//! round trip, but it also pays for per-frame work this engine does not
+//! implement yet — dispute proof projection on both propose and receive,
+//! j-claim sessions, pendingAccountInput/lastOutboundFrameAck bookkeeping, and
+//! deep clones of the replica. Read the ratio as "the payment path in Rust vs
+//! the payment path in TypeScript as it stands today", not as a like-for-like
+//! engine comparison.
+//!
 //! `cargo run --release --example bench_consensus -- [accounts] [rounds] [workers]`
 
 use std::time::Instant;
@@ -13,7 +22,7 @@ use std::time::Instant;
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict, AccountSeed,
-    EngineGeneration, StatefulConsensusEngine,
+    EngineGeneration, ReceiverClock, StatefulConsensusEngine,
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
@@ -236,7 +245,15 @@ fn main() {
             })
             .collect();
         inputs += frames.len();
-        let applied = payee_engine.apply_inputs(frames).expect("apply frames");
+        // The receiver judges enforcement on its own clock, which here is the
+        // same wall clock the proposer used.
+        let clock = ReceiverClock {
+            entity_timestamp: timestamp,
+            finalized_j_height: 100,
+        };
+        let applied = payee_engine
+            .apply_inputs(clock, frames)
+            .expect("apply frames");
 
         let mut acks = Vec::with_capacity(applied.len());
         for (index, result) in applied.iter().enumerate() {
@@ -263,7 +280,7 @@ fn main() {
             });
         }
         inputs += acks.len();
-        for result in payer_engine.apply_inputs(acks).expect("apply acks") {
+        for result in payer_engine.apply_inputs(clock, acks).expect("apply acks") {
             assert!(
                 matches!(
                     result.verdict,

@@ -344,7 +344,26 @@ fn push_optional(
 
 /// The transaction kinds the engine leaves to TypeScript, named the way the
 /// wire names them so a rejection points at the right handler.
-fn unsupported_kind(tx: &AccountTx) -> &'static str {
+/// Whether this transaction can be hashed into a frame at all.
+///
+/// A queued transaction the frame hash cannot express would wedge the account
+/// permanently: every proposal and every leaf digest would fail on it, and
+/// nothing removes it. Admission refuses it instead.
+pub fn is_frame_hashable(tx: &AccountTx) -> bool {
+    !matches!(
+        tx,
+        AccountTx::RebalancePolicy { .. }
+            | AccountTx::LendingFund { .. }
+            | AccountTx::LendingBorrowRequest { .. }
+            | AccountTx::LendingRepay { .. }
+            | AccountTx::LendingCredit { .. }
+            | AccountTx::LendingCloseRequest { .. }
+            | AccountTx::LendingClosePayout { .. }
+            | AccountTx::ReserveToCollateral { .. }
+    )
+}
+
+pub(crate) fn unsupported_kind(tx: &AccountTx) -> &'static str {
     match tx {
         AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::LendingFund { .. } => "lending_fund",

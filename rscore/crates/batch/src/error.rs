@@ -65,6 +65,10 @@ pub enum BatchError {
         input_index: u32,
         account_id: AccountId,
     },
+    #[error("RSCORE_BATCH_CHECKPOINT_REVISION:{actual}:{expected}")]
+    CheckpointRevision { actual: u64, expected: u64 },
+    #[error("RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY:{width}")]
+    CheckpointAccountKey { width: usize },
     #[error("RSCORE_BATCH_SIGNER_REQUIRED")]
     SignerRequired,
     #[error("RSCORE_BATCH_SIGNING:{0}")]

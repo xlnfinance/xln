@@ -10,7 +10,30 @@ use crate::consensus::proposal::propose::{WindowExecution, collect_frame_deltas,
 use crate::consensus::replica::AccountConsensus;
 use crate::consensus::signing::{SigningIdentity, verify_frame_hanko};
 use crate::error::StateError;
+use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
 use crate::{AccountExecutionContext, AccountOutput, AccountTx, Side};
+
+/// `ACCOUNT_NETWORK_ALLOWANCE_MS` (core/account/consensus/constants.ts). A peer
+/// chooses its own frame timestamp, so a frame from the future could satisfy
+/// payer-side deadlines early. Old signed frames stay legal: exact
+/// retransmission must survive an outage of any length.
+const MAX_FRAME_FUTURE_SKEW_MS: u64 = 30_000;
+
+/// `MAX_ACCOUNT_FRAME_TXS` (core/account/consensus/frame/hash.ts), which is
+/// the mempool bound.
+const MAX_ACCOUNT_FRAME_TXS: usize = ACCOUNT_MEMPOOL_SIZE;
+
+/// The receiver's own clock, which is what decides whether a lock has expired.
+///
+/// Parity target: `securityContext.entityTimestamp` / `finalizedJHeight`
+/// (core/account/consensus/index.ts). The frame's own clock stays the
+/// committed clock — it is what the peer signed — but enforcement is judged
+/// here, or the proposer would own our timeouts.
+#[derive(Clone, Copy, Debug)]
+pub struct ReceiverClock {
+    pub entity_timestamp: u64,
+    pub finalized_j_height: u64,
+}
 
 /// A frame as it arrives from the peer: the fields they signed, plus the
 /// Hanko over the frame hash.
@@ -50,6 +73,12 @@ pub enum IncomingOutcome {
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
     },
+    /// Already behind our chain head: an at-least-once retransmission, which
+    /// is applied as a no-op rather than treated as a fault.
+    Stale {
+        height: u64,
+        current_height: u64,
+    },
     Rejected {
         reason: String,
     },
@@ -82,8 +111,18 @@ pub fn apply_incoming_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
     counterparty_entity_id: &[u8; 32],
+    clock: ReceiverClock,
     incoming: IncomingFrame,
 ) -> Result<IncomingOutcome, StateError> {
+    // SECURITY: the signer must be this account's counterparty. A Hanko only
+    // proves who signed; without this, any entity that can sign could author
+    // frames into an account it is not a party to.
+    //
+    // Parity target: `validateIncomingFrameProposer`
+    // (core/account/consensus/incoming/preflight.ts).
+    if counterparty_entity_id != account.replica().counterparty().as_bytes() {
+        return Ok(rejected("ACCOUNT_PEER_FRAME_PROPOSER_INVALID"));
+    }
     // SECURITY: authenticate before touching any state, exactly as preflight
     // does. An unsigned frame is not evidence of anything.
     verify_frame_hanko(
@@ -91,6 +130,18 @@ pub fn apply_incoming_frame(
         &incoming.state_hash,
         counterparty_entity_id,
     )?;
+    if incoming.txs.len() > MAX_ACCOUNT_FRAME_TXS {
+        return Ok(rejected(format!(
+            "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:txs:{}",
+            incoming.txs.len()
+        )));
+    }
+    if incoming.timestamp > clock.entity_timestamp.saturating_add(MAX_FRAME_FUTURE_SKEW_MS) {
+        return Ok(rejected(format!(
+            "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew:{}",
+            incoming.timestamp - clock.entity_timestamp
+        )));
+    }
 
     let current_height = account.current_height();
     if incoming.height <= current_height {
@@ -105,19 +156,26 @@ pub fn apply_incoming_frame(
                 ack_hanko: identity.sign_frame(&incoming.state_hash)?,
             });
         }
-        return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_STALE:{}:{current_height}",
-            incoming.height
-        )));
+        // Delivery is at-least-once, so an ancestor frame arriving again is
+        // ordinary traffic, not peer misbehaviour.
+        //
+        // Parity target: `handleStaleIncomingFrame`
+        // (core/account/consensus/incoming/preflight.ts), which returns an
+        // applied no-op.
+        return Ok(IncomingOutcome::Stale {
+            height: incoming.height,
+            current_height,
+        });
     }
 
     // Each side may propose once at a height. If both race, the LEFT entity's
     // frame wins: the loser's proposal never acquired the counterparty Hanko
-    // it would need to be enforceable.
-    let mut rolled_back_txs = 0;
-    if let Some(pending) = account.pending()
-        && pending.frame.height == incoming.height
-    {
+    // it would need to be enforceable. Nothing is rolled back yet — a frame
+    // that fails validation below must leave our own proposal standing.
+    let collides = account
+        .pending()
+        .is_some_and(|pending| pending.frame.height == incoming.height);
+    if collides {
         if account.replica().owner_side() == Side::Left {
             return Ok(IncomingOutcome::CollisionIgnored {
                 height: incoming.height,
@@ -129,7 +187,6 @@ pub fn apply_incoming_frame(
                 incoming.height
             )));
         }
-        rolled_back_txs = account.rollback_pending(incoming.state_hash)?;
     }
 
     if incoming.height != current_height + 1 {
@@ -154,10 +211,13 @@ pub fn apply_incoming_frame(
         )));
     }
 
+    // The committed clock is the peer's — it is what they signed — but
+    // enforcement is judged on our own clock, so a backdated frame cannot
+    // decide our timeouts for us.
     let context = AccountExecutionContext::new(
         incoming.timestamp,
-        incoming.timestamp,
-        incoming.j_height,
+        clock.entity_timestamp,
+        clock.finalized_j_height,
         current_height,
         incoming.j_height,
     );
@@ -208,8 +268,19 @@ pub fn apply_incoming_frame(
         return Ok(rejected("ACCOUNT_PEER_FRAME_HASH_MISMATCH"));
     }
 
+    // Only now, with the frame proven to be one we can commit, does our own
+    // proposal give way to it.
+    //
+    // Parity target: `applySameHeightIncomingFrameRollback`
+    // (core/account/consensus/index.ts), which runs after the replay.
+    let rolled_back_txs = if collides {
+        account.rollback_pending(incoming.state_hash)?
+    } else {
+        0
+    };
+
     let ack_hanko = identity.sign_frame(&state_hash)?;
-    account.commit(candidate, &frame, state_hash);
+    account.commit_from_peer(candidate, &frame, state_hash, incoming.hanko);
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,
@@ -227,6 +298,16 @@ pub fn apply_incoming_ack(
     state_hash: &[u8; 32],
     hanko: &[u8],
 ) -> Result<AckOutcome, StateError> {
+    // SECURITY: an ack is only evidence when it comes from the party bound to
+    // this account.
+    //
+    // Parity target: the `proofHeader.toEntity` check in
+    // core/account/consensus/incoming/ack-commit.ts.
+    if counterparty_entity_id != account.replica().counterparty().as_bytes() {
+        return Ok(AckOutcome::Rejected {
+            reason: "ACCOUNT_PEER_ACK_SIGNER_INVALID".to_string(),
+        });
+    }
     let Some(pending) = account.pending() else {
         return Ok(AckOutcome::Stale { height });
     };
@@ -245,7 +326,12 @@ pub fn apply_incoming_ack(
     }
     verify_frame_hanko(hanko, state_hash, counterparty_entity_id)?;
     let pending = account.pending().expect("pending checked above").clone();
-    account.commit(pending.candidate, &pending.frame, pending.state_hash);
+    account.commit_from_ack(
+        pending.candidate,
+        &pending.frame,
+        pending.state_hash,
+        hanko.to_vec(),
+    );
     Ok(AckOutcome::Committed {
         height,
         state_hash: pending.state_hash,

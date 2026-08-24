@@ -21,7 +21,32 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct DroppedTx {
     pub index: usize,
+    pub tx: AccountTx,
     pub rejection: AccountRejection,
+}
+
+/// Whether a rejected transaction goes back on the queue or is dropped.
+///
+/// Parity target: `proposalFailureDisposition`
+/// (core/account/consensus/proposal/transactions.ts): a capacity rejection is
+/// a "not yet", so the transaction is deferred to the next frame rather than
+/// deleted. Everything else is a decision about the transaction itself.
+const fn is_retryable(rejection: &AccountRejection) -> bool {
+    matches!(rejection, AccountRejection::HtlcLockCapacity { .. })
+}
+
+/// Transactions whose rejection is a fault of the machine that queued them,
+/// not of the payer.
+///
+/// Parity target: `throwCriticalProposalFailure` (same file). A rejected
+/// `swap_resolve` comes from the deterministic matcher: dropping it would
+/// commit a matched book while discarding its bilateral settlement, which
+/// diverges the two sides permanently. Fail the proposal instead.
+fn critical_kind(tx: &AccountTx) -> Option<&'static str> {
+    match tx {
+        AccountTx::SwapResolve { .. } => Some("swap_resolve"),
+        _ => None,
+    }
 }
 
 /// A frame this side built, signed, and is waiting to have acknowledged.
@@ -99,7 +124,11 @@ pub(crate) fn execute_window(
             }
             AccountVerdict::Rejected(rejection) => {
                 let rejection = rejection.clone();
-                dropped.push(DroppedTx { index, rejection });
+                dropped.push(DroppedTx {
+                    index,
+                    tx,
+                    rejection,
+                });
                 if stop_on_rejection {
                     return Ok(WindowExecution {
                         candidate,
@@ -155,6 +184,27 @@ pub fn propose_account_frame(
         outputs,
         dropped,
     } = execution;
+    // A rejection the machine itself caused is not a dropped transaction.
+    if let Some(dropped_tx) = dropped
+        .iter()
+        .find(|dropped| critical_kind(&dropped.tx).is_some())
+    {
+        let kind = critical_kind(&dropped_tx.tx).unwrap_or("unknown");
+        return Err(StateError::CriticalProposalFailure {
+            kind,
+            reason: dropped_tx.rejection.message(),
+        });
+    }
+    // Capacity rejections go back on the queue, in their original order and
+    // ahead of anything admitted since, so the next frame retries them.
+    let deferred: Vec<AccountTx> = dropped
+        .iter()
+        .filter(|dropped| is_retryable(&dropped.rejection))
+        .map(|dropped| dropped.tx.clone())
+        .collect();
+    if !deferred.is_empty() {
+        account.restore_mempool_front(deferred)?;
+    }
     if applied.is_empty() {
         return Ok(ProposalOutcome::Idle { dropped });
     }
@@ -184,4 +234,59 @@ pub fn propose_account_frame(
         outputs,
         dropped,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_bigint::BigInt;
+
+    /// The matcher's own transactions are never dropped from a window: a
+    /// rejected `swap_resolve` would commit a matched book without its
+    /// bilateral settlement.
+    #[test]
+    fn the_matchers_transactions_are_critical() {
+        let resolve = AccountTx::SwapResolve {
+            offer_id: "offer-1".to_string(),
+            fill_ratio: 10_000,
+            fill_numerator: None,
+            fill_denominator: None,
+            cancel_remainder: false,
+            fee_token_id: None,
+            fee_amount: None,
+            execution_give_amount: None,
+            execution_want_amount: None,
+            resting_price_ticks: None,
+            resting_give_amount: None,
+            resting_want_amount: None,
+            resting_quantized_give: None,
+            resting_quantized_want: None,
+        };
+        assert_eq!(critical_kind(&resolve), Some("swap_resolve"));
+
+        let payment = AccountTx::DirectPayment {
+            token_id: crate::TokenId::new(1).expect("token"),
+            amount: BigInt::from(1),
+            route: Vec::new(),
+            description: None,
+            from_entity_id: format!("0x{}", "11".repeat(32)),
+            to_entity_id: format!("0x{}", "22".repeat(32)),
+            delivery_mode: crate::DeliveryMode::Direct,
+            trusted_gateway_entity_id: None,
+        };
+        assert_eq!(critical_kind(&payment), None);
+    }
+
+    /// Only a capacity rejection is a retry; a payer's own invalid transaction
+    /// is not requeued for ever.
+    #[test]
+    fn only_capacity_is_retried() {
+        assert!(is_retryable(&AccountRejection::HtlcLockCapacity {
+            maximum: 32
+        }));
+        assert!(!is_retryable(&AccountRejection::DeltaRowLimitExceeded {
+            attempted: 9,
+            maximum: 8
+        }));
+    }
 }

@@ -143,6 +143,8 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::StaleCandidate { .. } => "RSCORE_BATCH_CANDIDATE_STALE",
         BatchError::RevisionOverflow => "RSCORE_BATCH_REVISION_OVERFLOW",
         BatchError::InputSignatureInvalid { .. } => "RSCORE_BATCH_INPUT_SIGNATURE_INVALID",
+        BatchError::CheckpointRevision { .. } => "RSCORE_BATCH_CHECKPOINT_REVISION",
+        BatchError::CheckpointAccountKey { .. } => "RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY",
         BatchError::SignerRequired => "RSCORE_BATCH_SIGNER_REQUIRED",
         BatchError::Signing(_) => "RSCORE_BATCH_SIGNING",
         BatchError::AccountsTree { .. } => "RSCORE_BATCH_ACCOUNTS_TREE",

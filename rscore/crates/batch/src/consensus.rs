@@ -12,11 +12,12 @@ use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
     AccountConsensus, AccountFrame, AccountOutput, AckOutcome, BoardDelays, IncomingFrame,
-    IncomingOutcome, ProposalOutcome, SigningIdentity, StateError, apply_incoming_ack,
-    apply_incoming_frame, propose_account_frame,
+    IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
+    apply_incoming_ack, apply_incoming_frame, propose_account_frame,
 };
-use xln_rscore_protocol::PersistentRadixMap;
+use xln_rscore_protocol::{PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap};
 
+use crate::checkpoint::{AccountRestore, AccountsCheckpoint, account_rows};
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, EngineGeneration};
 
@@ -77,6 +78,11 @@ pub struct StatefulConsensusEngine {
     revision: u64,
     pool: ThreadPool,
     accounts: PersistentRadixMap<AccountConsensus>,
+    /// The accounts tree as of the last checkpoint the runtime took, so the
+    /// next checkpoint ships only what moved. The runtime asks for this every
+    /// hundred or so frames; between those it never pays for the diff.
+    checkpoint: PersistentRadixMap<AccountConsensus>,
+    checkpoint_revision: u64,
     /// The runtime seed and signer this process signs with. Every account
     /// derives its identity from them, bound to its own owner entity.
     seed: String,
@@ -109,6 +115,8 @@ impl StatefulConsensusEngine {
             revision,
             pool,
             accounts: PersistentRadixMap::empty(),
+            checkpoint: PersistentRadixMap::empty(),
+            checkpoint_revision: revision,
             seed,
             signer_id,
             identities: BTreeMap::new(),
@@ -262,8 +270,12 @@ impl StatefulConsensusEngine {
     /// Apply inputs that arrived from peers. Inputs for one account keep their
     /// order; different accounts run on different cores, which is where the
     /// signature verification parallelises.
+    /// Apply inputs against the runtime's own clock. Enforcement decisions —
+    /// whether a lock has expired — are judged with `clock`, never with the
+    /// clock the peer signed into the frame.
     pub fn apply_inputs(
         &mut self,
+        clock: ReceiverClock,
         rows: Vec<AccountInputRow>,
     ) -> Result<Vec<AccountInputResult>, BatchError> {
         if rows.is_empty() {
@@ -305,8 +317,13 @@ impl StatefulConsensusEngine {
                         .ok_or(BatchError::SignerRequired)?;
                     let mut results = Vec::with_capacity(rows.len());
                     for row in rows {
-                        let verdict =
-                            apply_one(&mut account, identity, &row.from_entity_id, row.kind);
+                        let verdict = apply_one(
+                            &mut account,
+                            identity,
+                            &row.from_entity_id,
+                            clock,
+                            row.kind,
+                        );
                         results.push(AccountInputResult {
                             input_index: row.input_index,
                             account_id,
@@ -352,6 +369,79 @@ impl StatefulConsensusEngine {
         Ok(())
     }
 
+    /// Everything that moved since the last committed checkpoint. The runtime
+    /// writes these rows into its canonical database and calls
+    /// `commit_checkpoint` once the write is durable; nothing is dropped until
+    /// then, so a crash in between replays from the previous checkpoint.
+    pub fn checkpoint_changes(&self) -> Result<AccountsCheckpoint, BatchError> {
+        let diff = self.accounts.node_changes_since(&self.checkpoint);
+        let mut accounts = Vec::new();
+        for record in &diff.puts {
+            let PersistentNodeRecord::Leaf { key, value, .. } = record else {
+                continue;
+            };
+            let account_id = account_id_of(key)?;
+            accounts.push(account_rows(
+                account_id,
+                value,
+                self.checkpoint.get(key),
+                leaf_root(account_id, value)?,
+            ));
+        }
+        let mut removed = Vec::new();
+        for record in &diff.dels {
+            let PersistentNodeRef::Leaf { key, .. } = record else {
+                continue;
+            };
+            // A leaf may move within the tree without leaving it: a deletion
+            // that the same revision also puts back is a reshape, not a drop.
+            if self.accounts.get(key).is_none() {
+                removed.push(account_id_of(key)?);
+            }
+        }
+        Ok(AccountsCheckpoint {
+            base_revision: self.checkpoint_revision,
+            revision: self.revision,
+            accounts_root: self.accounts.root_hash(),
+            accounts,
+            removed,
+        })
+    }
+
+    /// Accept a checkpoint the runtime has made durable. Only the exact
+    /// revision that was read may be committed: anything else would leave the
+    /// database missing the rows written in between.
+    pub fn commit_checkpoint(&mut self, revision: u64) -> Result<(), BatchError> {
+        if revision != self.revision {
+            return Err(BatchError::CheckpointRevision {
+                actual: revision,
+                expected: self.revision,
+            });
+        }
+        self.checkpoint = self.accounts.clone();
+        self.checkpoint_revision = revision;
+        Ok(())
+    }
+
+    /// Load accounts back from a checkpoint the database holds. The restored
+    /// tree is itself the checkpoint: nothing has moved since it was written.
+    pub fn restore_accounts(&mut self, rows: Vec<AccountRestore>) -> Result<[u8; 32], BatchError> {
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            self.ensure_identity(row.replica.owner().as_bytes())?;
+            let account = AccountConsensus::restore_from_checkpoint(row.replica, row.consensus)
+                .map_err(|error| state_error(row.account_id, &error))?;
+            let leaf = leaf_root(row.account_id, &account)?;
+            entries.push((row.account_id.as_bytes().to_vec(), account, leaf));
+        }
+        if !entries.is_empty() {
+            self.accounts = self.put_accounts(entries)?;
+        }
+        self.checkpoint = self.accounts.clone();
+        self.checkpoint_revision = self.revision;
+        Ok(self.accounts.root_hash())
+    }
+
     fn ensure_identity(&mut self, entity_id: &[u8; 32]) -> Result<(), BatchError> {
         if self.identities.contains_key(entity_id) {
             return Ok(());
@@ -390,11 +480,12 @@ fn apply_one(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
     from_entity_id: &[u8; 32],
+    clock: ReceiverClock,
     kind: AccountInputKind,
 ) -> AccountInputVerdict {
     match kind {
         AccountInputKind::Frame(frame) => {
-            match apply_incoming_frame(account, identity, from_entity_id, *frame) {
+            match apply_incoming_frame(account, identity, from_entity_id, clock, *frame) {
                 Ok(outcome) => AccountInputVerdict::Frame(outcome),
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
             }
@@ -439,4 +530,13 @@ fn hex_of(bytes: &[u8]) -> String {
         let _ = write!(output, "{byte:02x}");
     }
     output
+}
+
+/// The account id a tree key names. The tree is keyed by the id itself, so a
+/// key of any other width is a corrupt tree rather than an unknown account.
+fn account_id_of(key: &[u8]) -> Result<AccountId, BatchError> {
+    let bytes: [u8; 32] = key
+        .try_into()
+        .map_err(|_| BatchError::CheckpointAccountKey { width: key.len() })?;
+    Ok(AccountId::from_bytes(bytes))
 }

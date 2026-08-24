@@ -292,6 +292,10 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
             carried: decode_carried_sections(&fields[11])?,
             rebalance_fee_policies: decode_rebalance_policies(&fields[11])?,
             swap_offers: decode_swap_offers(&fields[11])?,
+            // The wire seed carries no lending intents: no supported account
+            // transaction opens one, so a seeded account starts without any.
+            // A checkpoint restore fills this from what it saved.
+            lending_intents: Vec::new(),
         })?,
     )?;
     if let Some(envelope) = crate::canonical::envelope(&fields[12])? {
