@@ -14,7 +14,6 @@ import {
 } from '../account/utils';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type {
-  AccountReplica,
   AccountState,
   AccountTx,
   Delta,
@@ -79,8 +78,7 @@ const lockWire = (lock: HtlcLock): RscoreWireValue[] => [
  *   - settlementWorkspace: TypeScript commits the whole object, not a root,
  *     and the engine has no representation for it.
  */
-export const shadowIneligibilityReason = (account: AccountReplica): string | null => {
-  const state = account.state;
+export const shadowIneligibilityReason = (state: AccountState): string | null => {
   if ((state.lendingIntents?.size ?? 0) > 0) return 'LENDING_INTENTS';
   if (state.settlementWorkspace !== undefined) return 'SETTLEMENT_WORKSPACE';
   // The engine owns the offer rows now, so it can only import offers it can
@@ -175,8 +173,7 @@ const collectionRoot = (
   : requirePersistentAccountStateMap(map, namespace).rootHash());
 
 /** Roots of the sections the engine carries without interpreting them. */
-const carriedSectionsWire = (account: AccountReplica): RscoreWireValue[] => {
-  const state = account.state;
+const carriedSectionsWire = (state: AccountState): RscoreWireValue[] => {
   const claim = (accumulator: { root: string; count: bigint }): RscoreWireValue[] => [
     hexToWireBytes(accumulator.root, 32, 'SHADOW_J_CLAIM_ROOT'),
     jClaimCount(accumulator.count),
@@ -251,9 +248,8 @@ const rebalanceFeePoliciesWire = (
 export const accountSeedWire = (
   ownerEntityId: string,
   counterpartyEntityId: string,
-  account: AccountReplica,
+  state: AccountState,
 ): RscoreWireValue[] => {
-  const state = account.state;
   return [
     hexToWireBytes(counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID'),
     hexToWireBytes(ownerEntityId, 32, 'SHADOW_OWNER'),
@@ -270,7 +266,7 @@ export const accountSeedWire = (
       .sort((left, right) => (left.lockId < right.lockId ? -1 : left.lockId > right.lockId ? 1 : 0))
       .map(lockWire),
     [state.jNonce, state.lastFinalizedJHeight],
-    carriedSectionsWire(account),
+    carriedSectionsWire(state),
   ];
 };
 

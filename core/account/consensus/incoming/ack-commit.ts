@@ -19,7 +19,7 @@ import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
 import { preparedCommitKey, takePreparedProposalCommit } from '../proposal/prepared-commit';
-import { noteAccountFrameForShadow } from '../../../rscore/shadow-hook';
+import { noteAccountFrameForShadow, shadowPreFrameState } from '../../../rscore/shadow-hook';
 import { publishAccountOverlay } from '../../state/candidate-overlay';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import { countOp } from '../../../support/performance/op-counters';
@@ -151,6 +151,7 @@ const applyPendingFrameTransactions = async (
   // Same derivation commitAccountFrameTransition uses, so both commit paths
   // hand the mirror the identical execution clock.
   const preparedJHeight = pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
+  const preFrameState = shadowPreFrameState(account.state);
   if (prepared) {
     // Only the bilateral transition is replayed. Everything Entity-private on
     // the live replica (shadow, dispute draft, proof nonce) kept moving while
@@ -185,6 +186,7 @@ const applyPendingFrameTransactions = async (
       tsApplyUs: prepared.applyUs,
       committedStateRoot: prepared.accountStateRoot,
       account,
+      ...(preFrameState ? { preFrameState } : {}),
     });
     return;
   }

@@ -14,6 +14,7 @@ type ShadowStatsLike = ShadowStats;
 type MirrorLike = Readonly<{
   noteCommittedFrame(input: ShadowFrameInput): void;
   primeOwner(ownerEntityId: string, accounts: ReadonlyMap<string, AccountReplica>): Promise<void>;
+  adoptOwner(ownerEntityId: string, accounts: ReadonlyMap<string, AccountReplica>): Promise<number>;
   flushWave(): void;
   onGap(callback: (gap: ShadowGap) => void): void;
   onProgress(callback: () => void): void;
@@ -28,10 +29,20 @@ let pending: ShadowFrameInput[] | null = null;
 /** Resolves once the mirror is armed (or has failed to arm). */
 let arming: Promise<void> | null = null;
 
+/**
+ * Read once: this is consulted on every applied transition, and the env object
+ * is a host proxy in Bun. The switch cannot change mid-process anyway.
+ */
+let enabled: boolean | null = null;
+
 const shadowEnabled = (): boolean => {
-  if (typeof process === 'undefined' || typeof process.env === 'undefined') return false;
-  if (process.env['XLN_RSCORE_SHADOW'] !== '1') return false;
-  return typeof globalThis.Bun !== 'undefined' || typeof process.versions?.node === 'string';
+  if (enabled !== null) return enabled;
+  enabled = (() => {
+    if (typeof process === 'undefined' || typeof process.env === 'undefined') return false;
+    if (process.env['XLN_RSCORE_SHADOW'] !== '1') return false;
+    return typeof globalThis.Bun !== 'undefined' || typeof process.versions?.node === 'string';
+  })();
+  return enabled;
 };
 
 const entityAllowed = (ownerEntityId: string): boolean => {
@@ -113,6 +124,16 @@ const armMirror = async (prime?: (started: MirrorLike) => Promise<void>): Promis
 export const shadowClockUs = (): number =>
   shadowEnabled() ? Math.round(performance.now() * 1000) : 0;
 
+/**
+ * Pre-frame snapshot for the seed of an account the mirror has never seen.
+ * Seeding from the committed post-state would import the very transition that
+ * is supposed to be proven, so the first frame of every account is seeded from
+ * the state it started in and then executed like any other. Returns undefined
+ * when shadow is off, so a production commit path allocates nothing.
+ */
+export const shadowPreFrameState = <T>(state: T): T | undefined =>
+  (shadowEnabled() ? state : undefined);
+
 export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
   if (mirror === null) return;
   if (mirror === undefined) {
@@ -147,6 +168,39 @@ export const primeShadowFromRuntimeState = async (state: RuntimeState): Promise<
     for (const replica of owners) await started.primeOwner(replica.entityId, replica.state.accounts);
   });
   await arming;
+};
+
+/**
+ * Canonical recovery boundary: hand the engine every account the restored
+ * Runtime holds, before the first live input. Without it the mirror only ever
+ * learns about accounts that move during this run, and a green reconciliation
+ * covers that subset instead of the restored tree. Safe to call repeatedly.
+ */
+export const adoptShadowRuntimeState = async (state: RuntimeState): Promise<void> => {
+  if (!shadowEnabled()) return;
+  const owners = [...state.eReplicas.values()]
+    .filter(replica => entityAllowed(replica.entityId))
+    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+  if (owners.length === 0) return;
+  if (mirror === undefined && arming === null) {
+    // Nothing has been mirrored yet: this restored tree is the checkpoint.
+    pending = [];
+    arming = armMirror(async started => {
+      for (const replica of owners) await started.primeOwner(replica.entityId, replica.state.accounts);
+    });
+    await arming;
+    return;
+  }
+  if (arming) await arming;
+  const active = mirror;
+  if (!active) return;
+  // Adopt only what the engine does not already hold, and only once the queue
+  // is quiet, so an adoption can never overwrite a frame still in flight.
+  active.flushWave();
+  await active.settled();
+  for (const replica of owners) {
+    await active.adoptOwner(replica.entityId, replica.state.accounts);
+  }
 };
 
 /**
@@ -216,7 +270,12 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   if (stats.forestMismatches > 0) failures.push(`forestMismatches=${stats.forestMismatches}`);
   if (stats.forestChecks === 0) failures.push('forestChecks=0');
   if (stats.reseedsRepair > 0) failures.push(`reseedsRepair=${stats.reseedsRepair}`);
-  if (stats.dropped > 0) failures.push(`dropped=${stats.dropped}`);
+  // Monotonic: an account whose first observed frame was imported instead of
+  // executed keeps that hole on the record even after later frames match.
+  if (stats.firstFramesSkipped > 0) failures.push(`firstFramesSkipped=${stats.firstFramesSkipped}`);
+  if (stats.droppedFrames > 0) {
+    failures.push(`dropped=${stats.droppedWaves}waves/${stats.droppedFrames}frames`);
+  }
   // Owners beyond the binding limit never reached the engine at all, so a
   // green report for the bound owner says nothing about them.
   if (stats.skippedUnboundOwner > 0) {

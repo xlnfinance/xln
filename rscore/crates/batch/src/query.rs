@@ -92,7 +92,7 @@ impl StatefulBatchEngine {
         &self,
         cursor: Option<AccountId>,
         limit: usize,
-    ) -> (Vec<AccountSummaryRow>, Option<AccountId>) {
+    ) -> Result<(Vec<AccountSummaryRow>, Option<AccountId>), xln_rscore_engine::StateError> {
         let mut rows = Vec::with_capacity(limit.min(64));
         let mut next_cursor = None;
         for (account_id, replica) in self.accounts_after(cursor) {
@@ -111,14 +111,15 @@ impl StatefulBatchEngine {
                 htlc_locks: state.htlc_count() as u64,
                 deltas_root: state.deltas_root(),
                 htlc_locks_root: state.htlc_locks_root(),
-                account_state_root: state
-                    .payment_profile_account_state_root()
-                    .unwrap_or([0; 32]),
+                // Fallible: substituting a zero root here turned an encoding
+                // or commitment failure into an ordinary-looking mismatch and
+                // threw the cause away.
+                account_state_root: state.payment_profile_account_state_root()?,
                 swap_offers_root: state.swap_offers_root(),
                 rebalance_fee_policies_root: state.rebalance_fee_policies_root(),
             });
         }
-        (rows, next_cursor)
+        Ok((rows, next_cursor))
     }
 
     /// Whole-engine reducers for the requested tokens, computed in one

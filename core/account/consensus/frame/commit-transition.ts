@@ -20,7 +20,7 @@ import {
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
 import type { ApplyAccountTxOk } from '../../tx/apply-types';
-import { noteAccountFrameForShadow, shadowClockUs } from '../../../rscore/shadow-hook';
+import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../../rscore/shadow-hook';
 import {
 } from '../helpers';
 import type { AccountConsensusContext } from '../context';
@@ -63,6 +63,9 @@ export const commitAccountFrameTransition = async (
   const txResults: ApplyAccountTxOk[] = [];
   let tsApplyUs = 0;
   const jHeight = frame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
+  // Read before the overlay is published: the mirror seeds a never-seen
+  // account from the state its first frame started in, then executes it.
+  const preFrameState = shadowPreFrameState(account.state);
 
   try {
     await timePerfPhase('account.commit.applyTxs', async () => {
@@ -123,6 +126,7 @@ export const commitAccountFrameTransition = async (
       tsApplyUs,
       committedStateRoot: committed.accountStateRoot,
       account,
+      ...(preFrameState ? { preFrameState } : {}),
     });
     return Object.freeze({
       accountStateRoot: committed.accountStateRoot,

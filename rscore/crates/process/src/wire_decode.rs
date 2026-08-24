@@ -10,7 +10,7 @@ use xln_rscore_engine::{
 };
 
 use crate::wire_value::{
-    bigint, bounded_u32, entity, exact, fixed_bytes, hex_fixed, integer, optional_fixed_bytes,
+    bigint, bounded_u32, entity, exact, fixed_bytes, hex_fixed, integer, js_number, optional_fixed_bytes,
     optional_text, text, text_list, token, tuple, unsigned,
 };
 use crate::{PROCESS_ABI_VERSION, PROCESS_PROFILE, ProcessError};
@@ -226,7 +226,7 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     }
     let identity = AccountIdentity::new(
         AccountDomain::new(
-            unsigned(&fields[4], "chainId")?,
+            js_number(&fields[4], "chainId")?,
             DepositoryAddress::parse(&hex_fixed(&fields[5], "depository", 20)?)?,
         )?,
         left.clone(),
@@ -235,8 +235,8 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     )?;
     let dispute = exact(tuple(&fields[7])?, 2, "disputeConfig")?;
     let dispute_config = AccountDisputeConfig::new(
-        unsigned(&dispute[0], "leftResponseSeconds")?,
-        unsigned(&dispute[1], "rightResponseSeconds")?,
+        js_number(&dispute[0], "leftResponseSeconds")?,
+        js_number(&dispute[1], "rightResponseSeconds")?,
     )?;
     let deltas = tuple(&fields[8])?
         .iter()
@@ -254,8 +254,8 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
             dispute_config,
             deltas,
             locks,
-            j_nonce: unsigned(&journal[0], "jNonce")?,
-            last_finalized_j_height: unsigned(&journal[1], "lastFinalizedJHeight")?,
+            j_nonce: js_number(&journal[0], "jNonce")?,
+            last_finalized_j_height: js_number(&journal[1], "lastFinalizedJHeight")?,
             carried: decode_carried_sections(&fields[11])?,
             rebalance_fee_policies: decode_rebalance_policies(&fields[11])?,
             swap_offers: decode_swap_offers(&fields[11])?,
@@ -321,7 +321,7 @@ fn decode_swap_offers(value: &AbiValue) -> Result<Vec<SwapOffer>, ProcessError> 
                         });
                     }
                 },
-                unsigned(&row[12], "createdHeight")?,
+                js_number(&row[12], "createdHeight")?,
             ))
         })
         .collect()
@@ -410,11 +410,11 @@ fn decode_policy_snapshot(
     }
     let fields = exact(fields, 5, "rebalanceFeePolicySnapshot")?;
     Ok(Some(RebalanceFeePolicySnapshot::new(
-        unsigned(&fields[0], "policyVersion")?,
+        js_number(&fields[0], "policyVersion")?,
         bigint(&fields[1], "baseFee")?,
         bigint(&fields[2], "liquidityFeeBps")?,
         bigint(&fields[3], "gasFee")?,
-        unsigned(&fields[4], "updatedAt")?,
+        js_number(&fields[4], "updatedAt")?,
     )))
 }
 
@@ -432,12 +432,12 @@ fn decode_lock(value: &AbiValue) -> Result<HtlcLock, ProcessError> {
         text(&fields[0])?.into(),
         HtlcHashlock::parse(&hex_fixed(&fields[1], "hashlock", 32)?)?,
         bigint(&fields[2], "timelock")?,
-        unsigned(&fields[3], "revealBeforeHeight")?,
+        js_number(&fields[3], "revealBeforeHeight")?,
         bigint(&fields[4], "amount")?,
         token(&fields[5])?,
         side(&fields[6], "sender")?,
-        unsigned(&fields[7], "createdHeight")?,
-        unsigned(&fields[8], "createdTimestamp")?,
+        js_number(&fields[7], "createdHeight")?,
+        js_number(&fields[8], "createdTimestamp")?,
         optional_fixed_bytes(&fields[9], "envelopeHash")?,
     )?)
 }
@@ -472,11 +472,11 @@ fn decode_job(value: &AbiValue) -> Result<BatchJob, ProcessError> {
 fn decode_context(value: &AbiValue) -> Result<AccountExecutionContext, ProcessError> {
     let fields = exact(tuple(value)?, 5, "context")?;
     Ok(AccountExecutionContext::new(
-        unsigned(&fields[0], "committedTimestamp")?,
-        unsigned(&fields[1], "enforcementTimestamp")?,
-        unsigned(&fields[2], "enforcementJHeight")?,
-        unsigned(&fields[3], "currentAccountHeight")?,
-        unsigned(&fields[4], "frameJHeight")?,
+        js_number(&fields[0], "committedTimestamp")?,
+        js_number(&fields[1], "enforcementTimestamp")?,
+        js_number(&fields[2], "enforcementJHeight")?,
+        js_number(&fields[3], "currentAccountHeight")?,
+        js_number(&fields[4], "frameJHeight")?,
     ))
 }
 
@@ -516,7 +516,7 @@ fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
     let fields = exact(fields, 6, "rebalancePolicy")?;
     Ok(AccountTx::RebalancePolicy {
         token_id: bounded_u32(&fields[1], "tokenId")?,
-        policy_version: unsigned(&fields[2], "policyVersion")?,
+        policy_version: js_number(&fields[2], "policyVersion")?,
         base_fee: bigint(&fields[3], "baseFee")?,
         liquidity_fee_bps: bigint(&fields[4], "liquidityFeeBps")?,
         gas_fee: bigint(&fields[5], "gasFee")?,
@@ -567,7 +567,7 @@ fn decode_htlc_lock(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
         lock_id: text(&fields[1])?.into(),
         hashlock: HtlcHashlock::parse(&hashlock)?,
         timelock: bigint(&fields[3], "timelock")?,
-        reveal_before_height: unsigned(&fields[4], "revealBeforeHeight")?,
+        reveal_before_height: js_number(&fields[4], "revealBeforeHeight")?,
         amount: bigint(&fields[5], "amount")?,
         token_id: token(&fields[6])?,
         delivery_mode: optional_delivery(&fields[7])?,

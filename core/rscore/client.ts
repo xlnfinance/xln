@@ -377,6 +377,9 @@ export class RscoreProcessClient {
         this.#stderrTail.trim() || '<empty>'}`,
     )));
     this.#child.on('error', error => this.#fail(error as Error));
+    // Without this an EPIPE on a closed pipe is an unhandled error event, and
+    // a writer parked on 'drain' would never learn the peer is gone.
+    this.#child.stdin.on('error', error => this.#fail(error as Error));
   }
 
   #fail(error: Error): void {
@@ -426,7 +429,16 @@ export class RscoreProcessClient {
         reject: (error: Error) => { clearTimeout(timer); reject(error); },
       });
     });
-    if (!this.#child.stdin.write(framed)) await once(this.#child.stdin, 'drain');
+    if (!this.#child.stdin.write(framed)) {
+      // Backpressure is raced against the reply, which already carries the
+      // request deadline and every process-death path. Awaiting 'drain' alone
+      // parked this call forever when the engine died with a full pipe: the
+      // waiter was already rejected, but execution had not reached it yet.
+      await Promise.race([
+        once(this.#child.stdin, 'drain'),
+        reply.then(() => undefined),
+      ]);
+    }
     const decoded = decodeEnvelope(await reply, {
       identity: this.#identity,
       requestId,

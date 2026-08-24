@@ -22,7 +22,7 @@ import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-valu
 import { safeStringify } from '../protocol/serialization';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type { ApplyAccountTxOk } from '../account/tx/apply-types';
-import type { AccountReplica, AccountTx } from '../types/account';
+import type { AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
   shadowOutputRows,
@@ -189,6 +189,33 @@ const DIFF_DIR: string | null = (() => {
 })();
 
 /**
+ * HTLC preimages travel through outputs and through the htlc_resolve wire. A
+ * divergence dump is a durable file, so the secret is replaced by its length:
+ * enough to see that one was present and how long, never enough to spend it.
+ */
+const redactSecrets = <T>(value: T): T => {
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      // ['secret', lockId, hashlock, <preimage>, ...] and the resolve wire
+      // [tag=2, lockId, outcome, <preimage bytes>].
+      const rows = node.map(walk);
+      if (rows[0] === 'secret' && typeof rows[3] === 'string') {
+        rows[3] = `redacted:${(rows[3] as string).length}`;
+      }
+      if (rows[0] === 2 && rows[3] instanceof Uint8Array) {
+        rows[3] = `redacted:${(rows[3] as Uint8Array).byteLength}`;
+      }
+      return rows;
+    }
+    if (node instanceof Uint8Array || node === null || typeof node !== 'object') return node;
+    return Object.fromEntries(
+      Object.entries(node as Record<string, unknown>).map(([key, entry]) => [key, walk(entry)]),
+    );
+  };
+  return walk(value) as T;
+};
+
+/**
  * The engine's own tree, computed on the TypeScript side: key = the raw
  * 32-byte counterparty id, leaf = the payment-profile account state root.
  */
@@ -245,6 +272,12 @@ export type ShadowFrameInput = Readonly<{
   tsApplyUs: number;
   /** TS authority root committed by this frame (hex). */
   committedStateRoot: string;
+  /**
+   * The state this frame started from. A never-mirrored account is seeded from
+   * it and then executes the frame like any other; importing the committed
+   * post-state instead would import the very transition under test.
+   */
+  preFrameState?: AccountState;
   /** Committed post-frame replica, read synchronously at note time. */
   account: AccountReplica;
 }>;
@@ -259,7 +292,29 @@ type WaveFrame = Readonly<{
   expectedOutputs: readonly IndexedShadowOutputRow[];
   /** TypeScript reducer time for this frame's txs, in microseconds. */
   tsApplyUs: number;
+  /**
+   * Per-section roots of the TS replica as this frame committed them. Captured
+   * here because the live replica keeps moving: diffing the engine against
+   * whatever the account looks like later named the wrong section.
+   */
+  sections: Readonly<Record<string, string>>;
 }>;
+
+/**
+ * The four sections the engine commits separately. Every root is already
+ * folded and memoized by the commit that produced this frame, so reading them
+ * at note time costs no extra hashing.
+ */
+const tsSectionRoots = (state: AccountState): Record<string, string> => ({
+  deltas: requirePersistentAccountStateMap(state.deltas, 'deltas').rootHash().toLowerCase(),
+  locks: requirePersistentAccountStateMap(state.locks, 'locks').rootHash().toLowerCase(),
+  swapOffers: requirePersistentAccountStateMap(state.swapOffers, 'swapOffers')
+    .rootHash().toLowerCase(),
+  rebalanceFeePolicies: state.rebalanceFeePolicies === undefined
+    ? EMPTY_RADIX_ROOT
+    : requirePersistentAccountStateMap(state.rebalanceFeePolicies, 'rebalanceFeePolicies')
+      .rootHash().toLowerCase(),
+});
 
 /** One committed frame and its request-local jobs before Runtime-wave packing. */
 type PendingWaveFrame = Readonly<{
@@ -356,7 +411,8 @@ export type ShadowReconciliation = Readonly<{
  * instead of proving it, so a strict run must treat them as failures.
  */
 export type ShadowGap = Readonly<{
-  kind: 'divergence' | 'forest-divergence' | 'reseed-repair' | 'ineligible';
+  kind: 'divergence' | 'forest-divergence' | 'reseed-repair' | 'ineligible'
+    | 'dropped' | 'unbound-owner' | 'disabled';
   owner: string;
   account: string;
   frameHeight: number;
@@ -386,15 +442,26 @@ export type ShadowStats = {
    */
   unsupportedTxTypes: Record<string, number>;
   skippedUnboundOwner: number;
-  dropped: number;
+  /** Accounts imported at a recovery boundary as shared initial condition. */
+  adoptedAccounts: number;
+  /** Queue entries and account frames lost to overflow. */
+  droppedWaves: number;
+  droppedFrames: number;
+  /**
+   * Monotonic: accounts whose first observed frame was imported instead of
+   * executed. Later frames of the same account never erase this, so a green
+   * run cannot hide an unproven first transition.
+   */
+  firstFramesSkipped: number;
   /**
    * Accounts whose state was imported from TypeScript but that never had a
    * single transition executed by the engine. A seeded account reproduces the
    * TS root by construction, so counting it as agreement proves nothing.
    */
   seededNeverExecuted: number;
-  /** Transitions the engine actually executed, by tx type. */
+  /** Transitions the engine applied, by tx type. Rejections are counted apart. */
   executedByType: Record<string, number>;
+  rejectedByType: Record<string, number>;
   /** Whole-tree diffs run mid-flight, and how many found a gap. */
   reconciliations: number;
   reconcileFailures: number;
@@ -420,6 +487,8 @@ export class RscoreShadowMirror {
   readonly #makeClient: (binaryPath: string) => RscoreProcessClient;
   readonly #clients = new Map<string, RscoreProcessClient>();
   readonly #boundOwners = new Set<string>();
+  /** Owners already reported as beyond the binding limit; one gap each. */
+  readonly #reportedUnbound = new Set<string>();
   readonly #maxOwners: number;
   readonly #registered = new Set<string>();
   /**
@@ -462,9 +531,13 @@ export class RscoreShadowMirror {
     ineligibleReasons: {},
     unsupportedTxTypes: {},
     skippedUnboundOwner: 0,
-    dropped: 0,
+    adoptedAccounts: 0,
+    droppedWaves: 0,
+    droppedFrames: 0,
+    firstFramesSkipped: 0,
     seededNeverExecuted: 0,
     executedByType: {},
+    rejectedByType: {},
     reconciliations: 0,
     reconcileFailures: 0,
     tsApplyUs: 0,
@@ -512,6 +585,7 @@ export class RscoreShadowMirror {
       unsupportedTxTypes: { ...this.#stats.unsupportedTxTypes },
       seededNeverExecuted: this.#seeded.size,
       executedByType: { ...this.#stats.executedByType },
+      rejectedByType: { ...this.#stats.rejectedByType },
       disabledReason: this.#disabledReason,
     };
   }
@@ -545,6 +619,62 @@ export class RscoreShadowMirror {
       this.#registered.add(`${ownerKey}/${accountKey}`);
       this.#remember(ownerKey, counterpartyId, account);
     }
+  }
+
+  /**
+   * Adopt the owner's whole account map as shared initial condition, for every
+   * account the mirror does not already hold. The recovery path restores a
+   * tree of which one run may touch a handful of accounts; without this the
+   * engine only ever learns about the accounts that happened to move, and a
+   * clean reconciliation then covers that subset instead of the tree.
+   *
+   * Unlike a post-transition reseed this imports nothing that was under test:
+   * these leaves are the state both engines start from.
+   */
+  async adoptOwner(
+    ownerEntityId: string,
+    accounts: ReadonlyMap<string, AccountReplica>,
+  ): Promise<number> {
+    if (this.#disabledReason) return 0;
+    const ownerKey = ownerEntityId.trim().toLowerCase();
+    if (!this.#tryBindOwner(ownerKey)) return 0;
+    const seeds: RscoreWireValue[][] = [];
+    const adopted: (readonly [string, AccountReplica])[] = [];
+    for (const [counterpartyId, account] of [...accounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))) {
+      const accountKey = Buffer.from(
+        hexToWireBytes(counterpartyId, 32, 'SHADOW_ADOPT_ACCOUNT_ID'),
+      ).toString('hex');
+      const scopedKey = `${ownerKey}/${accountKey}`;
+      if (this.#registered.has(scopedKey)) continue;
+      const reason = shadowIneligibilityReason(account.state);
+      if (reason !== null) {
+        this.#stats.skippedIneligible += 1;
+        this.#stats.ineligibleReasons[reason] = (this.#stats.ineligibleReasons[reason] ?? 0) + 1;
+        this.#reportGap({
+          kind: 'ineligible',
+          owner: ownerKey,
+          account: accountKey,
+          frameHeight: account.currentHeight ?? 0,
+          detail: `adopt:${reason}`,
+          txTypes: [],
+        });
+        continue;
+      }
+      seeds.push(accountSeedWire(ownerEntityId, counterpartyId, account.state));
+      adopted.push([counterpartyId, account]);
+      this.#registered.add(scopedKey);
+      this.#needsReseed.delete(scopedKey);
+    }
+    if (seeds.length === 0) return 0;
+    const client = await this.#ensureClient(ownerKey);
+    const upserted = (await client.upsertAccounts(seeds)) as unknown[];
+    this.#noteRevision(ownerKey, upserted);
+    this.#stats.adoptedAccounts += adopted.length;
+    for (const [counterpartyId, account] of adopted) {
+      this.#remember(ownerKey, counterpartyId, account);
+    }
+    return adopted.length;
   }
 
   /**
@@ -695,6 +825,19 @@ export class RscoreShadowMirror {
     const ownerKey = input.ownerEntityId.trim().toLowerCase();
     if (!this.#tryBindOwner(ownerKey)) {
       this.#stats.skippedUnboundOwner += 1;
+      // Reported once per owner: every frame of an unbound owner is invisible
+      // to the engine, which is a coverage hole a strict run must not survive.
+      if (!this.#reportedUnbound.has(ownerKey)) {
+        this.#reportedUnbound.add(ownerKey);
+        this.#reportGap({
+          kind: 'unbound-owner',
+          owner: ownerKey,
+          account: '',
+          frameHeight: input.frameHeight,
+          detail: `owner-limit:${this.#maxOwners}`,
+          txTypes: input.accountTxs.map(tx => tx.type),
+        });
+      }
       return;
     }
     const accountIdBytes = hexToWireBytes(input.counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID');
@@ -719,14 +862,23 @@ export class RscoreShadowMirror {
         this.#stats.unsupportedTxTypes[tx.type] = (this.#stats.unsupportedTxTypes[tx.type] ?? 0) + 1;
       }
       const supported = unsupported.length === 0;
-      const fresh = !this.#registered.has(scopedKey) || this.#needsReseed.has(scopedKey);
+      const wasRegistered = this.#registered.has(scopedKey);
+      const fresh = !wasRegistered || this.#needsReseed.has(scopedKey);
       if (!supported || fresh) {
         // Reseeds are queued immediately while supported frames wait for the
         // Runtime boundary. Flush the earlier frames first; otherwise a later
         // unsupported frame of the same account would seed its post-state and
         // the queued earlier frame would be replayed on top of that state.
         this.flushWave();
-        const reason = shadowIneligibilityReason(input.account);
+        const repair = wasRegistered || this.#needsReseed.has(scopedKey);
+        // Seed the state this frame STARTED in whenever the frame itself can
+        // still be replayed: the engine then executes the transition instead of
+        // importing its result, and no frame of a mirrored account goes unproven.
+        const seedFromPre = supported && input.preFrameState !== undefined;
+        const seedState = seedFromPre
+          ? input.preFrameState as AccountState
+          : input.account.state;
+        const reason = shadowIneligibilityReason(seedState);
         if (reason !== null) {
           if (process.env['XLN_RSCORE_SHADOW_TRACE'] === '1') {
             try { console.error(`SHADOW_TRACE ineligible ${accountKey.slice(0, 8)} h${input.frameHeight} ${reason}`); } catch { /* observer-only */ }
@@ -747,14 +899,14 @@ export class RscoreShadowMirror {
           });
           return;
         }
-        const seed = accountSeedWire(input.ownerEntityId, input.counterpartyEntityId, input.account);
-        const repair = !fresh || this.#needsReseed.has(scopedKey);
         this.#push({
           kind: 'reseed',
           ownerKey,
           accountKey,
-          seed,
-          reason: repair ? (supported ? 'repair' : 'unsupported-tx') : 'register',
+          seed: accountSeedWire(input.ownerEntityId, input.counterpartyEntityId, seedState),
+          reason: seedFromPre
+            ? (repair ? 'repair-pre-frame' : 'register-pre-frame')
+            : (repair ? (supported ? 'repair' : 'unsupported-tx') : 'register'),
           frameHeight: input.frameHeight,
         });
         if (repair) {
@@ -770,9 +922,16 @@ export class RscoreShadowMirror {
         }
         this.#registered.add(scopedKey);
         this.#needsReseed.delete(scopedKey);
-        this.#seeded.add(scopedKey);
-        this.#remember(ownerKey, input.counterpartyEntityId, input.account);
-        return;
+        if (!seedFromPre) {
+          // The frame itself was imported, not executed. Monotonic on the
+          // first sighting of an account, so a later matching frame cannot
+          // retire the fact that this one was never proven.
+          this.#seeded.add(scopedKey);
+          if (!wasRegistered) this.#stats.firstFramesSkipped += 1;
+          this.#remember(ownerKey, input.counterpartyEntityId, input.account);
+          return;
+        }
+        // Falls through: this frame is replayed on top of the pre-frame seed.
       }
       const jobs: RscoreWireValue[][] = [];
       for (const [index, wire] of wires.entries()) {
@@ -816,6 +975,7 @@ export class RscoreShadowMirror {
             ]),
           ),
           tsApplyUs: input.tsApplyUs,
+          sections: tsSectionRoots(input.account.state),
         },
         jobs,
       });
@@ -840,12 +1000,23 @@ export class RscoreShadowMirror {
 
   #push(entry: QueueEntry): void {
     if (this.#queue.length >= MAX_QUEUE) {
-      this.#stats.dropped += 1;
+      this.#stats.droppedWaves += 1;
       // A dropped wave breaks replay continuity for every account it carried.
       if (entry.kind === 'reseed') this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
       else if (entry.kind === 'wave') {
+        this.#stats.droppedFrames += entry.frames.length;
         for (const frame of entry.frames) this.#needsReseed.add(`${entry.ownerKey}/${frame.accountKey}`);
       }
+      // Lost coverage is a parity gap, not a statistic: strict mode must stop
+      // here rather than at whatever the end-of-run gate happens to notice.
+      this.#reportGap({
+        kind: 'dropped',
+        owner: entry.ownerKey,
+        account: entry.kind === 'reseed' ? entry.accountKey : '',
+        frameHeight: entry.kind === 'wave' ? entry.frames.length : 0,
+        detail: `queue-overflow:${entry.kind}:${MAX_QUEUE}`,
+        txTypes: entry.kind === 'wave' ? entry.frames.flatMap(frame => frame.txTypes) : [],
+      });
       return;
     }
     this.#queue.push(entry);
@@ -876,10 +1047,6 @@ export class RscoreShadowMirror {
         const wireStartedUs = Math.round(performance.now() * 1000);
         const { candidate, token } = await client.prepareCandidate(entry.jobs);
         const prepared = candidate as unknown[];
-        const results = prepared[2] as unknown[];
-        const verdicts = results
-          .map((row, index) => ({ verdict: (row as unknown[])[2] as unknown[], index }))
-        const rejected = verdicts.filter(({ verdict }) => Number(verdict[0]) !== 0);
         // Outputs and roots are read from the candidate before it is
         // committed, so a rejected wave never reaches the committed tree.
         const engineOutputs = prepared[3] as unknown[];
@@ -889,17 +1056,51 @@ export class RscoreShadowMirror {
         this.#stats.rustEngineUs += wireInteger(prepared[5], 'SHADOW_ENGINE_MICROS');
         this.#stats.timedTxs += entry.jobs.length;
         for (const frame of entry.frames) this.#stats.tsApplyUs += frame.tsApplyUs;
-        // Count only verdicts the engine actually returned. Enqueue-time
-        // accounting lied when a queue drop, process death or malformed reply
-        // prevented execution altogether.
-        const txTypes = entry.frames.flatMap(frame => frame.txTypes);
-        if (verdicts.length !== txTypes.length) {
-          throw new Error(`SHADOW_ENGINE_RESULT_LENGTH:${verdicts.length}:${txTypes.length}`);
+        // Every transition of this wave, in input-index order: which account it
+        // belongs to and what it was. The engine returns the same binding, so a
+        // rejection lands on the account that produced it instead of being
+        // smeared over every account in the wave.
+        const jobAccounts: string[] = [];
+        const jobTypes: string[] = [];
+        for (const frame of entry.frames) {
+          for (const type of frame.txTypes) {
+            jobAccounts.push(frame.accountKey);
+            jobTypes.push(type);
+          }
         }
-        for (const [index] of verdicts.entries()) {
-          const type = txTypes[index];
-          if (type === undefined) throw new Error(`SHADOW_ENGINE_RESULT_INDEX:${index}`);
-          this.#stats.executedByType[type] = (this.#stats.executedByType[type] ?? 0) + 1;
+        const results = prepared[2] as unknown[];
+        if (results.length !== jobTypes.length) {
+          throw new Error(`SHADOW_ENGINE_RESULT_LENGTH:${results.length}:${jobTypes.length}`);
+        }
+        const rejectionByAccount = new Map<string, string>();
+        for (const row of results) {
+          const fields = wireTuple(row, 'SHADOW_ENGINE_RESULT', 4);
+          const inputIndex = wireInteger(fields[0], 'SHADOW_ENGINE_RESULT_INPUT');
+          const type = jobTypes[inputIndex];
+          const expectedAccount = jobAccounts[inputIndex];
+          if (type === undefined || expectedAccount === undefined) {
+            throw new Error(`SHADOW_ENGINE_RESULT_INDEX:${inputIndex}`);
+          }
+          const accountKey = Buffer.from(
+            wireBytes(fields[1], 'SHADOW_ENGINE_RESULT_ACCOUNT', 32),
+          ).toString('hex');
+          if (accountKey !== expectedAccount) {
+            throw new Error(`SHADOW_ENGINE_RESULT_ACCOUNT_BINDING:${inputIndex}:${accountKey}`);
+          }
+          const verdict = wireTuple(fields[2], 'SHADOW_ENGINE_VERDICT');
+          if (Number(verdict[0]) === 0) {
+            // Applied only. Counting rejected verdicts as executions claimed
+            // coverage for a transition that changed nothing.
+            this.#stats.executedByType[type] = (this.#stats.executedByType[type] ?? 0) + 1;
+            continue;
+          }
+          this.#stats.rejectedByType[type] = (this.#stats.rejectedByType[type] ?? 0) + 1;
+          if (!rejectionByAccount.has(accountKey)) {
+            rejectionByAccount.set(
+              accountKey,
+              `rejected:${type}:input=${inputIndex}:${safeStringify(verdict)}`,
+            );
+          }
         }
         for (const frame of entry.frames) {
           this.#seeded.delete(`${entry.ownerKey}/${frame.accountKey}`);
@@ -914,21 +1115,40 @@ export class RscoreShadowMirror {
         if (this.#stats.framesCompared % PROGRESS_EVERY === 0) {
           try { this.#onProgress?.(); } catch { /* observer-only */ }
         }
-        // Only meaningful once the queue has drained: TypeScript mutates its
-        // replicas in place, so while waves are still pending the engine is
-        // legitimately behind and every diff would be a false alarm.
+        // Only meaningful once everything the authority has committed is also
+        // in the engine: TypeScript mutates its replicas in place, so a frame
+        // still sitting in the pending wave legitimately puts the engine behind
+        // and every diff taken then would be a false alarm.
         if (RECONCILE_EVERY > 0
+          && this.#stats.framesCompared > 0
           && this.#stats.framesCompared % RECONCILE_EVERY === 0
-          && this.#queue.length === 0) {
+          && this.#queue.length === 0
+          && this.#pendingWave.size === 0) {
           const owned = this.#mirrored.get(entry.ownerKey);
           if (owned) {
+            const epoch = this.#noteEpoch;
             const report = await this.reconcile(entry.ownerKey, owned);
             this.#stats.reconciliations += 1;
             const gap = report.mismatched.length > 0 || report.missingInEngine.length > 0
               || report.extraInEngine.length > 0 || !report.forestRoot.equal;
             // A frame that arrived while the diff was running puts the engine
-            // behind again; only a still-quiet queue makes the gap real.
-            if (gap && this.#queue.length === 0) this.#stats.reconcileFailures += 1;
+            // behind again; only an unchanged, still-quiet authority makes it real.
+            if (gap
+              && epoch === this.#noteEpoch
+              && this.#queue.length === 0
+              && this.#pendingWave.size === 0) {
+              this.#stats.reconcileFailures += 1;
+              this.#reportGap({
+                kind: 'forest-divergence',
+                owner: entry.ownerKey,
+                account: report.mismatched[0]?.accountId ?? '',
+                frameHeight: this.#stats.framesCompared,
+                detail: `reconcile:mismatched=${report.mismatched.length}:missing=${
+                  report.missingInEngine.length}:extra=${report.extraInEngine.length}:forest=${
+                  report.forestRoot.equal}`,
+                txTypes: [],
+              });
+            }
             try {
               console.error(`RSCORE_SHADOW_RECONCILE matched=${report.matched} mismatched=${
                 report.mismatched.length} missing=${report.missingInEngine.length} extra=${
@@ -936,19 +1156,13 @@ export class RscoreShadowMirror {
             } catch { /* observer-only */ }
           }
         }
-        const rejection = rejected.length > 0
-          ? `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(
-              entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null,
-              (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)),
-            )}`
-          : null;
         for (const frame of entry.frames) {
           const accountKey = frame.accountKey;
           // Counted only once a verdict exists, so framesCompared always equals
           // matches + mismatches; incrementing first let a stats snapshot taken
           // mid-frame report a comparison with no outcome.
           this.#stats.framesCompared += 1;
-          const failure = revisionGap ?? rejection ?? this.#verifyAccount(
+          const failure = revisionGap ?? rejectionByAccount.get(accountKey) ?? this.#verifyAccount(
             accountKey,
             frame,
             frame.expectedOutputs,
@@ -1011,7 +1225,7 @@ export class RscoreShadowMirror {
   ): Promise<void> {
     this.#stats.mismatches += 1;
     this.#needsReseed.add(`${entry.ownerKey}/${accountKey}`);
-    const sections = await this.#diverginSections(entry.ownerKey, accountKey);
+    const sections = await this.#diverginSections(entry.ownerKey, accountKey, frame);
     this.#writeDiff(entry, accountKey, frame, detail, sections);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
@@ -1069,6 +1283,12 @@ export class RscoreShadowMirror {
    * One file per divergence, so a long run leaves a diffable record instead of
    * a log line that scrolls away: the frame, its tx types, both roots, the
    * per-section roots and the exact wire jobs that produced it.
+   *
+   * The record is deliberately narrow. Only the diverging account's own jobs
+   * are written (a wave carries other accounts' financial payloads), HTLC
+   * preimages are replaced by their length, and the file is created 0600: a
+   * durable plaintext secret is worth more to an attacker than the diff is to
+   * us.
    */
   #writeDiff(
     entry: Extract<QueueEntry, { kind: 'wave' }>,
@@ -1081,69 +1301,67 @@ export class RscoreShadowMirror {
     try {
       mkdirSync(DIFF_DIR, { recursive: true });
       const name = `${String(this.#stats.mismatches).padStart(6, '0')}-${accountKey.slice(0, 12)}-h${frame.frameHeight}.json`;
+      const ownJobs = entry.jobs.filter(job =>
+        job[1] instanceof Uint8Array && Buffer.from(job[1]).toString('hex') === accountKey);
       writeFileSync(join(DIFF_DIR, name), safeStringify({
         owner: entry.ownerKey,
         account: accountKey,
         frameHeight: frame.frameHeight,
         txTypes: frame.txTypes,
-        detail,
+        detail: redactSecrets(detail),
         expectedRoot: frame.expectedRootHex,
         sections: sections ?? null,
-        expectedOutputs: frame.expectedOutputs,
-        jobs: entry.jobs,
-      }, 2));
+        expectedOutputs: redactSecrets(frame.expectedOutputs),
+        jobs: redactSecrets(ownJobs),
+      }, 2), { mode: 0o600 });
     } catch { /* observer-only */ }
   }
 
   /**
    * Which section of the account diverged. The frame comparison only proves
-   * the state roots differ; this pages the engine for the one account and
-   * diffs its per-section roots against the TypeScript replica, so the halt
-   * dump names deltas vs locks vs fee policies instead of one opaque hash.
+   * the state roots differ; this diffs the TS section roots captured when the
+   * frame committed against the engine's own, so the halt dump names deltas vs
+   * locks vs offers vs fee policies instead of one opaque hash.
    */
   async #diverginSections(
     ownerKey: string,
     accountKey: string,
+    frame: WaveFrame,
   ): Promise<Record<string, { typescript: string; rust: string }> | undefined> {
-    const account = this.#mirrored.get(ownerKey)?.get(`0x${accountKey}`);
-    if (!account) return undefined;
     try {
       const client = await this.#ensureClient(ownerKey);
-      const page = (await client.readAccountSummaryPage(null, 512, [])) as unknown[];
-      const row = (page[1] as unknown[]).find(candidate =>
-        Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === accountKey);
-      if (!row) return undefined;
-      const fields = row as unknown[];
+      // Page until the account is found: a hub holds thousands of accounts and
+      // reading only the first page left most divergences unlocalized.
+      let cursor: Uint8Array | null = null;
+      let fields: unknown[] | null = null;
+      for (;;) {
+        const page = wireTuple(
+          await client.readAccountSummaryPage(cursor, 512, []),
+          'SHADOW_SECTION_PAGE',
+          4,
+        );
+        const row = wireTuple(page[1], 'SHADOW_SECTION_ROWS').find(candidate =>
+          Buffer.from(wireBytes((candidate as unknown[])[0], 'SHADOW_SECTION_ID', 32))
+            .toString('hex') === accountKey);
+        if (row) {
+          fields = wireTuple(row, 'SHADOW_SECTION_ROW', 9);
+          break;
+        }
+        const next = page[2];
+        if (next === null || next === undefined) break;
+        cursor = wireBytes(next, 'SHADOW_SECTION_CURSOR', 32);
+      }
+      if (!fields) return undefined;
       const engine = (index: number): string =>
-        `0x${Buffer.from(fields[index] as Uint8Array).toString('hex')}`;
-      return {
-        deltas: {
-          typescript: requirePersistentAccountStateMap(account.state.deltas, 'deltas')
-            .rootHash().toLowerCase(),
-          rust: engine(4),
-        },
-        locks: {
-          typescript: requirePersistentAccountStateMap(account.state.locks, 'locks')
-            .rootHash().toLowerCase(),
-          rust: engine(5),
-        },
-        swapOffers: {
-          typescript: requirePersistentAccountStateMap(account.state.swapOffers, 'swapOffers')
-            .rootHash().toLowerCase(),
-          rust: engine(7),
-        },
-        rebalanceFeePolicies: {
-          // Absent on an account that never carried a policy; the engine
-          // commits the empty-map root for that case.
-          typescript: account.state.rebalanceFeePolicies === undefined
-            ? EMPTY_RADIX_ROOT
-            : requirePersistentAccountStateMap(
-              account.state.rebalanceFeePolicies,
-              'rebalanceFeePolicies',
-            ).rootHash().toLowerCase(),
-          rust: engine(8),
-        },
-      };
+        `0x${Buffer.from(wireBytes(fields[index], 'SHADOW_SECTION_ROOT', 32)).toString('hex')}`;
+      const pair = (name: string, index: number): [string, { typescript: string; rust: string }] =>
+        [name, { typescript: frame.sections[name] ?? 'missing', rust: engine(index) }];
+      return Object.fromEntries([
+        pair('deltas', 4),
+        pair('locks', 5),
+        pair('swapOffers', 7),
+        pair('rebalanceFeePolicies', 8),
+      ]);
     } catch {
       return undefined;
     }
@@ -1191,9 +1409,9 @@ export class RscoreShadowMirror {
     accounts: readonly (readonly [string, AccountReplica])[],
   ): RscoreWireValue[][] {
     return accounts.map(([counterpartyId, account]) => {
-      const reason = shadowIneligibilityReason(account);
+      const reason = shadowIneligibilityReason(account.state);
       if (reason !== null) throw new Error(`SHADOW_PRIME_INELIGIBLE:${counterpartyId}:${reason}`);
-      return accountSeedWire(ownerEntityId, counterpartyId, account);
+      return accountSeedWire(ownerEntityId, counterpartyId, account.state);
     });
   }
 
@@ -1268,12 +1486,23 @@ export class RscoreShadowMirror {
   }
 
   #disable(reason: string): void {
+    if (this.#disabledReason !== null) return;
     this.#disabledReason = reason;
     this.#stats.disabledReason = reason;
     this.#queue.length = 0;
     try {
       shadowLog.error('shadow.disabled', { reason });
     } catch { /* observer-only */ }
+    // From here on the authority runs unmirrored. Under strict that is a
+    // fail-stop: waiting for the end-of-run gate assumes the harness reaches it.
+    this.#reportGap({
+      kind: 'disabled',
+      owner: '',
+      account: '',
+      frameHeight: 0,
+      detail: reason,
+      txTypes: [],
+    });
     for (const client of this.#clients.values()) client.kill();
     this.#clients.clear();
   }

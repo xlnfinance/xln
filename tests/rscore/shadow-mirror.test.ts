@@ -132,6 +132,8 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         byLeft?: boolean;
         jHeight?: number;
         txResults?: readonly ApplyAccountTxOk[];
+        /** Seed the engine from the pre-frame state so this frame executes. */
+        preFrame?: boolean;
       } = {},
     ): Promise<void> => {
       height += 1;
@@ -139,6 +141,9 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       const timestamp = 1_700_000_000_000 + height;
       const jHeight = overrides.jHeight ?? 0;
       const txResults: ApplyAccountTxOk[] = [];
+      // The mutable test apply replaces the persistent maps on the same state
+      // object, so a shallow copy taken first is the pre-frame snapshot.
+      const preFrameState = { ...account.state };
       for (const tx of txs) {
         const result = await applyAccountTxToMutableReplica(
           account, tx, byLeft, timestamp, jHeight, false, undefined, undefined, undefined,
@@ -163,6 +168,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         txResults: overrides.txResults ?? txResults,
         committedStateRoot: overrides.expectedRoot ?? computeAccountStateRoot(account.state),
         account,
+        ...(overrides.preFrame ? { preFrameState } : {}),
       });
       // Each commitFrame stands for one Runtime frame, so the wave is flushed
       // at its boundary exactly as the runtime does.
@@ -215,7 +221,11 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     expect(stats.framesCompared).toBe(6);
     expect(stats.mismatches).toBe(1);
     expect(stats.matches).toBe(5);
-    expect(stats.dropped).toBe(0);
+    expect(stats.droppedWaves).toBe(0);
+    expect(stats.droppedFrames).toBe(0);
+    // Frame 1 was imported, not executed: the ledger keeps that on the record.
+    expect(stats.firstFramesSkipped).toBe(1);
+    expect(stats.rejectedByType).toEqual({});
     expect(stats.skippedUnboundOwner).toBe(0);
     expect(stats.seededNeverExecuted).toBe(0);
     expect(stats.executedByType).toEqual({
@@ -229,8 +239,52 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     // And every seen frame is accounted for by exactly one disposition.
     expect(
       stats.framesCompared + stats.reseeds + stats.emptyFrames
-      + stats.skippedIneligible + stats.skippedUnboundOwner + stats.dropped,
+      + stats.skippedIneligible + stats.skippedUnboundOwner + stats.droppedFrames,
     ).toBe(stats.framesSeen);
+  }, 30_000);
+
+  test('seeds a never-seen account from its pre-frame state and executes frame 1', async () => {
+    const account = makeTsAccount();
+    const mirror = makeMirror();
+    const tx = payment(10n);
+    const timestamp = 1_700_000_000_010;
+    const preFrameState = { ...account.state };
+    const result = await applyAccountTxToMutableReplica(
+      account, tx, false, timestamp, 0, false, undefined, undefined, undefined,
+      { timestamp, jHeight: 0 },
+    );
+    if (!result.ok) throw new Error(`TS_APPLY_FAILED:${result.rejection.code}`);
+    account.currentHeight = 1;
+    mirror.noteCommittedFrame({
+      ownerEntityId: LEFT,
+      counterpartyEntityId: RIGHT,
+      frameHeight: 1,
+      byLeft: false,
+      timestamp,
+      jHeight: 0,
+      enforcementTimestamp: timestamp,
+      enforcementJHeight: 0,
+      accountTxs: [tx],
+      txResults: [result],
+      tsApplyUs: 0,
+      committedStateRoot: computeAccountStateRoot(account.state),
+      account,
+      preFrameState,
+    });
+    mirror.flushWave();
+    await mirror.settled();
+    const stats = mirror.stats();
+    await mirror.shutdown();
+    // One import of the state the frame started in, and the frame itself is
+    // compared like any other — never counted as agreement by construction.
+    expect(stats.reseeds).toBe(1);
+    expect(stats.firstFramesSkipped).toBe(0);
+    expect(stats.seededNeverExecuted).toBe(0);
+    expect(stats.framesCompared).toBe(1);
+    expect(stats.matches).toBe(1);
+    expect(stats.executedByType).toEqual({ direct_payment: 1 });
+    expect(stats.forestChecks).toBeGreaterThan(0);
+    expect(stats.forestMismatches).toBe(0);
   }, 30_000);
 
   test('fails loudly when a committed tx has no authority result', async () => {

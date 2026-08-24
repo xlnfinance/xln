@@ -168,7 +168,7 @@ impl ProcessSession {
         token_ids: &[xln_rscore_engine::TokenId],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
-        let (rows, next_cursor) = engine.summary_page(cursor, limit);
+        let (rows, next_cursor) = engine.summary_page(cursor, limit)?;
         let totals = engine.totals(token_ids);
         Ok((
             wire_encode::summary_page(engine.revision(), &rows, next_cursor, &totals),

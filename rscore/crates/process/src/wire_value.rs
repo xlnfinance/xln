@@ -18,6 +18,24 @@ pub fn unsigned(value: &AbiValue, field: &'static str) -> Result<u64, ProcessErr
     u64::try_from(value).map_err(|_| ProcessError::Integer { field, value })
 }
 
+/// `Number.MAX_SAFE_INTEGER`. Fields the TypeScript authority commits as a JS
+/// `number` are hashed through that representation, so a larger value would
+/// hash as a different integer than the one sent — two distinct u64 could even
+/// commit identically. The domain boundary is expressed here rather than left
+/// to the caller happening to be a JS runtime.
+const JS_MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
+
+pub fn js_number(value: &AbiValue, field: &'static str) -> Result<u64, ProcessError> {
+    let value = unsigned(value, field)?;
+    if value > JS_MAX_SAFE_INTEGER {
+        return Err(ProcessError::Integer {
+            field,
+            value: i128::from(value),
+        });
+    }
+    Ok(value)
+}
+
 pub fn bigint(value: &AbiValue, field: &'static str) -> Result<BigInt, ProcessError> {
     let value = text(value)?;
     value.parse().map_err(|_| ProcessError::BigInt {

@@ -1,3 +1,4 @@
+import { adoptShadowRuntimeState } from '../../rscore/shadow-hook';
 import { createStructuredLogger } from '../../support/logger';
 import type { TrustedJurisdictionRpcBinding } from './j-adapter-restore';
 import type { RuntimeReplica } from '../types';
@@ -43,6 +44,10 @@ export const loadLiveRuntimeFromDB = async (
     // queue. Replay reconstructs them only to verify deterministic equivalence.
     // A live restore must neither resend nor block on the last replayed frame.
     env.pendingNetworkOutputs = [];
+    // Canonical recovery boundary for the Rust shadow: the whole restored
+    // account tree is the shared initial condition, and it must reach the
+    // engine before the first live input. No-op when shadow is off.
+    await adoptShadowRuntimeState(env.state);
     return env;
   } catch (error) {
     const message = error instanceof Error

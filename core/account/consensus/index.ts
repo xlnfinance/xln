@@ -3,7 +3,7 @@
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
 
-import { noteAccountFrameForShadow, shadowClockUs } from '../../rscore/shadow-hook';
+import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../rscore/shadow-hook';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -493,6 +493,9 @@ async function commitIncomingFrameOnRealState(
   // restore its losing proposal to the live mempool first and then publish the
   // already-validated winning transition without executing its AccountTxs a
   // second time.
+  // Captured before the publish: the pre-frame state is what the mirror seeds
+  // a never-seen account from, so its first frame is executed, not imported.
+  const preFrameState = shadowPreFrameState(account.state);
   publishAccountOverlay(account, validation.clonedMachine);
   if (account.state !== validation.clonedMachine.state) {
     throw new Error('ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH');
@@ -519,6 +522,7 @@ async function commitIncomingFrameOnRealState(
       tsApplyUs: validation.tsApplyUs,
       committedStateRoot: receivedFrame.accountStateRoot,
       account,
+      ...(preFrameState ? { preFrameState } : {}),
     });
   }
   timedOutHashlocks.push(...validation.timedOutHashlocks);

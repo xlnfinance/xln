@@ -152,7 +152,7 @@ fn summary_paging_covers_every_account_across_page_boundaries() {
     let mut cursor = None;
     let mut pages = 0;
     loop {
-        let (rows, next) = engine.summary_page(cursor, LIMIT);
+        let (rows, next) = engine.summary_page(cursor, LIMIT).expect("summary page");
         pages += 1;
         assert!(pages <= 20, "paging did not terminate");
         seen.extend(rows.iter().map(|row| row.account_id));
