@@ -227,6 +227,16 @@ const getPool = (): Worker[] | null => bulkLane.workers();
 
 export const cryptoPoolEnabled = (): boolean => getPool() !== null;
 
+/**
+ * Whether batched signing has workers of its own.
+ *
+ * The two lanes are configured independently, so asking `cryptoPoolEnabled()`
+ * before signing tied the sign lane to the recover lane: with
+ * `XLN_CRYPTO_POOL_WORKERS=0` and `XLN_CRYPTO_SIGN_WORKERS=4` every signature
+ * silently fell back to the main thread.
+ */
+export const cryptoSignPoolEnabled = (): boolean => signLane.workers() !== null;
+
 const isBytes = (value: JobResult['result']): value is Uint8Array => value instanceof Uint8Array;
 
 /**

@@ -65,17 +65,44 @@ type EconomicCounters = Readonly<{
  * the main thread (Promise.all over accounts) can only buy back the idle part,
  * so this number is the ceiling of that whole class of optimization.
  */
-const startMainThreadBusyProbe = (): (() => { busyFraction: number; sampledMs: number }) => {
+const measureBusyFraction = (ticks: number, sampledMs: number, intervalMs: number): number => {
+  const expected = sampledMs / intervalMs;
+  return expected <= 0 ? 0 : Math.max(0, Math.min(1, 1 - ticks / expected));
+};
+
+/**
+ * A 1 ms timer cannot tick while the thread is busy, but it also cannot tick
+ * at a true 1 ms on an idle Bun process — so the raw figure is only meaningful
+ * against this runtime's own idle baseline, measured first and reported with
+ * it. What it bounds is narrow: rearranging existing async waits (Promise.all
+ * over account inputs) can reclaim at most the idle share. It says nothing
+ * about moving synchronous work to workers or to Rust, which is a different
+ * optimization entirely.
+ */
+const startMainThreadBusyProbe = async (): Promise<
+  () => { busyFraction: number; idleBaselineFraction: number; sampledMs: number }
+> => {
   const intervalMs = 1;
+  const baselineMs = 200;
+  let baselineTicks = 0;
+  const baselineTimer = setInterval(() => { baselineTicks += 1; }, intervalMs);
+  const baselineStartedAt = performance.now();
+  await Bun.sleep(baselineMs);
+  clearInterval(baselineTimer);
+  const idleBaselineFraction = measureBusyFraction(
+    baselineTicks,
+    performance.now() - baselineStartedAt,
+    intervalMs,
+  );
   const startedAt = performance.now();
   let ticks = 0;
   const timer = setInterval(() => { ticks += 1; }, intervalMs);
   return () => {
     clearInterval(timer);
     const sampledMs = performance.now() - startedAt;
-    const expected = sampledMs / intervalMs;
     return {
-      busyFraction: expected <= 0 ? 0 : Math.max(0, Math.min(1, 1 - ticks / expected)),
+      busyFraction: measureBusyFraction(ticks, sampledMs, intervalMs),
+      idleBaselineFraction,
       sampledMs,
     };
   };
@@ -134,10 +161,12 @@ type ReplayTrial = Readonly<{
   entityInputsPerFrame: number;
   /** Account-consensus admissions by kind, e.g. `accountInput:ack`. */
   accountInputKinds: Readonly<Record<string, number>>;
-  /** Those admissions per wall-clock second — the hub's real consensus rate. */
-  accountInputsPerSecond: number;
+  /** Those inputs per wall-clock second, as observed in the recording. */
+  accountInputsObservedPerSecond: number;
   /** Share of replay wall time the main JS thread was not free to run a timer. */
   mainThreadBusyFraction: number;
+  /** The same measure on an idle process — the probe's own noise floor. */
+  mainThreadIdleBaselineFraction: number;
   outboxEnvelopes: number;
   elapsedMs: number;
   cpuMs: number;
@@ -345,7 +374,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
   const operationsBefore = snapshotOpCounters();
   const startedAt = performance.now();
   const cpuStarted = process.cpuUsage();
-  const stopBusyProbe = startMainThreadBusyProbe();
+  const stopBusyProbe = await startMainThreadBusyProbe();
   let cumulativeUnits = 0;
   const frameProfile: ReplayFrameProfile[] = [];
   try {
@@ -382,10 +411,11 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     }
     const mainThread = stopBusyProbe();
     const elapsedMs = performance.now() - startedAt;
-    // Account-consensus admission rate, the number the hub actually lives on:
-    // every ack and every proposal an Entity had to take in, per second. A
-    // payment is several of these, so pay/s hides how much consensus traffic
-    // the machine really moved.
+    // Account-consensus inputs the hub had to take in per second: every ack and
+    // every proposal the recording carried. Counted as observed, not as
+    // admitted — a rejected, duplicate or replayed input counts the same as one
+    // that changed state, so this measures offered consensus traffic and never
+    // replaces delivered pay/s as the authoritative outcome.
     const admission = countEntityInputTxKinds(frames.flatMap(frame => frame.runtimeInput.entityInputs)).txKinds;
     const cpu = process.cpuUsage(cpuStarted);
     const cpuMs = (cpu.user + cpu.system) / 1_000;
@@ -399,7 +429,8 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       entityInputsPerFrame: artifact.totals.runtimeEntityInputs / artifact.totals.runtimeFrames,
       accountInputKinds: admission,
       mainThreadBusyFraction: mainThread.busyFraction,
-      accountInputsPerSecond: Object.entries(admission)
+      mainThreadIdleBaselineFraction: mainThread.idleBaselineFraction,
+      accountInputsObservedPerSecond: Object.entries(admission)
         .filter(([kind]) => kind.startsWith('accountInput:'))
         .reduce((total, [, count]) => total + count, 0) / Math.max(elapsedMs / 1_000, Number.EPSILON),
       outboxEnvelopes: artifact.totals.outboxEnvelopes,
@@ -438,8 +469,9 @@ for (const rate of rates) {
     `payments=${trial.deliveredPayments}/${trial.deliveredPaymentTps.toFixed(2)}tps ` +
     `swaps=${trial.matchedEconomicSwaps}/${trial.matchedEconomicSwapTps.toFixed(2)}tps ` +
     `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
-    `mainThreadBusy=${(trial.mainThreadBusyFraction * 100).toFixed(1)}% ` +
-    `accountInputs=${trial.accountInputsPerSecond.toFixed(1)}/s${
+    `mainThreadBusy=${(trial.mainThreadBusyFraction * 100).toFixed(1)}%` +
+    `(idleBaseline=${(trial.mainThreadIdleBaselineFraction * 100).toFixed(1)}%) ` +
+    `accountInputsObserved=${trial.accountInputsObservedPerSecond.toFixed(1)}/s${
       Object.entries(trial.accountInputKinds)
         .filter(([kind]) => kind.startsWith('accountInput:'))
         .map(([kind, count]) => ` ${kind.slice('accountInput:'.length)}=${String(count)}`)

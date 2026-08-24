@@ -237,7 +237,15 @@ const accountEvidence = async (
   }
   if (!certifiedHead || certifiedHead.height !== account.currentHeight ||
     certifiedHead.stateHash !== account.currentFrame.stateHash) {
-    throw new Error(`RADAPTER_SETTLEMENT_CERTIFIED_HEAD_MISMATCH:${request.entityId}:${request.counterpartyEntityId}`);
+    // Which of the three failures this is decides where to look: history ahead
+    // of the live account, equal heights disagreeing on the state, or no
+    // history at all. Without the numbers every one of them read the same.
+    throw new Error(
+      `RADAPTER_SETTLEMENT_CERTIFIED_HEAD_MISMATCH:${request.entityId}:${request.counterpartyEntityId}` +
+      `:certified=${certifiedHead ? `${String(certifiedHead.height)}/${certifiedHead.stateHash.slice(0, 18)}` : 'none'}` +
+      `:live=${String(account.currentHeight)}/${account.currentFrame.stateHash.slice(0, 18)}` +
+      `:frames=${String(frames.length)}`,
+    );
   }
   const offers = request.offerIds.map(offerId => {
     const committed = committedOfferFlags(frames, offerId);

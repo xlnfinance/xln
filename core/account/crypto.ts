@@ -3,7 +3,7 @@
  * Canonical signerId is EOA address (lowercase). Keys are loaded via registerSignerKey.
  */
 
-import { cryptoPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
+import { cryptoSignPoolEnabled, ECDSA_SIGNATURE_BYTES, signDigestsBatchOnPool } from '../protocol/crypto/crypto-pool';
 import { RecencyMemo } from '../support/collections/recency-memo';
 import * as secp256k1 from '@noble/secp256k1';
 import { countOpWithSite, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
@@ -635,7 +635,7 @@ export async function signDigestsBatch(
   if (seed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signDigestsBatch called without runtimeSeed for signer ${signerId}`);
   }
-  if (digestsHex.length === 0 || !cryptoPoolEnabled()) return null;
+  if (digestsHex.length === 0 || !cryptoSignPoolEnabled()) return null;
   const privateKey = getOrDeriveKey(seed, signerId);
   const digests = new Uint8Array(digestsHex.length * 32);
   digestsHex.forEach((digestHex, index) => {

@@ -425,6 +425,14 @@ export class RscoreProcessClient {
     const requestId = this.#nextRequestId;
     this.#nextRequestId += 1n;
     const envelope = encodeEnvelope(this.#identity, requestId, opTag, payload);
+    // The engine refuses an oversized frame and exits, so the caller would
+    // otherwise see EPIPE and a dead mirror instead of the actual cause. A
+    // wave that does not fit is the caller's to split.
+    if (envelope.length > MAX_FRAME_BYTES) {
+      throw new Error(
+        `RSCORE_CLIENT_REQUEST_TOO_LARGE:op=${opTag}:bytes=${envelope.length}:max=${MAX_FRAME_BYTES}`,
+      );
+    }
     const framed = Buffer.alloc(4 + envelope.length);
     framed.writeUInt32BE(envelope.length);
     envelope.copy(framed, 4);

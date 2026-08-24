@@ -362,16 +362,37 @@ type PendingSubwave = Readonly<{
   jobs: RscoreWireValue[][];
 }>;
 
+/**
+ * Jobs per engine request. A hub commits thousands of account frames in one
+ * Runtime frame, and with replica shells attached one such request reached
+ * 20 MB against a 16 MiB frame limit — the engine refuses the frame and exits,
+ * so the caller has to keep requests bounded rather than discover the limit as
+ * a broken pipe.
+ */
+const MAX_JOBS_PER_WAVE = Math.max(
+  1,
+  Number(process.env['XLN_RSCORE_SHADOW_MAX_JOBS_PER_WAVE'] ?? '2048'),
+);
+
 /** Preserve per-account frame order while retaining cross-account parallelism. */
 const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwave[] => {
-  const subwaves: PendingSubwave[] = [];
+  // One chunk list per depth: an account's nth frame always lands in depth n,
+  // and depths are emitted in order, so per-account order survives chunking
+  // while distinct accounts stay independent.
+  const byDepth: PendingSubwave[][] = [];
   const occurrence = new Map<string, number>();
   for (const pendingFrame of pending) {
     // frame_ack can commit the ACKed frame and the peer's next proposal in one
     // Runtime frame. The nth frame of each account belongs in the nth subwave.
     const depth = occurrence.get(pendingFrame.frame.accountKey) ?? 0;
     occurrence.set(pendingFrame.frame.accountKey, depth + 1);
-    const subwave = subwaves[depth] ?? { frames: [], jobs: [] };
+    const chunks = byDepth[depth] ?? [];
+    byDepth[depth] = chunks;
+    const open = chunks.at(-1);
+    const subwave = open && open.jobs.length + pendingFrame.jobs.length <= MAX_JOBS_PER_WAVE
+      ? open
+      : { frames: [], jobs: [] };
+    if (subwave !== open) chunks.push(subwave);
     const inputBase = subwave.jobs.length;
     subwave.frames.push({
       ...pendingFrame.frame,
@@ -386,9 +407,8 @@ const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwa
       // results/outputs to this exact subwave.
       subwave.jobs.push([inputBase + index, ...job.slice(1)]);
     }
-    subwaves[depth] = subwave;
   }
-  return subwaves;
+  return byDepth.flat();
 };
 
 type QueueEntry = Readonly<{
