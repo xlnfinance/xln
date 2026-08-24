@@ -8,6 +8,7 @@ import { hasPreparedGeneratedInputs } from './generated-inputs';
 import { getSurface, type SurfaceId } from './surfaces';
 
 const FRONTEND_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const USE_DEVELOPMENT_GATEWAY = process.env['XLN_REACT_DEV_GATEWAY'] === '1';
 
 type ReactAppConfigInput = Readonly<{
@@ -35,6 +36,12 @@ export const createReactAppConfig = ({ surfaceId, rootDirectory }: ReactAppConfi
     appType: 'spa',
     publicDir: getReactPublicDirectory(surfaceId, USE_DEVELOPMENT_GATEWAY),
     plugins: [react()],
+    resolve: {
+      alias: {
+        '$lib': resolve(FRONTEND_ROOT, 'src/lib'),
+        '@xln/core': resolve(REPOSITORY_ROOT, 'core'),
+      },
+    },
     cacheDir: resolve(FRONTEND_ROOT, 'node_modules/.vite-react', surfaceId),
     server: {
       host: '127.0.0.1',

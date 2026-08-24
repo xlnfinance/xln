@@ -6,6 +6,7 @@ import { getSiteMetadata, resolveSitePage } from './site-model';
 import './styles/site.css';
 import './styles/landing.css';
 import './styles/install.css';
+import './styles/rcpan.css';
 
 const getRootElement = (): HTMLElement => {
   const rootElement = document.getElementById('root');

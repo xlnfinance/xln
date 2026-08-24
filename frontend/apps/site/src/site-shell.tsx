@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react';
 
 type SiteShellProps = Readonly<{
-  activeRoute: '/' | '/install' | 'pending';
+  activeRoute: '/' | '/install' | '/rcpan' | 'pending';
   children: ReactNode;
 }>;
 
@@ -28,6 +28,7 @@ export function SiteShell({ activeRoute, children }: SiteShellProps) {
         <a className="site-wordmark" href="/" aria-label="xln home">xln<span>.</span></a>
         <nav aria-label="Primary navigation">
           <a className={activeRoute === '/' ? 'is-active' : undefined} href="/">Thesis</a>
+          <a className={activeRoute === '/rcpan' ? 'is-active' : undefined} href="/rcpan">RCPAN</a>
           <a className={activeRoute === '/install' ? 'is-active' : undefined} href="/install">Install</a>
           <a href="/docs">Docs</a>
         </nav>

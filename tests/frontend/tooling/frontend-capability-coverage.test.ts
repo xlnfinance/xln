@@ -40,6 +40,7 @@ describe('frontend capability inventory', () => {
     expect(site?.status).toBe('in_progress');
     expect(site?.currentSources).toContain('frontend/apps/site/src/landing-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/install-page.tsx');
+    expect(site?.currentSources).toContain('frontend/apps/site/src/rcpan-page.tsx');
     expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information').every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);

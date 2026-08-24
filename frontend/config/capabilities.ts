@@ -21,8 +21,9 @@ export const CAPABILITIES = [
       'frontend/src/routes/install/+page.svelte',
       'frontend/apps/site/src/landing-page.tsx',
       'frontend/apps/site/src/install-page.tsx',
+      'frontend/apps/site/src/rcpan-page.tsx',
     ],
-    behavior: ['public navigation', 'install detection', 'live market-cap data'],
+    behavior: ['public navigation', 'install detection', 'deterministic RCPAN dispute microscope', 'live market-cap data'],
     status: 'in_progress',
   },
   {

@@ -1,5 +1,6 @@
 import { InstallPage } from './install-page';
 import { LandingPage } from './landing-page';
+import { RcpanPage } from './rcpan-page';
 import { Arrow, SiteFooter, SiteShell } from './site-shell';
 import type { SitePage } from './site-model';
 
@@ -20,5 +21,6 @@ function PendingRoute({ pathname }: Readonly<{ pathname: string }>) {
 export function SiteApp({ page }: Readonly<{ page: SitePage }>) {
   if (page.kind === 'home') return <LandingPage />;
   if (page.kind === 'install') return <InstallPage />;
+  if (page.kind === 'rcpan') return <RcpanPage />;
   return <PendingRoute pathname={page.pathname} />;
 }

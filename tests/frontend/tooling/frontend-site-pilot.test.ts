@@ -9,10 +9,12 @@ import {
 import packageJson from '../../../frontend/package.json';
 
 describe('React site pilot', () => {
-  test('resolves only the two pilot routes to migrated pages', () => {
+  test('resolves the three pilot routes to migrated pages', () => {
     expect(resolveSitePage('/')).toEqual({ kind: 'home' });
     expect(resolveSitePage('/install')).toEqual({ kind: 'install' });
     expect(resolveSitePage('/install/')).toEqual({ kind: 'install' });
+    expect(resolveSitePage('/rcpan')).toEqual({ kind: 'rcpan' });
+    expect(resolveSitePage('/rcpan/')).toEqual({ kind: 'rcpan' });
     expect(resolveSitePage('/market-cap')).toEqual({ kind: 'pending', pathname: '/market-cap' });
     expect(() => resolveSitePage('install')).toThrow('SITE_PATHNAME_INVALID');
   });
@@ -20,6 +22,8 @@ describe('React site pilot', () => {
   test('publishes route-specific document metadata', () => {
     expect(getSiteMetadata(resolveSitePage('/')).title).toBe('xln — cross-local network');
     expect(getSiteMetadata(resolveSitePage('/install')).description).toContain('persistent local runtime');
+    expect(getSiteMetadata(resolveSitePage('/rcpan')).title).toBe('RCPAN — provable bilateral accounts | xln');
+    expect(getSiteMetadata(resolveSitePage('/rcpan')).description).toContain('bounded counterparty risk');
     expect(getSiteMetadata(resolveSitePage('/reviews')).title).toContain('migration candidate');
   });
 

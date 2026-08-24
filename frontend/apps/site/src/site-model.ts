@@ -3,6 +3,7 @@ import packageJson from '../../../package.json';
 export type SitePage =
   | Readonly<{ kind: 'home' }>
   | Readonly<{ kind: 'install' }>
+  | Readonly<{ kind: 'rcpan' }>
   | Readonly<{ kind: 'pending'; pathname: string }>;
 
 export type PageMetadata = Readonly<{
@@ -35,6 +36,7 @@ export const resolveSitePage = (pathname: string): SitePage => {
   const normalized = normalizePathname(pathname);
   if (normalized === '/') return { kind: 'home' };
   if (normalized === '/install') return { kind: 'install' };
+  if (normalized === '/rcpan') return { kind: 'rcpan' };
   return { kind: 'pending', pathname: normalized };
 };
 
@@ -49,6 +51,12 @@ export const getSiteMetadata = (page: SitePage): PageMetadata => {
     return {
       title: 'Install xln',
       description: 'Run xln on web, desktop, mobile, Chrome, or as a persistent local runtime.',
+    };
+  }
+  if (page.kind === 'rcpan') {
+    return {
+      title: 'RCPAN — provable bilateral accounts | xln',
+      description: 'Explore bilateral account proofs, shared collateral, programmable disputes, and bounded counterparty risk.',
     };
   }
   return {
