@@ -537,6 +537,13 @@ export type ShadowStats = {
   framesSeen: number;
   framesCompared: number;
   matches: number;
+  /**
+   * Effect rows both engines produced for the same frame and agreed on. The
+   * frame match count alone cannot tell a frame whose effects agreed from one
+   * that produced none: outputs are not in any state root, so a run where this
+   * stays zero has proven nothing about them.
+   */
+  outputRowsCompared: number;
   mismatches: number;
   reseeds: number;
   /** Reseeds that repaired a gap (unsupported tx, drop, divergence) rather than registering a new account. */
@@ -664,6 +671,7 @@ export class RscoreShadowMirror {
     rustEngineUs: 0,
     rustWireUs: 0,
     timedTxs: 0,
+    outputRowsCompared: 0,
     forestChecks: 0,
     forestMismatches: 0,
     disabledReason: null,
@@ -1517,6 +1525,7 @@ export class RscoreShadowMirror {
     roots: readonly unknown[],
   ): string | null {
     const actualOutputs = engineOutputProjection(engineOutputs, accountKey);
+    this.#stats.outputRowsCompared += expectedOutputs.length;
     // Compare the raw values — two different preimages of the same length must
     // not compare equal — but build the message, which ends up in a durable
     // dump file, from redacted copies.

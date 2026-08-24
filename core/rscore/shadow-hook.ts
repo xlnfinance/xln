@@ -345,7 +345,14 @@ export const assertShadowParity = async (
   // engine agrees with the subset the mirror chose to follow. Parity is a
   // claim about the Entity's accounts root, so at least one check must have
   // been made against the Entity's own root, with every account present.
-  if (stats.entityRootChecks === 0) failures.push('entityRootChecks=0');
+  // An Entity-root check needs every account of that Entity in the engine.
+  // A knowingly excluded account (cross-J, until that lifecycle is ported)
+  // makes it unreachable by construction, so a run that accepted that hole
+  // falls back to the mirror's own forest root — which still covers every
+  // account it does mirror, and is why the verdict below says PARTIAL.
+  if (stats.entityRootChecks === 0 && !(allowIneligible() && stats.skippedIneligible > 0)) {
+    failures.push('entityRootChecks=0');
+  }
   if (stats.reseedsRepair > 0) failures.push(`reseedsRepair=${stats.reseedsRepair}`);
   // Monotonic: an account whose first observed frame was imported instead of
   // executed keeps that hole on the record even after later frames match.
@@ -413,7 +420,7 @@ export const assertShadowParity = async (
   console.error(
     `${verdict} ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
     `reseeds=${stats.reseeds} forestChecks=${stats.forestChecks}/${stats.entityRootChecks}entity ` +
-    `ineligible=${stats.skippedIneligible} ` +
+    `ineligible=${stats.skippedIneligible} outputs=${stats.outputRowsCompared} ` +
     `shells=${stats.shellRefreshes} ` +
     `executed=${safeStringify(stats.executedByType)} ${speedSummary(stats)}`,
   );
