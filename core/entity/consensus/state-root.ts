@@ -663,6 +663,15 @@ type EntitySectionCommitment = {
   encodedBytes: number;
 };
 
+/**
+ * The exact projection the Entity hashes into its account leaf. Exported for
+ * the Rust shadow, which must commit the same leaf from the same fields: a
+ * second, hand-written projection there would agree with the authority only
+ * until one of them changed.
+ */
+export const projectEntityAccountLeaf = (account: AccountReplica): Record<string, unknown> =>
+  projectAccountConsensusState(account);
+
 export const computeEntityAccountValueHash = (account: AccountReplica): string => {
   const startedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
   const entries = timePerfPhase(

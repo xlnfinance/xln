@@ -255,6 +255,10 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     );
     if (!result.ok) throw new Error(`TS_APPLY_FAILED:${result.rejection.code}`);
     account.currentHeight = 1;
+    // Queued-but-uncommitted work is part of the replica the Entity commits:
+    // the engine must derive the same mempool root from the same canonical
+    // transactions, or the account leaf it produces is not the Entity's leaf.
+    account.mempool = [payment(11n), payment(12n)];
     mirror.noteCommittedFrame({
       ownerEntityId: LEFT,
       counterpartyEntityId: RIGHT,
@@ -283,6 +287,9 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     expect(stats.framesCompared).toBe(1);
     expect(stats.matches).toBe(1);
     expect(stats.executedByType).toEqual({ direct_payment: 1 });
+    // The forest is keyed and hashed exactly like the Entity's accounts map,
+    // so an equal root means the engine holds the whole replica — mempool and
+    // shell included — not just the financial state.
     expect(stats.forestChecks).toBeGreaterThan(0);
     expect(stats.forestMismatches).toBe(0);
   }, 30_000);

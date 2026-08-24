@@ -5,6 +5,8 @@ use crate::{HtlcBoundaryError, HtlcRejection, Side, TokenId};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum StateError {
+    #[error("ACCOUNT_ENVELOPE:{0}")]
+    Envelope(String),
     #[error("ACCOUNT_ENTITY_ID_INVALID:{0}")]
     InvalidEntityId(String),
     #[error("ACCOUNT_DEPOSITORY_ADDRESS_INVALID:{0}")]

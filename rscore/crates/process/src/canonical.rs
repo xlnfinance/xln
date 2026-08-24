@@ -1,0 +1,106 @@
+//! Generic canonical values on the wire.
+//!
+//! The Entity commits parts of an account replica the engine does not execute
+//! (mempool txs in their frame-hash form, hankos, acks, frame bindings). They
+//! travel as a tagged encoding of the exact value model both sides hash —
+//! `CanonicalValue` here, `encodeAccountStateValue`'s input over there — so
+//! the engine can hash the whole leaf without a per-field Rust type for every
+//! shape the authority may commit.
+
+use num_bigint::BigInt;
+use xln_rscore_abi::AbiValue;
+use xln_rscore_engine::CanonicalValue;
+
+use crate::ProcessError;
+use crate::wire_value::{integer, text, tuple};
+
+/// Depth bound: a hostile or corrupt payload must not recurse the decoder into
+/// the stack guard. The deepest real projection is well under ten.
+const MAX_DEPTH: usize = 32;
+
+pub fn canonical_value(value: &AbiValue) -> Result<CanonicalValue, ProcessError> {
+    decode(value, 0)
+}
+
+/// `[fields, mempool]`: the account-leaf projection minus the derived roots,
+/// and the canonical frame-hash form of every queued tx.
+pub fn envelope(value: &AbiValue) -> Result<Option<xln_rscore_engine::AccountEnvelope>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = tuple(value)?;
+    if fields.len() != 2 {
+        return Err(ProcessError::Expected("envelope"));
+    }
+    let projected = match canonical_value(&fields[0])? {
+        CanonicalValue::Object(entries) => entries,
+        _ => return Err(ProcessError::Expected("envelopeFields")),
+    };
+    let mempool = tuple(&fields[1])?
+        .iter()
+        .map(canonical_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    xln_rscore_engine::AccountEnvelope::new(projected, mempool)
+        .map(Some)
+        .map_err(|error| ProcessError::Envelope(error.to_string()))
+}
+
+fn decode(value: &AbiValue, depth: usize) -> Result<CanonicalValue, ProcessError> {
+    if depth > MAX_DEPTH {
+        return Err(ProcessError::Expected("canonicalDepth"));
+    }
+    let fields = tuple(value)?;
+    let tag = integer(fields.first().ok_or(ProcessError::Expected("canonicalTag"))?)?;
+    let payload = &fields[1..];
+    let one = || -> Result<&AbiValue, ProcessError> {
+        payload.first().ok_or(ProcessError::Expected("canonicalPayload"))
+    };
+    match tag {
+        0 => Ok(CanonicalValue::Null),
+        1 => Ok(CanonicalValue::Bool(integer(one()?)? != 0)),
+        // Numbers travel as the string JavaScript renders, and are parsed back
+        // to the same double: the shortest representation round-trips exactly,
+        // so re-rendering it on this side reproduces the authority's bytes.
+        2 => text(one()?)?
+            .parse::<f64>()
+            .map(CanonicalValue::Number)
+            .map_err(|_| ProcessError::Expected("canonicalNumber")),
+        3 => text(one()?)?
+            .parse::<BigInt>()
+            .map(CanonicalValue::BigInt)
+            .map_err(|_| ProcessError::Expected("canonicalBigInt")),
+        4 => Ok(CanonicalValue::String(text(one()?)?.into())),
+        5 => Ok(CanonicalValue::Array(list(one()?, depth)?)),
+        6 => {
+            let mut entries = Vec::new();
+            for pair in tuple(one()?)? {
+                let pair = tuple(pair)?;
+                if pair.len() != 2 {
+                    return Err(ProcessError::Expected("canonicalMapEntry"));
+                }
+                entries.push((decode(&pair[0], depth + 1)?, decode(&pair[1], depth + 1)?));
+            }
+            Ok(CanonicalValue::Map(entries))
+        }
+        7 => Ok(CanonicalValue::Set(list(one()?, depth)?)),
+        8 => {
+            let mut entries = Vec::new();
+            for pair in tuple(one()?)? {
+                let pair = tuple(pair)?;
+                if pair.len() != 2 {
+                    return Err(ProcessError::Expected("canonicalObjectEntry"));
+                }
+                entries.push((text(&pair[0])?.into(), decode(&pair[1], depth + 1)?));
+            }
+            Ok(CanonicalValue::Object(entries))
+        }
+        _ => Err(ProcessError::Expected("canonicalTag")),
+    }
+}
+
+fn list(value: &AbiValue, depth: usize) -> Result<Vec<CanonicalValue>, ProcessError> {
+    tuple(value)?
+        .iter()
+        .map(|entry| decode(entry, depth + 1))
+        .collect()
+}

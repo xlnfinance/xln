@@ -420,6 +420,9 @@ pub struct AccountReplica {
     owner: EntityId,
     owner_side: Side,
     state: AccountState,
+    /// The replica shell the Entity commits around this state: mempool, frame
+    /// bindings, hankos, acks. Carried verbatim until the engine derives it.
+    envelope: crate::AccountEnvelope,
 }
 
 impl AccountReplica {
@@ -432,7 +435,32 @@ impl AccountReplica {
             owner,
             owner_side,
             state,
+            envelope: crate::AccountEnvelope::default(),
         })
+    }
+
+    /// Replace the replica shell. The authority hands it over with the last
+    /// transition of the frame that produced it.
+    pub fn set_envelope(&mut self, envelope: crate::AccountEnvelope) {
+        self.envelope = envelope;
+    }
+
+    pub const fn envelope(&self) -> &crate::AccountEnvelope {
+        &self.envelope
+    }
+
+    /// The leaf this replica occupies in the Entity's accounts tree: the whole
+    /// shell plus the engine's own financial root. Without an envelope there
+    /// is nothing to commit beyond the financial root, and the payment-profile
+    /// root is the leaf.
+    pub fn entity_account_leaf(&self) -> Result<[u8; 32], StateError> {
+        let account_state_root = self.state.payment_profile_account_state_root()?;
+        if self.envelope.is_empty() {
+            return Ok(account_state_root);
+        }
+        self.envelope
+            .entity_account_leaf(&account_state_root)
+            .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
     pub const fn owner(&self) -> &EntityId {

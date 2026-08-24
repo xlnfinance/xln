@@ -35,6 +35,12 @@ pub struct AccountSummaryRow {
     /// dump names the section instead of one opaque leaf hash.
     pub swap_offers_root: [u8; 32],
     pub rebalance_fee_policies_root: [u8; 32],
+    /// The leaf this account occupies in the Entity's accounts tree: the whole
+    /// replica shell plus the financial root.
+    pub entity_account_leaf: [u8; 32],
+    /// Root of the queued account txs, derived by the engine from the shell.
+    pub mempool_root: [u8; 32],
+    pub mempool_len: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,6 +123,12 @@ impl StatefulBatchEngine {
                 account_state_root: state.payment_profile_account_state_root()?,
                 swap_offers_root: state.swap_offers_root(),
                 rebalance_fee_policies_root: state.rebalance_fee_policies_root(),
+                entity_account_leaf: replica.entity_account_leaf()?,
+                mempool_root: replica
+                    .envelope()
+                    .mempool_root()
+                    .map_err(|error| xln_rscore_engine::StateError::Envelope(error.to_string()))?,
+                mempool_len: replica.envelope().mempool_len() as u64,
             });
         }
         Ok((rows, next_cursor))

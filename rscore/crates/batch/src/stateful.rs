@@ -19,8 +19,9 @@ pub struct StatefulBatchEngine {
     revision: u64,
     pool: ThreadPool,
     // The one canonical account store: a radix-16 Patricia tree keyed by the
-    // 32-byte account id, replicas living in the leaves, leaf digest = that
-    // account's payment-profile state root. Values and the Merkle commitment
+    // 32-byte account id, replicas living in the leaves, leaf digest = the
+    // Entity's own account leaf (the replica shell plus this account's
+    // payment-profile state root). Values and the Merkle commitment
     // can never diverge because they are the same structure; `accounts_root()`
     // is the single 32-byte summary the entity machine consumes.
     accounts: PersistentRadixMap<AccountReplica>,
@@ -72,8 +73,8 @@ impl StatefulBatchEngine {
         self.pool.current_num_threads()
     }
 
-    /// 32-byte root of the accounts-level Patricia tree (radix 16, leaf =
-    /// per-account payment-profile state root). This is the account module's
+    /// 32-byte root of the accounts-level Patricia tree (radix 16, leaf = the
+    /// Entity account leaf digest). This is the account module's
     /// whole-state commitment handed up to the entity machine.
     pub fn accounts_root(&self) -> [u8; 32] {
         self.accounts.root_hash()
@@ -329,8 +330,7 @@ fn leaf_root(
     replica: &AccountReplica,
 ) -> Result<(AccountId, [u8; 32]), BatchError> {
     replica
-        .state()
-        .payment_profile_account_state_root()
+        .entity_account_leaf()
         .map(|root| (account_id, root))
         .map_err(|error| BatchError::AccountsTree {
             account_id,

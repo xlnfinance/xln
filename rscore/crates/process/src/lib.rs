@@ -1,5 +1,6 @@
 //! Long-lived, framed binary host for the deterministic Account batch engine.
 
+mod canonical;
 mod error;
 mod session;
 mod transport;
@@ -17,7 +18,11 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=6")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=7")
+        // wire=7: the account seed and every job carry the authority's replica
+        // shell (the Entity account-leaf projection plus the mempool in its
+        // canonical frame-hash form), the engine derives the mempool root and
+        // the Entity account leaf from it, and the summary row reports both.
         // wire=6: the seed carries rebalance policy and swap offer rows instead
         // of carried roots, Hello installs the swap market tables, the job
         // context carries the signed frame's J height, and the summary row
@@ -27,9 +32,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x61, 0x40, 0x01, 0xcb, 0x79, 0xba, 0x61, 0x29, 0x11, 0x06, 0x63, 0x14, 0x70, 0xa6,
-            0x84, 0x57, 0x00, 0x35, 0x05, 0x32, 0x23, 0x83, 0x2f, 0xa1, 0x15, 0x3c, 0x96, 0x2a,
-            0x83, 0x17, 0x54, 0x7b,
+            0xfd, 0x65, 0xeb, 0xd7, 0xd1, 0xc1, 0x60, 0x2e, 0xde, 0x5c, 0x91, 0x46, 0xa4, 0xae,
+            0x00, 0xe3, 0x34, 0x95, 0x0a, 0xd6, 0x79, 0xba, 0x08, 0x51, 0x15, 0x52, 0x0e, 0xd8,
+            0x28, 0x49, 0x45, 0xd0,
         ],
     };
 

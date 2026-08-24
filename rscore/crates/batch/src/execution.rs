@@ -63,6 +63,13 @@ pub(crate) fn execute_account(work: AccountWork<'_>) -> Result<AccountExecution,
                 BatchVerdict::Rejected(rejection)
             }
         };
+        if let Some(envelope) = job.envelope.clone() {
+            // The shell belongs to the frame, not to the transition: it is
+            // installed even when this tx was rejected, because the authority
+            // committed the frame that produced it.
+            candidate.set_envelope(envelope);
+            changed = true;
+        }
         results.push(IndexedResult {
             input_index: job.input_index,
             account_id: job.account_id,

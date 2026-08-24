@@ -113,6 +113,9 @@ pub fn summary_page(
                         AbiValue::Bytes(row.account_state_root.to_vec()),
                         AbiValue::Bytes(row.swap_offers_root.to_vec()),
                         AbiValue::Bytes(row.rebalance_fee_policies_root.to_vec()),
+                        AbiValue::Bytes(row.entity_account_leaf.to_vec()),
+                        AbiValue::Bytes(row.mempool_root.to_vec()),
+                        integer(row.mempool_len),
                     ])
                 })
                 .collect(),

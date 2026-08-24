@@ -97,6 +97,7 @@ pub fn direct_job(input_index: u32, account: u32, amount: i64) -> BatchJob {
             delivery_mode: DeliveryMode::Direct,
             trusted_gateway_entity_id: None,
         },
+        envelope: None,
     }
 }
 
@@ -119,6 +120,7 @@ pub fn trusted_job(input_index: u32, account: u32, amount: i64) -> BatchJob {
             delivery_mode: DeliveryMode::Trusted,
             trusted_gateway_entity_id: Some(gateway),
         },
+        envelope: None,
     }
 }
 
@@ -138,6 +140,7 @@ pub fn htlc_lock_job(input_index: u32, account: u32, lock_id: &str) -> BatchJob 
             delivery_mode: None,
             envelope: None,
         }),
+        envelope: None,
     }
 }
 
@@ -153,6 +156,7 @@ pub fn htlc_resolve_job(input_index: u32, account: u32, lock_id: &str) -> BatchJ
                 secret: HTLC_SECRET.into(),
             },
         }),
+        envelope: None,
     }
 }
 

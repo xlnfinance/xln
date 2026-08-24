@@ -12,7 +12,7 @@ use crate::{ProcessSession, read_frame, serve, write_frame};
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "614001cb79ba61291106631470a684570035053223832fa1153c962a8317547b"
+        "fd65ebd7d1c1602ede5c9146a4ae00e334950ad679ba085115520ed8284945d0"
     );
 
     let mut session = ProcessSession::new();

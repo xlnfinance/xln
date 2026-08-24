@@ -12,6 +12,8 @@ pub enum ProcessError {
     Htlc(#[from] xln_rscore_engine::HtlcBoundaryError),
     #[error("RSCORE_PROCESS_IO:{0}")]
     Io(#[from] std::io::Error),
+    #[error("RSCORE_PROCESS_ENVELOPE:{0}")]
+    Envelope(String),
     #[error("RSCORE_PROCESS_EXPECTED:{0}")]
     Expected(&'static str),
     #[error("RSCORE_PROCESS_ARITY:{context}:{actual}:{expected}")]
@@ -85,6 +87,7 @@ impl ProcessError {
             Self::State(_) => "RSCORE_PROCESS_STATE",
             Self::Htlc(_) => "RSCORE_PROCESS_HTLC",
             Self::Io(_) => "RSCORE_PROCESS_IO",
+            Self::Envelope(_) => "RSCORE_PROCESS_ENVELOPE",
             Self::Expected(_) => "RSCORE_PROCESS_EXPECTED",
             Self::Arity { .. } => "RSCORE_PROCESS_ARITY",
             Self::Integer { .. } => "RSCORE_PROCESS_INTEGER",

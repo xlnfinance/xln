@@ -48,13 +48,19 @@ pub(crate) struct ReplicaFingerprint {
     pub payment_profile_root: [u8; 32],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+// The carried replica shell holds canonical numbers, so the job is comparable
+// but not Eq.
+#[derive(Clone, Debug, PartialEq)]
 pub struct BatchJob {
     pub input_index: u32,
     pub account_id: AccountId,
     pub proposer: Side,
     pub context: AccountExecutionContext,
     pub tx: AccountTx,
+    /// The authority's post-frame replica shell, handed over with the last
+    /// transition of the frame that produced it. Present until the engine
+    /// derives the shell itself; `None` on every other job of the frame.
+    pub envelope: Option<xln_rscore_engine::AccountEnvelope>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

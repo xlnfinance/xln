@@ -103,6 +103,9 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
                 AbiValue::Integer(0),
             ]),
         ]),
+        // No replica shell: this fixture exercises the financial engine, so
+        // the leaf stays the payment-profile state root.
+        AbiValue::Nil,
     ])
 }
 
@@ -137,6 +140,9 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
                 AbiValue::Integer(0),
             ]),
         ]),
+        // No replica shell: this fixture exercises the financial engine, so
+        // the leaf stays the payment-profile state root.
+        AbiValue::Nil,
     ])
 }
 
@@ -194,6 +200,7 @@ pub fn prepare(id: u64, amount: i64) -> Envelope {
             AbiValue::Integer(50),
         ]),
         tx,
+        AbiValue::Nil,
     ]);
     request(id, OpTag::ExecuteWave, vec![tuple(vec![job])])
 }
@@ -240,6 +247,7 @@ fn job(input_index: u32, proposer: i128, tx: AbiValue) -> AbiValue {
             AbiValue::Integer(1),
         ]),
         tx,
+        AbiValue::Nil,
     ])
 }
 

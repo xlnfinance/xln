@@ -210,7 +210,7 @@ fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
-    let fields = exact(tuple(value)?, 12, "accountSeed")?;
+    let fields = exact(tuple(value)?, 13, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
     // The account id IS the counterparty entity id: one engine process serves
@@ -247,7 +247,7 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
         .map(decode_lock)
         .collect::<Result<_, _>>()?;
     let journal = exact(tuple(&fields[10])?, 2, "journal")?;
-    let replica = AccountReplica::new(
+    let mut replica = AccountReplica::new(
         owner,
         AccountState::restore_full(AccountStateSeed {
             identity,
@@ -261,6 +261,9 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
             swap_offers: decode_swap_offers(&fields[11])?,
         })?,
     )?;
+    if let Some(envelope) = crate::canonical::envelope(&fields[12])? {
+        replica.set_envelope(envelope);
+    }
     Ok(AccountSeed {
         account_id,
         replica,
@@ -459,13 +462,14 @@ fn decode_delta(value: &AbiValue) -> Result<Delta, ProcessError> {
 }
 
 fn decode_job(value: &AbiValue) -> Result<BatchJob, ProcessError> {
-    let fields = exact(tuple(value)?, 5, "job")?;
+    let fields = exact(tuple(value)?, 6, "job")?;
     Ok(BatchJob {
         input_index: bounded_u32(&fields[0], "inputIndex")?,
         account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
         proposer: side(&fields[2], "proposer")?,
         context: decode_context(&fields[3])?,
         tx: decode_tx(&fields[4])?,
+        envelope: crate::canonical::envelope(&fields[5])?,
     })
 }
 

@@ -12,8 +12,11 @@ import {
   getTokenInfo,
   isLiquidSwapToken,
 } from '../account/utils';
+import { canonicalAccountTxForFrameHash } from '../account/consensus/frame/hash';
+import { projectEntityAccountLeaf } from '../entity/consensus/state-root';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type {
+  AccountReplica,
   AccountState,
   AccountTx,
   Delta,
@@ -65,6 +68,74 @@ const lockWire = (lock: HtlcLock): RscoreWireValue[] => [
   lock.createdTimestamp,
   lock.envelopeHash === undefined ? null : hexToWireBytes(lock.envelopeHash, 32, 'SHADOW_ENVELOPE_HASH'),
 ];
+
+/**
+ * Canonical values on the wire: the same nine-variant model both sides hash
+ * (`encodeAccountStateValue` here, `CanonicalValue` in the engine), tagged so
+ * the engine can commit sections it never interprets — the mempool in its
+ * frame-hash form, hankos, acks, frame bindings — without a Rust type per
+ * shape the authority happens to commit.
+ *
+ * Numbers travel as the string JavaScript renders: the shortest
+ * representation parses back to the identical double, so the engine
+ * re-renders the authority's exact bytes.
+ */
+const canonicalValueWire = (value: unknown, depth = 0): RscoreWireValue => {
+  if (depth > 32) throw new Error('SHADOW_CANONICAL_DEPTH');
+  if (value === null) return [0];
+  switch (typeof value) {
+    case 'boolean': return [1, value ? 1 : 0];
+    case 'number': {
+      if (!Number.isFinite(value)) throw new Error(`SHADOW_CANONICAL_NON_FINITE:${String(value)}`);
+      return [2, String(value)];
+    }
+    case 'bigint': return [3, value.toString()];
+    case 'string': return [4, value];
+    default: break;
+  }
+  if (Array.isArray(value)) return [5, value.map(entry => canonicalValueWire(entry, depth + 1))];
+  if (value instanceof Map) {
+    return [6, [...value.entries()].map(([key, entry]) => [
+      canonicalValueWire(key, depth + 1),
+      canonicalValueWire(entry, depth + 1),
+    ])];
+  }
+  if (value instanceof Set) {
+    return [7, [...value.values()].map(entry => canonicalValueWire(entry, depth + 1))];
+  }
+  if (typeof value === 'object') {
+    // Same filter the authority's encoder applies: an undefined property is
+    // not part of the value.
+    return [8, Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, canonicalValueWire(entry, depth + 1)])];
+  }
+  throw new Error(`SHADOW_CANONICAL_UNSUPPORTED:${typeof value}`);
+};
+
+/** Fields the engine derives itself; sending them would prove nothing. */
+const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRoot', 'mempoolRoot']);
+
+/**
+ * The replica shell the Entity commits around the financial state: its own
+ * account-leaf projection minus the two roots the engine derives, plus the
+ * mempool in the canonical form the frame hash uses. With it the engine's
+ * account tree leaf is the Entity's account leaf, so the two accounts roots
+ * are directly comparable.
+ */
+export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue => {
+  const projected = projectEntityAccountLeaf(account);
+  for (const field of ENGINE_DERIVED_LEAF_FIELDS) {
+    if (!(field in projected)) throw new Error(`SHADOW_LEAF_FIELD_MISSING:${field}`);
+  }
+  const fields = Object.entries(projected)
+    .filter(([key, value]) => !ENGINE_DERIVED_LEAF_FIELDS.has(key) && value !== undefined)
+    .map(([key, value]) => [key, canonicalValueWire(value)]);
+  return [
+    [8, fields],
+    account.mempool.map(tx => canonicalValueWire(canonicalAccountTxForFrameHash(tx))),
+  ];
+};
 
 /**
  * Why an account snapshot cannot be mirrored, or null when it can.
@@ -249,6 +320,12 @@ export const accountSeedWire = (
   ownerEntityId: string,
   counterpartyEntityId: string,
   state: AccountState,
+  /**
+   * The replica shell that belongs with this state. Absent when the seed is
+   * the state a frame started in: that frame's own execution installs the
+   * shell it produced.
+   */
+  envelope: RscoreWireValue | null = null,
 ): RscoreWireValue[] => {
   return [
     hexToWireBytes(counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID'),
@@ -267,6 +344,7 @@ export const accountSeedWire = (
       .map(lockWire),
     [state.jNonce, state.lastFinalizedJHeight],
     carriedSectionsWire(state),
+    envelope,
   ];
 };
 

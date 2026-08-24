@@ -152,6 +152,10 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
     claimWire(account.state.leftPendingJClaims),
     claimWire(account.state.rightPendingJClaims),
   ],
+  // No replica shell: these vectors pin the financial engine, so the engine's
+  // leaf stays the payment-profile state root and referenceRoot below is the
+  // matching TypeScript tree.
+  null,
 ];
 
 const paymentTx = (account: AccountReplica, index: number, amount: bigint): AccountTx => ({
@@ -188,6 +192,7 @@ const paymentJob = (
     0,
     null,
   ],
+  null,
 ];
 
 // Give leg of the swap: token 2 (18 decimals) against token 1 (6 decimals),
@@ -257,6 +262,7 @@ const swapOfferJob = (index: number): RscoreWireValue[] => [
     null,
     null, // no explicit price ticks: the engine derives the canonical one
   ],
+  null,
 ];
 
 const swapResolveTx = (
@@ -304,6 +310,7 @@ const swapResolveJob = (
     null,
     null,
   ],
+  null,
 ];
 
 /** TS reference: same data model as the Rust accounts tree. */

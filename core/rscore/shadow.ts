@@ -18,6 +18,7 @@ import { join } from 'node:path';
 
 import { createStructuredLogger } from '../support/logger';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
+import { computeEntityAccountValueHash } from '../entity/consensus/state-root';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import { safeStringify } from '../protocol/serialization';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
@@ -26,6 +27,7 @@ import type { AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
   shadowOutputRows,
+  accountEnvelopeWire,
   accountSeedWire,
   accountTxWire,
   hexToWireBytes,
@@ -216,15 +218,17 @@ const redactSecrets = <T>(value: T): T => {
 };
 
 /**
- * The engine's own tree, computed on the TypeScript side: key = the raw
- * 32-byte counterparty id, leaf = the payment-profile account state root.
+ * The engine's own tree, computed on the TypeScript side — and the Entity's
+ * accounts tree at the same time: key = the raw 32-byte counterparty id, leaf
+ * = the Entity account leaf digest (the replica shell plus the financial
+ * root), radix 16. Same data model as PersistentEntityAccountMap.
  */
 const emptyForest = (): PersistentRadixValueMap<string, AccountReplica> =>
   PersistentRadixValueMap.empty<string, AccountReplica>({
     radix: 16,
     ownKey: (key: string): string => key,
     keyBytes: (key: string): Uint8Array => hexToWireBytes(key, 32, 'SHADOW_FOREST_KEY'),
-    valueHash: (account: AccountReplica): string => computeAccountStateRoot(account.state),
+    valueHash: (account: AccountReplica): string => computeEntityAccountValueHash(account),
     ownValue: (account: AccountReplica): AccountReplica => account,
   });
 
@@ -383,8 +387,12 @@ type QueueEntry = Readonly<{
 
 export type ShadowReconciliationMismatch = Readonly<{
   accountId: string;
-  /** The whole leaf: identity, dispute config, journal counters, every section. */
+  /** The financial leaf: identity, dispute config, journal counters, every section. */
   accountStateRoot: Readonly<{ typescript: string; rust: string }>;
+  /** The Entity's own leaf: the whole replica, shell included. */
+  entityAccountLeaf: Readonly<{ typescript: string; rust: string }>;
+  /** Queued transactions on each side, when the shells disagree. */
+  mempool: Readonly<{ typescript: string; rust: string }>;
   /** Which section moved, when the full root differs. */
   deltasRoot: Readonly<{ typescript: string; rust: string }>;
   locksRoot: Readonly<{ typescript: string; rust: string }>;
@@ -394,10 +402,9 @@ export type ShadowReconciliationMismatch = Readonly<{
 export type ShadowReconciliation = Readonly<{
   matched: number;
   /**
-   * Radix-16 forest over the payment-profile account state roots — the tree
-   * the Rust engine commits. This is NOT the production Entity accounts root:
-   * the Entity leaf additionally commits the replica envelope (mempool,
-   * current/pending frames, acks, hankos, withdrawals).
+   * Radix-16 forest over the Entity account leaves — the tree the Rust engine
+   * commits and the same value the Entity's own accounts map roots to, so a
+   * match means the engine could hand its tree back to the entity machine.
    */
   forestRoot: Readonly<{ typescript: string; rust: string; equal: boolean }>;
   mismatched: readonly ShadowReconciliationMismatch[];
@@ -661,7 +668,12 @@ export class RscoreShadowMirror {
         });
         continue;
       }
-      seeds.push(accountSeedWire(ownerEntityId, counterpartyId, account.state));
+      seeds.push(accountSeedWire(
+        ownerEntityId,
+        counterpartyId,
+        account.state,
+        accountEnvelopeWire(account),
+      ));
       adopted.push([counterpartyId, account]);
       this.#registered.add(scopedKey);
       this.#needsReseed.delete(scopedKey);
@@ -697,6 +709,8 @@ export class RscoreShadowMirror {
       deltasRoot: string;
       locksRoot: string;
       accountStateRoot: string;
+      entityAccountLeaf: string;
+      mempoolLength: number;
     }>();
     let pageRevision: number | undefined;
     let cursor: Uint8Array | null = null;
@@ -712,7 +726,7 @@ export class RscoreShadowMirror {
         throw new Error(`SHADOW_RECONCILE_REVISION_CHANGED:${pageRevision}:${revision}`);
       }
       for (const row of wireTuple(page[1], 'SHADOW_SUMMARY_ROWS')) {
-        const fields = wireTuple(row, 'SHADOW_SUMMARY_ROW', 9);
+        const fields = wireTuple(row, 'SHADOW_SUMMARY_ROW', 12);
         const side = wireInteger(fields[1], 'SHADOW_SUMMARY_OWNER_SIDE');
         if (side !== 0 && side !== 1) throw new Error(`SHADOW_SUMMARY_OWNER_SIDE:${side}`);
         engineRows.set(`0x${Buffer.from(
@@ -722,6 +736,8 @@ export class RscoreShadowMirror {
           deltasRoot: `0x${Buffer.from(wireBytes(fields[4], 'SHADOW_SUMMARY_DELTAS_ROOT', 32)).toString('hex')}`,
           locksRoot: `0x${Buffer.from(wireBytes(fields[5], 'SHADOW_SUMMARY_LOCKS_ROOT', 32)).toString('hex')}`,
           accountStateRoot: `0x${Buffer.from(wireBytes(fields[6], 'SHADOW_SUMMARY_STATE_ROOT', 32)).toString('hex')}`,
+          entityAccountLeaf: `0x${Buffer.from(wireBytes(fields[9], 'SHADOW_SUMMARY_ENTITY_LEAF', 32)).toString('hex')}`,
+          mempoolLength: wireInteger(fields[11], 'SHADOW_SUMMARY_MEMPOOL_LEN'),
         });
       }
       const next = page[2];
@@ -748,14 +764,26 @@ export class RscoreShadowMirror {
       // Comparing the two map roots alone left identity, dispute config, the
       // journal counters and every carried section unverified.
       const accountStateRoot = computeAccountStateRoot(account.state).toLowerCase();
+      // And the whole replica: the leaf the Entity itself puts in its accounts
+      // map, which additionally commits the mempool, the frame bindings, the
+      // hankos and the acks.
+      const entityAccountLeaf = computeEntityAccountValueHash(account).toLowerCase();
       const ownerSide = account.state.leftEntity.trim().toLowerCase() === ownerKey ? 'left' : 'right';
-      if (engine.accountStateRoot === accountStateRoot && engine.ownerSide === ownerSide) {
+      if (engine.accountStateRoot === accountStateRoot
+        && engine.entityAccountLeaf === entityAccountLeaf
+        && engine.mempoolLength === account.mempool.length
+        && engine.ownerSide === ownerSide) {
         matched.push(key);
         continue;
       }
       mismatched.push({
         accountId: key,
         accountStateRoot: { typescript: accountStateRoot, rust: engine.accountStateRoot },
+        entityAccountLeaf: { typescript: entityAccountLeaf, rust: engine.entityAccountLeaf },
+        mempool: {
+          typescript: String(account.mempool.length),
+          rust: String(engine.mempoolLength),
+        },
         deltasRoot: { typescript: deltasRoot, rust: engine.deltasRoot },
         locksRoot: { typescript: locksRoot, rust: engine.locksRoot },
         ownerSide: { typescript: ownerSide, rust: engine.ownerSide },
@@ -903,7 +931,15 @@ export class RscoreShadowMirror {
           kind: 'reseed',
           ownerKey,
           accountKey,
-          seed: accountSeedWire(input.ownerEntityId, input.counterpartyEntityId, seedState),
+          seed: accountSeedWire(
+            input.ownerEntityId,
+            input.counterpartyEntityId,
+            seedState,
+            // A pre-frame seed gets no shell: the frame that follows installs
+            // the one it produced. Everything else imports the shell as it
+            // stands, so the engine's leaf is the Entity's leaf immediately.
+            seedFromPre ? null : accountEnvelopeWire(input.account),
+          ),
           reason: seedFromPre
             ? (repair ? 'repair-pre-frame' : 'register-pre-frame')
             : (repair ? (supported ? 'repair' : 'unsupported-tx') : 'register'),
@@ -934,6 +970,10 @@ export class RscoreShadowMirror {
         // Falls through: this frame is replayed on top of the pre-frame seed.
       }
       const jobs: RscoreWireValue[][] = [];
+      // The shell belongs to the frame, not to one transition, so it rides on
+      // the last job of the frame: after that job the engine holds exactly the
+      // replica the authority committed.
+      const envelope = accountEnvelopeWire(input.account);
       for (const [index, wire] of wires.entries()) {
         if (wire === null) throw new Error('SHADOW_TX_UNSUPPORTED_AFTER_ADMISSION');
         jobs.push([
@@ -951,6 +991,7 @@ export class RscoreShadowMirror {
             input.jHeight,
           ],
           wire,
+          index === wires.length - 1 ? envelope : null,
         ]);
       }
       if (jobs.length === 0) {
@@ -1411,7 +1452,12 @@ export class RscoreShadowMirror {
     return accounts.map(([counterpartyId, account]) => {
       const reason = shadowIneligibilityReason(account.state);
       if (reason !== null) throw new Error(`SHADOW_PRIME_INELIGIBLE:${counterpartyId}:${reason}`);
-      return accountSeedWire(ownerEntityId, counterpartyId, account.state);
+      return accountSeedWire(
+        ownerEntityId,
+        counterpartyId,
+        account.state,
+        accountEnvelopeWire(account),
+      );
     });
   }
 
