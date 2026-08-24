@@ -761,15 +761,35 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
   while (true) {
     const accountKey = worklist.take();
     if (!accountKey) break;
-    const account = getEntityAccountForWrite(currentEntityState.accounts, accountKey);
-    const { counterparty: cpId } = account
-      ? getAccountPerspective(account.state, currentEntityState.entityId)
-      : { counterparty: 'unknown' };
-    if (!account) {
+
+    // Read-only access for early eligibility checks. This avoids a COW fork
+    // (forkAccountReplicaShell) for accounts that have no proposable mempool
+    // work and no required response to route. During the ACK burst dead zone,
+    // most accounts are in the worklist only because an earlier entity tx
+    // added a requiredAccountResponse; their mempool is empty and they need
+    // no proposal, only a routed ACK.
+    const readonlyAccount = currentEntityState.accounts.get(accountKey);
+    if (!readonlyAccount) {
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
+    const { counterparty: cpId } = getAccountPerspective(
+      readonlyAccount.state,
+      currentEntityState.entityId,
+    );
 
-    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
+    const requiredResponseRaw = requiredAccountResponses.get(accountKey.toLowerCase());
+
+    // Fast skip: no mempool, no pending frame, and no required response.
+    if (
+      readonlyAccount.mempool.length === 0 &&
+      !readonlyAccount.pendingFrame &&
+      !requiredResponseRaw
+    ) {
+      continue;
+    }
+
+    // Cross-j opening cohort check is read-only (scans mempool + sibling state).
+    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, readonlyAccount);
     if (crossJOpeningProposalTxs === null) {
       entityLog.debug('account.cross_j_opening_cohort_wait', {
         account: shortId(accountKey),
@@ -778,10 +798,28 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       continue;
     }
 
-    const requiredResponse = liveRequiredAccountResponse(
-      account,
-      requiredAccountResponses.get(accountKey.toLowerCase()),
-    );
+    // Check proposable mempool without forking. accountHasProposableMempool
+    // reads account.mempool, account.pendingFrame, account.status, and
+    // account.state — all read-only on the AccountReplica.
+    const hasProposableWork = accountHasProposableMempool(readonlyAccount, currentEntityState);
+    const requiredResponse = liveRequiredAccountResponse(readonlyAccount, requiredResponseRaw);
+
+    // No proposal needed. Route the required response (if any) without
+    // forking — routeFinalAccountInput only pushes to allOutputs and emits
+    // events; it never mutates the AccountReplica.
+    if (!hasProposableWork) {
+      if (!requiredResponse) continue;
+      assertRequiredAccountResponsePreserved(accountKey, requiredResponse, requiredResponse);
+      routeFinalAccountInput(context, accountKey, cpId, requiredResponse, undefined);
+      continue;
+    }
+
+    // Has proposable work — now fork for write. proposeAccountFrame mutates
+    // account.pendingFrame, account.mempool, account.proofHeader, etc.
+    const account = getEntityAccountForWrite(currentEntityState.accounts, accountKey);
+    if (!account) {
+      throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
+    }
 
     const proposal = await proposeAccountFrameCandidate(
       context,
