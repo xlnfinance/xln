@@ -421,6 +421,20 @@ impl StatefulConsensusEngine {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
+        // The driver matches its own Nth raw input against the Nth verdict, so
+        // the indices must be exactly 0..n-1 in order. A duplicate would make
+        // two verdicts collide in that map and a gap would shift every later
+        // one — either way the comparison would still line up somewhere and
+        // report agreement about the wrong input.
+        for (position, row) in rows.iter().enumerate() {
+            let expected = u32::try_from(position).unwrap_or(u32::MAX);
+            if row.input_index != expected {
+                return Err(BatchError::InputIndex {
+                    actual: row.input_index,
+                    expected,
+                });
+            }
+        }
         let mut by_account: BTreeMap<AccountId, Vec<AccountInputRow>> = BTreeMap::new();
         let mut missing = Vec::new();
         for row in rows {

@@ -426,7 +426,6 @@ export class RscoreProcessClient {
   async request(opTag: number, payload: RscoreWireValue[]): Promise<unknown> {
     if (this.#dead) throw this.#dead;
     const requestId = this.#nextRequestId;
-    this.#nextRequestId += 1n;
     const envelope = encodeEnvelope(this.#identity, requestId, opTag, payload);
     // The engine refuses an oversized frame and exits, so the caller would
     // otherwise see EPIPE and a dead mirror instead of the actual cause. A
@@ -436,6 +435,11 @@ export class RscoreProcessClient {
         `RSCORE_CLIENT_REQUEST_TOO_LARGE:op=${opTag}:bytes=${envelope.length}:max=${MAX_FRAME_BYTES}`,
       );
     }
+    // Only now: the session pins request ids to an exact sequence, so an id
+    // spent on a request that was never written would make every later request
+    // fail the sequence check and take the process down with it. Encoding and
+    // the size check both happen before the id is consumed.
+    this.#nextRequestId += 1n;
     const framed = Buffer.alloc(4 + envelope.length);
     framed.writeUInt32BE(envelope.length);
     envelope.copy(framed, 4);

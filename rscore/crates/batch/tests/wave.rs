@@ -4,7 +4,9 @@
 mod fixture;
 
 use fixture::{Stand, clock, payment, stand};
-use xln_rscore_batch::{AccountInputVerdict, BatchError, WaveRequest, WaveResult};
+use xln_rscore_batch::{
+    AccountInputKind, AccountInputRow, AccountInputVerdict, BatchError, WaveRequest, WaveResult,
+};
 use xln_rscore_engine::{AckOutcome, IncomingOutcome};
 
 fn wave(stand: &Stand, timestamp: u64) -> WaveRequest {
@@ -305,4 +307,51 @@ fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
     assert_ne!(result.accounts_root, before);
     assert_eq!(result.touched.len(), 1);
     assert_eq!(result.touched[0].0, stand.pairs[0].payer_account);
+}
+
+/// The driver pairs its own Nth raw input with the Nth verdict. Indices that
+/// repeat or skip would still line up somewhere, and the comparison would
+/// report agreement about the wrong input.
+#[test]
+fn input_indices_must_be_unique_and_sequential() {
+    let mut stand = stand(1);
+    let pair = &stand.pairs[0];
+    let row = |input_index: u32| AccountInputRow {
+        input_index,
+        account_id: pair.payer_account,
+        from_entity_id: pair.payee_entity,
+        kind: AccountInputKind::Ack {
+            height: 1,
+            state_hash: [0; 32],
+            hanko: Vec::new(),
+        },
+    };
+
+    let duplicate = stand
+        .payer
+        .apply_inputs(clock(1_700_000_000_000), vec![row(0), row(0)]);
+    assert!(
+        matches!(
+            duplicate,
+            Err(BatchError::InputIndex {
+                actual: 0,
+                expected: 1
+            })
+        ),
+        "{duplicate:?}"
+    );
+
+    let gap = stand
+        .payer
+        .apply_inputs(clock(1_700_000_000_000), vec![row(0), row(2)]);
+    assert!(
+        matches!(
+            gap,
+            Err(BatchError::InputIndex {
+                actual: 2,
+                expected: 1
+            })
+        ),
+        "{gap:?}"
+    );
 }

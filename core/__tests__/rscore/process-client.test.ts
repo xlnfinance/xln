@@ -13,7 +13,7 @@ import { decodeWave, waveParityDigest } from '../../rscore/wave-decode';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { RSCORE_PROCESS_ABI_VERSION, RscoreProcessClient } from '../../rscore/client';
+import { RSCORE_OP, RSCORE_PROCESS_ABI_VERSION, RscoreProcessClient } from '../../rscore/client';
 import { computeFrameHash } from '../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../account/commitment/state-root';
 import { handleDirectPayment } from '../../account/tx/handlers/balance/direct-payment';
@@ -238,6 +238,28 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       const committed = (await client.commit(second.token)) as unknown[];
       expect(`0x${Buffer.from(committed[1] as Uint8Array).toString('hex')}`)
         .toBe(again.accountsRoot);
+
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  });
+
+  // A request the client never wrote must not consume a request id: the
+  // session pins them to an exact sequence, so a spent-but-unsent id would
+  // make every later request fail that check and take the engine down.
+  test('a request that was never written leaves the sequence intact', async () => {
+    const client = new RscoreProcessClient(BINARY, identity());
+    try {
+      await client.hello(2, swapMarketPolicyWire());
+      await client.restore(3, []);
+
+      await expect(
+        client.request(RSCORE_OP.readAccountSummaryPage, [undefined as never]),
+      ).rejects.toThrow('RSCORE_CLIENT_VALUE_UNSUPPORTED');
+
+      const page = (await client.readAccountSummaryPage(null, 8, [1])) as unknown[];
+      expect(page[0]).toBe(3);
 
       await client.shutdown();
     } finally {
