@@ -4,12 +4,17 @@
 //! This layer deliberately does not promise persistent account-to-worker shard
 //! affinity across batches.
 
+mod consensus;
 mod error;
 mod execution;
 mod query;
 mod stateful;
 mod types;
 
+pub use consensus::{
+    AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict, ProposalRow,
+    StatefulConsensusEngine,
+};
 pub use error::BatchError;
 pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};
 pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};

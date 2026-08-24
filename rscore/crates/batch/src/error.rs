@@ -65,6 +65,10 @@ pub enum BatchError {
         input_index: u32,
         account_id: AccountId,
     },
+    #[error("RSCORE_BATCH_SIGNER_REQUIRED")]
+    SignerRequired,
+    #[error("RSCORE_BATCH_SIGNING:{0}")]
+    Signing(String),
     #[error("RSCORE_BATCH_ACCOUNTS_TREE:{account_id}:{detail}")]
     AccountsTree {
         account_id: AccountId,

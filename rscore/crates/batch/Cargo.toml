@@ -15,3 +15,5 @@ thiserror.workspace = true
 xln-rscore-engine = { path = "../engine" }
 xln-rscore-protocol = { path = "../protocol" }
 
+[dev-dependencies]
+xln-rscore-hanko = { path = "../hanko" }

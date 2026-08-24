@@ -16,6 +16,14 @@ impl AccountId {
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// Rebuild the id from a tree key, which is the account id itself.
+    pub fn from_key(key: &[u8]) -> Self {
+        let mut bytes = [0_u8; 32];
+        let width = key.len().min(32);
+        bytes[..width].copy_from_slice(&key[..width]);
+        Self(bytes)
+    }
 }
 
 impl fmt::Display for AccountId {

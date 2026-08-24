@@ -56,6 +56,12 @@ impl AccountEnvelope {
         Ok(Self { fields, mempool })
     }
 
+    /// The carried projection fields, so a caller that owns part of the
+    /// projection can replace exactly those.
+    pub fn fields(&self) -> &[(String, CanonicalValue)] {
+        &self.fields
+    }
+
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty() && self.mempool.is_empty()
     }

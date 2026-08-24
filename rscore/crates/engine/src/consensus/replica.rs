@@ -7,11 +7,14 @@
 //! state stays in `AccountReplica` so executing a transaction never copies the
 //! queue.
 
-use crate::consensus::frame::hash::{AccountFrame, GENESIS_PREV_FRAME_HASH};
+use xln_rscore_protocol::CanonicalValue;
+
+use crate::consensus::frame::hash::{AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value};
 use crate::error::StateError;
 use crate::input::mempool::{
     assert_mempool_admission, assert_mempool_within_limit, is_deduplicated_on_restore,
 };
+use crate::state::account_replica_shell::AccountEnvelope;
 use crate::{AccountReplica, AccountTx};
 
 /// A frame both sides have committed.
@@ -186,6 +189,81 @@ impl AccountConsensus {
     pub(crate) const fn last_rollback_frame_hash(&self) -> Option<&[u8; 32]> {
         self.last_rollback_frame_hash.as_ref()
     }
+}
+
+impl AccountConsensus {
+    /// The Entity's account leaf for this replica, with everything consensus
+    /// owns derived rather than carried.
+    ///
+    /// Parity target: `projectAccountConsensusState`
+    /// (core/entity/consensus/state-root.ts). The engine now owns the queue,
+    /// the chain head and the frame in flight, so it projects them itself;
+    /// fields it does not model yet stay carried on the replica's envelope.
+    pub fn entity_account_leaf(&self) -> Result<[u8; 32], StateError> {
+        let account_state_root = self.replica.state().payment_profile_account_state_root()?;
+        let envelope = self.projected_envelope()?;
+        envelope
+            .entity_account_leaf(&account_state_root)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
+    fn projected_envelope(&self) -> Result<AccountEnvelope, StateError> {
+        let mut mempool = Vec::with_capacity(self.mempool.len());
+        for tx in &self.mempool {
+            mempool.push(canonical_tx_value(tx)?);
+        }
+        let mut fields: Vec<(String, CanonicalValue)> = self
+            .replica
+            .envelope()
+            .fields()
+            .iter()
+            .filter(|(name, _)| !DERIVED_CONSENSUS_FIELDS.contains(&name.as_str()))
+            .cloned()
+            .collect();
+        fields.push((
+            "currentHeight".to_string(),
+            CanonicalValue::Number(self.current_height() as f64),
+        ));
+        fields.push((
+            "rollbackCount".to_string(),
+            CanonicalValue::Number(self.rollback_count as f64),
+        ));
+        if let Some(current) = &self.current {
+            fields.push((
+                "currentFrameHash".to_string(),
+                CanonicalValue::String(hex_prefixed(&current.state_hash)),
+            ));
+        }
+        if let Some(pending) = &self.pending {
+            fields.push((
+                "pendingFrameHash".to_string(),
+                CanonicalValue::String(hex_prefixed(&pending.state_hash)),
+            ));
+        }
+        if let Some(hash) = &self.last_rollback_frame_hash {
+            fields.push((
+                "lastRollbackFrameHash".to_string(),
+                CanonicalValue::String(hex_prefixed(hash)),
+            ));
+        }
+        AccountEnvelope::new(fields, mempool)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+}
+
+/// Projection fields the engine derives from its own consensus state. A
+/// carried copy of any of them would let the authority's view of the queue or
+/// the chain head override what this engine actually holds.
+const DERIVED_CONSENSUS_FIELDS: [&str; 5] = [
+    "currentHeight",
+    "rollbackCount",
+    "currentFrameHash",
+    "pendingFrameHash",
+    "lastRollbackFrameHash",
+];
+
+fn hex_prefixed(bytes: &[u8; 32]) -> String {
+    format!("0x{}", hex_of(bytes))
 }
 
 fn hex_of(bytes: &[u8]) -> String {
