@@ -29,6 +29,13 @@ type RecordedInput = {
 };
 
 /**
+ * A clock an Entity used inside this Runtime frame — the timestamp and
+ * finalized J height a proposal was built with, or the enforcement clock a
+ * received frame was judged against.
+ */
+type RecordedClock = { ownerEntityId: string; role: 'propose' | 'enforce'; clock: string };
+
+/**
  * Observation only, and off by default: recording every input of every frame
  * costs allocations on the hub's hot path.
  */
@@ -43,6 +50,7 @@ export const authorityRecordEnabled = (): boolean =>
  * same call that reads it.
  */
 const frames = new Map<string, RecordedInput[]>();
+const clocks = new Map<string, RecordedClock[]>();
 
 let report = {
   frames: 0,
@@ -66,6 +74,16 @@ let report = {
   framesWithMultipleOwners: 0,
   /** The largest number of owner Entities seen in a single Runtime frame. */
   maxOwnersPerFrame: 0,
+  /**
+   * Owners that used more than one proposal clock inside a single Runtime
+   * frame. One wave per owner per Runtime frame carries one clock; if this is
+   * ever non-zero, the unit is the Entity frame, not the Runtime frame.
+   */
+  ownersWithMultipleProposeClocks: 0,
+  /** The same question for the receiver's enforcement clock. */
+  ownersWithMultipleEnforceClocks: 0,
+  /** Clocks observed at all, so a zero above is not zero observations. */
+  clocksObserved: 0,
   byKind: {} as Record<string, number>,
 };
 
@@ -126,6 +144,24 @@ export const noteRawAccountInput = (
  * anything and closes it in a `finally`, so a frame that throws is discarded
  * rather than merged into the next one.
  */
+export const noteAuthorityEntityClock = (
+  runtimeId: string | undefined,
+  ownerEntityId: string,
+  role: 'propose' | 'enforce',
+  timestamp: number,
+  finalizedJHeight: number,
+): void => {
+  if (!authorityRecordEnabled()) return;
+  if (runtimeId === undefined) return;
+  const open = clocks.get(runtimeId);
+  if (open === undefined) return;
+  open.push({
+    ownerEntityId: ownerEntityId.trim().toLowerCase(),
+    role,
+    clock: `${timestamp}/${finalizedJHeight}`,
+  });
+};
+
 export const beginAuthorityFrame = (runtimeId: string): void => {
   if (!authorityRecordEnabled()) return;
   if (frames.has(runtimeId)) {
@@ -134,6 +170,7 @@ export const beginAuthorityFrame = (runtimeId: string): void => {
     report.abandonedFrames += 1;
   }
   frames.set(runtimeId, []);
+  clocks.set(runtimeId, []);
 };
 
 /**
@@ -146,7 +183,10 @@ export const beginAuthorityFrame = (runtimeId: string): void => {
 export const flushAuthorityFrame = (runtimeId: string): void => {
   if (!authorityRecordEnabled()) return;
   const frame = frames.get(runtimeId) ?? [];
+  const frameClocks = clocks.get(runtimeId) ?? [];
   frames.delete(runtimeId);
+  clocks.delete(runtimeId);
+  recordClocks(frameClocks);
   if (frame.length === 0) return;
   report.frames += 1;
   report.inputs += frame.length;
@@ -171,6 +211,23 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   }
 };
 
+/** One clock per owner per role, or the Runtime frame is not the wave unit. */
+const recordClocks = (rows: readonly RecordedClock[]): void => {
+  report.clocksObserved += rows.length;
+  const byOwner = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const key = `${row.role}/${row.ownerEntityId}`;
+    const seen = byOwner.get(key) ?? new Set<string>();
+    seen.add(row.clock);
+    byOwner.set(key, seen);
+  }
+  for (const [key, seen] of byOwner) {
+    if (seen.size <= 1) continue;
+    if (key.startsWith('propose/')) report.ownersWithMultipleProposeClocks += 1;
+    else report.ownersWithMultipleEnforceClocks += 1;
+  }
+};
+
 export const authorityRecordReport = (): typeof report => ({ ...report, byKind: { ...report.byKind } });
 
 export const printAuthorityRecordReport = (): void => {
@@ -182,6 +239,7 @@ export const printAuthorityRecordReport = (): void => {
 
 export const resetAuthorityRecordForTests = (): void => {
   frames.clear();
+  clocks.clear();
   report = {
     frames: 0,
     inputs: 0,
@@ -192,6 +250,9 @@ export const resetAuthorityRecordForTests = (): void => {
     abandonedFrames: 0,
     framesWithMultipleOwners: 0,
     maxOwnersPerFrame: 0,
+    ownersWithMultipleProposeClocks: 0,
+    ownersWithMultipleEnforceClocks: 0,
+    clocksObserved: 0,
     byKind: {},
   };
 };

@@ -93,6 +93,7 @@ import {
   getQueuedAccountIds,
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
+import { noteAuthorityEntityClock } from '../../../rscore/authority-record';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { assertEntityFrameTxByteBudget } from '../frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from '../output/certification';
@@ -622,6 +623,16 @@ const proposeAccountFrameCandidate = async (
 ): Promise<AccountFrameProposal | undefined> => {
   const { currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
   if (!accountHasProposableMempool(account, state)) return undefined;
+  // The clock a proposal is built with belongs to this Entity, not to the
+  // Runtime frame: a wave carries one clock, so which unit that wave covers
+  // depends on whether an Entity ever uses two inside one Runtime frame.
+  noteAuthorityEntityClock(
+    context.accountConsensusContext.runtimeId,
+    state.entityId,
+    'propose',
+    state.timestamp,
+    state.lastFinalizedJHeight,
+  );
   const proposal = await proposeAccountFrame(
     context.accountConsensusContext,
     account,

@@ -4,7 +4,7 @@
  */
 
 import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../rscore/shadow-hook';
-import { noteRawAccountInput } from '../../rscore/authority-record';
+import { noteAuthorityEntityClock, noteRawAccountInput } from '../../rscore/authority-record';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -1183,6 +1183,15 @@ const applyPeerAccountInput = async (
 ): Promise<HandleAccountInputResult> => {
   const accountJClaimNodeStore = context.jClaimNodeStore;
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
+  // The receiver's enforcement clock, which is the Entity's and not the
+  // frame's: the same question as the proposal clock, from the other side.
+  noteAuthorityEntityClock(
+    context.runtimeId,
+    account.proofHeader?.fromEntity ?? '',
+    'enforce',
+    securityContext.entityTimestamp,
+    securityContext.finalizedJHeight,
+  );
   if (input.kind === 'dispute') {
     const events: string[] = [];
     const disputeHankoShapeError = getDisputeHankoShapeError(input);
