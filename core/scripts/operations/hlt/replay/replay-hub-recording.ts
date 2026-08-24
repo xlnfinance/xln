@@ -3,7 +3,7 @@
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
 import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
-import { printAuthorityRecordReport } from '../../../../rscore/authority';
+import { printAuthorityRecordReport } from '../../../../rscore/authority-record';
 import {
   assertShadowParity,
   currentShadowMirror,

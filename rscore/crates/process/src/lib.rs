@@ -9,6 +9,29 @@ mod wire_encode;
 mod wire_value;
 
 pub use error::ProcessError;
+
+/// The transaction codec, exposed for the cross-language vector test: the wire
+/// is a contract with TypeScript, so it is checked against bytes TypeScript
+/// wrote rather than only against this crate's own round trip.
+pub fn decode_account_tx(
+    value: &xln_rscore_abi::AbiValue,
+) -> Result<xln_rscore_engine::AccountTx, ProcessError> {
+    wire_decode::decode_tx(value)
+}
+
+pub fn encode_account_tx(
+    tx: &xln_rscore_engine::AccountTx,
+) -> Result<xln_rscore_abi::AbiValue, ProcessError> {
+    wire_encode::tx(tx)
+}
+
+pub fn decode_wire_value(bytes: &[u8]) -> Result<xln_rscore_abi::AbiValue, ProcessError> {
+    Ok(xln_rscore_abi::decode_value(bytes)?)
+}
+
+pub fn encode_wire_value(value: &xln_rscore_abi::AbiValue) -> Result<Vec<u8>, ProcessError> {
+    Ok(xln_rscore_abi::encode_value(value)?)
+}
 pub use session::{ProcessReply, ProcessSession};
 pub use transport::{read_frame, serve, write_frame};
 

@@ -75,6 +75,11 @@ impl Parser<'_> {
         Ok(BodyTuple::decoded(values))
     }
 
+    /// One value, read on its own rather than as a body field.
+    pub(crate) fn read_standalone_value(&mut self) -> Result<AbiValue, AbiError> {
+        self.read_value(0)
+    }
+
     fn read_value(&mut self, depth: usize) -> Result<AbiValue, AbiError> {
         self.check_depth(depth)?;
         self.record_value()?;

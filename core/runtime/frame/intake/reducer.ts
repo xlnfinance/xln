@@ -1,7 +1,7 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
-import { flushAuthorityFrame } from '../../../rscore/authority';
+import { beginAuthorityFrame, flushAuthorityFrame } from '../../../rscore/authority-record';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
@@ -287,32 +287,40 @@ const applyRuntimeInputPhases = async (
   isReplay: boolean,
   ingress: PreparedRuntimeIngress,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
-  const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
-  const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
-    hasVerifiedEntityCommitPrecertificate(env, input));
-  profile.mark('validateMerge');
-  const { prepared, batch } = await applyRuntimeEntityBatch(
-    env,
-    ingress,
-    mergedInputs,
-    isReplay,
-    deps,
-    profile,
-  );
-  const result = finalizeRuntimeInputApply(
-    env,
-    runtimeInput,
-    ingress,
-    prepared,
-    batch,
-    profile,
-  );
-  // Runtime frame boundary for the authoritative engine. It lives here, not at
-  // the live-loop apply, because recovery replays a journal through this
-  // reducer without passing through that path — and a boundary that only fires
-  // in one of the two would report a frame's inputs as belonging to the next.
-  flushAuthorityFrame();
-  return { result, profiledRuntimeTxs: ingress.runtimeTxs };
+  // One Runtime frame, one recording. Opened here and closed in the `finally`
+  // below so a frame that throws is discarded instead of being attributed to
+  // whichever Runtime opens the next one — this process hosts many.
+  const authorityFrameId = env.runtimeId ?? '';
+  beginAuthorityFrame(authorityFrameId);
+  try {
+    const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
+    const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
+      hasVerifiedEntityCommitPrecertificate(env, input));
+    profile.mark('validateMerge');
+    const { prepared, batch } = await applyRuntimeEntityBatch(
+      env,
+      ingress,
+      mergedInputs,
+      isReplay,
+      deps,
+      profile,
+    );
+    const result = finalizeRuntimeInputApply(
+      env,
+      runtimeInput,
+      ingress,
+      prepared,
+      batch,
+      profile,
+    );
+    return { result, profiledRuntimeTxs: ingress.runtimeTxs };
+  } finally {
+    // The boundary lives in the reducer, not at the live-loop frame apply:
+    // recovery replays a journal through here without passing through that
+    // path, and a boundary that fires in only one of the two reports a
+    // frame's inputs as belonging to the next.
+    flushAuthorityFrame(authorityFrameId);
+  }
 };
 
 export const createRuntimeInputReducer = (

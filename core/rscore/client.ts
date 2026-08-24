@@ -160,6 +160,20 @@ const readByte = (cursor: ReadCursor, offset: number): number => {
   return byte;
 };
 
+/**
+ * One canonical value from its bytes — the exact inverse of `packWireValue`.
+ * Exported so a decoder can be tested against bytes rather than against the
+ * objects this client happened to build.
+ */
+export const unpackWireValue = (bytes: Buffer): unknown => {
+  const cursor: ReadCursor = { buffer: bytes, offset: 0 };
+  const value = readValue(cursor);
+  if (cursor.offset !== bytes.length) {
+    throw new Error(`RSCORE_CLIENT_TRAILING_BYTES:${cursor.offset}:${bytes.length}`);
+  }
+  return value;
+};
+
 const readValue = (cursor: ReadCursor): unknown => {
   const marker = readByte(cursor, cursor.offset);
   cursor.offset += 1;

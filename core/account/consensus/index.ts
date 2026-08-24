@@ -4,7 +4,7 @@
  */
 
 import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../rscore/shadow-hook';
-import { noteRawAccountInput } from '../../rscore/authority';
+import { noteRawAccountInput } from '../../rscore/authority-record';
 import type {
   AccountReplica,
   AccountDisputeHanko,

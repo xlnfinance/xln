@@ -100,6 +100,13 @@ const text = (value: unknown, code: string): string =>
 const bool = (value: unknown, code: string): boolean =>
   typeof value === 'boolean' ? value : fail(`${code}:bool`);
 
+/** A wire flag: 0 or 1, never a msgpack boolean. */
+const flag = (value: unknown, code: string): boolean => {
+  const parsed = int(value, code);
+  if (parsed !== 0 && parsed !== 1) return fail(`${code}:flag:${parsed}`);
+  return parsed === 1;
+};
+
 const optionalText = (value: unknown, code: string): string | null =>
   value === null ? null : text(value, code);
 
@@ -342,6 +349,9 @@ export const decodeAccountTx = (value: unknown): AccountTx => {
           type: 'htlc_resolve',
           data: {
             lockId: text(fields[1], 'tx.lockId'),
+            // The tag is the discriminator TypeScript models as a field, and
+            // a resolve without it is not the transaction that was sent.
+            outcome: 'secret',
             secret: hex(fields[3], 'tx.secret', 32),
           },
         } as AccountTx;
@@ -352,6 +362,7 @@ export const decodeAccountTx = (value: unknown): AccountTx => {
         type: 'htlc_resolve',
         data: {
           lockId: text(fields[1], 'tx.lockId'),
+          outcome: 'error',
           ...(reason === null ? {} : { reason }),
         },
       } as AccountTx;
@@ -419,6 +430,18 @@ const decodeSwapResolve = (row: readonly unknown[]): AccountTx => {
   const fields = tupleOf(row, 15, 'tx.swapResolve');
   const optionalBig = (value: unknown, code: string): bigint | null =>
     value === null ? null : big(value, code);
+  const optionalInt = (value: unknown, code: string): number | null =>
+    value === null ? null : int(value, code);
+  // Every field but the offer, the coarse ratio and the cancel flag is
+  // optional on the wire, and each one absent is a different transaction from
+  // that one present: reading them as required turned a legitimate partial
+  // fill into a decode failure.
+  const fillNumerator = optionalBig(fields[3], 'tx.fillNumerator');
+  const fillDenominator = optionalBig(fields[4], 'tx.fillDenominator');
+  const feeTokenId = optionalInt(fields[6], 'tx.feeTokenId');
+  const feeAmount = optionalBig(fields[7], 'tx.feeAmount');
+  const executionGiveAmount = optionalBig(fields[8], 'tx.executionGiveAmount');
+  const executionWantAmount = optionalBig(fields[9], 'tx.executionWantAmount');
   const restingPriceTicks = optionalBig(fields[10], 'tx.restingPriceTicks');
   const restingGive = optionalBig(fields[11], 'tx.restingGiveAmount');
   const restingWant = optionalBig(fields[12], 'tx.restingWantAmount');
@@ -429,13 +452,15 @@ const decodeSwapResolve = (row: readonly unknown[]): AccountTx => {
     data: {
       offerId: text(fields[1], 'tx.offerId'),
       fillRatio: int(fields[2], 'tx.fillRatio'),
-      fillNumerator: big(fields[3], 'tx.fillNumerator'),
-      fillDenominator: big(fields[4], 'tx.fillDenominator'),
-      cancelRemainder: bool(fields[5], 'tx.cancelRemainder'),
-      feeTokenId: int(fields[6], 'tx.feeTokenId'),
-      feeAmount: big(fields[7], 'tx.feeAmount'),
-      executionGiveAmount: big(fields[8], 'tx.executionGiveAmount'),
-      executionWantAmount: big(fields[9], 'tx.executionWantAmount'),
+      ...(fillNumerator === null ? {} : { fillNumerator }),
+      ...(fillDenominator === null ? {} : { fillDenominator }),
+      // 0/1, matching both encoders. Reading a boolean here rejected every
+      // swap_resolve either engine produced.
+      cancelRemainder: flag(fields[5], 'tx.cancelRemainder'),
+      ...(feeTokenId === null ? {} : { feeTokenId }),
+      ...(feeAmount === null ? {} : { feeAmount }),
+      ...(executionGiveAmount === null ? {} : { executionGiveAmount }),
+      ...(executionWantAmount === null ? {} : { executionWantAmount }),
       ...(restingPriceTicks === null ? {} : { restingPriceTicks }),
       ...(restingGive === null ? {} : { restingGiveAmount: restingGive }),
       ...(restingWant === null ? {} : { restingWantAmount: restingWant }),

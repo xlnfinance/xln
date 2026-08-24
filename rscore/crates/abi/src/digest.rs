@@ -28,3 +28,24 @@ pub fn compute_body_digest(
 pub fn encode_tuple(tuple: &crate::BodyTuple) -> Result<Vec<u8>, crate::AbiError> {
     crate::msgpack_encode::encode_body_tuple(tuple, &crate::AbiLimits::default())
 }
+
+/// One standalone value from its canonical bytes, and back. The wire is a
+/// contract with another language, so both directions are exposed for the
+/// vector tests that hold this ABI to bytes TypeScript wrote.
+pub fn decode_value(bytes: &[u8]) -> Result<crate::AbiValue, crate::AbiError> {
+    let limits = crate::AbiLimits::default();
+    let mut parser = crate::msgpack_parser::Parser::new(bytes, &limits);
+    let value = parser.read_standalone_value()?;
+    if parser.remaining() != 0 {
+        return Err(crate::AbiError::TrailingBytes(parser.remaining()));
+    }
+    Ok(value)
+}
+
+pub fn encode_value(value: &crate::AbiValue) -> Result<Vec<u8>, crate::AbiError> {
+    let tuple = crate::BodyTuple::from_array([value.clone()]);
+    let encoded = encode_tuple(&tuple)?;
+    // `encode_tuple` writes a one-element array header first; the value's own
+    // bytes are what follows it.
+    Ok(encoded[1..].to_vec())
+}

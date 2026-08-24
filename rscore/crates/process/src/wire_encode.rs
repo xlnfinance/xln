@@ -645,7 +645,10 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
             integer(*fill_ratio),
             optional_big(fill_numerator),
             optional_big(fill_denominator),
-            AbiValue::Bool(*cancel_remainder),
+            // 0/1, not a boolean: the decoder reads an integer here and so
+            // does TypeScript's encoder. A boolean produced a swap_resolve
+            // this ABI could not read back.
+            integer(u8::from(*cancel_remainder)),
             fee_token_id.map_or(AbiValue::Nil, integer),
             optional_big(fee_amount),
             optional_big(execution_give_amount),
