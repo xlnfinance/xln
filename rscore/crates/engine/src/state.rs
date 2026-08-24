@@ -369,6 +369,12 @@ impl AccountState {
         Ok(())
     }
 
+    pub(crate) fn remove_swap_offer(&mut self, offer_id: &str) -> Result<(), StateError> {
+        let key = text_key(offer_id)?;
+        self.swap_offers = self.swap_offers.removed(&key);
+        Ok(())
+    }
+
     pub(crate) fn put_htlc_lock(&mut self, lock: HtlcLock) -> Result<(), StateError> {
         self.locks = put_htlc_map(&self.locks, lock)?;
         Ok(())

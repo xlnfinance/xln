@@ -163,3 +163,48 @@ pub fn prepare_swap_order(
         effective_want,
     })
 }
+
+/// Parity target: `requantizeRemainingSwapBaseAtPriceForDimensions`
+/// (core/orderbook/types.ts). Lot-aligns the remaining base at the offer's
+/// committed price and recomputes the quote leg from it.
+pub fn requantize_remaining_base_at_price(
+    policy: &SwapMarketPolicy,
+    give_token_id: u32,
+    want_token_id: u32,
+    give_decimals: u32,
+    want_decimals: u32,
+    remaining_base_amount: &BigInt,
+    price_ticks: &BigInt,
+) -> Option<PreparedSwapOrder> {
+    let zero = BigInt::from(0);
+    if remaining_base_amount <= &zero || price_ticks <= &zero {
+        return None;
+    }
+    let side = policy.derive_side(give_token_id, want_token_id);
+    let (base_decimals, quote_decimals) = if side == 1 {
+        (give_decimals, want_decimals)
+    } else {
+        (want_decimals, give_decimals)
+    };
+    let base_quantum = lot_scale(base_decimals)
+        * exact_quote_lot_multiple(base_decimals, quote_decimals, price_ticks)?;
+    let quantized_base = (remaining_base_amount / &base_quantum) * &base_quantum;
+    if quantized_base <= zero {
+        return None;
+    }
+    let quantized_quote =
+        quote_amount_at_price(base_decimals, quote_decimals, &quantized_base, price_ticks);
+    if quantized_quote <= zero {
+        return None;
+    }
+    let (effective_give, effective_want) = if side == 1 {
+        (quantized_base, quantized_quote)
+    } else {
+        (quantized_quote, quantized_base)
+    };
+    Some(PreparedSwapOrder {
+        price_ticks: price_ticks.clone(),
+        effective_give,
+        effective_want,
+    })
+}

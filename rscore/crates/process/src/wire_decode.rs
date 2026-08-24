@@ -1,3 +1,4 @@
+use num_bigint::BigInt;
 use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountSeed, BatchJob};
 use xln_rscore_engine::{
@@ -326,6 +327,51 @@ fn decode_swap_offers(value: &AbiValue) -> Result<Vec<SwapOffer>, ProcessError> 
         .collect()
 }
 
+/// Optional bigints stay optional: absent is not zero for the resting-terms
+/// and exact-ratio checks.
+fn optional_bigint(value: &AbiValue, field: &'static str) -> Result<Option<BigInt>, ProcessError> {
+    match value {
+        AbiValue::Nil => Ok(None),
+        value => Ok(Some(bigint(value, field)?)),
+    }
+}
+
+fn optional_u32(value: &AbiValue, field: &'static str) -> Result<Option<u32>, ProcessError> {
+    match value {
+        AbiValue::Nil => Ok(None),
+        value => Ok(Some(bounded_u32(value, field)?)),
+    }
+}
+
+fn decode_swap_resolve(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 15, "swapResolve")?;
+    Ok(AccountTx::SwapResolve {
+        offer_id: text(&fields[1])?.into(),
+        fill_ratio: bounded_u32(&fields[2], "fillRatio")?,
+        fill_numerator: optional_bigint(&fields[3], "fillNumerator")?,
+        fill_denominator: optional_bigint(&fields[4], "fillDenominator")?,
+        cancel_remainder: match integer(&fields[5])? {
+            0 => false,
+            1 => true,
+            value => {
+                return Err(ProcessError::Tag {
+                    field: "cancelRemainder",
+                    value,
+                });
+            }
+        },
+        fee_token_id: optional_u32(&fields[6], "feeTokenId")?,
+        fee_amount: optional_bigint(&fields[7], "feeAmount")?,
+        execution_give_amount: optional_bigint(&fields[8], "executionGiveAmount")?,
+        execution_want_amount: optional_bigint(&fields[9], "executionWantAmount")?,
+        resting_price_ticks: optional_bigint(&fields[10], "restingPriceTicks")?,
+        resting_give_amount: optional_bigint(&fields[11], "restingGiveAmount")?,
+        resting_want_amount: optional_bigint(&fields[12], "restingWantAmount")?,
+        resting_quantized_give: optional_bigint(&fields[13], "restingQuantizedGive")?,
+        resting_quantized_want: optional_bigint(&fields[14], "restingQuantizedWant")?,
+    })
+}
+
 fn decode_swap_cancel_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
     let fields = exact(fields, 2, "swapCancelRequest")?;
     Ok(AccountTx::SwapCancelRequest {
@@ -446,6 +492,7 @@ fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         5 => decode_rebalance_policy(fields),
         6 => decode_swap_offer(fields),
         7 => decode_swap_cancel_request(fields),
+        8 => decode_swap_resolve(fields),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
 }

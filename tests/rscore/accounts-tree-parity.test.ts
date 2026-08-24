@@ -21,6 +21,10 @@ import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j'
 import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../core/account/j-claims/j-claim-codec';
 import { RscoreProcessClient, type RscoreWireValue } from '../../core/rscore/client';
 import { engineOutputProjection } from '../../core/rscore/shadow';
+import {
+  deriveExactSwapFillRatio,
+  exactFillRatioToUint16,
+} from '../../core/orderbook/swap-execution';
 import { shadowOutputRows, swapMarketPolicyWire } from '../../core/rscore/shadow-wire';
 
 const BINARY = join(import.meta.dir, '../../rscore/target/release/xln-rscore');
@@ -190,9 +194,21 @@ const SWAP_MAX_FEE = 100_000n;
 
 const makeTsSwapAccount = (index: number): AccountReplica => {
   const account = makeTsAccount(index);
+  // Both legs need capacity on both sides: the maker gives token 2, the
+  // resolving counterparty pays token 1.
   account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
-    [1, initialDelta()],
-    [2, { ...createDefaultDelta(2), collateral: 10n ** 19n }],
+    [1, {
+      ...createDefaultDelta(1),
+      collateral: 10n ** 12n,
+      leftCreditLimit: 10n ** 12n,
+      rightCreditLimit: 10n ** 12n,
+    }],
+    [2, {
+      ...createDefaultDelta(2),
+      collateral: 10n ** 19n,
+      leftCreditLimit: 10n ** 19n,
+      rightCreditLimit: 10n ** 19n,
+    }],
   ]);
   return account;
 };
@@ -234,6 +250,53 @@ const swapOfferJob = (index: number): RscoreWireValue[] => [
     SWAP_WANT.toString(),
     SWAP_MAX_FEE.toString(),
     (SWAP_WANT - SWAP_MAX_FEE).toString(),
+    null,
+  ],
+];
+
+const swapResolveTx = (
+  index: number,
+  fillRatio: number,
+  filledGive: bigint,
+  filledWant: bigint,
+  cancelRemainder: boolean,
+): AccountTx => ({
+  type: 'swap_resolve',
+  data: {
+    offerId: `parity-offer-${index}`,
+    fillRatio,
+    cancelRemainder,
+    executionGiveAmount: filledGive,
+    executionWantAmount: filledWant,
+  },
+});
+
+const swapResolveJob = (
+  index: number,
+  fillRatio: number,
+  filledGive: bigint,
+  filledWant: bigint,
+  cancelRemainder: boolean,
+): RscoreWireValue[] => [
+  index,
+  hexBytes(ACCOUNT_IDS[index]!),
+  0, // proposer = left: only the counterparty resolves
+  [0, 0, SWAP_J_HEIGHT + 12, SWAP_ACCOUNT_HEIGHT + 1, SWAP_J_HEIGHT],
+  [
+    8,
+    `parity-offer-${index}`,
+    fillRatio,
+    null,
+    null,
+    cancelRemainder ? 1 : 0,
+    null,
+    null,
+    filledGive.toString(),
+    filledWant.toString(),
+    null,
+    null,
+    null,
+    null,
     null,
   ],
 ];
@@ -379,6 +442,79 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       client.kill();
     }
   }, 30_000);
+
+  test.each([['full'], ['partial']] as const)(
+    'a same-j swap resolve settles both legs identically (%s fill)',
+    async (mode: string) => {
+      const accounts = ACCOUNT_IDS.slice(0, 3).map((_, index) => makeTsSwapAccount(index));
+      const client = new RscoreProcessClient(BINARY, {
+        engineGeneration: Buffer.alloc(8, 0xa0),
+        runtimeId: Buffer.alloc(20, 0x10),
+        sessionId: Buffer.alloc(16, 0x20),
+      });
+      try {
+        await client.hello(2, swapMarketPolicyWire());
+        await client.restore(0, accounts.map((account, index) => seedWire(index, account)));
+
+        // Wave 1: rest the offer on both sides.
+        await client.prepare(accounts.map((_, index) => swapOfferJob(index)));
+        await client.commit(client.requestIdBytes(client.lastRequestId));
+        for (const [index, account] of accounts.entries()) {
+          const result = await applyAccountTxToMutableReplica(
+            account, swapOfferTx(index), false, 0, SWAP_J_HEIGHT, false,
+          );
+          if (!result.ok) throw new Error(`TS_OFFER_REJECTED:${index}`);
+        }
+
+        // The resolve terms are read off the committed offer, exactly as a
+        // matcher would: the test never invents a second quantization.
+        const resting = accounts[0]!.state.swapOffers.get('parity-offer-0')!;
+        const quantizedGive = resting.quantizedGive!;
+        const quantizedWant = resting.quantizedWant!;
+        const filledGive = mode === 'full' ? quantizedGive : quantizedGive / 2n;
+        const filledWant = mode === 'full'
+          ? quantizedWant
+          : (filledGive * quantizedWant + quantizedGive - 1n) / quantizedGive;
+        const fillRatio = exactFillRatioToUint16(
+          deriveExactSwapFillRatio(quantizedGive, filledGive),
+        );
+
+        const prepared = (await client.prepare(accounts.map((_, index) =>
+          swapResolveJob(index, fillRatio, filledGive, filledWant, false)))) as unknown[];
+        const verdicts = (prepared[2] as unknown[])
+          .map(row => (((row as unknown[])[2] as unknown[])));
+        if (Number(verdicts[0]![0]) !== 0) throw new Error(JSON.stringify(verdicts[0]));
+        expect(verdicts.map(verdict => Number(verdict[0]))).toEqual(accounts.map(() => 0));
+
+        for (const [index, account] of accounts.entries()) {
+          const result = await applyAccountTxToMutableReplica(
+            account,
+            swapResolveTx(index, fillRatio, filledGive, filledWant, false),
+            true,
+            0,
+            SWAP_J_HEIGHT,
+            false,
+          );
+          if (!result.ok) throw new Error(`TS_RESOLVE_REJECTED:${index}:${result.rejection.message}`);
+          const engineRows = engineOutputProjection(
+            prepared[3] as unknown[],
+            ACCOUNT_IDS[index]!.slice(2),
+          );
+          expect(engineRows.map(row => row[2])).toEqual(shadowOutputRows(result));
+        }
+        // A full fill closes the row; a partial fill leaves a requantized one.
+        expect(accounts[0]!.state.swapOffers.get('parity-offer-0') === undefined)
+          .toBe(mode === 'full');
+
+        const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+        expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
+        await client.shutdown();
+      } finally {
+        client.kill();
+      }
+    },
+    30_000,
+  );
 
   test.each(LARGE_CLAIM_COUNTS.map(count => [count.toString()] as const))(
     'carries a uint64 J-claim counter losslessly (%s)',

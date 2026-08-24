@@ -41,6 +41,11 @@ pub enum AccountOutput {
     /// The maker asked to cancel; the resting row is untouched until the
     /// counterparty resolves.
     SwapCancelRequested { offer_id: String },
+    /// The resting row was closed by a resolve: filled, cancelled, or dusted.
+    SwapOfferCancelled {
+        offer_id: String,
+        account_id: String,
+    },
     HtlcError {
         lock_id: String,
         hashlock: String,

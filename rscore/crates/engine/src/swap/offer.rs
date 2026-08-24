@@ -88,6 +88,46 @@ impl SwapOffer {
         &self.give_amount
     }
 
+    pub const fn want_amount(&self) -> &BigInt {
+        &self.want_amount
+    }
+
+    pub const fn quantized_give(&self) -> &BigInt {
+        &self.quantized_give
+    }
+
+    pub const fn quantized_want(&self) -> &BigInt {
+        &self.quantized_want
+    }
+
+    pub const fn price_ticks(&self) -> &BigInt {
+        &self.price_ticks
+    }
+
+    pub const fn max_fee(&self) -> &BigInt {
+        &self.max_fee
+    }
+
+    pub const fn min_net_receive(&self) -> &BigInt {
+        &self.min_net_receive
+    }
+
+    pub const fn give_token_decimals(&self) -> u32 {
+        self.give_token_decimals
+    }
+
+    pub const fn want_token_decimals(&self) -> u32 {
+        self.want_token_decimals
+    }
+
+    pub const fn time_in_force(&self) -> Option<u8> {
+        self.time_in_force
+    }
+
+    pub const fn created_height(&self) -> u64 {
+        self.created_height
+    }
+
     /// The market this offer rests in, for the per-side ceiling. Same-j only,
     /// so the key is the directed token pair.
     pub fn market_key(&self) -> String {

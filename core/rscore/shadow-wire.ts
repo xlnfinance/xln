@@ -268,6 +268,7 @@ export const SHADOW_SUPPORTED_TX_TYPES = new Set([
   'rebalance_policy',
   'swap_offer',
   'swap_cancel_request',
+  'swap_resolve',
 ]);
 
 export type ShadowOutputRow =
@@ -307,6 +308,7 @@ export type ShadowOutputRow =
       timeInForce: number | null,
     ]
   | readonly [kind: 'cancelRequest', offerId: string]
+  | readonly [kind: 'cancelled', offerId: string, accountId: string]
   | readonly [
       kind: 'error',
       lockId: string,
@@ -375,6 +377,13 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
       offer.timeInForce === undefined ? null : offer.timeInForce,
     ]);
   }
+  if (result.outcome === 'swap_cancelled') {
+    rows.push([
+      'cancelled',
+      result.swapOfferCancelled.offerId,
+      result.swapOfferCancelled.accountId,
+    ]);
+  }
   if (result.outcome === 'swap_cancel_requested') {
     rows.push(['cancelRequest', result.swapOfferCancelRequested.offerId]);
   }
@@ -390,6 +399,10 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
   }
   return rows;
 };
+
+/** Absent stays absent on the wire: several resolve checks distinguish it from zero. */
+const optionalAmount = (value: bigint | undefined): string | null =>
+  value === undefined ? null : value.toString();
 
 /** Process-wire tx tuple, or null when the tx type is outside the profile. */
 export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
@@ -451,6 +464,24 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
       ];
     case 'swap_cancel_request':
       return [7, tx.data.offerId];
+    case 'swap_resolve':
+      return [
+        8,
+        tx.data.offerId,
+        tx.data.fillRatio,
+        optionalAmount(tx.data.fillNumerator),
+        optionalAmount(tx.data.fillDenominator),
+        tx.data.cancelRemainder ? 1 : 0,
+        tx.data.feeTokenId ?? null,
+        optionalAmount(tx.data.feeAmount),
+        optionalAmount(tx.data.executionGiveAmount),
+        optionalAmount(tx.data.executionWantAmount),
+        optionalAmount(tx.data.restingPriceTicks),
+        optionalAmount(tx.data.restingGiveAmount),
+        optionalAmount(tx.data.restingWantAmount),
+        optionalAmount(tx.data.restingQuantizedGive),
+        optionalAmount(tx.data.restingQuantizedWant),
+      ];
     case 'htlc_resolve':
       return tx.data.outcome === 'secret'
         ? [2, tx.data.lockId, 0, hexToWireBytes(tx.data.secret, 32, 'SHADOW_SECRET')]

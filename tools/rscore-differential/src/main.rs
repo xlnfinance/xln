@@ -331,6 +331,14 @@ fn output_value(output: &AccountOutput) -> AbiValue {
             AbiValue::Text("swapCancelRequested".into()),
             AbiValue::Text(offer_id.clone()),
         ]),
+        AccountOutput::SwapOfferCancelled {
+            offer_id,
+            account_id,
+        } => values_tuple(vec![
+            AbiValue::Text("swapOfferCancelled".into()),
+            AbiValue::Text(offer_id.clone()),
+            AbiValue::Text(account_id.clone()),
+        ]),
         AccountOutput::HtlcError {
             lock_id,
             hashlock,

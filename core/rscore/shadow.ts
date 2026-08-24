@@ -134,6 +134,14 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
     wireTuple(output, 'SHADOW_ENGINE_CANCEL_REQUEST', 2);
     return ['cancelRequest', wireText(output[1], 'SHADOW_ENGINE_CANCEL_REQUEST_ID')];
   }
+  if (tag === 5) {
+    wireTuple(output, 'SHADOW_ENGINE_CANCELLED', 3);
+    return [
+      'cancelled',
+      wireText(output[1], 'SHADOW_ENGINE_CANCELLED_ID'),
+      wireText(output[2], 'SHADOW_ENGINE_CANCELLED_ACCOUNT'),
+    ];
+  }
   throw new Error(`SHADOW_ENGINE_OUTPUT_TAG_UNSUPPORTED:${tag}`);
 };
 

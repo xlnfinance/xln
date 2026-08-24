@@ -128,6 +128,7 @@ pub(crate) const fn supported(tx: &AccountTx) -> bool {
             | AccountTx::RebalancePolicy { .. }
             | AccountTx::SwapOffer { .. }
             | AccountTx::SwapCancelRequest { .. }
+            | AccountTx::SwapResolve { .. }
     )
 }
 
@@ -141,6 +142,7 @@ pub(crate) const fn tx_tag(tx: &AccountTx) -> &'static str {
         AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::SwapOffer { .. } => "swap_offer",
         AccountTx::SwapCancelRequest { .. } => "swap_cancel_request",
+        AccountTx::SwapResolve { .. } => "swap_resolve",
         AccountTx::LendingFund { .. } => "lending_fund",
         AccountTx::LendingBorrowRequest { .. } => "borrow_request",
         AccountTx::LendingRepay { .. } => "repay",

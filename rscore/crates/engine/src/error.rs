@@ -118,6 +118,10 @@ pub enum ValidationRejection {
         offer_id: String,
     },
     SwapCancelNotMaker,
+    /// One of the swap_resolve checks; the code names the TypeScript check.
+    SwapResolve {
+        code: &'static str,
+    },
     SwapNetAuthorization {
         code: &'static str,
     },
@@ -186,6 +190,7 @@ impl ValidationRejection {
             ),
             Self::SwapOfferNotFound { offer_id } => format!("Offer {offer_id} not found"),
             Self::SwapCancelNotMaker => "Only maker can cancel swap offer".into(),
+            Self::SwapResolve { code } => (*code).to_owned(),
             Self::SwapNetAuthorization { code } => (*code).to_owned(),
             Self::Htlc(reason) => reason.message(),
         }

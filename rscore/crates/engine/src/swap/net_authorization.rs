@@ -53,6 +53,98 @@ pub fn assert_offer_authorization(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwapFillAuthorizationError {
+    Offer(SwapNetAuthorizationError),
+    FillGive,
+    FillWant,
+    MaxFeeExceeded,
+    MinReceiveNotMet,
+}
+
+impl SwapFillAuthorizationError {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Offer(error) => error.code(),
+            Self::FillGive => "SWAP_NET_AUTH_FILL_GIVE_INVALID",
+            Self::FillWant => "SWAP_NET_AUTH_FILL_WANT_INVALID",
+            Self::MaxFeeExceeded => "SWAP_NET_AUTH_MAX_FEE_EXCEEDED",
+            Self::MinReceiveNotMet => "SWAP_NET_AUTH_MIN_RECEIVE_NOT_MET",
+        }
+    }
+}
+
+/// Authority consumed by one fill. Nonterminal fills consume it on the give
+/// leg; a terminal fill (cancelRemainder) may instead consume the larger
+/// capped want progress, because price improvement can satisfy the full
+/// receive target while leaving give unspent.
+fn fill_authorization(
+    give_amount: &BigInt,
+    want_amount: &BigInt,
+    authorization: &SwapNetAuthorization,
+    filled_give: &BigInt,
+    filled_want: &BigInt,
+    closes_remainder: bool,
+) -> SwapNetAuthorization {
+    let mut numerator = filled_give.clone();
+    let mut denominator = give_amount.clone();
+    if closes_remainder {
+        let capped_want = if filled_want < want_amount {
+            filled_want.clone()
+        } else {
+            want_amount.clone()
+        };
+        if &capped_want * &denominator > &numerator * want_amount {
+            numerator = capped_want;
+            denominator = want_amount.clone();
+        }
+    }
+    SwapNetAuthorization {
+        max_fee: (&authorization.max_fee * &numerator) / &denominator,
+        min_net_receive: ceil_divide(&(&authorization.min_net_receive * &numerator), &denominator),
+    }
+}
+
+/// Parity target: `assertSwapNetAuthorization`.
+pub fn assert_fill_authorization(
+    give_amount: &BigInt,
+    want_amount: &BigInt,
+    authorization: &SwapNetAuthorization,
+    filled_give: &BigInt,
+    filled_want: &BigInt,
+    fee: &BigInt,
+    closes_remainder: bool,
+) -> Result<(), SwapFillAuthorizationError> {
+    assert_offer_authorization(give_amount, want_amount, authorization)
+        .map_err(SwapFillAuthorizationError::Offer)?;
+    let zero = BigInt::from(0);
+    if filled_give < &zero || filled_give > give_amount {
+        return Err(SwapFillAuthorizationError::FillGive);
+    }
+    if filled_want < &zero
+        || fee < &zero
+        || fee > filled_want
+        || (filled_want > &zero && fee >= filled_want)
+    {
+        return Err(SwapFillAuthorizationError::FillWant);
+    }
+    let allowed = fill_authorization(
+        give_amount,
+        want_amount,
+        authorization,
+        filled_give,
+        filled_want,
+        closes_remainder,
+    );
+    if fee > &allowed.max_fee {
+        return Err(SwapFillAuthorizationError::MaxFeeExceeded);
+    }
+    if filled_want - fee < allowed.min_net_receive {
+        return Err(SwapFillAuthorizationError::MinReceiveNotMet);
+    }
+    Ok(())
+}
+
 /// Authority for the resized offer: the original minus the pro-rata share of
 /// the give leg that quantization removed.
 pub fn requantize(

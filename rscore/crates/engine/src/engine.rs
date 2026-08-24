@@ -223,6 +223,46 @@ fn apply_to_candidate(
                 context.frame_j_height,
             )
         }
+        AccountTx::SwapResolve {
+            offer_id,
+            fill_ratio,
+            fill_numerator,
+            fill_denominator,
+            cancel_remainder,
+            fee_token_id,
+            fee_amount,
+            execution_give_amount,
+            execution_want_amount,
+            resting_price_ticks,
+            resting_give_amount,
+            resting_want_amount,
+            resting_quantized_give,
+            resting_quantized_want,
+        } => {
+            let context =
+                context.ok_or(TransitionError::ExecutionContextRequired("swap_resolve"))?;
+            crate::swap::apply_resolve(
+                candidate,
+                &context.swap_market,
+                crate::swap::SwapResolveTx {
+                    offer_id,
+                    fill_ratio: *fill_ratio,
+                    fill_numerator: fill_numerator.clone(),
+                    fill_denominator: fill_denominator.clone(),
+                    cancel_remainder: *cancel_remainder,
+                    fee_token_id: *fee_token_id,
+                    fee_amount: fee_amount.clone(),
+                    execution_give_amount: execution_give_amount.clone(),
+                    execution_want_amount: execution_want_amount.clone(),
+                    resting_price_ticks: resting_price_ticks.clone(),
+                    resting_give_amount: resting_give_amount.clone(),
+                    resting_want_amount: resting_want_amount.clone(),
+                    resting_quantized_give: resting_quantized_give.clone(),
+                    resting_quantized_want: resting_quantized_want.clone(),
+                },
+                proposer,
+            )
+        }
         AccountTx::SwapCancelRequest { offer_id } => {
             crate::swap::apply_cancel_request(candidate, offer_id, proposer)
         }
