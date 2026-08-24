@@ -89,7 +89,10 @@ impl StatefulBatchEngine {
         let mut next_cursor = None;
         for (account_id, replica) in self.accounts_after(cursor) {
             if rows.len() == limit {
-                next_cursor = Some(account_id);
+                // The cursor is the LAST INCLUDED id, because `accounts_after`
+                // resumes strictly after it. Returning the first excluded id
+                // here silently dropped exactly one account per page boundary.
+                next_cursor = rows.last().map(|row: &AccountSummaryRow| row.account_id);
                 break;
             }
             let state = replica.state();

@@ -96,9 +96,23 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
  * engines disagree or the mirror never covered an account. Returns silently
  * when shadow is off, so callers can invoke it unconditionally.
  */
-export const assertShadowParity = async (): Promise<void> => {
+/**
+ * Strict replay mode: verify the whole tree after every Runtime frame instead
+ * of only at the end, so a divergence names the exact frame that introduced it.
+ */
+export const shadowStrictEnabled = (): boolean =>
+  shadowEnabled() && process.env['XLN_RSCORE_SHADOW_STRICT'] === '1';
+
+export const assertShadowParity = async (label = 'end-of-run'): Promise<void> => {
   const active = mirror;
-  if (!active) return;
+  if (!active) {
+    // Strict mode asks for proof, so an unarmed mirror is itself a failure:
+    // silently verifying nothing is exactly the trap this mode exists to close.
+    if (shadowStrictEnabled() && pending === null) {
+      throw new Error(`RSCORE_SHADOW_PARITY_UNARMED:${label}`);
+    }
+    return;
+  }
   const reports = await active.selfReconcile();
   const failures: string[] = [];
   for (const [owner, report] of reports) {
@@ -113,8 +127,10 @@ export const assertShadowParity = async (): Promise<void> => {
     }
   }
   const summary = [...reports].map(([owner, report]) => `${owner.slice(0, 10)}:${report.matched}`).join(' ');
-  if (failures.length > 0) throw new Error(`RSCORE_SHADOW_PARITY_FAILED:${failures.join('|')}`);
-  console.error(`RSCORE_SHADOW_PARITY_OK matched=[${summary}]`);
+  if (failures.length > 0) {
+    throw new Error(`RSCORE_SHADOW_PARITY_FAILED:${label}:${failures.join('|')}`);
+  }
+  console.error(`RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}]`);
 };
 
 /** Test/shutdown access to the live mirror (null when disabled or not started). */

@@ -2,6 +2,7 @@
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
+import { assertShadowParity, shadowStrictEnabled } from '../../../../rscore/shadow-hook';
 import { configureCryptoPoolEntry } from '../../../../protocol/crypto/crypto-pool';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -302,7 +303,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
   let cumulativeUnits = 0;
   const frameProfile: ReplayFrameProfile[] = [];
   try {
-    if (offeredTps === 0 && !frameProfileEnabled) {
+    if (offeredTps === 0 && !frameProfileEnabled && !shadowStrictEnabled()) {
       // Max mode measures the canonical recovery primitive over its native WAL
       // tail shape. Re-entering the public replay boundary for every frame
       // repeatedly toggled replay metadata and revalidated Runtime config; it
@@ -315,6 +316,9 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
         const economicBefore = readEconomicCounters(env);
         const frameStartedAt = performance.now();
         await replayRecoveryFrameJournals(env, [frame], { verify: recoveryVerifyEnabled });
+        // Strict shadow: both engines have now consumed the same Runtime frame,
+        // so their account trees must be identical before the next one starts.
+        if (shadowStrictEnabled()) await assertShadowParity(`r-frame:${frame.height}`);
         if (frameProfileEnabled) {
           const economicAfter = readEconomicCounters(env);
           frameProfile.push({

@@ -145,3 +145,37 @@ fn upsert_creates_and_replaces_accounts_atomically() {
         Err(BatchError::EmptyBatch)
     ));
 }
+
+#[test]
+fn summary_paging_covers_every_account_across_page_boundaries() {
+    const ACCOUNTS: u32 = 37;
+    const LIMIT: usize = 8; // deliberately not a divisor of ACCOUNTS
+    let engine = StatefulBatchEngine::new(
+        generation(),
+        1,
+        (0..ACCOUNTS).map(seed).collect(),
+    )
+    .expect("batch engine");
+
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    let mut pages = 0;
+    loop {
+        let (rows, next) = engine.summary_page(cursor, LIMIT);
+        pages += 1;
+        assert!(pages <= 20, "paging did not terminate");
+        seen.extend(rows.iter().map(|row| row.account_id));
+        match next {
+            None => break,
+            Some(next_cursor) => cursor = Some(next_cursor),
+        }
+    }
+    // Every account exactly once, in ascending order — an off-by-one in the
+    // cursor drops the account sitting on a page boundary.
+    assert_eq!(seen.len(), ACCOUNTS as usize);
+    let mut sorted = seen.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), ACCOUNTS as usize);
+    assert_eq!(seen, sorted);
+}
