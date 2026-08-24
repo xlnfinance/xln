@@ -177,10 +177,10 @@ fn rejects_unknown_tags_and_wrong_fixed_width_identifiers() {
     skip_binding_and_identity(&mut parser);
     let op_position = parser.position() + 1;
     let mut unknown_op = encoded.clone();
-    unknown_op[op_position] = 15;
+    unknown_op[op_position] = 17;
     assert_eq!(
         decode_envelope(&unknown_op, BODY_ARITY),
-        Err(AbiError::UnknownOpTag(15))
+        Err(AbiError::UnknownOpTag(17))
     );
     assert_eq!(parser.read_unsigned(), Ok(5));
     let kind_position = parser.position() + 1;

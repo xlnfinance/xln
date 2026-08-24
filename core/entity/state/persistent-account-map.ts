@@ -274,6 +274,37 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
   }
 
   /**
+   * Accounts whose leaf moved between two committed versions of this map, in
+   * O(changed) rather than O(accounts): the persistent tree shares untouched
+   * subtrees by identity, so the physical node diff names exactly the leaves
+   * that were rewritten. Returns null when the two maps were built through
+   * different option objects (a cold rebuild), where no structural diff is
+   * meaningful and the caller must fall back to a full comparison.
+   */
+  changedAccountsSince(previous: PersistentEntityAccountMap): Readonly<{
+    changed: readonly (readonly [string, AccountReplica])[];
+    removed: readonly string[];
+  }> | null {
+    let changes;
+    try {
+      changes = this.#values.nodeChangesSince(previous.#values);
+    } catch {
+      return null;
+    }
+    const changed: (readonly [string, AccountReplica])[] = [];
+    const removed: string[] = [];
+    for (const record of changes.puts) {
+      if (record.kind === 'leaf') changed.push([record.key, record.value]);
+    }
+    for (const record of changes.dels) {
+      if (record.kind !== 'leaf') continue;
+      const key = ethers.hexlify(record.keyBytes);
+      if (!this.#values.has(key)) removed.push(key);
+    }
+    return { changed, removed };
+  }
+
+  /**
    * Full Patricia traversal. The accounts tree is rebuilt from the per-account
    * documents at hydration rather than persisted node-by-node, so this exists
    * for offline inspection (tree dumps, shape audits), not the frame path.

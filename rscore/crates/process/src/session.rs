@@ -139,6 +139,8 @@ impl ProcessSession {
             Command::Abort { prepare_request_id } => self.abort(prepare_request_id),
             Command::Shutdown => self.shutdown(),
             Command::UpsertAccounts { accounts } => self.upsert_accounts(accounts),
+            Command::UpdateAccountShells { shells } => self.update_account_shells(shells),
+            Command::RemoveAccounts { account_ids } => self.remove_accounts(&account_ids),
             Command::ReadCapacityBatch { requests } => self.capacity_batch(&requests),
             Command::ReadAccountSummaryPage {
                 cursor,
@@ -205,6 +207,40 @@ impl ProcessSession {
         }
         let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
         let accounts_root = engine.upsert_accounts(accounts)?;
+        Ok((
+            wire_encode::upserted(engine.revision(), accounts_root),
+            false,
+        ))
+    }
+
+    /// Shell-only refresh: the Entity commits mempool, frame bindings, hankos
+    /// and acks around a state no account transaction touches, and they move
+    /// between account frames. Without this the engine's leaf would be the
+    /// Entity's leaf only at the instant a frame committed.
+    fn update_account_shells(
+        &mut self,
+        shells: Vec<(xln_rscore_batch::AccountId, xln_rscore_engine::AccountEnvelope)>,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
+        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
+        let accounts_root = engine.update_shells(shells)?;
+        Ok((
+            wire_encode::upserted(engine.revision(), accounts_root),
+            false,
+        ))
+    }
+
+    fn remove_accounts(
+        &mut self,
+        account_ids: &[xln_rscore_batch::AccountId],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
+        let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
+        let accounts_root = engine.remove_accounts(account_ids)?;
         Ok((
             wire_encode::upserted(engine.revision(), accounts_root),
             false,

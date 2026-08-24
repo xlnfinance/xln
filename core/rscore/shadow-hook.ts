@@ -15,19 +15,27 @@ type MirrorLike = Readonly<{
   noteCommittedFrame(input: ShadowFrameInput): void;
   primeOwner(ownerEntityId: string, accounts: ReadonlyMap<string, AccountReplica>): Promise<void>;
   adoptOwner(ownerEntityId: string, accounts: ReadonlyMap<string, AccountReplica>): Promise<number>;
-  flushWave(): void;
+  flushWave(state?: RuntimeState): void;
   onGap(callback: (gap: ShadowGap) => void): void;
   onProgress(callback: () => void): void;
   settled(): Promise<void>;
   shutdown(): Promise<void>;
+  markShuttingDown(): void;
   stats(): ShadowStatsLike;
-  selfReconcile(): Promise<Map<string, ShadowReconciliation>>;
+  selfReconcile(state?: RuntimeState): Promise<Map<string, ShadowReconciliation>>;
 }>;
 
 let mirror: MirrorLike | null | undefined;
 let pending: ShadowFrameInput[] | null = null;
 /** Resolves once the mirror is armed (or has failed to arm). */
 let arming: Promise<void> | null = null;
+/**
+ * The Runtime whose boundaries feed the mirror. Kept so the parity gate can
+ * refresh replica shells before it reconciles: the authority mutates its
+ * replicas between account frames, and comparing against a shell the engine
+ * was never handed is a false divergence.
+ */
+let lastRuntimeState: RuntimeState | null = null;
 
 /**
  * Read once: this is consulted on every applied transition, and the env object
@@ -72,9 +80,15 @@ const attachMirrorReporting = (started: MirrorLike): void => {
   started.onGap(gap => { haltOnGap(gap, printStats); });
   printStats();
   started.onProgress(printStats);
-  process.once('beforeExit', printStats);
-  process.once('exit', printStats);
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, printStats);
+  const teardown = (): void => {
+    // The engine dies with its parent; a broken pipe on the way out is not a
+    // divergence and must not halt a strict run at its own shutdown.
+    started.markShuttingDown();
+    printStats();
+  };
+  process.once('beforeExit', teardown);
+  process.once('exit', teardown);
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, teardown);
 };
 
 const createMirror = async (): Promise<MirrorLike> => {
@@ -155,19 +169,45 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
   mirror.noteCommittedFrame(input);
 };
 
+/**
+ * Owners in the order the limited number of engine processes should be spent
+ * on them: the entity with the most accounts first (a hub, not one of the user
+ * entities sharing its Runtime), then by id so the choice is deterministic.
+ */
+const orderedOwners = (state: RuntimeState): { entityId: string; state: { accounts: ReadonlyMap<string, AccountReplica> } }[] =>
+  [...state.eReplicas.values()]
+    .filter(replica => entityAllowed(replica.entityId))
+    .sort((left, right) => (right.state.accounts.size - left.state.accounts.size)
+      || left.entityId.localeCompare(right.entityId));
+
 /** Prime the Rust process from the exact recovered Runtime checkpoint. */
 export const primeShadowFromRuntimeState = async (state: RuntimeState): Promise<void> => {
   if (!shadowEnabled()) return;
   if (mirror !== undefined || arming !== null) throw new Error('RSCORE_SHADOW_PRIME_TOO_LATE');
-  const owners = [...state.eReplicas.values()]
-    .filter(replica => entityAllowed(replica.entityId))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+  const owners = orderedOwners(state);
   if (owners.length === 0) throw new Error('RSCORE_SHADOW_PRIME_NO_OWNER');
   pending = [];
   arming = armMirror(async started => {
-    for (const replica of owners) await started.primeOwner(replica.entityId, replica.state.accounts);
+    for (const replica of owners) await primeOwnerWithinLimit(started, replica);
   });
   await arming;
+};
+
+/**
+ * One engine process per owner entity, so a Runtime holding more owners than
+ * the configured limit primes the ones it can. The rest are counted as unbound
+ * when their frames arrive — the same hole, reported in one place.
+ */
+const primeOwnerWithinLimit = async (
+  started: MirrorLike,
+  replica: { entityId: string; state: { accounts: ReadonlyMap<string, AccountReplica> } },
+): Promise<void> => {
+  try {
+    await started.primeOwner(replica.entityId, replica.state.accounts);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.startsWith('SHADOW_PRIME_OWNER_LIMIT')) throw error;
+  }
 };
 
 /**
@@ -178,15 +218,13 @@ export const primeShadowFromRuntimeState = async (state: RuntimeState): Promise<
  */
 export const adoptShadowRuntimeState = async (state: RuntimeState): Promise<void> => {
   if (!shadowEnabled()) return;
-  const owners = [...state.eReplicas.values()]
-    .filter(replica => entityAllowed(replica.entityId))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+  const owners = orderedOwners(state);
   if (owners.length === 0) return;
   if (mirror === undefined && arming === null) {
     // Nothing has been mirrored yet: this restored tree is the checkpoint.
     pending = [];
     arming = armMirror(async started => {
-      for (const replica of owners) await started.primeOwner(replica.entityId, replica.state.accounts);
+      for (const replica of owners) await primeOwnerWithinLimit(started, replica);
     });
     await arming;
     return;
@@ -212,6 +250,9 @@ export const adoptShadowRuntimeState = async (state: RuntimeState): Promise<void
  * Strict replay mode: verify the whole tree after every Runtime frame instead
  * of only at the end, so a divergence names the exact frame that introduced it.
  */
+const allowIneligible = (): boolean =>
+  process.env['XLN_RSCORE_SHADOW_ALLOW_INELIGIBLE'] === '1';
+
 export const shadowStrictEnabled = (): boolean =>
   shadowEnabled() && process.env['XLN_RSCORE_SHADOW_STRICT'] === '1';
 
@@ -224,8 +265,24 @@ export const shadowStrictEnabled = (): boolean =>
  * (for divergences) which section's root differs, which is everything needed
  * to reproduce the frame in isolation.
  */
+/**
+ * Kinds that stop the process where they happen: the two engines actually
+ * disagreed, the mirror lost frames, or it stopped mirroring. A coverage
+ * refusal (an account the engine cannot represent yet, a repair reseed) is
+ * counted instead — it is a known hole, it is already fatal at the end-of-run
+ * gate, and halting the bootstrap on it would make strict mode unusable
+ * exactly where divergences are most interesting.
+ */
+const HALT_KINDS: ReadonlySet<ShadowGap['kind']> = new Set([
+  'divergence',
+  'forest-divergence',
+  'dropped',
+  'disabled',
+]);
+
 const haltOnGap = (gap: ShadowGap, printStats: () => void): void => {
   if (!shadowStrictEnabled()) return;
+  if (!HALT_KINDS.has(gap.kind)) return;
   try {
     console.error(`RSCORE_SHADOW_HALT ${JSON.stringify(gap)}`);
     printStats();
@@ -236,7 +293,16 @@ const haltOnGap = (gap: ShadowGap, printStats: () => void): void => {
 /** Distinct exit code so a harness can tell a parity halt from a crash. */
 export const RSCORE_SHADOW_HALT_EXIT_CODE = 70;
 
-export const assertShadowParity = async (label = 'end-of-run'): Promise<void> => {
+export const assertShadowParity = async (
+  label = 'end-of-run',
+  /**
+   * The Runtime being proven. Passing it lets the gate refresh the replica
+   * shells first, so the comparison is against the authority as it stands and
+   * not against the shell the engine was handed at the last account frame.
+   */
+  state?: RuntimeState,
+): Promise<void> => {
+  if (state) lastRuntimeState = state;
   // The mirror boots asynchronously (dynamic import, Hello, Restore). Waiting
   // for it is mandatory: returning early while it is still arming turned
   // "nothing was verified yet" into a pass.
@@ -249,9 +315,9 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
     if (shadowEnabled()) throw new Error(`RSCORE_SHADOW_PARITY_UNARMED:${label}`);
     return;
   }
-  active.flushWave();
+  active.flushWave(lastRuntimeState ?? undefined);
   await active.settled();
-  const reports = await active.selfReconcile();
+  const reports = await active.selfReconcile(lastRuntimeState ?? undefined);
   const failures: string[] = [];
   // Coverage first: a run where the engine executed nothing, or where every
   // gap was papered over with a reseed, produces a clean reconciliation and
@@ -286,7 +352,11 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   if (stats.seededNeverExecuted > 0) {
     failures.push(`seededNeverExecuted=${stats.seededNeverExecuted}`);
   }
-  if (stats.skippedIneligible > 0) {
+  // Accounts the engine cannot represent yet are a real coverage hole, so the
+  // gate fails on them by default. A run that knowingly accepts a named hole
+  // (cross-J offers, until that lifecycle is ported) sets the allowance and the
+  // count is reported instead.
+  if (stats.skippedIneligible > 0 && !allowIneligible()) {
     failures.push(`skippedIneligible=${stats.skippedIneligible}:${JSON.stringify(stats.ineligibleReasons)}`);
   }
   if (Object.keys(stats.unsupportedTxTypes).length > 0) {
@@ -295,7 +365,13 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   if (reports.size === 0) failures.push('reconciledOwners=0');
   for (const [owner, report] of reports) {
     if (report.mismatched.length > 0) {
-      failures.push(`${owner}:mismatched=${JSON.stringify(report.mismatched).slice(0, 400)}`);
+      // The whole first mismatch, unclipped: every root pair is what says
+      // which section moved, and a truncated dump loses exactly that.
+      try {
+        console.error(`RSCORE_SHADOW_RECONCILE_MISMATCH ${JSON.stringify(report.mismatched[0])}`);
+      } catch { /* observer-only */ }
+      failures.push(`${owner}:mismatched=${report.mismatched.length}:${
+        JSON.stringify(report.mismatched[0]).slice(0, 400)}`);
     }
     if (report.missingInEngine.length > 0) {
       failures.push(`${owner}:missingInEngine=${report.missingInEngine.length}`);
@@ -320,7 +396,9 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   }
   console.error(
     `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
-    `reseeds=${stats.reseeds} forestChecks=${stats.forestChecks} ` +
+    `reseeds=${stats.reseeds} forestChecks=${stats.forestChecks}/${stats.entityRootChecks}entity ` +
+    `ineligible=${stats.skippedIneligible} ` +
+    `shells=${stats.shellRefreshes} ` +
     `executed=${JSON.stringify(stats.executedByType)} ${speedSummary(stats)}`,
   );
 };
@@ -330,8 +408,9 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
  * goes to the engine as one wave, so the engine's worker pool sees the whole
  * frame at once instead of one account at a time. No-op when shadow is off.
  */
-export const flushShadowWave = (): void => {
-  mirror?.flushWave();
+export const flushShadowWave = (state?: RuntimeState): void => {
+  if (state) lastRuntimeState = state;
+  mirror?.flushWave(state);
 };
 
 /** Test/shutdown access to the live mirror (null when disabled or not started). */
@@ -343,5 +422,6 @@ export const resetShadowForTests = async (): Promise<void> => {
   mirror = undefined;
   pending = null;
   arming = null;
+  lastRuntimeState = null;
   if (active) await active.shutdown();
 };

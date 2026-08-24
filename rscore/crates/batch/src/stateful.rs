@@ -109,6 +109,50 @@ impl StatefulBatchEngine {
         Ok(self.accounts.root_hash())
     }
 
+    /// Replace only the replica shells the authority re-projected, leaving the
+    /// financial state each account reached by execution untouched. A reseed
+    /// would overwrite that state with the authority's and hide a divergence;
+    /// this cannot, which is why the shell has its own operation.
+    pub fn update_shells(
+        &mut self,
+        shells: Vec<(AccountId, xln_rscore_engine::AccountEnvelope)>,
+    ) -> Result<[u8; 32], BatchError> {
+        if shells.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        let mut accounts = self.accounts.clone();
+        for (account_id, envelope) in shells {
+            let mut replica = accounts
+                .get(account_id.as_bytes())
+                .ok_or(BatchError::AccountNotFound {
+                    input_index: 0,
+                    account_id,
+                })?
+                .clone();
+            replica.set_envelope(envelope);
+            let root = leaf_root(account_id, &replica)?.1;
+            accounts = put_account(&accounts, account_id, replica, root)?;
+        }
+        self.accounts = accounts;
+        Ok(self.accounts.root_hash())
+    }
+
+    /// Drop accounts the caller stopped mirroring. Without it an account the
+    /// mirror abandons (state the engine cannot represent) would sit in the
+    /// tree at its last known leaf and make the whole accounts root disagree
+    /// forever.
+    pub fn remove_accounts(&mut self, account_ids: &[AccountId]) -> Result<[u8; 32], BatchError> {
+        if account_ids.is_empty() {
+            return Err(BatchError::EmptyBatch);
+        }
+        let mut accounts = self.accounts.clone();
+        for account_id in account_ids {
+            accounts = accounts.removed(account_id.as_bytes());
+        }
+        self.accounts = accounts;
+        Ok(self.accounts.root_hash())
+    }
+
     pub const fn revision(&self) -> u64 {
         self.revision
     }

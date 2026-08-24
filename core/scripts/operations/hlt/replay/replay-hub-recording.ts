@@ -324,7 +324,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
         await replayRecoveryFrameJournals(env, [frame], { verify: recoveryVerifyEnabled });
         // Strict shadow: both engines have now consumed the same Runtime frame,
         // so their account trees must be identical before the next one starts.
-        if (shadowStrictEnabled()) await assertShadowParity(`r-frame:${frame.height}`);
+        if (shadowStrictEnabled()) await assertShadowParity(`r-frame:${frame.height}`, env.state);
         if (frameProfileEnabled) {
           const economicAfter = readEconomicCounters(env);
           frameProfile.push({

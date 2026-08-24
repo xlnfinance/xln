@@ -96,9 +96,10 @@ export const applyPreparedRuntimeFrame = async (
       const reducerStartedAt = profile.enabled ? getPerfMs() : 0;
       const result = await deps.applyRuntimeInput(env, input);
       // Runtime frame boundary for the Rust shadow engine: hand it every
-      // Account frame this Runtime frame committed as one wave (no-op when
-      // shadow mode is off).
-      flushShadowWave();
+      // Account frame this Runtime frame committed as one wave, plus the
+      // replica shells the Entity re-projected, then compare the whole
+      // accounts tree against the Entity's own root (no-op when shadow is off).
+      flushShadowWave(env.state);
       // A Runtime frame may create/import both siblings together, never leave
       // a live half-cohort that would only be discovered after restart.
       assertCrossJLocalCohorts(env);

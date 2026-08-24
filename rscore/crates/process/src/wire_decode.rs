@@ -45,6 +45,12 @@ pub enum Command {
     UpsertAccounts {
         accounts: Vec<AccountSeed>,
     },
+    UpdateAccountShells {
+        shells: Vec<(AccountId, xln_rscore_engine::AccountEnvelope)>,
+    },
+    RemoveAccounts {
+        account_ids: Vec<AccountId>,
+    },
 }
 
 pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
@@ -57,6 +63,8 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::CommitRuntime => decode_commit(payload),
         OpTag::AbortRuntime => decode_abort(payload),
         OpTag::Shutdown => decode_shutdown(payload),
+        OpTag::UpdateAccountShells => decode_update_shells(payload),
+        OpTag::RemoveAccounts => decode_remove_accounts(payload),
         OpTag::ReadCapacityBatch => decode_capacity_batch(payload),
         OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
         OpTag::UpsertAccounts => decode_upsert_accounts(payload),
@@ -134,6 +142,31 @@ fn decode_upsert_accounts(fields: &[AbiValue]) -> Result<Command, ProcessError> 
             .iter()
             .map(decode_seed_account)
             .collect::<Result<_, _>>()?,
+    })
+}
+
+/// `[(accountId, envelope)]`: the authority re-projected these replica shells
+/// at a Runtime boundary. Financial state is untouched by this operation.
+fn decode_update_shells(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "updateAccountShells")?;
+    let mut shells = Vec::new();
+    for row in tuple(&fields[0])? {
+        let row = exact(tuple(row)?, 2, "accountShell")?;
+        let account_id = AccountId::from_bytes(fixed_bytes(&row[0], "accountId")?);
+        let envelope = crate::canonical::envelope(&row[1])?
+            .ok_or(ProcessError::Expected("accountShellEnvelope"))?;
+        shells.push((account_id, envelope));
+    }
+    Ok(Command::UpdateAccountShells { shells })
+}
+
+fn decode_remove_accounts(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "removeAccounts")?;
+    Ok(Command::RemoveAccounts {
+        account_ids: tuple(&fields[0])?
+            .iter()
+            .map(|row| Ok(AccountId::from_bytes(fixed_bytes(row, "accountId")?)))
+            .collect::<Result<_, ProcessError>>()?,
     })
 }
 

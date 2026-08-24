@@ -41,9 +41,9 @@ export const RSCORE_PROCESS_ABI_VERSION = 1;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=7")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=9")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'fd65ebd7d1c1602ede5c9146a4ae00e334950ad679ba085115520ed8284945d0',
+  'd81d43c6476cf6e2ae0feacff4bd20178a53ba55efc594f3f1d172070a080ab3',
   'hex',
 );
 
@@ -57,6 +57,8 @@ export const RSCORE_OP = {
   readAccountSummaryPage: 12,
   shutdown: 13,
   upsertAccounts: 14,
+  updateAccountShells: 15,
+  removeAccounts: 16,
 } as const;
 
 const MESSAGE_KIND_REQUEST = 0;
@@ -491,6 +493,20 @@ export class RscoreProcessClient {
   /** Create or replace accounts between waves; replies [revision, accountsRoot]. */
   async upsertAccounts(accounts: RscoreWireValue[]): Promise<unknown> {
     return this.request(RSCORE_OP.upsertAccounts, [accounts]);
+  }
+
+  /**
+   * Replace replica shells only. Financial state stays exactly where the
+   * engine's own execution left it, so this can never paper over a divergence
+   * the way a reseed would.
+   */
+  async updateAccountShells(shells: RscoreWireValue[]): Promise<unknown> {
+    return this.request(RSCORE_OP.updateAccountShells, [shells]);
+  }
+
+  /** Drop accounts the mirror stopped following, so the trees stay comparable. */
+  async removeAccounts(accountIds: RscoreWireValue[]): Promise<unknown> {
+    return this.request(RSCORE_OP.removeAccounts, [accountIds]);
   }
 
   async readCapacityBatch(rows: Array<[Uint8Array, number, number]>): Promise<unknown> {

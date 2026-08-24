@@ -93,6 +93,8 @@ pub enum OpTag {
     ReadAccountSummaryPage = 12,
     Shutdown = 13,
     UpsertAccounts = 14,
+    UpdateAccountShells = 15,
+    RemoveAccounts = 16,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -115,6 +117,8 @@ impl TryFrom<u64> for OpTag {
             12 => Ok(Self::ReadAccountSummaryPage),
             13 => Ok(Self::Shutdown),
             14 => Ok(Self::UpsertAccounts),
+            15 => Ok(Self::UpdateAccountShells),
+            16 => Ok(Self::RemoveAccounts),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

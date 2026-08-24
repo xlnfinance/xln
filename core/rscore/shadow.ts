@@ -17,13 +17,16 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createStructuredLogger } from '../support/logger';
-import { computeAccountStateRoot } from '../account/commitment/state-root';
-import { computeEntityAccountValueHash } from '../entity/consensus/state-root';
+import { computeAccountStateRoot, computeCanonicalMerkleRoot } from '../account/commitment/state-root';
+import { canonicalAccountTxForFrameHash } from '../account/consensus/frame/hash';
+import { computeEntityAccountValueHash, projectEntityAccountLeaf } from '../entity/consensus/state-root';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import { safeStringify } from '../protocol/serialization';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 import type { AccountReplica, AccountState, AccountTx } from '../types/account';
+import { PersistentEntityAccountMap } from '../entity/state/persistent-account-map';
+import type { RuntimeState } from '../runtime/types';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
   shadowOutputRows,
@@ -176,6 +179,27 @@ export const engineOutputProjection = (
     decodeEngineOutput(fields[3]),
   ]);
 
+/**
+ * The Entity's own mempool commitment, recomputed here so a shell divergence
+ * says whether the queued transactions differ or something else in the shell
+ * does.
+ */
+const tsMempoolRoot = (mempool: readonly AccountTx[]): string => (mempool.length === 0
+  ? EMPTY_RADIX_ROOT
+  : computeCanonicalMerkleRoot(
+    'entity.account-mempool',
+    mempool.map((tx, index) => [String(index), canonicalAccountTxForFrameHash(tx)] as const),
+    'integrity',
+  ).toLowerCase());
+
+/**
+ * Diagnostic: re-send every mirrored shell at every boundary instead of only
+ * the ones whose leaf moved. Distinguishes a stale-shell bookkeeping bug from
+ * a real projection divergence.
+ */
+const SHELL_REFRESH_ALL = typeof process !== 'undefined'
+  && process.env?.['XLN_RSCORE_SHADOW_SHELL_ALL'] === '1';
+
 /** Root of an empty radix map on both sides. */
 const EMPTY_RADIX_ROOT = `0x${'00'.repeat(32)}`;
 
@@ -223,13 +247,18 @@ const redactSecrets = <T>(value: T): T => {
  * = the Entity account leaf digest (the replica shell plus the financial
  * root), radix 16. Same data model as PersistentEntityAccountMap.
  */
-const emptyForest = (): PersistentRadixValueMap<string, AccountReplica> =>
-  PersistentRadixValueMap.empty<string, AccountReplica>({
+const emptyForest = (): PersistentRadixValueMap<string, string> =>
+  PersistentRadixValueMap.empty<string, string>({
     radix: 16,
     ownKey: (key: string): string => key,
     keyBytes: (key: string): Uint8Array => hexToWireBytes(key, 32, 'SHADOW_FOREST_KEY'),
-    valueHash: (account: AccountReplica): string => computeEntityAccountValueHash(account),
-    ownValue: (account: AccountReplica): AccountReplica => account,
+    // The leaf is the digest itself, taken at the instant the frame was noted.
+    // Holding the live replica instead made the tree re-hash whatever the
+    // authority looked like at root time: the entity mutates its replicas in
+    // place, so a mempool append between the note and the flush moved a leaf
+    // the engine had never been told about.
+    valueHash: (digest: string): string => digest,
+    ownValue: (digest: string): string => digest,
   });
 
 const MAX_QUEUE = 50_000;
@@ -376,6 +405,27 @@ type QueueEntry = Readonly<{
   ownerKey: string;
   expectedForestRoot: string;
   frameCount: number;
+  /**
+   * 'entity' when the expectation is the Entity's own accounts root — the
+   * strongest form, available only while the mirror holds every account of
+   * that owner. 'forest' when it is the mirror's tree over the accounts it
+   * does hold.
+   */
+  source: 'entity' | 'forest';
+}> | Readonly<{
+  /**
+   * Replica shells the Entity re-projected since the last boundary. Shell-only
+   * by construction: it can never overwrite the financial state the engine
+   * reached by executing, so it cannot hide a divergence.
+   */
+  kind: 'shells';
+  ownerKey: string;
+  rows: RscoreWireValue[][];
+}> | Readonly<{
+  /** Accounts the mirror stopped following; the engine drops their leaves. */
+  kind: 'remove';
+  ownerKey: string;
+  accountKeys: readonly string[];
 }> | Readonly<{
   kind: 'reseed';
   ownerKey: string;
@@ -393,6 +443,8 @@ export type ShadowReconciliationMismatch = Readonly<{
   entityAccountLeaf: Readonly<{ typescript: string; rust: string }>;
   /** Queued transactions on each side, when the shells disagree. */
   mempool: Readonly<{ typescript: string; rust: string }>;
+  /** Root over those transactions: isolates a shell gap to the mempool. */
+  mempoolRoot: Readonly<{ typescript: string; rust: string }>;
   /** Which section moved, when the full root differs. */
   deltasRoot: Readonly<{ typescript: string; rust: string }>;
   locksRoot: Readonly<{ typescript: string; rust: string }>;
@@ -419,7 +471,7 @@ export type ShadowReconciliation = Readonly<{
  */
 export type ShadowGap = Readonly<{
   kind: 'divergence' | 'forest-divergence' | 'reseed-repair' | 'ineligible'
-    | 'dropped' | 'unbound-owner' | 'disabled';
+    | 'dropped' | 'disabled';
   owner: string;
   account: string;
   frameHeight: number;
@@ -469,6 +521,10 @@ export type ShadowStats = {
   /** Transitions the engine applied, by tx type. Rejections are counted apart. */
   executedByType: Record<string, number>;
   rejectedByType: Record<string, number>;
+  /** Replica shells re-sent because the Entity leaf moved outside a frame. */
+  shellRefreshes: number;
+  /** Whole-tree checkpoints taken against the Entity's own accounts root. */
+  entityRootChecks: number;
   /** Whole-tree diffs run mid-flight, and how many found a gap. */
   reconciliations: number;
   reconcileFailures: number;
@@ -506,7 +562,9 @@ export class RscoreShadowMirror {
    */
   readonly #mirrored = new Map<string, Map<string, AccountReplica>>();
   /** Incremental TypeScript forest per owner: the engine's tree, computed here. */
-  readonly #forests = new Map<string, PersistentRadixValueMap<string, AccountReplica>>();
+  readonly #forests = new Map<string, PersistentRadixValueMap<string, string>>();
+  /** Last committed account map seen per owner, for the O(changed) shell diff. */
+  readonly #lastAccountsMap = new Map<string, PersistentEntityAccountMap>();
   readonly #needsReseed = new Set<string>();
   /** Scoped keys seeded from TypeScript that have not executed a wave yet. */
   readonly #seeded = new Set<string>();
@@ -523,6 +581,7 @@ export class RscoreShadowMirror {
    */
   readonly #pendingWave = new Map<string, PendingWaveFrame[]>();
   #draining = false;
+  #shuttingDown = false;
   /** Changes on every observed committed frame, including skipped frames. */
   #noteEpoch = 0;
   #disabledReason: string | null = null;
@@ -545,6 +604,8 @@ export class RscoreShadowMirror {
     seededNeverExecuted: 0,
     executedByType: {},
     rejectedByType: {},
+    shellRefreshes: 0,
+    entityRootChecks: 0,
     reconciliations: 0,
     reconcileFailures: 0,
     tsApplyUs: 0,
@@ -614,12 +675,12 @@ export class RscoreShadowMirror {
     }
     const ordered = [...accounts.entries()]
       .sort(([left], [right]) => left.localeCompare(right));
-    const seeds = this.#checkpointSeeds(ownerEntityId, ordered);
+    const { seeds, primed } = this.#checkpointSeeds(ownerKey, ownerEntityId, ordered);
     const { client, restored } = await this.#restoreCheckpoint(seeds);
     this.#clients.set(ownerKey, client);
     this.#noteRevision(ownerKey, restored);
     this.#mirrored.set(ownerKey, new Map());
-    for (const [counterpartyId, account] of ordered) {
+    for (const [counterpartyId, account] of primed) {
       const accountKey = Buffer.from(
         hexToWireBytes(counterpartyId, 32, 'SHADOW_PRIME_ACCOUNT_ID'),
       ).toString('hex');
@@ -709,6 +770,7 @@ export class RscoreShadowMirror {
       deltasRoot: string;
       locksRoot: string;
       accountStateRoot: string;
+      mempoolRoot: string;
       entityAccountLeaf: string;
       mempoolLength: number;
     }>();
@@ -736,6 +798,7 @@ export class RscoreShadowMirror {
           deltasRoot: `0x${Buffer.from(wireBytes(fields[4], 'SHADOW_SUMMARY_DELTAS_ROOT', 32)).toString('hex')}`,
           locksRoot: `0x${Buffer.from(wireBytes(fields[5], 'SHADOW_SUMMARY_LOCKS_ROOT', 32)).toString('hex')}`,
           accountStateRoot: `0x${Buffer.from(wireBytes(fields[6], 'SHADOW_SUMMARY_STATE_ROOT', 32)).toString('hex')}`,
+          mempoolRoot: `0x${Buffer.from(wireBytes(fields[10], 'SHADOW_SUMMARY_MEMPOOL_ROOT', 32)).toString('hex')}`,
           entityAccountLeaf: `0x${Buffer.from(wireBytes(fields[9], 'SHADOW_SUMMARY_ENTITY_LEAF', 32)).toString('hex')}`,
           mempoolLength: wireInteger(fields[11], 'SHADOW_SUMMARY_MEMPOOL_LEN'),
         });
@@ -767,14 +830,45 @@ export class RscoreShadowMirror {
       // And the whole replica: the leaf the Entity itself puts in its accounts
       // map, which additionally commits the mempool, the frame bindings, the
       // hankos and the acks.
-      const entityAccountLeaf = computeEntityAccountValueHash(account).toLowerCase();
+      // The digest the mirror recorded when it last handed this account's
+      // shell to the engine — the same instant on both sides. Recomputing it
+      // live compares the engine against an authority that kept moving after
+      // the handover (a queued tx, an ack attached post-commit) and reports a
+      // divergence that the next boundary silently repairs.
+      const entityAccountLeaf = (this.#forests.get(ownerKey)?.get(key)
+        ?? computeEntityAccountValueHash(account)).toLowerCase();
       const ownerSide = account.state.leftEntity.trim().toLowerCase() === ownerKey ? 'left' : 'right';
+      // The mempool counts are reported for context but not matched on: they
+      // are read from the live replica, which keeps queueing work after the
+      // shell was handed over. The leaf digest above is the snapshot both
+      // sides agreed to.
       if (engine.accountStateRoot === accountStateRoot
         && engine.entityAccountLeaf === entityAccountLeaf
-        && engine.mempoolLength === account.mempool.length
         && engine.ownerSide === ownerSide) {
         matched.push(key);
         continue;
+      }
+      if (engine.accountStateRoot === accountStateRoot) {
+        // Financial state agrees and the leaf does not: the shell is what
+        // differs, so name the fields the authority projected into it.
+        try {
+          if (DIFF_DIR !== null) {
+            mkdirSync(DIFF_DIR, { recursive: true });
+            writeFileSync(
+              join(DIFF_DIR, `shell-${key.slice(2, 14)}.json`),
+              safeStringify(projectEntityAccountLeaf(account), 2),
+              { mode: 0o600 },
+            );
+          }
+        } catch { /* observer-only */ }
+        try {
+          console.error(`RSCORE_SHADOW_SHELL_MISMATCH ${key} ${safeStringify(
+            Object.fromEntries(Object.entries(projectEntityAccountLeaf(account))
+              .map(([field, value]) => [field, typeof value === 'object' && value !== null
+                ? safeStringify(value).slice(0, 200)
+                : `${typeof value}:${String(value)}`])),
+          ).slice(0, 3000)}`);
+        } catch { /* observer-only */ }
       }
       mismatched.push({
         accountId: key,
@@ -784,16 +878,28 @@ export class RscoreShadowMirror {
           typescript: String(account.mempool.length),
           rust: String(engine.mempoolLength),
         },
+        mempoolRoot: {
+          typescript: tsMempoolRoot(account.mempool),
+          rust: engine.mempoolRoot,
+        },
         deltasRoot: { typescript: deltasRoot, rust: engine.deltasRoot },
         locksRoot: { typescript: locksRoot, rust: engine.locksRoot },
         ownerSide: { typescript: ownerSide, rust: engine.ownerSide },
       });
     }
-    // Same data model as the engine's tree: key = 32-byte counterparty id,
-    // leaf = payment-profile account state root.
-    let forest = emptyForest();
-    for (const [counterpartyId, account] of accounts) {
-      forest = forest.updated(counterpartyId.trim().toLowerCase(), account);
+    // The mirror's own tree — the digests recorded at the instants they were
+    // handed over — rather than one rebuilt from replicas that kept moving.
+    // Same data model as the engine's: key = 32-byte counterparty id, leaf =
+    // Entity account leaf digest, radix 16.
+    let forest = this.#forests.get(ownerKey);
+    if (forest === undefined) {
+      forest = emptyForest();
+      for (const [counterpartyId, account] of accounts) {
+        forest = forest.updated(
+          counterpartyId.trim().toLowerCase(),
+          computeEntityAccountValueHash(account),
+        );
+      }
     }
     const typescriptForest = forest.rootHash().toLowerCase();
     const rustForest = (this.#lastCommittedRoot.get(ownerKey) ?? '').toLowerCase();
@@ -814,8 +920,9 @@ export class RscoreShadowMirror {
    * Runtime frame boundary: hand every account frame committed since the last
    * boundary to the engine as one wave.
    */
-  flushWave(): void {
+  flushWave(state?: RuntimeState): void {
     if (this.#disabledReason) return;
+    const queuedByOwner = new Map<string, number>();
     for (const [ownerKey, pending] of this.#pendingWave) {
       let queued = 0;
       for (const subwave of packRuntimeSubwaves(pending)) {
@@ -823,18 +930,91 @@ export class RscoreShadowMirror {
         this.#push({ kind: 'wave', ownerKey, frames: subwave.frames, jobs: subwave.jobs });
         queued += subwave.frames.length;
       }
-      if (queued === 0) continue;
+      queuedByOwner.set(ownerKey, queued);
+    }
+    this.#pendingWave.clear();
+    for (const ownerKey of this.#boundOwners) {
+      // The Entity commits mempool, frame bindings, hankos and acks around a
+      // state no account transaction touches, and they move between account
+      // frames. Refresh them here so the engine's tree is the Entity's tree at
+      // this boundary, not only at the instant a frame committed.
+      const owned = state === undefined ? undefined : this.#ownerAccounts(state, ownerKey);
+      const complete = owned === undefined ? false : this.#refreshShells(ownerKey, owned);
       const forest = this.#forests.get(ownerKey);
-      if (forest) {
+      const frameCount = queuedByOwner.get(ownerKey) ?? 0;
+      if (complete && owned) {
         this.#push({
           kind: 'verify',
           ownerKey,
-          expectedForestRoot: forest.rootHash().trim().toLowerCase(),
-          frameCount: queued,
+          expectedForestRoot: owned.rootHash().trim().toLowerCase(),
+          frameCount,
+          source: 'entity',
         });
+        continue;
       }
+      if (frameCount === 0 || !forest) continue;
+      this.#push({
+        kind: 'verify',
+        ownerKey,
+        expectedForestRoot: forest.rootHash().trim().toLowerCase(),
+        frameCount,
+        source: 'forest',
+      });
     }
-    this.#pendingWave.clear();
+  }
+
+  /** The owner's committed account map, when this Runtime holds that entity. */
+  #ownerAccounts(state: RuntimeState, ownerKey: string): PersistentEntityAccountMap | undefined {
+    for (const replica of state.eReplicas.values()) {
+      if (replica.entityId.trim().toLowerCase() !== ownerKey) continue;
+      const accounts = replica.state.accounts;
+      return accounts instanceof PersistentEntityAccountMap ? accounts : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Queue a shell update for every account whose Entity leaf moved since the
+   * last boundary, and answer whether the mirror now holds the owner's whole
+   * account map — the condition for comparing against the Entity's own root
+   * instead of the mirror's partial tree.
+   */
+  #refreshShells(ownerKey: string, accounts: PersistentEntityAccountMap): boolean {
+    const previous = this.#lastAccountsMap.get(ownerKey);
+    this.#lastAccountsMap.set(ownerKey, accounts);
+    // O(changed): the persistent tree shares untouched subtrees by identity.
+    // A cold rebuild breaks the diff, and then the whole map is rescanned.
+    const changes = previous === undefined || SHELL_REFRESH_ALL
+      ? null
+      : accounts.changedAccountsSince(previous);
+    const candidates: Iterable<readonly [string, AccountReplica]> = changes === null
+      ? accounts.entries()
+      : changes.changed;
+    const rows: RscoreWireValue[][] = [];
+    let forest = this.#forests.get(ownerKey) ?? emptyForest();
+    let mirrored = 0;
+    for (const [counterpartyId, account] of candidates) {
+      const key = counterpartyId.trim().toLowerCase();
+      const accountKey = key.replace(/^0x/, '');
+      if (!this.#registered.has(`${ownerKey}/${accountKey}`)) continue;
+      const digest = computeEntityAccountValueHash(account).trim().toLowerCase();
+      if (forest.get(key) === digest && !SHELL_REFRESH_ALL) continue;
+      rows.push([
+        hexToWireBytes(counterpartyId, 32, 'SHADOW_SHELL_ACCOUNT_ID'),
+        accountEnvelopeWire(account),
+      ]);
+      forest = forest.updated(key, digest);
+    }
+    this.#forests.set(ownerKey, forest);
+    if (rows.length > 0) {
+      this.#stats.shellRefreshes += rows.length;
+      this.#push({ kind: 'shells', ownerKey, rows });
+    }
+    for (const counterpartyId of accounts.keys()) {
+      const accountKey = counterpartyId.trim().toLowerCase().replace(/^0x/, '');
+      if (this.#registered.has(`${ownerKey}/${accountKey}`)) mirrored += 1;
+    }
+    return mirrored === accounts.size && accounts.size > 0;
   }
 
   /** Resolves when the queue has fully drained — test/shutdown ordering only. */
@@ -852,20 +1032,13 @@ export class RscoreShadowMirror {
     // owns exactly one account map.
     const ownerKey = input.ownerEntityId.trim().toLowerCase();
     if (!this.#tryBindOwner(ownerKey)) {
+      // Counted, not a live gap: the owner limit is the operator's scoping
+      // decision (one engine process per owner entity, default one owner), and
+      // a lane holding hundreds of user entities would otherwise halt on its
+      // second entity. Every process that is asked to PROVE parity still fails
+      // its end-of-run gate while this is non-zero.
       this.#stats.skippedUnboundOwner += 1;
-      // Reported once per owner: every frame of an unbound owner is invisible
-      // to the engine, which is a coverage hole a strict run must not survive.
-      if (!this.#reportedUnbound.has(ownerKey)) {
-        this.#reportedUnbound.add(ownerKey);
-        this.#reportGap({
-          kind: 'unbound-owner',
-          owner: ownerKey,
-          account: '',
-          frameHeight: input.frameHeight,
-          detail: `owner-limit:${this.#maxOwners}`,
-          txTypes: input.accountTxs.map(tx => tx.type),
-        });
-      }
+      this.#reportedUnbound.add(ownerKey);
       return;
     }
     const accountIdBytes = hexToWireBytes(input.counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID');
@@ -911,10 +1084,12 @@ export class RscoreShadowMirror {
           if (process.env['XLN_RSCORE_SHADOW_TRACE'] === '1') {
             try { console.error(`SHADOW_TRACE ineligible ${accountKey.slice(0, 8)} h${input.frameHeight} ${reason}`); } catch { /* observer-only */ }
           }
-          // Live out-of-profile state: cannot seed. Forget the account; a
-          // later clean snapshot re-registers it.
-          this.#registered.delete(scopedKey);
-          this.#needsReseed.delete(scopedKey);
+          // Live out-of-profile state: cannot seed. Forget the account
+          // everywhere — including the engine's tree, whose leaf would
+          // otherwise stay frozen at the last shell it was told about and
+          // hold the whole accounts root apart. A later clean snapshot
+          // re-registers it.
+          this.#forget(ownerKey, accountKey, input.counterpartyEntityId);
           this.#stats.skippedIneligible += 1;
           this.#stats.ineligibleReasons[reason] = (this.#stats.ineligibleReasons[reason] ?? 0) + 1;
           this.#reportGap({
@@ -1029,7 +1204,16 @@ export class RscoreShadowMirror {
     }
   }
 
+  /**
+   * Teardown in progress: transport failures from here on are the engine being
+   * torn down with the process, not a parity signal.
+   */
+  markShuttingDown(): void {
+    this.#shuttingDown = true;
+  }
+
   async shutdown(): Promise<void> {
+    this.#shuttingDown = true;
     this.flushWave();
     await this.#idle;
     for (const client of this.#clients.values()) {
@@ -1077,6 +1261,18 @@ export class RscoreShadowMirror {
         const client = await this.#ensureClient(entry.ownerKey);
         if (entry.kind === 'verify') {
           this.#verifyForest(entry);
+          continue;
+        }
+        if (entry.kind === 'remove') {
+          const removed = (await client.removeAccounts(
+            entry.accountKeys.map(key => hexToWireBytes(`0x${key}`, 32, 'SHADOW_REMOVE_ACCOUNT_ID')),
+          )) as unknown[];
+          this.#noteRevision(entry.ownerKey, removed);
+          continue;
+        }
+        if (entry.kind === 'shells') {
+          const updated = (await client.updateAccountShells(entry.rows)) as unknown[];
+          this.#noteRevision(entry.ownerKey, updated);
           continue;
         }
         if (entry.kind === 'reseed') {
@@ -1222,7 +1418,13 @@ export class RscoreShadowMirror {
         ? `${lastEntry.kind}:${safeStringify(
             lastEntry.kind === 'wave'
               ? lastEntry.jobs
-              : lastEntry.kind === 'reseed' ? lastEntry.seed : lastEntry.expectedForestRoot,
+              : lastEntry.kind === 'reseed'
+                ? lastEntry.seed
+                : lastEntry.kind === 'shells'
+                  ? lastEntry.rows.length
+                  : lastEntry.kind === 'remove'
+                    ? lastEntry.accountKeys
+                    : lastEntry.expectedForestRoot,
           ).slice(0, 600)}`
         : 'idle';
       this.#disable(`drain:${error instanceof Error ? error.message : String(error)}:${context}`);
@@ -1300,12 +1502,14 @@ export class RscoreShadowMirror {
   #verifyForest(entry: Extract<QueueEntry, { kind: 'verify' }>): void {
     const rust = (this.#lastCommittedRoot.get(entry.ownerKey) ?? '').trim().toLowerCase();
     this.#stats.forestChecks += 1;
+    if (entry.source === 'entity') this.#stats.entityRootChecks += 1;
     if (rust === entry.expectedForestRoot) return;
     this.#stats.forestMismatches += 1;
     try {
       shadowLog.error('shadow.forest-divergence', {
         owner: entry.ownerKey,
         frames: entry.frameCount,
+        source: entry.source,
         typescript: entry.expectedForestRoot,
         rust,
       });
@@ -1315,7 +1519,7 @@ export class RscoreShadowMirror {
       owner: entry.ownerKey,
       account: '',
       frameHeight: entry.frameCount,
-      detail: `forest:ts=${entry.expectedForestRoot}:rust=${rust}`,
+      detail: `${entry.source}-root:ts=${entry.expectedForestRoot}:rust=${rust}`,
       txTypes: [],
     });
   }
@@ -1435,7 +1639,24 @@ export class RscoreShadowMirror {
     // one path copy per frame instead of an O(accounts) rebuild, so the whole
     // tree can be compared at every Runtime boundary rather than at the end.
     const forest = this.#forests.get(ownerKey) ?? emptyForest();
-    this.#forests.set(ownerKey, forest.updated(key, account));
+    this.#forests.set(ownerKey, forest.updated(key, computeEntityAccountValueHash(account)));
+  }
+
+  /**
+   * Stop following an account: drop it from the registry, the live map, the
+   * TypeScript forest and the engine's tree, so the two trees keep describing
+   * the same account set.
+   */
+  #forget(ownerKey: string, accountKey: string, counterpartyEntityId: string): void {
+    const scopedKey = `${ownerKey}/${accountKey}`;
+    const key = counterpartyEntityId.trim().toLowerCase();
+    this.#registered.delete(scopedKey);
+    this.#needsReseed.delete(scopedKey);
+    this.#seeded.delete(scopedKey);
+    this.#mirrored.get(ownerKey)?.delete(key);
+    const forest = this.#forests.get(ownerKey);
+    if (forest?.get(key) !== undefined) this.#forests.set(ownerKey, forest.removed(key));
+    this.#push({ kind: 'remove', ownerKey, accountKeys: [accountKey] });
   }
 
   #tryBindOwner(ownerKey: string): boolean {
@@ -1445,20 +1666,43 @@ export class RscoreShadowMirror {
     return true;
   }
 
+  /**
+   * Checkpoint seeds, minus the accounts the engine cannot represent yet. A
+   * refused account is a counted coverage hole (and fatal at the gate), not a
+   * reason to leave the whole checkpoint unmirrored: one live cross-J offer
+   * used to take the entire replay prime down.
+   */
   #checkpointSeeds(
+    ownerKey: string,
     ownerEntityId: string,
     accounts: readonly (readonly [string, AccountReplica])[],
-  ): RscoreWireValue[][] {
-    return accounts.map(([counterpartyId, account]) => {
+  ): { seeds: RscoreWireValue[][]; primed: (readonly [string, AccountReplica])[] } {
+    const seeds: RscoreWireValue[][] = [];
+    const primed: (readonly [string, AccountReplica])[] = [];
+    for (const [counterpartyId, account] of accounts) {
       const reason = shadowIneligibilityReason(account.state);
-      if (reason !== null) throw new Error(`SHADOW_PRIME_INELIGIBLE:${counterpartyId}:${reason}`);
-      return accountSeedWire(
+      if (reason !== null) {
+        this.#stats.skippedIneligible += 1;
+        this.#stats.ineligibleReasons[reason] = (this.#stats.ineligibleReasons[reason] ?? 0) + 1;
+        this.#reportGap({
+          kind: 'ineligible',
+          owner: ownerKey,
+          account: counterpartyId.trim().toLowerCase().replace(/^0x/, ''),
+          frameHeight: account.currentHeight ?? 0,
+          detail: `prime:${reason}`,
+          txTypes: [],
+        });
+        continue;
+      }
+      seeds.push(accountSeedWire(
         ownerEntityId,
         counterpartyId,
         account.state,
         accountEnvelopeWire(account),
-      );
-    });
+      ));
+      primed.push([counterpartyId, account]);
+    }
+    return { seeds, primed };
   }
 
   /**
@@ -1495,9 +1739,12 @@ export class RscoreShadowMirror {
    * fed. Used as an end-of-run gate: identical trees mean the two engines are
    * interchangeable, and any gap names the exact account.
    */
-  async selfReconcile(): Promise<Map<string, ShadowReconciliation>> {
+  async selfReconcile(state?: RuntimeState): Promise<Map<string, ShadowReconciliation>> {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      this.flushWave();
+      // With the Runtime state in hand this also refreshes the replica shells,
+      // so the comparison is against the authority as it stands now rather
+      // than as it stood at the last account frame.
+      this.flushWave(state);
       await this.#idle;
       const epoch = this.#noteEpoch;
       const reports = new Map<string, ShadowReconciliation>();
@@ -1541,6 +1788,9 @@ export class RscoreShadowMirror {
     } catch { /* observer-only */ }
     // From here on the authority runs unmirrored. Under strict that is a
     // fail-stop: waiting for the end-of-run gate assumes the harness reaches it.
+    // Except during teardown, where a broken pipe is the engine going down with
+    // the process.
+    if (this.#shuttingDown) return;
     this.#reportGap({
       kind: 'disabled',
       owner: '',
