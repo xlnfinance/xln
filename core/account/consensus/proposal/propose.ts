@@ -111,6 +111,7 @@ const rememberProposalForAck = (
     candidateEffects: AccountOutput[];
     txResults: ApplyAccountTxOk[];
     timedOutHashlocks: string[];
+    applyUs: number;
   },
 ): void => {
   if (!preparedCommitCoversTxs(newFrame.accountTxs)) return;
@@ -124,6 +125,7 @@ const rememberProposalForAck = (
     candidateEffects: validation.candidateEffects,
     txResults: validation.txResults,
     timedOutHashlocks: validation.timedOutHashlocks,
+    applyUs: validation.applyUs,
   });
 };
 

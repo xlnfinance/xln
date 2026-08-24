@@ -230,8 +230,13 @@ impl ProcessSession {
                 job
             })
             .collect();
+        // Engine-side execution time, excluding transport and encoding: the
+        // caller compares it against its own reducer to see which side is
+        // actually faster, not how fast the pipe is.
+        let started = std::time::Instant::now();
         let candidate = engine.prepare(&jobs)?;
-        let response = wire_encode::prepared(&candidate)?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let response = wire_encode::prepared(&candidate, engine_micros)?;
         self.pending = Some(PendingBatch {
             prepare_request_id: request_id,
             candidate,

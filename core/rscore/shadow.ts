@@ -13,6 +13,9 @@
  * reseeds it from the committed post-frame snapshot via UpsertAccounts, and
  * comparison resumes from the next frame.
  */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { createStructuredLogger } from '../support/logger';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
@@ -174,6 +177,17 @@ export const engineOutputProjection = (
 /** Root of an empty radix map on both sides. */
 const EMPTY_RADIX_ROOT = `0x${'00'.repeat(32)}`;
 
+/**
+ * Where divergences are written, one JSON per mismatch. Defaults to
+ * .logs/rscore-diffs; set the env to an empty string to turn recording off.
+ */
+const DIFF_DIR: string | null = (() => {
+  if (typeof process === 'undefined' || typeof process.env === 'undefined') return null;
+  const configured = process.env['XLN_RSCORE_SHADOW_DIFF_DIR'];
+  if (configured === '') return null;
+  return configured ?? '.logs/rscore-diffs';
+})();
+
 const MAX_QUEUE = 50_000;
 /**
  * One engine process per owner entity means an unbounded stand (a lane with a
@@ -210,6 +224,12 @@ export type ShadowFrameInput = Readonly<{
    * never depends on a second, hand-written derivation at each commit site.
    */
   txResults: readonly ApplyAccountTxOk[];
+  /**
+   * Microseconds the TypeScript reducer spent applying exactly these txs. The
+   * mirror aggregates it against the engine's own execution time so a run
+   * answers "is Rust faster here" with measured numbers, not an assumption.
+   */
+  tsApplyUs: number;
   /** TS authority root committed by this frame (hex). */
   committedStateRoot: string;
   /** Committed post-frame replica, read synchronously at note time. */
@@ -224,6 +244,8 @@ type WaveFrame = Readonly<{
   txTypes: readonly string[];
   /** Canonical projection of the TS outputs this frame must reproduce. */
   expectedOutputs: readonly IndexedShadowOutputRow[];
+  /** TypeScript reducer time for this frame's txs, in microseconds. */
+  tsApplyUs: number;
 }>;
 
 /** One committed frame and its request-local jobs before Runtime-wave packing. */
@@ -353,6 +375,16 @@ export type ShadowStats = {
   /** Whole-tree diffs run mid-flight, and how many found a gap. */
   reconciliations: number;
   reconcileFailures: number;
+  /**
+   * Speed comparison over compared frames only: TypeScript reducer time, the
+   * engine's own execution time (transport excluded) and the whole round trip
+   * including transport, encoding and the commit.
+   */
+  tsApplyUs: number;
+  rustEngineUs: number;
+  rustWireUs: number;
+  /** Transitions behind those three numbers. */
+  timedTxs: number;
   disabledReason: string | null;
 };
 
@@ -407,6 +439,10 @@ export class RscoreShadowMirror {
     executedByType: {},
     reconciliations: 0,
     reconcileFailures: 0,
+    tsApplyUs: 0,
+    rustEngineUs: 0,
+    rustWireUs: 0,
+    timedTxs: 0,
     disabledReason: null,
   };
   #onProgress: (() => void) | null = null;
@@ -743,6 +779,7 @@ export class RscoreShadowMirror {
               output,
             ]),
           ),
+          tsApplyUs: input.tsApplyUs,
         },
         jobs,
       });
@@ -794,6 +831,7 @@ export class RscoreShadowMirror {
           this.#stats.reseeds += 1;
           continue;
         }
+        const wireStartedUs = Math.round(performance.now() * 1000);
         const { candidate, token } = await client.prepareCandidate(entry.jobs);
         const prepared = candidate as unknown[];
         const results = prepared[2] as unknown[];
@@ -805,6 +843,10 @@ export class RscoreShadowMirror {
         const engineOutputs = prepared[3] as unknown[];
         const roots = prepared[4] as unknown[];
         const committed = (await client.commit(token)) as unknown[];
+        this.#stats.rustWireUs += Math.round(performance.now() * 1000) - wireStartedUs;
+        this.#stats.rustEngineUs += wireInteger(prepared[5], 'SHADOW_ENGINE_MICROS');
+        this.#stats.timedTxs += entry.jobs.length;
+        for (const frame of entry.frames) this.#stats.tsApplyUs += frame.tsApplyUs;
         // Count only verdicts the engine actually returned. Enqueue-time
         // accounting lied when a queue drop, process death or malformed reply
         // prevented execution altogether.
@@ -926,6 +968,7 @@ export class RscoreShadowMirror {
     this.#stats.mismatches += 1;
     this.#needsReseed.add(`${entry.ownerKey}/${accountKey}`);
     const sections = await this.#diverginSections(entry.ownerKey, accountKey);
+    this.#writeDiff(entry, accountKey, frame, detail, sections);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
     try {
@@ -947,6 +990,36 @@ export class RscoreShadowMirror {
       txTypes: frame.txTypes,
       ...(sections ? { sections } : {}),
     });
+  }
+
+  /**
+   * One file per divergence, so a long run leaves a diffable record instead of
+   * a log line that scrolls away: the frame, its tx types, both roots, the
+   * per-section roots and the exact wire jobs that produced it.
+   */
+  #writeDiff(
+    entry: Extract<QueueEntry, { kind: 'wave' }>,
+    accountKey: string,
+    frame: WaveFrame,
+    detail: string,
+    sections: Record<string, { typescript: string; rust: string }> | undefined,
+  ): void {
+    if (DIFF_DIR === null) return;
+    try {
+      mkdirSync(DIFF_DIR, { recursive: true });
+      const name = `${String(this.#stats.mismatches).padStart(6, '0')}-${accountKey.slice(0, 12)}-h${frame.frameHeight}.json`;
+      writeFileSync(join(DIFF_DIR, name), safeStringify({
+        owner: entry.ownerKey,
+        account: accountKey,
+        frameHeight: frame.frameHeight,
+        txTypes: frame.txTypes,
+        detail,
+        expectedRoot: frame.expectedRootHex,
+        sections: sections ?? null,
+        expectedOutputs: frame.expectedOutputs,
+        jobs: entry.jobs,
+      }, 2));
+    } catch { /* observer-only */ }
   }
 
   /**

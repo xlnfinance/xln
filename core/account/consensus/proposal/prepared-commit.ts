@@ -23,6 +23,8 @@ export type PreparedProposalCommit = Readonly<{
   candidateEffects: readonly AccountOutput[];
   txResults: readonly ApplyAccountTxOk[];
   timedOutHashlocks: readonly string[];
+  /** Reducer time already spent on these txs at proposal time. */
+  applyUs: number;
 }>;
 
 const PREPARED_COMMIT_TX_TYPES: ReadonlySet<AccountTx['type']> = new Set<AccountTx['type']>([

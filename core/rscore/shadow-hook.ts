@@ -40,6 +40,20 @@ const entityAllowed = (ownerEntityId: string): boolean => {
   return filter.trim().toLowerCase() === ownerEntityId.trim().toLowerCase();
 };
 
+/**
+ * Measured, not assumed: reducer microseconds per transition on each side, and
+ * the round trip that includes transport so the IPC cost stays visible.
+ */
+const speedSummary = (stats: ShadowStatsLike): string => {
+  const per = (total: number): string =>
+    (stats.timedTxs === 0 ? 0 : total / stats.timedTxs).toFixed(1);
+  const ratio = stats.rustEngineUs === 0
+    ? 'n/a'
+    : (stats.tsApplyUs / stats.rustEngineUs).toFixed(2);
+  return `speed[txs=${stats.timedTxs} tsUs/tx=${per(stats.tsApplyUs)} ` +
+    `rustUs/tx=${per(stats.rustEngineUs)} wireUs/tx=${per(stats.rustWireUs)} ts/rust=${ratio}]`;
+};
+
 const attachMirrorReporting = (started: MirrorLike): void => {
   const printStats = (): void => {
     try { console.error(`RSCORE_SHADOW_STATS ${JSON.stringify(started.stats())}`); } catch { /* observer-only */ }
@@ -90,6 +104,14 @@ const armMirror = async (prime?: (started: MirrorLike) => Promise<void>): Promis
     throw error;
   }
 };
+
+/**
+ * Microsecond clock for the TypeScript-vs-engine speed comparison. Returns 0
+ * when the mirror is off, so the reducer pays one boolean check per tx and the
+ * measurement never exists in a production run that did not ask for it.
+ */
+export const shadowClockUs = (): number =>
+  shadowEnabled() ? Math.round(performance.now() * 1000) : 0;
 
 export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
   if (mirror === null) return;
@@ -234,7 +256,7 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   }
   console.error(
     `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
-    `reseeds=${stats.reseeds} executed=${JSON.stringify(stats.executedByType)}`,
+    `reseeds=${stats.reseeds} executed=${JSON.stringify(stats.executedByType)} ${speedSummary(stats)}`,
   );
 };
 

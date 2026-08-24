@@ -41,9 +41,9 @@ export const RSCORE_PROCESS_ABI_VERSION = 1;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=5")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=6")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '9e9cb3e3ce49dea590900e67fbd874cc0f81cb6d545b33f62c12798ba613c788',
+  '614001cb79ba61291106631470a684570035053223832fa1153c962a8317547b',
   'hex',
 );
 

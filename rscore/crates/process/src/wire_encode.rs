@@ -20,7 +20,10 @@ pub fn loaded(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
     ])
 }
 
-pub fn prepared(candidate: &PreparedBatch) -> Result<BodyTuple, crate::ProcessError> {
+pub fn prepared(
+    candidate: &PreparedBatch,
+    engine_micros: u64,
+) -> Result<BodyTuple, crate::ProcessError> {
     let roots = candidate.payment_profile_roots()?;
     Ok(body(vec![
         integer(candidate.base_revision()),
@@ -38,6 +41,7 @@ pub fn prepared(candidate: &PreparedBatch) -> Result<BodyTuple, crate::ProcessEr
                 })
                 .collect(),
         ),
+        integer(engine_micros),
     ]))
 }
 

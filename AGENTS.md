@@ -1,6 +1,6 @@
 # AGENTS.md
 
-**On first message: Briefly introduce yourself with "how to talk to me" - explain 80% confidence threshold, when to just execute vs ask, and preferred communication style (terse with metrics). Keep it 3-4 lines max.**
+**On first message: Briefly introduce yourself with "how to talk to me" - explain the 90% confidence threshold (below 90% = ask the owner), when to just execute vs ask, and preferred communication style (terse with metrics). Keep it 3-4 lines max.**
 
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
 ALWAYS: `bun run check` before push/merge/release. Test in browser F12 console. Never swallow errors.
@@ -110,7 +110,7 @@ Before starting ANY task, rate confidence (0-100%):
 - **≥90%**: Proceed autonomously (clear spec, obvious approach)
 - **<90%**: Stop and ask (multiple valid paths, UX unclear, architectural choice)
 
-Break rules: Always ask even if >80% for consensus/crypto/smart-contract changes.
+Break rules: Consensus, crypto, or smart-contract changes always require asking the owner, regardless of confidence.
 
 Quick iteration signals (full autonomy):
 - "slow/sluggish" → profile + fix, report metrics
@@ -132,7 +132,8 @@ Quick iteration signals (full autonomy):
 - Always end with clear next steps: **NEXT:** A) B) C)
 
 ## 🎯 TOKEN EFFICIENCY
-- Grep/offset before reading files >300 lines (NetworkTopology.svelte has function index at 163-282)
+- Grep/offset before reading files >300 lines
+- "No imports = delete" excludes entry points: scenarios, tests, scripts, and browser entrypoints (e.g. `runtime.ts`, `index`/`main` files). These are consumed externally, never imported — zero importers does not mean dead code.
 - Filter command output: `grep -E "error|FAIL"`, never dump full output
 - Agents for architecture, not verification
 - Terse confirmations with metrics: "Fixed. 0.2→45 FPS"
@@ -204,8 +205,8 @@ Functional/declarative paradigm. Pure functions. Immutability. Small composable 
 
 ## 🔧 Critical Bug Prevention
 
-**BigInt serialization:** Use `safeStringify()` from `serialization-utils.ts` (never raw JSON.stringify)
-**Buffer comparison:** Use `buffersEqual()` from `serialization-utils.ts` (not Buffer.compare)
+**BigInt serialization:** Use `safeStringify()` from `core/protocol/serialization` (never raw JSON.stringify)
+**Buffer comparison:** Use `buffersEqual()` from `core/protocol/serialization` (not Buffer.compare)
 **Contract addresses:** Use `getAvailableJurisdictions()` from `evm.ts` (never hardcode)
 **Bilateral consensus:** Study `.archive/2024_src/app/Channel.ts` for state verification patterns
 

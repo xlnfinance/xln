@@ -3,7 +3,7 @@
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
 
-import { noteAccountFrameForShadow } from '../../rscore/shadow-hook';
+import { noteAccountFrameForShadow, shadowClockUs } from '../../rscore/shadow-hook';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -118,6 +118,8 @@ type AccountSwapCancelRequest = { offerId: string; accountId: string };
 
 type IncomingFrameValidation = {
   clonedMachine: AccountReplica;
+  /** Reducer time for this frame's txs; zero unless the shadow mirror is on. */
+  tsApplyUs: number;
   proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   candidateEffects: AccountOutput[];
   txResults: ApplyAccountTxOk[];
@@ -280,6 +282,7 @@ const replayIncomingFrameOnClone = async (
   const replay: IncomingFrameReplay = {
     processEvents: [],
     revealedSecrets: [],
+    tsApplyUs: 0,
     swapOffersCreated: [],
     swapCancelRequests: [],
     swapOffersCancelled: [],
@@ -289,6 +292,7 @@ const replayIncomingFrameOnClone = async (
   };
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
+    const startedUs = shadowClockUs();
     const result = await applyAccountTx(
       clonedMachine,
       accountTx,
@@ -319,6 +323,7 @@ const replayIncomingFrameOnClone = async (
       accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
     }
     replay.processEvents.push(...result.events);
+    replay.tsApplyUs += shadowClockUs() - startedUs;
     replay.txResults.push(result);
     replay.candidateEffects.push(...(result.candidateEffects ?? []));
     collectIncomingOkOutcome(result, replay, input.fromEntityId);
@@ -511,6 +516,7 @@ async function commitIncomingFrameOnRealState(
       enforcementJHeight: securityContext.finalizedJHeight,
       accountTxs: receivedFrame.accountTxs,
       txResults: validation.txResults,
+      tsApplyUs: validation.tsApplyUs,
       committedStateRoot: receivedFrame.accountStateRoot,
       account,
     });

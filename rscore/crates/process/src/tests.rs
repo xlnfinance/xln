@@ -12,7 +12,7 @@ use crate::{ProcessSession, read_frame, serve, write_frame};
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "9e9cb3e3ce49dea590900e67fbd874cc0f81cb6d545b33f62c12798ba613c788"
+        "614001cb79ba61291106631470a684570035053223832fa1153c962a8317547b"
     );
 
     let mut session = ProcessSession::new();
@@ -54,7 +54,12 @@ fn revision_zero_restore_prepare_abort_reprepare_commit_is_atomic() {
     );
     let second = session.handle(prepare(4, 7)).envelope;
     assert_ok(second.clone());
-    assert_eq!(first.body, second.body);
+    // The prepared reply carries the engine's own execution microseconds, which
+    // are wall-clock by nature: compare everything else byte for byte.
+    assert_eq!(
+        without_engine_micros(&first.body),
+        without_engine_micros(&second.body)
+    );
     assert_ok(
         session
             .handle(candidate_command(5, OpTag::CommitRuntime, 4))
@@ -227,6 +232,15 @@ fn assert_prepared_payment_profile_root(envelope: &Envelope) {
     };
     assert_eq!(account_id.len(), 32);
     assert_eq!(profile_root.len(), 32);
+}
+
+/// The prepared body minus its trailing timing field.
+fn without_engine_micros(body: &xln_rscore_abi::BodyTuple) -> Vec<AbiValue> {
+    let AbiValue::Tuple(fields) = &body.fields()[0] else {
+        panic!("prepared body must be a tuple")
+    };
+    let fields = fields.fields();
+    fields[..fields.len() - 1].to_vec()
 }
 
 fn assert_ok(envelope: Envelope) {
