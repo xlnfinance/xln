@@ -59,6 +59,7 @@ import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../../support/logger';
 import { startParentLivenessWatch } from '../../support/process/parent-watch';
+import { startIdleShutdownWatch } from '../../support/process/idle-shutdown';
 import {
   buildMarketPairCatalogForReplica,
   buildMarketSnapshotForReplica,
@@ -1110,15 +1111,30 @@ const handleWebSocketClose = (session: ServerSession, ws: RelaySocket, code: num
   }
 };
 
+/**
+ * On a test/benchmark stand only: a node nobody talks to any more terminates
+ * instead of holding its port, its databases and its child processes until the
+ * machine is rebooted. Production never arms this unless the operator sets
+ * XLN_NODE_IDLE_TIMEOUT_S themselves.
+ */
+const serverIdleWatch = startIdleShutdownWatch('runtime-server', idleMs => {
+  serverLog.error('idle.exit', { idleMs, pid: process.pid });
+  process.kill(process.pid, 'SIGTERM');
+});
+
 const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
   Bun.serve<RelaySocketData>({
     port: options.port,
     hostname: options.host ?? '127.0.0.1',
     maxRequestBodySize: 1024 * 1024,
-    fetch: (req, server) => handleHttpRequest(options, session, req, server),
+    fetch: (req, server) => {
+      serverIdleWatch.noteActivity();
+      return handleHttpRequest(options, session, req, server);
+    },
     websocket: {
       maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
       open(ws: RelaySocket) {
+        serverIdleWatch.noteActivity();
         serverLog.info('ws.open', { type: ws.data.type });
         if (ws.data.type === 'rpc' && session.env) {
           attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
@@ -1126,7 +1142,10 @@ const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
         if (ws.data.type === 'relay') session.relayHelloChallenges.issue(ws, ws.data.audience);
         pushDebugEvent(relayStore, { event: 'ws_open', details: { wsType: ws.data.type } });
       },
-      message: (ws, message) => handleWebSocketMessage(session, ws, message),
+      message: (ws, message) => {
+        serverIdleWatch.noteActivity();
+        return handleWebSocketMessage(session, ws, message);
+      },
       close: (ws, code, reason) => handleWebSocketClose(session, ws, code, reason),
     },
   });

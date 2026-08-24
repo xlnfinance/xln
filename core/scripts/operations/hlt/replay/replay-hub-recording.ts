@@ -2,6 +2,7 @@
 
 /** Replay phase: restore one H1 checkpoint and deterministically execute its WAL tail. */
 
+import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
 import {
   assertShadowParity,
   currentShadowMirror,
@@ -52,6 +53,16 @@ type EconomicCounters = Readonly<{
   deliveredPayments: number;
   matchedEconomicSwaps: number;
 }>;
+
+/**
+ * A replay that stops making progress (a wedged shadow child, a stalled
+ * recovery read) used to sit on the machine for hours holding its engine
+ * children. Every replayed frame is progress; nothing else counts.
+ */
+const replayIdleWatch = startIdleShutdownWatch('hlt-replay-hub-recording', idleMs => {
+  console.error(`HLT_REPLAY_IDLE_EXIT idleMs=${String(idleMs)} pid=${String(process.pid)}`);
+  process.exit(1);
+});
 
 const subtractEconomicCounters = (
   final: EconomicCounters,
@@ -317,6 +328,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       await replayRecoveryFrameJournals(env, frames, { verify: recoveryVerifyEnabled });
     } else {
       for (const frame of frames) {
+        replayIdleWatch.noteActivity();
         cumulativeUnits += frameUnits(frame);
         await waitForOfferedRate(offeredTps, cumulativeUnits, startedAt);
         const economicBefore = readEconomicCounters(env);

@@ -68,6 +68,7 @@ import {
 import { SOVEREIGN_RUNTIMES_PER_WORKER } from './sovereign-runtime-sharding';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { getEntityReplicaById } from '../../../../entity/replica/replica-lookup';
+import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
 
 type HostSocketData = Readonly<{ type: 'rpc'; runtimeId: string }>;
 type HostSocket = ServerWebSocket<HostSocketData>;
@@ -609,6 +610,26 @@ const stop = async (exitCode: number): Promise<void> => {
   process.exitCode = exitCode;
 };
 
+/**
+ * A lane host whose driver stopped talking to it is dead weight: it keeps its
+ * ports, its LevelDB handles and its Rust engine children alive for as long as
+ * the machine runs. Every request and every adapter message counts as life.
+ */
+const idleWatch = startIdleShutdownWatch(
+  `hlt-sovereign-runtime-host:${String(processFirstPort)}`,
+  idleMs => {
+    const reason = `HLT_SOVEREIGN_HOST_IDLE_EXIT:idleMs=${String(idleMs)}:pid=${String(process.pid)}`;
+    console.error(reason);
+    if (isShardWorker) {
+      // The coordinator owns the process; it tears every worker down and then
+      // exits, so one idle lane cannot leave the rest of the host running.
+      postShardStatus({ type: 'fatal', error: reason });
+      return;
+    }
+    void stop(0).finally(() => process.exit(0));
+  },
+);
+
 const run = async (): Promise<void> => {
   await installGlobalOpCounters(opCounterLabel);
   if (await startRuntimeSamplingProfiler(opCounterLabel)) {
@@ -621,6 +642,7 @@ const run = async (): Promise<void> => {
     port,
     hostname: '127.0.0.1',
     fetch: async (request, server) => {
+      idleWatch.noteActivity();
       const pathname = new URL(request.url).pathname;
       if (pathname === '/health') {
         return response({
@@ -674,6 +696,7 @@ const run = async (): Promise<void> => {
         attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
       },
       message(ws: HostSocket, raw) {
+        idleWatch.noteActivity();
         try {
           const request = decodeRuntimeAdapterRequest(raw);
           void handleRuntimeAdapterMessage(ws, request, env, adapterDeps).catch(error => {
