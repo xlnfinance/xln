@@ -4,8 +4,8 @@ use thiserror::Error;
 
 use crate::EMPTY_RADIX_ROOT;
 use crate::persistent_node::{
-    Node, NodeRef, delete_node, ensure_root_branch, make_leaf, node_hash, node_path, path_slots,
-    put_node,
+    Node, NodeRef, delete_node, ensure_root_branch, make_branch, make_leaf, node_hash, node_path,
+    path_slots, put_node,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +47,38 @@ pub enum PersistentRadixMapError {
     EmptyKey,
     #[error("PERSISTENT_RADIX_KEY_PREFIX_COLLISION")]
     KeyPrefixCollision,
+}
+
+/// One top-level slot handed to the caller's mapper: the subtree that lives
+/// there today and the leaves that belong in it. Opaque on purpose — the
+/// caller decides only *where* each slot runs, never what a node looks like.
+pub struct SlotWork<V> {
+    child: Option<NodeRef<V>>,
+    leaves: Vec<NodeRef<V>>,
+}
+
+/// The rebuilt subtree of one slot, ready to be hung back under the root.
+pub struct SlotOutcome<V> {
+    child: Option<NodeRef<V>>,
+    inserted: usize,
+}
+
+impl<V: Clone> SlotWork<V> {
+    /// Fold this slot's leaves into its subtree, and hash the result while it
+    /// is still on this core — hashing is the expensive half.
+    pub fn apply(self) -> Result<SlotOutcome<V>, PersistentRadixMapError> {
+        let mut child = self.child;
+        let mut inserted = 0;
+        for leaf in self.leaves {
+            let (node, added) = put_node(child.as_ref(), leaf)?;
+            child = Some(node);
+            inserted += usize::from(added);
+        }
+        if let Some(node) = child.as_ref() {
+            node_hash(node);
+        }
+        Ok(SlotOutcome { child, inserted })
+    }
 }
 
 #[derive(Clone)]
@@ -111,6 +143,81 @@ impl<V: Clone> PersistentRadixMap<V> {
             root: ensure_root_branch(Some(node)),
             len: self.len + usize::from(inserted),
         })
+    }
+
+    /// Apply many updates at once, sharded by the tree's top-level nibble.
+    ///
+    /// Nodes carry absolute paths, so the sixteen subtrees under the root
+    /// branch are independent: each one can be rebuilt — and hashed — on its
+    /// own core, and only the root branch is left for the caller. Sequential
+    /// path-copy was the part of a commit that no worker count could shrink.
+    ///
+    /// Same result as folding `updated()` over the entries in order, including
+    /// repeated keys (the last write wins), so a caller may choose either.
+    pub fn updated_batch(
+        &self,
+        entries: Vec<(Vec<u8>, V, [u8; 32])>,
+        map_slots: impl Fn([SlotWork<V>; 16]) -> [Result<SlotOutcome<V>, PersistentRadixMapError>; 16],
+    ) -> Result<Self, PersistentRadixMapError>
+    where
+        V: Send + Sync,
+    {
+        if entries.is_empty() {
+            return Ok(self.clone());
+        }
+        for (key, _, _) in &entries {
+            if key.is_empty() {
+                return Err(PersistentRadixMapError::EmptyKey);
+            }
+        }
+        // The fast path needs the canonical root branch to shard against; a
+        // tree of one leaf (or none) has no branch and is folded directly.
+        let Some(root) = self.root.as_ref() else {
+            return self.fold_updates(entries);
+        };
+        let Node::Branch { path, children, .. } = &**root else {
+            return self.fold_updates(entries);
+        };
+        if !path.is_empty() {
+            return self.fold_updates(entries);
+        }
+        let mut buckets: [Vec<NodeRef<V>>; 16] = std::array::from_fn(|_| Vec::new());
+        for (key, value, digest) in entries {
+            let slot = usize::from(path_slots(&key)[0]);
+            buckets[slot].push(make_leaf(key, value, digest));
+        }
+        let mut bucket_iter = buckets.into_iter();
+        let mut child_iter = children.iter();
+        let work: [SlotWork<V>; 16] = std::array::from_fn(|_| SlotWork {
+            child: child_iter.next().and_then(Option::as_ref).map(Arc::clone),
+            leaves: bucket_iter.next().unwrap_or_default(),
+        });
+        let updated = map_slots(work);
+        let mut next: [Option<NodeRef<V>>; 16] = std::array::from_fn(|_| None);
+        let mut inserted = 0;
+        for (slot, result) in updated.into_iter().enumerate() {
+            let outcome = result?;
+            next[slot] = outcome.child;
+            inserted += outcome.inserted;
+        }
+        Ok(Self {
+            root: Some(make_branch(
+                Vec::new(),
+                &next.iter().flatten().cloned().collect::<Vec<_>>(),
+            )),
+            len: self.len + inserted,
+        })
+    }
+
+    fn fold_updates(
+        &self,
+        entries: Vec<(Vec<u8>, V, [u8; 32])>,
+    ) -> Result<Self, PersistentRadixMapError> {
+        let mut map = self.clone();
+        for (key, value, digest) in entries {
+            map = map.updated(key, value, digest)?;
+        }
+        Ok(map)
     }
 
     pub fn removed(&self, key: &[u8]) -> Self {

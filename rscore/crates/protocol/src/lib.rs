@@ -14,7 +14,7 @@ mod persistent_tests;
 pub use flat::compute_flat_integrity_root;
 pub use persistent::{
     PersistentChildRecord, PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef,
-    PersistentRadixMap, PersistentRadixMapError,
+    PersistentRadixMap, PersistentRadixMapError, SlotOutcome, SlotWork,
 };
 pub use radix::{
     EMPTY_RADIX_ROOT, RadixLeaf, RadixMerkleError, RadixMerkleResult, build_radix16_merkle,

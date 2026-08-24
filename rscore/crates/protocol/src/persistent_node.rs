@@ -59,7 +59,7 @@ pub(super) fn make_leaf<V>(key: Vec<u8>, value: V, value_digest: [u8; 32]) -> No
     })
 }
 
-fn make_branch<V>(path: Vec<u8>, nodes: &[NodeRef<V>]) -> NodeRef<V> {
+pub(super) fn make_branch<V>(path: Vec<u8>, nodes: &[NodeRef<V>]) -> NodeRef<V> {
     let mut children = std::array::from_fn(|_| None);
     for node in nodes {
         let slot = node_path(node)[path.len()] as usize;

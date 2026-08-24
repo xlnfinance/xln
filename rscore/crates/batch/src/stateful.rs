@@ -228,11 +228,15 @@ impl StatefulBatchEngine {
                 .map(|(account_id, _, candidate)| leaf_root(*account_id, candidate))
                 .collect::<Result<Vec<_>, BatchError>>()
         })?;
-        let mut accounts = self.accounts.clone();
-        for ((account_id, _, candidate), (_, root)) in prepared.updates.into_iter().zip(leaf_roots)
-        {
-            accounts = put_account(&accounts, account_id, candidate, root)?;
-        }
+        let entries = prepared
+            .updates
+            .into_iter()
+            .zip(leaf_roots)
+            .map(|((account_id, _, candidate), (_, root))| {
+                (account_id.as_bytes().to_vec(), candidate, root)
+            })
+            .collect::<Vec<_>>();
+        let accounts = self.put_accounts(entries)?;
         self.accounts = accounts;
         self.revision = prepared.next_revision;
         Ok(BatchResponse {
@@ -241,6 +245,37 @@ impl StatefulBatchEngine {
             results: prepared.results,
             outputs: prepared.outputs,
         })
+    }
+
+    /// Publish many account leaves at once, one core per top-level branch.
+    ///
+    /// Account ids are entity ids — uniformly distributed — so the sixteen
+    /// subtrees under the root carry roughly equal work, and each one is
+    /// rebuilt and hashed on its own core. Only the root branch is left for
+    /// this thread.
+    fn put_accounts(
+        &self,
+        entries: Vec<(Vec<u8>, AccountReplica, [u8; 32])>,
+    ) -> Result<PersistentRadixMap<AccountReplica>, BatchError> {
+        self.accounts
+            .updated_batch(entries, |slots| {
+                self.pool.install(|| {
+                    let mut results = slots
+                        .into_par_iter()
+                        .map(xln_rscore_protocol::SlotWork::apply)
+                        .collect::<Vec<_>>()
+                        .into_iter();
+                    std::array::from_fn(|_| {
+                        results.next().unwrap_or_else(|| {
+                            Err(xln_rscore_protocol::PersistentRadixMapError::EmptyKey)
+                        })
+                    })
+                })
+            })
+            .map_err(|error| BatchError::AccountsTree {
+                account_id: AccountId::from_bytes([0; 32]),
+                detail: error.to_string(),
+            })
     }
 
     fn validate_update_bases(&self, prepared: &PreparedBatch) -> Result<(), BatchError> {
