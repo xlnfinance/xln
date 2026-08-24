@@ -27,6 +27,13 @@ import {
 const shadowLog = createStructuredLogger('rscore.shadow');
 
 const MAX_QUEUE = 50_000;
+/**
+ * One engine process per owner entity means an unbounded stand (a lane with a
+ * thousand user entities) would fork a thousand processes. Shadow is a
+ * diagnostic, so it binds to the first N owners it sees and ignores the rest;
+ * a hub-only run is the intended shape (N=1).
+ */
+const DEFAULT_MAX_OWNERS = 1;
 
 export type ShadowFrameInput = Readonly<{
   ownerEntityId: string;
@@ -67,6 +74,7 @@ export type ShadowStats = {
   mismatches: number;
   reseeds: number;
   skippedIneligible: number;
+  skippedUnboundOwner: number;
   dropped: number;
   disabledReason: string | null;
 };
@@ -76,6 +84,8 @@ export class RscoreShadowMirror {
   readonly #workers: number;
   readonly #makeClient: (binaryPath: string) => RscoreProcessClient;
   readonly #clients = new Map<string, RscoreProcessClient>();
+  readonly #boundOwners = new Set<string>();
+  readonly #maxOwners: number;
   readonly #registered = new Set<string>();
   readonly #needsReseed = new Set<string>();
   readonly #queue: QueueEntry[] = [];
@@ -88,6 +98,7 @@ export class RscoreShadowMirror {
     mismatches: 0,
     reseeds: 0,
     skippedIneligible: 0,
+    skippedUnboundOwner: 0,
     dropped: 0,
     disabledReason: null,
   };
@@ -97,10 +108,12 @@ export class RscoreShadowMirror {
   constructor(options: Readonly<{
     binaryPath: string;
     workers: number;
+    maxOwners?: number;
     makeClient: (binaryPath: string) => RscoreProcessClient;
   }>) {
     this.#binaryPath = options.binaryPath;
     this.#workers = options.workers;
+    this.#maxOwners = options.maxOwners ?? DEFAULT_MAX_OWNERS;
     this.#makeClient = options.makeClient;
   }
 
@@ -121,6 +134,13 @@ export class RscoreShadowMirror {
     // one engine process per owner entity, exactly the way the entity machine
     // owns exactly one account map.
     const ownerKey = input.ownerEntityId.trim().toLowerCase();
+    if (!this.#boundOwners.has(ownerKey)) {
+      if (this.#boundOwners.size >= this.#maxOwners) {
+        this.#stats.skippedUnboundOwner += 1;
+        return;
+      }
+      this.#boundOwners.add(ownerKey);
+    }
     const accountIdBytes = hexToWireBytes(input.counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID');
     const accountKey = Buffer.from(accountIdBytes).toString('hex');
     const scopedKey = `${ownerKey}/${accountKey}`;

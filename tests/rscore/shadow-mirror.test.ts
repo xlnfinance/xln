@@ -24,9 +24,10 @@ const LEFT = entity('aa');
 const RIGHT = entity('bb');
 const SECRET = `0x${'77'.repeat(32)}`;
 
-const makeMirror = (): RscoreShadowMirror => new RscoreShadowMirror({
+const makeMirror = (maxOwners = 1): RscoreShadowMirror => new RscoreShadowMirror({
   binaryPath: BINARY,
   workers: 2,
+  maxOwners,
   makeClient: path => new RscoreProcessClient(path, {
     engineGeneration: Buffer.alloc(8, 0x5d),
     runtimeId: Buffer.alloc(20, 0x5d),
@@ -125,5 +126,37 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     expect(stats.mismatches).toBe(1);
     expect(stats.matches).toBe(5);
     expect(stats.dropped).toBe(0);
+    expect(stats.skippedUnboundOwner).toBe(0);
+  }, 30_000);
+
+  // A stand with many entities must not fork one engine per entity: the
+  // mirror binds to the first maxOwners owners and ignores the rest.
+  test('binds a bounded number of owner entities', async () => {
+    const mirror = makeMirror(1);
+    const first = makeTsAccount();
+    const second = makeTsAccount();
+    const note = (owner: string, counterparty: string, account: AccountReplica): void => {
+      mirror.noteCommittedFrame({
+        ownerEntityId: owner,
+        counterpartyEntityId: counterparty,
+        frameHeight: 1,
+        byLeft: false,
+        timestamp: 1_700_000_000_000,
+        jHeight: 0,
+        enforcementTimestamp: 1_700_000_000_000,
+        enforcementJHeight: 0,
+        accountTxs: [payment(1n)],
+        committedStateRoot: computeAccountStateRoot(account.state),
+        account,
+      });
+    };
+    note(LEFT, RIGHT, first);
+    note(entity('cc'), RIGHT, second); // second owner: ignored
+    await mirror.settled();
+    const stats = mirror.stats();
+    await mirror.shutdown();
+    expect(stats.skippedUnboundOwner).toBe(1);
+    expect(stats.reseeds).toBe(1);
+    expect(stats.disabledReason).toBeNull();
   }, 30_000);
 });

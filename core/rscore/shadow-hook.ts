@@ -53,6 +53,7 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
         const started = new RscoreShadowMirror({
           binaryPath,
           workers: Number(process.env['XLN_RSCORE_SHADOW_WORKERS'] ?? '4'),
+          maxOwners: Number(process.env['XLN_RSCORE_SHADOW_MAX_ENTITIES'] ?? '1'),
           makeClient: path => new RscoreProcessClient(path, {
             engineGeneration: Buffer.alloc(8, 0x5d),
             runtimeId: Buffer.alloc(20, 0x5d),
