@@ -42,6 +42,7 @@ describe('frontend capability inventory', () => {
     expect(site?.currentSources).toContain('frontend/apps/site/src/install-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/rcpan-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/unicast-page.tsx');
+    expect(site?.currentSources).toContain('frontend/apps/site/src/releases-page.tsx');
     expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information').every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);

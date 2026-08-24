@@ -8,6 +8,7 @@ import './styles/landing.css';
 import './styles/install.css';
 import './styles/rcpan.css';
 import './styles/unicast.css';
+import './styles/releases.css';
 
 const getRootElement = (): HTMLElement => {
   const rootElement = document.getElementById('root');

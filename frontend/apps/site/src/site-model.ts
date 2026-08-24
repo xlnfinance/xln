@@ -5,6 +5,7 @@ export type SitePage =
   | Readonly<{ kind: 'install' }>
   | Readonly<{ kind: 'rcpan' }>
   | Readonly<{ kind: 'unicast' }>
+  | Readonly<{ kind: 'releases' }>
   | Readonly<{ kind: 'pending'; pathname: string }>;
 
 export type PageMetadata = Readonly<{
@@ -39,6 +40,7 @@ export const resolveSitePage = (pathname: string): SitePage => {
   if (normalized === '/install') return { kind: 'install' };
   if (normalized === '/rcpan') return { kind: 'rcpan' };
   if (normalized === '/unicast') return { kind: 'unicast' };
+  if (normalized === '/releases') return { kind: 'releases' };
   return { kind: 'pending', pathname: normalized };
 };
 
@@ -65,6 +67,12 @@ export const getSiteMetadata = (page: SitePage): PageMetadata => {
     return {
       title: 'Why broadcast dies at scale | xln',
       description: 'Visual proof of the O(n) broadcast bottleneck compared with O(1) unicast routing.',
+    };
+  }
+  if (page.kind === 'releases') {
+    return {
+      title: 'Releases | xln',
+      description: 'xln release history and verified codebase metrics.',
     };
   }
   return {
