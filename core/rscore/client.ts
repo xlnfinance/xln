@@ -83,7 +83,7 @@ export type RscoreWireValue =
 // Rust decoder re-encodes every envelope and byte-compares, so the TS side
 // must produce exactly the same minimal encodings (unsigned-minimal ints,
 // bin8/16/32 for bytes, fixstr/str8+, fixarray/array16/32).
-const packValue = (value: RscoreWireValue): Buffer => {
+export const packWireValue = (value: RscoreWireValue): Buffer => {
   const chunks: Buffer[] = [];
   writeValue(chunks, value);
   return Buffer.concat(chunks);
@@ -276,7 +276,7 @@ const encodeEnvelope = (
   const requestIdBytes = Buffer.alloc(8);
   requestIdBytes.writeBigUInt64BE(requestId);
   // body = one payload tuple (BODY_ARITY = 1 on the Rust side)
-  const bodyBytes = packValue([payload]);
+  const bodyBytes = packWireValue([payload]);
   const digest = bodyDigest(identity.runtimeId, opTag, MESSAGE_KIND_REQUEST, bodyBytes);
   const head = [
     RSCORE_ABI_DOMAIN,
@@ -296,7 +296,7 @@ const encodeEnvelope = (
   // Outer msgpack array of 14: header byte 0x9E, then the 13 head fields and
   // the raw body bytes (already a complete msgpack value) concatenated —
   // msgpack values compose by concatenation under an explicit array header.
-  const headBytes = head.map(field => packValue(field as RscoreWireValue));
+  const headBytes = head.map(field => packWireValue(field as RscoreWireValue));
   // fixarray(14) = 0x9e
   return Buffer.concat([Buffer.from([RSCORE_ABI_MAGIC, 0x9e]), ...headBytes, bodyBytes]);
 };

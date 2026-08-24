@@ -84,15 +84,6 @@ pub struct WaveResult {
     /// Every account the wave moved, with the leaf it now commits. The root
     /// alone says that something differs; these say which account does.
     pub touched: Vec<(AccountId, [u8; 32])>,
-    /// One digest over everything this wave produced — the root, the touched
-    /// leaves, the frame hashes, the verdicts in order, the effects in order,
-    /// and the dropped rows. A double-run compares this and nothing else
-    /// until it differs, which is what keeps a differential affordable.
-    ///
-    /// Effects are in it deliberately: they are not part of any account state
-    /// root, so an engine that lost a forward or a revealed secret would
-    /// otherwise agree on every root it publishes.
-    pub parity_digest: [u8; 32],
 }
 
 /// The committed store as it was before the wave, kept until the runtime says
@@ -102,17 +93,49 @@ struct PendingWave {
     base_revision: u64,
 }
 
-/// A proposal to send. It carries no outputs: what the frame produced is
-/// released with the peer's ack, never before.
+/// One attempt to propose, whether or not it produced a frame. A window where
+/// every transaction was rejected still moves the account — the mempool is
+/// part of the leaf — so the attempt is reported with no frame rather than
+/// not reported at all, or the two engines would silently disagree about a
+/// tree they both changed.
 pub struct ProposalRow {
     pub account_id: AccountId,
-    pub frame: AccountFrame,
-    pub state_hash: [u8; 32],
-    pub hanko: Vec<u8>,
+    /// The signed frame, absent when nothing survived the window.
+    ///
+    /// It carries no outputs: what the frame produced is released with the
+    /// peer's ack, never before.
+    pub proposed: Option<ProposedRow>,
     /// Every transaction the window could not include, named by the digest of
     /// its canonical form. A count would say that something was dropped
     /// without saying what, which is not enough to compare two engines.
     pub dropped: Vec<DroppedRow>,
+}
+
+/// The frame an attempt produced.
+pub struct ProposedRow {
+    pub frame: AccountFrame,
+    pub state_hash: [u8; 32],
+    pub hanko: Vec<u8>,
+}
+
+impl ProposalRow {
+    /// The frame as the counterparty receives it, or `None` when the attempt
+    /// produced none.
+    pub fn incoming(&self) -> Option<xln_rscore_engine::IncomingFrame> {
+        self.proposed
+            .as_ref()
+            .map(|proposed| xln_rscore_engine::IncomingFrame {
+                height: proposed.frame.height,
+                timestamp: proposed.frame.timestamp,
+                j_height: proposed.frame.j_height,
+                txs: proposed.frame.txs.clone(),
+                prev_frame_hash: proposed.frame.prev_frame_hash.clone(),
+                account_state_root: proposed.frame.account_state_root,
+                by_left: proposed.frame.by_left,
+                state_hash: proposed.state_hash,
+                hanko: proposed.hanko.clone(),
+            })
+    }
 }
 
 /// One transaction the proposal window rejected.
@@ -122,154 +145,6 @@ pub struct DroppedRow {
     pub code: &'static str,
     pub message: String,
     pub disposition: Disposition,
-}
-
-/// The wave's whole result in one hash. Ordered by construction: the leaves
-/// are in account order, the verdicts in input order, the proposals in
-/// account order.
-fn parity_digest(
-    accounts_root: [u8; 32],
-    leaves: &[(AccountId, [u8; 32])],
-    applied: &[AccountInputResult],
-    proposals: &[ProposalRow],
-) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut digest = Sha256::new();
-    digest.update(b"xln.rscore.wave-parity.v1");
-    digest.update(accounts_root);
-    digest.update(
-        u32::try_from(leaves.len())
-            .unwrap_or(u32::MAX)
-            .to_be_bytes(),
-    );
-    for (account_id, leaf) in leaves {
-        digest.update(account_id.as_bytes());
-        digest.update(leaf);
-    }
-    digest.update(
-        u32::try_from(applied.len())
-            .unwrap_or(u32::MAX)
-            .to_be_bytes(),
-    );
-    for row in applied {
-        digest.update(row.input_index.to_be_bytes());
-        digest.update(row.account_id.as_bytes());
-        digest.update(verdict_digest(&row.verdict));
-    }
-    digest.update(
-        u32::try_from(proposals.len())
-            .unwrap_or(u32::MAX)
-            .to_be_bytes(),
-    );
-    for row in proposals {
-        digest.update(row.account_id.as_bytes());
-        digest.update(row.state_hash);
-        digest.update(
-            u32::try_from(row.dropped.len())
-                .unwrap_or(u32::MAX)
-                .to_be_bytes(),
-        );
-        for dropped in &row.dropped {
-            digest.update(
-                u32::try_from(dropped.index)
-                    .unwrap_or(u32::MAX)
-                    .to_be_bytes(),
-            );
-            digest.update(dropped.tx_digest);
-            digest.update(dropped.code.as_bytes());
-            digest.update([match dropped.disposition {
-                Disposition::Deferred => 0,
-                Disposition::Removed => 1,
-            }]);
-        }
-    }
-    digest.finalize().into()
-}
-
-/// One verdict, effects included. The effects are the part no state root
-/// covers, so they are the part this digest exists for.
-fn verdict_digest(verdict: &AccountInputVerdict) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut digest = Sha256::new();
-    match verdict {
-        AccountInputVerdict::Frame(IncomingOutcome::Committed {
-            height,
-            state_hash,
-            outputs,
-            rolled_back_txs,
-            ..
-        }) => {
-            digest.update([0]);
-            digest.update(height.to_be_bytes());
-            digest.update(state_hash);
-            digest.update(
-                u64::try_from(*rolled_back_txs)
-                    .unwrap_or(u64::MAX)
-                    .to_be_bytes(),
-            );
-            digest.update(outputs_digest(outputs));
-        }
-        AccountInputVerdict::Frame(IncomingOutcome::CollisionIgnored { height }) => {
-            digest.update([1]);
-            digest.update(height.to_be_bytes());
-        }
-        AccountInputVerdict::Frame(IncomingOutcome::Duplicate {
-            height, state_hash, ..
-        }) => {
-            digest.update([2]);
-            digest.update(height.to_be_bytes());
-            digest.update(state_hash);
-        }
-        AccountInputVerdict::Frame(IncomingOutcome::Stale {
-            height,
-            current_height,
-        }) => {
-            digest.update([3]);
-            digest.update(height.to_be_bytes());
-            digest.update(current_height.to_be_bytes());
-        }
-        AccountInputVerdict::Frame(IncomingOutcome::Rejected { reason }) => {
-            digest.update([4]);
-            digest.update(reason.as_bytes());
-        }
-        AccountInputVerdict::Ack(AckOutcome::Committed {
-            height,
-            state_hash,
-            outputs,
-        }) => {
-            digest.update([5]);
-            digest.update(height.to_be_bytes());
-            digest.update(state_hash);
-            digest.update(outputs_digest(outputs));
-        }
-        AccountInputVerdict::Ack(AckOutcome::Stale { height }) => {
-            digest.update([6]);
-            digest.update(height.to_be_bytes());
-        }
-        AccountInputVerdict::Ack(AckOutcome::Rejected { reason }) => {
-            digest.update([7]);
-            digest.update(reason.as_bytes());
-        }
-        AccountInputVerdict::Failed(message) => {
-            digest.update([8]);
-            digest.update(message.as_bytes());
-        }
-    }
-    digest.finalize().into()
-}
-
-fn outputs_digest(outputs: &[xln_rscore_engine::AccountOutput]) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut digest = Sha256::new();
-    digest.update(
-        u32::try_from(outputs.len())
-            .unwrap_or(u32::MAX)
-            .to_be_bytes(),
-    );
-    for output in outputs {
-        digest.update(format!("{output:?}").as_bytes());
-    }
-    digest.finalize().into()
 }
 
 fn dropped_rows(
@@ -293,7 +168,7 @@ fn dropped_rows(
 
 /// One account's work returned from the pool: the account it belongs to, the
 /// state it reached, and whatever the caller asked for.
-type ProposalWork = Result<(AccountId, AccountConsensus, Option<ProposalRow>), BatchError>;
+type ProposalWork = Result<(AccountId, AccountConsensus, ProposalRow), BatchError>;
 type InputWork = Result<(AccountId, AccountConsensus, Vec<AccountInputResult>), BatchError>;
 
 pub struct StatefulConsensusEngine {
@@ -498,14 +373,20 @@ impl StatefulConsensusEngine {
                     )
                     .map_err(|error| state_error(account_id, &error))?;
                     let row = match outcome {
-                        ProposalOutcome::Idle { .. } => None,
-                        ProposalOutcome::Proposed(proposed) => Some(ProposalRow {
+                        ProposalOutcome::Idle { dropped } => ProposalRow {
                             account_id,
-                            frame: proposed.frame,
-                            state_hash: proposed.state_hash,
-                            hanko: proposed.hanko,
+                            proposed: None,
+                            dropped: dropped_rows(account_id, &dropped)?,
+                        },
+                        ProposalOutcome::Proposed(proposed) => ProposalRow {
+                            account_id,
+                            proposed: Some(ProposedRow {
+                                frame: proposed.frame,
+                                state_hash: proposed.state_hash,
+                                hanko: proposed.hanko,
+                            }),
                             dropped: dropped_rows(account_id, &proposed.dropped)?,
-                        }),
+                        },
                     };
                     Ok((account_id, account, row))
                 })
@@ -517,9 +398,7 @@ impl StatefulConsensusEngine {
             let (account_id, account, row) = proposal?;
             let leaf = leaf_root(account_id, &account)?;
             entries.push((account_id.as_bytes().to_vec(), account, leaf));
-            if let Some(row) = row {
-                rows.push(row);
-            }
+            rows.push(row);
         }
         self.accounts = self.put_accounts(entries)?;
         self.revision += 1;
@@ -682,15 +561,12 @@ impl StatefulConsensusEngine {
             };
             leaves.push((account_id, leaf_root(account_id, account)?));
         }
-        let accounts_root = self.accounts.root_hash();
-        let parity_digest = parity_digest(accounts_root, &leaves, &applied, &proposals);
         Ok(WaveResult {
             revision: self.revision,
-            accounts_root,
+            accounts_root: self.accounts.root_hash(),
             applied,
             proposals,
             touched: leaves,
-            parity_digest,
         })
     }
 

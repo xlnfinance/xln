@@ -670,7 +670,7 @@ fn decode_context(value: &AbiValue) -> Result<AccountExecutionContext, ProcessEr
     ))
 }
 
-fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
+pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
     let fields = tuple(value)?;
     let tag = fields.first().ok_or(ProcessError::Expected("txTag"))?;
     match integer(tag)? {

@@ -20,3 +20,11 @@ pub fn compute_body_digest(
     hasher.update(body_bytes);
     Ok(hasher.finalize().into())
 }
+
+/// Canonical bytes of a standalone tuple, for a digest two languages must
+/// agree on. It is the same writer the envelope body uses — minimal integer
+/// widths, bin8/16/32, fixstr/str8+ — so a TypeScript encoder that already
+/// round-trips against this ABI reproduces these bytes exactly.
+pub fn encode_tuple(tuple: &crate::BodyTuple) -> Result<Vec<u8>, crate::AbiError> {
+    crate::msgpack_encode::encode_body_tuple(tuple, &crate::AbiLimits::default())
+}

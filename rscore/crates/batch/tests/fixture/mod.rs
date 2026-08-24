@@ -12,8 +12,8 @@ use xln_rscore_batch::{
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
-    AckOutcome, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingFrame,
-    IncomingOutcome, SigningIdentity, TokenId, WatchSeed,
+    AckOutcome, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingOutcome,
+    SigningIdentity, TokenId, WatchSeed,
 };
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
@@ -295,17 +295,9 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
                 input_index: index as u32,
                 account_id: pair.payee_account,
                 from_entity_id: pair.payer_entity,
-                kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                    height: proposal.frame.height,
-                    timestamp: proposal.frame.timestamp,
-                    j_height: proposal.frame.j_height,
-                    txs: proposal.frame.txs.clone(),
-                    prev_frame_hash: proposal.frame.prev_frame_hash.clone(),
-                    account_state_root: proposal.frame.account_state_root,
-                    by_left: proposal.frame.by_left,
-                    state_hash: proposal.state_hash,
-                    hanko: proposal.hanko.clone(),
-                })),
+                kind: AccountInputKind::Frame(Box::new(
+                    proposal.incoming().expect("the attempt produced a frame"),
+                )),
             }
         })
         .collect();
@@ -366,17 +358,9 @@ pub fn frames_for(stand: &Stand, proposals: &[ProposalRow]) -> Vec<AccountInputR
                 input_index: index as u32,
                 account_id: pair.payee_account,
                 from_entity_id: pair.payer_entity,
-                kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                    height: proposal.frame.height,
-                    timestamp: proposal.frame.timestamp,
-                    j_height: proposal.frame.j_height,
-                    txs: proposal.frame.txs.clone(),
-                    prev_frame_hash: proposal.frame.prev_frame_hash.clone(),
-                    account_state_root: proposal.frame.account_state_root,
-                    by_left: proposal.frame.by_left,
-                    state_hash: proposal.state_hash,
-                    hanko: proposal.hanko.clone(),
-                })),
+                kind: AccountInputKind::Frame(Box::new(
+                    proposal.incoming().expect("the attempt produced a frame"),
+                )),
             }
         })
         .collect()

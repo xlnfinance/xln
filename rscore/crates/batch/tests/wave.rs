@@ -231,15 +231,16 @@ fn the_market_from_hello_reaches_the_proposal() {
         .propose_frames(1_700_000_000_000, 100, None)
         .expect("propose");
     assert_eq!(proposals.len(), 1);
-    assert_eq!(proposals[0].frame.txs.len(), 1);
+    let proposed = proposals[0].proposed.as_ref().expect("a frame");
+    assert_eq!(proposed.frame.txs.len(), 1);
     assert!(proposals[0].dropped.is_empty());
 }
 
 /// A wave reports the accounts it moved, each with the leaf the Entity tree
-/// would commit for it, and one digest over everything it produced. The root
-/// says that two engines differ; these say where.
+/// would commit for it. The root says that two engines differ; these say
+/// which account does.
 #[test]
-fn a_wave_reports_the_leaves_it_moved_and_a_digest_over_all_of_it() {
+fn a_wave_reports_every_leaf_it_moved() {
     let mut stand = stand(2);
     let request = wave(&stand, 1_700_000_000_000);
     let first = stand.payer.prepare_wave(request).expect("wave");
@@ -254,20 +255,54 @@ fn a_wave_reports_the_leaves_it_moved_and_a_digest_over_all_of_it() {
         "leaves are in account order, so the digest over them is stable"
     );
 
-    // The same wave against the same state is the same digest; a different
-    // amount is a different digest even though nothing else changed.
+    // Aborting and re-running the same wave reaches the same tree.
     stand.payer.abort_wave(first.revision).expect("abort");
     let again = stand
         .payer
         .prepare_wave(wave(&stand, 1_700_000_000_000))
         .expect("wave");
-    assert_eq!(again.parity_digest, first.parity_digest);
     assert_eq!(again.accounts_root, first.accounts_root);
-    stand.payer.abort_wave(again.revision).expect("abort");
+    assert_eq!(again.touched, first.touched);
+}
 
-    let other = stand
+/// A window where nothing survives still moves the account: the transactions
+/// left the mempool, so the leaf changed. The attempt is reported with no
+/// frame and with the rows it dropped — an engine that reported nothing here
+/// would be silently ahead of the one it is compared against.
+#[test]
+fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
+    let mut stand = stand(1);
+    // More than the account can cover: rejected, and not the kind of rejection
+    // that is retried, so the transaction leaves the mempool for good.
+    stand
         .payer
-        .prepare_wave(wave_amount(&stand, 1_700_000_000_000, 26))
+        .admit_txs(vec![payment(&stand.pairs[0], 10_000_000_000)])
+        .expect("admit");
+    let before = stand.payer.accounts_root();
+
+    let result = stand
+        .payer
+        .prepare_wave(WaveRequest {
+            timestamp: 1_700_000_000_000,
+            j_height: 100,
+            clock: clock(1_700_000_000_000),
+            admissions: Vec::new(),
+            inputs: Vec::new(),
+            propose: true,
+        })
         .expect("wave");
-    assert_ne!(other.parity_digest, first.parity_digest);
+
+    assert_eq!(result.proposals.len(), 1, "the attempt is reported");
+    assert!(result.proposals[0].proposed.is_none(), "no frame survived");
+    assert_eq!(result.proposals[0].dropped.len(), 1);
+    let dropped = &result.proposals[0].dropped[0];
+    assert_eq!(dropped.index, 0);
+    assert_eq!(dropped.disposition, xln_rscore_engine::Disposition::Removed);
+    assert!(!dropped.code.is_empty());
+    assert_ne!(dropped.tx_digest, [0; 32]);
+
+    // The account moved even though no frame did, and the wave says so.
+    assert_ne!(result.accounts_root, before);
+    assert_eq!(result.touched.len(), 1);
+    assert_eq!(result.touched[0].0, stand.pairs[0].payer_account);
 }

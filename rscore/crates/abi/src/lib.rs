@@ -10,7 +10,7 @@ mod types;
 mod value;
 
 pub use codec::{decode_envelope, decode_envelope_with_limits, encode_envelope};
-pub use digest::compute_body_digest;
+pub use digest::{compute_body_digest, encode_tuple};
 pub use error::AbiError;
 pub use types::{
     ABI_DOMAIN, ABI_MAGIC, ABI_VERSION, AbiLimits, BodyTuple, EngineIdentity, Envelope,

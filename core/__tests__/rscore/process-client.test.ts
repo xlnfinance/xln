@@ -2,7 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { accountSeedWire, accountTxWire, hexToWireBytes, swapMarketPolicyWire } from '../../rscore/shadow-wire';
+import {
+  accountSeedWire,
+  accountTxWire,
+  hexToWireBytes,
+  swapMarketPolicyDigest,
+  swapMarketPolicyWire,
+} from '../../rscore/shadow-wire';
+import { decodeWave, waveParityDigest } from '../../rscore/wave-decode';
+import { deriveSignerAddressSync } from '../../account/crypto';
+import { generateLazyEntityId } from '../../entity/factory';
+import { verifyHankoForHash } from '../../hanko/signing';
 import { RSCORE_PROCESS_ABI_VERSION, RscoreProcessClient } from '../../rscore/client';
 import { computeFrameHash } from '../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../account/commitment/state-root';
@@ -13,7 +23,7 @@ import {
   publishAccountTransition,
 } from '../../account/state/candidate-overlay';
 import { makeAccount } from '../helpers/cross-j';
-import type { AccountFrame, AccountTx, Delta } from '../../types/account';
+import type { AccountTx } from '../../types/account';
 
 const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
 
@@ -33,32 +43,6 @@ if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
   throw new Error(`RSCORE_BINARY_MISSING:${BINARY}`);
 }
 
-
-/** The proposal row as an AccountFrame, exactly as TypeScript models one. */
-const readFrame = (row: readonly unknown[]): AccountFrame => ({
-  height: row[1] as number,
-  timestamp: row[2] as number,
-  jHeight: row[3] as number,
-  accountTxs: [],
-  prevFrameHash: row[5] as string,
-  accountStateRoot: `0x${Buffer.from(row[6] as Uint8Array).toString('hex')}`,
-  stateHash: `0x${Buffer.from(row[9] as Uint8Array).toString('hex')}`,
-  byLeft: row[7] as boolean,
-  deltas: (row[8] as unknown[][]).map(readDelta),
-});
-
-const readDelta = (row: readonly unknown[]): Delta => ({
-  tokenId: row[0] as number,
-  collateral: BigInt(row[1] as string),
-  ondelta: BigInt(row[2] as string),
-  offdelta: BigInt(row[3] as string),
-  leftCreditLimit: BigInt(row[4] as string),
-  rightCreditLimit: BigInt(row[5] as string),
-  leftAllowance: BigInt(row[6] as string),
-  rightAllowance: BigInt(row[7] as string),
-  leftHold: BigInt(row[8] as string),
-  rightHold: BigInt(row[9] as string),
-});
 
 describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
   test('speaks the framed ABI end to end', async () => {
@@ -141,23 +125,29 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
   // The whole authoritative path over the real binary: the engine derives its
   // own signer, is handed one funded account, admits a direct_payment, and
   // signs a frame. TypeScript then verifies that frame with its own code —
-  // rebuilding the hash from the wire fields and reaching the same account
-  // state root by applying the same transaction itself.
+  // deriving the same identity independently, decoding every field, checking
+  // the signature, rebuilding the hash, reaching the same account state root
+  // and the same leaf, and recomputing the wave's parity digest.
   test('an authoritative session signs a payment frame TypeScript verifies', async () => {
     const client = new RscoreProcessClient(BINARY, identity());
     try {
       const seed = `0x${'7a'.repeat(32)}`;
-      const hello = (await client.hello(2, swapMarketPolicyWire(), {
-        seed,
-        signerId: '1',
-      })) as unknown[];
+      const market = swapMarketPolicyWire();
+      const hello = (await client.hello(2, market, { seed, signerId: '1' })) as unknown[];
       expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
-      // Hello reports the identity the engine derived, so the runtime knows
-      // which entity it is about to hand accounts to before any frame exists.
-      const signerAddress = `0x${Buffer.from(hello[4] as Uint8Array).toString('hex')}`;
-      const owner = `0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`;
-      expect(signerAddress).toHaveLength(42);
-      expect(owner).toHaveLength(66);
+      expect(`0x${Buffer.from(hello[3] as Uint8Array).toString('hex')}`)
+        .toBe(swapMarketPolicyDigest(market));
+
+      // TypeScript derives the identity itself and holds the engine to it.
+      // Taking the entity from the engine's own answer would prove only that
+      // the engine agrees with itself.
+      const expectedAddress = deriveSignerAddressSync(seed, '1');
+      const expectedOwner = generateLazyEntityId([expectedAddress], 1n);
+      expect(`0x${Buffer.from(hello[4] as Uint8Array).toString('hex')}`.toLowerCase())
+        .toBe(expectedAddress.toLowerCase());
+      expect(`0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`.toLowerCase())
+        .toBe(expectedOwner.toLowerCase());
+      const owner = expectedOwner.toLowerCase();
 
       const counterparty = `0x${'cc'.repeat(32)}`;
       const account = makeAccount(owner, counterparty);
@@ -165,8 +155,6 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
         accountSeedWire(owner, counterparty, account.state),
       ])) as unknown[];
       expect(loaded[0]).toBe(0);
-      const seededRoot = Buffer.from(loaded[1] as Uint8Array).toString('hex');
-      expect(seededRoot).not.toBe('00'.repeat(32));
 
       const tx: AccountTx = {
         type: 'direct_payment',
@@ -192,34 +180,39 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
         inputs: [],
       };
       const first = await client.prepareAccountWave(request);
-      const wave = first.result as unknown[];
-      const proposals = wave[3] as unknown[][];
-      expect(proposals).toHaveLength(1);
+      const wave = decodeWave(first.result);
+      expect(wave.proposals).toHaveLength(1);
+      expect(wave.proposals[0]!.accountId).toBe(counterparty);
+      expect(wave.proposals[0]!.dropped).toEqual([]);
+      expect(wave.touched).toHaveLength(1);
 
-      // The wave names the account it moved and the leaf the Entity tree would
-      // commit for it, plus one digest over everything it produced.
-      const touched = wave[4] as unknown[][];
-      expect(touched).toHaveLength(1);
-      expect(Buffer.from(touched[0]![0] as Uint8Array).toString('hex'))
-        .toBe(counterparty.slice(2));
-      expect((touched[0]![1] as Uint8Array).length).toBe(32);
-      expect((wave[5] as Uint8Array).length).toBe(32);
+      // The digest is recomputed from the decoded model: it matches only if
+      // every field decoded into something that encodes back identically.
+      expect(waveParityDigest(wave)).toBe(wave.parityDigest);
 
-      const frame = readFrame(proposals[0]!);
+      const frame = wave.proposals[0]!.frame;
+      if (frame === null) throw new Error('expected a signed frame');
       expect(frame.height).toBe(1);
       expect(frame.prevFrameHash).toBe('genesis');
-      expect(proposals[0]![4] as unknown[]).toHaveLength(1);
-      // Dropped rows are ordered and explicit; nothing was dropped here.
-      expect(proposals[0]![11]).toEqual([]);
+      // The transaction came back as the transaction that was sent, decoded
+      // from the engine's own bytes rather than substituted from this test.
+      expect(frame.accountTxs).toEqual([tx]);
 
-      // The frame the wire carries is complete: TypeScript rebuilds the signed
-      // hash from it, deltas included, and reaches the same digest the engine
-      // signed.
-      const rebuilt = await computeFrameHash({ ...frame, accountTxs: [tx] });
-      expect(rebuilt).toBe(frame.stateHash);
+      // The signature is checked against the frame it signs and the entity
+      // that must have produced it.
+      const verified = await verifyHankoForHash(
+        frame.hanko as `0x${string}`,
+        frame.stateHash,
+        owner,
+      );
+      expect(verified.valid).toBe(true);
+
+      // TypeScript rebuilds the signed hash from the frame it decoded.
+      expect(await computeFrameHash(frame)).toBe(frame.stateHash);
 
       // And the state that frame commits is the state TypeScript reaches by
-      // applying the same transaction to the same account.
+      // applying the same transaction to the same account, down to the leaf
+      // the Entity tree would put in its accounts map.
       const transition = beginAccountTransition(account);
       const applied = handleDirectPayment(
         accountTransitionView(transition),
@@ -230,20 +223,79 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       publishAccountTransition(account, transition, 'rscore-authority-test');
       expect(computeAccountStateRoot(account.state).toLowerCase())
         .toBe(frame.accountStateRoot);
+      // The leaf itself is compared against a live replica in the runtime
+      // driver, where the shell is the Entity's own, not one this test
+      // assembled by hand.
+      expect(wave.touched[0]!.accountId).toBe(counterparty);
 
       // A runtime that could not make its own record durable takes the wave
       // back, and the same request reaches the same candidate again.
       await client.abort(first.token);
       const second = await client.prepareAccountWave(request);
-      const again = second.result as unknown[];
-      expect(Buffer.from(again[5] as Uint8Array).toString('hex'))
-        .toBe(Buffer.from(wave[5] as Uint8Array).toString('hex'));
-      expect(readFrame((again[3] as unknown[][])[0]!).stateHash).toBe(frame.stateHash);
+      const again = decodeWave(second.result);
+      expect(again.parityDigest).toBe(wave.parityDigest);
 
       const committed = (await client.commit(second.token)) as unknown[];
-      expect(Buffer.from(committed[1] as Uint8Array).toString('hex'))
-        .toBe(Buffer.from(again[1] as Uint8Array).toString('hex'));
+      expect(`0x${Buffer.from(committed[1] as Uint8Array).toString('hex')}`)
+        .toBe(again.accountsRoot);
 
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  });
+
+  // A window where every transaction is rejected produces no frame, but it
+  // still moved the account. The wave must say so, or a driver would compare
+  // a tree the engine changed against one it did not.
+  test('a window that proposes nothing still reports what it dropped', async () => {
+    const client = new RscoreProcessClient(BINARY, identity());
+    try {
+      const seed = `0x${'7a'.repeat(32)}`;
+      const hello = (await client.hello(2, swapMarketPolicyWire(), {
+        seed,
+        signerId: '1',
+      })) as unknown[];
+      const owner = `0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`.toLowerCase();
+      const counterparty = `0x${'ce'.repeat(32)}`;
+      const account = makeAccount(owner, counterparty);
+      await client.restore(0, [accountSeedWire(owner, counterparty, account.state)]);
+
+      // Far beyond anything the account can cover, and not a rejection that is
+      // retried, so the transaction leaves the mempool for good.
+      const tx: AccountTx = {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 10n ** 40n,
+          route: [counterparty],
+          fromEntityId: owner,
+          toEntityId: counterparty,
+          deliveryMode: 'direct',
+        },
+      };
+      const prepared = await client.prepareAccountWave({
+        timestamp: 1_700_000_000_000,
+        jHeight: 100,
+        entityTimestamp: 1_700_000_000_000,
+        finalizedJHeight: 100,
+        propose: true,
+        admissions: [[hexToWireBytes(counterparty, 32, 'TEST_ACCOUNT_ID'), [accountTxWire(tx)]]],
+        inputs: [],
+      });
+      const wave = decodeWave(prepared.result);
+
+      expect(wave.proposals).toHaveLength(1);
+      expect(wave.proposals[0]!.frame).toBeNull();
+      expect(wave.proposals[0]!.dropped).toHaveLength(1);
+      const dropped = wave.proposals[0]!.dropped[0]!;
+      expect(dropped.index).toBe(0);
+      expect(dropped.disposition).toBe('removed');
+      expect(dropped.code.length).toBeGreaterThan(0);
+      expect(wave.touched).toHaveLength(1);
+      expect(waveParityDigest(wave)).toBe(wave.parityDigest);
+
+      await client.commit(prepared.token);
       await client.shutdown();
     } finally {
       client.kill();

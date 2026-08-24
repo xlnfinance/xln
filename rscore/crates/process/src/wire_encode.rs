@@ -296,26 +296,70 @@ pub fn wave(result: &xln_rscore_batch::WaveResult) -> Result<BodyTuple, crate::P
     for row in &result.proposals {
         proposals.push(proposal(row)?);
     }
+    let applied = tuple(result.applied.iter().map(input_result).collect());
+    let touched = tuple(
+        result
+            .touched
+            .iter()
+            .map(|(account_id, leaf)| {
+                tuple(vec![
+                    AbiValue::Bytes(account_id.as_bytes().to_vec()),
+                    AbiValue::Bytes(leaf.to_vec()),
+                ])
+            })
+            .collect(),
+    );
+    let proposals = tuple(proposals);
+    let digest = parity_digest(result.accounts_root, &touched, &applied, &proposals)?;
     Ok(body(vec![
         integer(result.revision),
         AbiValue::Bytes(result.accounts_root.to_vec()),
-        tuple(result.applied.iter().map(input_result).collect()),
-        tuple(proposals),
-        tuple(
-            result
-                .touched
-                .iter()
-                .map(|(account_id, leaf)| {
-                    tuple(vec![
-                        AbiValue::Bytes(account_id.as_bytes().to_vec()),
-                        AbiValue::Bytes(leaf.to_vec()),
-                    ])
-                })
-                .collect(),
-        ),
-        AbiValue::Bytes(result.parity_digest.to_vec()),
+        applied,
+        proposals,
+        touched,
+        AbiValue::Bytes(digest.to_vec()),
     ]))
 }
+
+/// The whole wave in one hash: the accounts root, the leaves it moved, the
+/// verdicts in order — effects included — and every proposal attempt with its
+/// dropped rows. A driver compares this and nothing else until it differs.
+///
+/// Effects are in it deliberately: no state root covers them, so an engine
+/// that lost a forward or a revealed secret would otherwise agree on every
+/// root it publishes.
+///
+/// Signatures are not: a Hanko is checked against the frame it signs and the
+/// entity that must have produced it, which is a stronger statement than two
+/// engines producing identical bytes.
+///
+/// The digest is taken over this ABI's own canonical encoding rather than any
+/// Rust-side formatting, so TypeScript reproduces it with the encoder it
+/// already speaks.
+fn parity_digest(
+    accounts_root: [u8; 32],
+    touched: &AbiValue,
+    applied: &AbiValue,
+    proposals: &AbiValue,
+) -> Result<[u8; 32], crate::ProcessError> {
+    use sha2::{Digest, Sha256};
+    // The transcript is the four values themselves, not a body: a reply wraps
+    // its fields in one more tuple, and hashing that wrapper would make the
+    // digest describe the envelope rather than the wave.
+    let transcript = xln_rscore_abi::BodyTuple::from_array([
+        AbiValue::Bytes(accounts_root.to_vec()),
+        touched.clone(),
+        applied.clone(),
+        proposals.clone(),
+    ]);
+    let encoded = xln_rscore_abi::encode_tuple(&transcript)?;
+    let mut digest = Sha256::new();
+    digest.update(WAVE_PARITY_DOMAIN.as_bytes());
+    digest.update(&encoded);
+    Ok(digest.finalize().into())
+}
+
+const WAVE_PARITY_DOMAIN: &str = "xln.rscore.wave-parity.v1";
 
 pub fn wave_committed(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
     body(vec![
@@ -331,25 +375,34 @@ pub fn wave_aborted(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
     ])
 }
 
-/// The frame to send to the counterparty, whole: the runtime relays it, and a
-/// peer running either engine must be able to rebuild exactly these bytes.
+/// One attempt to propose: the account, the frame it produced if any, and the
+/// transactions it could not include. An attempt that produced no frame is
+/// still reported — it moved the mempool, and therefore the leaf.
 fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::ProcessError> {
-    let mut txs = Vec::with_capacity(row.frame.txs.len());
-    for value in &row.frame.txs {
-        txs.push(tx(value)?);
-    }
+    let proposed = match row.proposed.as_ref() {
+        None => AbiValue::Nil,
+        Some(proposed) => {
+            let mut txs = Vec::with_capacity(proposed.frame.txs.len());
+            for value in &proposed.frame.txs {
+                txs.push(tx(value)?);
+            }
+            tuple(vec![
+                integer(proposed.frame.height),
+                integer(proposed.frame.timestamp),
+                integer(proposed.frame.j_height),
+                tuple(txs),
+                AbiValue::Text(proposed.frame.prev_frame_hash.clone()),
+                AbiValue::Bytes(proposed.frame.account_state_root.to_vec()),
+                AbiValue::Bool(proposed.frame.by_left),
+                tuple(proposed.frame.deltas.iter().map(delta).collect()),
+                AbiValue::Bytes(proposed.state_hash.to_vec()),
+                AbiValue::Bytes(proposed.hanko.clone()),
+            ])
+        }
+    };
     Ok(tuple(vec![
         AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
-        integer(row.frame.height),
-        integer(row.frame.timestamp),
-        integer(row.frame.j_height),
-        tuple(txs),
-        AbiValue::Text(row.frame.prev_frame_hash.clone()),
-        AbiValue::Bytes(row.frame.account_state_root.to_vec()),
-        AbiValue::Bool(row.frame.by_left),
-        tuple(row.frame.deltas.iter().map(delta).collect()),
-        AbiValue::Bytes(row.state_hash.to_vec()),
-        AbiValue::Bytes(row.hanko.clone()),
+        proposed,
         tuple(row.dropped.iter().map(dropped).collect()),
     ]))
 }
@@ -463,7 +516,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
 /// The exact inverse of `decode_tx` (wire_decode.rs): same tags, same field
 /// order, so a frame this engine proposes decodes back into the same
 /// transactions on the other side.
-fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessError> {
+pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessError> {
     use xln_rscore_engine::{AccountTx, HtlcDeliveryMode, HtlcResolveOutcome};
     let fields = match value {
         AccountTx::DirectPayment {
@@ -497,7 +550,7 @@ fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessEr
         AccountTx::HtlcLock(lock) => vec![
             integer(1),
             AbiValue::Text(lock.lock_id.clone()),
-            AbiValue::Text(lock.hashlock.as_str().to_string()),
+            hex_bytes(lock.hashlock.as_str(), 32),
             big(&lock.timelock),
             integer(lock.reveal_before_height),
             big(&lock.amount),
@@ -514,9 +567,7 @@ fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessEr
         ],
         AccountTx::HtlcResolve(resolve) => {
             let (outcome, payload) = match &resolve.outcome {
-                HtlcResolveOutcome::Secret { secret } => {
-                    (integer(0), AbiValue::Text(secret.clone()))
-                }
+                HtlcResolveOutcome::Secret { secret } => (integer(0), hex_bytes(secret, 32)),
                 HtlcResolveOutcome::Error { reason } => (integer(1), optional_text(reason)),
             };
             vec![
@@ -617,6 +668,19 @@ fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessEr
         }
     };
     Ok(tuple(fields))
+}
+
+/// A `0x`-prefixed hex string as the bytes the decoder expects. The wire is
+/// binary for fixed-width identifiers: encoding one as text here would produce
+/// a frame this ABI cannot read back.
+fn hex_bytes(value: &str, length: usize) -> AbiValue {
+    let hex = value.strip_prefix("0x").unwrap_or(value);
+    let mut bytes = Vec::with_capacity(length);
+    for pair in hex.as_bytes().chunks_exact(2) {
+        let text = std::str::from_utf8(pair).unwrap_or("");
+        bytes.push(u8::from_str_radix(text, 16).unwrap_or(0));
+    }
+    AbiValue::Bytes(bytes)
 }
 
 fn big(value: &num_bigint::BigInt) -> AbiValue {

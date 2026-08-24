@@ -508,18 +508,35 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
         1,
         "one account had something to propose: {fields:?}"
     );
-    let proposal = tuple_fields(&proposals[0]);
-    assert_eq!(proposal[1], AbiValue::Integer(1), "height 1");
-    assert_eq!(tuple_fields(&proposal[4]).len(), 1, "one transaction");
+    let proposal = exact_tuple(&proposals[0], 3, "proposal");
+    let frame = exact_tuple(&proposal[1], 10, "frame");
+    assert_eq!(frame[0], AbiValue::Integer(1), "height 1");
+    assert_eq!(tuple_fields(&frame[3]).len(), 1, "one transaction");
     assert_eq!(
-        proposal[5],
+        frame[4],
         AbiValue::Text("genesis".into()),
         "the first frame chains to genesis",
     );
-    let AbiValue::Bytes(hanko) = &proposal[9] else {
-        panic!("expected a hanko: {:?}", proposal[9]);
+    assert_eq!(
+        tuple_fields(&frame[7]).len(),
+        1,
+        "one delta the hash commits"
+    );
+    let AbiValue::Bytes(state_hash) = &frame[8] else {
+        panic!("expected a state hash: {:?}", frame[8]);
+    };
+    assert_eq!(state_hash.len(), 32);
+    let AbiValue::Bytes(hanko) = &frame[9] else {
+        panic!("expected a hanko: {:?}", frame[9]);
     };
     assert!(!hanko.is_empty(), "the frame is signed");
+    assert_eq!(tuple_fields(&proposal[2]).len(), 0, "nothing was dropped");
+    // Touched leaves and the parity digest travel with every wave.
+    assert_eq!(tuple_fields(&fields[4]).len(), 1, "one account moved");
+    let AbiValue::Bytes(digest) = &fields[5] else {
+        panic!("expected a parity digest: {:?}", fields[5]);
+    };
+    assert_eq!(digest.len(), 32);
 
     // A wave the runtime has not committed blocks the next one.
     assert_error(
@@ -604,4 +621,91 @@ fn an_aborted_wave_puts_the_authority_engine_back() {
         body_fields(&first)[3],
         "the same wave reaches the same proposal",
     );
+}
+
+/// A tuple of exactly this many fields, so a shape change is a test failure
+/// rather than a silently shifted index.
+fn exact_tuple(value: &AbiValue, arity: usize, what: &str) -> Vec<AbiValue> {
+    let fields = tuple_fields(value);
+    assert_eq!(fields.len(), arity, "{what} arity");
+    fields
+}
+
+/// Every transaction the wire carries must decode back into the transaction it
+/// came from. The frame the runtime relays to the counterparty is these bytes:
+/// a field encoded one way and read another produces a frame the peer cannot
+/// read, and no test of a single direction would notice.
+#[test]
+fn every_transaction_survives_the_wire_round_trip() {
+    use num_bigint::BigInt;
+    use xln_rscore_engine::{
+        AccountTx, DeliveryMode, HtlcDeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
+        HtlcResolveTx, TokenId,
+    };
+
+    let hashlock = format!("0x{}", "ab".repeat(32));
+    let secret = format!("0x{}", "cd".repeat(32));
+    let cases = vec![
+        AccountTx::DirectPayment {
+            token_id: TokenId::new(1).expect("token"),
+            amount: BigInt::from(25),
+            route: vec![format!("0x{}", "cc".repeat(32))],
+            description: Some("memo".to_string()),
+            from_entity_id: format!("0x{}", "aa".repeat(32)),
+            to_entity_id: format!("0x{}", "bb".repeat(32)),
+            delivery_mode: DeliveryMode::Trusted,
+            trusted_gateway_entity_id: Some(format!("0x{}", "dd".repeat(32))),
+        },
+        AccountTx::HtlcLock(HtlcLockTx {
+            lock_id: "lock-1".to_string(),
+            hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
+            timelock: BigInt::from(1_700_000_000_000_u64),
+            reveal_before_height: 12,
+            amount: BigInt::from(500),
+            token_id: TokenId::new(1).expect("token"),
+            delivery_mode: Some(HtlcDeliveryMode::Async),
+            envelope: None,
+        }),
+        AccountTx::HtlcResolve(HtlcResolveTx {
+            lock_id: "lock-1".to_string(),
+            outcome: HtlcResolveOutcome::Secret {
+                secret: secret.clone(),
+            },
+        }),
+        AccountTx::HtlcResolve(HtlcResolveTx {
+            lock_id: "lock-2".to_string(),
+            outcome: HtlcResolveOutcome::Error {
+                reason: Some("expired".to_string()),
+            },
+        }),
+        AccountTx::AddDelta {
+            token_id: TokenId::new(2).expect("token"),
+        },
+        AccountTx::SetCreditLimit {
+            token_id: TokenId::new(1).expect("token"),
+            amount: BigInt::from(1_000),
+        },
+        AccountTx::SwapOffer {
+            offer_id: "offer-1".to_string(),
+            give_token_id: 1,
+            give_token_decimals: 6,
+            give_amount: BigInt::from(1_000_000),
+            want_token_id: 2,
+            want_token_decimals: 6,
+            want_amount: BigInt::from(2_000_000),
+            max_fee: BigInt::from(0),
+            min_net_receive: BigInt::from(1_900_000),
+            time_in_force: Some(1),
+            price_ticks: Some(BigInt::from(20_000)),
+        },
+        AccountTx::SwapCancelRequest {
+            offer_id: "offer-1".to_string(),
+        },
+    ];
+
+    for tx in cases {
+        let encoded = crate::wire_encode::tx(&tx).expect("encode");
+        let decoded = crate::wire_decode::decode_tx(&encoded).expect("decode");
+        assert_eq!(decoded, tx, "round trip: {tx:?}");
+    }
 }

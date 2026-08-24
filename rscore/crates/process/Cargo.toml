@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 num-bigint.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 xln-rscore-abi = { path = "../abi" }
 xln-rscore-batch = { path = "../batch" }

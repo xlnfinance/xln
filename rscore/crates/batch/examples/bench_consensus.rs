@@ -26,8 +26,8 @@ use xln_rscore_batch::{
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
-    AckOutcome, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingFrame,
-    IncomingOutcome, SigningIdentity, TokenId, WatchSeed,
+    AckOutcome, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingOutcome,
+    SigningIdentity, TokenId, WatchSeed,
 };
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
@@ -232,17 +232,9 @@ fn main() {
                     // The payee holds this account under the payer's id.
                     account_id: AccountId::from_bytes(pair.payer_entity),
                     from_entity_id: pair.payer_entity,
-                    kind: AccountInputKind::Frame(Box::new(IncomingFrame {
-                        height: proposal.frame.height,
-                        timestamp: proposal.frame.timestamp,
-                        j_height: proposal.frame.j_height,
-                        txs: proposal.frame.txs.clone(),
-                        prev_frame_hash: proposal.frame.prev_frame_hash.clone(),
-                        account_state_root: proposal.frame.account_state_root,
-                        by_left: proposal.frame.by_left,
-                        state_hash: proposal.state_hash,
-                        hanko: proposal.hanko.clone(),
-                    })),
+                    kind: AccountInputKind::Frame(Box::new(
+                        proposal.incoming().expect("the attempt produced a frame"),
+                    )),
                 }
             })
             .collect();

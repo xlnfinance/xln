@@ -554,6 +554,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "num-bigint",
+ "sha2",
  "thiserror",
  "xln-rscore-abi",
  "xln-rscore-batch",

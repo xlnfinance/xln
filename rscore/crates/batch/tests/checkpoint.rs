@@ -17,7 +17,7 @@ use xln_rscore_batch::{
 };
 use xln_rscore_engine::{
     AccountReplica, AccountState, AccountStateSeed, AckOutcome, ConsensusSnapshot, Delta,
-    IncomingFrame, IncomingOutcome,
+    IncomingOutcome,
 };
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
@@ -381,17 +381,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .propose_frames(1_700_000_000_000, 100, None)
         .expect("propose");
     let proposal = &proposals[0];
-    let frame = IncomingFrame {
-        height: proposal.frame.height,
-        timestamp: proposal.frame.timestamp,
-        j_height: proposal.frame.j_height,
-        txs: proposal.frame.txs.clone(),
-        prev_frame_hash: proposal.frame.prev_frame_hash.clone(),
-        account_state_root: proposal.frame.account_state_root,
-        by_left: proposal.frame.by_left,
-        state_hash: proposal.state_hash,
-        hanko: proposal.hanko.clone(),
-    };
+    let frame = proposal.incoming().expect("the attempt produced a frame");
 
     let mut database = Database::default();
     let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
@@ -415,7 +405,10 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .expect("account")
         .pending()
         .expect("pending frame");
-    assert_eq!(pending.state_hash, proposal.state_hash);
+    assert_eq!(
+        pending.state_hash,
+        proposal.proposed.as_ref().expect("a frame").state_hash
+    );
 
     // The peer never saw the crash: it commits the frame and acks it.
     let applied = stand
@@ -625,7 +618,7 @@ fn a_wave_with_two_rows_for_one_account_keeps_both() {
         .iter()
         .find(|row| row.account_id == account_id)
         .expect("row");
-    assert_eq!(rows.frame.txs.len(), 2);
+    assert_eq!(rows.proposed.as_ref().expect("a frame").frame.txs.len(), 2);
 }
 
 /// A restore that fails must leave the engine exactly as it was. Half a load
