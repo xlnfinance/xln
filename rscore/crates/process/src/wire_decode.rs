@@ -10,15 +10,26 @@ use xln_rscore_engine::{
 };
 
 use crate::wire_value::{
-    bigint, bounded_u32, entity, exact, fixed_bytes, hex_fixed, integer, js_number,
+    bigint, boolean, bounded_u32, bytes, entity, exact, fixed_bytes, hex_fixed, integer, js_number,
     optional_fixed_bytes, optional_text, text, text_list, token, tuple, unsigned,
 };
 use crate::{PROCESS_ABI_VERSION, PROCESS_PROFILE, ProcessError};
+
+/// What an authoritative session needs that a mirror session does not: the
+/// runtime's seed and the signer it signs as. The engine derives its own keys
+/// from them, so the runtime never ships a private key.
+pub struct AuthorityConfig {
+    pub seed: String,
+    pub signer_id: String,
+}
 
 pub enum Command {
     Hello {
         worker_count: usize,
         swap_market: SwapMarketPolicy,
+        /// Present when this session owns the accounts rather than mirroring
+        /// them.
+        authority: Option<AuthorityConfig>,
     },
     Restore {
         revision: u64,
@@ -51,6 +62,10 @@ pub enum Command {
     RemoveAccounts {
         account_ids: Vec<AccountId>,
     },
+    /// One runtime frame for the authoritative engine.
+    PrepareAccountWave {
+        request: Box<xln_rscore_batch::WaveRequest>,
+    },
 }
 
 pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
@@ -68,12 +83,13 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::ReadCapacityBatch => decode_capacity_batch(payload),
         OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
         OpTag::UpsertAccounts => decode_upsert_accounts(payload),
+        OpTag::PrepareAccountWave => decode_prepare_wave(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
 }
 
 fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 3, "hello")?;
+    let fields = exact(fields, 4, "hello")?;
     let version = unsigned(&fields[0], "processVersion")?;
     if version != PROCESS_ABI_VERSION {
         return Err(ProcessError::Version {
@@ -85,7 +101,24 @@ fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
         worker_count: usize::try_from(unsigned(&fields[1], "workerCount")?)
             .map_err(|_| ProcessError::Expected("workerCount"))?,
         swap_market: decode_swap_market(&fields[2])?,
+        authority: decode_authority_config(&fields[3])?,
     })
+}
+
+/// `null` for a mirror session, or `(seed, signerId)` for one that owns the
+/// accounts. The seed never leaves this process again: the engine derives its
+/// keys from it and returns signatures, not key material.
+fn decode_authority_config(value: &AbiValue) -> Result<Option<AuthorityConfig>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = exact(tuple(value)?, 2, "authorityConfig")?;
+    let seed = text(&fields[0])?.to_string();
+    let signer_id = text(&fields[1])?.to_string();
+    if seed.is_empty() || signer_id.is_empty() {
+        return Err(ProcessError::Expected("authorityConfig"));
+    }
+    Ok(Some(AuthorityConfig { seed, signer_id }))
 }
 
 /// Registry-derived market tables, installed once per session. The engine
@@ -178,6 +211,100 @@ fn decode_prepare(fields: &[AbiValue]) -> Result<Command, ProcessError> {
             .map(decode_job)
             .collect::<Result<_, _>>()?,
     })
+}
+
+const MAX_WAVE_ADMISSION_ROWS: usize = 1_000_000;
+const MAX_WAVE_INPUT_ROWS: usize = 1_000_000;
+
+/// One runtime frame: what to queue, what arrived, and whether to propose.
+fn decode_prepare_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 7, "prepareWave")?;
+    let admissions = tuple(&fields[5])?;
+    if admissions.len() > MAX_WAVE_ADMISSION_ROWS {
+        return Err(ProcessError::Expected("waveAdmissionRows"));
+    }
+    let inputs = tuple(&fields[6])?;
+    if inputs.len() > MAX_WAVE_INPUT_ROWS {
+        return Err(ProcessError::Expected("waveInputRows"));
+    }
+    Ok(Command::PrepareAccountWave {
+        request: Box::new(xln_rscore_batch::WaveRequest {
+            timestamp: js_number(&fields[0], "timestamp")?,
+            j_height: js_number(&fields[1], "jHeight")?,
+            clock: xln_rscore_batch::ReceiverClock {
+                entity_timestamp: js_number(&fields[2], "entityTimestamp")?,
+                finalized_j_height: js_number(&fields[3], "finalizedJHeight")?,
+            },
+            propose: boolean(&fields[4], "propose")?,
+            admissions: admissions
+                .iter()
+                .map(decode_admission)
+                .collect::<Result<_, _>>()?,
+            inputs: inputs
+                .iter()
+                .map(decode_input_row)
+                .collect::<Result<_, _>>()?,
+        }),
+    })
+}
+
+fn decode_admission(value: &AbiValue) -> Result<(AccountId, Vec<AccountTx>), ProcessError> {
+    let fields = exact(tuple(value)?, 2, "admission")?;
+    Ok((
+        AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?),
+        tuple(&fields[1])?
+            .iter()
+            .map(decode_tx)
+            .collect::<Result<_, _>>()?,
+    ))
+}
+
+fn decode_input_row(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
+    let fields = exact(tuple(value)?, 4, "accountInput")?;
+    Ok(xln_rscore_batch::AccountInputRow {
+        input_index: bounded_u32(&fields[0], "inputIndex")?,
+        account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
+        from_entity_id: fixed_bytes(&fields[2], "fromEntityId")?,
+        kind: decode_input_kind(&fields[3])?,
+    })
+}
+
+fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputKind, ProcessError> {
+    let fields = tuple(value)?;
+    let tag = fields.first().ok_or(ProcessError::Expected("inputTag"))?;
+    match integer(tag)? {
+        0 => {
+            let fields = exact(fields, 10, "incomingFrame")?;
+            Ok(xln_rscore_batch::AccountInputKind::Frame(Box::new(
+                xln_rscore_engine::IncomingFrame {
+                    height: js_number(&fields[1], "height")?,
+                    timestamp: js_number(&fields[2], "timestamp")?,
+                    j_height: js_number(&fields[3], "jHeight")?,
+                    txs: tuple(&fields[4])?
+                        .iter()
+                        .map(decode_tx)
+                        .collect::<Result<_, _>>()?,
+                    prev_frame_hash: text(&fields[5])?.into(),
+                    account_state_root: fixed_bytes(&fields[6], "accountStateRoot")?,
+                    by_left: boolean(&fields[7], "byLeft")?,
+                    state_hash: fixed_bytes(&fields[8], "stateHash")?,
+                    hanko: bytes(&fields[9], "hanko")?.to_vec(),
+                },
+            )))
+        }
+        1 => {
+            let fields = exact(fields, 4, "incomingAck")?;
+            Ok(xln_rscore_batch::AccountInputKind::Ack {
+                height: js_number(&fields[1], "height")?,
+                state_hash: fixed_bytes(&fields[2], "stateHash")?,
+                hanko: bytes(&fields[3], "hanko")?.to_vec(),
+            })
+        }
+        value => Err(ProcessError::Tag {
+            field: "accountInput",
+            value,
+        }),
+    }
 }
 
 fn decode_commit(fields: &[AbiValue]) -> Result<Command, ProcessError> {

@@ -1,7 +1,9 @@
 use xln_rscore_abi::{EngineIdentity, Envelope, MessageKind, ProtocolBinding};
-use xln_rscore_batch::{EngineGeneration, PreparedBatch, StatefulBatchEngine};
+use xln_rscore_batch::{
+    EngineGeneration, PreparedBatch, StatefulBatchEngine, StatefulConsensusEngine,
+};
 
-use crate::wire_decode::{Command, decode_command};
+use crate::wire_decode::{AuthorityConfig, Command, decode_command};
 use crate::{ProcessError, wire_encode};
 
 pub struct ProcessReply {
@@ -15,8 +17,21 @@ pub struct ProcessSession {
     swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     last_request_id: Option<u64>,
     engine: Option<StatefulBatchEngine>,
+    /// The authoritative engine, when the runtime asked for one at Hello. A
+    /// session is one or the other for its whole life: mirroring and owning
+    /// the accounts are different jobs, and a process that could switch would
+    /// have two answers to "what is the account".
+    authority: Option<Box<StatefulConsensusEngine>>,
+    authority_config: Option<AuthorityConfig>,
     pending: Option<PendingBatch>,
+    pending_wave: Option<PendingWave>,
     stopped: bool,
+}
+
+/// The wave the engine is holding, and the request that produced it.
+struct PendingWave {
+    prepare_request_id: [u8; 8],
+    revision: u64,
 }
 
 struct SessionBinding {
@@ -39,7 +54,10 @@ impl ProcessSession {
             swap_market: std::sync::Arc::default(),
             last_request_id: None,
             engine: None,
+            authority: None,
+            authority_config: None,
             pending: None,
+            pending_wave: None,
             stopped: false,
         }
     }
@@ -88,6 +106,7 @@ impl ProcessSession {
         let Command::Hello {
             worker_count,
             swap_market,
+            authority,
         } = command
         else {
             return Err(ProcessError::HelloRequired);
@@ -108,6 +127,7 @@ impl ProcessSession {
         self.last_request_id = Some(0);
         let digest = swap_market.digest();
         self.swap_market = std::sync::Arc::new(swap_market);
+        self.authority_config = authority;
         Ok((wire_encode::hello(worker_count, digest), false))
     }
 
@@ -134,9 +154,22 @@ impl ProcessSession {
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
             Command::Restore { revision, accounts } => self.load(revision, accounts),
+            Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
-            Command::Commit { prepare_request_id } => self.commit(prepare_request_id),
-            Command::Abort { prepare_request_id } => self.abort(prepare_request_id),
+            Command::Commit { prepare_request_id } => {
+                if self.authority.is_some() {
+                    self.commit_wave(prepare_request_id)
+                } else {
+                    self.commit(prepare_request_id)
+                }
+            }
+            Command::Abort { prepare_request_id } => {
+                if self.authority.is_some() {
+                    self.abort_wave(prepare_request_id)
+                } else {
+                    self.abort(prepare_request_id)
+                }
+            }
             Command::Shutdown => self.shutdown(),
             Command::UpsertAccounts { accounts } => self.upsert_accounts(accounts),
             Command::UpdateAccountShells { shells } => self.update_account_shells(shells),
@@ -178,15 +211,104 @@ impl ProcessSession {
         ))
     }
 
+    /// One runtime frame, against a candidate this process keeps until the
+    /// runtime has made its own record of it durable.
+    fn prepare_wave(
+        &mut self,
+        request_id: [u8; 8],
+        request: xln_rscore_batch::WaveRequest,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending_wave.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let result = engine.prepare_wave(request)?;
+        let response = wire_encode::wave(&result)?;
+        self.pending_wave = Some(PendingWave {
+            prepare_request_id: request_id,
+            revision: result.revision,
+        });
+        Ok((response, false))
+    }
+
+    fn commit_wave(
+        &mut self,
+        prepare_request_id: [u8; 8],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let pending = self.take_pending_wave(prepare_request_id)?;
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        match engine.commit_wave(pending.revision) {
+            Ok(accounts_root) => Ok((
+                wire_encode::wave_committed(engine.revision(), accounts_root),
+                false,
+            )),
+            Err(error) => {
+                // A commit that cannot be honoured leaves this process and the
+                // runtime disagreeing about what happened; there is nothing
+                // safe to serve after that.
+                self.stopped = true;
+                Err(error.into())
+            }
+        }
+    }
+
+    fn abort_wave(
+        &mut self,
+        prepare_request_id: [u8; 8],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let pending = self.take_pending_wave(prepare_request_id)?;
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let revision = engine.abort_wave(pending.revision)?;
+        Ok((
+            wire_encode::wave_aborted(revision, engine.accounts_root()),
+            false,
+        ))
+    }
+
+    fn take_pending_wave(&mut self, actual: [u8; 8]) -> Result<PendingWave, ProcessError> {
+        let pending = self
+            .pending_wave
+            .as_ref()
+            .ok_or(ProcessError::PrepareNotPending)?;
+        if pending.prepare_request_id != actual {
+            return Err(ProcessError::PrepareIdMismatch);
+        }
+        self.pending_wave
+            .take()
+            .ok_or(ProcessError::PrepareNotPending)
+    }
+
     fn load(
         &mut self,
         revision: u64,
         accounts: Vec<xln_rscore_batch::AccountSeed>,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.engine.is_some() {
+        if self.engine.is_some() || self.authority.is_some() {
             return Err(ProcessError::EngineAlreadyLoaded);
         }
         let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
+        if let Some(config) = self.authority_config.as_ref() {
+            let engine = StatefulConsensusEngine::restore(
+                EngineGeneration::from_bytes(binding.engine_generation),
+                self.worker_count,
+                revision,
+                config.seed.clone(),
+                config.signer_id.clone(),
+                accounts,
+            )?;
+            let accounts_root = engine.accounts_root();
+            self.authority = Some(Box::new(engine));
+            return Ok((wire_encode::loaded(revision, accounts_root), false));
+        }
         let engine = StatefulBatchEngine::restore(
             EngineGeneration::from_bytes(binding.engine_generation),
             self.worker_count,
@@ -202,8 +324,15 @@ impl ProcessSession {
         &mut self,
         accounts: Vec<xln_rscore_batch::AccountSeed>,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending.is_some() {
+        if self.pending.is_some() || self.pending_wave.is_some() {
             return Err(ProcessError::PreparePending);
+        }
+        if let Some(engine) = self.authority.as_mut() {
+            let accounts_root = engine.upsert_accounts(accounts)?;
+            return Ok((
+                wire_encode::upserted(engine.revision(), accounts_root),
+                false,
+            ));
         }
         let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
         let accounts_root = engine.upsert_accounts(accounts)?;
@@ -325,6 +454,9 @@ impl ProcessSession {
     }
 
     fn shutdown(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending_wave.is_some() {
+            return Err(ProcessError::PreparePending);
+        }
         if self.pending.is_some() {
             return Err(ProcessError::PreparePending);
         }

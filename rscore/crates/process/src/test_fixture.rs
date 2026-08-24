@@ -26,11 +26,27 @@ fn binding() -> ProtocolBinding {
 }
 
 pub fn hello(id: u64) -> Envelope {
+    hello_with_authority(id, AbiValue::Nil)
+}
+
+/// The same Hello, with the authority config a session that owns its accounts
+/// sends: `(seed, signerId)`.
+pub fn hello_authority(id: u64, seed: &str, signer_id: &str) -> Envelope {
+    hello_with_authority(
+        id,
+        tuple(vec![
+            AbiValue::Text(seed.into()),
+            AbiValue::Text(signer_id.into()),
+        ]),
+    )
+}
+
+fn hello_with_authority(id: u64, authority: AbiValue) -> Envelope {
     request(
         id,
         OpTag::Hello,
         vec![
-            AbiValue::Integer(1),
+            AbiValue::Integer(i128::from(crate::PROCESS_ABI_VERSION)),
             AbiValue::Integer(20),
             // Market policy: WETH(2, 18) based against USDC(1, 6).
             tuple(vec![
@@ -52,6 +68,7 @@ pub fn hello(id: u64) -> Envelope {
                     AbiValue::Integer(1),
                 ])]),
             ]),
+            authority,
         ],
     )
 }
@@ -143,6 +160,22 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
         // No replica shell: this fixture exercises the financial engine, so
         // the leaf stays the payment-profile state root.
         AbiValue::Nil,
+    ])
+}
+
+/// Collateral plus credit both ways, so either side can pay.
+fn funded_delta() -> AbiValue {
+    tuple(vec![
+        AbiValue::Integer(1),
+        AbiValue::Text("1000000".into()),
+        AbiValue::Text("0".into()),
+        AbiValue::Text("0".into()),
+        AbiValue::Text("500000".into()),
+        AbiValue::Text("500000".into()),
+        AbiValue::Text("0".into()),
+        AbiValue::Text("0".into()),
+        AbiValue::Text("0".into()),
+        AbiValue::Text("0".into()),
     ])
 }
 
@@ -282,6 +315,113 @@ pub fn fixture_account_id() -> [u8; 32] {
 /// a change to the engine's domain string.
 fn empty_j_claim_root() -> [u8; 32] {
     xln_rscore_engine::JClaimAccumulator::default().root
+}
+
+/// The lazy entity a signer id defines under this seed — the only owner an
+/// authoritative session can sign for.
+pub fn authority_entity(seed: &str, signer_id: &str) -> [u8; 32] {
+    *xln_rscore_engine::SigningIdentity::lazy_from_seed(
+        seed,
+        signer_id,
+        1,
+        1,
+        xln_rscore_engine::BoardDelays::default(),
+    )
+    .expect("identity")
+    .entity_id()
+}
+
+/// One account between two lazy entities, seeded with a funded delta.
+pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
+    let (left, right) = if owner <= counterparty {
+        (owner, counterparty)
+    } else {
+        (counterparty, owner)
+    };
+    tuple(vec![
+        AbiValue::Bytes(counterparty.to_vec()),
+        AbiValue::Bytes(owner.to_vec()),
+        AbiValue::Bytes(left.to_vec()),
+        AbiValue::Bytes(right.to_vec()),
+        AbiValue::Integer(31_337),
+        AbiValue::Bytes(vec![0x88; 20]),
+        AbiValue::Bytes(vec![0x99; 32]),
+        tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
+        tuple(vec![funded_delta()]),
+        tuple(Vec::new()),
+        tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
+        tuple(vec![
+            AbiValue::Bytes(vec![0_u8; 32]),
+            tuple(Vec::new()),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            tuple(Vec::new()),
+            tuple(vec![
+                AbiValue::Bytes(empty_j_claim_root().to_vec()),
+                AbiValue::Integer(0),
+            ]),
+            tuple(vec![
+                AbiValue::Bytes(empty_j_claim_root().to_vec()),
+                AbiValue::Integer(0),
+            ]),
+        ]),
+        AbiValue::Nil,
+    ])
+}
+
+/// `RestoreCheckpoint` carrying accounts an authoritative session owns.
+pub fn load_accounts(id: u64, revision: u64, accounts: Vec<AbiValue>) -> Envelope {
+    request(
+        id,
+        OpTag::RestoreCheckpoint,
+        vec![
+            AbiValue::Text(crate::PROCESS_PROFILE.into()),
+            AbiValue::Integer(i128::from(revision)),
+            tuple(accounts),
+        ],
+    )
+}
+
+/// One runtime frame: admissions, arriving inputs, and whether to propose.
+pub fn prepare_wave(
+    id: u64,
+    timestamp: u64,
+    admissions: Vec<AbiValue>,
+    inputs: Vec<AbiValue>,
+    propose: bool,
+) -> Envelope {
+    request(
+        id,
+        OpTag::PrepareAccountWave,
+        vec![
+            AbiValue::Integer(i128::from(timestamp)),
+            AbiValue::Integer(100),
+            AbiValue::Integer(i128::from(timestamp)),
+            AbiValue::Integer(100),
+            AbiValue::Bool(propose),
+            tuple(admissions),
+            tuple(inputs),
+        ],
+    )
+}
+
+/// A direct payment queued for one account.
+pub fn wave_payment(account_id: [u8; 32], from: [u8; 32], to: [u8; 32], amount: i128) -> AbiValue {
+    tuple(vec![
+        AbiValue::Bytes(account_id.to_vec()),
+        tuple(vec![tuple(vec![
+            AbiValue::Integer(0),
+            AbiValue::Integer(1),
+            AbiValue::Text(amount.to_string()),
+            tuple(vec![AbiValue::Text(format!("0x{}", hex::encode(to)))]),
+            AbiValue::Nil,
+            AbiValue::Text(format!("0x{}", hex::encode(from))),
+            AbiValue::Text(format!("0x{}", hex::encode(to))),
+            AbiValue::Integer(0),
+            AbiValue::Nil,
+        ])]),
+    ])
 }
 
 fn entity_bytes(suffix: u8) -> [u8; 32] {

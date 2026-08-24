@@ -96,6 +96,8 @@ pub enum OpTag {
     UpsertAccounts = 14,
     UpdateAccountShells = 15,
     RemoveAccounts = 16,
+    /// The authoritative account engine: one runtime frame, one call.
+    PrepareAccountWave = 17,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -120,6 +122,7 @@ impl TryFrom<u64> for OpTag {
             14 => Ok(Self::UpsertAccounts),
             15 => Ok(Self::UpdateAccountShells),
             16 => Ok(Self::RemoveAccounts),
+            17 => Ok(Self::PrepareAccountWave),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

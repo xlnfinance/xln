@@ -454,3 +454,154 @@ fn capacity_batch_and_summary_page_read_committed_state() {
 fn tuple_of(fields: Vec<AbiValue>) -> AbiValue {
     AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields))
 }
+
+fn body_fields(envelope: &Envelope) -> Vec<AbiValue> {
+    let AbiValue::Tuple(payload) = &envelope.body.fields()[0] else {
+        panic!("payload tuple expected: {envelope:?}");
+    };
+    payload.fields().to_vec()
+}
+
+fn tuple_fields(value: &AbiValue) -> Vec<AbiValue> {
+    let AbiValue::Tuple(payload) = value else {
+        panic!("tuple expected: {value:?}");
+    };
+    payload.fields().to_vec()
+}
+
+/// The authoritative session end to end over the wire: it derives its own
+/// keys from the seed, queues a payment, signs a frame for it, and the wave is
+/// only kept when the runtime says its own record is durable.
+#[test]
+fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
+    use crate::test_fixture::{
+        authority_account, authority_entity, hello_authority, load_accounts, prepare_wave,
+        wave_payment,
+    };
+
+    const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+    let owner = authority_entity(SEED, "1");
+    let peer = authority_entity(SEED, "2");
+
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello_authority(0, SEED, "1")).envelope);
+    assert_ok(
+        session
+            .handle(load_accounts(1, 0, vec![authority_account(owner, peer)]))
+            .envelope,
+    );
+
+    let prepared = session
+        .handle(prepare_wave(
+            2,
+            1_700_000_000_000,
+            vec![wave_payment(peer, owner, peer, 25)],
+            Vec::new(),
+            true,
+        ))
+        .envelope;
+    assert_ok(prepared.clone());
+    let fields = body_fields(&prepared);
+    let proposals = tuple_fields(&fields[3]);
+    assert_eq!(
+        proposals.len(),
+        1,
+        "one account had something to propose: {fields:?}"
+    );
+    let proposal = tuple_fields(&proposals[0]);
+    assert_eq!(proposal[1], AbiValue::Integer(1), "height 1");
+    assert_eq!(tuple_fields(&proposal[4]).len(), 1, "one transaction");
+    assert_eq!(
+        proposal[5],
+        AbiValue::Text("genesis".into()),
+        "the first frame chains to genesis",
+    );
+    let AbiValue::Bytes(hanko) = &proposal[9] else {
+        panic!("expected a hanko: {:?}", proposal[9]);
+    };
+    assert!(!hanko.is_empty(), "the frame is signed");
+
+    // A wave the runtime has not committed blocks the next one.
+    assert_error(
+        session
+            .handle(prepare_wave(
+                3,
+                1_700_000_000_001,
+                Vec::new(),
+                Vec::new(),
+                true,
+            ))
+            .envelope,
+        "RSCORE_PROCESS_PREPARE_PENDING",
+    );
+    // Only the request that prepared it may commit it.
+    assert_error(
+        session
+            .handle(candidate_command(4, OpTag::CommitRuntime, 3))
+            .envelope,
+        "RSCORE_PROCESS_PREPARE_ID_MISMATCH",
+    );
+    assert_ok(
+        session
+            .handle(candidate_command(5, OpTag::CommitRuntime, 2))
+            .envelope,
+    );
+}
+
+/// A wave the runtime takes back leaves the engine exactly where it was, and
+/// the same wave can be prepared again.
+#[test]
+fn an_aborted_wave_puts_the_authority_engine_back() {
+    use crate::test_fixture::{
+        authority_account, authority_entity, hello_authority, load_accounts, prepare_wave,
+        wave_payment,
+    };
+
+    const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+    let owner = authority_entity(SEED, "1");
+    let peer = authority_entity(SEED, "2");
+
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello_authority(0, SEED, "1")).envelope);
+    let loaded = session
+        .handle(load_accounts(1, 0, vec![authority_account(owner, peer)]))
+        .envelope;
+    assert_ok(loaded.clone());
+    let root_before = body_fields(&loaded)[1].clone();
+
+    let first = session
+        .handle(prepare_wave(
+            2,
+            1_700_000_000_000,
+            vec![wave_payment(peer, owner, peer, 25)],
+            Vec::new(),
+            true,
+        ))
+        .envelope;
+    assert_ok(first.clone());
+    let aborted = session
+        .handle(candidate_command(3, OpTag::AbortRuntime, 2))
+        .envelope;
+    assert_ok(aborted.clone());
+    assert_eq!(
+        body_fields(&aborted)[1],
+        root_before,
+        "the abort restores the accounts root",
+    );
+
+    let second = session
+        .handle(prepare_wave(
+            4,
+            1_700_000_000_000,
+            vec![wave_payment(peer, owner, peer, 25)],
+            Vec::new(),
+            true,
+        ))
+        .envelope;
+    assert_ok(second.clone());
+    assert_eq!(
+        body_fields(&second)[3],
+        body_fields(&first)[3],
+        "the same wave reaches the same proposal",
+    );
+}

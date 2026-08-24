@@ -51,6 +51,23 @@ pub fn integer(value: &AbiValue) -> Result<i128, ProcessError> {
     }
 }
 
+pub fn boolean(value: &AbiValue, field: &'static str) -> Result<bool, ProcessError> {
+    match value {
+        AbiValue::Bool(value) => Ok(*value),
+        // A wire that already carries integers for tags may carry 0/1 here.
+        AbiValue::Integer(0) => Ok(false),
+        AbiValue::Integer(1) => Ok(true),
+        _ => Err(ProcessError::Expected(field)),
+    }
+}
+
+pub fn bytes<'a>(value: &'a AbiValue, field: &'static str) -> Result<&'a [u8], ProcessError> {
+    match value {
+        AbiValue::Bytes(bytes) => Ok(bytes),
+        _ => Err(ProcessError::Expected(field)),
+    }
+}
+
 pub fn text(value: &AbiValue) -> Result<&str, ProcessError> {
     match value {
         AbiValue::Text(value) => Ok(value),

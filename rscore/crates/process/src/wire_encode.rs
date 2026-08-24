@@ -272,3 +272,293 @@ fn optional_text(value: &Option<String>) -> AbiValue {
 fn integer(value: impl TryInto<i128>) -> AbiValue {
     AbiValue::Integer(value.try_into().ok().expect("wire integer fits i128"))
 }
+
+// ---------------------------------------------------------- authority wave
+
+/// What one wave produced, against a candidate the runtime has not committed.
+pub fn wave(result: &xln_rscore_batch::WaveResult) -> Result<BodyTuple, crate::ProcessError> {
+    let mut proposals = Vec::with_capacity(result.proposals.len());
+    for row in &result.proposals {
+        proposals.push(proposal(row)?);
+    }
+    Ok(body(vec![
+        integer(result.revision),
+        AbiValue::Bytes(result.accounts_root.to_vec()),
+        tuple(result.applied.iter().map(input_result).collect()),
+        tuple(proposals),
+    ]))
+}
+
+pub fn wave_committed(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
+    body(vec![
+        integer(revision),
+        AbiValue::Bytes(accounts_root.to_vec()),
+    ])
+}
+
+pub fn wave_aborted(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
+    body(vec![
+        integer(revision),
+        AbiValue::Bytes(accounts_root.to_vec()),
+    ])
+}
+
+/// The frame to send to the counterparty, whole: the runtime relays it, and a
+/// peer running either engine must be able to rebuild exactly these bytes.
+fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::ProcessError> {
+    let mut txs = Vec::with_capacity(row.frame.txs.len());
+    for value in &row.frame.txs {
+        txs.push(tx(value)?);
+    }
+    Ok(tuple(vec![
+        AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
+        integer(row.frame.height),
+        integer(row.frame.timestamp),
+        integer(row.frame.j_height),
+        tuple(txs),
+        AbiValue::Text(row.frame.prev_frame_hash.clone()),
+        AbiValue::Bytes(row.frame.account_state_root.to_vec()),
+        AbiValue::Bool(row.frame.by_left),
+        AbiValue::Bytes(row.state_hash.to_vec()),
+        AbiValue::Bytes(row.hanko.clone()),
+        integer(row.dropped),
+    ]))
+}
+
+fn input_result(value: &xln_rscore_batch::AccountInputResult) -> AbiValue {
+    tuple(vec![
+        integer(value.input_index),
+        AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
+        verdict(&value.verdict),
+    ])
+}
+
+/// Tagged so the runtime can tell a commit from an ignored collision without
+/// parsing text. The tags are the wire's, not the engine's: a new outcome adds
+/// a tag rather than changing an old one.
+fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
+    use xln_rscore_batch::AccountInputVerdict;
+    use xln_rscore_engine::{AckOutcome, IncomingOutcome};
+    match value {
+        AccountInputVerdict::Frame(IncomingOutcome::Committed {
+            height,
+            state_hash,
+            ack_hanko,
+            outputs,
+            rolled_back_txs,
+        }) => tuple(vec![
+            integer(0),
+            integer(*height),
+            AbiValue::Bytes(state_hash.to_vec()),
+            AbiValue::Bytes(ack_hanko.clone()),
+            tuple(outputs.iter().map(account_output).collect()),
+            integer(*rolled_back_txs),
+        ]),
+        AccountInputVerdict::Frame(IncomingOutcome::CollisionIgnored { height }) => {
+            tuple(vec![integer(1), integer(*height)])
+        }
+        AccountInputVerdict::Frame(IncomingOutcome::Duplicate {
+            height,
+            state_hash,
+            ack_hanko,
+        }) => tuple(vec![
+            integer(2),
+            integer(*height),
+            AbiValue::Bytes(state_hash.to_vec()),
+            AbiValue::Bytes(ack_hanko.clone()),
+        ]),
+        AccountInputVerdict::Frame(IncomingOutcome::Stale {
+            height,
+            current_height,
+        }) => tuple(vec![integer(3), integer(*height), integer(*current_height)]),
+        AccountInputVerdict::Frame(IncomingOutcome::Rejected { reason }) => {
+            tuple(vec![integer(4), AbiValue::Text(reason.clone())])
+        }
+        AccountInputVerdict::Ack(AckOutcome::Committed {
+            height,
+            state_hash,
+            outputs,
+        }) => tuple(vec![
+            integer(5),
+            integer(*height),
+            AbiValue::Bytes(state_hash.to_vec()),
+            tuple(outputs.iter().map(account_output).collect()),
+        ]),
+        AccountInputVerdict::Ack(AckOutcome::Stale { height }) => {
+            tuple(vec![integer(6), integer(*height)])
+        }
+        AccountInputVerdict::Ack(AckOutcome::Rejected { reason }) => {
+            tuple(vec![integer(7), AbiValue::Text(reason.clone())])
+        }
+        AccountInputVerdict::Failed(message) => {
+            tuple(vec![integer(8), AbiValue::Text(message.clone())])
+        }
+    }
+}
+
+/// The exact inverse of `decode_tx` (wire_decode.rs): same tags, same field
+/// order, so a frame this engine proposes decodes back into the same
+/// transactions on the other side.
+fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessError> {
+    use xln_rscore_engine::{AccountTx, HtlcDeliveryMode, HtlcResolveOutcome};
+    let fields = match value {
+        AccountTx::DirectPayment {
+            token_id,
+            amount,
+            route,
+            description,
+            from_entity_id,
+            to_entity_id,
+            delivery_mode,
+            trusted_gateway_entity_id,
+        } => vec![
+            integer(0),
+            integer(token_id.get()),
+            big(amount),
+            tuple(
+                route
+                    .iter()
+                    .map(|hop| AbiValue::Text(hop.clone()))
+                    .collect(),
+            ),
+            optional_text(description),
+            AbiValue::Text(from_entity_id.clone()),
+            AbiValue::Text(to_entity_id.clone()),
+            integer(match delivery_mode {
+                DeliveryMode::Direct => 0,
+                DeliveryMode::Trusted => 1,
+            }),
+            optional_text(trusted_gateway_entity_id),
+        ],
+        AccountTx::HtlcLock(lock) => vec![
+            integer(1),
+            AbiValue::Text(lock.lock_id.clone()),
+            AbiValue::Text(lock.hashlock.as_str().to_string()),
+            big(&lock.timelock),
+            integer(lock.reveal_before_height),
+            big(&lock.amount),
+            integer(lock.token_id.get()),
+            match lock.delivery_mode {
+                None => AbiValue::Nil,
+                Some(HtlcDeliveryMode::Instant) => integer(0),
+                Some(HtlcDeliveryMode::Async) => integer(1),
+            },
+            match &lock.envelope {
+                None => AbiValue::Nil,
+                Some(envelope) => AbiValue::Bytes(envelope.packed().to_vec()),
+            },
+        ],
+        AccountTx::HtlcResolve(resolve) => {
+            let (outcome, payload) = match &resolve.outcome {
+                HtlcResolveOutcome::Secret { secret } => {
+                    (integer(0), AbiValue::Text(secret.clone()))
+                }
+                HtlcResolveOutcome::Error { reason } => (integer(1), optional_text(reason)),
+            };
+            vec![
+                integer(2),
+                AbiValue::Text(resolve.lock_id.clone()),
+                outcome,
+                payload,
+            ]
+        }
+        AccountTx::AddDelta { token_id } => vec![integer(3), integer(token_id.get())],
+        AccountTx::SetCreditLimit { token_id, amount } => {
+            vec![integer(4), integer(token_id.get()), big(amount)]
+        }
+        AccountTx::RebalancePolicy {
+            token_id,
+            policy_version,
+            base_fee,
+            liquidity_fee_bps,
+            gas_fee,
+        } => vec![
+            integer(5),
+            integer(*token_id),
+            integer(*policy_version),
+            big(base_fee),
+            big(liquidity_fee_bps),
+            big(gas_fee),
+        ],
+        AccountTx::SwapOffer {
+            offer_id,
+            give_token_id,
+            give_token_decimals,
+            give_amount,
+            want_token_id,
+            want_token_decimals,
+            want_amount,
+            max_fee,
+            min_net_receive,
+            time_in_force,
+            price_ticks,
+        } => vec![
+            integer(6),
+            AbiValue::Text(offer_id.clone()),
+            integer(*give_token_id),
+            integer(*give_token_decimals),
+            big(give_amount),
+            integer(*want_token_id),
+            integer(*want_token_decimals),
+            big(want_amount),
+            big(max_fee),
+            big(min_net_receive),
+            time_in_force.map_or(AbiValue::Nil, integer),
+            optional_big(price_ticks),
+        ],
+        AccountTx::SwapCancelRequest { offer_id } => {
+            vec![integer(7), AbiValue::Text(offer_id.clone())]
+        }
+        AccountTx::SwapResolve {
+            offer_id,
+            fill_ratio,
+            fill_numerator,
+            fill_denominator,
+            cancel_remainder,
+            fee_token_id,
+            fee_amount,
+            execution_give_amount,
+            execution_want_amount,
+            resting_price_ticks,
+            resting_give_amount,
+            resting_want_amount,
+            resting_quantized_give,
+            resting_quantized_want,
+        } => vec![
+            integer(8),
+            AbiValue::Text(offer_id.clone()),
+            integer(*fill_ratio),
+            optional_big(fill_numerator),
+            optional_big(fill_denominator),
+            AbiValue::Bool(*cancel_remainder),
+            fee_token_id.map_or(AbiValue::Nil, integer),
+            optional_big(fee_amount),
+            optional_big(execution_give_amount),
+            optional_big(execution_want_amount),
+            optional_big(resting_price_ticks),
+            optional_big(resting_give_amount),
+            optional_big(resting_want_amount),
+            optional_big(resting_quantized_give),
+            optional_big(resting_quantized_want),
+        ],
+        // Every kind the frame hash cannot express is refused at admission, so
+        // one cannot reach a proposal.
+        other => {
+            return Err(crate::ProcessError::Unsupported(
+                xln_rscore_engine::StateError::UnsupportedFrameTx(
+                    xln_rscore_engine::unsupported_frame_tx_kind(other),
+                )
+                .to_string(),
+            ));
+        }
+    };
+    Ok(tuple(fields))
+}
+
+fn big(value: &num_bigint::BigInt) -> AbiValue {
+    AbiValue::Text(value.to_string())
+}
+
+fn optional_big(value: &Option<num_bigint::BigInt>) -> AbiValue {
+    value.as_ref().map_or(AbiValue::Nil, big)
+}

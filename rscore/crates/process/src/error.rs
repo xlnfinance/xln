@@ -30,6 +30,8 @@ pub enum ProcessError {
     Tag { field: &'static str, value: i128 },
     #[error("RSCORE_PROCESS_OP_UNSUPPORTED:{0}")]
     UnsupportedOp(u8),
+    #[error("RSCORE_PROCESS_UNSUPPORTED:{0}")]
+    Unsupported(String),
     #[error("RSCORE_PROCESS_REQUEST_KIND")]
     RequestKind,
     #[error("RSCORE_PROCESS_HELLO_REQUIRED")]
@@ -94,6 +96,7 @@ impl ProcessError {
             Self::BigInt { .. } => "RSCORE_PROCESS_BIGINT",
             Self::Tag { .. } => "RSCORE_PROCESS_TAG",
             Self::UnsupportedOp(_) => "RSCORE_PROCESS_OP_UNSUPPORTED",
+            Self::Unsupported(_) => "RSCORE_PROCESS_UNSUPPORTED",
             Self::RequestKind => "RSCORE_PROCESS_REQUEST_KIND",
             Self::HelloRequired => "RSCORE_PROCESS_HELLO_REQUIRED",
             Self::HelloDuplicate => "RSCORE_PROCESS_HELLO_DUPLICATE",

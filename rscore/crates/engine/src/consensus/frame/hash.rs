@@ -363,7 +363,7 @@ pub fn is_frame_hashable(tx: &AccountTx) -> bool {
     )
 }
 
-pub(crate) fn unsupported_kind(tx: &AccountTx) -> &'static str {
+pub fn unsupported_kind(tx: &AccountTx) -> &'static str {
     match tx {
         AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::LendingFund { .. } => "lending_fund",
