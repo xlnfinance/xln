@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyAccountTxToMutableReplica } from '../../core/account/tx/apply';
+import type { ApplyAccountTxOk } from '../../core/account/tx/apply-types';
 import { computeAccountStateRoot } from '../../core/account/commitment/state-root';
 import { createDefaultDelta } from '../../core/account/state/delta';
 import { PersistentAccountStateMap } from '../../core/account/state/persistent-state-map';
@@ -89,7 +90,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         expectedRoot?: string;
         byLeft?: boolean;
         jHeight?: number;
-        outputRows?: readonly string[];
+        txResults?: readonly ApplyAccountTxOk[];
       } = {},
     ): Promise<void> => {
       height += 1;
@@ -116,7 +117,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         accountTxs: txs,
         // Direct-mode payments emit no forward; the resolve outcome rows come
         // from the TS apply results, exactly as the commit paths build them.
-        outputRows: overrides.outputRows ?? [],
+        txResults: overrides.txResults ?? [],
         committedStateRoot: overrides.expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });
@@ -150,7 +151,15 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       byLeft: false,
       // The full released-secret envelope: a right balance with a wrong
       // secret, hashlock, token or amount must not pass.
-      outputRows: [['secret', 'shadow-lock-1', hashlock, SECRET, 1, '7'].join('|')],
+      txResults: [{
+        ok: true,
+        outcome: 'htlc_secret',
+        events: [],
+        secret: SECRET,
+        hashlock,
+        amount: 7n,
+        tokenId: 1,
+      }],
     });
 
     const stats = mirror.stats();
@@ -197,7 +206,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: 0,
         accountTxs: [tx],
-        outputRows: [],
+        txResults: [],
         committedStateRoot: expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });
@@ -264,7 +273,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: 0,
         accountTxs: [tx],
-        outputRows: [],
+        txResults: [],
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });
@@ -313,7 +322,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: 1_700_000_000_000,
         enforcementJHeight: 0,
         accountTxs: [payment(1n)],
-        outputRows: [],
+        txResults: [],
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });

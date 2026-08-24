@@ -315,13 +315,13 @@ type ApplyResult = Awaited<ReturnType<typeof applyAccountTxToMutableReplica>>;
 // TypeScript returns HTLC completion through ApplyResult, while Rust returns a
 // typed AccountOutput. Normalize that outcome into one shared wire tuple; it
 // is intentionally not presented as a native TypeScript AccountOutput.
-const resultOutputs = (entry: Case, result: ApplyResult, priorLock: HtlcLock | undefined): WireValue[] => {
+const resultOutputs = (result: ApplyResult): WireValue[] => {
   const outputs = (result.candidateEffects ?? []).map(outputWire);
   if (!result.ok || result.outcome === 'applied') return outputs;
-  if (result.outcome === 'htlc_secret' && entry.tx.type === 'htlc_resolve') {
+  if (result.outcome === 'htlc_secret') {
     outputs.push([
       'htlcSecret',
-      entry.tx.data.lockId,
+      result.lockId,
       result.hashlock,
       result.secret,
       result.tokenId,
@@ -329,26 +329,24 @@ const resultOutputs = (entry: Case, result: ApplyResult, priorLock: HtlcLock | u
     ]);
     return outputs;
   }
-  if (result.outcome === 'htlc_error' && entry.tx.type === 'htlc_resolve' && priorLock) {
-    const reason = entry.tx.data.outcome === 'error' ? (entry.tx.data.reason ?? null) : null;
+  if (result.outcome === 'htlc_error') {
     outputs.push([
       'htlcError',
-      entry.tx.data.lockId,
+      result.lockId,
       result.hashlock,
-      priorLock.tokenId,
-      priorLock.amount.toString(),
-      reason,
+      result.tokenId,
+      result.amount.toString(),
+      result.reason ?? null,
     ]);
     return outputs;
   }
-  throw new Error(`DIFFERENTIAL_RESULT_UNSUPPORTED:${result.outcome}:${entry.tx.type}`);
+  throw new Error(`DIFFERENTIAL_RESULT_UNSUPPORTED:${result.outcome}`);
 };
 
 const executeTypescript = async (): Promise<WireValue[]> => {
   const account = accountFixture();
   const steps: WireValue[] = [];
   for (const entry of CASES) {
-    const priorLock = entry.tx.type === 'htlc_resolve' ? account.state.locks.get(entry.tx.data.lockId) : undefined;
     if (entry.context && entry.context.currentAccountHeight !== account.currentHeight) {
       throw new Error('DIFFERENTIAL_ACCOUNT_HEIGHT_MISMATCH');
     }
@@ -377,7 +375,7 @@ const executeTypescript = async (): Promise<WireValue[]> => {
       entry.id,
       verdict,
       [...result.events],
-      resultOutputs(entry, result, priorLock),
+      resultOutputs(result),
       deltaRows,
       lockRows,
       [deltasRadixRoot, locksRadixRoot, paymentProfileAccountStateRoot],

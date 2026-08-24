@@ -4,7 +4,6 @@
  */
 
 import { noteAccountFrameForShadow } from '../../rscore/shadow-hook';
-import { shadowOutputRows } from '../../rscore/shadow-wire';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -121,6 +120,7 @@ type IncomingFrameValidation = {
   clonedMachine: AccountReplica;
   proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   candidateEffects: AccountOutput[];
+  txResults: ApplyAccountTxOk[];
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
@@ -128,8 +128,6 @@ type IncomingFrameValidation = {
   swapCancelRequests: AccountSwapCancelRequest[];
   swapOffersCancelled: AccountSwapCancelRequest[];
   timedOutHashlocks: string[];
-  /** Observable-output rows in tx order, for engine comparison. */
-  shadowOutputRows: string[];
 };
 
 type IncomingFrameValidationResult =
@@ -286,8 +284,8 @@ const replayIncomingFrameOnClone = async (
     swapCancelRequests: [],
     swapOffersCancelled: [],
     candidateEffects: [],
+    txResults: [],
     timedOutHashlocks: [],
-    shadowOutputRows: [],
   };
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
@@ -321,8 +319,8 @@ const replayIncomingFrameOnClone = async (
       accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
     }
     replay.processEvents.push(...result.events);
+    replay.txResults.push(result);
     replay.candidateEffects.push(...(result.candidateEffects ?? []));
-    replay.shadowOutputRows.push(...shadowOutputRows(accountTx, result));
     collectIncomingOkOutcome(result, replay, input.fromEntityId);
   }
   return { kind: 'continue', replay };
@@ -512,7 +510,7 @@ async function commitIncomingFrameOnRealState(
       enforcementTimestamp: securityContext.entityTimestamp,
       enforcementJHeight: securityContext.finalizedJHeight,
       accountTxs: receivedFrame.accountTxs,
-      outputRows: validation.shadowOutputRows,
+      txResults: validation.txResults,
       committedStateRoot: receivedFrame.accountStateRoot,
       account,
     });

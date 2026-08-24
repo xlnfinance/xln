@@ -184,6 +184,7 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
     if (!revealed.ok || revealed.outcome !== 'htlc_secret') {
       throw new Error('ACCOUNT_TX_TEST_EXPECTED_HTLC_SECRET');
     }
+    expect(revealed.lockId).toBe(lockId);
     expect(revealed.secret).toBe(secret);
     expect(revealed.hashlock).toBe(hashlock);
     expect(revealed.amount).toBe(7n);
@@ -222,7 +223,11 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
     if (!result.ok || result.outcome !== 'htlc_error') {
       throw new Error('ACCOUNT_TX_TEST_EXPECTED_HTLC_ERROR');
     }
+    expect(result.lockId).toBe(lockId);
     expect(result.hashlock).toBe(hashlock);
+    expect(result.tokenId).toBe(1);
+    expect(result.amount).toBe(7n);
+    expect(result.reason).toBe('timeout');
     expect(draft.state.locks.has(lockId)).toBe(false);
     expect(draft.state.deltas.get(1)?.leftHold).toBe(0n);
     discardAccountTransition(transition);

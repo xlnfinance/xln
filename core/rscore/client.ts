@@ -442,8 +442,23 @@ export class RscoreProcessClient {
     return this.request(RSCORE_OP.restoreCheckpoint, [RSCORE_PROCESS_PROFILE, revision, accounts]);
   }
 
+  /**
+   * Prepare one wave and return the candidate together with the token that
+   * commits it. Deriving the token from the client's last request id made any
+   * interleaved read (a summary page, a capacity batch) silently retarget the
+   * commit at that read instead.
+   */
+  async prepareCandidate(jobs: RscoreWireValue[]): Promise<{
+    candidate: unknown;
+    token: Buffer;
+  }> {
+    const token = this.requestIdBytes(this.#nextRequestId);
+    const candidate = await this.request(RSCORE_OP.executeWave, [jobs]);
+    return { candidate, token };
+  }
+
   async prepare(jobs: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.executeWave, [jobs]);
+    return (await this.prepareCandidate(jobs)).candidate;
   }
 
   async commit(prepareRequestId: Buffer): Promise<unknown> {

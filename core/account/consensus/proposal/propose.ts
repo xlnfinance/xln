@@ -11,6 +11,7 @@ import {
   rememberPreparedProposalCommit,
 } from './prepared-commit';
 import type { AccountFrame, AccountOutput, AccountReplica, AccountTx } from '../../../types/account';
+import type { ApplyAccountTxOk } from '../../tx/apply-types';
 import type { AccountConsensusContext } from '../context';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import { getPerfMs } from '../../../support/time';
@@ -108,8 +109,8 @@ const rememberProposalForAck = (
   newFrame: AccountFrame,
   validation: {
     candidateEffects: AccountOutput[];
+    txResults: ApplyAccountTxOk[];
     timedOutHashlocks: string[];
-    shadowOutputRows: string[];
   },
 ): void => {
   if (!preparedCommitCoversTxs(newFrame.accountTxs)) return;
@@ -121,8 +122,8 @@ const rememberProposalForAck = (
     state: candidate.state,
     accountStateRoot: newFrame.accountStateRoot,
     candidateEffects: validation.candidateEffects,
+    txResults: validation.txResults,
     timedOutHashlocks: validation.timedOutHashlocks,
-    shadowOutputRows: validation.shadowOutputRows,
   });
 };
 

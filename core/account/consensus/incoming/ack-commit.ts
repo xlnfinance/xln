@@ -181,7 +181,7 @@ const applyPendingFrameTransactions = async (
       enforcementTimestamp: pendingFrame.timestamp,
       enforcementJHeight: preparedJHeight,
       accountTxs: pendingFrame.accountTxs,
-      outputRows: prepared.shadowOutputRows,
+      txResults: prepared.txResults,
       committedStateRoot: prepared.accountStateRoot,
       account,
     });

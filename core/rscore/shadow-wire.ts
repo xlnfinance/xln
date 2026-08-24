@@ -11,7 +11,7 @@ import type {
   RebalanceFeePolicySnapshot,
 } from '../types/finance/rebalance';
 import type { AccountStateCollection, AccountStateMapNamespace } from '../account/state/persistent-state-map';
-import type { ApplyAccountTxResult } from '../account/tx/apply-types';
+import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 import type { RscoreWireValue } from './client';
 
 export const hexToWireBytes = (value: string, expectedBytes: number, code: string): Uint8Array => {
@@ -185,9 +185,8 @@ export const SHADOW_SUPPORTED_TX_TYPES = new Set([
  */
 export const shadowOutputRows = (
   tx: AccountTx,
-  result: ApplyAccountTxResult,
+  result: ApplyAccountTxOk,
 ): string[] => {
-  if (!result.ok) return [];
   const rows: string[] = [];
   for (const output of result.candidateEffects ?? []) {
     if (output.kind !== 'directPaymentForward') continue;

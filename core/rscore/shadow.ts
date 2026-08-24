@@ -17,10 +17,12 @@ import { createStructuredLogger } from '../support/logger';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
+import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
   SHADOW_SUPPORTED_TX_TYPES,
+  shadowOutputRows,
   accountSeedWire,
   accountTxWire,
   hexToWireBytes,
@@ -96,10 +98,11 @@ export type ShadowFrameInput = Readonly<{
   enforcementJHeight: number;
   accountTxs: readonly AccountTx[];
   /**
-   * Canonical rows for everything the committed frame made observable outside
-   * the account state, in tx order (see shadowOutputRows).
+   * The authority's own per-tx results, in tx order. The mirror projects them
+   * with the single canonical projector (shadowOutputRows), so the comparison
+   * never depends on a second, hand-written derivation at each commit site.
    */
-  outputRows: readonly string[];
+  txResults: readonly ApplyAccountTxOk[];
   /** TS authority root committed by this frame (hex). */
   committedStateRoot: string;
   /** Committed post-frame replica, read synchronously at note time. */
@@ -562,7 +565,10 @@ export class RscoreShadowMirror {
           frameHeight: input.frameHeight,
           expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
           txTypes: input.accountTxs.map(tx => tx.type),
-          expectedOutputs: input.outputRows,
+          expectedOutputs: input.accountTxs.flatMap((tx, index) => {
+          const result = input.txResults[index];
+          return result ? shadowOutputRows(tx, result) : [];
+        }),
         },
         jobs,
       });
@@ -615,7 +621,8 @@ export class RscoreShadowMirror {
           this.#stats.reseeds += 1;
           continue;
         }
-        const prepared = (await client.prepare(entry.jobs)) as unknown[];
+        const { candidate, token } = await client.prepareCandidate(entry.jobs);
+        const prepared = candidate as unknown[];
         const results = prepared[2] as unknown[];
         const rejected = results
           .map((row, index) => ({ verdict: (row as unknown[])[2] as unknown[], index }))
@@ -624,7 +631,7 @@ export class RscoreShadowMirror {
         // committed, so a rejected wave never reaches the committed tree.
         const engineOutputs = prepared[3] as unknown[];
         const roots = prepared[4] as unknown[];
-        const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+        const committed = (await client.commit(token)) as unknown[];
         // The engine's revision must advance by exactly one per commit; a gap
         // means a candidate was silently dropped or replayed.
         const expectedRevision = (this.#lastRevision.get(entry.ownerKey) ?? 0) + 1;
