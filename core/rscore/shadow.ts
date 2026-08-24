@@ -14,6 +14,7 @@
  * comparison resumes from the next frame.
  */
 import { createStructuredLogger } from '../support/logger';
+import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
@@ -69,6 +70,19 @@ type QueueEntry = Readonly<{
   frameHeight: number;
 }>;
 
+export type ShadowReconciliationMismatch = Readonly<{
+  accountId: string;
+  deltasRoot: Readonly<{ typescript: string; rust: string }>;
+  locksRoot: Readonly<{ typescript: string; rust: string }>;
+}>;
+
+export type ShadowReconciliation = Readonly<{
+  matched: number;
+  mismatched: readonly ShadowReconciliationMismatch[];
+  missingInEngine: readonly string[];
+  extraInEngine: readonly string[];
+}>;
+
 export type ShadowStats = {
   framesSeen: number;
   framesCompared: number;
@@ -76,6 +90,8 @@ export type ShadowStats = {
   mismatches: number;
   reseeds: number;
   skippedIneligible: number;
+  /** Why accounts were refused, by out-of-profile section. */
+  ineligibleReasons: Record<string, number>;
   skippedUnboundOwner: number;
   dropped: number;
   disabledReason: string | null;
@@ -100,6 +116,7 @@ export class RscoreShadowMirror {
     mismatches: 0,
     reseeds: 0,
     skippedIneligible: 0,
+    ineligibleReasons: {},
     skippedUnboundOwner: 0,
     dropped: 0,
     disabledReason: null,
@@ -126,7 +143,75 @@ export class RscoreShadowMirror {
   }
 
   stats(): ShadowStats {
-    return { ...this.#stats, disabledReason: this.#disabledReason };
+    return {
+      ...this.#stats,
+      ineligibleReasons: { ...this.#stats.ineligibleReasons },
+      disabledReason: this.#disabledReason,
+    };
+  }
+
+  /**
+   * Whole-tree reconciliation: page every account the engine holds and compare
+   * it against the authoritative TypeScript map, leaf by leaf. Per-frame
+   * comparison only covers frames the mirror chose to replay; this covers the
+   * entire committed tree, so accounts that were skipped, dropped or never
+   * seen show up as gaps instead of passing silently. Intended for the end of
+   * a deterministic replay: identical trees mean the two engines are
+   * interchangeable across a crash.
+   */
+  async reconcile(
+    ownerEntityId: string,
+    accounts: ReadonlyMap<string, AccountReplica>,
+  ): Promise<ShadowReconciliation> {
+    const ownerKey = ownerEntityId.trim().toLowerCase();
+    const client = await this.#ensureClient(ownerKey);
+    const engineRows = new Map<string, { deltasRoot: string; locksRoot: string }>();
+    let cursor: Uint8Array | null = null;
+    for (;;) {
+      const page = (await client.readAccountSummaryPage(cursor, 512, [])) as unknown[];
+      for (const row of page[1] as unknown[]) {
+        const fields = row as unknown[];
+        engineRows.set(`0x${Buffer.from(fields[0] as Uint8Array).toString('hex')}`, {
+          deltasRoot: `0x${Buffer.from(fields[4] as Uint8Array).toString('hex')}`,
+          locksRoot: `0x${Buffer.from(fields[5] as Uint8Array).toString('hex')}`,
+        });
+      }
+      const next = page[2];
+      if (next === null || next === undefined) break;
+      cursor = next as Uint8Array;
+    }
+
+    const matched: string[] = [];
+    const mismatched: ShadowReconciliationMismatch[] = [];
+    const missingInEngine: string[] = [];
+    for (const [counterpartyId, account] of accounts) {
+      const key = counterpartyId.trim().toLowerCase();
+      const engine = engineRows.get(key);
+      if (!engine) {
+        missingInEngine.push(key);
+        continue;
+      }
+      engineRows.delete(key);
+      const deltasRoot = requirePersistentAccountStateMap(account.state.deltas, 'deltas')
+        .rootHash().toLowerCase();
+      const locksRoot = requirePersistentAccountStateMap(account.state.locks, 'locks')
+        .rootHash().toLowerCase();
+      if (engine.deltasRoot === deltasRoot && engine.locksRoot === locksRoot) {
+        matched.push(key);
+        continue;
+      }
+      mismatched.push({
+        accountId: key,
+        deltasRoot: { typescript: deltasRoot, rust: engine.deltasRoot },
+        locksRoot: { typescript: locksRoot, rust: engine.locksRoot },
+      });
+    }
+    return {
+      matched: matched.length,
+      mismatched,
+      missingInEngine,
+      extraInEngine: [...engineRows.keys()],
+    };
   }
 
   /** Resolves when the queue has fully drained — test/shutdown ordering only. */
@@ -171,6 +256,7 @@ export class RscoreShadowMirror {
           this.#registered.delete(scopedKey);
           this.#needsReseed.delete(scopedKey);
           this.#stats.skippedIneligible += 1;
+          this.#stats.ineligibleReasons[reason] = (this.#stats.ineligibleReasons[reason] ?? 0) + 1;
           return;
         }
         const seed = accountSeedWire(input.ownerEntityId, input.counterpartyEntityId, input.account);

@@ -35,14 +35,28 @@ const makeMirror = (maxOwners = 1): RscoreShadowMirror => new RscoreShadowMirror
   }),
 });
 
-const makeTsAccount = (): AccountReplica => {
-  const account = makeAccount(LEFT, RIGHT, { chainId: 31_337, depositoryAddress: addr('88') });
+const makeTsAccount = (counterparty: string = RIGHT): AccountReplica => {
+  const account = makeAccount(LEFT, counterparty, { chainId: 31_337, depositoryAddress: addr('88') });
   account.state.watchSeed = entity('99');
   account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
     [1, { ...createDefaultDelta(1), collateral: 1_000_000n }],
   ]);
   return account;
 };
+
+/** Canonical-direction payment for whichever pair this account holds. */
+const paymentFor = (account: AccountReplica, amount: bigint): AccountTx => ({
+  type: 'direct_payment',
+  data: {
+    tokenId: 1,
+    amount,
+    route: [account.state.leftEntity],
+    description: 'shadow',
+    fromEntityId: account.state.rightEntity,
+    toEntityId: account.state.leftEntity,
+    deliveryMode: 'direct',
+  },
+});
 
 const payment = (amount: bigint): AccountTx => ({
   type: 'direct_payment',
@@ -127,6 +141,68 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     expect(stats.matches).toBe(5);
     expect(stats.dropped).toBe(0);
     expect(stats.skippedUnboundOwner).toBe(0);
+  }, 30_000);
+
+  // Whole-tree reconciliation after a deterministic run: every account the
+  // engine holds is compared against the TypeScript map leaf by leaf, so a
+  // skipped or diverged account surfaces as a gap instead of passing silently.
+  test('reconciles the whole accounts tree and names every gap', async () => {
+    const mirror = makeMirror(1);
+    const mirrored = makeTsAccount(RIGHT);
+    const drifted = makeTsAccount(entity('cd'));
+    const never = makeTsAccount(entity('ce'));
+    const counterparties = new Map<string, AccountReplica>([
+      [RIGHT, mirrored],
+      [entity('cd'), drifted],
+      [entity('ce'), never],
+    ]);
+    let height = 0;
+    const commit = async (counterparty: string, account: AccountReplica): Promise<void> => {
+      height += 1;
+      const timestamp = 1_700_000_000_000 + height;
+      const tx = paymentFor(account, 5n);
+      const result = await applyAccountTxToMutableReplica(
+        account, tx, false, timestamp, 0, false, undefined, undefined, undefined,
+        { timestamp, jHeight: 0 },
+      );
+      if (!result.ok) throw new Error(`TS_APPLY_FAILED:${result.rejection.code}`);
+      account.currentHeight = height;
+      mirror.noteCommittedFrame({
+        ownerEntityId: LEFT,
+        counterpartyEntityId: counterparty,
+        frameHeight: height,
+        byLeft: false,
+        timestamp,
+        jHeight: 0,
+        enforcementTimestamp: timestamp,
+        enforcementJHeight: 0,
+        accountTxs: [tx],
+        committedStateRoot: computeAccountStateRoot(account.state),
+        account,
+      });
+      await mirror.settled();
+    };
+
+    await commit(RIGHT, mirrored);
+    await commit(entity('cd'), drifted);
+    // Drift the TypeScript side only: the engine keeps the seeded state.
+    const drift = await applyAccountTxToMutableReplica(
+      drifted, paymentFor(drifted, 9n), false, 1_700_000_009_999, 0, false, undefined, undefined, undefined,
+      { timestamp: 1_700_000_009_999, jHeight: 0 },
+    );
+    if (!drift.ok) throw new Error('TS_DRIFT_FAILED');
+    // `never` is never mirrored at all.
+
+    const report = await mirror.reconcile(LEFT, counterparties);
+    const stats = mirror.stats();
+    await mirror.shutdown();
+    expect(stats.disabledReason).toBeNull();
+    expect(report.matched).toBe(1);
+    expect(report.mismatched.map(entry => entry.accountId)).toEqual([entity('cd')]);
+    expect(report.mismatched[0]?.deltasRoot.typescript)
+      .not.toBe(report.mismatched[0]?.deltasRoot.rust);
+    expect(report.missingInEngine).toEqual([entity('ce')]);
+    expect(report.extraInEngine).toEqual([]);
   }, 30_000);
 
   // A stand with many entities must not fork one engine per entity: the
