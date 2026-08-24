@@ -162,7 +162,7 @@ describe('React development gateway', () => {
     expect(getReactAppBase('site', true)).toBe('/__app/site/');
     expect(getReactAppBase('site', false)).toBe('/');
     expect(getReactPublicDirectory('docs', true)).toEndWith('/.artifacts/public/docs');
-    expect(getReactPublicDirectory('wallet', true)).toBe(false);
+    expect(getReactPublicDirectory('wallet', true)).toEndWith('/.artifacts/public/wallet');
     expect(getReactPublicDirectory('docs', false)).toBe(false);
     expect(parseDevelopmentGatewayPort('18080')).toBe(18080);
     expect(() => parseDevelopmentGatewayPort('0')).toThrow('DEVELOPMENT_GATEWAY_PORT_INVALID:0');

@@ -142,9 +142,12 @@ function copyContracts(requireAllSources) {
       if (requireAllSources) {
         throw new Error(`CONTRACT_SOURCE_REQUIRED:${srcPath}. Build every contract before verifying bundled artifacts.`);
       }
-      if (!existsSync(destPath) || statSync(destPath).size === 0) {
-        throw new Error(`CONTRACT_STATIC_MISSING:${destPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
+      const bundledPath = fromFrontend(file.dest);
+      if (!existsSync(bundledPath) || statSync(bundledPath).size === 0) {
+        throw new Error(`CONTRACT_STATIC_MISSING:${bundledPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
       }
+      ensureDir(dirname(destPath));
+      if (resolve(bundledPath) !== resolve(destPath)) copyFileSync(bundledPath, destPath);
       console.log(`[static] using bundled ${file.dest}; source artifact is not present`);
       continue;
     }
@@ -449,17 +452,23 @@ function generateLlmsStaticFiles() {
 
 const contractsOnly = process.argv.includes('--contracts-only');
 const docsOnly = process.argv.includes('--docs-only');
+const walletOnly = process.argv.includes('--wallet-only');
 const skipLlms = process.argv.includes('--skip-llms');
 const requireAllContractSources = process.argv.includes('--require-all-contract-sources');
 
-if (contractsOnly && docsOnly) throw new Error('STATIC_COPY_SCOPE_CONFLICT');
+if ([contractsOnly, docsOnly, walletOnly].filter(Boolean).length > 1) {
+  throw new Error('STATIC_COPY_SCOPE_CONFLICT');
+}
 if (docsOnly) {
   copyDocsAndManifest();
   if (!skipLlms) generateLlmsStaticFiles();
+} else if (walletOnly) {
+  copyContracts(requireAllContractSources);
+  buildBrainvaultWorker();
 } else {
   copyContracts(requireAllContractSources);
 }
-if (!contractsOnly && !docsOnly) {
+if (!contractsOnly && !docsOnly && !walletOnly) {
   buildBrainvaultWorker();
   copyScenarios();
   copyDocsAndManifest();

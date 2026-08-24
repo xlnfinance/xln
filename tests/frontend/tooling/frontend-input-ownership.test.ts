@@ -40,10 +40,11 @@ describe('frontend generated input ownership', () => {
     }
   });
 
-  test('includes the docs command producer in candidate preparation', () => {
+  test('includes the docs and wallet command producers in candidate preparation', () => {
     expect(PREPARED_GENERATED_INPUTS.map(({ id }) => id)).toEqual([
       'docs-catalog',
       'site-public-static',
+      'wallet-browser-assets',
       'ops-comparative-results',
     ]);
   });

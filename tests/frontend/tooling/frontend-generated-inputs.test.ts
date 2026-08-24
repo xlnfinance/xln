@@ -209,4 +209,50 @@ describe('frontend generated input preparation', () => {
     expect(await readFile(join(outputRoot, 'docs-catalog/readme.md'), 'utf8')).toContain('#');
     await expect(readFile(join(outputRoot, 'contracts/Account.json'), 'utf8')).rejects.toThrow();
   });
+
+  test('keeps wallet browser assets isolated and deterministic', async () => {
+    const { frontendRoot } = await createWorkspace();
+    const outputRoots = [
+      join(frontendRoot, 'wallet-assets-first'),
+      join(frontendRoot, 'wallet-assets-second'),
+    ];
+    for (const outputRoot of outputRoots) {
+      const child = Bun.spawn([
+        'bun',
+        'frontend/copy-static-files.js',
+        '--wallet-only',
+      ], {
+        cwd: REPOSITORY_ROOT,
+        env: { ...process.env, XLN_STATIC_DIR: outputRoot },
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
+      const exitCode = await child.exited;
+      const stderr = child.stderr instanceof ReadableStream
+        ? await new Response(child.stderr).text()
+        : '';
+      if (exitCode !== 0) throw new Error(`TEST_WALLET_ASSET_BUILD_FAILED:${exitCode}:${stderr}`);
+    }
+
+    const expectedPaths = [
+      'brainvault-worker.js',
+      'contracts/Account.json',
+      'contracts/DeltaTransformer.json',
+      'contracts/Depository.json',
+      'contracts/DepositoryBounds.json',
+      'contracts/ERC20Mock.json',
+      'contracts/EntityProvider.json',
+      'contracts/HankoVerifier.json',
+      'contracts/HashLadderRegistry.json',
+      'contracts/NftCustody.json',
+    ];
+    for (const pathname of expectedPaths) {
+      const first = await readFile(join(outputRoots[0], pathname));
+      const second = await readFile(join(outputRoots[1], pathname));
+      expect(first.byteLength).toBeGreaterThan(0);
+      expect(first.equals(second)).toBe(true);
+    }
+    await expect(readFile(join(outputRoots[0], 'runtime.js'))).rejects.toThrow();
+    await expect(readFile(join(outputRoots[0], 'docs-catalog/manifest.json'))).rejects.toThrow();
+  });
 });

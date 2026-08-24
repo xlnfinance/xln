@@ -113,11 +113,36 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
     },
   },
   {
-    id: 'wallet-runtime-assets',
+    id: 'wallet-runtime-bundle',
     owner: 'wallet',
-    sourcePaths: ['scripts/build-runtime.sh', 'brainvault', 'jurisdictions/typechain-types'],
-    outputNamespace: 'assets/wallet',
+    sourcePaths: [
+      'scripts/build-runtime.sh',
+      'core/api/public',
+    ],
+    outputNamespace: 'wallet-runtime-bundle',
     producer: { kind: 'deferred' },
+  },
+  {
+    id: 'wallet-browser-assets',
+    owner: 'wallet',
+    sourcePaths: [
+      'frontend/copy-static-files.js',
+      'frontend/static/contracts',
+      'brainvault',
+      'jurisdictions/artifacts',
+    ],
+    outputNamespace: 'wallet-browser-assets',
+    producer: {
+      kind: 'command',
+      argv: ['bun', 'frontend/copy-static-files.js', '--wallet-only'],
+      outputEnvironment: 'XLN_STATIC_DIR',
+      environment: {},
+      copies: [],
+      outputRoutes: [
+        { kind: 'exact', pathname: '/brainvault-worker.js' },
+        { kind: 'prefix', pathname: '/contracts' },
+      ],
+    },
   },
   {
     id: 'ops-comparative-results',
