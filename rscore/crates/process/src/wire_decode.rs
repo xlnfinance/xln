@@ -2,7 +2,8 @@ use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountSeed, BatchJob};
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode,
+    AccountState, AccountTx, CarriedSections, DeliveryMode, Delta, DepositoryAddress,
+    HtlcDeliveryMode, JClaimAccumulator,
     HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, OpaqueHtlcCiphertext,
     Side, WatchSeed,
 };
@@ -174,7 +175,7 @@ fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
-    let fields = exact(tuple(value)?, 11, "accountSeed")?;
+    let fields = exact(tuple(value)?, 12, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
     // The account id IS the counterparty entity id: one engine process serves
@@ -213,18 +214,47 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     let journal = exact(tuple(&fields[10])?, 2, "journal")?;
     let replica = AccountReplica::new(
         owner,
-        AccountState::restore_with_journal(
+        AccountState::restore_full(
             identity,
             dispute_config,
             deltas,
             locks,
             unsigned(&journal[0], "jNonce")?,
             unsigned(&journal[1], "lastFinalizedJHeight")?,
+            decode_carried_sections(&fields[11])?,
         )?,
     )?;
     Ok(AccountSeed {
         account_id,
         replica,
+    })
+}
+
+/// Sections the engine carries but never interprets: their roots are committed
+/// verbatim so a live account whose swap/pull/rebalance/J-claim state is
+/// non-empty still reproduces its exact TypeScript account state root.
+fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessError> {
+    let fields = exact(tuple(value)?, 8, "carriedSections")?;
+    Ok(CarriedSections {
+        pulls_root: fixed_bytes(&fields[0], "pullsRoot")?,
+        swap_offers_root: fixed_bytes(&fields[1], "swapOffersRoot")?,
+        subcontracts_root: fixed_bytes(&fields[2], "subcontractsRoot")?,
+        requested_rebalance_root: fixed_bytes(&fields[3], "requestedRebalanceRoot")?,
+        requested_rebalance_fee_state_root: fixed_bytes(
+            &fields[4],
+            "requestedRebalanceFeeStateRoot",
+        )?,
+        rebalance_fee_policies_root: fixed_bytes(&fields[5], "rebalanceFeePoliciesRoot")?,
+        left_pending_j_claims: decode_claim_accumulator(&fields[6])?,
+        right_pending_j_claims: decode_claim_accumulator(&fields[7])?,
+    })
+}
+
+fn decode_claim_accumulator(value: &AbiValue) -> Result<JClaimAccumulator, ProcessError> {
+    let fields = exact(tuple(value)?, 2, "jClaimAccumulator")?;
+    Ok(JClaimAccumulator {
+        root: fixed_bytes(&fields[0], "jClaimRoot")?,
+        count: unsigned(&fields[1], "jClaimCount")?,
     })
 }
 

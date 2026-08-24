@@ -78,6 +78,10 @@ pub struct AccountState {
     lending_intents: Option<PersistentRadixMap<LendingIntentKind>>,
     j_nonce: u64,
     last_finalized_j_height: u64,
+    /// Sections no supported transaction mutates; committed verbatim so a
+    /// live account with swap/pull/rebalance/J-claim state still reproduces
+    /// its exact TypeScript state root.
+    carried: crate::commitment::CarriedSections,
 }
 
 impl AccountState {
@@ -108,6 +112,26 @@ impl AccountState {
         locks: Vec<HtlcLock>,
         j_nonce: u64,
         last_finalized_j_height: u64,
+    ) -> Result<Self, StateError> {
+        Self::restore_full(
+            identity,
+            dispute_config,
+            deltas,
+            locks,
+            j_nonce,
+            last_finalized_j_height,
+            crate::commitment::CarriedSections::default(),
+        )
+    }
+
+    pub fn restore_full(
+        identity: AccountIdentity,
+        dispute_config: AccountDisputeConfig,
+        deltas: Vec<Delta>,
+        locks: Vec<HtlcLock>,
+        j_nonce: u64,
+        last_finalized_j_height: u64,
+        carried: crate::commitment::CarriedSections,
     ) -> Result<Self, StateError> {
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
@@ -147,6 +171,7 @@ impl AccountState {
             lending_intents: None,
             j_nonce,
             last_finalized_j_height,
+            carried,
         })
     }
 
@@ -182,6 +207,7 @@ impl AccountState {
                 j_nonce: self.j_nonce,
                 last_finalized_j_height: self.last_finalized_j_height,
             },
+            &self.carried,
         )
     }
 

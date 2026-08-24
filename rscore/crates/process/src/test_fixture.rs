@@ -62,6 +62,16 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
         tuple(vec![delta()]),
         tuple(locks),
         tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
+        tuple(vec![
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
+            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
+        ]),
     ])
 }
 
@@ -78,6 +88,16 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
         tuple(vec![delta()]),
         tuple(locks),
         tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
+        tuple(vec![
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
+            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
+        ]),
     ])
 }
 
@@ -202,6 +222,13 @@ fn account_id() -> [u8; 32] {
 
 pub fn fixture_account_id() -> [u8; 32] {
     account_id()
+}
+
+/// keccak256("xln.account-j-claim.empty.v1") — the genesis accumulator root.
+/// Pinned here rather than recomputed so the fixture does not silently follow
+/// a change to the engine's domain string.
+fn empty_j_claim_root() -> [u8; 32] {
+    xln_rscore_engine::JClaimAccumulator::default().root
 }
 
 fn entity_bytes(suffix: u8) -> [u8; 32] {

@@ -6,7 +6,6 @@ use crate::{AccountDisputeConfig, AccountIdentity, StateError};
 
 const ACCOUNT_STATE_NAMESPACE: &str = "account.state";
 const EMPTY_J_CLAIM_DOMAIN: &[u8] = b"xln.account-j-claim.empty.v1";
-const EMPTY_ROOT: [u8; 32] = [0; 32];
 
 pub(crate) struct PaymentAccountRoots {
     pub deltas: [u8; 32],
@@ -19,15 +18,50 @@ pub(crate) struct AccountJournal {
     pub last_finalized_j_height: u64,
 }
 
+/// Sections the engine does not interpret but must commit verbatim.
+///
+/// No supported transaction (payments, HTLC lock/resolve) mutates any of
+/// them, so carrying their roots preserves the exact account state root of a
+/// live account whose swap/pull/lending/rebalance/J-claim state is non-empty.
+/// What the engine computes itself (deltas, locks, the accounts tree) is still
+/// verified independently; these are faithfully preserved, not re-derived.
+#[derive(Clone, Default)]
+pub struct CarriedSections {
+    pub pulls_root: [u8; 32],
+    pub swap_offers_root: [u8; 32],
+    pub subcontracts_root: [u8; 32],
+    pub requested_rebalance_root: [u8; 32],
+    pub requested_rebalance_fee_state_root: [u8; 32],
+    pub rebalance_fee_policies_root: [u8; 32],
+    pub left_pending_j_claims: JClaimAccumulator,
+    pub right_pending_j_claims: JClaimAccumulator,
+}
+
+#[derive(Clone)]
+pub struct JClaimAccumulator {
+    pub root: [u8; 32],
+    pub count: u64,
+}
+
+impl Default for JClaimAccumulator {
+    fn default() -> Self {
+        Self {
+            root: Keccak256::digest(EMPTY_J_CLAIM_DOMAIN).into(),
+            count: 0,
+        }
+    }
+}
+
 pub(crate) fn payment_account_state_root(
     identity: &AccountIdentity,
     dispute_config: AccountDisputeConfig,
     roots: PaymentAccountRoots,
     journal: AccountJournal,
+    carried: &CarriedSections,
 ) -> Result<[u8; 32], StateError> {
     compute_flat_integrity_root(
         ACCOUNT_STATE_NAMESPACE,
-        &account_state_entries(identity, dispute_config, roots, journal),
+        &account_state_entries(identity, dispute_config, roots, journal, carried),
     )
     .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
@@ -37,8 +71,8 @@ fn account_state_entries(
     dispute_config: AccountDisputeConfig,
     roots: PaymentAccountRoots,
     journal: AccountJournal,
+    carried: &CarriedSections,
 ) -> Vec<(String, CanonicalValue)> {
-    let zero = root_value(&EMPTY_ROOT);
     vec![
         ("identity".into(), identity_value(identity)),
         (
@@ -53,9 +87,9 @@ fn account_state_entries(
             "commitments".into(),
             object(vec![
                 ("locksRoot", root_value(&roots.locks)),
-                ("pullsRoot", zero.clone()),
-                ("swapOffersRoot", zero.clone()),
-                ("subcontractsRoot", zero.clone()),
+                ("pullsRoot", root_value(&carried.pulls_root)),
+                ("swapOffersRoot", root_value(&carried.swap_offers_root)),
+                ("subcontractsRoot", root_value(&carried.subcontracts_root)),
                 ("lendingIntentsRoot", root_value(&roots.lending_intents)),
             ]),
         ),
@@ -63,16 +97,25 @@ fn account_state_entries(
             "jurisdiction".into(),
             object(vec![
                 ("lastFinalizedJHeight", number(journal.last_finalized_j_height)),
-                ("leftPendingJClaims", empty_claim_value()),
-                ("rightPendingJClaims", empty_claim_value()),
+                ("leftPendingJClaims", claim_value(&carried.left_pending_j_claims)),
+                ("rightPendingJClaims", claim_value(&carried.right_pending_j_claims)),
             ]),
         ),
         (
             "rebalance".into(),
             object(vec![
-                ("requestedRebalanceRoot", zero.clone()),
-                ("requestedRebalanceFeeStateRoot", zero.clone()),
-                ("rebalanceFeePoliciesRoot", zero),
+                (
+                    "requestedRebalanceRoot",
+                    root_value(&carried.requested_rebalance_root),
+                ),
+                (
+                    "requestedRebalanceFeeStateRoot",
+                    root_value(&carried.requested_rebalance_fee_state_root),
+                ),
+                (
+                    "rebalanceFeePoliciesRoot",
+                    root_value(&carried.rebalance_fee_policies_root),
+                ),
             ]),
         ),
     ]
@@ -104,12 +147,11 @@ fn dispute_config_value(config: AccountDisputeConfig) -> CanonicalValue {
     ])
 }
 
-fn empty_claim_value() -> CanonicalValue {
-    let root: [u8; 32] = Keccak256::digest(EMPTY_J_CLAIM_DOMAIN).into();
+fn claim_value(accumulator: &JClaimAccumulator) -> CanonicalValue {
     object(vec![
         ("version", number(1)),
-        ("root", root_value(&root)),
-        ("count", CanonicalValue::BigInt(BigInt::from(0))),
+        ("root", root_value(&accumulator.root)),
+        ("count", CanonicalValue::BigInt(BigInt::from(accumulator.count))),
     ])
 }
 

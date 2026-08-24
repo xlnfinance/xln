@@ -3,7 +3,10 @@
  * Every shape here is pinned by tests/rscore/accounts-tree-parity.test.ts and
  * the process wire decoders (rscore/crates/process/src/wire_decode.rs).
  */
+import { EMPTY_ACCOUNT_STATE_ROOT } from '../account/commitment/state-root';
+import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type { AccountReplica, AccountTx, Delta, HtlcLock } from '../types/account';
+import type { AccountStateCollection, AccountStateMapNamespace } from '../account/state/persistent-state-map';
 import type { RscoreWireValue } from './client';
 
 export const hexToWireBytes = (value: string, expectedBytes: number, code: string): Uint8Array => {
@@ -45,24 +48,56 @@ const lockWire = (lock: HtlcLock): RscoreWireValue[] => [
 ];
 
 /**
- * Why an account snapshot cannot be mirrored, or null when it can. The Rust
- * payment profile commits swap/pull/subcontract/rebalance/J-claim sections at
- * their genesis values, so any account carrying live state there would seed to
- * a different root — refuse loudly instead of diverging silently.
+ * Why an account snapshot cannot be mirrored, or null when it can.
+ *
+ * Most out-of-profile sections are *carried*: the engine commits their roots
+ * verbatim and no supported transaction mutates them, so a live account with
+ * swap/pull/rebalance/J-claim state still reproduces its exact state root.
+ * Two cannot be carried and are refused loudly:
+ *   - lendingIntents: the engine owns this map itself (it computes the root
+ *     from its own entries), so a non-empty one would need the entries.
+ *   - settlementWorkspace: TypeScript commits the whole object, not a root,
+ *     and the engine has no representation for it.
  */
 export const shadowIneligibilityReason = (account: AccountReplica): string | null => {
   const state = account.state;
-  if (state.swapOffers.size > 0) return 'SWAP_OFFERS';
-  if ((state.pulls?.size ?? 0) > 0) return 'PULLS';
-  if ((state.subcontracts?.size ?? 0) > 0) return 'SUBCONTRACTS';
   if ((state.lendingIntents?.size ?? 0) > 0) return 'LENDING_INTENTS';
   if (state.settlementWorkspace !== undefined) return 'SETTLEMENT_WORKSPACE';
-  if (state.leftPendingJClaims.count !== 0n) return 'LEFT_PENDING_J_CLAIMS';
-  if (state.rightPendingJClaims.count !== 0n) return 'RIGHT_PENDING_J_CLAIMS';
-  if (state.requestedRebalance.size > 0) return 'REQUESTED_REBALANCE';
-  if (state.requestedRebalanceFeeState.size > 0) return 'REBALANCE_FEE_STATE';
-  if ((state.rebalanceFeePolicies?.size ?? 0) > 0) return 'REBALANCE_FEE_POLICIES';
   return null;
+};
+
+const collectionRoot = (
+  namespace: AccountStateMapNamespace,
+  map: AccountStateCollection<never, never> | undefined,
+): string => (map === undefined
+  ? EMPTY_ACCOUNT_STATE_ROOT
+  : requirePersistentAccountStateMap(map, namespace).rootHash());
+
+/** Roots of the sections the engine carries without interpreting them. */
+const carriedSectionsWire = (account: AccountReplica): RscoreWireValue[] => {
+  const state = account.state;
+  const claim = (accumulator: { root: string; count: bigint }): RscoreWireValue[] => [
+    hexToWireBytes(accumulator.root, 32, 'SHADOW_J_CLAIM_ROOT'),
+    Number(accumulator.count),
+  ];
+  const root = (
+    namespace: AccountStateMapNamespace,
+    map: unknown,
+  ): Uint8Array => hexToWireBytes(
+    collectionRoot(namespace, map as AccountStateCollection<never, never> | undefined),
+    32,
+    `SHADOW_${namespace.toUpperCase()}_ROOT`,
+  );
+  return [
+    root('pulls', state.pulls),
+    root('swapOffers', state.swapOffers),
+    root('subcontracts', state.subcontracts),
+    root('requestedRebalance', state.requestedRebalance),
+    root('requestedRebalanceFeeState', state.requestedRebalanceFeeState),
+    root('rebalanceFeePolicies', state.rebalanceFeePolicies),
+    claim(state.leftPendingJClaims),
+    claim(state.rightPendingJClaims),
+  ];
 };
 
 /** Seed-wire row (arity 11) for one committed account snapshot. */
@@ -88,6 +123,7 @@ export const accountSeedWire = (
       .sort((left, right) => (left.lockId < right.lockId ? -1 : left.lockId > right.lockId ? 1 : 0))
       .map(lockWire),
     [state.jNonce, state.lastFinalizedJHeight],
+    carriedSectionsWire(account),
   ];
 };
 

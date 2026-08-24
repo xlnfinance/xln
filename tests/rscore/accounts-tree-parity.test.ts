@@ -18,6 +18,7 @@ import { PersistentAccountStateMap } from '../../core/account/state/persistent-s
 import { PersistentRadixValueMap } from '../../core/protocol/state/persistent-radix-value-map';
 import type { AccountReplica, AccountTx, Delta } from '../../core/types/account';
 import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j';
+import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../core/account/j-claims/j-claim-codec';
 import { RscoreProcessClient, type RscoreWireValue } from '../../core/rscore/client';
 
 const BINARY = join(import.meta.dir, '../../rscore/target/release/xln-rscore');
@@ -71,6 +72,16 @@ const makeTsAccount = (index: number): AccountReplica => {
   return account;
 };
 
+
+// Sections the engine carries but never interprets; all empty for a fresh
+// payment-profile account (roots zero, J-claim accumulators at genesis).
+const EMPTY_CLAIM: RscoreWireValue[] = [hexBytes(EMPTY_ACCOUNT_J_CLAIM_ROOT), 0];
+const EMPTY_CARRIED: RscoreWireValue[] = [
+  new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+  new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+  EMPTY_CLAIM, EMPTY_CLAIM,
+];
+
 const deltaWire = (delta: Delta): RscoreWireValue[] => [
   delta.tokenId,
   delta.collateral.toString(),
@@ -96,6 +107,7 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   [...account.state.deltas.values()].map(deltaWire),
   [],
   [account.state.jNonce, account.state.lastFinalizedJHeight],
+  EMPTY_CARRIED,
 ];
 
 const paymentTx = (account: AccountReplica, index: number, amount: bigint): AccountTx => ({

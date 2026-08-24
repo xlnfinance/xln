@@ -10,6 +10,7 @@
  */
 import { join } from 'node:path';
 
+import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../account/j-claims/j-claim-codec';
 import { RscoreProcessClient, type RscoreWireValue } from '../../../rscore/client';
 
 const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
@@ -18,6 +19,8 @@ const accounts = Number(process.argv[2] ?? '1000');
 const waves = Number(process.argv[3] ?? '20');
 const txsPerWave = Number(process.argv[4] ?? '10000');
 const workers = Number(process.argv[5] ?? '8');
+
+
 
 const entityHex = (index: number): string => `0x${index.toString(16).padStart(64, '0')}`;
 
@@ -44,6 +47,7 @@ const seed = (index: number): RscoreWireValue[] => {
     [[1, '1000000000', '0', '0', '500000000', '500000000', '0', '0', '0', '0']],
     [],
     [0, 0],
+    EMPTY_CARRIED,
   ];
 };
 
@@ -55,6 +59,16 @@ const hexToBytes = (value: string): Uint8Array => {
   }
   return bytes;
 };
+
+
+// Sections the engine carries but never interprets; all empty for a fresh
+// payment-profile account (roots zero, J-claim accumulators at genesis).
+const EMPTY_CLAIM: RscoreWireValue[] = [hexToBytes(EMPTY_ACCOUNT_J_CLAIM_ROOT), 0];
+const EMPTY_CARRIED: RscoreWireValue[] = [
+  new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+  new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+  EMPTY_CLAIM, EMPTY_CLAIM,
+];
 
 const directPayment = (
   inputIndex: number,
