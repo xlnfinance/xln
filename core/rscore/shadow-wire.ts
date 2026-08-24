@@ -5,7 +5,11 @@
  */
 import { EMPTY_ACCOUNT_STATE_ROOT } from '../account/commitment/state-root';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
-import type { AccountReplica, AccountTx, Delta, HtlcLock } from '../types/account';
+import type { AccountReplica, AccountState, AccountTx, Delta, HtlcLock } from '../types/account';
+import type {
+  BilateralRebalanceFeePolicy,
+  RebalanceFeePolicySnapshot,
+} from '../types/finance/rebalance';
 import type { AccountStateCollection, AccountStateMapNamespace } from '../account/state/persistent-state-map';
 import type { RscoreWireValue } from './client';
 
@@ -94,13 +98,38 @@ const carriedSectionsWire = (account: AccountReplica): RscoreWireValue[] => {
     root('subcontracts', state.subcontracts),
     root('requestedRebalance', state.requestedRebalance),
     root('requestedRebalanceFeeState', state.requestedRebalanceFeeState),
-    root('rebalanceFeePolicies', state.rebalanceFeePolicies),
+    rebalanceFeePoliciesWire(state.rebalanceFeePolicies),
     claim(state.leftPendingJClaims),
     claim(state.rightPendingJClaims),
   ];
 };
 
-/** Seed-wire row (arity 11) for one committed account snapshot. */
+/**
+ * Slot 5 of the carried tuple is not a carried root: the engine owns the
+ * rebalance fee registers and recomputes their root, so the seed ships their
+ * full contents. An absent side is an empty tuple.
+ */
+const policySnapshotWire = (
+  snapshot: RebalanceFeePolicySnapshot | undefined,
+): RscoreWireValue[] => (snapshot === undefined ? [] : [
+  snapshot.policyVersion,
+  snapshot.baseFee.toString(),
+  snapshot.liquidityFeeBps.toString(),
+  snapshot.gasFee.toString(),
+  snapshot.updatedAt,
+]);
+
+const rebalanceFeePoliciesWire = (
+  policies: AccountState['rebalanceFeePolicies'],
+): RscoreWireValue[] => [...(policies ?? new Map<number, BilateralRebalanceFeePolicy>()).entries()]
+  .sort(([left], [right]) => left - right)
+  .map(([tokenId, policy]) => [
+    tokenId,
+    policySnapshotWire(policy.left),
+    policySnapshotWire(policy.right),
+  ]);
+
+/** Seed-wire row (arity 12) for one committed account snapshot. */
 export const accountSeedWire = (
   ownerEntityId: string,
   counterpartyEntityId: string,
@@ -129,6 +158,7 @@ export const accountSeedWire = (
 
 export const SHADOW_SUPPORTED_TX_TYPES = new Set([
   'direct_payment', 'htlc_lock', 'htlc_resolve', 'add_delta', 'set_credit_limit',
+  'rebalance_policy',
 ]);
 
 /** Process-wire tx tuple, or null when the tx type is outside the profile. */
@@ -162,6 +192,15 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
       return [3, tx.data.tokenId];
     case 'set_credit_limit':
       return [4, tx.data.tokenId, tx.data.amount.toString()];
+    case 'rebalance_policy':
+      return [
+        5,
+        tx.data.tokenId,
+        tx.data.policyVersion,
+        tx.data.baseFee.toString(),
+        tx.data.liquidityFeeBps.toString(),
+        tx.data.gasFee.toString(),
+      ];
     case 'htlc_resolve':
       return tx.data.outcome === 'secret'
         ? [2, tx.data.lockId, 0, hexToWireBytes(tx.data.secret, 32, 'SHADOW_SECRET')]

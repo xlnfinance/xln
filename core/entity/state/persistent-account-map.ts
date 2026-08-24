@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import type { AccountReplica } from '../../types/account';
 import {
   PersistentRadixValueMap,
+  type PersistentRadixNodeRecord,
   type RadixFoldMutation,
 } from '../../protocol/state/persistent-radix-value-map';
 import { createStructuredLogger } from '../../support/logger';
@@ -270,6 +271,15 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
 
   rootHash(): string {
     return this.#values.rootHash();
+  }
+
+  /**
+   * Full Patricia traversal. The accounts tree is rebuilt from the per-account
+   * documents at hydration rather than persisted node-by-node, so this exists
+   * for offline inspection (tree dumps, shape audits), not the frame path.
+   */
+  nodeRecords(): Generator<PersistentRadixNodeRecord<string, AccountReplica>> {
+    return this.#values.nodeRecords();
   }
 
   get hash(): string {

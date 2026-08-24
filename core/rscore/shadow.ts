@@ -70,6 +70,7 @@ type QueueEntry = Readonly<{
   jobs: RscoreWireValue[][];
   expectedRootHex: string;
   frameHeight: number;
+  txTypes: readonly string[];
 }> | Readonly<{
   kind: 'reseed';
   ownerKey: string;
@@ -92,12 +93,30 @@ export type ShadowReconciliation = Readonly<{
   extraInEngine: readonly string[];
 }>;
 
+/**
+ * A parity gap the mirror observed. Divergence is the obvious one; a repair
+ * reseed and a refused account are gaps too — they silently restore agreement
+ * instead of proving it, so a strict run must treat them as failures.
+ */
+export type ShadowGap = Readonly<{
+  kind: 'divergence' | 'reseed-repair' | 'ineligible';
+  owner: string;
+  account: string;
+  frameHeight: number;
+  detail: string;
+  txTypes: readonly string[];
+  /** Per-section roots, filled in for divergences so the dump names the section. */
+  sections?: Readonly<Record<string, Readonly<{ typescript: string; rust: string }>>>;
+}>;
+
 export type ShadowStats = {
   framesSeen: number;
   framesCompared: number;
   matches: number;
   mismatches: number;
   reseeds: number;
+  /** Reseeds that repaired a gap (unsupported tx, drop, divergence) rather than registering a new account. */
+  reseedsRepair: number;
   /** Frames carrying no account txs: nothing to replay, nothing to compare. */
   emptyFrames: number;
   skippedIneligible: number;
@@ -142,6 +161,7 @@ export class RscoreShadowMirror {
     matches: 0,
     mismatches: 0,
     reseeds: 0,
+    reseedsRepair: 0,
     emptyFrames: 0,
     skippedIneligible: 0,
     ineligibleReasons: {},
@@ -153,6 +173,7 @@ export class RscoreShadowMirror {
     disabledReason: null,
   };
   #onProgress: (() => void) | null = null;
+  #onGap: ((gap: ShadowGap) => void) | null = null;
   #idle: Promise<void> = Promise.resolve();
   #idleResolve: (() => void) | null = null;
 
@@ -171,6 +192,14 @@ export class RscoreShadowMirror {
   /** Observer hook: called every PROGRESS_EVERY compared frames. */
   onProgress(callback: () => void): void {
     this.#onProgress = callback;
+  }
+
+  /**
+   * Observer hook for every parity gap. A strict run halts here on the first
+   * one; the default run only counts them.
+   */
+  onGap(callback: (gap: ShadowGap) => void): void {
+    this.#onGap = callback;
   }
 
   stats(): ShadowStats {
@@ -293,17 +322,37 @@ export class RscoreShadowMirror {
           this.#needsReseed.delete(scopedKey);
           this.#stats.skippedIneligible += 1;
           this.#stats.ineligibleReasons[reason] = (this.#stats.ineligibleReasons[reason] ?? 0) + 1;
+          this.#reportGap({
+            kind: 'ineligible',
+            owner: ownerKey,
+            account: accountKey,
+            frameHeight: input.frameHeight,
+            detail: reason,
+            txTypes: input.accountTxs.map(tx => tx.type),
+          });
           return;
         }
         const seed = accountSeedWire(input.ownerEntityId, input.counterpartyEntityId, input.account);
+        const repair = !fresh || this.#needsReseed.has(scopedKey);
         this.#push({
           kind: 'reseed',
           ownerKey,
           accountKey,
           seed,
-          reason: fresh ? 'register' : 'unsupported-tx',
+          reason: repair ? (supported ? 'repair' : 'unsupported-tx') : 'register',
           frameHeight: input.frameHeight,
         });
+        if (repair) {
+          this.#stats.reseedsRepair += 1;
+          this.#reportGap({
+            kind: 'reseed-repair',
+            owner: ownerKey,
+            account: accountKey,
+            frameHeight: input.frameHeight,
+            detail: supported ? 'continuity-lost' : `unsupported:${unsupported.map(tx => tx.type).join(',')}`,
+            txTypes: input.accountTxs.map(tx => tx.type),
+          });
+        }
         this.#registered.add(scopedKey);
         this.#needsReseed.delete(scopedKey);
         this.#remember(ownerKey, input.counterpartyEntityId, input.account);
@@ -335,6 +384,7 @@ export class RscoreShadowMirror {
         jobs,
         expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
         frameHeight: input.frameHeight,
+        txTypes: input.accountTxs.map(tx => tx.type),
       });
     } catch (error) {
       this.#disable(`note:${error instanceof Error ? error.message : String(error)}`);
@@ -413,7 +463,7 @@ export class RscoreShadowMirror {
         // mid-frame report a comparison with no outcome.
         this.#stats.framesCompared += 1;
         if (rejected.length > 0) {
-          this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
+          await this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
           continue;
         }
         const roots = prepared[4] as unknown[];
@@ -423,7 +473,7 @@ export class RscoreShadowMirror {
         if (actual === entry.expectedRootHex) {
           this.#stats.matches += 1;
         } else {
-          this.#recordMismatch(entry, `root:${actual}`);
+          await this.#recordMismatch(entry, `root:${actual}`);
         }
       }
     } catch (error) {
@@ -449,9 +499,13 @@ export class RscoreShadowMirror {
     }
   }
 
-  #recordMismatch(entry: Extract<QueueEntry, { kind: 'wave' }>, detail: string): void {
+  async #recordMismatch(
+    entry: Extract<QueueEntry, { kind: 'wave' }>,
+    detail: string,
+  ): Promise<void> {
     this.#stats.mismatches += 1;
     this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
+    const sections = await this.#diverginSections(entry);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
     try {
@@ -461,8 +515,59 @@ export class RscoreShadowMirror {
         frameHeight: entry.frameHeight,
         expected: entry.expectedRootHex,
         detail,
+        sections,
       });
     } catch { /* observer-only */ }
+    this.#reportGap({
+      kind: 'divergence',
+      owner: entry.ownerKey,
+      account: entry.accountKey,
+      frameHeight: entry.frameHeight,
+      detail,
+      txTypes: entry.txTypes,
+      ...(sections ? { sections } : {}),
+    });
+  }
+
+  /**
+   * Which section of the account diverged. The frame comparison only proves
+   * the state roots differ; this pages the engine for the one account and
+   * diffs its per-section roots against the TypeScript replica, so the halt
+   * dump names deltas vs locks vs fee policies instead of one opaque hash.
+   */
+  async #diverginSections(
+    entry: Extract<QueueEntry, { kind: 'wave' }>,
+  ): Promise<Record<string, { typescript: string; rust: string }> | undefined> {
+    const account = this.#mirrored.get(entry.ownerKey)?.get(`0x${entry.accountKey}`);
+    if (!account) return undefined;
+    try {
+      const client = await this.#ensureClient(entry.ownerKey);
+      const page = (await client.readAccountSummaryPage(null, 512, [])) as unknown[];
+      const row = (page[1] as unknown[]).find(candidate =>
+        Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === entry.accountKey);
+      if (!row) return undefined;
+      const fields = row as unknown[];
+      const engine = (index: number): string =>
+        `0x${Buffer.from(fields[index] as Uint8Array).toString('hex')}`;
+      return {
+        deltas: {
+          typescript: requirePersistentAccountStateMap(account.state.deltas, 'deltas')
+            .rootHash().toLowerCase(),
+          rust: engine(4),
+        },
+        locks: {
+          typescript: requirePersistentAccountStateMap(account.state.locks, 'locks')
+            .rootHash().toLowerCase(),
+          rust: engine(5),
+        },
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  #reportGap(gap: ShadowGap): void {
+    try { this.#onGap?.(gap); } catch { /* observer-only */ }
   }
 
   /**

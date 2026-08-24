@@ -125,6 +125,7 @@ pub(crate) const fn supported(tx: &AccountTx) -> bool {
             | AccountTx::DirectPayment { .. }
             | AccountTx::HtlcLock(_)
             | AccountTx::HtlcResolve(_)
+            | AccountTx::RebalancePolicy { .. }
     )
 }
 
@@ -135,6 +136,7 @@ pub(crate) const fn tx_tag(tx: &AccountTx) -> &'static str {
         AccountTx::DirectPayment { .. } => "direct_payment",
         AccountTx::HtlcLock(_) => "htlc_lock",
         AccountTx::HtlcResolve(_) => "htlc_resolve",
+        AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::LendingFund { .. } => "lending_fund",
         AccountTx::LendingBorrowRequest { .. } => "borrow_request",
         AccountTx::LendingRepay { .. } => "repay",

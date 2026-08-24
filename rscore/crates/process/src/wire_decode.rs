@@ -2,8 +2,8 @@ use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountSeed, BatchJob};
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, CarriedSections, DeliveryMode, Delta, DepositoryAddress,
-    HtlcDeliveryMode, JClaimAccumulator,
+    AccountState, AccountTx, BilateralRebalanceFeePolicy, CarriedSections, DeliveryMode, Delta,
+    DepositoryAddress, HtlcDeliveryMode, JClaimAccumulator, RebalanceFeePolicySnapshot, TokenId,
     HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, OpaqueHtlcCiphertext,
     Side, WatchSeed,
 };
@@ -222,6 +222,7 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
             unsigned(&journal[0], "jNonce")?,
             unsigned(&journal[1], "lastFinalizedJHeight")?,
             decode_carried_sections(&fields[11])?,
+            decode_rebalance_policies(&fields[11])?,
         )?,
     )?;
     Ok(AccountSeed {
@@ -244,10 +245,48 @@ fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessE
             &fields[4],
             "requestedRebalanceFeeStateRoot",
         )?,
-        rebalance_fee_policies_root: fixed_bytes(&fields[5], "rebalanceFeePoliciesRoot")?,
         left_pending_j_claims: decode_claim_accumulator(&fields[6])?,
         right_pending_j_claims: decode_claim_accumulator(&fields[7])?,
     })
+}
+
+/// Slot 5 of the carried tuple is no longer a carried root: the engine owns
+/// the rebalance fee registers, so the seed ships their full contents and the
+/// root is recomputed here.
+fn decode_rebalance_policies(
+    value: &AbiValue,
+) -> Result<Vec<(TokenId, BilateralRebalanceFeePolicy)>, ProcessError> {
+    let fields = exact(tuple(value)?, 8, "carriedSections")?;
+    tuple(&fields[5])?
+        .iter()
+        .map(|row| {
+            let row = exact(tuple(row)?, 3, "rebalanceFeePolicy")?;
+            Ok((
+                token(&row[0])?,
+                BilateralRebalanceFeePolicy::new(
+                    decode_policy_snapshot(&row[1])?,
+                    decode_policy_snapshot(&row[2])?,
+                ),
+            ))
+        })
+        .collect()
+}
+
+fn decode_policy_snapshot(
+    value: &AbiValue,
+) -> Result<Option<RebalanceFeePolicySnapshot>, ProcessError> {
+    let fields = tuple(value)?;
+    if fields.is_empty() {
+        return Ok(None);
+    }
+    let fields = exact(fields, 5, "rebalanceFeePolicySnapshot")?;
+    Ok(Some(RebalanceFeePolicySnapshot::new(
+        bounded_u32(&fields[0], "policyVersion")?,
+        bigint(&fields[1], "baseFee")?,
+        bigint(&fields[2], "liquidityFeeBps")?,
+        bigint(&fields[3], "gasFee")?,
+        unsigned(&fields[4], "updatedAt")?,
+    )))
 }
 
 fn decode_claim_accumulator(value: &AbiValue) -> Result<JClaimAccumulator, ProcessError> {
@@ -320,6 +359,7 @@ fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         2 => decode_htlc_resolve(fields),
         3 => decode_add_delta(fields),
         4 => decode_set_credit_limit(fields),
+        5 => decode_rebalance_policy(fields),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
 }
@@ -336,6 +376,17 @@ fn decode_set_credit_limit(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
     Ok(AccountTx::SetCreditLimit {
         token_id: token(&fields[1])?,
         amount: bigint(&fields[2], "amount")?,
+    })
+}
+
+fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 6, "rebalancePolicy")?;
+    Ok(AccountTx::RebalancePolicy {
+        token_id: bounded_u32(&fields[1], "tokenId")?,
+        policy_version: bounded_u32(&fields[2], "policyVersion")?,
+        base_fee: bigint(&fields[3], "baseFee")?,
+        liquidity_fee_bps: bigint(&fields[4], "liquidityFeeBps")?,
+        gas_fee: bigint(&fields[5], "gasFee")?,
     })
 }
 

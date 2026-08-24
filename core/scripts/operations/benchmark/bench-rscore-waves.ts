@@ -66,7 +66,8 @@ const hexToBytes = (value: string): Uint8Array => {
 const EMPTY_CLAIM: RscoreWireValue[] = [hexToBytes(EMPTY_ACCOUNT_J_CLAIM_ROOT), 0];
 const EMPTY_CARRIED: RscoreWireValue[] = [
   new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
-  new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+  new Uint8Array(32), new Uint8Array(32),
+  [], // rebalance fee policies: owned by the engine, shipped in full
   EMPTY_CLAIM, EMPTY_CLAIM,
 ];
 

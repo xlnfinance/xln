@@ -15,10 +15,12 @@ mod identity;
 mod lending;
 mod mutation;
 mod output;
+mod rebalance;
 mod state;
 mod tx;
 
 pub use commitment::{CarriedSections, JClaimAccumulator};
+pub use rebalance::{BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot};
 pub use context::AccountExecutionContext;
 pub use delta::{Delta, DeltaPerspective, TokenId};
 pub use engine::{AccountTransition, AccountVerdict, SequentialAccountEngine};

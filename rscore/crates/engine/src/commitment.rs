@@ -11,6 +11,7 @@ pub(crate) struct PaymentAccountRoots {
     pub deltas: [u8; 32],
     pub locks: [u8; 32],
     pub lending_intents: [u8; 32],
+    pub rebalance_fee_policies: [u8; 32],
 }
 
 pub(crate) struct AccountJournal {
@@ -32,7 +33,6 @@ pub struct CarriedSections {
     pub subcontracts_root: [u8; 32],
     pub requested_rebalance_root: [u8; 32],
     pub requested_rebalance_fee_state_root: [u8; 32],
-    pub rebalance_fee_policies_root: [u8; 32],
     pub left_pending_j_claims: JClaimAccumulator,
     pub right_pending_j_claims: JClaimAccumulator,
 }
@@ -114,7 +114,7 @@ fn account_state_entries(
                 ),
                 (
                     "rebalanceFeePoliciesRoot",
-                    root_value(&carried.rebalance_fee_policies_root),
+                    root_value(&roots.rebalance_fee_policies),
                 ),
             ]),
         ),

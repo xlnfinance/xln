@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use thiserror::Error;
 
-use crate::{HtlcBoundaryError, HtlcRejection, TokenId};
+use crate::{HtlcBoundaryError, HtlcRejection, Side, TokenId};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum StateError {
@@ -74,6 +74,24 @@ pub enum ValidationRejection {
         available: BigInt,
     },
     ReserveToCollateralBlocked,
+    RebalancePolicyTokenId {
+        token_id: u32,
+    },
+    RebalancePolicyVersion {
+        version: u32,
+    },
+    RebalancePolicyTimestamp,
+    RebalancePolicyFeeTerms {
+        token_id: u32,
+    },
+    RebalancePolicyMissingDelta {
+        token_id: u32,
+    },
+    RebalancePolicyEquivocation {
+        side: Side,
+        token_id: u32,
+        version: u32,
+    },
     Htlc(HtlcRejection),
 }
 
@@ -100,6 +118,25 @@ impl ValidationRejection {
             ),
             Self::ReserveToCollateralBlocked => {
                 "SECURITY: reserve_to_collateral blocked - must use j_event_claim bilateral consensus".into()
+            }
+            Self::RebalancePolicyTokenId { token_id } => {
+                format!("rebalance_policy: invalid tokenId {token_id}")
+            }
+            Self::RebalancePolicyVersion { version } => {
+                format!("rebalance_policy: invalid policyVersion {version}")
+            }
+            Self::RebalancePolicyTimestamp => {
+                "rebalance_policy: invalid committed timestamp".into()
+            }
+            Self::RebalancePolicyFeeTerms { token_id } => {
+                format!("rebalance_policy: invalid fee terms for token {token_id}")
+            }
+            Self::RebalancePolicyMissingDelta { token_id } => {
+                format!("rebalance_policy: no delta for token {token_id}")
+            }
+            Self::RebalancePolicyEquivocation { side, token_id, version } => {
+                let side = if *side == Side::Left { "left" } else { "right" };
+                format!("REBALANCE_POLICY_EQUIVOCATION: side={side} token={token_id} version={version}")
             }
             Self::Htlc(reason) => reason.message(),
         }

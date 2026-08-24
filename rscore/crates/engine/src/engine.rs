@@ -165,6 +165,28 @@ fn apply_to_candidate(
         AccountTx::SetCreditLimit { token_id, amount } => {
             balance::set_credit_limit(candidate, *token_id, amount, proposer)
         }
+        AccountTx::RebalancePolicy {
+            token_id,
+            policy_version,
+            base_fee,
+            liquidity_fee_bps,
+            gas_fee,
+        } => {
+            let context =
+                context.ok_or(TransitionError::ExecutionContextRequired("rebalance_policy"))?;
+            crate::rebalance::apply_policy(
+                candidate,
+                crate::rebalance::RebalancePolicyTx {
+                    token_id: *token_id,
+                    policy_version: *policy_version,
+                    base_fee,
+                    liquidity_fee_bps,
+                    gas_fee,
+                },
+                proposer,
+                context.committed_timestamp,
+            )
+        }
         AccountTx::DirectPayment {
             token_id,
             amount,

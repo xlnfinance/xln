@@ -5,10 +5,11 @@
  * loaded dynamically only when XLN_RSCORE_SHADOW=1 in a Bun/Node runtime, so
  * browser bundles and non-shadow servers pay one env check per frame.
  */
-import type { ShadowFrameInput } from './shadow';
+import type { ShadowFrameInput, ShadowGap } from './shadow';
 
 type MirrorLike = Readonly<{
   noteCommittedFrame(input: ShadowFrameInput): void;
+  onGap(callback: (gap: ShadowGap) => void): void;
   settled(): Promise<void>;
   shutdown(): Promise<void>;
   stats(): unknown;
@@ -76,6 +77,7 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
         // exit-only reporting silently looks identical to "shadow never ran".
         printStats();
         started.onProgress(printStats);
+        started.onGap(gap => { haltOnGap(gap, printStats); });
         process.once('beforeExit', printStats);
         process.once('exit', printStats);
         for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, printStats);
@@ -102,6 +104,27 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
  */
 export const shadowStrictEnabled = (): boolean =>
   shadowEnabled() && process.env['XLN_RSCORE_SHADOW_STRICT'] === '1';
+
+/**
+ * Strict live mode: the first parity gap stops the process where it happened.
+ *
+ * A gap is not only a divergence — a repair reseed or a refused account
+ * silently restores agreement instead of proving it, so both halt too. The
+ * dump carries the account, the frame height, the tx types of that frame and
+ * (for divergences) which section's root differs, which is everything needed
+ * to reproduce the frame in isolation.
+ */
+const haltOnGap = (gap: ShadowGap, printStats: () => void): void => {
+  if (!shadowStrictEnabled()) return;
+  try {
+    console.error(`RSCORE_SHADOW_HALT ${JSON.stringify(gap)}`);
+    printStats();
+  } catch { /* observer-only */ }
+  process.exit(RSCORE_SHADOW_HALT_EXIT_CODE);
+};
+
+/** Distinct exit code so a harness can tell a parity halt from a crash. */
+export const RSCORE_SHADOW_HALT_EXIT_CODE = 70;
 
 export const assertShadowParity = async (label = 'end-of-run'): Promise<void> => {
   const active = mirror;

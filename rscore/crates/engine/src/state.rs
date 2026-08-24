@@ -7,6 +7,7 @@ use xln_rscore_protocol::{
 };
 
 use crate::delta::MAX_ACCOUNT_TOKEN_ROWS;
+use crate::rebalance::BilateralRebalanceFeePolicy;
 use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenId};
 
 const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;
@@ -76,6 +77,9 @@ pub struct AccountState {
     deltas: PersistentRadixMap<Delta>,
     locks: PersistentRadixMap<HtlcLock>,
     lending_intents: Option<PersistentRadixMap<LendingIntentKind>>,
+    /// Per-token bilateral fee registers. Owned and interpreted here, unlike
+    /// the carried sections below.
+    rebalance_fee_policies: PersistentRadixMap<BilateralRebalanceFeePolicy>,
     j_nonce: u64,
     last_finalized_j_height: u64,
     /// Sections no supported transaction mutates; committed verbatim so a
@@ -121,6 +125,7 @@ impl AccountState {
             j_nonce,
             last_finalized_j_height,
             crate::commitment::CarriedSections::default(),
+            Vec::new(),
         )
     }
 
@@ -132,6 +137,7 @@ impl AccountState {
         j_nonce: u64,
         last_finalized_j_height: u64,
         carried: crate::commitment::CarriedSections,
+        rebalance_fee_policies: Vec<(TokenId, BilateralRebalanceFeePolicy)>,
     ) -> Result<Self, StateError> {
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
@@ -163,12 +169,21 @@ impl AccountState {
             }
             lock_map = put_htlc_map(&lock_map, lock)?;
         }
+        let mut policy_map = PersistentRadixMap::empty();
+        let mut seen_policies = BTreeSet::new();
+        for (token_id, policy) in rebalance_fee_policies {
+            if !seen_policies.insert(token_id) {
+                return Err(StateError::DuplicateToken(token_id));
+            }
+            policy_map = put_policy_map(&policy_map, token_id, policy)?;
+        }
         Ok(Self {
             identity,
             dispute_config,
             deltas: map,
             locks: lock_map,
             lending_intents: None,
+            rebalance_fee_policies: policy_map,
             j_nonce,
             last_finalized_j_height,
             carried,
@@ -202,6 +217,7 @@ impl AccountState {
                     .lending_intents
                     .as_ref()
                     .map_or([0; 32], PersistentRadixMap::root_hash),
+                rebalance_fee_policies: self.rebalance_fee_policies.root_hash(),
             },
             crate::commitment::AccountJournal {
                 j_nonce: self.j_nonce,
@@ -227,6 +243,14 @@ impl AccountState {
         self.lending_intents
             .as_ref()
             .map(PersistentRadixMap::root_hash)
+    }
+
+    pub fn rebalance_policy(&self, token_id: TokenId) -> Option<&BilateralRebalanceFeePolicy> {
+        self.rebalance_fee_policies.get(&token_id.radix_key())
+    }
+
+    pub fn rebalance_fee_policies_root(&self) -> [u8; 32] {
+        self.rebalance_fee_policies.root_hash()
     }
 
     pub fn htlc_lock(&self, lock_id: &str) -> Option<&HtlcLock> {
@@ -284,6 +308,15 @@ impl AccountState {
 
     pub(crate) fn put_delta(&mut self, delta: Delta) -> Result<(), StateError> {
         self.deltas = put_delta_map(&self.deltas, delta)?;
+        Ok(())
+    }
+
+    pub(crate) fn put_rebalance_policy(
+        &mut self,
+        token_id: TokenId,
+        policy: BilateralRebalanceFeePolicy,
+    ) -> Result<(), StateError> {
+        self.rebalance_fee_policies = put_policy_map(&self.rebalance_fee_policies, token_id, policy)?;
         Ok(())
     }
 
@@ -385,6 +418,16 @@ fn put_htlc_map(
     let key = crate::htlc_lock_radix_key(lock.lock_id())?;
     let digest = crate::htlc_lock_value_digest(&lock)?;
     map.updated(key, lock, digest)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
+fn put_policy_map(
+    map: &PersistentRadixMap<BilateralRebalanceFeePolicy>,
+    token_id: TokenId,
+    policy: BilateralRebalanceFeePolicy,
+) -> Result<PersistentRadixMap<BilateralRebalanceFeePolicy>, StateError> {
+    let digest = canonical_digest(policy.canonical())?;
+    map.updated(token_id.radix_key(), policy, digest)
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
 

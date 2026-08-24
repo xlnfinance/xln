@@ -36,6 +36,13 @@ pub enum AccountTx {
         token_id: TokenId,
         amount: BigInt,
     },
+    RebalancePolicy {
+        token_id: u32,
+        policy_version: u32,
+        base_fee: BigInt,
+        liquidity_fee_bps: BigInt,
+        gas_fee: BigInt,
+    },
     DirectPayment {
         token_id: TokenId,
         amount: BigInt,

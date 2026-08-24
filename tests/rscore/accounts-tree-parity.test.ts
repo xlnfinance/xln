@@ -78,7 +78,8 @@ const makeTsAccount = (index: number): AccountReplica => {
 const EMPTY_CLAIM: RscoreWireValue[] = [hexBytes(EMPTY_ACCOUNT_J_CLAIM_ROOT), 0];
 const EMPTY_CARRIED: RscoreWireValue[] = [
   new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
-  new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
+  new Uint8Array(32), new Uint8Array(32),
+  [], // rebalance fee policies: owned by the engine, shipped in full
   EMPTY_CLAIM, EMPTY_CLAIM,
 ];
 
