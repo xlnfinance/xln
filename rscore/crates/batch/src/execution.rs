@@ -77,6 +77,17 @@ pub(crate) fn execute_account(work: AccountWork<'_>) -> Result<AccountExecution,
             events,
         });
     }
+    if changed {
+        // Once per candidate, on the worker that produced it: the commit fold,
+        // the leaf digest and every later read then hit the memo instead of
+        // rebuilding this account's state root.
+        candidate.refresh_account_state_root().map_err(|source| {
+            BatchError::CandidateFingerprint {
+                account_id: work.account_id,
+                source,
+            }
+        })?;
+    }
     Ok(AccountExecution {
         account_id: work.account_id,
         base_fingerprint: work.base_fingerprint,

@@ -89,6 +89,11 @@ pub struct AccountState {
     /// live account with swap/pull/rebalance/J-claim state still reproduces
     /// its exact TypeScript state root.
     carried: crate::commitment::CarriedSections,
+    /// Derived, never compared: the per-section memo for this account's state
+    /// root. A payment moves one section; the other four are byte-identical to
+    /// the previous commit and are reused instead of being rebuilt, encoded
+    /// and hashed again.
+    root_cache: crate::commitment::AccountRootCache,
 }
 
 /// Everything a checkpoint carries for one account, in the same shape the
@@ -212,6 +217,7 @@ impl AccountState {
             j_nonce,
             last_finalized_j_height,
             carried,
+            root_cache: crate::commitment::AccountRootCache::default(),
         })
     }
 
@@ -231,24 +237,60 @@ impl AccountState {
     /// wider Account snapshot instead of projecting it. The J journal counters
     /// (`jNonce`, `lastFinalizedJHeight`) ARE represented and committed
     /// verbatim.
+    /// Section roots this account currently commits.
+    fn payment_roots(&self) -> crate::commitment::PaymentAccountRoots {
+        crate::commitment::PaymentAccountRoots {
+            deltas: self.deltas.root_hash(),
+            locks: self.locks.root_hash(),
+            lending_intents: self
+                .lending_intents
+                .as_ref()
+                .map_or([0; 32], PersistentRadixMap::root_hash),
+            rebalance_fee_policies: self.rebalance_fee_policies.root_hash(),
+            swap_offers: self.swap_offers.root_hash(),
+        }
+    }
+
+    fn journal(&self) -> crate::commitment::AccountJournal {
+        crate::commitment::AccountJournal {
+            j_nonce: self.j_nonce,
+            last_finalized_j_height: self.last_finalized_j_height,
+        }
+    }
+
+    /// Recompute exactly the sections whose inputs moved and refresh the memo.
+    ///
+    /// Called once per candidate, after its transitions are applied: from then
+    /// on every read of this account's state root — the leaf digest, the query
+    /// page, the parity check — is a memo hit.
+    pub fn refresh_account_state_root(&mut self) -> Result<[u8; 32], StateError> {
+        let roots = self.payment_roots();
+        let journal = self.journal();
+        crate::commitment::refresh_payment_account_state_root(
+            &mut self.root_cache,
+            &self.identity,
+            self.dispute_config,
+            &roots,
+            &journal,
+            &self.carried,
+        )
+    }
+
     pub fn payment_profile_account_state_root(&self) -> Result<[u8; 32], StateError> {
+        if let Some(root) = crate::commitment::cached_payment_account_state_root(
+            &self.root_cache,
+            self.dispute_config,
+            &self.payment_roots(),
+            &self.journal(),
+            &self.carried,
+        ) {
+            return Ok(root);
+        }
         crate::commitment::payment_account_state_root(
             &self.identity,
             self.dispute_config,
-            crate::commitment::PaymentAccountRoots {
-                deltas: self.deltas.root_hash(),
-                locks: self.locks.root_hash(),
-                lending_intents: self
-                    .lending_intents
-                    .as_ref()
-                    .map_or([0; 32], PersistentRadixMap::root_hash),
-                rebalance_fee_policies: self.rebalance_fee_policies.root_hash(),
-                swap_offers: self.swap_offers.root_hash(),
-            },
-            crate::commitment::AccountJournal {
-                j_nonce: self.j_nonce,
-                last_finalized_j_height: self.last_finalized_j_height,
-            },
+            self.payment_roots(),
+            self.journal(),
             &self.carried,
         )
     }
@@ -469,6 +511,12 @@ impl AccountReplica {
 
     pub const fn state(&self) -> &AccountState {
         &self.state
+    }
+
+    /// Refresh this replica's memoized account state root after a candidate
+    /// finished its transitions.
+    pub fn refresh_account_state_root(&mut self) -> Result<[u8; 32], StateError> {
+        self.state.refresh_account_state_root()
     }
 
     pub(crate) fn state_mut(&mut self) -> &mut AccountState {
