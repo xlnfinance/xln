@@ -71,6 +71,12 @@ const payment = (amount: bigint): AccountTx => ({
   },
 });
 
+// A release gate sets XLN_RSCORE_REQUIRE_BINARY=1: an absent binary is then a
+// failure, never a silent skip.
+if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
+  throw new Error(`RSCORE_BINARY_MISSING:${BINARY}`);
+}
+
 describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
   test('register, match, diverge, reseed, recover — plus HTLC frames', async () => {
     const account = makeTsAccount();
@@ -109,6 +115,9 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         committedStateRoot: overrides.expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });
+      // Each commitFrame stands for one Runtime frame, so the wave is flushed
+      // at its boundary exactly as the runtime does.
+      mirror.flushWave();
       await mirror.settled();
     };
 
@@ -191,6 +200,9 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });
+      // Each commitFrame stands for one Runtime frame, so the wave is flushed
+      // at its boundary exactly as the runtime does.
+      mirror.flushWave();
       await mirror.settled();
     };
 

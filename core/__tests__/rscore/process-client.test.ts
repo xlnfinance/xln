@@ -16,6 +16,12 @@ const identity = () => ({
 // prepare/commit → shutdown. Requires `cargo build --release -p
 // xln-rscore-process` (deploy/dev builds it; skip when absent so pure-TS
 // environments stay green).
+// A release gate sets XLN_RSCORE_REQUIRE_BINARY=1: an absent binary is then a
+// failure, never a silent skip.
+if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
+  throw new Error(`RSCORE_BINARY_MISSING:${BINARY}`);
+}
+
 describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
   test('speaks the framed ABI end to end', async () => {
     const client = new RscoreProcessClient(BINARY, identity());

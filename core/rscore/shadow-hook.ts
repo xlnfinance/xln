@@ -11,6 +11,7 @@ type ShadowStatsLike = ShadowStats;
 
 type MirrorLike = Readonly<{
   noteCommittedFrame(input: ShadowFrameInput): void;
+  flushWave(): void;
   onGap(callback: (gap: ShadowGap) => void): void;
   settled(): Promise<void>;
   shutdown(): Promise<void>;
@@ -58,6 +59,9 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
           binaryPath,
           workers: Number(process.env['XLN_RSCORE_SHADOW_WORKERS'] ?? '4'),
           maxOwners: Number(process.env['XLN_RSCORE_SHADOW_MAX_ENTITIES'] ?? '1'),
+          // Strict runs verify every Account frame on its own wave; otherwise
+          // one wave carries the whole Runtime frame and the engine shards it.
+          strictFrames: process.env['XLN_RSCORE_SHADOW_STRICT'] === '1',
           makeClient: path => new RscoreProcessClient(path, {
             engineGeneration: Buffer.alloc(8, 0x5d),
             runtimeId: Buffer.alloc(20, 0x5d),
@@ -184,6 +188,15 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
     `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
     `reseeds=${stats.reseeds}`,
   );
+};
+
+/**
+ * Runtime frame boundary: every Account frame committed by this Runtime frame
+ * goes to the engine as one wave, so the engine's worker pool sees the whole
+ * frame at once instead of one account at a time. No-op when shadow is off.
+ */
+export const flushShadowWave = (): void => {
+  mirror?.flushWave();
 };
 
 /** Test/shutdown access to the live mirror (null when disabled or not started). */

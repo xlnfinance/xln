@@ -119,16 +119,22 @@ export type ShadowFrameInput = Readonly<{
   account: AccountReplica;
 }>;
 
-type QueueEntry = Readonly<{
-  kind: 'wave';
-  ownerKey: string;
+/** One mirrored Account frame inside a wave. */
+type WaveFrame = Readonly<{
   accountKey: string;
-  jobs: RscoreWireValue[][];
-  expectedRootHex: string;
   frameHeight: number;
+  expectedRootHex: string;
   txTypes: readonly string[];
   /** Canonical projection of the TS outputs this frame must reproduce. */
   expectedOutputs: readonly string[];
+}>;
+
+type QueueEntry = Readonly<{
+  kind: 'wave';
+  ownerKey: string;
+  /** Every account frame of one Runtime frame, in commit order. */
+  frames: readonly WaveFrame[];
+  jobs: RscoreWireValue[][];
 }> | Readonly<{
   kind: 'reseed';
   ownerKey: string;
@@ -212,6 +218,8 @@ export class RscoreShadowMirror {
   readonly #clients = new Map<string, RscoreProcessClient>();
   readonly #boundOwners = new Set<string>();
   readonly #maxOwners: number;
+  /** Verify each Account frame on its own wave instead of batching. */
+  readonly #strictFrames: boolean;
   readonly #registered = new Set<string>();
   /**
    * Live replica references, per owner, for self-reconciliation. These are the
@@ -225,6 +233,14 @@ export class RscoreShadowMirror {
   readonly #lastCommittedRoot = new Map<string, string>();
   readonly #lastRevision = new Map<string, number>();
   readonly #queue: QueueEntry[] = [];
+  /**
+   * Account frames committed since the last Runtime frame boundary, per owner.
+   * They are handed to the engine as ONE Prepare: the engine groups jobs by
+   * account id and runs distinct accounts on its worker pool, so batching by
+   * Runtime frame is what actually fills the cores. Sending one account frame
+   * per Prepare left a single Rayon task and idle workers.
+   */
+  readonly #pendingWave = new Map<string, { frames: WaveFrame[]; jobs: RscoreWireValue[][] }>();
   #draining = false;
   #disabledReason: string | null = null;
   readonly #stats: ShadowStats = {
@@ -253,11 +269,13 @@ export class RscoreShadowMirror {
     binaryPath: string;
     workers: number;
     maxOwners?: number;
+    strictFrames?: boolean;
     makeClient: (binaryPath: string) => RscoreProcessClient;
   }>) {
     this.#binaryPath = options.binaryPath;
     this.#workers = options.workers;
     this.#maxOwners = options.maxOwners ?? DEFAULT_MAX_OWNERS;
+    this.#strictFrames = options.strictFrames ?? false;
     this.#makeClient = options.makeClient;
   }
 
@@ -380,6 +398,19 @@ export class RscoreShadowMirror {
     };
   }
 
+  /**
+   * Runtime frame boundary: hand every account frame committed since the last
+   * boundary to the engine as one wave.
+   */
+  flushWave(): void {
+    if (this.#disabledReason) return;
+    for (const [ownerKey, pending] of this.#pendingWave) {
+      if (pending.jobs.length === 0) continue;
+      this.#push({ kind: 'wave', ownerKey, frames: pending.frames, jobs: pending.jobs });
+    }
+    this.#pendingWave.clear();
+  }
+
   /** Resolves when the queue has fully drained — test/shutdown ordering only. */
   settled(): Promise<void> {
     return this.#idle;
@@ -464,11 +495,12 @@ export class RscoreShadowMirror {
         return;
       }
       const jobs: RscoreWireValue[][] = [];
+      const inputBase = this.#pendingWave.get(ownerKey)?.jobs.length ?? 0;
       for (const [index, tx] of input.accountTxs.entries()) {
         const wire = accountTxWire(tx);
         if (wire === null) throw new Error(`SHADOW_TX_UNSUPPORTED:${tx.type}`);
         jobs.push([
-          index,
+          inputBase + index,
           accountIdBytes,
           input.byLeft ? 0 : 1,
           [input.timestamp, input.enforcementTimestamp, input.enforcementJHeight, input.frameHeight - 1],
@@ -482,16 +514,20 @@ export class RscoreShadowMirror {
         return;
       }
       this.#remember(ownerKey, input.counterpartyEntityId, input.account);
-      this.#push({
-        kind: 'wave',
-        ownerKey,
+      const pending = this.#pendingWave.get(ownerKey) ?? { frames: [], jobs: [] };
+      pending.frames.push({
         accountKey,
-        jobs,
-        expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
         frameHeight: input.frameHeight,
+        expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
         txTypes: input.accountTxs.map(tx => tx.type),
         expectedOutputs: expectedOutputProjection(input),
       });
+      pending.jobs.push(...jobs);
+      this.#pendingWave.set(ownerKey, pending);
+      // Strict mode verifies frame by frame, so it never batches: a batched
+      // wave only proves the final per-account root, and an intermediate frame
+      // that lands on the same state would go unnoticed.
+      if (this.#strictFrames) this.flushWave();
     } catch (error) {
       this.#disable(`note:${error instanceof Error ? error.message : String(error)}`);
     }
@@ -509,8 +545,9 @@ export class RscoreShadowMirror {
   #push(entry: QueueEntry): void {
     if (this.#queue.length >= MAX_QUEUE) {
       this.#stats.dropped += 1;
-      // A dropped frame breaks the replay continuity for that account.
-      this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
+      // A dropped wave breaks replay continuity for every account it carried.
+      if (entry.kind === 'reseed') this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
+      else for (const frame of entry.frames) this.#needsReseed.add(`${entry.ownerKey}/${frame.accountKey}`);
       return;
     }
     this.#queue.push(entry);
@@ -539,15 +576,17 @@ export class RscoreShadowMirror {
         const rejected = results
           .map((row, index) => ({ verdict: (row as unknown[])[2] as unknown[], index }))
           .filter(({ verdict }) => Number(verdict[0]) !== 0);
+        // Outputs and roots are read from the candidate before it is
+        // committed, so a rejected wave never reaches the committed tree.
+        const engineOutputs = prepared[3] as unknown[];
+        const roots = prepared[4] as unknown[];
         const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
         // The engine's revision must advance by exactly one per commit; a gap
         // means a candidate was silently dropped or replayed.
         const expectedRevision = (this.#lastRevision.get(entry.ownerKey) ?? 0) + 1;
-        if (Number(committed[0]) !== expectedRevision) {
-          await this.#recordMismatch(entry, `revision:${committed[0]}!=${expectedRevision}`);
-          this.#noteRevision(entry.ownerKey, committed);
-          continue;
-        }
+        const revisionGap = Number(committed[0]) !== expectedRevision
+          ? `revision:${committed[0]}!=${expectedRevision}`
+          : null;
         this.#noteRevision(entry.ownerKey, committed);
         if (this.#stats.framesCompared % PROGRESS_EVERY === 0) {
           try { this.#onProgress?.(); } catch { /* observer-only */ }
@@ -563,46 +602,59 @@ export class RscoreShadowMirror {
             const report = await this.reconcile(entry.ownerKey, owned);
             this.#stats.reconciliations += 1;
             const gap = report.mismatched.length > 0 || report.missingInEngine.length > 0
-              || report.extraInEngine.length > 0;
+              || report.extraInEngine.length > 0 || !report.forestRoot.equal;
             // A frame that arrived while the diff was running puts the engine
             // behind again; only a still-quiet queue makes the gap real.
             if (gap && this.#queue.length === 0) this.#stats.reconcileFailures += 1;
             try {
               console.error(`RSCORE_SHADOW_RECONCILE matched=${report.matched} mismatched=${
                 report.mismatched.length} missing=${report.missingInEngine.length} extra=${
-                report.extraInEngine.length}`);
+                report.extraInEngine.length} forestRoot=${report.forestRoot.equal}`);
             } catch { /* observer-only */ }
           }
         }
-        // Counted only once a verdict exists, so framesCompared always equals
-        // matches + mismatches; incrementing first let a stats snapshot taken
-        // mid-frame report a comparison with no outcome.
-        this.#stats.framesCompared += 1;
-        if (rejected.length > 0) {
-          await this.#recordMismatch(entry, `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null, (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)))}`);
-          continue;
+        // A wave carries the Account frames of one Runtime frame — by design
+        // at most one per counterparty, because an Account input already
+        // combines the ack and the proposal. A second frame for the same
+        // account in one wave breaks that invariant, and its intermediate root
+        // would go unverified, so it is reported instead of collapsed.
+        const frameOf = new Map<string, WaveFrame>();
+        const duplicated: string[] = [];
+        for (const frame of entry.frames) {
+          if (frameOf.has(frame.accountKey)) duplicated.push(frame.accountKey);
+          frameOf.set(frame.accountKey, frame);
         }
-        const engineOutputs = engineOutputProjection(prepared[3] as unknown[], entry.accountKey);
-        if (engineOutputs.join('\n') !== entry.expectedOutputs.join('\n')) {
-          await this.#recordMismatch(
-            entry,
-            `outputs:ts=${JSON.stringify(entry.expectedOutputs)}:rust=${JSON.stringify(engineOutputs)}`,
+        const rejection = rejected.length > 0
+          ? `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(
+              entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null,
+              (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)),
+            )}`
+          : null;
+        for (const [accountKey, frame] of frameOf) {
+          // Counted only once a verdict exists, so framesCompared always equals
+          // matches + mismatches; incrementing first let a stats snapshot taken
+          // mid-frame report a comparison with no outcome.
+          this.#stats.framesCompared += 1;
+          const duplicate = duplicated.includes(accountKey)
+            ? `waveCarriedTwoFramesForOneAccount:${duplicated.length}`
+            : null;
+          const failure = revisionGap ?? rejection ?? duplicate ?? this.#verifyAccount(
+            accountKey,
+            frame,
+            frame.expectedOutputs,
+            engineOutputs,
+            roots,
           );
-          continue;
-        }
-        const roots = prepared[4] as unknown[];
-        const row = roots.find(candidate =>
-          Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === entry.accountKey);
-        const actual = row ? Buffer.from((row as unknown[])[1] as Uint8Array).toString('hex') : 'missing';
-        if (actual === entry.expectedRootHex) {
-          this.#stats.matches += 1;
-        } else {
-          await this.#recordMismatch(entry, `root:${actual}`);
+          if (failure === null) {
+            this.#stats.matches += 1;
+            continue;
+          }
+          await this.#recordMismatch(entry, accountKey, frame, failure);
         }
       }
     } catch (error) {
       const context = lastEntry
-        ? `${lastEntry.kind}:h${lastEntry.frameHeight}:${JSON.stringify(
+        ? `${lastEntry.kind}:${JSON.stringify(
             lastEntry.kind === 'wave' ? lastEntry.jobs : lastEntry.seed,
             (_key, value) => {
               if (value instanceof Uint8Array || Buffer.isBuffer(value)) return `0x${Buffer.from(value as Uint8Array).toString('hex').slice(0, 16)}`;
@@ -623,21 +675,41 @@ export class RscoreShadowMirror {
     }
   }
 
+  /** Outputs then final root, for one account of a wave. Null when it matches. */
+  #verifyAccount(
+    accountKey: string,
+    frame: WaveFrame,
+    expectedOutputs: readonly string[],
+    engineOutputs: readonly unknown[],
+    roots: readonly unknown[],
+  ): string | null {
+    const actualOutputs = engineOutputProjection(engineOutputs, accountKey);
+    if (actualOutputs.join('\n') !== expectedOutputs.join('\n')) {
+      return `outputs:ts=${JSON.stringify(expectedOutputs)}:rust=${JSON.stringify(actualOutputs)}`;
+    }
+    const row = roots.find(candidate =>
+      Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === accountKey);
+    const actual = row ? Buffer.from((row as unknown[])[1] as Uint8Array).toString('hex') : 'missing';
+    return actual === frame.expectedRootHex ? null : `root:${actual}`;
+  }
+
   async #recordMismatch(
     entry: Extract<QueueEntry, { kind: 'wave' }>,
+    accountKey: string,
+    frame: WaveFrame,
     detail: string,
   ): Promise<void> {
     this.#stats.mismatches += 1;
-    this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
-    const sections = await this.#diverginSections(entry);
+    this.#needsReseed.add(`${entry.ownerKey}/${accountKey}`);
+    const sections = await this.#diverginSections(entry.ownerKey, accountKey);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
     try {
       shadowLog.error('shadow.divergence', {
         owner: entry.ownerKey,
-        account: entry.accountKey,
-        frameHeight: entry.frameHeight,
-        expected: entry.expectedRootHex,
+        account: accountKey,
+        frameHeight: frame.frameHeight,
+        expected: frame.expectedRootHex,
         detail,
         sections,
       });
@@ -645,10 +717,10 @@ export class RscoreShadowMirror {
     this.#reportGap({
       kind: 'divergence',
       owner: entry.ownerKey,
-      account: entry.accountKey,
-      frameHeight: entry.frameHeight,
+      account: accountKey,
+      frameHeight: frame.frameHeight,
       detail,
-      txTypes: entry.txTypes,
+      txTypes: frame.txTypes,
       ...(sections ? { sections } : {}),
     });
   }
@@ -660,15 +732,16 @@ export class RscoreShadowMirror {
    * dump names deltas vs locks vs fee policies instead of one opaque hash.
    */
   async #diverginSections(
-    entry: Extract<QueueEntry, { kind: 'wave' }>,
+    ownerKey: string,
+    accountKey: string,
   ): Promise<Record<string, { typescript: string; rust: string }> | undefined> {
-    const account = this.#mirrored.get(entry.ownerKey)?.get(`0x${entry.accountKey}`);
+    const account = this.#mirrored.get(ownerKey)?.get(`0x${accountKey}`);
     if (!account) return undefined;
     try {
-      const client = await this.#ensureClient(entry.ownerKey);
+      const client = await this.#ensureClient(ownerKey);
       const page = (await client.readAccountSummaryPage(null, 512, [])) as unknown[];
       const row = (page[1] as unknown[]).find(candidate =>
-        Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === entry.accountKey);
+        Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === accountKey);
       if (!row) return undefined;
       const fields = row as unknown[];
       const engine = (index: number): string =>

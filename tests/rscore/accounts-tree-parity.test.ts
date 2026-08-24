@@ -193,6 +193,12 @@ const referenceRoot = (accounts: readonly AccountReplica[]): Uint8Array => {
   return hexBytes(map.rootHash());
 };
 
+// A release gate sets XLN_RSCORE_REQUIRE_BINARY=1: an absent binary is then a
+// failure, never a silent skip.
+if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
+  throw new Error(`RSCORE_BINARY_MISSING:${BINARY}`);
+}
+
 describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
   test('restore and commit report the TS-identical radix-16 accounts root', async () => {
     const accounts = ACCOUNT_IDS.slice(0, 4).map((_, index) => makeTsAccount(index));
