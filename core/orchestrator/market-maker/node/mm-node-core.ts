@@ -1427,6 +1427,18 @@ const finalizeCrossOfferRoute = (
   return { offerId, route: withCanonicalCrossJurisdictionRouteHash({ ...draftTerms, orderId: offerId }) };
 };
 
+/**
+ * Whether this market maker quotes cross-jurisdiction routes at all.
+ *
+ * Off (`XLN_MM_CROSS_J=0`) the MM behaves like a single-jurisdiction stand: it
+ * plans no cross routes, creates no cross offers, and reports cross health as
+ * not applicable — the same path a one-jurisdiction topology already takes.
+ * A debugging switch for isolating same-jurisdiction behaviour, not a
+ * production default.
+ */
+export const marketMakerCrossJurisdictionEnabled = (): boolean =>
+  readBooleanEnv('XLN_MM_CROSS_J', true);
+
 export const buildMarketMakerCrossOfferSpecs = (
   env: RuntimeReplica,
   sourceContext: MarketMakerEntityContext,
@@ -1436,6 +1448,7 @@ export const buildMarketMakerCrossOfferSpecs = (
   sourceTokenIds: number[],
   targetTokenIds: number[],
 ): MarketMakerOfferSpec[] => {
+  if (!marketMakerCrossJurisdictionEnabled()) return [];
   if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) return [];
   const sourceJurisdictionRef = sourceContext.jurisdictionRef;
   const targetJurisdictionRef = targetContext.jurisdictionRef;

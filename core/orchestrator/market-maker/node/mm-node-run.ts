@@ -127,6 +127,7 @@ import {
   nodeLog,
   planMarketMakerQuoteEntityInputs,
   readVisibleHubProfiles,
+  marketMakerCrossJurisdictionEnabled,
   resolveImportedJurisdictionRpc,
   resolveJurisdictionConfig,
   resolveLocalApiUrl,
@@ -333,11 +334,15 @@ const computeMarketMakerHealthSnapshot = (
   const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryContext, profile));
   const allVisibleHubs = readVisibleHubProfiles(env, true);
   const crossOverride = options.crossOverride;
-  const includeCross = !crossOverride && options.includeCross !== false;
+  // With cross-J switched off the MM never plans a route, so health takes the
+  // same "not applicable" path a single-jurisdiction topology takes.
+  const includeCross =
+    marketMakerCrossJurisdictionEnabled() && !crossOverride && options.includeCross !== false;
   // Same-j HLT never fills cross-j books. Reporting applicable:true with
   // empty routes made MM.ok false and crashed finalize
   // (MARKET_MAKER_BOOTSTRAP_INCOMPLETE) even after hubs were depth-ready.
   const crossApplicable =
+    marketMakerCrossJurisdictionEnabled() &&
     contexts.length > 1 &&
     allVisibleHubs.some(
       profile =>

@@ -33,6 +33,7 @@ import {
   type MeshHealthPayload,
 } from '../../../scenarios/cross-j/mm-mesh-adversary';
 import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
+import { readBooleanEnv } from '../../../config/environment';
 
 type ManagedProcess = {
   name: string;
@@ -866,9 +867,23 @@ const marketMakerSameChainReady = (health: HealthPayload): boolean => {
     );
 };
 
+/**
+ * With `XLN_MM_CROSS_J=0` the market maker plans no cross routes at all, so
+ * readiness is the same-jurisdiction book plus a cross section that reports
+ * itself not applicable. Every other run keeps the strict contract: routes
+ * must exist and be fully deep.
+ */
+const crossJurisdictionExpected = readBooleanEnv('XLN_MM_CROSS_J', true);
+
 const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
   const routes = health.marketMaker?.cross?.routes ?? [];
   const expectedRoutes = Number(health.marketMaker?.cross?.expectedRoutes || 0);
+  if (!crossJurisdictionExpected) {
+    return health.marketMaker?.ok === true &&
+      marketMakerSameChainReady(health) &&
+      health.marketMaker?.cross?.ok === true &&
+      expectedRoutes === 0;
+  }
   return health.marketMaker?.ok === true &&
     marketMakerSameChainReady(health) &&
     expectedRoutes > 0 &&
@@ -1221,6 +1236,11 @@ const main = async (): Promise<void> => {
     XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250',
     MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:
       process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000',
+    // Debug switch: with cross-J off the MM plans no cross routes and reports
+    // cross health as not applicable, so a same-jurisdiction stand can be
+    // isolated end to end. Passed through so the child MM sees the operator's
+    // decision.
+    XLN_MM_CROSS_J: process.env['XLN_MM_CROSS_J'] || '1',
     XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? {
