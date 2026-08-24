@@ -9,6 +9,7 @@ import {
   DEFAULT_RETAIN_SNAPSHOTS,
 } from '../../../storage/keys';
 import { ensureRuntimeConfig } from '../../../runtime/loop/loop-environment.ts';
+import { decodeRuntimeConfig } from '../../../storage/wal/runtime-machine-schema';
 import { measureRuntimeFrameCloneBytes } from '../../../runtime/frame/clone';
 
 describe('storage config', () => {
@@ -33,7 +34,7 @@ describe('storage config', () => {
 
   test('uses sparse full-state checkpoints without weakening per-frame WAL chaining', () => {
     const env = createEmptyEnv('sparse-storage-checkpoints');
-    env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 100 };
+    env.runtimeConfig = { ...(env.runtimeConfig || {}) };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
     expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
@@ -130,4 +131,15 @@ describe('storage config', () => {
       else process.env['XLN_STORAGE_VERIFY_CANONICAL'] = previous;
     }
   });
+});
+
+test('a runtime config written before the dead snapshot knob was removed still decodes', () => {
+  // The field decided nothing, so a recovery must not fail over it — and it
+  // must not come back into the model either.
+  const decoded = decodeRuntimeConfig(
+    { minFrameDelayMs: 25, snapshotIntervalFrames: 7, storage: { snapshotPeriodFrames: 10_000 } },
+    'TEST_RUNTIME_CONFIG',
+  ) as Record<string, unknown>;
+  expect(decoded['minFrameDelayMs']).toBe(25);
+  expect('snapshotIntervalFrames' in decoded).toBe(false);
 });

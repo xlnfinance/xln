@@ -1433,7 +1433,6 @@ describe('storage frame journal retention', () => {
     env.dbNamespace = runtimeId;
     env.runtimeConfig = {
       ...(env.runtimeConfig || {}),
-      snapshotIntervalFrames: 1,
       storage: {
         ...(env.runtimeConfig?.storage || {}),
         snapshotPeriodFrames: 1,

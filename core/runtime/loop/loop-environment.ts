@@ -1,5 +1,4 @@
 import {
-  DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
 } from '../replica/platform.ts';
 import {
   isProductionRuntime,
@@ -152,7 +151,6 @@ export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeRep
   env.runtimeConfig ??= {
     minFrameDelayMs: runtimeMinFrameDelayMs(),
     loopIntervalMs: isProductionRuntime ? 25 : 0,
-    snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
   };
   const epochMaxBytes = readPositiveInteger('XLN_STORAGE_EPOCH_MAX_BYTES');
   if (epochMaxBytes !== undefined && env.runtimeConfig.storage?.epochMaxBytes === undefined) {
@@ -164,12 +162,6 @@ export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeRep
     env.runtimeConfig.storage?.snapshotPeriodFrames === undefined
   ) {
     env.runtimeConfig.storage = { ...env.runtimeConfig.storage, snapshotPeriodFrames };
-  }
-  if (
-    !Number.isFinite(env.runtimeConfig.snapshotIntervalFrames ?? NaN) ||
-    (env.runtimeConfig.snapshotIntervalFrames ?? 0) < 1
-  ) {
-    env.runtimeConfig.snapshotIntervalFrames = DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
   }
   for (const [name, value] of Object.entries(env.runtimeConfig.performance ?? {})) {
     if (!Number.isFinite(value) || Number(value) <= 0) {

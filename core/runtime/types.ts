@@ -720,8 +720,6 @@ export interface RuntimeReplica {
     /** Minimum start-to-start period for live Runtime frames; replay/scenarios ignore it. */
     minFrameDelayMs?: number;
     loopIntervalMs?: number;  // Loop interval for runtime processing
-    /** In-memory/debug history cadence. Durable storage snapshots use storage.snapshotPeriodFrames. */
-    snapshotIntervalFrames?: number;
     /** Local operator warning only; never rejects an otherwise valid Entity frame. */
     entityConsensusStateWarningBytes?: number;
     advertiseProfileMirrors?: boolean; // Opt-in only; otherwise profiles do not correlate sibling entities.

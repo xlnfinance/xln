@@ -74,7 +74,6 @@ export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}
 # five-frame developer cadence snapshots four CPU-heavy runtimes at once and
 # can starve the authoritative WAL write. Keep bootstrap WAL-only; the first
 # compact recovery snapshot is a steady-state concern.
-export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}
 # Chained Runtime work is latency-critical. Async persistence/network I/O yields
 # naturally; operators may still set an explicit positive throttle if required.
 export XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-0}

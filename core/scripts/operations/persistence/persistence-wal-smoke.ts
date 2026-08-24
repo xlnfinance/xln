@@ -40,7 +40,7 @@ async function main() {
   const env = createEmptyEnv(seed);
   env.runtimeId = runtimeId;
   env.dbNamespace = runtimeId;
-  env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 1000 };
+  env.runtimeConfig = { ...(env.runtimeConfig || {}) };
   env.quietRuntimeLogs = true;
 
   const signer1 = deriveSignerAddressSync(seed, '1');

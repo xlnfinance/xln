@@ -46,6 +46,9 @@ export const decodeRuntimeConfig = (
   code: string,
 ): RuntimeReplica['runtimeConfig'] => {
   const config = requireBoundaryRecord(value, code);
+  // `snapshotIntervalFrames` decided nothing and was removed; records written
+  // before that still carry it, so it is accepted here and dropped below
+  // rather than failing a recovery over a field nothing ever read.
   requireExactBoundaryKeys(config, [], [
     'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames',
     'entityConsensusStateWarningBytes', 'advertiseProfileMirrors', 'performance', 'storage',
@@ -68,7 +71,9 @@ export const decodeRuntimeConfig = (
     }
   }
   if (config['storage'] !== undefined) validateStorageConfig(config['storage'], `${code}_STORAGE`);
-  return structuredClone(config) as RuntimeReplica['runtimeConfig'];
+  const decoded = structuredClone(config) as Record<string, unknown>;
+  delete decoded['snapshotIntervalFrames'];
+  return decoded as RuntimeReplica['runtimeConfig'];
 };
 
 function assertRoutedEntityInput(

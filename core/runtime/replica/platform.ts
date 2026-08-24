@@ -1,7 +1,4 @@
-import {
-  nodeProcess,
-  readRuntimeEnv,
-} from '../../support/process/runtime-process';
+import { nodeProcess } from '../../support/process/runtime-process';
 import { countOp } from '../../support/performance/op-counters';
 import { getPerfMs } from '../../support/time';
 
@@ -56,8 +53,3 @@ export const yieldRuntimeIoTurn = async (): Promise<void> => {
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 export const dbRootPath = nodeProcess?.env?.['XLN_DB_PATH'] || defaultDbPath;
 
-export const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '100');
-  if (!Number.isFinite(parsed) || parsed < 1) return 100;
-  return Math.floor(parsed);
-})();

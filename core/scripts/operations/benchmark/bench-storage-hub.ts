@@ -527,10 +527,6 @@ async function main() {
   const crashRecoveryBudgetMs = parsePositiveInt(getArg('--crash-recovery-budget-ms', '10000'), 10000);
   const crashRecover = hasFlag('--crash-recover');
   const recoveryScanStep = parsePositiveInt(getArg('--recovery-scan-step', '1'), 1);
-  const snapshotInterval = parsePositiveInt(
-    getArg('--snapshot-interval', persist ? '100000' : String(Number.MAX_SAFE_INTEGER)),
-    persist ? 100000 : Number.MAX_SAFE_INTEGER,
-  );
   const creditAmount = parseBigIntArg(getArg('--credit', '1000000000000000000'), 10n ** 18n);
   const paymentAmount = parseBigIntArg(getArg('--amount', '1'), 1n);
   const maxConverge = parsePositiveInt(getArg('--max-converge', '200'), 200);
@@ -569,7 +565,6 @@ async function main() {
   env.state.timestamp = 1;
   env.runtimeConfig = {
     ...(env.runtimeConfig || {}),
-    snapshotIntervalFrames: snapshotInterval,
     ...(storageEnabled
       ? {
           storage: {
@@ -1087,7 +1082,6 @@ async function main() {
         persist,
         storageEnabled,
         storageSnapshotPeriod,
-        snapshotInterval,
         importBatch,
         openBatch,
         paymentBatch,

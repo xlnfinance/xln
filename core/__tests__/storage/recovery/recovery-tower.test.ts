@@ -211,7 +211,7 @@ describe('runtime recovery tower', () => {
       queuedAt: 5_500,
     };
     env.runtimeMempool = queuedInput;
-    env.runtimeConfig = { minFrameDelayMs: 25, snapshotIntervalFrames: 7 };
+    env.runtimeConfig = { minFrameDelayMs: 25 };
     env.infrastructure = {
       ...(env.infrastructure ?? {}),
       maxEntityInputsPerFrame: 123,

@@ -37,7 +37,7 @@ describe('runtime snapshot codec', () => {
 
   test('durable runtime snapshot helper restores queues config and failover outbox', () => {
     const env = createEmptyEnv('durable-runtime-snapshot');
-    env.runtimeConfig = { minFrameDelayMs: 25, snapshotIntervalFrames: 7 };
+    env.runtimeConfig = { minFrameDelayMs: 25 };
     env.runtimeMempool = {
       runtimeTxs: [],
       entityInputs: [],

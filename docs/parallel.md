@@ -146,7 +146,8 @@ attempt (`core/account/worker/pool.ts`, unused) stalled.
 
 ### 4.5 Snapshots / nodeChanges (owner's question)
 WAL frames persist inputs only; materialized Account trees are written at
-checkpoints (`snapshotIntervalFrames`, `DEFAULT_SNAPSHOT_INTERVAL_FRAMES`) via
+checkpoints (`storage.materializePeriodFrames`, and full snapshots at
+`storage.snapshotPeriodFrames`) via
 `projectAccountTreeChanges(next, previous)` (`core/storage/schema/account-graph-codec.ts:126`),
 i.e. `nodeChangesSince` between the replica at the previous checkpoint and now.
 With shards this is **on demand at checkpoint, not per frame**: the shard keeps a

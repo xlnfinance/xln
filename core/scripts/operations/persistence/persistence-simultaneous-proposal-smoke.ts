@@ -51,7 +51,7 @@ async function main() {
   const env = createEmptyEnv(seed);
   env.runtimeId = runtimeId;
   env.dbNamespace = runtimeId;
-  env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 1000 };
+  env.runtimeConfig = { ...(env.runtimeConfig || {}) };
   env.quietRuntimeLogs = true;
   env.scenarioMode = true;
   env.state.timestamp = 1000;
