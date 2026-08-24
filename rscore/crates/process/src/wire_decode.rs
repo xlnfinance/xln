@@ -177,13 +177,24 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     let fields = exact(tuple(value)?, 11, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
+    // The account id IS the counterparty entity id: one engine process serves
+    // exactly one owner entity, so its account tree is keyed the same way the
+    // TypeScript entity keys its account map (raw 32-byte counterparty id, no
+    // hashing). Anything else would produce a different tree shape and a
+    // different accounts root than the entity machine computes.
+    let left = entity(&fields[2], "left")?;
+    let right = entity(&fields[3], "right")?;
+    let counterparty = if owner == left { &right } else { &left };
+    if account_id.as_bytes() != counterparty.as_bytes() {
+        return Err(ProcessError::Expected("accountIdIsCounterparty"));
+    }
     let identity = AccountIdentity::new(
         AccountDomain::new(
             unsigned(&fields[4], "chainId")?,
             DepositoryAddress::parse(&hex_fixed(&fields[5], "depository", 20)?)?,
         )?,
-        entity(&fields[2], "left")?,
-        entity(&fields[3], "right")?,
+        left.clone(),
+        right.clone(),
         WatchSeed::parse(&hex_fixed(&fields[6], "watchSeed", 32)?)?,
     )?;
     let dispute = exact(tuple(&fields[7])?, 2, "disputeConfig")?;

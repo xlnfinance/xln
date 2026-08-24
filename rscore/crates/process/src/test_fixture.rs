@@ -51,10 +51,10 @@ pub fn load_profile(id: u64, profile: &str, revision: u64, locks: Vec<AbiValue>)
 
 pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
     tuple(vec![
-        AbiValue::Bytes(vec![id_byte; 32]),
+        AbiValue::Bytes(entity_bytes(id_byte).to_vec()),
         AbiValue::Bytes(entity_bytes(1).to_vec()),
         AbiValue::Bytes(entity_bytes(1).to_vec()),
-        AbiValue::Bytes(entity_bytes(2).to_vec()),
+        AbiValue::Bytes(entity_bytes(id_byte).to_vec()),
         AbiValue::Integer(31_337),
         AbiValue::Bytes(vec![0x88; 20]),
         AbiValue::Bytes(vec![0x99; 32]),
@@ -194,8 +194,10 @@ pub fn shutdown(id: u64) -> Envelope {
     request(id, OpTag::Shutdown, Vec::new())
 }
 
+// Owner is entity(1) and the pair is (1, 2), so the account id must be the
+// counterparty entity id — the decoder enforces that binding.
 fn account_id() -> [u8; 32] {
-    [0x44; 32]
+    entity_bytes(2)
 }
 
 pub fn fixture_account_id() -> [u8; 32] {

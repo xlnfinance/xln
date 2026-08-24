@@ -13,8 +13,6 @@
  * reseeds it from the committed post-frame snapshot via UpsertAccounts, and
  * comparison resumes from the next frame.
  */
-import { sha256 } from '@noble/hashes/sha2.js';
-
 import { createStructuredLogger } from '../support/logger';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
@@ -48,12 +46,14 @@ export type ShadowFrameInput = Readonly<{
 
 type QueueEntry = Readonly<{
   kind: 'wave';
+  ownerKey: string;
   accountKey: string;
   jobs: RscoreWireValue[][];
   expectedRootHex: string;
   frameHeight: number;
 }> | Readonly<{
   kind: 'reseed';
+  ownerKey: string;
   accountKey: string;
   seed: RscoreWireValue[];
   reason: string;
@@ -75,8 +75,7 @@ export class RscoreShadowMirror {
   readonly #binaryPath: string;
   readonly #workers: number;
   readonly #makeClient: (binaryPath: string) => RscoreProcessClient;
-  #client: RscoreProcessClient | null = null;
-  #started = false;
+  readonly #clients = new Map<string, RscoreProcessClient>();
   readonly #registered = new Set<string>();
   readonly #needsReseed = new Set<string>();
   readonly #queue: QueueEntry[] = [];
@@ -117,19 +116,22 @@ export class RscoreShadowMirror {
   noteCommittedFrame(input: ShadowFrameInput): void {
     if (this.#disabledReason) return;
     this.#stats.framesSeen += 1;
-    // One mirror serves every local entity: the engine-side account id is the
-    // hash of the (owner, counterparty) pair so two entities sharing a
-    // counterparty never collide on one leaf.
-    const accountIdBytes = pairAccountId(input.ownerEntityId, input.counterpartyEntityId);
+    // Parity with the entity machine: the account key is the raw 32-byte
+    // counterparty entity id, never a hash. Owners are separated by running
+    // one engine process per owner entity, exactly the way the entity machine
+    // owns exactly one account map.
+    const ownerKey = input.ownerEntityId.trim().toLowerCase();
+    const accountIdBytes = hexToWireBytes(input.counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID');
     const accountKey = Buffer.from(accountIdBytes).toString('hex');
+    const scopedKey = `${ownerKey}/${accountKey}`;
     if (process.env['XLN_RSCORE_SHADOW_TRACE'] === '1') {
       try {
-        console.error(`SHADOW_TRACE note ${accountKey.slice(0, 8)} h${input.frameHeight} byLeft=${input.byLeft} txs=[${input.accountTxs.map(tx => tx.type).join(',')}] registered=${this.#registered.has(accountKey)} needsReseed=${this.#needsReseed.has(accountKey)}`);
+        console.error(`SHADOW_TRACE note ${accountKey.slice(0, 8)} h${input.frameHeight} byLeft=${input.byLeft} txs=[${input.accountTxs.map(tx => tx.type).join(',')}] registered=${this.#registered.has(scopedKey)} needsReseed=${this.#needsReseed.has(scopedKey)}`);
       } catch { /* observer-only */ }
     }
     try {
       const supported = input.accountTxs.every(tx => SHADOW_SUPPORTED_TX_TYPES.has(tx.type));
-      const fresh = !this.#registered.has(accountKey) || this.#needsReseed.has(accountKey);
+      const fresh = !this.#registered.has(scopedKey) || this.#needsReseed.has(scopedKey);
       if (!supported || fresh) {
         const reason = shadowIneligibilityReason(input.account);
         if (reason !== null) {
@@ -138,22 +140,22 @@ export class RscoreShadowMirror {
           }
           // Live out-of-profile state: cannot seed. Forget the account; a
           // later clean snapshot re-registers it.
-          this.#registered.delete(accountKey);
-          this.#needsReseed.delete(accountKey);
+          this.#registered.delete(scopedKey);
+          this.#needsReseed.delete(scopedKey);
           this.#stats.skippedIneligible += 1;
           return;
         }
         const seed = accountSeedWire(input.ownerEntityId, input.counterpartyEntityId, input.account);
-        seed[0] = accountIdBytes;
         this.#push({
           kind: 'reseed',
+          ownerKey,
           accountKey,
           seed,
           reason: fresh ? 'register' : 'unsupported-tx',
           frameHeight: input.frameHeight,
         });
-        this.#registered.add(accountKey);
-        this.#needsReseed.delete(accountKey);
+        this.#registered.add(scopedKey);
+        this.#needsReseed.delete(scopedKey);
         return;
       }
       const jobs: RscoreWireValue[][] = [];
@@ -175,6 +177,7 @@ export class RscoreShadowMirror {
       }
       this.#push({
         kind: 'wave',
+        ownerKey,
         accountKey,
         jobs,
         expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
@@ -187,18 +190,18 @@ export class RscoreShadowMirror {
 
   async shutdown(): Promise<void> {
     await this.#idle;
-    if (this.#client) {
-      try { await this.#client.shutdown(); } catch { /* already down */ }
-      this.#client.kill();
-      this.#client = null;
+    for (const client of this.#clients.values()) {
+      try { await client.shutdown(); } catch { /* already down */ }
+      client.kill();
     }
+    this.#clients.clear();
   }
 
   #push(entry: QueueEntry): void {
     if (this.#queue.length >= MAX_QUEUE) {
       this.#stats.dropped += 1;
       // A dropped frame breaks the replay continuity for that account.
-      this.#needsReseed.add(entry.accountKey);
+      this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
       return;
     }
     this.#queue.push(entry);
@@ -212,10 +215,10 @@ export class RscoreShadowMirror {
   async #drain(): Promise<void> {
     let lastEntry: QueueEntry | null = null;
     try {
-      const client = await this.#ensureClient();
       while (this.#queue.length > 0) {
         const entry = this.#queue.shift()!;
         lastEntry = entry;
+        const client = await this.#ensureClient(entry.ownerKey);
         if (entry.kind === 'reseed') {
           await client.upsertAccounts([entry.seed]);
           this.#stats.reseeds += 1;
@@ -267,11 +270,12 @@ export class RscoreShadowMirror {
 
   #recordMismatch(entry: Extract<QueueEntry, { kind: 'wave' }>, detail: string): void {
     this.#stats.mismatches += 1;
-    this.#needsReseed.add(entry.accountKey);
+    this.#needsReseed.add(`${entry.ownerKey}/${entry.accountKey}`);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
     try {
       shadowLog.error('shadow.divergence', {
+        owner: entry.ownerKey,
         account: entry.accountKey,
         frameHeight: entry.frameHeight,
         expected: entry.expectedRootHex,
@@ -280,13 +284,18 @@ export class RscoreShadowMirror {
     } catch { /* observer-only */ }
   }
 
-  async #ensureClient(): Promise<RscoreProcessClient> {
-    if (this.#client && this.#started) return this.#client;
+  /**
+   * One engine process per owner entity: the engine's account tree is keyed by
+   * the raw counterparty entity id, so a process may only ever hold the
+   * accounts of a single owner — exactly the entity machine's own scope.
+   */
+  async #ensureClient(ownerKey: string): Promise<RscoreProcessClient> {
+    const existing = this.#clients.get(ownerKey);
+    if (existing) return existing;
     const client = this.#makeClient(this.#binaryPath);
     await client.hello(this.#workers);
     await client.restore(0, []);
-    this.#client = client;
-    this.#started = true;
+    this.#clients.set(ownerKey, client);
     return client;
   }
 
@@ -297,17 +306,7 @@ export class RscoreShadowMirror {
     try {
       shadowLog.error('shadow.disabled', { reason });
     } catch { /* observer-only */ }
-    if (this.#client) {
-      this.#client.kill();
-      this.#client = null;
-    }
+    for (const client of this.#clients.values()) client.kill();
+    this.#clients.clear();
   }
 }
-
-/** Engine-side account id: sha256(ownerEntityId32 || counterpartyEntityId32). */
-const pairAccountId = (ownerEntityId: string, counterpartyEntityId: string): Uint8Array => {
-  const preimage = new Uint8Array(64);
-  preimage.set(hexToWireBytes(ownerEntityId, 32, 'SHADOW_OWNER'), 0);
-  preimage.set(hexToWireBytes(counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID'), 32);
-  return sha256(preimage);
-};

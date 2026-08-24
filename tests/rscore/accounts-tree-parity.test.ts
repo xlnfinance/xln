@@ -27,9 +27,10 @@ const WATCH_SEED = entity('99');
 const CHAIN_ID = 31_337;
 const RESPONSE_SECONDS: [number, number] = [10, 10];
 
-// Account ids exercise every rebranch shape: 0x...01/0x...02 split a leaf at
-// the last nibble, 0x01000000 splits the deep zero extension, 0x80... forces
-// a top-level branch slot.
+// The account id IS the counterparty entity id (engine enforces the binding).
+// These ids exercise every rebranch shape: ...01/...02 split a leaf at the
+// last nibble, ...01000000 splits the deep zero prefix, 0x80... forces a
+// top-level branch slot.
 const ACCOUNT_IDS = [
   `0x${'00'.repeat(28)}00000001`,
   `0x${'00'.repeat(28)}00000002`,
@@ -49,7 +50,7 @@ const hexBytes = (value: string): Uint8Array => {
 
 // Distinct entity pair per account; hub-style shared LEFT keeps ids simple.
 const LEFT = entity('aa');
-const rightEntity = (index: number): string => entity((0xb0 + index).toString(16));
+const rightEntity = (index: number): string => ACCOUNT_IDS[index]!;
 
 const initialDelta = (): Delta => ({
   ...createDefaultDelta(1),
@@ -86,8 +87,8 @@ const deltaWire = (delta: Delta): RscoreWireValue[] => [
 const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => [
   hexBytes(ACCOUNT_IDS[index]!),
   hexBytes(LEFT),
-  hexBytes(LEFT),
-  hexBytes(rightEntity(index)),
+  hexBytes(account.state.leftEntity),
+  hexBytes(account.state.rightEntity),
   CHAIN_ID,
   hexBytes(DEPOSITORY),
   hexBytes(WATCH_SEED),
@@ -97,25 +98,40 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   [account.state.jNonce, account.state.lastFinalizedJHeight],
 ];
 
-const paymentTx = (index: number, amount: bigint): AccountTx => ({
+const paymentTx = (account: AccountReplica, index: number, amount: bigint): AccountTx => ({
   type: 'direct_payment',
   data: {
     tokenId: 1,
     amount,
-    route: [LEFT],
+    route: [account.state.leftEntity],
     description: `parity-${index}`,
-    fromEntityId: rightEntity(index),
-    toEntityId: LEFT,
+    fromEntityId: account.state.rightEntity,
+    toEntityId: account.state.leftEntity,
     deliveryMode: 'direct',
   },
 });
 
-const paymentJob = (inputIndex: number, accountIndex: number, amount: bigint): RscoreWireValue[] => [
+const paymentJob = (
+  account: AccountReplica,
+  inputIndex: number,
+  accountIndex: number,
+  amount: bigint,
+): RscoreWireValue[] => [
   inputIndex,
   hexBytes(ACCOUNT_IDS[accountIndex]!),
   1, // proposer = right (byLeft=false)
   [0, 0, 0, 0],
-  [0, 1, amount.toString(), [LEFT], `parity-${accountIndex}`, rightEntity(accountIndex), LEFT, 0, null],
+  [
+    0,
+    1,
+    amount.toString(),
+    [account.state.leftEntity],
+    `parity-${accountIndex}`,
+    account.state.rightEntity,
+    account.state.leftEntity,
+    0,
+    null,
+  ],
 ];
 
 /** TS reference: same data model as the Rust accounts tree. */
@@ -148,7 +164,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(referenceRoot(accounts));
 
       // One payment per account, distinct amounts: every leaf rebranches.
-      const jobs = accounts.map((_, index) => paymentJob(index, index, BigInt(7 + index)));
+      const jobs = accounts.map((account, index) => paymentJob(account, index, index, BigInt(7 + index)));
       const prepared = (await client.prepare(jobs)) as unknown[];
       const verdicts = (prepared[2] as unknown[]).map(row => Number(((row as unknown[])[2] as unknown[])[0]));
       expect(verdicts).toEqual(accounts.map(() => 0)); // all applied
@@ -156,7 +172,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       for (const [index, account] of accounts.entries()) {
         const result = await applyAccountTxToMutableReplica(
           account,
-          paymentTx(index, BigInt(7 + index)),
+          paymentTx(account, index, BigInt(7 + index)),
           false,
           0,
           0,

@@ -21,20 +21,20 @@ const workers = Number(process.argv[5] ?? '8');
 
 const entityHex = (index: number): string => `0x${index.toString(16).padStart(64, '0')}`;
 
-const accountIdBytes = (index: number): Uint8Array => {
-  const bytes = new Uint8Array(32);
-  new DataView(bytes.buffer).setUint32(28, index + 1);
-  return bytes;
-};
+// The account id IS the counterparty entity id (engine enforces the binding),
+// so the bench addresses accounts by the user entity itself.
+const USER_OFFSET = 1 << 20;
+const userHex = (index: number): string => entityHex(USER_OFFSET + index + 2);
+const accountIdBytes = (index: number): Uint8Array => hexToBytes(userHex(index));
 
-// Hub is LEFT of every account; counterparty entity index offset by 1<<20.
+// Hub owns every account; users are the counterparties.
 const HUB = entityHex(1);
 const seed = (index: number): RscoreWireValue[] => {
-  const user = entityHex((1 << 20) + index + 2);
+  const user = userHex(index);
   const [left, right] = HUB < user ? [HUB, user] : [user, HUB];
   return [
     accountIdBytes(index),
-    hexToBytes(left), // owner = left side of the pair
+    hexToBytes(HUB), // owner = the hub entity this engine process serves
     hexToBytes(left),
     hexToBytes(right),
     31_337,
@@ -62,7 +62,7 @@ const directPayment = (
   amount: bigint,
   leftPays: boolean,
 ): RscoreWireValue[] => {
-  const user = entityHex((1 << 20) + accountIndex + 2);
+  const user = userHex(accountIndex);
   const [left, right] = HUB < user ? [HUB, user] : [user, HUB];
   const [from, to] = leftPays ? [left, right] : [right, left];
   return [
