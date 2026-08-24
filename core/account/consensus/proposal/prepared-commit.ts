@@ -21,6 +21,8 @@ export type PreparedProposalCommit = Readonly<{
   accountStateRoot: string;
   candidateEffects: readonly AccountOutput[];
   timedOutHashlocks: readonly string[];
+  /** Observable-output rows of the validated transition, in tx order. */
+  shadowOutputRows: readonly string[];
 }>;
 
 const PREPARED_COMMIT_TX_TYPES: ReadonlySet<AccountTx['type']> = new Set<AccountTx['type']>([

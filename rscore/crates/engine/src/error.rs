@@ -78,7 +78,7 @@ pub enum ValidationRejection {
         token_id: u32,
     },
     RebalancePolicyVersion {
-        version: u32,
+        version: u64,
     },
     RebalancePolicyTimestamp,
     RebalancePolicyFeeTerms {
@@ -90,7 +90,7 @@ pub enum ValidationRejection {
     RebalancePolicyEquivocation {
         side: Side,
         token_id: u32,
-        version: u32,
+        version: u64,
     },
     Htlc(HtlcRejection),
 }

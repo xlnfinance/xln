@@ -17,7 +17,7 @@ import { createStructuredLogger } from '../support/logger';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
-import type { AccountOutput, AccountReplica, AccountTx } from '../types/account';
+import type { AccountReplica, AccountTx } from '../types/account';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
 import {
   SHADOW_SUPPORTED_TX_TYPES,
@@ -29,35 +29,7 @@ import {
 
 const shadowLog = createStructuredLogger('rscore.shadow');
 
-/**
- * Output-channel parity, as a canonical ordered list of strings.
- *
- * Both engines emit two comparable signals for the payment profile: the
- * trusted-payment forward, and the HTLC secret released by a resolve. The
- * account state root says nothing about either — a lost or invented forward
- * keeps the same balances — so they are compared explicitly.
- */
-const expectedOutputProjection = (input: ShadowFrameInput): string[] => {
-  const rows: string[] = [];
-  for (const output of input.outputs) {
-    if (output.kind !== 'directPaymentForward') continue;
-    rows.push([
-      'forward',
-      output.tokenId,
-      output.amount.toString(),
-      output.route.join('>'),
-      output.description ?? '',
-      output.trustedGatewayEntityId,
-    ].join('|'));
-  }
-  for (const tx of input.accountTxs) {
-    if (tx.type !== 'htlc_resolve' || tx.data.outcome !== 'secret') continue;
-    rows.push(['secret', tx.data.lockId].join('|'));
-  }
-  return rows;
-};
-
-/** Same projection, read back from the engine's typed outputs. */
+/** The engine's typed outputs, projected into the same rows as the authority. */
 const engineOutputProjection = (outputs: readonly unknown[], accountKey: string): string[] => {
   const rows: string[] = [];
   for (const entry of outputs) {
@@ -72,11 +44,23 @@ const engineOutputProjection = (outputs: readonly unknown[], accountKey: string)
         String(output[2]),
         (output[3] as string[]).join('>'),
         (output[4] as string | null) ?? '',
+        Number(output[5]) === 0 ? 'direct' : 'trusted',
         String(output[6]),
       ].join('|'));
       continue;
     }
-    if (tag === 1) rows.push(['secret', String(output[1])].join('|'));
+    if (tag === 1) {
+      rows.push([
+        'secret',
+        String(output[1]),
+        String(output[2]),
+        String(output[3]),
+        Number(output[4]),
+        String(output[5]),
+      ].join('|'));
+      continue;
+    }
+    if (tag === 2) rows.push(['error', String(output[1]), String(output[2])].join('|'));
   }
   return rows;
 };
@@ -111,8 +95,11 @@ export type ShadowFrameInput = Readonly<{
   enforcementTimestamp: number;
   enforcementJHeight: number;
   accountTxs: readonly AccountTx[];
-  /** Effects the committed frame produced (the TS authority's output channel). */
-  outputs: readonly AccountOutput[];
+  /**
+   * Canonical rows for everything the committed frame made observable outside
+   * the account state, in tx order (see shadowOutputRows).
+   */
+  outputRows: readonly string[];
   /** TS authority root committed by this frame (hex). */
   committedStateRoot: string;
   /** Committed post-frame replica, read synchronously at note time. */
@@ -128,6 +115,39 @@ type WaveFrame = Readonly<{
   /** Canonical projection of the TS outputs this frame must reproduce. */
   expectedOutputs: readonly string[];
 }>;
+
+/** One committed frame and its request-local jobs before Runtime-wave packing. */
+type PendingWaveFrame = Readonly<{
+  frame: WaveFrame;
+  jobs: readonly RscoreWireValue[][];
+}>;
+
+type PendingSubwave = Readonly<{
+  frames: WaveFrame[];
+  jobs: RscoreWireValue[][];
+}>;
+
+/** Preserve per-account frame order while retaining cross-account parallelism. */
+const packRuntimeSubwaves = (pending: readonly PendingWaveFrame[]): PendingSubwave[] => {
+  const subwaves: PendingSubwave[] = [];
+  const occurrence = new Map<string, number>();
+  for (const pendingFrame of pending) {
+    // frame_ack can commit the ACKed frame and the peer's next proposal in one
+    // Runtime frame. The nth frame of each account belongs in the nth subwave.
+    const depth = occurrence.get(pendingFrame.frame.accountKey) ?? 0;
+    occurrence.set(pendingFrame.frame.accountKey, depth + 1);
+    const subwave = subwaves[depth] ?? { frames: [], jobs: [] };
+    const inputBase = subwave.jobs.length;
+    subwave.frames.push(pendingFrame.frame);
+    for (const [index, job] of pendingFrame.jobs.entries()) {
+      // Rust input indexes are request-local, contiguous, and bind returned
+      // results/outputs to this exact subwave.
+      subwave.jobs.push([inputBase + index, ...job.slice(1)]);
+    }
+    subwaves[depth] = subwave;
+  }
+  return subwaves;
+};
 
 type QueueEntry = Readonly<{
   kind: 'wave';
@@ -205,6 +225,14 @@ export type ShadowStats = {
   unsupportedTxTypes: Record<string, number>;
   skippedUnboundOwner: number;
   dropped: number;
+  /**
+   * Accounts whose state was imported from TypeScript but that never had a
+   * single transition executed by the engine. A seeded account reproduces the
+   * TS root by construction, so counting it as agreement proves nothing.
+   */
+  seededNeverExecuted: number;
+  /** Transitions the engine actually executed, by tx type. */
+  executedByType: Record<string, number>;
   /** Whole-tree diffs run mid-flight, and how many found a gap. */
   reconciliations: number;
   reconcileFailures: number;
@@ -229,6 +257,8 @@ export class RscoreShadowMirror {
    */
   readonly #mirrored = new Map<string, Map<string, AccountReplica>>();
   readonly #needsReseed = new Set<string>();
+  /** Scoped keys seeded from TypeScript that have not executed a wave yet. */
+  readonly #seeded = new Set<string>();
   /** Last accounts-forest root and revision the engine reported per owner. */
   readonly #lastCommittedRoot = new Map<string, string>();
   readonly #lastRevision = new Map<string, number>();
@@ -240,7 +270,7 @@ export class RscoreShadowMirror {
    * Runtime frame is what actually fills the cores. Sending one account frame
    * per Prepare left a single Rayon task and idle workers.
    */
-  readonly #pendingWave = new Map<string, { frames: WaveFrame[]; jobs: RscoreWireValue[][] }>();
+  readonly #pendingWave = new Map<string, PendingWaveFrame[]>();
   #draining = false;
   #disabledReason: string | null = null;
   readonly #stats: ShadowStats = {
@@ -256,6 +286,8 @@ export class RscoreShadowMirror {
     unsupportedTxTypes: {},
     skippedUnboundOwner: 0,
     dropped: 0,
+    seededNeverExecuted: 0,
+    executedByType: {},
     reconciliations: 0,
     reconcileFailures: 0,
     disabledReason: null,
@@ -297,6 +329,8 @@ export class RscoreShadowMirror {
       ...this.#stats,
       ineligibleReasons: { ...this.#stats.ineligibleReasons },
       unsupportedTxTypes: { ...this.#stats.unsupportedTxTypes },
+      seededNeverExecuted: this.#seeded.size,
+      executedByType: { ...this.#stats.executedByType },
       disabledReason: this.#disabledReason,
     };
   }
@@ -405,8 +439,10 @@ export class RscoreShadowMirror {
   flushWave(): void {
     if (this.#disabledReason) return;
     for (const [ownerKey, pending] of this.#pendingWave) {
-      if (pending.jobs.length === 0) continue;
-      this.#push({ kind: 'wave', ownerKey, frames: pending.frames, jobs: pending.jobs });
+      for (const subwave of packRuntimeSubwaves(pending)) {
+        if (subwave.jobs.length === 0) continue;
+        this.#push({ kind: 'wave', ownerKey, frames: subwave.frames, jobs: subwave.jobs });
+      }
     }
     this.#pendingWave.clear();
   }
@@ -447,6 +483,11 @@ export class RscoreShadowMirror {
       const supported = unsupported.length === 0;
       const fresh = !this.#registered.has(scopedKey) || this.#needsReseed.has(scopedKey);
       if (!supported || fresh) {
+        // Reseeds are queued immediately while supported frames wait for the
+        // Runtime boundary. Flush the earlier frames first; otherwise a later
+        // unsupported frame of the same account would seed its post-state and
+        // the queued earlier frame would be replayed on top of that state.
+        this.flushWave();
         const reason = shadowIneligibilityReason(input.account);
         if (reason !== null) {
           if (process.env['XLN_RSCORE_SHADOW_TRACE'] === '1') {
@@ -491,16 +532,16 @@ export class RscoreShadowMirror {
         }
         this.#registered.add(scopedKey);
         this.#needsReseed.delete(scopedKey);
+        this.#seeded.add(scopedKey);
         this.#remember(ownerKey, input.counterpartyEntityId, input.account);
         return;
       }
       const jobs: RscoreWireValue[][] = [];
-      const inputBase = this.#pendingWave.get(ownerKey)?.jobs.length ?? 0;
       for (const [index, tx] of input.accountTxs.entries()) {
         const wire = accountTxWire(tx);
         if (wire === null) throw new Error(`SHADOW_TX_UNSUPPORTED:${tx.type}`);
         jobs.push([
-          inputBase + index,
+          index,
           accountIdBytes,
           input.byLeft ? 0 : 1,
           [input.timestamp, input.enforcementTimestamp, input.enforcementJHeight, input.frameHeight - 1],
@@ -514,15 +555,17 @@ export class RscoreShadowMirror {
         return;
       }
       this.#remember(ownerKey, input.counterpartyEntityId, input.account);
-      const pending = this.#pendingWave.get(ownerKey) ?? { frames: [], jobs: [] };
-      pending.frames.push({
-        accountKey,
-        frameHeight: input.frameHeight,
-        expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
-        txTypes: input.accountTxs.map(tx => tx.type),
-        expectedOutputs: expectedOutputProjection(input),
+      const pending = this.#pendingWave.get(ownerKey) ?? [];
+      pending.push({
+        frame: {
+          accountKey,
+          frameHeight: input.frameHeight,
+          expectedRootHex: input.committedStateRoot.trim().toLowerCase().replace(/^0x/, ''),
+          txTypes: input.accountTxs.map(tx => tx.type),
+          expectedOutputs: input.outputRows,
+        },
+        jobs,
       });
-      pending.jobs.push(...jobs);
       this.#pendingWave.set(ownerKey, pending);
       // Strict mode verifies frame by frame, so it never batches: a batched
       // wave only proves the final per-account root, and an intermediate frame
@@ -534,6 +577,7 @@ export class RscoreShadowMirror {
   }
 
   async shutdown(): Promise<void> {
+    this.flushWave();
     await this.#idle;
     for (const client of this.#clients.values()) {
       try { await client.shutdown(); } catch { /* already down */ }
@@ -613,32 +657,19 @@ export class RscoreShadowMirror {
             } catch { /* observer-only */ }
           }
         }
-        // A wave carries the Account frames of one Runtime frame — by design
-        // at most one per counterparty, because an Account input already
-        // combines the ack and the proposal. A second frame for the same
-        // account in one wave breaks that invariant, and its intermediate root
-        // would go unverified, so it is reported instead of collapsed.
-        const frameOf = new Map<string, WaveFrame>();
-        const duplicated: string[] = [];
-        for (const frame of entry.frames) {
-          if (frameOf.has(frame.accountKey)) duplicated.push(frame.accountKey);
-          frameOf.set(frame.accountKey, frame);
-        }
         const rejection = rejected.length > 0
           ? `rejected:${JSON.stringify(rejected[0]?.verdict ?? null)}:job=${JSON.stringify(
               entry.jobs[rejected[0]?.index ?? 0]?.[4] ?? null,
               (_key, value) => (value instanceof Uint8Array || Buffer.isBuffer(value) ? 'bytes' : (value as unknown)),
             )}`
           : null;
-        for (const [accountKey, frame] of frameOf) {
+        for (const frame of entry.frames) {
+          const accountKey = frame.accountKey;
           // Counted only once a verdict exists, so framesCompared always equals
           // matches + mismatches; incrementing first let a stats snapshot taken
           // mid-frame report a comparison with no outcome.
           this.#stats.framesCompared += 1;
-          const duplicate = duplicated.includes(accountKey)
-            ? `waveCarriedTwoFramesForOneAccount:${duplicated.length}`
-            : null;
-          const failure = revisionGap ?? rejection ?? duplicate ?? this.#verifyAccount(
+          const failure = revisionGap ?? rejection ?? this.#verifyAccount(
             accountKey,
             frame,
             frame.expectedOutputs,

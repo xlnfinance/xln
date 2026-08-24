@@ -19,6 +19,16 @@ import { createHash } from 'node:crypto';
 
 export const RSCORE_ABI_MAGIC = 0x03;
 export const RSCORE_ABI_DOMAIN = 'xln.rscore.account';
+/**
+ * Deadline for one request/response round trip. Generous next to the largest
+ * observed wave, tight enough that a wedged engine fails the run instead of
+ * hanging it.
+ */
+const REQUEST_TIMEOUT_MS = Number(
+  (typeof process === 'undefined' ? undefined : process.env['XLN_RSCORE_REQUEST_TIMEOUT_MS'])
+  ?? '60000',
+);
+
 export const RSCORE_ABI_VERSION = 1;
 export const RSCORE_PROCESS_ABI_VERSION = 1;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
@@ -26,7 +36,7 @@ export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
 // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '883bd6650cbc2fdd9ff73ada850f1b876c976f53d3721b987b615e9304333d4f',
+  '8d08cd9da652b342f3ac3e6c5950f4bb53cdaeabfca13f23431cb2cd8d02902b',
   'hex',
 );
 
@@ -396,8 +406,18 @@ export class RscoreProcessClient {
     const framed = Buffer.alloc(4 + envelope.length);
     framed.writeUInt32BE(envelope.length);
     envelope.copy(framed, 4);
+    // A live-but-wedged process (header written, body never finished) would
+    // otherwise leave this promise pending forever and hang every caller that
+    // waits on the mirror. The deadline turns that into a loud failure.
     const reply = new Promise<Buffer>((resolve, reject) => {
-      this.#waiters.push({ resolve, reject });
+      const timer = setTimeout(() => {
+        this.#fail(new Error(`RSCORE_CLIENT_REQUEST_TIMEOUT:op=${opTag}:ms=${REQUEST_TIMEOUT_MS}`));
+      }, REQUEST_TIMEOUT_MS);
+      timer.unref?.();
+      this.#waiters.push({
+        resolve: (frame: Buffer) => { clearTimeout(timer); resolve(frame); },
+        reject: (error: Error) => { clearTimeout(timer); reject(error); },
+      });
     });
     if (!this.#child.stdin.write(framed)) await once(this.#child.stdin, 'drain');
     const decoded = decodeEnvelope(await reply, {

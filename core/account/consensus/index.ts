@@ -4,6 +4,7 @@
  */
 
 import { noteAccountFrameForShadow } from '../../rscore/shadow-hook';
+import { shadowOutputRows } from '../../rscore/shadow-wire';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -127,6 +128,8 @@ type IncomingFrameValidation = {
   swapCancelRequests: AccountSwapCancelRequest[];
   swapOffersCancelled: AccountSwapCancelRequest[];
   timedOutHashlocks: string[];
+  /** Observable-output rows in tx order, for engine comparison. */
+  shadowOutputRows: string[];
 };
 
 type IncomingFrameValidationResult =
@@ -284,6 +287,7 @@ const replayIncomingFrameOnClone = async (
     swapOffersCancelled: [],
     candidateEffects: [],
     timedOutHashlocks: [],
+    shadowOutputRows: [],
   };
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
@@ -318,6 +322,7 @@ const replayIncomingFrameOnClone = async (
     }
     replay.processEvents.push(...result.events);
     replay.candidateEffects.push(...(result.candidateEffects ?? []));
+    replay.shadowOutputRows.push(...shadowOutputRows(accountTx, result));
     collectIncomingOkOutcome(result, replay, input.fromEntityId);
   }
   return { kind: 'continue', replay };
@@ -500,10 +505,14 @@ async function commitIncomingFrameOnRealState(
       byLeft: receivedFrame.byLeft,
       timestamp: receivedFrame.timestamp,
       jHeight: shadowJHeight,
-      enforcementTimestamp: receivedFrame.timestamp,
-      enforcementJHeight: shadowJHeight,
+      // The enforcement clock is the Entity's, not the frame's: TS replayed
+      // this frame with securityContext.entityTimestamp/finalizedJHeight, so
+      // handing the engine the signed frame clock made a legitimately accepted
+      // late timeout look like a divergence.
+      enforcementTimestamp: securityContext.entityTimestamp,
+      enforcementJHeight: securityContext.finalizedJHeight,
       accountTxs: receivedFrame.accountTxs,
-      outputs: validation.candidateEffects,
+      outputRows: validation.shadowOutputRows,
       committedStateRoot: receivedFrame.accountStateRoot,
       account,
     });

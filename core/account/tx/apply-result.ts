@@ -32,28 +32,38 @@ export const accountTxApplied = (
 
 export const accountTxHtlcSecret = (
   events: readonly string[],
-  secret: string,
+  lockId: string,
   hashlock: string,
-  amount: bigint,
+  secret: string,
   tokenId: number,
+  amount: bigint,
 ): ApplyAccountTxHtlcSecret => ({
   ok: true,
   outcome: 'htlc_secret',
   events: eventsOf(events),
-  secret: toHtlcSecret(secret),
+  lockId,
   hashlock: toHashlock(hashlock),
-  amount: toTokenAmount(amount),
+  secret: toHtlcSecret(secret),
   tokenId: toTokenId(tokenId),
+  amount: toTokenAmount(amount),
 });
 
 export const accountTxHtlcError = (
   events: readonly string[],
+  lockId: string,
   hashlock: string,
+  tokenId: number,
+  amount: bigint,
+  reason?: string,
 ): ApplyAccountTxHtlcError => ({
   ok: true,
   outcome: 'htlc_error',
   events: eventsOf(events),
+  lockId,
   hashlock: toHashlock(hashlock),
+  tokenId: toTokenId(tokenId),
+  amount: toTokenAmount(amount),
+  ...(reason === undefined ? {} : { reason }),
 });
 
 export const accountTxSwapOfferCreated = (

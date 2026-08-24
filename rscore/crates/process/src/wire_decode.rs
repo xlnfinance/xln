@@ -281,7 +281,7 @@ fn decode_policy_snapshot(
     }
     let fields = exact(fields, 5, "rebalanceFeePolicySnapshot")?;
     Ok(Some(RebalanceFeePolicySnapshot::new(
-        bounded_u32(&fields[0], "policyVersion")?,
+        unsigned(&fields[0], "policyVersion")?,
         bigint(&fields[1], "baseFee")?,
         bigint(&fields[2], "liquidityFeeBps")?,
         bigint(&fields[3], "gasFee")?,
@@ -383,7 +383,7 @@ fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
     let fields = exact(fields, 6, "rebalancePolicy")?;
     Ok(AccountTx::RebalancePolicy {
         token_id: bounded_u32(&fields[1], "tokenId")?,
-        policy_version: bounded_u32(&fields[2], "policyVersion")?,
+        policy_version: unsigned(&fields[2], "policyVersion")?,
         base_fee: bigint(&fields[3], "baseFee")?,
         liquidity_fee_bps: bigint(&fields[4], "liquidityFeeBps")?,
         gas_fee: bigint(&fields[5], "gasFee")?,

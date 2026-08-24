@@ -107,9 +107,23 @@ function applyHtlcResolution(
   commitDeltaDraft(account, delta);
   account.locks.del(lock.lockId);
   if (data.outcome === 'secret' && 'secret' in data) {
-    return accountTxHtlcSecret(events, data.secret, lock.hashlock, lock.amount, lock.tokenId);
+    return accountTxHtlcSecret(
+      events,
+      lock.lockId,
+      lock.hashlock,
+      data.secret,
+      lock.tokenId,
+      lock.amount,
+    );
   }
-  return accountTxHtlcError(events, lock.hashlock);
+  return accountTxHtlcError(
+    events,
+    lock.lockId,
+    lock.hashlock,
+    lock.tokenId,
+    lock.amount,
+    data.outcome === 'error' ? data.reason : undefined,
+  );
 }
 
 export async function handleHtlcResolve(

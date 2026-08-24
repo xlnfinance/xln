@@ -116,6 +116,7 @@ export type ApplyAccountTxApplied = Readonly<AccountTxEvents & {
 export type ApplyAccountTxHtlcSecret = Readonly<AccountTxEvents & {
   ok: true;
   outcome: 'htlc_secret';
+  lockId: string;
   secret: HtlcSecret;
   hashlock: Hashlock;
   amount: TokenAmount;
@@ -125,7 +126,11 @@ export type ApplyAccountTxHtlcSecret = Readonly<AccountTxEvents & {
 export type ApplyAccountTxHtlcError = Readonly<AccountTxEvents & {
   ok: true;
   outcome: 'htlc_error';
+  lockId: string;
   hashlock: Hashlock;
+  amount: TokenAmount;
+  tokenId: TokenId;
+  reason?: string;
 }>;
 
 export type ApplyAccountTxSwapOfferCreated = Readonly<AccountTxEvents & {

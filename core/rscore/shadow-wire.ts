@@ -11,6 +11,7 @@ import type {
   RebalanceFeePolicySnapshot,
 } from '../types/finance/rebalance';
 import type { AccountStateCollection, AccountStateMapNamespace } from '../account/state/persistent-state-map';
+import type { ApplyAccountTxResult } from '../account/tx/apply-types';
 import type { RscoreWireValue } from './client';
 
 export const hexToWireBytes = (value: string, expectedBytes: number, code: string): Uint8Array => {
@@ -174,6 +175,48 @@ export const SHADOW_SUPPORTED_TX_TYPES = new Set([
   'direct_payment', 'htlc_lock', 'htlc_resolve', 'add_delta', 'set_credit_limit',
   'rebalance_policy',
 ]);
+
+/**
+ * Canonical projection of everything one applied tx made observable outside
+ * the account state: the trusted-payment forward, and the HTLC secret or
+ * timeout outcome with all of their fields. Compared against the engine's
+ * typed outputs, so a right balance with a wrong secret, hashlock, token or
+ * amount cannot pass.
+ */
+export const shadowOutputRows = (
+  tx: AccountTx,
+  result: ApplyAccountTxResult,
+): string[] => {
+  if (!result.ok) return [];
+  const rows: string[] = [];
+  for (const output of result.candidateEffects ?? []) {
+    if (output.kind !== 'directPaymentForward') continue;
+    rows.push([
+      'forward',
+      output.tokenId,
+      output.amount.toString(),
+      output.route.join('>'),
+      output.description ?? '',
+      output.deliveryMode,
+      output.trustedGatewayEntityId,
+    ].join('|'));
+  }
+  const lockId = tx.type === 'htlc_resolve' ? tx.data.lockId : '';
+  if (result.outcome === 'htlc_secret') {
+    rows.push([
+      'secret',
+      lockId,
+      result.hashlock,
+      result.secret,
+      result.tokenId,
+      result.amount.toString(),
+    ].join('|'));
+  }
+  if (result.outcome === 'htlc_error') {
+    rows.push(['error', lockId, result.hashlock].join('|'));
+  }
+  return rows;
+};
 
 /** Process-wire tx tuple, or null when the tx type is outside the profile. */
 export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {

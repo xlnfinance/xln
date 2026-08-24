@@ -21,6 +21,8 @@ type MirrorLike = Readonly<{
 
 let mirror: MirrorLike | null | undefined;
 let pending: ShadowFrameInput[] | null = null;
+/** Resolves once the mirror is armed (or has failed to arm). */
+let arming: Promise<void> | null = null;
 
 const shadowEnabled = (): boolean => {
   if (typeof process === 'undefined' || typeof process.env === 'undefined') return false;
@@ -47,7 +49,7 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
       return;
     }
     pending = [input];
-    void (async () => {
+    arming = (async () => {
       try {
         const [{ RscoreShadowMirror }, { RscoreProcessClient }] = await Promise.all([
           import('./shadow'),
@@ -68,17 +70,24 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
             sessionId: Buffer.alloc(16, 0x5d),
           }),
         });
-        for (const buffered of pending ?? []) started.noteCommittedFrame(buffered);
-        pending = null;
-        mirror = started;
         const printStats = (): void => {
           try { console.error(`RSCORE_SHADOW_STATS ${JSON.stringify(started.stats())}`); } catch { /* observer-only */ }
         };
+        // Armed BEFORE the buffered frames replay: a gap in that first batch
+        // is exactly the case strict mode exists for.
+        started.onGap(gap => { haltOnGap(gap, printStats); });
+        for (const buffered of pending ?? []) started.noteCommittedFrame(buffered);
+        // Runtime boundaries that happened while the dynamic imports were in
+        // flight could not call through to this instance. Flush the buffered
+        // sequence now; the mirror splits repeated accounts into ordered
+        // subwaves and still verifies every intermediate frame root.
+        started.flushWave();
+        pending = null;
+        mirror = started;
         // A hub runtime is killed with a signal and never reaches 'exit', so
         // exit-only reporting silently looks identical to "shadow never ran".
         printStats();
         started.onProgress(printStats);
-        started.onGap(gap => { haltOnGap(gap, printStats); });
         process.once('beforeExit', printStats);
         process.once('exit', printStats);
         for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, printStats);
@@ -88,6 +97,7 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
         console.error(`RSCORE_SHADOW_INIT_FAILED:${error instanceof Error ? error.message : String(error)}`);
       }
     })();
+    void arming;
     return;
   }
   if (!entityAllowed(input.ownerEntityId)) return;
@@ -128,15 +138,19 @@ const haltOnGap = (gap: ShadowGap, printStats: () => void): void => {
 export const RSCORE_SHADOW_HALT_EXIT_CODE = 70;
 
 export const assertShadowParity = async (label = 'end-of-run'): Promise<void> => {
+  // The mirror boots asynchronously (dynamic import, Hello, Restore). Waiting
+  // for it is mandatory: returning early while it is still arming turned
+  // "nothing was verified yet" into a pass.
+  if (arming) await arming;
   const active = mirror;
   if (!active) {
     // Strict mode asks for proof, so an unarmed mirror is itself a failure:
     // silently verifying nothing is exactly the trap this mode exists to close.
-    if (shadowStrictEnabled() && pending === null) {
-      throw new Error(`RSCORE_SHADOW_PARITY_UNARMED:${label}`);
-    }
+    if (shadowStrictEnabled()) throw new Error(`RSCORE_SHADOW_PARITY_UNARMED:${label}`);
     return;
   }
+  active.flushWave();
+  await active.settled();
   const reports = await active.selfReconcile();
   const failures: string[] = [];
   // Coverage first: a run where the engine executed nothing, or where every
@@ -152,6 +166,16 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   if (stats.mismatches > 0) failures.push(`mismatches=${stats.mismatches}`);
   if (stats.reseedsRepair > 0) failures.push(`reseedsRepair=${stats.reseedsRepair}`);
   if (stats.dropped > 0) failures.push(`dropped=${stats.dropped}`);
+  // Owners beyond the binding limit never reached the engine at all, so a
+  // green report for the bound owner says nothing about them.
+  if (stats.skippedUnboundOwner > 0) {
+    failures.push(`skippedUnboundOwner=${stats.skippedUnboundOwner}`);
+  }
+  // An account whose state was imported but never executed a transition
+  // reproduces the TS root by construction.
+  if (stats.seededNeverExecuted > 0) {
+    failures.push(`seededNeverExecuted=${stats.seededNeverExecuted}`);
+  }
   if (stats.skippedIneligible > 0) {
     failures.push(`skippedIneligible=${stats.skippedIneligible}:${JSON.stringify(stats.ineligibleReasons)}`);
   }
@@ -186,7 +210,7 @@ export const assertShadowParity = async (label = 'end-of-run'): Promise<void> =>
   }
   console.error(
     `RSCORE_SHADOW_PARITY_OK ${label} matched=[${summary}] compared=${stats.framesCompared} ` +
-    `reseeds=${stats.reseeds}`,
+    `reseeds=${stats.reseeds} executed=${JSON.stringify(stats.executedByType)}`,
   );
 };
 

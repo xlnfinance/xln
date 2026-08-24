@@ -19,6 +19,7 @@ import {
   publishAccountOverlay,
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
+import type { ApplyAccountTxOk } from '../../tx/apply-types';
 import { noteAccountFrameForShadow } from '../../../rscore/shadow-hook';
 import {
 } from '../helpers';
@@ -59,6 +60,7 @@ export const commitAccountFrameTransition = async (
   const draft = accountTransitionView(owner);
   const candidateEffects: AccountOutput[] = [];
   const timedOutHashlocks: string[] = [];
+  const txResults: ApplyAccountTxOk[] = [];
   const jHeight = frame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
 
   try {
@@ -81,6 +83,7 @@ export const commitAccountFrameTransition = async (
             `Frame ${frame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
           );
         }
+        txResults.push(result);
         candidateEffects.push(...(result.candidateEffects ?? []));
         if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
       }
@@ -113,7 +116,7 @@ export const commitAccountFrameTransition = async (
       enforcementTimestamp: options.htlcEnforcementClock?.timestamp ?? frame.timestamp,
       enforcementJHeight: options.htlcEnforcementClock?.jHeight ?? jHeight,
       accountTxs: frame.accountTxs,
-      outputs: candidateEffects,
+      txResults,
       committedStateRoot: committed.accountStateRoot,
       account,
     });

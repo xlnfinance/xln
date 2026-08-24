@@ -16,7 +16,7 @@ const MAX_LIQUIDITY_FEE_BPS: i64 = 10_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RebalanceFeePolicySnapshot {
-    policy_version: u32,
+    policy_version: u64,
     base_fee: BigInt,
     liquidity_fee_bps: BigInt,
     gas_fee: BigInt,
@@ -25,7 +25,7 @@ pub struct RebalanceFeePolicySnapshot {
 
 impl RebalanceFeePolicySnapshot {
     pub const fn new(
-        policy_version: u32,
+        policy_version: u64,
         base_fee: BigInt,
         liquidity_fee_bps: BigInt,
         gas_fee: BigInt,
@@ -40,7 +40,7 @@ impl RebalanceFeePolicySnapshot {
         }
     }
 
-    pub const fn policy_version(&self) -> u32 {
+    pub const fn policy_version(&self) -> u64 {
         self.policy_version
     }
 
@@ -57,7 +57,7 @@ impl RebalanceFeePolicySnapshot {
         CanonicalValue::Object(vec![
             (
                 "policyVersion".into(),
-                CanonicalValue::Number(f64::from(self.policy_version)),
+                CanonicalValue::Number(self.policy_version as f64),
             ),
             (
                 "baseFee".into(),
@@ -123,7 +123,7 @@ impl BilateralRebalanceFeePolicy {
 
 pub(crate) struct RebalancePolicyTx<'a> {
     pub token_id: u32,
-    pub policy_version: u32,
+    pub policy_version: u64,
     pub base_fee: &'a BigInt,
     pub liquidity_fee_bps: &'a BigInt,
     pub gas_fee: &'a BigInt,

@@ -106,7 +106,11 @@ const rememberProposalForAck = (
   account: AccountReplica,
   candidate: AccountReplica,
   newFrame: AccountFrame,
-  validation: { candidateEffects: AccountOutput[]; timedOutHashlocks: string[] },
+  validation: {
+    candidateEffects: AccountOutput[];
+    timedOutHashlocks: string[];
+    shadowOutputRows: string[];
+  },
 ): void => {
   if (!preparedCommitCoversTxs(newFrame.accountTxs)) return;
   if (!preparedCommitLeavesPrivateStateUntouched(account, candidate)) return;
@@ -118,6 +122,7 @@ const rememberProposalForAck = (
     accountStateRoot: newFrame.accountStateRoot,
     candidateEffects: validation.candidateEffects,
     timedOutHashlocks: validation.timedOutHashlocks,
+    shadowOutputRows: validation.shadowOutputRows,
   });
 };
 

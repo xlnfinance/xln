@@ -85,7 +85,12 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
 
     const commitFrame = async (
       txs: AccountTx[],
-      overrides: { expectedRoot?: string; byLeft?: boolean; jHeight?: number } = {},
+      overrides: {
+        expectedRoot?: string;
+        byLeft?: boolean;
+        jHeight?: number;
+        outputRows?: readonly string[];
+      } = {},
     ): Promise<void> => {
       height += 1;
       const byLeft = overrides.byLeft ?? false;
@@ -109,9 +114,9 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: jHeight,
         accountTxs: txs,
-        // Direct-mode payments emit no forward; the secret-resolve signal is
-        // derived from the frame's txs on both sides.
-        outputs: [],
+        // Direct-mode payments emit no forward; the resolve outcome rows come
+        // from the TS apply results, exactly as the commit paths build them.
+        outputRows: overrides.outputRows ?? [],
         committedStateRoot: overrides.expectedRoot ?? computeAccountStateRoot(account.state),
         account,
       });
@@ -141,7 +146,12 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
     await commitFrame([{
       type: 'htlc_resolve',
       data: { lockId: 'shadow-lock-1', outcome: 'secret', secret: SECRET },
-    }], { byLeft: false });
+    }], {
+      byLeft: false,
+      // The full released-secret envelope: a right balance with a wrong
+      // secret, hashlock, token or amount must not pass.
+      outputRows: [['secret', 'shadow-lock-1', hashlock, SECRET, 1, '7'].join('|')],
+    });
 
     const stats = mirror.stats();
     await mirror.shutdown();
@@ -161,6 +171,63 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       stats.framesCompared + stats.reseeds + stats.emptyFrames
       + stats.skippedIneligible + stats.skippedUnboundOwner + stats.dropped,
     ).toBe(stats.framesSeen);
+  }, 30_000);
+
+  test('splits frame_ack commits into ordered subwaves and checks the intermediate root', async () => {
+    const account = makeTsAccount();
+    const mirror = makeMirror();
+    let height = 0;
+    const notePayment = async (amount: bigint, expectedRoot?: string): Promise<void> => {
+      height += 1;
+      const timestamp = 1_700_100_000_000 + height;
+      const tx = payment(amount);
+      const result = await applyAccountTxToMutableReplica(
+        account, tx, false, timestamp, 0, false, undefined, undefined, undefined,
+        { timestamp, jHeight: 0 },
+      );
+      if (!result.ok) throw new Error(`TS_APPLY_FAILED:${result.rejection.code}`);
+      account.currentHeight = height;
+      mirror.noteCommittedFrame({
+        ownerEntityId: LEFT,
+        counterpartyEntityId: RIGHT,
+        frameHeight: height,
+        byLeft: false,
+        timestamp,
+        jHeight: 0,
+        enforcementTimestamp: timestamp,
+        enforcementJHeight: 0,
+        accountTxs: [tx],
+        outputRows: [],
+        committedStateRoot: expectedRoot ?? computeAccountStateRoot(account.state),
+        account,
+      });
+    };
+
+    // Registration is its own Runtime frame.
+    await notePayment(1n);
+    mirror.flushWave();
+    await mirror.settled();
+
+    // Canonical frame_ack processing can commit the ACKed pending frame and
+    // the peer's next proposal before the same Runtime boundary. Corrupt only
+    // the first claimed root: the second/final root remains correct, so this
+    // proves the intermediate frame is checked instead of folded away.
+    await notePayment(2n, `0x${'ee'.repeat(32)}`);
+    await notePayment(3n);
+    mirror.flushWave();
+    await mirror.settled();
+
+    const stats = mirror.stats();
+    const report = await mirror.reconcile(LEFT, new Map([[RIGHT, account]]));
+    await mirror.shutdown();
+    expect(stats.disabledReason).toBeNull();
+    expect(stats.framesSeen).toBe(3);
+    expect(stats.reseeds).toBe(1);
+    expect(stats.framesCompared).toBe(2);
+    expect(stats.mismatches).toBe(1);
+    expect(stats.matches).toBe(1);
+    expect(report.matched).toBe(1);
+    expect(report.forestRoot.equal).toBe(true);
   }, 30_000);
 
   // Whole-tree reconciliation after a deterministic run: every account the
@@ -197,6 +264,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: timestamp,
         enforcementJHeight: 0,
         accountTxs: [tx],
+        outputRows: [],
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });
@@ -245,6 +313,7 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
         enforcementTimestamp: 1_700_000_000_000,
         enforcementJHeight: 0,
         accountTxs: [payment(1n)],
+        outputRows: [],
         committedStateRoot: computeAccountStateRoot(account.state),
         account,
       });

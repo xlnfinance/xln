@@ -27,6 +27,7 @@ import {
   type AccountTxRejection,
 } from '../../tx/apply-types';
 import { accountTxRejectionMessage, assertNever } from '../../tx/apply-result';
+import { shadowOutputRows } from '../../../rscore/shadow-wire';
 
 const accountLog = createStructuredLogger('account');
 
@@ -39,6 +40,8 @@ export type ProposalTransactionEffects = {
   failedHtlcLocks: AccountFailedHtlcLock[];
   /** Commit-time effects of the validated txs, kept for the prepared ACK commit. */
   candidateEffects: AccountOutput[];
+  /** Canonical observable-output rows, in tx order, for engine comparison. */
+  shadowOutputRows: string[];
   timedOutHashlocks: string[];
 };
 
@@ -74,6 +77,7 @@ const createTransactionEffects = (): ProposalTransactionEffects => ({
   swapOffersCancelled: [],
   failedHtlcLocks: [],
   candidateEffects: [],
+  shadowOutputRows: [],
   timedOutHashlocks: [],
 });
 
@@ -160,6 +164,7 @@ const collectSuccessfulTransaction = (
   validMempoolTxs.push(tx);
   effects.events.push(...result.events);
   effects.candidateEffects.push(...(result.candidateEffects ?? []));
+  effects.shadowOutputRows.push(...shadowOutputRows(tx, result));
   if (HEAVY_LOGS) {
     accountLog.debug('tx.result', {
       type: tx.type,

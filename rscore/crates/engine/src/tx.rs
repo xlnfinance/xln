@@ -38,7 +38,9 @@ pub enum AccountTx {
     },
     RebalancePolicy {
         token_id: u32,
-        policy_version: u32,
+        /// TypeScript admits any positive safe integer, so this is u64 and the
+        /// wire keeps the whole domain instead of disabling the mirror.
+        policy_version: u64,
         base_fee: BigInt,
         liquidity_fee_bps: BigInt,
         gas_fee: BigInt,
