@@ -51,7 +51,12 @@ const writeGeneratedInputSources = async (frontendRoot: string): Promise<void> =
   await writeInputSource(frontendRoot, 'static/img/logo.png', 'logo');
   await writeInputSource(frontendRoot, 'static/img/RCPAN.png', 'uppercase');
   await writeInputSource(frontendRoot, 'static/bikes/rcpan.svg', 'bike');
-  await prepareGeneratedInputs(join(frontendRoot, '..'), frontendRoot, ['site', 'ops']);
+  await prepareGeneratedInputs(
+    join(frontendRoot, '..'),
+    frontendRoot,
+    ['site', 'ops'],
+    COPY_GENERATED_INPUTS,
+  );
 };
 
 const writeSurfaceArtifact = async (frontendRoot: string, surfaceId: SurfaceId): Promise<void> => {

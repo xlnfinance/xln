@@ -57,12 +57,22 @@ describe('frontend generated input preparation', () => {
     const { repositoryRoot, frontendRoot } = await createWorkspace();
     await writeImplementedSources(repositoryRoot);
 
-    const first = await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['site', 'ops']);
+    const first = await prepareGeneratedInputs(
+      repositoryRoot,
+      frontendRoot,
+      ['site', 'ops'],
+      COPY_GENERATED_INPUTS,
+    );
     const firstManifest = await readFile(
       join(frontendRoot, '.artifacts/inputs/site-public-static/input-manifest.json'),
       'utf8',
     );
-    const second = await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['site', 'ops']);
+    const second = await prepareGeneratedInputs(
+      repositoryRoot,
+      frontendRoot,
+      ['site', 'ops'],
+      COPY_GENERATED_INPUTS,
+    );
     const secondManifest = await readFile(
       join(frontendRoot, '.artifacts/inputs/site-public-static/input-manifest.json'),
       'utf8',
@@ -82,7 +92,12 @@ describe('frontend generated input preparation', () => {
     const { repositoryRoot, frontendRoot } = await createWorkspace();
     await writeImplementedSources(repositoryRoot);
 
-    const manifests = await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['ops']);
+    const manifests = await prepareGeneratedInputs(
+      repositoryRoot,
+      frontendRoot,
+      ['ops'],
+      COPY_GENERATED_INPUTS,
+    );
 
     expect(manifests.map(({ id }) => id)).toEqual(['ops-comparative-results']);
   });
@@ -90,7 +105,7 @@ describe('frontend generated input preparation', () => {
   test('rejects prepared payload bytes that no longer match their manifest', async () => {
     const { repositoryRoot, frontendRoot } = await createWorkspace();
     await writeImplementedSources(repositoryRoot);
-    await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['ops']);
+    await prepareGeneratedInputs(repositoryRoot, frontendRoot, ['ops'], COPY_GENERATED_INPUTS);
     await writeFile(
       join(frontendRoot, '.artifacts/inputs/ops-comparative-results/files/comparative-results.json'),
       'corrupted',

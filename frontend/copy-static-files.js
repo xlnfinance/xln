@@ -3,7 +3,6 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -158,26 +157,6 @@ function copyContracts(requireAllSources) {
     writeFileSync(destPath, `${JSON.stringify(artifact, null, 2)}\n`);
     console.log(`[static] copied ${file.src} -> ${file.dest}`);
   }
-}
-
-function copyScenarios() {
-  const scenariosSrc = fromFrontend('../scenarios');
-  const scenariosDest = fromStatic('scenarios');
-
-  try {
-    const stats = lstatSync(scenariosDest);
-    if (stats.isSymbolicLink()) {
-      console.log('[static] static/scenarios is symlinked; skipping copy');
-      return;
-    }
-  } catch {
-    // no-op
-  }
-
-  if (!existsSync(scenariosSrc)) return;
-  ensureDir(scenariosDest);
-  cpSync(scenariosSrc, scenariosDest, { recursive: true });
-  console.log('[static] copied scenarios/ -> static/scenarios/');
 }
 
 function walkMarkdownFiles(rootDir) {
@@ -470,7 +449,6 @@ if (docsOnly) {
 }
 if (!contractsOnly && !docsOnly && !walletOnly) {
   buildBrainvaultWorker();
-  copyScenarios();
   copyDocsAndManifest();
   generateLlmsStaticFiles();
 }

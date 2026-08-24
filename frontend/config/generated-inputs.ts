@@ -160,9 +160,19 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
   {
     id: 'ops-scenario-assets',
     owner: 'ops',
-    sourcePaths: ['core/scenarios'],
+    sourcePaths: [
+      'frontend/scripts/scenario-assets.js',
+      'core/scenarios/runner/catalog.ts',
+    ],
     outputNamespace: 'scenarios',
-    producer: { kind: 'deferred' },
+    producer: {
+      kind: 'command',
+      argv: ['bun', 'frontend/scripts/scenario-assets.js'],
+      outputEnvironment: 'XLN_SCENARIO_ASSET_DIR',
+      environment: {},
+      copies: [],
+      outputRoutes: [{ kind: 'exact', pathname: '/scenarios/catalog.json' }],
+    },
   },
   {
     id: 'release-assembly',

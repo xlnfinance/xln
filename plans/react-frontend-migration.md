@@ -235,7 +235,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `IN PROGRESS — DOCS, BRAINVAULT, AND CONTRACT INPUTS ASSEMBLED`
+**Status:** `IN PROGRESS — DOCS, WALLET, AND OPS CATALOG INPUTS ASSEMBLED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -388,9 +388,10 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Define the ops scenario catalog/media producer without publishing TypeScript
-   scenario source as a browser artifact.
-3. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
+2. Start the `/` and `/install` site pilot while keeping wallet/ops browser and
    Runtime-client packages deferred until their first real flow needs them.
-4. Capture the remaining wallet-owned static/PWA inputs before the first wallet
+3. Capture the remaining wallet-owned static/PWA inputs before the first wallet
    flow migrates.
+4. Attach scenario media only when scenario-specific browser-safe artifacts are
+   checked in. The generated catalog currently records an empty media inventory
+   and never publishes the 46 TypeScript scenario files.
