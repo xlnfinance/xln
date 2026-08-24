@@ -2,58 +2,67 @@
 /* tslint:disable */
 /* eslint-disable */
 
-  import { Contract, Interface, type ContractRunner } from "ethers";
-  import type { IHashLadderRevealRegistry, IHashLadderRevealRegistryInterface } from "../../DeltaTransformer.sol/IHashLadderRevealRegistry.js";
+import { Contract, Interface, type ContractRunner } from "ethers";
+import type {
+  IHashLadderRevealRegistry,
+  IHashLadderRevealRegistryInterface,
+} from "../../DeltaTransformer.sol/IHashLadderRevealRegistry";
 
-  const _abi = [
+const _abi = [
   {
-    "inputs": [
+    inputs: [
       {
-        "internalType": "bytes32",
-        "name": "ownerEntity",
-        "type": "bytes32"
+        internalType: "bytes32",
+        name: "ownerEntity",
+        type: "bytes32",
       },
       {
-        "internalType": "bytes32",
-        "name": "counterpartyEntity",
-        "type": "bytes32"
+        internalType: "bytes32",
+        name: "counterpartyEntity",
+        type: "bytes32",
       },
       {
-        "internalType": "bytes32",
-        "name": "ladderHash",
-        "type": "bytes32"
+        internalType: "bytes32",
+        name: "ladderHash",
+        type: "bytes32",
       },
       {
-        "internalType": "bool",
-        "name": "targetRole",
-        "type": "bool"
-      }
+        internalType: "bool",
+        name: "targetRole",
+        type: "bool",
+      },
     ],
-    "name": "getHashLadderReveal",
-    "outputs": [
+    name: "getHashLadderReveal",
+    outputs: [
       {
-        "internalType": "uint16",
-        "name": "fillRatio",
-        "type": "uint16"
+        internalType: "uint16",
+        name: "fillRatio",
+        type: "uint16",
       },
       {
-        "internalType": "uint256",
-        "name": "revealedAt",
-        "type": "uint256"
-      }
+        internalType: "uint256",
+        name: "revealedAt",
+        type: "uint256",
+      },
     ],
-    "stateMutability": "view",
-    "type": "function"
-  }
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
-  export class IHashLadderRevealRegistry__factory {
-    static readonly abi = _abi;
-    static createInterface(): IHashLadderRevealRegistryInterface {
-      return new Interface(_abi) as IHashLadderRevealRegistryInterface;
-    }
-    static connect(address: string, runner?: ContractRunner | null): IHashLadderRevealRegistry {
-      return new Contract(address, _abi, runner) as unknown as IHashLadderRevealRegistry;
-    }
+export class IHashLadderRevealRegistry__factory {
+  static readonly abi = _abi;
+  static createInterface(): IHashLadderRevealRegistryInterface {
+    return new Interface(_abi) as IHashLadderRevealRegistryInterface;
   }
-  
+  static connect(
+    address: string,
+    runner?: ContractRunner | null
+  ): IHashLadderRevealRegistry {
+    return new Contract(
+      address,
+      _abi,
+      runner
+    ) as unknown as IHashLadderRevealRegistry;
+  }
+}

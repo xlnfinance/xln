@@ -2,37 +2,46 @@
 /* tslint:disable */
 /* eslint-disable */
 
-  import { Contract, Interface, type ContractRunner } from "ethers";
-  import type { ReentrancyGuardLite, ReentrancyGuardLiteInterface } from "../../Depository.sol/ReentrancyGuardLite.js";
+import { Contract, Interface, type ContractRunner } from "ethers";
+import type {
+  ReentrancyGuardLite,
+  ReentrancyGuardLiteInterface,
+} from "../../Depository.sol/ReentrancyGuardLite";
 
-  const _abi = [
+const _abi = [
   {
-    "inputs": [],
-    "name": "E0",
-    "type": "error"
+    inputs: [],
+    name: "E0",
+    type: "error",
   },
   {
-    "inputs": [],
-    "name": "_status",
-    "outputs": [
+    inputs: [],
+    name: "_status",
+    outputs: [
       {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
     ],
-    "stateMutability": "view",
-    "type": "function"
-  }
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;
 
-  export class ReentrancyGuardLite__factory {
-    static readonly abi = _abi;
-    static createInterface(): ReentrancyGuardLiteInterface {
-      return new Interface(_abi) as ReentrancyGuardLiteInterface;
-    }
-    static connect(address: string, runner?: ContractRunner | null): ReentrancyGuardLite {
-      return new Contract(address, _abi, runner) as unknown as ReentrancyGuardLite;
-    }
+export class ReentrancyGuardLite__factory {
+  static readonly abi = _abi;
+  static createInterface(): ReentrancyGuardLiteInterface {
+    return new Interface(_abi) as ReentrancyGuardLiteInterface;
   }
-  
+  static connect(
+    address: string,
+    runner?: ContractRunner | null
+  ): ReentrancyGuardLite {
+    return new Contract(
+      address,
+      _abi,
+      runner
+    ) as unknown as ReentrancyGuardLite;
+  }
+}
