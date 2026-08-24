@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { swapMarketPolicyWire } from '../../rscore/shadow-wire';
 import { RscoreProcessClient } from '../../rscore/client';
 
 const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
@@ -26,7 +27,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
   test('speaks the framed ABI end to end', async () => {
     const client = new RscoreProcessClient(BINARY, identity());
     try {
-      const hello = (await client.hello(4)) as unknown[];
+      const hello = (await client.hello(4, swapMarketPolicyWire())) as unknown[];
       expect(hello[0]).toBe(1);
       expect(hello[2]).toBe(4);
 

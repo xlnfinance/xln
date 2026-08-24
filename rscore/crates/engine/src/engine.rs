@@ -172,8 +172,9 @@ fn apply_to_candidate(
             liquidity_fee_bps,
             gas_fee,
         } => {
-            let context =
-                context.ok_or(TransitionError::ExecutionContextRequired("rebalance_policy"))?;
+            let context = context.ok_or(TransitionError::ExecutionContextRequired(
+                "rebalance_policy",
+            ))?;
             crate::rebalance::apply_policy(
                 candidate,
                 crate::rebalance::RebalancePolicyTx {
@@ -186,6 +187,44 @@ fn apply_to_candidate(
                 proposer,
                 context.committed_timestamp,
             )
+        }
+        AccountTx::SwapOffer {
+            offer_id,
+            give_token_id,
+            give_token_decimals,
+            give_amount,
+            want_token_id,
+            want_token_decimals,
+            want_amount,
+            max_fee,
+            min_net_receive,
+            time_in_force,
+        } => {
+            let context = context.ok_or(TransitionError::ExecutionContextRequired("swap_offer"))?;
+            crate::swap::apply_offer(
+                candidate,
+                &context.swap_market,
+                crate::swap::SwapOfferTx {
+                    offer_id,
+                    give_token_id: *give_token_id,
+                    give_token_decimals: *give_token_decimals,
+                    give_amount,
+                    want_token_id: *want_token_id,
+                    want_token_decimals: *want_token_decimals,
+                    want_amount,
+                    max_fee,
+                    min_net_receive,
+                    time_in_force: *time_in_force,
+                },
+                proposer,
+                // core/account/tx/mutation.ts routes swap_offer with the
+                // signed frame's J height, never the account frame height and
+                // never the Entity enforcement clock.
+                context.frame_j_height,
+            )
+        }
+        AccountTx::SwapCancelRequest { offer_id } => {
+            crate::swap::apply_cancel_request(candidate, offer_id, proposer)
         }
         AccountTx::DirectPayment {
             token_id,

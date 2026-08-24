@@ -100,12 +100,8 @@ fn commit_rebranches_only_touched_leaves_and_reports_the_new_root() {
 
 #[test]
 fn thousand_accounts_form_a_multi_level_patricia_tree() {
-    let engine = StatefulBatchEngine::new(
-        generation(),
-        4,
-        (0..1000).map(seed).collect(),
-    )
-    .expect("batch engine");
+    let engine = StatefulBatchEngine::new(generation(), 4, (0..1000).map(seed).collect())
+        .expect("batch engine");
     let (branches, leaves, depth) = engine.accounts_tree_stats();
     assert_eq!(leaves, 1000);
     // u32-indexed ids share a 56-nibble zero prefix; the live spread sits in
@@ -114,18 +110,17 @@ fn thousand_accounts_form_a_multi_level_patricia_tree() {
     // the 64-nibble key length.
     assert!(depth >= 3, "depth {depth} too shallow for 1000 leaves");
     assert!(depth <= 8, "depth {depth}: extension compression broken");
-    assert!(branches >= 64, "branches {branches} too few for 1000 leaves");
+    assert!(
+        branches >= 64,
+        "branches {branches} too few for 1000 leaves"
+    );
     assert_eq!(engine.accounts_root(), cold_accounts_root(&engine));
 }
 
 #[test]
 fn upsert_creates_and_replaces_accounts_atomically() {
-    let mut engine = StatefulBatchEngine::new(
-        generation(),
-        1,
-        vec![seed(1), seed(2)],
-    )
-    .expect("batch engine");
+    let mut engine =
+        StatefulBatchEngine::new(generation(), 1, vec![seed(1), seed(2)]).expect("batch engine");
     let before = engine.accounts_root();
 
     // Create a brand-new account.
@@ -150,12 +145,8 @@ fn upsert_creates_and_replaces_accounts_atomically() {
 fn summary_paging_covers_every_account_across_page_boundaries() {
     const ACCOUNTS: u32 = 37;
     const LIMIT: usize = 8; // deliberately not a divisor of ACCOUNTS
-    let engine = StatefulBatchEngine::new(
-        generation(),
-        1,
-        (0..ACCOUNTS).map(seed).collect(),
-    )
-    .expect("batch engine");
+    let engine = StatefulBatchEngine::new(generation(), 1, (0..ACCOUNTS).map(seed).collect())
+        .expect("batch engine");
 
     let mut seen = Vec::new();
     let mut cursor = None;

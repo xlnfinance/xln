@@ -10,7 +10,7 @@ pub const SECRET: &str = "0x0101010101010101010101010101010101010101010101010101
 pub const HASHLOCK: &str = "0xcebc8882fecbec7fb80d2cf4b312bec018884c2d66667c67a90508214bd8bafc";
 
 pub fn execution_context(timestamp: u64, j_height: u64) -> AccountExecutionContext {
-    AccountExecutionContext::new(1_000, timestamp, j_height, 7)
+    AccountExecutionContext::new(1_000, timestamp, j_height, 7, j_height)
 }
 
 pub fn lock_tx(lock_id: &str, amount: BigInt) -> AccountTx {

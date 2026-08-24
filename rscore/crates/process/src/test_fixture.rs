@@ -29,7 +29,30 @@ pub fn hello(id: u64) -> Envelope {
     request(
         id,
         OpTag::Hello,
-        vec![AbiValue::Integer(1), AbiValue::Integer(20)],
+        vec![
+            AbiValue::Integer(1),
+            AbiValue::Integer(20),
+            // Market policy: WETH(2, 18) based against USDC(1, 6).
+            tuple(vec![
+                tuple(vec![
+                    tuple(vec![
+                        AbiValue::Integer(1),
+                        AbiValue::Integer(6),
+                        AbiValue::Integer(1),
+                    ]),
+                    tuple(vec![
+                        AbiValue::Integer(2),
+                        AbiValue::Integer(18),
+                        AbiValue::Integer(0),
+                    ]),
+                ]),
+                tuple(vec![tuple(vec![
+                    AbiValue::Integer(2),
+                    AbiValue::Integer(1),
+                    AbiValue::Integer(1),
+                ])]),
+            ]),
+        ],
     )
 }
 
@@ -64,15 +87,21 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
         tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
         tuple(vec![
             AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            // Rebalance fee registers are owned by the engine, so the seed
-            // ships their rows instead of a carried root.
+            // Swap offers and rebalance fee registers are owned by the engine,
+            // so the seed ships their rows instead of a carried root.
             tuple(Vec::new()),
-            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
-            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            tuple(Vec::new()),
+            tuple(vec![
+                AbiValue::Bytes(empty_j_claim_root().to_vec()),
+                AbiValue::Integer(0),
+            ]),
+            tuple(vec![
+                AbiValue::Bytes(empty_j_claim_root().to_vec()),
+                AbiValue::Integer(0),
+            ]),
         ]),
     ])
 }
@@ -92,15 +121,21 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
         tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
         tuple(vec![
             AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            AbiValue::Bytes(vec![0_u8; 32]),
-            // Rebalance fee registers are owned by the engine, so the seed
-            // ships their rows instead of a carried root.
+            // Swap offers and rebalance fee registers are owned by the engine,
+            // so the seed ships their rows instead of a carried root.
             tuple(Vec::new()),
-            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
-            tuple(vec![AbiValue::Bytes(empty_j_claim_root().to_vec()), AbiValue::Integer(0)]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            AbiValue::Bytes(vec![0_u8; 32]),
+            tuple(Vec::new()),
+            tuple(vec![
+                AbiValue::Bytes(empty_j_claim_root().to_vec()),
+                AbiValue::Integer(0),
+            ]),
+            tuple(vec![
+                AbiValue::Bytes(empty_j_claim_root().to_vec()),
+                AbiValue::Integer(0),
+            ]),
         ]),
     ])
 }
@@ -156,6 +191,7 @@ pub fn prepare(id: u64, amount: i64) -> Envelope {
             AbiValue::Integer(1000),
             AbiValue::Integer(50),
             AbiValue::Integer(0),
+            AbiValue::Integer(50),
         ]),
         tx,
     ]);
@@ -201,6 +237,7 @@ fn job(input_index: u32, proposer: i128, tx: AbiValue) -> AbiValue {
             AbiValue::Integer(1000),
             AbiValue::Integer(1),
             AbiValue::Integer(0),
+            AbiValue::Integer(1),
         ]),
         tx,
     ])

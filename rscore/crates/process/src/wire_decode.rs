@@ -2,10 +2,10 @@ use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountSeed, BatchJob};
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, BilateralRebalanceFeePolicy, CarriedSections, DeliveryMode, Delta,
-    DepositoryAddress, HtlcDeliveryMode, JClaimAccumulator, RebalanceFeePolicySnapshot, TokenId,
-    HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, OpaqueHtlcCiphertext,
-    Side, WatchSeed,
+    AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy, CarriedSections,
+    DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx,
+    HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, OpaqueHtlcCiphertext,
+    RebalanceFeePolicySnapshot, Side, SwapMarketPolicy, SwapOffer, SwapToken, TokenId, WatchSeed,
 };
 
 use crate::wire_value::{
@@ -17,6 +17,7 @@ use crate::{PROCESS_ABI_VERSION, PROCESS_PROFILE, ProcessError};
 pub enum Command {
     Hello {
         worker_count: usize,
+        swap_market: SwapMarketPolicy,
     },
     Restore {
         revision: u64,
@@ -63,7 +64,7 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
 }
 
 fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 2, "hello")?;
+    let fields = exact(fields, 3, "hello")?;
     let version = unsigned(&fields[0], "processVersion")?;
     if version != PROCESS_ABI_VERSION {
         return Err(ProcessError::Version {
@@ -74,7 +75,40 @@ fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     Ok(Command::Hello {
         worker_count: usize::try_from(unsigned(&fields[1], "workerCount")?)
             .map_err(|_| ProcessError::Expected("workerCount"))?,
+        swap_market: decode_swap_market(&fields[2])?,
     })
+}
+
+/// Registry-derived market tables, installed once per session. The engine
+/// cannot derive pair orientation or the price step from account state, and
+/// duplicating the TypeScript registry here would be a second source of truth.
+fn decode_swap_market(value: &AbiValue) -> Result<SwapMarketPolicy, ProcessError> {
+    let fields = exact(tuple(value)?, 2, "swapMarketPolicy")?;
+    let tokens = tuple(&fields[0])?
+        .iter()
+        .map(|row| {
+            let row = exact(tuple(row)?, 3, "swapMarketToken")?;
+            Ok(SwapToken {
+                token_id: bounded_u32(&row[0], "tokenId")?,
+                decimals: bounded_u32(&row[1], "decimals")?,
+                liquid: integer(&row[2])? != 0,
+            })
+        })
+        .collect::<Result<Vec<_>, ProcessError>>()?;
+    let steps = tuple(&fields[1])?
+        .iter()
+        .map(|row| {
+            let row = exact(tuple(row)?, 3, "swapMarketStep")?;
+            Ok((
+                (
+                    bounded_u32(&row[0], "baseTokenId")?,
+                    bounded_u32(&row[1], "quoteTokenId")?,
+                ),
+                bounded_u32(&row[2], "priceStepTicks")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, ProcessError>>()?;
+    Ok(SwapMarketPolicy::new(tokens, steps))
 }
 
 fn decode_restore(fields: &[AbiValue]) -> Result<Command, ProcessError> {
@@ -214,16 +248,17 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     let journal = exact(tuple(&fields[10])?, 2, "journal")?;
     let replica = AccountReplica::new(
         owner,
-        AccountState::restore_full(
+        AccountState::restore_full(AccountStateSeed {
             identity,
             dispute_config,
             deltas,
             locks,
-            unsigned(&journal[0], "jNonce")?,
-            unsigned(&journal[1], "lastFinalizedJHeight")?,
-            decode_carried_sections(&fields[11])?,
-            decode_rebalance_policies(&fields[11])?,
-        )?,
+            j_nonce: unsigned(&journal[0], "jNonce")?,
+            last_finalized_j_height: unsigned(&journal[1], "lastFinalizedJHeight")?,
+            carried: decode_carried_sections(&fields[11])?,
+            rebalance_fee_policies: decode_rebalance_policies(&fields[11])?,
+            swap_offers: decode_swap_offers(&fields[11])?,
+        })?,
     )?;
     Ok(AccountSeed {
         account_id,
@@ -238,7 +273,6 @@ fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessE
     let fields = exact(tuple(value)?, 8, "carriedSections")?;
     Ok(CarriedSections {
         pulls_root: fixed_bytes(&fields[0], "pullsRoot")?,
-        swap_offers_root: fixed_bytes(&fields[1], "swapOffersRoot")?,
         subcontracts_root: fixed_bytes(&fields[2], "subcontractsRoot")?,
         requested_rebalance_root: fixed_bytes(&fields[3], "requestedRebalanceRoot")?,
         requested_rebalance_fee_state_root: fixed_bytes(
@@ -247,6 +281,55 @@ fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessE
         )?,
         left_pending_j_claims: decode_claim_accumulator(&fields[6])?,
         right_pending_j_claims: decode_claim_accumulator(&fields[7])?,
+    })
+}
+
+/// Slot 1 of the carried tuple is no longer a carried root either: the engine
+/// owns the resting same-jurisdiction offers and recomputes their root.
+fn decode_swap_offers(value: &AbiValue) -> Result<Vec<SwapOffer>, ProcessError> {
+    let fields = exact(tuple(value)?, 8, "carriedSections")?;
+    tuple(&fields[1])?
+        .iter()
+        .map(|row| {
+            let row = exact(tuple(row)?, 13, "swapOffer")?;
+            Ok(SwapOffer::new(
+                text(&row[0])?.into(),
+                bounded_u32(&row[1], "giveTokenId")?,
+                bounded_u32(&row[2], "giveTokenDecimals")?,
+                bigint(&row[3], "giveAmount")?,
+                bounded_u32(&row[4], "wantTokenId")?,
+                bounded_u32(&row[5], "wantTokenDecimals")?,
+                bigint(&row[6], "wantAmount")?,
+                bigint(&row[7], "maxFee")?,
+                bigint(&row[8], "minNetReceive")?,
+                bigint(&row[9], "priceTicks")?,
+                match &row[10] {
+                    AbiValue::Nil => None,
+                    value => Some(
+                        u8::try_from(bounded_u32(value, "timeInForce")?)
+                            .map_err(|_| ProcessError::Expected("timeInForce"))?,
+                    ),
+                },
+                match integer(&row[11])? {
+                    0 => true,
+                    1 => false,
+                    value => {
+                        return Err(ProcessError::Tag {
+                            field: "makerIsLeft",
+                            value,
+                        });
+                    }
+                },
+                unsigned(&row[12], "createdHeight")?,
+            ))
+        })
+        .collect()
+}
+
+fn decode_swap_cancel_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 2, "swapCancelRequest")?;
+    Ok(AccountTx::SwapCancelRequest {
+        offer_id: text(&fields[1])?.into(),
     })
 }
 
@@ -341,12 +424,13 @@ fn decode_job(value: &AbiValue) -> Result<BatchJob, ProcessError> {
 }
 
 fn decode_context(value: &AbiValue) -> Result<AccountExecutionContext, ProcessError> {
-    let fields = exact(tuple(value)?, 4, "context")?;
+    let fields = exact(tuple(value)?, 5, "context")?;
     Ok(AccountExecutionContext::new(
         unsigned(&fields[0], "committedTimestamp")?,
         unsigned(&fields[1], "enforcementTimestamp")?,
         unsigned(&fields[2], "enforcementJHeight")?,
         unsigned(&fields[3], "currentAccountHeight")?,
+        unsigned(&fields[4], "frameJHeight")?,
     ))
 }
 
@@ -360,6 +444,8 @@ fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         3 => decode_add_delta(fields),
         4 => decode_set_credit_limit(fields),
         5 => decode_rebalance_policy(fields),
+        6 => decode_swap_offer(fields),
+        7 => decode_swap_cancel_request(fields),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
 }
@@ -387,6 +473,28 @@ fn decode_rebalance_policy(fields: &[AbiValue]) -> Result<AccountTx, ProcessErro
         base_fee: bigint(&fields[3], "baseFee")?,
         liquidity_fee_bps: bigint(&fields[4], "liquidityFeeBps")?,
         gas_fee: bigint(&fields[5], "gasFee")?,
+    })
+}
+
+fn decode_swap_offer(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 11, "swapOffer")?;
+    Ok(AccountTx::SwapOffer {
+        offer_id: text(&fields[1])?.into(),
+        give_token_id: bounded_u32(&fields[2], "giveTokenId")?,
+        give_token_decimals: bounded_u32(&fields[3], "giveTokenDecimals")?,
+        give_amount: bigint(&fields[4], "giveAmount")?,
+        want_token_id: bounded_u32(&fields[5], "wantTokenId")?,
+        want_token_decimals: bounded_u32(&fields[6], "wantTokenDecimals")?,
+        want_amount: bigint(&fields[7], "wantAmount")?,
+        max_fee: bigint(&fields[8], "maxFee")?,
+        min_net_receive: bigint(&fields[9], "minNetReceive")?,
+        time_in_force: match &fields[10] {
+            AbiValue::Nil => None,
+            value => Some(
+                u8::try_from(bounded_u32(value, "timeInForce")?)
+                    .map_err(|_| ProcessError::Expected("timeInForce"))?,
+            ),
+        },
     })
 }
 

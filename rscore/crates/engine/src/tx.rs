@@ -45,6 +45,21 @@ pub enum AccountTx {
         liquidity_fee_bps: BigInt,
         gas_fee: BigInt,
     },
+    SwapOffer {
+        offer_id: String,
+        give_token_id: u32,
+        give_token_decimals: u32,
+        give_amount: BigInt,
+        want_token_id: u32,
+        want_token_decimals: u32,
+        want_amount: BigInt,
+        max_fee: BigInt,
+        min_net_receive: BigInt,
+        time_in_force: Option<u8>,
+    },
+    SwapCancelRequest {
+        offer_id: String,
+    },
     DirectPayment {
         token_id: TokenId,
         amount: BigInt,

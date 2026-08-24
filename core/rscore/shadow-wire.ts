@@ -3,9 +3,24 @@
  * Every shape here is pinned by tests/rscore/accounts-tree-parity.test.ts and
  * the process wire decoders (rscore/crates/process/src/wire_decode.rs).
  */
+import { createHash } from 'node:crypto';
+
 import { EMPTY_ACCOUNT_STATE_ROOT } from '../account/commitment/state-root';
+import {
+  getKnownTokenIds,
+  getSwapPairPolicyForDimensions,
+  getTokenInfo,
+  isLiquidSwapToken,
+} from '../account/utils';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
-import type { AccountReplica, AccountState, AccountTx, Delta, HtlcLock } from '../types/account';
+import type {
+  AccountReplica,
+  AccountState,
+  AccountTx,
+  Delta,
+  HtlcLock,
+  SwapOffer,
+} from '../types/account';
 import type {
   BilateralRebalanceFeePolicy,
   RebalanceFeePolicySnapshot,
@@ -85,6 +100,62 @@ const jClaimCount = (count: bigint): bigint => {
   return count;
 };
 
+/**
+ * Registry-derived market tables the engine cannot derive from account state:
+ * token decimals, which assets quote a pair, and the per-pair price step. The
+ * digest is compared against the engine's own so a registry that moved under a
+ * running engine is loud instead of silently mispricing.
+ */
+export const swapMarketPolicyWire = (): RscoreWireValue[] => {
+  const tokenIds = getKnownTokenIds();
+  const tokens = tokenIds.map(tokenId => [
+    tokenId,
+    getTokenInfo(tokenId).decimals,
+    isLiquidSwapToken(tokenId) ? 1 : 0,
+  ]);
+  const steps: RscoreWireValue[] = [];
+  for (const base of tokenIds) {
+    for (const quote of tokenIds) {
+      if (base === quote) continue;
+      const step = getSwapPairPolicyForDimensions(
+        base,
+        quote,
+        getTokenInfo(base).decimals,
+        getTokenInfo(quote).decimals,
+      ).priceStepTicks;
+      steps.push([base, quote, Math.max(1, step)]);
+    }
+  }
+  return [tokens, steps];
+};
+
+const be32 = (value: number): Buffer => {
+  const bytes = Buffer.alloc(4);
+  bytes.writeUInt32BE(value);
+  return bytes;
+};
+
+/** Same preimage as SwapMarketPolicy::digest on the engine side. */
+export const swapMarketPolicyDigest = (policy: readonly RscoreWireValue[]): string => {
+  const hasher = createHash('sha256');
+  hasher.update(Buffer.from('xln.rscore.swap-market-policy.v1'));
+  for (const row of policy[0] as number[][]) {
+    hasher.update(be32(row[0]!));
+    hasher.update(be32(row[1]!));
+    hasher.update(Buffer.from([row[2]!]));
+  }
+  hasher.update(Buffer.from('steps'));
+  // The engine keeps steps in a map keyed by (base, quote); match that order.
+  const steps = [...(policy[1] as number[][])]
+    .sort((left, right) => (left[0]! - right[0]!) || (left[1]! - right[1]!));
+  for (const row of steps) {
+    hasher.update(be32(row[0]!));
+    hasher.update(be32(row[1]!));
+    hasher.update(be32(row[2]!));
+  }
+  return `0x${hasher.digest('hex')}`;
+};
+
 const collectionRoot = (
   namespace: AccountStateMapNamespace,
   map: AccountStateCollection<never, never> | undefined,
@@ -109,7 +180,7 @@ const carriedSectionsWire = (account: AccountReplica): RscoreWireValue[] => {
   );
   return [
     root('pulls', state.pulls),
-    root('swapOffers', state.swapOffers),
+    swapOffersWire(state.swapOffers),
     root('subcontracts', state.subcontracts),
     root('requestedRebalance', state.requestedRebalance),
     root('requestedRebalanceFeeState', state.requestedRebalanceFeeState),
@@ -118,6 +189,27 @@ const carriedSectionsWire = (account: AccountReplica): RscoreWireValue[] => {
     claim(state.rightPendingJClaims),
   ];
 };
+
+/** Resting same-j offers, in the engine's own field order. */
+const swapOffersWire = (
+  offers: AccountState['swapOffers'],
+): RscoreWireValue[] => [...(offers ?? new Map<string, SwapOffer>()).values()]
+  .sort((left, right) => (left.offerId < right.offerId ? -1 : left.offerId > right.offerId ? 1 : 0))
+  .map(offer => [
+    offer.offerId,
+    offer.giveTokenId,
+    offer.giveTokenDecimals,
+    offer.giveAmount.toString(),
+    offer.wantTokenId,
+    offer.wantTokenDecimals,
+    offer.wantAmount.toString(),
+    offer.maxFee.toString(),
+    offer.minNetReceive.toString(),
+    offer.priceTicks.toString(),
+    offer.timeInForce ?? null,
+    offer.makerIsLeft ? 0 : 1,
+    offer.createdHeight,
+  ]);
 
 /**
  * Slot 5 of the carried tuple is not a carried root: the engine owns the
@@ -174,6 +266,8 @@ export const accountSeedWire = (
 export const SHADOW_SUPPORTED_TX_TYPES = new Set([
   'direct_payment', 'htlc_lock', 'htlc_resolve', 'add_delta', 'set_credit_limit',
   'rebalance_policy',
+  'swap_offer',
+  'swap_cancel_request',
 ]);
 
 export type ShadowOutputRow =
@@ -194,6 +288,25 @@ export type ShadowOutputRow =
       tokenId: number,
       amount: string,
     ]
+  | readonly [
+      kind: 'offer',
+      offerId: string,
+      makerSide: number,
+      fromEntity: string,
+      toEntity: string,
+      createdHeight: number,
+      giveTokenId: number,
+      giveTokenDecimals: number,
+      giveAmount: string,
+      wantTokenId: number,
+      wantTokenDecimals: number,
+      wantAmount: string,
+      maxFee: string,
+      minNetReceive: string,
+      priceTicks: string,
+      timeInForce: number | null,
+    ]
+  | readonly [kind: 'cancelRequest', offerId: string]
   | readonly [
       kind: 'error',
       lockId: string,
@@ -232,6 +345,38 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
       result.tokenId,
       result.amount.toString(),
     ]);
+  }
+  if (result.outcome === 'swap_offer_created') {
+    const offer = result.swapOfferCreated;
+    // The offer event type marks priceTicks optional for the cross-j paths;
+    // a same-j offer always carries it, and a missing one is a broken
+    // transition rather than something to paper over with a default.
+    // The event type marks priceTicks and createdHeight optional for the
+    // cross-j paths; a same-j offer always carries both, and a missing one is
+    // a broken transition rather than something to paper over with a default.
+    if (offer.priceTicks === undefined) throw new Error('SHADOW_OFFER_PRICE_TICKS_MISSING');
+    if (offer.createdHeight === undefined) throw new Error('SHADOW_OFFER_HEIGHT_MISSING');
+    rows.push([
+      'offer',
+      offer.offerId,
+      offer.makerIsLeft ? 0 : 1,
+      offer.fromEntity,
+      offer.toEntity,
+      offer.createdHeight,
+      offer.giveTokenId,
+      offer.giveTokenDecimals,
+      offer.giveAmount.toString(),
+      offer.wantTokenId,
+      offer.wantTokenDecimals,
+      offer.wantAmount.toString(),
+      offer.maxFee.toString(),
+      offer.minNetReceive.toString(),
+      offer.priceTicks.toString(),
+      offer.timeInForce === undefined ? null : offer.timeInForce,
+    ]);
+  }
+  if (result.outcome === 'swap_cancel_requested') {
+    rows.push(['cancelRequest', result.swapOfferCancelRequested.offerId]);
   }
   if (result.outcome === 'htlc_error') {
     rows.push([
@@ -286,6 +431,26 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         tx.data.liquidityFeeBps.toString(),
         tx.data.gasFee.toString(),
       ];
+    case 'swap_offer':
+      // Cross-jurisdiction offers carry a route, paired pulls and their own
+      // settlement path: outside the payment profile, so the engine is never
+      // handed one.
+      if (tx.data.crossJurisdiction) return null;
+      return [
+        6,
+        tx.data.offerId,
+        tx.data.giveTokenId,
+        tx.data.giveTokenDecimals,
+        tx.data.giveAmount.toString(),
+        tx.data.wantTokenId,
+        tx.data.wantTokenDecimals,
+        tx.data.wantAmount.toString(),
+        tx.data.maxFee.toString(),
+        tx.data.minNetReceive.toString(),
+        tx.data.timeInForce ?? null,
+      ];
+    case 'swap_cancel_request':
+      return [7, tx.data.offerId];
     case 'htlc_resolve':
       return tx.data.outcome === 'secret'
         ? [2, tx.data.lockId, 0, hexToWireBytes(tx.data.secret, 32, 'SHADOW_SECRET')]

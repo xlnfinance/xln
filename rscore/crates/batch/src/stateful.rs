@@ -133,9 +133,7 @@ impl StatefulBatchEngine {
                 bytes.copy_from_slice(key);
                 (AccountId::from_bytes(bytes), replica)
             })
-            .skip_while(move |(account_id, _)| {
-                cursor.is_some_and(|cursor| *account_id <= cursor)
-            })
+            .skip_while(move |(account_id, _)| cursor.is_some_and(|cursor| *account_id <= cursor))
     }
 
     pub fn prepare(&self, jobs: &[BatchJob]) -> Result<PreparedBatch, BatchError> {
@@ -182,8 +180,7 @@ impl StatefulBatchEngine {
                 .collect::<Result<Vec<_>, BatchError>>()
         })?;
         let mut accounts = self.accounts.clone();
-        for ((account_id, _, candidate), (_, root)) in
-            prepared.updates.into_iter().zip(leaf_roots)
+        for ((account_id, _, candidate), (_, root)) in prepared.updates.into_iter().zip(leaf_roots)
         {
             accounts = put_account(&accounts, account_id, candidate, root)?;
         }
@@ -260,13 +257,12 @@ impl StatefulBatchEngine {
                     .first()
                     .map(|job| job.input_index)
                     .ok_or(BatchError::EmptyBatch)?;
-                let base = self
-                    .accounts
-                    .get(account_id.as_bytes())
-                    .ok_or(BatchError::AccountNotFound {
+                let base = self.accounts.get(account_id.as_bytes()).ok_or(
+                    BatchError::AccountNotFound {
                         input_index,
                         account_id,
-                    })?;
+                    },
+                )?;
                 Ok(AccountWork {
                     account_id,
                     base_fingerprint: replica_fingerprint(account_id, base)?,
@@ -350,10 +346,12 @@ fn put_account(
 ) -> Result<PersistentRadixMap<AccountReplica>, BatchError> {
     accounts
         .updated(account_id.as_bytes().to_vec(), replica, root)
-        .map_err(|error: xln_rscore_protocol::PersistentRadixMapError| BatchError::AccountsTree {
-            account_id,
-            detail: error.to_string(),
-        })
+        .map_err(
+            |error: xln_rscore_protocol::PersistentRadixMapError| BatchError::AccountsTree {
+                account_id,
+                detail: error.to_string(),
+            },
+        )
 }
 
 fn replica_fingerprint(

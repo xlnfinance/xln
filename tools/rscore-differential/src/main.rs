@@ -67,7 +67,7 @@ fn context(value: &AbiValue) -> Result<Option<AccountExecutionContext>, Box<dyn 
         return Ok(None);
     }
     let fields = tuple(value)?;
-    if fields.len() != 4 {
+    if fields.len() != 5 {
         return Err(invalid("DIFFERENTIAL_CONTEXT_ARITY").into());
     }
     Ok(Some(AccountExecutionContext::new(
@@ -75,6 +75,7 @@ fn context(value: &AbiValue) -> Result<Option<AccountExecutionContext>, Box<dyn 
         unsigned(&fields[1])?,
         unsigned(&fields[2])?,
         unsigned(&fields[3])?,
+        unsigned(&fields[4])?,
     )))
 }
 
@@ -291,6 +292,44 @@ fn output_value(output: &AccountOutput) -> AbiValue {
             AbiValue::Text(secret.clone()),
             AbiValue::Integer(i128::from(token_id.get())),
             AbiValue::Text(amount.to_string()),
+        ]),
+        AccountOutput::SwapOfferCreated {
+            offer_id,
+            maker_is_left,
+            from_entity,
+            to_entity,
+            created_height,
+            give_token_id,
+            give_token_decimals,
+            give_amount,
+            want_token_id,
+            want_token_decimals,
+            want_amount,
+            max_fee,
+            min_net_receive,
+            price_ticks,
+            time_in_force,
+        } => values_tuple(vec![
+            AbiValue::Text("swapOfferCreated".into()),
+            AbiValue::Text(offer_id.clone()),
+            AbiValue::Integer(i128::from(*maker_is_left)),
+            AbiValue::Text(from_entity.clone()),
+            AbiValue::Text(to_entity.clone()),
+            AbiValue::Integer(i128::from(*created_height)),
+            AbiValue::Integer(i128::from(*give_token_id)),
+            AbiValue::Integer(i128::from(*give_token_decimals)),
+            AbiValue::Text(give_amount.to_string()),
+            AbiValue::Integer(i128::from(*want_token_id)),
+            AbiValue::Integer(i128::from(*want_token_decimals)),
+            AbiValue::Text(want_amount.to_string()),
+            AbiValue::Text(max_fee.to_string()),
+            AbiValue::Text(min_net_receive.to_string()),
+            AbiValue::Text(price_ticks.to_string()),
+            time_in_force.map_or(AbiValue::Nil, |value| AbiValue::Integer(i128::from(value))),
+        ]),
+        AccountOutput::SwapCancelRequested { offer_id } => values_tuple(vec![
+            AbiValue::Text("swapCancelRequested".into()),
+            AbiValue::Text(offer_id.clone()),
         ]),
         AccountOutput::HtlcError {
             lock_id,

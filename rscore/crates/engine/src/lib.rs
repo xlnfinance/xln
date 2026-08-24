@@ -17,10 +17,10 @@ mod mutation;
 mod output;
 mod rebalance;
 mod state;
+mod swap;
 mod tx;
 
 pub use commitment::{CarriedSections, JClaimAccumulator};
-pub use rebalance::{BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot};
 pub use context::AccountExecutionContext;
 pub use delta::{Delta, DeltaPerspective, TokenId};
 pub use engine::{AccountTransition, AccountVerdict, SequentialAccountEngine};
@@ -32,5 +32,9 @@ pub use htlc::{
 };
 pub use identity::{AccountDomain, AccountIdentity, DepositoryAddress, EntityId, Side, WatchSeed};
 pub use output::AccountOutput;
-pub use state::{AccountDisputeConfig, AccountReplica, AccountState, LendingIntentKind};
+pub use rebalance::{BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot};
+pub use state::{
+    AccountDisputeConfig, AccountReplica, AccountState, AccountStateSeed, LendingIntentKind,
+};
+pub use swap::{SwapMarketPolicy, SwapOffer, SwapToken};
 pub use tx::{AccountTx, DeliveryMode, LendingAction, LendingTermId, ReserveSide};

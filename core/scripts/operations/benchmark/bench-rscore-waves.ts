@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../account/j-claims/j-claim-codec';
 import { RscoreProcessClient, type RscoreWireValue } from '../../../rscore/client';
+import { swapMarketPolicyWire } from '../../../rscore/shadow-wire';
 
 const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
 
@@ -65,8 +66,9 @@ const hexToBytes = (value: string): Uint8Array => {
 // payment-profile account (roots zero, J-claim accumulators at genesis).
 const EMPTY_CLAIM: RscoreWireValue[] = [hexToBytes(EMPTY_ACCOUNT_J_CLAIM_ROOT), 0];
 const EMPTY_CARRIED: RscoreWireValue[] = [
+  new Uint8Array(32),
+  [], // resting swap offers: owned by the engine, shipped in full
   new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
-  new Uint8Array(32), new Uint8Array(32),
   [], // rebalance fee policies: owned by the engine, shipped in full
   EMPTY_CLAIM, EMPTY_CLAIM,
 ];
@@ -84,7 +86,7 @@ const directPayment = (
     inputIndex,
     accountIdBytes(accountIndex),
     leftPays ? 0 : 1, // proposer side
-    [1_700_000_000_000 + inputIndex, 1_700_000_000_000 + inputIndex, 100, 0],
+    [1_700_000_000_000 + inputIndex, 1_700_000_000_000 + inputIndex, 100, 0, 100],
     [0, 1, amount.toString(), [to], null, from, to, 0, null],
   ];
 };
@@ -95,7 +97,7 @@ const main = async (): Promise<void> => {
     runtimeId: Buffer.alloc(20, 0x10),
     sessionId: Buffer.alloc(16, 0x20),
   });
-  await client.hello(workers);
+  await client.hello(workers, swapMarketPolicyWire());
   const seeds = Array.from({ length: accounts }, (_, index) => seed(index));
   const restoreStarted = performance.now();
   await client.restore(0, seeds);

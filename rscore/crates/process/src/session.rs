@@ -12,6 +12,7 @@ pub struct ProcessReply {
 pub struct ProcessSession {
     binding: Option<SessionBinding>,
     worker_count: usize,
+    swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     last_request_id: Option<u64>,
     engine: Option<StatefulBatchEngine>,
     pending: Option<PendingBatch>,
@@ -31,10 +32,11 @@ struct PendingBatch {
 }
 
 impl ProcessSession {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             binding: None,
             worker_count: 0,
+            swap_market: std::sync::Arc::default(),
             last_request_id: None,
             engine: None,
             pending: None,
@@ -83,7 +85,11 @@ impl ProcessSession {
         request: &Envelope,
         command: Command,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let Command::Hello { worker_count } = command else {
+        let Command::Hello {
+            worker_count,
+            swap_market,
+        } = command
+        else {
             return Err(ProcessError::HelloRequired);
         };
         validate_payment_profile_binding(&request.binding)?;
@@ -100,7 +106,9 @@ impl ProcessSession {
         self.binding = Some(SessionBinding::from_request(request));
         self.worker_count = worker_count;
         self.last_request_id = Some(0);
-        Ok((wire_encode::hello(worker_count), false))
+        let digest = swap_market.digest();
+        self.swap_market = std::sync::Arc::new(swap_market);
+        Ok((wire_encode::hello(worker_count, digest), false))
     }
 
     fn validate_bound_request(&self, request: &Envelope) -> Result<(), ProcessError> {
@@ -197,7 +205,10 @@ impl ProcessSession {
         }
         let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
         let accounts_root = engine.upsert_accounts(accounts)?;
-        Ok((wire_encode::upserted(engine.revision(), accounts_root), false))
+        Ok((
+            wire_encode::upserted(engine.revision(), accounts_root),
+            false,
+        ))
     }
 
     fn prepare(
@@ -209,7 +220,17 @@ impl ProcessSession {
             return Err(ProcessError::PreparePending);
         }
         let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
-        let candidate = engine.prepare(jobs)?;
+        // The session owns the market tables; every job executes against the
+        // exact policy installed at Hello.
+        let jobs: Vec<xln_rscore_batch::BatchJob> = jobs
+            .iter()
+            .map(|job| {
+                let mut job = job.clone();
+                job.context.swap_market = std::sync::Arc::clone(&self.swap_market);
+                job
+            })
+            .collect();
+        let candidate = engine.prepare(&jobs)?;
         let response = wire_encode::prepared(&candidate)?;
         self.pending = Some(PendingBatch {
             prepare_request_id: request_id,

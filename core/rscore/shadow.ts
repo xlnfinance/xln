@@ -28,6 +28,8 @@ import {
   accountTxWire,
   hexToWireBytes,
   shadowIneligibilityReason,
+  swapMarketPolicyDigest,
+  swapMarketPolicyWire,
   type ShadowOutputRow,
 } from './shadow-wire';
 
@@ -102,6 +104,35 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
       wireText(output[4], 'SHADOW_ENGINE_ERROR_AMOUNT'),
       wireOptionalText(output[5], 'SHADOW_ENGINE_ERROR_REASON'),
     ];
+  }
+  if (tag === 3) {
+    wireTuple(output, 'SHADOW_ENGINE_OFFER', 16);
+    const makerSide = wireInteger(output[2], 'SHADOW_ENGINE_OFFER_MAKER');
+    if (makerSide !== 0 && makerSide !== 1) throw new Error(`SHADOW_ENGINE_OFFER_MAKER:${makerSide}`);
+    return [
+      'offer',
+      wireText(output[1], 'SHADOW_ENGINE_OFFER_ID'),
+      makerSide,
+      wireText(output[3], 'SHADOW_ENGINE_OFFER_FROM'),
+      wireText(output[4], 'SHADOW_ENGINE_OFFER_TO'),
+      wireInteger(output[5], 'SHADOW_ENGINE_OFFER_HEIGHT'),
+      wireInteger(output[6], 'SHADOW_ENGINE_OFFER_GIVE_TOKEN'),
+      wireInteger(output[7], 'SHADOW_ENGINE_OFFER_GIVE_DECIMALS'),
+      wireText(output[8], 'SHADOW_ENGINE_OFFER_GIVE_AMOUNT'),
+      wireInteger(output[9], 'SHADOW_ENGINE_OFFER_WANT_TOKEN'),
+      wireInteger(output[10], 'SHADOW_ENGINE_OFFER_WANT_DECIMALS'),
+      wireText(output[11], 'SHADOW_ENGINE_OFFER_WANT_AMOUNT'),
+      wireText(output[12], 'SHADOW_ENGINE_OFFER_MAX_FEE'),
+      wireText(output[13], 'SHADOW_ENGINE_OFFER_MIN_NET'),
+      wireText(output[14], 'SHADOW_ENGINE_OFFER_PRICE_TICKS'),
+      output[15] === null || output[15] === undefined
+        ? null
+        : wireInteger(output[15], 'SHADOW_ENGINE_OFFER_TIF'),
+    ];
+  }
+  if (tag === 4) {
+    wireTuple(output, 'SHADOW_ENGINE_CANCEL_REQUEST', 2);
+    return ['cancelRequest', wireText(output[1], 'SHADOW_ENGINE_CANCEL_REQUEST_ID')];
   }
   throw new Error(`SHADOW_ENGINE_OUTPUT_TAG_UNSUPPORTED:${tag}`);
 };
@@ -668,7 +699,16 @@ export class RscoreShadowMirror {
           index,
           accountIdBytes,
           input.byLeft ? 0 : 1,
-          [input.timestamp, input.enforcementTimestamp, input.enforcementJHeight, input.frameHeight - 1],
+          [
+            input.timestamp,
+            input.enforcementTimestamp,
+            input.enforcementJHeight,
+            input.frameHeight - 1,
+            // Swap and pull transitions are clocked with the frame's own J
+            // height (core/account/consensus: frameJHeight), which is neither
+            // the account height nor the Entity enforcement clock.
+            input.jHeight,
+          ],
           wire,
         ]);
       }
@@ -979,13 +1019,27 @@ export class RscoreShadowMirror {
     });
   }
 
+  /**
+   * Install the registry-derived swap market tables and prove the engine read
+   * them as sent: the engine cannot derive pair orientation or the price step
+   * from account state, so a silent disagreement there would misprice offers
+   * on one side only.
+   */
+  async #hello(client: RscoreProcessClient): Promise<void> {
+    const market = swapMarketPolicyWire();
+    const reply = wireTuple(await client.hello(this.#workers, market), 'SHADOW_HELLO', 4);
+    const digest = `0x${Buffer.from(wireBytes(reply[3], 'SHADOW_HELLO_MARKET', 32)).toString('hex')}`;
+    const expected = swapMarketPolicyDigest(market);
+    if (digest !== expected) throw new Error(`SHADOW_HELLO_MARKET_DIGEST:${digest}:${expected}`);
+  }
+
   async #restoreCheckpoint(seeds: RscoreWireValue[][]): Promise<Readonly<{
     client: RscoreProcessClient;
     restored: unknown[];
   }>> {
     const client = this.#makeClient(this.#binaryPath);
     try {
-      await client.hello(this.#workers);
+      await this.#hello(client);
       const restored = wireTuple(await client.restore(0, seeds), 'SHADOW_PRIME_RESTORE', 2);
       return { client, restored };
     } catch (error) {
@@ -1029,7 +1083,7 @@ export class RscoreShadowMirror {
     const existing = this.#clients.get(ownerKey);
     if (existing) return existing;
     const client = this.#makeClient(this.#binaryPath);
-    await client.hello(this.#workers);
+    await this.#hello(client);
     await client.restore(0, []);
     this.#clients.set(ownerKey, client);
     return client;

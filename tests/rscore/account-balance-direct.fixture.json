@@ -19,8 +19,8 @@
     "paymentProfileAccountStateRoot"
   ],
   "request": {
-    "bytes": 2072,
-    "sha256": "6b9946be918c3aefa5cc12975041d428b662e7d375d06b7f2cd5f640f6db6667"
+    "bytes": 2076,
+    "sha256": "9957c0bcd3b78bead532d9ca142dfe094cb56821b619d5456b79caa75e97c471"
   },
   "response": {
     "bytes": 3510,

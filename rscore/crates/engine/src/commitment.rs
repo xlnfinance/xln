@@ -12,6 +12,7 @@ pub(crate) struct PaymentAccountRoots {
     pub locks: [u8; 32],
     pub lending_intents: [u8; 32],
     pub rebalance_fee_policies: [u8; 32],
+    pub swap_offers: [u8; 32],
 }
 
 pub(crate) struct AccountJournal {
@@ -29,7 +30,6 @@ pub(crate) struct AccountJournal {
 #[derive(Clone, Default)]
 pub struct CarriedSections {
     pub pulls_root: [u8; 32],
-    pub swap_offers_root: [u8; 32],
     pub subcontracts_root: [u8; 32],
     pub requested_rebalance_root: [u8; 32],
     pub requested_rebalance_fee_state_root: [u8; 32],
@@ -88,7 +88,7 @@ fn account_state_entries(
             object(vec![
                 ("locksRoot", root_value(&roots.locks)),
                 ("pullsRoot", root_value(&carried.pulls_root)),
-                ("swapOffersRoot", root_value(&carried.swap_offers_root)),
+                ("swapOffersRoot", root_value(&roots.swap_offers)),
                 ("subcontractsRoot", root_value(&carried.subcontracts_root)),
                 ("lendingIntentsRoot", root_value(&roots.lending_intents)),
             ]),
@@ -96,9 +96,18 @@ fn account_state_entries(
         (
             "jurisdiction".into(),
             object(vec![
-                ("lastFinalizedJHeight", number(journal.last_finalized_j_height)),
-                ("leftPendingJClaims", claim_value(&carried.left_pending_j_claims)),
-                ("rightPendingJClaims", claim_value(&carried.right_pending_j_claims)),
+                (
+                    "lastFinalizedJHeight",
+                    number(journal.last_finalized_j_height),
+                ),
+                (
+                    "leftPendingJClaims",
+                    claim_value(&carried.left_pending_j_claims),
+                ),
+                (
+                    "rightPendingJClaims",
+                    claim_value(&carried.right_pending_j_claims),
+                ),
             ]),
         ),
         (
@@ -151,7 +160,10 @@ fn claim_value(accumulator: &JClaimAccumulator) -> CanonicalValue {
     object(vec![
         ("version", number(1)),
         ("root", root_value(&accumulator.root)),
-        ("count", CanonicalValue::BigInt(BigInt::from(accumulator.count))),
+        (
+            "count",
+            CanonicalValue::BigInt(BigInt::from(accumulator.count)),
+        ),
     ])
 }
 

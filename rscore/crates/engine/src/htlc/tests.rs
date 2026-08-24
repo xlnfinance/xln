@@ -51,7 +51,7 @@ fn replica() -> AccountReplica {
 
 #[test]
 fn hold_underflow_is_a_typed_atomic_rejection() {
-    let context = AccountExecutionContext::new(1_000, 1_000, 10, 7);
+    let context = AccountExecutionContext::new(1_000, 1_000, 10, 7, 10);
     let token_id = TokenId::new(1).expect("literal token");
     let lock = AccountTx::HtlcLock(HtlcLockTx {
         lock_id: "underflow".into(),

@@ -17,17 +17,16 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=2")
-        // wire=2: the seed carries rebalance policy rows instead of a carried
-        // root, and the summary row carries the full account state root. The
-        // fingerprint exists to reject a binary built for the older shapes at
-        // Hello, so it moves with every request/reply shape change.
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=3")
+        // wire=3: the seed carries rebalance policy and swap offer rows instead
+        // of carried roots, Hello installs the swap market tables, and the job
+        // context carries the signed frame's J height. The fingerprint exists
+        // to reject a binary built for the older shapes at Hello, so it moves
+        // with every request/reply shape change.
         protocol_fingerprint: [
-            0x8d, 0x08, 0xcd, 0x9d, 0xa6, 0x52, 0xb3,
-            0x42, 0xf3, 0xac, 0x3e, 0x6c, 0x59, 0x50,
-            0xf4, 0xbb, 0x53, 0xcd, 0xae, 0xab, 0xfc,
-            0xa1, 0x3f, 0x23, 0x43, 0x1c, 0xb2, 0xcd,
-            0x8d, 0x02, 0x90, 0x2b
+            0x90, 0xf4, 0x1c, 0x54, 0x2e, 0xe7, 0xd5, 0x41, 0x05, 0x8f, 0x81, 0xba, 0xb9, 0xa7,
+            0x78, 0xd7, 0xa9, 0xa6, 0x51, 0xf9, 0x01, 0xc6, 0xa9, 0x73, 0xdf, 0x58, 0xaf, 0xf4,
+            0x49, 0xa5, 0x44, 0x20,
         ],
     };
 

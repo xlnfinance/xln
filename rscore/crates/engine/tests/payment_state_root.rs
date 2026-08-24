@@ -126,7 +126,7 @@ fn exact_payment_profile_root_matches_typescript_with_committed_htlc() {
         &base,
         Side::Left,
         &tx,
-        &AccountExecutionContext::new(1_000, 1_000, 0, 0),
+        &AccountExecutionContext::new(1_000, 1_000, 0, 0, 0),
     )
     .expect("reachable lock transition")
     .committed()

@@ -10,7 +10,9 @@ use xln_rscore_protocol::CanonicalValue;
 
 use crate::delta::MAX_TOKEN_ID;
 use crate::mutation::MutationDecision;
-use crate::{AccountRejection, AccountReplica, Side, TokenId, TransitionError, ValidationRejection};
+use crate::{
+    AccountRejection, AccountReplica, Side, TokenId, TransitionError, ValidationRejection,
+};
 
 const MAX_LIQUIDITY_FEE_BPS: i64 = 10_000;
 
@@ -67,7 +69,10 @@ impl RebalanceFeePolicySnapshot {
                 "liquidityFeeBps".into(),
                 CanonicalValue::BigInt(self.liquidity_fee_bps.clone()),
             ),
-            ("gasFee".into(), CanonicalValue::BigInt(self.gas_fee.clone())),
+            (
+                "gasFee".into(),
+                CanonicalValue::BigInt(self.gas_fee.clone()),
+            ),
             (
                 "updatedAt".into(),
                 CanonicalValue::Number(self.updated_at as f64),
@@ -143,12 +148,14 @@ pub(crate) fn apply_policy(
         gas_fee,
     } = tx;
     if token_id == 0 || token_id > MAX_TOKEN_ID {
-        return Ok(rejected(ValidationRejection::RebalancePolicyTokenId { token_id }));
+        return Ok(rejected(ValidationRejection::RebalancePolicyTokenId {
+            token_id,
+        }));
     }
     if policy_version == 0 {
         return Ok(rejected(ValidationRejection::RebalancePolicyVersion {
-                version: policy_version,
-            }));
+            version: policy_version,
+        }));
     }
     if committed_timestamp == 0 {
         return Ok(rejected(ValidationRejection::RebalancePolicyTimestamp));
@@ -159,13 +166,17 @@ pub(crate) fn apply_policy(
         || liquidity_fee_bps < &zero
         || liquidity_fee_bps > &BigInt::from(MAX_LIQUIDITY_FEE_BPS)
     {
-        return Ok(rejected(ValidationRejection::RebalancePolicyFeeTerms { token_id }));
+        return Ok(rejected(ValidationRejection::RebalancePolicyFeeTerms {
+            token_id,
+        }));
     }
     // The token id is already inside the accepted range, so this cannot widen
     // the delta key space.
     let token = TokenId::new(token_id)?;
     if replica.state().delta(token).is_none() {
-        return Ok(rejected(ValidationRejection::RebalancePolicyMissingDelta { token_id }));
+        return Ok(rejected(ValidationRejection::RebalancePolicyMissingDelta {
+            token_id,
+        }));
     }
 
     let register = replica.state().rebalance_policy(token).cloned();
@@ -179,10 +190,10 @@ pub(crate) fn apply_policy(
         if policy_version == current.policy_version {
             if !current.same_terms(base_fee, liquidity_fee_bps, gas_fee) {
                 return Ok(rejected(ValidationRejection::RebalancePolicyEquivocation {
-                        side: proposer,
-                        token_id,
-                        version: policy_version,
-                    }));
+                    side: proposer,
+                    token_id,
+                    version: policy_version,
+                }));
             }
             return Ok(MutationDecision::applied(vec![format!(
                 "rebalance_policy: exact v{policy_version} retry"
@@ -197,9 +208,7 @@ pub(crate) fn apply_policy(
         gas_fee.clone(),
         committed_timestamp,
     );
-    let updated = register
-        .unwrap_or_default()
-        .with_side(proposer, next);
+    let updated = register.unwrap_or_default().with_side(proposer, next);
     replica.state_mut().put_rebalance_policy(token, updated)?;
     let side = if proposer == Side::Left {
         "left"

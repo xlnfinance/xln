@@ -289,6 +289,7 @@ dependencies = [
  "base64",
  "hex",
  "num-bigint",
+ "num-integer",
  "sha2",
  "sha3",
  "thiserror",

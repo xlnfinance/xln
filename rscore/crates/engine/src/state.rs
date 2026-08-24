@@ -8,6 +8,7 @@ use xln_rscore_protocol::{
 
 use crate::delta::MAX_ACCOUNT_TOKEN_ROWS;
 use crate::rebalance::BilateralRebalanceFeePolicy;
+use crate::swap::SwapOffer;
 use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenId};
 
 const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;
@@ -80,12 +81,28 @@ pub struct AccountState {
     /// Per-token bilateral fee registers. Owned and interpreted here, unlike
     /// the carried sections below.
     rebalance_fee_policies: PersistentRadixMap<BilateralRebalanceFeePolicy>,
+    /// Resting same-jurisdiction offers, keyed by offer id.
+    swap_offers: PersistentRadixMap<SwapOffer>,
     j_nonce: u64,
     last_finalized_j_height: u64,
     /// Sections no supported transaction mutates; committed verbatim so a
     /// live account with swap/pull/rebalance/J-claim state still reproduces
     /// its exact TypeScript state root.
     carried: crate::commitment::CarriedSections,
+}
+
+/// Everything a checkpoint carries for one account, in the same shape the
+/// process seed decodes it from the wire.
+pub struct AccountStateSeed {
+    pub identity: AccountIdentity,
+    pub dispute_config: AccountDisputeConfig,
+    pub deltas: Vec<Delta>,
+    pub locks: Vec<HtlcLock>,
+    pub j_nonce: u64,
+    pub last_finalized_j_height: u64,
+    pub carried: crate::commitment::CarriedSections,
+    pub rebalance_fee_policies: Vec<(TokenId, BilateralRebalanceFeePolicy)>,
+    pub swap_offers: Vec<SwapOffer>,
 }
 
 impl AccountState {
@@ -117,28 +134,31 @@ impl AccountState {
         j_nonce: u64,
         last_finalized_j_height: u64,
     ) -> Result<Self, StateError> {
-        Self::restore_full(
+        Self::restore_full(AccountStateSeed {
             identity,
             dispute_config,
             deltas,
             locks,
             j_nonce,
             last_finalized_j_height,
-            crate::commitment::CarriedSections::default(),
-            Vec::new(),
-        )
+            carried: crate::commitment::CarriedSections::default(),
+            rebalance_fee_policies: Vec::new(),
+            swap_offers: Vec::new(),
+        })
     }
 
-    pub fn restore_full(
-        identity: AccountIdentity,
-        dispute_config: AccountDisputeConfig,
-        deltas: Vec<Delta>,
-        locks: Vec<HtlcLock>,
-        j_nonce: u64,
-        last_finalized_j_height: u64,
-        carried: crate::commitment::CarriedSections,
-        rebalance_fee_policies: Vec<(TokenId, BilateralRebalanceFeePolicy)>,
-    ) -> Result<Self, StateError> {
+    pub fn restore_full(seed: AccountStateSeed) -> Result<Self, StateError> {
+        let AccountStateSeed {
+            identity,
+            dispute_config,
+            deltas,
+            locks,
+            j_nonce,
+            last_finalized_j_height,
+            carried,
+            rebalance_fee_policies,
+            swap_offers,
+        } = seed;
         if deltas.len() > MAX_ACCOUNT_TOKEN_ROWS {
             return Err(StateError::DeltaRowLimitExceeded {
                 context: "decode",
@@ -177,6 +197,10 @@ impl AccountState {
             }
             policy_map = put_policy_map(&policy_map, token_id, policy)?;
         }
+        let mut offer_map = PersistentRadixMap::empty();
+        for offer in swap_offers {
+            offer_map = put_swap_offer_map(&offer_map, offer)?;
+        }
         Ok(Self {
             identity,
             dispute_config,
@@ -184,6 +208,7 @@ impl AccountState {
             locks: lock_map,
             lending_intents: None,
             rebalance_fee_policies: policy_map,
+            swap_offers: offer_map,
             j_nonce,
             last_finalized_j_height,
             carried,
@@ -218,6 +243,7 @@ impl AccountState {
                     .as_ref()
                     .map_or([0; 32], PersistentRadixMap::root_hash),
                 rebalance_fee_policies: self.rebalance_fee_policies.root_hash(),
+                swap_offers: self.swap_offers.root_hash(),
             },
             crate::commitment::AccountJournal {
                 j_nonce: self.j_nonce,
@@ -251,6 +277,23 @@ impl AccountState {
 
     pub fn rebalance_fee_policies_root(&self) -> [u8; 32] {
         self.rebalance_fee_policies.root_hash()
+    }
+
+    pub fn swap_offer(&self, offer_id: &str) -> Option<&SwapOffer> {
+        let raw_key = encode_raw_text_key(offer_id).ok()?;
+        self.swap_offers.get(&raw_key)
+    }
+
+    pub fn swap_offers(&self) -> impl Iterator<Item = &SwapOffer> {
+        self.swap_offers.iter().map(|(_, offer)| offer)
+    }
+
+    pub fn swap_offer_count(&self) -> usize {
+        self.swap_offers.len()
+    }
+
+    pub fn swap_offers_root(&self) -> [u8; 32] {
+        self.swap_offers.root_hash()
     }
 
     pub fn htlc_lock(&self, lock_id: &str) -> Option<&HtlcLock> {
@@ -316,7 +359,13 @@ impl AccountState {
         token_id: TokenId,
         policy: BilateralRebalanceFeePolicy,
     ) -> Result<(), StateError> {
-        self.rebalance_fee_policies = put_policy_map(&self.rebalance_fee_policies, token_id, policy)?;
+        self.rebalance_fee_policies =
+            put_policy_map(&self.rebalance_fee_policies, token_id, policy)?;
+        Ok(())
+    }
+
+    pub(crate) fn put_swap_offer(&mut self, offer: SwapOffer) -> Result<(), StateError> {
+        self.swap_offers = put_swap_offer_map(&self.swap_offers, offer)?;
         Ok(())
     }
 
@@ -418,6 +467,16 @@ fn put_htlc_map(
     let key = crate::htlc_lock_radix_key(lock.lock_id())?;
     let digest = crate::htlc_lock_value_digest(&lock)?;
     map.updated(key, lock, digest)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))
+}
+
+fn put_swap_offer_map(
+    map: &PersistentRadixMap<SwapOffer>,
+    offer: SwapOffer,
+) -> Result<PersistentRadixMap<SwapOffer>, StateError> {
+    let key = text_key(offer.offer_id())?;
+    let digest = canonical_digest(offer.canonical())?;
+    map.updated(key, offer, digest)
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
 

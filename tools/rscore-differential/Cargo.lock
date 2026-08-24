@@ -228,6 +228,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "num-bigint",
+ "num-integer",
  "sha2",
  "sha3",
  "thiserror",

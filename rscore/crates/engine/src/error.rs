@@ -92,6 +92,35 @@ pub enum ValidationRejection {
         token_id: u32,
         version: u64,
     },
+    SwapOfferId {
+        offer_id: String,
+    },
+    SwapOfferExists {
+        offer_id: String,
+    },
+    SwapOfferLimit {
+        maximum: usize,
+    },
+    SwapOfferMarketLimit {
+        market: String,
+        maximum: usize,
+    },
+    SwapOfferDecimals,
+    SwapOfferAmount,
+    SwapOfferSameToken {
+        token_id: u32,
+    },
+    SwapOfferTimeInForce,
+    SwapOfferQuantization {
+        offer_id: String,
+    },
+    SwapOfferNotFound {
+        offer_id: String,
+    },
+    SwapCancelNotMaker,
+    SwapNetAuthorization {
+        code: &'static str,
+    },
     Htlc(HtlcRejection),
 }
 
@@ -138,6 +167,26 @@ impl ValidationRejection {
                 let side = if *side == Side::Left { "left" } else { "right" };
                 format!("REBALANCE_POLICY_EQUIVOCATION: side={side} token={token_id} version={version}")
             }
+            Self::SwapOfferId { offer_id } => {
+                format!("Invalid offerId: colons not allowed (got {offer_id})")
+            }
+            Self::SwapOfferExists { offer_id } => format!("Offer {offer_id} already exists"),
+            Self::SwapOfferLimit { maximum } => {
+                format!("Too many open swap offers: max {maximum}")
+            }
+            Self::SwapOfferMarketLimit { market, maximum } => {
+                format!("Too many open swap offers for {market}: max {maximum}")
+            }
+            Self::SwapOfferDecimals => "Invalid token decimals".into(),
+            Self::SwapOfferAmount => "Invalid swap amount".into(),
+            Self::SwapOfferSameToken { token_id } => format!("Cannot swap same token: {token_id}"),
+            Self::SwapOfferTimeInForce => "Invalid timeInForce".into(),
+            Self::SwapOfferQuantization { offer_id } => format!(
+                "Invalid price ratio or order too small after canonical quantization: {offer_id}"
+            ),
+            Self::SwapOfferNotFound { offer_id } => format!("Offer {offer_id} not found"),
+            Self::SwapCancelNotMaker => "Only maker can cancel swap offer".into(),
+            Self::SwapNetAuthorization { code } => (*code).to_owned(),
             Self::Htlc(reason) => reason.message(),
         }
     }
@@ -178,6 +227,8 @@ pub enum TransitionError {
     InvalidState(#[from] StateError),
     #[error(transparent)]
     HtlcBoundary(#[from] HtlcBoundaryError),
+    #[error("SWAP_MARKET_POLICY_MISSING")]
+    SwapMarketPolicyMissing,
     #[error("TRUSTED_PAYMENT_FORWARD_CONTEXT_MISSING")]
     TrustedPaymentForwardContextMissing,
     #[error("TRUSTED_PAYMENT_FORWARD_GATEWAY_MISMATCH")]

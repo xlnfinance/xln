@@ -41,9 +41,9 @@ export const RSCORE_PROCESS_ABI_VERSION = 1;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=2")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=3")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '8d08cd9da652b342f3ac3e6c5950f4bb53cdaeabfca13f23431cb2cd8d02902b',
+  '90f41c542ee7d541058f81bab9a778d7a9a651f901c6a973df58aff449a54420',
   'hex',
 );
 
@@ -441,8 +441,8 @@ export class RscoreProcessClient {
     return Array.isArray(body) && body.length === 1 ? body[0] : body;
   }
 
-  async hello(workerCount: number): Promise<unknown> {
-    return this.request(RSCORE_OP.hello, [RSCORE_PROCESS_ABI_VERSION, workerCount]);
+  async hello(workerCount: number, swapMarket: RscoreWireValue[]): Promise<unknown> {
+    return this.request(RSCORE_OP.hello, [RSCORE_PROCESS_ABI_VERSION, workerCount, swapMarket]);
   }
 
   async restore(revision: number, accounts: RscoreWireValue[]): Promise<unknown> {

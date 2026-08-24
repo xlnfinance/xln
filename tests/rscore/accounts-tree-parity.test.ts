@@ -20,6 +20,8 @@ import type { AccountReplica, AccountTx, Delta } from '../../core/types/account'
 import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j';
 import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../core/account/j-claims/j-claim-codec';
 import { RscoreProcessClient, type RscoreWireValue } from '../../core/rscore/client';
+import { engineOutputProjection } from '../../core/rscore/shadow';
+import { shadowOutputRows, swapMarketPolicyWire } from '../../core/rscore/shadow-wire';
 
 const BINARY = join(import.meta.dir, '../../rscore/target/release/xln-rscore');
 
@@ -99,8 +101,9 @@ const makeTsAccountWithClaims = (index: number, count: bigint): AccountReplica =
 // payment-profile account (roots zero, J-claim accumulators at genesis).
 const EMPTY_CLAIM: RscoreWireValue[] = [hexBytes(EMPTY_ACCOUNT_J_CLAIM_ROOT), 0];
 const EMPTY_CARRIED: RscoreWireValue[] = [
+  new Uint8Array(32),
+  [], // resting swap offers: owned by the engine, shipped in full
   new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
-  new Uint8Array(32), new Uint8Array(32),
   [], // rebalance fee policies: owned by the engine, shipped in full
   EMPTY_CLAIM, EMPTY_CLAIM,
 ];
@@ -134,8 +137,9 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   [],
   [account.state.jNonce, account.state.lastFinalizedJHeight],
   [
+    new Uint8Array(32),
+    [], // resting swap offers: owned by the engine, shipped in full
     new Uint8Array(32), new Uint8Array(32), new Uint8Array(32),
-    new Uint8Array(32), new Uint8Array(32),
     [],
     claimWire(account.state.leftPendingJClaims),
     claimWire(account.state.rightPendingJClaims),
@@ -164,7 +168,7 @@ const paymentJob = (
   inputIndex,
   hexBytes(ACCOUNT_IDS[accountIndex]!),
   1, // proposer = right (byLeft=false)
-  [0, 0, 0, 0],
+  [0, 0, 0, 0, 0],
   [
     0,
     1,
@@ -174,6 +178,62 @@ const paymentJob = (
     account.state.rightEntity,
     account.state.leftEntity,
     0,
+    null,
+  ],
+];
+
+// Give leg of the swap: token 2 (18 decimals) against token 1 (6 decimals),
+// the pair the registry quotes with a price step of one tick.
+const SWAP_GIVE = 10n ** 18n;
+const SWAP_WANT = 2_000_000n;
+const SWAP_MAX_FEE = 100_000n;
+
+const makeTsSwapAccount = (index: number): AccountReplica => {
+  const account = makeTsAccount(index);
+  account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [
+    [1, initialDelta()],
+    [2, { ...createDefaultDelta(2), collateral: 10n ** 19n }],
+  ]);
+  return account;
+};
+
+const swapOfferTx = (index: number): AccountTx => ({
+  type: 'swap_offer',
+  data: {
+    offerId: `parity-offer-${index}`,
+    giveTokenId: 2,
+    giveTokenDecimals: 18,
+    giveAmount: SWAP_GIVE,
+    wantTokenId: 1,
+    wantTokenDecimals: 6,
+    wantAmount: SWAP_WANT,
+    maxFee: SWAP_MAX_FEE,
+    minNetReceive: SWAP_WANT - SWAP_MAX_FEE,
+  },
+});
+
+// createdHeight comes from the finalized J height, not the account frame
+// height: the two are deliberately different here so the wrong clock diverges.
+const SWAP_J_HEIGHT = 21;
+const SWAP_ACCOUNT_HEIGHT = 3;
+
+const swapOfferJob = (index: number): RscoreWireValue[] => [
+  index,
+  hexBytes(ACCOUNT_IDS[index]!),
+  1, // proposer = right (byLeft=false); same-j maker is the proposer
+  // enforcementJHeight is deliberately NOT the frame J height here.
+  [0, 0, SWAP_J_HEIGHT + 12, SWAP_ACCOUNT_HEIGHT, SWAP_J_HEIGHT],
+  [
+    6,
+    `parity-offer-${index}`,
+    2,
+    18,
+    SWAP_GIVE.toString(),
+    1,
+    6,
+    SWAP_WANT.toString(),
+    SWAP_MAX_FEE.toString(),
+    (SWAP_WANT - SWAP_MAX_FEE).toString(),
     null,
   ],
 ];
@@ -208,7 +268,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       sessionId: Buffer.alloc(16, 0x20),
     });
     try {
-      await client.hello(2);
+      await client.hello(2, swapMarketPolicyWire());
       const loaded = (await client.restore(0, accounts.map((account, index) => seedWire(index, account)))) as unknown[];
       expect(loaded[0]).toBe(0);
       expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(referenceRoot(accounts));
@@ -249,6 +309,77 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
     }
   }, 30_000);
 
+  test('a same-j swap offer holds and rests identically in both engines', async () => {
+    const accounts = ACCOUNT_IDS.slice(0, 3).map((_, index) => makeTsSwapAccount(index));
+    const client = new RscoreProcessClient(BINARY, {
+      engineGeneration: Buffer.alloc(8, 0xa0),
+      runtimeId: Buffer.alloc(20, 0x10),
+      sessionId: Buffer.alloc(16, 0x20),
+    });
+    try {
+      await client.hello(2, swapMarketPolicyWire());
+      const loaded = (await client.restore(
+        0,
+        accounts.map((account, index) => seedWire(index, account)),
+      )) as unknown[];
+      expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(referenceRoot(accounts));
+
+      const prepared = (await client.prepare(accounts.map((_, index) => swapOfferJob(index)))) as unknown[];
+      const verdicts = (prepared[2] as unknown[]).map(row => Number(((row as unknown[])[2] as unknown[])[0]));
+      expect(verdicts).toEqual(accounts.map(() => 0)); // all applied
+      // One offer event per input, in input order, decoded through the same
+      // projection the shadow mirror compares with.
+      const engineOutputs = accounts.map((_, index) => engineOutputProjection(
+        prepared[3] as unknown[],
+        ACCOUNT_IDS[index]!.slice(2),
+      ));
+      expect(engineOutputs.map(rows => rows.length)).toEqual(accounts.map(() => 1));
+
+      for (const [index, account] of accounts.entries()) {
+        const result = await applyAccountTxToMutableReplica(
+          account,
+          swapOfferTx(index),
+          false,
+          0,
+          SWAP_J_HEIGHT,
+          false,
+        );
+        if (!result.ok) throw new Error(`TS_APPLY_REJECTED:${index}:${result.rejection.code}`);
+        // The offer event the Entity layer consumes must match field for
+        // field, not only the resulting account root.
+        if (result.outcome !== 'swap_offer_created') throw new Error(`TS_OUTCOME:${result.outcome}`);
+        expect(engineOutputs[index]![0]![2]).toEqual(shadowOutputRows(result)[0]!);
+        expect(shadowOutputRows(result)).toEqual([[
+          'offer',
+          `parity-offer-${index}`,
+          1,
+          account.state.leftEntity,
+          account.state.rightEntity,
+          SWAP_J_HEIGHT,
+          2,
+          18,
+          SWAP_GIVE.toString(),
+          1,
+          6,
+          SWAP_WANT.toString(),
+          SWAP_MAX_FEE.toString(),
+          (SWAP_WANT - SWAP_MAX_FEE).toString(),
+          result.swapOfferCreated.priceTicks!.toString(),
+          null,
+        ]]);
+      }
+
+      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      // The hold and the resting row are hashed state: the committed root must
+      // both match TypeScript and differ from the pre-offer root.
+      expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
+      expect(new Uint8Array(committed[1] as Uint8Array)).not.toEqual(new Uint8Array(loaded[1] as Uint8Array));
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  }, 30_000);
+
   test.each(LARGE_CLAIM_COUNTS.map(count => [count.toString()] as const))(
     'carries a uint64 J-claim counter losslessly (%s)',
     async (countText: string) => {
@@ -261,7 +392,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         sessionId: Buffer.alloc(16, 0x20),
       });
       try {
-        await client.hello(2);
+        await client.hello(2, swapMarketPolicyWire());
         const loaded = (await client.restore(
           0,
           accounts.map((account, index) => seedWire(index, account)),
@@ -286,7 +417,12 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
     ['disputeLeftSeconds', wire => { (wire[7] as RscoreWireValue[])[0] = 11; }],
     ['disputeRightSeconds', wire => { (wire[7] as RscoreWireValue[])[1] = 13; }],
     ['pullsRoot', wire => { (wire[11] as RscoreWireValue[])[0] = hexBytes(entity('a1')); }],
-    ['swapOffersRoot', wire => { (wire[11] as RscoreWireValue[])[1] = hexBytes(entity('a2')); }],
+    ['swapOffers', wire => {
+      (wire[11] as RscoreWireValue[])[1] = [[
+        'offer-1', 2, 18, '1000000000000000000', 1, 6, '2000000', '0', '2000000', '20000',
+        null, 0, 3,
+      ]];
+    }],
     ['subcontractsRoot', wire => { (wire[11] as RscoreWireValue[])[2] = hexBytes(entity('a3')); }],
     ['requestedRebalanceRoot', wire => { (wire[11] as RscoreWireValue[])[3] = hexBytes(entity('a4')); }],
     ['requestedRebalanceFeeStateRoot', wire => { (wire[11] as RscoreWireValue[])[4] = hexBytes(entity('a5')); }],
@@ -315,7 +451,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         sessionId: Buffer.alloc(16, 0x20),
       });
       try {
-        await client.hello(2);
+        await client.hello(2, swapMarketPolicyWire());
         const seeds = accounts.map((account, index) => seedWire(index, account));
         perturb(seeds[0]!);
         const loaded = (await client.restore(0, seeds)) as unknown[];

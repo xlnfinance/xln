@@ -17,6 +17,8 @@ type ExecutionContext = Readonly<{
   enforcementTimestamp: number;
   enforcementJHeight: number;
   currentAccountHeight: number;
+  /** The signed frame's own J height; the corpus clocks both from one value. */
+  frameJHeight: number;
 }>;
 type Case = Readonly<{
   id: string;
@@ -93,6 +95,7 @@ const htlcContext = (timestamp: number, jHeight: number): ExecutionContext => ({
   enforcementTimestamp: timestamp,
   enforcementJHeight: jHeight,
   currentAccountHeight: 0,
+  frameJHeight: jHeight,
 });
 
 const htlcLock = (
@@ -247,6 +250,7 @@ const contextWire = (context: ExecutionContext | undefined): WireValue =>
         context.enforcementTimestamp,
         context.enforcementJHeight,
         context.currentAccountHeight,
+        context.frameJHeight,
       ]
     : null;
 
