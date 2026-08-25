@@ -91,9 +91,11 @@ type RecordedClock = {
  * driver on turns this on too, rather than leaving it silently collecting
  * nothing.
  */
-export const authorityRecordEnabled = (): boolean =>
+export const authorityRecordEnabled = (
+  authorityEnabled = process.env['XLN_RSCORE_AUTHORITY'] === '1',
+): boolean =>
   process.env['XLN_RSCORE_AUTHORITY_RECORD'] === '1'
-  || process.env['XLN_RSCORE_AUTHORITY'] === '1';
+  || authorityEnabled;
 
 /**
  * The frame being recorded, and the Runtime it belongs to. A single process

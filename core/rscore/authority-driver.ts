@@ -22,6 +22,8 @@
  * one call.
  */
 
+import { createHash } from 'node:crypto';
+
 import { createStructuredLogger } from '../support/logger';
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
@@ -38,6 +40,7 @@ import {
   accountConsensusWire,
   accountEnvelopeWire,
   accountSeedWire,
+  hexToWireBytes,
   swapMarketPolicyDigest,
   swapMarketPolicyWire,
 } from './shadow-wire';
@@ -60,9 +63,38 @@ import { buffersEqual, safeStringify } from '../protocol/serialization';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
-export const authorityDriverEnabled = (env?: RuntimeReplica): boolean =>
-  process.env['XLN_RSCORE_AUTHORITY'] === '1' &&
-  (env === undefined || env.accountAuthoritySuppressed !== true);
+type AuthorityRuntimeScope = Pick<
+  RuntimeReplica,
+  'runtimeId' | 'accountAuthoritySuppressed'
+>;
+
+const authorityTargetRuntimeId = (): string | undefined => {
+  const configured = process.env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
+  if (configured === undefined || configured === '') return undefined;
+  if (!/^0x[0-9a-f]{40}$/.test(configured)) {
+    throw new Error(`RSCORE_AUTHORITY_RUNTIME_ID_INVALID:${configured}`);
+  }
+  return configured;
+};
+
+/**
+ * Authority is process-configured but Runtime-scoped. HLT packs hundreds of
+ * sovereign Runtime replicas into one process, so inheriting the flag must
+ * never silently hand all of them to the H1 engine. Omitting the target keeps
+ * the single-Runtime production process behavior; packed hosts name H1
+ * explicitly.
+ */
+export const authorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean => {
+  if (process.env['XLN_RSCORE_AUTHORITY'] !== '1') return false;
+  if (env?.accountAuthoritySuppressed === true) return false;
+  const target = authorityTargetRuntimeId();
+  if (target === undefined || env === undefined) return true;
+  const runtimeId = String(env.runtimeId ?? '');
+  if (!/^0x[0-9a-f]{40}$/.test(runtimeId)) {
+    throw new Error(`RSCORE_AUTHORITY_RUNTIME_ID_MISSING:${runtimeId}`);
+  }
+  return runtimeId === target;
+};
 
 export const authorityRuntimeSuppressed = (env: RuntimeReplica): boolean =>
   env.accountAuthoritySuppressed === true;
@@ -174,6 +206,55 @@ const sessionEntriesForRuntime = (env: RuntimeReplica): Session[] =>
 
 const protocolFingerprint = `0x${RSCORE_PROTOCOL_FINGERPRINT.toString('hex')}`;
 
+const authorityBindingDigest = (
+  domain: string,
+  ...parts: readonly Uint8Array[]
+): Buffer => {
+  const hasher = createHash('sha256').update(domain, 'utf8').update(Buffer.from([0]));
+  for (const part of parts) hasher.update(part);
+  return hasher.digest();
+};
+
+/**
+ * Bind every process transcript to the sovereign Runtime and Account owner it
+ * serves. Constant identities let a reply from one packed Runtime satisfy the
+ * header checks of another; random identities make deterministic recovery
+ * needlessly depend on host entropy. The real Runtime and owner identifiers
+ * are fixed-width, so their concatenation is unambiguous under separate
+ * domains.
+ */
+export const authoritySessionIdentityFor = (
+  runtimeIdValue: string,
+  ownerEntityId: string,
+): Readonly<{
+  engineGeneration: Buffer;
+  runtimeId: Buffer;
+  sessionId: Buffer;
+}> => {
+  const runtimeId = Buffer.from(hexToWireBytes(
+    runtimeIdValue,
+    20,
+    'RSCORE_AUTHORITY_RUNTIME_ID_BYTES',
+  ));
+  const ownerId = Buffer.from(hexToWireBytes(
+    ownerEntityId,
+    32,
+    'RSCORE_AUTHORITY_OWNER_ID_BYTES',
+  ));
+  return {
+    engineGeneration: authorityBindingDigest(
+      'xln.rscore.engine-generation.v1',
+      runtimeId,
+    ).subarray(0, 8),
+    runtimeId,
+    sessionId: authorityBindingDigest(
+      'xln.rscore.authority-session.v1',
+      runtimeId,
+      ownerId,
+    ).subarray(0, 16),
+  };
+};
+
 /**
  * The signer this Runtime holds for an Entity, as the replica itself records
  * it: the signer's own address, which is also the single member of a lazy
@@ -211,11 +292,10 @@ const openAuthoritySession = async (
   const { RscoreProcessClient } = await import('./client');
   const binaryPath = process.env['XLN_RSCORE_BINARY']
     ?? new URL('../../rscore/target/release/xln-rscore', import.meta.url).pathname;
-  const client = new RscoreProcessClient(binaryPath, {
-    engineGeneration: Buffer.alloc(8, 0x5d),
-    runtimeId: Buffer.alloc(20, 0x5d),
-    sessionId: Buffer.alloc(16, 0x5d),
-  });
+  const client = new RscoreProcessClient(
+    binaryPath,
+    authoritySessionIdentityFor(String(env.runtimeId ?? ''), ownerEntityId),
+  );
   const workers = Number(process.env['XLN_RSCORE_AUTHORITY_WORKERS'] ?? '8');
   const market = swapMarketPolicyWire();
   try {

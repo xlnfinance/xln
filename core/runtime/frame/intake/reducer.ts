@@ -297,7 +297,8 @@ const applyRuntimeInputPhases = async (
   ingress: PreparedRuntimeIngress,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
   const authorityFrameId = env.runtimeId ?? '';
-  const recordingEnabled = authorityRecordEnabled() && !authorityRuntimeSuppressed(env);
+  const recordingEnabled = authorityRecordEnabled(authorityDriverEnabled(env))
+    && !authorityRuntimeSuppressed(env);
   return runAuthorityFrameScope(env, authorityFrameId, recordingEnabled, async scopedFrameId => {
     // Before anything of this frame is applied: the authoritative engine has
     // to start where TypeScript starts, not where it ends up.
