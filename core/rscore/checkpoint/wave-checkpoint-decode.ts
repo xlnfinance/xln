@@ -194,14 +194,6 @@ const changes = (value: unknown, code: string): RscoreCheckpointNodeChanges => {
   return { puts, dels };
 };
 
-const WAVE_TREE_SECTIONS = [
-  'deltas',
-  'locks',
-  'lendingIntents',
-  'swapOffers',
-  'rebalanceFeePolicies',
-] as const satisfies readonly RscoreCheckpointSectionName[];
-
 /**
  * Apply one section's leaf changes to the tree the Entity already holds.
  *
@@ -248,15 +240,22 @@ export const resolveRscoreWaveAccount = (
   row: RscoreAccountCheckpointRow,
   prior: AccountReplica | null,
 ): RscoreResolvedAccountRow => {
-  const trees = Object.fromEntries(WAVE_TREE_SECTIONS.map(section => [
-    section,
+  const treeFor = <Section extends RscoreCheckpointSectionName>(
+    section: Section,
+  ): RscoreAccountStateTrees[Section] =>
     applySectionChanges(
       section,
       prior?.state[section] as PersistentAccountStateMap<AccountStateMapKey, unknown> | undefined,
       row.sections[section],
       row.nodeChanges[section],
-    ),
-  ])) as unknown as RscoreAccountStateTrees;
+    ) as RscoreAccountStateTrees[Section];
+  const trees: RscoreAccountStateTrees = {
+    deltas: treeFor('deltas'),
+    locks: treeFor('locks'),
+    lendingIntents: treeFor('lendingIntents'),
+    swapOffers: treeFor('swapOffers'),
+    rebalanceFeePolicies: treeFor('rebalanceFeePolicies'),
+  };
   return {
     ...row,
     decoded: buildRscoreAccountRestore(

@@ -26,6 +26,7 @@ import type {
   ProposalDroppedTransaction,
 } from '../../account/consensus/types';
 import type { AccountFrame, AccountReplica } from '../../types/account';
+import { safeStringify } from '../../protocol/serialization';
 import {
   materializeRscoreAccountReplica,
   planRscoreLocalWitnesses,
@@ -49,8 +50,7 @@ import {
 } from './outbound';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
-  throw new Error(`RSCORE_CUTOVER_${code}:${JSON.stringify(detail, (_key, value) =>
-    typeof value === 'bigint' ? value.toString() : value)}`);
+  throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
 };
 
 /** One operation's answer: the engine's verdicts plus its post-state row. */
@@ -128,10 +128,11 @@ const requireRow = (
 
 const verdictOf = (result: CutoverWaveResult, accountId: string, operationIndex: number) => {
   const rows = result.wave.applied.filter(row => row.accountId === accountId);
-  if (rows.length !== 1) {
+  const row = rows[0];
+  if (rows.length !== 1 || row === undefined) {
     return fail('VERDICT_ARITY', { account: accountId, operationIndex, rows: rows.length });
   }
-  return rows[0]!.verdict;
+  return row.verdict;
 };
 
 const committedFrame = (
@@ -304,10 +305,11 @@ export const cutoverAccountAdmissionResult = (
 ): HandleAccountInputResult => {
   const accountId = request.accountId;
   const rows = result.wave.admissions.filter(row => row.accountId === accountId);
-  if (rows.length !== 1) {
+  const row = rows[0];
+  if (rows.length !== 1 || row === undefined) {
     return fail('ADMISSION_ARITY', { account: accountId, rows: rows.length });
   }
-  const verdict = rows[0]!.verdict;
+  const verdict = row.verdict;
   if (verdict.kind !== 'admitted') {
     return fail('ADMISSION_REJECTED', {
       account: accountId,
@@ -325,10 +327,10 @@ export const cutoverAccountProposalResult = (
 ): ProposeAccountFrameResult => {
   const accountId = request.accountId;
   const rows = result.wave.proposals.filter(row => row.accountId === accountId);
-  if (rows.length !== 1) {
+  const proposal = rows[0];
+  if (rows.length !== 1 || proposal === undefined) {
     return fail('PROPOSAL_ARITY', { account: accountId, rows: rows.length });
   }
-  const proposal = rows[0]!;
   const dropped: ProposalDroppedTransaction[] = proposal.dropped.map(row => ({
     index: row.index,
     txDigest: row.txDigest,

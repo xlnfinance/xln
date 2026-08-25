@@ -535,7 +535,7 @@ console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
 printAuthorityRecordReport();
 printAuthorityDriverReport();
 printAccountAuthorityExecutionLedger();
-console.error(`RSCORE_TRANSPORT ${JSON.stringify(rscoreTransportBytes)}`);
+console.error(`RSCORE_TRANSPORT ${safeStringify(rscoreTransportBytes)}`);
 await shutdownAuthorityDriver();
 const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
 if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);

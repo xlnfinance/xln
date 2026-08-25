@@ -12,6 +12,7 @@ import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../account/consensus/types';
+import { safeStringify } from '../../protocol/serialization';
 import type {
   AccountAuthorityEntityBatchInbound,
   AccountAuthorityEntityBatchOutbound,
@@ -33,7 +34,7 @@ import {
 import { inboundSlice } from '../round/inbound';
 
 const halt = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
-  throw new Error(`RSCORE_CUTOVER_${code}:${JSON.stringify(detail)}`);
+  throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
 };
 
 const bindingFor = (

@@ -166,7 +166,7 @@ export const accountAuthorityExecutionLedger = (): Readonly<typeof executionLedg
   ({ ...executionLedger });
 
 export const printAccountAuthorityExecutionLedger = (): void => {
-  console.error(`RSCORE_ACCOUNT_EXECUTION ${JSON.stringify(executionLedger)}`);
+  console.error(`RSCORE_ACCOUNT_EXECUTION ${safeStringify(executionLedger)}`);
 };
 
 export const resetAccountAuthorityExecutionLedgerForTests = (): void => {

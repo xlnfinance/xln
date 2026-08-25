@@ -17,9 +17,10 @@ import type { AccountPeerInput } from '../../types/account';
 import type { RscoreWireValue } from '../client';
 import type { Wave } from '../wave-decode';
 import { authorityPeerInputRow } from '../authority-wave';
+import { safeStringify } from '../../protocol/serialization';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
-  throw new Error(`RSCORE_ROUND_${code}:${JSON.stringify(detail)}`);
+  throw new Error(`RSCORE_ROUND_${code}:${safeStringify(detail)}`);
 };
 
 /** The three arrival shapes the Account layer accepts from a peer. */
