@@ -98,6 +98,50 @@ pub struct EntityRoundResult {
     pub post_accounts: Vec<AccountCheckpointRows>,
 }
 
+/// Phase timers, printed to stderr when XLN_RSCORE_PHASE_LOG is set.
+///
+/// Diagnostic only: the caller measures the round as a whole, and this says
+/// which half of it the time went to.
+pub mod phase {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    pub static APPLY: AtomicU64 = AtomicU64::new(0);
+    pub static ADMIT: AtomicU64 = AtomicU64::new(0);
+    pub static PROPOSE: AtomicU64 = AtomicU64::new(0);
+    pub static SETTLE: AtomicU64 = AtomicU64::new(0);
+    pub static SNAPSHOT: AtomicU64 = AtomicU64::new(0);
+    pub static ROUNDS: AtomicU64 = AtomicU64::new(0);
+
+    pub fn enabled() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("XLN_RSCORE_PHASE_LOG").as_deref() == Ok("1"))
+    }
+
+    pub fn add(counter: &AtomicU64, started: std::time::Instant) {
+        if !enabled() {
+            return;
+        }
+        counter.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn tick() {
+        if !enabled() {
+            return;
+        }
+        let rounds = ROUNDS.fetch_add(1, Ordering::Relaxed) + 1;
+        if rounds % 4000 != 0 {
+            return;
+        }
+        eprintln!(
+            "PHASE rounds={rounds} apply={} admit={} propose={} settle={} snapshot={}",
+            APPLY.load(Ordering::Relaxed),
+            ADMIT.load(Ordering::Relaxed),
+            PROPOSE.load(Ordering::Relaxed),
+            SETTLE.load(Ordering::Relaxed),
+            SNAPSHOT.load(Ordering::Relaxed),
+        );
+    }
+}
+
 impl StatefulConsensusEngine {
     /// Mark a point every account can be put back to.
     pub fn push_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
@@ -132,9 +176,16 @@ impl StatefulConsensusEngine {
     ) -> Result<EntityRoundResult, BatchError> {
         let named: BTreeSet<AccountId> = request.rows.iter().map(|row| row.account_id).collect();
         self.assert_owner(request.owner_entity_id, &named)?;
+        let snapshot_at = std::time::Instant::now();
         let base = self.accounts_snapshot();
+        phase::add(&phase::SNAPSHOT, snapshot_at);
+        let apply_at = std::time::Instant::now();
         let applied = self.apply_inputs(request.clock, request.rows)?;
+        phase::add(&phase::APPLY, apply_at);
+        let settle_at = std::time::Instant::now();
         let mut result = self.settle(&base, &named, request.post_accounts)?;
+        phase::add(&phase::SETTLE, settle_at);
+        phase::tick();
         result.applied = applied;
         Ok(result)
     }
@@ -149,17 +200,26 @@ impl StatefulConsensusEngine {
         named.extend(request.propose.iter().copied());
         let created: BTreeSet<AccountId> = request.creates.iter().map(|seed| seed.account_id).collect();
         self.assert_owner(request.owner_entity_id, &named.difference(&created).copied().collect())?;
+        let snapshot_at = std::time::Instant::now();
         let base = self.accounts_snapshot();
+        phase::add(&phase::SNAPSHOT, snapshot_at);
         if !request.creates.is_empty() {
             self.upsert_accounts(request.creates)?;
         }
+        let admit_at = std::time::Instant::now();
         let admissions = self.admit_named(request.admits)?;
+        phase::add(&phase::ADMIT, admit_at);
+        let propose_at = std::time::Instant::now();
         let proposals = if request.propose.is_empty() {
             Vec::new()
         } else {
             self.propose_frames(request.timestamp, request.j_height, Some(&request.propose))?
         };
+        phase::add(&phase::PROPOSE, propose_at);
+        let settle_at = std::time::Instant::now();
         let mut result = self.settle(&base, &named, request.post_accounts)?;
+        phase::add(&phase::SETTLE, settle_at);
+        phase::tick();
         result.admissions = admissions;
         result.proposals = proposals;
         Ok(result)

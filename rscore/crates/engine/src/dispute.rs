@@ -241,13 +241,15 @@ pub(crate) fn counterparty_dispute_requirement_error(
 }
 
 fn prefixed_hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut output = String::with_capacity(2 + bytes.len() * 2);
-    output.push_str("0x");
+    // Nibble table, not `write!`: a dispute proof formats every leaf it binds.
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = Vec::with_capacity(2 + bytes.len() * 2);
+    output.extend_from_slice(b"0x");
     for byte in bytes {
-        let _ = write!(output, "{byte:02x}");
+        output.push(DIGITS[usize::from(byte >> 4)]);
+        output.push(DIGITS[usize::from(byte & 0x0f)]);
     }
-    output
+    String::from_utf8(output).unwrap_or_default()
 }
 
 /// Build this account's proof body and the dispute hash for one nonce.

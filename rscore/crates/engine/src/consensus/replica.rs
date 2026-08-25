@@ -1201,10 +1201,14 @@ fn hex_prefixed(bytes: &[u8; 32]) -> String {
 }
 
 fn hex_of(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut output = String::with_capacity(bytes.len() * 2);
+    // Nibble table, not `write!`: the formatter machinery showed up in the
+    // engine profile, and every frame formats its predecessor's hash.
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = Vec::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        let _ = write!(output, "{byte:02x}");
+        output.push(DIGITS[usize::from(byte >> 4)]);
+        output.push(DIGITS[usize::from(byte & 0x0f)]);
     }
-    output
+    // Every byte written is an ASCII hex digit.
+    String::from_utf8(output).unwrap_or_default()
 }
