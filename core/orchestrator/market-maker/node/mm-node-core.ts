@@ -20,7 +20,7 @@ import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
 } from '../../../account/config/dispute-config';
-import { LIMITS, SWAP_CONSTANTS } from '../../../config/constants';
+import { HUB_NAMES, LIMITS, SWAP_CONSTANTS } from '../../../config/constants';
 import { readCliOption } from '../../../config/cli';
 import { readBooleanEnv } from '../../../config/environment';
 import { resolveCrossJurisdictionRuntimeTopology } from '../../../extensions/cross-j/boundary';
@@ -471,7 +471,7 @@ const parseArgs = (): Args => {
     rpcUrl: rpcUrls[1] || '',
     rpc2Url: rpcUrls[2] || '',
     rpcUrls,
-    meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
+    meshHubNames: getArg('--mesh-hub-names', HUB_NAMES.join(','))
       .split(',')
       .map(part => part.trim())
       .filter(Boolean),
@@ -490,7 +490,7 @@ const defaultArgsForImport = (): Args => ({
   rpcUrl: '',
   rpc2Url: '',
   rpcUrls: {},
-  meshHubNames: ['H1', 'H2', 'H3'],
+  meshHubNames: [...HUB_NAMES],
   dbPath: '',
 });
 

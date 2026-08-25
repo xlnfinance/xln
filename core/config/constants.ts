@@ -8,6 +8,8 @@
  * Copyright (C) 2025 XLN Finance
  */
 
+import { readPositiveIntegerEnv } from './environment';
+
 // ═══════════════════════════════════════════════════════════════
 // SYSTEM LIMITS
 // ═══════════════════════════════════════════════════════════════
@@ -401,3 +403,14 @@ export const QA = {
 //   DEBUG_ACCOUNTS: true,
 //   DEBUG_ROUTING: true,
 // } as const;
+
+/**
+ * The hub mesh is a full mesh of `H1..HN`. Three is what production runs and
+ * what every fixture expects; a larger count exists so a sharding stand can
+ * put one hub on each core and see whether the curve is linear. Kept here
+ * rather than in orchestrator-config because the hub child process needs it
+ * too, and that module parses the orchestrator's own argv when it loads.
+ */
+export const HUB_COUNT = readPositiveIntegerEnv('XLN_HUB_COUNT', 3);
+export const HUB_NAMES: readonly string[] =
+  Array.from({ length: HUB_COUNT }, (_unused, index) => `H${index + 1}`);

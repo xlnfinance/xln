@@ -47,7 +47,7 @@ export const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntegerEnv('XLN_RELAY_
 export const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
 export const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
 export const CHILD_LOG_RING_MAX = 200;
-export const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
+export { HUB_COUNT, HUB_NAMES } from '../config/constants';
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 

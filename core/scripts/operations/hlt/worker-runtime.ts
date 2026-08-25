@@ -16,6 +16,7 @@ import { RuntimeAdapterError } from '../../../api/runtime-adapter/errors';
 import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
 import type { RuntimeAdapterSendResult } from '../../../api/runtime-adapter/types';
 import { DaemonControlClient } from '../../../orchestrator/daemon-control';
+import { HUB_NAMES } from '../../../config/constants';
 import { canonicalPair } from '../../../orderbook';
 import { safeParse, safeStringify } from '../../../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
@@ -99,11 +100,8 @@ export const hltProcessOpCounterResetTargets = (
   portBase: number,
   runtimes: readonly Readonly<{ wsUrl: string; label: string }>[],
 ): ReadonlyArray<readonly [url: string, label: string]> => {
-  const processes = new Map<string, string>([
-    [opCounterResetUrl(`http://127.0.0.1:${portBase + 10}`), 'H1'],
-    [opCounterResetUrl(`http://127.0.0.1:${portBase + 11}`), 'H2'],
-    [opCounterResetUrl(`http://127.0.0.1:${portBase + 12}`), 'H3'],
-  ]);
+  const processes = new Map<string, string>(HUB_NAMES.map((label, index) =>
+    [opCounterResetUrl(`http://127.0.0.1:${portBase + 10 + index}`), label]));
   for (const runtime of runtimes) processes.set(opCounterResetUrl(runtime.wsUrl), runtime.label);
   return [...processes];
 };
@@ -168,8 +166,8 @@ export const decodeHltOpCounterReport = (payload: unknown): unknown => {
     throw new Error('HLT_OP_COUNTER_REPORT_RUN_ID_INVALID');
   }
   const hubs = requireBoundaryRecord(report['hubs'], 'HLT_OP_COUNTER_REPORT_HUBS_INVALID');
-  requireExactBoundaryKeys(hubs, ['H1', 'H2', 'H3'], [], 'HLT_OP_COUNTER_REPORT_HUB_FIELDS_INVALID');
-  for (const label of ['H1', 'H2', 'H3']) {
+  requireExactBoundaryKeys(hubs, HUB_NAMES, [], 'HLT_OP_COUNTER_REPORT_HUB_FIELDS_INVALID');
+  for (const label of HUB_NAMES) {
     decodeHltOpCounterSnapshot({ counters: hubs[label] }, label);
   }
   return report;
@@ -235,7 +233,10 @@ export const assertHltHubProcessIsolation = async (
   const carriesLoad = new Set(loadHubLabels.map(label => label.toUpperCase()));
   const ioByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
   const countersByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
-  for (const [offset, label] of [[10, 'H1'], [11, 'H2'], [12, 'H3']] as const) {
+  // Hub `H<n>` answers on portBase + 10 + (n - 1), the same offset the mesh
+  // assigns it. Listing the three by hand made every shard past the third
+  // invisible to the isolation proof.
+  for (const [offset, label] of HUB_NAMES.map((label, index) => [10 + index, label] as const)) {
     const counters = await readProcessOpCounters(`http://127.0.0.1:${args.portBase + offset}`, label);
     assertSocketCounterCoverage(counters, label);
     ioByHub[label] = summarizeHltIoCounters(counters);

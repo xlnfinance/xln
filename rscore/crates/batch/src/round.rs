@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rayon::prelude::*;
 use xln_rscore_engine::{AccountTx, ReceiverClock};
 use xln_rscore_protocol::PersistentRadixMap;
 
@@ -24,7 +23,7 @@ use crate::consensus::{
     StatefulConsensusEngine, state_error,
 };
 use crate::error::BatchError;
-use crate::shard::partition_accounts;
+use crate::shard::map_accounts;
 use crate::types::{AccountId, AccountSeed};
 use xln_rscore_engine::{AccountConsensus, SigningIdentity};
 
@@ -280,41 +279,26 @@ impl StatefulConsensusEngine {
             ..EntityRoundResult::default()
         };
         let ids = named.iter().copied().collect::<Vec<_>>();
-        let shards = partition_accounts(ids, |account_id| *account_id);
-        let settled = self.pool().install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|account_id| {
-                            let Some((account, leaf)) = self.account_with_leaf(&account_id) else {
-                                return Ok(None);
-                            };
-                            let post_account = if post_accounts {
-                                let previous = base.get(account_id.as_bytes());
-                                Some(
-                                    account_rows(
-                                        account_id,
-                                        account,
-                                        previous,
-                                        leaf,
-                                        self.signer_id(),
-                                    )
-                                    .map_err(|error| state_error(account_id, &error))?,
-                                )
-                            } else {
-                                None
-                            };
-                            Ok(Some((account_id, leaf, post_account)))
-                        })
-                        .collect::<Vec<Result<_, BatchError>>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-        });
+        let settled = map_accounts(
+            self.pool(),
+            ids,
+            |account_id| *account_id,
+            |account_id| {
+                let Some((account, leaf)) = self.account_with_leaf(&account_id) else {
+                    return Ok(None);
+                };
+                let post_account = if post_accounts {
+                    let previous = base.get(account_id.as_bytes());
+                    Some(
+                        account_rows(account_id, account, previous, leaf, self.signer_id())
+                            .map_err(|error| state_error(account_id, &error))?,
+                    )
+                } else {
+                    None
+                };
+                Ok(Some((account_id, leaf, post_account)))
+            },
+        );
         for row in settled {
             let Some((account_id, leaf, post_account)) = row? else {
                 continue;

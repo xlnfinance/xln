@@ -5,6 +5,8 @@
 //! preserves subtree isolation without pinning a hot nibble to an idle peer;
 //! only the sixteen resulting child roots meet above this boundary.
 
+use rayon::{ThreadPool, prelude::*};
+
 use crate::AccountId;
 
 pub(crate) const ROOT_SLOTS: usize = 16;
@@ -13,10 +15,7 @@ pub(crate) fn account_slot(account_id: AccountId) -> usize {
     usize::from(account_id.as_bytes()[0] >> 4)
 }
 
-pub(crate) fn partition_accounts<T>(
-    items: Vec<T>,
-    account_id: impl Fn(&T) -> AccountId,
-) -> Vec<Vec<T>> {
+fn partition_accounts<T>(items: Vec<T>, account_id: impl Fn(&T) -> AccountId) -> Vec<Vec<T>> {
     let mut shards = (0..ROOT_SLOTS).map(|_| Vec::new()).collect::<Vec<_>>();
     for item in items {
         let slot = account_slot(account_id(&item));
@@ -25,12 +24,36 @@ pub(crate) fn partition_accounts<T>(
     shards
 }
 
-pub(crate) fn partition_root_slots<T>(slots: [T; ROOT_SLOTS]) -> Vec<Vec<(usize, T)>> {
-    slots
-        .into_iter()
-        .enumerate()
-        .map(|entry| vec![entry])
-        .collect()
+/// Run small waves inline; otherwise give each root nibble to one worker.
+///
+/// This keeps all mutation, hashing and signing for one canonical subtree on
+/// one CPU during the phase. Rayon may move a subtree between CPUs across
+/// phases, but two CPUs never mutate the same subtree inside one phase.
+pub(crate) fn map_accounts<T, R, F, K>(
+    pool: &ThreadPool,
+    items: Vec<T>,
+    account_id: K,
+    map: F,
+) -> Vec<R>
+where
+    T: Send,
+    R: Send,
+    F: Fn(T) -> R + Sync + Send,
+    K: Fn(&T) -> AccountId,
+{
+    if items.len() <= crate::fanout::SEQUENTIAL_FANOUT_MAX {
+        return items.into_iter().map(map).collect();
+    }
+    let shards = partition_accounts(items, account_id);
+    pool.install(|| {
+        shards
+            .into_par_iter()
+            .map(|shard| shard.into_iter().map(&map).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect()
+    })
 }
 
 #[cfg(test)]

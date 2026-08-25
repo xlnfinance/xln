@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { REMOTE_RUNTIME } from '../../../config/constants';
+import { HUB_NAMES, REMOTE_RUNTIME } from '../../../config/constants';
 
 type DevRadapterKeys = {
   importUrl?: string;
@@ -116,7 +116,7 @@ const rows: LinkRow[] = [
 
 const labelWidth = rows.reduce((width, row) => Math.max(width, row.label.length), 0);
 const line = '='.repeat(88);
-const expectedRemoteRuntimes = ['H1', 'H2', 'H3', 'MM', 'Custody'].join(', ');
+const expectedRemoteRuntimes = [...HUB_NAMES, 'MM', 'Custody'].join(', ');
 
 console.log('');
 console.log(line);

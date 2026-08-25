@@ -1,9 +1,9 @@
-import { ethers } from 'ethers';
 import {
   deriveSignerAddressSync,
   signAccountFrame,
   verifyAccountSignature,
 } from '../../../account/crypto';
+import { keccakTextHash } from '../../../protocol/crypto/keccak-text';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import { buildRuntimeRecoveryCheckpointSnapshot } from '../../wal';
@@ -69,19 +69,19 @@ const normalizeSigner = (signer: RuntimeRecoverySignerV1): RuntimeRecoverySigner
 });
 
 export const computeRuntimeRecoveryCheckpointHash = (checkpoint: Record<string, unknown>): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(checkpoint)));
+  keccakTextHash(serializeTaggedJson(checkpoint));
 
 export const computeRuntimeRecoveryBundleHash = (bundle: RuntimeRecoveryBundleV1): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(bundle)));
+  keccakTextHash(serializeTaggedJson(bundle));
 
 const computeRuntimeRecoveryBundleSignatureDigest = (
   bundle: RuntimeRecoveryBundleV1 | UnsignedRuntimeRecoveryBundleV1,
 ): string => {
   const { signature: _signature, ...unsigned } = bundle as RuntimeRecoveryBundleV1;
-  return ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson({
+  return keccakTextHash(serializeTaggedJson({
     domain: RECOVERY_BUNDLE_SIGNATURE_DOMAIN,
     bundle: unsigned,
-  })));
+  }));
 };
 
 const normalizeAndValidateBundleFields = (

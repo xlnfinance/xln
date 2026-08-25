@@ -344,6 +344,6 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     header: parsedHeader,
     sections,
     nodeChanges,
-    consensus: decodeRscoreConsensusSeed(row[9]),
+    consensus: decodeRscoreConsensusSeed(row[9], RSCORE_CUTOVER_VERIFY),
   };
 };

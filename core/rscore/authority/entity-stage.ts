@@ -8,7 +8,7 @@ import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
 } from '../../account/consensus/types';
-import type { AccountInput } from '../../types/account';
+import type { AccountInput, AccountTx } from '../../types/account';
 import type { EntityInput } from '../../entity/types';
 import type {
   AccountAuthorityEntityStageCapability,
@@ -315,14 +315,25 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNCONSUMED:${this.inboundCursor}:${this.inboundRequests.length}`);
     }
     this.frameOutboundPrepared = true;
-    const admittedIds = new Set(this.admissionRequests.map(entry =>
-      normalizeEntityId(entry.account.proofHeader.toEntity)));
+    // The gate is the Entity's, not a second one written here: an account in
+    // dispute preparation, one holding a transaction that still waits on a
+    // post-commit Hanko, one at the lock ceiling or one carrying a signed
+    // settlement error is not proposable, and none of that is visible from
+    // `pendingFrame` and a mempool count alone.
+    const pendingAdmissions = new Map<string, AccountTx[]>();
+    for (const entry of this.admissionRequests) {
+      if (entry.input.kind !== 'enqueue') continue;
+      const accountId = normalizeEntityId(entry.account.proofHeader.toEntity);
+      pendingAdmissions.set(accountId, [
+        ...(pendingAdmissions.get(accountId) ?? []),
+        ...entry.input.txs,
+      ]);
+    }
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
       .filter(accountId => {
         const account = request.accounts.get(accountId);
         return account !== undefined
-          && account.pendingFrame === undefined
-          && (account.mempool.length > 0 || admittedIds.has(accountId));
+          && request.isProposable(account, pendingAdmissions.get(accountId) ?? []);
       })
       .toSorted();
     const proposals = proposalIds.map(accountId => {
@@ -359,9 +370,20 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
 
   hasPreparedAccountInput(accountId: string, input: AccountInput): boolean {
     const normalized = normalizeEntityId(accountId);
-    return this.inboundRequests.slice(this.inboundCursor).some(request =>
-      normalizeEntityId(request.account.proofHeader.toEntity) === normalized
-      && safeStringify(request.input) === safeStringify(input));
+    // Serialize the needle at most once, and only if no arrival is the very
+    // object the Entity is holding. The frame hands the engine the same
+    // `entityTx.data` references it later dispatches, so the scan is normally
+    // a pointer compare over a queue that can be hundreds of arrivals long.
+    let serializedInput: string | undefined;
+    for (let index = this.inboundCursor; index < this.inboundRequests.length; index += 1) {
+      const request = this.inboundRequests[index];
+      if (request === undefined) continue;
+      if (normalizeEntityId(request.account.proofHeader.toEntity) !== normalized) continue;
+      if (request.input === input) return true;
+      serializedInput ??= safeStringify(input);
+      if (safeStringify(request.input) === serializedInput) return true;
+    }
+    return false;
   }
 
   finishEntityAccountFrame(): void {
@@ -426,7 +448,12 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     }
     const expectedAccount = normalizeEntityId(expected.account.proofHeader.toEntity);
     const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
-    if (expectedAccount !== actualAccount || safeStringify(expected.input) !== safeStringify(request.input)) {
+    // Identity is the common case and is exactly as strong as comparing the
+    // canonical bytes: both sides hold the same `entityTx.data`. A frame that
+    // rebuilt its inputs still gets the full byte comparison.
+    const sameInput = expected.input === request.input
+      || safeStringify(expected.input) === safeStringify(request.input);
+    if (expectedAccount !== actualAccount || !sameInput) {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ORDER_MISMATCH:${expectedAccount}:${actualAccount}`);
     }
     this.inboundRequests[this.inboundCursor] = { ...expected, account: request.account };

@@ -812,9 +812,51 @@ const routeFinalAccountInput = (
   );
 };
 
+/**
+ * The authoritative engine selects a proposal worklist before the admissions it
+ * was handed this frame are visible in the replica mirror. Gate each candidate
+ * on the mempool it will actually hold, so Rust never proposes a frame the
+ * TypeScript engine would have withheld.
+ */
+const authorityProposalGate = (
+  state: EntityState,
+): ((account: AccountReplica, pendingAdmissions: readonly AccountTx[]) => boolean) =>
+  (account, pendingAdmissions) => accountHasProposableMempool(
+    pendingAdmissions.length === 0
+      ? account
+      : { ...account, mempool: [...account.mempool, ...pendingAdmissions] },
+    state,
+  );
+
+/**
+ * A cross-jurisdiction opening either waits for its cohort or proposes a subset
+ * of the mempool. Neither is something the authoritative engine can express: it
+ * was asked for a whole-mempool frame and has already built one. Refuse rather
+ * than let the opening silently skip the cohort it is bound to.
+ */
+function resolveCrossJOpeningProposalTxs(
+  context: ProposePendingAccountFramesContext,
+  accountKey: string,
+  account: AccountReplica,
+): AccountTx[] | null | undefined {
+  const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(
+    context.env,
+    context.currentEntityState,
+    account,
+  );
+  const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
+    ?.hasPreparedAccountProposal?.(accountKey) === true;
+  if (authorityPrepared && crossJOpeningProposalTxs !== undefined) {
+    throw haltRuntimeFailure(
+      'ACCOUNT_AUTHORITY_CROSS_J_OPENING_UNSUPPORTED',
+      `ACCOUNT_AUTHORITY_CROSS_J_OPENING_UNSUPPORTED:${context.currentEntityState.entityId}:${accountKey}`,
+    );
+  }
+  return crossJOpeningProposalTxs;
+}
+
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
   const {
-    env,
     currentEntityState,
     proposableAccounts,
   } = context;
@@ -833,11 +875,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
 
-    const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
-      ?.hasPreparedAccountProposal?.(accountKey) === true;
-    const crossJOpeningProposalTxs = authorityPrepared
-      ? undefined
-      : selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
+    const crossJOpeningProposalTxs = resolveCrossJOpeningProposalTxs(context, accountKey, account);
     if (crossJOpeningProposalTxs === null && !force) {
       entityLog.debug('account.cross_j_opening_cohort_wait', {
         account: shortId(accountKey),
@@ -1617,6 +1655,7 @@ const applyPostEntityTxPhases = async (
     ?.prepareEntityAccountOutbound?.({
       accounts: currentEntityState.accounts,
       proposalAccountIds,
+      isProposable: authorityProposalGate(currentEntityState),
       timestamp: currentEntityState.timestamp,
       jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
     });
@@ -1743,6 +1782,7 @@ const applyEntityFrameWithIsolation = async (
       ?.prepareEntityAccountOutbound?.({
         accounts: working.currentEntityState.accounts,
         proposalAccountIds: [],
+        isProposable: authorityProposalGate(working.currentEntityState),
         timestamp: working.currentEntityState.timestamp,
         jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
       });

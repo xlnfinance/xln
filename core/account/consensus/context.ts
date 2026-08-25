@@ -1,4 +1,4 @@
-import type { AccountInput, AccountReplica } from '../../types/account';
+import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from './types';
 import type { HankoString } from '../../types/hanko';
@@ -53,6 +53,17 @@ export type AccountAuthorityFrameBeginRequest = Readonly<{
 export type AccountAuthorityFrameOutboundRequest = Readonly<{
   accounts: ReadonlyMap<string, AccountReplica>;
   proposalAccountIds: readonly string[];
+  /**
+   * The Entity's own proposal gate, and the only one there is.
+   *
+   * The engine decides nothing here: it proposes exactly the accounts this
+   * predicate accepts. Asking it against the live replica is sound because the
+   * inbound visit already published its post-state; the one thing the replica
+   * cannot see is what this same outbound visit is about to admit, so those
+   * transactions are handed over separately and judged as if they were already
+   * in the mempool.
+   */
+  isProposable(account: AccountReplica, pendingAdmissions: readonly AccountTx[]): boolean;
   timestamp: number;
   jHeight: number;
 }>;

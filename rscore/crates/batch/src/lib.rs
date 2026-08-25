@@ -8,6 +8,7 @@ mod checkpoint;
 mod consensus;
 mod error;
 mod execution;
+mod fanout;
 mod query;
 mod round;
 mod shard;

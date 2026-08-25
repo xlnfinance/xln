@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { TextDecoder, TextEncoder } from 'util';
 import { deriveSignerAddressSync } from '../../../account/crypto';
+import { keccakTextHash } from '../../../protocol/crypto/keccak-text';
 import { deserializeTaggedJson, serializeTaggedJson } from '../../../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import {
@@ -155,7 +156,7 @@ export const deriveRuntimeRecoveryActionLookupKey = (
 
 export const computeTowerLastResortPayloadDigest = (payload: TowerLastResortPayloadV1 | null | undefined): string => {
   if (!payload) return ethers.ZeroHash;
-  return ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(payload)));
+  return keccakTextHash(serializeTaggedJson(payload));
 };
 
 /**
@@ -165,7 +166,7 @@ export const computeTowerLastResortPayloadDigest = (payload: TowerLastResortPayl
  */
 export const computeEncryptedRuntimeRecoveryEnvelopeHash = (
   bundle: EncryptedRuntimeRecoveryBundleV1,
-): string => ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(bundle)));
+): string => keccakTextHash(serializeTaggedJson(bundle));
 
 export const buildTowerAppointmentOwnerMessage = (
   runtimeId: string,

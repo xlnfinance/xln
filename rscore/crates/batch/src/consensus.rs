@@ -26,7 +26,7 @@ use crate::checkpoint::{
     AccountCheckpointRows, AccountRestore, AccountsCheckpoint, CheckpointExpectation,
     CheckpointToken, account_rows,
 };
-use crate::shard::{partition_accounts, partition_root_slots};
+use crate::shard::map_accounts;
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, CandidateId, EngineGeneration};
 
@@ -763,27 +763,18 @@ impl StatefulConsensusEngine {
                 Ok((account_id, account, txs))
             })
             .collect::<Result<Vec<_>, BatchError>>()?;
-        let shards = partition_accounts(work, |row| row.0);
-        let admitted = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|(account_id, mut account, txs)| {
-                            account
-                                .admit_txs(txs, "rscoreConsensus:admit")
-                                .map_err(|error| state_error(account_id, &error))?;
-                            let leaf = leaf_root(account_id, &account)?;
-                            Ok((account_id.as_bytes().to_vec(), account, leaf))
-                        })
-                        .collect::<Vec<Result<_, BatchError>>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-        });
+        let admitted = map_accounts(
+            &self.pool,
+            work,
+            |row| row.0,
+            |(account_id, mut account, txs)| {
+                account
+                    .admit_txs(txs, "rscoreConsensus:admit")
+                    .map_err(|error| state_error(account_id, &error))?;
+                let leaf = leaf_root(account_id, &account)?;
+                Ok((account_id.as_bytes().to_vec(), account, leaf))
+            },
+        );
         let entries = admitted
             .into_iter()
             .collect::<Result<Vec<_>, BatchError>>()?;
@@ -845,68 +836,59 @@ impl StatefulConsensusEngine {
         let accounts = &self.accounts;
         let identities = &self.identities;
         let swap_market = &self.swap_market;
-        let shards = partition_accounts(work, |row| row.0);
-        let outcomes: Vec<OutboundWork> = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|(account_id, txs, selected)| {
-                            let mut account = accounts
-                                .get(account_id.as_bytes())
-                                .ok_or(BatchError::AccountNotFound {
-                                    input_index: 0,
-                                    account_id,
-                                })?
-                                .clone();
-                            let mut changed = false;
-                            if let Some(txs) = txs {
-                                account
-                                    .admit_txs(txs, "rscoreConsensus:admit")
-                                    .map_err(|error| state_error(account_id, &error))?;
-                                changed = true;
-                            }
-                            let proposal = if selected {
-                                if proposable(&account) {
-                                    let identity = identities
-                                        .get(account.replica().owner().as_bytes())
-                                        .ok_or(BatchError::SignerRequired)?;
-                                    let outcome = propose_account_frame(
-                                        &mut account,
-                                        identity,
-                                        timestamp,
-                                        j_height,
-                                        swap_market,
-                                    )
-                                    .map_err(|error| state_error(account_id, &error))?;
-                                    changed = true;
-                                    Some(proposal_row(account_id, outcome)?)
-                                } else {
-                                    Some(ProposalRow {
-                                        account_id,
-                                        proposed: None,
-                                        dropped: Vec::new(),
-                                    })
-                                }
-                            } else {
-                                None
-                            };
-                            let update = if changed {
-                                let leaf = leaf_root(account_id, &account)?;
-                                Some((account, leaf))
-                            } else {
-                                None
-                            };
-                            Ok((account_id, update, proposal))
+        let outcomes: Vec<OutboundWork> = map_accounts(
+            &self.pool,
+            work,
+            |row| row.0,
+            |(account_id, txs, selected)| {
+                let mut account = accounts
+                    .get(account_id.as_bytes())
+                    .ok_or(BatchError::AccountNotFound {
+                        input_index: 0,
+                        account_id,
+                    })?
+                    .clone();
+                let mut changed = false;
+                if let Some(txs) = txs {
+                    account
+                        .admit_txs(txs, "rscoreConsensus:admit")
+                        .map_err(|error| state_error(account_id, &error))?;
+                    changed = true;
+                }
+                let proposal = if selected {
+                    if proposable(&account) {
+                        let identity = identities
+                            .get(account.replica().owner().as_bytes())
+                            .ok_or(BatchError::SignerRequired)?;
+                        let outcome = propose_account_frame(
+                            &mut account,
+                            identity,
+                            timestamp,
+                            j_height,
+                            swap_market,
+                        )
+                        .map_err(|error| state_error(account_id, &error))?;
+                        changed = true;
+                        Some(proposal_row(account_id, outcome)?)
+                    } else {
+                        Some(ProposalRow {
+                            account_id,
+                            proposed: None,
+                            dropped: Vec::new(),
                         })
-                        .collect::<Vec<OutboundWork>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect()
-        });
+                    }
+                } else {
+                    None
+                };
+                let update = if changed {
+                    let leaf = leaf_root(account_id, &account)?;
+                    Some((account, leaf))
+                } else {
+                    None
+                };
+                Ok((account_id, update, proposal))
+            },
+        );
         let mut entries = Vec::with_capacity(outcomes.len());
         let mut proposals = Vec::with_capacity(selected.len());
         for outcome in outcomes {
@@ -993,36 +975,22 @@ impl StatefulConsensusEngine {
         }
         let identities = &self.identities;
         let swap_market = &self.swap_market;
-        let shards = partition_accounts(candidates, |row| row.0);
-        let proposals: Vec<ProposalWork> = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|(account_id, mut account)| {
-                            let identity = identities
-                                .get(account.replica().owner().as_bytes())
-                                .ok_or(BatchError::SignerRequired)?;
-                            let outcome = propose_account_frame(
-                                &mut account,
-                                identity,
-                                timestamp,
-                                j_height,
-                                swap_market,
-                            )
-                            .map_err(|error| state_error(account_id, &error))?;
-                            let row = proposal_row(account_id, outcome)?;
-                            let leaf = leaf_root(account_id, &account)?;
-                            Ok((account_id, account, leaf, row))
-                        })
-                        .collect::<Vec<ProposalWork>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect()
-        });
+        let proposals: Vec<ProposalWork> = map_accounts(
+            &self.pool,
+            candidates,
+            |row| row.0,
+            |(account_id, mut account)| {
+                let identity = identities
+                    .get(account.replica().owner().as_bytes())
+                    .ok_or(BatchError::SignerRequired)?;
+                let outcome =
+                    propose_account_frame(&mut account, identity, timestamp, j_height, swap_market)
+                        .map_err(|error| state_error(account_id, &error))?;
+                let row = proposal_row(account_id, outcome)?;
+                let leaf = leaf_root(account_id, &account)?;
+                Ok((account_id, account, leaf, row))
+            },
+        );
         let mut entries = Vec::with_capacity(proposals.len());
         let mut rows = Vec::new();
         for proposal in proposals {
@@ -1078,53 +1046,44 @@ impl StatefulConsensusEngine {
         let accounts = &self.accounts;
         let identities = &self.identities;
         let swap_market = &self.swap_market;
-        let shards = partition_accounts(work, |row| row.0);
-        let applied: Vec<InputWork> = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|(account_id, rows)| {
-                            let mut account = accounts
-                                .get(account_id.as_bytes())
-                                .expect("presence checked above")
-                                .clone();
-                            let identity = identities
-                                .get(account.replica().owner().as_bytes())
-                                .ok_or(BatchError::SignerRequired)?;
-                            let mut results = Vec::with_capacity(rows.len());
-                            let mut changed = false;
-                            for row in rows {
-                                let (verdict, row_changed) = apply_one(
-                                    account_id,
-                                    &mut account,
-                                    identity,
-                                    clock,
-                                    row.input,
-                                    swap_market,
-                                );
-                                changed |= row_changed;
-                                results.push(AccountInputResult {
-                                    operation_index: row.operation_index,
-                                    account_id,
-                                    verdict,
-                                });
-                            }
-                            let leaf = if changed {
-                                Some(leaf_root(account_id, &account)?)
-                            } else {
-                                None
-                            };
-                            Ok((account_id, account, results, Vec::new(), leaf))
-                        })
-                        .collect::<Vec<InputWork>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect()
-        });
+        let applied: Vec<InputWork> = map_accounts(
+            &self.pool,
+            work,
+            |row| row.0,
+            |(account_id, rows)| {
+                let mut account = accounts
+                    .get(account_id.as_bytes())
+                    .expect("presence checked above")
+                    .clone();
+                let identity = identities
+                    .get(account.replica().owner().as_bytes())
+                    .ok_or(BatchError::SignerRequired)?;
+                let mut results = Vec::with_capacity(rows.len());
+                let mut changed = false;
+                for row in rows {
+                    let (verdict, row_changed) = apply_one(
+                        account_id,
+                        &mut account,
+                        identity,
+                        clock,
+                        row.input,
+                        swap_market,
+                    );
+                    changed |= row_changed;
+                    results.push(AccountInputResult {
+                        operation_index: row.operation_index,
+                        account_id,
+                        verdict,
+                    });
+                }
+                let leaf = if changed {
+                    Some(leaf_root(account_id, &account)?)
+                } else {
+                    None
+                };
+                Ok((account_id, account, results, Vec::new(), leaf))
+            },
+        );
         let mut entries = Vec::with_capacity(applied.len());
         let mut results = missing;
         for outcome in applied {
@@ -1281,83 +1240,74 @@ impl StatefulConsensusEngine {
         let units: Vec<(AccountId, AccountWork)> = work.into_iter().collect();
         let identities = &self.identities;
         let swap_market = &self.swap_market;
-        let shards = partition_accounts(units, |row| row.0);
-        let applied: Vec<InputWork> = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|(account_id, unit)| {
-                            let AccountWork {
-                                clock,
-                                mut account,
-                                ops,
-                            } = unit;
-                            let identity = identities
-                                .get(account.replica().owner().as_bytes())
-                                .ok_or(BatchError::SignerRequired)?;
-                            let mut results = Vec::new();
-                            let mut admissions = Vec::new();
-                            let mut changed = step_created.contains_key(&account_id);
-                            for op in ops {
-                                match op {
-                                    WaveOp::Admit {
-                                        operation_index,
-                                        txs,
-                                        ..
-                                    } => {
-                                        let verdict = match admit_local_txs(&mut account, txs) {
-                                            Ok(count) => {
-                                                changed |= count > 0;
-                                                AccountAdmissionVerdict::Admitted { count }
-                                            }
-                                            Err(error) => AccountAdmissionVerdict::Rejected {
-                                                code: "ACCOUNT_ADMISSION_REJECTED".to_string(),
-                                                message: error.to_string(),
-                                            },
-                                        };
-                                        admissions.push(AccountAdmissionResult {
-                                            operation_index,
-                                            account_id,
-                                            verdict,
-                                        });
-                                    }
-                                    WaveOp::Input(row) => {
-                                        let (verdict, row_changed) = apply_one(
-                                            account_id,
-                                            &mut account,
-                                            identity,
-                                            clock,
-                                            row.input,
-                                            swap_market,
-                                        );
-                                        changed |= row_changed;
-                                        results.push(AccountInputResult {
-                                            operation_index: row.operation_index,
-                                            account_id,
-                                            verdict,
-                                        });
-                                    }
-                                    // Validation already constructed this exact
-                                    // genesis account as the unit's starting value.
-                                    WaveOp::Create { .. } => {}
+        let applied: Vec<InputWork> = map_accounts(
+            &self.pool,
+            units,
+            |row| row.0,
+            |(account_id, unit)| {
+                let AccountWork {
+                    clock,
+                    mut account,
+                    ops,
+                } = unit;
+                let identity = identities
+                    .get(account.replica().owner().as_bytes())
+                    .ok_or(BatchError::SignerRequired)?;
+                let mut results = Vec::new();
+                let mut admissions = Vec::new();
+                let mut changed = step_created.contains_key(&account_id);
+                for op in ops {
+                    match op {
+                        WaveOp::Admit {
+                            operation_index,
+                            txs,
+                            ..
+                        } => {
+                            let verdict = match admit_local_txs(&mut account, txs) {
+                                Ok(count) => {
+                                    changed |= count > 0;
+                                    AccountAdmissionVerdict::Admitted { count }
                                 }
-                            }
-                            let leaf = if changed {
-                                Some(leaf_root(account_id, &account)?)
-                            } else {
-                                None
+                                Err(error) => AccountAdmissionVerdict::Rejected {
+                                    code: "ACCOUNT_ADMISSION_REJECTED".to_string(),
+                                    message: error.to_string(),
+                                },
                             };
-                            Ok((account_id, account, results, admissions, leaf))
-                        })
-                        .collect::<Vec<InputWork>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect()
-        });
+                            admissions.push(AccountAdmissionResult {
+                                operation_index,
+                                account_id,
+                                verdict,
+                            });
+                        }
+                        WaveOp::Input(row) => {
+                            let (verdict, row_changed) = apply_one(
+                                account_id,
+                                &mut account,
+                                identity,
+                                clock,
+                                row.input,
+                                swap_market,
+                            );
+                            changed |= row_changed;
+                            results.push(AccountInputResult {
+                                operation_index: row.operation_index,
+                                account_id,
+                                verdict,
+                            });
+                        }
+                        // Validation already constructed this exact
+                        // genesis account as the unit's starting value.
+                        WaveOp::Create { .. } => {}
+                    }
+                }
+                let leaf = if changed {
+                    Some(leaf_root(account_id, &account)?)
+                } else {
+                    None
+                };
+                Ok((account_id, account, results, admissions, leaf))
+            },
+        );
         let mut entries = Vec::with_capacity(applied.len());
         let mut results = missing;
         let mut admissions = Vec::new();
@@ -1956,45 +1906,37 @@ impl StatefulConsensusEngine {
         include_accounts: bool,
     ) -> Result<MaterializedWaveRows, BatchError> {
         let ids = touched.iter().copied().collect::<Vec<_>>();
-        let shards = partition_accounts(ids, |account_id| *account_id);
-        let materialized = self.pool.install(|| {
-            shards
-                .into_par_iter()
-                .map(|shard| {
-                    shard
-                        .into_iter()
-                        .map(|account_id| {
-                            let Some((account, leaf)) =
-                                self.accounts.get_with_digest(account_id.as_bytes())
-                            else {
-                                return Ok(None);
-                            };
-                            let post_account = if include_accounts {
-                                let signer_id = self
-                                    .signer_of(account.replica().owner().as_bytes())
-                                    .ok_or(BatchError::SignerRequired)?;
-                                let previous = self.pending.as_ref().and_then(|pending| {
-                                    pending.base_accounts.get(account_id.as_bytes())
-                                });
-                                Some(
-                                    account_rows(account_id, account, previous, leaf, signer_id)
-                                        .map_err(|error| BatchError::AccountsTree {
-                                            account_id,
-                                            detail: error.to_string(),
-                                        })?,
-                                )
-                            } else {
-                                None
-                            };
-                            Ok(Some((account_id, leaf, post_account)))
-                        })
-                        .collect::<Vec<Result<_, BatchError>>>()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-        });
+        let materialized = map_accounts(
+            &self.pool,
+            ids,
+            |account_id| *account_id,
+            |account_id| {
+                let Some((account, leaf)) = self.accounts.get_with_digest(account_id.as_bytes())
+                else {
+                    return Ok(None);
+                };
+                let post_account = if include_accounts {
+                    let signer_id = self
+                        .signer_of(account.replica().owner().as_bytes())
+                        .ok_or(BatchError::SignerRequired)?;
+                    let previous = self
+                        .pending
+                        .as_ref()
+                        .and_then(|pending| pending.base_accounts.get(account_id.as_bytes()));
+                    Some(
+                        account_rows(account_id, account, previous, leaf, signer_id).map_err(
+                            |error| BatchError::AccountsTree {
+                                account_id,
+                                detail: error.to_string(),
+                            },
+                        )?,
+                    )
+                } else {
+                    None
+                };
+                Ok(Some((account_id, leaf, post_account)))
+            },
+        );
         let mut leaves = Vec::with_capacity(touched.len());
         let mut post_accounts =
             Vec::with_capacity(if include_accounts { touched.len() } else { 0 });
@@ -2449,19 +2391,20 @@ impl StatefulConsensusEngine {
         entries: Vec<(Vec<u8>, AccountConsensus, [u8; 32])>,
     ) -> Result<PersistentRadixMap<AccountConsensus>, BatchError> {
         base.updated_batch(entries, |slots| {
-            let shards = partition_root_slots(slots);
+            // Sixteen slots are always handed over; only the ones holding
+            // leaves are work. A wave that moved one account would otherwise
+            // pay a pool hand-off to hash fifteen empty slots.
+            if slots.iter().filter(|slot| slot.has_work()).count()
+                <= crate::fanout::SEQUENTIAL_SLOT_FANOUT_MAX
+            {
+                return slots.map(xln_rscore_protocol::SlotWork::apply);
+            }
             self.pool.install(|| {
-                let mut results = shards
+                let mut results = slots
                     .into_par_iter()
-                    .map(|shard| {
-                        shard
-                            .into_iter()
-                            .map(|(slot, work)| (slot, work.apply()))
-                            .collect::<Vec<_>>()
-                    })
+                    .map(xln_rscore_protocol::SlotWork::apply)
                     .collect::<Vec<_>>()
                     .into_iter();
-                let mut results = results.by_ref().flatten().map(|(_, result)| result);
                 std::array::from_fn(|_| {
                     results.next().unwrap_or_else(|| {
                         Err(xln_rscore_protocol::PersistentRadixMapError::EmptyKey)

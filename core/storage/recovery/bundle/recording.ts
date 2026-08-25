@@ -1,5 +1,5 @@
-import { ethers } from 'ethers';
 
+import { keccakTextHash } from '../../../protocol/crypto/keccak-text';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 import {
   computeRuntimeRecoveryBundleHash,
@@ -10,7 +10,7 @@ import type { RuntimeRecording, RuntimeRecoveryBundleV1 } from './types';
 type UnsignedRecordingManifest = Omit<RuntimeRecording, 'manifestHash'>;
 
 const recordingManifestHash = (manifest: UnsignedRecordingManifest): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(manifest)));
+  keccakTextHash(serializeTaggedJson(manifest));
 
 const validateRecordingBundles = (
   bundles: RuntimeRecoveryBundleV1[],
