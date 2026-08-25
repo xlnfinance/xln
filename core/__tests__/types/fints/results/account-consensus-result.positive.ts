@@ -43,11 +43,13 @@ const idle: ProposeAccountFrameResult = {
   outcome: 'idle',
   message: 'Transactions deferred until signed settlement finalizes: 1',
   events: [],
+  proposalDroppedTransactions: [],
 };
 const proposeRejected: ProposeAccountFrameResult = {
   ok: false,
   rejection: { message: 'ACCOUNT_PROPOSAL_STATUS_FROZEN:dispute_preparing' },
   events: [],
+  proposalDroppedTransactions: [],
 };
 
 export const fintsPositiveAccountConsensusResult = (): {
