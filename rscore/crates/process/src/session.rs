@@ -304,7 +304,7 @@ impl ProcessSession {
                 EngineGeneration::from_bytes(binding.engine_generation),
                 self.worker_count,
                 revision,
-                config.seed.clone(),
+                config.private_key,
                 config.signer_id.clone(),
                 std::sync::Arc::clone(&self.swap_market),
                 accounts,
@@ -532,8 +532,8 @@ fn validate_payment_profile_binding(binding: &ProtocolBinding) -> Result<(), Pro
 /// the key alone defines the lazy entity, and the entity id is that board's
 /// own hash.
 fn authority_identity(config: &AuthorityConfig) -> Result<([u8; 20], [u8; 32]), ProcessError> {
-    let identity = xln_rscore_engine::SigningIdentity::lazy_from_seed(
-        &config.seed,
+    let identity = xln_rscore_engine::SigningIdentity::lazy_from_key(
+        config.private_key,
         &config.signer_id,
         1,
         1,

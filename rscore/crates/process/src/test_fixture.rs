@@ -30,15 +30,21 @@ pub fn hello(id: u64) -> Envelope {
 }
 
 /// The same Hello, with the authority config a session that owns its accounts
-/// sends: `(seed, signerId)`.
+/// sends: `(privateKey, signerId)`. The fixture derives the key from a seed
+/// the way the runtime does, because the tests still name signers by label.
 pub fn hello_authority(id: u64, seed: &str, signer_id: &str) -> Envelope {
     hello_with_authority(
         id,
         tuple(vec![
-            AbiValue::Text(seed.into()),
+            AbiValue::Bytes(authority_key(seed, signer_id).to_vec()),
             AbiValue::Text(signer_id.into()),
         ]),
     )
+}
+
+/// The key a runtime would derive for this signer label.
+pub fn authority_key(seed: &str, signer_id: &str) -> [u8; 32] {
+    xln_rscore_engine::derive_signer_key(seed, signer_id).expect("signer key")
 }
 
 fn hello_with_authority(id: u64, authority: AbiValue) -> Envelope {
@@ -123,6 +129,8 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
         // No replica shell: this fixture exercises the financial engine, so
         // the leaf stays the payment-profile state root.
         AbiValue::Nil,
+        // No consensus state either: the account starts at genesis.
+        AbiValue::Nil,
     ])
 }
 
@@ -159,6 +167,8 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
         ]),
         // No replica shell: this fixture exercises the financial engine, so
         // the leaf stays the payment-profile state root.
+        AbiValue::Nil,
+        // No consensus state either: the account starts at genesis.
         AbiValue::Nil,
     ])
 }
@@ -320,8 +330,8 @@ fn empty_j_claim_root() -> [u8; 32] {
 /// The lazy entity a signer id defines under this seed — the only owner an
 /// authoritative session can sign for.
 pub fn authority_entity(seed: &str, signer_id: &str) -> [u8; 32] {
-    *xln_rscore_engine::SigningIdentity::lazy_from_seed(
-        seed,
+    *xln_rscore_engine::SigningIdentity::lazy_from_key(
+        authority_key(seed, signer_id),
         signer_id,
         1,
         1,
@@ -366,6 +376,7 @@ pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
                 AbiValue::Integer(0),
             ]),
         ]),
+        AbiValue::Nil,
         AbiValue::Nil,
     ])
 }

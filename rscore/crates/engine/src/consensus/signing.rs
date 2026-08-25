@@ -59,14 +59,66 @@ impl SigningIdentity {
     ) -> Result<Self, StateError> {
         let private_key = crate::derive_signer_key(seed, signer_id)
             .map_err(|error| StateError::Signing(error.to_string()))?;
-        Ok(Self {
+        Ok(Self::from_key(
+            private_key,
+            signer_id,
+            entity_id,
+            weight,
+            threshold,
+            delays,
+        ))
+    }
+
+    /// The same identity from the key itself. The runtime derives keys from
+    /// labels of its own choosing, which this process cannot reconstruct from
+    /// an address; it hands over one key instead of the seed that makes them
+    /// all.
+    pub fn from_key(
+        private_key: [u8; 32],
+        signer_id: &str,
+        entity_id: [u8; 32],
+        weight: u128,
+        threshold: u128,
+        delays: BoardDelays,
+    ) -> Self {
+        Self {
             entity_id,
             private_key,
             weight,
             threshold,
             delays,
             signer_id: signer_id.to_string(),
-        })
+        }
+    }
+
+    /// The lazy entity one key alone defines.
+    pub fn lazy_from_key(
+        private_key: [u8; 32],
+        signer_id: &str,
+        weight: u128,
+        threshold: u128,
+        delays: BoardDelays,
+    ) -> Result<Self, StateError> {
+        let address = crate::address_of_private_key(&private_key)
+            .ok_or_else(|| StateError::Signing("address".to_string()))?;
+        let mut member_entity_id = [0_u8; 32];
+        member_entity_id[12..].copy_from_slice(&address);
+        let entity_id = xln_rscore_hanko::lazy_entity_id(
+            &[xln_rscore_hanko::BoardMember {
+                entity_id: member_entity_id,
+                weight,
+            }],
+            threshold,
+            delays,
+        );
+        Ok(Self::from_key(
+            private_key,
+            signer_id,
+            entity_id,
+            weight,
+            threshold,
+            delays,
+        ))
     }
 
     /// The lazy entity this key alone defines: id equals board hash, so its
@@ -80,26 +132,7 @@ impl SigningIdentity {
     ) -> Result<Self, StateError> {
         let private_key = crate::derive_signer_key(seed, signer_id)
             .map_err(|error| StateError::Signing(error.to_string()))?;
-        let address = crate::address_of_private_key(&private_key)
-            .ok_or_else(|| StateError::Signing("address".to_string()))?;
-        let mut member_entity_id = [0_u8; 32];
-        member_entity_id[12..].copy_from_slice(&address);
-        let entity_id = xln_rscore_hanko::lazy_entity_id(
-            &[xln_rscore_hanko::BoardMember {
-                entity_id: member_entity_id,
-                weight,
-            }],
-            threshold,
-            delays,
-        );
-        Ok(Self {
-            entity_id,
-            private_key,
-            weight,
-            threshold,
-            delays,
-            signer_id: signer_id.to_string(),
-        })
+        Self::lazy_from_key(private_key, signer_id, weight, threshold, delays)
     }
 
     pub const fn entity_id(&self) -> &[u8; 32] {

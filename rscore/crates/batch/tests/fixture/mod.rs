@@ -17,7 +17,13 @@ use xln_rscore_engine::{
     SigningIdentity, TokenId, WatchSeed,
 };
 
-const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+/// The key the runtime would derive for a signer label, which is what the
+/// engine is handed now — it never sees the seed.
+pub fn signer_key(signer_id: &str) -> [u8; 32] {
+    xln_rscore_engine::derive_signer_key(SEED, signer_id).expect("signer key")
+}
+
+pub const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 const WORKERS: usize = 4;
 
 // ------------------------------------------------------------- the fixture
@@ -92,6 +98,22 @@ pub fn engine() -> StatefulConsensusEngine {
     engine_with_market(std::sync::Arc::default())
 }
 
+/// A fresh engine that already knows the stand's payer signers.
+///
+/// A restore needs them: this process is handed keys, never the seed that
+/// makes them, so it cannot rebuild an entity's key from a checkpoint row the
+/// way it once could.
+pub fn engine_knowing(stand: &Stand) -> StatefulConsensusEngine {
+    let mut engine = engine();
+    for (index, pair) in stand.pairs.iter().enumerate() {
+        let signer = format!("payer-{index}");
+        engine
+            .register_signer(pair.payer_entity, signer_key(&signer), &signer)
+            .expect("payer signer");
+    }
+    engine
+}
+
 /// The registry tables the runtime installs with Hello. They are not account
 /// state, so an engine that never received them prices swaps differently from
 /// TypeScript — which is why the market is a constructor argument and not a
@@ -121,7 +143,7 @@ pub fn engine_with_market(
         EngineGeneration::from_bytes([0x42; 8]),
         WORKERS,
         0,
-        SEED.to_string(),
+        xln_rscore_engine::derive_signer_key(SEED, "1").expect("signer key"),
         "1".to_string(),
         swap_market,
         Vec::new(),
@@ -142,13 +164,14 @@ pub fn seeded_engine(
         .map(|row| AccountSeed {
             account_id: row.account_id,
             replica: row.replica.clone(),
+            consensus: None,
         })
         .collect();
     StatefulConsensusEngine::restore(
         EngineGeneration::from_bytes([0x42; 8]),
         WORKERS,
         revision,
-        SEED.to_string(),
+        signer_key(signer_id),
         signer_id.to_string(),
         std::sync::Arc::default(),
         seeds,
@@ -181,18 +204,20 @@ pub fn stand_with_market(
         };
         let state = account_state(&left, &right);
         payer_engine
-            .register_signer(payer_bytes, &payer_signer)
+            .register_signer(payer_bytes, signer_key(&payer_signer), &payer_signer)
             .expect("payer signer");
         payee_engine
-            .register_signer(payee_bytes, &payee_signer)
+            .register_signer(payee_bytes, signer_key(&payee_signer), &payee_signer)
             .expect("payee signer");
         payer_seeds.push(AccountSeed {
             account_id: AccountId::from_bytes(payee_bytes),
             replica: AccountReplica::new(payer.clone(), state.clone()).expect("payer replica"),
+            consensus: None,
         });
         payee_seeds.push(AccountSeed {
             account_id: AccountId::from_bytes(payer_bytes),
             replica: AccountReplica::new(payee.clone(), state).expect("payee replica"),
+            consensus: None,
         });
         pairs.push(Pair {
             payer_account: AccountId::from_bytes(payee_bytes),

@@ -10,7 +10,7 @@ mod fixture;
 
 use std::collections::BTreeMap;
 
-use fixture::{clock, engine, payment, round, stand};
+use fixture::{clock, engine_knowing, payment, round, stand};
 use xln_rscore_batch::{
     AccountCheckpointRows, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
     AccountRestore, AccountsCheckpoint, BatchError, CheckpointExpectation, CheckpointToken,
@@ -275,7 +275,7 @@ fn an_engine_restored_from_the_database_reproduces_the_accounts_root() {
     }
 
     let live_root = stand.payer.accounts_root();
-    let mut restored = engine();
+    let mut restored = engine_knowing(&stand);
     let root = restored
         .restore_accounts(database.restore_rows(), &database.expectation())
         .expect("restore");
@@ -318,7 +318,7 @@ fn an_unacknowledged_checkpoint_is_carried_into_the_next_one() {
     assert!(recovered.revision() > lost.revision());
 
     written.write(&recovered);
-    let mut restored = engine();
+    let mut restored = engine_knowing(&stand);
     let root = restored
         .restore_accounts(written.restore_rows(), &written.expectation())
         .expect("restore");
@@ -392,9 +392,13 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .expect("commit");
 
     // The payer process dies here. Everything below runs on the rebuilt one.
-    let mut restored = engine();
+    let mut restored = engine_knowing(&stand);
     restored
-        .register_signer(stand.pairs[0].payer_entity, "payer-0")
+        .register_signer(
+            stand.pairs[0].payer_entity,
+            xln_rscore_engine::derive_signer_key(fixture::SEED, "payer-0").expect("key"),
+            "payer-0",
+        )
         .expect("signer");
     let root = restored
         .restore_accounts(database.restore_rows(), &database.expectation())
@@ -509,7 +513,7 @@ fn a_truncated_database_is_refused() {
         .leaves
         .clear();
 
-    let mut restored = engine();
+    let mut restored = engine_knowing(&stand);
     let error = restored
         .restore_accounts(database.restore_rows(), &database.expectation())
         .expect_err("a truncated row is not an account");
@@ -533,7 +537,7 @@ fn a_partial_load_is_refused() {
     let expectation = database.expectation();
     let mut rows = database.restore_rows();
     rows.pop();
-    let mut restored = engine();
+    let mut restored = engine_knowing(&stand);
     let error = restored
         .restore_accounts(rows, &expectation)
         .expect_err("a short load is not a checkpoint");

@@ -60,6 +60,7 @@ fn seed_with_deltas(value: u32, deltas: Vec<Delta>) -> AccountSeed {
     AccountSeed {
         account_id: account_id(value),
         replica: AccountReplica::new(left, state).expect("literal owner"),
+        consensus: None,
     }
 }
 

@@ -40,7 +40,8 @@ const REQUEST_TIMEOUT_MS = requestTimeoutMs();
 export const RSCORE_ABI_VERSION = 1;
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An engine built against the old Hello fails at Hello, not later.
-export const RSCORE_PROCESS_ABI_VERSION = 4;
+// 5: that config carries the signer key instead of the runtime seed.
+export const RSCORE_PROCESS_ABI_VERSION = 5;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -495,20 +496,25 @@ export class RscoreProcessClient {
   }
 
   /**
-   * `authority` turns this session into one that owns its accounts: it derives
-   * its own signer key from the seed and returns signed frames. Without it the
-   * session mirrors what the TypeScript engine already decided.
+   * `authority` turns this session into one that owns its accounts: it signs
+   * with the key it is given and returns signed frames. Without it the session
+   * mirrors what the TypeScript engine already decided.
+   *
+   * The key, not the seed: this runtime derives signer keys from labels of its
+   * own choosing, and an engine holding the seed cannot rebuild a label from
+   * the address a replica is keyed by. Handing over one key is also the
+   * smaller secret — the seed is every signer this runtime will ever have.
    */
   async hello(
     workerCount: number,
     swapMarket: RscoreWireValue[],
-    authority?: Readonly<{ seed: string; signerId: string }>,
+    authority?: Readonly<{ privateKey: Uint8Array; signerId: string }>,
   ): Promise<unknown> {
     return this.request(RSCORE_OP.hello, [
       RSCORE_PROCESS_ABI_VERSION,
       workerCount,
       swapMarket,
-      authority ? [authority.seed, authority.signerId] : null,
+      authority ? [Buffer.from(authority.privateKey), authority.signerId] : null,
     ]);
   }
 

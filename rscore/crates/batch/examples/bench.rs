@@ -74,6 +74,7 @@ fn seed(value: u32) -> AccountSeed {
     AccountSeed {
         account_id: account_id(value),
         replica: AccountReplica::new(left, state).expect("owner"),
+        consensus: None,
     }
 }
 

@@ -47,6 +47,9 @@ impl EngineGeneration {
 pub struct AccountSeed {
     pub account_id: AccountId,
     pub replica: AccountReplica,
+    /// Where consensus stands for this account, when the seed carries it. A
+    /// mirror seed does not: it is handed each frame and never proposes one.
+    pub consensus: Option<xln_rscore_engine::ConsensusSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

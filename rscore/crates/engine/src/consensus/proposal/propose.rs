@@ -247,6 +247,8 @@ pub fn propose_account_frame(
     let state_hash = frame.hash()?;
     let hanko = identity.sign_frame(&state_hash)?;
     account.set_pending(PendingFrame {
+        // `set_pending` decides whether this proposal carries the ack we owe.
+        bundled_ack: None,
         frame: frame.clone(),
         state_hash,
         hanko: hanko.clone(),

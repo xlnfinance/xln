@@ -289,6 +289,10 @@ pub fn apply_incoming_frame(
 
     let ack_hanko = identity.sign_frame(&state_hash)?;
     account.commit_from_peer(candidate, &frame, state_hash, incoming.hanko);
+    // The ack this outcome carries is one the Entity commits in the account
+    // leaf until a later proposal carries it, so the account remembers sending
+    // it rather than the wire remembering for it.
+    account.note_outbound_ack(frame.height, state_hash);
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,

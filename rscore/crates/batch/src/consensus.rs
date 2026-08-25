@@ -223,9 +223,11 @@ pub struct StatefulConsensusEngine {
     /// hundred or so frames; between those it never pays for the diff.
     checkpoint: PersistentRadixMap<AccountConsensus>,
     checkpoint_revision: u64,
-    /// The runtime seed and signer this process signs with. Every account
-    /// derives its identity from them, bound to its own owner entity.
-    seed: String,
+    /// The signer key this process signs with, and the id the runtime knows
+    /// it by. Every account derives its identity from the key, bound to its
+    /// own owner entity. The runtime hands over this one key, never the seed
+    /// that makes all of them.
+    private_key: [u8; 32],
     signer_id: String,
     identities: BTreeMap<[u8; 32], SigningIdentity>,
     /// Registry market tables, installed by the runtime with Hello. Not
@@ -241,7 +243,7 @@ impl StatefulConsensusEngine {
         engine_generation: EngineGeneration,
         worker_count: usize,
         revision: u64,
-        seed: String,
+        private_key: [u8; 32],
         signer_id: String,
         swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
         seeds: Vec<AccountSeed>,
@@ -249,7 +251,7 @@ impl StatefulConsensusEngine {
         if worker_count == 0 || worker_count > MAX_BATCH_WORKERS {
             return Err(BatchError::InvalidWorkerCount(worker_count));
         }
-        if seed.is_empty() || signer_id.is_empty() {
+        if private_key == [0_u8; 32] || signer_id.is_empty() {
             return Err(BatchError::SignerRequired);
         }
         let pool = ThreadPoolBuilder::new()
@@ -264,7 +266,7 @@ impl StatefulConsensusEngine {
             accounts: PersistentRadixMap::empty(),
             checkpoint: PersistentRadixMap::empty(),
             checkpoint_revision: revision,
-            seed,
+            private_key,
             signer_id,
             identities: BTreeMap::new(),
             swap_market,
@@ -303,8 +305,10 @@ impl StatefulConsensusEngine {
         self.accounts.len()
     }
 
-    /// Seed or replace accounts. Their consensus state starts empty: a fresh
-    /// account has no frames and no queue.
+    /// Seed or replace accounts. A seed that carries no consensus state starts
+    /// the account at genesis — no frames, no queue; one that carries it is
+    /// restored to exactly where the runtime holds the account, and its pending
+    /// proposal is replayed rather than trusted.
     pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
         self.assert_no_pending_wave()?;
         let mut entries = Vec::with_capacity(seeds.len());
@@ -316,7 +320,18 @@ impl StatefulConsensusEngine {
                 return Err(BatchError::DuplicateAccount(seed.account_id));
             }
             self.ensure_identity(seed.replica.owner().as_bytes())?;
-            let account = AccountConsensus::new(seed.replica);
+            let account = match seed.consensus {
+                None => AccountConsensus::new(seed.replica),
+                Some(snapshot) => AccountConsensus::restore_from_checkpoint(
+                    seed.replica,
+                    snapshot,
+                    &self.swap_market,
+                )
+                .map_err(|error| BatchError::SeedRestore {
+                    account_id: seed.account_id,
+                    detail: error.to_string(),
+                })?,
+            };
             let leaf = leaf_root(seed.account_id, &account)?;
             entries.push((seed.account_id.as_bytes().to_vec(), account, leaf));
         }
@@ -871,15 +886,20 @@ impl StatefulConsensusEngine {
         Ok(())
     }
 
-    /// Bind an entity this runtime signs for to its signer id. A runtime that
-    /// hosts several entities derives a different key for each; without this
-    /// they would all sign as the session's default signer.
+    /// Bind an entity this runtime signs for to the key it signs with. A
+    /// runtime that hosts several entities holds a different key for each;
+    /// without this they would all sign as the session's default signer.
+    ///
+    /// The key comes from the caller because only the runtime knows how its
+    /// own signers are derived — this process is handed keys, never a seed to
+    /// derive them from.
     pub fn register_signer(
         &mut self,
         entity_id: [u8; 32],
+        private_key: [u8; 32],
         signer_id: &str,
     ) -> Result<(), BatchError> {
-        let identity = self.derive_identity(entity_id, signer_id)?;
+        let identity = self.build_identity(entity_id, private_key, signer_id)?;
         self.identities.insert(entity_id, identity);
         Ok(())
     }
@@ -1010,7 +1030,15 @@ impl StatefulConsensusEngine {
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
             let owner = *row.replica.owner().as_bytes();
-            let identity = self.derive_identity(owner, &row.signer_id)?;
+            // The key for an entity this session was told about is the one it
+            // was given; for any other row the session's own key must bind the
+            // entity, or the row is refused rather than signed for by the
+            // wrong signer. This process holds keys, not the seed that makes
+            // them, so it cannot derive a stranger's.
+            let identity = match self.identities.get(&owner) {
+                Some(known) if known.signer_id() == row.signer_id => known.clone(),
+                _ => self.build_identity(owner, self.private_key, &row.signer_id)?,
+            };
             identities.insert(owner, identity);
             let account = AccountConsensus::restore_from_checkpoint(
                 row.replica,
@@ -1067,28 +1095,28 @@ impl StatefulConsensusEngine {
             return Ok(());
         }
         let signer_id = self.signer_id.clone();
-        let identity = self.derive_identity(*entity_id, &signer_id)?;
+        let identity = self.build_identity(*entity_id, self.private_key, &signer_id)?;
         self.identities.insert(*entity_id, identity);
         Ok(())
     }
 
-    /// Derive the key for one entity and prove it belongs to it. The proof is
-    /// the lazy entity id: it is the hash of the board this key alone defines,
-    /// so a signer id that is not this entity's cannot pass.
-    fn derive_identity(
+    /// Bind a key to one entity and prove it belongs to it. The proof is the
+    /// lazy entity id: it is the hash of the board this key alone defines, so
+    /// a key that is not this entity's cannot pass.
+    fn build_identity(
         &self,
         entity_id: [u8; 32],
+        private_key: [u8; 32],
         signer_id: &str,
     ) -> Result<SigningIdentity, BatchError> {
-        let identity = SigningIdentity::from_seed(
-            &self.seed,
+        let identity = SigningIdentity::from_key(
+            private_key,
             signer_id,
             entity_id,
             1,
             1,
             BoardDelays::default(),
-        )
-        .map_err(|error| BatchError::Signing(error.to_string()))?;
+        );
         if !identity.binds_lazy_entity() {
             return Err(BatchError::SignerUnknownEntity {
                 entity_id: hex_of(&entity_id),

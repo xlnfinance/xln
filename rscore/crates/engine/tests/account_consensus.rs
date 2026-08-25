@@ -466,11 +466,13 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
         rollback_count: 0,
         last_rollback_frame_hash: None,
         counterparty_frame_hanko: None,
+        last_outbound_ack: None,
     };
     let saved = PendingFrameSnapshot {
         frame: frame.clone(),
         state_hash,
         hanko: hanko.clone(),
+        bundled_ack: None,
     };
 
     let restored = AccountConsensus::restore_from_checkpoint(

@@ -100,6 +100,11 @@ pub enum BatchError {
     CheckpointSignerDigest { actual: String, expected: String },
     #[error("RSCORE_BATCH_CHECKPOINT_TOKEN:{actual}:{expected}")]
     CheckpointToken { actual: String, expected: String },
+    #[error("RSCORE_BATCH_SEED_RESTORE:{account_id}:{detail}")]
+    SeedRestore {
+        account_id: AccountId,
+        detail: String,
+    },
     #[error("RSCORE_BATCH_SIGNER_REQUIRED")]
     SignerRequired,
     #[error("RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY:{entity_id}")]

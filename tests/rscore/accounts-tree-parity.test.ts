@@ -156,6 +156,8 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   // leaf stays the payment-profile state root and referenceRoot below is the
   // matching TypeScript tree.
   null,
+  // No consensus state: these accounts start at genesis.
+  null,
 ];
 
 const paymentTx = (account: AccountReplica, index: number, amount: bigint): AccountTx => ({
@@ -303,18 +305,21 @@ const swapResolveJob = (
     8,
     `parity-offer-${index}`,
     fillRatio,
-    null,
-    null,
+    null, // fillNumerator
+    null, // fillDenominator
     cancelRemainder ? 1 : 0,
-    null,
-    null,
+    null, // comment
+    null, // restingGiveTokenId
+    null, // restingWantTokenId
+    null, // feeTokenId
+    null, // feeAmount
     filledGive.toString(),
     filledWant.toString(),
-    null,
-    null,
-    null,
-    null,
-    null,
+    null, // restingPriceTicks
+    null, // restingGiveAmount
+    null, // restingWantAmount
+    null, // restingQuantizedGive
+    null, // restingQuantizedWant
   ],
   null,
   // No authority: these vectors drive the engine directly, without a peer

@@ -30,6 +30,10 @@ use xln_rscore_engine::{
     SigningIdentity, TokenId, WatchSeed,
 };
 
+fn signer_key(signer_id: &str) -> [u8; 32] {
+    xln_rscore_engine::derive_signer_key(SEED, signer_id).expect("signer key")
+}
+
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 
 fn hex_of(bytes: &[u8]) -> String {
@@ -127,10 +131,12 @@ fn main() {
         payer_seeds.push(AccountSeed {
             account_id: payer_account,
             replica: AccountReplica::new(payer.clone(), state.clone()).expect("payer replica"),
+            consensus: None,
         });
         payee_seeds.push(AccountSeed {
             account_id: payee_account,
             replica: AccountReplica::new(payee.clone(), state).expect("payee replica"),
+            consensus: None,
         });
         payer_signers.push((payer_bytes, payer_signer));
         payee_signers.push((payee_bytes, payee_signer));
@@ -158,7 +164,7 @@ fn main() {
         EngineGeneration::from_bytes([0x42; 8]),
         workers,
         0,
-        SEED.to_string(),
+        xln_rscore_engine::derive_signer_key(SEED, "1").expect("signer key"),
         "1".to_string(),
         std::sync::Arc::default(),
         Vec::new(),
@@ -168,7 +174,7 @@ fn main() {
         EngineGeneration::from_bytes([0x42; 8]),
         workers,
         0,
-        SEED.to_string(),
+        xln_rscore_engine::derive_signer_key(SEED, "1").expect("signer key"),
         "1".to_string(),
         std::sync::Arc::default(),
         Vec::new(),
@@ -176,12 +182,12 @@ fn main() {
     .expect("payee engine");
     for (entity, signer) in &payer_signers {
         payer_engine
-            .register_signer(*entity, signer)
+            .register_signer(*entity, signer_key(signer), signer)
             .expect("payer signer");
     }
     for (entity, signer) in &payee_signers {
         payee_engine
-            .register_signer(*entity, signer)
+            .register_signer(*entity, signer_key(signer), signer)
             .expect("payee signer");
     }
     payer_engine

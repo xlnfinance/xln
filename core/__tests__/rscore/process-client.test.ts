@@ -11,7 +11,7 @@ import {
   waveAdmitOp,
 } from '../../rscore/shadow-wire';
 import { decodeWave, waveParityDigest } from '../../rscore/wave-decode';
-import { deriveSignerAddressSync } from '../../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { RSCORE_OP, RSCORE_PROCESS_ABI_VERSION, RscoreProcessClient } from '../../rscore/client';
@@ -78,7 +78,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
     try {
       const seed = `0x${'7a'.repeat(32)}`;
       const hello = (await client.hello(2, swapMarketPolicyWire(), {
-        seed,
+        privateKey: deriveSignerKeySync(seed, '1'),
         signerId: '1',
       })) as unknown[];
       expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
@@ -138,7 +138,10 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
     try {
       const seed = `0x${'7a'.repeat(32)}`;
       const market = swapMarketPolicyWire();
-      const hello = (await client.hello(2, market, { seed, signerId: '1' })) as unknown[];
+      const hello = (await client.hello(2, market, {
+        privateKey: deriveSignerKeySync(seed, '1'),
+        signerId: '1',
+      })) as unknown[];
       expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
       expect(`0x${Buffer.from(hello[3] as Uint8Array).toString('hex')}`)
         .toBe(swapMarketPolicyDigest(market));
@@ -282,7 +285,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
     try {
       const seed = `0x${'7a'.repeat(32)}`;
       const hello = (await client.hello(2, swapMarketPolicyWire(), {
-        seed,
+        privateKey: deriveSignerKeySync(seed, '1'),
         signerId: '1',
       })) as unknown[];
       const owner = `0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`.toLowerCase();

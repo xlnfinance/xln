@@ -37,7 +37,8 @@ pub use transport::{read_frame, serve, write_frame};
 
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An older runtime fails at Hello rather than at the first wave.
-pub const PROCESS_ABI_VERSION: u64 = 4;
+// 5: that config carries the signer key instead of the runtime seed.
+pub const PROCESS_ABI_VERSION: u64 = 5;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {

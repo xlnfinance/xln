@@ -143,6 +143,7 @@ fn commit_rejects_different_replica_identity() {
     let target_seed = AccountSeed {
         account_id: account_id(0),
         replica: foreign.replica,
+        consensus: None,
     };
     let mut target =
         StatefulBatchEngine::new(generation(), 1, vec![target_seed]).expect("target engine");
@@ -343,5 +344,6 @@ fn seed_with_dispute_config(value: u32, left: u64, right: u64) -> AccountSeed {
     AccountSeed {
         account_id: account_id(value),
         replica: AccountReplica::new(owner, state).expect("account replica"),
+        consensus: None,
     }
 }

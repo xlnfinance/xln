@@ -16,6 +16,7 @@ import { canonicalAccountTxForFrameHash } from '../account/consensus/frame/hash'
 import { projectEntityAccountLeaf } from '../entity/consensus/state-root';
 import { requirePersistentAccountStateMap } from '../account/state/persistent-state-map';
 import type {
+  AccountFrame,
   AccountReplica,
   AccountState,
   AccountTx,
@@ -342,6 +343,106 @@ const rebalanceFeePoliciesWire = (
   ]);
 
 /** Seed-wire row (arity 12) for one committed account snapshot. */
+/**
+ * Where the account stands in its own bilateral consensus: the frame it
+ * committed, the frame it proposed and has not been acked for, its queue, and
+ * the counterparty's certificate over the committed frame.
+ *
+ * A seed without this starts the account at height zero. That is right for the
+ * mirror, which is re-seeded at each frame and told what the frame was, and
+ * wrong for an engine that has to propose the *next* frame itself: it would
+ * propose height one against an account the Entity has at height three, and
+ * every hash from there on would be its own.
+ */
+export const accountConsensusWire = (account: AccountReplica): RscoreWireValue => {
+  const current = account.currentFrame;
+  const pending = account.pendingFrame;
+  return [
+    // Height zero is no frame at all: the engine chains its first frame to the
+    // genesis marker, exactly as this side does.
+    current === undefined || current.height === 0 ? null : [
+      current.height,
+      hexToWireBytes(current.stateHash, 32, 'SHADOW_CURRENT_STATE_HASH'),
+      current.timestamp,
+      current.jHeight,
+    ],
+    pending === undefined ? null : frameWire(
+      pending,
+      pendingFrameHanko(account),
+      outboundAckWire(account.pendingAccountInput?.kind === 'frame_ack'
+        ? account.pendingAccountInput.ack
+        : undefined),
+    ),
+    account.mempool.map(tx => {
+      const wire = accountTxWire(tx);
+      if (wire === null) throw new Error(`SHADOW_MEMPOOL_TX_UNSUPPORTED:${tx.type}`);
+      return wire;
+    }),
+    account.rollbackCount,
+    account.lastRollbackFrameHash === undefined
+      ? null
+      : hexToWireBytes(account.lastRollbackFrameHash, 32, 'SHADOW_LAST_ROLLBACK'),
+    account.counterpartyFrameHanko === undefined
+      ? null
+      : hankoWireBytes(account.counterpartyFrameHanko),
+    outboundAckWire(account.lastOutboundFrameAck?.response.ack),
+  ];
+};
+
+/**
+ * An acknowledgement this side sent, as the engine needs it: the height it
+ * covers and the frame hash it binds. The Entity commits both — inside
+ * `lastOutboundFrameAck`, and inside a proposal that carried the ack with it.
+ */
+const outboundAckWire = (
+  ack: { height: number; frameHash: string } | undefined,
+): RscoreWireValue => (ack === undefined
+  ? null
+  : [ack.height, hexToWireBytes(ack.frameHash, 32, 'SHADOW_OUTBOUND_ACK_HASH')]);
+
+/**
+ * Our own signature over the proposed frame. It is not a field of the frame:
+ * it lives in the signed proposal still waiting for the counterparty's ack,
+ * which is the only place this side keeps it.
+ */
+const pendingFrameHanko = (account: AccountReplica): string => {
+  const input = account.pendingAccountInput;
+  const hanko = input === undefined ? undefined : input.proposal?.frameHanko;
+  if (typeof hanko !== 'string') throw new Error('SHADOW_PENDING_FRAME_HANKO_MISSING');
+  return hanko;
+};
+
+/** A proposed frame, whole: the engine replays it and checks its own hash. */
+const frameWire = (
+  frame: AccountFrame,
+  hanko: string,
+  bundledAck: RscoreWireValue,
+): RscoreWireValue => [
+  frame.height,
+  frame.timestamp,
+  frame.jHeight,
+  frame.accountTxs.map(tx => {
+    const wire = accountTxWire(tx);
+    if (wire === null) throw new Error(`SHADOW_FRAME_TX_UNSUPPORTED:${tx.type}`);
+    return wire;
+  }),
+  frame.prevFrameHash,
+  hexToWireBytes(frame.accountStateRoot, 32, 'SHADOW_FRAME_STATE_ROOT'),
+  frame.byLeft,
+  frame.deltas.map(deltaWire),
+  hexToWireBytes(frame.stateHash, 32, 'SHADOW_FRAME_STATE_HASH'),
+  hankoWireBytes(hanko),
+  bundledAck,
+];
+
+const hankoWireBytes = (value: string): Uint8Array => {
+  const clean = value.startsWith('0x') ? value.slice(2) : value;
+  if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {
+    throw new Error(`SHADOW_HANKO_INVALID:${clean.length}`);
+  }
+  return Uint8Array.from(Buffer.from(clean, 'hex'));
+};
+
 export const accountSeedWire = (
   ownerEntityId: string,
   counterpartyEntityId: string,
@@ -352,6 +453,11 @@ export const accountSeedWire = (
    * shell it produced.
    */
   envelope: RscoreWireValue | null = null,
+  /**
+   * Where consensus stands for this account. Absent for the mirror, which is
+   * handed each frame and never proposes one.
+   */
+  consensus: RscoreWireValue | null = null,
 ): RscoreWireValue[] => {
   return [
     hexToWireBytes(counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID'),
@@ -371,6 +477,7 @@ export const accountSeedWire = (
     [state.jNonce, state.lastFinalizedJHeight],
     carriedSectionsWire(state),
     envelope,
+    consensus,
   ];
 };
 

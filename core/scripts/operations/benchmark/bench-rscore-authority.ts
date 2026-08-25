@@ -172,7 +172,7 @@ const main = async (): Promise<void> => {
     sessionId: Buffer.alloc(16, 0x20),
   });
   const hello = (await client.hello(workers, swapMarketPolicyWire(), {
-    seed: SEED,
+    privateKey: deriveSignerKeySync(SEED, HUB_SIGNER),
     signerId: HUB_SIGNER,
   })) as unknown[];
   const hub = `0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`.toLowerCase();

@@ -30,7 +30,8 @@ pub use consensus::proposal::propose::{
     Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
 };
 pub use consensus::replica::{
-    AccountConsensus, CommittedFrame, ConsensusSnapshot, PendingFrame, PendingFrameSnapshot,
+    AccountConsensus, CommittedFrame, ConsensusSnapshot, OutboundAck, PendingFrame,
+    PendingFrameSnapshot,
 };
 pub use consensus::signing::{SigningIdentity, verify_frame_hanko};
 pub use crypto::{

@@ -16,10 +16,12 @@ use crate::wire_value::{
 use crate::{PROCESS_ABI_VERSION, PROCESS_PROFILE, ProcessError};
 
 /// What an authoritative session needs that a mirror session does not: the
-/// runtime's seed and the signer it signs as. The engine derives its own keys
-/// from them, so the runtime never ships a private key.
+/// key it signs with, and the id the runtime knows that key by. The runtime
+/// derives its keys from labels of its own choosing, which this process cannot
+/// reconstruct from an address, so it is handed one key rather than the seed
+/// that makes all of them.
 pub struct AuthorityConfig {
-    pub seed: String,
+    pub private_key: [u8; 32],
     pub signer_id: String,
 }
 
@@ -105,20 +107,23 @@ fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-/// `null` for a mirror session, or `(seed, signerId)` for one that owns the
-/// accounts. The seed never leaves this process again: the engine derives its
-/// keys from it and returns signatures, not key material.
+/// `null` for a mirror session, or `(privateKey, signerId)` for one that owns
+/// the accounts. The key never leaves this process again: the engine signs
+/// with it and returns signatures, not key material.
 fn decode_authority_config(value: &AbiValue) -> Result<Option<AuthorityConfig>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
     let fields = exact(tuple(value)?, 2, "authorityConfig")?;
-    let seed = text(&fields[0])?.to_string();
+    let private_key = fixed_bytes(&fields[0], "authorityPrivateKey")?;
     let signer_id = text(&fields[1])?.to_string();
-    if seed.is_empty() || signer_id.is_empty() {
+    if private_key == [0_u8; 32] || signer_id.is_empty() {
         return Err(ProcessError::Expected("authorityConfig"));
     }
-    Ok(Some(AuthorityConfig { seed, signer_id }))
+    Ok(Some(AuthorityConfig {
+        private_key,
+        signer_id,
+    }))
 }
 
 /// Registry-derived market tables, installed once per session. The engine
@@ -395,7 +400,7 @@ fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
-    let fields = exact(tuple(value)?, 13, "accountSeed")?;
+    let fields = exact(tuple(value)?, 14, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
     // The account id IS the counterparty entity id: one engine process serves
@@ -456,6 +461,100 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     Ok(AccountSeed {
         account_id,
         replica,
+        consensus: decode_consensus_snapshot(&fields[13])?,
+    })
+}
+
+/// Where the account stands in its own consensus, or `null` for a seed that
+/// starts at genesis. A mirror session is re-seeded per frame and never
+/// proposes, so it sends none; an authoritative session proposes the account's
+/// *next* frame and would otherwise propose height one against an account the
+/// entity holds at height three.
+fn decode_consensus_snapshot(
+    value: &AbiValue,
+) -> Result<Option<xln_rscore_engine::ConsensusSnapshot>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = exact(tuple(value)?, 7, "accountConsensus")?;
+    let current = match &fields[0] {
+        AbiValue::Nil => None,
+        value => {
+            let row = exact(tuple(value)?, 4, "committedFrame")?;
+            Some(xln_rscore_engine::CommittedFrame {
+                height: js_number(&row[0], "committedHeight")?,
+                state_hash: fixed_bytes(&row[1], "committedStateHash")?,
+                timestamp: js_number(&row[2], "committedTimestamp")?,
+                j_height: js_number(&row[3], "committedJHeight")?,
+            })
+        }
+    };
+    let pending = match &fields[1] {
+        AbiValue::Nil => None,
+        value => Some(decode_pending_frame(value)?),
+    };
+    let mempool = tuple(&fields[2])?
+        .iter()
+        .map(decode_tx)
+        .collect::<Result<_, _>>()?;
+    Ok(Some(xln_rscore_engine::ConsensusSnapshot {
+        mempool,
+        current,
+        pending,
+        rollback_count: js_number(&fields[3], "rollbackCount")?,
+        last_rollback_frame_hash: match &fields[4] {
+            AbiValue::Nil => None,
+            value => Some(fixed_bytes(value, "lastRollbackFrameHash")?),
+        },
+        counterparty_frame_hanko: match &fields[5] {
+            AbiValue::Nil => None,
+            value => Some(bytes(value, "counterpartyFrameHanko")?.to_vec()),
+        },
+        last_outbound_ack: decode_outbound_ack(&fields[6], "lastOutboundAck")?,
+    }))
+}
+
+/// The proposal this side signed and has not been acked for, whole. The engine
+/// replays it against the committed replica and refuses a snapshot whose frame
+/// does not reproduce its own hash.
+fn decode_outbound_ack(
+    value: &AbiValue,
+    field: &'static str,
+) -> Result<Option<xln_rscore_engine::OutboundAck>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let row = exact(tuple(value)?, 2, field)?;
+    Ok(Some(xln_rscore_engine::OutboundAck {
+        height: js_number(&row[0], "ackHeight")?,
+        frame_hash: fixed_bytes(&row[1], "ackFrameHash")?,
+    }))
+}
+
+fn decode_pending_frame(
+    value: &AbiValue,
+) -> Result<xln_rscore_engine::PendingFrameSnapshot, ProcessError> {
+    let fields = exact(tuple(value)?, 11, "pendingFrame")?;
+    Ok(xln_rscore_engine::PendingFrameSnapshot {
+        frame: xln_rscore_engine::AccountFrame {
+            height: js_number(&fields[0], "pendingHeight")?,
+            timestamp: js_number(&fields[1], "pendingTimestamp")?,
+            j_height: js_number(&fields[2], "pendingJHeight")?,
+            txs: tuple(&fields[3])?
+                .iter()
+                .map(decode_tx)
+                .collect::<Result<_, _>>()?,
+            prev_frame_hash: text(&fields[4])?.into(),
+            account_state_root: fixed_bytes(&fields[5], "pendingAccountStateRoot")?,
+            by_left: boolean(&fields[6], "pendingByLeft")?,
+            deltas: tuple(&fields[7])?
+                .iter()
+                .map(decode_delta)
+                .collect::<Result<_, _>>()?,
+        },
+        state_hash: fixed_bytes(&fields[8], "pendingStateHash")?,
+        hanko: bytes(&fields[9], "pendingHanko")?.to_vec(),
+        bundled_ack: decode_outbound_ack(&fields[10], "pendingBundledAck")?,
     })
 }
 

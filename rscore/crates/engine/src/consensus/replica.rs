@@ -20,6 +20,18 @@ use crate::input::mempool::{
 use crate::state::account_replica_shell::AccountEnvelope;
 use crate::{AccountReplica, AccountTx};
 
+/// An acknowledgement this side sent for the counterparty's frame, kept
+/// because the Entity commits it in the account leaf: a proposal built right
+/// after it carries it, and a retry of the ack must be the same bytes.
+///
+/// Parity target: `lastOutboundFrameAck` and the `ack` half of
+/// `pendingAccountInput` (core/types/account.ts).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutboundAck {
+    pub height: u64,
+    pub frame_hash: [u8; 32],
+}
+
 /// A frame both sides have committed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommittedFrame {
@@ -48,6 +60,10 @@ pub struct PendingFrame {
     /// `candidateEffects` in the prepared commit; the proposal result carries
     /// none, and the ACK path releases them.
     pub(crate) outputs: Vec<crate::AccountOutput>,
+    /// The acknowledgement carried by the message that sent this proposal, if
+    /// it carried one. Present means the message was a `frame_ack` rather than
+    /// a `frame`, which the account leaf commits.
+    pub(crate) bundled_ack: Option<OutboundAck>,
 }
 
 #[derive(Clone)]
@@ -68,6 +84,10 @@ pub struct AccountConsensus {
     /// the Hanko is stored — exact by identity, like the memo TypeScript keys
     /// on the Hanko string.
     counterparty_frame_hanko_digest: Option<String>,
+    /// The last acknowledgement this side sent, kept for the same reasons
+    /// TypeScript keeps it: the next proposal may carry it, and the leaf
+    /// commits it until it does.
+    last_outbound_ack: Option<OutboundAck>,
 }
 
 impl AccountConsensus {
@@ -81,6 +101,7 @@ impl AccountConsensus {
             last_rollback_frame_hash: None,
             counterparty_frame_hanko: None,
             counterparty_frame_hanko_digest: None,
+            last_outbound_ack: None,
         }
     }
 
@@ -165,8 +186,40 @@ impl AccountConsensus {
         Ok(())
     }
 
-    pub(crate) fn set_pending(&mut self, pending: PendingFrame) {
+    /// Install our proposal, and decide what the message carrying it was: a
+    /// bare frame, or a frame carrying the acknowledgement we owe for the
+    /// counterparty's previous one. The account leaf commits that choice, so
+    /// it is made here rather than at the wire.
+    ///
+    /// Parity target: `buildOutboundAccountInput`
+    /// (core/account/consensus/proposal/finalize.ts) — bundle when the ack is
+    /// for this counterparty, one height below the frame, and the account has
+    /// committed exactly that height; and drop an ack older than the committed
+    /// height, which no later proposal can carry.
+    pub(crate) fn set_pending(&mut self, mut pending: PendingFrame) {
+        let current_height = self.current_height();
+        let bundle = self.last_outbound_ack.as_ref().is_some_and(|ack| {
+            ack.height + 1 == pending.frame.height && current_height == ack.height
+        });
+        if bundle {
+            pending.bundled_ack = self.last_outbound_ack.clone();
+        } else if self
+            .last_outbound_ack
+            .as_ref()
+            .is_some_and(|ack| ack.height < current_height)
+        {
+            self.last_outbound_ack = None;
+        }
         self.pending = Some(pending);
+    }
+
+    /// Remember the acknowledgement we are sending for a frame we just
+    /// committed from the counterparty.
+    ///
+    /// Parity target: `account.lastOutboundFrameAck = material.outboundAck`
+    /// (core/account/consensus/index.ts).
+    pub(crate) fn note_outbound_ack(&mut self, height: u64, frame_hash: [u8; 32]) {
+        self.last_outbound_ack = Some(OutboundAck { height, frame_hash });
     }
 
     /// Commit a frame: the candidate becomes live state and the frame becomes
@@ -205,6 +258,15 @@ impl AccountConsensus {
     ) {
         self.install_commit(candidate, frame, state_hash);
         self.store_counterparty_hanko(ack_hanko);
+        // Parity target: the same drop in `installPendingFrameCommit`
+        // (core/account/consensus/incoming/ack-commit.ts).
+        if self
+            .last_outbound_ack
+            .as_ref()
+            .is_some_and(|ack| ack.height < frame.height)
+        {
+            self.last_outbound_ack = None;
+        }
         self.rollback_count = self.rollback_count.saturating_sub(1);
         if self.rollback_count == 0 {
             self.last_rollback_frame_hash = None;
@@ -285,6 +347,10 @@ pub struct PendingFrameSnapshot {
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
+    /// The acknowledgement the message carrying this proposal also carried,
+    /// if any. It decides whether the leaf calls the message a `frame` or a
+    /// `frame_ack`, so it is saved with the proposal rather than rederived.
+    pub bundled_ack: Option<OutboundAck>,
 }
 
 /// Everything consensus owns for one account, in a form a database can hold.
@@ -303,6 +369,9 @@ pub struct ConsensusSnapshot {
     /// The bilateral certificate for the committed frame. It is committed in
     /// the account leaf, so losing it across a restart would change the leaf.
     pub counterparty_frame_hanko: Option<Vec<u8>>,
+    /// The last acknowledgement this side sent. The leaf commits it until a
+    /// proposal carries it, so a restore that dropped it would change the leaf.
+    pub last_outbound_ack: Option<OutboundAck>,
 }
 
 impl AccountConsensus {
@@ -315,10 +384,12 @@ impl AccountConsensus {
                 frame: pending.frame.clone(),
                 state_hash: pending.state_hash,
                 hanko: pending.hanko.clone(),
+                bundled_ack: pending.bundled_ack.clone(),
             }),
             rollback_count: self.rollback_count,
             last_rollback_frame_hash: self.last_rollback_frame_hash,
             counterparty_frame_hanko: self.counterparty_frame_hanko.clone(),
+            last_outbound_ack: self.last_outbound_ack.clone(),
         }
     }
 
@@ -341,6 +412,7 @@ impl AccountConsensus {
             rollback_count,
             last_rollback_frame_hash,
             counterparty_frame_hanko,
+            last_outbound_ack,
         } = snapshot;
         assert_mempool_within_limit(
             mempool.len(),
@@ -360,6 +432,7 @@ impl AccountConsensus {
                 .as_deref()
                 .map(hanko_leaf_digest),
             counterparty_frame_hanko,
+            last_outbound_ack,
         };
         let Some(pending) = pending else {
             return Ok(account);
@@ -386,6 +459,7 @@ impl AccountConsensus {
             hanko: pending.hanko,
             candidate,
             outputs,
+            bundled_ack: pending.bundled_ack,
         });
         Ok(account)
     }
@@ -489,6 +563,28 @@ impl AccountConsensus {
                 CanonicalValue::String(hex_prefixed(hash)),
             ));
         }
+        if let Some(pending) = &self.pending {
+            fields.push((
+                "pendingAccountInput".to_string(),
+                self.outbound_proposal_binding(pending),
+            ));
+        }
+        if let Some(ack) = &self.last_outbound_ack {
+            fields.push((
+                "lastOutboundFrameAck".to_string(),
+                CanonicalValue::Object(vec![
+                    (
+                        "height".to_string(),
+                        CanonicalValue::Number(ack.height as f64),
+                    ),
+                    (
+                        "counterpartyEntityId".to_string(),
+                        CanonicalValue::String(self.replica.counterparty().to_string()),
+                    ),
+                    ("response".to_string(), self.ack_binding(ack)),
+                ]),
+            ));
+        }
         if let Some(digest) = &self.counterparty_frame_hanko_digest {
             // The leaf commits the Hanko's digest, not its ~1.4 KB of hex.
             //
@@ -504,6 +600,85 @@ impl AccountConsensus {
         AccountEnvelope::new(fields, mempool)
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
+
+    /// The signed proposal still waiting for its ack, as the Entity commits
+    /// it: which message carried it, between whom, and what it binds.
+    ///
+    /// Parity target: `compactAccountInputBinding`
+    /// (core/entity/consensus/state-root.ts) over `pendingAccountInput`.
+    fn outbound_proposal_binding(&self, pending: &PendingFrame) -> CanonicalValue {
+        let mut fields = vec![
+            (
+                "kind".to_string(),
+                CanonicalValue::String(
+                    if pending.bundled_ack.is_some() {
+                        "frame_ack"
+                    } else {
+                        "frame"
+                    }
+                    .to_string(),
+                ),
+            ),
+            (
+                "fromEntityId".to_string(),
+                CanonicalValue::String(self.replica.owner().to_string()),
+            ),
+            (
+                "toEntityId".to_string(),
+                CanonicalValue::String(self.replica.counterparty().to_string()),
+            ),
+            (
+                "proposal".to_string(),
+                CanonicalValue::Object(vec![
+                    (
+                        "height".to_string(),
+                        CanonicalValue::Number(pending.frame.height as f64),
+                    ),
+                    (
+                        "frameHash".to_string(),
+                        CanonicalValue::String(hex_prefixed(&pending.state_hash)),
+                    ),
+                ]),
+            ),
+        ];
+        if let Some(ack) = &pending.bundled_ack {
+            fields.push(("ack".to_string(), ack_fields(ack)));
+        }
+        CanonicalValue::Object(fields)
+    }
+
+    /// The standalone acknowledgement message this side sent, as the Entity
+    /// commits it inside `lastOutboundFrameAck`.
+    fn ack_binding(&self, ack: &OutboundAck) -> CanonicalValue {
+        CanonicalValue::Object(vec![
+            (
+                "kind".to_string(),
+                CanonicalValue::String("ack".to_string()),
+            ),
+            (
+                "fromEntityId".to_string(),
+                CanonicalValue::String(self.replica.owner().to_string()),
+            ),
+            (
+                "toEntityId".to_string(),
+                CanonicalValue::String(self.replica.counterparty().to_string()),
+            ),
+            ("ack".to_string(), ack_fields(ack)),
+        ])
+    }
+}
+
+fn ack_fields(ack: &OutboundAck) -> CanonicalValue {
+    CanonicalValue::Object(vec![
+        (
+            "height".to_string(),
+            CanonicalValue::Number(ack.height as f64),
+        ),
+        (
+            "frameHash".to_string(),
+            CanonicalValue::String(hex_prefixed(&ack.frame_hash)),
+        ),
+    ])
 }
 
 impl std::fmt::Debug for AccountConsensus {
@@ -527,7 +702,9 @@ impl std::fmt::Debug for AccountConsensus {
 /// Projection fields the engine derives from its own consensus state. A
 /// carried copy of any of them would let the authority's view of the queue or
 /// the chain head override what this engine actually holds.
-const DERIVED_CONSENSUS_FIELDS: [&str; 6] = [
+const DERIVED_CONSENSUS_FIELDS: [&str; 8] = [
+    "pendingAccountInput",
+    "lastOutboundFrameAck",
     "counterpartyFrameHanko",
     "currentHeight",
     "rollbackCount",
