@@ -18,6 +18,7 @@ import {
   runtimeViewPublicationMatches,
   runtimeViewSelectionMatches,
   setRuntimeViewActiveEntityId,
+  setRuntimeViewPage,
 } from '../../../frontend/src/lib/stores/runtimeViewStore';
 import {
   ensureRuntimeHistoryContext,
@@ -125,7 +126,7 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).toContain('export const refreshRuntimeView');
   expect(source).toContain('export const refreshSelectedRuntimeView');
   expect(source).toContain('refreshRuntimeView(currentRuntimeViewQuery())');
-  expect(source).toContain('if (get(runtimeViewActiveEntityId) === normalizedEntityId) return;');
+  expect(source).toContain('runtimeViewSelectionCoordinator.setActiveEntityId(entityId)');
   expect(source).toContain('runtimeQueryClient.readHead()');
   expect(source).toContain('runtimeQueryClient.readViewFrame(query)');
   expect(source).toContain('runtimeControllerHandle');
@@ -158,8 +159,8 @@ test('re-pinning the same wallet Entity preserves account pagination', () => {
   resetRuntimeViewSelection();
   try {
     setRuntimeViewActiveEntityId('0xentity-a');
-    runtimeViewAccountsPage.set(3);
-    runtimeViewBooksPage.set(4);
+    setRuntimeViewPage('accounts', 3);
+    setRuntimeViewPage('books', 4);
 
     setRuntimeViewActiveEntityId(' 0xENTITY-A ');
 

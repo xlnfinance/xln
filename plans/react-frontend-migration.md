@@ -333,7 +333,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, ACTIVATION, QUERY, OBSERVER, CATCH-UP, AND VIEW-MODEL BOUNDARIES SHARED`
+**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, ACTIVATION, QUERY, OBSERVER, CATCH-UP, VIEW-SELECTION, AND VIEW-MODEL BOUNDARIES SHARED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -477,6 +477,17 @@ in-flight coalescing, newer targets, timeout, read failures, reset, destruction,
 and thin Svelte wiring. The wallet local check covers 435 files with zero
 unsafe-type findings.
 
+The next `packages/runtime-client` slice now owns framework-neutral RuntimeView
+selection state: stable snapshots and subscriptions, normalized Entity/page/
+historical-height updates, monotonic revisions, navigation reset, complete
+selection matching, and generation-aware publication guards. The canonical
+Svelte adapter exposes the same Entity and page values as derived readable
+stores and still owns query refresh invalidation and live RuntimeView
+publication. Ten direct tests cover defaults, Entity normalization, same-Entity
+pagination, page normalization, historical height, navigation reset, ABA
+selection, publication identity, subscriptions, and thin Svelte wiring. The
+wallet local check covers 436 files with zero unsafe-type findings.
+
 ### WP6 — Migrate wallet by flow
 
 **Status:** `IN PROGRESS — TESTNET LAUNCHER AND DISPOSABLE IDENTITIES IMPLEMENTED`
@@ -617,11 +628,11 @@ any mismatch. Never compile on production.
    `packages/browser`; wallet boot sequencing, active-tab Runtime ownership,
    Runtime selection concurrency, adapter activation, and Runtime handle
    projection are shared; cached Runtime projection reads plus the RuntimeView
-   query, pagination, height model, and committed-height catch-up are also
-   shared. Latest-read Runtime query subscriptions expose stable external-store
-   snapshots while concrete source wiring, core result typing, and live
-   RuntimeView publication remain with the canonical Svelte adapter until a
-   complete React consumer exists.
+   query, pagination, height model, committed-height catch-up, and RuntimeView
+   selection snapshots are also shared. Latest-read Runtime query subscriptions
+   expose stable external-store snapshots while concrete source wiring, core
+   result typing, and live RuntimeView publication remain with the canonical
+   Svelte adapter until a complete React consumer exists.
 3. Wire PWA/native consumers to the assembled candidate after the React
    `/app` boot flow exists; wallet static/PWA input ownership is ready and does
    not require production activation.
