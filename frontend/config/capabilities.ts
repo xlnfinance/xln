@@ -87,6 +87,7 @@ export const CAPABILITIES = [
     routes: ['/app'],
     currentSources: [
       'frontend/packages/browser/src/runtime-adapter-session.ts',
+      'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
       'frontend/packages/runtime-client/src/runtime-handle.ts',
       'frontend/packages/runtime-client/src/remote-runtime-request.ts',
       'frontend/packages/runtime-client/src/runtime-selection.ts',
@@ -98,6 +99,7 @@ export const CAPABILITIES = [
       'validated hash bootstrap and query rejection',
       'tab-confined Runtime authority and rollback-safe adapter selection',
       'framework-neutral Runtime handle identity, permissions, and readiness',
+      'framework-neutral adapter activation ordering and rollback',
       'one-writer latest-intent Runtime selection',
       'explicit remote attachment consent',
       'reconnect and failure states',

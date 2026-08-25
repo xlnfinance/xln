@@ -456,22 +456,29 @@ test('view runtime frame stores expose the canonical live snapshot debug surface
 
 test('local runtime selection persists embedded mode without deleting saved remote registry', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
-  const persistStart = source.indexOf('const persistActiveEmbeddedRuntime =');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const switchStart = source.indexOf('const performRuntimeSelection =');
-  expect(persistStart).toBeGreaterThan(0);
-  expect(switchStart).toBeGreaterThan(persistStart);
-  const persistSource = source.slice(persistStart, switchStart);
-  expect(persistSource).toContain(
+  expect(switchStart).toBeGreaterThan(0);
+  expect(source).toContain(
     'writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage })',
   );
-  expect(persistSource).not.toContain('REMOTE_RUNTIME.IMPORT_STORAGE_KEY');
-  expect(source.slice(switchStart)).toContain('persistActiveEmbeddedRuntime();');
-  expect(source.slice(switchStart)).toContain("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
-  expect(source.slice(switchStart)).toContain('runtimeId: id');
+  expect(source).not.toContain('REMOTE_RUNTIME.IMPORT_STORAGE_KEY');
+  expect(source.slice(switchStart)).toContain('registered: Boolean(runtime)');
+  expect(source.slice(switchStart)).toContain('persistEmbedded: persistActiveEmbeddedRuntime');
+  expect(source.slice(switchStart)).toContain('switchAdapter: switchToRuntimeAdapter');
+  expect(activationSource).toContain('if (!target.registered || !dependencies.isCurrent(target))');
+  expect(activationSource).toContain('dependencies.persistEmbedded();');
 });
 
 test('selecting the already connected runtime does not reconnect the adapter', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const helperStart = source.indexOf('const runtimeControllerAlreadyTargets =');
   const selectStart = source.indexOf('const performRuntimeSelection =');
   expect(helperStart).toBeGreaterThan(0);
@@ -482,17 +489,17 @@ test('selecting the already connected runtime does not reconnect the adapter', (
   expect(helperSource).toContain("handle.status !== 'connected'");
   expect(helperSource).toContain('handle.authLevel === expectedAuth');
   expect(helperSource).toContain('normalizeRemoteRuntimeWsUrl(config.wsUrl) === normalizeRemoteRuntimeWsUrl(runtime.wsUrl)');
-  expect(selectSource).toContain('if (!runtimeControllerAlreadyTargets(runtime, id)) {');
-  const reconnectGuardIndex = selectSource.indexOf('if (!runtimeControllerAlreadyTargets(runtime, id)) {');
-  const reconnectIndex = selectSource.indexOf('await switchToRuntimeAdapter({', reconnectGuardIndex);
-  const guardEndIndex = selectSource.indexOf('return persistActiveRemoteRuntime(runtime);', reconnectIndex);
-  expect(reconnectGuardIndex).toBeGreaterThan(0);
-  expect(reconnectIndex).toBeGreaterThan(reconnectGuardIndex);
-  expect(guardEndIndex).toBeGreaterThan(reconnectIndex);
+  expect(selectSource).toContain('isCurrent: () => runtimeControllerAlreadyTargets(runtime, id)');
+  expect(activationSource).toContain('if (!dependencies.isCurrent(target)) {');
+  expect(activationSource).toContain('await dependencies.switchAdapter(activationConfig(target));');
 });
 
 test('runtime selection persists websocket before switch with rollback and reaffirms active endpoint after success', () => {
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const selectStart = runtimeStoreSource.indexOf('const performRuntimeSelection =');
   const activateStart = runtimeStoreSource.indexOf('// Operations', selectStart);
@@ -502,13 +509,24 @@ test('runtime selection persists websocket before switch with rollback and reaff
 
   expect(runtimeStoreSource).toContain('const readRuntimeAdapterStorageSnapshot =');
   expect(runtimeStoreSource).toContain('const restoreRuntimeAdapterStorageSnapshot =');
-  const remoteSwitchIndex = selectSource.indexOf("await switchToRuntimeAdapter({\n          mode: 'remote'");
-  const remotePersistIndex = selectSource.indexOf('const persisted = persistActiveRemoteRuntime(runtime)');
-  const remoteRollbackIndex = selectSource.indexOf('restoreRuntimeAdapterStorageSnapshot(previousStorage)');
-  const remotePendingIndex = selectSource.indexOf('setRuntimeControllerPendingRuntimeId(id)', remotePersistIndex);
-  const remotePendingRollbackIndex = selectSource.indexOf('setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId)', remoteRollbackIndex);
-  const remoteTargetAssertIndex = selectSource.indexOf('REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH', remoteSwitchIndex);
-  const remoteFinalPersistIndex = selectSource.indexOf('return persistActiveRemoteRuntime(runtime);', remoteSwitchIndex);
+  expect(selectSource).toContain('readSessionSnapshot: readRuntimeAdapterStorageSnapshot');
+  expect(selectSource).toContain('restoreSessionSnapshot: restoreRuntimeAdapterStorageSnapshot');
+  expect(selectSource).toContain('persistRemote: () => persistActiveRemoteRuntime(runtime)');
+  expect(selectSource).toContain('setPendingRuntimeId: setRuntimeControllerPendingRuntimeId');
+  expect(selectSource).toContain('switchAdapter: switchToRuntimeAdapter');
+
+  const remoteStart = activationSource.indexOf('export const activateRemoteRuntimeTarget =');
+  const embeddedStart = activationSource.indexOf('export const activateEmbeddedRuntimeTarget =');
+  const remoteSource = activationSource.slice(remoteStart, embeddedStart);
+  const remotePersistIndex = remoteSource.indexOf('if (!dependencies.persistRemote(target))');
+  const remotePendingIndex = remoteSource.indexOf('dependencies.setPendingRuntimeId(target.runtimeId)');
+  const remoteSwitchIndex = remoteSource.indexOf('await dependencies.switchAdapter(activationConfig(target))');
+  const remoteRollbackIndex = remoteSource.indexOf('dependencies.restoreSessionSnapshot(previousSession)');
+  const remotePendingRollbackIndex = remoteSource.indexOf('dependencies.setPendingRuntimeId(previousPendingRuntimeId)');
+  const remoteTargetAssertIndex = remoteSource.indexOf('REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH');
+  const remoteFinalPersistIndex = remoteSource.indexOf('return dependencies.persistRemote(target);');
+  expect(remoteStart).toBeGreaterThan(0);
+  expect(embeddedStart).toBeGreaterThan(remoteStart);
   expect(remoteSwitchIndex).toBeGreaterThan(0);
   expect(remotePersistIndex).toBeGreaterThan(0);
   expect(remotePersistIndex).toBeLessThan(remoteSwitchIndex);
@@ -519,13 +537,13 @@ test('runtime selection persists websocket before switch with rollback and reaff
   expect(remoteTargetAssertIndex).toBeGreaterThan(remoteSwitchIndex);
   expect(remoteFinalPersistIndex).toBeGreaterThan(remoteTargetAssertIndex);
 
-  const embeddedSwitchIndex = selectSource.indexOf("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
-  const embeddedPersistIndex = selectSource.indexOf('persistActiveEmbeddedRuntime();');
-  const embeddedPendingIndex = selectSource.lastIndexOf('setRuntimeControllerPendingRuntimeId(id)', embeddedSwitchIndex);
-  const embeddedPendingRollbackIndex = selectSource.lastIndexOf('setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId)');
-  expect(embeddedPendingIndex).toBeGreaterThan(remotePendingRollbackIndex);
+  const embeddedSource = activationSource.slice(embeddedStart);
+  const embeddedPendingIndex = embeddedSource.indexOf('dependencies.setPendingRuntimeId(target.runtimeId)');
+  const embeddedSwitchIndex = embeddedSource.indexOf('await dependencies.switchAdapter(activationConfig(target))');
+  const embeddedPendingRollbackIndex = embeddedSource.indexOf('dependencies.setPendingRuntimeId(previousPendingRuntimeId)');
+  const embeddedPersistIndex = embeddedSource.indexOf('dependencies.persistEmbedded();');
+  expect(embeddedPendingIndex).toBeGreaterThan(0);
   expect(embeddedPendingIndex).toBeLessThan(embeddedSwitchIndex);
-  expect(embeddedSwitchIndex).toBeGreaterThan(remotePendingRollbackIndex);
   expect(embeddedPersistIndex).toBeGreaterThan(embeddedSwitchIndex);
   expect(embeddedPendingRollbackIndex).toBeGreaterThan(embeddedSwitchIndex);
 
@@ -536,6 +554,10 @@ test('runtime selection persists websocket before switch with rollback and reaff
 test('runtime controller handle carries selected runtime identity', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
   const handleSource = readFileSync('frontend/packages/runtime-client/src/runtime-handle.ts', 'utf8');
+  const activationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-adapter-activation.ts',
+    'utf8',
+  );
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const activeStart = runtimeStoreSource.indexOf('export const activeRuntimeId = derived');
@@ -550,7 +572,8 @@ test('runtime controller handle carries selected runtime identity', () => {
   expect(handleSource).toContain('normalizeRuntimeHandleId(adapter?.runtimeId) || runtimeAdapterConfigId(config)');
   expect(controllerSource).toContain('const handle = createRuntimeHandle({');
   expect(handleSource).toContain('currentRuntimeId === nextRuntimeId');
-  expect(runtimeStoreSource).toContain("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
+  expect(runtimeStoreSource).toContain('activateEmbeddedRuntimeTarget(target, {');
+  expect(activationSource).toContain("{ mode: 'embedded', runtimeId: target.runtimeId }");
   expect(runtimeStoreSource).toContain('runtimeId: id');
   expect(activeSource).toContain('if (pendingId && $runtimes.has(pendingId))');
   expect(activeSource).toContain('controllerId && controllerId !== \'embedded\' && $runtimes.has(controllerId)');

@@ -35,6 +35,11 @@ import {
   createRuntimeSelectionCoordinator,
   type RuntimeSelectionLease,
 } from '../../../packages/runtime-client/src/runtime-selection';
+import {
+  activateEmbeddedRuntimeTarget,
+  activateRemoteRuntimeTarget,
+  type RuntimeActivationTarget,
+} from '../../../packages/runtime-client/src/runtime-adapter-activation';
 
 export type { RuntimeSelectionLease };
 
@@ -243,45 +248,33 @@ export const coordinateRuntimeSelection = async <T>(
 const performRuntimeSelection = async (id: string): Promise<boolean> => {
   const runtime = get(runtimes).get(id);
   if (runtime?.type === 'remote') {
-    if (!runtime.wsUrl) throw new Error(`REMOTE_RUNTIME_WS_MISSING:${id}`);
-    const previousStorage = readRuntimeAdapterStorageSnapshot();
-    const previousPendingRuntimeId = get(runtimeControllerHandle).pendingRuntimeId;
-    const persisted = persistActiveRemoteRuntime(runtime);
-    if (!persisted) return false;
-    setRuntimeControllerPendingRuntimeId(id);
-    if (!runtimeControllerAlreadyTargets(runtime, id)) {
-      try {
-        await switchToRuntimeAdapter({
-          mode: 'remote',
-          runtimeId: id,
-          wsUrl: runtime.wsUrl,
-          ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
-        });
-      } catch (error) {
-        restoreRuntimeAdapterStorageSnapshot(previousStorage);
-        setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId);
-        throw error;
-      }
-    }
-    if (!runtimeControllerAlreadyTargets(runtime, id)) {
-      throw new Error(`REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH:${id}`);
-    }
-    return persistActiveRemoteRuntime(runtime);
+    return activateRemoteRuntimeTarget({
+      mode: 'remote',
+      runtimeId: id,
+      wsUrl: runtime.wsUrl || '',
+      ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
+    }, {
+      readPendingRuntimeId: () => get(runtimeControllerHandle).pendingRuntimeId,
+      setPendingRuntimeId: setRuntimeControllerPendingRuntimeId,
+      readSessionSnapshot: readRuntimeAdapterStorageSnapshot,
+      restoreSessionSnapshot: restoreRuntimeAdapterStorageSnapshot,
+      persistRemote: () => persistActiveRemoteRuntime(runtime),
+      isCurrent: () => runtimeControllerAlreadyTargets(runtime, id),
+      switchAdapter: switchToRuntimeAdapter,
+    });
   }
-  const previousPendingRuntimeId = get(runtimeControllerHandle).pendingRuntimeId;
-  setRuntimeControllerPendingRuntimeId(id);
-  try {
-    if (runtime && !runtimeControllerAlreadyTargets(runtime, id)) {
-      await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id });
-    } else if (!runtime) {
-      await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id });
-    }
-  } catch (error) {
-    setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId);
-    throw error;
-  }
-  persistActiveEmbeddedRuntime();
-  return true;
+  const target = {
+    mode: 'embedded',
+    runtimeId: id,
+    registered: Boolean(runtime),
+  } satisfies RuntimeActivationTarget;
+  return activateEmbeddedRuntimeTarget(target, {
+    readPendingRuntimeId: () => get(runtimeControllerHandle).pendingRuntimeId,
+    setPendingRuntimeId: setRuntimeControllerPendingRuntimeId,
+    persistEmbedded: persistActiveEmbeddedRuntime,
+    isCurrent: () => Boolean(runtime && runtimeControllerAlreadyTargets(runtime, id)),
+    switchAdapter: switchToRuntimeAdapter,
+  });
 };
 
 // Operations
