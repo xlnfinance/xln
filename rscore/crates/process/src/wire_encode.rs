@@ -638,10 +638,13 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
             fill_numerator,
             fill_denominator,
             cancel_remainder,
+            comment,
             fee_token_id,
             fee_amount,
             execution_give_amount,
             execution_want_amount,
+            resting_give_token_id,
+            resting_want_token_id,
             resting_price_ticks,
             resting_give_amount,
             resting_want_amount,
@@ -657,6 +660,11 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
             // does TypeScript's encoder. A boolean produced a swap_resolve
             // this ABI could not read back.
             integer(u8::from(*cancel_remainder)),
+            comment
+                .as_ref()
+                .map_or(AbiValue::Nil, |value| AbiValue::Text(value.clone())),
+            resting_give_token_id.map_or(AbiValue::Nil, integer),
+            resting_want_token_id.map_or(AbiValue::Nil, integer),
             fee_token_id.map_or(AbiValue::Nil, integer),
             optional_big(fee_amount),
             optional_big(execution_give_amount),

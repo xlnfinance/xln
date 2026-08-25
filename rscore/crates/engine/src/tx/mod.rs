@@ -72,10 +72,18 @@ pub enum AccountTx {
         fill_numerator: Option<BigInt>,
         fill_denominator: Option<BigInt>,
         cancel_remainder: bool,
+        /// Carried, never interpreted. TypeScript hashes whatever the matcher
+        /// wrote here, so an engine that dropped it would sign a frame the
+        /// other side cannot reproduce.
+        comment: Option<String>,
         fee_token_id: Option<u32>,
         fee_amount: Option<BigInt>,
         execution_give_amount: Option<BigInt>,
         execution_want_amount: Option<BigInt>,
+        /// The book's own view of the resting remainder. Carried for the same
+        /// reason as `comment`: TypeScript hashes it.
+        resting_give_token_id: Option<u32>,
+        resting_want_token_id: Option<u32>,
         resting_price_ticks: Option<BigInt>,
         resting_give_amount: Option<BigInt>,
         resting_want_amount: Option<BigInt>,

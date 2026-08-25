@@ -231,6 +231,10 @@ fn apply_to_candidate(
             fill_numerator,
             fill_denominator,
             cancel_remainder,
+            // Carried for the frame hash; the transition does not read them.
+            comment: _,
+            resting_give_token_id: _,
+            resting_want_token_id: _,
             fee_token_id,
             fee_amount,
             execution_give_amount,

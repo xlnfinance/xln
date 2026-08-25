@@ -52,8 +52,13 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'swap_offer/full', tx: { type: 'swap_offer', data: { offerId: 'offer-1', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 1_000_000n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 2_000_000n, maxFee: 0n, minNetReceive: 1_900_000n, timeInForce: 1, priceTicks: 20_000n } } },
   { name: 'swap_offer/minimal', tx: { type: 'swap_offer', data: { offerId: 'offer-2', giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 1_000_000n, wantTokenId: 2, wantTokenDecimals: 6, wantAmount: 2_000_000n, maxFee: 0n, minNetReceive: 1n } } },
   { name: 'swap_cancel_request', tx: { type: 'swap_cancel_request', data: { offerId: 'offer-1' } } },
-  { name: 'swap_resolve/full', tx: { type: 'swap_resolve', data: { offerId: 'offer-1', fillRatio: 10_000, fillNumerator: 1n, fillDenominator: 2n, cancelRemainder: true, feeTokenId: 2, feeAmount: 7n, executionGiveAmount: 1_000_000n, executionWantAmount: 2_000_000n, restingPriceTicks: 20_000n, restingGiveAmount: 3n, restingWantAmount: 4n, restingQuantizedGive: 5n, restingQuantizedWant: 6n } } },
+  { name: 'swap_resolve/full', tx: { type: 'swap_resolve', data: { offerId: 'offer-1', fillRatio: 10_000, fillNumerator: 1n, fillDenominator: 2n, cancelRemainder: true, comment: 'STP:book', feeTokenId: 2, feeAmount: 7n, executionGiveAmount: 1_000_000n, executionWantAmount: 2_000_000n, restingGiveTokenId: 1, restingWantTokenId: 2, restingPriceTicks: 20_000n, restingGiveAmount: 3n, restingWantAmount: 4n, restingQuantizedGive: 5n, restingQuantizedWant: 6n } } },
   { name: 'swap_resolve/minimal', tx: { type: 'swap_resolve', data: { offerId: 'offer-2', fillRatio: 0, cancelRemainder: false } } },
+  // The shape the matcher actually produces for a partial fill that keeps the
+  // offer open: `cancelRemainder` present and false, the book's own view of
+  // the remainder attached. Rust used to omit the false flag and drop the
+  // three carried fields, so its frame hash could not be reproduced here.
+  { name: 'swap_resolve/partial-fill', tx: { type: 'swap_resolve', data: { offerId: 'offer-3', fillRatio: 3_333, fillNumerator: 1n, fillDenominator: 3n, cancelRemainder: false, comment: 'book:partial', feeTokenId: 2, feeAmount: 1n, executionGiveAmount: 333_333n, executionWantAmount: 666_666n, restingGiveTokenId: 1, restingWantTokenId: 2, restingPriceTicks: 20_000n, restingGiveAmount: 666_667n, restingWantAmount: 1_333_334n, restingQuantizedGive: 666_667n, restingQuantizedWant: 1_333_334n } } },
 ];
 
 type Vector = { name: string; bytes: string };

@@ -583,6 +583,12 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
         optionalAmount(tx.data.fillNumerator),
         optionalAmount(tx.data.fillDenominator),
         tx.data.cancelRemainder ? 1 : 0,
+        // Carried, never interpreted: TypeScript hashes whatever the matcher
+        // wrote, so a wire that dropped these would make the engine sign a
+        // frame TypeScript cannot reproduce.
+        tx.data.comment ?? null,
+        tx.data.restingGiveTokenId ?? null,
+        tx.data.restingWantTokenId ?? null,
         tx.data.feeTokenId ?? null,
         optionalAmount(tx.data.feeAmount),
         optionalAmount(tx.data.executionGiveAmount),

@@ -236,10 +236,13 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             fill_numerator,
             fill_denominator,
             cancel_remainder,
+            comment,
             fee_token_id,
             fee_amount,
             execution_give_amount,
             execution_want_amount,
+            resting_give_token_id,
+            resting_want_token_id,
             resting_price_ticks,
             resting_give_amount,
             resting_want_amount,
@@ -260,9 +263,29 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
                 "fillDenominator",
                 fill_denominator.as_ref().map(big),
             );
-            if *cancel_remainder {
-                fields.push(("cancelRemainder".to_string(), CanonicalValue::Bool(true)));
-            }
+            // TypeScript declares this field required and hashes whatever it
+            // holds, including `false`. Omitting the false case produced a
+            // frame hash TypeScript could not reproduce for every partial fill
+            // that keeps an offer open — which is most of them.
+            fields.push((
+                "cancelRemainder".to_string(),
+                CanonicalValue::Bool(*cancel_remainder),
+            ));
+            push_optional(
+                &mut fields,
+                "comment",
+                comment.as_ref().map(|value| text(value)),
+            );
+            push_optional(
+                &mut fields,
+                "restingGiveTokenId",
+                resting_give_token_id.map(|value| number(u64::from(value))),
+            );
+            push_optional(
+                &mut fields,
+                "restingWantTokenId",
+                resting_want_token_id.map(|value| number(u64::from(value))),
+            );
             push_optional(
                 &mut fields,
                 "feeTokenId",
@@ -540,15 +563,44 @@ mod tests {
             fill_numerator: value(1),
             fill_denominator: value(2),
             cancel_remainder: full,
+            comment: None,
             fee_token_id: if full { Some(2) } else { None },
             fee_amount: value(3),
             execution_give_amount: value(500),
             execution_want_amount: value(1000),
+            resting_give_token_id: None,
+            resting_want_token_id: None,
             resting_price_ticks: value(999),
             resting_give_amount: value(500),
             resting_want_amount: value(1000),
             resting_quantized_give: value(500),
             resting_quantized_want: value(1000),
+        }
+    }
+
+    /// What a matcher actually writes for a partial fill that keeps the offer
+    /// open: the cancel flag present and false, its own comment, and the
+    /// book's view of the remainder including both token ids. Every one of
+    /// those is hashed by TypeScript.
+    fn swap_resolve_partial_fill() -> AccountTx {
+        AccountTx::SwapResolve {
+            offer_id: offer_id(),
+            fill_ratio: 3_333,
+            fill_numerator: Some(BigInt::from(1)),
+            fill_denominator: Some(BigInt::from(3)),
+            cancel_remainder: false,
+            comment: Some("book:partial".to_string()),
+            fee_token_id: Some(2),
+            fee_amount: Some(BigInt::from(1)),
+            execution_give_amount: Some(BigInt::from(333_333)),
+            execution_want_amount: Some(BigInt::from(666_666)),
+            resting_give_token_id: Some(1),
+            resting_want_token_id: Some(2),
+            resting_price_ticks: Some(BigInt::from(20_000)),
+            resting_give_amount: Some(BigInt::from(666_667)),
+            resting_want_amount: Some(BigInt::from(1_333_334)),
+            resting_quantized_give: Some(BigInt::from(666_667)),
+            resting_quantized_want: Some(BigInt::from(1_333_334)),
         }
     }
 
@@ -620,8 +672,15 @@ mod tests {
                 swap_resolve(true),
             ),
             (
-                "5430e00527107e26c980598d84110e26398add8f8b705f50eeb69bf46971a7dd",
+                // `cancelRemainder: false` is hashed, not omitted. The old
+                // vector here reproduced a TypeScript object that simply did
+                // not carry the field, which real traffic always does.
+                "0a022fdbbf7673b1bd9a24a0c521dd709a9367a76e2f558534580ad3f47aa4c3",
                 swap_resolve(false),
+            ),
+            (
+                "a81bad89a2cad7872453f69d1981384029db4ef9b3b996a4257f515f41f7d481",
+                swap_resolve_partial_fill(),
             ),
             (
                 "b2b171664b26860284c22bb46ab47744f29833521d46e131909d46f461706258",

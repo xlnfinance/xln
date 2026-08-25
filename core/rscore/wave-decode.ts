@@ -627,7 +627,7 @@ export const decodeAccountTx = (value: unknown): AccountTx => {
 };
 
 const decodeSwapResolve = (row: readonly unknown[]): AccountTx => {
-  const fields = tupleOf(row, 15, 'tx.swapResolve');
+  const fields = tupleOf(row, 18, 'tx.swapResolve');
   const optionalBig = (value: unknown, code: string): bigint | null =>
     value === null ? null : big(value, code);
   const optionalInt = (value: unknown, code: string): number | null =>
@@ -638,15 +638,18 @@ const decodeSwapResolve = (row: readonly unknown[]): AccountTx => {
   // fill into a decode failure.
   const fillNumerator = optionalBig(fields[3], 'tx.fillNumerator');
   const fillDenominator = optionalBig(fields[4], 'tx.fillDenominator');
-  const feeTokenId = optionalInt(fields[6], 'tx.feeTokenId');
-  const feeAmount = optionalBig(fields[7], 'tx.feeAmount');
-  const executionGiveAmount = optionalBig(fields[8], 'tx.executionGiveAmount');
-  const executionWantAmount = optionalBig(fields[9], 'tx.executionWantAmount');
-  const restingPriceTicks = optionalBig(fields[10], 'tx.restingPriceTicks');
-  const restingGive = optionalBig(fields[11], 'tx.restingGiveAmount');
-  const restingWant = optionalBig(fields[12], 'tx.restingWantAmount');
-  const quantizedGive = optionalBig(fields[13], 'tx.restingQuantizedGive');
-  const quantizedWant = optionalBig(fields[14], 'tx.restingQuantizedWant');
+  const comment = optionalText(fields[6], 'tx.comment');
+  const restingGiveTokenId = optionalInt(fields[7], 'tx.restingGiveTokenId');
+  const restingWantTokenId = optionalInt(fields[8], 'tx.restingWantTokenId');
+  const feeTokenId = optionalInt(fields[9], 'tx.feeTokenId');
+  const feeAmount = optionalBig(fields[10], 'tx.feeAmount');
+  const executionGiveAmount = optionalBig(fields[11], 'tx.executionGiveAmount');
+  const executionWantAmount = optionalBig(fields[12], 'tx.executionWantAmount');
+  const restingPriceTicks = optionalBig(fields[13], 'tx.restingPriceTicks');
+  const restingGive = optionalBig(fields[14], 'tx.restingGiveAmount');
+  const restingWant = optionalBig(fields[15], 'tx.restingWantAmount');
+  const quantizedGive = optionalBig(fields[16], 'tx.restingQuantizedGive');
+  const quantizedWant = optionalBig(fields[17], 'tx.restingQuantizedWant');
   return {
     type: 'swap_resolve',
     data: {
@@ -657,6 +660,9 @@ const decodeSwapResolve = (row: readonly unknown[]): AccountTx => {
       // 0/1, matching both encoders. Reading a boolean here rejected every
       // swap_resolve either engine produced.
       cancelRemainder: flag(fields[5], 'tx.cancelRemainder'),
+      ...(comment === null ? {} : { comment }),
+      ...(restingGiveTokenId === null ? {} : { restingGiveTokenId }),
+      ...(restingWantTokenId === null ? {} : { restingWantTokenId }),
       ...(feeTokenId === null ? {} : { feeTokenId }),
       ...(feeAmount === null ? {} : { feeAmount }),
       ...(executionGiveAmount === null ? {} : { executionGiveAmount }),
