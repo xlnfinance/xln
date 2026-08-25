@@ -195,11 +195,16 @@ impl StatefulConsensusEngine {
         &mut self,
         request: EntityOutboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
-        let mut named: BTreeSet<AccountId> = request.creates.iter().map(|seed| seed.account_id).collect();
+        let mut named: BTreeSet<AccountId> =
+            request.creates.iter().map(|seed| seed.account_id).collect();
         named.extend(request.admits.iter().map(|(account_id, _)| *account_id));
         named.extend(request.propose.iter().copied());
-        let created: BTreeSet<AccountId> = request.creates.iter().map(|seed| seed.account_id).collect();
-        self.assert_owner(request.owner_entity_id, &named.difference(&created).copied().collect())?;
+        let created: BTreeSet<AccountId> =
+            request.creates.iter().map(|seed| seed.account_id).collect();
+        self.assert_owner(
+            request.owner_entity_id,
+            &named.difference(&created).copied().collect(),
+        )?;
         let snapshot_at = std::time::Instant::now();
         let base = self.accounts_snapshot();
         phase::add(&phase::SNAPSHOT, snapshot_at);

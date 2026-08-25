@@ -64,6 +64,13 @@ pub struct SlotOutcome<V> {
 }
 
 impl<V: Clone> SlotWork<V> {
+    /// Whether this slot has leaves to fold. A slot with none still has to be
+    /// handed back, but it is not work worth a thread hop; the caller decides
+    /// where to run the batch and needs to see how much of it is real.
+    pub fn has_work(&self) -> bool {
+        !self.leaves.is_empty()
+    }
+
     /// Fold this slot's leaves into its subtree, and hash the result while it
     /// is still on this core — hashing is the expensive half.
     pub fn apply(self) -> Result<SlotOutcome<V>, PersistentRadixMapError> {

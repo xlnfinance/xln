@@ -45,10 +45,13 @@ fn two_visits_carry_a_whole_entity_frame() {
         outbound.proposals[0].proposed.is_some(),
         "the proposal carries a signed frame"
     );
-    assert_eq!(outbound.touched, vec![(payer_account, {
-        let account = stand.payer.account(&payer_account).expect("account");
-        account.entity_account_leaf().expect("leaf")
-    })]);
+    assert_eq!(
+        outbound.touched,
+        vec![(payer_account, {
+            let account = stand.payer.account(&payer_account).expect("account");
+            account.entity_account_leaf().expect("leaf")
+        })]
+    );
     assert_eq!(outbound.post_accounts.len(), 1, "one body, once");
 
     let rows = fixture::frames_for(&stand, &outbound.proposals);
@@ -64,7 +67,10 @@ fn two_visits_carry_a_whole_entity_frame() {
     assert_eq!(inbound.applied.len(), 1);
     assert_eq!(inbound.applied[0].account_id, payee_account);
     let AccountInputVerdict::FrameCommitted { events, .. } = &inbound.applied[0].verdict else {
-        panic!("expected a committed frame: {:?}", inbound.applied[0].verdict);
+        panic!(
+            "expected a committed frame: {:?}",
+            inbound.applied[0].verdict
+        );
     };
     assert!(!events.is_empty(), "the frame says what it did");
     assert_eq!(inbound.touched.len(), 1, "the payee's account moved");
@@ -121,7 +127,11 @@ fn an_aborted_runtime_frame_puts_every_account_back() {
             post_accounts: false,
         })
         .expect("outbound");
-    assert_ne!(stand.payer.accounts_root(), before, "the frame moved the tree");
+    assert_ne!(
+        stand.payer.accounts_root(),
+        before,
+        "the frame moved the tree"
+    );
 
     let (_, after) = stand.payer.undo_savepoint().expect("undo");
     assert_eq!(after, before, "an abandoned frame leaves nothing behind");

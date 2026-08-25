@@ -195,11 +195,7 @@ impl StatefulBatchEngine {
             .checked_add(1)
             .ok_or(BatchError::RevisionOverflow)?;
         let work = self.group_work(jobs)?;
-        let attempted = self.pool.install(|| {
-            work.into_par_iter()
-                .map(execute_account_caught)
-                .collect::<Vec<_>>()
-        });
+        let attempted = crate::fanout::map_owned(&self.pool, work, execute_account_caught);
         let completed = collect_executions(attempted)?;
         let attempt = self
             .candidate_attempt
@@ -236,13 +232,13 @@ impl StatefulBatchEngine {
         // the engine untouched (commit stays atomic). Leaf digests are
         // independent per account — compute them on the pool; only the cheap
         // path-copy fold below is sequential.
-        let leaf_roots = self.pool.install(|| {
-            prepared
-                .updates
-                .par_iter()
-                .map(|(account_id, _, candidate)| leaf_root(*account_id, candidate))
-                .collect::<Result<Vec<_>, BatchError>>()
-        })?;
+        let leaf_roots = crate::fanout::map_borrowed(
+            &self.pool,
+            &prepared.updates,
+            |(account_id, _, candidate)| leaf_root(*account_id, candidate),
+        )
+        .into_iter()
+        .collect::<Result<Vec<_>, BatchError>>()?;
         let entries = prepared
             .updates
             .into_iter()
@@ -274,6 +270,14 @@ impl StatefulBatchEngine {
     ) -> Result<PersistentRadixMap<AccountReplica>, BatchError> {
         self.accounts
             .updated_batch(entries, |slots| {
+                // Sixteen slots are always handed over; only the ones holding
+                // leaves are work. A commit that moved one account would
+                // otherwise pay a pool hand-off to hash fifteen empty slots.
+                if slots.iter().filter(|slot| slot.has_work()).count()
+                    <= crate::fanout::SEQUENTIAL_SLOT_FANOUT_MAX
+                {
+                    return slots.map(xln_rscore_protocol::SlotWork::apply);
+                }
                 self.pool.install(|| {
                     let mut results = slots
                         .into_par_iter()
