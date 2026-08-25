@@ -209,3 +209,73 @@ describe('authority wave', () => {
     flushAuthorityFrame('r');
   });
 });
+
+/**
+ * Guards on the collector itself. Each of these was a way to build a wave that
+ * looks fine and is not the frame TypeScript actually processed.
+ */
+describe('authority wave guards', () => {
+  beforeEach(() => {
+    process.env['XLN_RSCORE_AUTHORITY_RECORD'] = '1';
+    resetAuthorityRecordForTests();
+  });
+  afterEach(() => {
+    delete process.env['XLN_RSCORE_AUTHORITY_RECORD'];
+    resetAuthorityRecordForTests();
+  });
+
+  test('two different clocks for one Entity refuse the frame instead of keeping the last', () => {
+    beginAuthorityFrame('r');
+    noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
+    noteRawAccountInput('r', replica(A, B), frameAck(2));
+    // The same Entity, judged again at a different J height inside one frame:
+    // the Runtime frame is then not this Entity's wave unit.
+    noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 101);
+    noteRawAccountInput('r', replica(A, C), frameAck(2));
+    const wave = buildAuthorityWave('r');
+
+    expect(wave.kind).toBe('ineligible');
+    if (wave.kind !== 'ineligible') throw new Error('expected ineligible');
+    expect(wave.reason).toBe(`clock:enforce:${A}`);
+  });
+
+  test('the same clock recorded twice is not a conflict', () => {
+    beginAuthorityFrame('r');
+    noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
+    noteRawAccountInput('r', replica(A, B), frameAck(2));
+    noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
+    expect(buildAuthorityWave('r').kind).toBe('wave');
+  });
+
+  test('grouping reorders the request but never the arrival order it reports', () => {
+    beginAuthorityFrame('r');
+    noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
+    noteAuthorityEntityClock('r', C, 'enforce', 1_700_000_000_000, 100);
+    // A, then C, then A again: grouping sends A's two inputs together.
+    noteRawAccountInput('r', replica(A, B), enqueue([payment(B)]));
+    noteRawAccountInput('r', replica(C, B), frameAck(2));
+    noteRawAccountInput('r', replica(A, B), frameAck(3));
+    const wave = buildAuthorityWave('r');
+
+    if (wave.kind !== 'wave') throw new Error('expected a wave');
+    // Sent as A's group first, so A's ack/frame take indices 0..1 — but they
+    // arrived at positions 3 and 4, after C's two operations.
+    expect(wave.inputs.map(row => row.inputIndex)).toEqual([0, 1, 2, 3]);
+    expect(wave.inputs.map(row => row.arrivalIndex)).toEqual([3, 4, 1, 2]);
+    expect(wave.inputs.map(row => row.ownerEntityId)).toEqual([A, A, C, C]);
+  });
+
+  test('a Hanko that is not hex is refused, never read as zero bytes', () => {
+    beginAuthorityFrame('r');
+    noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
+    noteRawAccountInput('r', replica(A, B), {
+      kind: 'ack',
+      ack: { height: 1, frameHash: `0x${'55'.repeat(32)}`, frameHanko: '0xzzzz' },
+    } as unknown as AccountInput);
+    const wave = buildAuthorityWave('r');
+
+    expect(wave.kind).toBe('ineligible');
+    if (wave.kind !== 'ineligible') throw new Error('expected ineligible');
+    expect(wave.reason).toContain('hankoInvalid');
+  });
+});

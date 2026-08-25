@@ -280,7 +280,14 @@ export type AuthorityWaveEntity = {
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
 export type AuthorityWaveInput = {
+  /** Position in the request, which is what the engine numbers its verdicts by. */
   inputIndex: number;
+  /**
+   * Position in the order the authority actually received it, before grouping
+   * by Entity. Verdicts and the effects they release are published in this
+   * order: `A1, C1, A2` must not become `A1, A2, C1` on the way out.
+   */
+  arrivalIndex: number;
   ownerEntityId: string;
   accountId: string;
   kind: 'frame' | 'ack';
@@ -308,23 +315,48 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
   const frame = frames.get(runtimeId);
   if (frame === undefined || frame.length === 0) return { kind: 'empty' };
   const frameClocks = clocks.get(runtimeId) ?? [];
-  const byOwner = new Map<string, RecordedInput[]>();
+  // Arrival order first, grouping second. The index is assigned while the
+  // frame is still in the sequence the authority saw, so grouping can reorder
+  // the request without reordering what comes out of it.
+  type ArrivedOp = {
+    arrivalIndex: number;
+    ownerEntityId: string;
+    accountId: string;
+    payload: Exclude<RecordedPayload, { kind: 'unsupported' }>;
+  };
+  const arrived: ArrivedOp[] = [];
   for (const row of frame) {
     for (const payload of row.payloads) {
+      // One thing this frame carries that no wave can express makes the whole
+      // frame undrivable — never "skip this one and drive the rest".
       if (payload.kind === 'unsupported') {
         return { kind: 'ineligible', reason: `input:${payload.reason}` };
       }
+      arrived.push({
+        arrivalIndex: arrived.length,
+        ownerEntityId: row.ownerEntityId,
+        accountId: row.counterpartyEntityId,
+        payload,
+      });
     }
-    const rows = byOwner.get(row.ownerEntityId) ?? [];
-    rows.push(row);
-    byOwner.set(row.ownerEntityId, rows);
+  }
+  const byOwner = new Map<string, ArrivedOp[]>();
+  for (const op of arrived) {
+    const rows = byOwner.get(op.ownerEntityId) ?? [];
+    rows.push(op);
+    byOwner.set(op.ownerEntityId, rows);
   }
   const entities: AuthorityWaveEntity[] = [];
   const inputs: AuthorityWaveInput[] = [];
   let inputIndex = 0;
   for (const [ownerEntityId, rows] of byOwner) {
-    const propose = latestClock(frameClocks, ownerEntityId, 'propose');
-    const enforce = latestClock(frameClocks, ownerEntityId, 'enforce');
+    const propose = soleClock(frameClocks, ownerEntityId, 'propose');
+    const enforce = soleClock(frameClocks, ownerEntityId, 'enforce');
+    // Two different clocks for one Entity in one frame means the Runtime frame
+    // is not this Entity's wave unit. Taking the last one would sign some of
+    // its work with a clock it never used.
+    if (propose === 'conflict') return { kind: 'ineligible', reason: `clock:propose:${ownerEntityId}` };
+    if (enforce === 'conflict') return { kind: 'ineligible', reason: `clock:enforce:${ownerEntityId}` };
     // Without the Entity's own clock there is nothing to judge expiry with,
     // and borrowing a neighbour's is exactly what the grouped wave exists to
     // prevent.
@@ -332,33 +364,36 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
     if (!clock) return { kind: 'ineligible', reason: `clock:missing:${ownerEntityId}` };
     const ops: RscoreWireValue[] = [];
     for (const row of rows) {
-      for (const payload of row.payloads) {
-        if (payload.kind === 'admit') {
-          const txs: RscoreWireValue[] = [];
-          for (const tx of payload.txs) {
-            const wire = accountTxWire(tx);
-            // A transaction outside the profile makes the whole frame
-            // undrivable: the engine would build a different mempool.
-            if (wire === null) return { kind: 'ineligible', reason: `tx:${tx.type}` };
-            txs.push(wire);
-          }
-          ops.push(waveAdmitOp(row.counterpartyEntityId, txs));
-          continue;
+      const payload = row.payload;
+      if (payload.kind === 'admit') {
+        const txs: RscoreWireValue[] = [];
+        for (const tx of payload.txs) {
+          const wire = accountTxWire(tx);
+          // A transaction outside the profile makes the whole frame
+          // undrivable: the engine would build a different mempool.
+          if (wire === null) return { kind: 'ineligible', reason: `tx:${tx.type}` };
+          txs.push(wire);
         }
-        if (payload.kind === 'unsupported') {
-          // Already refused above; narrowed here so the row builder only ever
-          // sees a payload it can encode.
-          return { kind: 'ineligible', reason: `input:${payload.reason}` };
-        }
-        ops.push(waveInputOp(peerInputRow(inputIndex, row, payload)));
-        inputs.push({
-          inputIndex,
-          ownerEntityId,
-          accountId: row.counterpartyEntityId,
-          kind: payload.kind,
-        });
-        inputIndex += 1;
+        ops.push(waveAdmitOp(row.accountId, txs));
+        continue;
       }
+      let encoded: RscoreWireValue;
+      try {
+        encoded = peerInputRow(inputIndex, row.accountId, payload);
+      } catch (error) {
+        // A malformed Hanko or hash is not something to drive around: the
+        // engine would judge a different input than TypeScript did.
+        return { kind: 'ineligible', reason: `input:${(error as Error).message}` };
+      }
+      ops.push(waveInputOp(encoded));
+      inputs.push({
+        inputIndex,
+        arrivalIndex: row.arrivalIndex,
+        ownerEntityId,
+        accountId: row.accountId,
+        kind: payload.kind,
+      });
+      inputIndex += 1;
     }
     entities.push({
       ownerEntityId,
@@ -375,27 +410,34 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
   return { kind: 'wave', entities, inputs };
 };
 
-const latestClock = (
+/**
+ * The one clock this Entity used for this role, `undefined` if it used none,
+ * and `'conflict'` if it used more than one — which the caller must refuse
+ * rather than resolve.
+ */
+const soleClock = (
   rows: readonly RecordedClock[],
   ownerEntityId: string,
   role: 'propose' | 'enforce',
-): RecordedClock | undefined => {
+): RecordedClock | undefined | 'conflict' => {
   let found: RecordedClock | undefined;
   for (const row of rows) {
-    if (row.ownerEntityId === ownerEntityId && row.role === role) found = row;
+    if (row.ownerEntityId !== ownerEntityId || row.role !== role) continue;
+    if (found !== undefined && found.clock !== row.clock) return 'conflict';
+    found = row;
   }
   return found;
 };
 
 const peerInputRow = (
   inputIndex: number,
-  row: RecordedInput,
+  counterpartyEntityId: string,
   payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' }>,
 ): RscoreWireValue => {
-  const accountId = hexToWireBytes(row.counterpartyEntityId, 32, 'AUTHORITY_ACCOUNT_ID');
+  const accountId = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_ACCOUNT_ID');
   // The signer of this input is the counterparty; the engine authenticates it
   // against the account's own binding rather than trusting the label.
-  const from = hexToWireBytes(row.counterpartyEntityId, 32, 'AUTHORITY_FROM_ENTITY');
+  const from = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_FROM_ENTITY');
   if (payload.kind === 'ack') {
     return [
       inputIndex,
@@ -430,16 +472,17 @@ const peerInputRow = (
   ];
 };
 
+/**
+ * A Hanko as bytes, refusing anything that is not hex. `parseInt` reads
+ * non-hex characters as `NaN` and writes them into a byte array as zero, which
+ * would have handed the engine a signature nobody produced.
+ */
 const hankoBytes = (value: string): Uint8Array => {
   const clean = value.startsWith('0x') ? value.slice(2) : value;
-  if (clean.length === 0 || clean.length % 2 !== 0) {
-    throw new Error(`RSCORE_AUTHORITY_HANKO_INVALID:${clean.length}`);
+  if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {
+    throw new Error(`hankoInvalid:${clean.length}`);
   }
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(clean.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
+  return Uint8Array.from(Buffer.from(clean, 'hex'));
 };
 
 /** One clock per owner per role, or the Runtime frame is not the wave unit. */
