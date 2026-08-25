@@ -2,12 +2,20 @@
 import type { RscoreWireValue } from '../process-wire-value';
 import {
   decodeRscoreCheckpointSectionEntry,
+  decodeRscoreCheckpointSectionKey,
+  type RscoreAccountStateTrees,
   type RscoreCheckpointSectionName,
 } from './checkpoint-restore-state';
 import {
-  decodeRscoreAccountRestoreRow,
+  buildRscoreAccountRestore,
   type RscoreDecodedAccountRestore,
 } from './checkpoint-restore';
+import {
+  decodeRscoreConsensusSeed,
+  type RscoreConsensusSeed,
+} from './checkpoint-restore-consensus';
+import type { AccountReplica } from '../../types/account';
+import { RSCORE_CUTOVER_VERIFY } from '../cutover/verify';
 import {
   rscoreCheckpointBytes,
   rscoreCheckpointList,
@@ -18,7 +26,6 @@ import {
   type AccountStateMapKey,
   type AccountStateMapNamespace,
 } from '../../account/state/persistent-state-map';
-import type { PersistentRadixNodeRecord } from '../../protocol/state/persistent-radix-value-map';
 import { buffersEqual } from '../../protocol/serialization';
 
 type RscoreCheckpointTreeDescriptor = Readonly<{ root: string; leafCount: number }>;
@@ -68,11 +75,24 @@ export type RscoreAccountCheckpointRow = Readonly<{
     swapOffers: RscoreCheckpointNodeChanges;
     rebalanceFeePolicies: RscoreCheckpointNodeChanges;
   }>;
-  consensus: readonly RscoreWireValue[];
-  /** Fully decoded and independently commitment-checked materialization seed. */
+  /**
+   * The consensus half of the row: mempool, pending frame, acknowledgement
+   * and dispute drafts. It does not depend on the state trees, so it decodes
+   * without the Account the changes diff against.
+   */
+  consensus: RscoreConsensusSeed;
+}>;
+
+/**
+ * One wave row bound to the Account it changes.
+ *
+ * The changes alone say nothing: they are a diff against the Account the
+ * Entity already holds, so the decoded seed only exists once that Account is
+ * named. Everything the row claims — both roots and the Entity leaf — is
+ * recomputed from the result.
+ */
+export type RscoreResolvedAccountRow = RscoreAccountCheckpointRow & Readonly<{
   decoded: RscoreDecodedAccountRestore;
-  /** Exact 10-field row for the canonical storage materializer. */
-  wire: readonly RscoreWireValue[];
 }>;
 
 const fail = (code: string): never => {
@@ -165,16 +185,12 @@ const del = (value: unknown, code: string): RscoreCheckpointNodeDelete => {
   return fail(`${code}.tag:${tag}`);
 };
 
-const changes = (value: unknown, code: string, leafCount: number): RscoreCheckpointNodeChanges => {
+const changes = (value: unknown, code: string): RscoreCheckpointNodeChanges => {
   const row = rscoreCheckpointTuple(value, 2, code);
   const puts = rscoreCheckpointList(row[0], `${code}_PUTS`)
     .map((entry, index) => put(entry, `${code}.put.${index}`));
   const dels = rscoreCheckpointList(row[1], `${code}_DELS`)
     .map((entry, index) => del(entry, `${code}.del.${index}`));
-  // Wave rows are full snapshots diffed from an empty tree, not incremental
-  // checkpoint patches. A materialized RestoreExact row is built only later.
-  if (dels.length !== 0) return fail(`${code}.dels:nonempty`);
-  if (puts.filter(entry => entry.kind === 'leaf').length !== leafCount) return fail(`${code}.leafCount`);
   return { puts, dels };
 };
 
@@ -186,67 +202,72 @@ const WAVE_TREE_SECTIONS = [
   'rebalanceFeePolicies',
 ] as const satisfies readonly RscoreCheckpointSectionName[];
 
-const validateFullTree = (
+/**
+ * Apply one section's leaf changes to the tree the Entity already holds.
+ *
+ * Branch records are the engine's own radix bookkeeping and are ignored here:
+ * this side re-derives every branch from the leaves it ends up with, and then
+ * checks the root and the leaf count against what the engine committed. A
+ * diff against the wrong prior Account cannot survive that check.
+ */
+const applySectionChanges = (
   section: RscoreCheckpointSectionName,
+  prior: PersistentAccountStateMap<AccountStateMapKey, unknown> | undefined,
   descriptorValue: RscoreCheckpointTreeDescriptor,
   nodeChanges: RscoreCheckpointNodeChanges,
-): readonly RscoreWireValue[] => {
-  const records: PersistentRadixNodeRecord<AccountStateMapKey, unknown>[] = [];
-  const restoreValues: RscoreWireValue[] = [];
+): PersistentAccountStateMap<AccountStateMapKey, unknown> => {
+  let tree = prior
+    ?? PersistentAccountStateMap.empty<AccountStateMapKey, unknown>(section as AccountStateMapNamespace);
   let leafIndex = 0;
   for (const record of nodeChanges.puts) {
-    if (record.kind === 'branch') {
-      records.push({
-        kind: 'branch',
-        path: [...record.path],
-        children: record.children.map(child => ({
-          slot: child.slot,
-          kind: child.kind,
-          path: [...child.path],
-          edgeHash: child.edgeHash,
-        })),
-      });
-      continue;
+    if (record.kind === 'branch') continue;
+    const [key, value] = decodeRscoreCheckpointSectionEntry(section, record.key, record.value, leafIndex);
+    if (decodeRscoreCheckpointSectionKey(section, record.key, leafIndex) !== key) {
+      return fail(`postAccount.${section}.put.${leafIndex}:key`);
     }
-    const [key, value] = decodeRscoreCheckpointSectionEntry(
-      section,
-      record.key,
-      record.value,
-      leafIndex,
-    );
-    restoreValues.push(
-      section === 'lendingIntents' || section === 'rebalanceFeePolicies'
-        ? [key, record.value as RscoreWireValue]
-        : record.value as RscoreWireValue,
-    );
     leafIndex += 1;
-    records.push({
-      kind: 'leaf',
-      path: [...record.path],
-      key,
-      keyBytes: Uint8Array.from(record.key),
-      value,
-    });
+    tree = tree.updated(key, value);
   }
-  try {
-    const tree = PersistentAccountStateMap.fromNodeRecords<AccountStateMapKey, unknown>(
-      section as AccountStateMapNamespace,
-      records,
-    );
-    if (tree.size !== descriptorValue.leafCount) {
-      return fail(`postAccount.${section}.tree:leafCount:${tree.size}:${descriptorValue.leafCount}`);
-    }
-    const root = tree.rootHash();
-    if (root !== descriptorValue.root) {
-      return fail(`postAccount.${section}.tree:root:${root}:${descriptorValue.root}`);
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('RSCORE_WAVE_DECODE:')) throw error;
-    return fail(
-      `postAccount.${section}.tree:${error instanceof Error ? error.message : String(error)}`,
-    );
+  for (const [index, record] of nodeChanges.dels.entries()) {
+    if (record.kind === 'branch') continue;
+    tree = tree.removed(decodeRscoreCheckpointSectionKey(section, record.key, index));
   }
-  return restoreValues;
+  if (!RSCORE_CUTOVER_VERIFY) return tree;
+  if (tree.size !== descriptorValue.leafCount) {
+    return fail(`postAccount.${section}.tree:leafCount:${tree.size}:${descriptorValue.leafCount}`);
+  }
+  const root = tree.rootHash();
+  if (root !== descriptorValue.root) {
+    return fail(`postAccount.${section}.tree:root:${root}:${descriptorValue.root}`);
+  }
+  return tree;
+};
+
+/** Bind one wave row to the Account it diffs against and decode the result. */
+export const resolveRscoreWaveAccount = (
+  row: RscoreAccountCheckpointRow,
+  prior: AccountReplica | null,
+): RscoreResolvedAccountRow => {
+  const trees = Object.fromEntries(WAVE_TREE_SECTIONS.map(section => [
+    section,
+    applySectionChanges(
+      section,
+      prior?.state[section] as PersistentAccountStateMap<AccountStateMapKey, unknown> | undefined,
+      row.sections[section],
+      row.nodeChanges[section],
+    ),
+  ])) as unknown as RscoreAccountStateTrees;
+  return {
+    ...row,
+    decoded: buildRscoreAccountRestore(
+      row.accountId,
+      row.entityAccountLeaf,
+      row.header,
+      trees,
+      row.consensus,
+      RSCORE_CUTOVER_VERIFY,
+    ),
+  };
 };
 
 const header = (
@@ -308,31 +329,12 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     rebalanceFeePolicies: descriptor(rawSections[4], 'WAVE_POST_ACCOUNT_POLICIES'),
   };
   const nodeChanges = {
-    deltas: changes(row[4], 'postAccount.deltas', sections.deltas.leafCount),
-    locks: changes(row[5], 'postAccount.locks', sections.locks.leafCount),
-    lendingIntents: changes(row[6], 'postAccount.lendingIntents', sections.lendingIntents.leafCount),
-    swapOffers: changes(row[7], 'postAccount.swapOffers', sections.swapOffers.leafCount),
-    rebalanceFeePolicies: changes(
-      row[8],
-      'postAccount.rebalanceFeePolicies',
-      sections.rebalanceFeePolicies.leafCount,
-    ),
+    deltas: changes(row[4], 'postAccount.deltas'),
+    locks: changes(row[5], 'postAccount.locks'),
+    lendingIntents: changes(row[6], 'postAccount.lendingIntents'),
+    swapOffers: changes(row[7], 'postAccount.swapOffers'),
+    rebalanceFeePolicies: changes(row[8], 'postAccount.rebalanceFeePolicies'),
   };
-  const restoreSections = Object.fromEntries(WAVE_TREE_SECTIONS.map(section => [
-    section,
-    validateFullTree(section, sections[section], nodeChanges[section]),
-  ])) as Record<RscoreCheckpointSectionName, readonly RscoreWireValue[]>;
-  const decoded = decodeRscoreAccountRestoreRow([
-    row[0] as RscoreWireValue,
-    row[1] as RscoreWireValue,
-    row[2] as RscoreWireValue,
-    [...restoreSections.deltas],
-    [...restoreSections.locks],
-    [...restoreSections.lendingIntents],
-    [...restoreSections.swapOffers],
-    [...restoreSections.rebalanceFeePolicies],
-    row[9] as RscoreWireValue,
-  ]);
   return {
     accountId: `0x${Buffer.from(accountId).toString('hex')}`,
     entityAccountLeaf: `0x${Buffer.from(
@@ -341,8 +343,6 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     header: parsedHeader,
     sections,
     nodeChanges,
-    consensus: rscoreCheckpointTuple(row[9], 11, 'WAVE_POST_ACCOUNT_CONSENSUS'),
-    decoded,
-    wire: row,
+    consensus: decodeRscoreConsensusSeed(row[9]),
   };
 };

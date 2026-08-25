@@ -71,19 +71,28 @@ pub enum IncomingOutcome {
         events: Vec<String>,
         /// Set when our own same-height proposal lost the collision and its
         /// transactions went back to the queue.
-        rolled_back_txs: usize,
+        rolled_back: Option<crate::consensus::replica::RolledBackProposal>,
         committed_frame: CommittedFrameEvidence,
+        /// The recovery proof our acknowledgement carries, when it carries
+        /// one. It travels with the verdict because the acknowledgement is
+        /// what the publisher sends, and it must not have to read the account
+        /// back to learn what it just signed.
+        ack_dispute: Option<crate::consensus::replica::DisputeDraft>,
     },
     /// We are LEFT and the peer raced us at the same height: our proposal
     /// stands and their frame is ignored until they ack it.
     CollisionIgnored {
         height: u64,
+        /// Transactions still queued behind the proposal that won.
+        queued: usize,
     },
     /// Already committed at this height with this hash: re-ack, do not replay.
     Duplicate {
         height: u64,
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
+        /// The same proof the original acknowledgement carried, replayed.
+        ack_dispute: Option<crate::consensus::replica::DisputeDraft>,
     },
     /// Already behind our chain head: an at-least-once retransmission, which
     /// is applied as a no-op rather than treated as a fault.
@@ -170,6 +179,12 @@ pub fn apply_incoming_frame(
             height: frame.height,
             state_hash,
             ack_hanko: identity.sign_frame(&state_hash)?,
+            // A re-sent acknowledgement carries the proof the original one
+            // did, which the account still holds.
+            ack_dispute: account
+                .outbound_ack()
+                .filter(|ack| ack.height == frame.height)
+                .and_then(|ack| ack.dispute.clone()),
         });
     }
     if frame.height < current_height {
@@ -237,6 +252,7 @@ pub fn apply_incoming_frame(
         if account.replica().owner_side() == Side::Left {
             return Ok(IncomingOutcome::CollisionIgnored {
                 height: frame.height,
+                queued: account.mempool().len(),
             });
         }
         if account.last_rollback_frame_hash() == Some(&state_hash) {
@@ -334,10 +350,10 @@ pub fn apply_incoming_frame(
     //
     // Parity target: `applySameHeightIncomingFrameRollback`
     // (core/account/consensus/index.ts), which runs after the replay.
-    let rolled_back_txs = if collides {
+    let rolled_back = if collides {
         account.rollback_pending(state_hash)?
     } else {
-        0
+        None
     };
 
     let ack_hanko = identity.sign_frame(&state_hash)?;
@@ -366,14 +382,20 @@ pub fn apply_incoming_frame(
     // The ack this outcome carries is one the Entity commits in the account
     // leaf until a later proposal carries it, so the account remembers sending
     // it rather than the wire remembering for it.
-    account.note_outbound_ack(frame.height, state_hash, ack_hanko.clone(), ack_dispute);
+    account.note_outbound_ack(
+        frame.height,
+        state_hash,
+        ack_hanko.clone(),
+        ack_dispute.clone(),
+    );
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,
         ack_hanko,
         outputs,
         events,
-        rolled_back_txs,
+        rolled_back,
+        ack_dispute,
         committed_frame: CommittedFrameEvidence {
             frame,
             committed_via_new_frame: true,

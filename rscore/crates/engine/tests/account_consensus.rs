@@ -7,7 +7,8 @@ use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope,
     AccountReplica, AccountState, AccountTx, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
     DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame, IncomingOutcome,
-    ProposalOutcome, ProposedFrame, ReceiverClock, SigningIdentity, TokenId, WatchSeed,
+    ProposalOutcome, ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity, TokenId,
+    WatchSeed,
     apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, dispute_proof_hash, propose_account_frame,
 };
@@ -536,7 +537,7 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
     .expect("left applies");
     assert!(matches!(
         outcome,
-        IncomingOutcome::CollisionIgnored { height: 1 }
+        IncomingOutcome::CollisionIgnored { height: 1, .. }
     ));
     assert_eq!(left.account.current_height(), 0);
     assert!(left.account.pending().is_some());
@@ -554,13 +555,13 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
     .expect("right applies");
     let IncomingOutcome::Committed {
         ack_hanko,
-        rolled_back_txs,
+        rolled_back,
         ..
     } = outcome
     else {
         panic!("expected RIGHT to commit, got {outcome:?}");
     };
-    assert_eq!(rolled_back_txs, 1);
+    assert_eq!(rolled_back.expect("collision rolled back").restored, 1);
     assert_eq!(right.account.mempool().len(), 1);
     assert_eq!(right.account.rollback_count(), 1);
 
@@ -1071,7 +1072,7 @@ fn a_failing_frame_leaves_our_own_proposal_standing() {
         matches!(
             outcome,
             IncomingOutcome::Committed {
-                rolled_back_txs: 1,
+                rolled_back: Some(RolledBackProposal { restored: 1, .. }),
                 ..
             }
         ),

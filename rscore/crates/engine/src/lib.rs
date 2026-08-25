@@ -35,6 +35,7 @@ pub use consensus::proposal::propose::{
     Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
 };
 pub use consensus::replica::{
+    RolledBackProposal,
     AccountConsensus, CommittedFrame, ConsensusSnapshot, CounterpartyDispute, DisputeDraft,
     OutboundAck, PendingFrame, PendingFrameSnapshot,
 };

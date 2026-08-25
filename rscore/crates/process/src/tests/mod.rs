@@ -737,7 +737,7 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
         1,
         "one account had something to propose: {fields:?}"
     );
-    let proposal = exact_tuple(&proposals[0], 5, "proposal");
+    let proposal = exact_tuple(&proposals[0], 7, "proposal");
     let frame = exact_tuple(&proposal[1], 10, "frame");
     assert_eq!(frame[0], AbiValue::Integer(1), "height 1");
     assert_eq!(tuple_fields(&frame[3]).len(), 1, "one transaction");
@@ -774,11 +774,9 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
         5,
         "all Rust-owned Account trees are described"
     );
-    let delta_changes = exact_tuple(&post_account[4], 2, "post account delta changes");
-    assert!(
-        !tuple_fields(&delta_changes[0]).is_empty(),
-        "the full delta tree is materialized"
-    );
+    // The delta rows are a diff against the account the caller already holds:
+    // a proposal window that queued no balance change moves no delta leaf.
+    exact_tuple(&post_account[4], 2, "post account delta changes");
     let consensus = exact_tuple(&post_account[9], 11, "post account consensus");
     assert!(
         matches!(&consensus[2], AbiValue::Tuple(_)),
@@ -1400,7 +1398,7 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
             .handle(finalize_entity(6, uninterrupted_token, stage_key, 0))
             .envelope,
     );
-    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 5, "proposal");
+    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 7, "proposal");
     assert!(
         !matches!(proposal[1], AbiValue::Nil),
         "swap proposal rejected: {:?}",

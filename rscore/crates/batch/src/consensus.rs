@@ -65,16 +65,23 @@ pub enum AccountInputVerdict {
         /// frame hashes these strings, so a publisher that re-derived them
         /// would be signing its own guess.
         events: Vec<String>,
-        rolled_back_txs: usize,
+        rolled_back: Option<xln_rscore_engine::RolledBackProposal>,
         committed_frame: CommittedFrameEvidence,
+        /// The recovery proof the acknowledgement this frame produced carries,
+        /// so the publisher can send it without reading the account back.
+        ack_dispute: Option<xln_rscore_engine::DisputeDraft>,
     },
     FrameCollisionIgnored {
         height: u64,
+        /// What this side still holds while it waits to be acknowledged. The
+        /// publisher names the count in an event the Entity frame commits.
+        queued: usize,
     },
     FrameDuplicate {
         height: u64,
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
+        ack_dispute: Option<xln_rscore_engine::DisputeDraft>,
     },
     FrameStale {
         height: u64,
@@ -138,6 +145,15 @@ pub struct WaveRequest {
     /// The whole wave is still one candidate: prepared together, committed or
     /// aborted together, under one accounts root.
     pub entities: Vec<EntityWave>,
+    /// Whether every reply must carry the full checkpoint row of each touched
+    /// account.
+    ///
+    /// This is the account body: its mempool, its trees, its node changes. A
+    /// caller that only needs to know what happened — the verdicts, the
+    /// outputs, the leaf — must not pay to have the whole account serialized,
+    /// shipped and decoded on every operation. Durable checkpointing asks for
+    /// the rows explicitly, at the frame boundary, where they belong.
+    pub post_accounts: bool,
 }
 
 /// One thing the authority did to one account, in the order it did it.
@@ -336,6 +352,8 @@ pub struct WaveResult {
 /// its own record is durable.
 struct PendingWave {
     candidate_id: CandidateId,
+    /// Carried from the request: whether replies include account bodies.
+    post_accounts: bool,
     base_accounts: PersistentRadixMap<AccountConsensus>,
     base_identities: BTreeMap<[u8; 32], SigningIdentity>,
     base_revision: u64,
@@ -430,6 +448,9 @@ pub struct ProposedRow {
     /// the moment the window executed.
     pub events: Vec<String>,
     pub outputs: Vec<AccountOutput>,
+    /// Present when this proposal also carries the acknowledgement this side
+    /// owed, which makes it a `frame_ack` on the wire.
+    pub bundled_ack: Option<xln_rscore_engine::OutboundAck>,
 }
 
 impl ProposalRow {
@@ -590,6 +611,16 @@ impl StatefulConsensusEngine {
 
     pub fn worker_count(&self) -> usize {
         self.pool.current_num_threads()
+    }
+
+    pub(crate) fn signer_id(&self) -> &str {
+        &self.signer_id
+    }
+
+    /// The committed tree as it stands, kept so a round can name what it moved.
+    /// The map is persistent: this shares structure rather than copying it.
+    pub(crate) fn accounts_snapshot(&self) -> PersistentRadixMap<AccountConsensus> {
+        self.accounts.clone()
     }
 
     pub fn accounts_root(&self) -> [u8; 32] {
@@ -755,6 +786,7 @@ impl StatefulConsensusEngine {
                                 dispute: proposed.dispute,
                                 events: proposed.events,
                                 outputs: proposed.outputs,
+                                bundled_ack: proposed.bundled_ack,
                             }),
                             dropped: dropped_rows(account_id, &proposed.dropped)?,
                         },
@@ -1180,6 +1212,7 @@ impl StatefulConsensusEngine {
         if self.pending.is_some() {
             return Err(BatchError::WavePending);
         }
+        let include_post_accounts = request.post_accounts;
         let base_accounts = self.accounts.clone();
         let base_identities = self.identities.clone();
         let base_revision = self.revision;
@@ -1222,6 +1255,7 @@ impl StatefulConsensusEngine {
         }
         self.pending = Some(PendingWave {
             candidate_id,
+            post_accounts: include_post_accounts,
             base_accounts: base_accounts.clone(),
             base_identities: base_identities.clone(),
             base_revision,
@@ -1479,7 +1513,14 @@ impl StatefulConsensusEngine {
     /// Continue an open candidate. A failed step restores the candidate state
     /// that preceded this call; the original abort base remains unchanged.
     pub fn apply_wave_ops(&mut self, request: WaveOpsRequest) -> Result<WaveResult, BatchError> {
-        let (contexts, previous_index, prior_used, prior_created, prior_unused_created) = {
+        let (
+            contexts,
+            previous_index,
+            prior_used,
+            prior_created,
+            prior_unused_created,
+            include_post_accounts,
+        ) = {
             let pending = self.open_wave()?;
             if let Some(stage) = pending.entity_stage.as_ref() {
                 for entity in &request.entities {
@@ -1498,6 +1539,7 @@ impl StatefulConsensusEngine {
                 pending.used_accounts.clone(),
                 pending.created_accounts.clone(),
                 pending.unused_created_accounts.clone(),
+                pending.post_accounts,
             )
         };
         let next_index = validate_operation_indices(&request.entities, previous_index)?;
@@ -1519,7 +1561,8 @@ impl StatefulConsensusEngine {
             )
             .and_then(
                 |(applied, admissions, step_used, created, unused_created)| {
-                    let (leaves, post_accounts) = self.materialize_wave_rows(&touched, true)?;
+                    let (leaves, post_accounts) =
+                        self.materialize_wave_rows(&touched, include_post_accounts)?;
                     Ok((
                         applied,
                         admissions,
@@ -1568,7 +1611,7 @@ impl StatefulConsensusEngine {
     /// Build frames only for the exact deterministic Account worklist selected
     /// by each Entity for this round.
     pub fn propose_wave(&mut self, request: WaveProposalRequest) -> Result<WaveResult, BatchError> {
-        let contexts = {
+        let (contexts, include_post_accounts) = {
             let pending = self.open_wave()?;
             if let Some(stage) = pending.entity_stage.as_ref() {
                 for entity in &request.entities {
@@ -1581,7 +1624,7 @@ impl StatefulConsensusEngine {
                     }
                 }
             }
-            pending.contexts.clone()
+            (pending.contexts.clone(), pending.post_accounts)
         };
         let step_accounts = self.accounts.clone();
         let step_revision = self.revision;
@@ -1590,7 +1633,8 @@ impl StatefulConsensusEngine {
             .and_then(|proposals| {
                 let touched: BTreeSet<AccountId> =
                     proposals.iter().map(|row| row.account_id).collect();
-                let (leaves, post_accounts) = self.materialize_wave_rows(&touched, true)?;
+                let (leaves, post_accounts) =
+                    self.materialize_wave_rows(&touched, include_post_accounts)?;
                 Ok((proposals, touched, leaves, post_accounts))
             });
         let (proposals, touched, leaves, post_accounts) = match outcome {
@@ -1638,7 +1682,8 @@ impl StatefulConsensusEngine {
                 pending.proposals.clone(),
             )
         };
-        let (leaves, post_accounts) = self.materialize_wave_rows(&touched, true)?;
+        let include_post_accounts = self.open_wave()?.post_accounts;
+        let (leaves, post_accounts) = self.materialize_wave_rows(&touched, include_post_accounts)?;
         self.open_wave_mut()?.sealed = true;
         Ok(WaveResult {
             candidate_id: self
@@ -1674,8 +1719,17 @@ impl StatefulConsensusEngine {
                 let signer_id = self
                     .signer_of(account.replica().owner().as_bytes())
                     .ok_or(BatchError::SignerRequired)?;
+                // Against the state the caller already holds, which is this
+                // candidate's base: it opened the frame with that state and
+                // has been applying every change since. Sending whole trees
+                // instead would ship the account's entire body once per
+                // operation.
+                let previous = self
+                    .pending
+                    .as_ref()
+                    .and_then(|pending| pending.base_accounts.get(account_id.as_bytes()));
                 post_accounts.push(
-                    account_rows(*account_id, account, None, leaf, signer_id).map_err(|error| {
+                    account_rows(*account_id, account, previous, leaf, signer_id).map_err(|error| {
                         BatchError::AccountsTree {
                             account_id: *account_id,
                             detail: error.to_string(),
@@ -2203,28 +2257,32 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             ack_hanko,
             outputs,
             events,
-            rolled_back_txs,
+            rolled_back,
             committed_frame,
+            ack_dispute,
         } => AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
             ack_hanko,
             outputs,
             events,
-            rolled_back_txs,
+            rolled_back,
             committed_frame,
+            ack_dispute,
         },
-        IncomingOutcome::CollisionIgnored { height } => {
-            AccountInputVerdict::FrameCollisionIgnored { height }
+        IncomingOutcome::CollisionIgnored { height, queued } => {
+            AccountInputVerdict::FrameCollisionIgnored { height, queued }
         }
         IncomingOutcome::Duplicate {
             height,
             state_hash,
             ack_hanko,
+            ack_dispute,
         } => AccountInputVerdict::FrameDuplicate {
             height,
             state_hash,
             ack_hanko,
+            ack_dispute,
         },
         IncomingOutcome::Stale {
             height,
@@ -2688,7 +2746,7 @@ fn proposable(account: &AccountConsensus) -> bool {
 
 /// The leaf commits the consensus state too, so a queued transaction or a new
 /// frame moves the tree even when the financial root did not change.
-fn leaf_root(account_id: AccountId, account: &AccountConsensus) -> Result<[u8; 32], BatchError> {
+pub(crate) fn leaf_root(account_id: AccountId, account: &AccountConsensus) -> Result<[u8; 32], BatchError> {
     account
         .entity_account_leaf()
         .map_err(|error| BatchError::AccountsTree {
@@ -2697,7 +2755,7 @@ fn leaf_root(account_id: AccountId, account: &AccountConsensus) -> Result<[u8; 3
         })
 }
 
-fn state_error(account_id: AccountId, error: &StateError) -> BatchError {
+pub(crate) fn state_error(account_id: AccountId, error: &StateError) -> BatchError {
     BatchError::AccountsTree {
         account_id,
         detail: error.to_string(),

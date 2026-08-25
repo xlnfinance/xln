@@ -82,7 +82,7 @@ const RSCORE_ABI_VERSION = 1;
 // 14: peer inputs carry the exact Account envelope plus the closed
 // Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
 // returns one ordered composite result row.
-export const RSCORE_PROCESS_ABI_VERSION = 16;
+export const RSCORE_PROCESS_ABI_VERSION = 17;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -116,6 +116,14 @@ export const RSCORE_OP = {
   proposeAccountWave: 23,
   sealAccountWave: 24,
 } as const;
+
+/**
+ * Bytes crossing the process boundary, counted for measurement only.
+ *
+ * The engine's own work is cheap; what a reply costs to serialize, ship and
+ * decode is not, and that cost is invisible unless something counts it.
+ */
+export const rscoreTransportBytes = { sent: 0, received: 0 };
 
 const MESSAGE_KIND_REQUEST = 0;
 const MESSAGE_KIND_OK = 1;
@@ -438,6 +446,7 @@ export class RscoreProcessClient {
 
   #onData(chunk: Buffer): void {
     if (this.#dead || chunk.length === 0) return;
+    rscoreTransportBytes.received += chunk.length;
     // Requests are serialized and install their sole waiter before writing.
     // Therefore any stdout byte observed without that waiter is unsolicited,
     // even when it is only a fragment too short to contain a frame header.
@@ -557,6 +566,7 @@ export class RscoreProcessClient {
     });
     let backpressured: boolean;
     try {
+      rscoreTransportBytes.sent += framed.length;
       backpressured = !this.#child.stdin.write(framed);
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -774,6 +784,15 @@ export class RscoreProcessClient {
    */
   async prepareAccountWave(wave: Readonly<{
     entities: readonly RscoreAuthorityWaveEntity[];
+    /**
+     * Ask every reply in this candidate to carry the full account body.
+     *
+     * That body is the mempool, the trees and their node changes, serialized
+     * and decoded once per operation. A caller that only needs the verdicts,
+     * the outputs and the leaf must not pay for it; durable checkpointing
+     * asks for the rows explicitly at the frame boundary.
+     */
+    postAccounts: boolean;
   }>): Promise<{ result: Wave; token: Buffer }> {
     const payload = ownWirePayload([
       wave.entities.map(entity => [
@@ -785,6 +804,7 @@ export class RscoreProcessClient {
         entity.propose,
         [...entity.ops],
       ]),
+      wave.postAccounts,
     ]);
     return this.#withRequestTurn(async () => {
       if (this.#authorityCandidate !== null) {

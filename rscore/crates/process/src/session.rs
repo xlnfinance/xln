@@ -237,6 +237,8 @@ impl ProcessSession {
                 expected_accepted_ordinal,
                 context,
             ),
+            Command::AccountInbound { request } => self.account_inbound(*request),
+            Command::AccountOutbound { request } => self.account_outbound(*request),
             Command::ApplyAccountWave {
                 candidate_token,
                 stage_key,
@@ -402,6 +404,37 @@ impl ProcessSession {
             checkpoint: None,
         });
         Ok((response, false))
+    }
+
+    /// One Entity input's inbound half. Nothing is staged: the accounts move
+    /// when the Entity says they move, and the reply is what happened.
+    fn account_inbound(
+        &mut self,
+        request: xln_rscore_batch::EntityInboundRequest,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
+        let result = engine.entity_inbound(request)?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        Ok((crate::wire_encode::round(&result, engine_micros)?, false))
+    }
+
+    /// One Entity input's outbound half.
+    fn account_outbound(
+        &mut self,
+        request: xln_rscore_batch::EntityOutboundRequest,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
+        let result = engine.entity_outbound(request)?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        Ok((crate::wire_encode::round(&result, engine_micros)?, false))
     }
 
     fn apply_wave(

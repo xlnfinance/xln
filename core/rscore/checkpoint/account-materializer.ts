@@ -44,7 +44,11 @@ import type {
 import type { HankoString } from '../../types/hanko';
 import type { RscoreDisputeDraft, RscoreOutboundAck } from './checkpoint-restore-consensus';
 import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
-import type { RscoreAccountCheckpointRow } from './wave-checkpoint-decode';
+import { RSCORE_CUTOVER_VERIFY } from '../cutover/verify';
+import type {
+  RscoreAccountCheckpointRow,
+  RscoreResolvedAccountRow,
+} from './wave-checkpoint-decode';
 
 export type RscoreAccountMaterializerBinding = Readonly<{
   /** Entity bound by the live authority process Hello response. */
@@ -328,7 +332,7 @@ const ackInput = (
 const pendingInput = (
   seed: RscoreAccountStateSeed,
   witnesses: LocalWitnessResolver,
-  pending: NonNullable<RscoreAccountCheckpointRow['decoded']['consensus']['pending']>,
+  pending: NonNullable<RscoreResolvedAccountRow['decoded']['consensus']['pending']>,
 ): Extract<AccountPeerInput, { kind: 'frame' | 'frame_ack' }> => {
   const prefix = `account:${seed.accountId.slice(-8)}`;
   const frameHanko = witnesses.frame(
@@ -382,7 +386,6 @@ const assertPriorBinding = (
   accountId: string,
   seed: RscoreAccountStateSeed,
   currentFrame: AccountFrame,
-  rollbackCount: number,
 ): void => {
   validateAccountReplica(prior, 'rscore.materialize.prior');
   if (prior.proofHeader.fromEntity !== ownerEntityId) fail('PRIOR_OWNER_MISMATCH');
@@ -403,7 +406,6 @@ const assertPriorBinding = (
   ) {
     fail('PRIOR_FRAME_FORK');
   }
-  if (prior.rollbackCount > rollbackCount) fail('PRIOR_ROLLBACK_STALE');
   if (prior.state.jNonce > seed.jNonce) fail('PRIOR_J_NONCE_STALE');
   if (prior.state.lastFinalizedJHeight > seed.lastFinalizedJHeight) {
     fail('PRIOR_J_HEIGHT_STALE');
@@ -550,13 +552,13 @@ const sameDisputeDraft = (
 ): boolean => disputeKey(left) === disputeKey(right);
 
 const latestOutboundDisputeDraft = (
-  consensus: RscoreAccountCheckpointRow['decoded']['consensus'],
+  consensus: RscoreResolvedAccountRow['decoded']['consensus'],
 ): RscoreDisputeDraft | undefined => consensus.pending?.proposalDispute
   ?? consensus.pending?.bundledAck?.dispute
   ?? consensus.lastOutboundAck?.dispute;
 
 const latestOutboundDisputeContext = (
-  consensus: RscoreAccountCheckpointRow['decoded']['consensus'],
+  consensus: RscoreResolvedAccountRow['decoded']['consensus'],
   accountId: string,
 ): string | undefined => {
   const prefix = `account:${accountId.slice(-8)}`;
@@ -568,7 +570,7 @@ const latestOutboundDisputeContext = (
 };
 
 const assertCurrentDisputeDraftOrder = (
-  consensus: RscoreAccountCheckpointRow['decoded']['consensus'],
+  consensus: RscoreResolvedAccountRow['decoded']['consensus'],
 ): void => {
   const outbound = latestOutboundDisputeDraft(consensus);
   if (outbound !== undefined && (
@@ -585,7 +587,7 @@ const assertCurrentDisputeDraftOrder = (
 export const materializeRscoreAccountReplica = (
   binding: RscoreAccountMaterializerBinding,
   accountIdValue: string,
-  row: RscoreAccountCheckpointRow,
+  row: RscoreResolvedAccountRow,
   prior: AccountReplica | null,
   witnessPlan: RscoreAccountLocalWitnessPlan,
 ): RscoreAccountMaterialization => {
@@ -610,14 +612,18 @@ export const materializeRscoreAccountReplica = (
   assertCurrentDisputeDraftOrder(consensus);
 
   const state = stateFromSeed(seed, prior);
-  const accountStateRoot = computeAccountStateRoot(state, undefined, 'rscoreMaterialize');
-  if (accountStateRoot !== row.decoded.accountStateRoot) fail('ACCOUNT_STATE_ROOT_MISMATCH');
-  if (computeAccountStateRootCold(state) !== accountStateRoot) fail('ACCOUNT_STATE_COLD_ROOT_MISMATCH');
+  const accountStateRoot = row.decoded.accountStateRoot;
+  if (RSCORE_CUTOVER_VERIFY) {
+    if (computeAccountStateRoot(state, undefined, 'rscoreMaterialize') !== accountStateRoot) {
+      fail('ACCOUNT_STATE_ROOT_MISMATCH');
+    }
+    if (computeAccountStateRootCold(state) !== accountStateRoot) fail('ACCOUNT_STATE_COLD_ROOT_MISMATCH');
+  }
   const currentFrame = consensus.currentFrame
     ? cloneIsolatedAccountFrame(consensus.currentFrame)
     : h0Frame(seed, accountStateRoot);
   if (prior !== null) {
-    assertPriorBinding(prior, ownerEntityId, accountId, seed, currentFrame, consensus.rollbackCount);
+    assertPriorBinding(prior, ownerEntityId, accountId, seed, currentFrame);
   }
   const fields = seed.envelope.fields;
   const collections = envelopeCollections(fields, prior);
@@ -711,19 +717,21 @@ export const materializeRscoreAccountReplica = (
       ?? fail('LOCAL_FRAME_DRAFT_UNREACHABLE');
   }
 
-  validateAccountReplica(account, 'rscore.materialize.result');
-  const expectedProjection = {
-    ...fields,
-    accountStateRoot,
-    mempoolRoot: row.decoded.mempoolRoot,
-  };
-  const projected = projectEntityAccountLeaf(account);
-  requireCanonicalEqual(projected, expectedProjection, 'ENTITY_PROJECTION');
-  const projectedLeaf = computeEntityAccountLeafDigest(
-    Object.entries(projected).sort(([left], [right]) => left.localeCompare(right)),
-  );
-  if (projectedLeaf !== row.entityAccountLeaf) fail('PROJECTED_LEAF_MISMATCH');
-  if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
+  if (RSCORE_CUTOVER_VERIFY) {
+    validateAccountReplica(account, 'rscore.materialize.result');
+    const expectedProjection = {
+      ...fields,
+      accountStateRoot,
+      mempoolRoot: row.decoded.mempoolRoot,
+    };
+    const projected = projectEntityAccountLeaf(account);
+    requireCanonicalEqual(projected, expectedProjection, 'ENTITY_PROJECTION');
+    const projectedLeaf = computeEntityAccountLeafDigest(
+      Object.entries(projected).sort(([left], [right]) => left.localeCompare(right)),
+    );
+    if (projectedLeaf !== row.entityAccountLeaf) fail('PROJECTED_LEAF_MISMATCH');
+    if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
+  }
   return { account, hashesToSign: witnesses.finish() };
 };
 
@@ -761,7 +769,7 @@ export const planRscoreLocalWitnesses = (
     claimed.add(key);
     fresh.push({ hash: normalized, type: 'dispute', context });
   };
-  const { consensus } = row.decoded;
+  const { consensus } = row;
   // Both, not one of them: a proposal may bundle an acknowledgement the
   // stored outbound copy no longer matches, and materialization asks for each
   // separately.

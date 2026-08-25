@@ -24,18 +24,28 @@ import type {
   ProposeAccountFrameResult,
   ProposalDroppedTransaction,
 } from '../../account/consensus/types';
-import type { AccountFrame, AccountPeerInput, AccountReplica } from '../../types/account';
+import type { AccountFrame, AccountReplica } from '../../types/account';
 import {
   materializeRscoreAccountReplica,
   planRscoreLocalWitnesses,
   type RscoreAccountMaterializerBinding,
 } from '../checkpoint/account-materializer';
-import type { RscoreAccountCheckpointRow } from '../checkpoint/wave-checkpoint-decode';
-import type { Wave, WaveOutput } from '../wave-decode';
+import {
+  resolveRscoreWaveAccount,
+  type RscoreAccountCheckpointRow,
+} from '../checkpoint/wave-checkpoint-decode';
+import type { Wave, WaveDisputeDraft, WaveOutput } from '../wave-decode';
 
 /** One applied operation's verdict, as the wave reports it. */
 export type CutoverVerdict = Wave['applied'][number]['verdict'];
 import { cutoverAccountEffects } from './effects';
+import {
+  cutoverAck,
+  cutoverAckHashes,
+  cutoverEnvelope,
+  cutoverProposal,
+  cutoverProposalHashes,
+} from './outbound';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_CUTOVER_${code}:${JSON.stringify(detail, (_key, value) =>
@@ -71,11 +81,12 @@ const materialize = (
   row: RscoreAccountCheckpointRow,
 ): MaterializedOperation => {
   const prior = request.account;
-  const plan = planRscoreLocalWitnesses(request.accountId, row, prior);
+  const resolved = resolveRscoreWaveAccount(row, prior);
+  const plan = planRscoreLocalWitnesses(request.accountId, resolved, prior);
   const materialized = materializeRscoreAccountReplica(
     request.binding,
     request.accountId,
-    row,
+    resolved,
     prior,
     plan,
   );
@@ -122,18 +133,6 @@ const committedFrame = (
   committedViaNewFrame: evidence.committedViaNewFrame,
 });
 
-const outboundAck = (
-  account: AccountReplica,
-  accountId: string,
-  height: number,
-): AccountPeerInput => {
-  const ack = account.lastOutboundFrameAck;
-  if (ack === undefined || ack.height !== height) {
-    return fail('OUTBOUND_ACK_MISSING', { account: accountId, height, held: ack?.height ?? null });
-  }
-  return ack.response;
-};
-
 /**
  * The engine publishes one flat output list per committed window; TypeScript
  * publishes different halves of it at different moments. A frame this side
@@ -163,12 +162,26 @@ export const cutoverAccountInputEvents = (
     events.push(`✅ Frame ${ack.height} confirmed and committed`);
   }
   if (frame.kind === 'frameCommitted') {
+    // A lost collision is announced before the winning frame is accepted: our
+    // own proposal gave way, and its transactions went back on the queue.
+    if (frame.rolledBack !== null) {
+      events.push(
+        `🔄 ROLLBACK: Discarded our frame ${frame.rolledBack.height}, `
+        + `restored ${frame.rolledBack.restored}/${frame.rolledBack.proposed} txs to mempool`,
+      );
+      events.push(
+        `📥 Accepted LEFT's frame ${frame.height} (we are RIGHT, deterministic tiebreaker)`,
+      );
+    }
     events.push(...frame.events);
     events.push(`🤝 Accepted frame ${frame.height} from Entity ${fromEntityId.slice(-4)}`);
   } else if (frame.kind === 'frameDuplicate') {
     events.push(`↩️ Re-sent ACK for duplicate committed frame ${frame.height}`);
   } else if (frame.kind === 'frameCollisionIgnored') {
     events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${frame.height} (waiting for their ACK)`);
+    if (frame.queued > 0) {
+      events.push(`⚠️ LEFT has ${frame.queued} pending txs while waiting for RIGHT's ACK`);
+    }
   }
   return events;
 };
@@ -189,7 +202,12 @@ export const cutoverAccountInputResult = (
   const swapOffersCreated = [];
   const swapCancelRequests = [];
   const swapOffersCancelled = [];
-  let ackHeight: number | null = null;
+  const envelope = cutoverEnvelope(request.account);
+  let outbound: Readonly<{
+    height: number;
+    frameHash: string;
+    dispute: WaveDisputeDraft | null;
+  }> | null = null;
 
   const ackPart = verdict.kind === 'frameAckApplied' ? verdict.ackVerdict : verdict;
   const framePart = verdict.kind === 'frameAckApplied' ? verdict.frameVerdict : verdict;
@@ -209,13 +227,6 @@ export const cutoverAccountInputResult = (
   }
 
   if (framePart.kind === 'frameCommitted') {
-    if (framePart.rolledBackTxs !== 0) {
-      return fail('FRAME_COLLISION_ROLLBACK', {
-        account: accountId,
-        height: framePart.height,
-        rolledBack: framePart.rolledBackTxs,
-      });
-    }
     const effects = appliedFromCommit(priorSnapshot, accountId, framePart.outputs);
     candidateEffects.push(...effects.candidateEffects);
     revealedSecrets.push(...effects.revealedSecrets);
@@ -224,9 +235,17 @@ export const cutoverAccountInputResult = (
     swapCancelRequests.push(...effects.swapCancelRequests);
     swapOffersCancelled.push(...effects.swapOffersCancelled);
     committedFrames.push(committedFrame(framePart.committedFrame));
-    ackHeight = framePart.height;
+    outbound = {
+      height: framePart.height,
+      frameHash: framePart.stateHash,
+      dispute: framePart.ackDispute,
+    };
   } else if (framePart.kind === 'frameDuplicate') {
-    ackHeight = framePart.height;
+    outbound = {
+      height: framePart.height,
+      frameHash: framePart.stateHash,
+      dispute: framePart.ackDispute,
+    };
   } else if (framePart.kind === 'frameCollisionIgnored') {
     // Nothing was committed; the event list still records the decision.
   } else if (framePart.kind === 'frameStale') {
@@ -248,10 +267,13 @@ export const cutoverAccountInputResult = (
   }
 
   events.push(...cutoverAccountInputEvents(verdict, request.fromEntityId));
-  const materialized = materialize(request, row);
-  const response = ackHeight === null
+  const hashesToSign = outbound === null
+    ? []
+    : cutoverAckHashes(accountId, outbound.height, outbound.frameHash, outbound.dispute);
+  materialize(request, row);
+  const response = outbound === null
     ? undefined
-    : outboundAck(materialized.account, accountId, ackHeight);
+    : cutoverAck(envelope, outbound.height, outbound.frameHash, outbound.dispute);
   return accountInputApplied({
     events,
     ...(response === undefined ? {} : { response }),
@@ -262,7 +284,7 @@ export const cutoverAccountInputResult = (
     timedOutHashlocks,
     ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
     ...(committedFrames.length > 0 ? { committedFrames } : {}),
-    ...(materialized.hashesToSign.length > 0 ? { hashesToSign: materialized.hashesToSign } : {}),
+    ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
   });
 };
 
@@ -325,11 +347,26 @@ export const cutoverAccountProposalResult = (
     // Both halves are released with the peer's acknowledgement, never here.
     return fail('PROPOSAL_EFFECT_TIMING', { account: accountId });
   }
-  const materialized = materialize(request, row);
-  const accountInput = materialized.account.pendingAccountInput;
-  if (accountInput === undefined) {
-    return fail('PENDING_INPUT_MISSING', { account: accountId });
-  }
+  const envelope = cutoverEnvelope(priorSnapshot);
+  materialize(request, row);
+  // The bundled acknowledgement was produced — and published for signing —
+  // when the frame it answers was committed. Carrying it again here would put
+  // the same hash in the Entity's manifest twice; the certificate the Entity
+  // has already collected for it travels instead.
+  const owedAck = proposal.bundledAck;
+  const heldAck = priorSnapshot.lastOutboundFrameAck;
+  const accountInput = cutoverProposal(
+    envelope,
+    proposal.frame,
+    proposal.dispute,
+    owedAck === null
+      ? null
+      // The certificates this side already collected for that acknowledgement
+      // travel with it; only a bundle the Entity has never seen is rebuilt.
+      : heldAck?.height === owedAck.height
+        ? heldAck.response.ack
+        : cutoverAck(envelope, owedAck.height, owedAck.frameHash, owedAck.dispute).ack,
+  );
   // Only the proposal's own line. A proposer does not publish its window's
   // transaction events: they are published where the frame commits, which for
   // the proposer's own frame is the peer's side.
@@ -345,6 +382,6 @@ export const cutoverAccountProposalResult = (
     swapOffersCreated: effects.swapOffersCreated,
     swapCancelRequests: effects.swapCancelRequests,
     swapOffersCancelled: effects.swapOffersCancelled,
-    hashesToSign: materialized.hashesToSign,
+    hashesToSign: cutoverProposalHashes(accountId, proposal.frame, proposal.dispute),
   });
 };

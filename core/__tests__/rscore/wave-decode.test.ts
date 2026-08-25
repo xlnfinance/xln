@@ -16,6 +16,7 @@ import {
   waveParityDigest,
   waveParityDigestFromWireForTests,
 } from '../../rscore/wave-decode';
+import { resolveRscoreWaveAccount } from '../../rscore/checkpoint/wave-checkpoint-decode';
 
 const bytes = (length: number, fill: number): Buffer => Buffer.alloc(length, fill);
 const hex = (length: number, fill: number): string => `0x${fill.toString(16).padStart(2, '0').repeat(length)}`;
@@ -272,9 +273,10 @@ describe('rscore staged wave decoder', () => {
       frameStateHash,
       bytes(65, 0x55),
       [],
-      0,
+      null,
       committedFrameEvidence(frameStateHash, true),
       ['\u{1F91D} Accepted frame 1 from Entity 2222'],
+      null,
     ];
     const frameVerdict = decodeWave(withParityDigest(frameCommit)).applied[0]?.verdict;
     expect(frameVerdict).toMatchObject({
@@ -335,9 +337,10 @@ describe('rscore staged wave decoder', () => {
           [5, 'frame-cancel'],
           [2, 'frame-lock', 'frame-hashlock', 8, '13', 'frame-error'],
         ],
-        4,
+        [1, 4, 2],
         committedFrameEvidence(frameStateHash, true),
         [],
+        null,
       ],
     ];
 
@@ -358,7 +361,7 @@ describe('rscore staged wave decoder', () => {
       kind: 'frameCommitted',
       height: 1,
       stateHash: hex(32, 0x77),
-      rolledBackTxs: 4,
+      rolledBack: { height: 1, restored: 4, proposed: 2 },
       committedFrame: {
         committedViaNewFrame: true,
         frame: { height: 1, stateHash: hex(32, 0x77), accountTxs: [] },
@@ -467,9 +470,10 @@ describe('rscore staged wave decoder', () => {
       stateHash,
       bytes(65, 0x55),
       [],
-      0,
+      null,
       committedFrameEvidence(stateHash, false),
       [],
+      null,
     ];
     expect(() => decodeWave(withParityDigest(raw))).toThrow('committedFrame.binding');
   });
@@ -496,15 +500,16 @@ describe('rscore staged wave decoder', () => {
   });
 
   test('rejects partial, deleting or unbound post-account snapshots', () => {
+    const resolve = (raw: RscoreWireValue[]): void => {
+      const wave = decodeWave(withParityDigest(raw));
+      const post = requiredAt(wave.postAccounts, 0, 'RESOLVE_POST');
+      resolveRscoreWaveAccount(post, null);
+    };
+
     const wrongCount = rawWave();
     const post = requiredAt(wrongCount[6] as RscoreWireValue[][], 0, 'WRONG_COUNT_POST');
     (((post[3] as RscoreWireValue[])[0] as RscoreWireValue[]))[1] = 1;
-    expect(() => decodeWave(wrongCount)).toThrow('postAccount.deltas.leafCount');
-
-    const deleting = rawWave();
-    const deletingPost = requiredAt(deleting[6] as RscoreWireValue[][], 0, 'DELETING_POST');
-    (deletingPost[4] as RscoreWireValue[])[1] = [[0, Buffer.alloc(0)]];
-    expect(() => decodeWave(deleting)).toThrow('postAccount.deltas.dels:nonempty');
+    expect(() => resolve(wrongCount)).toThrow('postAccount.deltas.tree:leafCount');
 
     const unbound = rawWave();
     requiredAt(unbound[5] as RscoreWireValue[][], 0, 'UNBOUND_TOUCHED')[1] = bytes(32, 0xaa);
@@ -520,34 +525,27 @@ describe('rscore staged wave decoder', () => {
     installDeltaSnapshot(wrongRoot);
     const wrongRootPost = requiredAt(wrongRoot[6] as RscoreWireValue[][], 0, 'WRONG_ROOT_POST');
     ((wrongRootPost[3] as RscoreWireValue[])[0] as RscoreWireValue[])[0] = bytes(32, 0xaa);
-    expect(() => decodeWave(wrongRoot)).toThrow('postAccount.deltas.tree:root');
-
-    const wrongEdge = rawWave();
-    installDeltaSnapshot(wrongEdge);
-    const wrongEdgePost = requiredAt(wrongEdge[6] as RscoreWireValue[][], 0, 'WRONG_EDGE_POST');
-    const puts = requiredAt(wrongEdgePost[4] as RscoreWireValue[][], 0, 'WRONG_EDGE_PUTS');
-    const branch = puts.find(row => row[0] === 0);
-    if (branch === undefined) throw new Error('RSCORE_TEST_MISSING_WRONG_EDGE_BRANCH');
-    requiredAt(branch[2] as RscoreWireValue[][], 0, 'WRONG_EDGE_CHILD')[3] = bytes(32, 0xbb);
-    expect(() => decodeWave(wrongEdge)).toThrow('PERSISTENT_RADIX_EDGE_HASH_MISMATCH');
+    expect(() => resolve(wrongRoot)).toThrow('postAccount.deltas.tree:root');
 
     const changedHeader = rawWave();
+    installDeltaSnapshot(changedHeader);
     const changedHeaderRow = requiredAt(
       changedHeader[6] as RscoreWireValue[][],
       0,
       'CHANGED_HEADER_POST',
     )[2] as RscoreWireValue[];
     changedHeaderRow[4] = 1;
-    expect(() => decodeWave(changedHeader)).toThrow('ACCOUNT_LEAF_MISMATCH');
+    expect(() => resolve(changedHeader)).toThrow('ACCOUNT_LEAF_MISMATCH');
 
     const changedConsensus = rawWave();
+    installDeltaSnapshot(changedConsensus);
     const changedConsensusRow = requiredAt(
       changedConsensus[6] as RscoreWireValue[][],
       0,
       'CHANGED_CONSENSUS_POST',
     )[9] as RscoreWireValue[];
     changedConsensusRow[3] = 1;
-    expect(() => decodeWave(changedConsensus)).toThrow('ACCOUNT_LEAF_MISMATCH');
+    expect(() => resolve(changedConsensus)).toThrow('ACCOUNT_LEAF_MISMATCH');
 
     const reversedParties = rawWave();
     const reversedHeader = requiredAt(

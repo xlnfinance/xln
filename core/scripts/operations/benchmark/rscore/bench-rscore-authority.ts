@@ -182,7 +182,7 @@ const runWave = async (
       ops,
     ]))
     .digest();
-  const { token } = await client.prepareAccountWave({ entities: [] });
+  const { token } = await client.prepareAccountWave({ entities: [], postAccounts: true });
   await client.beginEntityStage(token, stageKey, 0, context);
   if (ops.length > 0) {
     await client.applyAccountWave(token, stageKey, {

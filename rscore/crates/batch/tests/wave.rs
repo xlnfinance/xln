@@ -469,11 +469,9 @@ fn a_wave_reports_every_leaf_it_moved() {
                 .signer_of(account.replica().owner().as_bytes())
                 .expect("account signer")
         );
-        assert!(
-            post_account.put_count() > 0,
-            "full account rows, not a diff"
-        );
-        assert_eq!(post_account.del_count(), 0, "full rows delete nothing");
+        // Rows are a diff against the account the caller already holds: a
+        // window that only moved consensus state changes no state leaf at all.
+        assert_eq!(post_account.del_count(), 0, "this window deletes nothing");
         assert!(
             post_account.consensus.pending.is_some(),
             "the materialization carries the post-proposal envelope"
@@ -829,6 +827,7 @@ fn two_groups_for_one_entity_are_refused() {
             ),
             group(Vec::new(), timestamp + 1_000),
         ],
+        post_accounts: true,
     });
     assert!(
         matches!(refused, Err(BatchError::WaveEntityDuplicate { .. })),
@@ -859,6 +858,7 @@ fn an_account_named_by_another_entity_is_refused() {
             }],
             propose: false,
         }],
+        post_accounts: true,
     });
     assert!(
         matches!(refused, Err(BatchError::WaveAccountOwner { .. })),

@@ -53,6 +53,7 @@ import {
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
 import { waveOutputRow, type Wave } from './wave-decode';
 import { cutoverAccountInputEvents } from './cutover/execute';
+import { authorityCutoverEnabled } from './cutover/enabled';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import type { ShadowOutputRow } from './shadow-wire';
 import {
@@ -259,6 +260,10 @@ const report = {
   checkpointValidations: 0,
   checkpointsCommitted: 0,
   restores: 0,
+  /** Microseconds spent inside the engine, as the engine itself measured. */
+  engineMicros: 0,
+  /** Microseconds the caller waited for the engine, transport included. */
+  waveMicros: 0,
 };
 
 const authorityDriverReport = (): typeof report => ({ ...report });
@@ -777,7 +782,13 @@ const openTrackedCandidate = async (
   try {
     // Prepare only allocates the Runtime-frame candidate. Every mutation is
     // subsequently owned by one abortable parent-Entity stage.
-    prepared = await session.client.prepareAccountWave({ entities: [] });
+    prepared = await session.client.prepareAccountWave({
+      entities: [],
+      // Only the cutover needs account bodies back, and only until it reads
+      // its post-state from the leaf instead. Parity compares leaves and
+      // roots, which the wave already carries.
+      postAccounts: authorityCutoverEnabled(),
+    });
   } catch (error) {
     session.client.kill();
     throw error;
@@ -1264,6 +1275,7 @@ export const runAuthorityCutoverOperation = async (
   const state = open.cutover;
   if (state === undefined) return halt('CUTOVER_STAGE_MISSING', { owner: ownerEntityId });
   const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER');
+  const waveStartedMs = performance.now();
   let result: Wave;
   if (operation.kind === 'applyAccountInput') {
     const wave = buildAuthorityWave(operation.collectorFrameId, {
@@ -1317,6 +1329,8 @@ export const runAuthorityCutoverOperation = async (
   }
   open.latestResult = result;
   report.waves += 1;
+  report.engineMicros += result.engineMicros;
+  report.waveMicros += Math.round((performance.now() - waveStartedMs) * 1_000);
   const row = result.postAccounts.find(candidateRow => candidateRow.accountId === accountId) ?? null;
   return { wave: result, row };
 };

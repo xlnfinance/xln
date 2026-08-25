@@ -22,7 +22,11 @@ import type {
 import { decodeRscoreConsensusSeed } from './checkpoint-restore-consensus';
 import { checkpointHex, checkpointRestoreFail } from './checkpoint-restore-read';
 import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
-import { decodeRscoreAccountStateSeed } from './checkpoint-restore-state';
+import {
+  decodeRscoreAccountStateSeed,
+  decodeRscoreAccountStateTrees,
+  type RscoreAccountStateTrees,
+} from './checkpoint-restore-state';
 import { rscoreCheckpointTuple } from './checkpoint-wire';
 
 const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
@@ -234,25 +238,70 @@ const computeRestoredEntityLeaf = (
   return computeEntityAccountLeafDigest(Object.entries(projection));
 };
 
+/**
+ * The mempool commitment the Entity leaf carries.
+ *
+ * The engine sends the queue twice: once as account txs and once as the
+ * canonical values its own leaf hashed. A verifying caller checks the two
+ * against each other; a trusting one hashes the queue it was given.
+ */
+const restoredMempoolRoot = (
+  stateSeed: RscoreAccountStateSeed,
+  consensus: RscoreConsensusSeed,
+  verify: boolean,
+): string => {
+  const canonicalMempool = consensus.mempool.map(canonicalAccountTxForFrameHash);
+  if (verify) {
+    if (stateSeed.envelope.canonicalMempool.length !== canonicalMempool.length) {
+      checkpointRestoreFail('ENVELOPE_MEMPOOL_LENGTH');
+    }
+    for (const [index, expected] of canonicalMempool.entries()) {
+      assertSameRscoreCanonicalValue(
+        stateSeed.envelope.canonicalMempool[index],
+        expected,
+        `RESTORE_ENVELOPE_MEMPOOL_${index}`,
+      );
+    }
+  }
+  return canonicalMempool.length === 0
+    ? EMPTY_ACCOUNT_STATE_ROOT
+    : computeCanonicalMerkleRoot(
+        'entity.account-mempool',
+        canonicalMempool.map((tx, index) => [String(index), tx] as const),
+        'integrity',
+      );
+};
+
 export const decodeRscoreAccountRestoreRow = (value: unknown): RscoreDecodedAccountRestore => {
   const row = rscoreCheckpointTuple(value, 9, 'RESTORE_ACCOUNT');
-  const accountId = checkpointHex(row[0], 32, 'ACCOUNT_ID');
-  const storedEntityAccountLeaf = checkpointHex(row[1], 32, 'ACCOUNT_LEAF');
-  const stateSeed = decodeRscoreAccountStateSeed(accountId, row[2], row.slice(3, 8));
-  const consensus = decodeRscoreConsensusSeed(row[8]);
+  return buildRscoreAccountRestore(
+    checkpointHex(row[0], 32, 'ACCOUNT_ID'),
+    checkpointHex(row[1], 32, 'ACCOUNT_LEAF'),
+    row[2],
+    decodeRscoreAccountStateTrees(row.slice(3, 8)),
+    decodeRscoreConsensusSeed(row[8]),
+    true,
+  );
+};
+
+/**
+ * Bind one account's header, state trees and consensus into a checked restore.
+ *
+ * A checkpoint row carries whole section lists; a wave row carries the changes
+ * since the account the caller already holds. Both arrive here as trees, and
+ * everything downstream — the two roots and the Entity leaf — is recomputed,
+ * so neither shape is trusted for its own commitment.
+ */
+export const buildRscoreAccountRestore = (
+  accountId: string,
+  storedEntityAccountLeaf: string,
+  headerValue: unknown,
+  trees: RscoreAccountStateTrees,
+  consensus: RscoreConsensusSeed,
+  verify: boolean,
+): RscoreDecodedAccountRestore => {
+  const stateSeed = decodeRscoreAccountStateSeed(accountId, headerValue, trees);
   if (stateSeed.domain.chainId === 0) checkpointRestoreFail('CHAIN_ID_ZERO');
-  if (stateSeed.envelope.canonicalMempool.length !== consensus.mempool.length) {
-    checkpointRestoreFail('ENVELOPE_MEMPOOL_LENGTH');
-  }
-  const canonicalMempool = consensus.mempool.map(canonicalAccountTxForFrameHash);
-  for (const [index, expected] of canonicalMempool.entries()) {
-    assertSameRscoreCanonicalValue(
-      stateSeed.envelope.canonicalMempool[index],
-      expected,
-      `RESTORE_ENVELOPE_MEMPOOL_${index}`,
-    );
-  }
-  validateDisputeHashes(consensus, stateSeed);
   const accountStateRoot = computeRestoredAccountStateRoot(stateSeed);
   if (
     consensus.currentFrame?.accountStateRoot !== undefined &&
@@ -260,22 +309,23 @@ export const decodeRscoreAccountRestoreRow = (value: unknown): RscoreDecodedAcco
   ) {
     checkpointRestoreFail('CURRENT_ACCOUNT_STATE_ROOT_MISMATCH');
   }
-  const mempoolRoot =
-    canonicalMempool.length === 0
-      ? EMPTY_ACCOUNT_STATE_ROOT
-      : computeCanonicalMerkleRoot(
-          'entity.account-mempool',
-          canonicalMempool.map((tx, index) => [String(index), tx] as const),
-          'integrity',
-        );
-  const entityAccountLeaf = computeRestoredEntityLeaf(stateSeed, consensus, accountStateRoot, mempoolRoot);
-  if (entityAccountLeaf !== storedEntityAccountLeaf) checkpointRestoreFail('ACCOUNT_LEAF_MISMATCH');
+  const mempoolRoot = restoredMempoolRoot(stateSeed, consensus, verify);
+  if (verify) {
+    validateDisputeHashes(consensus, stateSeed);
+    const entityAccountLeaf = computeRestoredEntityLeaf(
+      stateSeed,
+      consensus,
+      accountStateRoot,
+      mempoolRoot,
+    );
+    if (entityAccountLeaf !== storedEntityAccountLeaf) checkpointRestoreFail('ACCOUNT_LEAF_MISMATCH');
+  }
   return {
     accountId,
     storedEntityAccountLeaf,
     accountStateRoot,
     mempoolRoot,
-    entityAccountLeaf,
+    entityAccountLeaf: storedEntityAccountLeaf,
     stateSeed,
     consensus,
     rootOnlyCarriedSections: RSCORE_ROOT_ONLY_CARRIED_SECTIONS,

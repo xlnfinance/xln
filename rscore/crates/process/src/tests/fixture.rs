@@ -608,7 +608,11 @@ pub fn staged_wave_ops(admissions: Vec<AbiValue>, inputs: Vec<AbiValue>) -> Vec<
 }
 
 pub fn prepare_empty_wave(id: u64) -> Envelope {
-    request(id, OpTag::PrepareAccountWave, vec![tuple(Vec::new())])
+    request(
+        id,
+        OpTag::PrepareAccountWave,
+        vec![tuple(Vec::new()), AbiValue::Bool(true)],
+    )
 }
 
 pub fn prepare_wave_ops(
@@ -629,7 +633,9 @@ pub fn prepare_wave_ops(
             AbiValue::Integer(100),
             AbiValue::Bool(propose),
             tuple(ops),
-        ])])],
+        ])]),
+        AbiValue::Bool(true),
+        ],
     )
 }
 

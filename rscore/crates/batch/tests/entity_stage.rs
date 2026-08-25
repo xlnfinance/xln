@@ -33,7 +33,7 @@ fn rollback_restores_the_index_and_transcript_for_the_next_parent_input() {
     let second_txs = fixture::payment(pair, 11).1;
     let base = stand
         .payer
-        .prepare_wave(WaveRequest { entities: vec![] })
+        .prepare_wave(WaveRequest { entities: vec![], post_accounts: true })
         .expect("empty Runtime candidate");
 
     let rolled_back_key = key(1);
@@ -125,7 +125,7 @@ fn multiple_apply_and_propose_rounds_roll_back_exactly() {
     let second_txs = fixture::payment(pair, 21).1;
     let base = stand
         .payer
-        .prepare_wave(WaveRequest { entities: vec![] })
+        .prepare_wave(WaveRequest { entities: vec![], post_accounts: true })
         .expect("candidate");
     let stage_key = key(3);
     stand
@@ -183,7 +183,7 @@ fn accept_keeps_mutations_but_removes_the_stage_context() {
     let timestamp = 1_700_000_002_000;
     stand
         .payer
-        .prepare_wave(WaveRequest { entities: vec![] })
+        .prepare_wave(WaveRequest { entities: vec![], post_accounts: true })
         .expect("candidate");
     let stage_key = key(4);
     let stage_context = context(owner, timestamp, true);
@@ -254,7 +254,7 @@ fn an_open_stage_blocks_seal_commit_and_checkpoint() {
     let owner = stand.pairs[0].payer_entity;
     let prepared = stand
         .payer
-        .prepare_wave(WaveRequest { entities: vec![] })
+        .prepare_wave(WaveRequest { entities: vec![], post_accounts: true })
         .expect("candidate");
     let stage_key = key(5);
     stand
@@ -290,7 +290,7 @@ fn whole_wave_abort_discards_an_open_stage_and_its_mutations() {
     let base_revision = stand.payer.revision();
     let prepared = stand
         .payer
-        .prepare_wave(WaveRequest { entities: vec![] })
+        .prepare_wave(WaveRequest { entities: vec![], post_accounts: true })
         .expect("candidate");
     let stage_key = key(6);
     stand

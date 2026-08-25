@@ -77,6 +77,10 @@ pub struct ProposedFrame {
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
     pub events: Vec<String>,
     pub outputs: Vec<AccountOutput>,
+    /// The acknowledgement this proposal carries, when it carries one. The
+    /// publisher sends `frame_ack` rather than `frame` in that case, and must
+    /// be told so by the verdict.
+    pub bundled_ack: Option<crate::consensus::replica::OutboundAck>,
 }
 
 #[derive(Debug)]
@@ -285,6 +289,9 @@ pub fn propose_account_frame(
         candidate,
         outputs,
     });
+    let bundled_ack = account
+        .pending()
+        .and_then(|pending| pending.bundled_ack.clone());
     Ok(ProposalOutcome::Proposed(Box::new(ProposedFrame {
         frame,
         state_hash,
@@ -293,6 +300,7 @@ pub fn propose_account_frame(
         dispute: proposal_dispute,
         events: published_events,
         outputs: published_outputs,
+        bundled_ack,
     })))
 }
 

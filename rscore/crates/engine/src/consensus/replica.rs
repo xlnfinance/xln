@@ -75,6 +75,18 @@ pub struct DisputeDraft {
     pub proposer_is_left: bool,
 }
 
+/// What a lost collision put back on the queue.
+///
+/// The publisher names it in the events the Entity frame commits, so the
+/// counts travel with the verdict rather than being recomputed from a copy of
+/// the account.
+#[derive(Clone, Copy, Debug)]
+pub struct RolledBackProposal {
+    pub height: u64,
+    pub restored: usize,
+    pub proposed: usize,
+}
+
 /// A frame both sides have committed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommittedFrame {
@@ -308,6 +320,11 @@ impl AccountConsensus {
         });
     }
 
+    /// The acknowledgement this side still owes or already sent, if any.
+    pub fn outbound_ack(&self) -> Option<&OutboundAck> {
+        self.last_outbound_ack.as_ref()
+    }
+
     /// Keep the counterparty's proof after the verifier proved that its exact
     /// supplied hash equals the independently rebuilt Account-bound digest.
     ///
@@ -461,10 +478,12 @@ impl AccountConsensus {
     pub(crate) fn rollback_pending(
         &mut self,
         winner_state_hash: [u8; 32],
-    ) -> Result<usize, StateError> {
+    ) -> Result<Option<RolledBackProposal>, StateError> {
         let Some(pending) = self.pending.as_ref() else {
-            return Ok(0);
+            return Ok(None);
         };
+        let discarded_height = pending.frame.height;
+        let proposed = pending.frame.txs.len();
         let mut restored: Vec<AccountTx> = Vec::with_capacity(pending.frame.txs.len());
         for tx in &pending.frame.txs {
             let duplicate = is_deduplicated_on_restore(tx)
@@ -487,7 +506,11 @@ impl AccountConsensus {
         self.restore_mempool_front(restored)?;
         self.rollback_count = (self.rollback_count + 1).max(1);
         self.last_rollback_frame_hash = Some(winner_state_hash);
-        Ok(count)
+        Ok(Some(RolledBackProposal {
+            height: discarded_height,
+            restored: count,
+            proposed,
+        }))
     }
 
     pub const fn dispute(&self) -> Option<&DisputeDraft> {

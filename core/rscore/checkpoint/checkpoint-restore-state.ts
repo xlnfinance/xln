@@ -252,6 +252,16 @@ const checkpointTokenKey = (keyBytes: Uint8Array, field: string): number => {
   return checkpointTokenId(bytes.readUInt16BE(30), field);
 };
 
+/** The map key a section's raw radix key spells. */
+export const decodeRscoreCheckpointSectionKey = (
+  section: RscoreCheckpointSectionName,
+  keyBytes: Uint8Array,
+  index: number,
+): number | string =>
+  section === 'deltas' || section === 'rebalanceFeePolicies'
+    ? checkpointTokenKey(keyBytes, `${section.toUpperCase()}_${index}`)
+    : checkpointTextKey(keyBytes, `${section.toUpperCase()}_${index}`);
+
 /** Decode one typed leaf without trusting the persisted raw radix key. */
 export const decodeRscoreCheckpointSectionEntry = (
   section: RscoreCheckpointSectionName,
@@ -279,24 +289,24 @@ export const decodeRscoreCheckpointSectionEntry = (
   }
 };
 
-export const decodeRscoreAccountStateSeed = (
-  accountId: string,
-  headerValue: unknown,
+/**
+ * The five Rust-owned account namespaces, built from complete section lists.
+ *
+ * A wave hands over changes rather than whole trees, so it builds these by
+ * applying them to the account it already holds; a restore has no such
+ * account and builds them from the complete lists here.
+ */
+export type RscoreAccountStateTrees = Readonly<{
+  deltas: PersistentAccountStateMap<number, Delta>;
+  locks: PersistentAccountStateMap<string, HtlcLock>;
+  lendingIntents: PersistentAccountStateMap<string, AccountLendingIntentKind>;
+  swapOffers: PersistentAccountStateMap<string, SwapOffer>;
+  rebalanceFeePolicies: PersistentAccountStateMap<number, BilateralRebalanceFeePolicy>;
+}>;
+
+export const decodeRscoreAccountStateTrees = (
   sectionValues: readonly unknown[],
-): RscoreAccountStateSeed => {
-  const header = rscoreCheckpointTuple(headerValue, 9, 'RESTORE_HEADER');
-  const identity = rscoreCheckpointTuple(header[2], 5, 'RESTORE_IDENTITY');
-  const ownerEntityId = checkpointHex(header[0], 32, 'OWNER');
-  const leftEntity = checkpointHex(identity[2], 32, 'LEFT_ENTITY');
-  const rightEntity = checkpointHex(identity[3], 32, 'RIGHT_ENTITY');
-  if (leftEntity >= rightEntity) checkpointRestoreFail('IDENTITY_ORDER');
-  const counterparty =
-    ownerEntityId === leftEntity ? rightEntity : ownerEntityId === rightEntity ? leftEntity : undefined;
-  if (counterparty !== accountId) checkpointRestoreFail('ACCOUNT_ID_COUNTERPARTY');
-  const signerId = checkpointText(header[1], 'SIGNER_ID');
-  if (signerId.length === 0) checkpointRestoreFail('SIGNER_ID_EMPTY');
-  const dispute = rscoreCheckpointTuple(header[3], 2, 'RESTORE_DISPUTE_CONFIG');
-  const carried = rscoreCheckpointTuple(header[6], 6, 'RESTORE_CARRIED');
+): RscoreAccountStateTrees => {
   const deltas = rscoreCheckpointList(sectionValues[0], 'RESTORE_DELTAS').map(decodeRscoreCheckpointDelta);
   const locks = rscoreCheckpointList(sectionValues[1], 'RESTORE_LOCKS').map(decodeLock);
   const lending = rscoreCheckpointList(sectionValues[2], 'RESTORE_LENDING').map(decodeLending);
@@ -324,6 +334,42 @@ export const decodeRscoreAccountStateSeed = (
   );
   duplicateKeys(policies, 'POLICY');
   return {
+    deltas: PersistentAccountStateMap.fromEntries(
+      'deltas',
+      deltas.map(value => [value.tokenId, value]),
+    ),
+    locks: PersistentAccountStateMap.fromEntries(
+      'locks',
+      locks.map(value => [value.lockId, value]),
+    ),
+    lendingIntents: PersistentAccountStateMap.fromEntries('lendingIntents', lending),
+    swapOffers: PersistentAccountStateMap.fromEntries(
+      'swapOffers',
+      offers.map(value => [value.offerId, value]),
+    ),
+    rebalanceFeePolicies: PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', policies),
+  };
+};
+
+export const decodeRscoreAccountStateSeed = (
+  accountId: string,
+  headerValue: unknown,
+  trees: RscoreAccountStateTrees,
+): RscoreAccountStateSeed => {
+  const header = rscoreCheckpointTuple(headerValue, 9, 'RESTORE_HEADER');
+  const identity = rscoreCheckpointTuple(header[2], 5, 'RESTORE_IDENTITY');
+  const ownerEntityId = checkpointHex(header[0], 32, 'OWNER');
+  const leftEntity = checkpointHex(identity[2], 32, 'LEFT_ENTITY');
+  const rightEntity = checkpointHex(identity[3], 32, 'RIGHT_ENTITY');
+  if (leftEntity >= rightEntity) checkpointRestoreFail('IDENTITY_ORDER');
+  const counterparty =
+    ownerEntityId === leftEntity ? rightEntity : ownerEntityId === rightEntity ? leftEntity : undefined;
+  if (counterparty !== accountId) checkpointRestoreFail('ACCOUNT_ID_COUNTERPARTY');
+  const signerId = checkpointText(header[1], 'SIGNER_ID');
+  if (signerId.length === 0) checkpointRestoreFail('SIGNER_ID_EMPTY');
+  const dispute = rscoreCheckpointTuple(header[3], 2, 'RESTORE_DISPUTE_CONFIG');
+  const carried = rscoreCheckpointTuple(header[6], 6, 'RESTORE_CARRIED');
+  return {
     ownerEntityId,
     signerId,
     accountId,
@@ -350,19 +396,6 @@ export const decodeRscoreAccountStateSeed = (
     },
     envelope: decodeEnvelope(header[7]),
     ...(header[8] === null ? {} : { deltaTransformer: checkpointHex(header[8], 20, 'DELTA_TRANSFORMER') }),
-    deltas: PersistentAccountStateMap.fromEntries(
-      'deltas',
-      deltas.map(value => [value.tokenId, value]),
-    ),
-    locks: PersistentAccountStateMap.fromEntries(
-      'locks',
-      locks.map(value => [value.lockId, value]),
-    ),
-    lendingIntents: PersistentAccountStateMap.fromEntries('lendingIntents', lending),
-    swapOffers: PersistentAccountStateMap.fromEntries(
-      'swapOffers',
-      offers.map(value => [value.offerId, value]),
-    ),
-    rebalanceFeePolicies: PersistentAccountStateMap.fromEntries('rebalanceFeePolicies', policies),
+    ...trees,
   };
 };

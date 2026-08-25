@@ -33,6 +33,7 @@ import {
   rscoreWireTuple,
   rscoreWireUint,
 } from './account-tx-wire-decode';
+import { RSCORE_CUTOVER_VERIFY } from './cutover/verify';
 import { decodeRscoreWavePostAccount } from './checkpoint/wave-checkpoint-decode';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import { accountTxWire, type ShadowOutputRow } from './shadow-wire';
@@ -55,6 +56,17 @@ type WaveProposal = {
   /** Absent when every transaction in the window was rejected. */
   frame: (AccountFrame & { hanko: string }) | null;
   dropped: WaveDroppedRow[];
+  /** The proof this proposal travels with, when it carries one. */
+  dispute: WaveDisputeDraft | null;
+  /**
+   * The acknowledgement this proposal also carries, which makes what the
+   * publisher sends a `frame_ack` rather than a `frame`.
+   */
+  bundledAck: Readonly<{
+    height: number;
+    frameHash: string;
+    dispute: WaveDisputeDraft | null;
+  }> | null;
   /**
    * What the proposer publishes the moment it signs, before any
    * acknowledgement exists: the window's transaction events, which the Entity
@@ -129,14 +141,35 @@ type WaveSwapOffer = {
   quantizedWant: string;
 };
 
+/**
+ * The recovery proof an acknowledgement or proposal travels with.
+ *
+ * It rides on the verdict because the publisher sends it: reading it back out
+ * of the account afterwards would mean the account body has to come back
+ * across the wire for every operation, which is the whole cost this avoids.
+ */
+export type WaveDisputeDraft = {
+  hash: string;
+  proofBodyHash: string;
+  nonce: number;
+  proposerIsLeft: boolean;
+};
+
 type WaveFrameVerdict =
   | {
       kind: 'frameCommitted';
       height: number;
       stateHash: string;
       ackHanko: string;
+      /** The proof our acknowledgement of this frame carries, if any. */
+      ackDispute: WaveDisputeDraft | null;
       outputs: WaveOutput[];
-      rolledBackTxs: number;
+      /**
+       * Present when our own same-height proposal lost the collision: the
+       * frame it discarded and how much of it went back on the queue. The
+       * publisher names both in the events the Entity frame commits.
+       */
+      rolledBack: Readonly<{ height: number; restored: number; proposed: number }> | null;
       committedFrame: WaveCommittedFrame;
       /**
        * Exactly what the committed transactions said they did. The Entity
@@ -145,8 +178,14 @@ type WaveFrameVerdict =
        */
       events: string[];
     }
-  | { kind: 'frameCollisionIgnored'; height: number }
-  | { kind: 'frameDuplicate'; height: number; stateHash: string; ackHanko: string }
+  | { kind: 'frameCollisionIgnored'; height: number; queued: number }
+  | {
+      kind: 'frameDuplicate';
+      height: number;
+      stateHash: string;
+      ackHanko: string;
+      ackDispute: WaveDisputeDraft | null;
+    }
   | { kind: 'frameStale'; height: number; currentHeight: number }
   | { kind: 'frameRejected'; reason: string };
 
@@ -250,7 +289,12 @@ const decodeWavePayload = (value: unknown): Wave => {
   const postKeys = postAccounts.map(row => row.accountId);
   if (new Set(touchedKeys).size !== touchedKeys.length) return rscoreWireDecodeFail('wave.touched:duplicate');
   if (new Set(postKeys).size !== postKeys.length) return rscoreWireDecodeFail('wave.postAccounts:duplicate');
-  if (touched.length !== postAccounts.length) return rscoreWireDecodeFail('wave.postAccounts:length');
+  // Bodies are optional: a candidate that did not ask for them gets none, and
+  // the leaves in `touched` are then the whole answer. Any body that does
+  // arrive must still bind to its leaf.
+  if (postAccounts.length !== 0 && touched.length !== postAccounts.length) {
+    return rscoreWireDecodeFail('wave.postAccounts:length');
+  }
   for (const [index, post] of postAccounts.entries()) {
     const touchedRow = touched[index];
     if (
@@ -277,6 +321,7 @@ const decodeWavePayload = (value: unknown): Wave => {
 /** Decode and bind every relayed field to Rust's cumulative wave digest. */
 export const decodeWave = (value: unknown): Wave => {
   const wave = decodeWavePayload(value);
+  if (!RSCORE_CUTOVER_VERIFY) return wave;
   const computed = waveParityDigest(wave);
   if (computed !== wave.parityDigest) {
     return rscoreWireDecodeFail(`wave.parityDigest:${wave.parityDigest}:${computed}`);
@@ -288,15 +333,51 @@ export const decodeWave = (value: unknown): Wave => {
 export const waveParityDigestFromWireForTests = (value: unknown): string =>
   waveParityDigest(decodeWavePayload(value));
 
+const decodeRolledBack = (
+  value: unknown,
+  field: string,
+): Readonly<{ height: number; restored: number; proposed: number }> | null => {
+  if (value === null) return null;
+  const row = rscoreWireTuple(value, 3, field);
+  return {
+    height: rscoreWireInt(row[0], `${field}.height`),
+    restored: rscoreWireInt(row[1], `${field}.restored`),
+    proposed: rscoreWireInt(row[2], `${field}.proposed`),
+  };
+};
+
+const decodeDisputeDraft = (value: unknown, field: string): WaveDisputeDraft | null => {
+  if (value === null) return null;
+  const row = rscoreWireTuple(value, 4, field);
+  return {
+    hash: rscoreWireHex(row[0], `${field}.hash`, 32),
+    proofBodyHash: rscoreWireHex(row[1], `${field}.proofBodyHash`, 32),
+    nonce: rscoreWireInt(row[2], `${field}.nonce`),
+    proposerIsLeft: rscoreWireBool(row[3], `${field}.proposerIsLeft`),
+  };
+};
+
+const decodeBundledAck = (value: unknown): WaveProposal['bundledAck'] => {
+  if (value === null) return null;
+  const row = rscoreWireTuple(value, 3, 'proposal.bundledAck');
+  return {
+    height: rscoreWireInt(row[0], 'proposal.bundledAck.height'),
+    frameHash: rscoreWireHex(row[1], 'proposal.bundledAck.frameHash', 32),
+    dispute: decodeDisputeDraft(row[2], 'proposal.bundledAck.dispute'),
+  };
+};
+
 const decodeProposal = (value: unknown): WaveProposal => {
-  const row = rscoreWireTuple(value, 5, 'proposal');
+  const row = rscoreWireTuple(value, 7, 'proposal');
   return {
     accountId: rscoreWireHex(row[0], 'proposal.accountId', 32),
     frame: row[1] === null ? null : decodeFrame(row[1]),
     dropped: rscoreWireList(row[2], 'proposal.dropped').map(decodeDropped),
-    events: rscoreWireList(row[3], 'proposal.events')
+    dispute: decodeDisputeDraft(row[3], 'proposal.dispute'),
+    bundledAck: decodeBundledAck(row[4]),
+    events: rscoreWireList(row[5], 'proposal.events')
       .map((entry, index) => rscoreWireText(entry, `proposal.events.${index}`)),
-    outputs: rscoreWireList(row[4], 'proposal.outputs').map(decodeOutput),
+    outputs: rscoreWireList(row[6], 'proposal.outputs').map(decodeOutput),
   };
 };
 
@@ -418,7 +499,7 @@ const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => 
   const tag = rscoreWireInt(row[0], `${field}.tag`);
   switch (tag) {
     case 0: {
-      const fields = rscoreWireTuple(row, 8, `${field}.frameCommitted`);
+      const fields = rscoreWireTuple(row, 9, `${field}.frameCommitted`);
       const height = rscoreWireInt(fields[1], `${field}.height`);
       const stateHash = rscoreWireHex(fields[2], `${field}.stateHash`, 32);
       return {
@@ -427,7 +508,7 @@ const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => 
         stateHash,
         ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], `${field}.ackHanko`)).toString('hex')}`,
         outputs: rscoreWireList(fields[4], `${field}.outputs`).map(decodeOutput),
-        rolledBackTxs: rscoreWireInt(fields[5], `${field}.rolledBackTxs`),
+        rolledBack: decodeRolledBack(fields[5], `${field}.rolledBack`),
         committedFrame: assertCommittedFrameBinding(
           decodeCommittedFrame(fields[6]),
           height,
@@ -436,19 +517,25 @@ const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => 
         ),
         events: rscoreWireList(fields[7], `${field}.events`)
           .map((entry, index) => rscoreWireText(entry, `${field}.events.${index}`)),
+        ackDispute: decodeDisputeDraft(fields[8], `${field}.ackDispute`),
       };
     }
     case 1: {
-      const fields = rscoreWireTuple(row, 2, `${field}.collision`);
-      return { kind: 'frameCollisionIgnored', height: rscoreWireInt(fields[1], `${field}.height`) };
+      const fields = rscoreWireTuple(row, 3, `${field}.collision`);
+      return {
+        kind: 'frameCollisionIgnored',
+        height: rscoreWireInt(fields[1], `${field}.height`),
+        queued: rscoreWireInt(fields[2], `${field}.queued`),
+      };
     }
     case 2: {
-      const fields = rscoreWireTuple(row, 4, `${field}.duplicate`);
+      const fields = rscoreWireTuple(row, 5, `${field}.duplicate`);
       return {
         kind: 'frameDuplicate',
         height: rscoreWireInt(fields[1], `${field}.height`),
         stateHash: rscoreWireHex(fields[2], `${field}.stateHash`, 32),
         ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], `${field}.ackHanko`)).toString('hex')}`,
+        ackDispute: decodeDisputeDraft(fields[4], `${field}.ackDispute`),
       };
     }
     case 3: {
@@ -786,6 +873,16 @@ const outputWire = (output: WaveOutput): RscoreWireValue => {
   }
 };
 
+const disputeDraftWire = (draft: WaveDisputeDraft | null): RscoreWireValue =>
+  draft === null
+    ? null
+    : [
+        hexToBytes(draft.hash, 'transcript.dispute.hash'),
+        hexToBytes(draft.proofBodyHash, 'transcript.dispute.proofBodyHash'),
+        draft.nonce,
+        draft.proposerIsLeft,
+      ];
+
 const frameVerdictWire = (verdict: WaveFrameVerdict): RscoreWireValue => {
   switch (verdict.kind) {
     case 'frameCommitted':
@@ -795,18 +892,22 @@ const frameVerdictWire = (verdict: WaveFrameVerdict): RscoreWireValue => {
         hexToBytes(verdict.stateHash, 'transcript.stateHash'),
         hexToBytes(verdict.ackHanko, 'transcript.ackHanko'),
         verdict.outputs.map(outputWire),
-        verdict.rolledBackTxs,
+        verdict.rolledBack === null
+          ? null
+          : [verdict.rolledBack.height, verdict.rolledBack.restored, verdict.rolledBack.proposed],
         committedFrameWire(verdict.committedFrame),
         [...verdict.events],
+        disputeDraftWire(verdict.ackDispute),
       ];
     case 'frameCollisionIgnored':
-      return [1, verdict.height];
+      return [1, verdict.height, verdict.queued];
     case 'frameDuplicate':
       return [
         2,
         verdict.height,
         hexToBytes(verdict.stateHash, 'transcript.stateHash'),
         hexToBytes(verdict.ackHanko, 'transcript.ackHanko'),
+        disputeDraftWire(verdict.ackDispute),
       ];
     case 'frameStale':
       return [3, verdict.height, verdict.currentHeight];
@@ -894,6 +995,14 @@ export const waveParityDigest = (wave: Wave): string => {
       hexToBytes(row.accountId, 'transcript.accountId'),
       row.frame === null ? null : frameWire(row.frame),
       row.dropped.map(droppedWire),
+      disputeDraftWire(row.dispute),
+      row.bundledAck === null
+        ? null
+        : [
+            row.bundledAck.height,
+            hexToBytes(row.bundledAck.frameHash, 'transcript.bundledAck.frameHash'),
+            disputeDraftWire(row.bundledAck.dispute),
+          ],
       [...row.events],
       row.outputs.map(outputWire),
     ]),

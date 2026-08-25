@@ -336,25 +336,64 @@ pub fn prepared_wave(
     Ok(body(fields))
 }
 
+/// One Entity round in the same canonical shape a wave reply has, so the
+/// caller decodes both with one decoder.
+pub fn round(
+    result: &xln_rscore_batch::EntityRoundResult,
+    engine_micros: u64,
+) -> Result<BodyTuple, crate::ProcessError> {
+    Ok(body(round_fields(
+        result.revision,
+        result.accounts_root,
+        &result.applied,
+        &result.admissions,
+        &result.proposals,
+        &result.touched,
+        &result.post_accounts,
+        engine_micros,
+    )?))
+}
+
 fn wave_fields(
     result: &xln_rscore_batch::WaveResult,
     engine_micros: u64,
 ) -> Result<Vec<AbiValue>, crate::ProcessError> {
-    let mut proposals = Vec::with_capacity(result.proposals.len());
-    for row in &result.proposals {
+    round_fields(
+        result.revision,
+        result.accounts_root,
+        &result.applied,
+        &result.admissions,
+        &result.proposals,
+        &result.touched,
+        &result.post_accounts,
+        engine_micros,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn round_fields(
+    revision: u64,
+    accounts_root: [u8; 32],
+    applied_rows: &[xln_rscore_batch::AccountInputResult],
+    admission_rows: &[xln_rscore_batch::AccountAdmissionResult],
+    proposal_rows: &[xln_rscore_batch::ProposalRow],
+    touched_rows: &[(xln_rscore_batch::AccountId, [u8; 32])],
+    post_account_rows: &[xln_rscore_batch::AccountCheckpointRows],
+    engine_micros: u64,
+) -> Result<Vec<AbiValue>, crate::ProcessError> {
+    let mut proposals = Vec::with_capacity(proposal_rows.len());
+    for row in proposal_rows {
         proposals.push(proposal(row)?);
     }
     let applied = tuple(
-        result
-            .applied
+        applied_rows
             .iter()
             .map(input_result)
             .collect::<Result<Vec<_>, _>>()?,
     );
-    let admissions = tuple(result.admissions.iter().map(admission_result).collect());
+    let admissions = tuple(admission_rows.iter().map(admission_result).collect());
     let touched = tuple(
-        result
-            .touched
+        touched_rows
             .iter()
             .map(|(account_id, leaf)| {
                 tuple(vec![
@@ -366,22 +405,15 @@ fn wave_fields(
     );
     let proposals = tuple(proposals);
     let post_accounts = tuple(
-        result
-            .post_accounts
+        post_account_rows
             .iter()
             .map(crate::checkpoint_wire::account_rows)
             .collect::<Result<_, _>>()?,
     );
-    let digest = parity_digest(
-        result.accounts_root,
-        &touched,
-        &applied,
-        &admissions,
-        &proposals,
-    )?;
+    let digest = parity_digest(accounts_root, &touched, &applied, &admissions, &proposals)?;
     Ok(vec![
-        integer(result.revision),
-        AbiValue::Bytes(result.accounts_root.to_vec()),
+        integer(revision),
+        AbiValue::Bytes(accounts_root.to_vec()),
         applied,
         admissions,
         proposals,
@@ -495,6 +527,15 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
         AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
         proposed,
         tuple(row.dropped.iter().map(dropped).collect()),
+        dispute_draft(row.proposed.as_ref().and_then(|row| row.dispute.as_ref())),
+        match row.proposed.as_ref().and_then(|row| row.bundled_ack.as_ref()) {
+            None => AbiValue::Nil,
+            Some(ack) => tuple(vec![
+                integer(ack.height),
+                AbiValue::Bytes(ack.frame_hash.to_vec()),
+                dispute_draft(ack.dispute.as_ref()),
+            ]),
+        },
         tuple(match row.proposed.as_ref() {
             None => Vec::new(),
             Some(proposed) => proposed
@@ -619,6 +660,22 @@ fn frame_events(events: &[String]) -> AbiValue {
     )
 }
 
+/// The recovery proof an acknowledgement or proposal travels with, or `Nil`.
+///
+/// The publisher sends this; it must not have to read the account back to
+/// learn what it just signed.
+fn dispute_draft(value: Option<&xln_rscore_engine::DisputeDraft>) -> AbiValue {
+    match value {
+        None => AbiValue::Nil,
+        Some(draft) => tuple(vec![
+            AbiValue::Bytes(draft.hash.to_vec()),
+            AbiValue::Bytes(draft.proof_body_hash.to_vec()),
+            integer(draft.nonce),
+            AbiValue::Bool(draft.proposer_is_left),
+        ]),
+    }
+}
+
 /// Tagged so the runtime can tell a commit from an ignored collision without
 /// parsing text. The tags are the wire's, not the engine's: a new outcome adds
 /// a tag rather than changing an old one.
@@ -631,30 +688,41 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             ack_hanko,
             outputs,
             events,
-            rolled_back_txs,
+            rolled_back,
             committed_frame: evidence,
+            ack_dispute,
         } => tuple(vec![
             integer(0),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
             AbiValue::Bytes(ack_hanko.clone()),
             tuple(outputs.iter().map(account_output).collect()),
-            integer(*rolled_back_txs),
+            match rolled_back {
+                None => AbiValue::Nil,
+                Some(rolled_back) => tuple(vec![
+                    integer(rolled_back.height),
+                    integer(rolled_back.restored),
+                    integer(rolled_back.proposed),
+                ]),
+            },
             committed_frame(evidence, *state_hash)?,
             frame_events(events),
+            dispute_draft(ack_dispute.as_ref()),
         ]),
-        AccountInputVerdict::FrameCollisionIgnored { height } => {
-            tuple(vec![integer(1), integer(*height)])
+        AccountInputVerdict::FrameCollisionIgnored { height, queued } => {
+            tuple(vec![integer(1), integer(*height), integer(*queued)])
         }
         AccountInputVerdict::FrameDuplicate {
             height,
             state_hash,
             ack_hanko,
+            ack_dispute,
         } => tuple(vec![
             integer(2),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
             AbiValue::Bytes(ack_hanko.clone()),
+            dispute_draft(ack_dispute.as_ref()),
         ]),
         AccountInputVerdict::FrameStale {
             height,

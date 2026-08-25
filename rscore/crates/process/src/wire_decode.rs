@@ -100,6 +100,12 @@ pub enum Command {
         stage_key: xln_rscore_batch::StageKey,
         request: Box<xln_rscore_batch::WaveOpsRequest>,
     },
+    AccountInbound {
+        request: Box<xln_rscore_batch::EntityInboundRequest>,
+    },
+    AccountOutbound {
+        request: Box<xln_rscore_batch::EntityOutboundRequest>,
+    },
     ProposeAccountWave {
         candidate_token: [u8; 32],
         stage_key: xln_rscore_batch::StageKey,
@@ -139,6 +145,8 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::BeginEntity => decode_begin_entity(payload),
         OpTag::ApplyAccountWave => decode_apply_wave(payload),
         OpTag::ProposeAccountWave => decode_propose_wave(payload),
+        OpTag::AccountInbound => decode_account_inbound(payload),
+        OpTag::AccountOutbound => decode_account_outbound(payload),
         OpTag::FinalizeEntity => decode_finalize_entity(payload),
         OpTag::DiscardEntity => decode_discard_entity(payload),
         OpTag::SealAccountWave => decode_seal_wave(payload),
@@ -316,7 +324,7 @@ const MAX_WAVE_OP_ROWS: usize = 1_000_000;
 /// J height it judges arrivals with. Its operations stay in the order the
 /// authority performed them — admissions and peer inputs interleave.
 fn decode_prepare_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "prepareWave")?;
+    let fields = exact(fields, 2, "prepareWave")?;
     let entities = tuple(&fields[0])?;
     if entities.len() > MAX_WAVE_ENTITY_ROWS {
         return Err(ProcessError::Expected("waveEntityRows"));
@@ -327,6 +335,7 @@ fn decode_prepare_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
                 .iter()
                 .map(decode_entity_wave)
                 .collect::<Result<_, _>>()?,
+            post_accounts: boolean(&fields[1], "prepareWave.postAccounts")?,
         }),
     })
 }
@@ -477,6 +486,70 @@ fn decode_entity_wave_ops(
     Ok(xln_rscore_batch::EntityWaveOps {
         owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
         ops: ops.iter().map(decode_wave_op).collect::<Result<_, _>>()?,
+    })
+}
+
+/// One Entity input's inbound half: owner, receiver clock, arrivals.
+fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 4, "accountInbound")?;
+    let rows = tuple(&fields[2])?;
+    if rows.len() > MAX_WAVE_OP_ROWS {
+        return Err(ProcessError::Expected("waveOpRows"));
+    }
+    let clock = exact(tuple(&fields[1])?, 2, "receiverClock")?;
+    Ok(Command::AccountInbound {
+        request: Box::new(xln_rscore_batch::EntityInboundRequest {
+            owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+            clock: xln_rscore_batch::ReceiverClock {
+                entity_timestamp: js_number(&clock[0], "entityTimestamp")?,
+                finalized_j_height: js_number(&clock[1], "finalizedJHeight")?,
+            },
+            rows: rows
+                .iter()
+                .map(decode_input_row)
+                .collect::<Result<_, _>>()?,
+            post_accounts: strict_boolean(&fields[3], "postAccounts")?,
+        }),
+    })
+}
+
+/// One Entity input's outbound half: creates, admissions, proposal worklist.
+fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 7, "accountOutbound")?;
+    let creates = tuple(&fields[3])?;
+    let admits = tuple(&fields[4])?;
+    let propose = tuple(&fields[5])?;
+    if creates.len() + admits.len() + propose.len() > MAX_WAVE_OP_ROWS {
+        return Err(ProcessError::Expected("waveOpRows"));
+    }
+    Ok(Command::AccountOutbound {
+        request: Box::new(xln_rscore_batch::EntityOutboundRequest {
+            owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+            timestamp: js_number(&fields[1], "timestamp")?,
+            j_height: js_number(&fields[2], "jHeight")?,
+            creates: creates
+                .iter()
+                .map(decode_seed_account)
+                .collect::<Result<_, _>>()?,
+            admits: admits
+                .iter()
+                .map(|value| {
+                    let row = exact(tuple(value)?, 2, "accountAdmit")?;
+                    Ok((
+                        AccountId::from_bytes(fixed_bytes(&row[0], "accountId")?),
+                        tuple(&row[1])?
+                            .iter()
+                            .map(decode_tx)
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ))
+                })
+                .collect::<Result<_, ProcessError>>()?,
+            propose: propose
+                .iter()
+                .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
+                .collect::<Result<_, ProcessError>>()?,
+            post_accounts: strict_boolean(&fields[6], "postAccounts")?,
+        }),
     })
 }
 

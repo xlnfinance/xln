@@ -119,6 +119,12 @@ pub enum OpTag {
     ProposeAccountWave = 23,
     /// Freeze the candidate transcript before checkpoint/WAL commit.
     SealAccountWave = 24,
+    /// One Entity input's inbound half: everything that arrived from peers,
+    /// applied in one call and reported as events.
+    AccountInbound = 25,
+    /// One Entity input's outbound half: the transactions the Entity's own
+    /// logic produced, and the accounts that now propose.
+    AccountOutbound = 26,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -151,6 +157,8 @@ impl TryFrom<u64> for OpTag {
             22 => Ok(Self::ApplyAccountWave),
             23 => Ok(Self::ProposeAccountWave),
             24 => Ok(Self::SealAccountWave),
+            25 => Ok(Self::AccountInbound),
+            26 => Ok(Self::AccountOutbound),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

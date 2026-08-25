@@ -5,6 +5,7 @@
 import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
 import { printAuthorityRecordReport } from '../../../../rscore/authority-wave';
 import { printAccountAuthorityExecutionLedger } from '../../../../rscore/authority/entity-stage';
+import { rscoreTransportBytes } from '../../../../rscore/client';
 import { printAuthorityDriverReport, shutdownAuthorityDriver } from '../../../../rscore/authority-driver';
 import {
   assertShadowParity,
@@ -513,6 +514,7 @@ console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
 printAuthorityRecordReport();
 printAuthorityDriverReport();
 printAccountAuthorityExecutionLedger();
+console.error(`RSCORE_TRANSPORT ${JSON.stringify(rscoreTransportBytes)}`);
 await shutdownAuthorityDriver();
 const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
 if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);

@@ -9,6 +9,7 @@ mod consensus;
 mod error;
 mod execution;
 mod query;
+mod round;
 mod stateful;
 mod types;
 
@@ -24,6 +25,9 @@ pub use consensus::{
     WaveProposalRequest, WaveRequest, WaveResult,
 };
 pub use error::BatchError;
+pub use round::{
+    EntityInboundRequest, EntityOutboundRequest, EntityRoundResult,
+};
 // The receiver clock is part of this layer's boundary: a caller cannot apply
 // an input without saying what time it is on its own machine.
 pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};

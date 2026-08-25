@@ -24,6 +24,7 @@ import {
 } from '../authority-driver';
 import { noteRawAccountInput } from '../authority-wave';
 import type { RscoreAccountMaterializerBinding } from '../checkpoint/account-materializer';
+import { authorityCutoverEnabled } from './enabled';
 import {
   cutoverAccountAdmissionResult,
   cutoverAccountInputResult,
@@ -34,11 +35,6 @@ import {
 const halt = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_CUTOVER_${code}:${JSON.stringify(detail)}`);
 };
-
-export const authorityCutoverEnabled = (): boolean =>
-  typeof process !== 'undefined'
-  && process.env?.['XLN_RSCORE_AUTHORITY_CUTOVER'] === '1'
-  && process.env?.['XLN_RSCORE_AUTHORITY'] === '1';
 
 const bindingFor = (
   env: RuntimeReplica,

@@ -207,7 +207,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         account_id,
         verdict: AccountInputVerdict::FrameAckApplied {
             ack: Box::new(AccountInputVerdict::AckStale { height: 42 }),
-            frame: Box::new(AccountInputVerdict::FrameCollisionIgnored { height: 43 }),
+            frame: Box::new(AccountInputVerdict::FrameCollisionIgnored { height: 43, queued: 0 }),
         },
     };
     assert_eq!(
@@ -218,7 +218,11 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
             tuple(vec![
                 AbiValue::Integer(9),
                 tuple(vec![AbiValue::Integer(6), AbiValue::Integer(42)]),
-                tuple(vec![AbiValue::Integer(1), AbiValue::Integer(43)]),
+                tuple(vec![
+                    AbiValue::Integer(1),
+                    AbiValue::Integer(43),
+                    AbiValue::Integer(0),
+                ]),
             ]),
         ])
     );
@@ -245,7 +249,7 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         operation_index: 19,
         account_id,
         verdict: AccountInputVerdict::FrameAckApplied {
-            ack: Box::new(AccountInputVerdict::FrameCollisionIgnored { height: 1 }),
+            ack: Box::new(AccountInputVerdict::FrameCollisionIgnored { height: 1, queued: 0 }),
             frame: Box::new(AccountInputVerdict::AckStale { height: 1 }),
         },
     };
