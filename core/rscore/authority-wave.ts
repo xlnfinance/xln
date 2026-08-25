@@ -421,8 +421,8 @@ type AuthorityWaveEntity = {
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
 type AuthorityWaveInput = {
-  /** Position in the request, which is what the engine numbers its verdicts by. */
-  inputIndex: number;
+  /** Candidate-global position in the grouped request. Admissions consume one too. */
+  operationIndex: number;
   /**
    * Position in the order the authority actually received it, before grouping
    * by Entity. Verdicts and the effects they release are published in this
@@ -490,7 +490,7 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
   }
   const entities: AuthorityWaveEntity[] = [];
   const inputs: AuthorityWaveInput[] = [];
-  let inputIndex = 0;
+  let operationIndex = 0;
   for (const [ownerEntityId, rows] of byOwner) {
     const propose = soleClock(frameClocks, ownerEntityId, 'propose');
     const enforce = soleClock(frameClocks, ownerEntityId, 'enforce');
@@ -516,12 +516,13 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
           if (wire === null) return { kind: 'ineligible', reason: `tx:${tx.type}` };
           txs.push(wire);
         }
-        ops.push(waveAdmitOp(row.accountId, txs));
+        ops.push(waveAdmitOp(operationIndex, row.accountId, txs));
+        operationIndex += 1;
         continue;
       }
       let encoded: RscoreWireValue;
       try {
-        encoded = peerInputRow(inputIndex, row.accountId, payload);
+        encoded = peerInputRow(operationIndex, row.accountId, payload);
       } catch (error) {
         // A malformed Hanko or hash is not something to drive around: the
         // engine would judge a different input than TypeScript did.
@@ -529,13 +530,13 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
       }
       ops.push(waveInputOp(encoded));
       inputs.push({
-        inputIndex,
+        operationIndex,
         arrivalIndex: row.arrivalIndex,
         ownerEntityId,
         accountId: row.accountId,
         kind: payload.kind,
       });
-      inputIndex += 1;
+      operationIndex += 1;
     }
     const expectedOutputs = new Map<string, ShadowOutputRow[]>();
     for (const committed of frameOutputs) {
@@ -580,7 +581,7 @@ const soleClock = (
 };
 
 const peerInputRow = (
-  inputIndex: number,
+  operationIndex: number,
   counterpartyEntityId: string,
   payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' }>,
 ): RscoreWireValue => {
@@ -590,7 +591,7 @@ const peerInputRow = (
   const from = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_FROM_ENTITY');
   if (payload.kind === 'ack') {
     return [
-      inputIndex,
+      operationIndex,
       accountId,
       from,
       [
@@ -610,7 +611,7 @@ const peerInputRow = (
     txs.push(wire);
   }
   return [
-    inputIndex,
+    operationIndex,
     accountId,
     from,
     [

@@ -206,8 +206,8 @@ const main = async (): Promise<void> => {
     const unique = [...new Map(selected.map(row => [row.entityId, row])).values()];
 
     let buildStarted = performance.now();
-    const admissions = unique.map(row =>
-      waveAdmitOp(row.entityId, [paymentTx(hub, row.entityId, 5n)] as never));
+    const admissions = unique.map((row, operationIndex) =>
+      waveAdmitOp(operationIndex, row.entityId, [paymentTx(hub, row.entityId, 5n)] as never));
     buildMs += performance.now() - buildStarted;
 
     const proposed = await runWave(client, hub, admissions, timestamp, true, propose);

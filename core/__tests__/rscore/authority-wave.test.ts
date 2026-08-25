@@ -183,9 +183,10 @@ describe('authority wave', () => {
     // TypeScript runs the ack phase before the proposal phase, and so does the
     // wave: the ack advances the account the frame is then judged against.
     expect(wave.inputs.map(row => row.kind)).toEqual(['ack', 'frame']);
-    expect(wave.inputs.map(row => row.inputIndex)).toEqual([0, 1]);
+    expect(wave.inputs.map(row => row.operationIndex)).toEqual([0, 1]);
     // Both are input operations (tag 1), addressed to the same account.
     expect(ops.map(op => op[0])).toEqual([1, 1]);
+    expect(ops.map(op => (op[1] as unknown[])[0])).toEqual([0, 1]);
   });
 
   test('each Entity carries its own clock, and one that never proposed does not', () => {
@@ -296,9 +297,13 @@ describe('authority wave guards', () => {
     if (wave.kind !== 'wave') throw new Error('expected a wave');
     // Sent as A's group first, so A's ack/frame take indices 0..1 — but they
     // arrived at positions 3 and 4, after C's two operations.
-    expect(wave.inputs.map(row => row.inputIndex)).toEqual([0, 1, 2, 3]);
+    // The A admission consumes operation 0 before its two peer operations.
+    expect(wave.inputs.map(row => row.operationIndex)).toEqual([1, 2, 3, 4]);
     expect(wave.inputs.map(row => row.arrivalIndex)).toEqual([3, 4, 1, 2]);
     expect(wave.inputs.map(row => row.ownerEntityId)).toEqual([A, A, C, C]);
+    const groupedOps = wave.entities.flatMap(entity => entity.ops) as unknown[][];
+    expect(groupedOps.map(op => op[0] === 0 ? op[1] : (op[1] as unknown[])[0]))
+      .toEqual([0, 1, 2, 3, 4]);
   });
 
   test('a Hanko that is not hex is refused, never read as zero bytes', () => {

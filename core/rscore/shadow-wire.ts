@@ -132,8 +132,12 @@ const ENGINE_DERIVED_LEAF_FIELDS: ReadonlySet<string> = new Set(['accountStateRo
  * transactions to the front of the queue and drops the ones already there, so
  * whether our own admission had landed yet decides what survives.
  */
-export const waveAdmitOp = (accountId: string, txs: RscoreWireValue[]): RscoreWireValue =>
-  [0, hexToWireBytes(accountId, 32, 'RSCORE_WAVE_ACCOUNT_ID'), txs];
+export const waveAdmitOp = (
+  operationIndex: number,
+  accountId: string,
+  txs: RscoreWireValue[],
+): RscoreWireValue =>
+  [0, operationIndex, hexToWireBytes(accountId, 32, 'RSCORE_WAVE_ACCOUNT_ID'), txs];
 
 export const waveInputOp = (row: RscoreWireValue): RscoreWireValue => [1, row];
 
