@@ -107,8 +107,13 @@ test('remote history cache clears synchronously and rejects a superseded selecti
 
 test('runtime view store owns the active projected RuntimeView without RuntimeReplica access', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
+  const modelSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-model.ts',
+    'utf8',
+  );
 
   expect(source).toContain('export type RuntimeView');
+  expect(source).toContain("from '../../../packages/runtime-client/src/runtime-view-model'");
   expect(source).toContain('export const runtimeView');
   expect(source).toContain('export const refreshRuntimeView');
   expect(source).toContain('export const refreshSelectedRuntimeView');
@@ -136,6 +141,10 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).not.toContain('getEnv');
   expect(source).not.toContain('setXlnEnvironment');
   expect(source).not.toContain('runtimeAdapterStore');
+  expect(modelSource).toContain('export type RuntimeViewPageInfo');
+  expect(modelSource).not.toContain('svelte');
+  expect(modelSource).not.toContain('@xln/core');
+  expect(modelSource).not.toContain('runtimeQueryClient');
 });
 
 test('re-pinning the same wallet Entity preserves account pagination', () => {

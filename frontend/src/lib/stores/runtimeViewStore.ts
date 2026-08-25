@@ -13,6 +13,33 @@ import {
 } from './runtimeControllerStore';
 import { errorLog } from './errorLogStore';
 import { runtimeQueryClient } from './runtimeQueryClient';
+import {
+  assertRuntimeViewIsLive,
+  emptyRuntimeViewHistoryScan,
+  normalizeEntityIdForRuntimeView,
+  normalizeRuntimeViewAtHeight,
+  runtimeViewFrameMatchesAtHeight,
+  runtimeViewNeedsHeightRefresh,
+  runtimeViewPageInfoFromFrame,
+  runtimeViewPageNeedsNavigation,
+  runtimeViewQueryAtHeight,
+  runtimeViewTracksHeightAdvance,
+  type RuntimeViewHistoryScanState,
+  type RuntimeViewPageInfo,
+} from '../../../packages/runtime-client/src/runtime-view-model';
+
+export {
+  assertRuntimeViewIsLive,
+  emptyRuntimeViewHistoryScan,
+  normalizeRuntimeViewAtHeight,
+  runtimeViewFrameMatchesAtHeight,
+  runtimeViewNeedsHeightRefresh,
+  runtimeViewPageInfoFromFrame,
+  runtimeViewPageNeedsNavigation,
+  runtimeViewQueryAtHeight,
+  runtimeViewTracksHeightAdvance,
+};
+export type { RuntimeViewHistoryScanState, RuntimeViewPageInfo };
 
 export type RuntimeView = {
   runtimeId: string;
@@ -27,135 +54,6 @@ export type RuntimeView = {
   frame: RuntimeAdapterViewFrame | null;
   entities: RuntimeAdapterEntitySummary[];
   activeEntityId: string;
-};
-
-export type RuntimeViewHistoryScanState = {
-  loading: boolean;
-  error: string | null;
-  requestedHeight: number | null;
-  scannedHeight: number | null;
-  latestHeight: number | null;
-  framesCached: number;
-  durationMs: number | null;
-  accountsShown: number | null;
-  accountsTotal: number | null;
-  booksShown: number | null;
-  booksTotal: number | null;
-  endpoint: string;
-};
-
-export type RuntimeViewPageInfo = {
-  entityId: string;
-  accountsShown: number;
-  accountsTotal: number;
-  accountsPageIndex: number;
-  accountsPageCount: number;
-  accountsPrevCursor: string | null;
-  accountsNextCursor: string | null;
-  accountsHasMore: boolean;
-  booksShown: number;
-  booksTotal: number;
-  booksPageIndex: number;
-  booksPageCount: number;
-  booksPrevCursor: string | null;
-  booksNextCursor: string | null;
-  booksHasMore: boolean;
-};
-
-export const runtimeViewPageInfoFromFrame = (
-  frame: RuntimeAdapterViewFrame,
-): RuntimeViewPageInfo | null => {
-  const active = frame.activeEntity;
-  const entityId = normalizeEntityIdForRuntimeView(
-    frame.activeEntityId || active?.summary?.entityId || active?.core?.entityId,
-  );
-  if (!active || !entityId) return null;
-  const accountsPageIndex = active.accounts.pageIndex ?? 0;
-  const accountsPageCount = active.accounts.pageCount ?? 1;
-  const booksPageIndex = active.books.pageIndex ?? 0;
-  const booksPageCount = active.books.pageCount ?? 1;
-  return {
-    entityId,
-    accountsShown: active.accounts.items.length,
-    accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
-    accountsPageIndex,
-    accountsPageCount,
-    accountsPrevCursor: active.accounts.prevCursor ?? null,
-    accountsNextCursor: active.accounts.nextCursor ?? null,
-    accountsHasMore: accountsPageIndex + 1 < accountsPageCount && !!active.accounts.nextCursor,
-    booksShown: active.books.items.length,
-    booksTotal: active.books.totalItems ?? active.books.items.length,
-    booksPageIndex,
-    booksPageCount,
-    booksPrevCursor: active.books.prevCursor ?? null,
-    booksNextCursor: active.books.nextCursor ?? null,
-    booksHasMore: booksPageIndex + 1 < booksPageCount && !!active.books.nextCursor,
-  };
-};
-
-export const runtimeViewPageNeedsNavigation = (
-  pageInfo: RuntimeViewPageInfo,
-  kind?: 'accounts' | 'books',
-): boolean => {
-  const accountsNeedNavigation = pageInfo.accountsPageIndex > 0 || pageInfo.accountsPageCount > 1;
-  const booksNeedNavigation = pageInfo.booksPageIndex > 0 || pageInfo.booksPageCount > 1;
-  if (kind === 'accounts') return accountsNeedNavigation;
-  if (kind === 'books') return booksNeedNavigation;
-  return accountsNeedNavigation || booksNeedNavigation;
-};
-
-const normalizeEntityIdForRuntimeView = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-export const normalizeRuntimeViewAtHeight = (value: number | null | undefined): number | null => {
-  if (value === null || value === undefined) return null;
-  const height = Math.floor(Number(value));
-  if (!Number.isFinite(height) || height < 1) {
-    throw new Error('RuntimeView historical height must be a positive integer');
-  }
-  return height;
-};
-
-export const runtimeViewQueryAtHeight = (
-  query: RuntimeAdapterReadQuery,
-  atHeight: number | null,
-): RuntimeAdapterReadQuery => {
-  const next = { ...query };
-  if (atHeight === null) delete next.atHeight;
-  else next.atHeight = atHeight;
-  return next;
-};
-
-export const runtimeViewFrameMatchesAtHeight = (
-  frame: RuntimeAdapterViewFrame | null | undefined,
-  atHeight: number | null,
-): boolean => {
-  if (!frame) return false;
-  if (atHeight === null) return true;
-  return Math.max(0, Math.floor(Number(frame.height || 0))) === atHeight;
-};
-
-export const runtimeViewNeedsHeightRefresh = (
-  view: Pick<RuntimeView, 'atHeight' | 'frame'>,
-  status: RuntimeAdapterStatus,
-  nextHeight: number,
-): boolean => {
-  if (!view.frame) return false;
-  return runtimeViewTracksHeightAdvance(view, status, nextHeight);
-};
-
-export const runtimeViewTracksHeightAdvance = (
-  view: Pick<RuntimeView, 'atHeight' | 'frame'>,
-  status: RuntimeAdapterStatus,
-  nextHeight: number,
-): boolean => {
-  if (view.atHeight !== null || status !== 'connected' || nextHeight <= 0) return false;
-  const frameHeight = Math.max(0, Math.floor(Number(view.frame?.height || 0)));
-  return nextHeight > frameHeight;
-};
-
-export const assertRuntimeViewIsLive = (view: Pick<RuntimeView, 'atHeight'>): void => {
-  if (view.atHeight === null) return;
-  throw new Error(`RUNTIME_COMMAND_REQUIRES_LIVE_VIEW: selected=h${view.atHeight}`);
 };
 
 /**
@@ -228,21 +126,6 @@ export const readRuntimeSwapHistory = async (
     runtimeViewQueryAtHeight({ ...(cursor === null ? {} : { cursor }), limit: 100 }, atHeight),
   );
 };
-
-export const emptyRuntimeViewHistoryScan = (endpoint = ''): RuntimeViewHistoryScanState => ({
-  loading: false,
-  error: null,
-  requestedHeight: null,
-  scannedHeight: null,
-  latestHeight: null,
-  framesCached: 0,
-  durationMs: null,
-  accountsShown: null,
-  accountsTotal: null,
-  booksShown: null,
-  booksTotal: null,
-  endpoint,
-});
 
 export const runtimeViewActiveEntityId = writable<string>('');
 export const runtimeViewAccountsPage = writable<number>(0);

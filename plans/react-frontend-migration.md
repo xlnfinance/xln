@@ -333,7 +333,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, AND ACTIVATION BOUNDARIES SHARED`
+**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, ACTIVATION, AND VIEW-MODEL BOUNDARIES SHARED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -433,6 +433,16 @@ adapter switching, and target comparison. Eleven direct tests cover both modes,
 ordering, reconnect elision, unavailable persistence, rollback, mismatch,
 unregistered targets, endpoint validation, and thin Svelte wiring. The wallet
 local check covers 431 files with zero unsafe-type findings.
+
+The next `packages/runtime-client` slice now owns the framework-neutral
+RuntimeView query, pagination, historical-height, committed-height tracking,
+live-command assertion, and history-scan default model. The canonical Svelte
+store still owns the live RuntimeView state, core projection types, adapter
+reads, race guards, catch-up scheduling, and store publication. Eleven direct
+tests cover identity normalization, page derivation and navigation, height and
+query selection, frame matching, committed-height tracking, live assertions,
+history defaults, and thin Svelte wiring. The wallet local check covers 432
+files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
@@ -573,7 +583,8 @@ any mismatch. Never compile on production.
    ready in `packages/runtime-client`, and adapter session storage is ready in
    `packages/browser`; wallet boot sequencing, active-tab Runtime ownership,
    Runtime selection concurrency, adapter activation, and Runtime handle
-   projection are shared while Runtime data projections remain with the
+   projection are shared; the RuntimeView query, pagination, and height model is
+   also shared while live Runtime data reads and publication remain with the
    canonical Svelte adapter until a complete React consumer exists.
 3. Wire PWA/native consumers to the assembled candidate after the React
    `/app` boot flow exists; wallet static/PWA input ownership is ready and does

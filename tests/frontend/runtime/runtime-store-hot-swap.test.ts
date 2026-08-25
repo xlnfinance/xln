@@ -766,6 +766,10 @@ test('remote app can page through full hub account and book projections', () => 
   const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
+  const runtimeViewModelSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-model.ts',
+    'utf8',
+  );
 
   expect(layoutSource).toContain("import {");
   expect(layoutSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
@@ -795,10 +799,11 @@ test('remote app can page through full hub account and book projections', () => 
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterPageInfo');
   expect(xlnStoreSource).toContain('accountsPage,');
   expect(xlnStoreSource).toContain('booksPage,');
-  expect(runtimeViewSource).toContain('accountsPageIndex: number');
-  expect(runtimeViewSource).toContain('accountsPageCount: number');
-  expect(runtimeViewSource).toContain('accountsHasMore: boolean');
-  expect(runtimeViewSource).toContain('export const runtimeViewPageNeedsNavigation');
+  expect(runtimeViewModelSource).toContain('accountsPageIndex: number');
+  expect(runtimeViewModelSource).toContain('accountsPageCount: number');
+  expect(runtimeViewModelSource).toContain('accountsHasMore: boolean');
+  expect(runtimeViewModelSource).toContain('export const runtimeViewPageNeedsNavigation');
+  expect(runtimeViewSource).toContain("from '../../../packages/runtime-client/src/runtime-view-model'");
   expect(runtimeViewSource).toContain('export const runtimeViewPageInfo');
 });
 
