@@ -1,4 +1,4 @@
-import { get, writable } from 'svelte/store';
+import { get } from 'svelte/store';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeAdapter,
@@ -23,15 +23,9 @@ import {
   RuntimeQueryClient as RuntimeQueryClientBoundary,
   clearRuntimeQueryCache,
 } from '../../../packages/runtime-client/src/runtime-query-client';
+import { RuntimeQueryObserver } from '../../../packages/runtime-client/src/runtime-query-observer';
 
 export { clearRuntimeQueryCache };
-
-type RuntimeReadState<T> = {
-  loading: boolean;
-  data: T | null;
-  error: string | null;
-  height: number;
-};
 
 export type RuntimeReceiptStatus = {
   status?: string | null;
@@ -81,9 +75,6 @@ export class RuntimeQueryClient extends RuntimeQueryClientBoundary<
   }
 }
 
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error || 'Runtime query failed');
-
 export const runtimeQueryClient = new RuntimeQueryClient();
 
 runtimeAdapter.subscribe(() => clearRuntimeQueryCache());
@@ -125,36 +116,18 @@ exposeRuntimeAdapterDebugSurface();
 export const createRuntimeQueryStore = <T>(
   reader: (client: RuntimeQueryClient) => Promise<T>,
 ) => {
-  const store = writable<RuntimeReadState<T>>({
-    loading: true,
-    data: null,
-    error: null,
-    height: get(runtimeAdapterHeight),
+  const observer = new RuntimeQueryObserver(() => reader(runtimeQueryClient), {
+    readHeight: () => get(runtimeAdapterHeight),
+    subscribeHeight: (listener) => runtimeAdapterHeight.subscribe(() => listener()),
+    subscribeAdapter: (listener) => runtimeAdapter.subscribe(() => listener()),
   });
-  let disposed = false;
-  let version = 0;
-  const refresh = async (): Promise<void> => {
-    const currentVersion = ++version;
-    store.update((state) => ({ ...state, loading: true, error: null }));
-    try {
-      const data = await reader(runtimeQueryClient);
-      if (disposed || currentVersion !== version) return;
-      store.set({ loading: false, data, error: null, height: get(runtimeAdapterHeight) });
-    } catch (error) {
-      if (disposed || currentVersion !== version) return;
-      store.set({ loading: false, data: null, error: errorMessage(error), height: get(runtimeAdapterHeight) });
-    }
-  };
-  const unsubscribeHeight = runtimeAdapterHeight.subscribe(() => void refresh());
-  const unsubscribeAdapter = runtimeAdapter.subscribe(() => void refresh());
-  void refresh();
   return {
-    subscribe: store.subscribe,
-    refresh,
-    destroy: () => {
-      disposed = true;
-      unsubscribeHeight();
-      unsubscribeAdapter();
+    subscribe: (run: (snapshot: ReturnType<typeof observer.getSnapshot>) => void) => {
+      run(observer.getSnapshot());
+      return observer.subscribe(() => run(observer.getSnapshot()));
     },
+    getSnapshot: observer.getSnapshot,
+    refresh: observer.refresh,
+    destroy: observer.destroy,
   };
 };
