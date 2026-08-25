@@ -15,9 +15,8 @@ use fixture::{
 };
 use num_bigint::BigInt;
 use xln_rscore_batch::{
-    AccountCheckpointRows, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
-    AccountRestore, AccountSeed, AccountsCheckpoint, BatchError, CheckpointExpectation,
-    CheckpointToken,
+    AccountCheckpointRows, AccountId, AccountInputKind, AccountInputVerdict, AccountRestore,
+    AccountSeed, AccountsCheckpoint, BatchError, CheckpointExpectation, CheckpointToken,
 };
 use xln_rscore_engine::{
     AccountConsensus, AccountReplica, AccountState, AccountStateSeed, AccountTx,
@@ -502,12 +501,13 @@ fn an_outbound_ack_hanko_survives_checkpoint_restore_and_bundling() {
         .payee
         .apply_inputs(
             clock(1_700_000_000_000),
-            vec![AccountInputRow {
-                operation_index: 0,
-                account_id: pair.payee_account,
-                from_entity_id: pair.payer_entity,
-                kind: AccountInputKind::Frame(Box::new(incoming)),
-            }],
+            vec![fixture::input_row(
+                0,
+                pair.payee_account,
+                pair.payer_entity,
+                pair.payee_entity,
+                AccountInputKind::Frame(Box::new(incoming)),
+            )],
         )
         .expect("payee applies payer frame");
     let AccountInputVerdict::FrameCommitted { ack_hanko, .. } = &applied[0].verdict else {
@@ -842,12 +842,13 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .payee
         .apply_inputs(
             clock(1_700_000_000_000),
-            vec![AccountInputRow {
-                operation_index: 0,
-                account_id: stand.pairs[0].payee_account,
-                from_entity_id: stand.pairs[0].payer_entity,
-                kind: AccountInputKind::Frame(Box::new(frame)),
-            }],
+            vec![fixture::input_row(
+                0,
+                stand.pairs[0].payee_account,
+                stand.pairs[0].payer_entity,
+                stand.pairs[0].payee_entity,
+                AccountInputKind::Frame(Box::new(frame)),
+            )],
         )
         .expect("apply frame");
     let AccountInputVerdict::FrameCommitted {
@@ -863,17 +864,17 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
     let acked = restored
         .apply_inputs(
             clock(1_700_000_000_000),
-            vec![AccountInputRow {
-                operation_index: 0,
-                account_id: pair_payer_account,
-                from_entity_id: stand.pairs[0].payee_entity,
-                kind: AccountInputKind::Ack {
-                    height: *height,
-                    state_hash: *state_hash,
-                    hanko: ack_hanko.clone(),
-                    dispute: None,
-                },
-            }],
+            vec![fixture::input_row(
+                0,
+                pair_payer_account,
+                stand.pairs[0].payee_entity,
+                stand.pairs[0].payer_entity,
+                AccountInputKind::Ack(fixture::incoming_ack(
+                    *height,
+                    *state_hash,
+                    ack_hanko.clone(),
+                )),
+            )],
         )
         .expect("apply ack");
     let AccountInputVerdict::AckCommitted {
@@ -896,17 +897,17 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
                 .payer
                 .apply_inputs(
                     clock(1_700_000_000_000),
-                    vec![AccountInputRow {
-                        operation_index: 0,
-                        account_id: pair_payer_account,
-                        from_entity_id: stand.pairs[0].payee_entity,
-                        kind: AccountInputKind::Ack {
-                            height: *height,
-                            state_hash: *state_hash,
-                            hanko: ack_hanko.clone(),
-                            dispute: None,
-                        },
-                    }],
+                    vec![fixture::input_row(
+                        0,
+                        pair_payer_account,
+                        stand.pairs[0].payee_entity,
+                        stand.pairs[0].payer_entity,
+                        AccountInputKind::Ack(fixture::incoming_ack(
+                            *height,
+                            *state_hash,
+                            ack_hanko.clone(),
+                        )),
+                    )],
                 )
                 .expect("apply ack");
             assert!(matches!(

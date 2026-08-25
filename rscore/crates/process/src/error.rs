@@ -71,6 +71,8 @@ pub enum ProcessError {
     AuthorityUpsertForbidden,
     #[error("RSCORE_PROCESS_PREPARE_PENDING")]
     PreparePending,
+    #[error("RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY:entities={entities}")]
+    PrepareWaveNonempty { entities: usize },
     #[error("RSCORE_PROCESS_PREPARE_NOT_PENDING")]
     PrepareNotPending,
     #[error("RSCORE_PROCESS_CANDIDATE_TOKEN_MISMATCH")]
@@ -125,6 +127,7 @@ impl ProcessError {
             Self::AuthorityBootstrapInvalid { .. } => "RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID",
             Self::AuthorityUpsertForbidden => "RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN",
             Self::PreparePending => "RSCORE_PROCESS_PREPARE_PENDING",
+            Self::PrepareWaveNonempty { .. } => "RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY",
             Self::PrepareNotPending => "RSCORE_PROCESS_PREPARE_NOT_PENDING",
             Self::CandidateTokenMismatch => "RSCORE_PROCESS_CANDIDATE_TOKEN_MISMATCH",
             Self::CheckpointPending => "RSCORE_PROCESS_CHECKPOINT_PENDING",
@@ -182,6 +185,14 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::WaveMissing => "RSCORE_BATCH_WAVE_MISSING",
         BatchError::WaveOpen => "RSCORE_BATCH_WAVE_OPEN",
         BatchError::WaveSealed => "RSCORE_BATCH_WAVE_SEALED",
+        BatchError::EntityStageOpen(_) => "RSCORE_BATCH_ENTITY_STAGE_OPEN",
+        BatchError::EntityStageMissing(_) => "RSCORE_BATCH_ENTITY_STAGE_MISSING",
+        BatchError::EntityStageKey { .. } => "RSCORE_BATCH_ENTITY_STAGE_KEY",
+        BatchError::EntityStageOrdinal { .. } => "RSCORE_BATCH_ENTITY_STAGE_ORDINAL",
+        BatchError::EntityStageOrdinalOverflow => "RSCORE_BATCH_ENTITY_STAGE_ORDINAL_OVERFLOW",
+        BatchError::EntityStageReplay { .. } => "RSCORE_BATCH_ENTITY_STAGE_REPLAY",
+        BatchError::EntityStageDecisionConflict { .. } => "RSCORE_BATCH_ENTITY_STAGE_DECISION",
+        BatchError::EntityStageOwner { .. } => "RSCORE_BATCH_ENTITY_STAGE_OWNER",
         BatchError::WaveRevision { .. } => "RSCORE_BATCH_WAVE_REVISION",
         BatchError::WaveCandidate { .. } => "RSCORE_BATCH_WAVE_CANDIDATE",
         BatchError::CheckpointRevision { .. } => "RSCORE_BATCH_CHECKPOINT_REVISION",

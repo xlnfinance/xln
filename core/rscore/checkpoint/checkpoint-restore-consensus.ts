@@ -38,8 +38,9 @@ export type RscorePendingFrame = Readonly<{
   proposalDispute?: RscoreDisputeDraft;
 }>;
 
-type RscoreCounterpartyDispute = Readonly<{
-  hanko: string;
+export type RscoreCounterpartyDispute = Readonly<{
+  hanko?: string;
+  hash: string;
   proofBodyHash: string;
   nonce: number;
   proposerIsLeft: boolean;
@@ -127,14 +128,15 @@ const decodePending = (value: unknown): RscorePendingFrame | undefined => {
 };
 
 const decodeCounterpartyDispute = (value: unknown): RscoreCounterpartyDispute | undefined => {
-  const row = checkpointOptionalTuple(value, 4, 'COUNTERPARTY_DISPUTE');
+  const row = checkpointOptionalTuple(value, 5, 'COUNTERPARTY_DISPUTE');
   return row === undefined
     ? undefined
     : {
-        hanko: checkpointHanko(row[0], 'COUNTERPARTY_DISPUTE'),
-        proofBodyHash: checkpointHex(row[1], 32, 'COUNTERPARTY_DISPUTE_PROOF_BODY'),
-        nonce: checkpointSafeInt(row[2], 'COUNTERPARTY_DISPUTE_NONCE'),
-        proposerIsLeft: checkpointBool(row[3], 'COUNTERPARTY_DISPUTE_PROPOSER'),
+        ...(row[0] === null ? {} : { hanko: checkpointHanko(row[0], 'COUNTERPARTY_DISPUTE') }),
+        hash: checkpointHex(row[1], 32, 'COUNTERPARTY_DISPUTE_HASH'),
+        proofBodyHash: checkpointHex(row[2], 32, 'COUNTERPARTY_DISPUTE_PROOF_BODY'),
+        nonce: checkpointSafeInt(row[3], 'COUNTERPARTY_DISPUTE_NONCE'),
+        proposerIsLeft: checkpointBool(row[4], 'COUNTERPARTY_DISPUTE_PROPOSER'),
       };
 };
 

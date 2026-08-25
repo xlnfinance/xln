@@ -10,12 +10,17 @@ use crate::consensus::proposal::propose::{WindowExecution, collect_frame_deltas,
 use crate::consensus::replica::AccountConsensus;
 use crate::consensus::signing::{SigningIdentity, verify_frame_hanko};
 use crate::dispute::{
-    counterparty_dispute_requirement_error, proof_body_hash, validate_counterparty_dispute_shape,
-    verify_counterparty_dispute,
+    counterparty_dispute_requirement_error, proof_body_hash, validate_counterparty_dispute_hash,
+    validate_counterparty_dispute_shape, verify_counterparty_dispute,
 };
 use crate::error::StateError;
 use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
-use crate::{AccountExecutionContext, AccountOutput, AccountTx, Side};
+use crate::{AccountExecutionContext, AccountOutput, Side};
+
+use super::types::{
+    AccountPeerEnvelope, FrameAckOutcome, FrameAckPhase, IncomingAck, IncomingFrame,
+    validate_peer_envelope,
+};
 
 /// `ACCOUNT_NETWORK_ALLOWANCE_MS` (core/account/consensus/constants.ts). A peer
 /// chooses its own frame timestamp, so a frame from the future could satisfy
@@ -33,28 +38,10 @@ const MAX_ACCOUNT_FRAME_TXS: usize = ACCOUNT_MEMPOOL_SIZE;
 /// (core/account/consensus/index.ts). The frame's own clock stays the
 /// committed clock — it is what the peer signed — but enforcement is judged
 /// here, or the proposer would own our timeouts.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReceiverClock {
     pub entity_timestamp: u64,
     pub finalized_j_height: u64,
-}
-
-/// A frame as it arrives from the peer: the fields they signed, plus the
-/// Hanko over the frame hash.
-#[derive(Clone, Debug)]
-pub struct IncomingFrame {
-    pub height: u64,
-    pub timestamp: u64,
-    pub j_height: u64,
-    pub txs: Vec<AccountTx>,
-    pub prev_frame_hash: String,
-    pub account_state_root: [u8; 32],
-    pub by_left: bool,
-    pub state_hash: [u8; 32],
-    pub hanko: Vec<u8>,
-    /// The proposer's own recovery proof for the state this frame commits to,
-    /// when their message carried one.
-    pub dispute: Option<crate::consensus::replica::CounterpartyDispute>,
 }
 
 /// The exact canonical frame whose bilateral commit an input completed.
@@ -70,7 +57,7 @@ pub struct CommittedFrameEvidence {
     pub committed_via_new_frame: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum IncomingOutcome {
     /// The frame is now the chain head; the ack is ours to send.
     Committed {
@@ -105,7 +92,7 @@ pub enum IncomingOutcome {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum AckOutcome {
     /// The peer acknowledged our pending frame; it is committed on both sides,
     /// and only now may its effects leave the account.
@@ -130,83 +117,105 @@ fn rejected(reason: impl Into<String>) -> IncomingOutcome {
     }
 }
 
+fn ack_rejected(reason: impl Into<String>) -> AckOutcome {
+    AckOutcome::Rejected {
+        reason: reason.into(),
+    }
+}
+
 /// Apply a peer's proposal.
 pub fn apply_incoming_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    counterparty_entity_id: &[u8; 32],
+    envelope: &AccountPeerEnvelope,
     clock: ReceiverClock,
     incoming: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<IncomingOutcome, StateError> {
-    // SECURITY: the signer must be this account's counterparty. A Hanko only
-    // proves who signed; without this, any entity that can sign could author
-    // frames into an account it is not a party to.
-    //
-    // Parity target: `validateIncomingFrameProposer`
-    // (core/account/consensus/incoming/preflight.ts).
-    if counterparty_entity_id != account.replica().counterparty().as_bytes() {
-        return Ok(rejected("ACCOUNT_PEER_FRAME_PROPOSER_INVALID"));
+    if let Err(error) = validate_peer_envelope(account, envelope) {
+        return Ok(rejected(error.to_string()));
     }
-    if let Some(dispute) = incoming.dispute.as_ref() {
-        validate_counterparty_dispute_shape(dispute)?;
+    let IncomingFrame {
+        frame,
+        state_hash,
+        frame_hanko,
+        dispute,
+    } = incoming;
+    if let Some(dispute) = dispute.as_ref()
+        && let Err(error) = validate_counterparty_dispute_shape(dispute)
+    {
+        return Ok(rejected(error.to_string()));
+    }
+
+    // At-least-once replay is classified from the exact signed hash before
+    // obsolete certificate material is inspected. TypeScript rebuilds an ACK
+    // for an exact-current retry and ignores an older ancestor even when the
+    // old proposal no longer carries a usable frame Hanko. Equal-height hash
+    // conflicts deliberately fall through: they are not stale traffic.
+    let current_height = account.current_height();
+    if frame.height == current_height
+        && account
+            .current()
+            .is_some_and(|committed| committed.state_hash == state_hash)
+    {
+        return Ok(IncomingOutcome::Duplicate {
+            height: frame.height,
+            state_hash,
+            ack_hanko: identity.sign_frame(&state_hash)?,
+        });
+    }
+    if frame.height < current_height {
+        return Ok(IncomingOutcome::Stale {
+            height: frame.height,
+            current_height,
+        });
+    }
+
+    let Some(frame_hanko) = frame_hanko else {
+        return Ok(rejected("ACCOUNT_PEER_FRAME_HANKO_MISSING"));
+    };
+    if let Some(dispute) = dispute.as_ref()
+        && let Err(error) =
+            validate_counterparty_dispute_hash(account.replica(), &envelope.from_entity_id, dispute)
+    {
+        return Ok(rejected(error.to_string()));
     }
     // SECURITY: authenticate before touching any state, exactly as preflight
     // does. An unsigned frame is not evidence of anything.
-    verify_frame_hanko(
-        &incoming.hanko,
-        &incoming.state_hash,
-        counterparty_entity_id,
-    )?;
-    if incoming.txs.len() > MAX_ACCOUNT_FRAME_TXS {
+    if let Err(error) = verify_frame_hanko(&frame_hanko, &state_hash, &envelope.from_entity_id) {
+        return Ok(rejected(error.to_string()));
+    }
+    let received_hash = match frame.hash() {
+        Ok(hash) => hash,
+        Err(error) => return Ok(rejected(error.to_string())),
+    };
+    if received_hash != state_hash {
+        return Ok(rejected("ACCOUNT_PEER_FRAME_HASH_MISMATCH"));
+    }
+    if frame.txs.len() > MAX_ACCOUNT_FRAME_TXS {
         return Ok(rejected(format!(
             "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:txs:{}",
-            incoming.txs.len()
+            frame.txs.len()
         )));
     }
-    if incoming.timestamp
+    if frame.timestamp
         > clock
             .entity_timestamp
             .saturating_add(MAX_FRAME_FUTURE_SKEW_MS)
     {
         return Ok(rejected(format!(
             "ACCOUNT_PEER_FRAME_STRUCTURE_INVALID:skew:{}",
-            incoming.timestamp - clock.entity_timestamp
+            frame.timestamp - clock.entity_timestamp
         )));
     }
 
-    let current_height = account.current_height();
-    if incoming.height <= current_height {
-        let committed = account.current();
-        let duplicate = committed.is_some_and(|frame| {
-            frame.frame.height == incoming.height && frame.state_hash == incoming.state_hash
-        });
-        if duplicate {
-            return Ok(IncomingOutcome::Duplicate {
-                height: incoming.height,
-                state_hash: incoming.state_hash,
-                ack_hanko: identity.sign_frame(&incoming.state_hash)?,
-            });
-        }
-        // Delivery is at-least-once, so an ancestor frame arriving again is
-        // ordinary traffic, not peer misbehaviour.
-        //
-        // Parity target: `handleStaleIncomingFrame`
-        // (core/account/consensus/incoming/preflight.ts), which returns an
-        // applied no-op.
-        return Ok(IncomingOutcome::Stale {
-            height: incoming.height,
-            current_height,
-        });
-    }
-
-    // TypeScript's at-least-once replay gate runs before dispute-witness
-    // validation: an exact duplicate or stale ancestor is a no-op even if its
-    // obsolete optional witness cannot be decoded under today's board. Every
-    // input that can still move consensus authenticates the witness here,
-    // before replay or collision handling mutates anything.
-    if let Some(dispute) = incoming.dispute.as_ref() {
-        verify_counterparty_dispute(account.replica(), counterparty_entity_id, dispute)?;
+    // Every input that can still move consensus authenticates the witness
+    // here, before replay or collision handling mutates anything.
+    if let Some(dispute) = dispute.as_ref()
+        && let Err(error) =
+            verify_counterparty_dispute(account.replica(), &envelope.from_entity_id, dispute)
+    {
+        return Ok(rejected(error.to_string()));
     }
 
     // Each side may propose once at a height. If both race, the LEFT entity's
@@ -215,40 +224,40 @@ pub fn apply_incoming_frame(
     // that fails validation below must leave our own proposal standing.
     let collides = account
         .pending()
-        .is_some_and(|pending| pending.frame.height == incoming.height);
+        .is_some_and(|pending| pending.frame.height == frame.height);
     if collides {
         if account.replica().owner_side() == Side::Left {
             return Ok(IncomingOutcome::CollisionIgnored {
-                height: incoming.height,
+                height: frame.height,
             });
         }
-        if account.last_rollback_frame_hash() == Some(&incoming.state_hash) {
+        if account.last_rollback_frame_hash() == Some(&state_hash) {
             return Ok(rejected(format!(
                 "ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE:{}",
-                incoming.height
+                frame.height
             )));
         }
     }
 
-    if incoming.height != current_height + 1 {
+    if frame.height != current_height + 1 {
         return Ok(rejected(format!(
             "ACCOUNT_PEER_FRAME_HEIGHT_GAP:{}:{current_height}",
-            incoming.height
+            frame.height
         )));
     }
-    if incoming.prev_frame_hash != account.prev_frame_hash() {
+    if frame.prev_frame_hash != account.prev_frame_hash() {
         return Ok(rejected(format!(
             "ACCOUNT_PEER_FRAME_PREV_MISMATCH:{}",
-            incoming.prev_frame_hash
+            frame.prev_frame_hash
         )));
     }
-    if incoming.by_left != (account.replica().owner_side() == Side::Right) {
+    if frame.by_left != (account.replica().owner_side() == Side::Right) {
         // `byLeft` is the proposer's side, and the proposer is our
         // counterparty. A frame claiming our own side would let one entity
         // author both directions of the account.
         return Ok(rejected(format!(
             "ACCOUNT_PEER_FRAME_BY_LEFT_MISMATCH:{}",
-            incoming.by_left
+            frame.by_left
         )));
     }
 
@@ -256,18 +265,18 @@ pub fn apply_incoming_frame(
     // enforcement is judged on our own clock, so a backdated frame cannot
     // decide our timeouts for us.
     let context = AccountExecutionContext::with_market(
-        incoming.timestamp,
+        frame.timestamp,
         clock.entity_timestamp,
         clock.finalized_j_height,
         current_height,
-        incoming.j_height,
+        frame.j_height,
         std::sync::Arc::clone(swap_market),
     );
     let proposer = account.replica().owner_side().opposite();
     let execution = execute_window(
         account.replica(),
         proposer,
-        incoming.txs.clone(),
+        frame.txs.clone(),
         &context,
         true,
     )?;
@@ -285,29 +294,17 @@ pub fn apply_incoming_frame(
             first.index, first.rejection
         )));
     }
-    if applied.len() != incoming.txs.len() {
+    if applied != frame.txs {
         return Ok(rejected("ACCOUNT_PEER_FRAME_TX_COUNT_MISMATCH"));
     }
 
     let account_state_root = candidate.refresh_account_state_root()?;
-    if account_state_root != incoming.account_state_root {
+    if account_state_root != frame.account_state_root {
         return Ok(rejected("ACCOUNT_PEER_FRAME_STATE_ROOT_MISMATCH"));
     }
-    let frame = AccountFrame {
-        height: incoming.height,
-        timestamp: incoming.timestamp,
-        j_height: incoming.j_height,
-        txs: applied,
-        prev_frame_hash: incoming.prev_frame_hash.clone(),
-        account_state_root,
-        by_left: incoming.by_left,
-        deltas: collect_frame_deltas(&candidate),
-    };
-    let state_hash = frame.hash()?;
-    if state_hash != incoming.state_hash {
-        // The signature was over their bytes; ours differ, so the two sides
-        // do not agree on what this frame says.
-        return Ok(rejected("ACCOUNT_PEER_FRAME_HASH_MISMATCH"));
+    let derived_deltas = collect_frame_deltas(&candidate);
+    if derived_deltas != frame.deltas {
+        return Ok(rejected("ACCOUNT_PEER_FRAME_DELTAS_MISMATCH"));
     }
 
     let expected_proof_body_hash = candidate
@@ -318,7 +315,7 @@ pub fn apply_incoming_frame(
         expected_proof_body_hash.as_ref(),
         account.counterparty_dispute(),
         candidate.state().j_nonce(),
-        incoming.dispute.as_ref(),
+        dispute.as_ref(),
     ) {
         return Ok(rejected(reason));
     }
@@ -329,7 +326,7 @@ pub fn apply_incoming_frame(
     // Parity target: `applySameHeightIncomingFrameRollback`
     // (core/account/consensus/index.ts), which runs after the replay.
     let rolled_back_txs = if collides {
-        account.rollback_pending(incoming.state_hash)?
+        account.rollback_pending(state_hash)?
     } else {
         0
     };
@@ -338,7 +335,7 @@ pub fn apply_incoming_frame(
     // Their proof of the state they just proposed was authenticated against
     // the reconstructed Solidity digest before replay, then checked against
     // this exact candidate proof body above. Only now may it be retained.
-    if let Some(dispute) = incoming.dispute.clone() {
+    if let Some(dispute) = dispute {
         account.store_counterparty_dispute(dispute);
     }
     // Our own proof of the same state, which the acknowledgement carries. It
@@ -347,14 +344,14 @@ pub fn apply_incoming_frame(
     let ack_dispute = match candidate.delta_transformer().copied() {
         None => None,
         Some(transformer) => {
-            account.refresh_ack_dispute_draft(&candidate, &transformer, incoming.by_left)?
+            account.refresh_ack_dispute_draft(&candidate, &transformer, frame.by_left)?
         }
     };
     account.commit_from_peer(
         candidate,
         &frame,
         state_hash,
-        incoming.hanko,
+        frame_hanko,
         ack_hanko.clone(),
     );
     // The ack this outcome carries is one the Entity commits in the account
@@ -377,47 +374,81 @@ pub fn apply_incoming_frame(
 /// Apply the peer's ack of our pending frame.
 pub fn apply_incoming_ack(
     account: &mut AccountConsensus,
-    counterparty_entity_id: &[u8; 32],
-    height: u64,
-    state_hash: &[u8; 32],
-    hanko: &[u8],
-    dispute: Option<crate::consensus::replica::CounterpartyDispute>,
+    envelope: &AccountPeerEnvelope,
+    incoming: IncomingAck,
 ) -> Result<AckOutcome, StateError> {
-    // SECURITY: an ack is only evidence when it comes from the party bound to
-    // this account.
-    //
-    // Parity target: the `proofHeader.toEntity` check in
-    // core/account/consensus/incoming/ack-commit.ts.
-    if counterparty_entity_id != account.replica().counterparty().as_bytes() {
+    if let Err(error) = validate_peer_envelope(account, envelope) {
         return Ok(AckOutcome::Rejected {
-            reason: "ACCOUNT_PEER_ACK_SIGNER_INVALID".to_string(),
+            reason: error.to_string(),
         });
     }
-    if let Some(dispute) = dispute.as_ref() {
-        validate_counterparty_dispute_shape(dispute)?;
+    let IncomingAck {
+        height,
+        frame_hash,
+        frame_hanko,
+        dispute,
+    } = incoming;
+    if let Some(dispute) = dispute.as_ref()
+        && let Err(error) = validate_counterparty_dispute_shape(dispute)
+    {
+        return Ok(ack_rejected(error.to_string()));
     }
-    let Some(pending) = account.pending() else {
-        if height > account.current_height()
-            && let Some(dispute) = dispute.as_ref()
+
+    let current_height = account.current_height();
+    let pending_height = account.pending().map(|pending| pending.frame.height);
+    let has_certificate = frame_hanko.as_ref().is_some_and(|hanko| !hanko.is_empty());
+    let replay_is_stale = height > 0
+        && match pending_height {
+            Some(pending_height) => height < pending_height,
+            None => height <= current_height,
+        };
+    // TypeScript's first replay gate uses certificate *presence*, not
+    // validity. A non-empty obsolete Hanko may be unverifiable after board
+    // rotation and still remains an at-least-once no-op. Shape-invalid dispute
+    // evidence was rejected above; its obsolete signature/hash are skipped.
+    if has_certificate && replay_is_stale {
+        return Ok(AckOutcome::Stale { height });
+    }
+
+    if let Some(dispute) = dispute.as_ref() {
+        if let Err(error) =
+            validate_counterparty_dispute_hash(account.replica(), &envelope.from_entity_id, dispute)
         {
-            verify_counterparty_dispute(account.replica(), counterparty_entity_id, dispute)?;
+            return Ok(ack_rejected(error.to_string()));
         }
-        return Ok(AckOutcome::Stale { height });
-    };
-    if height < pending.frame.height {
-        return Ok(AckOutcome::Stale { height });
+        if let Err(error) =
+            verify_counterparty_dispute(account.replica(), &envelope.from_entity_id, dispute)
+        {
+            return Ok(ack_rejected(error.to_string()));
+        }
     }
-    if let Some(dispute) = dispute.as_ref() {
-        verify_counterparty_dispute(account.replica(), counterparty_entity_id, dispute)?;
-    }
-    if pending.frame.height != height {
+
+    let Some(pending_height) = pending_height else {
+        // Without the pending proposal, neither an old ACK nor the next ACK
+        // can advance state. The next height is an ordinary early delivery;
+        // anything beyond it is unmatched future traffic and must stay loud.
+        if height > 0 && height <= current_height.saturating_add(1) {
+            return Ok(AckOutcome::Stale { height });
+        }
         return Ok(AckOutcome::Rejected {
-            reason: format!(
-                "ACCOUNT_PEER_ACK_UNMATCHED:{height}:{}",
-                pending.frame.height
-            ),
+            reason: format!("ACCOUNT_PEER_ACK_UNMATCHED:{height}:none"),
+        });
+    };
+    if height != pending_height {
+        if height > 0 && height <= current_height {
+            return Ok(AckOutcome::Stale { height });
+        }
+        return Ok(AckOutcome::Rejected {
+            reason: format!("ACCOUNT_PEER_ACK_UNMATCHED:{height}:{pending_height}"),
         });
     }
+
+    let Some(frame_hanko) = frame_hanko.filter(|hanko| !hanko.is_empty()) else {
+        return Ok(AckOutcome::Rejected {
+            reason: "ACCOUNT_PEER_ACK_HANKO_MISSING".to_string(),
+        });
+    };
+    let pending = account.pending().expect("pending height checked above");
     if let Some(reason) = counterparty_dispute_requirement_error(
         account.dispute().map(|draft| &draft.proof_body_hash),
         account.counterparty_dispute(),
@@ -426,12 +457,14 @@ pub fn apply_incoming_ack(
     ) {
         return Ok(AckOutcome::Rejected { reason });
     }
-    if &pending.state_hash != state_hash {
+    if pending.state_hash != frame_hash {
         return Ok(AckOutcome::Rejected {
             reason: "ACCOUNT_PEER_ACK_HASH_MISMATCH".to_string(),
         });
     }
-    verify_frame_hanko(hanko, state_hash, counterparty_entity_id)?;
+    if let Err(error) = verify_frame_hanko(&frame_hanko, &frame_hash, &envelope.from_entity_id) {
+        return Ok(ack_rejected(error.to_string()));
+    }
     // Their proof of the state this ack commits, kept as it arrived.
     //
     // Parity target: `storeCounterpartyDisputeHanko` in
@@ -445,7 +478,7 @@ pub fn apply_incoming_ack(
         pending.candidate,
         &pending.frame,
         pending.state_hash,
-        hanko.to_vec(),
+        frame_hanko,
         pending.hanko,
     );
     Ok(AckOutcome::Committed {
@@ -456,5 +489,48 @@ pub fn apply_incoming_ack(
             frame: pending.frame,
             committed_via_new_frame: false,
         },
+    })
+}
+
+/// Apply one canonical `frame_ack` input in ACK-before-proposal order.
+///
+/// Both phases run against a private Account candidate. A rejection or fault
+/// publishes nothing, including an ACK commit that succeeded before a bad
+/// proposal was examined.
+pub fn apply_incoming_frame_ack(
+    account: &mut AccountConsensus,
+    identity: &SigningIdentity,
+    envelope: &AccountPeerEnvelope,
+    clock: ReceiverClock,
+    ack: IncomingAck,
+    frame: IncomingFrame,
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+) -> Result<FrameAckOutcome, StateError> {
+    let mut candidate = account.clone();
+    let ack = apply_incoming_ack(&mut candidate, envelope, ack)?;
+    if let AckOutcome::Rejected { reason } = &ack {
+        return Ok(FrameAckOutcome::Rejected {
+            phase: FrameAckPhase::Ack,
+            reason: reason.clone(),
+        });
+    }
+    let frame = apply_incoming_frame(
+        &mut candidate,
+        identity,
+        envelope,
+        clock,
+        frame,
+        swap_market,
+    )?;
+    if let IncomingOutcome::Rejected { reason } = &frame {
+        return Ok(FrameAckOutcome::Rejected {
+            phase: FrameAckPhase::Frame,
+            reason: reason.clone(),
+        });
+    }
+    *account = candidate;
+    Ok(FrameAckOutcome::Applied {
+        ack: Box::new(ack),
+        frame: Box::new(frame),
     })
 }

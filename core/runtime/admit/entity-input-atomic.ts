@@ -21,10 +21,12 @@ import {
   collectCommittedAccountFrames,
   collectStagedEntityInput,
   publishStagedEntityNodeChanges,
+  settleStagedAuthority,
   stageExternalEntityInput,
   type StagedEntityInput,
 } from './entity-input-staging.ts';
 import { safeStringify } from '../../protocol/serialization';
+import { authorityDriverEnabled } from '../../rscore/authority-driver';
 
 export const atomicPairInputsMatch = (
   first: RoutedEntityInput,
@@ -201,6 +203,27 @@ const applyRetainedNonAtomicInputs = async (
   }
 };
 
+const discardAtomicAuthorityStages = async (
+  env: RuntimeReplica,
+  staged: readonly StagedEntityInput[],
+  cause?: unknown,
+): Promise<void> => {
+  const failures: unknown[] = [];
+  for (const entry of staged) {
+    try {
+      await settleStagedAuthority(env, entry, false);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      cause === undefined ? failures : [cause, ...failures],
+      'RUNTIME_ATOMIC_AUTHORITY_ROLLBACK_FAILED',
+    );
+  }
+};
+
 export const applyAtomicEntityInputPair = async (
   env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
@@ -219,38 +242,54 @@ export const applyAtomicEntityInputPair = async (
       `RUNTIME_ATOMIC_PAIR_MISSING_CROSS_J_STAMP:${pair[0].entityId}:${pair[1].entityId}`,
     );
   }
+  // The ordinary TypeScript path deliberately treats a same-Entity stamped
+  // pair as two normal inputs (see atomicPairInputsMatch). A direct/misrouted
+  // call must preserve that behavior while authority is off. With authority
+  // on, however, one owner session cannot hold two sibling savepoints, so fail
+  // before either replica or Rust candidate is touched.
+  if (
+    authorityDriverEnabled(env)
+    && normalizeEntityKey(pair[0].entityId) === normalizeEntityKey(pair[1].entityId)
+  ) {
+    throw new Error(`RUNTIME_CROSS_J_ATOMIC_PAIR_ENTITY_COLLISION:${pair[0].entityId}`);
+  }
   const entityIds: [string, string] = [pair[0].entityId, pair[1].entityId];
   const indexes: [number, number] = [
     firstInputIndex,
     firstInputIndex + 1,
   ];
+  const partial: StagedEntityInput[] = [];
   let staged: [StagedEntityInput, StagedEntityInput];
   try {
     const requiredIndexes: [number, number] = [
       requiredAtomicAccountInputIndex(pair[0]),
       requiredAtomicAccountInputIndex(pair[1]),
     ];
-    staged = [
-      await stageExternalEntityInput(
-        env,
-        pair[0],
-        indexes[0],
-        options,
-        false,
-        false,
-        requiredIndexes[0],
-      ),
-      await stageExternalEntityInput(
-        env,
-        pair[1],
-        indexes[1],
-        options,
-        false,
-        false,
-        requiredIndexes[1],
-      ),
-    ];
+    partial.push(await stageExternalEntityInput(
+      env,
+      pair[0],
+      indexes[0],
+      options,
+      false,
+      false,
+      requiredIndexes[0],
+    ));
+    partial.push(await stageExternalEntityInput(
+      env,
+      pair[1],
+      indexes[1],
+      options,
+      false,
+      false,
+      requiredIndexes[1],
+    ));
+    const [firstStage, secondStage] = partial;
+    if (firstStage === undefined || secondStage === undefined) {
+      throw new Error('RUNTIME_ATOMIC_AUTHORITY_STAGE_ARITY');
+    }
+    staged = [firstStage, secondStage];
   } catch (error) {
+    await discardAtomicAuthorityStages(env, partial, error);
     const rejection = atomicPairProtocolRejection(error);
     if (!rejection || options.isReplay) throw error;
     recordAtomicPairRejection(
@@ -265,11 +304,21 @@ export const applyAtomicEntityInputPair = async (
   }
 
   if (staged[0].replicaKey === staged[1].replicaKey) {
+    await discardAtomicAuthorityStages(env, staged);
     throw new Error(
       `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION:${staged[0].replicaKey}`,
     );
   }
+  const stageOwners = staged.flatMap(entry =>
+    entry.result.authorityStage === null
+      ? []
+      : [entry.result.authorityStage.ownerEntityId]);
+  if (stageOwners.length === 2 && stageOwners[0] === stageOwners[1]) {
+    await discardAtomicAuthorityStages(env, staged);
+    throw new Error(`RUNTIME_ATOMIC_AUTHORITY_OWNER_COLLISION:${stageOwners[0]}`);
+  }
   if (!staged.every(stagedAtomicLegCommitted)) {
+    await discardAtomicAuthorityStages(env, staged);
     if (options.isReplay) {
       throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED');
     }
@@ -293,6 +342,9 @@ export const applyAtomicEntityInputPair = async (
       entry.result.nextReplica.state,
       committedEntityStateRoot(entry.result.nextReplica),
     );
+  }
+  for (const entry of staged) {
+    await settleStagedAuthority(env, entry, true);
   }
   for (const entry of staged) {
     collectStagedEntityInput(env, entry, options, context);

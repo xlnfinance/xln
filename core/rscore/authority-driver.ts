@@ -43,14 +43,10 @@ import {
   type AuthorityWaveOperation,
 } from './authority-wave';
 import {
-  accountConsensusWire,
-  accountEnvelopeWire,
-  accountSeedWire,
   hexToWireBytes,
   swapMarketPolicyDigest,
   swapMarketPolicyWire,
 } from './shadow-wire';
-import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
 import { waveOutputRow, type Wave } from './wave-decode';
 import type { ShadowOutputRow } from './shadow-wire';
 import {
@@ -64,8 +60,9 @@ import {
 } from './client';
 import { assertRscoreCheckpointCandidate } from './checkpoint/checkpoint-wire';
 import type { AccountFrame, AccountReplica } from '../types/account';
-import type { RuntimeReplica } from '../runtime/types';
+import type { RoutedEntityInput, RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
+import { encodeCanonicalConsensusBytes } from '../protocol/serialization/binary-codec';
 import { verifyHankoForHash } from '../hanko/signing';
 
 const authorityLog = createStructuredLogger('rscore.authority');
@@ -117,7 +114,7 @@ export const setAuthorityRuntimeSuppressed = (
 type Session = {
   client: RscoreProcessClient;
   ownerEntityId: string;
-  /** Accounts the engine has been seeded with, so a new one is seeded once. */
+  /** Membership committed by Create or proven by RestoreExact. */
   seeded: Set<string>;
   /**
    * The leaf projection each account was seeded with. The engine carries the
@@ -127,12 +124,49 @@ type Session = {
   seededProjection: Map<string, Record<string, unknown>>;
 };
 
+type OpenAuthorityEntityStage = {
+  handle: AuthorityEntityStageHandle;
+  priorResult: Wave;
+  latestResult: Wave;
+};
+
 type PendingWave = {
   session: Session;
   token: Buffer;
+  /** Latest cumulative candidate view; final only once sealed. */
   result: Wave;
+  sealed: boolean;
+  acceptedStageOrdinal: number;
+  nextOperationIndex: number;
+  operations: AuthorityWaveOperation[];
+  expectedOutputs: Map<string, ShadowOutputRow[]>;
+  openStage: OpenAuthorityEntityStage | null;
+  /** Candidate-created membership promoted only after the Runtime WAL and Rust commit. */
+  createdAccounts: string[];
   checkpoint?: RscoreCheckpointChanges;
 };
+
+/** Runtime-envelope handle for one still-abortable parent Entity transition. */
+export type AuthorityEntityStageHandle = Readonly<{
+  ownerEntityId: string;
+  stageKey: Buffer;
+  expectedAcceptedOrdinal: number;
+  nextOperationIndex: number;
+  operations: readonly AuthorityWaveOperation[];
+  expectedOutputs: ReadonlyMap<string, readonly ShadowOutputRow[]>;
+  createdAccounts: readonly string[];
+}>;
+
+export type AuthorityEntityStageInput = Readonly<{
+  collectorFrameId: string | null;
+  ownerEntityId: string;
+  appliedInput: RoutedEntityInput;
+  trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
+  deferProposal: boolean;
+  requiredEntityTxIndex?: number;
+  fallbackTimestamp: number;
+  fallbackFinalizedJHeight: number;
+}>;
 
 export type AuthorityCheckpointStorageInput = Readonly<{
   ownerEntityId: string;
@@ -151,6 +185,8 @@ const allSessions = new Set<Session>();
 const captured = new Map<RuntimeReplica, AuthorityWave>();
 /** Candidates open in each Entity's engine, by Runtime. */
 const pending = new Map<RuntimeReplica, PendingWave[]>();
+/** Original Account-operation arrival cursor for the active Runtime frame. */
+const arrivalCursors = new Map<RuntimeReplica, number>();
 
 const report = {
   waves: 0,
@@ -278,23 +314,26 @@ const accountsOf = (env: RuntimeReplica, entityId: string): ReadonlyMap<string, 
   return replica?.state.accounts ?? new Map<string, AccountReplica>();
 };
 
+const authoritySignerFor = (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+): Readonly<{ signerId: string; privateKey: Uint8Array }> | string => {
+  const signerId = signerIdFor(env, ownerEntityId);
+  if (!signerId) return 'SIGNER_UNKNOWN';
+  const expected = generateLazyEntityId([signerId], 1n).toLowerCase();
+  if (expected !== ownerEntityId) return `ENTITY_NOT_LAZY_1_OF_1:${expected}`;
+  const privateKey = getSignerPrivateKeyIfAvailable(env, signerId);
+  if (!privateKey) return 'SIGNER_KEY_UNAVAILABLE';
+  return { signerId, privateKey };
+};
+
 const openAuthoritySession = async (
   env: RuntimeReplica,
   ownerEntityId: string,
 ): Promise<Session | 'disabled'> => {
-  const signerId = signerIdFor(env, ownerEntityId);
-  if (!signerId) return disable(ownerEntityId, 'SIGNER_UNKNOWN');
-  // The engine signs as one member of a one-of-one board, so the Entity it
-  // will sign for is fixed by that member's address. A registered or numbered
-  // board hashes to something else and is refused here, rather than being
-  // discovered at the first frame hash.
-  const expected = generateLazyEntityId([signerId], 1n).toLowerCase();
-  if (expected !== ownerEntityId) return disable(ownerEntityId, `ENTITY_NOT_LAZY_1_OF_1:${expected}`);
-  // The key this Runtime signs that Entity's frames with. Derived from a label
-  // only this Runtime knows, so the engine cannot rebuild it from the address
-  // and is handed the key itself.
-  const privateKey = getSignerPrivateKeyIfAvailable(env, signerId);
-  if (!privateKey) return disable(ownerEntityId, 'SIGNER_KEY_UNAVAILABLE');
+  const signer = authoritySignerFor(env, ownerEntityId);
+  if (typeof signer === 'string') return disable(ownerEntityId, signer);
+  const { signerId, privateKey } = signer;
 
   const { RscoreProcessClient } = await import('./client');
   const binaryPath = process.env['XLN_RSCORE_BINARY']
@@ -348,13 +387,11 @@ const openAuthoritySession = async (
     client.kill();
     throw error;
   }
-  const accounts = accountsOf(env, ownerEntityId);
   return {
     client,
     ownerEntityId,
-    seeded: new Set(accounts.keys()),
-    seededProjection: new Map([...accounts.entries()]
-      .map(([counterpartyId, account]) => [counterpartyId, projectEntityAccountLeaf(account)])),
+    seeded: new Set(),
+    seededProjection: new Map(),
   };
 };
 
@@ -362,21 +399,17 @@ const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<S
   const session = await openAuthoritySession(env, ownerEntityId);
   if (session === 'disabled') return session;
   const accounts = accountsOf(env, ownerEntityId);
-  const seeds = [...accounts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([counterpartyId, account]) => accountSeedWire(
-      ownerEntityId,
-      counterpartyId,
-      account.state,
-      accountEnvelopeWire(account),
-      accountConsensusWire(account),
-      requireAccountDeltaTransformerAddress(env.state, account.state),
-    ));
-  await session.client.bootstrapAccounts(0, seeds);
-  report.accountsSeeded += seeds.length;
+  if (accounts.size !== 0) {
+    session.client.kill();
+    return halt('AUTHORITY_EXACT_RESTORE_REQUIRED', {
+      owner: ownerEntityId,
+      accountCount: accounts.size,
+    });
+  }
+  await session.client.bootstrapAccounts(0, []);
   authorityLog.error('authority.armed', {
     owner: ownerEntityId,
-    accounts: seeds.length,
+    accounts: 0,
     workers: Number(process.env['XLN_RSCORE_AUTHORITY_WORKERS'] ?? '8'),
   });
   return session;
@@ -389,22 +422,26 @@ const disable = (ownerEntityId: string, reason: string): 'disabled' => {
 };
 
 /**
- * Arm the engine, and seed it, on the state as it stands *before* this frame.
+ * Arm an empty engine before the first Account exists.
  *
- * This is the whole reason the hook exists at the frame's opening rather than
- * at its close: a session armed after TypeScript applied would be seeded with
- * the frame's own result and would then apply that frame a second time. Its
- * first leaf would disagree, and the disagreement would look like an execution
- * bug rather than a seeding one.
+ * Existing Account state may enter only through RestoreExact. Fresh membership
+ * enters only through WaveOp::Create inside the abortable Runtime candidate;
+ * importing TypeScript's current answer here would hide a missed transition.
  */
 export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const runtimeSessions = sessionMap(env, true);
-  // Entities holding no accounts have nothing for this engine to own; an
-  // Entity that opens its first account is armed at the frame after it did.
+  // A zero-account Entity must already own an empty session before the frame
+  // that opens its first Account, otherwise Create would have nowhere to run.
   for (const replica of env.state.eReplicas.values()) {
-    if (replica.state.accounts.size === 0) continue;
     const ownerEntityId = replica.entityId.trim().toLowerCase();
+    // Do not pre-arm unrelated registered/numbered Entities that happen to be
+    // hosted by this Runtime. If one later tries to open an Account, its first
+    // wave is refused as unarmed; nonempty state is never imported.
+    if (
+      replica.state.accounts.size === 0
+      && typeof authoritySignerFor(env, ownerEntityId) === 'string'
+    ) continue;
     const existing = runtimeSessions.get(ownerEntityId);
     if (existing === 'disabled') {
       return halt('OWNER_AUTHORITY_INELIGIBLE', { owner: ownerEntityId });
@@ -418,25 +455,49 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       allSessions.add(armed);
       continue;
     }
-    // Accounts opened by earlier frames: seeded here, before this frame moves
-    // them, so the engine starts each frame where TypeScript starts it.
-    const fresh = [...replica.state.accounts.entries()]
-      .filter(([counterpartyId]) => !existing.seeded.has(counterpartyId))
-      .sort(([left], [right]) => left.localeCompare(right));
-    if (fresh.length === 0) continue;
-    await existing.client.upsertAccounts(fresh.map(([counterpartyId, account]) => accountSeedWire(
-      ownerEntityId,
-      counterpartyId,
-      account.state,
-      accountEnvelopeWire(account),
-      accountConsensusWire(account),
-      requireAccountDeltaTransformerAddress(env.state, account.state),
-    )));
-    for (const [counterpartyId, account] of fresh) {
-      existing.seeded.add(counterpartyId);
-      existing.seededProjection.set(counterpartyId, projectEntityAccountLeaf(account));
+    const actual = new Set(replica.state.accounts.keys());
+    const missing = [...actual].filter(accountId => !existing.seeded.has(accountId)).sort();
+    const removed = [...existing.seeded].filter(accountId => !actual.has(accountId)).sort();
+    if (missing.length > 0 || removed.length > 0) {
+      halt('AUTHORITY_MEMBERSHIP_OUTSIDE_CANDIDATE', {
+        owner: ownerEntityId,
+        missing,
+        removed,
+      });
     }
-    report.accountsSeeded += fresh.length;
+  }
+  if (pending.has(env)) {
+    return halt('AUTHORITY_CANDIDATE_ALREADY_OPEN', {
+      owners: (pending.get(env) ?? []).map(candidate => candidate.session.ownerEntityId),
+    });
+  }
+  const candidates: PendingWave[] = [];
+  pending.set(env, candidates);
+  arrivalCursors.set(env, 0);
+  try {
+    for (const session of sessionEntriesForRuntime(env)) {
+      candidates.push(await openTrackedCandidate(env, session));
+    }
+  } catch (error) {
+    const abortErrors: unknown[] = [];
+    for (const candidate of candidates) {
+      try {
+        await candidate.session.client.abort(candidate.token);
+        report.aborts += 1;
+      } catch (abortError) {
+        candidate.session.client.kill();
+        abortErrors.push(abortError);
+      }
+    }
+    pending.delete(env);
+    arrivalCursors.delete(env);
+    if (abortErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...abortErrors],
+        'RSCORE_AUTHORITY_FRAME_OPEN_ABORT_FAILED',
+      );
+    }
+    throw error;
   }
 };
 
@@ -556,6 +617,14 @@ export const restoreAuthorityExact = async (
           restoredRevision: String(restored[1]),
         });
       }
+      const restoredAccounts = accountsOf(env, ownerEntityId);
+      session.seeded = new Set(restoredAccounts.keys());
+      session.seededProjection = new Map(
+        [...restoredAccounts.entries()].map(([counterpartyId, account]) => [
+          counterpartyId,
+          projectEntityAccountLeaf(account),
+        ]),
+      );
       report.restores += 1;
     }
   } catch (error) {
@@ -575,41 +644,42 @@ export const restoreAuthorityExact = async (
   sessions.set(env, installed);
   captured.delete(env);
   pending.delete(env);
+  arrivalCursors.delete(env);
 };
 
-const prepareTrackedCandidate = async (
+const openTrackedCandidate = async (
+  env: RuntimeReplica,
   session: Session,
-  request: Parameters<RscoreProcessClient['prepareAccountWave']>[0],
-  validate: (result: Wave) => Promise<void>,
 ): Promise<PendingWave> => {
   let prepared: Awaited<ReturnType<RscoreProcessClient['prepareAccountWave']>>;
   try {
-    prepared = await session.client.prepareAccountWave(request);
+    // Prepare only allocates the Runtime-frame candidate. Every mutation is
+    // subsequently owned by one abortable parent-Entity stage.
+    prepared = await session.client.prepareAccountWave({ entities: [] });
   } catch (error) {
-    // A malformed/truncated reply can hide a live candidate token. Kill the
-    // process; only exact durable recovery may decide its next state.
     session.client.kill();
     throw error;
   }
   try {
-    const selections = request.entities.flatMap(entity => {
-      if (!entity.propose) return [];
-      const accountIds = [...new Set(entity.ops
-        .map(accountIdOf)
-        .filter((accountId): accountId is string => accountId !== null))]
-        .sort()
-        .map(accountId => hexToWireBytes(accountId, 32, 'AUTHORITY_PROPOSAL_ACCOUNT'));
-      return accountIds.length === 0 ? [] : [{
-        ownerEntityId: entity.ownerEntityId,
-        accountIds,
-      }];
-    });
-    if (selections.length > 0) {
-      await session.client.proposeAccountWave(prepared.token, { entities: selections });
-    }
-    const result = await session.client.sealAccountWave(prepared.token);
-    await validate(result);
-    return { session, token: prepared.token, result };
+    await compareWithTypescript(
+      env,
+      session.ownerEntityId,
+      prepared.result,
+      new Map(),
+      session,
+    );
+    return {
+      session,
+      token: prepared.token,
+      result: prepared.result,
+      sealed: false,
+      acceptedStageOrdinal: 0,
+      nextOperationIndex: 0,
+      operations: [],
+      expectedOutputs: new Map(),
+      openStage: null,
+      createdAccounts: [],
+    };
   } catch (error) {
     try {
       await session.client.abort(prepared.token);
@@ -618,11 +688,331 @@ const prepareTrackedCandidate = async (
       session.client.kill();
       throw new AggregateError(
         [error, abortError],
-        `RSCORE_AUTHORITY_PREPARE_VALIDATION_ABORT_FAILED:${session.ownerEntityId}`,
+        `RSCORE_AUTHORITY_CANDIDATE_OPEN_ABORT_FAILED:${session.ownerEntityId}`,
       );
     }
     throw error;
   }
+};
+
+const u64be = (value: number, label: string): Buffer => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label}:${String(value)}`);
+  }
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64BE(BigInt(value));
+  return bytes;
+};
+
+/** Exact retry-stable identity of one parent Entity transition savepoint. */
+export const deriveAuthorityEntityStageKey = (
+  runtimeId: string,
+  ownerEntityId: string,
+  acceptedStageOrdinal: number,
+  appliedInput: RoutedEntityInput,
+  trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
+  deferProposal: boolean,
+  requiredEntityTxIndex: number | undefined,
+): Buffer => createHash('sha256')
+  .update('xln.rscore.entity-input-stage.v1', 'utf8')
+  .update(Buffer.from([0]))
+  .update(Buffer.from(hexToWireBytes(runtimeId, 20, 'AUTHORITY_STAGE_RUNTIME_ID')))
+  .update(Buffer.from(hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER_ID')))
+  .update(u64be(acceptedStageOrdinal, 'RSCORE_AUTHORITY_STAGE_ORDINAL'))
+  .update(Buffer.from(encodeCanonicalConsensusBytes([
+    appliedInput,
+    trustedLocalRuntimeProtocol ?? null,
+    deferProposal,
+    requiredEntityTxIndex ?? null,
+  ])))
+  .digest();
+
+const candidateForOwner = (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+): PendingWave | undefined => (pending.get(env) ?? [])
+  .find(candidate => candidate.session.ownerEntityId === ownerEntityId);
+
+const mergeExpectedOutputs = (
+  target: Map<string, ShadowOutputRow[]>,
+  source: ReadonlyMap<string, readonly ShadowOutputRow[]>,
+): void => {
+  for (const [accountId, rows] of source) {
+    const current = target.get(accountId) ?? [];
+    current.push(...rows);
+    target.set(accountId, current);
+  }
+};
+
+const entityOfStageWave = (
+  ownerEntityId: string,
+  wave: AuthorityWave,
+): Extract<AuthorityWave, { kind: 'wave' }>['entities'][number] => {
+  if (wave.kind === 'ineligible') {
+    return halt('ENTITY_STAGE_INELIGIBLE', { owner: ownerEntityId, reason: wave.reason });
+  }
+  if (wave.kind !== 'wave' || wave.entities.length !== 1) {
+    return halt('ENTITY_STAGE_ARITY', {
+      owner: ownerEntityId,
+      kind: wave.kind,
+      entities: wave.kind === 'wave' ? wave.entities.map(entity => entity.ownerEntityId) : [],
+    });
+  }
+  const entity = wave.entities[0];
+  if (entity === undefined || entity.ownerEntityId !== ownerEntityId) {
+    return halt('ENTITY_STAGE_OWNER', {
+      owner: ownerEntityId,
+      actual: entity?.ownerEntityId ?? null,
+    });
+  }
+  assertAuthorityWaveOperationLedger(wave);
+  return entity;
+};
+
+/**
+ * Replay the Account work observed while TypeScript evaluated one EntityInput
+ * into its exact Rust savepoint. The caller owns accept/discard after deciding
+ * whether the parent Entity transition commits.
+ */
+export const stageAuthorityEntityInput = async (
+  env: RuntimeReplica,
+  input: AuthorityEntityStageInput,
+): Promise<AuthorityEntityStageHandle | null> => {
+  if (!authorityDriverEnabled(env)) return null;
+  const ownerEntityId = input.ownerEntityId.trim().toLowerCase();
+  const candidate = candidateForOwner(env, ownerEntityId);
+  if (input.collectorFrameId === null) {
+    return halt('ENTITY_STAGE_COLLECTOR_MISSING', { owner: ownerEntityId });
+  }
+  if (candidate === undefined) {
+    const unowned = buildAuthorityWave(input.collectorFrameId);
+    if (unowned.kind === 'empty') return null;
+    return halt('ENTITY_STAGE_OWNER_UNARMED', { owner: ownerEntityId, kind: unowned.kind });
+  }
+  if (candidate.sealed || candidate.openStage !== null) {
+    return halt('ENTITY_STAGE_CANDIDATE_STATE', {
+      owner: ownerEntityId,
+      sealed: candidate.sealed,
+      open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
+    });
+  }
+  const wave = buildAuthorityWave(input.collectorFrameId, {
+    operationIndexStart: candidate.nextOperationIndex,
+    arrivalIndexStart: arrivalCursors.get(env) ?? 0,
+    fallbackEntity: {
+      ownerEntityId,
+      timestamp: input.fallbackTimestamp,
+      finalizedJHeight: input.fallbackFinalizedJHeight,
+    },
+  });
+  const entity = entityOfStageWave(ownerEntityId, wave);
+  arrivalCursors.set(
+    env,
+    (arrivalCursors.get(env) ?? 0) + entity.operations.length,
+  );
+  const visibleAccounts = new Set([
+    ...candidate.session.seeded,
+    ...candidate.createdAccounts,
+  ]);
+  const createdAccounts = deriveAuthorityCandidateCreates(
+    ownerEntityId,
+    visibleAccounts,
+    entity.ops,
+  );
+  const runtimeId = String(env.runtimeId ?? '');
+  const stageKey = deriveAuthorityEntityStageKey(
+    runtimeId,
+    ownerEntityId,
+    candidate.acceptedStageOrdinal,
+    input.appliedInput,
+    input.trustedLocalRuntimeProtocol,
+    input.deferProposal,
+    input.requiredEntityTxIndex,
+  );
+  const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER');
+  const priorResult = candidate.result;
+  let latestResult = priorResult;
+  try {
+    const opened = await candidate.session.client.beginEntityStage(
+      candidate.token,
+      stageKey,
+      candidate.acceptedStageOrdinal,
+      {
+        ownerEntityId: ownerBytes,
+        timestamp: entity.timestamp,
+        jHeight: entity.jHeight,
+        entityTimestamp: entity.entityTimestamp,
+        finalizedJHeight: entity.finalizedJHeight,
+        propose: entity.propose,
+      },
+    );
+    const openedRoot = `0x${opened.accountsRoot.toString('hex')}`.toLowerCase();
+    if (
+      opened.revision !== priorResult.revision
+      || openedRoot !== priorResult.accountsRoot.toLowerCase()
+    ) {
+      return halt('ENTITY_STAGE_BEGIN_STATE', {
+        owner: ownerEntityId,
+        expectedRevision: priorResult.revision,
+        actualRevision: opened.revision,
+        expectedRoot: priorResult.accountsRoot,
+        actualRoot: openedRoot,
+      });
+    }
+    if (entity.ops.length > 0) {
+      latestResult = await candidate.session.client.applyAccountWave(
+        candidate.token,
+        stageKey,
+        { entities: [{ ownerEntityId: ownerBytes, ops: entity.ops }] },
+      );
+      // Apply returns the step-local admission/peer verdict rows. Propose is a
+      // distinct step and intentionally returns none of those rows, so bind
+      // parity before advancing to it while retaining the later root as the
+      // stage's terminal candidate view.
+      assertAuthorityStageVerdictParity(
+        ownerEntityId,
+        stageKey,
+        entity.operations,
+        latestResult,
+      );
+    }
+    if (entity.proposalAccountIds.length > 0) {
+      latestResult = await candidate.session.client.proposeAccountWave(
+        candidate.token,
+        stageKey,
+        {
+          entities: [{
+            ownerEntityId: ownerBytes,
+            accountIds: entity.proposalAccountIds.map(accountId =>
+              hexToWireBytes(accountId, 32, 'AUTHORITY_PROPOSAL_ACCOUNT')),
+          }],
+        },
+      );
+      assertAuthorityStageProposalParity(
+        ownerEntityId,
+        stageKey,
+        entity.expectedProposals,
+        latestResult,
+      );
+    }
+  } catch (error) {
+    try {
+      await candidate.session.client.discardEntityStage(
+        candidate.token,
+        stageKey,
+        candidate.acceptedStageOrdinal,
+      );
+    } catch (discardError) {
+      candidate.session.client.kill();
+      throw new AggregateError(
+        [error, discardError],
+        `RSCORE_AUTHORITY_ENTITY_STAGE_ABORT_FAILED:${ownerEntityId}`,
+      );
+    }
+    throw error;
+  }
+  const handle: AuthorityEntityStageHandle = {
+    ownerEntityId,
+    stageKey,
+    expectedAcceptedOrdinal: candidate.acceptedStageOrdinal,
+    nextOperationIndex: candidate.nextOperationIndex + entity.operations.length,
+    operations: [...entity.operations],
+    expectedOutputs: new Map(
+      [...entity.expectedOutputs].map(([accountId, rows]) => [accountId, [...rows]]),
+    ),
+    createdAccounts: [...createdAccounts],
+  };
+  candidate.openStage = { handle, priorResult, latestResult };
+  return handle;
+};
+
+const requireOpenStage = (
+  env: RuntimeReplica,
+  handle: AuthorityEntityStageHandle,
+): Readonly<{ candidate: PendingWave; open: OpenAuthorityEntityStage }> => {
+  const candidate = candidateForOwner(env, handle.ownerEntityId);
+  const open = candidate?.openStage;
+  if (
+    candidate === undefined
+    || open == null
+    || open.handle !== handle
+    || !buffersEqual(open.handle.stageKey, handle.stageKey)
+  ) {
+    return halt('ENTITY_STAGE_HANDLE_STALE', {
+      owner: handle.ownerEntityId,
+      key: handle.stageKey.toString('hex'),
+    });
+  }
+  return { candidate, open };
+};
+
+export const acceptAuthorityEntityStage = async (
+  env: RuntimeReplica,
+  handle: AuthorityEntityStageHandle | null,
+): Promise<void> => {
+  if (handle === null) return;
+  const { candidate, open } = requireOpenStage(env, handle);
+  const receipt = await candidate.session.client.finalizeEntityStage(
+    candidate.token,
+    handle.stageKey,
+    handle.expectedAcceptedOrdinal,
+  );
+  const expectedRoot = open.latestResult.accountsRoot.toLowerCase();
+  const actualRoot = `0x${receipt.accountsRoot.toString('hex')}`.toLowerCase();
+  if (
+    receipt.acceptedStageOrdinal !== handle.expectedAcceptedOrdinal + 1
+    || receipt.revision !== open.latestResult.revision
+    || actualRoot !== expectedRoot
+  ) {
+    return halt('ENTITY_STAGE_ACCEPT_STATE', {
+      owner: handle.ownerEntityId,
+      expectedOrdinal: handle.expectedAcceptedOrdinal + 1,
+      actualOrdinal: receipt.acceptedStageOrdinal,
+      expectedRevision: open.latestResult.revision,
+      actualRevision: receipt.revision,
+      expectedRoot,
+      actualRoot,
+    });
+  }
+  candidate.result = open.latestResult;
+  candidate.acceptedStageOrdinal = receipt.acceptedStageOrdinal;
+  candidate.nextOperationIndex = handle.nextOperationIndex;
+  candidate.operations.push(...handle.operations);
+  mergeExpectedOutputs(candidate.expectedOutputs, handle.expectedOutputs);
+  candidate.createdAccounts.push(...handle.createdAccounts);
+  candidate.openStage = null;
+};
+
+export const discardAuthorityEntityStage = async (
+  env: RuntimeReplica,
+  handle: AuthorityEntityStageHandle | null,
+): Promise<void> => {
+  if (handle === null) return;
+  const { candidate, open } = requireOpenStage(env, handle);
+  const receipt = await candidate.session.client.discardEntityStage(
+    candidate.token,
+    handle.stageKey,
+    handle.expectedAcceptedOrdinal,
+  );
+  const expectedRoot = open.priorResult.accountsRoot.toLowerCase();
+  const actualRoot = `0x${receipt.accountsRoot.toString('hex')}`.toLowerCase();
+  if (
+    receipt.acceptedStageOrdinal !== handle.expectedAcceptedOrdinal
+    || receipt.revision !== open.priorResult.revision
+    || actualRoot !== expectedRoot
+  ) {
+    return halt('ENTITY_STAGE_DISCARD_STATE', {
+      owner: handle.ownerEntityId,
+      expectedOrdinal: handle.expectedAcceptedOrdinal,
+      actualOrdinal: receipt.acceptedStageOrdinal,
+      expectedRevision: open.priorResult.revision,
+      actualRevision: receipt.revision,
+      expectedRoot,
+      actualRoot,
+    });
+  }
+  candidate.result = open.priorResult;
+  candidate.openStage = null;
 };
 
 /**
@@ -632,55 +1022,51 @@ const prepareTrackedCandidate = async (
  */
 export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
-  const wave = captured.get(env);
+  const leaked = captured.get(env);
   captured.delete(env);
-  if (wave === undefined || wave.kind === 'empty') {
-    if (wave?.kind === 'empty') report.emptyFrames += 1;
-    return;
-  }
-  if (wave.kind === 'ineligible') {
-    // No quiet repair: an engine that missed part of a frame is behind, and
-    // every frame after it would be compared against the wrong state.
-    halt('WAVE_INELIGIBLE', { reason: wave.reason });
-    return;
-  }
-  assertAuthorityWaveOperationLedger(wave);
-  const candidates: PendingWave[] = [];
-  pending.set(env, candidates);
-  const runtimeSessions = sessionMap(env, false);
-  for (const entity of wave.entities) {
-    const ownerEntityId = entity.ownerEntityId;
-    const session = runtimeSessions?.get(ownerEntityId);
-    if (session === 'disabled') {
-      return halt('OWNER_AUTHORITY_INELIGIBLE', { owner: ownerEntityId });
-    }
-    if (session === undefined) {
-      // The frame opened with this Entity holding no accounts and closed with
-      // a wave for it: the accounts it touches were opened inside the frame,
-      // so there is no pre-frame state to seed from.
-      halt('UNARMED_WAVE', { owner: ownerEntityId });
-      return;
-    }
-    assertWaveAccountsSeeded(session, entity.ops);
-    const candidate = await prepareTrackedCandidate(session, {
-      entities: [{
-        ...entity,
-        ownerEntityId: Uint8Array.from(Buffer.from(ownerEntityId.slice(2), 'hex')),
-      }],
-    }, decoded => {
-      assertAuthorityOperationCoverage(ownerEntityId, entity.operations, decoded);
-      return compareWithTypescript(
-        env,
-        ownerEntityId,
-        decoded,
-        entity.expectedOutputs,
-        session,
-      );
+  if (leaked !== undefined && leaked.kind !== 'empty') {
+    return halt('ACCOUNT_WORK_OUTSIDE_ENTITY_STAGE', {
+      kind: leaked.kind,
+      detail: leaked.kind === 'ineligible'
+        ? leaked.reason
+        : leaked.entities.map(entity => ({
+            owner: entity.ownerEntityId,
+            operations: entity.operations.length,
+            proposals: entity.proposalAccountIds,
+          })),
     });
+  }
+  const candidates = pending.get(env);
+  if (candidates === undefined) {
+    return halt('AUTHORITY_FRAME_CANDIDATE_MISSING', {});
+  }
+  if (candidates.length === 0) {
+    report.emptyFrames += 1;
+    return;
+  }
+  for (const candidate of candidates) {
+    const ownerEntityId = candidate.session.ownerEntityId;
+    if (candidate.openStage !== null || candidate.sealed) {
+      return halt('AUTHORITY_FRAME_SEAL_STATE', {
+        owner: ownerEntityId,
+        sealed: candidate.sealed,
+        open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
+      });
+    }
+    const result = await candidate.session.client.sealAccountWave(candidate.token);
+    assertAuthorityOperationCoverage(ownerEntityId, candidate.operations, result);
+    await compareWithTypescript(
+      env,
+      ownerEntityId,
+      result,
+      candidate.expectedOutputs,
+      candidate.session,
+    );
+    candidate.result = result;
+    candidate.sealed = true;
     report.waves += 1;
-    report.framesProposed += candidate.result.proposals.filter(row => row.frame !== null).length;
-    report.inputsApplied += candidate.result.applied.length;
-    candidates.push(candidate);
+    report.framesProposed += result.proposals.filter(row => row.frame !== null).length;
+    report.inputsApplied += result.applied.length;
   }
 };
 
@@ -690,13 +1076,31 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
  * has no such state: TypeScript created it while applying, and seeding it now
  * would seed the answer. That case halts rather than being papered over.
  */
-const assertWaveAccountsSeeded = (session: Session, ops: readonly unknown[]): void => {
+export const deriveAuthorityCandidateCreates = (
+  ownerEntityId: string,
+  committedAccounts: ReadonlySet<string>,
+  ops: readonly unknown[],
+): readonly string[] => {
+  const visible = new Set(committedAccounts);
+  const created: string[] = [];
   for (const op of ops) {
     const accountId = accountIdOf(op);
-    if (accountId === null || session.seeded.has(accountId)) continue;
-    halt('ACCOUNT_OPENED_MID_FRAME', { owner: session.ownerEntityId, account: accountId });
-    return;
+    if (accountId === null) continue;
+    if (Array.isArray(op) && op[0] === 2) {
+      if (visible.has(accountId)) {
+        halt('ACCOUNT_CREATE_ALREADY_COMMITTED', {
+          owner: ownerEntityId,
+          account: accountId,
+        });
+      }
+      visible.add(accountId);
+      created.push(accountId);
+      continue;
+    }
+    if (visible.has(accountId)) continue;
+    halt('ACCOUNT_OPENED_MID_FRAME', { owner: ownerEntityId, account: accountId });
   }
+  return created;
 };
 
 /** Account id inside Admit, Apply or Create candidate operations. */
@@ -719,6 +1123,183 @@ const operationMatches = (
   && left.accountId === right.accountId
   && left.resultKind === right.resultKind;
 
+type RustPeerVerdictParity = Readonly<{
+  outcome: 'applied' | 'rejected' | 'failed';
+  committedFrames: readonly Readonly<{
+    frame: AccountFrame;
+    committedViaNewFrame: boolean;
+  }>[];
+  responseAckHanko: string | null;
+}>;
+
+const projectRustPeerVerdict = (
+  verdict: Wave['applied'][number]['verdict'],
+): RustPeerVerdictParity => {
+  switch (verdict.kind) {
+    case 'frameCommitted':
+      return {
+        outcome: 'applied',
+        committedFrames: [verdict.committedFrame],
+        responseAckHanko: verdict.ackHanko,
+      };
+    case 'ackCommitted':
+      return {
+        outcome: 'applied',
+        committedFrames: [verdict.committedFrame],
+        responseAckHanko: null,
+      };
+    case 'frameDuplicate':
+      return {
+        outcome: 'applied',
+        committedFrames: [],
+        responseAckHanko: verdict.ackHanko,
+      };
+    case 'frameCollisionIgnored':
+    case 'frameStale':
+    case 'ackStale':
+      return { outcome: 'applied', committedFrames: [], responseAckHanko: null };
+    case 'frameRejected':
+    case 'ackRejected':
+    case 'frameAckRejected':
+      return { outcome: 'rejected', committedFrames: [], responseAckHanko: null };
+    case 'failed':
+      return { outcome: 'failed', committedFrames: [], responseAckHanko: null };
+    case 'frameAckApplied': {
+      const ack = projectRustPeerVerdict(verdict.ackVerdict);
+      const frame = projectRustPeerVerdict(verdict.frameVerdict);
+      if (ack.outcome !== 'applied' || frame.outcome !== 'applied') {
+        return halt('FRAME_ACK_CHILD_TERMINAL_INVALID', {
+          ack: ack.outcome,
+          frame: frame.outcome,
+        });
+      }
+      return {
+        outcome: 'applied',
+        committedFrames: [...ack.committedFrames, ...frame.committedFrames],
+        responseAckHanko: frame.responseAckHanko,
+      };
+    }
+  }
+};
+
+const rustProposalFrame = (
+  frame: Wave['proposals'][number]['frame'],
+): AccountFrame | null => {
+  if (frame === null) return null;
+  const { hanko: _hanko, ...accountFrame } = frame;
+  return accountFrame;
+};
+
+/** Bind exact proposal order, terminal shape, frame and dropped rows. */
+export const assertAuthorityStageProposalParity = (
+  ownerEntityId: string,
+  stageKey: Uint8Array,
+  expected: Extract<AuthorityWave, { kind: 'wave' }>['entities'][number]['expectedProposals'],
+  actual: Pick<Wave, 'proposals'>,
+): void => {
+  const stageKeyHex = Buffer.from(stageKey).toString('hex');
+  if (actual.proposals.length !== expected.length) {
+    return halt('ENTITY_STAGE_PROPOSAL_COUNT_MISMATCH', {
+      owner: ownerEntityId,
+      stageKey: stageKeyHex,
+      typescript: expected.length,
+      rust: actual.proposals.length,
+    });
+  }
+  for (const [attemptIndex, expectedRow] of expected.entries()) {
+    const actualRow = actual.proposals[attemptIndex]
+      ?? halt('ENTITY_STAGE_PROPOSAL_ROW_MISSING', {
+        owner: ownerEntityId,
+        stageKey: stageKeyHex,
+        attemptIndex,
+      });
+    const actualFrame = rustProposalFrame(actualRow.frame);
+    if (
+      actualRow.accountId !== expectedRow.accountId
+      || (actualFrame !== null) !== (expectedRow.outcome === 'proposed')
+      || safeStringify(actualFrame) !== safeStringify(expectedRow.frame)
+      || safeStringify(actualRow.dropped) !== safeStringify(expectedRow.dropped)
+    ) {
+      halt('ENTITY_STAGE_PROPOSAL_VERDICT_MISMATCH', {
+        owner: ownerEntityId,
+        stageKey: stageKeyHex,
+        attemptIndex,
+        account: expectedRow.accountId,
+        typescript: expectedRow,
+        rust: {
+          accountId: actualRow.accountId,
+          frame: actualFrame,
+          dropped: actualRow.dropped,
+        },
+      });
+    }
+    if (actualFrame !== null && computeFrameHash(actualFrame) !== actualFrame.stateHash) {
+      halt('ENTITY_STAGE_PROPOSAL_FRAME_HASH_INVALID', {
+        owner: ownerEntityId,
+        stageKey: stageKeyHex,
+        attemptIndex,
+        account: expectedRow.accountId,
+      });
+    }
+  }
+};
+
+/**
+ * Bind every Rust result row to the exact TypeScript Account transition that
+ * produced the parent Entity candidate. Full committed frame evidence stays
+ * ordered; FrameAck is one operation whose evidence is ACK then frame.
+ */
+export const assertAuthorityStageVerdictParity = (
+  ownerEntityId: string,
+  stageKey: Uint8Array,
+  operations: readonly AuthorityWaveOperation[],
+  result: Pick<Wave, 'admissions' | 'applied'>,
+): void => {
+  const admissions = new Map(result.admissions.map(row => [row.operationIndex, row]));
+  const applied = new Map(result.applied.map(row => [row.operationIndex, row]));
+  for (const operation of [...operations].sort((left, right) =>
+    left.arrivalIndex - right.arrivalIndex)) {
+    const detail = {
+      owner: ownerEntityId,
+      stageKey: Buffer.from(stageKey).toString('hex'),
+      arrivalIndex: operation.arrivalIndex,
+      operationIndex: operation.operationIndex,
+      account: operation.accountId,
+    };
+    if (operation.expectedVerdict.kind === 'create') continue;
+    if (operation.expectedVerdict.kind === 'admission') {
+      const actual = admissions.get(operation.operationIndex)?.verdict;
+      if (
+        actual?.kind !== 'admitted'
+        || actual.count !== operation.expectedVerdict.admittedCount
+      ) {
+        halt('ENTITY_STAGE_ADMISSION_VERDICT_MISMATCH', {
+          ...detail,
+          typescript: operation.expectedVerdict,
+          rust: actual ?? null,
+        });
+      }
+      continue;
+    }
+    const actualRow = applied.get(operation.operationIndex)
+      ?? halt('ENTITY_STAGE_PEER_VERDICT_MISSING', detail);
+    const actual = projectRustPeerVerdict(actualRow.verdict);
+    const expected = operation.expectedVerdict;
+    if (
+      actual.outcome !== expected.outcome
+      || actual.responseAckHanko !== expected.responseAckHanko
+      || safeStringify(actual.committedFrames) !== safeStringify(expected.committedFrames)
+    ) {
+      halt('ENTITY_STAGE_PEER_VERDICT_MISMATCH', {
+        ...detail,
+        typescript: expected,
+        rust: actual,
+        rustKind: actualRow.verdict.kind,
+      });
+    }
+  }
+};
+
 /**
  * The collector ledger must itself be a bijection with what is put on the
  * process wire. Otherwise a missing Create is invisible (it returns no row),
@@ -727,13 +1308,15 @@ const operationMatches = (
 export const assertAuthorityWaveOperationLedger = (
   wave: Extract<AuthorityWave, { kind: 'wave' }>,
 ): void => {
-  const operationIndices = new Set<number>();
+  const operationIndices = new Set<string>();
   const arrivalIndices = new Set<number>();
-  const appliedMetadata = new Map(wave.inputs.map(input => [input.operationIndex, input]));
+  const appliedMetadata = new Map(wave.inputs.map(input => [
+    `${input.ownerEntityId}/${input.operationIndex}`,
+    input,
+  ]));
   if (appliedMetadata.size !== wave.inputs.length) {
     halt('OPERATION_LEDGER_MISMATCH', { reason: 'duplicateInputMetadata' });
   }
-  let operationCount = 0;
   let appliedCount = 0;
   for (const entity of wave.entities) {
     if (entity.ops.length !== entity.operations.length) {
@@ -782,7 +1365,8 @@ export const assertAuthorityWaveOperationLedger = (
           arrivalIndex: ledger.arrivalIndex,
         });
       }
-      if (operationIndices.has(ledger.operationIndex)) {
+      const operationKey = `${entity.ownerEntityId}/${ledger.operationIndex}`;
+      if (operationIndices.has(operationKey)) {
         halt('OPERATION_LEDGER_MISMATCH', {
           reason: 'duplicateOperationIndex',
           operationIndex: ledger.operationIndex,
@@ -794,11 +1378,9 @@ export const assertAuthorityWaveOperationLedger = (
           arrivalIndex: ledger.arrivalIndex,
         });
       }
-      operationIndices.add(ledger.operationIndex);
+      operationIndices.add(operationKey);
       arrivalIndices.add(ledger.arrivalIndex);
-      operationCount += 1;
-
-      const metadata = appliedMetadata.get(ledger.operationIndex);
+      const metadata = appliedMetadata.get(operationKey);
       if (ledger.resultKind === 'applied') {
         appliedCount += 1;
         if (
@@ -830,16 +1412,8 @@ export const assertAuthorityWaveOperationLedger = (
       metadata: wave.inputs.length,
     });
   }
-  const orderedArrivals = [...arrivalIndices].sort((left, right) => left - right);
-  for (let expected = 0; expected < operationCount; expected += 1) {
-    if (orderedArrivals[expected] !== expected) {
-      halt('OPERATION_LEDGER_MISMATCH', {
-        reason: 'arrivalCoverage',
-        expected,
-        actual: orderedArrivals[expected] ?? null,
-      });
-    }
-  }
+  // Discarded parent stages intentionally leave gaps. Retained global arrival
+  // values still preserve exact order and must never be renumbered.
 };
 
 /**
@@ -1043,12 +1617,15 @@ const projectionDiff = (
 const engineOutputsByAccount = (wave: Wave): Map<string, ShadowOutputRow[]> => {
   const byAccount = new Map<string, ShadowOutputRow[]>();
   for (const applied of wave.applied) {
-    const verdict = applied.verdict;
-    if (verdict.kind !== 'frameCommitted' && verdict.kind !== 'ackCommitted') continue;
-    if (verdict.outputs.length === 0) continue;
+    const verdicts = applied.verdict.kind === 'frameAckApplied'
+      ? [applied.verdict.ackVerdict, applied.verdict.frameVerdict]
+      : [applied.verdict];
     const rows = byAccount.get(applied.accountId) ?? [];
-    rows.push(...verdict.outputs.map(waveOutputRow));
-    byAccount.set(applied.accountId, rows);
+    for (const verdict of verdicts) {
+      if (verdict.kind !== 'frameCommitted' && verdict.kind !== 'ackCommitted') continue;
+      rows.push(...verdict.outputs.map(waveOutputRow));
+    }
+    if (rows.length > 0) byAccount.set(applied.accountId, rows);
   }
   return byAccount;
 };
@@ -1277,19 +1854,6 @@ const compareWithTypescript = async (
   }
 };
 
-const openEmptyCandidate = async (
-  env: RuntimeReplica,
-  session: Session,
-): Promise<PendingWave> => {
-  const candidate = await prepareTrackedCandidate(
-    session,
-    { entities: [] },
-    result => compareWithTypescript(env, session.ownerEntityId, result, new Map(), session),
-  );
-  report.waves += 1;
-  return candidate;
-};
-
 const assertCheckpointMatchesCandidate = (
   env: RuntimeReplica,
   candidate: PendingWave,
@@ -1345,20 +1909,20 @@ export const prepareAuthorityCheckpoint = async (
   checkpointRequested: boolean,
 ): Promise<readonly AuthorityCheckpointStorageInput[]> => {
   if (!authorityDriverEnabled(env) || !checkpointRequested) return [];
-  const candidates = pending.get(env) ?? [];
-  if (!pending.has(env)) pending.set(env, candidates);
-  const byOwner = new Map(candidates.map(candidate => [candidate.session.ownerEntityId, candidate]));
-  for (const session of sessionEntriesForRuntime(env)) {
-    if (byOwner.has(session.ownerEntityId)) continue;
-    const candidate = await openEmptyCandidate(env, session);
-    candidates.push(candidate);
-    byOwner.set(session.ownerEntityId, candidate);
-  }
+  const candidates = pending.get(env);
+  if (candidates === undefined) return halt('CHECKPOINT_CANDIDATE_MISSING', {});
   const inputs: AuthorityCheckpointStorageInput[] = [];
   for (const candidate of [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
     if (candidate.checkpoint) {
       halt('CHECKPOINT_ALREADY_EXPORTED', { owner: candidate.session.ownerEntityId });
+    }
+    if (!candidate.sealed || candidate.openStage !== null) {
+      return halt('CHECKPOINT_CANDIDATE_NOT_SEALED', {
+        owner: candidate.session.ownerEntityId,
+        sealed: candidate.sealed,
+        open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
+      });
     }
     const checkpoint = await candidate.session.client.getCheckpointChanges(candidate.token);
     assertCheckpointMatchesCandidate(env, candidate, checkpoint);
@@ -1482,6 +2046,13 @@ export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> =>
   const ordered = [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId));
   for (const candidate of ordered) {
+    if (!candidate.sealed || candidate.openStage !== null) {
+      return halt('COMMIT_CANDIDATE_NOT_SEALED', {
+        owner: candidate.session.ownerEntityId,
+        sealed: candidate.sealed,
+        open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
+      });
+    }
     const committed = decodeCommitResponse(
       candidate.session.ownerEntityId,
       await candidate.session.client.commit(candidate.token),
@@ -1515,7 +2086,38 @@ export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> =>
     }
     report.checkpointsCommitted += 1;
   }
+  // Membership becomes observable only after the Runtime WAL and every Rust
+  // candidate commit succeeded. Abort and pre-WAL failures therefore cannot
+  // leave a TS-side cache claiming that an uncommitted Create exists.
+  for (const candidate of ordered) {
+    const accounts = accountsOf(env, candidate.session.ownerEntityId);
+    for (const accountId of candidate.createdAccounts) {
+      if (candidate.session.seeded.has(accountId)) {
+        halt('ACCOUNT_CREATE_PROMOTION_DUPLICATE', {
+          owner: candidate.session.ownerEntityId,
+          account: accountId,
+        });
+      }
+      const account = accounts.get(accountId)
+        ?? findAccountByCounterparty(
+          accounts,
+          candidate.session.ownerEntityId,
+          accountId,
+        );
+      if (account == null) {
+        halt('ACCOUNT_CREATE_PROMOTION_MISSING', {
+          owner: candidate.session.ownerEntityId,
+          account: accountId,
+        });
+        continue;
+      }
+      candidate.session.seeded.add(accountId);
+      candidate.session.seededProjection.set(accountId, projectEntityAccountLeaf(account));
+      report.accountsSeeded += 1;
+    }
+  }
   pending.delete(env);
+  arrivalCursors.delete(env);
 };
 
 /** The Runtime could not make its record durable: the engines take it back. */
@@ -1529,6 +2131,7 @@ export const abortAuthorityWave = async (env: RuntimeReplica): Promise<void> => 
     report.aborts += 1;
   }
   pending.delete(env);
+  arrivalCursors.delete(env);
 };
 
 export const printAuthorityDriverReport = (): void => {
@@ -1545,6 +2148,7 @@ export const discardAuthorityRuntime = async (env: RuntimeReplica): Promise<void
   sessions.delete(env);
   captured.delete(env);
   pending.delete(env);
+  arrivalCursors.delete(env);
   delete env.accountAuthorityFrameId;
 };
 
@@ -1556,4 +2160,5 @@ export const shutdownAuthorityDriver = async (): Promise<void> => {
   sessions.clear();
   captured.clear();
   pending.clear();
+  arrivalCursors.clear();
 };

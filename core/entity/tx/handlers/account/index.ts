@@ -23,6 +23,7 @@ import {
   type PreparedAccountConsensusRun,
 } from './input-phases';
 import { applyAccountInput } from '../../../../account/consensus';
+import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
 import {
   buildAccountHandlerResult,
   type AccountHandlerResult,
@@ -31,6 +32,10 @@ import { addMessage } from '../../../frame-events';
 import { safeStringify } from '../../../../protocol/serialization';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { traceAccountApplyHop } from '../../../../support/performance/account-delivery-trace';
+import {
+  authorityRecordEnabled,
+  noteAuthorityAccountCreate,
+} from '../../../../rscore/authority-wave';
 
 export {
   canProcessFrozenAccountInput,
@@ -179,6 +184,18 @@ const prepareAccountInputToEntity = (
     );
   }
   const { account, counterpartyId, createdAccount } = resolution;
+  if (createdAccount && authorityRecordEnabled()) {
+    // The inbound H=0 replica is complete here but has not consumed the peer's
+    // H=1 input yet. Create must occupy the immediately preceding wave slot;
+    // seeding the post-input replica would hide the very transition Rust owns.
+    noteAuthorityAccountCreate(
+      accountConsensusContext.accountAuthorityFrameId,
+      state.entityId,
+      counterpartyId,
+      account,
+      requireAccountDeltaTransformerAddress(accountConsensusContext, account.state),
+    );
+  }
   checkpointProfile('accountResolve');
   if (rejectFrozenAccountInput(state, account, input, counterpartyId)) {
     return { kind: 'terminal', result: buildAccountHandlerResult(state, effects) };

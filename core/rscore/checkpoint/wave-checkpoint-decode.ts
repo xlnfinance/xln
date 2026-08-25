@@ -4,7 +4,10 @@ import {
   decodeRscoreCheckpointSectionEntry,
   type RscoreCheckpointSectionName,
 } from './checkpoint-restore-state';
-import { decodeRscoreAccountRestoreRow } from './checkpoint-restore';
+import {
+  decodeRscoreAccountRestoreRow,
+  type RscoreDecodedAccountRestore,
+} from './checkpoint-restore';
 import {
   rscoreCheckpointBytes,
   rscoreCheckpointList,
@@ -66,6 +69,8 @@ export type RscoreAccountCheckpointRow = Readonly<{
     rebalanceFeePolicies: RscoreCheckpointNodeChanges;
   }>;
   consensus: readonly RscoreWireValue[];
+  /** Fully decoded and independently commitment-checked materialization seed. */
+  decoded: RscoreDecodedAccountRestore;
   /** Exact 10-field row for the canonical storage materializer. */
   wire: readonly RscoreWireValue[];
 }>;
@@ -317,7 +322,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     section,
     validateFullTree(section, sections[section], nodeChanges[section]),
   ])) as Record<RscoreCheckpointSectionName, readonly RscoreWireValue[]>;
-  decodeRscoreAccountRestoreRow([
+  const decoded = decodeRscoreAccountRestoreRow([
     row[0] as RscoreWireValue,
     row[1] as RscoreWireValue,
     row[2] as RscoreWireValue,
@@ -337,6 +342,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     sections,
     nodeChanges,
     consensus: rscoreCheckpointTuple(row[9], 11, 'WAVE_POST_ACCOUNT_CONSENSUS'),
+    decoded,
     wire: row,
   };
 };

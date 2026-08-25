@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 
 import {
   accountEnvelopeWire,
+  accountPeerFrameWire,
   accountConsensusWire,
   accountSeedWire,
   accountTxWire,
@@ -13,11 +14,14 @@ import {
   swapMarketPolicyWire,
   waveAdmitOp,
   waveCreateOp,
+  waveInputOp,
 } from '../../rscore/shadow-wire';
 import { waveParityDigest } from '../../rscore/wave-decode';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import { verifyHankoForHash } from '../../hanko/signing';
+import { buildSingleSignerHanko } from '../../hanko/batch';
+import { safeStringify } from '../../protocol/serialization';
 import {
   RSCORE_PROCESS_ABI_VERSION,
   RSCORE_PROTOCOL_FINGERPRINT,
@@ -29,6 +33,7 @@ import {
   loadRscoreCheckpoint,
   prepareRscoreCheckpointStorage,
 } from '../../storage/schema/rscore/checkpoint';
+import type { RscoreDisputeDraft } from '../../rscore/checkpoint/checkpoint-restore-consensus';
 import type { RuntimeDbLike } from '../../storage/types';
 import { computeFrameHash } from '../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../account/commitment/state-root';
@@ -44,7 +49,7 @@ import { PersistentAccountStateMap } from '../../account/state/persistent-state-
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
 import { addr, makeAccount } from '../helpers/cross-j';
-import type { AccountReplica, AccountTx } from '../../types/account';
+import type { AccountFrame, AccountReplica, AccountTx } from '../../types/account';
 
 const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
 const POISONED_PROCESS = join(
@@ -166,22 +171,112 @@ const identity = () => ({
   sessionId: Buffer.alloc(16, 0x20),
 });
 
-const proposeAndSeal = async (
+const exactHankoBytes = (hanko: string): Buffer => {
+  const clean = hanko.startsWith('0x') ? hanko.slice(2) : hanko;
+  if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {
+    throw new Error(`RSCORE_TEST_HANKO_INVALID:${clean.length}`);
+  }
+  return Buffer.from(clean, 'hex');
+};
+
+const peerDisputeWire = (
+  dispute: RscoreDisputeDraft,
+  signer: Readonly<{ entityId: string; privateKey: Uint8Array }>,
+): RscoreWireValue => [
+  exactHankoBytes(buildSingleSignerHanko(
+    signer.entityId,
+    dispute.hash,
+    signer.privateKey,
+  )),
+  hexToWireBytes(dispute.hash, 32, 'TEST_PEER_DISPUTE_HASH'),
+  hexToWireBytes(dispute.proofBodyHash, 32, 'TEST_PEER_PROOF_BODY_HASH'),
+  dispute.nonce,
+  dispute.proposerIsLeft,
+];
+
+const peerProposalWire = (
+  frame: AccountFrame & Readonly<{ hanko: string }>,
+  dispute: RscoreDisputeDraft | undefined,
+  signer: Readonly<{ entityId: string; privateKey: Uint8Array }>,
+): RscoreWireValue => [
+  accountPeerFrameWire(frame),
+  exactHankoBytes(frame.hanko),
+  dispute === undefined ? null : peerDisputeWire(dispute, signer),
+];
+
+const exactPeerInputOp = (
+  operationIndex: number,
+  accountId: string,
+  fromEntityId: string,
+  toEntityId: string,
+  account: AccountReplica,
+  kind: RscoreWireValue,
+): RscoreWireValue => waveInputOp([
+  operationIndex,
+  hexToWireBytes(accountId, 32, 'TEST_PEER_ACCOUNT'),
+  [
+    hexToWireBytes(fromEntityId, 32, 'TEST_PEER_FROM'),
+    hexToWireBytes(toEntityId, 32, 'TEST_PEER_TO'),
+    [
+      account.state.domain.chainId,
+      hexToWireBytes(
+        account.state.domain.depositoryAddress,
+        20,
+        'TEST_PEER_DEPOSITORY',
+      ),
+    ],
+    [
+      account.state.disputeConfig.leftResponseSeconds,
+      account.state.disputeConfig.rightResponseSeconds,
+    ],
+    hexToWireBytes(account.state.watchSeed, 32, 'TEST_PEER_WATCH_SEED'),
+    kind,
+  ],
+]);
+
+const stageAndSeal = async (
   client: RscoreProcessClient,
   token: Uint8Array,
   ownerEntityId: string,
+  ops: readonly RscoreWireValue[],
   accountIds: readonly string[],
 ) => {
-  if (accountIds.length !== 0) {
-    await client.proposeAccountWave(token, {
-      entities: [{
-        ownerEntityId: hexToWireBytes(ownerEntityId, 32, 'TEST_WAVE_OWNER'),
-        accountIds: accountIds.map(accountId =>
-          hexToWireBytes(accountId, 32, 'TEST_WAVE_ACCOUNT')),
-      }],
-    });
-  }
-  return client.sealAccountWave(token);
+  const stageKey = createHash('sha256')
+    .update('xln.rscore.test.entity-stage')
+    .update(token)
+    .update(ownerEntityId)
+    .digest();
+  await client.beginEntityStage(token, stageKey, 0, {
+    ownerEntityId: hexToWireBytes(ownerEntityId, 32, 'TEST_WAVE_OWNER'),
+    timestamp: 1_700_000_000_000,
+    jHeight: 100,
+    entityTimestamp: 1_700_000_000_000,
+    finalizedJHeight: 100,
+    propose: true,
+  });
+  const applied = ops.length === 0
+    ? null
+    : await client.applyAccountWave(token, stageKey, {
+        entities: [{
+          ownerEntityId: hexToWireBytes(ownerEntityId, 32, 'TEST_WAVE_OWNER'),
+          ops,
+        }],
+      });
+  const proposed = accountIds.length === 0
+    ? null
+    : await client.proposeAccountWave(token, stageKey, {
+        entities: [{
+          ownerEntityId: hexToWireBytes(ownerEntityId, 32, 'TEST_WAVE_OWNER'),
+          accountIds: accountIds.map(accountId =>
+            hexToWireBytes(accountId, 32, 'TEST_WAVE_ACCOUNT')),
+        }],
+      });
+  await client.finalizeEntityStage(token, stageKey, 0);
+  return {
+    applied,
+    proposed,
+    sealed: await client.sealAccountWave(token),
+  };
 };
 
 // Live TS→Rust IPC over the real binary: hello → restore(empty) → summary →
@@ -336,17 +431,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       const loaded = (await client.bootstrapAccounts(0, [])) as unknown[];
       expect(loaded[0]).toBe(0);
 
-      const { result, token } = await client.prepareAccountWave({
-        entities: [{
-          ownerEntityId: hexToWireBytes(`0x${'11'.repeat(32)}`, 32, 'TEST_OWNER'),
-          timestamp: 1_700_000_000_000,
-          jHeight: 100,
-          entityTimestamp: 1_700_000_000_000,
-          finalizedJHeight: 100,
-          propose: true,
-          ops: [],
-        }],
-      });
+      const { result, token } = await client.prepareAccountWave({ entities: [] });
       expect(token).toHaveLength(32);
       // No accounts, so nothing moved and nothing was proposed — but the wave
       // is still a candidate that must be committed or taken back.
@@ -355,17 +440,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       expect(result.admissions).toEqual([]);
 
       await expect(
-        client.prepareAccountWave({
-          entities: [{
-            ownerEntityId: hexToWireBytes(`0x${'11'.repeat(32)}`, 32, 'TEST_OWNER'),
-            timestamp: 1_700_000_000_001,
-            jHeight: 100,
-            entityTimestamp: 1_700_000_000_001,
-            finalizedJHeight: 100,
-            propose: true,
-            ops: [],
-          }],
-        }),
+        client.prepareAccountWave({ entities: [] }),
       ).rejects.toThrow('RSCORE_CLIENT_AUTHORITY_CANDIDATE_PENDING');
 
       await expect(client.commit(token))
@@ -373,6 +448,107 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       await client.sealAccountWave(token);
       const committed = (await client.commit(token)) as unknown[];
       expect(committed[0]).toBe(0);
+
+      await client.shutdown();
+    } finally {
+      client.kill();
+    }
+  });
+
+  test('entity stages bind every mutation and advance only accepted inputs', async () => {
+    const client = new RscoreProcessClient(BINARY, identity());
+    try {
+      const seed = `0x${'7a'.repeat(32)}`;
+      await client.hello(2, swapMarketPolicyWire(), {
+        privateKey: deriveSignerKeySync(seed, '1'),
+        signerId: '1',
+      });
+      await client.bootstrapAccounts(0, []);
+
+      const prepared = await client.prepareAccountWave({ entities: [] });
+      const ownerEntityId = Buffer.alloc(32, 0x11);
+      const context = {
+        ownerEntityId,
+        timestamp: 1_700_000_000_000,
+        jHeight: 100,
+        entityTimestamp: 1_700_000_000_000,
+        finalizedJHeight: 100,
+        propose: true,
+      } as const;
+      const rolledBackKey = Buffer.alloc(32, 0x41);
+      const acceptedKey = Buffer.alloc(32, 0x42);
+      const wrongKey = Buffer.alloc(32, 0x43);
+
+      const opened = await client.beginEntityStage(
+        prepared.token,
+        rolledBackKey,
+        0,
+        context,
+      );
+      expect(opened).toEqual({
+        stageKey: rolledBackKey,
+        status: 'open',
+        acceptedStageOrdinal: 0,
+        revision: 0,
+        accountsRoot: Buffer.alloc(32),
+      });
+
+      await expect(client.applyAccountWave(prepared.token, wrongKey, { entities: [] }))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_KEY_MISMATCH:APPLY');
+      await expect(client.proposeAccountWave(prepared.token, wrongKey, { entities: [] }))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_KEY_MISMATCH:PROPOSE');
+      await expect(client.sealAccountWave(prepared.token))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_ACTIVE:SEAL');
+      await expect(client.getCheckpointChanges(prepared.token))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_ACTIVE:CHECKPOINT');
+      await expect(client.commit(prepared.token))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_ACTIVE:COMMIT');
+
+      const applied = await client.applyAccountWave(
+        prepared.token,
+        rolledBackKey,
+        { entities: [] },
+      );
+      expect(applied.revision).toBe(0);
+      const rolledBack = await client.discardEntityStage(
+        prepared.token,
+        rolledBackKey,
+        0,
+      );
+      expect(rolledBack.status).toBe('rolled_back');
+      expect(rolledBack.acceptedStageOrdinal).toBe(0);
+
+      await expect(client.beginEntityStage(prepared.token, acceptedKey, 1, context))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_ORDINAL_MISMATCH:BEGIN_ENTITY:1:0');
+      await client.beginEntityStage(prepared.token, acceptedKey, 0, context);
+      const proposed = await client.proposeAccountWave(
+        prepared.token,
+        acceptedKey,
+        { entities: [] },
+      );
+      expect(proposed.revision).toBe(0);
+      const accepted = await client.finalizeEntityStage(
+        prepared.token,
+        acceptedKey,
+        0,
+      );
+      expect(accepted.status).toBe('accepted');
+      expect(accepted.acceptedStageOrdinal).toBe(1);
+
+      await expect(client.beginEntityStage(prepared.token, wrongKey, 0, context))
+        .rejects.toThrow('RSCORE_CLIENT_ENTITY_STAGE_ORDINAL_MISMATCH:BEGIN_ENTITY:0:1');
+      await client.sealAccountWave(prepared.token);
+      await client.commit(prepared.token);
+
+      // Abort is the one candidate terminal operation allowed with an open
+      // Entity stage: process ambiguity poisons, but a successful reply clears
+      // the complete candidate and its savepoint together.
+      const abortable = await client.prepareAccountWave({ entities: [] });
+      await client.beginEntityStage(abortable.token, wrongKey, 0, context);
+      await client.abort(abortable.token);
+      const afterAbort = await client.prepareAccountWave({ entities: [] });
+      await client.sealAccountWave(afterAbort.token);
+      await client.abort(afterAbort.token);
 
       await client.shutdown();
     } finally {
@@ -438,8 +614,17 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       });
       await client.bootstrapAccounts(0, []);
       const prepared = await client.prepareAccountWave({ entities: [] });
+      const stageKey = Buffer.alloc(32, 0x31);
+      await client.beginEntityStage(prepared.token, stageKey, 0, {
+        ownerEntityId: Buffer.alloc(32, 0x11),
+        timestamp: 1,
+        jHeight: 1,
+        entityTimestamp: 1,
+        finalizedJHeight: 1,
+        propose: false,
+      });
 
-      await expect(client.applyAccountWave(prepared.token, {
+      await expect(client.applyAccountWave(prepared.token, stageKey, {
         entities: [{
           ownerEntityId: Buffer.alloc(32, 0x11),
           ops: [Number.MAX_SAFE_INTEGER + 1],
@@ -503,34 +688,24 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       const wireTx = accountTxWire(tx);
       expect(wireTx).not.toBeNull();
 
-      const request = {
-        entities: [{
-          ownerEntityId: hexToWireBytes(owner, 32, 'TEST_OWNER'),
-          timestamp: 1_700_000_000_000,
-          jHeight: 100,
-          entityTimestamp: 1_700_000_000_000,
-          finalizedJHeight: 100,
-          propose: true,
-          ops: [waveAdmitOp(0, counterparty, [wireTx])],
-        }],
-      };
-      const first = await client.prepareAccountWave(request);
-      const firstApply = first.result;
+      const stagedOps = [waveAdmitOp(0, counterparty, [wireTx])];
+      const first = await client.prepareAccountWave({ entities: [] });
+      const {
+        applied: firstApply,
+        proposed: firstProposal,
+        sealed: wave,
+      } = await stageAndSeal(client, first.token, owner, stagedOps, [counterparty]);
+      if (firstApply === null || firstProposal === null) {
+        throw new Error('RSCORE_TEST_EXPECTED_STAGED_PAYMENT');
+      }
       expect(firstApply.admissions).toEqual([{
         operationIndex: 0,
         accountId: counterparty,
         verdict: { kind: 'admitted', count: 1 },
       }]);
       expect(firstApply.proposals).toEqual([]);
-      const firstProposal = await client.proposeAccountWave(first.token, {
-        entities: [{
-          ownerEntityId: hexToWireBytes(owner, 32, 'TEST_OWNER'),
-          accountIds: [hexToWireBytes(counterparty, 32, 'TEST_ACCOUNT')],
-        }],
-      });
       expect(firstProposal.admissions).toEqual([]);
       expect(firstProposal.proposals).toHaveLength(1);
-      const wave = await client.sealAccountWave(first.token);
       expect(wave.proposals).toHaveLength(1);
       expect(wave.proposals[0]!.accountId).toBe(counterparty);
       expect(wave.proposals[0]!.dropped).toEqual([]);
@@ -581,12 +756,18 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       // A runtime that could not make its own record durable takes the wave
       // back, and the same request reaches the same candidate again.
       await client.abort(first.token);
-      const second = await client.prepareAccountWave(request);
+      const second = await client.prepareAccountWave({ entities: [] });
       expect(second.token).toHaveLength(32);
       expect(second.token.equals(first.token)).toBe(false);
       await expect(client.abort(first.token))
         .rejects.toThrow('RSCORE_CLIENT_AUTHORITY_TOKEN_MISMATCH:ABORT');
-      const again = await proposeAndSeal(client, second.token, owner, [counterparty]);
+      const again = (await stageAndSeal(
+        client,
+        second.token,
+        owner,
+        stagedOps,
+        [counterparty],
+      )).sealed;
       expect(again.parityDigest).toBe(wave.parityDigest);
 
       const committed = (await client.commit(second.token)) as unknown[];
@@ -596,6 +777,336 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       await client.shutdown();
     } finally {
       client.kill();
+    }
+  });
+
+  test('exact Frame, Ack and atomic ACK-first FrameAck cross the real process ABI', async () => {
+    const payerClient = new RscoreProcessClient(BINARY, identity());
+    const payeeClient = new RscoreProcessClient(BINARY, {
+      ...identity(),
+      sessionId: Buffer.alloc(16, 0x21),
+    });
+    try {
+      const seed = `0x${'7a'.repeat(32)}`;
+      const market = swapMarketPolicyWire();
+      const payerKey = deriveSignerKeySync(seed, '1');
+      const payeeKey = deriveSignerKeySync(seed, '2');
+      const payerHello = exactTuple(await payerClient.hello(2, market, {
+        privateKey: payerKey,
+        signerId: '1',
+      }), 6, 'payer hello');
+      const payeeHello = exactTuple(await payeeClient.hello(2, market, {
+        privateKey: payeeKey,
+        signerId: '2',
+      }), 6, 'payee hello');
+      const payer = `0x${exactBytes(payerHello[5], 32, 'payer owner').toString('hex')}`
+        .toLowerCase();
+      const payee = `0x${exactBytes(payeeHello[5], 32, 'payee owner').toString('hex')}`
+        .toLowerCase();
+      const payerAccount = makeAccount(payer, payee);
+      const payeeAccount = makeAccount(payee, payer);
+      payerAccount.proofHeader.nextProofNonce = 1;
+      payeeAccount.proofHeader.nextProofNonce = 1;
+      const payerRestore = exactRestoreFixture(payer, payee, payerAccount, '1');
+      const payeeRestore = exactRestoreFixture(payee, payer, payeeAccount, '2');
+      expect(await payerClient.restoreExact(payerRestore.token, payerRestore.accounts))
+        .toEqual(payerRestore.token);
+      expect(await payeeClient.restoreExact(payeeRestore.token, payeeRestore.accounts))
+        .toEqual(payeeRestore.token);
+
+      const firstTx: AccountTx = {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 25n,
+          route: [payee],
+          fromEntityId: payer,
+          toEntityId: payee,
+          deliveryMode: 'direct',
+        },
+      };
+      const firstTxWire = accountTxWire(firstTx);
+      if (firstTxWire === null) throw new Error('RSCORE_TEST_FIRST_TX_WIRE');
+      const firstPrepared = await payerClient.prepareAccountWave({ entities: [] });
+      const firstSealed = (await stageAndSeal(
+        payerClient,
+        firstPrepared.token,
+        payer,
+        [waveAdmitOp(0, payee, [firstTxWire])],
+        [payee],
+      )).sealed;
+      const firstFrame = firstSealed.proposals[0]?.frame;
+      if (firstFrame === null || firstFrame === undefined) {
+        throw new Error('RSCORE_TEST_FIRST_FRAME');
+      }
+      const firstProposalDispute = firstSealed.postAccounts
+        .find(row => row.accountId === payee)
+        ?.decoded.consensus.pending?.proposalDispute;
+      if (firstProposalDispute === undefined) {
+        throw new Error('RSCORE_TEST_FIRST_PROPOSAL_DISPUTE');
+      }
+      await payerClient.commit(firstPrepared.token);
+
+      const frameOp = exactPeerInputOp(
+        0,
+        payer,
+        payer,
+        payee,
+        payeeAccount,
+        [0, peerProposalWire(firstFrame, firstProposalDispute, {
+          entityId: payer,
+          privateKey: payerKey,
+        })],
+      );
+      const framePrepared = await payeeClient.prepareAccountWave({ entities: [] });
+      const frameStage = await stageAndSeal(
+        payeeClient,
+        framePrepared.token,
+        payee,
+        [frameOp],
+        [],
+      );
+      if (frameStage.applied === null) throw new Error('RSCORE_TEST_FRAME_RESULT');
+      expect(frameStage.applied.applied).toHaveLength(1);
+      const frameVerdict = frameStage.applied.applied[0]?.verdict;
+      if (frameVerdict?.kind !== 'frameCommitted') {
+        throw new Error(`RSCORE_TEST_FRAME_VERDICT:${safeStringify(frameVerdict)}`);
+      }
+      expect(frameVerdict.height).toBe(1);
+      expect(waveParityDigest(frameStage.applied)).toBe(frameStage.applied.parityDigest);
+      const firstAckDispute = frameStage.applied.postAccounts
+        .find(row => row.accountId === payer)
+        ?.decoded.consensus.lastOutboundAck?.dispute;
+      if (firstAckDispute === undefined) {
+        throw new Error('RSCORE_TEST_FIRST_ACK_DISPUTE');
+      }
+      await payeeClient.commit(framePrepared.token);
+
+      const reverseTx: AccountTx = {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 7n,
+          route: [payer],
+          fromEntityId: payee,
+          toEntityId: payer,
+          deliveryMode: 'direct',
+        },
+      };
+      const reverseTxWire = accountTxWire(reverseTx);
+      if (reverseTxWire === null) throw new Error('RSCORE_TEST_REVERSE_TX_WIRE');
+      const successorPrepared = await payeeClient.prepareAccountWave({ entities: [] });
+      const successorSealed = (await stageAndSeal(
+        payeeClient,
+        successorPrepared.token,
+        payee,
+        [waveAdmitOp(0, payer, [reverseTxWire])],
+        [payer],
+      )).sealed;
+      const successorFrame = successorSealed.proposals[0]?.frame;
+      if (successorFrame === null || successorFrame === undefined) {
+        throw new Error('RSCORE_TEST_SUCCESSOR_FRAME');
+      }
+      const successorProposalDispute = successorSealed.postAccounts
+        .find(row => row.accountId === payer)
+        ?.decoded.consensus.pending?.proposalDispute;
+      if (successorProposalDispute === undefined) {
+        throw new Error('RSCORE_TEST_SUCCESSOR_PROPOSAL_DISPUTE');
+      }
+      expect(successorFrame.height).toBe(2);
+      await payeeClient.commit(successorPrepared.token);
+
+      const firstAckWire: RscoreWireValue = [
+        frameVerdict.height,
+        hexToWireBytes(frameVerdict.stateHash, 32, 'TEST_PEER_ACK_HASH'),
+        exactHankoBytes(frameVerdict.ackHanko),
+        peerDisputeWire(firstAckDispute, { entityId: payee, privateKey: payeeKey }),
+      ];
+      const validFrameAckOp = exactPeerInputOp(
+        0,
+        payee,
+        payee,
+        payer,
+        payerAccount,
+        [2, firstAckWire, peerProposalWire(successorFrame, successorProposalDispute, {
+          entityId: payee,
+          privateKey: payeeKey,
+        })],
+      );
+      const malformedFrame = {
+        ...successorFrame,
+        stateHash: `0x${'fe'.repeat(32)}`,
+      };
+      const malformedFrameAckOp = exactPeerInputOp(
+        0,
+        payee,
+        payee,
+        payer,
+        payerAccount,
+        [2, firstAckWire, peerProposalWire(malformedFrame, successorProposalDispute, {
+          entityId: payee,
+          privateKey: payeeKey,
+        })],
+      );
+
+      const firstComposite = await payerClient.prepareAccountWave({ entities: [] });
+      const malformedStageKey = Buffer.alloc(32, 0x91);
+      const compositeContext = {
+        ownerEntityId: hexToWireBytes(payer, 32, 'TEST_COMPOSITE_OWNER'),
+        timestamp: 1_700_000_000_001,
+        jHeight: 100,
+        entityTimestamp: 1_700_000_000_001,
+        finalizedJHeight: 100,
+        propose: false,
+      } as const;
+      await payerClient.beginEntityStage(
+        firstComposite.token,
+        malformedStageKey,
+        0,
+        compositeContext,
+      );
+      const malformed = await payerClient.applyAccountWave(
+        firstComposite.token,
+        malformedStageKey,
+        { entities: [{
+          ownerEntityId: compositeContext.ownerEntityId,
+          ops: [malformedFrameAckOp],
+        }] },
+      );
+      expect(malformed.applied).toHaveLength(1);
+      expect(malformed.revision).toBe(firstComposite.result.revision);
+      expect(malformed.accountsRoot).toBe(firstComposite.result.accountsRoot);
+      expect(malformed.applied[0]?.verdict).toMatchObject({
+        kind: 'frameAckRejected',
+        phase: 'frame',
+      });
+      expect(waveParityDigest(malformed)).toBe(malformed.parityDigest);
+      const discarded = await payerClient.discardEntityStage(
+        firstComposite.token,
+        malformedStageKey,
+        0,
+      );
+      expect(discarded.revision).toBe(firstComposite.result.revision);
+      expect(`0x${discarded.accountsRoot.toString('hex')}`)
+        .toBe(firstComposite.result.accountsRoot);
+
+      const validStageKey = Buffer.alloc(32, 0x92);
+      await payerClient.beginEntityStage(
+        firstComposite.token,
+        validStageKey,
+        0,
+        compositeContext,
+      );
+      const firstValid = await payerClient.applyAccountWave(
+        firstComposite.token,
+        validStageKey,
+        { entities: [{
+          ownerEntityId: compositeContext.ownerEntityId,
+          ops: [validFrameAckOp],
+        }] },
+      );
+      expect(firstValid.applied).toHaveLength(1);
+      const firstCompositeVerdict = firstValid.applied[0]?.verdict;
+      if (firstCompositeVerdict?.kind !== 'frameAckApplied') {
+        throw new Error(
+          `RSCORE_TEST_FRAME_ACK_VERDICT:${firstCompositeVerdict?.kind ?? 'missing'}`,
+        );
+      }
+      expect(firstCompositeVerdict.ackVerdict.kind).toBe('ackCommitted');
+      expect(firstCompositeVerdict.frameVerdict.kind).toBe('frameCommitted');
+      expect(firstCompositeVerdict.ackVerdict.height).toBe(1);
+      expect(firstCompositeVerdict.frameVerdict.height).toBe(2);
+      expect(waveParityDigest(firstValid)).toBe(firstValid.parityDigest);
+      await payerClient.finalizeEntityStage(firstComposite.token, validStageKey, 0);
+      const firstCompositeSealed = await payerClient.sealAccountWave(firstComposite.token);
+      const aborted = exactTuple(
+        await payerClient.abort(firstComposite.token),
+        2,
+        'composite abort',
+      );
+      expect(aborted[0]).toBe(firstComposite.result.revision);
+      expect(`0x${exactBytes(aborted[1], 32, 'composite aborted root').toString('hex')}`)
+        .toBe(firstComposite.result.accountsRoot);
+
+      const retryComposite = await payerClient.prepareAccountWave({ entities: [] });
+      expect(retryComposite.result.revision).toBe(firstComposite.result.revision);
+      expect(retryComposite.result.accountsRoot).toBe(firstComposite.result.accountsRoot);
+      await payerClient.beginEntityStage(
+        retryComposite.token,
+        validStageKey,
+        0,
+        compositeContext,
+      );
+      const retryValid = await payerClient.applyAccountWave(
+        retryComposite.token,
+        validStageKey,
+        { entities: [{
+          ownerEntityId: compositeContext.ownerEntityId,
+          ops: [validFrameAckOp],
+        }] },
+      );
+      expect(retryValid.applied).toHaveLength(1);
+      const retryVerdict = retryValid.applied[0]?.verdict;
+      if (retryVerdict?.kind !== 'frameAckApplied') {
+        throw new Error(`RSCORE_TEST_RETRY_FRAME_ACK:${retryVerdict?.kind ?? 'missing'}`);
+      }
+      expect(retryVerdict.ackVerdict.kind).toBe('ackCommitted');
+      expect(retryVerdict.frameVerdict.kind).toBe('frameCommitted');
+      await payerClient.finalizeEntityStage(retryComposite.token, validStageKey, 0);
+      const retrySealed = await payerClient.sealAccountWave(retryComposite.token);
+      expect(retrySealed.parityDigest).toBe(firstCompositeSealed.parityDigest);
+      expect(retrySealed.accountsRoot).toBe(firstCompositeSealed.accountsRoot);
+      await payerClient.commit(retryComposite.token);
+
+      if (retryVerdict.frameVerdict.kind !== 'frameCommitted') {
+        throw new Error('RSCORE_TEST_RETRY_FRAME_NOT_COMMITTED');
+      }
+      const successorAckDispute = retryValid.postAccounts
+        .find(row => row.accountId === payee)
+        ?.decoded.consensus.lastOutboundAck?.dispute;
+      if (successorAckDispute === undefined) {
+        throw new Error('RSCORE_TEST_SUCCESSOR_ACK_DISPUTE');
+      }
+      const successorAckWire: RscoreWireValue = [
+        retryVerdict.frameVerdict.height,
+        hexToWireBytes(
+          retryVerdict.frameVerdict.stateHash,
+          32,
+          'TEST_SUCCESSOR_ACK_HASH',
+        ),
+        exactHankoBytes(retryVerdict.frameVerdict.ackHanko),
+        peerDisputeWire(successorAckDispute, { entityId: payer, privateKey: payerKey }),
+      ];
+      const ackOp = exactPeerInputOp(
+        0,
+        payer,
+        payer,
+        payee,
+        payeeAccount,
+        [1, successorAckWire],
+      );
+      const ackPrepared = await payeeClient.prepareAccountWave({ entities: [] });
+      const ackStage = await stageAndSeal(
+        payeeClient,
+        ackPrepared.token,
+        payee,
+        [ackOp],
+        [],
+      );
+      if (ackStage.applied === null) throw new Error('RSCORE_TEST_ACK_RESULT');
+      expect(ackStage.applied.applied).toHaveLength(1);
+      expect(ackStage.applied.applied[0]?.verdict).toMatchObject({
+        kind: 'ackCommitted',
+        height: 2,
+      });
+      expect(waveParityDigest(ackStage.applied)).toBe(ackStage.applied.parityDigest);
+      await payeeClient.commit(ackPrepared.token);
+
+      await payerClient.shutdown();
+      await payeeClient.shutdown();
+    } finally {
+      payerClient.kill();
+      payeeClient.kill();
     }
   });
 
@@ -620,30 +1131,24 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       const tx: AccountTx = { type: 'add_delta', data: { tokenId: 1 } };
       const wireTx = accountTxWire(tx);
       if (wireTx === null) throw new Error('expected add_delta wire transaction');
-      const request = {
-        entities: [{
-          ownerEntityId: hexToWireBytes(owner, 32, 'TEST_OWNER'),
-          timestamp: 1_700_000_000_000,
-          jHeight: 100,
-          entityTimestamp: 1_700_000_000_000,
-          finalizedJHeight: 100,
-          propose: true,
-          ops: [
-            waveCreateOp(0, accountSeedWire(
-              owner,
-              counterparty,
-              account.state,
-              accountEnvelopeWire(account),
-              null,
-              addr('77'),
-            )),
-            waveAdmitOp(1, counterparty, [wireTx]),
-          ],
-        }],
-      };
+      const stagedOps = [
+        waveCreateOp(0, accountSeedWire(
+          owner,
+          counterparty,
+          account.state,
+          accountEnvelopeWire(account),
+          null,
+          addr('77'),
+        )),
+        waveAdmitOp(1, counterparty, [wireTx]),
+      ];
 
-      const first = await client.prepareAccountWave(request);
-      const firstApply = first.result;
+      const first = await client.prepareAccountWave({ entities: [] });
+      const {
+        applied: firstApply,
+        sealed: firstSealed,
+      } = await stageAndSeal(client, first.token, owner, stagedOps, [counterparty]);
+      if (firstApply === null) throw new Error('RSCORE_TEST_EXPECTED_STAGED_CREATE');
       expect(firstApply.admissions).toEqual([{
         operationIndex: 1,
         accountId: counterparty,
@@ -653,7 +1158,6 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       account.mempool.push(tx);
       expect(requiredAt(firstApply.touched, 0, 'FIRST_APPLY_TOUCHED').entityAccountLeaf)
         .toBe(computeEntityAccountValueHash(account).toLowerCase());
-      const firstSealed = await proposeAndSeal(client, first.token, owner, [counterparty]);
       const firstFrame = firstSealed.proposals[0]?.frame;
       if (firstFrame === null || firstFrame === undefined) {
         throw new Error('expected created account height-one frame');
@@ -679,8 +1183,14 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
 
       // Repeating Create itself proves abort removed both the Account and its
       // signer binding: either survivor makes the second Prepare fail loudly.
-      const second = await client.prepareAccountWave(request);
-      const secondSealed = await proposeAndSeal(client, second.token, owner, [counterparty]);
+      const second = await client.prepareAccountWave({ entities: [] });
+      const secondSealed = (await stageAndSeal(
+        client,
+        second.token,
+        owner,
+        stagedOps,
+        [counterparty],
+      )).sealed;
       expect(secondSealed.parityDigest).toBe(firstSealed.parityDigest);
       expect(secondSealed.accountsRoot).toBe(firstSealed.accountsRoot);
 
@@ -782,18 +1292,14 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
           deliveryMode: 'direct',
         },
       };
-      const prepared = await client.prepareAccountWave({
-        entities: [{
-          ownerEntityId: hexToWireBytes(owner, 32, 'TEST_OWNER'),
-          timestamp: 1_700_000_000_000,
-          jHeight: 100,
-          entityTimestamp: 1_700_000_000_000,
-          finalizedJHeight: 100,
-          propose: true,
-          ops: [waveAdmitOp(0, counterparty, [accountTxWire(tx)] as never)],
-        }],
-      });
-      const wave = await proposeAndSeal(client, prepared.token, owner, [counterparty]);
+      const prepared = await client.prepareAccountWave({ entities: [] });
+      const wave = (await stageAndSeal(
+        client,
+        prepared.token,
+        owner,
+        [waveAdmitOp(0, counterparty, [accountTxWire(tx)] as never)],
+        [counterparty],
+      )).sealed;
 
       expect(wave.proposals).toHaveLength(1);
       expect(wave.proposals[0]!.frame).toBeNull();
@@ -818,4 +1324,11 @@ const exactTuple = (value: unknown, arity: number, field: string): unknown[] => 
     throw new Error(`RSCORE_TEST_${field.toUpperCase().replaceAll(' ', '_')}_ARITY`);
   }
   return value;
+};
+
+const exactBytes = (value: unknown, size: number, field: string): Buffer => {
+  if (!(value instanceof Uint8Array) || value.length !== size) {
+    throw new Error(`RSCORE_TEST_${field.toUpperCase().replaceAll(' ', '_')}_BYTES`);
+  }
+  return Buffer.from(value);
 };

@@ -5,6 +5,7 @@ import {
   assertAuthorityWaveOperationLedger,
   authorityDriverEnabled,
   authoritySessionIdentityFor,
+  deriveAuthorityCandidateCreates,
 } from '../../rscore/authority-driver';
 import {
   authorityRecordEnabled,
@@ -36,6 +37,16 @@ const operation = (
 ): AuthorityWaveOperation => ({
   ...describeAuthorityWaveOperation(encoded),
   arrivalIndex,
+  expectedVerdict: describeAuthorityWaveOperation(encoded).resultKind === 'none'
+    ? { kind: 'create' }
+    : describeAuthorityWaveOperation(encoded).resultKind === 'admission'
+      ? { kind: 'admission', admittedCount: 0 }
+      : {
+          kind: 'peer',
+          outcome: 'applied',
+          committedFrames: [],
+          responseAckHanko: null,
+        },
 });
 
 const previousAuthority = process.env['XLN_RSCORE_AUTHORITY'];
@@ -176,8 +187,14 @@ describe('rscore authority Runtime scope', () => {
     const input = waveInputOp([
       2,
       wireId(ACCOUNT_A),
-      wireId(ACCOUNT_A),
-      [1, 1, wireId(`0x${'77'.repeat(32)}`), new Uint8Array([1]), null],
+      [
+        wireId(ACCOUNT_A),
+        wireId(OWNER_A),
+        [1, wireId(H1)],
+        [1, 1],
+        null,
+        [1, [1, wireId(`0x${'77'.repeat(32)}`), new Uint8Array([1]), null]],
+      ],
     ]);
     const wave: Extract<AuthorityWave, { kind: 'wave' }> = {
       kind: 'wave',
@@ -195,6 +212,7 @@ describe('rscore authority Runtime scope', () => {
         entityTimestamp: 1,
         finalizedJHeight: 1,
         propose: false,
+        proposalAccountIds: [],
         ops: [admit, create, input],
         operations: [operation(admit, 1), operation(create, 2), operation(input, 0)],
         expectedOutputs: new Map(),
@@ -216,11 +234,47 @@ describe('rscore authority Runtime scope', () => {
       .toThrow('RSCORE_AUTHORITY_HALT:OPERATION_LEDGER_MISMATCH');
   });
 
+  test('Account membership enters only through candidate Create before first use', () => {
+    const create = waveCreateOp(0, [wireId(ACCOUNT_A)]);
+    const admit = waveAdmitOp(1, ACCOUNT_A, []);
+    expect(deriveAuthorityCandidateCreates(OWNER_A, new Set(), [create, admit]))
+      .toEqual([ACCOUNT_A]);
+    expect(() => deriveAuthorityCandidateCreates(OWNER_A, new Set(), [admit]))
+      .toThrow('RSCORE_AUTHORITY_HALT:ACCOUNT_OPENED_MID_FRAME');
+    expect(() => deriveAuthorityCandidateCreates(OWNER_A, new Set([ACCOUNT_A]), [create]))
+      .toThrow('RSCORE_AUTHORITY_HALT:ACCOUNT_CREATE_ALREADY_COMMITTED');
+    expect(() => deriveAuthorityCandidateCreates(OWNER_A, new Set(), [create, create]))
+      .toThrow('RSCORE_AUTHORITY_HALT:ACCOUNT_CREATE_ALREADY_COMMITTED');
+  });
+
   test('every result-bearing operation is answered exactly once and Create is unanswered', () => {
     const submitted: AuthorityWaveOperation[] = [
-      { operationIndex: 0, arrivalIndex: 1, accountId: ACCOUNT_A, resultKind: 'admission' },
-      { operationIndex: 1, arrivalIndex: 2, accountId: ACCOUNT_B, resultKind: 'none' },
-      { operationIndex: 2, arrivalIndex: 0, accountId: ACCOUNT_A, resultKind: 'applied' },
+      {
+        operationIndex: 0,
+        arrivalIndex: 1,
+        accountId: ACCOUNT_A,
+        resultKind: 'admission',
+        expectedVerdict: { kind: 'admission', admittedCount: 1 },
+      },
+      {
+        operationIndex: 1,
+        arrivalIndex: 2,
+        accountId: ACCOUNT_B,
+        resultKind: 'none',
+        expectedVerdict: { kind: 'create' },
+      },
+      {
+        operationIndex: 2,
+        arrivalIndex: 0,
+        accountId: ACCOUNT_A,
+        resultKind: 'applied',
+        expectedVerdict: {
+          kind: 'peer',
+          outcome: 'applied',
+          committedFrames: [],
+          responseAckHanko: null,
+        },
+      },
     ];
     const admission = {
       operationIndex: 0,

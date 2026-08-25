@@ -24,10 +24,15 @@ import {
   sameAccountStateDomain,
 } from '../../../../../account/commitment/state-root';
 import { applyAccountInput } from '../../../../../account/consensus';
+import { requireAccountDeltaTransformerAddress } from '../../../../../account/consensus/helpers';
 import { createEmptyAccountJClaimAccumulator } from '../../../../../account/j-claims/j-claim-accumulator';
 import { MAX_PROFILE_ADVERTISED_ACCOUNTS } from '../../../../profile/profile-descriptor';
 import { buildHubRebalancePolicyTx } from './admin';
 import { canonicalAccountDisputeConfig } from '../../../../../account/config/dispute-config';
+import {
+  authorityRecordEnabled,
+  noteAuthorityAccountCreate,
+} from '../../../../../rscore/authority-wave';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -151,6 +156,28 @@ const seedOpenAccountPolicies = async (
   const tokenId = tx.data.tokenId ?? 1;
   const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
     .filter(id => Number.isFinite(id) && id > 0);
+  if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);
+  // The policy is part of the Entity account leaf even though it is outside
+  // AccountStateRoot. Install the final H=0 envelope before recording Create;
+  // admissions below may only change the mempool after that exact snapshot.
+  for (const policyTokenId of tokenIds) {
+    const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
+      ? tx.data.rebalancePolicy
+      : resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, policyTokenId);
+    account.shadow.rebalance.policy = requirePersistentAccountStateMap(
+      account.shadow.rebalance.policy,
+      'rebalanceShadowPolicy',
+    ).updated(policyTokenId, { ...policy });
+  }
+  if (authorityRecordEnabled()) {
+    noteAuthorityAccountCreate(
+      accountConsensusContext.accountAuthorityFrameId,
+      state.entityId,
+      counterpartyId,
+      account,
+      requireAccountDeltaTransformerAddress(accountConsensusContext, account.state),
+    );
+  }
   const initialAccountTxs = [
     ...tokenIds.map(deltaTokenId => ({
       type: 'add_delta' as const,
@@ -170,16 +197,6 @@ const seedOpenAccountPolicies = async (
   );
   if (!admission.ok || admission.admittedAccountTxCount !== initialAccountTxs.length) {
     throw new Error(`OPEN_ACCOUNT_INITIAL_TXS_NOT_ADMITTED:${counterpartyId}`);
-  }
-  if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);
-  for (const policyTokenId of tokenIds) {
-    const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
-      ? tx.data.rebalancePolicy
-      : resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, policyTokenId);
-    account.shadow.rebalance.policy = requirePersistentAccountStateMap(
-      account.shadow.rebalance.policy,
-      'rebalanceShadowPolicy',
-    ).updated(policyTokenId, { ...policy });
   }
 };
 

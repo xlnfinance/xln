@@ -107,13 +107,12 @@ pub struct DisputeProof {
 }
 
 /// The byte wire has already made hash widths, integer sign and the role bit
-/// structural. Empty Hanko bytes remain representable, and TypeScript rejects
-/// them before its stale/duplicate replay gate rather than treating malformed
-/// evidence as an obsolete no-op.
+/// structural. Hanko absence remains representable because internal drafts use
+/// the same canonical shape, but routed evidence requires non-empty bytes.
 pub(crate) fn validate_counterparty_dispute_shape(
     dispute: &CounterpartyDispute,
 ) -> Result<(), StateError> {
-    if dispute.hanko.is_empty() {
+    if dispute.hanko.as_ref().is_none_or(Vec::is_empty) {
         return Err(StateError::DisputeHankoInvalid(
             "SHAPE_INVALID:HANKO_MISSING".to_string(),
         ));
@@ -122,10 +121,29 @@ pub(crate) fn validate_counterparty_dispute_shape(
 }
 
 /// Rebuild and authenticate a peer's recovery proof from the Account's own
-/// identity. The peer does not get to supply the hash: accepting that would
-/// permit a valid Hanko over another Account/domain/watch-seed to be retained
-/// as if it were enforceable evidence for this one.
+/// identity. The exact supplied hash must equal the independent rebuild: a
+/// valid Hanko over another Account/domain/watch-seed must never be retained
+/// as enforceable evidence for this one.
 pub(crate) fn verify_counterparty_dispute(
+    replica: &AccountReplica,
+    expected_counterparty: &[u8; 32],
+    dispute: &CounterpartyDispute,
+) -> Result<[u8; 32], StateError> {
+    let digest = validate_counterparty_dispute_hash(replica, expected_counterparty, dispute)?;
+    let hanko = dispute
+        .hanko
+        .as_deref()
+        .ok_or_else(|| StateError::DisputeHankoInvalid("SHAPE_INVALID:HANKO_MISSING".into()))?;
+    verify_dispute_hanko(hanko, &digest, expected_counterparty)?;
+    Ok(digest)
+}
+
+/// Prove the exact received hash independently of board authentication.
+///
+/// Stale/duplicate delivery may skip an obsolete Hanko under the canonical
+/// replay policy, but it still may not smuggle a different Account-bound hash
+/// into the exact peer envelope.
+pub(crate) fn validate_counterparty_dispute_hash(
     replica: &AccountReplica,
     expected_counterparty: &[u8; 32],
     dispute: &CounterpartyDispute,
@@ -153,7 +171,9 @@ pub(crate) fn verify_counterparty_dispute(
         &dispute.proof_body_hash,
         identity.watch_seed().bytes(),
     );
-    verify_dispute_hanko(&dispute.hanko, &digest, expected_counterparty)?;
+    if dispute.hash != digest {
+        return Err(StateError::DisputeHankoInvalid("HASH_MISMATCH".to_string()));
+    }
     Ok(digest)
 }
 
@@ -570,7 +590,8 @@ mod counterparty_requirement_tests {
 
     fn dispute(nonce: u64, proof_body_hash: [u8; 32]) -> CounterpartyDispute {
         CounterpartyDispute {
-            hanko: vec![1],
+            hanko: Some(vec![1]),
+            hash: [0; 32],
             proof_body_hash,
             nonce,
             proposer_is_left: true,

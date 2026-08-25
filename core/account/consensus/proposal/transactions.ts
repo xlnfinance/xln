@@ -21,7 +21,11 @@ import { createAccountJClaimSession } from '../../j-claims/j-claim-session';
 import { prepareAccountJClaimTx } from '../../j-claims/j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
-import type { AccountFailedHtlcLock, AccountSwapOfferCreated } from '../types';
+import type {
+  AccountFailedHtlcLock,
+  AccountSwapOfferCreated,
+  ProposalDroppedTransaction,
+} from '../types';
 import {
   ACCOUNT_TX_FAILURE_DISPOSITIONS,
   type ApplyAccountTxOk,
@@ -29,6 +33,9 @@ import {
   type AccountTxRejection,
 } from '../../tx/apply-types';
 import { accountTxRejectionMessage, assertNever } from '../../tx/apply-result';
+import { canonicalAccountTxForFrameHash } from '../frame/hash';
+import { encodeAccountStateValue } from '../../commitment/account-state-value';
+import { createHash } from '../../../support/platform-crypto';
 
 const accountLog = createStructuredLogger('account');
 
@@ -54,6 +61,7 @@ export type ValidatedProposalTransactions = ProposalTransactionEffects & {
   validMempoolTxs: AccountTx[];
   txsToRemove: AccountTx[];
   deferredTxCount: number;
+  droppedTransactions: ProposalDroppedTransaction[];
   optimisticBatch: boolean;
 };
 
@@ -285,6 +293,10 @@ const classifyFailedTransaction = (
   return 'remove';
 };
 
+const proposalTxDigest = (tx: AccountTx): string => `0x${createHash('sha256')
+  .update(encodeAccountStateValue(canonicalAccountTxForFrameHash(tx)))
+  .digest('hex')}`;
+
 const validateOptimisticBatch = async (
   context: ProposalTransactionContext,
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
@@ -320,6 +332,7 @@ export const validateProposalTransactions = async (
   const validTxs: AccountTx[] = [];
   const validMempoolTxs: AccountTx[] = [];
   const txsToRemove: AccountTx[] = [];
+  const droppedTransactions: ProposalDroppedTransaction[] = [];
   let deferredTxCount = 0;
   const jClaimSession = createAccountJClaimSession(context.jClaimNodeStore);
   const optimistic = await validateOptimisticBatch(context, jClaimSession);
@@ -340,12 +353,13 @@ export const validateProposalTransactions = async (
       validMempoolTxs,
       txsToRemove,
       deferredTxCount,
+      droppedTransactions,
       optimisticBatch: true,
     };
   }
 
   let clonedMachine = context.account;
-  for (const tx of context.proposalWindow) {
+  for (const [index, tx] of context.proposalWindow.entries()) {
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
     const transition = beginAccountTransition(clonedMachine);
     const txMachine = accountTransitionView(transition);
@@ -361,6 +375,13 @@ export const validateProposalTransactions = async (
       const disposition = classifyFailedTransaction(clonedMachine, applied, effects);
       if (disposition === 'deferred') deferredTxCount += 1;
       else txsToRemove.push(tx);
+      droppedTransactions.push({
+        index,
+        txDigest: proposalTxDigest(tx),
+        code: applied.result.rejection.code,
+        message: applied.result.rejection.message,
+        disposition: disposition === 'deferred' ? 'deferred' : 'removed',
+      });
       continue;
     }
     clonedMachine = commitAccountTransition(transition, 'proposalTx').account;
@@ -379,6 +400,7 @@ export const validateProposalTransactions = async (
     validMempoolTxs,
     txsToRemove,
     deferredTxCount,
+    droppedTransactions,
     optimisticBatch: false,
   };
 };

@@ -4,11 +4,12 @@
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
-    DepositoryAddress, DisputeDraft, EntityId, IncomingFrame, IncomingOutcome, ProposalOutcome,
-    ProposedFrame, ReceiverClock, SigningIdentity, TokenId, WatchSeed, apply_incoming_ack,
-    apply_incoming_frame, dispute_proof_hash, propose_account_frame,
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope,
+    AccountReplica, AccountState, AccountTx, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
+    DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame, IncomingOutcome,
+    ProposalOutcome, ProposedFrame, ReceiverClock, SigningIdentity, TokenId, WatchSeed,
+    apply_incoming_ack as apply_exact_incoming_ack,
+    apply_incoming_frame as apply_exact_incoming_frame, dispute_proof_hash, propose_account_frame,
 };
 
 /// The receiver's own clock, at the same moment the frames below are proposed.
@@ -129,24 +130,65 @@ fn incoming_of(
     hanko: Vec<u8>,
 ) -> IncomingFrame {
     IncomingFrame {
-        height: frame.height,
-        timestamp: frame.timestamp,
-        j_height: frame.j_height,
-        txs: frame.txs.clone(),
-        prev_frame_hash: frame.prev_frame_hash.clone(),
-        account_state_root: frame.account_state_root,
-        by_left: frame.by_left,
+        frame: frame.clone(),
         dispute: None,
         state_hash,
-        hanko,
+        frame_hanko: Some(hanko),
     }
+}
+
+fn envelope(account: &AccountConsensus, from_entity_id: &[u8; 32]) -> AccountPeerEnvelope {
+    let state = account.replica().state();
+    AccountPeerEnvelope {
+        from_entity_id: *from_entity_id,
+        to_entity_id: *account.replica().owner().as_bytes(),
+        domain: state.identity().domain().clone(),
+        dispute_config: state.dispute_config(),
+        watch_seed: Some(state.identity().watch_seed().clone()),
+    }
+}
+
+fn apply_incoming_frame(
+    account: &mut AccountConsensus,
+    identity: &SigningIdentity,
+    from_entity_id: &[u8; 32],
+    clock: ReceiverClock,
+    incoming: IncomingFrame,
+    swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
+) -> Result<xln_rscore_engine::IncomingOutcome, xln_rscore_engine::StateError> {
+    let envelope = envelope(account, from_entity_id);
+    apply_exact_incoming_frame(account, identity, &envelope, clock, incoming, swap_market)
+}
+
+fn apply_incoming_ack(
+    account: &mut AccountConsensus,
+    from_entity_id: &[u8; 32],
+    height: u64,
+    state_hash: &[u8; 32],
+    hanko: &[u8],
+    dispute: Option<CounterpartyDispute>,
+) -> Result<xln_rscore_engine::AckOutcome, xln_rscore_engine::StateError> {
+    let envelope = envelope(account, from_entity_id);
+    apply_exact_incoming_ack(
+        account,
+        &envelope,
+        IncomingAck {
+            height,
+            frame_hash: *state_hash,
+            frame_hanko: Some(hanko.to_vec()),
+            dispute,
+        },
+    )
 }
 
 fn certify_dispute(identity: &SigningIdentity, draft: &DisputeDraft) -> CounterpartyDispute {
     CounterpartyDispute {
-        hanko: identity
-            .sign_frame(&draft.hash)
-            .expect("sign dispute digest"),
+        hanko: Some(
+            identity
+                .sign_frame(&draft.hash)
+                .expect("sign dispute digest"),
+        ),
+        hash: draft.hash,
         proof_body_hash: draft.proof_body_hash,
         nonce: draft.nonce,
         proposer_is_left: draft.proposer_is_left,
@@ -173,7 +215,8 @@ fn resign_dispute(
         &dispute.proof_body_hash,
         account_identity.watch_seed().bytes(),
     );
-    dispute.hanko = identity.sign_frame(&digest).expect("sign rebuilt dispute");
+    dispute.hash = digest;
+    dispute.hanko = Some(identity.sign_frame(&digest).expect("sign rebuilt dispute"));
 }
 
 fn incoming_with_dispute(proposed: &ProposedFrame, identity: &SigningIdentity) -> IncomingFrame {
@@ -386,17 +429,19 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
         let IncomingOutcome::Rejected { reason } = outcome else {
             panic!("expected a rejection, got {outcome:?}");
         };
-        assert_eq!(reason, "ACCOUNT_PEER_FRAME_PROPOSER_INVALID");
+        assert_eq!(reason, "ACCOUNT_INPUT_PARTY_MISMATCH");
         assert_eq!(right.account.current_height(), 0);
     }
 
     // The right party, the wrong signature: caught by the Hanko itself.
     let mut forged = incoming_of(&frame, state_hash, hanko.clone());
-    forged.hanko = right
-        .identity
-        .sign_frame(&state_hash)
-        .expect("forged hanko");
-    let error = apply_incoming_frame(
+    forged.frame_hanko = Some(
+        right
+            .identity
+            .sign_frame(&state_hash)
+            .expect("forged hanko"),
+    );
+    let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
@@ -404,19 +449,18 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
         forged,
         &market(),
     )
-    .expect_err("wrong signer");
-    assert!(
-        error
-            .to_string()
-            .starts_with("ACCOUNT_PEER_FRAME_HANKO_INVALID"),
-        "{error}",
-    );
+    .expect("wrong signer is peer rejection, not engine failure");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason.starts_with("ACCOUNT_PEER_FRAME_HANKO_INVALID")
+    ));
     assert_eq!(right.account.current_height(), 0);
 
     // The Hanko commits the frame hash, so tampering with a field the hash
     // covers is caught by our own replay rather than by recovery.
     let mut tampered = incoming_of(&frame, state_hash, hanko);
-    tampered.account_state_root[0] ^= 0x01;
+    tampered.frame.account_state_root[0] ^= 0x01;
     let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
@@ -429,7 +473,7 @@ fn a_frame_signed_by_the_wrong_entity_is_refused() {
     let IncomingOutcome::Rejected { reason } = outcome else {
         panic!("expected a rejection, got {outcome:?}");
     };
-    assert_eq!(reason, "ACCOUNT_PEER_FRAME_STATE_ROOT_MISMATCH");
+    assert_eq!(reason, "ACCOUNT_PEER_FRAME_HASH_MISMATCH");
     assert_eq!(right.account.current_height(), 0);
 }
 
@@ -844,6 +888,35 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     )
     .expect("ack");
 
+    // The replay key is the exact committed stateHash. A retry at the current
+    // height is re-ACKed before obsolete Hanko or body verification, matching
+    // TypeScript's ACK-loss recovery gate.
+    let leaf_after_first = right.account.entity_account_leaf().expect("leaf");
+    let mut duplicate = incoming_of(&first.frame, first.state_hash, first.hanko.clone());
+    duplicate.frame_hanko = None;
+    duplicate.frame.deltas[0] = Delta::zero(TokenId::new(1).expect("token"));
+    let duplicate = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        duplicate,
+        &market(),
+    )
+    .expect("exact-current retry skips obsolete certificate and body");
+    assert!(matches!(
+        duplicate,
+        IncomingOutcome::Duplicate {
+            height: 1,
+            state_hash,
+            ..
+        } if state_hash == first.state_hash
+    ));
+    assert_eq!(
+        right.account.entity_account_leaf().expect("leaf"),
+        leaf_after_first
+    );
+
     // Height 2, so height 1 is now an ancestor.
     left.account
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 5)], "test")
@@ -864,18 +937,20 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         &right.identity,
         left.identity.entity_id(),
         CLOCK,
-        incoming_of(&second.frame, second.state_hash, second.hanko),
+        incoming_of(&second.frame, second.state_hash, second.hanko.clone()),
         &market(),
     )
     .expect("apply");
     assert_eq!(right.account.current_height(), 2);
 
+    let mut ancestor = incoming_of(&first.frame, first.state_hash, first.hanko);
+    ancestor.frame_hanko = None;
     let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
         CLOCK,
-        incoming_of(&first.frame, first.state_hash, first.hanko),
+        ancestor,
         &market(),
     )
     .expect("apply");
@@ -889,6 +964,32 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         ),
         "{outcome:?}",
     );
+    assert_eq!(right.account.current_height(), 2);
+
+    // Equal height with another stateHash is a conflict, not an ancestor.
+    // It must reach active validation even though the height is already
+    // committed, or a peer could hide contradictory evidence as stale.
+    let mut conflict = incoming_of(&second.frame, second.state_hash, second.hanko);
+    conflict.state_hash[0] ^= 0x01;
+    conflict.frame_hanko = Some(
+        left.identity
+            .sign_frame(&conflict.state_hash)
+            .expect("conflict signature"),
+    );
+    let conflict = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        conflict,
+        &market(),
+    )
+    .expect("equal-height conflict is a typed rejection");
+    assert!(matches!(
+        conflict,
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_PEER_FRAME_HASH_MISMATCH"
+    ));
     assert_eq!(right.account.current_height(), 2);
 }
 
@@ -933,7 +1034,7 @@ fn a_failing_frame_leaves_our_own_proposal_standing() {
         left_proposed.state_hash,
         left_proposed.hanko.clone(),
     );
-    broken.account_state_root[0] ^= 0x01;
+    broken.frame.account_state_root[0] ^= 0x01;
     let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
@@ -1170,6 +1271,48 @@ fn an_unhashable_transaction_is_refused_at_admission() {
         .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 5)], "test")
         .expect("admit");
     assert_eq!(left.account.mempool().len(), 1);
+}
+
+#[test]
+fn rebalance_policy_is_hashable_at_admission_and_cross_peer_replay() {
+    let (mut left, mut right) = parties();
+    let policy = AccountTx::RebalancePolicy {
+        token_id: 1,
+        policy_version: 7,
+        base_fee: BigInt::from(19),
+        liquidity_fee_bps: BigInt::from(375),
+        gas_fee: BigInt::from(23),
+    };
+    left.account
+        .admit_txs(vec![policy.clone()], "test")
+        .expect("rebalance policy is frame-hashable");
+
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose policy") else {
+        panic!("expected a policy proposal");
+    };
+    assert_eq!(proposed.frame.txs, vec![policy]);
+
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone()),
+        &market(),
+    )
+    .expect("replay policy");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Committed { height: 1, .. }
+    ));
+    assert_eq!(right.account.current_height(), 1);
 }
 
 /// Capacity is a "not yet", not a "no": a lock the frame had no room for
@@ -1453,11 +1596,13 @@ fn a_forged_or_retargeted_dispute_hanko_is_refused_before_frame_replay() {
 
     let mut wrong_signer = incoming_with_dispute(&proposed, &left.identity);
     let draft = proposed.dispute.as_ref().expect("dispute");
-    wrong_signer.dispute.as_mut().expect("wire dispute").hanko = right
-        .identity
-        .sign_frame(&draft.hash)
-        .expect("foreign signature");
-    let error = apply_incoming_frame(
+    wrong_signer.dispute.as_mut().expect("wire dispute").hanko = Some(
+        right
+            .identity
+            .sign_frame(&draft.hash)
+            .expect("foreign signature"),
+    );
+    let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
@@ -1465,18 +1610,18 @@ fn a_forged_or_retargeted_dispute_hanko_is_refused_before_frame_replay() {
         wrong_signer,
         &market(),
     )
-    .expect_err("foreign dispute signer");
-    assert!(
-        error
-            .to_string()
-            .starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
-    );
+    .expect("foreign dispute signer is a peer rejection");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason.starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
+    ));
     assert_eq!(right.account.current_height(), 0);
 
     let mut wrong_role = incoming_with_dispute(&proposed, &left.identity);
     let dispute = wrong_role.dispute.as_mut().expect("wire dispute");
     dispute.proposer_is_left = !dispute.proposer_is_left;
-    let error = apply_incoming_frame(
+    let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
@@ -1484,13 +1629,13 @@ fn a_forged_or_retargeted_dispute_hanko_is_refused_before_frame_replay() {
         wrong_role,
         &market(),
     )
-    .expect_err("role is part of signed digest");
-    let error = error.to_string();
-    assert!(
-        error.starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
-            || error == "ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE",
-        "{error}",
-    );
+    .expect("retargeted role is a peer rejection");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason.starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
+                || reason == "ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE"
+    ));
     assert_eq!(right.account.current_height(), 0);
 }
 
@@ -1595,7 +1740,7 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
     };
     let mut incoming = incoming_with_dispute(&proposed, &left.identity);
     incoming.dispute.as_mut().expect("wire dispute").nonce = MAX_SAFE_INTEGER + 1;
-    let error = apply_incoming_frame(
+    let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
@@ -1603,11 +1748,13 @@ fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
         incoming,
         &market(),
     )
-    .expect_err("unsafe nonce");
-    assert_eq!(
-        error.to_string(),
-        "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:PROOF_NONCE:9007199254740992",
-    );
+    .expect("unsafe nonce is a peer rejection");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason
+                == "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:PROOF_NONCE:9007199254740992"
+    ));
     assert_eq!(right.account.current_height(), 0);
 }
 
@@ -1661,8 +1808,8 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
 
     let right_leaf = right.account.entity_account_leaf().expect("right leaf");
     let mut malformed = incoming_with_dispute(&proposed, &left.identity);
-    malformed.dispute.as_mut().expect("dispute").hanko.clear();
-    let error = apply_incoming_frame(
+    malformed.dispute.as_mut().expect("dispute").hanko = Some(Vec::new());
+    let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
         left.identity.entity_id(),
@@ -1670,14 +1817,15 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
         malformed,
         &market(),
     )
-    .expect_err("empty witness is malformed before replay classification");
-    assert_eq!(
-        error.to_string(),
-        "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:HANKO_MISSING",
-    );
+    .expect("empty witness is a peer rejection before replay classification");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:HANKO_MISSING"
+    ));
 
     let mut duplicate = incoming_with_dispute(&proposed, &left.identity);
-    duplicate.dispute.as_mut().expect("dispute").hanko = vec![0];
+    duplicate.dispute.as_mut().expect("dispute").hanko = Some(vec![0]);
     let outcome = apply_incoming_frame(
         &mut right.account,
         &right.identity,
@@ -1701,7 +1849,7 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
 
     let left_leaf = left.account.entity_account_leaf().expect("left leaf");
     let mut obsolete_dispute = certify_dispute(&right.identity, &ack_draft);
-    obsolete_dispute.hanko = vec![0];
+    obsolete_dispute.hanko = Some(vec![0]);
     let ack = apply_incoming_ack(
         &mut left.account,
         right.identity.entity_id(),
@@ -1718,6 +1866,299 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
     assert_eq!(
         left.account.entity_account_leaf().expect("left leaf after"),
         left_leaf,
+    );
+}
+
+#[test]
+fn exact_received_deltas_are_replayed_before_commit() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let mut incoming = incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone());
+    incoming.frame.deltas[0] = Delta::zero(TokenId::new(1).expect("token"));
+    incoming.state_hash = incoming.frame.hash().expect("received frame hash");
+    incoming.frame_hanko = Some(
+        left.identity
+            .sign_frame(&incoming.state_hash)
+            .expect("received frame signature"),
+    );
+    let leaf = right.account.entity_account_leaf().expect("leaf before");
+    let exact_envelope = envelope(&right.account, left.identity.entity_id());
+
+    let outcome = apply_exact_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        &exact_envelope,
+        CLOCK,
+        incoming,
+        &market(),
+    )
+    .expect("mismatch is a typed rejection");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_PEER_FRAME_DELTAS_MISMATCH"
+    ));
+    assert_eq!(right.account.current_height(), 0);
+    assert_eq!(
+        right.account.entity_account_leaf().expect("leaf after"),
+        leaf
+    );
+}
+
+#[test]
+fn exact_dispute_hash_is_account_bound_before_mutation() {
+    let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let mut incoming = incoming_with_dispute(&proposed, &left.identity);
+    incoming.dispute.as_mut().expect("dispute").hash[0] ^= 0x01;
+    let leaf = right.account.entity_account_leaf().expect("leaf before");
+    let exact_envelope = envelope(&right.account, left.identity.entity_id());
+
+    let outcome = apply_exact_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        &exact_envelope,
+        CLOCK,
+        incoming,
+        &market(),
+    )
+    .expect("wrong wire hash is a peer rejection, not an engine failure");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:HASH_MISMATCH"
+    ));
+    assert_eq!(right.account.current_height(), 0);
+    assert_eq!(
+        right.account.entity_account_leaf().expect("leaf after"),
+        leaf
+    );
+}
+
+#[test]
+fn envelope_sentinels_precede_mutation_and_watch_seed_absence_is_preserved() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let incoming = incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone());
+    let leaf = right.account.entity_account_leaf().expect("leaf before");
+    let mut wrong = envelope(&right.account, left.identity.entity_id());
+    wrong.dispute_config = AccountDisputeConfig::new(11, 10).expect("sentinel config");
+
+    let rejected = apply_exact_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        &wrong,
+        CLOCK,
+        incoming.clone(),
+        &market(),
+    )
+    .expect("envelope mismatch is a typed rejection");
+    assert!(matches!(
+        rejected,
+        IncomingOutcome::Rejected { reason }
+            if reason == "ACCOUNT_INPUT_DISPUTE_CONFIG_MISMATCH"
+    ));
+    assert_eq!(right.account.current_height(), 0);
+    assert_eq!(
+        right
+            .account
+            .entity_account_leaf()
+            .expect("leaf after reject"),
+        leaf
+    );
+
+    let mut seed_absent = envelope(&right.account, left.identity.entity_id());
+    seed_absent.watch_seed = None;
+    let committed = apply_exact_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        &seed_absent,
+        CLOCK,
+        incoming,
+        &market(),
+    )
+    .expect("omitted seed remains absent instead of being defaulted");
+    assert!(matches!(
+        committed,
+        IncomingOutcome::Committed { height: 1, .. }
+    ));
+    assert_eq!(right.account.current_height(), 1);
+}
+
+#[test]
+fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit first");
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose first") else {
+        panic!("expected first proposal");
+    };
+    let first = *first;
+    let committed = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&first.frame, first.state_hash, first.hanko),
+        &market(),
+    )
+    .expect("commit first on receiver");
+    let IncomingOutcome::Committed { ack_hanko, .. } = committed else {
+        panic!("expected first commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &first.state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("commit first on proposer");
+
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 5)], "test")
+        .expect("admit second");
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose second") else {
+        panic!("expected second proposal");
+    };
+    let second = *second;
+    let left_leaf = left.account.entity_account_leaf().expect("left leaf");
+    let pending_hash = left.account.pending().expect("pending second").state_hash;
+    let left_envelope = envelope(&left.account, right.identity.entity_id());
+
+    for frame_hanko in [None, Some(vec![0])] {
+        let stale = apply_exact_incoming_ack(
+            &mut left.account,
+            &left_envelope,
+            IncomingAck {
+                height: 1,
+                frame_hash: [0x44; 32],
+                frame_hanko,
+                dispute: None,
+            },
+        )
+        .expect("old ACK is a no-op even when its certificate is obsolete");
+        assert!(matches!(
+            stale,
+            xln_rscore_engine::AckOutcome::Stale { height: 1 }
+        ));
+    }
+    let invalid_active = apply_exact_incoming_ack(
+        &mut left.account,
+        &left_envelope,
+        IncomingAck {
+            height: 2,
+            frame_hash: second.state_hash,
+            frame_hanko: Some(vec![0]),
+            dispute: None,
+        },
+    )
+    .expect("bad active ACK certificate is a peer rejection");
+    assert!(matches!(
+        invalid_active,
+        xln_rscore_engine::AckOutcome::Rejected { reason }
+            if reason.starts_with("ACCOUNT_PEER_FRAME_HANKO_INVALID")
+    ));
+    assert_eq!(
+        left.account.entity_account_leaf().expect("left leaf"),
+        left_leaf
+    );
+    assert_eq!(
+        left.account.pending().expect("pending survives").state_hash,
+        pending_hash,
+    );
+
+    let right_leaf = right.account.entity_account_leaf().expect("right leaf");
+    let right_envelope = envelope(&right.account, left.identity.entity_id());
+    for (height, frame_hanko) in [(1, None), (2, Some(vec![0]))] {
+        let early_or_stale = apply_exact_incoming_ack(
+            &mut right.account,
+            &right_envelope,
+            IncomingAck {
+                height,
+                frame_hash: [0x55; 32],
+                frame_hanko,
+                dispute: None,
+            },
+        )
+        .expect("no-pending stale/early ACK is a no-op");
+        assert!(matches!(
+            early_or_stale,
+            xln_rscore_engine::AckOutcome::Stale { height: outcome_height }
+                if outcome_height == height
+        ));
+    }
+    let future = apply_exact_incoming_ack(
+        &mut right.account,
+        &right_envelope,
+        IncomingAck {
+            height: 3,
+            frame_hash: [0x66; 32],
+            frame_hanko: Some(vec![0]),
+            dispute: None,
+        },
+    )
+    .expect("unmatched future ACK is a peer rejection");
+    assert!(matches!(
+        future,
+        xln_rscore_engine::AckOutcome::Rejected { reason }
+            if reason == "ACCOUNT_PEER_ACK_UNMATCHED:3:none"
+    ));
+    assert_eq!(
+        right.account.entity_account_leaf().expect("right leaf"),
+        right_leaf
     );
 }
 

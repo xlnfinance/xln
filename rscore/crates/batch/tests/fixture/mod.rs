@@ -8,13 +8,13 @@
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountId, AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict,
-    AccountSeed, EngineGeneration, EntityWave, ProposalRow, ReceiverClock, StatefulConsensusEngine,
-    WaveOp, WaveRequest,
+    AccountPeerInput, AccountSeed, EngineGeneration, EntityWave, ProposalRow, ReceiverClock,
+    StatefulConsensusEngine, WaveOp, WaveRequest,
 };
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
-    BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, SigningIdentity, TokenId,
-    WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope, AccountReplica,
+    AccountState, AccountTx, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId,
+    IncomingAck, SigningIdentity, TokenId, WatchSeed,
 };
 
 /// The key the runtime would derive for a signer label, which is what the
@@ -253,6 +253,52 @@ pub fn clock(timestamp: u64) -> ReceiverClock {
     }
 }
 
+pub fn peer_input(
+    from_entity_id: [u8; 32],
+    to_entity_id: [u8; 32],
+    kind: AccountInputKind,
+) -> AccountPeerInput {
+    AccountPeerInput {
+        envelope: AccountPeerEnvelope {
+            from_entity_id,
+            to_entity_id,
+            domain: AccountDomain::new(
+                31_337,
+                DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).expect("depository"),
+            )
+            .expect("domain"),
+            dispute_config: AccountDisputeConfig::new(10, 10).expect("dispute config"),
+            watch_seed: Some(
+                WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+            ),
+        },
+        kind,
+    }
+}
+
+pub fn input_row(
+    operation_index: u64,
+    account_id: AccountId,
+    from_entity_id: [u8; 32],
+    to_entity_id: [u8; 32],
+    kind: AccountInputKind,
+) -> AccountInputRow {
+    AccountInputRow {
+        operation_index,
+        account_id,
+        input: peer_input(from_entity_id, to_entity_id, kind),
+    }
+}
+
+pub fn incoming_ack(height: u64, frame_hash: [u8; 32], frame_hanko: Vec<u8>) -> IncomingAck {
+    IncomingAck {
+        height,
+        frame_hash,
+        frame_hanko: Some(frame_hanko),
+        dispute: None,
+    }
+}
+
 pub fn payment(pair: &Pair, amount: i64) -> (AccountId, Vec<AccountTx>) {
     (
         pair.payer_account,
@@ -321,14 +367,15 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
         .enumerate()
         .map(|(index, proposal)| {
             let pair = &stand.pairs[pair_by_payer_account(&stand.pairs, &proposal.account_id)];
-            AccountInputRow {
-                operation_index: index as u64,
-                account_id: pair.payee_account,
-                from_entity_id: pair.payer_entity,
-                kind: AccountInputKind::Frame(Box::new(
+            input_row(
+                index as u64,
+                pair.payee_account,
+                pair.payer_entity,
+                pair.payee_entity,
+                AccountInputKind::Frame(Box::new(
                     proposal.incoming().expect("the attempt produced a frame"),
                 )),
-            }
+            )
         })
         .collect();
     let applied = stand
@@ -349,17 +396,13 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
             else {
                 panic!("expected a commit: {:?}", result.verdict);
             };
-            AccountInputRow {
-                operation_index: index as u64,
-                account_id: pair.payer_account,
-                from_entity_id: pair.payee_entity,
-                kind: AccountInputKind::Ack {
-                    height: *height,
-                    state_hash: *state_hash,
-                    hanko: ack_hanko.clone(),
-                    dispute: None,
-                },
-            }
+            input_row(
+                index as u64,
+                pair.payer_account,
+                pair.payee_entity,
+                pair.payer_entity,
+                AccountInputKind::Ack(incoming_ack(*height, *state_hash, ack_hanko.clone())),
+            )
         })
         .collect();
     let acked = stand
@@ -443,7 +486,7 @@ pub fn frame_ops(stand: &Stand, proposals: &[ProposalRow]) -> Vec<([u8; 32], Wav
         .into_iter()
         .map(|row| {
             let pair = &stand.pairs[pair_by_payee_account(&stand.pairs, &row.account_id)];
-            (pair.payee_entity, WaveOp::Input(row))
+            (pair.payee_entity, WaveOp::Input(Box::new(row)))
         })
         .collect()
 }
@@ -454,7 +497,7 @@ pub fn ack_ops(stand: &Stand, applied: &[AccountInputResult]) -> Vec<([u8; 32], 
         .into_iter()
         .map(|row| {
             let pair = &stand.pairs[pair_by_payer_account(&stand.pairs, &row.account_id)];
-            (pair.payer_entity, WaveOp::Input(row))
+            (pair.payer_entity, WaveOp::Input(Box::new(row)))
         })
         .collect()
 }
@@ -466,14 +509,15 @@ pub fn frames_for(stand: &Stand, proposals: &[ProposalRow]) -> Vec<AccountInputR
         .enumerate()
         .map(|(index, proposal)| {
             let pair = &stand.pairs[pair_by_payer_account(&stand.pairs, &proposal.account_id)];
-            AccountInputRow {
-                operation_index: index as u64,
-                account_id: pair.payee_account,
-                from_entity_id: pair.payer_entity,
-                kind: AccountInputKind::Frame(Box::new(
+            input_row(
+                index as u64,
+                pair.payee_account,
+                pair.payer_entity,
+                pair.payee_entity,
+                AccountInputKind::Frame(Box::new(
                     proposal.incoming().expect("the attempt produced a frame"),
                 )),
-            }
+            )
         })
         .collect()
 }
@@ -494,17 +538,13 @@ pub fn acks_for(stand: &Stand, applied: &[AccountInputResult]) -> Vec<AccountInp
             else {
                 panic!("expected a commit: {:?}", result.verdict);
             };
-            AccountInputRow {
-                operation_index: index as u64,
-                account_id: pair.payer_account,
-                from_entity_id: pair.payee_entity,
-                kind: AccountInputKind::Ack {
-                    height: *height,
-                    state_hash: *state_hash,
-                    hanko: ack_hanko.clone(),
-                    dispute: None,
-                },
-            }
+            input_row(
+                index as u64,
+                pair.payer_account,
+                pair.payee_entity,
+                pair.payer_entity,
+                AccountInputKind::Ack(incoming_ack(*height, *state_hash, ack_hanko.clone())),
+            )
         })
         .collect()
 }

@@ -127,6 +127,36 @@ pub enum BatchError {
     WaveOpen,
     #[error("RSCORE_BATCH_WAVE_SEALED")]
     WaveSealed,
+    #[error("RSCORE_BATCH_ENTITY_STAGE_OPEN:{0}")]
+    EntityStageOpen(crate::StageKey),
+    #[error("RSCORE_BATCH_ENTITY_STAGE_MISSING:{0}")]
+    EntityStageMissing(crate::StageKey),
+    #[error("RSCORE_BATCH_ENTITY_STAGE_KEY:{actual}:{expected}")]
+    EntityStageKey {
+        actual: crate::StageKey,
+        expected: crate::StageKey,
+    },
+    #[error("RSCORE_BATCH_ENTITY_STAGE_ORDINAL:{actual}:{expected}")]
+    EntityStageOrdinal { actual: u64, expected: u64 },
+    #[error("RSCORE_BATCH_ENTITY_STAGE_ORDINAL_OVERFLOW")]
+    EntityStageOrdinalOverflow,
+    #[error("RSCORE_BATCH_ENTITY_STAGE_REPLAY:{key}:{detail}")]
+    EntityStageReplay {
+        key: crate::StageKey,
+        detail: &'static str,
+    },
+    #[error("RSCORE_BATCH_ENTITY_STAGE_DECISION:{key}:{actual}:{expected}")]
+    EntityStageDecisionConflict {
+        key: crate::StageKey,
+        actual: crate::EntityStageStatus,
+        expected: crate::EntityStageStatus,
+    },
+    #[error("RSCORE_BATCH_ENTITY_STAGE_OWNER:{key}:{actual}:{expected}")]
+    EntityStageOwner {
+        key: crate::StageKey,
+        actual: String,
+        expected: String,
+    },
     #[error("RSCORE_BATCH_WAVE_REVISION:{actual}:{expected}")]
     WaveRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_WAVE_CANDIDATE:{actual}:{expected}")]

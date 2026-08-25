@@ -192,6 +192,22 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
         AccountTx::AddDelta { token_id } => {
             ("add_delta", vec![("tokenId".to_string(), token(*token_id))])
         }
+        AccountTx::RebalancePolicy {
+            token_id,
+            policy_version,
+            base_fee,
+            liquidity_fee_bps,
+            gas_fee,
+        } => (
+            "rebalance_policy",
+            vec![
+                ("tokenId".to_string(), number(u64::from(*token_id))),
+                ("policyVersion".to_string(), number(*policy_version)),
+                ("baseFee".to_string(), big(base_fee)),
+                ("liquidityFeeBps".to_string(), big(liquidity_fee_bps)),
+                ("gasFee".to_string(), big(gas_fee)),
+            ],
+        ),
         AccountTx::SwapOffer {
             offer_id,
             give_token_id,
@@ -385,8 +401,7 @@ pub fn canonical_tx_digest(tx: &AccountTx) -> Result<[u8; 32], StateError> {
 pub fn is_frame_hashable(tx: &AccountTx) -> bool {
     !matches!(
         tx,
-        AccountTx::RebalancePolicy { .. }
-            | AccountTx::LendingFund { .. }
+        AccountTx::LendingFund { .. }
             | AccountTx::LendingBorrowRequest { .. }
             | AccountTx::LendingRepay { .. }
             | AccountTx::LendingCredit { .. }
@@ -398,7 +413,6 @@ pub fn is_frame_hashable(tx: &AccountTx) -> bool {
 
 pub fn unsupported_kind(tx: &AccountTx) -> &'static str {
     match tx {
-        AccountTx::RebalancePolicy { .. } => "rebalance_policy",
         AccountTx::LendingFund { .. } => "lending_fund",
         AccountTx::LendingBorrowRequest { .. } => "lending_borrow_request",
         AccountTx::LendingRepay { .. } => "lending_repay",
@@ -512,6 +526,16 @@ mod tests {
         format!("0x{}", "a1".repeat(32))
     }
 
+    fn rebalance_policy() -> AccountTx {
+        AccountTx::RebalancePolicy {
+            token_id: 7,
+            policy_version: 9_007_199_254_740_991,
+            base_fee: BigInt::parse_bytes(b"123456789012345678901234567890", 10).expect("base fee"),
+            liquidity_fee_bps: BigInt::from(375),
+            gas_fee: BigInt::from(999_999_999_999_999_999_u64),
+        }
+    }
+
     fn htlc_lock(
         delivery_mode: Option<HtlcDeliveryMode>,
         envelope: Option<OpaqueHtlcCiphertext>,
@@ -604,6 +628,40 @@ mod tests {
         }
     }
 
+    /// Produced directly by TypeScript's
+    /// `canonicalAccountTxForFrameHash`, `encodeAccountStateValue`, and
+    /// `computeFrameHash`. This pins both numeric domains: safe-integer
+    /// token/version fields are canonical numbers, while all three fee fields
+    /// remain arbitrary-precision BigInts.
+    #[test]
+    fn matches_typescript_rebalance_policy_bytes_and_hashes() {
+        let tx = rebalance_policy();
+        let encoded = xln_rscore_protocol::encode_account_state_value(
+            &canonical_tx_value(&tx).expect("canonical transaction"),
+        )
+        .expect("canonical bytes");
+        assert_eq!(
+            hex::encode(encoded),
+            concat!(
+                "f8c7866f626a656374f89f8464617461f898866f626a656374df8762617365",
+                "466565d686626967696e74008d018ee90ff6c373e0ee4e3f0ad2d986676173",
+                "466565d186626967696e7400880de0b6b3a763ffffdc8f6c6971756964697479",
+                "466565427073cb86626967696e7400820177e78d706f6c69637956657273696f",
+                "6ed8866e756d6265729039303037313939323534373430393931d187746f6b65",
+                "6e4964c8866e756d62657237de8474797065d886737472696e6790726562616c",
+                "616e63655f706f6c696379",
+            ),
+        );
+        assert_eq!(
+            hex::encode(canonical_tx_digest(&tx).expect("transaction digest")),
+            "9e88d241bd1890ebce28e487ee3ca49af92cf384b728751d0878b8078f5c47f1",
+        );
+        assert_eq!(
+            hex::encode(frame_for(tx).hash().expect("frame hash")),
+            "29631559c85f7707a65a878ae7379ff156ddb4a56f1c55aa5f4c546a9156bb21",
+        );
+    }
+
     /// Vectors produced by `computeFrameHash` over one-transaction frames
     /// (scratchpad/txvec.ts), one per transaction kind the engine hashes
     /// natively. A renamed or dropped field changes the hash here first.
@@ -658,6 +716,10 @@ mod tests {
                 AccountTx::AddDelta {
                     token_id: TokenId::new(3).expect("token"),
                 },
+            ),
+            (
+                "29631559c85f7707a65a878ae7379ff156ddb4a56f1c55aa5f4c546a9156bb21",
+                rebalance_policy(),
             ),
             (
                 "c11728fa5bd309b6a5a884ac408425c29c556f7e5a9d5807921493f6dcc00163",

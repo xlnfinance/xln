@@ -93,7 +93,10 @@ import {
   getQueuedAccountIds,
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
-import { noteAuthorityEntityClock } from '../../../rscore/authority-wave';
+import {
+  noteAuthorityAccountProposal,
+  noteAuthorityAccountProposalResult,
+} from '../../../rscore/authority-wave';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { assertEntityFrameTxByteBudget } from '../frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from '../output/certification';
@@ -626,12 +629,17 @@ const proposeAccountFrameCandidate = async (
   // The clock a proposal is built with belongs to this Entity, not to the
   // Runtime frame: a wave carries one clock, so which unit that wave covers
   // depends on whether an Entity ever uses two inside one Runtime frame.
-  noteAuthorityEntityClock(
+  const authorityProposal = noteAuthorityAccountProposal(
     context.accountConsensusContext.accountAuthorityFrameId,
     state.entityId,
-    'propose',
+    accountKey,
     state.timestamp,
     state.lastFinalizedJHeight,
+    crossJOpeningProposalTxs === undefined || (
+      crossJOpeningProposalTxs.length === account.mempool.length
+      && crossJOpeningProposalTxs.every((tx, index) =>
+        safeStringify(tx) === safeStringify(account.mempool[index]))
+    ),
   );
   const proposal = await proposeAccountFrame(
     context.accountConsensusContext,
@@ -640,6 +648,7 @@ const proposeAccountFrameCandidate = async (
     state.lastFinalizedJHeight,
     crossJOpeningProposalTxs,
   );
+  noteAuthorityAccountProposalResult(authorityProposal, proposal);
   if ('accountChanged' in proposal && proposal.accountChanged) {
     recordFrameAccountChange(storageChanges, state.entityId, accountKey);
   }

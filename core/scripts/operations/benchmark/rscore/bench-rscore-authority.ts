@@ -24,12 +24,17 @@
  *          [accounts=1000] [waves=10] [paymentsPerWave=1000] [workers=8]
  */
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../../account/crypto';
 import { buildSingleSignerHanko } from '../../../../hanko/batch';
 import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../../account/j-claims/j-claim-codec';
 import { generateLazyEntityId } from '../../../../entity/factory';
-import { RscoreProcessClient, type RscoreWireValue } from '../../../../rscore/client';
+import {
+  packWireValue,
+  RscoreProcessClient,
+  type RscoreWireValue,
+} from '../../../../rscore/client';
 import { swapMarketPolicyWire, waveAdmitOp, waveInputOp } from '../../../../rscore/shadow-wire';
 import type { Wave } from '../../../../rscore/wave-decode';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -155,17 +160,35 @@ const runWave = async (
   phase: Phase,
 ): Promise<Wave> => {
   const started = performance.now();
-  const { token } = await client.prepareAccountWave({
-    entities: [{
-      ownerEntityId: hexToBytes(hub),
+  const ownerEntityId = hexToBytes(hub);
+  const context = {
+    ownerEntityId,
+    timestamp,
+    jHeight: 100,
+    entityTimestamp: timestamp,
+    finalizedJHeight: 100,
+    propose,
+  } as const;
+  const stageKey = createHash('sha256')
+    .update('xln.rscore.bench.entity-stage.v1', 'utf8')
+    .update(Buffer.from([0]))
+    .update(packWireValue([
+      ownerEntityId,
       timestamp,
-      jHeight: 100,
-      entityTimestamp: timestamp,
-      finalizedJHeight: 100,
+      100,
+      timestamp,
+      100,
       propose,
       ops,
-    }],
-  });
+    ]))
+    .digest();
+  const { token } = await client.prepareAccountWave({ entities: [] });
+  await client.beginEntityStage(token, stageKey, 0, context);
+  if (ops.length > 0) {
+    await client.applyAccountWave(token, stageKey, {
+      entities: [{ ownerEntityId, ops }],
+    });
+  }
   const decodeStarted = performance.now();
   if (propose) {
     const accountIds = [...new Map(ops
@@ -174,11 +197,12 @@ const runWave = async (
       .map(accountId => [Buffer.from(accountId).toString('hex'), accountId])).values()]
       .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
     if (accountIds.length > 0) {
-      await client.proposeAccountWave(token, {
-        entities: [{ ownerEntityId: hexToBytes(hub), accountIds }],
+      await client.proposeAccountWave(token, stageKey, {
+        entities: [{ ownerEntityId, accountIds }],
       });
     }
   }
+  await client.finalizeEntityStage(token, stageKey, 0);
   const wave = await client.sealAccountWave(token);
   const commitStarted = performance.now();
   await client.commit(token);

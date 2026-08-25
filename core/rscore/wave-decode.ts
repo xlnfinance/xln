@@ -120,7 +120,7 @@ type WaveSwapOffer = {
   quantizedWant: string;
 };
 
-type WaveVerdict =
+type WaveFrameVerdict =
   | {
       kind: 'frameCommitted';
       height: number;
@@ -133,7 +133,9 @@ type WaveVerdict =
   | { kind: 'frameCollisionIgnored'; height: number }
   | { kind: 'frameDuplicate'; height: number; stateHash: string; ackHanko: string }
   | { kind: 'frameStale'; height: number; currentHeight: number }
-  | { kind: 'frameRejected'; reason: string }
+  | { kind: 'frameRejected'; reason: string };
+
+type WaveAckVerdict =
   | {
       kind: 'ackCommitted';
       height: number;
@@ -142,7 +144,19 @@ type WaveVerdict =
       committedFrame: WaveCommittedFrame;
     }
   | { kind: 'ackStale'; height: number }
-  | { kind: 'ackRejected'; reason: string }
+  | { kind: 'ackRejected'; reason: string };
+
+type WaveVerdict =
+  | WaveFrameVerdict
+  | WaveAckVerdict
+  /**
+   * The child types are deliberately narrower than `WaveVerdict`: Rust can
+   * emit only one ACK verdict followed by one frame verdict here. Accepting a
+   * recursive FrameAck or a generic Failed child would create wire states the
+   * authoritative transition never produced.
+   */
+  | { kind: 'frameAckApplied'; ackVerdict: WaveAckVerdict; frameVerdict: WaveFrameVerdict }
+  | { kind: 'frameAckRejected'; phase: 'ack' | 'frame'; reason: string }
   | { kind: 'failed'; message: string };
 
 type WaveCommittedFrame = Readonly<{
@@ -379,20 +393,21 @@ const decodeAdmissionResult = (value: unknown): WaveAdmissionResult => {
   return rscoreWireDecodeFail(`admissionResult.verdict.tag:${tag}`);
 };
 
-const decodeVerdict = (value: unknown): WaveVerdict => {
-  const row = rscoreWireList(value, 'verdict');
-  switch (rscoreWireInt(row[0], 'verdict.tag')) {
+const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => {
+  const row = rscoreWireList(value, field);
+  const tag = rscoreWireInt(row[0], `${field}.tag`);
+  switch (tag) {
     case 0: {
-      const fields = rscoreWireTuple(row, 7, 'verdict.frameCommitted');
-      const height = rscoreWireInt(fields[1], 'verdict.height');
-      const stateHash = rscoreWireHex(fields[2], 'verdict.stateHash', 32);
+      const fields = rscoreWireTuple(row, 7, `${field}.frameCommitted`);
+      const height = rscoreWireInt(fields[1], `${field}.height`);
+      const stateHash = rscoreWireHex(fields[2], `${field}.stateHash`, 32);
       return {
         kind: 'frameCommitted',
         height,
         stateHash,
-        ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
-        outputs: rscoreWireList(fields[4], 'verdict.outputs').map(decodeOutput),
-        rolledBackTxs: rscoreWireInt(fields[5], 'verdict.rolledBackTxs'),
+        ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], `${field}.ackHanko`)).toString('hex')}`,
+        outputs: rscoreWireList(fields[4], `${field}.outputs`).map(decodeOutput),
+        rolledBackTxs: rscoreWireInt(fields[5], `${field}.rolledBackTxs`),
         committedFrame: assertCommittedFrameBinding(
           decodeCommittedFrame(fields[6]),
           height,
@@ -402,39 +417,48 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
       };
     }
     case 1: {
-      const fields = rscoreWireTuple(row, 2, 'verdict.collision');
-      return { kind: 'frameCollisionIgnored', height: rscoreWireInt(fields[1], 'verdict.height') };
+      const fields = rscoreWireTuple(row, 2, `${field}.collision`);
+      return { kind: 'frameCollisionIgnored', height: rscoreWireInt(fields[1], `${field}.height`) };
     }
     case 2: {
-      const fields = rscoreWireTuple(row, 4, 'verdict.duplicate');
+      const fields = rscoreWireTuple(row, 4, `${field}.duplicate`);
       return {
         kind: 'frameDuplicate',
-        height: rscoreWireInt(fields[1], 'verdict.height'),
-        stateHash: rscoreWireHex(fields[2], 'verdict.stateHash', 32),
-        ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
+        height: rscoreWireInt(fields[1], `${field}.height`),
+        stateHash: rscoreWireHex(fields[2], `${field}.stateHash`, 32),
+        ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], `${field}.ackHanko`)).toString('hex')}`,
       };
     }
     case 3: {
-      const fields = rscoreWireTuple(row, 3, 'verdict.stale');
+      const fields = rscoreWireTuple(row, 3, `${field}.stale`);
       return {
         kind: 'frameStale',
-        height: rscoreWireInt(fields[1], 'verdict.height'),
-        currentHeight: rscoreWireInt(fields[2], 'verdict.currentHeight'),
+        height: rscoreWireInt(fields[1], `${field}.height`),
+        currentHeight: rscoreWireInt(fields[2], `${field}.currentHeight`),
       };
     }
     case 4: {
-      const fields = rscoreWireTuple(row, 2, 'verdict.rejected');
-      return { kind: 'frameRejected', reason: rscoreWireText(fields[1], 'verdict.reason') };
+      const fields = rscoreWireTuple(row, 2, `${field}.rejected`);
+      return { kind: 'frameRejected', reason: rscoreWireText(fields[1], `${field}.reason`) };
     }
+    default:
+      return rscoreWireDecodeFail(`${field}.tag:${tag}:frameDomain`);
+  }
+};
+
+const decodeAckVerdict = (value: unknown, field: string): WaveAckVerdict => {
+  const row = rscoreWireList(value, field);
+  const tag = rscoreWireInt(row[0], `${field}.tag`);
+  switch (tag) {
     case 5: {
-      const fields = rscoreWireTuple(row, 5, 'verdict.ackCommitted');
-      const height = rscoreWireInt(fields[1], 'verdict.height');
-      const stateHash = rscoreWireHex(fields[2], 'verdict.stateHash', 32);
+      const fields = rscoreWireTuple(row, 5, `${field}.ackCommitted`);
+      const height = rscoreWireInt(fields[1], `${field}.height`);
+      const stateHash = rscoreWireHex(fields[2], `${field}.stateHash`, 32);
       return {
         kind: 'ackCommitted',
         height,
         stateHash,
-        outputs: rscoreWireList(fields[3], 'verdict.outputs').map(decodeOutput),
+        outputs: rscoreWireList(fields[3], `${field}.outputs`).map(decodeOutput),
         committedFrame: assertCommittedFrameBinding(
           decodeCommittedFrame(fields[4]),
           height,
@@ -444,16 +468,50 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
       };
     }
     case 6: {
-      const fields = rscoreWireTuple(row, 2, 'verdict.ackStale');
-      return { kind: 'ackStale', height: rscoreWireInt(fields[1], 'verdict.height') };
+      const fields = rscoreWireTuple(row, 2, `${field}.ackStale`);
+      return { kind: 'ackStale', height: rscoreWireInt(fields[1], `${field}.height`) };
     }
     case 7: {
-      const fields = rscoreWireTuple(row, 2, 'verdict.ackRejected');
-      return { kind: 'ackRejected', reason: rscoreWireText(fields[1], 'verdict.reason') };
+      const fields = rscoreWireTuple(row, 2, `${field}.ackRejected`);
+      return { kind: 'ackRejected', reason: rscoreWireText(fields[1], `${field}.reason`) };
     }
+    default:
+      return rscoreWireDecodeFail(`${field}.tag:${tag}:ackDomain`);
+  }
+};
+
+const FRAME_ACK_PHASES = ['ack', 'frame'] as const;
+
+const decodeVerdict = (value: unknown): WaveVerdict => {
+  const row = rscoreWireList(value, 'verdict');
+  const tag = rscoreWireInt(row[0], 'verdict.tag');
+  if (tag >= 0 && tag <= 4) return decodeFrameVerdict(row, 'verdict');
+  if (tag >= 5 && tag <= 7) return decodeAckVerdict(row, 'verdict');
+  switch (tag) {
     case 8: {
       const fields = rscoreWireTuple(row, 2, 'verdict.failed');
       return { kind: 'failed', message: rscoreWireText(fields[1], 'verdict.message') };
+    }
+    case 9: {
+      const fields = rscoreWireTuple(row, 3, 'verdict.frameAckApplied');
+      return {
+        kind: 'frameAckApplied',
+        ackVerdict: decodeAckVerdict(fields[1], 'verdict.frameAckApplied.ackVerdict'),
+        frameVerdict: decodeFrameVerdict(fields[2], 'verdict.frameAckApplied.frameVerdict'),
+      };
+    }
+    case 10: {
+      const fields = rscoreWireTuple(row, 3, 'verdict.frameAckRejected');
+      const phaseValue = rscoreWireInt(fields[1], 'verdict.frameAckRejected.phase');
+      const phase = FRAME_ACK_PHASES[phaseValue];
+      if (phase === undefined) {
+        return rscoreWireDecodeFail(`verdict.frameAckRejected.phase:${phaseValue}`);
+      }
+      return {
+        kind: 'frameAckRejected',
+        phase,
+        reason: rscoreWireText(fields[2], 'verdict.frameAckRejected.reason'),
+      };
     }
     default:
       return rscoreWireDecodeFail('verdict.tag:unknown');
@@ -704,7 +762,7 @@ const outputWire = (output: WaveOutput): RscoreWireValue => {
   }
 };
 
-const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
+const frameVerdictWire = (verdict: WaveFrameVerdict): RscoreWireValue => {
   switch (verdict.kind) {
     case 'frameCommitted':
       return [
@@ -729,6 +787,11 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
       return [3, verdict.height, verdict.currentHeight];
     case 'frameRejected':
       return [4, verdict.reason];
+  }
+};
+
+const ackVerdictWire = (verdict: WaveAckVerdict): RscoreWireValue => {
+  switch (verdict.kind) {
     case 'ackCommitted':
       return [
         5,
@@ -741,6 +804,29 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
       return [6, verdict.height];
     case 'ackRejected':
       return [7, verdict.reason];
+  }
+};
+
+const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
+  switch (verdict.kind) {
+    case 'frameCommitted':
+    case 'frameCollisionIgnored':
+    case 'frameDuplicate':
+    case 'frameStale':
+    case 'frameRejected':
+      return frameVerdictWire(verdict);
+    case 'ackCommitted':
+    case 'ackStale':
+    case 'ackRejected':
+      return ackVerdictWire(verdict);
+    case 'frameAckApplied':
+      return [
+        9,
+        ackVerdictWire(verdict.ackVerdict),
+        frameVerdictWire(verdict.frameVerdict),
+      ];
+    case 'frameAckRejected':
+      return [10, verdict.phase === 'ack' ? 0 : 1, verdict.reason];
     case 'failed':
       return [8, verdict.message];
   }

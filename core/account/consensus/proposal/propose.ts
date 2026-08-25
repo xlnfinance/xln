@@ -55,6 +55,7 @@ const finishEmptyProposal = (
       ? `Transactions deferred until signed settlement finalizes: ${validation.deferredTxCount}`
       : 'All transactions failed validation',
     events: validation.events,
+    proposalDroppedTransactions: validation.droppedTransactions,
     ...(validation.failedHtlcLocks.length > 0
       ? { failedHtlcLocks: validation.failedHtlcLocks }
       : {}),
@@ -212,6 +213,7 @@ export async function proposeAccountFrame(
     counterparty,
     validMempoolTxs,
     txsToRemove,
+    validation.droppedTransactions,
     validation,
     events,
     checkpointProfile,

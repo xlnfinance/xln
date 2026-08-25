@@ -575,9 +575,13 @@ pub fn prepare_wave(
     inputs: Vec<AbiValue>,
     propose: bool,
 ) -> Envelope {
-    let mut operation_index = 0_u64;
+    let ops = staged_wave_ops(admissions, inputs);
+    prepare_wave_ops(id, owner_entity_id, timestamp, ops, propose)
+}
+
+pub fn staged_wave_ops(admissions: Vec<AbiValue>, inputs: Vec<AbiValue>) -> Vec<AbiValue> {
     let mut ops = Vec::new();
-    for admission in admissions {
+    for (operation_index, admission) in (0_u64..).zip(admissions) {
         let AbiValue::Tuple(fields) = admission else {
             panic!("an admission is [accountId, txs]")
         };
@@ -588,18 +592,21 @@ pub fn prepare_wave(
             fields[0].clone(),
             fields[1].clone(),
         ]));
-        operation_index += 1;
     }
-    for input in inputs {
+    let first_input_index = u64::try_from(ops.len()).expect("test wave operation count fits u64");
+    for (operation_index, input) in (first_input_index..).zip(inputs) {
         let AbiValue::Tuple(fields) = input else {
-            panic!("an input is [operationIndex, accountId, from, kind]")
+            panic!("an input is [operationIndex, accountId, peerEnvelope]")
         };
         let mut fields = fields.fields().to_vec();
         fields[0] = AbiValue::Integer(i128::from(operation_index));
         ops.push(tuple(vec![AbiValue::Integer(1), tuple(fields)]));
-        operation_index += 1;
     }
-    prepare_wave_ops(id, owner_entity_id, timestamp, ops, propose)
+    ops
+}
+
+pub fn prepare_empty_wave(id: u64) -> Envelope {
+    request(id, OpTag::PrepareAccountWave, vec![tuple(Vec::new())])
 }
 
 pub fn prepare_wave_ops(
@@ -647,6 +654,7 @@ pub fn wave_add_delta(operation_index: u64, account_id: [u8; 32], token_id: u32)
 pub fn apply_wave(
     id: u64,
     candidate_token: [u8; 32],
+    stage_key: [u8; 32],
     owner_entity_id: [u8; 32],
     ops: Vec<AbiValue>,
 ) -> Envelope {
@@ -655,6 +663,7 @@ pub fn apply_wave(
         OpTag::ApplyAccountWave,
         vec![
             AbiValue::Bytes(candidate_token.to_vec()),
+            AbiValue::Bytes(stage_key.to_vec()),
             tuple(vec![tuple(vec![
                 AbiValue::Bytes(owner_entity_id.to_vec()),
                 tuple(ops),
@@ -666,6 +675,7 @@ pub fn apply_wave(
 pub fn propose_wave(
     id: u64,
     candidate_token: [u8; 32],
+    stage_key: [u8; 32],
     owner_entity_id: [u8; 32],
     account_ids: Vec<[u8; 32]>,
 ) -> Envelope {
@@ -674,6 +684,7 @@ pub fn propose_wave(
         OpTag::ProposeAccountWave,
         vec![
             AbiValue::Bytes(candidate_token.to_vec()),
+            AbiValue::Bytes(stage_key.to_vec()),
             tuple(vec![tuple(vec![
                 AbiValue::Bytes(owner_entity_id.to_vec()),
                 tuple(
@@ -683,6 +694,82 @@ pub fn propose_wave(
                         .collect(),
                 ),
             ])]),
+        ],
+    )
+}
+
+pub fn begin_entity(
+    id: u64,
+    candidate_token: [u8; 32],
+    stage_key: [u8; 32],
+    expected_accepted_ordinal: u64,
+    owner_entity_id: [u8; 32],
+    timestamp: u64,
+    propose: bool,
+) -> Envelope {
+    request(
+        id,
+        OpTag::BeginEntity,
+        vec![
+            AbiValue::Bytes(candidate_token.to_vec()),
+            AbiValue::Bytes(stage_key.to_vec()),
+            AbiValue::Integer(i128::from(expected_accepted_ordinal)),
+            tuple(vec![
+                AbiValue::Bytes(owner_entity_id.to_vec()),
+                AbiValue::Integer(i128::from(timestamp)),
+                AbiValue::Integer(100),
+                AbiValue::Integer(i128::from(timestamp)),
+                AbiValue::Integer(100),
+                AbiValue::Bool(propose),
+            ]),
+        ],
+    )
+}
+
+pub fn finalize_entity(
+    id: u64,
+    candidate_token: [u8; 32],
+    stage_key: [u8; 32],
+    expected_accepted_ordinal: u64,
+) -> Envelope {
+    entity_stage_terminal(
+        id,
+        OpTag::FinalizeEntity,
+        candidate_token,
+        stage_key,
+        expected_accepted_ordinal,
+    )
+}
+
+pub fn discard_entity(
+    id: u64,
+    candidate_token: [u8; 32],
+    stage_key: [u8; 32],
+    expected_accepted_ordinal: u64,
+) -> Envelope {
+    entity_stage_terminal(
+        id,
+        OpTag::DiscardEntity,
+        candidate_token,
+        stage_key,
+        expected_accepted_ordinal,
+    )
+}
+
+fn entity_stage_terminal(
+    id: u64,
+    op_tag: OpTag,
+    candidate_token: [u8; 32],
+    stage_key: [u8; 32],
+    expected_accepted_ordinal: u64,
+) -> Envelope {
+    request(
+        id,
+        op_tag,
+        vec![
+            AbiValue::Bytes(candidate_token.to_vec()),
+            AbiValue::Bytes(stage_key.to_vec()),
+            AbiValue::Integer(i128::from(expected_accepted_ordinal)),
         ],
     )
 }
@@ -734,23 +821,35 @@ pub fn wave_swap_offer(account_id: [u8; 32]) -> AbiValue {
 }
 
 pub fn wave_ack(
-    input_index: u32,
+    operation_index: u64,
     account_id: [u8; 32],
     from: [u8; 32],
+    to: [u8; 32],
     height: u64,
-    state_hash: [u8; 32],
-    hanko: Vec<u8>,
+    frame_hash: [u8; 32],
+    frame_hanko: Vec<u8>,
 ) -> AbiValue {
     tuple(vec![
-        AbiValue::Integer(i128::from(input_index)),
+        AbiValue::Integer(i128::from(operation_index)),
         AbiValue::Bytes(account_id.to_vec()),
-        AbiValue::Bytes(from.to_vec()),
         tuple(vec![
-            AbiValue::Integer(1),
-            AbiValue::Integer(i128::from(height)),
-            AbiValue::Bytes(state_hash.to_vec()),
-            AbiValue::Bytes(hanko),
-            AbiValue::Nil,
+            AbiValue::Bytes(from.to_vec()),
+            AbiValue::Bytes(to.to_vec()),
+            tuple(vec![
+                AbiValue::Integer(31_337),
+                AbiValue::Bytes(vec![0x88; 20]),
+            ]),
+            tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
+            AbiValue::Bytes(vec![0x99; 32]),
+            tuple(vec![
+                AbiValue::Integer(1),
+                tuple(vec![
+                    AbiValue::Integer(i128::from(height)),
+                    AbiValue::Bytes(frame_hash.to_vec()),
+                    AbiValue::Bytes(frame_hanko),
+                    AbiValue::Nil,
+                ]),
+            ]),
         ]),
     ])
 }

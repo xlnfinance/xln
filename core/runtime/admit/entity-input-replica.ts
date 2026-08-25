@@ -15,6 +15,16 @@ import {
   isCommittedEntityInput,
   RuntimeEntityInputApplyError,
 } from './entity-input-contract.ts';
+import {
+  authorityDriverEnabled,
+  authorityRuntimeSuppressed,
+  stageAuthorityEntityInput,
+  type AuthorityEntityStageHandle,
+} from '../../rscore/authority-driver.ts';
+import {
+  authorityRecordEnabled,
+  runAuthorityFrameScope,
+} from '../../rscore/authority-wave.ts';
 
 export type AppliedEntityReplicaInput = {
   outcome: EntityInputOutcome;
@@ -36,6 +46,8 @@ export type AppliedEntityReplicaInput = {
     ReturnType<typeof applyEntityInput>
   >['accountJClaimNodeChanges'];
   entityContext: Awaited<ReturnType<typeof applyEntityInput>>['entityContext'];
+  /** Open Rust savepoint; the Runtime caller owns its terminal decision. */
+  authorityStage: AuthorityEntityStageHandle | null;
 };
 
 const didCommitEntityFrame = (
@@ -186,64 +198,93 @@ export const applyEntityInputToReplica = async (
     });
   }
 
-  const applyStartedAt = getPerfMs();
-  let applied: Awaited<ReturnType<typeof applyEntityInput>>;
-  try {
-    applied = await applyEntityInput(
-      env,
-      entityReplica,
-      normalizedInput,
-      trustedLocalRuntimeProtocol
-        ? { trustedLocalRuntimeProtocol, promoteCandidateState }
-        : {
-            promoteCandidateState,
+  const driverEnabled = authorityDriverEnabled(env);
+  const recordingEnabled = authorityRecordEnabled(driverEnabled)
+    && !authorityRuntimeSuppressed(env);
+  const runtimeId = String(env.runtimeId ?? '');
+  return runAuthorityFrameScope(
+    env,
+    runtimeId,
+    recordingEnabled,
+    async collectorFrameId => {
+      const applyStartedAt = getPerfMs();
+      let applied: Awaited<ReturnType<typeof applyEntityInput>>;
+      try {
+        applied = await applyEntityInput(
+          env,
+          entityReplica,
+          normalizedInput,
+          trustedLocalRuntimeProtocol
+            ? { trustedLocalRuntimeProtocol, promoteCandidateState }
+            : {
+                promoteCandidateState,
+                deferProposal,
+                ...(requiredEntityTxIndex === undefined
+                  ? {}
+                  : { requiredEntityTxIndex }),
+              },
+        );
+      } catch (error) {
+        throw new RuntimeEntityInputApplyError(
+          entityInput,
+          trustedLocalRuntimeProtocol !== undefined,
+          error,
+        );
+      }
+      const applyEntityInputMs = Math.round(getPerfMs() - applyStartedAt);
+
+      const committed = isCommittedEntityInput(applied.outcome);
+      const nextReplica: EntityReplica = committed
+        ? { ...applied.workingReplica, state: applied.newState }
+        : entityReplica;
+      const routeOutputsStartedAt = getPerfMs();
+      const outputs = await routeEntityOutputs(
+        env,
+        nextReplica,
+        applied.outputs,
+        replicaKey,
+      );
+      const routeOutputsMs = Math.round(getPerfMs() - routeOutputsStartedAt);
+      logEntityInputProfile(replicaKey, applied.outputs.length, applyEntityInputMs, routeOutputsMs);
+      const appliedInput = preserveAppliedRoutedProvenance(
+        applied.canonicalAppliedInput ?? normalizedInput,
+        entityInput,
+        actualSignerId,
+      );
+      const authorityStage = driverEnabled
+        ? await stageAuthorityEntityInput(env, {
+            collectorFrameId,
+            ownerEntityId: entityReplica.entityId,
+            appliedInput,
+            ...(trustedLocalRuntimeProtocol === undefined
+              ? {}
+              : { trustedLocalRuntimeProtocol }),
             deferProposal,
             ...(requiredEntityTxIndex === undefined
               ? {}
               : { requiredEntityTxIndex }),
-          },
-    );
-  } catch (error) {
-    throw new RuntimeEntityInputApplyError(
-      entityInput,
-      trustedLocalRuntimeProtocol !== undefined,
-      error,
-    );
-  }
-  const applyEntityInputMs = Math.round(getPerfMs() - applyStartedAt);
-
-  const committed = isCommittedEntityInput(applied.outcome);
-  const nextReplica: EntityReplica = committed
-    ? { ...applied.workingReplica, state: applied.newState }
-    : entityReplica;
-  const routeOutputsStartedAt = getPerfMs();
-  const outputs = await routeEntityOutputs(
-    env,
-    nextReplica,
-    applied.outputs,
-    replicaKey,
+            fallbackTimestamp: entityReplica.state.timestamp,
+            fallbackFinalizedJHeight: entityReplica.state.lastFinalizedJHeight,
+          })
+        : null;
+      return {
+        outcome: applied.outcome,
+        appliedInput,
+        entityFrameCommitted: didCommitEntityFrame(
+          entityReplica,
+          nextReplica,
+          applied.outcome,
+        ),
+        nextReplica,
+        outputs,
+        jOutputs: applied.jOutputs || [],
+        candidateEffects: applied.candidateEffects,
+        storageChanges: applied.storageChanges,
+        consumptionNodeChanges: applied.consumptionNodeChanges,
+        accountJClaimNodeChanges: applied.accountJClaimNodeChanges,
+        entityContext: applied.entityContext,
+        authorityStage,
+      };
+    },
   );
-  const routeOutputsMs = Math.round(getPerfMs() - routeOutputsStartedAt);
-  logEntityInputProfile(replicaKey, applied.outputs.length, applyEntityInputMs, routeOutputsMs);
-  return {
-    outcome: applied.outcome,
-    appliedInput: preserveAppliedRoutedProvenance(
-      applied.canonicalAppliedInput ?? normalizedInput,
-      entityInput,
-      actualSignerId,
-    ),
-    entityFrameCommitted: didCommitEntityFrame(
-      entityReplica,
-      nextReplica,
-      applied.outcome,
-    ),
-    nextReplica,
-    outputs,
-    jOutputs: applied.jOutputs || [],
-    candidateEffects: applied.candidateEffects,
-    storageChanges: applied.storageChanges,
-    consumptionNodeChanges: applied.consumptionNodeChanges,
-    accountJClaimNodeChanges: applied.accountJClaimNodeChanges,
-    entityContext: applied.entityContext,
-  };
 };

@@ -81,6 +81,7 @@ export const proposeAccountFrameRejected = (
   ok: false,
   rejection: { message },
   events,
+  proposalDroppedTransactions: [],
 });
 
 export const isProposedAccountFrame = (

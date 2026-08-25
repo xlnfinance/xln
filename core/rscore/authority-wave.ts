@@ -20,40 +20,54 @@
 
 import { createStructuredLogger } from '../support/logger';
 import {
+  accountPeerFrameWire,
   accountTxWire,
+  accountEnvelopeWire,
+  accountSeedWire,
   hexToWireBytes,
   shadowOutputRows,
   waveAdmitOp,
+  waveCreateOp,
   waveInputOp,
   type ShadowOutputRow,
 } from './shadow-wire';
 import type { RscoreWireValue } from './client';
-import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../types/account';
+import type {
+  AccountDisputeHanko,
+  AccountFrame,
+  AccountFrameAck,
+  AccountFrameProposal,
+  AccountInput,
+  AccountPeerInput,
+  AccountReplica,
+  AccountTx,
+} from '../types/account';
 import type { ApplyAccountTxOk } from '../account/tx/apply-types';
+import type {
+  HandleAccountInputResult,
+  ProposalDroppedTransaction,
+  ProposeAccountFrameResult,
+} from '../account/consensus/types';
 import { safeStringify } from '../protocol/serialization';
+import { decodeAccountPeerInput } from '../account/validation/input-validation';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
-/**
- * The counterparty's recovery proof as their message carried it. The hash they
- * claim is deliberately absent: the receiving side rebuilds it from the rest,
- * because a signature is over one exact message.
- */
-type PeerDispute = {
-  hanko: string;
-  proofBodyHash: string;
-  proofNonce: number;
-  proposerIsLeft: boolean;
-};
-
-type RawAccountInputKind = 'enqueue' | 'frame' | 'ack' | 'frame_ack' | 'dispute'
+type RawAccountInputKind = 'create' | 'enqueue' | 'frame' | 'ack' | 'frame_ack' | 'dispute'
   | 'external_finality' | 'other';
+
+type AuthorityPeerInput = Extract<
+  AccountPeerInput,
+  { kind: 'frame' | 'ack' | 'frame_ack' }
+>;
 
 /** What arrived for one account, as the engine would be handed it. */
 type RecordedPayload =
+  | { kind: 'create'; seed: RscoreWireValue }
   | { kind: 'admit'; txs: readonly AccountTx[] }
-  | { kind: 'frame'; frame: AccountFrame; hanko: string; dispute?: PeerDispute }
-  | { kind: 'ack'; height: number; frameHash: string; hanko: string; dispute?: PeerDispute }
+  | { kind: 'frame'; input: Extract<AccountPeerInput, { kind: 'frame' }> }
+  | { kind: 'ack'; input: Extract<AccountPeerInput, { kind: 'ack' }> }
+  | { kind: 'frame_ack'; input: Extract<AccountPeerInput, { kind: 'frame_ack' }> }
   /** Inputs no wave can carry: they are counted, and the frame is not driven. */
   | { kind: 'unsupported'; reason: string };
 
@@ -62,7 +76,28 @@ type RecordedInput = {
   counterpartyEntityId: string;
   kind: RawAccountInputKind;
   payloads: RecordedPayload[];
+  expectedVerdict?: AuthorityExpectedOperationVerdict;
 };
+
+/** Opaque, frame-local binding between one raw Account input and its result. */
+export type AuthorityRecordedAccountInput = Readonly<{
+  row: RecordedInput;
+}>;
+
+export type AuthorityExpectedOperationVerdict =
+  | Readonly<{ kind: 'create' }>
+  | Readonly<{ kind: 'admission'; admittedCount: number }>
+  | Readonly<{
+      kind: 'peer';
+      outcome: 'applied' | 'rejected' | 'dispute';
+      /** Exact Account certificate evidence, in ACK-then-frame order. */
+      committedFrames: readonly Readonly<{
+        frame: AccountFrame;
+        committedViaNewFrame: boolean;
+      }>[];
+      /** ACK Hanko TypeScript produced for an accepted or duplicate frame. */
+      responseAckHanko: string | null;
+    }>;
 
 /**
  * A clock an Entity used inside this Runtime frame — the timestamp and
@@ -83,6 +118,29 @@ type RecordedClock = {
   timestamp: number;
   finalizedJHeight: number;
 };
+
+/** One Account the canonical Entity worklist actually sent to proposeAccountFrame. */
+type RecordedProposalSelection = {
+  ownerEntityId: string;
+  accountId: string;
+  timestamp: number;
+  finalizedJHeight: number;
+  /** Current Rust Propose consumes the whole mempool, never a TS subset. */
+  selectionIsWholeMempool: boolean;
+  expected?: AuthorityExpectedProposalAttempt;
+};
+
+export type AuthorityExpectedProposalAttempt = Readonly<{
+  accountId: string;
+  outcome: 'proposed' | 'idle';
+  frame: AccountFrame | null;
+  dropped: readonly ProposalDroppedTransaction[];
+}>;
+
+/** Opaque binding from the exact worklist selection to its TS result. */
+export type AuthorityRecordedAccountProposal = Readonly<{
+  row: RecordedProposalSelection;
+}>;
 
 /**
  * Observation only, and off by default: recording every input of every frame
@@ -113,6 +171,7 @@ const clocks = new Map<string, RecordedClock[]>();
  * publishing a different forward, secret or resting offer.
  */
 const outputs = new Map<string, RecordedOutputs[]>();
+const proposalSelections = new Map<string, RecordedProposalSelection[]>();
 let frameSequence = 0;
 
 let report = {
@@ -172,17 +231,17 @@ export const noteRawAccountInput = (
   frameId: string | null | undefined,
   account: AccountReplica,
   input: AccountInput,
-): void => {
-  if (!authorityRecordEnabled()) return;
+): AuthorityRecordedAccountInput | null => {
+  if (!authorityRecordEnabled()) return null;
   // `null` is an explicit detached/read-only scope. It is not a gap and must
   // not touch or poison the live replica's collector even if runtimeIds match.
-  if (frameId === null) return;
+  if (frameId === null) return null;
   if (frameId === undefined) {
     // An input outside any Runtime frame belongs to no wave. Counted, because
     // an authority that never saw it would diverge and this is where that
     // would first be visible.
     report.skippedNoFrame += 1;
-    return;
+    return null;
   }
   const owner = account.proofHeader?.fromEntity;
   const counterparty = account.proofHeader?.toEntity;
@@ -190,6 +249,93 @@ export const noteRawAccountInput = (
     // Counted, never silently dropped: an input the recorder cannot attribute
     // is an input the authority would not receive.
     report.skippedNoHeader += 1;
+    return null;
+  }
+  const open = frames.get(frameId);
+  if (open === undefined) {
+    report.skippedNoFrame += 1;
+    return null;
+  }
+  const row: RecordedInput = {
+    ownerEntityId: owner.trim().toLowerCase(),
+    counterpartyEntityId: counterparty.trim().toLowerCase(),
+    kind: classify(input),
+    payloads: payloadsOf(input),
+  };
+  open.push(row);
+  return { row };
+};
+
+const responseAckHanko = (result: HandleAccountInputResult): string | null => {
+  if (!result.ok || result.response === undefined) return null;
+  const response = result.response;
+  if (response.kind !== 'ack' && response.kind !== 'frame_ack') return null;
+  return response.ack.frameHanko ?? null;
+};
+
+/**
+ * Bind the exact TypeScript terminal and committed certificate evidence to the
+ * raw operation recorded immediately before execution. This is observation,
+ * not re-execution or inference from the final Account forest.
+ */
+export const noteAuthorityAccountInputResult = (
+  recorded: AuthorityRecordedAccountInput | null,
+  result: HandleAccountInputResult,
+): void => {
+  if (recorded === null) return;
+  if (recorded.row.expectedVerdict !== undefined) {
+    throw new Error('AUTHORITY_ACCOUNT_RESULT_DUPLICATE');
+  }
+  const payload = recorded.row.payloads[0];
+  if (payload === undefined || recorded.row.payloads.length !== 1) {
+    throw new Error('AUTHORITY_ACCOUNT_RESULT_PAYLOAD_ARITY');
+  }
+  if (payload.kind === 'admit') {
+    if (!result.ok || result.admittedAccountTxCount === undefined) {
+      throw new Error('AUTHORITY_ACCOUNT_ADMISSION_RESULT_INVALID');
+    }
+    recorded.row.expectedVerdict = {
+      kind: 'admission',
+      admittedCount: result.admittedAccountTxCount,
+    };
+    return;
+  }
+  if (payload.kind === 'unsupported') return;
+  if (payload.kind === 'create') {
+    throw new Error(`AUTHORITY_ACCOUNT_RESULT_KIND:${payload.kind}`);
+  }
+  recorded.row.expectedVerdict = {
+    kind: 'peer',
+    outcome: result.ok ? 'applied' : result.disposition,
+    committedFrames: result.ok
+      ? (result.committedFrames ?? []).map(committed => ({
+          frame: structuredClone(committed.frame),
+          committedViaNewFrame: committed.committedViaNewFrame,
+        }))
+      : [],
+    responseAckHanko: responseAckHanko(result),
+  };
+};
+
+/**
+ * Record the exact H=0 replica before its first admission or peer input.
+ *
+ * Create is a candidate operation, not a recovery seed: consensus is null,
+ * the complete Entity envelope is present, and the replica must still be a
+ * pristine genesis. Encoding happens here so later TypeScript mutation cannot
+ * change the snapshot already assigned an arrival position.
+ */
+export const noteAuthorityAccountCreate = (
+  frameId: string | null | undefined,
+  ownerEntityId: string,
+  counterpartyEntityId: string,
+  account: AccountReplica,
+  deltaTransformer: string,
+): void => {
+  if (!authorityRecordEnabled()) return;
+  if (frameId === null) return;
+  if (frameId === undefined) {
+    report.skippedNoFrame += 1;
     return;
   }
   const open = frames.get(frameId);
@@ -197,84 +343,60 @@ export const noteRawAccountInput = (
     report.skippedNoFrame += 1;
     return;
   }
+  const owner = ownerEntityId.trim().toLowerCase();
+  const counterparty = counterpartyEntityId.trim().toLowerCase();
+  if (
+    account.proofHeader?.fromEntity.trim().toLowerCase() !== owner
+    || account.proofHeader?.toEntity.trim().toLowerCase() !== counterparty
+  ) {
+    throw new Error(`AUTHORITY_CREATE_PARTIES:${owner}:${counterparty}`);
+  }
+  if (
+    account.currentHeight !== 0
+    || account.currentFrame.height !== 0
+    || account.currentFrame.stateHash !== ''
+    || account.mempool.length !== 0
+    || account.pendingFrame !== undefined
+  ) {
+    throw new Error(`AUTHORITY_CREATE_NOT_H0:${owner}:${counterparty}`);
+  }
+  const seed = accountSeedWire(
+    owner,
+    counterparty,
+    account.state,
+    accountEnvelopeWire(account),
+    null,
+    deltaTransformer,
+  );
   open.push({
-    ownerEntityId: owner.trim().toLowerCase(),
-    counterpartyEntityId: counterparty.trim().toLowerCase(),
-    kind: classify(input),
-    payloads: payloadsOf(input),
+    ownerEntityId: owner,
+    counterpartyEntityId: counterparty,
+    kind: 'create',
+    payloads: [{ kind: 'create', seed }],
   });
 };
 
 /**
- * One TypeScript input can be two operations for the engine: a delivery may
- * acknowledge the previous frame and propose the next one, and TypeScript
- * applies the ack first (`handleAccountAckPhase` before
- * `handleAccountProposalPhase`). They are recorded in that same order.
+ * Preserve one canonical peer envelope as one authority operation. A
+ * `frame_ack` still has ACK-before-proposal semantics, but the order lives
+ * inside its composite kind instead of inventing two arrivals and two result
+ * rows for the one AccountInput TypeScript received.
  */
 const payloadsOf = (input: AccountInput): RecordedPayload[] => {
-  if (input.kind === 'enqueue') return [{ kind: 'admit', txs: input.txs }];
-  if (
-    input.kind === 'external_finality' ||
-    input.kind === 'dispute' ||
-    input.kind === 'board_hanko_refresh'
-  ) {
-    return [{ kind: 'unsupported', reason: input.kind }];
+  switch (input.kind) {
+    case 'enqueue':
+      return [{ kind: 'admit', txs: input.txs }];
+    case 'frame':
+      return [{ kind: 'frame', input }];
+    case 'ack':
+      return [{ kind: 'ack', input }];
+    case 'frame_ack':
+      return [{ kind: 'frame_ack', input }];
+    case 'external_finality':
+    case 'dispute':
+    case 'board_hanko_refresh':
+      return [{ kind: 'unsupported', reason: input.kind }];
   }
-  const payloads: RecordedPayload[] = [];
-  const ack = input.kind === 'ack' || input.kind === 'frame_ack' ? input.ack : undefined;
-  if (ack !== undefined) {
-    const dispute = peerDispute(ack.disputeHanko);
-    if (typeof ack.height !== 'number' || typeof ack.frameHash !== 'string'
-      || typeof ack.frameHanko !== 'string' || dispute === 'invalid') {
-      payloads.push({ kind: 'unsupported', reason: 'ackIncomplete' });
-    } else {
-      payloads.push({
-        kind: 'ack',
-        height: ack.height,
-        frameHash: ack.frameHash,
-        hanko: ack.frameHanko,
-        ...(dispute === undefined ? {} : { dispute }),
-      });
-    }
-  }
-  const proposal = input.kind === 'frame' || input.kind === 'frame_ack'
-    ? input.proposal
-    : undefined;
-  if (proposal !== undefined) {
-    const dispute = peerDispute(proposal.disputeHanko);
-    if (!proposal.frame || typeof proposal.frameHanko !== 'string' || dispute === 'invalid') {
-      payloads.push({ kind: 'unsupported', reason: 'proposalIncomplete' });
-    } else {
-      payloads.push({
-        kind: 'frame',
-        frame: proposal.frame,
-        hanko: proposal.frameHanko,
-        ...(dispute === undefined ? {} : { dispute }),
-      });
-    }
-  }
-  if (payloads.length === 0) payloads.push({ kind: 'unsupported', reason: input.kind });
-  return payloads;
-};
-
-/**
- * The proof attached to a peer's message, refused rather than half-read: an
- * account that stored three of its four fields would commit a proof the
- * counterparty never sent.
- */
-const peerDispute = (value: unknown): PeerDispute | undefined | 'invalid' => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'object') return 'invalid';
-  const row = value as Record<string, unknown>;
-  const hanko = row['hanko'];
-  const proofBodyHash = row['proofBodyHash'];
-  const proofNonce = row['proofNonce'];
-  const proposerIsLeft = row['proposerIsLeft'];
-  if (typeof hanko !== 'string' || typeof proofBodyHash !== 'string'
-    || typeof proofNonce !== 'number' || typeof proposerIsLeft !== 'boolean') {
-    return 'invalid';
-  }
-  return { hanko, proofBodyHash, proofNonce, proposerIsLeft };
 };
 
 /**
@@ -300,6 +422,72 @@ export const noteAuthorityEntityClock = (
     timestamp,
     finalizedJHeight,
   });
+};
+
+/**
+ * Record the exact Account selected by the Entity proposal worklist.
+ *
+ * A zero-op flush can propose a mempool entry admitted by an earlier Entity
+ * input, so the stage cannot infer this set from its own operations. The hook
+ * lives immediately before the canonical proposeAccountFrame call and binds
+ * the selection to the same clock that call receives.
+ */
+export const noteAuthorityAccountProposal = (
+  frameId: string | null | undefined,
+  ownerEntityId: string,
+  accountId: string,
+  timestamp: number,
+  finalizedJHeight: number,
+  selectionIsWholeMempool = true,
+): AuthorityRecordedAccountProposal | null => {
+  if (!authorityRecordEnabled()) return null;
+  noteAuthorityEntityClock(
+    frameId,
+    ownerEntityId,
+    'propose',
+    timestamp,
+    finalizedJHeight,
+  );
+  if (frameId === null || frameId === undefined) return null;
+  const open = proposalSelections.get(frameId);
+  if (open === undefined) return null;
+  const row: RecordedProposalSelection = {
+    ownerEntityId: ownerEntityId.trim().toLowerCase(),
+    accountId: accountId.trim().toLowerCase(),
+    timestamp,
+    finalizedJHeight,
+    selectionIsWholeMempool,
+  };
+  open.push(row);
+  return { row };
+};
+
+/** Bind the selected Account to the exact result of its single TS proposal. */
+export const noteAuthorityAccountProposalResult = (
+  recorded: AuthorityRecordedAccountProposal | null,
+  result: ProposeAccountFrameResult,
+): void => {
+  if (recorded === null) return;
+  if (!result.ok) {
+    throw new Error(
+      `RSCORE_AUTHORITY_PROPOSAL_REJECTED:${recorded.row.ownerEntityId}/${recorded.row.accountId}:` +
+      result.rejection.message,
+    );
+  }
+  let frame: AccountFrame | null = null;
+  if (result.outcome === 'proposed') {
+    const outbound = result.accountInput;
+    if (outbound.kind !== 'frame' && outbound.kind !== 'frame_ack') {
+      throw new Error(`RSCORE_AUTHORITY_PROPOSAL_INPUT_KIND:${outbound.kind}`);
+    }
+    frame = outbound.proposal.frame;
+  }
+  recorded.row.expected = {
+    accountId: recorded.row.accountId,
+    outcome: result.outcome,
+    frame,
+    dropped: result.proposalDroppedTransactions,
+  };
 };
 
 /**
@@ -336,6 +524,7 @@ export const beginAuthorityFrame = (runtimeId: string): void => {
   frames.set(runtimeId, []);
   clocks.set(runtimeId, []);
   outputs.set(runtimeId, []);
+  proposalSelections.set(runtimeId, []);
 };
 
 /**
@@ -377,6 +566,7 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   frames.delete(runtimeId);
   clocks.delete(runtimeId);
   outputs.delete(runtimeId);
+  proposalSelections.delete(runtimeId);
   recordClocks(frameClocks);
   if (frame.length === 0) return;
   report.frames += 1;
@@ -388,7 +578,7 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
     const key = `${row.ownerEntityId}/${row.counterpartyEntityId}`;
     owners.add(row.ownerEntityId);
     report.byKind[row.kind] = (report.byKind[row.kind] ?? 0) + 1;
-    if (row.kind === 'enqueue') {
+    if (row.kind === 'create' || row.kind === 'enqueue') {
       if (seenPeerInput.has(key)) interleaved.add(key);
       continue;
     }
@@ -417,15 +607,20 @@ export type AuthorityWaveOperation = {
   resultKind: AuthorityWaveOperationResultKind;
   /** Global position before grouping the Runtime frame by owner Entity. */
   arrivalIndex: number;
+  expectedVerdict: AuthorityExpectedOperationVerdict;
 };
 
-type AuthorityWaveEntity = {
+export type AuthorityWaveEntity = {
   ownerEntityId: string;
   timestamp: number;
   jHeight: number;
   entityTimestamp: number;
   finalizedJHeight: number;
   propose: boolean;
+  /** Exact observed worklist order immediately before proposeAccountFrame. */
+  proposalAccountIds: string[];
+  /** Exact TS terminal row for every selected Account, in that same order. */
+  expectedProposals: readonly AuthorityExpectedProposalAttempt[];
   ops: RscoreWireValue[];
   /** Exact bijection target for the admissions/applied rows Rust returns. */
   operations: AuthorityWaveOperation[];
@@ -439,7 +634,7 @@ type AuthorityWaveEntity = {
 };
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
-type AuthorityWaveInput = {
+export type AuthorityWaveInput = {
   /** Candidate-global position in the grouped request. Admissions consume one too. */
   operationIndex: number;
   /**
@@ -450,7 +645,7 @@ type AuthorityWaveInput = {
   arrivalIndex: number;
   ownerEntityId: string;
   accountId: string;
-  kind: 'frame' | 'ack';
+  kind: AuthorityPeerInput['kind'];
 };
 
 export type AuthorityWave =
@@ -458,6 +653,16 @@ export type AuthorityWave =
   | { kind: 'empty' }
   /** Something in this frame no wave can carry. The driver must not run it. */
   | { kind: 'ineligible'; reason: string };
+
+export type AuthorityWaveBuildOptions = Readonly<{
+  operationIndexStart?: number;
+  arrivalIndexStart?: number;
+  fallbackEntity?: Readonly<{
+    ownerEntityId: string;
+    timestamp: number;
+    finalizedJHeight: number;
+  }>;
+}>;
 
 /**
  * Classify the three candidate-operation variants without executing them.
@@ -467,7 +672,7 @@ export type AuthorityWave =
  */
 export const describeAuthorityWaveOperation = (
   value: RscoreWireValue,
-): Omit<AuthorityWaveOperation, 'arrivalIndex'> => {
+): Omit<AuthorityWaveOperation, 'arrivalIndex' | 'expectedVerdict'> => {
   if (!Array.isArray(value)) throw new Error('AUTHORITY_OPERATION_NOT_LIST');
   const tag = value[0];
   let operationIndex: unknown;
@@ -477,7 +682,12 @@ export const describeAuthorityWaveOperation = (
     operationIndex = value[1];
     accountIdValue = value[2];
     resultKind = 'admission';
-  } else if (tag === 1 && value.length === 2 && Array.isArray(value[1])) {
+  } else if (
+    tag === 1
+    && value.length === 2
+    && Array.isArray(value[1])
+    && value[1].length === 3
+  ) {
     const input = value[1];
     operationIndex = input[0];
     accountIdValue = input[1];
@@ -515,11 +725,24 @@ export const describeAuthorityWaveOperation = (
  *
  * Reading does not clear: the frame is still open, and the reducer closes it.
  */
-export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
-  const frame = frames.get(runtimeId);
-  if (frame === undefined || frame.length === 0) return { kind: 'empty' };
+export const buildAuthorityWave = (
+  runtimeId: string,
+  options: AuthorityWaveBuildOptions = {},
+): AuthorityWave => {
+  const frame = frames.get(runtimeId) ?? [];
   const frameClocks = clocks.get(runtimeId) ?? [];
   const frameOutputs = outputs.get(runtimeId) ?? [];
+  const frameProposals = proposalSelections.get(runtimeId) ?? [];
+  const operationIndexStart = options.operationIndexStart ?? 0;
+  const arrivalIndexStart = options.arrivalIndexStart ?? 0;
+  if (
+    !Number.isSafeInteger(operationIndexStart)
+    || operationIndexStart < 0
+    || !Number.isSafeInteger(arrivalIndexStart)
+    || arrivalIndexStart < 0
+  ) {
+    return { kind: 'ineligible', reason: 'index:start' };
+  }
   // Arrival order first, grouping second. The index is assigned while the
   // frame is still in the sequence the authority saw, so grouping can reorder
   // the request without reordering what comes out of it.
@@ -528,8 +751,11 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
     ownerEntityId: string;
     accountId: string;
     payload: Exclude<RecordedPayload, { kind: 'unsupported' }>;
+    expectedVerdict?: AuthorityExpectedOperationVerdict;
   };
   const arrived: ArrivedOp[] = [];
+  const accountActivity = new Set<string>();
+  const createdAccounts = new Set<string>();
   for (const row of frame) {
     for (const payload of row.payloads) {
       // One thing this frame carries that no wave can express makes the whole
@@ -537,11 +763,26 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
       if (payload.kind === 'unsupported') {
         return { kind: 'ineligible', reason: `input:${payload.reason}` };
       }
+      const accountKey = `${row.ownerEntityId}/${row.counterpartyEntityId}`;
+      if (payload.kind === 'create') {
+        if (createdAccounts.has(accountKey)) {
+          return { kind: 'ineligible', reason: `create:duplicate:${accountKey}` };
+        }
+        if (accountActivity.has(accountKey)) {
+          return { kind: 'ineligible', reason: `create:late:${accountKey}` };
+        }
+        createdAccounts.add(accountKey);
+      } else {
+        accountActivity.add(accountKey);
+      }
       arrived.push({
-        arrivalIndex: arrived.length,
+        arrivalIndex: arrivalIndexStart + arrived.length,
         ownerEntityId: row.ownerEntityId,
         accountId: row.counterpartyEntityId,
         payload,
+        ...(row.expectedVerdict === undefined
+          ? {}
+          : { expectedVerdict: row.expectedVerdict }),
       });
     }
   }
@@ -551,10 +792,36 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
     rows.push(op);
     byOwner.set(op.ownerEntityId, rows);
   }
+  const fallback = options.fallbackEntity === undefined ? undefined : {
+    ownerEntityId: options.fallbackEntity.ownerEntityId.trim().toLowerCase(),
+    timestamp: options.fallbackEntity.timestamp,
+    finalizedJHeight: options.fallbackEntity.finalizedJHeight,
+  };
+  if (fallback !== undefined && !byOwner.has(fallback.ownerEntityId)) {
+    byOwner.set(fallback.ownerEntityId, []);
+  }
+  for (const row of frameClocks) {
+    if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
+  }
+  for (const row of frameProposals) {
+    if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
+  }
+  for (const row of frameOutputs) {
+    if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
+  }
+  if (byOwner.size === 0) return { kind: 'empty' };
+  if (
+    fallback !== undefined
+    && [...byOwner.keys()].some(ownerEntityId => ownerEntityId !== fallback.ownerEntityId)
+  ) {
+    return { kind: 'ineligible', reason: `owner:cross-scope:${fallback.ownerEntityId}` };
+  }
   const entities: AuthorityWaveEntity[] = [];
   const inputs: AuthorityWaveInput[] = [];
-  let operationIndex = 0;
   for (const [ownerEntityId, rows] of byOwner) {
+    // Each owner is a distinct Rust session/candidate. Candidate operation
+    // indices are local to that owner; arrival indices alone span the Runtime.
+    let operationIndex = operationIndexStart;
     const propose = soleClock(frameClocks, ownerEntityId, 'propose');
     const enforce = soleClock(frameClocks, ownerEntityId, 'enforce');
     // Two different clocks for one Entity in one frame means the Runtime frame
@@ -565,13 +832,49 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
     // Without the Entity's own clock there is nothing to judge expiry with,
     // and borrowing a neighbour's is exactly what the grouped wave exists to
     // prevent.
-    const clock = enforce ?? propose;
+    const fallbackClock = fallback?.ownerEntityId === ownerEntityId
+      ? fallback
+      : undefined;
+    const clock = enforce ?? propose ?? fallbackClock;
     if (!clock) return { kind: 'ineligible', reason: `clock:missing:${ownerEntityId}` };
+    const selected = frameProposals
+      .filter(row => row.ownerEntityId === ownerEntityId)
+      .map(row => row.accountId);
+    if (frameProposals.some(row =>
+      row.ownerEntityId === ownerEntityId && !row.selectionIsWholeMempool)) {
+      return { kind: 'ineligible', reason: `proposal:subset-unsupported:${ownerEntityId}` };
+    }
+    const expectedProposals = frameProposals
+      .filter(row => row.ownerEntityId === ownerEntityId)
+      .map(row => row.expected);
+    if (expectedProposals.some(row => row === undefined)) {
+      return { kind: 'ineligible', reason: `proposal:result-missing:${ownerEntityId}` };
+    }
+    if (new Set(selected).size !== selected.length) {
+      return { kind: 'ineligible', reason: `proposal:duplicate:${ownerEntityId}` };
+    }
+    if ((propose === undefined) !== (selected.length === 0)) {
+      return { kind: 'ineligible', reason: `proposal:clock-selection:${ownerEntityId}` };
+    }
     const ops: RscoreWireValue[] = [];
     const operations: AuthorityWaveOperation[] = [];
     for (const row of rows) {
       const payload = row.payload;
+      if (payload.kind === 'create') {
+        const encoded = waveCreateOp(operationIndex, payload.seed);
+        ops.push(encoded);
+        operations.push({
+          ...describeAuthorityWaveOperation(encoded),
+          arrivalIndex: row.arrivalIndex,
+          expectedVerdict: { kind: 'create' },
+        });
+        operationIndex += 1;
+        continue;
+      }
       if (payload.kind === 'admit') {
+        if (row.expectedVerdict?.kind !== 'admission') {
+          return { kind: 'ineligible', reason: `result:admission:${row.ownerEntityId}/${row.accountId}` };
+        }
         const txs: RscoreWireValue[] = [];
         for (const tx of payload.txs) {
           const wire = accountTxWire(tx);
@@ -585,23 +888,29 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
         operations.push({
           ...describeAuthorityWaveOperation(encoded),
           arrivalIndex: row.arrivalIndex,
+          expectedVerdict: row.expectedVerdict,
         });
         operationIndex += 1;
         continue;
       }
       let encoded: RscoreWireValue;
+      if (row.expectedVerdict?.kind !== 'peer') {
+        return { kind: 'ineligible', reason: `result:peer:${row.ownerEntityId}/${row.accountId}` };
+      }
       try {
         encoded = peerInputRow(operationIndex, row.accountId, payload);
       } catch (error) {
         // A malformed Hanko or hash is not something to drive around: the
         // engine would judge a different input than TypeScript did.
-        return { kind: 'ineligible', reason: `input:${(error as Error).message}` };
+        const message = error instanceof Error ? error.message : String(error);
+        return { kind: 'ineligible', reason: `input:${message}` };
       }
       const operation = waveInputOp(encoded);
       ops.push(operation);
       operations.push({
         ...describeAuthorityWaveOperation(operation),
         arrivalIndex: row.arrivalIndex,
+        expectedVerdict: row.expectedVerdict,
       });
       inputs.push({
         operationIndex,
@@ -628,7 +937,9 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
       jHeight: propose?.finalizedJHeight ?? clock.finalizedJHeight,
       entityTimestamp: clock.timestamp,
       finalizedJHeight: clock.finalizedJHeight,
-      propose: propose !== undefined,
+      propose: selected.length > 0,
+      proposalAccountIds: selected,
+      expectedProposals: expectedProposals as AuthorityExpectedProposalAttempt[],
       ops,
       operations,
     });
@@ -658,61 +969,80 @@ const soleClock = (
 const peerInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
-  payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' }>,
+  payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' | 'frame_ack' }>,
 ): RscoreWireValue => {
   const accountId = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_ACCOUNT_ID');
-  // The signer of this input is the counterparty; the engine authenticates it
-  // against the account's own binding rather than trusting the label.
-  const from = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_FROM_ENTITY');
-  if (payload.kind === 'ack') {
-    return [
-      operationIndex,
-      accountId,
-      from,
-      [
-        1,
-        payload.height,
-        hexToWireBytes(payload.frameHash, 32, 'AUTHORITY_ACK_STATE_HASH'),
-        hankoBytes(payload.hanko),
-        peerDisputeWire(payload.dispute),
-      ],
-    ];
+  const decoded = decodeAccountPeerInput(payload.input, 'RSCORE_AUTHORITY_PEER_INPUT');
+  if (decoded.kind !== payload.kind) {
+    throw new Error(`RSCORE_AUTHORITY_PEER_KIND_CHANGED:${payload.kind}:${decoded.kind}`);
   }
-  const frame = payload.frame;
-  const txs: RscoreWireValue[] = [];
-  for (const tx of frame.accountTxs) {
-    const wire = accountTxWire(tx);
-    if (wire === null) throw new Error(`RSCORE_AUTHORITY_FRAME_TX_UNSUPPORTED:${tx.type}`);
-    txs.push(wire);
+  switch (decoded.kind) {
+    case 'frame':
+    case 'ack':
+    case 'frame_ack':
+      return [operationIndex, accountId, peerEnvelopeWire(decoded)];
   }
-  return [
-    operationIndex,
-    accountId,
-    from,
-    [
-      0,
-      frame.height,
-      frame.timestamp,
-      frame.jHeight ?? 0,
-      txs,
-      frame.prevFrameHash,
-      hexToWireBytes(frame.accountStateRoot, 32, 'AUTHORITY_FRAME_STATE_ROOT'),
-      frame.byLeft,
-      hexToWireBytes(frame.stateHash ?? '', 32, 'AUTHORITY_FRAME_STATE_HASH'),
-      hankoBytes(payload.hanko),
-      peerDisputeWire(payload.dispute),
-    ],
-  ];
 };
 
-/** Their signature, and the three fields that say which proof it is. */
-const peerDisputeWire = (dispute: PeerDispute | undefined): RscoreWireValue =>
+/**
+ * Exact canonical Account peer envelope. Identity, jurisdiction, timeout and
+ * watch-seed values come from the received input itself; the local Account is
+ * only the row address and must never be used to fill a missing peer value.
+ */
+const peerEnvelopeWire = (input: AuthorityPeerInput): RscoreWireValue => [
+  hexToWireBytes(input.fromEntityId, 32, 'AUTHORITY_FROM_ENTITY'),
+  hexToWireBytes(input.toEntityId, 32, 'AUTHORITY_TO_ENTITY'),
+  [
+    input.domain.chainId,
+    hexToWireBytes(input.domain.depositoryAddress, 20, 'AUTHORITY_DEPOSITORY'),
+  ],
+  [
+    input.disputeConfig.leftResponseSeconds,
+    input.disputeConfig.rightResponseSeconds,
+  ],
+  input.watchSeed === undefined
+    ? null
+    : hexToWireBytes(input.watchSeed, 32, 'AUTHORITY_WATCH_SEED'),
+  peerKindWire(input),
+];
+
+/** Tags 0/1/2 are Frame/Ack/FrameAck; composite order is ACK then proposal. */
+const peerKindWire = (input: AuthorityPeerInput): RscoreWireValue => {
+  switch (input.kind) {
+    case 'frame':
+      return [0, peerProposalWire(input.proposal)];
+    case 'ack':
+      return [1, peerAckWire(input.ack)];
+    case 'frame_ack':
+      return [2, peerAckWire(input.ack), peerProposalWire(input.proposal)];
+  }
+};
+
+const peerProposalWire = (proposal: AccountFrameProposal): RscoreWireValue => [
+  accountPeerFrameWire(proposal.frame),
+  optionalHankoWire(proposal.frameHanko),
+  peerDisputeWire(proposal.disputeHanko),
+];
+
+const peerAckWire = (ack: AccountFrameAck): RscoreWireValue => [
+  ack.height,
+  hexToWireBytes(ack.frameHash, 32, 'AUTHORITY_ACK_FRAME_HASH'),
+  optionalHankoWire(ack.frameHanko),
+  peerDisputeWire(ack.disputeHanko),
+];
+
+/** The supplied dispute hash is signed evidence; Rust must recompute and compare it. */
+const peerDisputeWire = (dispute: AccountDisputeHanko | undefined): RscoreWireValue =>
   (dispute === undefined ? null : [
-    hankoBytes(dispute.hanko),
+    optionalHankoWire(dispute.hanko),
+    hexToWireBytes(dispute.hash, 32, 'AUTHORITY_PEER_DISPUTE_HASH'),
     hexToWireBytes(dispute.proofBodyHash, 32, 'AUTHORITY_PEER_PROOF_BODY_HASH'),
     dispute.proofNonce,
     dispute.proposerIsLeft,
   ]);
+
+const optionalHankoWire = (value: string | undefined): RscoreWireValue =>
+  value === undefined ? null : hankoBytes(value);
 
 /**
  * A Hanko as bytes, refusing anything that is not hex. `parseInt` reads
@@ -757,6 +1087,7 @@ export const resetAuthorityRecordForTests = (): void => {
   frames.clear();
   clocks.clear();
   outputs.clear();
+  proposalSelections.clear();
   report = {
     frames: 0,
     inputs: 0,

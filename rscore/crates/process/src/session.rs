@@ -200,8 +200,11 @@ impl ProcessSession {
         if self.pending_wave.is_some()
             && !matches!(
                 &command,
-                Command::ApplyAccountWave { .. }
+                Command::BeginEntity { .. }
+                    | Command::ApplyAccountWave { .. }
                     | Command::ProposeAccountWave { .. }
+                    | Command::FinalizeEntity { .. }
+                    | Command::DiscardEntity { .. }
                     | Command::SealAccountWave { .. }
                     | Command::GetCheckpointChanges { .. }
                     | Command::Commit { .. }
@@ -219,14 +222,47 @@ impl ProcessSession {
             Command::CommitCheckpoint { token } => self.commit_checkpoint(&token),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
             Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
+            Command::BeginEntity {
+                candidate_token,
+                stage_key,
+                expected_accepted_ordinal,
+                context,
+            } => self.begin_entity_stage(
+                candidate_token,
+                stage_key,
+                expected_accepted_ordinal,
+                context,
+            ),
             Command::ApplyAccountWave {
                 candidate_token,
+                stage_key,
                 request,
-            } => self.apply_wave(candidate_token, *request),
+            } => self.apply_wave(candidate_token, stage_key, *request),
             Command::ProposeAccountWave {
                 candidate_token,
+                stage_key,
                 request,
-            } => self.propose_wave(candidate_token, *request),
+            } => self.propose_wave(candidate_token, stage_key, *request),
+            Command::FinalizeEntity {
+                candidate_token,
+                stage_key,
+                expected_accepted_ordinal,
+            } => self.finish_entity_stage(
+                candidate_token,
+                stage_key,
+                expected_accepted_ordinal,
+                true,
+            ),
+            Command::DiscardEntity {
+                candidate_token,
+                stage_key,
+                expected_accepted_ordinal,
+            } => self.finish_entity_stage(
+                candidate_token,
+                stage_key,
+                expected_accepted_ordinal,
+                false,
+            ),
             Command::SealAccountWave { candidate_token } => self.seal_wave(candidate_token),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
             Command::Commit { candidate_token } => {
@@ -331,6 +367,14 @@ impl ProcessSession {
         request_id: [u8; 8],
         request: xln_rscore_batch::WaveRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        // Prepare owns only the Runtime candidate capability. Accepting even
+        // one Entity here would apply its Account work before BeginEntity had
+        // established the stage key and rollback savepoint that authorize it.
+        if !request.entities.is_empty() {
+            return Err(ProcessError::PrepareWaveNonempty {
+                entities: request.entities.len(),
+            });
+        }
         if self.pending_wave.is_some() {
             return Err(ProcessError::PreparePending);
         }
@@ -359,6 +403,7 @@ impl ProcessSession {
     fn apply_wave(
         &mut self,
         candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
         request: xln_rscore_batch::WaveOpsRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
@@ -366,6 +411,7 @@ impl ProcessSession {
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
+        engine.require_entity_stage(stage_key)?;
         let started = std::time::Instant::now();
         let result = engine.apply_wave_ops(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
@@ -384,6 +430,7 @@ impl ProcessSession {
     fn propose_wave(
         &mut self,
         candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
         request: xln_rscore_batch::WaveProposalRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
@@ -391,6 +438,7 @@ impl ProcessSession {
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
+        engine.require_entity_stage(stage_key)?;
         let started = std::time::Instant::now();
         let result = engine.propose_wave(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
@@ -404,6 +452,79 @@ impl ProcessSession {
             .ok_or(ProcessError::PrepareNotPending)?
             .revision = result.revision;
         Ok((response, false))
+    }
+
+    fn begin_entity_stage(
+        &mut self,
+        candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
+        expected_accepted_ordinal: u64,
+        context: xln_rscore_batch::EntityStageContext,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.pending_wave_for(candidate_token)?;
+        let (receipt, revision, accounts_root) = {
+            let engine = self
+                .authority
+                .as_mut()
+                .ok_or(ProcessError::EngineNotLoaded)?;
+            let receipt =
+                engine.begin_entity_stage(stage_key, expected_accepted_ordinal, context)?;
+            (receipt, engine.revision(), engine.accounts_root())
+        };
+        let response =
+            self.encode_entity_stage_after_mutation(&receipt, revision, accounts_root)?;
+        self.pending_wave
+            .as_mut()
+            .ok_or(ProcessError::PrepareNotPending)?
+            .revision = revision;
+        Ok((response, false))
+    }
+
+    fn finish_entity_stage(
+        &mut self,
+        candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
+        expected_accepted_ordinal: u64,
+        accept: bool,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.pending_wave_for(candidate_token)?;
+        let (receipt, revision, accounts_root) = {
+            let engine = self
+                .authority
+                .as_mut()
+                .ok_or(ProcessError::EngineNotLoaded)?;
+            let receipt = if accept {
+                engine.accept_entity_stage(stage_key, expected_accepted_ordinal)?
+            } else {
+                engine.rollback_entity_stage(stage_key, expected_accepted_ordinal)?
+            };
+            (receipt, engine.revision(), engine.accounts_root())
+        };
+        let response =
+            self.encode_entity_stage_after_mutation(&receipt, revision, accounts_root)?;
+        self.pending_wave
+            .as_mut()
+            .ok_or(ProcessError::PrepareNotPending)?
+            .revision = revision;
+        Ok((response, false))
+    }
+
+    /// Entity-stage calls mutate the held candidate before their reply exists.
+    /// If reply construction ever becomes fallible, the process must not
+    /// continue with candidate state the runtime never observed.
+    fn encode_entity_stage_after_mutation(
+        &mut self,
+        receipt: &xln_rscore_batch::EntityStageReceipt,
+        revision: u64,
+        accounts_root: [u8; 32],
+    ) -> Result<xln_rscore_abi::BodyTuple, ProcessError> {
+        match wire_encode::entity_stage(receipt, revision, accounts_root) {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                self.stopped = true;
+                Err(error)
+            }
+        }
     }
 
     fn seal_wave(

@@ -452,6 +452,33 @@ pub fn wave_aborted(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
     ])
 }
 
+/// Exact acknowledgement of one parent Entity-input savepoint operation.
+///
+/// This intentionally carries the candidate revision and forest root beside
+/// the idempotency receipt. The runtime can therefore prove that an accepted
+/// stage retained its Account mutations and a discarded stage restored the
+/// exact pre-input candidate before it decides what enters the Runtime WAL.
+pub fn entity_stage(
+    receipt: &xln_rscore_batch::EntityStageReceipt,
+    revision: u64,
+    accounts_root: [u8; 32],
+) -> Result<BodyTuple, crate::ProcessError> {
+    use xln_rscore_batch::EntityStageStatus;
+
+    let status = match receipt.status {
+        EntityStageStatus::Open => 0,
+        EntityStageStatus::Accepted => 1,
+        EntityStageStatus::RolledBack => 2,
+    };
+    Ok(body(vec![
+        AbiValue::Bytes(receipt.key.as_bytes().to_vec()),
+        integer(status),
+        integer(receipt.accepted_stage_ordinal),
+        integer(revision),
+        AbiValue::Bytes(accounts_root.to_vec()),
+    ]))
+}
+
 /// One attempt to propose: the account, the frame it produced if any, and the
 /// transactions it could not include. An attempt that produced no frame is
 /// still reported — it moved the mempool, and therefore the leaf.
@@ -541,7 +568,7 @@ fn dropped(value: &xln_rscore_batch::DroppedRow) -> AbiValue {
     ])
 }
 
-fn input_result(
+pub(crate) fn input_result(
     value: &xln_rscore_batch::AccountInputResult,
 ) -> Result<AbiValue, crate::ProcessError> {
     Ok(tuple(vec![
@@ -629,7 +656,44 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
         AccountInputVerdict::Failed(message) => {
             tuple(vec![integer(8), AbiValue::Text(message.clone())])
         }
+        AccountInputVerdict::FrameAckApplied { ack, frame } => {
+            if !is_ack_verdict(ack) {
+                return Err(crate::ProcessError::Expected("frameAckAckVerdict"));
+            }
+            if !is_frame_verdict(frame) {
+                return Err(crate::ProcessError::Expected("frameAckFrameVerdict"));
+            }
+            tuple(vec![integer(9), verdict(ack)?, verdict(frame)?])
+        }
+        AccountInputVerdict::FrameAckRejected { phase, reason } => tuple(vec![
+            integer(10),
+            integer(match phase {
+                xln_rscore_engine::FrameAckPhase::Ack => 0,
+                xln_rscore_engine::FrameAckPhase::Frame => 1,
+            }),
+            AbiValue::Text(reason.clone()),
+        ]),
     })
+}
+
+fn is_ack_verdict(value: &xln_rscore_batch::AccountInputVerdict) -> bool {
+    matches!(
+        value,
+        xln_rscore_batch::AccountInputVerdict::AckCommitted { .. }
+            | xln_rscore_batch::AccountInputVerdict::AckStale { .. }
+            | xln_rscore_batch::AccountInputVerdict::AckRejected { .. }
+    )
+}
+
+fn is_frame_verdict(value: &xln_rscore_batch::AccountInputVerdict) -> bool {
+    matches!(
+        value,
+        xln_rscore_batch::AccountInputVerdict::FrameCommitted { .. }
+            | xln_rscore_batch::AccountInputVerdict::FrameCollisionIgnored { .. }
+            | xln_rscore_batch::AccountInputVerdict::FrameDuplicate { .. }
+            | xln_rscore_batch::AccountInputVerdict::FrameStale { .. }
+            | xln_rscore_batch::AccountInputVerdict::FrameRejected { .. }
+    )
 }
 
 /// The exact inverse of `decode_tx` (wire_decode.rs): same tags, same field

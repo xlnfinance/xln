@@ -6,13 +6,23 @@ import {
   buildAuthorityWave,
   describeAuthorityWaveOperation,
   flushAuthorityFrame,
+  noteAuthorityAccountProposal,
+  noteAuthorityAccountProposalResult,
+  noteAuthorityAccountInputResult,
   noteAuthorityEntityClock,
   noteRawAccountInput,
   resetAuthorityRecordForTests,
   runAuthorityFrameScope,
 } from '../../rscore/authority-wave';
 import { waveCreateOp } from '../../rscore/shadow-wire';
-import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../types/account';
+import type {
+  AccountFrame,
+  AccountInput,
+  AccountPeerInput,
+  AccountReplica,
+  AccountTx,
+} from '../../types/account';
+import { proposeAccountFrameIdle } from '../../account/consensus/result';
 
 /**
  * One process hosts up to two hundred Runtimes in a load run, and their frames
@@ -28,6 +38,17 @@ const replica = (owner: string, counterparty: string): AccountReplica =>
 const enqueue = (txs: AccountTx[] = []): AccountInput =>
   ({ kind: 'enqueue', txs } as unknown as AccountInput);
 
+const recordAccountInput = (
+  frameId: string | null | undefined,
+  account: AccountReplica,
+  input: AccountInput,
+): void => {
+  const recorded = noteRawAccountInput(frameId, account, input);
+  noteAuthorityAccountInputResult(recorded, input.kind === 'enqueue'
+    ? { ok: true, events: [], admittedAccountTxCount: input.txs.length }
+    : { ok: true, events: [] });
+};
+
 const payment = (to: string): AccountTx => ({
   type: 'direct_payment',
   data: { tokenId: 1, amount: 25n, route: [to], fromEntityId: A, toEntityId: to, deliveryMode: 'direct' },
@@ -38,17 +59,23 @@ const frameOf = (height: number): AccountFrame => ({
   timestamp: 1_700_000_000_000,
   jHeight: 100,
   accountTxs: [],
-  prevFrameHash: 'genesis',
+  prevFrameHash: height === 1 ? 'genesis' : `0x${'32'.repeat(32)}`,
   accountStateRoot: `0x${'33'.repeat(32)}`,
   byLeft: true,
   stateHash: `0x${'44'.repeat(32)}`,
-} as unknown as AccountFrame);
+  deltas: [],
+});
 
-const frameAck = (height: number): AccountInput => ({
+const frameAck = (height: number, fromEntityId = B, toEntityId = A): AccountPeerInput => ({
   kind: 'frame_ack',
+  fromEntityId,
+  toEntityId,
+  domain: { chainId: 31_337, depositoryAddress: `0x${'11'.repeat(20)}` },
+  disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 },
+  watchSeed: `0x${'22'.repeat(32)}`,
   ack: { height: height - 1, frameHash: `0x${'55'.repeat(32)}`, frameHanko: `0x${'66'.repeat(64)}` },
   proposal: { frame: frameOf(height), frameHanko: `0x${'77'.repeat(64)}` },
-} as unknown as AccountInput);
+});
 
 const A = `0x${'aa'.repeat(32)}`;
 const B = `0x${'bb'.repeat(32)}`;
@@ -66,12 +93,12 @@ describe('authority record', () => {
 
   test('two Runtimes with overlapping frames keep their own inputs', () => {
     beginAuthorityFrame('runtime-a');
-    noteRawAccountInput('runtime-a', replica(A, B), enqueue());
+    recordAccountInput('runtime-a', replica(A, B), enqueue());
     beginAuthorityFrame('runtime-b');
-    noteRawAccountInput('runtime-b', replica(A, C), enqueue());
+    recordAccountInput('runtime-b', replica(A, C), enqueue());
     // Back to A while B is still open: an active-Runtime pointer would have
     // put this in B's frame.
-    noteRawAccountInput('runtime-a', replica(A, B), enqueue());
+    recordAccountInput('runtime-a', replica(A, B), enqueue());
     flushAuthorityFrame('runtime-b');
     flushAuthorityFrame('runtime-a');
 
@@ -83,11 +110,11 @@ describe('authority record', () => {
 
   test('a frame abandoned by a throw is dropped, not merged into the next', () => {
     beginAuthorityFrame('runtime-a');
-    noteRawAccountInput('runtime-a', replica(A, B), enqueue());
+    recordAccountInput('runtime-a', replica(A, B), enqueue());
     // No flush: the reducer threw. The next frame for the same Runtime finds
     // the old one still open.
     beginAuthorityFrame('runtime-a');
-    noteRawAccountInput('runtime-a', replica(A, C), enqueue());
+    recordAccountInput('runtime-a', replica(A, C), enqueue());
     flushAuthorityFrame('runtime-a');
 
     const report = authorityRecordReport();
@@ -98,7 +125,7 @@ describe('authority record', () => {
 
   test('an input with no Runtime is counted, never attributed to another', () => {
     beginAuthorityFrame('runtime-a');
-    noteRawAccountInput(undefined, replica(A, B), enqueue());
+    recordAccountInput(undefined, replica(A, B), enqueue());
     flushAuthorityFrame('runtime-a');
 
     const report = authorityRecordReport();
@@ -112,7 +139,7 @@ describe('authority record', () => {
     await runAuthorityFrameScope(live, 'runtime-a', true, async frameId => {
       if (frameId === null) throw new Error('expected live authority frame');
       noteAuthorityEntityClock(live.accountAuthorityFrameId, A, 'enforce', 1_700_000_000_000, 100);
-      noteRawAccountInput(live.accountAuthorityFrameId, replica(A, B), enqueue());
+      recordAccountInput(live.accountAuthorityFrameId, replica(A, B), enqueue());
 
       await runAuthorityFrameScope(detached, 'runtime-a', false, async () => {
         noteAuthorityEntityClock(
@@ -122,7 +149,7 @@ describe('authority record', () => {
           1_700_000_000_999,
           999,
         );
-        noteRawAccountInput(detached.accountAuthorityFrameId, replica(A, C), enqueue());
+        recordAccountInput(detached.accountAuthorityFrameId, replica(A, C), enqueue());
       });
 
       const wave = buildAuthorityWave(frameId);
@@ -145,8 +172,8 @@ describe('authority record', () => {
     // Each Entity carries its own enforcement clock, so this frame cannot be
     // one wave with one clock.
     beginAuthorityFrame('runtime-a');
-    noteRawAccountInput('runtime-a', replica(A, B), enqueue());
-    noteRawAccountInput('runtime-a', replica(C, B), enqueue());
+    recordAccountInput('runtime-a', replica(A, B), enqueue());
+    recordAccountInput('runtime-a', replica(C, B), enqueue());
     flushAuthorityFrame('runtime-a');
 
     const report = authorityRecordReport();
@@ -171,10 +198,10 @@ describe('authority wave', () => {
     resetAuthorityRecordForTests();
   });
 
-  test('one delivery that acknowledges and proposes becomes two operations, ack first', () => {
+  test('one frame_ack stays one operation with ACK before proposal inside its kind', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    noteRawAccountInput('r', replica(A, B), frameAck(4));
+    recordAccountInput('r', replica(A, B), frameAck(4));
     const wave = buildAuthorityWave('r');
 
     expect(wave.kind).toBe('wave');
@@ -183,27 +210,42 @@ describe('authority wave', () => {
     const entity = wave.entities[0];
     if (entity === undefined) throw new Error('expected one Entity');
     const ops = entity.ops as unknown[][];
-    expect(ops).toHaveLength(2);
-    // TypeScript runs the ack phase before the proposal phase, and so does the
-    // wave: the ack advances the account the frame is then judged against.
-    expect(wave.inputs.map(row => row.kind)).toEqual(['ack', 'frame']);
-    expect(wave.inputs.map(row => row.operationIndex)).toEqual([0, 1]);
+    expect(ops).toHaveLength(1);
+    expect(wave.inputs.map(row => row.kind)).toEqual(['frame_ack']);
+    expect(wave.inputs.map(row => row.operationIndex)).toEqual([0]);
     expect(entity.operations).toEqual([
-      { operationIndex: 0, arrivalIndex: 0, accountId: B, resultKind: 'applied' },
-      { operationIndex: 1, arrivalIndex: 1, accountId: B, resultKind: 'applied' },
+      {
+        operationIndex: 0,
+        arrivalIndex: 0,
+        accountId: B,
+        resultKind: 'applied',
+        expectedVerdict: {
+          kind: 'peer',
+          outcome: 'applied',
+          committedFrames: [],
+          responseAckHanko: null,
+        },
+      },
     ]);
-    // Both are input operations (tag 1), addressed to the same account.
-    expect(ops.map(op => op[0])).toEqual([1, 1]);
-    expect(ops.map(op => (op[1] as unknown[])[0])).toEqual([0, 1]);
+    // Wave input tag 1 contains one peer row. Its envelope kind tag 2 carries
+    // ACK at slot 1 and proposal at slot 2, matching TypeScript phase order.
+    expect(ops[0]?.[0]).toBe(1);
+    expect((ops[0]?.[1] as unknown[])[0]).toBe(0);
+    expect((((ops[0]?.[1] as unknown[])[2] as unknown[])[5] as unknown[])[0]).toBe(2);
   });
 
   test('each Entity carries its own clock, and one that never proposed does not', () => {
     beginAuthorityFrame('r');
-    noteAuthorityEntityClock('r', A, 'propose', 1_700_000_000_000, 100);
+    const proposal = noteAuthorityAccountProposal('r', A, B, 1_700_000_000_000, 100);
+    noteAuthorityAccountProposalResult(proposal, proposeAccountFrameIdle({
+      message: 'test idle',
+      events: [],
+      proposalDroppedTransactions: [],
+    }));
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_500, 101);
-    noteRawAccountInput('r', replica(A, B), enqueue([payment(B)]));
+    recordAccountInput('r', replica(A, B), enqueue([payment(B)]));
     noteAuthorityEntityClock('r', C, 'enforce', 1_700_000_009_000, 77);
-    noteRawAccountInput('r', replica(C, B), frameAck(2));
+    recordAccountInput('r', replica(C, B), frameAck(2, B, C));
     const wave = buildAuthorityWave('r');
 
     if (wave.kind !== 'wave') throw new Error('expected a wave');
@@ -226,7 +268,7 @@ describe('authority wave', () => {
   test('a transaction outside the profile makes the whole frame undrivable', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    noteRawAccountInput('r', replica(A, B), enqueue([
+    recordAccountInput('r', replica(A, B), enqueue([
       { type: 'settle_hold', data: {} } as unknown as AccountTx,
     ]));
     const wave = buildAuthorityWave('r');
@@ -240,7 +282,7 @@ describe('authority wave', () => {
 
   test('an Entity with no clock is refused rather than given a neighbour to borrow', () => {
     beginAuthorityFrame('r');
-    noteRawAccountInput('r', replica(A, B), enqueue([payment(B)]));
+    recordAccountInput('r', replica(A, B), enqueue([payment(B)]));
     const wave = buildAuthorityWave('r');
 
     expect(wave.kind).toBe('ineligible');
@@ -281,11 +323,11 @@ describe('authority wave guards', () => {
   test('two different clocks for one Entity refuse the frame instead of keeping the last', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    noteRawAccountInput('r', replica(A, B), frameAck(2));
+    recordAccountInput('r', replica(A, B), frameAck(2));
     // The same Entity, judged again at a different J height inside one frame:
     // the Runtime frame is then not this Entity's wave unit.
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 101);
-    noteRawAccountInput('r', replica(A, C), frameAck(2));
+    recordAccountInput('r', replica(A, C), frameAck(2, C, A));
     const wave = buildAuthorityWave('r');
 
     expect(wave.kind).toBe('ineligible');
@@ -296,7 +338,7 @@ describe('authority wave guards', () => {
   test('the same clock recorded twice is not a conflict', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    noteRawAccountInput('r', replica(A, B), frameAck(2));
+    recordAccountInput('r', replica(A, B), frameAck(2));
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
     expect(buildAuthorityWave('r').kind).toBe('wave');
   });
@@ -306,40 +348,70 @@ describe('authority wave guards', () => {
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
     noteAuthorityEntityClock('r', C, 'enforce', 1_700_000_000_000, 100);
     // A, then C, then A again: grouping sends A's two inputs together.
-    noteRawAccountInput('r', replica(A, B), enqueue([payment(B)]));
-    noteRawAccountInput('r', replica(C, B), frameAck(2));
-    noteRawAccountInput('r', replica(A, B), frameAck(3));
+    recordAccountInput('r', replica(A, B), enqueue([payment(B)]));
+    recordAccountInput('r', replica(C, B), frameAck(2, B, C));
+    recordAccountInput('r', replica(A, B), frameAck(3));
     const wave = buildAuthorityWave('r');
 
     if (wave.kind !== 'wave') throw new Error('expected a wave');
-    // Sent as A's group first, so A's ack/frame take indices 0..1 — but they
-    // arrived at positions 3 and 4, after C's two operations.
-    // The A admission consumes operation 0 before its two peer operations.
-    expect(wave.inputs.map(row => row.operationIndex)).toEqual([1, 2, 3, 4]);
-    expect(wave.inputs.map(row => row.arrivalIndex)).toEqual([3, 4, 1, 2]);
-    expect(wave.inputs.map(row => row.ownerEntityId)).toEqual([A, A, C, C]);
+    // Sent as A's group first, so A's composite input is operation 1 even
+    // though C's composite input arrived first. Each frame_ack consumes one
+    // global arrival and one candidate operation.
+    expect(wave.inputs.map(row => row.operationIndex)).toEqual([1, 0]);
+    expect(wave.inputs.map(row => row.arrivalIndex)).toEqual([2, 1]);
+    expect(wave.inputs.map(row => row.ownerEntityId)).toEqual([A, C]);
     expect(wave.entities.flatMap(entity => entity.operations)).toEqual([
-      { operationIndex: 0, arrivalIndex: 0, accountId: B, resultKind: 'admission' },
-      { operationIndex: 1, arrivalIndex: 3, accountId: B, resultKind: 'applied' },
-      { operationIndex: 2, arrivalIndex: 4, accountId: B, resultKind: 'applied' },
-      { operationIndex: 3, arrivalIndex: 1, accountId: B, resultKind: 'applied' },
-      { operationIndex: 4, arrivalIndex: 2, accountId: B, resultKind: 'applied' },
+      {
+        operationIndex: 0,
+        arrivalIndex: 0,
+        accountId: B,
+        resultKind: 'admission',
+        expectedVerdict: { kind: 'admission', admittedCount: 1 },
+      },
+      {
+        operationIndex: 1,
+        arrivalIndex: 2,
+        accountId: B,
+        resultKind: 'applied',
+        expectedVerdict: {
+          kind: 'peer',
+          outcome: 'applied',
+          committedFrames: [],
+          responseAckHanko: null,
+        },
+      },
+      {
+        operationIndex: 0,
+        arrivalIndex: 1,
+        accountId: B,
+        resultKind: 'applied',
+        expectedVerdict: {
+          kind: 'peer',
+          outcome: 'applied',
+          committedFrames: [],
+          responseAckHanko: null,
+        },
+      },
     ]);
     expect(wave.entities.flatMap(entity => entity.operations)
       .sort((left, right) => left.arrivalIndex - right.arrivalIndex)
-      .map(row => row.operationIndex)).toEqual([0, 3, 4, 1, 2]);
+      .map(row => row.operationIndex)).toEqual([0, 0, 1]);
     const groupedOps = wave.entities.flatMap(entity => entity.ops) as unknown[][];
     expect(groupedOps.map(op => op[0] === 0 ? op[1] : (op[1] as unknown[])[0]))
-      .toEqual([0, 1, 2, 3, 4]);
+      .toEqual([0, 1, 0]);
   });
 
   test('a Hanko that is not hex is refused, never read as zero bytes', () => {
     beginAuthorityFrame('r');
     noteAuthorityEntityClock('r', A, 'enforce', 1_700_000_000_000, 100);
-    noteRawAccountInput('r', replica(A, B), {
+    recordAccountInput('r', replica(A, B), {
       kind: 'ack',
+      fromEntityId: B,
+      toEntityId: A,
+      domain: { chainId: 31_337, depositoryAddress: `0x${'11'.repeat(20)}` },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 },
       ack: { height: 1, frameHash: `0x${'55'.repeat(32)}`, frameHanko: '0xzzzz' },
-    } as unknown as AccountInput);
+    });
     const wave = buildAuthorityWave('r');
 
     expect(wave.kind).toBe('ineligible');

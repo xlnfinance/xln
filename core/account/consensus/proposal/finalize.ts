@@ -6,7 +6,11 @@ import {
   copyAccountDisputeConfig,
   copyAccountStateDomain,
 } from '../../../protocol/state/account-input-clone';
-import type { AccountConsensusHashToSign, ProposeAccountFrameResult } from '../types';
+import type {
+  AccountConsensusHashToSign,
+  ProposalDroppedTransaction,
+  ProposeAccountFrameResult,
+} from '../types';
 import { proposeAccountFrameProposed } from '../result';
 import type {
   PreparedProposalProof,
@@ -97,6 +101,7 @@ export const finalizeAccountProposal = (
   counterparty: string,
   validMempoolTxs: readonly AccountTx[],
   txsToRemove: readonly AccountTx[],
+  proposalDroppedTransactions: readonly ProposalDroppedTransaction[],
   effects: ProposalTransactionEffects,
   events: string[],
   checkpointProfile: (label: string) => void,
@@ -133,6 +138,7 @@ export const finalizeAccountProposal = (
     accountChanged: true,
     accountInput,
     events,
+    proposalDroppedTransactions,
     revealedSecrets: effects.revealedSecrets,
     swapOffersCreated: effects.swapOffersCreated,
     swapCancelRequests: effects.swapCancelRequests,

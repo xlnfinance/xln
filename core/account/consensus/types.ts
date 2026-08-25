@@ -91,7 +91,20 @@ export type HandleAccountInputResult =
   | HandleAccountInputRejected
   | HandleAccountInputDispute;
 
-export type ProposeAccountFrameProposed = Readonly<AccountConsensusOkEffects & {
+export type ProposalDroppedTransaction = Readonly<{
+  index: number;
+  txDigest: string;
+  code: string;
+  message: string;
+  disposition: 'deferred' | 'removed';
+}>;
+
+type ProposalTrace = Readonly<{
+  /** Exact rejected proposal-window rows, in original mempool order. */
+  proposalDroppedTransactions: readonly ProposalDroppedTransaction[];
+}>;
+
+export type ProposeAccountFrameProposed = Readonly<AccountConsensusOkEffects & ProposalTrace & {
   ok: true;
   outcome: 'proposed';
   accountChanged: true;
@@ -99,7 +112,7 @@ export type ProposeAccountFrameProposed = Readonly<AccountConsensusOkEffects & {
   failedHtlcLocks?: AccountFailedHtlcLock[];
 }>;
 
-export type ProposeAccountFrameIdle = Readonly<{
+export type ProposeAccountFrameIdle = Readonly<ProposalTrace & {
   ok: true;
   outcome: 'idle';
   message: string;
@@ -108,7 +121,7 @@ export type ProposeAccountFrameIdle = Readonly<{
   failedHtlcLocks?: AccountFailedHtlcLock[];
 }>;
 
-export type ProposeAccountFrameRejected = Readonly<{
+export type ProposeAccountFrameRejected = Readonly<ProposalTrace & {
   ok: false;
   rejection: Readonly<{ message: string }>;
   events: string[];

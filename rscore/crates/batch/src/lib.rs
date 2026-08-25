@@ -18,8 +18,9 @@ pub use checkpoint::{
 };
 pub use consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
-    AccountInputRow, AccountInputVerdict, DroppedRow, EntityProposalSelection, EntityWave,
-    EntityWaveOps, ProposalRow, ProposedRow, StatefulConsensusEngine, WaveOp, WaveOpsRequest,
+    AccountInputRow, AccountInputVerdict, AccountPeerInput, DroppedRow, EntityProposalSelection,
+    EntityStageContext, EntityStageReceipt, EntityStageStatus, EntityWave, EntityWaveOps,
+    ProposalRow, ProposedRow, StageKey, StatefulConsensusEngine, WaveOp, WaveOpsRequest,
     WaveProposalRequest, WaveRequest, WaveResult,
 };
 pub use error::BatchError;

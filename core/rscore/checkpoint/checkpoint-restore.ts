@@ -175,6 +175,12 @@ const validateDisputeHashes = (consensus: RscoreConsensusSeed, seed: RscoreAccou
   for (const draft of drafts) {
     if (draft.hash !== expectedDisputeHash(draft, seed)) checkpointRestoreFail('DISPUTE_HASH_MISMATCH');
   }
+  if (
+    consensus.counterpartyDispute !== undefined
+    && consensus.counterpartyDispute.hash !== expectedDisputeHash(consensus.counterpartyDispute, seed)
+  ) {
+    checkpointRestoreFail('COUNTERPARTY_DISPUTE_HASH_MISMATCH');
+  }
 };
 
 const hankoDigest = (hanko: string): string => computeIntegrityDigest(new TextEncoder().encode(hanko));
@@ -214,11 +220,11 @@ const computeRestoredEntityLeaf = (
   }
   if (consensus.counterpartyDispute) {
     const dispute = consensus.counterpartyDispute;
-    projection['counterpartyDisputeHash'] = expectedDisputeHash(dispute, seed);
+    projection['counterpartyDisputeHash'] = dispute.hash;
     projection['counterpartyDisputeProofBodyHash'] = dispute.proofBodyHash;
     projection['counterpartyDisputeProofNonce'] = dispute.nonce;
     projection['counterpartyDisputeProofProposerIsLeft'] = dispute.proposerIsLeft;
-    projection['counterpartyDisputeProofHanko'] = hankoDigest(dispute.hanko);
+    if (dispute.hanko) projection['counterpartyDisputeProofHanko'] = hankoDigest(dispute.hanko);
   }
   if (consensus.counterpartyFrameHanko) {
     projection['counterpartyFrameHanko'] = hankoDigest(consensus.counterpartyFrameHanko);

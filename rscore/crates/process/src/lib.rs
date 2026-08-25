@@ -55,13 +55,23 @@ pub use transport::{read_frame, serve, write_frame};
 // monotonic batch candidate id. Every later candidate operation consumes it.
 // 12: committed input verdicts carry the exact Account frame and commit
 // provenance Entity needs, and exact checkpoints retain the ACK frame Hanko.
-pub const PROCESS_ABI_VERSION: u64 = 12;
+// 13: every parent Entity input owns an idempotent savepoint inside the held
+// Runtime candidate. Apply/Propose are bound to that exact stage key; rejected
+// Entity inputs roll back their Account mutations and operation indices.
+// 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
+// shapes. FrameAck is one atomic operation with one ordered composite result.
+pub const PROCESS_ABI_VERSION: u64 = 14;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=18")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=20")
+        // wire=20: Account peer inputs carry from/to/domain/dispute/watch-seed
+        // exactly, received frames retain deltas and optional Hankos, disputes
+        // retain their claimed hash, and FrameAck is one ACK-first result row.
+        // wire=19: BeginEntity/FinalizeEntity/DiscardEntity delimit one
+        // abortable parent Entity input, and Apply/Propose carry its stage key.
         // wire=18: commit verdicts carry the exact committed frame and
         // provenance, and exact OutboundAck rows preserve their frame Hanko.
         // wire=17: request ids no longer masquerade as candidate handles;
@@ -102,9 +112,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x7d, 0x69, 0xbb, 0x5f, 0x69, 0x16, 0xdf, 0x6e, 0x7a, 0x48, 0x71, 0x1a, 0xe7, 0xb0,
-            0x8b, 0xb1, 0xc1, 0x46, 0x6b, 0x90, 0x7b, 0xdb, 0x05, 0xdd, 0x98, 0x9d, 0x05, 0x39,
-            0xa0, 0x31, 0x65, 0x85,
+            0x07, 0x20, 0xc8, 0x39, 0xd3, 0x87, 0x4f, 0x4a, 0x70, 0xe3, 0x58, 0xf5, 0xf7, 0xe2,
+            0xb7, 0xf7, 0x8c, 0xf2, 0xa3, 0xcb, 0x21, 0x32, 0x90, 0x6a, 0xe0, 0x5c, 0xdd, 0x73,
+            0x65, 0xf8, 0xb3, 0xa7,
         ],
     };
 

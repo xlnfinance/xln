@@ -7,14 +7,16 @@
 //! keyed by account id, leaf digest = the Entity's account leaf.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
-    AccountConsensus, AccountEnvelope, AccountFrame, AccountOutput, AccountReplica, AccountState,
-    AccountTx, AckOutcome, BoardDelays, CommittedFrameEvidence, Disposition, IncomingFrame,
-    IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
-    apply_incoming_ack, apply_incoming_frame, canonical_tx_digest, propose_account_frame,
+    AccountConsensus, AccountEnvelope, AccountFrame, AccountOutput, AccountPeerEnvelope,
+    AccountReplica, AccountState, AccountTx, AckOutcome, BoardDelays, CommittedFrameEvidence,
+    Disposition, FrameAckOutcome, FrameAckPhase, IncomingAck, IncomingFrame, IncomingOutcome,
+    ProposalOutcome, ReceiverClock, SigningIdentity, StateError, apply_incoming_ack,
+    apply_incoming_frame, apply_incoming_frame_ack, canonical_tx_digest, propose_account_frame,
 };
 use xln_rscore_protocol::{
     CanonicalValue, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
@@ -27,28 +29,29 @@ use crate::checkpoint::{
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, CandidateId, EngineGeneration};
 
-/// What arrives for one account: either the peer's frame or their ack of ours.
+/// What arrives for one account. `FrameAck` is one canonical input and cannot
+/// be split into independently committable operations.
 #[derive(Clone, Debug)]
 pub enum AccountInputKind {
     Frame(Box<IncomingFrame>),
-    Ack {
-        height: u64,
-        state_hash: [u8; 32],
-        hanko: Vec<u8>,
-        /// The counterparty's recovery proof for the state their ack commits,
-        /// when their message carried one.
-        dispute: Option<xln_rscore_engine::CounterpartyDispute>,
+    Ack(IncomingAck),
+    FrameAck {
+        ack: IncomingAck,
+        frame: Box<IncomingFrame>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct AccountPeerInput {
+    pub envelope: AccountPeerEnvelope,
+    pub kind: AccountInputKind,
 }
 
 #[derive(Clone, Debug)]
 pub struct AccountInputRow {
     pub operation_index: u64,
     pub account_id: AccountId,
-    /// The entity that signed this input, which the engine authenticates
-    /// against the account's own counterparty before applying anything.
-    pub from_entity_id: [u8; 32],
-    pub kind: AccountInputKind,
+    pub input: AccountPeerInput,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +89,14 @@ pub enum AccountInputVerdict {
         height: u64,
     },
     AckRejected {
+        reason: String,
+    },
+    FrameAckApplied {
+        ack: Box<AccountInputVerdict>,
+        frame: Box<AccountInputVerdict>,
+    },
+    FrameAckRejected {
+        phase: FrameAckPhase,
         reason: String,
     },
     /// The account is not in this engine, or its transition faulted. The
@@ -136,7 +147,7 @@ pub enum WaveOp {
         account_id: AccountId,
         txs: Vec<xln_rscore_engine::AccountTx>,
     },
-    Input(AccountInputRow),
+    Input(Box<AccountInputRow>),
     /// Create the account at financial genesis inside this abortable candidate.
     /// It must be the first operation that names the account; importing a
     /// post-transition seed here would make TypeScript, not Rust, authoritative.
@@ -189,6 +200,87 @@ pub struct EntityWave {
     /// Whether this Entity proposes once its work is applied. An Entity that
     /// only wants to drain its inbox says no.
     pub propose: bool,
+}
+
+/// The exact Entity clock and proposal policy for one parent Entity input.
+///
+/// Runtime candidates may consume several Entity inputs before their WAL row
+/// is durable. Each input installs its own context only for its abortable
+/// stage, so a rejected parent input cannot leave its clock behind for the
+/// next accepted input.
+#[derive(Clone, Copy, Debug)]
+pub struct EntityStageContext {
+    pub owner_entity_id: [u8; 32],
+    pub timestamp: u64,
+    pub j_height: u64,
+    pub clock: ReceiverClock,
+    pub propose: bool,
+}
+
+impl PartialEq for EntityStageContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.owner_entity_id == other.owner_entity_id
+            && self.timestamp == other.timestamp
+            && self.j_height == other.j_height
+            && self.clock.entity_timestamp == other.clock.entity_timestamp
+            && self.clock.finalized_j_height == other.clock.finalized_j_height
+            && self.propose == other.propose
+    }
+}
+
+impl Eq for EntityStageContext {}
+
+/// Stable identity of one parent Entity input inside an abortable Runtime
+/// candidate. It is derived by the caller from that exact input, not allocated
+/// by transport, so retrying after a lost reply reaches the same stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StageKey([u8; 32]);
+
+impl StageKey {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl fmt::Display for StageKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntityStageStatus {
+    Open,
+    Accepted,
+    RolledBack,
+}
+
+impl fmt::Display for EntityStageStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Open => "open",
+            Self::Accepted => "accepted",
+            Self::RolledBack => "rolled_back",
+        })
+    }
+}
+
+/// Idempotent acknowledgement of one Entity stage command.
+///
+/// Begin and rollback return the ordinal they received. Accept returns the
+/// next ordinal, which is the value the next distinct Entity stage must name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntityStageReceipt {
+    pub key: StageKey,
+    pub status: EntityStageStatus,
+    pub accepted_stage_ordinal: u64,
 }
 
 #[derive(Debug)]
@@ -256,6 +348,9 @@ struct PendingWave {
     admissions: Vec<AccountAdmissionResult>,
     proposals: Vec<ProposalRow>,
     sealed: bool,
+    accepted_stage_ordinal: u64,
+    terminal_entity_stages: BTreeMap<StageKey, TerminalEntityStage>,
+    entity_stage: Option<EntityStageSavepoint>,
 }
 
 #[derive(Clone, Copy)]
@@ -264,6 +359,35 @@ struct WaveEntityContext {
     j_height: u64,
     clock: ReceiverClock,
     propose: bool,
+}
+
+/// Everything one parent Entity input is allowed to change inside a held
+/// Runtime candidate. The persistent Account forest makes the large fields
+/// cheap path-copy snapshots; rollback is an exact pointer-level restoration,
+/// not a best-effort inverse transition.
+struct EntityStageSavepoint {
+    key: StageKey,
+    expected_accepted_stage_ordinal: u64,
+    context: EntityStageContext,
+    accounts: PersistentRadixMap<AccountConsensus>,
+    identities: BTreeMap<[u8; 32], SigningIdentity>,
+    revision: u64,
+    contexts: BTreeMap<[u8; 32], WaveEntityContext>,
+    last_operation_index: Option<u64>,
+    used_accounts: BTreeSet<AccountId>,
+    created_accounts: BTreeSet<AccountId>,
+    unused_created_accounts: BTreeSet<AccountId>,
+    touched: BTreeSet<AccountId>,
+    applied_len: usize,
+    admissions_len: usize,
+    proposals_len: usize,
+}
+
+#[derive(Clone, Copy)]
+struct TerminalEntityStage {
+    begin_ordinal: u64,
+    context: EntityStageContext,
+    receipt: EntityStageReceipt,
 }
 
 /// One attempt to propose, whether or not it produced a frame. A window where
@@ -302,22 +426,17 @@ impl ProposalRow {
         self.proposed
             .as_ref()
             .map(|proposed| xln_rscore_engine::IncomingFrame {
-                height: proposed.frame.height,
-                timestamp: proposed.frame.timestamp,
-                j_height: proposed.frame.j_height,
-                txs: proposed.frame.txs.clone(),
-                prev_frame_hash: proposed.frame.prev_frame_hash.clone(),
-                account_state_root: proposed.frame.account_state_root,
-                by_left: proposed.frame.by_left,
+                frame: proposed.frame.clone(),
                 state_hash: proposed.state_hash,
-                hanko: proposed.hanko.clone(),
+                frame_hanko: Some(proposed.hanko.clone()),
                 // The proposer's signature over their proof is not modelled
                 // here: this path hands one engine's own proposal to another
                 // inside a test, where both sides build the same proof from
                 // the same state.
                 dispute: proposed.dispute.as_ref().map(|draft| {
                     xln_rscore_engine::CounterpartyDispute {
-                        hanko: Vec::new(),
+                        hanko: None,
+                        hash: draft.hash,
                         proof_body_hash: draft.proof_body_hash,
                         nonce: draft.nonce,
                         proposer_is_left: draft.proposer_is_left,
@@ -365,6 +484,7 @@ type InputWork = Result<
         AccountConsensus,
         Vec<AccountInputResult>,
         Vec<AccountAdmissionResult>,
+        bool,
     ),
     BatchError,
 >;
@@ -701,35 +821,43 @@ impl StatefulConsensusEngine {
                         .get(account.replica().owner().as_bytes())
                         .ok_or(BatchError::SignerRequired)?;
                     let mut results = Vec::with_capacity(rows.len());
+                    let mut changed = false;
                     for row in rows {
-                        let verdict = apply_one(
+                        let (verdict, row_changed) = apply_one(
+                            account_id,
                             &mut account,
                             identity,
-                            &row.from_entity_id,
                             clock,
-                            row.kind,
+                            row.input,
                             swap_market,
                         );
+                        changed |= row_changed;
                         results.push(AccountInputResult {
                             operation_index: row.operation_index,
                             account_id,
                             verdict,
                         });
                     }
-                    Ok((account_id, account, results, Vec::new()))
+                    Ok((account_id, account, results, Vec::new(), changed))
                 })
                 .collect()
         });
         let mut entries = Vec::with_capacity(applied.len());
         let mut results = missing;
         for outcome in applied {
-            let (account_id, account, rows, _) = outcome?;
+            let (account_id, account, rows, _, changed) = outcome?;
+            if !changed {
+                results.extend(rows);
+                continue;
+            }
             let leaf = leaf_root(account_id, &account)?;
             entries.push((account_id.as_bytes().to_vec(), account, leaf));
             results.extend(rows);
         }
-        self.accounts = self.put_accounts(entries)?;
-        self.revision += 1;
+        if !entries.is_empty() {
+            self.accounts = self.put_accounts(entries)?;
+            self.revision += 1;
+        }
         results.sort_by_key(|result| result.operation_index);
         Ok(results)
     }
@@ -885,6 +1013,7 @@ impl StatefulConsensusEngine {
                         .ok_or(BatchError::SignerRequired)?;
                     let mut results = Vec::new();
                     let mut admissions = Vec::new();
+                    let mut changed = step_created.contains_key(&account_id);
                     for op in ops {
                         match op {
                             WaveOp::Admit {
@@ -893,7 +1022,10 @@ impl StatefulConsensusEngine {
                                 ..
                             } => {
                                 let verdict = match admit_local_txs(&mut account, txs) {
-                                    Ok(count) => AccountAdmissionVerdict::Admitted { count },
+                                    Ok(count) => {
+                                        changed |= count > 0;
+                                        AccountAdmissionVerdict::Admitted { count }
+                                    }
                                     Err(error) => AccountAdmissionVerdict::Rejected {
                                         code: "ACCOUNT_ADMISSION_REJECTED".to_string(),
                                         message: error.to_string(),
@@ -906,14 +1038,15 @@ impl StatefulConsensusEngine {
                                 });
                             }
                             WaveOp::Input(row) => {
-                                let verdict = apply_one(
+                                let (verdict, row_changed) = apply_one(
+                                    account_id,
                                     &mut account,
                                     identity,
-                                    &row.from_entity_id,
                                     clock,
-                                    row.kind,
+                                    row.input,
                                     swap_market,
                                 );
+                                changed |= row_changed;
                                 results.push(AccountInputResult {
                                     operation_index: row.operation_index,
                                     account_id,
@@ -925,7 +1058,7 @@ impl StatefulConsensusEngine {
                             WaveOp::Create { .. } => {}
                         }
                     }
-                    Ok((account_id, account, results, admissions))
+                    Ok((account_id, account, results, admissions, changed))
                 })
                 .collect()
         });
@@ -933,26 +1066,24 @@ impl StatefulConsensusEngine {
         let mut results = missing;
         let mut admissions = Vec::new();
         for outcome in applied {
-            let (account_id, account, rows, admitted) = outcome?;
+            let (account_id, account, rows, admitted, changed) = outcome?;
             if created.contains(&account_id)
-                && (rows.iter().any(|row| {
-                    matches!(
-                        &row.verdict,
-                        AccountInputVerdict::FrameCommitted { height: 1, .. }
-                    )
-                }) || admitted.iter().any(|row| {
-                    matches!(
-                        &row.verdict,
-                        AccountAdmissionVerdict::Admitted { count } if *count > 0
-                    )
-                }))
+                && (rows.iter().any(|row| verdict_commits_genesis(&row.verdict))
+                    || admitted.iter().any(|row| {
+                        matches!(
+                            &row.verdict,
+                            AccountAdmissionVerdict::Admitted { count } if *count > 0
+                        )
+                    }))
             {
                 unused_created.remove(&account_id);
             }
-            let leaf = leaf_root(account_id, &account)?;
-            entries.push((account_id.as_bytes().to_vec(), account, leaf));
             results.extend(rows);
             admissions.extend(admitted);
+            if changed {
+                let leaf = leaf_root(account_id, &account)?;
+                entries.push((account_id.as_bytes().to_vec(), account, leaf));
+            }
         }
         if !entries.is_empty() {
             self.accounts = self.put_accounts(entries)?;
@@ -1089,6 +1220,9 @@ impl StatefulConsensusEngine {
             admissions: Vec::new(),
             proposals: Vec::new(),
             sealed: false,
+            accepted_stage_ordinal: 0,
+            terminal_entity_stages: BTreeMap::new(),
+            entity_stage: None,
         });
         let outcome = self.apply_wave_ops(WaveOpsRequest { entities: ops });
         match outcome {
@@ -1103,11 +1237,246 @@ impl StatefulConsensusEngine {
         }
     }
 
+    /// Open the savepoint for one exact parent Entity input.
+    ///
+    /// The caller supplies both a content-derived key and the number of Entity
+    /// stages this candidate has already accepted. The pair makes retries
+    /// idempotent without letting an old input attach itself to a later point
+    /// in the same Runtime candidate.
+    pub fn begin_entity_stage(
+        &mut self,
+        key: StageKey,
+        expected_accepted_stage_ordinal: u64,
+        context: EntityStageContext,
+    ) -> Result<EntityStageReceipt, BatchError> {
+        let pending = self.pending.as_ref().ok_or(BatchError::WaveMissing)?;
+        if let Some(terminal) = pending.terminal_entity_stages.get(&key) {
+            validate_terminal_replay(key, expected_accepted_stage_ordinal, &context, terminal)?;
+            return Ok(terminal.receipt);
+        }
+        if pending.sealed {
+            return Err(BatchError::WaveSealed);
+        }
+        if let Some(active) = pending.entity_stage.as_ref() {
+            if active.key != key {
+                return Err(BatchError::EntityStageOpen(active.key));
+            }
+            if active.expected_accepted_stage_ordinal != expected_accepted_stage_ordinal {
+                return Err(BatchError::EntityStageOrdinal {
+                    actual: expected_accepted_stage_ordinal,
+                    expected: active.expected_accepted_stage_ordinal,
+                });
+            }
+            if active.context != context {
+                return Err(BatchError::EntityStageReplay {
+                    key,
+                    detail: "context",
+                });
+            }
+            return Ok(EntityStageReceipt {
+                key,
+                status: EntityStageStatus::Open,
+                accepted_stage_ordinal: expected_accepted_stage_ordinal,
+            });
+        }
+        if pending.accepted_stage_ordinal != expected_accepted_stage_ordinal {
+            return Err(BatchError::EntityStageOrdinal {
+                actual: expected_accepted_stage_ordinal,
+                expected: pending.accepted_stage_ordinal,
+            });
+        }
+        let savepoint = EntityStageSavepoint {
+            key,
+            expected_accepted_stage_ordinal,
+            context,
+            accounts: self.accounts.clone(),
+            identities: self.identities.clone(),
+            revision: self.revision,
+            contexts: pending.contexts.clone(),
+            last_operation_index: pending.last_operation_index,
+            used_accounts: pending.used_accounts.clone(),
+            created_accounts: pending.created_accounts.clone(),
+            unused_created_accounts: pending.unused_created_accounts.clone(),
+            touched: pending.touched.clone(),
+            applied_len: pending.applied.len(),
+            admissions_len: pending.admissions.len(),
+            proposals_len: pending.proposals.len(),
+        };
+        let pending = self.pending.as_mut().ok_or(BatchError::WaveMissing)?;
+        pending.contexts.insert(
+            context.owner_entity_id,
+            WaveEntityContext {
+                timestamp: context.timestamp,
+                j_height: context.j_height,
+                clock: context.clock,
+                propose: context.propose,
+            },
+        );
+        pending.entity_stage = Some(savepoint);
+        Ok(EntityStageReceipt {
+            key,
+            status: EntityStageStatus::Open,
+            accepted_stage_ordinal: expected_accepted_stage_ordinal,
+        })
+    }
+
+    /// Keep the mutations made for one parent Entity input. Its clock is
+    /// stage-local and is removed even on accept; the next Entity input must
+    /// install its own exact context before doing Account work.
+    pub fn accept_entity_stage(
+        &mut self,
+        key: StageKey,
+        expected_accepted_stage_ordinal: u64,
+    ) -> Result<EntityStageReceipt, BatchError> {
+        self.finish_entity_stage(
+            key,
+            expected_accepted_stage_ordinal,
+            EntityStageStatus::Accepted,
+        )
+    }
+
+    /// Reject the parent Entity input and restore the candidate byte-for-byte
+    /// to its pre-input state, including the operation index. A later accepted
+    /// input can therefore reuse the same deterministic index range.
+    pub fn rollback_entity_stage(
+        &mut self,
+        key: StageKey,
+        expected_accepted_stage_ordinal: u64,
+    ) -> Result<EntityStageReceipt, BatchError> {
+        self.finish_entity_stage(
+            key,
+            expected_accepted_stage_ordinal,
+            EntityStageStatus::RolledBack,
+        )
+    }
+
+    /// Prove that a staged Apply/Propose command is attached to the currently
+    /// open parent Entity input. The process layer calls this after validating
+    /// the candidate capability and before dispatching the existing mutation
+    /// method; batch methods deliberately retain their no-stage form until the
+    /// old driver is removed at cutover.
+    pub fn require_entity_stage(&self, key: StageKey) -> Result<(), BatchError> {
+        let pending = self.pending.as_ref().ok_or(BatchError::WaveMissing)?;
+        let active = pending
+            .entity_stage
+            .as_ref()
+            .ok_or(BatchError::EntityStageMissing(key))?;
+        if active.key != key {
+            return Err(BatchError::EntityStageKey {
+                actual: key,
+                expected: active.key,
+            });
+        }
+        Ok(())
+    }
+
+    fn finish_entity_stage(
+        &mut self,
+        key: StageKey,
+        expected_accepted_stage_ordinal: u64,
+        decision: EntityStageStatus,
+    ) -> Result<EntityStageReceipt, BatchError> {
+        let pending = self.pending.as_ref().ok_or(BatchError::WaveMissing)?;
+        if let Some(terminal) = pending.terminal_entity_stages.get(&key) {
+            if terminal.begin_ordinal != expected_accepted_stage_ordinal {
+                return Err(BatchError::EntityStageOrdinal {
+                    actual: expected_accepted_stage_ordinal,
+                    expected: terminal.begin_ordinal,
+                });
+            }
+            if terminal.receipt.status != decision {
+                return Err(BatchError::EntityStageDecisionConflict {
+                    key,
+                    actual: decision,
+                    expected: terminal.receipt.status,
+                });
+            }
+            return Ok(terminal.receipt);
+        }
+        let active = pending
+            .entity_stage
+            .as_ref()
+            .ok_or(BatchError::EntityStageMissing(key))?;
+        if active.key != key {
+            return Err(BatchError::EntityStageKey {
+                actual: key,
+                expected: active.key,
+            });
+        }
+        if active.expected_accepted_stage_ordinal != expected_accepted_stage_ordinal {
+            return Err(BatchError::EntityStageOrdinal {
+                actual: expected_accepted_stage_ordinal,
+                expected: active.expected_accepted_stage_ordinal,
+            });
+        }
+        let accepted_stage_ordinal = match decision {
+            EntityStageStatus::Accepted => expected_accepted_stage_ordinal
+                .checked_add(1)
+                .ok_or(BatchError::EntityStageOrdinalOverflow)?,
+            EntityStageStatus::RolledBack => expected_accepted_stage_ordinal,
+            EntityStageStatus::Open => unreachable!("open is not a terminal decision"),
+        };
+        let savepoint = self
+            .pending
+            .as_mut()
+            .ok_or(BatchError::WaveMissing)?
+            .entity_stage
+            .take()
+            .ok_or(BatchError::EntityStageMissing(key))?;
+        let receipt = EntityStageReceipt {
+            key,
+            status: decision,
+            accepted_stage_ordinal,
+        };
+        let terminal = TerminalEntityStage {
+            begin_ordinal: expected_accepted_stage_ordinal,
+            context: savepoint.context,
+            receipt,
+        };
+        match decision {
+            EntityStageStatus::Accepted => {
+                let pending = self.pending.as_mut().ok_or(BatchError::WaveMissing)?;
+                pending.contexts = savepoint.contexts;
+                pending.accepted_stage_ordinal = accepted_stage_ordinal;
+                pending.terminal_entity_stages.insert(key, terminal);
+            }
+            EntityStageStatus::RolledBack => {
+                self.accounts = savepoint.accounts;
+                self.identities = savepoint.identities;
+                self.revision = savepoint.revision;
+                let pending = self.pending.as_mut().ok_or(BatchError::WaveMissing)?;
+                pending.contexts = savepoint.contexts;
+                pending.last_operation_index = savepoint.last_operation_index;
+                pending.used_accounts = savepoint.used_accounts;
+                pending.created_accounts = savepoint.created_accounts;
+                pending.unused_created_accounts = savepoint.unused_created_accounts;
+                pending.touched = savepoint.touched;
+                pending.applied.truncate(savepoint.applied_len);
+                pending.admissions.truncate(savepoint.admissions_len);
+                pending.proposals.truncate(savepoint.proposals_len);
+                pending.terminal_entity_stages.insert(key, terminal);
+            }
+            EntityStageStatus::Open => unreachable!("open is not a terminal decision"),
+        }
+        Ok(receipt)
+    }
+
     /// Continue an open candidate. A failed step restores the candidate state
     /// that preceded this call; the original abort base remains unchanged.
     pub fn apply_wave_ops(&mut self, request: WaveOpsRequest) -> Result<WaveResult, BatchError> {
         let (contexts, previous_index, prior_used, prior_created, prior_unused_created) = {
             let pending = self.open_wave()?;
+            if let Some(stage) = pending.entity_stage.as_ref() {
+                for entity in &request.entities {
+                    if entity.owner_entity_id != stage.context.owner_entity_id {
+                        return Err(BatchError::EntityStageOwner {
+                            key: stage.key,
+                            actual: hex_of(&entity.owner_entity_id),
+                            expected: hex_of(&stage.context.owner_entity_id),
+                        });
+                    }
+                }
+            }
             (
                 pending.contexts.clone(),
                 pending.last_operation_index,
@@ -1184,7 +1553,21 @@ impl StatefulConsensusEngine {
     /// Build frames only for the exact deterministic Account worklist selected
     /// by each Entity for this round.
     pub fn propose_wave(&mut self, request: WaveProposalRequest) -> Result<WaveResult, BatchError> {
-        let contexts = self.open_wave()?.contexts.clone();
+        let contexts = {
+            let pending = self.open_wave()?;
+            if let Some(stage) = pending.entity_stage.as_ref() {
+                for entity in &request.entities {
+                    if entity.owner_entity_id != stage.context.owner_entity_id {
+                        return Err(BatchError::EntityStageOwner {
+                            key: stage.key,
+                            actual: hex_of(&entity.owner_entity_id),
+                            expected: hex_of(&stage.context.owner_entity_id),
+                        });
+                    }
+                }
+            }
+            pending.contexts.clone()
+        };
         let step_accounts = self.accounts.clone();
         let step_revision = self.revision;
         let outcome = self
@@ -1227,6 +1610,9 @@ impl StatefulConsensusEngine {
     pub fn seal_wave(&mut self) -> Result<WaveResult, BatchError> {
         let (touched, applied, admissions, proposals) = {
             let pending = self.open_wave()?;
+            if let Some(stage) = pending.entity_stage.as_ref() {
+                return Err(BatchError::EntityStageOpen(stage.key));
+            }
             if let Some(account_id) = pending.unused_created_accounts.first() {
                 return Err(BatchError::WaveCreateUnused(*account_id));
             }
@@ -1305,6 +1691,9 @@ impl StatefulConsensusEngine {
     /// Keep the wave: the runtime has made its own record of it durable.
     pub fn commit_wave(&mut self, candidate_id: CandidateId) -> Result<[u8; 32], BatchError> {
         let pending = self.pending.as_ref().ok_or(BatchError::WaveMissing)?;
+        if let Some(stage) = pending.entity_stage.as_ref() {
+            return Err(BatchError::EntityStageOpen(stage.key));
+        }
         if !pending.sealed {
             return Err(BatchError::WaveOpen);
         }
@@ -1347,7 +1736,10 @@ impl StatefulConsensusEngine {
     /// engine holds exactly one candidate, and a second mutation on top of it
     /// could not be rolled back to the state the runtime agreed on.
     fn assert_no_pending_wave(&self) -> Result<(), BatchError> {
-        if self.pending.is_some() {
+        if let Some(pending) = self.pending.as_ref() {
+            if let Some(stage) = pending.entity_stage.as_ref() {
+                return Err(BatchError::EntityStageOpen(stage.key));
+            }
             return Err(BatchError::WavePending);
         }
         Ok(())
@@ -1403,6 +1795,9 @@ impl StatefulConsensusEngine {
         candidate_id: CandidateId,
     ) -> Result<AccountsCheckpoint, BatchError> {
         let pending = self.pending.as_ref().ok_or(BatchError::WaveMissing)?;
+        if let Some(stage) = pending.entity_stage.as_ref() {
+            return Err(BatchError::EntityStageOpen(stage.key));
+        }
         if !pending.sealed {
             return Err(BatchError::WaveOpen);
         }
@@ -1462,6 +1857,13 @@ impl StatefulConsensusEngine {
 
     /// The token for the state as it stands: what a restore must reproduce.
     pub fn checkpoint_token(&self) -> Result<CheckpointToken, BatchError> {
+        if let Some(stage) = self
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.entity_stage.as_ref())
+        {
+            return Err(BatchError::EntityStageOpen(stage.key));
+        }
         Ok(CheckpointToken {
             base_revision: self.checkpoint_revision,
             revision: self.revision,
@@ -1730,19 +2132,25 @@ impl StatefulConsensusEngine {
 }
 
 fn apply_one(
+    account_id: AccountId,
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    from_entity_id: &[u8; 32],
     clock: ReceiverClock,
-    kind: AccountInputKind,
+    input: AccountPeerInput,
     swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
-) -> AccountInputVerdict {
-    match kind {
+) -> (AccountInputVerdict, bool) {
+    if account_id.as_bytes() != &input.envelope.from_entity_id {
+        return (
+            AccountInputVerdict::Failed("ACCOUNT_INPUT_ACCOUNT_ID_MISMATCH".to_string()),
+            false,
+        );
+    }
+    let verdict = match input.kind {
         AccountInputKind::Frame(frame) => {
             match apply_incoming_frame(
                 account,
                 identity,
-                from_entity_id,
+                &input.envelope,
                 clock,
                 *frame,
                 swap_market,
@@ -1751,23 +2159,25 @@ fn apply_one(
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
             }
         }
-        AccountInputKind::Ack {
-            height,
-            state_hash,
-            hanko,
-            dispute,
-        } => match apply_incoming_ack(
-            account,
-            from_entity_id,
-            height,
-            &state_hash,
-            &hanko,
-            dispute,
-        ) {
+        AccountInputKind::Ack(ack) => match apply_incoming_ack(account, &input.envelope, ack) {
             Ok(outcome) => ack_verdict(outcome),
             Err(error) => AccountInputVerdict::Failed(error.to_string()),
         },
-    }
+        AccountInputKind::FrameAck { ack, frame } => match apply_incoming_frame_ack(
+            account,
+            identity,
+            &input.envelope,
+            clock,
+            ack,
+            *frame,
+            swap_market,
+        ) {
+            Ok(outcome) => frame_ack_verdict(outcome),
+            Err(error) => AccountInputVerdict::Failed(error.to_string()),
+        },
+    };
+    let changed = verdict_changes_account(&verdict);
+    (verdict, changed)
 }
 
 fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
@@ -1825,6 +2235,54 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
         },
         AckOutcome::Stale { height } => AccountInputVerdict::AckStale { height },
         AckOutcome::Rejected { reason } => AccountInputVerdict::AckRejected { reason },
+    }
+}
+
+fn frame_ack_verdict(outcome: FrameAckOutcome) -> AccountInputVerdict {
+    match outcome {
+        FrameAckOutcome::Applied { ack, frame } => AccountInputVerdict::FrameAckApplied {
+            ack: Box::new(ack_verdict(*ack)),
+            frame: Box::new(incoming_verdict(*frame)),
+        },
+        FrameAckOutcome::Rejected { phase, reason } => {
+            AccountInputVerdict::FrameAckRejected { phase, reason }
+        }
+    }
+}
+
+fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
+    match verdict {
+        AccountInputVerdict::FrameCommitted { .. } | AccountInputVerdict::AckCommitted { .. } => {
+            true
+        }
+        AccountInputVerdict::FrameAckApplied { ack, frame } => {
+            verdict_changes_account(ack) || verdict_changes_account(frame)
+        }
+        AccountInputVerdict::FrameCollisionIgnored { .. }
+        | AccountInputVerdict::FrameDuplicate { .. }
+        | AccountInputVerdict::FrameStale { .. }
+        | AccountInputVerdict::FrameRejected { .. }
+        | AccountInputVerdict::AckStale { .. }
+        | AccountInputVerdict::AckRejected { .. }
+        | AccountInputVerdict::FrameAckRejected { .. }
+        | AccountInputVerdict::Failed(_) => false,
+    }
+}
+
+fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
+    match verdict {
+        AccountInputVerdict::FrameCommitted { height: 1, .. } => true,
+        AccountInputVerdict::FrameAckApplied { frame, .. } => verdict_commits_genesis(frame),
+        AccountInputVerdict::FrameCommitted { .. }
+        | AccountInputVerdict::FrameCollisionIgnored { .. }
+        | AccountInputVerdict::FrameDuplicate { .. }
+        | AccountInputVerdict::FrameStale { .. }
+        | AccountInputVerdict::FrameRejected { .. }
+        | AccountInputVerdict::AckCommitted { .. }
+        | AccountInputVerdict::AckStale { .. }
+        | AccountInputVerdict::AckRejected { .. }
+        | AccountInputVerdict::FrameAckRejected { .. }
+        | AccountInputVerdict::Failed(_) => false,
     }
 }
 
@@ -2182,6 +2640,27 @@ fn validate_operation_indices(
         last = Some(operation_index);
     }
     Ok(last)
+}
+
+fn validate_terminal_replay(
+    key: StageKey,
+    expected_accepted_stage_ordinal: u64,
+    context: &EntityStageContext,
+    terminal: &TerminalEntityStage,
+) -> Result<(), BatchError> {
+    if terminal.begin_ordinal != expected_accepted_stage_ordinal {
+        return Err(BatchError::EntityStageOrdinal {
+            actual: expected_accepted_stage_ordinal,
+            expected: terminal.begin_ordinal,
+        });
+    }
+    if terminal.context != *context {
+        return Err(BatchError::EntityStageReplay {
+            key,
+            detail: "context",
+        });
+    }
+    Ok(())
 }
 
 fn proposable(account: &AccountConsensus) -> bool {

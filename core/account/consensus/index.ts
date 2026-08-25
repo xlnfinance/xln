@@ -4,7 +4,11 @@
  */
 
 import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../rscore/shadow-hook';
-import { noteAuthorityEntityClock, noteRawAccountInput } from '../../rscore/authority-wave';
+import {
+  noteAuthorityAccountInputResult,
+  noteAuthorityEntityClock,
+  noteRawAccountInput,
+} from '../../rscore/authority-wave';
 import type {
   AccountReplica,
   AccountDisputeHanko,
@@ -1209,19 +1213,23 @@ export async function applyAccountInput(
 ): Promise<HandleAccountInputResult> {
   // The authoritative engine is handed the same raw inputs, in this order,
   // before TypeScript executes them (no-op unless recording is on).
-  noteRawAccountInput(context.accountAuthorityFrameId, account, input);
-  if (input.kind === 'enqueue') return applyAccountEnqueue(account, input);
-  const envelopeError = getAccountInputEnvelopeError(account.state, input);
-  if (envelopeError) {
-    if (input.kind === 'external_finality') {
-      return accountInputValidationRejected(envelopeError.reason, []);
+  const recorded = noteRawAccountInput(context.accountAuthorityFrameId, account, input);
+  const result = await (async (): Promise<HandleAccountInputResult> => {
+    if (input.kind === 'enqueue') return applyAccountEnqueue(account, input);
+    const envelopeError = getAccountInputEnvelopeError(account.state, input);
+    if (envelopeError) {
+      if (input.kind === 'external_finality') {
+        return accountInputValidationRejected(envelopeError.reason, []);
+      }
+      return rejectAccountPeerInput(envelopeError.code, envelopeError.reason, []);
     }
-    return rejectAccountPeerInput(envelopeError.code, envelopeError.reason, []);
-  }
-  if (input.kind === 'external_finality') {
-    return applyExternalFinalityInput(account, input);
-  }
-  return applyPeerAccountInput(context, account, input, providedSecurityContext);
+    if (input.kind === 'external_finality') {
+      return applyExternalFinalityInput(account, input);
+    }
+    return applyPeerAccountInput(context, account, input, providedSecurityContext);
+  })();
+  noteAuthorityAccountInputResult(recorded, result);
+  return result;
 }
 
 const applyPeerAccountInput = async (

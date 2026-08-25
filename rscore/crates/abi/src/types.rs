@@ -84,11 +84,15 @@ pub enum OpTag {
     /// state and therefore must never be used for crash recovery.
     BootstrapAccounts = 1,
     BeginRuntime = 2,
+    /// Open one abortable parent Entity-input savepoint inside the held
+    /// authoritative Runtime candidate.
     BeginEntity = 3,
     ReadCapacityBatch = 4,
     ExecuteWave = 5,
     PrepareEntity = 6,
+    /// Accept the currently open Entity-input savepoint.
     FinalizeEntity = 7,
+    /// Roll the currently open Entity-input savepoint back exactly.
     DiscardEntity = 8,
     PrepareRuntime = 9,
     CommitRuntime = 10,

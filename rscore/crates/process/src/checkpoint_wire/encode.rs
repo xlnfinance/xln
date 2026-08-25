@@ -230,7 +230,11 @@ fn optional_dispute(value: Option<&DisputeDraft>) -> AbiValue {
 fn optional_counterparty_dispute(value: Option<&CounterpartyDispute>) -> AbiValue {
     value.map_or(AbiValue::Nil, |dispute| {
         tuple(vec![
-            AbiValue::Bytes(dispute.hanko.clone()),
+            dispute
+                .hanko
+                .as_ref()
+                .map_or(AbiValue::Nil, |hanko| AbiValue::Bytes(hanko.clone())),
+            AbiValue::Bytes(dispute.hash.to_vec()),
             AbiValue::Bytes(dispute.proof_body_hash.to_vec()),
             integer(dispute.nonce),
             AbiValue::Bool(dispute.proposer_is_left),

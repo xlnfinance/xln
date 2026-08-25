@@ -2,11 +2,12 @@ use num_bigint::BigInt;
 use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountInputAuthority, AccountSeed, BatchJob};
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
-    AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy, CarriedSections,
-    DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx,
-    HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator, OpaqueHtlcCiphertext,
-    RebalanceFeePolicySnapshot, Side, SwapMarketPolicy, SwapOffer, SwapToken, TokenId, WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountFrame, AccountIdentity,
+    AccountReplica, AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy,
+    CarriedSections, DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock,
+    HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator,
+    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, Side, SwapMarketPolicy, SwapOffer, SwapToken,
+    TokenId, WatchSeed,
 };
 
 use crate::wire_value::{
@@ -81,13 +82,31 @@ pub enum Command {
     PrepareAccountWave {
         request: Box<xln_rscore_batch::WaveRequest>,
     },
+    BeginEntity {
+        candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
+        expected_accepted_ordinal: u64,
+        context: xln_rscore_batch::EntityStageContext,
+    },
     ApplyAccountWave {
         candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
         request: Box<xln_rscore_batch::WaveOpsRequest>,
     },
     ProposeAccountWave {
         candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
         request: Box<xln_rscore_batch::WaveProposalRequest>,
+    },
+    FinalizeEntity {
+        candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
+        expected_accepted_ordinal: u64,
+    },
+    DiscardEntity {
+        candidate_token: [u8; 32],
+        stage_key: xln_rscore_batch::StageKey,
+        expected_accepted_ordinal: u64,
     },
     SealAccountWave {
         candidate_token: [u8; 32],
@@ -110,8 +129,11 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
         OpTag::UpsertAccounts => decode_upsert_accounts(payload),
         OpTag::PrepareAccountWave => decode_prepare_wave(payload),
+        OpTag::BeginEntity => decode_begin_entity(payload),
         OpTag::ApplyAccountWave => decode_apply_wave(payload),
         OpTag::ProposeAccountWave => decode_propose_wave(payload),
+        OpTag::FinalizeEntity => decode_finalize_entity(payload),
+        OpTag::DiscardEntity => decode_discard_entity(payload),
         OpTag::SealAccountWave => decode_seal_wave(payload),
         OpTag::ReadAccountEnvelope => decode_read_envelope(payload),
         OpTag::GetCheckpointChanges => decode_get_checkpoint_changes(payload),
@@ -337,9 +359,9 @@ fn decode_wave_op(value: &AbiValue) -> Result<xln_rscore_batch::WaveOp, ProcessE
         }
         1 => {
             let fields = exact(fields, 2, "waveInput")?;
-            Ok(xln_rscore_batch::WaveOp::Input(decode_input_row(
+            Ok(xln_rscore_batch::WaveOp::Input(Box::new(decode_input_row(
                 &fields[1],
-            )?))
+            )?)))
         }
         2 => {
             let fields = exact(fields, 3, "waveCreate")?;
@@ -355,24 +377,78 @@ fn decode_wave_op(value: &AbiValue) -> Result<xln_rscore_batch::WaveOp, ProcessE
     }
 }
 
-fn decode_input_row(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
-    let fields = exact(tuple(value)?, 4, "accountInput")?;
+pub(crate) fn decode_input_row(
+    value: &AbiValue,
+) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
+    let fields = exact(tuple(value)?, 3, "accountInput")?;
     Ok(xln_rscore_batch::AccountInputRow {
         operation_index: js_number(&fields[0], "operationIndex")?,
         account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
-        from_entity_id: fixed_bytes(&fields[2], "fromEntityId")?,
-        kind: decode_input_kind(&fields[3])?,
+        input: decode_peer_input(&fields[2])?,
+    })
+}
+
+fn decode_peer_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountPeerInput, ProcessError> {
+    let fields = exact(tuple(value)?, 6, "accountPeerEnvelope")?;
+    let domain = exact(tuple(&fields[2])?, 2, "accountPeerDomain")?;
+    let dispute = exact(tuple(&fields[3])?, 2, "accountPeerDisputeConfig")?;
+    let watch_seed = match &fields[4] {
+        AbiValue::Nil => None,
+        value => Some(WatchSeed::parse(&hex_fixed(value, "watchSeed", 32)?)?),
+    };
+    Ok(xln_rscore_batch::AccountPeerInput {
+        envelope: xln_rscore_engine::AccountPeerEnvelope {
+            from_entity_id: fixed_bytes(&fields[0], "fromEntityId")?,
+            to_entity_id: fixed_bytes(&fields[1], "toEntityId")?,
+            domain: AccountDomain::new(
+                js_number(&domain[0], "chainId")?,
+                DepositoryAddress::parse(&hex_fixed(&domain[1], "depositoryAddress", 20)?)?,
+            )?,
+            dispute_config: AccountDisputeConfig::new(
+                js_number(&dispute[0], "leftResponseSeconds")?,
+                js_number(&dispute[1], "rightResponseSeconds")?,
+            )?,
+            watch_seed,
+        },
+        kind: decode_input_kind(&fields[5])?,
+    })
+}
+
+fn decode_begin_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 4, "beginEntity")?;
+    Ok(Command::BeginEntity {
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
+        stage_key: xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
+        expected_accepted_ordinal: unsigned(&fields[2], "expectedAcceptedOrdinal")?,
+        context: decode_entity_stage_context(&fields[3])?,
+    })
+}
+
+fn decode_entity_stage_context(
+    value: &AbiValue,
+) -> Result<xln_rscore_batch::EntityStageContext, ProcessError> {
+    let fields = exact(tuple(value)?, 6, "entityStageContext")?;
+    Ok(xln_rscore_batch::EntityStageContext {
+        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+        timestamp: js_number(&fields[1], "timestamp")?,
+        j_height: js_number(&fields[2], "jHeight")?,
+        clock: xln_rscore_batch::ReceiverClock {
+            entity_timestamp: js_number(&fields[3], "entityTimestamp")?,
+            finalized_j_height: js_number(&fields[4], "finalizedJHeight")?,
+        },
+        propose: strict_boolean(&fields[5], "propose")?,
     })
 }
 
 fn decode_apply_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 2, "applyWave")?;
-    let entities = tuple(&fields[1])?;
+    let fields = exact(fields, 3, "applyWave")?;
+    let entities = tuple(&fields[2])?;
     if entities.len() > MAX_WAVE_ENTITY_ROWS {
         return Err(ProcessError::Expected("waveEntityRows"));
     }
     Ok(Command::ApplyAccountWave {
         candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
+        stage_key: xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
         request: Box::new(xln_rscore_batch::WaveOpsRequest {
             entities: entities
                 .iter()
@@ -397,13 +473,14 @@ fn decode_entity_wave_ops(
 }
 
 fn decode_propose_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 2, "proposeWave")?;
-    let entities = tuple(&fields[1])?;
+    let fields = exact(fields, 3, "proposeWave")?;
+    let entities = tuple(&fields[2])?;
     if entities.len() > MAX_WAVE_ENTITY_ROWS {
         return Err(ProcessError::Expected("waveEntityRows"));
     }
     Ok(Command::ProposeAccountWave {
         candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
+        stage_key: xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
         request: Box::new(xln_rscore_batch::WaveProposalRequest {
             entities: entities
                 .iter()
@@ -424,6 +501,38 @@ fn decode_propose_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
+fn decode_finalize_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let (candidate_token, stage_key, expected_accepted_ordinal) =
+        decode_entity_stage_terminal(fields, "finalizeEntity")?;
+    Ok(Command::FinalizeEntity {
+        candidate_token,
+        stage_key,
+        expected_accepted_ordinal,
+    })
+}
+
+fn decode_discard_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let (candidate_token, stage_key, expected_accepted_ordinal) =
+        decode_entity_stage_terminal(fields, "discardEntity")?;
+    Ok(Command::DiscardEntity {
+        candidate_token,
+        stage_key,
+        expected_accepted_ordinal,
+    })
+}
+
+fn decode_entity_stage_terminal(
+    fields: &[AbiValue],
+    context: &'static str,
+) -> Result<([u8; 32], xln_rscore_batch::StageKey, u64), ProcessError> {
+    let fields = exact(fields, 3, context)?;
+    Ok((
+        fixed_bytes(&fields[0], "candidateToken")?,
+        xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
+        unsigned(&fields[2], "expectedAcceptedOrdinal")?,
+    ))
+}
+
 fn decode_seal_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 1, "sealWave")?;
     Ok(Command::SealAccountWave {
@@ -436,32 +545,22 @@ fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputK
     let tag = fields.first().ok_or(ProcessError::Expected("inputTag"))?;
     match integer(tag)? {
         0 => {
-            let fields = exact(fields, 11, "incomingFrame")?;
+            let fields = exact(fields, 2, "accountFrameInput")?;
             Ok(xln_rscore_batch::AccountInputKind::Frame(Box::new(
-                xln_rscore_engine::IncomingFrame {
-                    height: js_number(&fields[1], "height")?,
-                    timestamp: js_number(&fields[2], "timestamp")?,
-                    j_height: js_number(&fields[3], "jHeight")?,
-                    txs: tuple(&fields[4])?
-                        .iter()
-                        .map(decode_tx)
-                        .collect::<Result<_, _>>()?,
-                    prev_frame_hash: text(&fields[5])?.into(),
-                    account_state_root: fixed_bytes(&fields[6], "accountStateRoot")?,
-                    by_left: boolean(&fields[7], "byLeft")?,
-                    state_hash: fixed_bytes(&fields[8], "stateHash")?,
-                    hanko: bytes(&fields[9], "hanko")?.to_vec(),
-                    dispute: decode_counterparty_dispute(&fields[10])?,
-                },
+                decode_incoming_frame(&fields[1])?,
             )))
         }
         1 => {
-            let fields = exact(fields, 5, "incomingAck")?;
-            Ok(xln_rscore_batch::AccountInputKind::Ack {
-                height: js_number(&fields[1], "height")?,
-                state_hash: fixed_bytes(&fields[2], "stateHash")?,
-                hanko: bytes(&fields[3], "hanko")?.to_vec(),
-                dispute: decode_counterparty_dispute(&fields[4])?,
+            let fields = exact(fields, 2, "accountAckInput")?;
+            Ok(xln_rscore_batch::AccountInputKind::Ack(
+                decode_incoming_ack(&fields[1])?,
+            ))
+        }
+        2 => {
+            let fields = exact(fields, 3, "accountFrameAckInput")?;
+            Ok(xln_rscore_batch::AccountInputKind::FrameAck {
+                ack: decode_incoming_ack(&fields[1])?,
+                frame: Box::new(decode_incoming_frame(&fields[2])?),
             })
         }
         value => Err(ProcessError::Tag {
@@ -469,6 +568,44 @@ fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputK
             value,
         }),
     }
+}
+
+fn decode_incoming_frame(
+    value: &AbiValue,
+) -> Result<xln_rscore_engine::IncomingFrame, ProcessError> {
+    let proposal = exact(tuple(value)?, 3, "incomingProposal")?;
+    let frame = exact(tuple(&proposal[0])?, 9, "incomingFrame")?;
+    Ok(xln_rscore_engine::IncomingFrame {
+        frame: AccountFrame {
+            height: js_number(&frame[0], "height")?,
+            timestamp: js_number(&frame[1], "timestamp")?,
+            j_height: js_number(&frame[2], "jHeight")?,
+            txs: tuple(&frame[3])?
+                .iter()
+                .map(decode_tx)
+                .collect::<Result<_, _>>()?,
+            prev_frame_hash: text(&frame[4])?.into(),
+            account_state_root: fixed_bytes(&frame[5], "accountStateRoot")?,
+            by_left: strict_boolean(&frame[7], "byLeft")?,
+            deltas: tuple(&frame[8])?
+                .iter()
+                .map(decode_delta)
+                .collect::<Result<_, _>>()?,
+        },
+        state_hash: fixed_bytes(&frame[6], "stateHash")?,
+        frame_hanko: optional_bytes(&proposal[1], "frameHanko")?,
+        dispute: decode_counterparty_dispute(&proposal[2])?,
+    })
+}
+
+fn decode_incoming_ack(value: &AbiValue) -> Result<xln_rscore_engine::IncomingAck, ProcessError> {
+    let fields = exact(tuple(value)?, 4, "incomingAck")?;
+    Ok(xln_rscore_engine::IncomingAck {
+        height: js_number(&fields[0], "height")?,
+        frame_hash: fixed_bytes(&fields[1], "frameHash")?,
+        frame_hanko: optional_bytes(&fields[2], "frameHanko")?,
+        dispute: decode_counterparty_dispute(&fields[3])?,
+    })
 }
 
 fn decode_commit(fields: &[AbiValue]) -> Result<Command, ProcessError> {
@@ -625,22 +762,38 @@ fn decode_consensus_snapshot(
 /// The recovery proof this account already stands behind, or `null` for an
 /// account that has never proposed. The engine replaces it when a frame moves
 /// the state, and spends the next nonce when it does.
-/// The counterparty's proof as their message carried it: their signature, and
-/// the three fields that say which proof it is. The hash is not on the wire —
-/// this side rebuilds it, because a signature is over one exact message.
+/// The counterparty's proof exactly as received. The claimed hash is retained
+/// so the engine can rebuild it independently and reject a mismatch before it
+/// authenticates or stores the witness.
 pub(crate) fn decode_counterparty_dispute(
     value: &AbiValue,
 ) -> Result<Option<xln_rscore_engine::CounterpartyDispute>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let row = exact(tuple(value)?, 4, "counterpartyDispute")?;
+    let row = exact(tuple(value)?, 5, "counterpartyDispute")?;
     Ok(Some(xln_rscore_engine::CounterpartyDispute {
-        hanko: bytes(&row[0], "counterpartyDisputeHanko")?.to_vec(),
-        proof_body_hash: fixed_bytes(&row[1], "counterpartyDisputeProofBodyHash")?,
-        nonce: js_number(&row[2], "counterpartyDisputeProofNonce")?,
-        proposer_is_left: boolean(&row[3], "counterpartyDisputeProposerIsLeft")?,
+        hanko: optional_bytes(&row[0], "counterpartyDisputeHanko")?,
+        hash: fixed_bytes(&row[1], "counterpartyDisputeHash")?,
+        proof_body_hash: fixed_bytes(&row[2], "counterpartyDisputeProofBodyHash")?,
+        nonce: js_number(&row[3], "counterpartyDisputeProofNonce")?,
+        proposer_is_left: strict_boolean(&row[4], "counterpartyDisputeProposerIsLeft")?,
     }))
+}
+
+fn optional_bytes(value: &AbiValue, field: &'static str) -> Result<Option<Vec<u8>>, ProcessError> {
+    match value {
+        AbiValue::Nil => Ok(None),
+        AbiValue::Bytes(value) => Ok(Some(value.clone())),
+        _ => Err(ProcessError::Expected(field)),
+    }
+}
+
+fn strict_boolean(value: &AbiValue, field: &'static str) -> Result<bool, ProcessError> {
+    match value {
+        AbiValue::Bool(value) => Ok(*value),
+        _ => Err(ProcessError::Expected(field)),
+    }
 }
 
 pub(crate) fn decode_dispute_draft(

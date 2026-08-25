@@ -28,6 +28,10 @@ import {
 import { hasProposableAccount } from '../../entity/consensus/account/work-index';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import type { EntityReplica, EntityState } from '../../entity/types';
+import {
+  acceptAuthorityEntityStage,
+  discardAuthorityEntityStage,
+} from '../../rscore/authority-driver.ts';
 
 export const recordEntityInputProfile = (
   context: RuntimeEntityInputBatchContext,
@@ -345,8 +349,8 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       true,
       command.kind === 'entity-txs' ? 'cross-j' : 'account-work',
     );
-    context.localCrossJurisdictionEventTrace.push(result.appliedInput);
     if (result.outcome.kind !== 'committed') {
+      await discardAuthorityEntityStage(env, result.authorityStage);
       const detail = result.outcome.kind === 'rejected'
         ? result.outcome.code
         : result.outcome.reason;
@@ -355,6 +359,8 @@ export const drainImmediateCrossJurisdictionOutputs = async (
           `round=${round}:outcome=${result.outcome.kind}:detail=${detail}`,
       );
     }
+    await acceptAuthorityEntityStage(env, result.authorityStage);
+    context.localCrossJurisdictionEventTrace.push(result.appliedInput);
     context.entityFrameCommitted ||= result.entityFrameCommitted;
     const elapsedMs = Math.round(getPerfMs() - startedAt);
     context.immediateCrossJApplyMs += elapsedMs;

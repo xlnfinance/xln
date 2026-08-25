@@ -307,6 +307,153 @@ describe('rscore staged wave decoder', () => {
     });
   });
 
+  test('decodes one atomic frame-ACK result with ordered outputs and both committed frames', () => {
+    const raw = rawWave();
+    const ackStateHash = bytes(32, 0x66);
+    const frameStateHash = bytes(32, 0x77);
+    requiredAt(raw[2] as RscoreWireValue[][], 0, 'FRAME_ACK_APPLIED')[2] = [
+      9,
+      [
+        5,
+        1,
+        ackStateHash,
+        [
+          [4, 'ack-remove'],
+          [1, 'ack-lock', 'ack-hashlock', 'ack-secret', 7, '12'],
+        ],
+        committedFrameEvidence(ackStateHash, false),
+      ],
+      [
+        0,
+        1,
+        frameStateHash,
+        bytes(65, 0x55),
+        [
+          [5, 'frame-cancel'],
+          [2, 'frame-lock', 'frame-hashlock', 8, '13', 'frame-error'],
+        ],
+        4,
+        committedFrameEvidence(frameStateHash, true),
+      ],
+    ];
+
+    const wave = decodeWave(withParityDigest(raw));
+    expect(wave.applied).toHaveLength(1);
+    const verdict = wave.applied[0]?.verdict;
+    if (verdict?.kind !== 'frameAckApplied') throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_APPLIED');
+    expect(verdict.ackVerdict).toMatchObject({
+      kind: 'ackCommitted',
+      height: 1,
+      stateHash: hex(32, 0x66),
+      committedFrame: {
+        committedViaNewFrame: false,
+        frame: { height: 1, stateHash: hex(32, 0x66), accountTxs: [] },
+      },
+    });
+    expect(verdict.frameVerdict).toMatchObject({
+      kind: 'frameCommitted',
+      height: 1,
+      stateHash: hex(32, 0x77),
+      rolledBackTxs: 4,
+      committedFrame: {
+        committedViaNewFrame: true,
+        frame: { height: 1, stateHash: hex(32, 0x77), accountTxs: [] },
+      },
+    });
+    if (verdict.ackVerdict.kind !== 'ackCommitted') {
+      throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_ACK_COMMIT');
+    }
+    if (verdict.frameVerdict.kind !== 'frameCommitted') {
+      throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_FRAME_COMMIT');
+    }
+    expect(verdict.ackVerdict.outputs).toEqual([
+      { kind: 'swapOfferRemove', offerId: 'ack-remove' },
+      {
+        kind: 'htlcSecret',
+        lockId: 'ack-lock',
+        hashlock: 'ack-hashlock',
+        secret: 'ack-secret',
+        tokenId: 7,
+        amount: '12',
+      },
+    ]);
+    expect(verdict.frameVerdict.outputs).toEqual([
+      { kind: 'swapCancelRequest', offerId: 'frame-cancel' },
+      {
+        kind: 'htlcError',
+        lockId: 'frame-lock',
+        hashlock: 'frame-hashlock',
+        tokenId: 8,
+        amount: '13',
+        reason: 'frame-error',
+      },
+    ]);
+    expect(waveParityDigest(wave)).toBe(wave.parityDigest);
+  });
+
+  test('decodes atomic frame-ACK rejection phases by name', () => {
+    for (const [phaseTag, phase] of [[0, 'ack'], [1, 'frame']] as const) {
+      const raw = rawWave();
+      requiredAt(raw[2] as RscoreWireValue[][], 0, `FRAME_ACK_REJECTED_${phase}`)[2] = [
+        10,
+        phaseTag,
+        `${phase} rejected`,
+      ];
+      expect(decodeWave(withParityDigest(raw)).applied[0]?.verdict).toEqual({
+        kind: 'frameAckRejected',
+        phase,
+        reason: `${phase} rejected`,
+      });
+    }
+  });
+
+  test('rejects malformed or out-of-domain frame-ACK child verdicts', () => {
+    const rejects = (
+      verdict: RscoreWireValue[],
+      message: string,
+    ): void => {
+      const raw = rawWave();
+      requiredAt(raw[2] as RscoreWireValue[][], 0, 'BAD_FRAME_ACK')[2] = verdict;
+      expect(() => decodeWave(raw)).toThrow(message);
+    };
+
+    rejects([9, [0], [4, 'frame rejected']], 'ackVerdict.tag:0:ackDomain');
+    rejects([9, [6, 1], [5]], 'frameVerdict.tag:5:frameDomain');
+    rejects([9, [6, 1, 2], [4, 'frame rejected']], 'ackStale:arity:3:2');
+    rejects([9, [6, 1], [4]], 'rejected:arity:1:2');
+    rejects([9, [8, 'failed child'], [4, 'frame rejected']], 'ackVerdict.tag:8:ackDomain');
+    rejects([9, [6, 1], [8, 'failed child']], 'frameVerdict.tag:8:frameDomain');
+    rejects([9, [9, [6, 1], [4, 'nested']], [4, 'frame rejected']], 'ackVerdict.tag:9:ackDomain');
+    rejects([9, [6, 1], [10, 1, 'nested']], 'frameVerdict.tag:10:frameDomain');
+    rejects([9, [11], [4, 'frame rejected']], 'ackVerdict.tag:11:ackDomain');
+    rejects([9, [6, 1]], 'frameAckApplied:arity:2:3');
+    rejects([10, 2, 'bad phase'], 'frameAckRejected.phase:2');
+  });
+
+  test('binds both frame-ACK children into the parity digest', () => {
+    const withFrameAck = (ackHeight: number, currentFrameHeight: number): RscoreWireValue[] => {
+      const raw = rawWave();
+      requiredAt(raw[2] as RscoreWireValue[][], 0, 'FRAME_ACK_DIGEST')[2] = [
+        9,
+        [6, ackHeight],
+        [3, 1, currentFrameHeight],
+      ];
+      return raw;
+    };
+    const original = withFrameAck(1, 2);
+    const changedAck = withFrameAck(2, 2);
+    const changedFrame = withFrameAck(1, 3);
+    expect(waveParityDigestFromWireForTests(original))
+      .not.toBe(waveParityDigestFromWireForTests(changedAck));
+    expect(waveParityDigestFromWireForTests(original))
+      .not.toBe(waveParityDigestFromWireForTests(changedFrame));
+
+    const signed = withParityDigest(withFrameAck(1, 2));
+    const applied = requiredAt(signed[2] as RscoreWireValue[][], 0, 'SIGNED_FRAME_ACK');
+    ((applied[2] as RscoreWireValue[])[1] as RscoreWireValue[])[1] = 2;
+    expect(() => decodeWave(signed)).toThrow('wave.parityDigest');
+  });
+
   test('rejects committed-frame evidence not bound to its verdict', () => {
     const raw = rawWave();
     const stateHash = bytes(32, 0x44);

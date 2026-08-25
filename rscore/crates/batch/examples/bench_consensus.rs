@@ -21,13 +21,13 @@ use std::time::Instant;
 
 use num_bigint::BigInt;
 use xln_rscore_batch::{
-    AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict, AccountSeed,
-    EngineGeneration, ReceiverClock, StatefulConsensusEngine,
+    AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict, AccountPeerInput,
+    AccountSeed, EngineGeneration, ReceiverClock, StatefulConsensusEngine,
 };
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
-    BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, SigningIdentity, TokenId,
-    WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope, AccountReplica,
+    AccountState, AccountTx, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId,
+    IncomingAck, SigningIdentity, TokenId, WatchSeed,
 };
 
 fn signer_key(signer_id: &str) -> [u8; 32] {
@@ -85,6 +85,29 @@ fn account_state(left: &EntityId, right: &EntityId) -> AccountState {
         vec![delta],
     )
     .expect("state")
+}
+
+fn peer_input(
+    from_entity_id: [u8; 32],
+    to_entity_id: [u8; 32],
+    kind: AccountInputKind,
+) -> AccountPeerInput {
+    AccountPeerInput {
+        envelope: AccountPeerEnvelope {
+            from_entity_id,
+            to_entity_id,
+            domain: AccountDomain::new(
+                31_337,
+                DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).expect("depository"),
+            )
+            .expect("domain"),
+            dispute_config: AccountDisputeConfig::new(10, 10).expect("dispute config"),
+            watch_seed: Some(
+                WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+            ),
+        },
+        kind,
+    }
 }
 
 fn arg(index: usize, fallback: usize) -> usize {
@@ -237,10 +260,13 @@ fn main() {
                     operation_index: index as u64,
                     // The payee holds this account under the payer's id.
                     account_id: AccountId::from_bytes(pair.payer_entity),
-                    from_entity_id: pair.payer_entity,
-                    kind: AccountInputKind::Frame(Box::new(
-                        proposal.incoming().expect("the attempt produced a frame"),
-                    )),
+                    input: peer_input(
+                        pair.payer_entity,
+                        pair.payee_entity,
+                        AccountInputKind::Frame(Box::new(
+                            proposal.incoming().expect("the attempt produced a frame"),
+                        )),
+                    ),
                 }
             })
             .collect();
@@ -271,13 +297,16 @@ fn main() {
             acks.push(AccountInputRow {
                 operation_index: index as u64,
                 account_id: pair.account_id,
-                from_entity_id: pair.payee_entity,
-                kind: AccountInputKind::Ack {
-                    height: *height,
-                    state_hash: *state_hash,
-                    hanko: ack_hanko.clone(),
-                    dispute: None,
-                },
+                input: peer_input(
+                    pair.payee_entity,
+                    pair.payer_entity,
+                    AccountInputKind::Ack(IncomingAck {
+                        height: *height,
+                        frame_hash: *state_hash,
+                        frame_hanko: Some(ack_hanko.clone()),
+                        dispute: None,
+                    }),
+                ),
             });
         }
         inputs += acks.len();

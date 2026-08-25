@@ -503,6 +503,30 @@ const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
   frame.deltas.map(deltaWire),
 ];
 
+/**
+ * One received peer frame, exactly as the signed AccountInput carried it.
+ *
+ * Consensus snapshots bind `stateHash` beside their frame because the engine
+ * independently restores that binding. A peer input is different: its frame
+ * itself carries both the signed deltas and `stateHash`, and dropping either
+ * would make Rust judge reconstructed data instead of the canonical input.
+ */
+export const accountPeerFrameWire = (frame: AccountFrame): RscoreWireValue => [
+  frame.height,
+  frame.timestamp,
+  frame.jHeight,
+  frame.accountTxs.map(tx => {
+    const wire = accountTxWire(tx);
+    if (wire === null) throw new Error(`RSCORE_AUTHORITY_FRAME_TX_UNSUPPORTED:${tx.type}`);
+    return wire;
+  }),
+  frame.prevFrameHash,
+  hexToWireBytes(frame.accountStateRoot, 32, 'AUTHORITY_FRAME_STATE_ROOT'),
+  hexToWireBytes(frame.stateHash, 32, 'AUTHORITY_FRAME_STATE_HASH'),
+  frame.byLeft,
+  frame.deltas.map(deltaWire),
+];
+
 const hankoWireBytes = (value: string): Uint8Array => {
   const clean = value.startsWith('0x') ? value.slice(2) : value;
   if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {

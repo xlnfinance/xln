@@ -51,7 +51,11 @@ pub struct OutboundAck {
 /// together by `storeCounterpartyDisputeHanko`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CounterpartyDispute {
-    pub hanko: Vec<u8>,
+    pub hanko: Option<Vec<u8>>,
+    /// The exact digest claimed by the peer. Verification independently
+    /// rebuilds it from the Account identity and rejects any mismatch before
+    /// authenticating or retaining the witness.
+    pub hash: [u8; 32],
     pub proof_body_hash: [u8; 32],
     pub nonce: u64,
     pub proposer_is_left: bool,
@@ -300,30 +304,15 @@ impl AccountConsensus {
         });
     }
 
-    /// Keep the counterparty's proof. Its hash is recomputed from the message
-    /// rather than taken from them: a signature is over one exact message, and
-    /// the only one worth committing is the one this side can rebuild.
+    /// Keep the counterparty's proof after the verifier proved that its exact
+    /// supplied hash equals the independently rebuilt Account-bound digest.
     ///
     /// Parity target: `storeCounterpartyDisputeHanko`
     /// (core/account/consensus/dispute/hanko.ts), whose `hash` is likewise the
     /// verifier's own.
     pub(crate) fn store_counterparty_dispute(&mut self, dispute: CounterpartyDispute) {
-        let identity = self.replica.state().identity();
-        self.counterparty_dispute_hash = Some(crate::dispute::dispute_proof_hash(
-            identity.domain().chain_id(),
-            identity.domain().depository_address().bytes(),
-            identity
-                .entity(crate::state::identity::Side::Left)
-                .as_bytes(),
-            identity
-                .entity(crate::state::identity::Side::Right)
-                .as_bytes(),
-            dispute.nonce,
-            dispute.proposer_is_left,
-            &dispute.proof_body_hash,
-            identity.watch_seed().bytes(),
-        ));
-        self.counterparty_dispute_hanko_digest = Some(hanko_leaf_digest(&dispute.hanko));
+        self.counterparty_dispute_hash = Some(dispute.hash);
+        self.counterparty_dispute_hanko_digest = dispute.hanko.as_deref().map(hanko_leaf_digest);
         self.counterparty_dispute = Some(dispute);
     }
 

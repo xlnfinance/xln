@@ -5,13 +5,13 @@ mod fixture;
 
 use fixture::{Stand, clock, payment, stand};
 use xln_rscore_batch::{
-    AccountAdmissionVerdict, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
-    AccountSeed, BatchError, EngineGeneration, EntityProposalSelection, EntityWave, EntityWaveOps,
+    AccountAdmissionVerdict, AccountId, AccountInputKind, AccountInputVerdict, AccountSeed,
+    BatchError, EngineGeneration, EntityProposalSelection, EntityWave, EntityWaveOps,
     StatefulConsensusEngine, WaveOp, WaveOpsRequest, WaveProposalRequest, WaveRequest, WaveResult,
 };
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity,
-    AccountReplica, AccountState, AccountTx, DepositoryAddress, TokenId, WatchSeed,
+    AccountReplica, AccountState, AccountTx, DepositoryAddress, ReserveSide, TokenId, WatchSeed,
 };
 use xln_rscore_protocol::CanonicalValue;
 
@@ -541,16 +541,19 @@ fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
 fn operation_indices_are_monotonic_unique_and_allow_gaps() {
     let mut stand = stand(1);
     let pair = &stand.pairs[0];
-    let row = |operation_index: u64| AccountInputRow {
-        operation_index,
-        account_id: pair.payer_account,
-        from_entity_id: pair.payee_entity,
-        kind: AccountInputKind::Ack {
-            height: 1,
-            state_hash: [0; 32],
-            hanko: Vec::new(),
-            dispute: None,
-        },
+    let row = |operation_index: u64| {
+        fixture::input_row(
+            operation_index,
+            pair.payer_account,
+            pair.payee_entity,
+            pair.payer_entity,
+            AccountInputKind::Ack(xln_rscore_engine::IncomingAck {
+                height: 1,
+                frame_hash: [0; 32],
+                frame_hanko: Some(Vec::new()),
+                dispute: None,
+            }),
+        )
     };
 
     let duplicate = stand
@@ -1104,9 +1107,12 @@ fn create_inbound_genesis_applies_the_peers_height_one_frame() {
         .and_then(|proposed| proposed.dispute.as_ref())
     {
         incoming.dispute = Some(xln_rscore_engine::CounterpartyDispute {
-            hanko: fixture::signing_identity("1")
-                .sign_frame(&draft.hash)
-                .expect("dispute Hanko"),
+            hanko: Some(
+                fixture::signing_identity("1")
+                    .sign_frame(&draft.hash)
+                    .expect("dispute Hanko"),
+            ),
+            hash: draft.hash,
             proof_body_hash: draft.proof_body_hash,
             nonce: draft.nonce,
             proposer_is_left: draft.proposer_is_left,
@@ -1127,12 +1133,13 @@ fn create_inbound_genesis_applies_the_peers_height_one_frame() {
                 (right, create_op(0, right_seed)),
                 (
                     right,
-                    WaveOp::Input(AccountInputRow {
-                        operation_index: 1,
-                        account_id: AccountId::from_bytes(left),
-                        from_entity_id: left,
-                        kind: AccountInputKind::Frame(Box::new(incoming)),
-                    }),
+                    WaveOp::Input(Box::new(fixture::input_row(
+                        1,
+                        AccountId::from_bytes(left),
+                        left,
+                        right,
+                        AccountInputKind::Frame(Box::new(incoming)),
+                    ))),
                 ),
             ],
             timestamp,
@@ -1262,17 +1269,18 @@ fn create_rejects_duplicate_existing_and_after_use() {
         .prepare_wave(fixture::wave_of(
             vec![(
                 owner,
-                WaveOp::Input(AccountInputRow {
-                    operation_index: 0,
-                    account_id: AccountId::from_bytes(peer),
-                    from_entity_id: peer,
-                    kind: AccountInputKind::Ack {
+                WaveOp::Input(Box::new(fixture::input_row(
+                    0,
+                    AccountId::from_bytes(peer),
+                    peer,
+                    owner,
+                    AccountInputKind::Ack(xln_rscore_engine::IncomingAck {
                         height: 1,
-                        state_hash: [0; 32],
-                        hanko: Vec::new(),
+                        frame_hash: [0; 32],
+                        frame_hanko: Some(Vec::new()),
                         dispute: None,
-                    },
-                }),
+                    }),
+                ))),
             )],
             timestamp,
             false,
@@ -1585,12 +1593,13 @@ fn create_is_rebuilt_from_canonical_fields_and_must_be_used_before_seal() {
                 ops: vec![WaveOp::Admit {
                     operation_index: 2,
                     account_id: AccountId::from_bytes(peer),
-                    txs: vec![AccountTx::RebalancePolicy {
-                        token_id: 1,
-                        policy_version: 1,
-                        base_fee: 0.into(),
-                        liquidity_fee_bps: 0.into(),
-                        gas_fee: 0.into(),
+                    txs: vec![AccountTx::ReserveToCollateral {
+                        token_id: TokenId::new(1).expect("token"),
+                        collateral: "10".to_string(),
+                        ondelta: "0".to_string(),
+                        side: ReserveSide::Receiving,
+                        block_number: 1,
+                        transaction_hash: format!("0x{}", "ee".repeat(32)),
                     }],
                 }],
             }],

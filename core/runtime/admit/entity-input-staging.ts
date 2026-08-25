@@ -39,6 +39,10 @@ import {
   collectRuntimeEntityContext,
   describeEntityInputCommitShape,
 } from './entity-context-collection';
+import {
+  acceptAuthorityEntityStage,
+  discardAuthorityEntityStage,
+} from '../../rscore/authority-driver.ts';
 
 export const collectCommittedAccountFrames = (
   input: RoutedEntityInput,
@@ -239,6 +243,18 @@ export const collectStagedEntityInput = (
   collectCommittedEntityResult(env, replicaKey, result, context);
 };
 
+export const settleStagedAuthority = async (
+  env: RuntimeReplica,
+  staged: StagedEntityInput,
+  accept: boolean,
+): Promise<void> => {
+  if (accept) {
+    await acceptAuthorityEntityStage(env, staged.result.authorityStage);
+  } else {
+    await discardAuthorityEntityStage(env, staged.result.authorityStage);
+  }
+};
+
 export const applyExternalEntityInput = async (
   env: RuntimeReplica,
   input: RoutedEntityInput,
@@ -263,6 +279,11 @@ export const applyExternalEntityInput = async (
       committedEntityStateRoot(staged.result.nextReplica),
     );
   }
+  await settleStagedAuthority(
+    env,
+    staged,
+    isCommittedEntityInput(staged.result.outcome),
+  );
   collectStagedEntityInput(env, staged, options, context);
   publishStagedEntityNodeChanges(env, [staged]);
   return staged;
