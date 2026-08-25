@@ -95,6 +95,13 @@ import type {
   Profile as GossipProfile,
 } from '@xln/core/api/public/runtime-module';
 import { REMOTE_RUNTIME } from '@xln/core/config/constants';
+import {
+  RUNTIME_ADAPTER_AUTH_KEY,
+  RUNTIME_ADAPTER_MODE_KEY,
+  RUNTIME_ADAPTER_WS_KEY,
+  readRemoteRuntimeAdapterAuth,
+  writeRemoteRuntimeAdapterAuth,
+} from '../../../packages/browser/src/runtime-adapter-session';
 
 let unregisterEnvChange: (() => void) | null = null;
 let unregisterRuntimeControllerChange: (() => void) | null = null;
@@ -472,9 +479,8 @@ const isCurrentRuntimeAdapterConfig = isRuntimeControllerConfigCurrent;
 const readStoredAdapterValue = (key: string): string => {
   if (typeof window === 'undefined') return '';
   try {
-    if (key === 'xln-runtime-adapter-key') {
-      localStorage.removeItem(key);
-      return sessionStorage.getItem(key)?.trim() || '';
+    if (key === RUNTIME_ADAPTER_AUTH_KEY) {
+      return readRemoteRuntimeAdapterAuth({ durable: localStorage, session: sessionStorage });
     }
     const sessionValue = sessionStorage.getItem(key)?.trim();
     if (sessionValue) return sessionValue;
@@ -550,22 +556,27 @@ export const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefi
 
 const resolveAppRuntimeAdapterConfig = async (): Promise<RuntimeAdapterConfig> => {
   if (typeof window === 'undefined') return { mode: 'embedded' };
-  const remoteRequested = readStoredAdapterValue('xln-runtime-adapter-mode') === 'remote';
+  const remoteRequested = readStoredAdapterValue(RUNTIME_ADAPTER_MODE_KEY) === 'remote';
   if (!remoteRequested) {
     const seed = await readOrCreateEmbeddedRuntimeSeed();
     return seed ? { mode: 'embedded', seed } : { mode: 'embedded' };
   }
 
-  const wsUrl = (readStoredAdapterValue('xln-runtime-adapter-ws') || defaultRemoteAdapterWsUrl()).trim();
+  const wsUrl = (readStoredAdapterValue(RUNTIME_ADAPTER_WS_KEY) || defaultRemoteAdapterWsUrl()).trim();
   const normalizedWsUrl = normalizeWsConnectUrl(wsUrl);
-  const storedAuthKey = readStoredAdapterValue('xln-runtime-adapter-key').trim();
+  const storedAuthKey = readStoredAdapterValue(RUNTIME_ADAPTER_AUTH_KEY).trim();
   let restoredAuthKey = '';
   try {
     restoredAuthKey = resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl).trim();
   } catch (error) {
     if (!storedAuthKey || readRemoteRuntimeTokenAccess(storedAuthKey) !== 'admin') throw error;
   }
-  if (restoredAuthKey) sessionStorage.setItem('xln-runtime-adapter-key', restoredAuthKey);
+  if (restoredAuthKey) {
+    writeRemoteRuntimeAdapterAuth(
+      { durable: localStorage, session: sessionStorage },
+      restoredAuthKey,
+    );
+  }
   const authKey = restoredAuthKey || storedAuthKey;
   const runtimeId = readRemoteRuntimeTokenAudience(authKey);
 

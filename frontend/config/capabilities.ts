@@ -73,6 +73,7 @@ export const CAPABILITIES = [
     owner: 'wallet',
     routes: ['/app'],
     currentSources: [
+      'frontend/packages/browser/src/runtime-adapter-session.ts',
       'frontend/packages/runtime-client/src/remote-runtime-request.ts',
       'frontend/packages/runtime-client/src/ws-url.ts',
       'frontend/src/lib/utils/runtime/runtimeConnection.ts',
@@ -80,6 +81,7 @@ export const CAPABILITIES = [
     behavior: [
       'Runtime discovery',
       'validated hash bootstrap and query rejection',
+      'tab-confined Runtime authority and rollback-safe adapter selection',
       'explicit remote attachment consent',
       'reconnect and failure states',
     ],

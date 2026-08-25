@@ -333,7 +333,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `IN PROGRESS — RESET AND REMOTE REQUEST BOUNDARIES SHARED`
+**Status:** `IN PROGRESS — RESET, REMOTE REQUEST, AND RUNTIME SESSION BOUNDARIES SHARED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -360,12 +360,23 @@ The first `packages/runtime-client` slice now owns framework-neutral WebSocket
 URL normalization, remote Runtime hash decoding, forbidden query detection,
 import-parameter removal, capability-role validation, and the pure consent
 decision. The canonical Svelte wallet remains the live adapter for
-session-scoped capability persistence, history replacement, RuntimeController
-activation, and recovery imports; no Runtime state or transition logic moved
-into the package. Seven direct boundary tests cover URL normalization,
-authenticated and stored-authority links, missing capability prompts, query
-rejection before authority resolution, import stripping, and consent. The
-wallet local check covers 424 files with zero unsafe-type findings.
+history replacement, RuntimeController activation, and recovery imports; no
+Runtime state or transition logic moved into the package. Seven direct boundary
+tests cover URL normalization, authenticated and stored-authority links,
+missing capability prompts, query rejection before authority resolution,
+import stripping, and consent. The wallet local check covers 425 files with
+zero unsafe-type findings.
+
+The next `packages/browser` slice now owns validated Runtime adapter session
+selection: durable mode, endpoint, and access metadata; tab-confined capability
+authority; embedded-mode cleanup; rollback snapshots; and per-tab remote-link
+acceptance. Canonical Svelte boot, import, connection, selection, and restored
+authority paths delegate storage mutations to this framework-neutral boundary,
+while the saved Runtime registry remains in its existing Svelte adapter. Eight
+direct tests cover validation-before-mutation, authority confinement and
+restoration, stale cleanup, embedded selection, rollback, acceptance failure,
+and canonical-consumer wiring. The wallet local check covers 425 files with
+zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
@@ -503,8 +514,9 @@ any mismatch. Never compile on production.
    mnemonic identity choices, onboarding, recovery, settings, and diagnostics;
    keep Runtime projections in shared client adapters and do not move
    transition logic into the frontend. Remote link decoding and consent are
-   ready in `packages/runtime-client`; boot activation and projections remain
-   with the canonical Svelte adapter until a complete React consumer exists.
+   ready in `packages/runtime-client`, and adapter session storage is ready in
+   `packages/browser`; boot activation and projections remain with the canonical
+   Svelte adapter until a complete React consumer exists.
 3. Wire PWA/native consumers to the assembled candidate after the React
    `/app` boot flow exists; wallet static/PWA input ownership is ready and does
    not require production activation.

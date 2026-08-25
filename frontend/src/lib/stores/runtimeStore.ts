@@ -23,6 +23,14 @@ import {
   runtimeControllerHandle,
   setRuntimeControllerPendingRuntimeId,
 } from './runtimeControllerStore';
+import {
+  readRuntimeAdapterStorageSnapshot as readBrowserRuntimeAdapterStorageSnapshot,
+  restoreRuntimeAdapterStorageSnapshot as restoreBrowserRuntimeAdapterStorageSnapshot,
+  RUNTIME_ADAPTER_WS_KEY,
+  writeEmbeddedRuntimeAdapterSession,
+  writeRemoteRuntimeAdapterSession,
+  type RuntimeAdapterStorageSnapshot,
+} from '../../../packages/browser/src/runtime-adapter-session';
 
 export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
@@ -92,13 +100,6 @@ export const activeEnv = derived(
   ($activeRuntimeEntry) => $activeRuntimeEntry?.env || null
 );
 
-type RuntimeAdapterStorageSnapshot = {
-  mode: string | null;
-  wsUrl: string | null;
-  access: string | null;
-  sessionKey: string | null;
-};
-
 const getEnvRuntimeId = (env: RuntimeReplica | null | undefined): string => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const runtimeId = typeof runtimeEnv?.runtimeId === 'string' ? runtimeEnv.runtimeId.trim() : '';
@@ -122,68 +123,44 @@ const setRuntimeEntry = (
 
 const persistActiveRemoteRuntime = (runtime: Runtime): boolean => {
   if (typeof window === 'undefined' || runtime.type !== 'remote' || !runtime.wsUrl) return false;
-  localStorage.setItem('xln-runtime-adapter-mode', 'remote');
-  localStorage.setItem('xln-runtime-adapter-ws', runtime.wsUrl);
-  localStorage.setItem('xln-runtime-adapter-access', 'admin');
-  localStorage.removeItem('xln-runtime-adapter-key');
-  if (runtime.apiKey) sessionStorage.setItem('xln-runtime-adapter-key', runtime.apiKey);
-  else sessionStorage.removeItem('xln-runtime-adapter-key');
+  writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {
+    wsUrl: runtime.wsUrl,
+    access: 'admin',
+    ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
+  });
   return true;
 };
 
 const readRuntimeAdapterStorageSnapshot = (): RuntimeAdapterStorageSnapshot | null => {
   if (typeof window === 'undefined') return null;
-  return {
-    mode: localStorage.getItem('xln-runtime-adapter-mode'),
-    wsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
-    access: localStorage.getItem('xln-runtime-adapter-access'),
-    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
-  };
-};
-
-const writeStorageValue = (
-  storage: Storage,
-  key: string,
-  value: string | null,
-): void => {
-  if (value === null) storage.removeItem(key);
-  else storage.setItem(key, value);
+  return readBrowserRuntimeAdapterStorageSnapshot({ durable: localStorage, session: sessionStorage });
 };
 
 const restoreRuntimeAdapterStorageSnapshot = (snapshot: RuntimeAdapterStorageSnapshot | null): void => {
   if (typeof window === 'undefined' || !snapshot) return;
-  writeStorageValue(localStorage, 'xln-runtime-adapter-mode', snapshot.mode);
-  writeStorageValue(localStorage, 'xln-runtime-adapter-ws', snapshot.wsUrl);
-  writeStorageValue(localStorage, 'xln-runtime-adapter-access', snapshot.access);
-  localStorage.removeItem('xln-runtime-adapter-key');
-  writeStorageValue(sessionStorage, 'xln-runtime-adapter-key', snapshot.sessionKey);
+  restoreBrowserRuntimeAdapterStorageSnapshot(
+    { durable: localStorage, session: sessionStorage },
+    snapshot,
+  );
 };
 
 const clearActiveRemoteRuntimeStorage = (runtime: Runtime | null | undefined): boolean => {
   if (typeof window === 'undefined' || runtime?.type !== 'remote') return false;
   let matchesActiveStorage = false;
   try {
-    const storedWs = localStorage.getItem('xln-runtime-adapter-ws') || '';
+    const storedWs = localStorage.getItem(RUNTIME_ADAPTER_WS_KEY) || '';
     matchesActiveStorage = !!runtime.wsUrl && normalizeRemoteRuntimeWsUrl(storedWs) === normalizeRemoteRuntimeWsUrl(runtime.wsUrl);
   } catch {
     matchesActiveStorage = false;
   }
   if (!matchesActiveStorage) return false;
-  localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
-  localStorage.removeItem('xln-runtime-adapter-ws');
-  localStorage.removeItem('xln-runtime-adapter-access');
-  localStorage.removeItem('xln-runtime-adapter-key');
-  sessionStorage.removeItem('xln-runtime-adapter-key');
+  writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
   return true;
 };
 
 const persistActiveEmbeddedRuntime = (): void => {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
-  localStorage.removeItem('xln-runtime-adapter-ws');
-  localStorage.removeItem('xln-runtime-adapter-access');
-  localStorage.removeItem('xln-runtime-adapter-key');
-  sessionStorage.removeItem('xln-runtime-adapter-key');
+  writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
 };
 
 const switchToRuntimeAdapter = async (config: RuntimeAdapterConfig): Promise<void> => {

@@ -460,9 +460,9 @@ test('local runtime selection persists embedded mode without deleting saved remo
   expect(persistStart).toBeGreaterThan(0);
   expect(switchStart).toBeGreaterThan(persistStart);
   const persistSource = source.slice(persistStart, switchStart);
-  expect(persistSource).toContain("localStorage.setItem('xln-runtime-adapter-mode', 'embedded')");
-  expect(persistSource).toContain("localStorage.removeItem('xln-runtime-adapter-ws')");
-  expect(persistSource).toContain("sessionStorage.removeItem('xln-runtime-adapter-key')");
+  expect(persistSource).toContain(
+    'writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage })',
+  );
   expect(persistSource).not.toContain('REMOTE_RUNTIME.IMPORT_STORAGE_KEY');
   expect(source.slice(switchStart)).toContain('persistActiveEmbeddedRuntime();');
   expect(source.slice(switchStart)).toContain("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
@@ -637,7 +637,7 @@ test('app embedded boot restores vault runtimes before default browser runtime i
   expect(mountStart).toBeGreaterThan(bootStart);
 
   const bootSource = source.slice(bootStart, mountStart);
-  expect(source.slice(helperStart, bootStart)).toContain("localStorage.getItem('xln-runtime-adapter-mode')");
+  expect(source.slice(helperStart, bootStart)).toContain('isRemoteRuntimeAdapterPreferred(localStorage)');
   expect(bootSource).toContain('const bootingRemoteRuntime = shouldBootRemoteRuntime();');
   expect(bootSource).toContain('if (!bootingRemoteRuntime) {');
   expect(bootSource.indexOf('await vaultOperations.initialize();')).toBeLessThan(bootSource.indexOf('await initializeXLN();'));
@@ -707,13 +707,15 @@ test('accepted remote runtime links persist into the shared runtime registry', (
   expect(acceptStart).toBeGreaterThan(persistStart);
   const persistSource = source.slice(persistStart, acceptStart);
 
-  expect(persistSource).toContain("localStorage.setItem('xln-runtime-adapter-mode', 'remote')");
-  expect(persistSource).toContain("sessionStorage.setItem('xln-runtime-adapter-key', request.authKey)");
+  expect(persistSource).toContain(
+    'writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {',
+  );
   expect(persistSource).toContain('persistRemoteRuntimeImports([{');
   expect(persistSource).toContain('runtimeId: readRemoteRuntimeTokenAudience(request.authKey) || remoteRuntimeIdForWsUrl(request.wsUrl)');
   expect(persistSource).toContain("authLevel: 'admin'");
   expect(persistSource).not.toContain("authLevel: access === 'admin' ? 'admin' : 'inspect'");
   expect(persistSource).toContain('], { merge: true })');
+  expect(persistSource).toContain('markRemoteRuntimeRequestAccepted(sessionStorage, request)');
   expect(persistSource).not.toContain("localStorage.setItem('xln-runtime-adapter-key'");
 });
 

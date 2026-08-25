@@ -31,6 +31,12 @@ import {
   runtimeImportSourceFromHash,
 } from '../../../../packages/runtime-client/src/remote-runtime-request';
 import type { RemoteRuntimeRequest } from '../../../../packages/runtime-client/src/remote-runtime-request';
+import {
+  hasAcceptedRemoteRuntimeRequest,
+  isRemoteRuntimeAdapterPreferred,
+  markRemoteRuntimeRequestAccepted,
+  writeRemoteRuntimeAdapterSession,
+} from '../../../../packages/browser/src/runtime-adapter-session';
 
 export {
   REMOTE_ACCEPT_PREFIX,
@@ -90,11 +96,11 @@ const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
  */
 export function persistRuntimeAdapterSession(wsUrl: string, authKey: string): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('xln-runtime-adapter-mode', 'remote');
-  localStorage.setItem('xln-runtime-adapter-ws', wsUrl);
-  localStorage.setItem('xln-runtime-adapter-access', remoteAccessFromAuthKey(authKey));
-  localStorage.removeItem('xln-runtime-adapter-key');
-  sessionStorage.setItem('xln-runtime-adapter-key', authKey);
+  writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {
+    wsUrl,
+    access: remoteAccessFromAuthKey(authKey),
+    authKey,
+  });
 }
 
 export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
@@ -120,13 +126,13 @@ export function readRemoteRuntimeImportSourceFromHash(): string {
 }
 
 export function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
-  localStorage.setItem('xln-runtime-adapter-mode', 'remote');
-  localStorage.setItem('xln-runtime-adapter-ws', request.wsUrl);
   const access = remoteAccessFromAuthKey(request.authKey);
-  localStorage.setItem('xln-runtime-adapter-access', access);
-  localStorage.removeItem('xln-runtime-adapter-key');
+  writeRemoteRuntimeAdapterSession({ durable: localStorage, session: sessionStorage }, {
+    wsUrl: request.wsUrl,
+    access,
+    ...(request.authKey ? { authKey: request.authKey } : {}),
+  });
   if (request.authKey) {
-    sessionStorage.setItem('xln-runtime-adapter-key', request.authKey);
     persistRemoteRuntimeImports([{
       label: request.hostLabel,
       access,
@@ -138,19 +144,15 @@ export function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void
       entityCount: 0,
       importedAt: Date.now(),
     }], { merge: true });
-  } else {
-    sessionStorage.removeItem('xln-runtime-adapter-key');
   }
-  sessionStorage.setItem(request.acceptKey, '1');
+  markRemoteRuntimeRequestAccepted(sessionStorage, request);
 }
 
 export function hasAcceptedRemoteRuntime(request: RemoteRuntimeRequest): boolean {
-  try {
-    localStorage.removeItem('xln-runtime-adapter-key');
-    return sessionStorage.getItem(request.acceptKey) === '1';
-  } catch {
-    return false;
-  }
+  return hasAcceptedRemoteRuntimeRequest(
+    { durable: localStorage, session: sessionStorage },
+    request,
+  );
 }
 
 export function remoteRuntimeRequiresConsent(request: RemoteRuntimeRequest): boolean {
@@ -187,7 +189,7 @@ function waitForRuntimeConnected(timeoutMs = PROJECTION_RUNTIME_CONNECT_TIMEOUT_
 
 function hasStoredRemoteRuntimePreference(): boolean {
   if (typeof window === 'undefined') return false;
-  return localStorage.getItem('xln-runtime-adapter-mode') === 'remote';
+  return isRemoteRuntimeAdapterPreferred(localStorage);
 }
 
 async function runProjectionRuntimeBootstrap(task: () => Promise<void>): Promise<void> {

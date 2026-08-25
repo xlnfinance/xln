@@ -57,6 +57,10 @@
     stripRemoteRuntimeParamsFromHistory,
     type RemoteRuntimeRequest,
   } from '$lib/utils/runtime/runtimeConnection';
+  import {
+    isRemoteRuntimeAdapterPreferred,
+    writeEmbeddedRuntimeAdapterSession,
+  } from '../../../packages/browser/src/runtime-adapter-session';
 
   let { children } = $props();
 
@@ -170,7 +174,7 @@
 
   function shouldBootRemoteRuntime(): boolean {
     if (!browser) return false;
-    return localStorage.getItem('xln-runtime-adapter-mode') === 'remote';
+    return isRemoteRuntimeAdapterPreferred(localStorage);
   }
 
   function stripRemoteRuntimeParams(): void {
@@ -367,11 +371,7 @@
   }
 
   async function useLocalBrowserRuntime(): Promise<void> {
-    localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
-    localStorage.removeItem('xln-runtime-adapter-ws');
-    localStorage.removeItem('xln-runtime-adapter-access');
-    localStorage.removeItem('xln-runtime-adapter-key');
-    sessionStorage.removeItem('xln-runtime-adapter-key');
+    writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
     stripRemoteRuntimeParams();
     await activateAppAfterRuntimeChoice();
   }
