@@ -16,6 +16,17 @@ fn clock() -> ReceiverClock {
     }
 }
 
+fn enter(engine: &mut xln_rscore_batch::StatefulConsensusEngine, owner_entity_id: [u8; 32]) {
+    engine
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id,
+            clock: clock(),
+            rows: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("inbound half");
+}
+
 /// One Entity frame queues what its own logic decided, proposes, and the
 /// counterparty applies the result — two calls each, not one per operation.
 #[test]
@@ -27,6 +38,7 @@ fn two_visits_carry_a_whole_entity_frame() {
     let payee_account = stand.pairs[0].payee_account;
     let (_, txs) = fixture::payment(&stand.pairs[0], 25);
 
+    enter(&mut stand.payer, payer_entity);
     let outbound = stand
         .payer
         .entity_outbound(EntityOutboundRequest {
@@ -78,6 +90,19 @@ fn two_visits_carry_a_whole_entity_frame() {
         inbound.post_accounts.is_empty(),
         "a caller that did not ask for bodies is not sent any"
     );
+    let payee_final = stand
+        .payee
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: payee_entity,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: Vec::new(),
+            propose: Vec::new(),
+            post_accounts: true,
+        })
+        .expect("outbound half");
+    assert!(payee_final.post_accounts.is_empty());
 }
 
 /// An account this Entity does not own is refused before anything executes.
@@ -85,7 +110,9 @@ fn two_visits_carry_a_whole_entity_frame() {
 fn a_round_refuses_an_account_another_entity_owns() {
     let mut stand = stand(1);
     let payee_entity = stand.pairs[0].payee_entity;
+    let payer_entity = stand.pairs[0].payer_entity;
     let payer_account = stand.pairs[0].payer_account;
+    enter(&mut stand.payer, payer_entity);
     let refused = stand
         .payer
         .entity_outbound(EntityOutboundRequest {
@@ -103,6 +130,18 @@ fn a_round_refuses_an_account_another_entity_owns() {
         refused.to_string().contains("WAVE_ACCOUNT_OWNER"),
         "named the owner mismatch: {refused}"
     );
+    stand
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: payer_entity,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: Vec::new(),
+            propose: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("a rejected outbound does not consume the inbound half");
 }
 
 /// A Runtime frame is one transaction: what its Entity inputs moved is undone
@@ -115,6 +154,7 @@ fn an_aborted_runtime_frame_puts_every_account_back() {
     let (_, txs) = fixture::payment(&stand.pairs[0], 25);
 
     let (_, before) = stand.payer.push_savepoint().expect("savepoint");
+    enter(&mut stand.payer, payer_entity);
     stand
         .payer
         .entity_outbound(EntityOutboundRequest {

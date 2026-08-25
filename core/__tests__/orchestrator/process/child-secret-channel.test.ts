@@ -146,11 +146,16 @@ describe('orchestrator child secret channel', () => {
   test('managed hub, market maker, and custody argv contain no secrets', () => {
     const root = process.cwd();
     const orchestrator = readFileSync(join(root, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    const hubRuntimeEnv = readFileSync(
+      join(root, 'core/orchestrator/process/hub-runtime-env.ts'),
+      'utf8',
+    );
     const custody = readFileSync(join(root, 'core/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
 
     expect(orchestrator).not.toContain("'--seed', child.seed");
     expect(orchestrator).not.toContain("'--seed', marketMakerChild.seed");
-    expect(orchestrator.match(/buildManagedRuntimeChildSecretEnv\(process\.env\)/g)).toHaveLength(2);
+    expect(orchestrator.match(/buildManagedRuntimeChildSecretEnv\(process\.env\)/g)).toHaveLength(1);
+    expect(hubRuntimeEnv).toContain('...buildManagedRuntimeChildSecretEnv(source),');
     expect(orchestrator).not.toContain('...childSecretFdEnv(),');
     expect(custody.match(/buildManagedRuntimeChildSecretEnv\(process\.env, false\)/g)).toHaveLength(2);
     expect(custody).not.toContain("'--seed', options.seed");

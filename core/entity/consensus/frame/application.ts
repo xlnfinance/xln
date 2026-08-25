@@ -625,7 +625,9 @@ const proposeAccountFrameCandidate = async (
   scheduleAccount: (accountId: string) => void,
 ): Promise<AccountFrameProposal | undefined> => {
   const { currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
-  if (!accountHasProposableMempool(account, state)) return undefined;
+  const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
+    ?.hasPreparedAccountProposal?.(accountKey) === true;
+  if (!authorityPrepared && !accountHasProposableMempool(account, state)) return undefined;
   // The clock a proposal is built with belongs to this Entity, not to the
   // Runtime frame: a wave carries one clock, so which unit that wave covers
   // depends on whether an Entity ever uses two inside one Runtime frame.
@@ -810,9 +812,51 @@ const routeFinalAccountInput = (
   );
 };
 
+/**
+ * The authoritative engine selects a proposal worklist before the admissions it
+ * was handed this frame are visible in the replica mirror. Gate each candidate
+ * on the mempool it will actually hold, so Rust never proposes a frame the
+ * TypeScript engine would have withheld.
+ */
+const authorityProposalGate = (
+  state: EntityState,
+): ((account: AccountReplica, pendingAdmissions: readonly AccountTx[]) => boolean) =>
+  (account, pendingAdmissions) => accountHasProposableMempool(
+    pendingAdmissions.length === 0
+      ? account
+      : { ...account, mempool: [...account.mempool, ...pendingAdmissions] },
+    state,
+  );
+
+/**
+ * A cross-jurisdiction opening either waits for its cohort or proposes a subset
+ * of the mempool. Neither is something the authoritative engine can express: it
+ * was asked for a whole-mempool frame and has already built one. Refuse rather
+ * than let the opening silently skip the cohort it is bound to.
+ */
+function resolveCrossJOpeningProposalTxs(
+  context: ProposePendingAccountFramesContext,
+  accountKey: string,
+  account: AccountReplica,
+): AccountTx[] | null | undefined {
+  const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(
+    context.env,
+    context.currentEntityState,
+    account,
+  );
+  const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
+    ?.hasPreparedAccountProposal?.(accountKey) === true;
+  if (authorityPrepared && crossJOpeningProposalTxs !== undefined) {
+    throw haltRuntimeFailure(
+      'ACCOUNT_AUTHORITY_CROSS_J_OPENING_UNSUPPORTED',
+      `ACCOUNT_AUTHORITY_CROSS_J_OPENING_UNSUPPORTED:${context.currentEntityState.entityId}:${accountKey}`,
+    );
+  }
+  return crossJOpeningProposalTxs;
+}
+
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
   const {
-    env,
     currentEntityState,
     proposableAccounts,
   } = context;
@@ -831,7 +875,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
 
-    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
+    const crossJOpeningProposalTxs = resolveCrossJOpeningProposalTxs(context, accountKey, account);
     if (crossJOpeningProposalTxs === null && !force) {
       entityLog.debug('account.cross_j_opening_cohort_wait', {
         account: shortId(accountKey),
@@ -1364,6 +1408,37 @@ const primeEntityFrameAccountWork = async (
   }
 };
 
+const assertEntityFrameInfraBinding = (
+  entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
+): void => {
+  const expectedEntityId = entityState.entityId.trim().toLowerCase();
+  const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
+  if (
+    entityContext.entityId === expectedEntityId
+    && entityContext.proposerReplicaId === `${expectedEntityId}:${entityContext.proposerSignerId}`
+    && entityContext.parentFrameHash === expectedParentFrameHash
+    && entityContext.height === entityState.height + 1
+  ) return;
+  throw new Error(
+    `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
+      actual: {
+        entityId: entityContext.entityId,
+        height: entityContext.height,
+        parentFrameHash: entityContext.parentFrameHash,
+        proposerReplicaId: entityContext.proposerReplicaId,
+        proposerSignerId: entityContext.proposerSignerId,
+      },
+      expected: {
+        entityId: expectedEntityId,
+        height: entityState.height + 1,
+        parentFrameHash: expectedParentFrameHash,
+        proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
+      },
+    })}`,
+  );
+};
+
 const prepareEntityFrameWorkingSet = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
@@ -1372,32 +1447,7 @@ const prepareEntityFrameWorkingSet = async (
   frameTimestamp: number | undefined,
   isolateState: boolean,
 ): Promise<EntityFrameWorkingSet> => {
-  const expectedEntityId = entityState.entityId.trim().toLowerCase();
-  const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
-  if (
-    entityContext.entityId !== expectedEntityId ||
-    entityContext.proposerReplicaId !== `${expectedEntityId}:${entityContext.proposerSignerId}` ||
-    entityContext.parentFrameHash !== expectedParentFrameHash ||
-    entityContext.height !== entityState.height + 1
-  ) {
-    throw new Error(
-      `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
-        actual: {
-          entityId: entityContext.entityId,
-          height: entityContext.height,
-          parentFrameHash: entityContext.parentFrameHash,
-          proposerReplicaId: entityContext.proposerReplicaId,
-          proposerSignerId: entityContext.proposerSignerId,
-        },
-        expected: {
-          entityId: expectedEntityId,
-          height: entityState.height + 1,
-          parentFrameHash: expectedParentFrameHash,
-          proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
-        },
-      })}`,
-    );
-  }
+  assertEntityFrameInfraBinding(entityState, entityContext);
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
   assertScheduledWakeFrameOrder(entityTxs);
@@ -1446,6 +1496,14 @@ const prepareEntityFrameWorkingSet = async (
     verifiedCertifiedOutputs,
     authorizedBoardHandoverConfig ?? undefined,
   );
+  await context.accountConsensusContext.accountAuthorityExecutionScope?.beginEntityAccountFrame?.({
+    ownerEntityId: currentEntityState.entityId,
+    entityTxs,
+    accounts: currentEntityState.accounts,
+    accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
+    entityTimestamp: currentEntityState.timestamp,
+    finalizedJHeight: currentEntityState.lastFinalizedJHeight ?? 0,
+  });
   if (!authorityTransitionOnly) {
     await primeEntityFrameAccountWork(context);
   }
@@ -1524,6 +1582,37 @@ const refreshChangedAccountCommitments = (
   );
 };
 
+const drainPostOrderbookAccountWork = async (
+  context: ApplyEntityTxsInOrderContext,
+  currentEntityState: EntityState,
+): Promise<void> => {
+  await drainPendingCrossJurisdictionFillAcks(
+    context.env,
+    context.accountConsensusContext,
+    currentEntityState,
+    context.proposableAccounts,
+    context.storageChanges,
+    context.candidateEffects,
+    context.allOutputs,
+  );
+  await drainCommittedCrossJurisdictionCancelAcks(
+    context.accountConsensusContext,
+    currentEntityState,
+    context.proposableAccounts,
+    context.storageChanges,
+    context.allOutputs,
+  );
+  refreshStaleUncommittedSettlementHankos(currentEntityState, context.storageChanges);
+  await materializeDeferredSettlementApprovals(
+    context.env,
+    context.accountConsensusContext,
+    currentEntityState,
+    context.proposableAccounts,
+    context.collectedHashes,
+    context.storageChanges,
+  );
+};
+
 const applyPostEntityTxPhases = async (
   working: EntityFrameWorkingSet,
 ): Promise<PostEntityTxPhases> => {
@@ -1558,31 +1647,18 @@ const applyPostEntityTxPhases = async (
     storageChanges: context.storageChanges,
   });
   markFrameProfile('orderbook');
-  await drainPendingCrossJurisdictionFillAcks(
-    context.env,
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.candidateEffects,
-    context.allOutputs,
-  );
-  await drainCommittedCrossJurisdictionCancelAcks(
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.allOutputs,
-  );
-  refreshStaleUncommittedSettlementHankos(currentEntityState, context.storageChanges);
-  await materializeDeferredSettlementApprovals(
-    context.env,
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.collectedHashes,
-    context.storageChanges,
-  );
+  await drainPostOrderbookAccountWork(context, currentEntityState);
+  const proposalAccountIds = crossJSetupPhase
+    ? []
+    : [...context.proposableAccounts.keys()].sort(compareStableText);
+  await context.accountConsensusContext.accountAuthorityExecutionScope
+    ?.prepareEntityAccountOutbound?.({
+      accounts: currentEntityState.accounts,
+      proposalAccountIds,
+      isProposable: authorityProposalGate(currentEntityState),
+      timestamp: currentEntityState.timestamp,
+      jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
+    });
   const accountsToProposeFramesCount = crossJSetupPhase
     ? 0
     : await proposePendingAccountFrames({
@@ -1596,6 +1672,7 @@ const applyPostEntityTxPhases = async (
         accountJClaimNodeStore: context.accountJClaimNodeStore,
         storageChanges: context.storageChanges,
       });
+  context.accountConsensusContext.accountAuthorityExecutionScope?.finishEntityAccountFrame?.();
   markFrameProfile('accountProposals');
   // Account proposal construction mutates the Account replica envelope
   // (pending frame and Hanko state). Refresh each dirty leaf only
@@ -1701,6 +1778,15 @@ const applyEntityFrameWithIsolation = async (
     }
   };
   if (working.authorityTransitionOnly) {
+    await working.context.accountConsensusContext.accountAuthorityExecutionScope
+      ?.prepareEntityAccountOutbound?.({
+        accounts: working.currentEntityState.accounts,
+        proposalAccountIds: [],
+        isProposable: authorityProposalGate(working.currentEntityState),
+        timestamp: working.currentEntityState.timestamp,
+        jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
+      });
+    working.context.accountConsensusContext.accountAuthorityExecutionScope?.finishEntityAccountFrame?.();
     working.currentEntityState = assignCertifiedOutputIdentities(
       working.currentEntityState,
       working.context.allOutputs,

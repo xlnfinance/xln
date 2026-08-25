@@ -710,7 +710,7 @@ export interface RuntimeReplica {
   /** Detached/read-only replicas never arm or mutate authority sessions. */
   accountAuthoritySuppressed?: boolean | undefined;
   /** Explicit pre-TS lifecycle mode; absent keeps the canonical TS path. */
-  accountAuthorityExecutionMode?: import('../rscore/authority/entity-stage').AccountAuthorityExecutionMode | undefined;
+  accountAuthorityExecutionMode?: 'pre-ts-observe' | 'cutover' | undefined;
   /** Injected lifecycle only; production leaves this absent until result ABI cutover. */
   accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */

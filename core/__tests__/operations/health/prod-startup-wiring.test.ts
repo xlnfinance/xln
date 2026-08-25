@@ -62,6 +62,11 @@ describe('production startup wiring', () => {
     const hub = readFileSync(join(repoRoot, 'core/orchestrator/hub-node.ts'), 'utf8');
     const transport = readFileSync(join(repoRoot, 'core/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
+    // The child environment is built by the helper the orchestrator calls, so
+    // the invariant reads as two halves: the orchestrator names the owner file
+    // under the hub's own database directory, and the helper is what puts it
+    // on XLN_BRAINVAULT_OWNER_PATH.
+    const hubChildEnv = readFileSync(join(repoRoot, 'core/orchestrator/process/hub-runtime-env.ts'), 'utf8');
     const prewarm = hub.indexOf('await brainVaultOwner.prewarm(resolvedArgs.seed);');
     const runtimeMain = hub.indexOf('const env = await main(resolvedArgs.seed', prewarm);
     const runtimeLoop = hub.indexOf('startRuntimeLoop(env, {', runtimeMain);
@@ -76,7 +81,8 @@ describe('production startup wiring', () => {
     expect(helperRestore).toBeGreaterThanOrEqual(0);
     expect(helperRestore).toBeLessThan(helperReady);
     expect(transport).toContain("throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING')");
-    expect(orchestrator).toContain("XLN_BRAINVAULT_OWNER_PATH: join(child.dbPath, 'brainvault-owner.json')");
+    expect(orchestrator).toContain("brainvaultOwnerPath: join(child.dbPath, 'brainvault-owner.json')");
+    expect(hubChildEnv).toContain('XLN_BRAINVAULT_OWNER_PATH: options.brainvaultOwnerPath');
   });
 
   test('public direct runtime ports expose only websocket transport routes', () => {

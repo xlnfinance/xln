@@ -72,7 +72,7 @@ pub enum IncomingOutcome {
         /// Set when our own same-height proposal lost the collision and its
         /// transactions went back to the queue.
         rolled_back: Option<crate::consensus::replica::RolledBackProposal>,
-        committed_frame: CommittedFrameEvidence,
+        committed_frame: Box<CommittedFrameEvidence>,
         /// The recovery proof our acknowledgement carries, when it carries
         /// one. It travels with the verdict because the acknowledgement is
         /// what the publisher sends, and it must not have to read the account
@@ -396,10 +396,10 @@ pub fn apply_incoming_frame(
         events,
         rolled_back,
         ack_dispute,
-        committed_frame: CommittedFrameEvidence {
+        committed_frame: Box::new(CommittedFrameEvidence {
             frame,
             committed_via_new_frame: true,
-        },
+        }),
     })
 }
 

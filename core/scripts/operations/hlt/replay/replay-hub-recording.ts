@@ -4,9 +4,16 @@
 
 import { startIdleShutdownWatch } from '../../../../support/process/idle-shutdown';
 import { printAuthorityRecordReport } from '../../../../rscore/authority-wave';
-import { printAccountAuthorityExecutionLedger } from '../../../../rscore/authority/entity-stage';
+import {
+  accountAuthorityExecutionLedger,
+  printAccountAuthorityExecutionLedger,
+} from '../../../../rscore/authority/entity-stage';
 import { rscoreTransportBytes } from '../../../../rscore/client';
-import { printAuthorityDriverReport, shutdownAuthorityDriver } from '../../../../rscore/authority-driver';
+import {
+  authorityDriverEnabled,
+  printAuthorityDriverReport,
+  shutdownAuthorityDriver,
+} from '../../../../rscore/authority-driver';
 import {
   assertShadowParity,
   currentShadowMirror,
@@ -360,6 +367,13 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     targetHeight: artifact.recording.baseHeight,
     readOnly: true,
   });
+  const authoritySelectedForRuntime = authorityDriverEnabled({ runtimeId: env.runtimeId });
+  if (authoritySelectedForRuntime && env.accountAuthoritySuppressed === true) {
+    throw new Error(
+      'HLT_REPLAY_RSCORE_AUTHORITY_REPLAY_REQUIRED:' +
+      'set XLN_RSCORE_AUTHORITY_REPLAY=1 to execute Account transitions in Rust',
+    );
+  }
   // Max replay measures the deterministic machine, not terminal rendering.
   // Runtime logs are an envelope-side external effect and are intentionally
   // excluded alongside sockets and durable writes.
@@ -425,6 +439,13 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     const cpuMs = (cpu.user + cpu.system) / 1_000;
     const seconds = Math.max(elapsedMs / 1_000, Number.EPSILON);
     const economic = subtractEconomicCounters(readEconomicCounters(env), economicBaseline);
+    if (
+      authoritySelectedForRuntime
+      && economic.deliveredPayments + economic.matchedEconomicSwaps > 0
+      && accountAuthorityExecutionLedger().authoritativeOperations === 0
+    ) {
+      throw new Error('HLT_REPLAY_RSCORE_UNARMED_ZERO_AUTHORITY_OPERATIONS');
+    }
     const operations = diffOpCounters(operationsBefore);
     return {
       offeredTps: offeredTps > 0 ? offeredTps : null,
@@ -514,7 +535,7 @@ console.log(`HLT_REPLAY_REPORT path=${outputPath}`);
 printAuthorityRecordReport();
 printAuthorityDriverReport();
 printAccountAuthorityExecutionLedger();
-console.error(`RSCORE_TRANSPORT ${JSON.stringify(rscoreTransportBytes)}`);
+console.error(`RSCORE_TRANSPORT ${safeStringify(rscoreTransportBytes)}`);
 await shutdownAuthorityDriver();
 const opCountersPath = dumpOpCounters('hlt-replay', 'complete');
 if (opCountersPath) console.log(`HLT_REPLAY_OP_COUNTERS path=${opCountersPath}`);

@@ -26,6 +26,7 @@ import type {
   ProposalDroppedTransaction,
 } from '../../account/consensus/types';
 import type { AccountFrame, AccountReplica } from '../../types/account';
+import { safeStringify } from '../../protocol/serialization';
 import {
   materializeRscoreAccountReplica,
   planRscoreLocalWitnesses,
@@ -38,7 +39,7 @@ import {
 import type { Wave, WaveDisputeDraft, WaveOutput } from '../wave-decode';
 
 /** One applied operation's verdict, as the wave reports it. */
-export type CutoverVerdict = Wave['applied'][number]['verdict'];
+type CutoverVerdict = Wave['applied'][number]['verdict'];
 import { cutoverAccountEffects } from './effects';
 import {
   cutoverAck,
@@ -49,8 +50,7 @@ import {
 } from './outbound';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
-  throw new Error(`RSCORE_CUTOVER_${code}:${JSON.stringify(detail, (_key, value) =>
-    typeof value === 'bigint' ? value.toString() : value)}`);
+  throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
 };
 
 /** One operation's answer: the engine's verdicts plus its post-state row. */
@@ -77,7 +77,7 @@ type MaterializedOperation = Readonly<{
  * reference in its accounts forest, and the Account's committed root is
  * recomputed from the published state, not copied from the engine.
  */
-const materialize = (
+export const materializeCutoverAccount = (
   request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
   row: RscoreAccountCheckpointRow,
 ): MaterializedOperation => {
@@ -128,10 +128,11 @@ const requireRow = (
 
 const verdictOf = (result: CutoverWaveResult, accountId: string, operationIndex: number) => {
   const rows = result.wave.applied.filter(row => row.accountId === accountId);
-  if (rows.length !== 1) {
+  const row = rows[0];
+  if (rows.length !== 1 || row === undefined) {
     return fail('VERDICT_ARITY', { account: accountId, operationIndex, rows: rows.length });
   }
-  return rows[0]!.verdict;
+  return row.verdict;
 };
 
 const committedFrame = (
@@ -159,7 +160,7 @@ const appliedFromCommit = (
  * is checked against TypeScript's own list on every parity run, which is the
  * only place both engines produce one.
  */
-export const cutoverAccountInputEvents = (
+const cutoverAccountInputEvents = (
   verdict: CutoverVerdict,
   fromEntityId: string,
 ): string[] => {
@@ -197,11 +198,11 @@ export const cutoverAccountInputEvents = (
 export const cutoverAccountInputResult = (
   request: CutoverInputRequest,
   result: CutoverWaveResult,
+  publishPostState = true,
 ): HandleAccountInputResult => {
   const accountId = request.accountId;
   const verdict = verdictOf(result, accountId, request.operationIndex);
   const priorSnapshot = request.account;
-  const row = requireRow(result, accountId);
   const events: string[] = [];
   const committedFrames: AccountCommittedFrame[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
@@ -278,7 +279,9 @@ export const cutoverAccountInputResult = (
   const hashesToSign = outbound === null
     ? []
     : cutoverAckHashes(accountId, outbound.height, outbound.frameHash, outbound.dispute);
-  materialize(request, row);
+  if (publishPostState) {
+    materializeCutoverAccount(request, requireRow(result, accountId));
+  }
   const response = outbound === null
     ? undefined
     : cutoverAck(envelope, outbound.height, outbound.frameHash, outbound.dispute);
@@ -296,37 +299,16 @@ export const cutoverAccountInputResult = (
   });
 };
 
-export const cutoverAccountAdmissionResult = (
-  request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
-  result: CutoverWaveResult,
-): HandleAccountInputResult => {
-  const accountId = request.accountId;
-  const rows = result.wave.admissions.filter(row => row.accountId === accountId);
-  if (rows.length !== 1) {
-    return fail('ADMISSION_ARITY', { account: accountId, rows: rows.length });
-  }
-  const verdict = rows[0]!.verdict;
-  if (verdict.kind !== 'admitted') {
-    return fail('ADMISSION_REJECTED', {
-      account: accountId,
-      code: verdict.code,
-      message: verdict.message,
-    });
-  }
-  materialize(request, requireRow(result, accountId));
-  return accountInputApplied({ events: [], admittedAccountTxCount: verdict.count });
-};
-
 export const cutoverAccountProposalResult = (
   request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
   result: CutoverWaveResult,
 ): ProposeAccountFrameResult => {
   const accountId = request.accountId;
   const rows = result.wave.proposals.filter(row => row.accountId === accountId);
-  if (rows.length !== 1) {
+  const proposal = rows[0];
+  if (rows.length !== 1 || proposal === undefined) {
     return fail('PROPOSAL_ARITY', { account: accountId, rows: rows.length });
   }
-  const proposal = rows[0]!;
   const dropped: ProposalDroppedTransaction[] = proposal.dropped.map(row => ({
     index: row.index,
     txDigest: row.txDigest,
@@ -339,7 +321,7 @@ export const cutoverAccountProposalResult = (
     // The window produced no frame. The mempool still moved when something was
     // dropped, so the row is materialized either way.
     const row = result.row;
-    if (row !== null) materialize(request, row);
+    if (row !== null) materializeCutoverAccount(request, row);
     return proposeAccountFrameIdle({
       message: dropped.length > 0
         ? 'Proposal window produced no frame'
@@ -356,7 +338,7 @@ export const cutoverAccountProposalResult = (
     return fail('PROPOSAL_EFFECT_TIMING', { account: accountId });
   }
   const envelope = cutoverEnvelope(priorSnapshot);
-  materialize(request, row);
+  materializeCutoverAccount(request, row);
   // The bundled acknowledgement was produced — and published for signing —
   // when the frame it answers was committed. Carrying it again here would put
   // the same hash in the Entity's manifest twice; the certificate the Entity

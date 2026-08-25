@@ -84,7 +84,7 @@ export type AuthorityRecordedAccountInput = Readonly<{
   row: RecordedInput;
 }>;
 
-export type AuthorityExpectedOperationVerdict =
+type AuthorityExpectedOperationVerdict =
   | Readonly<{ kind: 'create' }>
   | Readonly<{ kind: 'admission'; admittedCount: number }>
   | Readonly<{
@@ -136,7 +136,7 @@ type RecordedProposalSelection = {
   expected?: AuthorityExpectedProposalAttempt;
 };
 
-export type AuthorityExpectedProposalAttempt = Readonly<{
+type AuthorityExpectedProposalAttempt = Readonly<{
   accountId: string;
   outcome: 'proposed' | 'idle';
   frame: AccountFrame | null;
@@ -618,7 +618,7 @@ export type AuthorityWaveOperation = {
   expectedVerdict?: AuthorityExpectedOperationVerdict;
 };
 
-export type AuthorityWaveEntity = {
+type AuthorityWaveEntity = {
   ownerEntityId: string;
   timestamp: number;
   jHeight: number;
@@ -642,7 +642,7 @@ export type AuthorityWaveEntity = {
 };
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
-export type AuthorityWaveInput = {
+type AuthorityWaveInput = {
   /** Candidate-global position in the grouped request. Admissions consume one too. */
   operationIndex: number;
   /**
@@ -675,13 +675,8 @@ export type AuthorityWaveBuildOptions = Readonly<{
    * `absent` when TypeScript will not execute this operation at all. Parity
    * mode compares Rust against a TypeScript result and refuses a row that has
    * none; the cutover has no such row to compare, by construction.
-   */
+  */
   expectations?: 'required' | 'absent';
-  fallbackEntity?: Readonly<{
-    ownerEntityId: string;
-    timestamp: number;
-    finalizedJHeight: number;
-  }>;
 }>;
 
 /**
@@ -733,6 +728,155 @@ export const describeAuthorityWaveOperation = (
   };
 };
 
+type ArrivedAuthorityOperation = Readonly<{
+  arrivalIndex: number;
+  ownerEntityId: string;
+  accountId: string;
+  payload: Exclude<RecordedPayload, { kind: 'unsupported' }>;
+  expectedVerdict?: AuthorityExpectedOperationVerdict;
+}>;
+
+type AuthorityOwnerBuildRequest = Readonly<{
+  ownerEntityId: string;
+  rows: readonly ArrivedAuthorityOperation[];
+  frameClocks: readonly RecordedClock[];
+  frameOutputs: readonly RecordedOutputs[];
+  frameProposals: readonly RecordedProposalSelection[];
+  operationIndexStart: number;
+  expectations: 'required' | 'absent';
+}>;
+
+type AuthorityOwnerBuildResult =
+  | Readonly<{ kind: 'built'; entity: AuthorityWaveEntity; inputs: AuthorityWaveInput[] }>
+  | Readonly<{ kind: 'ineligible'; reason: string }>;
+
+const buildAuthorityOwnerWave = (
+  request: AuthorityOwnerBuildRequest,
+): AuthorityOwnerBuildResult => {
+  const {
+    ownerEntityId,
+    rows,
+    frameClocks,
+    frameOutputs,
+    frameProposals,
+    expectations,
+  } = request;
+  let operationIndex = request.operationIndexStart;
+  const propose = soleClock(frameClocks, ownerEntityId, 'propose');
+  const enforce = soleClock(frameClocks, ownerEntityId, 'enforce');
+  if (propose === 'conflict') return { kind: 'ineligible', reason: `clock:propose:${ownerEntityId}` };
+  if (enforce === 'conflict') return { kind: 'ineligible', reason: `clock:enforce:${ownerEntityId}` };
+  const clock = enforce ?? propose;
+  if (!clock) return { kind: 'ineligible', reason: `clock:missing:${ownerEntityId}` };
+  const selected = frameProposals
+    .filter(row => row.ownerEntityId === ownerEntityId)
+    .map(row => row.accountId);
+  if (frameProposals.some(row =>
+    row.ownerEntityId === ownerEntityId && !row.selectionIsWholeMempool)) {
+    return { kind: 'ineligible', reason: `proposal:subset-unsupported:${ownerEntityId}` };
+  }
+  const expectedProposals = frameProposals
+    .filter(row => row.ownerEntityId === ownerEntityId)
+    .map(row => row.expected);
+  if (expectations === 'required' && expectedProposals.some(row => row === undefined)) {
+    return { kind: 'ineligible', reason: `proposal:result-missing:${ownerEntityId}` };
+  }
+  if (new Set(selected).size !== selected.length) {
+    return { kind: 'ineligible', reason: `proposal:duplicate:${ownerEntityId}` };
+  }
+  if ((propose === undefined) !== (selected.length === 0)) {
+    return { kind: 'ineligible', reason: `proposal:clock-selection:${ownerEntityId}` };
+  }
+  const ops: RscoreWireValue[] = [];
+  const operations: AuthorityWaveOperation[] = [];
+  const inputs: AuthorityWaveInput[] = [];
+  for (const row of rows) {
+    const payload = row.payload;
+    if (payload.kind === 'create') {
+      const encoded = waveCreateOp(operationIndex, payload.seed);
+      ops.push(encoded);
+      operations.push({
+        ...describeAuthorityWaveOperation(encoded),
+        arrivalIndex: row.arrivalIndex,
+        expectedVerdict: { kind: 'create' },
+      });
+      operationIndex += 1;
+      continue;
+    }
+    if (payload.kind === 'admit') {
+      if (expectations === 'required' && row.expectedVerdict?.kind !== 'admission') {
+        return { kind: 'ineligible', reason: `result:admission:${row.ownerEntityId}/${row.accountId}` };
+      }
+      const txs: RscoreWireValue[] = [];
+      for (const tx of payload.txs) {
+        const wire = accountTxWire(tx);
+        if (wire === null) return { kind: 'ineligible', reason: `tx:${tx.type}` };
+        txs.push(wire);
+      }
+      const encoded = waveAdmitOp(operationIndex, row.accountId, txs);
+      ops.push(encoded);
+      operations.push({
+        ...describeAuthorityWaveOperation(encoded),
+        arrivalIndex: row.arrivalIndex,
+        ...(row.expectedVerdict === undefined ? {} : { expectedVerdict: row.expectedVerdict }),
+      });
+      operationIndex += 1;
+      continue;
+    }
+    if (expectations === 'required' && row.expectedVerdict?.kind !== 'peer') {
+      return { kind: 'ineligible', reason: `result:peer:${row.ownerEntityId}/${row.accountId}` };
+    }
+    let encoded: RscoreWireValue;
+    try {
+      encoded = authorityPeerInputRow(operationIndex, row.accountId, payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { kind: 'ineligible', reason: `input:${message}` };
+    }
+    const operation = waveInputOp(encoded);
+    ops.push(operation);
+    operations.push({
+      ...describeAuthorityWaveOperation(operation),
+      arrivalIndex: row.arrivalIndex,
+      ...(row.expectedVerdict === undefined ? {} : { expectedVerdict: row.expectedVerdict }),
+    });
+    inputs.push({
+      operationIndex,
+      arrivalIndex: row.arrivalIndex,
+      ownerEntityId,
+      accountId: row.accountId,
+      kind: payload.kind,
+    });
+    operationIndex += 1;
+  }
+  const expectedOutputs = new Map<string, ShadowOutputRow[]>();
+  for (const committed of frameOutputs) {
+    if (committed.ownerEntityId !== ownerEntityId) continue;
+    const outputRows = expectedOutputs.get(committed.counterpartyEntityId) ?? [];
+    outputRows.push(...committed.rows);
+    expectedOutputs.set(committed.counterpartyEntityId, outputRows);
+  }
+  return {
+    kind: 'built',
+    inputs,
+    entity: {
+      ownerEntityId,
+      expectedOutputs,
+      timestamp: propose?.timestamp ?? clock.timestamp,
+      jHeight: propose?.finalizedJHeight ?? clock.finalizedJHeight,
+      entityTimestamp: clock.timestamp,
+      finalizedJHeight: clock.finalizedJHeight,
+      propose: selected.length > 0,
+      proposalAccountIds: selected,
+      expectedProposals: expectations === 'required'
+        ? (expectedProposals as AuthorityExpectedProposalAttempt[])
+        : [],
+      ops,
+      operations,
+    },
+  };
+};
+
 /**
  * The Runtime frame as a grouped wave request: one group per owner Entity,
  * each with the clocks that Entity actually used and its operations in the
@@ -768,14 +912,7 @@ export const buildAuthorityWave = (
   // Arrival order first, grouping second. The index is assigned while the
   // frame is still in the sequence the authority saw, so grouping can reorder
   // the request without reordering what comes out of it.
-  type ArrivedOp = {
-    arrivalIndex: number;
-    ownerEntityId: string;
-    accountId: string;
-    payload: Exclude<RecordedPayload, { kind: 'unsupported' }>;
-    expectedVerdict?: AuthorityExpectedOperationVerdict;
-  };
-  const arrived: ArrivedOp[] = [];
+  const arrived: ArrivedAuthorityOperation[] = [];
   const accountActivity = new Set<string>();
   const createdAccounts = new Set<string>();
   let payloadOrdinal = 0;
@@ -814,19 +951,11 @@ export const buildAuthorityWave = (
       });
     }
   }
-  const byOwner = new Map<string, ArrivedOp[]>();
+  const byOwner = new Map<string, ArrivedAuthorityOperation[]>();
   for (const op of arrived) {
     const rows = byOwner.get(op.ownerEntityId) ?? [];
     rows.push(op);
     byOwner.set(op.ownerEntityId, rows);
-  }
-  const fallback = options.fallbackEntity === undefined ? undefined : {
-    ownerEntityId: options.fallbackEntity.ownerEntityId.trim().toLowerCase(),
-    timestamp: options.fallbackEntity.timestamp,
-    finalizedJHeight: options.fallbackEntity.finalizedJHeight,
-  };
-  if (fallback !== undefined && !byOwner.has(fallback.ownerEntityId)) {
-    byOwner.set(fallback.ownerEntityId, []);
   }
   for (const row of frameClocks) {
     if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
@@ -838,141 +967,21 @@ export const buildAuthorityWave = (
     if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
   }
   if (byOwner.size === 0) return { kind: 'empty' };
-  if (
-    fallback !== undefined
-    && [...byOwner.keys()].some(ownerEntityId => ownerEntityId !== fallback.ownerEntityId)
-  ) {
-    return { kind: 'ineligible', reason: `owner:cross-scope:${fallback.ownerEntityId}` };
-  }
   const entities: AuthorityWaveEntity[] = [];
   const inputs: AuthorityWaveInput[] = [];
   for (const [ownerEntityId, rows] of byOwner) {
-    // Each owner is a distinct Rust session/candidate. Candidate operation
-    // indices are local to that owner; arrival indices alone span the Runtime.
-    let operationIndex = operationIndexStart;
-    const propose = soleClock(frameClocks, ownerEntityId, 'propose');
-    const enforce = soleClock(frameClocks, ownerEntityId, 'enforce');
-    // Two different clocks for one Entity in one frame means the Runtime frame
-    // is not this Entity's wave unit. Taking the last one would sign some of
-    // its work with a clock it never used.
-    if (propose === 'conflict') return { kind: 'ineligible', reason: `clock:propose:${ownerEntityId}` };
-    if (enforce === 'conflict') return { kind: 'ineligible', reason: `clock:enforce:${ownerEntityId}` };
-    // Without the Entity's own clock there is nothing to judge expiry with,
-    // and borrowing a neighbour's is exactly what the grouped wave exists to
-    // prevent.
-    const fallbackClock = fallback?.ownerEntityId === ownerEntityId
-      ? fallback
-      : undefined;
-    const clock = enforce ?? propose ?? fallbackClock;
-    if (!clock) return { kind: 'ineligible', reason: `clock:missing:${ownerEntityId}` };
-    const selected = frameProposals
-      .filter(row => row.ownerEntityId === ownerEntityId)
-      .map(row => row.accountId);
-    if (frameProposals.some(row =>
-      row.ownerEntityId === ownerEntityId && !row.selectionIsWholeMempool)) {
-      return { kind: 'ineligible', reason: `proposal:subset-unsupported:${ownerEntityId}` };
-    }
-    const expectedProposals = frameProposals
-      .filter(row => row.ownerEntityId === ownerEntityId)
-      .map(row => row.expected);
-    if (expectations === 'required' && expectedProposals.some(row => row === undefined)) {
-      return { kind: 'ineligible', reason: `proposal:result-missing:${ownerEntityId}` };
-    }
-    if (new Set(selected).size !== selected.length) {
-      return { kind: 'ineligible', reason: `proposal:duplicate:${ownerEntityId}` };
-    }
-    if ((propose === undefined) !== (selected.length === 0)) {
-      return { kind: 'ineligible', reason: `proposal:clock-selection:${ownerEntityId}` };
-    }
-    const ops: RscoreWireValue[] = [];
-    const operations: AuthorityWaveOperation[] = [];
-    for (const row of rows) {
-      const payload = row.payload;
-      if (payload.kind === 'create') {
-        const encoded = waveCreateOp(operationIndex, payload.seed);
-        ops.push(encoded);
-        operations.push({
-          ...describeAuthorityWaveOperation(encoded),
-          arrivalIndex: row.arrivalIndex,
-          expectedVerdict: { kind: 'create' },
-        });
-        operationIndex += 1;
-        continue;
-      }
-      if (payload.kind === 'admit') {
-        if (expectations === 'required' && row.expectedVerdict?.kind !== 'admission') {
-          return { kind: 'ineligible', reason: `result:admission:${row.ownerEntityId}/${row.accountId}` };
-        }
-        const txs: RscoreWireValue[] = [];
-        for (const tx of payload.txs) {
-          const wire = accountTxWire(tx);
-          // A transaction outside the profile makes the whole frame
-          // undrivable: the engine would build a different mempool.
-          if (wire === null) return { kind: 'ineligible', reason: `tx:${tx.type}` };
-          txs.push(wire);
-        }
-        const encoded = waveAdmitOp(operationIndex, row.accountId, txs);
-        ops.push(encoded);
-        operations.push({
-          ...describeAuthorityWaveOperation(encoded),
-          arrivalIndex: row.arrivalIndex,
-          ...(row.expectedVerdict === undefined ? {} : { expectedVerdict: row.expectedVerdict }),
-        });
-        operationIndex += 1;
-        continue;
-      }
-      let encoded: RscoreWireValue;
-      if (expectations === 'required' && row.expectedVerdict?.kind !== 'peer') {
-        return { kind: 'ineligible', reason: `result:peer:${row.ownerEntityId}/${row.accountId}` };
-      }
-      try {
-        encoded = authorityPeerInputRow(operationIndex, row.accountId, payload);
-      } catch (error) {
-        // A malformed Hanko or hash is not something to drive around: the
-        // engine would judge a different input than TypeScript did.
-        const message = error instanceof Error ? error.message : String(error);
-        return { kind: 'ineligible', reason: `input:${message}` };
-      }
-      const operation = waveInputOp(encoded);
-      ops.push(operation);
-      operations.push({
-        ...describeAuthorityWaveOperation(operation),
-        arrivalIndex: row.arrivalIndex,
-        ...(row.expectedVerdict === undefined ? {} : { expectedVerdict: row.expectedVerdict }),
-      });
-      inputs.push({
-        operationIndex,
-        arrivalIndex: row.arrivalIndex,
-        ownerEntityId,
-        accountId: row.accountId,
-        kind: payload.kind,
-      });
-      operationIndex += 1;
-    }
-    const expectedOutputs = new Map<string, ShadowOutputRow[]>();
-    for (const committed of frameOutputs) {
-      if (committed.ownerEntityId !== ownerEntityId) continue;
-      const rows = expectedOutputs.get(committed.counterpartyEntityId) ?? [];
-      rows.push(...committed.rows);
-      expectedOutputs.set(committed.counterpartyEntityId, rows);
-    }
-    entities.push({
+    const built = buildAuthorityOwnerWave({
       ownerEntityId,
-      expectedOutputs,
-      // An Entity that never proposed in this frame carries no proposal clock;
-      // it must not stamp one from somewhere else, so it does not propose.
-      timestamp: propose?.timestamp ?? clock.timestamp,
-      jHeight: propose?.finalizedJHeight ?? clock.finalizedJHeight,
-      entityTimestamp: clock.timestamp,
-      finalizedJHeight: clock.finalizedJHeight,
-      propose: selected.length > 0,
-      proposalAccountIds: selected,
-      expectedProposals: expectations === 'required'
-        ? (expectedProposals as AuthorityExpectedProposalAttempt[])
-        : [],
-      ops,
-      operations,
+      rows,
+      frameClocks,
+      frameOutputs,
+      frameProposals,
+      operationIndexStart,
+      expectations,
     });
+    if (built.kind === 'ineligible') return built;
+    entities.push(built.entity);
+    inputs.push(...built.inputs);
   }
   return { kind: 'wave', entities, inputs };
 };

@@ -21,10 +21,10 @@ import type {
 } from './checkpoint-restore-consensus';
 import { decodeRscoreConsensusSeed } from './checkpoint-restore-consensus';
 import { checkpointHex, checkpointRestoreFail } from './checkpoint-restore-read';
-import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
 import {
   decodeRscoreAccountStateSeed,
   decodeRscoreAccountStateTrees,
+  type RscoreAccountStateSeed,
   type RscoreAccountStateTrees,
 } from './checkpoint-restore-state';
 import { rscoreCheckpointTuple } from './checkpoint-wire';

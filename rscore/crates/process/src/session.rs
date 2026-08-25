@@ -62,6 +62,9 @@ struct PendingBatch {
     candidate: PreparedBatch,
 }
 
+type SavepointAction =
+    fn(&mut StatefulConsensusEngine) -> Result<(u64, [u8; 32]), xln_rscore_batch::BatchError>;
+
 impl ProcessSession {
     pub fn new() -> Self {
         Self::try_new().expect("operating-system entropy is required for rscore candidate tokens")
@@ -431,7 +434,7 @@ impl ProcessSession {
     /// Where the accounts stand after marking, keeping or undoing a savepoint.
     fn savepoint(
         &mut self,
-        act: fn(&mut StatefulConsensusEngine) -> Result<(u64, [u8; 32]), xln_rscore_batch::BatchError>,
+        act: SavepointAction,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         let engine = self
             .authority

@@ -736,16 +736,37 @@ impl StatefulConsensusEngine {
         j_height: u64,
         selected: Option<&[AccountId]>,
     ) -> Result<Vec<ProposalRow>, BatchError> {
+        let mut idle = Vec::new();
         let candidates: Vec<(AccountId, AccountConsensus)> = match selected {
-            Some(ids) => ids
-                .iter()
-                .filter_map(|account_id| {
-                    self.accounts
-                        .get(account_id.as_bytes())
-                        .map(|account| (*account_id, account.clone()))
-                })
-                .filter(|(_, account)| proposable(account))
-                .collect(),
+            Some(ids) => {
+                let mut seen = BTreeSet::new();
+                let mut candidates = Vec::new();
+                for account_id in ids {
+                    if !seen.insert(*account_id) {
+                        return Err(BatchError::DuplicateAccount(*account_id));
+                    }
+                    let account = self.accounts.get(account_id.as_bytes()).ok_or(
+                        BatchError::AccountNotFound {
+                            input_index: 0,
+                            account_id: *account_id,
+                        },
+                    )?;
+                    if proposable(account) {
+                        candidates.push((*account_id, account.clone()));
+                    } else {
+                        // A selected worklist is a request/response contract:
+                        // every named Account gets one row. The Entity cannot
+                        // consult its stale pre-outbound replica to predict
+                        // whether Rust's post-inbound Account is proposable.
+                        idle.push(ProposalRow {
+                            account_id: *account_id,
+                            proposed: None,
+                            dropped: Vec::new(),
+                        });
+                    }
+                }
+                candidates
+            }
             None => self
                 .accounts
                 .iter()
@@ -753,7 +774,10 @@ impl StatefulConsensusEngine {
                 .map(|(key, account)| (AccountId::from_key(key), account.clone()))
                 .collect(),
         };
-        self.propose_candidates(candidates, timestamp, j_height)
+        let mut rows = self.propose_candidates(candidates, timestamp, j_height)?;
+        rows.append(&mut idle);
+        rows.sort_by_key(|row| *row.account_id.as_bytes());
+        Ok(rows)
     }
 
     /// Build, hash and sign one clock's worth of proposals. Split out of
@@ -2273,7 +2297,7 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             outputs,
             events,
             rolled_back,
-            committed_frame,
+            committed_frame: *committed_frame,
             ack_dispute,
         },
         IncomingOutcome::CollisionIgnored { height, queued } => {

@@ -3,10 +3,10 @@
  *
  * The Entity frame knows every account input it carries before it dispatches
  * any of them. Rather than asking the engine one arrival at a time, it hands
- * over a whole round — at most one arrival per account, so every verdict names
- * an unambiguous post-state — and then reads the verdicts back as its own
- * handlers reach them. A frame with more than one arrival for the same account
- * takes one round per repeat, which is a handful of calls, not one per input.
+ * over one whole batch and then reads the verdicts back as its own handlers
+ * reach them. If an account occurs more than once, only its last verdict
+ * publishes the final post-state row; every earlier verdict still publishes
+ * its own events and effects. The batch is never split into extra IPC calls.
  *
  * The verdicts are a queue, not a lookup: a verdict TypeScript never consumed
  * means the engine applied something the Entity decided not to, so the round
@@ -14,12 +14,11 @@
  */
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountPeerInput } from '../../types/account';
-import type { RscoreWireValue } from '../client';
 import type { Wave } from '../wave-decode';
-import { authorityPeerInputRow } from '../authority-wave';
+import { safeStringify } from '../../protocol/serialization';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
-  throw new Error(`RSCORE_ROUND_${code}:${JSON.stringify(detail)}`);
+  throw new Error(`RSCORE_ROUND_${code}:${safeStringify(detail)}`);
 };
 
 /** The three arrival shapes the Account layer accepts from a peer. */
@@ -29,13 +28,6 @@ type PeerArrivalInput = Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'fra
 export type InboundArrival = Readonly<{
   accountId: string;
   input: PeerArrivalInput;
-}>;
-
-/** The engine's answer for one arrival, sliced out of the round it came in. */
-export type InboundVerdict = Readonly<{
-  accountId: string;
-  wave: Wave;
-  operationIndex: number;
 }>;
 
 /**
@@ -56,32 +48,6 @@ export const inboundArrivals = (entityTxs: readonly EntityTx[]): InboundArrival[
     }
     return [{ accountId, input }];
   });
-
-/**
- * The longest leading run with no account named twice.
- *
- * Two arrivals for one account in one call would share a post-state row, and
- * the Entity reads that row between them. Splitting on the repeat keeps every
- * verdict bound to the state that produced it.
- */
-export const inboundRound = (pending: readonly InboundArrival[]): InboundArrival[] => {
-  const seen = new Set<string>();
-  const round: InboundArrival[] = [];
-  for (const arrival of pending) {
-    if (seen.has(arrival.accountId)) break;
-    seen.add(arrival.accountId);
-    round.push(arrival);
-  }
-  return round;
-};
-
-/** The wire rows for one round, indexed from zero. */
-export const inboundRows = (round: readonly InboundArrival[]): RscoreWireValue[] =>
-  round.map((arrival, index) => authorityPeerInputRow(
-    index,
-    arrival.accountId,
-    { kind: arrival.input.kind, input: arrival.input } as Parameters<typeof authorityPeerInputRow>[2],
-  ));
 
 /**
  * One arrival's own view of the round it was answered in.

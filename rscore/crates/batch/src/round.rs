@@ -7,9 +7,10 @@
 //! hands over the transactions that logic produced and names the accounts that
 //! should now propose. The second visit returns what to send onward.
 //!
-//! There is nothing between the two: no per-operation call, no staged
-//! candidate, no account body crossing back so the caller can re-derive what
-//! the engine already committed.
+//! There is no per-operation call between the two. The inbound visit may return
+//! the changed Account bodies because Entity order-book and routing logic read
+//! that post-inbound state. The outbound visit returns the final bodies and
+//! effects that the parent commits and routes.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -128,7 +129,7 @@ pub mod phase {
             return;
         }
         let rounds = ROUNDS.fetch_add(1, Ordering::Relaxed) + 1;
-        if rounds % 4000 != 0 {
+        if !rounds.is_multiple_of(4000) {
             return;
         }
         eprintln!(

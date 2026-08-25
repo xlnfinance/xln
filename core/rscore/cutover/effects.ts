@@ -13,6 +13,7 @@
  */
 import type { AccountOutput, AccountReplica, AccountSwapOfferSnapshot } from '../../types/account';
 import type { SwapOfferEvent } from '../../account/tx/apply-types';
+import { safeStringify } from '../../protocol/serialization';
 import type { WaveOutput } from '../wave-decode';
 
 export type CutoverAccountEffects = Readonly<{
@@ -25,7 +26,7 @@ export type CutoverAccountEffects = Readonly<{
 }>;
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
-  throw new Error(`RSCORE_CUTOVER_EFFECT_${code}:${JSON.stringify(detail)}`);
+  throw new Error(`RSCORE_CUTOVER_EFFECT_${code}:${safeStringify(detail)}`);
 };
 
 const snapshot = (

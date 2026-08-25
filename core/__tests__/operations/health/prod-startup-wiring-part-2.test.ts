@@ -10,6 +10,8 @@ import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '
 import { expandPlaywrightTargets } from '../../../scripts/e2e/runners/run-e2e-parallel-isolated';
 import {
   applyHubRuntimeFrameDelay,
+  buildHubChildProcessEnv,
+  buildHubEngineArgs,
   DEFAULT_HUB_RUNTIME_FRAME_PERIOD_MS,
   readHubSteadyRuntimeFramePeriodMs,
 } from '../../../orchestrator/process/hub-runtime-env';
@@ -77,9 +79,34 @@ describe('production startup wiring', () => {
     expect(() => readHubSteadyRuntimeFramePeriodMs({
       XLN_HUB_STEADY_FRAME_PERIOD_MS: '-1',
     })).toThrow('HUB_STEADY_FRAME_PERIOD_MS_INVALID:-1');
-    expect(orchestrator).toContain(
-      "}, process.env['XLN_HUB_MIN_FRAME_DELAY_MS'])),",
-    );
+    expect(orchestrator).toContain('env: sanitizeChildProcessEnv(buildHubChildProcessEnv({');
+    expect(buildHubEngineArgs('h1', {
+      XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
+    })).toEqual(['--cpu-prof', '--smol']);
+    expect(buildHubChildProcessEnv({
+      hubName: 'h1',
+      dbPath: '/db/h1',
+      brainvaultOwnerPath: '/db/h1/brainvault-owner.json',
+      jurisdictionsPath: '/db/jurisdictions.json',
+      rpcEnv: { ANVIL_RPC: 'http://rpc' },
+      orchestratorPid: 42,
+      orchestratorOwnerId: 'owner',
+      startupTimeoutMs: 5_000,
+      hubDelayMs: '25',
+      sourceEnv: {
+        XLN_HUB_RSCORE_AUTHORITY_H1: '1',
+        XLN_RSCORE_BINARY: '/bin/rscore',
+        XLN_RUNTIME_APPLY_PROFILE: '1',
+      },
+    })).toMatchObject({
+      XLN_DB_PATH: '/db/h1',
+      ANVIL_RPC: 'http://rpc',
+      XLN_RSCORE_AUTHORITY: '1',
+      XLN_RSCORE_BINARY: '/bin/rscore',
+      XLN_RUNTIME_APPLY_PROFILE: '1',
+      XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
+      XLN_HUB_STEADY_FRAME_PERIOD_MS: '25',
+    });
   });
 
   test('prod runtime child keeps merge debug output structured and gated', () => {

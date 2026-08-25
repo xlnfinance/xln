@@ -212,13 +212,16 @@ export const resolveInboundAccount = (
   input: AccountPeerInput,
   hasAck: boolean,
   hasProposal: boolean,
+  authorityPrepared = false,
 ): InboundAccountResolution => {
   const counterpartyId = assertAccountInputParticipants(state, input);
   const existingKey = findAccountKey(state.accounts, counterpartyId);
   const existing = existingKey ? getEntityAccountForWrite(state.accounts, existingKey) : undefined;
   if (existing) {
-    const envelopeError = getAccountInputEnvelopeError(existing.state, input);
-    if (envelopeError) return rejectPeerInput(envelopeError.code, envelopeError.reason);
+    if (!authorityPrepared) {
+      const envelopeError = getAccountInputEnvelopeError(existing.state, input);
+      if (envelopeError) return rejectPeerInput(envelopeError.code, envelopeError.reason);
+    }
     return { account: existing, counterpartyId, createdAccount: false };
   }
   assertUnknownAccountGenesis(state, input, counterpartyId, hasAck, hasProposal);

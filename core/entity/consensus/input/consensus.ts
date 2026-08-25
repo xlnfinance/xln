@@ -240,6 +240,18 @@ const requiredAtomicAccountTx = (
   return tx;
 };
 
+const shouldDeferEntityProposal = (
+  input: EntityInput,
+  deferProposal: boolean | undefined,
+  trustedLocalCrossJurisdiction: boolean,
+  accountWorkOnly: boolean,
+): boolean => Boolean(
+  deferProposal
+  && !trustedLocalCrossJurisdiction
+  && !accountWorkOnly
+  && isProposalDeferrableEntityInput(input),
+);
+
 export const applyEntityInput = async (
   env: EntityRuntimeContext,
   entityReplica: EntityReplica,
@@ -294,12 +306,7 @@ export const applyEntityInput = async (
   const commitNotificationResult = await handleCommitNotification(phaseContext);
   if (commitNotificationResult) return commitNotificationResult;
 
-  if (
-    options.deferProposal &&
-    !trustedLocalCrossJurisdiction &&
-    !accountWorkOnly &&
-    isProposalDeferrableEntityInput(entityInput)
-  ) {
+  if (shouldDeferEntityProposal(entityInput, options.deferProposal, trustedLocalCrossJurisdiction, accountWorkOnly)) {
     profile.checkpoint('deferred');
     return currentEntityInputResult(phaseContext);
   }
