@@ -296,12 +296,13 @@ const main = async (): Promise<void> => {
   console.log(`restore accounts=${accounts} ms=${Math.round(restoreMs)} workers=${workers}`);
   report('propose', propose);
   report('ack    ', ack);
-  // A payment through this hub costs it one signed frame and one verified ack.
-  const paymentMs = propose.wallMs + ack.wallMs;
+  // This ceiling counts one direct Account leg (proposal + peer ACK), not an
+  // end-to-end sender -> H1 -> receiver economic payment.
+  const directAccountLegMs = propose.wallMs + ack.wallMs;
   console.log(
     `authority signedFrames=${signedFrames} ackCommits=${ackCommits} ` +
     `signedFramesPerSec=${perSecond(signedFrames, propose.wallMs)} ` +
-    `hubPaymentsPerSec=${perSecond(signedFrames, paymentMs)} ` +
+    `directAccountLegsPerSec=${perSecond(signedFrames, directAccountLegMs)} ` +
     `tsAckBuildMs=${Math.round(buildMs)} workers=${workers} accounts=${accounts}`,
   );
   await client.shutdown();
