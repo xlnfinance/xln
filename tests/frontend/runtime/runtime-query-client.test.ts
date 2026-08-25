@@ -247,16 +247,26 @@ test('runtime view queues committed heights that arrive during the initial proje
   expect(runtimeViewTracksHeightAdvance(loadingLiveView, 'connected', 0)).toBe(false);
 
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
-  expect(source).toContain('pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);');
-  expect(source).toContain('if (!view.frame) return;');
+  const boundary = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-catchup.ts',
+    'utf8',
+  );
+  expect(boundary).toContain('this.pendingHeight = Math.max(this.pendingHeight, nextHeight);');
+  expect(boundary).toContain('if (!state.hasFrame) return;');
+  expect(source).toContain('runtimeViewCatchup.observeHeight(nextHeight);');
   expect(source).toContain('continueRuntimeViewCatchup();');
 });
 
 test('runtime view catch-up retries back off instead of spinning', () => {
   expect([0, 1, 2, 3, 20].map(runtimeViewHeightRetryDelayMs)).toEqual([50, 100, 200, 250, 250]);
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
-  expect(source).not.toContain('while (pendingHeightRefresh');
-  expect(source).toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
+  const boundary = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-catchup.ts',
+    'utf8',
+  );
+  expect(boundary).not.toContain('while (this.pendingHeight');
+  expect(boundary).toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
+  expect(source).not.toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
 });
 
 test('persisted receipt probes reuse the live Runtime module singleton', () => {

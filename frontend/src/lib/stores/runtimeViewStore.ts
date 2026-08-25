@@ -27,6 +27,10 @@ import {
   type RuntimeViewHistoryScanState,
   type RuntimeViewPageInfo,
 } from '../../../packages/runtime-client/src/runtime-view-model';
+import {
+  RuntimeViewCatchupCoordinator,
+  runtimeViewCatchupRetryDelayMs,
+} from '../../../packages/runtime-client/src/runtime-view-catchup';
 
 export {
   assertRuntimeViewIsLive,
@@ -40,6 +44,8 @@ export {
   runtimeViewTracksHeightAdvance,
 };
 export type { RuntimeViewHistoryScanState, RuntimeViewPageInfo };
+
+export const runtimeViewHeightRetryDelayMs = runtimeViewCatchupRetryDelayMs;
 
 export type RuntimeView = {
   runtimeId: string;
@@ -221,29 +227,11 @@ const emptyRuntimeView = (atHeight = selectedRuntimeViewHeight): RuntimeView => 
 const errorMessage = (value: unknown): string =>
   value instanceof Error ? value.message : String(value || 'RuntimeView refresh failed');
 
-let heightRefreshInFlight = false;
-let pendingHeightRefresh = 0;
-let heightRefreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
-let heightRefreshRetryTarget = 0;
-let heightRefreshRetryAttempt = 0;
-const HEIGHT_REFRESH_RETRY_LIMIT = 20;
-
-export const runtimeViewHeightRetryDelayMs = (attempt: number): number =>
-  Math.min(250, 50 * (2 ** Math.max(0, Math.floor(Number(attempt) || 0))));
-
-const clearHeightRefreshRetry = (): void => {
-  if (heightRefreshRetryTimer) clearTimeout(heightRefreshRetryTimer);
-  heightRefreshRetryTimer = null;
-  heightRefreshRetryTarget = 0;
-  heightRefreshRetryAttempt = 0;
-};
-
 export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
 
 export const resetRuntimeView = (): void => {
   runtimeViewRefreshId += 1;
-  pendingHeightRefresh = 0;
-  clearHeightRefreshRetry();
+  runtimeViewCatchup.reset();
   if (selectedRuntimeViewHeight !== null) runtimeViewSelectionRevision += 1;
   selectedRuntimeViewHeight = null;
   runtimeViewPageInfo.set(null);
@@ -356,6 +344,27 @@ const currentRuntimeViewQuery = (): RuntimeAdapterReadQuery => {
 export const refreshSelectedRuntimeView = (): Promise<RuntimeView> =>
   refreshRuntimeView(currentRuntimeViewQuery());
 
+const runtimeViewCatchup = new RuntimeViewCatchupCoordinator({
+  readState: () => {
+    const view = get(runtimeView);
+    return {
+      atHeight: view.atHeight,
+      frameHeight: Math.max(0, Math.floor(Number(view.frame?.height || 0))),
+      hasFrame: !!view.frame,
+      status: get(runtimeControllerHandle).status,
+    };
+  },
+  refresh: async () => { await refreshSelectedRuntimeView(); },
+  publishTimeout: (message) => {
+    runtimeView.update((view) => ({ ...view, loading: false, error: message }));
+  },
+  reportRefreshError: (error) => {
+    errorLog.log(errorMessage(error), 'Runtime View Catch-up', error);
+  },
+  scheduleRetry: (listener, delayMs) => setTimeout(listener, delayMs),
+  cancelRetry: (timer) => clearTimeout(timer),
+});
+
 export const setRuntimeViewAtHeight = async (value: number | null): Promise<RuntimeView> => {
   const atHeight = normalizeRuntimeViewAtHeight(value);
   const current = get(runtimeView);
@@ -371,7 +380,7 @@ export const setRuntimeViewAtHeight = async (value: number | null): Promise<Runt
   if (selectedRuntimeViewHeight !== atHeight) runtimeViewSelectionRevision += 1;
   selectedRuntimeViewHeight = atHeight;
   runtimeViewRefreshId += 1;
-  pendingHeightRefresh = 0;
+  runtimeViewCatchup.reset();
   runtimeViewPageInfo.set(null);
   runtimeView.update((view) => ({
     ...view,
@@ -385,64 +394,8 @@ export const setRuntimeViewAtHeight = async (value: number | null): Promise<Runt
   return refreshRuntimeView(currentRuntimeViewQuery());
 };
 
-const scheduleRuntimeViewHeightRetry = (): void => {
-  if (heightRefreshRetryTimer || heightRefreshInFlight || selectedRuntimeViewHeight !== null) return;
-  const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
-  const targetHeight = pendingHeightRefresh;
-  if (targetHeight <= frameHeight || get(runtimeControllerHandle).status !== 'connected') {
-    clearHeightRefreshRetry();
-    return;
-  }
-  if (heightRefreshRetryTarget !== targetHeight) {
-    heightRefreshRetryTarget = targetHeight;
-    heightRefreshRetryAttempt = 0;
-  }
-  if (heightRefreshRetryAttempt >= HEIGHT_REFRESH_RETRY_LIMIT) {
-    runtimeView.update((view) => ({
-      ...view,
-      loading: false,
-      error: `RUNTIME_VIEW_CATCHUP_TIMEOUT: target=h${targetHeight} frame=h${frameHeight}`,
-    }));
-    return;
-  }
-  const delayMs = runtimeViewHeightRetryDelayMs(heightRefreshRetryAttempt++);
-  heightRefreshRetryTimer = setTimeout(() => {
-    heightRefreshRetryTimer = null;
-    void refreshRuntimeViewAfterHeightAdvance();
-  }, delayMs);
-};
-
 function continueRuntimeViewCatchup(): void {
-  if (heightRefreshInFlight || selectedRuntimeViewHeight !== null) return;
-  const view = get(runtimeView);
-  const handle = get(runtimeControllerHandle);
-  if (!runtimeViewTracksHeightAdvance(view, handle.status, pendingHeightRefresh)) return;
-  void refreshRuntimeViewAfterHeightAdvance();
-}
-
-async function refreshRuntimeViewAfterHeightAdvance(): Promise<void> {
-  if (selectedRuntimeViewHeight !== null) return;
-  if (heightRefreshInFlight) return;
-  heightRefreshInFlight = true;
-  try {
-    await refreshRuntimeView(currentRuntimeViewQuery());
-  } catch (error) {
-    // refreshRuntimeView already surfaces a current failure in RuntimeView.
-    // Superseded failures remain auditable but must not overwrite a newer read.
-    errorLog.log(errorMessage(error), 'Runtime View Catch-up', error);
-  } finally {
-    heightRefreshInFlight = false;
-    const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
-    if (
-      selectedRuntimeViewHeight === null &&
-      pendingHeightRefresh > frameHeight &&
-      get(runtimeControllerHandle).status === 'connected'
-    ) {
-      scheduleRuntimeViewHeightRetry();
-    } else {
-      clearHeightRefreshRetry();
-    }
-  }
+  void runtimeViewCatchup.continue();
 }
 
 runtimeAdapter.subscribe(() => {
@@ -455,15 +408,5 @@ runtimeAdapterHeight.subscribe((height) => {
     ...view,
     height: view.atHeight ?? Math.max(view.height, nextHeight),
   }));
-  const handle = get(runtimeControllerHandle);
-  const view = get(runtimeView);
-  if (!runtimeViewTracksHeightAdvance(view, handle.status, nextHeight)) return;
-  if (nextHeight > pendingHeightRefresh) {
-    clearHeightRefreshRetry();
-  }
-  pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);
-  // The adapter switcher owns the initial projection. Remember newer committed
-  // heights while it loads, then catch up from the frame publication above.
-  if (!view.frame) return;
-  void refreshRuntimeViewAfterHeightAdvance();
+  runtimeViewCatchup.observeHeight(nextHeight);
 });

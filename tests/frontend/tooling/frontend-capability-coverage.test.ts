@@ -79,6 +79,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/runtime-client/src/runtime-selection.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
+      .toContain('frontend/packages/runtime-client/src/runtime-view-catchup.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/runtime-client/src/runtime-view-model.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('tab-confined Runtime authority and rollback-safe adapter selection');
@@ -92,6 +94,8 @@ describe('frontend capability inventory', () => {
       .toContain('framework-neutral latest-read Runtime query subscriptions and snapshots');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('one-writer latest-intent Runtime selection');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
+      .toContain('framework-neutral committed-height RuntimeView catch-up');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('framework-neutral RuntimeView query, pagination, and height model');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-native-and-offline')?.status).toBe('in_progress');
