@@ -11,6 +11,7 @@ import {
   computeAccountStateRootCold,
   EMPTY_ACCOUNT_STATE_ROOT,
 } from '../../account/commitment/state-root';
+import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import { encodeAccountStateValue } from '../../account/commitment/account-state-value';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import {
@@ -40,6 +41,7 @@ import type {
   AccountReplica,
   AccountState,
 } from '../../types/account';
+import type { HankoString } from '../../types/hanko';
 import type { RscoreDisputeDraft, RscoreOutboundAck } from './checkpoint-restore-consensus';
 import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
 import type { RscoreAccountCheckpointRow } from './wave-checkpoint-decode';
@@ -49,6 +51,29 @@ export type RscoreAccountMaterializerBinding = Readonly<{
   sessionOwnerEntityId: string;
   /** Exact signer id used to derive that session's key. */
   expectedSignerId: string;
+}>;
+
+export type RscoreAccountLocalHashToSign = Readonly<{
+  hash: string;
+  type: 'accountFrame' | 'dispute';
+  context: string;
+}>;
+
+/**
+ * Exact fresh secondary-hash manifest emitted by the staged Rust wave.
+ *
+ * Absence from this list means reuse, which is accepted only when the prior
+ * TypeScript Account already contains the exact certified witness. Rust-local
+ * Hankos in the checkpoint row are never authority for either branch.
+ */
+export type RscoreAccountLocalWitnessPlan = Readonly<{
+  freshHashesToSign: readonly RscoreAccountLocalHashToSign[];
+}>;
+
+export type RscoreAccountMaterialization = Readonly<{
+  account: AccountReplica;
+  /** Feed these exact rows into the Entity frame's secondary-hash manifest. */
+  hashesToSign: readonly RscoreAccountLocalHashToSign[];
 }>;
 
 const fail = (code: string): never => {
@@ -120,68 +145,207 @@ const carriedMap = <K extends AccountStateMapKey, V>(
   return committedMap(namespace, prior, expectedRoot, field);
 };
 
-const sameProof = (
-  account: AccountReplica,
-  draft: RscoreDisputeDraft,
-): boolean =>
-  account.currentDisputeHash === draft.hash
-  && account.currentDisputeProofBodyHash === draft.proofBodyHash
-  && account.currentDisputeProofNonce === draft.nonce
-  && account.currentDisputeProofProposerIsLeft === draft.proposerIsLeft;
+type LocalWitnessResolver = Readonly<{
+  frame(hash: string, context?: string): HankoString | undefined;
+  dispute(draft: RscoreDisputeDraft, context?: string): HankoString | undefined;
+  finish(): readonly RscoreAccountLocalHashToSign[];
+}>;
 
-const exactLocalProofHanko = (
-  prior: AccountReplica | null,
-  draft: RscoreDisputeDraft,
-): string => {
-  const hanko = prior !== null && sameProof(prior, draft)
-    ? prior.currentDisputeProofHanko
-    : undefined;
-  if (typeof hanko !== 'string' || hanko.length === 0) {
-    return fail('LOCAL_DISPUTE_HANKO_ABI_INCOMPLETE');
+const disputeKey = (draft: RscoreDisputeDraft): string => [
+  draft.hash.toLowerCase(),
+  draft.proofBodyHash.toLowerCase(),
+  draft.nonce,
+  draft.proposerIsLeft ? 1 : 0,
+].join(':');
+
+const addPriorWitness = (
+  witnesses: Map<string, HankoString>,
+  key: string,
+  hanko: string | undefined,
+): void => {
+  if (typeof hanko !== 'string' || hanko.length === 0) return;
+  const existing = witnesses.get(key);
+  if (existing !== undefined && existing !== hanko) fail(`PRIOR_LOCAL_WITNESS_EQUIVOCATION:${key}`);
+  witnesses.set(key, hanko as HankoString);
+};
+
+const addPriorInputWitnesses = (
+  frameWitnesses: Map<string, HankoString>,
+  disputeWitnesses: Map<string, HankoString>,
+  input: AccountPeerInput | undefined,
+): void => {
+  if (input === undefined) return;
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
+  if (ack) {
+    addPriorWitness(frameWitnesses, ack.frameHash.toLowerCase(), ack.frameHanko);
+    if (ack.disputeHanko) {
+      addPriorWitness(disputeWitnesses, disputeKey({
+        hash: ack.disputeHanko.hash,
+        proofBodyHash: ack.disputeHanko.proofBodyHash,
+        nonce: ack.disputeHanko.proofNonce,
+        proposerIsLeft: ack.disputeHanko.proposerIsLeft,
+      }), ack.disputeHanko.hanko);
+    }
   }
-  return hanko;
+  if (proposal) {
+    addPriorWitness(frameWitnesses, proposal.frame.stateHash.toLowerCase(), proposal.frameHanko);
+    if (proposal.disputeHanko) {
+      addPriorWitness(disputeWitnesses, disputeKey({
+        hash: proposal.disputeHanko.hash,
+        proofBodyHash: proposal.disputeHanko.proofBodyHash,
+        nonce: proposal.disputeHanko.proofNonce,
+        proposerIsLeft: proposal.disputeHanko.proposerIsLeft,
+      }), proposal.disputeHanko.hanko);
+    }
+  }
+};
+
+const priorLocalWitnesses = (
+  prior: AccountReplica | null,
+): Readonly<{
+  frames: Map<string, HankoString>;
+  disputes: Map<string, HankoString>;
+}> => {
+  const frames = new Map<string, HankoString>();
+  const disputes = new Map<string, HankoString>();
+  if (prior === null) return { frames, disputes };
+  addPriorInputWitnesses(frames, disputes, prior.lastOutboundFrameAck?.response);
+  addPriorInputWitnesses(frames, disputes, prior.pendingAccountInput);
+  const localFrameHash = prior.pendingFrame?.stateHash ?? prior.currentFrame.stateHash;
+  if (localFrameHash.length > 0) {
+    addPriorWitness(frames, localFrameHash.toLowerCase(), prior.currentFrameHanko);
+  }
+  if (
+    prior.currentDisputeHash !== undefined
+    && prior.currentDisputeProofBodyHash !== undefined
+    && prior.currentDisputeProofNonce !== undefined
+    && prior.currentDisputeProofProposerIsLeft !== undefined
+  ) {
+    addPriorWitness(disputes, disputeKey({
+      hash: prior.currentDisputeHash,
+      proofBodyHash: prior.currentDisputeProofBodyHash,
+      nonce: prior.currentDisputeProofNonce,
+      proposerIsLeft: prior.currentDisputeProofProposerIsLeft,
+    }), prior.currentDisputeProofHanko);
+  }
+  return { frames, disputes };
+};
+
+const localWitnessResolver = (
+  plan: RscoreAccountLocalWitnessPlan,
+  prior: AccountReplica | null,
+): LocalWitnessResolver => {
+  const fresh = new Map<string, RscoreAccountLocalHashToSign>();
+  for (const entry of plan.freshHashesToSign) {
+    const hash = canonicalRoot(entry.hash, 'LOCAL_WITNESS_PLAN').toLowerCase();
+    if (
+      (entry.type !== 'accountFrame' && entry.type !== 'dispute')
+      || entry.hash !== hash
+      || entry.context.length === 0
+      || entry.context.trim() !== entry.context
+    ) {
+      fail('LOCAL_WITNESS_PLAN_ENTRY_INVALID');
+    }
+    if (fresh.has(hash)) fail(`LOCAL_WITNESS_PLAN_DUPLICATE:${hash}`);
+    fresh.set(hash, entry);
+  }
+  const priorWitnesses = priorLocalWitnesses(prior);
+  const consumed = new Set<string>();
+  const resolve = (
+    type: 'accountFrame' | 'dispute',
+    hash: string,
+    key: string,
+    context: string | undefined,
+  ): HankoString | undefined => {
+    const normalized = hash.toLowerCase();
+    const freshEntry = fresh.get(normalized);
+    if (freshEntry !== undefined) {
+      if (freshEntry.type !== type) fail(`LOCAL_WITNESS_PLAN_TYPE_MISMATCH:${normalized}`);
+      if (context === undefined || freshEntry.context !== context) {
+        fail(`LOCAL_WITNESS_PLAN_CONTEXT_MISMATCH:${normalized}`);
+      }
+      consumed.add(normalized);
+      return undefined;
+    }
+    const reused = type === 'accountFrame'
+      ? priorWitnesses.frames.get(key)
+      : priorWitnesses.disputes.get(key);
+    if (reused === undefined) fail(`LOCAL_WITNESS_PLAN_INCOMPLETE:${type}:${normalized}`);
+    return reused;
+  };
+  return {
+    frame: (hash, context) => resolve('accountFrame', hash, hash.toLowerCase(), context),
+    dispute: (draft, context) => resolve('dispute', draft.hash, disputeKey(draft), context),
+    finish: () => {
+      const unused = [...fresh.keys()].filter(hash => !consumed.has(hash));
+      if (unused.length > 0) fail(`LOCAL_WITNESS_PLAN_UNUSED:${unused.join(',')}`);
+      return plan.freshHashesToSign.map(entry => ({ ...entry }));
+    },
+  };
 };
 
 const disputeHanko = (
-  prior: AccountReplica | null,
+  witnesses: LocalWitnessResolver,
   draft: RscoreDisputeDraft,
-): AccountDisputeHanko => ({
-  hanko: exactLocalProofHanko(prior, draft),
-  hash: draft.hash,
-  proofBodyHash: draft.proofBodyHash,
-  proofNonce: draft.nonce,
-  proposerIsLeft: draft.proposerIsLeft,
-});
+  context: string,
+): AccountDisputeHanko => {
+  const hanko = witnesses.dispute(draft, context);
+  return {
+    ...(hanko === undefined ? {} : { hanko }),
+    hash: draft.hash,
+    proofBodyHash: draft.proofBodyHash,
+    proofNonce: draft.nonce,
+    proposerIsLeft: draft.proposerIsLeft,
+  };
+};
 
 const ackInput = (
   seed: RscoreAccountStateSeed,
-  prior: AccountReplica | null,
+  witnesses: LocalWitnessResolver,
   ack: RscoreOutboundAck,
-): Extract<AccountPeerInput, { kind: 'ack' }> => ({
-  kind: 'ack',
-  fromEntityId: seed.ownerEntityId,
-  toEntityId: seed.accountId,
-  domain: copyAccountStateDomain(seed.domain),
-  disputeConfig: copyAccountDisputeConfig(seed.disputeConfig),
-  watchSeed: seed.watchSeed,
-  ack: {
-    height: ack.height,
-    frameHash: ack.frameHash,
-    frameHanko: ack.frameHanko,
-    ...(ack.dispute ? { disputeHanko: disputeHanko(prior, ack.dispute) } : {}),
-  },
-});
+): Extract<AccountPeerInput, { kind: 'ack' }> => {
+  const prefix = `account:${seed.accountId.slice(-8)}`;
+  const frameHanko = witnesses.frame(ack.frameHash, `${prefix}:ack:${ack.height}`);
+  return {
+    kind: 'ack',
+    fromEntityId: seed.ownerEntityId,
+    toEntityId: seed.accountId,
+    domain: copyAccountStateDomain(seed.domain),
+    disputeConfig: copyAccountDisputeConfig(seed.disputeConfig),
+    watchSeed: seed.watchSeed,
+    ack: {
+      height: ack.height,
+      frameHash: ack.frameHash,
+      ...(frameHanko === undefined ? {} : { frameHanko }),
+      ...(ack.dispute
+        ? { disputeHanko: disputeHanko(witnesses, ack.dispute, `${prefix}:ack-dispute`) }
+        : {}),
+    },
+  };
+};
 
 const pendingInput = (
   seed: RscoreAccountStateSeed,
-  prior: AccountReplica | null,
+  witnesses: LocalWitnessResolver,
   pending: NonNullable<RscoreAccountCheckpointRow['decoded']['consensus']['pending']>,
 ): Extract<AccountPeerInput, { kind: 'frame' | 'frame_ack' }> => {
+  const prefix = `account:${seed.accountId.slice(-8)}`;
+  const frameHanko = witnesses.frame(
+    pending.frame.stateHash,
+    `${prefix}:frame:${pending.frame.height}`,
+  );
   const proposal = {
     frame: cloneIsolatedAccountFrame(pending.frame),
-    frameHanko: pending.hanko,
+    ...(frameHanko === undefined ? {} : { frameHanko }),
     ...(pending.proposalDispute
-      ? { disputeHanko: disputeHanko(prior, pending.proposalDispute) }
+      ? {
+          disputeHanko: disputeHanko(
+            witnesses,
+            pending.proposalDispute,
+            `${prefix}:dispute`,
+          ),
+        }
       : {}),
   };
   const common = {
@@ -196,7 +360,7 @@ const pendingInput = (
   return {
     kind: 'frame_ack',
     ...common,
-    ack: ackInput(seed, prior, pending.bundledAck).ack,
+    ack: ackInput(seed, witnesses, pending.bundledAck).ack,
   };
 };
 
@@ -380,6 +544,40 @@ const clearConsensusFields = (account: AccountReplica): void => {
   delete account.counterpartyDisputeProofProposerIsLeft;
 };
 
+const sameDisputeDraft = (
+  left: RscoreDisputeDraft,
+  right: RscoreDisputeDraft,
+): boolean => disputeKey(left) === disputeKey(right);
+
+const latestOutboundDisputeDraft = (
+  consensus: RscoreAccountCheckpointRow['decoded']['consensus'],
+): RscoreDisputeDraft | undefined => consensus.pending?.proposalDispute
+  ?? consensus.pending?.bundledAck?.dispute
+  ?? consensus.lastOutboundAck?.dispute;
+
+const latestOutboundDisputeContext = (
+  consensus: RscoreAccountCheckpointRow['decoded']['consensus'],
+  accountId: string,
+): string | undefined => {
+  const prefix = `account:${accountId.slice(-8)}`;
+  if (consensus.pending?.proposalDispute) return `${prefix}:dispute`;
+  if (consensus.pending?.bundledAck?.dispute || consensus.lastOutboundAck?.dispute) {
+    return `${prefix}:ack-dispute`;
+  }
+  return undefined;
+};
+
+const assertCurrentDisputeDraftOrder = (
+  consensus: RscoreAccountCheckpointRow['decoded']['consensus'],
+): void => {
+  const outbound = latestOutboundDisputeDraft(consensus);
+  if (outbound !== undefined && (
+    consensus.dispute === undefined || !sameDisputeDraft(outbound, consensus.dispute)
+  )) {
+    fail('LOCAL_DISPUTE_DRAFT_ORDER_MISMATCH');
+  }
+};
+
 /**
  * Rebuild a fresh AccountReplica from one already-decoded Rust post-account
  * row. No TypeScript Account transition or proposal code is called.
@@ -389,7 +587,8 @@ export const materializeRscoreAccountReplica = (
   accountIdValue: string,
   row: RscoreAccountCheckpointRow,
   prior: AccountReplica | null,
-): AccountReplica => {
+  witnessPlan: RscoreAccountLocalWitnessPlan,
+): RscoreAccountMaterialization => {
   const ownerEntityId = canonicalEntityId(binding.sessionOwnerEntityId, 'SESSION_OWNER');
   const accountId = canonicalEntityId(accountIdValue, 'ACCOUNT');
   if (binding.expectedSignerId.length === 0 || binding.expectedSignerId.trim() !== binding.expectedSignerId) {
@@ -401,6 +600,14 @@ export const materializeRscoreAccountReplica = (
   if (seed.ownerEntityId !== ownerEntityId) fail('OWNER_BINDING_MISMATCH');
   if (seed.signerId !== binding.expectedSignerId) fail('SIGNER_BINDING_MISMATCH');
   if (seed.accountId !== accountId) fail('SEED_ACCOUNT_BINDING_MISMATCH');
+  if (
+    consensus.pending !== undefined
+    && consensus.pending.frame.byLeft !== (ownerEntityId === seed.leftEntity)
+  ) {
+    fail('PENDING_AUTHOR_MISMATCH');
+  }
+  const witnesses = localWitnessResolver(witnessPlan, prior);
+  assertCurrentDisputeDraftOrder(consensus);
 
   const state = stateFromSeed(seed, prior);
   const accountStateRoot = computeAccountStateRoot(state, undefined, 'rscoreMaterialize');
@@ -452,10 +659,7 @@ export const materializeRscoreAccountReplica = (
 
   if (consensus.pending) {
     account.pendingFrame = cloneIsolatedAccountFrame(consensus.pending.frame);
-    account.pendingAccountInput = pendingInput(seed, prior, consensus.pending);
-    account.currentFrameHanko = consensus.pending.hanko;
-  } else if (consensus.localCommittedFrameHanko) {
-    account.currentFrameHanko = consensus.localCommittedFrameHanko;
+    account.pendingAccountInput = pendingInput(seed, witnesses, consensus.pending);
   }
   if (consensus.counterpartyFrameHanko) {
     account.counterpartyFrameHanko = consensus.counterpartyFrameHanko;
@@ -464,15 +668,21 @@ export const materializeRscoreAccountReplica = (
     account.lastOutboundFrameAck = {
       height: consensus.lastOutboundAck.height,
       counterpartyEntityId: accountId,
-      response: ackInput(seed, prior, consensus.lastOutboundAck),
+      response: ackInput(seed, witnesses, consensus.lastOutboundAck),
     };
   }
   if (consensus.lastRollbackFrameHash) {
     account.lastRollbackFrameHash = consensus.lastRollbackFrameHash;
   }
   if (consensus.dispute) {
-    const hanko = exactLocalProofHanko(prior, consensus.dispute);
-    account.currentDisputeProofHanko = hanko;
+    const hanko = witnesses.dispute(
+      consensus.dispute,
+      latestOutboundDisputeContext(consensus, accountId),
+    );
+    if (hanko === undefined && latestOutboundDisputeDraft(consensus) === undefined) {
+      fail('LOCAL_DISPUTE_DRAFT_UNREACHABLE');
+    }
+    if (hanko !== undefined) account.currentDisputeProofHanko = hanko;
     account.currentDisputeHash = consensus.dispute.hash;
     account.currentDisputeProofBodyHash = consensus.dispute.proofBodyHash;
     account.currentDisputeProofNonce = consensus.dispute.nonce;
@@ -488,6 +698,19 @@ export const materializeRscoreAccountReplica = (
     }
   }
 
+  const pendingProposal = account.pendingAccountInput
+    ? accountInputProposal(account.pendingAccountInput)
+    : undefined;
+  const outboundAck = account.lastOutboundFrameAck?.response.ack;
+  if (pendingProposal) {
+    if (pendingProposal.frameHanko) account.currentFrameHanko = pendingProposal.frameHanko;
+  } else if (outboundAck) {
+    if (outboundAck.frameHanko) account.currentFrameHanko = outboundAck.frameHanko;
+  } else if (consensus.currentFrame) {
+    account.currentFrameHanko = witnesses.frame(consensus.currentFrame.stateHash)
+      ?? fail('LOCAL_FRAME_DRAFT_UNREACHABLE');
+  }
+
   validateAccountReplica(account, 'rscore.materialize.result');
   const expectedProjection = {
     ...fields,
@@ -501,5 +724,5 @@ export const materializeRscoreAccountReplica = (
   );
   if (projectedLeaf !== row.entityAccountLeaf) fail('PROJECTED_LEAF_MISMATCH');
   if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
-  return account;
+  return { account, hashesToSign: witnesses.finish() };
 };
