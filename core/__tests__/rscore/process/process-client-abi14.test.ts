@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../../account/crypto';
-import { generateLazyEntityId } from '../../entity/factory';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../account/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
 import {
   RSCORE_OP,
   RSCORE_PROCESS_ABI_VERSION,
@@ -14,10 +14,10 @@ import {
   packWireValue,
   unpackWireValue,
   type RscoreWireValue,
-} from '../../rscore/client';
-import { hexToWireBytes, swapMarketPolicyWire, waveInputOp } from '../../rscore/shadow-wire';
-import { decodeWave } from '../../rscore/wave-decode';
-const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
+} from '../../../rscore/client';
+import { hexToWireBytes, swapMarketPolicyWire, waveInputOp } from '../../../rscore/shadow-wire';
+import { decodeWave } from '../../../rscore/wave-decode';
+const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
 
 if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
   throw new Error(`RSCORE_BINARY_MISSING:${BINARY}`);

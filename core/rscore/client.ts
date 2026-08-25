@@ -31,7 +31,7 @@ import {
   type RscoreWireValue,
 } from './process-wire-value';
 import { decodeWave, type Wave } from './wave-decode';
-import { RscoreResponseFrameQueue } from './response-frame-queue';
+import { RscoreResponseFrameQueue } from './process/response-frame-queue';
 export { packWireValue, unpackWireValue } from './process-wire-value';
 export type { RscoreWireValue } from './process-wire-value';
 export type {

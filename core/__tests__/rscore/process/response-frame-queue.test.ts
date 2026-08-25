@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { RscoreResponseFrameQueue } from '../../rscore/response-frame-queue';
+import { RscoreResponseFrameQueue } from '../../../rscore/process/response-frame-queue';
 
 const frame = (body: Buffer): Buffer => {
   const header = Buffer.alloc(4);

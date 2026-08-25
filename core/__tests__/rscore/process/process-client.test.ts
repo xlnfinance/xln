@@ -15,46 +15,46 @@ import {
   waveAdmitOp,
   waveCreateOp,
   waveInputOp,
-} from '../../rscore/shadow-wire';
-import { waveParityDigest } from '../../rscore/wave-decode';
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../../account/crypto';
-import { generateLazyEntityId } from '../../entity/factory';
-import { verifyHankoForHash } from '../../hanko/signing';
-import { buildSingleSignerHanko } from '../../hanko/batch';
-import { safeStringify } from '../../protocol/serialization';
+} from '../../../rscore/shadow-wire';
+import { waveParityDigest } from '../../../rscore/wave-decode';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../account/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { verifyHankoForHash } from '../../../hanko/signing';
+import { buildSingleSignerHanko } from '../../../hanko/batch';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   RSCORE_PROCESS_ABI_VERSION,
   RSCORE_PROTOCOL_FINGERPRINT,
   RscoreProcessClient,
   type RscoreCheckpointToken,
   type RscoreWireValue,
-} from '../../rscore/client';
+} from '../../../rscore/client';
 import {
   loadRscoreCheckpoint,
   prepareRscoreCheckpointStorage,
-} from '../../storage/schema/rscore/checkpoint';
-import type { RscoreDisputeDraft } from '../../rscore/checkpoint/checkpoint-restore-consensus';
-import type { RuntimeDbLike } from '../../storage/types';
-import { computeFrameHash } from '../../account/consensus/frame/hash';
-import { computeAccountStateRoot } from '../../account/commitment/state-root';
-import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
-import { handleDirectPayment } from '../../account/tx/handlers/balance/direct-payment';
-import { handleAddDelta } from '../../account/tx/handlers/balance/add-delta';
+} from '../../../storage/schema/rscore/checkpoint';
+import type { RscoreDisputeDraft } from '../../../rscore/checkpoint/checkpoint-restore-consensus';
+import type { RuntimeDbLike } from '../../../storage/types';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
+import { computeAccountStateRoot } from '../../../account/commitment/state-root';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { handleDirectPayment } from '../../../account/tx/handlers/balance/direct-payment';
+import { handleAddDelta } from '../../../account/tx/handlers/balance/add-delta';
 import {
   accountTransitionView,
   beginAccountTransition,
   publishAccountTransition,
-} from '../../account/state/candidate-overlay';
-import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
-import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
-import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
-import { addr, makeAccount } from '../helpers/cross-j';
-import type { AccountFrame, AccountReplica, AccountTx } from '../../types/account';
+} from '../../../account/state/candidate-overlay';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { addr, makeAccount } from '../../helpers/cross-j';
+import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/account';
 
-const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
 const POISONED_PROCESS = join(
   import.meta.dir,
-  '../fixtures/process/rscore-poisoned-process.ts',
+  '../../fixtures/process/rscore-poisoned-process.ts',
 );
 
 const requiredAt = <T>(values: readonly T[], index: number, field: string): T => {
