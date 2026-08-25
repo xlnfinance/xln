@@ -64,6 +64,7 @@ export const RSCORE_OP = {
   updateAccountShells: 15,
   removeAccounts: 16,
   prepareAccountWave: 17,
+  readAccountEnvelope: 18,
 } as const;
 
 const MESSAGE_KIND_REQUEST = 0;
@@ -609,6 +610,14 @@ export class RscoreProcessClient {
 
   async readCapacityBatch(rows: Array<[Uint8Array, number, number]>): Promise<unknown> {
     return this.request(RSCORE_OP.readCapacityBatch, [rows as RscoreWireValue[]]);
+  }
+
+  /**
+   * One account's committed leaf projection, field by field. A leaf that
+   * disagrees says only that something differs; this says what.
+   */
+  async readAccountEnvelope(accountId: Uint8Array): Promise<unknown> {
+    return this.request(RSCORE_OP.readAccountEnvelope, [accountId]);
   }
 
   async readAccountSummaryPage(

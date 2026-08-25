@@ -30,6 +30,38 @@ use crate::{AccountReplica, AccountTx};
 pub struct OutboundAck {
     pub height: u64,
     pub frame_hash: [u8; 32],
+    /// The recovery proof the acknowledgement carried. The counterparty needs
+    /// it to hold the state it just committed, and the leaf commits that it
+    /// was sent.
+    pub dispute: Option<DisputeDraft>,
+}
+
+/// The counterparty's own recovery proof, as it arrived and was checked.
+///
+/// Parity target: `counterpartyDisputeProofHanko`, `counterpartyDisputeHash`,
+/// `counterpartyDisputeProofBodyHash`, `counterpartyDisputeProofNonce` and
+/// `counterpartyDisputeProofProposerIsLeft` (core/types/account.ts), stored
+/// together by `storeCounterpartyDisputeHanko`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CounterpartyDispute {
+    pub hanko: Vec<u8>,
+    pub proof_body_hash: [u8; 32],
+    pub nonce: u64,
+    pub proposer_is_left: bool,
+}
+
+/// The unsigned recovery proof this account currently stands behind: what a
+/// validator would sign to start a dispute at this state.
+///
+/// Parity target: `currentDisputeHash`, `currentDisputeProofBodyHash`,
+/// `currentDisputeProofNonce` and `currentDisputeProofProposerIsLeft`
+/// (core/types/account.ts), replaced together by `replaceLocalDisputeDraft`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisputeDraft {
+    pub hash: [u8; 32],
+    pub proof_body_hash: [u8; 32],
+    pub nonce: u64,
+    pub proposer_is_left: bool,
 }
 
 /// A frame both sides have committed.
@@ -64,6 +96,10 @@ pub struct PendingFrame {
     /// it carried one. Present means the message was a `frame_ack` rather than
     /// a `frame`, which the account leaf commits.
     pub(crate) bundled_ack: Option<OutboundAck>,
+    /// The recovery proof this proposal travels with, when it does. The
+    /// counterparty needs it to hold the state the frame commits to, and the
+    /// account leaf commits the fact that it was sent.
+    pub(crate) proposal_dispute: Option<DisputeDraft>,
 }
 
 #[derive(Clone)]
@@ -88,6 +124,16 @@ pub struct AccountConsensus {
     /// TypeScript keeps it: the next proposal may carry it, and the leaf
     /// commits it until it does.
     last_outbound_ack: Option<OutboundAck>,
+    /// The recovery proof this account stands behind, and the next dispute
+    /// nonce it will spend. Both are committed in the account leaf, and a
+    /// proposal that moves the state moves them with it.
+    dispute: Option<DisputeDraft>,
+    next_proof_nonce: u64,
+    /// The counterparty's proof, and the digest of their signature over it —
+    /// the leaf commits the digest, not the kilobyte of hex.
+    counterparty_dispute: Option<CounterpartyDispute>,
+    counterparty_dispute_hash: Option<[u8; 32]>,
+    counterparty_dispute_hanko_digest: Option<String>,
 }
 
 impl AccountConsensus {
@@ -102,6 +148,11 @@ impl AccountConsensus {
             counterparty_frame_hanko: None,
             counterparty_frame_hanko_digest: None,
             last_outbound_ack: None,
+            dispute: None,
+            next_proof_nonce: 0,
+            counterparty_dispute: None,
+            counterparty_dispute_hash: None,
+            counterparty_dispute_hanko_digest: None,
         }
     }
 
@@ -218,8 +269,101 @@ impl AccountConsensus {
     ///
     /// Parity target: `account.lastOutboundFrameAck = material.outboundAck`
     /// (core/account/consensus/index.ts).
-    pub(crate) fn note_outbound_ack(&mut self, height: u64, frame_hash: [u8; 32]) {
-        self.last_outbound_ack = Some(OutboundAck { height, frame_hash });
+    pub(crate) fn note_outbound_ack(
+        &mut self,
+        height: u64,
+        frame_hash: [u8; 32],
+        dispute: Option<DisputeDraft>,
+    ) {
+        self.last_outbound_ack = Some(OutboundAck {
+            height,
+            frame_hash,
+            dispute,
+        });
+    }
+
+    /// Keep the counterparty's proof. Its hash is recomputed from the message
+    /// rather than taken from them: a signature is over one exact message, and
+    /// the only one worth committing is the one this side can rebuild.
+    ///
+    /// Parity target: `storeCounterpartyDisputeHanko`
+    /// (core/account/consensus/dispute/hanko.ts), whose `hash` is likewise the
+    /// verifier's own.
+    pub(crate) fn store_counterparty_dispute(&mut self, dispute: CounterpartyDispute) {
+        let identity = self.replica.state().identity();
+        self.counterparty_dispute_hash = Some(crate::dispute::dispute_proof_hash(
+            identity.domain().chain_id(),
+            identity.domain().depository_address().bytes(),
+            identity
+                .entity(crate::state::identity::Side::Left)
+                .as_bytes(),
+            identity
+                .entity(crate::state::identity::Side::Right)
+                .as_bytes(),
+            dispute.nonce,
+            dispute.proposer_is_left,
+            &dispute.proof_body_hash,
+            identity.watch_seed().bytes(),
+        ));
+        self.counterparty_dispute_hanko_digest = Some(hanko_leaf_digest(&dispute.hanko));
+        self.counterparty_dispute = Some(dispute);
+    }
+
+    /// The proof this side sends with the acknowledgement of a frame it just
+    /// committed, and the draft it stands behind afterwards.
+    ///
+    /// Parity target: `buildIncomingFrameAckMaterial` + `storeAckDisputeState`
+    /// (core/account/consensus/index.ts). The proof is built for the side that
+    /// proposed the frame, because that is the side the contract will check it
+    /// against.
+    pub(crate) fn refresh_ack_dispute_draft(
+        &mut self,
+        committed: &AccountReplica,
+        delta_transformer: &[u8; 20],
+        proposer_is_left: bool,
+    ) -> Result<Option<DisputeDraft>, StateError> {
+        let proof_body_hash = crate::dispute::proof_body_hash(committed, delta_transformer)?;
+        let j_nonce = self.replica.state().j_nonce();
+        let changed = self.dispute.as_ref().is_none_or(|draft| {
+            draft.proof_body_hash != proof_body_hash
+                || draft.proposer_is_left != proposer_is_left
+                || draft.nonce <= j_nonce
+        });
+        let nonce = self.next_proof_nonce.max(j_nonce + 1);
+        if !changed {
+            // Nothing new to sign; a proof already certified for exactly this
+            // body travels with the acknowledgement instead.
+            let certified = self
+                .replica
+                .envelope()
+                .has_field("currentDisputeProofHanko");
+            return Ok(self.dispute.clone().filter(|_| certified));
+        }
+        let identity = self.replica.state().identity();
+        let draft = DisputeDraft {
+            hash: crate::dispute::dispute_proof_hash(
+                identity.domain().chain_id(),
+                identity.domain().depository_address().bytes(),
+                identity
+                    .entity(crate::state::identity::Side::Left)
+                    .as_bytes(),
+                identity
+                    .entity(crate::state::identity::Side::Right)
+                    .as_bytes(),
+                nonce,
+                proposer_is_left,
+                &proof_body_hash,
+                identity.watch_seed().bytes(),
+            ),
+            proof_body_hash,
+            nonce,
+            proposer_is_left,
+        };
+        self.dispute = Some(draft.clone());
+        self.replica
+            .forget_envelope_field("currentDisputeProofHanko");
+        self.next_proof_nonce = nonce + 1;
+        Ok(Some(draft))
     }
 
     /// Commit a frame: the candidate becomes live state and the frame becomes
@@ -333,6 +477,86 @@ impl AccountConsensus {
         Ok(count)
     }
 
+    pub const fn dispute(&self) -> Option<&DisputeDraft> {
+        self.dispute.as_ref()
+    }
+
+    pub const fn next_proof_nonce(&self) -> u64 {
+        self.next_proof_nonce
+    }
+
+    /// Stand behind a new recovery proof for the state this frame commits to.
+    ///
+    /// Parity target: `buildDisputeProjection` + `persistDisputeProjection`
+    /// (core/account/consensus/proposal/proof.ts). A body identical to the one
+    /// already signed, at a nonce the jurisdiction has not consumed, needs no
+    /// new proof — and spending a nonce for nothing is what would make the two
+    /// sides disagree about which proof is current.
+    pub(crate) fn refresh_dispute_draft(
+        &mut self,
+        candidate: &AccountReplica,
+        delta_transformer: &[u8; 20],
+    ) -> Result<Option<DisputeDraft>, StateError> {
+        let proof_body_hash = crate::dispute::proof_body_hash(candidate, delta_transformer)?;
+        let j_nonce = candidate.state().j_nonce();
+        let body_changed = self
+            .dispute
+            .as_ref()
+            .is_none_or(|draft| draft.proof_body_hash != proof_body_hash);
+        let nonce_consumed = self
+            .dispute
+            .as_ref()
+            .is_none_or(|draft| draft.nonce <= j_nonce);
+        let proposer_is_left = candidate.owner_side() == crate::state::identity::Side::Left;
+        if !body_changed && !nonce_consumed {
+            // Nothing new to sign, but a proof already certified for exactly
+            // this body still travels with the frame.
+            //
+            // Parity target: the second branch of `resolveDisputeHanko`
+            // (core/account/consensus/proposal/finalize.ts).
+            let certified = self
+                .replica
+                .envelope()
+                .has_field("currentDisputeProofHanko");
+            return Ok(self.dispute.clone().filter(|draft| {
+                certified
+                    && draft.proof_body_hash == proof_body_hash
+                    && draft.proposer_is_left == proposer_is_left
+                    && draft.nonce > j_nonce
+            }));
+        }
+        let nonce = self.next_proof_nonce.max(j_nonce + 1);
+        let identity = candidate.state().identity();
+        self.dispute = Some(DisputeDraft {
+            hash: crate::dispute::dispute_proof_hash(
+                identity.domain().chain_id(),
+                identity.domain().depository_address().bytes(),
+                identity
+                    .entity(crate::state::identity::Side::Left)
+                    .as_bytes(),
+                identity
+                    .entity(crate::state::identity::Side::Right)
+                    .as_bytes(),
+                nonce,
+                proposer_is_left,
+                &proof_body_hash,
+                identity.watch_seed().bytes(),
+            ),
+            proof_body_hash,
+            nonce,
+            proposer_is_left,
+        });
+        // A Hanko certifies one exact hash, so the witness for the proof this
+        // replaces does not carry over.
+        //
+        // Parity target: `replaceLocalDisputeDraft`
+        // (core/account/consensus/dispute/hanko.ts).
+        self.replica
+            .forget_envelope_field("currentDisputeProofHanko");
+        self.next_proof_nonce = nonce + 1;
+        Ok(self.dispute.clone())
+    }
+
     pub(crate) const fn last_rollback_frame_hash(&self) -> Option<&[u8; 32]> {
         self.last_rollback_frame_hash.as_ref()
     }
@@ -351,6 +575,8 @@ pub struct PendingFrameSnapshot {
     /// if any. It decides whether the leaf calls the message a `frame` or a
     /// `frame_ack`, so it is saved with the proposal rather than rederived.
     pub bundled_ack: Option<OutboundAck>,
+    /// The recovery proof the proposal travelled with, if it carried one.
+    pub proposal_dispute: Option<DisputeDraft>,
 }
 
 /// Everything consensus owns for one account, in a form a database can hold.
@@ -372,6 +598,13 @@ pub struct ConsensusSnapshot {
     /// The last acknowledgement this side sent. The leaf commits it until a
     /// proposal carries it, so a restore that dropped it would change the leaf.
     pub last_outbound_ack: Option<OutboundAck>,
+    /// The recovery proof the account stands behind, and the next nonce it
+    /// will spend. A restore that dropped them would sign a proof for a state
+    /// the counterparty never saw, at a nonce the jurisdiction already spent.
+    pub dispute: Option<DisputeDraft>,
+    pub next_proof_nonce: u64,
+    /// The counterparty's proof as it last arrived.
+    pub counterparty_dispute: Option<CounterpartyDispute>,
 }
 
 impl AccountConsensus {
@@ -385,11 +618,15 @@ impl AccountConsensus {
                 state_hash: pending.state_hash,
                 hanko: pending.hanko.clone(),
                 bundled_ack: pending.bundled_ack.clone(),
+                proposal_dispute: pending.proposal_dispute.clone(),
             }),
             rollback_count: self.rollback_count,
             last_rollback_frame_hash: self.last_rollback_frame_hash,
             counterparty_frame_hanko: self.counterparty_frame_hanko.clone(),
             last_outbound_ack: self.last_outbound_ack.clone(),
+            dispute: self.dispute.clone(),
+            next_proof_nonce: self.next_proof_nonce,
+            counterparty_dispute: self.counterparty_dispute.clone(),
         }
     }
 
@@ -413,6 +650,9 @@ impl AccountConsensus {
             last_rollback_frame_hash,
             counterparty_frame_hanko,
             last_outbound_ack,
+            dispute,
+            next_proof_nonce,
+            counterparty_dispute,
         } = snapshot;
         assert_mempool_within_limit(
             mempool.len(),
@@ -433,7 +673,15 @@ impl AccountConsensus {
                 .map(hanko_leaf_digest),
             counterparty_frame_hanko,
             last_outbound_ack,
+            dispute,
+            next_proof_nonce,
+            counterparty_dispute_hash: None,
+            counterparty_dispute_hanko_digest: None,
+            counterparty_dispute: None,
         };
+        if let Some(dispute) = counterparty_dispute {
+            account.store_counterparty_dispute(dispute);
+        }
         let Some(pending) = pending else {
             return Ok(account);
         };
@@ -460,6 +708,7 @@ impl AccountConsensus {
             candidate,
             outputs,
             bundled_ack: pending.bundled_ack,
+            proposal_dispute: pending.proposal_dispute,
         });
         Ok(account)
     }
@@ -524,6 +773,12 @@ impl AccountConsensus {
             .map_err(|error| StateError::Envelope(error.to_string()))
     }
 
+    /// The exact fields this account commits in the Entity's leaf. Read back
+    /// by a runtime that found the leaf disagreeing and needs the field.
+    pub fn projected_leaf_fields(&self) -> Result<Vec<(String, CanonicalValue)>, StateError> {
+        Ok(self.projected_envelope()?.fields().to_vec())
+    }
+
     fn projected_envelope(&self) -> Result<AccountEnvelope, StateError> {
         let mut mempool = Vec::with_capacity(self.mempool.len());
         for tx in &self.mempool {
@@ -569,6 +824,41 @@ impl AccountConsensus {
                 self.outbound_proposal_binding(pending),
             ));
         }
+        if let Some(draft) = &self.dispute {
+            fields.push((
+                "currentDisputeHash".to_string(),
+                CanonicalValue::String(hex_prefixed(&draft.hash)),
+            ));
+            fields.push((
+                "currentDisputeProofBodyHash".to_string(),
+                CanonicalValue::String(hex_prefixed(&draft.proof_body_hash)),
+            ));
+            fields.push((
+                "currentDisputeProofNonce".to_string(),
+                CanonicalValue::Number(draft.nonce as f64),
+            ));
+            fields.push((
+                "currentDisputeProofProposerIsLeft".to_string(),
+                CanonicalValue::Bool(draft.proposer_is_left),
+            ));
+        }
+        fields.push((
+            "proofHeader".to_string(),
+            CanonicalValue::Object(vec![
+                (
+                    "fromEntity".to_string(),
+                    CanonicalValue::String(self.replica.owner().to_string()),
+                ),
+                (
+                    "toEntity".to_string(),
+                    CanonicalValue::String(self.replica.counterparty().to_string()),
+                ),
+                (
+                    "nextProofNonce".to_string(),
+                    CanonicalValue::Number(self.next_proof_nonce as f64),
+                ),
+            ]),
+        ));
         if let Some(ack) = &self.last_outbound_ack {
             fields.push((
                 "lastOutboundFrameAck".to_string(),
@@ -583,6 +873,32 @@ impl AccountConsensus {
                     ),
                     ("response".to_string(), self.ack_binding(ack)),
                 ]),
+            ));
+        }
+        if let (Some(dispute), Some(hash)) =
+            (&self.counterparty_dispute, &self.counterparty_dispute_hash)
+        {
+            fields.push((
+                "counterpartyDisputeHash".to_string(),
+                CanonicalValue::String(hex_prefixed(hash)),
+            ));
+            fields.push((
+                "counterpartyDisputeProofBodyHash".to_string(),
+                CanonicalValue::String(hex_prefixed(&dispute.proof_body_hash)),
+            ));
+            fields.push((
+                "counterpartyDisputeProofNonce".to_string(),
+                CanonicalValue::Number(dispute.nonce as f64),
+            ));
+            fields.push((
+                "counterpartyDisputeProofProposerIsLeft".to_string(),
+                CanonicalValue::Bool(dispute.proposer_is_left),
+            ));
+        }
+        if let Some(digest) = &self.counterparty_dispute_hanko_digest {
+            fields.push((
+                "counterpartyDisputeProofHanko".to_string(),
+                CanonicalValue::String(digest.clone()),
             ));
         }
         if let Some(digest) = &self.counterparty_frame_hanko_digest {
@@ -627,9 +943,8 @@ impl AccountConsensus {
                 "toEntityId".to_string(),
                 CanonicalValue::String(self.replica.counterparty().to_string()),
             ),
-            (
-                "proposal".to_string(),
-                CanonicalValue::Object(vec![
+            ("proposal".to_string(), {
+                let mut proposal = vec![
                     (
                         "height".to_string(),
                         CanonicalValue::Number(pending.frame.height as f64),
@@ -638,8 +953,12 @@ impl AccountConsensus {
                         "frameHash".to_string(),
                         CanonicalValue::String(hex_prefixed(&pending.state_hash)),
                     ),
-                ]),
-            ),
+                ];
+                if let Some(draft) = &pending.proposal_dispute {
+                    proposal.push(("disputeHanko".to_string(), dispute_binding(draft)));
+                }
+                CanonicalValue::Object(proposal)
+            }),
         ];
         if let Some(ack) = &pending.bundled_ack {
             fields.push(("ack".to_string(), ack_fields(ack)));
@@ -668,8 +987,33 @@ impl AccountConsensus {
     }
 }
 
-fn ack_fields(ack: &OutboundAck) -> CanonicalValue {
+/// The recovery proof as the leaf commits it: the four fields that identify
+/// which proof, never the signature over it.
+///
+/// Parity target: `compactDisputeHanko` (core/entity/consensus/state-root.ts).
+fn dispute_binding(draft: &DisputeDraft) -> CanonicalValue {
     CanonicalValue::Object(vec![
+        (
+            "hash".to_string(),
+            CanonicalValue::String(hex_prefixed(&draft.hash)),
+        ),
+        (
+            "proofBodyHash".to_string(),
+            CanonicalValue::String(hex_prefixed(&draft.proof_body_hash)),
+        ),
+        (
+            "proofNonce".to_string(),
+            CanonicalValue::Number(draft.nonce as f64),
+        ),
+        (
+            "proposerIsLeft".to_string(),
+            CanonicalValue::Bool(draft.proposer_is_left),
+        ),
+    ])
+}
+
+fn ack_fields(ack: &OutboundAck) -> CanonicalValue {
+    let mut fields = vec![
         (
             "height".to_string(),
             CanonicalValue::Number(ack.height as f64),
@@ -678,7 +1022,11 @@ fn ack_fields(ack: &OutboundAck) -> CanonicalValue {
             "frameHash".to_string(),
             CanonicalValue::String(hex_prefixed(&ack.frame_hash)),
         ),
-    ])
+    ];
+    if let Some(draft) = &ack.dispute {
+        fields.push(("disputeHanko".to_string(), dispute_binding(draft)));
+    }
+    CanonicalValue::Object(fields)
 }
 
 impl std::fmt::Debug for AccountConsensus {
@@ -702,9 +1050,19 @@ impl std::fmt::Debug for AccountConsensus {
 /// Projection fields the engine derives from its own consensus state. A
 /// carried copy of any of them would let the authority's view of the queue or
 /// the chain head override what this engine actually holds.
-const DERIVED_CONSENSUS_FIELDS: [&str; 8] = [
+const DERIVED_CONSENSUS_FIELDS: [&str; 18] = [
+    "counterpartyDisputeHash",
+    "counterpartyDisputeProofBodyHash",
+    "counterpartyDisputeProofNonce",
+    "counterpartyDisputeProofProposerIsLeft",
+    "counterpartyDisputeProofHanko",
     "pendingAccountInput",
     "lastOutboundFrameAck",
+    "proofHeader",
+    "currentDisputeHash",
+    "currentDisputeProofBodyHash",
+    "currentDisputeProofNonce",
+    "currentDisputeProofProposerIsLeft",
     "counterpartyFrameHanko",
     "currentHeight",
     "rollbackCount",

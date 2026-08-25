@@ -181,6 +181,7 @@ impl ProcessSession {
                 limit,
                 token_ids,
             } => self.summary_page(cursor, limit, &token_ids),
+            Command::ReadAccountEnvelope { account_id } => self.account_envelope(account_id),
         }
     }
 
@@ -208,6 +209,28 @@ impl ProcessSession {
         let totals = engine.totals(token_ids);
         Ok((
             wire_encode::summary_page(engine.revision(), &rows, next_cursor, &totals),
+            false,
+        ))
+    }
+
+    /// Read-only: the committed leaf projection of one account, so a runtime
+    /// whose leaf disagrees can name the field instead of the hash.
+    fn account_envelope(
+        &self,
+        account_id: xln_rscore_batch::AccountId,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_ref()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let account = engine
+            .account(&account_id)
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let fields = account
+            .projected_leaf_fields()
+            .map_err(|error| ProcessError::Envelope(error.to_string()))?;
+        Ok((
+            wire_encode::account_envelope(engine.revision(), &fields),
             false,
         ))
     }

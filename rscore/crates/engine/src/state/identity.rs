@@ -51,6 +51,11 @@ impl EntityId {
 pub struct DepositoryAddress([u8; 20]);
 
 impl DepositoryAddress {
+    /// The raw address, which is what an ABI word carries.
+    pub const fn bytes(&self) -> &[u8; 20] {
+        &self.0
+    }
+
     pub fn parse(value: &str) -> Result<Self, StateError> {
         if value != value.to_ascii_lowercase() {
             return Err(StateError::InvalidDepositoryAddress(value.into()));
@@ -69,6 +74,11 @@ impl DepositoryAddress {
 pub struct WatchSeed([u8; 32]);
 
 impl WatchSeed {
+    /// The raw seed, which is what an ABI word carries.
+    pub const fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
     pub fn parse(value: &str) -> Result<Self, StateError> {
         if value != value.to_ascii_lowercase() {
             return Err(StateError::InvalidWatchSeed(value.into()));

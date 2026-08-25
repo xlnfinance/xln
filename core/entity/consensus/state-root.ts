@@ -315,7 +315,7 @@ const ENTITY_ACCOUNT_LEAF_DOMAIN = ENTITY_ACCOUNT_LEAF_UTF8.encode('xln.entity.a
  * pure overhead (~57 µs per Account per frame before, ~28 µs after the flat
  * digest, ~5 µs now).
  */
-const computeEntityAccountLeafDigest = (
+export const computeEntityAccountLeafDigest = (
   entries: ReadonlyArray<readonly [string, unknown]>,
 ): string => {
   for (const [field] of entries) {

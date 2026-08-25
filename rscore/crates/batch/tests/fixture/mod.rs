@@ -353,6 +353,7 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
                     height: *height,
                     state_hash: *state_hash,
                     hanko: ack_hanko.clone(),
+                    dispute: None,
                 },
             }
         })
@@ -492,6 +493,7 @@ pub fn acks_for(stand: &Stand, applied: &[AccountInputResult]) -> Vec<AccountInp
                     height: *height,
                     state_hash: *state_hash,
                     hanko: ack_hanko.clone(),
+                    dispute: None,
                 },
             }
         })

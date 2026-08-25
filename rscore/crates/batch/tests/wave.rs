@@ -296,6 +296,7 @@ fn input_indices_must_be_unique_and_sequential() {
             height: 1,
             state_hash: [0; 32],
             hanko: Vec::new(),
+            dispute: None,
         },
     };
 

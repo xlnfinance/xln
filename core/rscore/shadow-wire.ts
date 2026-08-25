@@ -372,6 +372,7 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
       outboundAckWire(account.pendingAccountInput?.kind === 'frame_ack'
         ? account.pendingAccountInput.ack
         : undefined),
+      disputeDraftWire(account.pendingAccountInput?.proposal?.disputeHanko),
     ),
     account.mempool.map(tx => {
       const wire = accountTxWire(tx);
@@ -386,6 +387,32 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
       ? null
       : hankoWireBytes(account.counterpartyFrameHanko),
     outboundAckWire(account.lastOutboundFrameAck?.response.ack),
+    // The recovery proof this account already stands behind. The engine
+    // replaces it the next time a frame moves the state, and spends the nonce
+    // after this one when it does.
+    disputeDraftWire(account.currentDisputeHash === undefined
+      || account.currentDisputeProofBodyHash === undefined
+      || account.currentDisputeProofNonce === undefined
+      ? undefined
+      : {
+          hash: account.currentDisputeHash,
+          proofBodyHash: account.currentDisputeProofBodyHash,
+          proofNonce: Number(account.currentDisputeProofNonce),
+          proposerIsLeft: account.currentDisputeProofProposerIsLeft === true,
+        }),
+    account.proofHeader.nextProofNonce,
+    // The counterparty's proof as it last arrived. Their signature travels
+    // with it: the leaf commits its digest.
+    account.counterpartyDisputeProofHanko === undefined
+      || account.counterpartyDisputeProofBodyHash === undefined
+      || account.counterpartyDisputeProofNonce === undefined
+      ? null
+      : [
+          hankoWireBytes(account.counterpartyDisputeProofHanko),
+          hexToWireBytes(account.counterpartyDisputeProofBodyHash, 32, 'SHADOW_PEER_PROOF_BODY_HASH'),
+          Number(account.counterpartyDisputeProofNonce),
+          account.counterpartyDisputeProofProposerIsLeft === true,
+        ],
   ];
 };
 
@@ -395,10 +422,18 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
  * `lastOutboundFrameAck`, and inside a proposal that carried the ack with it.
  */
 const outboundAckWire = (
-  ack: { height: number; frameHash: string } | undefined,
+  ack: {
+    height: number;
+    frameHash: string;
+    disputeHanko?: { hash: string; proofBodyHash: string; proofNonce: number; proposerIsLeft: boolean };
+  } | undefined,
 ): RscoreWireValue => (ack === undefined
   ? null
-  : [ack.height, hexToWireBytes(ack.frameHash, 32, 'SHADOW_OUTBOUND_ACK_HASH')]);
+  : [
+      ack.height,
+      hexToWireBytes(ack.frameHash, 32, 'SHADOW_OUTBOUND_ACK_HASH'),
+      disputeDraftWire(ack.disputeHanko),
+    ]);
 
 /**
  * Our own signature over the proposed frame. It is not a field of the frame:
@@ -413,10 +448,21 @@ const pendingFrameHanko = (account: AccountReplica): string => {
 };
 
 /** A proposed frame, whole: the engine replays it and checks its own hash. */
+/** The four fields that name a recovery proof, never the signature on it. */
+const disputeDraftWire = (
+  draft: { hash: string; proofBodyHash: string; proofNonce: number; proposerIsLeft: boolean } | undefined,
+): RscoreWireValue => (draft === undefined ? null : [
+  hexToWireBytes(draft.hash, 32, 'SHADOW_DISPUTE_DRAFT_HASH'),
+  hexToWireBytes(draft.proofBodyHash, 32, 'SHADOW_DISPUTE_DRAFT_BODY_HASH'),
+  Number(draft.proofNonce),
+  draft.proposerIsLeft === true,
+]);
+
 const frameWire = (
   frame: AccountFrame,
   hanko: string,
   bundledAck: RscoreWireValue,
+  proposalDispute: RscoreWireValue,
 ): RscoreWireValue => [
   frame.height,
   frame.timestamp,
@@ -433,6 +479,7 @@ const frameWire = (
   hexToWireBytes(frame.stateHash, 32, 'SHADOW_FRAME_STATE_HASH'),
   hankoWireBytes(hanko),
   bundledAck,
+  proposalDispute,
 ];
 
 const hankoWireBytes = (value: string): Uint8Array => {
@@ -458,6 +505,11 @@ export const accountSeedWire = (
    * handed each frame and never proposes one.
    */
   consensus: RscoreWireValue | null = null,
+  /**
+   * The jurisdiction's `DeltaTransformer`, which the recovery proof names.
+   * Absent for the mirror, for the same reason: it signs no proof.
+   */
+  deltaTransformer: string | null = null,
 ): RscoreWireValue[] => {
   return [
     hexToWireBytes(counterpartyEntityId, 32, 'SHADOW_ACCOUNT_ID'),
@@ -478,6 +530,9 @@ export const accountSeedWire = (
     carriedSectionsWire(state),
     envelope,
     consensus,
+    deltaTransformer === null
+      ? null
+      : hexToWireBytes(deltaTransformer, 20, 'SHADOW_DELTA_TRANSFORMER'),
   ];
 };
 

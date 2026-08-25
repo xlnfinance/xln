@@ -127,6 +127,7 @@ fn incoming_of(
         prev_frame_hash: frame.prev_frame_hash.clone(),
         account_state_root: frame.account_state_root,
         by_left: frame.by_left,
+        dispute: None,
         state_hash,
         hanko,
     }
@@ -186,6 +187,7 @@ fn a_signed_frame_commits_on_both_sides() {
         1,
         &state_hash,
         &ack_hanko,
+        None,
     )
     .expect("ack");
     assert!(matches!(
@@ -402,6 +404,7 @@ fn a_same_height_collision_resolves_to_the_left_entity() {
         1,
         &left_hash,
         &ack_hanko,
+        None,
     )
     .expect("left commits on ack");
     assert_eq!(left.account.current_height(), 1);
@@ -467,12 +470,16 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
         last_rollback_frame_hash: None,
         counterparty_frame_hanko: None,
         last_outbound_ack: None,
+        dispute: None,
+        next_proof_nonce: 0,
+        counterparty_dispute: None,
     };
     let saved = PendingFrameSnapshot {
         frame: frame.clone(),
         state_hash,
         hanko: hanko.clone(),
         bundled_ack: None,
+        proposal_dispute: None,
     };
 
     let restored = AccountConsensus::restore_from_checkpoint(
@@ -710,6 +717,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         1,
         &first.state_hash,
         &ack_hanko,
+        None,
     )
     .expect("ack");
 
@@ -905,6 +913,7 @@ fn a_rollback_is_settled_by_our_next_acked_frame() {
         1,
         &left_proposed.state_hash,
         &ack_hanko,
+        None,
     )
     .expect("left commits");
 
@@ -938,6 +947,7 @@ fn a_rollback_is_settled_by_our_next_acked_frame() {
         2,
         &second.state_hash,
         &ack_hanko,
+        None,
     )
     .expect("right commits on ack");
     assert_eq!(right.account.rollback_count(), 0);
@@ -984,6 +994,7 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
         1,
         &proposed.state_hash,
         &ack_hanko,
+        None,
     )
     .expect("ack");
 
@@ -1150,6 +1161,7 @@ fn outputs_are_held_until_the_peer_acks() {
         1,
         &lock_frame.state_hash,
         &ack_hanko,
+        None,
     )
     .expect("ack lock");
 
@@ -1209,6 +1221,7 @@ fn outputs_are_held_until_the_peer_acks() {
         2,
         &resolve.state_hash,
         &ack_hanko,
+        None,
     )
     .expect("ack resolve");
     let xln_rscore_engine::AckOutcome::Committed { outputs, .. } = ack else {

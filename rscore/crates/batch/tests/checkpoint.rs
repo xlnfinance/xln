@@ -448,6 +448,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
                     height: *height,
                     state_hash: *state_hash,
                     hanko: ack_hanko.clone(),
+                    dispute: None,
                 },
             }],
         )
@@ -480,6 +481,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
                             height: *height,
                             state_hash: *state_hash,
                             hanko: ack_hanko.clone(),
+                            dispute: None,
                         },
                     }],
                 )

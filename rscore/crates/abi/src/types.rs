@@ -98,6 +98,9 @@ pub enum OpTag {
     RemoveAccounts = 16,
     /// The authoritative account engine: one runtime frame, one call.
     PrepareAccountWave = 17,
+    /// Read one account's committed leaf projection, field by field. A leaf
+    /// that disagrees says only that something differs; this says what.
+    ReadAccountEnvelope = 18,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -123,6 +126,7 @@ impl TryFrom<u64> for OpTag {
             15 => Ok(Self::UpdateAccountShells),
             16 => Ok(Self::RemoveAccounts),
             17 => Ok(Self::PrepareAccountWave),
+            18 => Ok(Self::ReadAccountEnvelope),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

@@ -129,7 +129,9 @@ pub fn account_with_id(id_byte: u8, locks: Vec<AbiValue>) -> AbiValue {
         // No replica shell: this fixture exercises the financial engine, so
         // the leaf stays the payment-profile state root.
         AbiValue::Nil,
-        // No consensus state either: the account starts at genesis.
+        // No consensus state either: the account starts at genesis, and it
+        // builds no recovery proof of its own.
+        AbiValue::Nil,
         AbiValue::Nil,
     ])
 }
@@ -168,7 +170,9 @@ fn account(locks: Vec<AbiValue>) -> AbiValue {
         // No replica shell: this fixture exercises the financial engine, so
         // the leaf stays the payment-profile state root.
         AbiValue::Nil,
-        // No consensus state either: the account starts at genesis.
+        // No consensus state either: the account starts at genesis, and it
+        // builds no recovery proof of its own.
+        AbiValue::Nil,
         AbiValue::Nil,
     ])
 }
@@ -376,6 +380,7 @@ pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
                 AbiValue::Integer(0),
             ]),
         ]),
+        AbiValue::Nil,
         AbiValue::Nil,
         AbiValue::Nil,
     ])

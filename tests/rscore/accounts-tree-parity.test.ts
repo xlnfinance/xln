@@ -156,7 +156,9 @@ const seedWire = (index: number, account: AccountReplica): RscoreWireValue[] => 
   // leaf stays the payment-profile state root and referenceRoot below is the
   // matching TypeScript tree.
   null,
-  // No consensus state: these accounts start at genesis.
+  // No consensus state: these accounts start at genesis, and build no
+  // recovery proof of their own.
+  null,
   null,
 ];
 

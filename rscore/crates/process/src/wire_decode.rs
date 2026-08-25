@@ -55,6 +55,9 @@ pub enum Command {
         limit: usize,
         token_ids: Vec<xln_rscore_engine::TokenId>,
     },
+    ReadAccountEnvelope {
+        account_id: AccountId,
+    },
     UpsertAccounts {
         accounts: Vec<AccountSeed>,
     },
@@ -86,6 +89,7 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
         OpTag::UpsertAccounts => decode_upsert_accounts(payload),
         OpTag::PrepareAccountWave => decode_prepare_wave(payload),
+        OpTag::ReadAccountEnvelope => decode_read_envelope(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
 }
@@ -170,6 +174,14 @@ fn decode_restore(fields: &[AbiValue]) -> Result<Command, ProcessError> {
             .iter()
             .map(decode_seed_account)
             .collect::<Result<_, _>>()?,
+    })
+}
+
+/// Which account's committed projection to read back.
+fn decode_read_envelope(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "readAccountEnvelope")?;
+    Ok(Command::ReadAccountEnvelope {
+        account_id: AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?),
     })
 }
 
@@ -304,7 +316,7 @@ fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputK
     let tag = fields.first().ok_or(ProcessError::Expected("inputTag"))?;
     match integer(tag)? {
         0 => {
-            let fields = exact(fields, 10, "incomingFrame")?;
+            let fields = exact(fields, 11, "incomingFrame")?;
             Ok(xln_rscore_batch::AccountInputKind::Frame(Box::new(
                 xln_rscore_engine::IncomingFrame {
                     height: js_number(&fields[1], "height")?,
@@ -319,15 +331,17 @@ fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputK
                     by_left: boolean(&fields[7], "byLeft")?,
                     state_hash: fixed_bytes(&fields[8], "stateHash")?,
                     hanko: bytes(&fields[9], "hanko")?.to_vec(),
+                    dispute: decode_counterparty_dispute(&fields[10])?,
                 },
             )))
         }
         1 => {
-            let fields = exact(fields, 4, "incomingAck")?;
+            let fields = exact(fields, 5, "incomingAck")?;
             Ok(xln_rscore_batch::AccountInputKind::Ack {
                 height: js_number(&fields[1], "height")?,
                 state_hash: fixed_bytes(&fields[2], "stateHash")?,
                 hanko: bytes(&fields[3], "hanko")?.to_vec(),
+                dispute: decode_counterparty_dispute(&fields[4])?,
             })
         }
         value => Err(ProcessError::Tag {
@@ -400,7 +414,7 @@ fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
-    let fields = exact(tuple(value)?, 14, "accountSeed")?;
+    let fields = exact(tuple(value)?, 15, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;
     // The account id IS the counterparty entity id: one engine process serves
@@ -458,6 +472,12 @@ fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     if let Some(envelope) = crate::canonical::envelope(&fields[12])? {
         replica.set_envelope(envelope);
     }
+    // Present when this session builds its own recovery proofs; a mirror seed
+    // leaves it out, because it is told what each frame was and never signs a
+    // proof of its own.
+    if !matches!(&fields[14], AbiValue::Nil) {
+        replica.set_delta_transformer(fixed_bytes(&fields[14], "deltaTransformer")?);
+    }
     Ok(AccountSeed {
         account_id,
         replica,
@@ -476,7 +496,7 @@ fn decode_consensus_snapshot(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let fields = exact(tuple(value)?, 7, "accountConsensus")?;
+    let fields = exact(tuple(value)?, 10, "accountConsensus")?;
     let current = match &fields[0] {
         AbiValue::Nil => None,
         value => {
@@ -511,12 +531,51 @@ fn decode_consensus_snapshot(
             value => Some(bytes(value, "counterpartyFrameHanko")?.to_vec()),
         },
         last_outbound_ack: decode_outbound_ack(&fields[6], "lastOutboundAck")?,
+        dispute: decode_dispute_draft(&fields[7])?,
+        next_proof_nonce: js_number(&fields[8], "nextProofNonce")?,
+        counterparty_dispute: decode_counterparty_dispute(&fields[9])?,
     }))
 }
 
 /// The proposal this side signed and has not been acked for, whole. The engine
 /// replays it against the committed replica and refuses a snapshot whose frame
 /// does not reproduce its own hash.
+/// The recovery proof this account already stands behind, or `null` for an
+/// account that has never proposed. The engine replaces it when a frame moves
+/// the state, and spends the next nonce when it does.
+/// The counterparty's proof as their message carried it: their signature, and
+/// the three fields that say which proof it is. The hash is not on the wire —
+/// this side rebuilds it, because a signature is over one exact message.
+fn decode_counterparty_dispute(
+    value: &AbiValue,
+) -> Result<Option<xln_rscore_engine::CounterpartyDispute>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let row = exact(tuple(value)?, 4, "counterpartyDispute")?;
+    Ok(Some(xln_rscore_engine::CounterpartyDispute {
+        hanko: bytes(&row[0], "counterpartyDisputeHanko")?.to_vec(),
+        proof_body_hash: fixed_bytes(&row[1], "counterpartyDisputeProofBodyHash")?,
+        nonce: js_number(&row[2], "counterpartyDisputeProofNonce")?,
+        proposer_is_left: boolean(&row[3], "counterpartyDisputeProposerIsLeft")?,
+    }))
+}
+
+fn decode_dispute_draft(
+    value: &AbiValue,
+) -> Result<Option<xln_rscore_engine::DisputeDraft>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let row = exact(tuple(value)?, 4, "disputeDraft")?;
+    Ok(Some(xln_rscore_engine::DisputeDraft {
+        hash: fixed_bytes(&row[0], "disputeHash")?,
+        proof_body_hash: fixed_bytes(&row[1], "disputeProofBodyHash")?,
+        nonce: js_number(&row[2], "disputeProofNonce")?,
+        proposer_is_left: boolean(&row[3], "disputeProposerIsLeft")?,
+    }))
+}
+
 fn decode_outbound_ack(
     value: &AbiValue,
     field: &'static str,
@@ -524,17 +583,18 @@ fn decode_outbound_ack(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let row = exact(tuple(value)?, 2, field)?;
+    let row = exact(tuple(value)?, 3, field)?;
     Ok(Some(xln_rscore_engine::OutboundAck {
         height: js_number(&row[0], "ackHeight")?,
         frame_hash: fixed_bytes(&row[1], "ackFrameHash")?,
+        dispute: decode_dispute_draft(&row[2])?,
     }))
 }
 
 fn decode_pending_frame(
     value: &AbiValue,
 ) -> Result<xln_rscore_engine::PendingFrameSnapshot, ProcessError> {
-    let fields = exact(tuple(value)?, 11, "pendingFrame")?;
+    let fields = exact(tuple(value)?, 12, "pendingFrame")?;
     Ok(xln_rscore_engine::PendingFrameSnapshot {
         frame: xln_rscore_engine::AccountFrame {
             height: js_number(&fields[0], "pendingHeight")?,
@@ -555,6 +615,7 @@ fn decode_pending_frame(
         state_hash: fixed_bytes(&fields[8], "pendingStateHash")?,
         hanko: bytes(&fields[9], "pendingHanko")?.to_vec(),
         bundled_ack: decode_outbound_ack(&fields[10], "pendingBundledAck")?,
+        proposal_dispute: decode_dispute_draft(&fields[11])?,
     })
 }
 

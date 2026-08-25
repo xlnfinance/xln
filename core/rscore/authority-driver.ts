@@ -25,7 +25,11 @@
 import { createStructuredLogger } from '../support/logger';
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { computeEntityAccountValueHash, projectEntityAccountLeaf } from '../entity/consensus/state-root';
+import {
+  computeEntityAccountLeafDigest,
+  computeEntityAccountValueHash,
+  projectEntityAccountLeaf,
+} from '../entity/consensus/state-root';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import { findAccountByCounterparty } from '../account/state/account-lookup';
@@ -36,6 +40,7 @@ import {
   accountSeedWire,
   swapMarketPolicyWire,
 } from './shadow-wire';
+import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
 import { decodeWave, type Wave } from './wave-decode';
 import type { RscoreProcessClient } from './client';
 import type { AccountReplica } from '../types/account';
@@ -167,6 +172,7 @@ const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<S
       account.state,
       accountEnvelopeWire(account),
       accountConsensusWire(account),
+      requireAccountDeltaTransformerAddress(env.state, account.state),
     ));
   await client.restore(0, seeds);
   report.accountsSeeded += seeds.length;
@@ -222,6 +228,7 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       account.state,
       accountEnvelopeWire(account),
       accountConsensusWire(account),
+      requireAccountDeltaTransformerAddress(env.state, account.state),
     )));
     for (const [counterpartyId, account] of fresh) {
       existing.seeded.add(counterpartyId);
@@ -275,7 +282,7 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
     report.waves += 1;
     report.framesProposed += decoded.proposals.filter(row => row.frame !== null).length;
     report.inputsApplied += decoded.applied.length;
-    compareWithTypescript(env, ownerEntityId, decoded, session);
+    await compareWithTypescript(env, ownerEntityId, decoded, session);
     candidates.push({ session, token, result: decoded });
   }
 };
@@ -331,6 +338,34 @@ const movedCarriedFields = (
     .sort();
 };
 
+/**
+ * Which single field, reverted to what the engine was seeded with, would make
+ * TypeScript's leaf equal the engine's. It names the rule the engine got
+ * wrong; nothing matching means the engine computed a value neither side has
+ * seen, and the field is one it derives itself.
+ */
+const fieldExplainingLeaf = (
+  session: Session | undefined,
+  accountId: string,
+  account: AccountReplica,
+  rustLeaf: string,
+): string => {
+  const seeded = session?.seededProjection.get(accountId);
+  if (seeded === undefined) return 'unseeded';
+  const now = projectEntityAccountLeaf(account);
+  const digest = (projection: Record<string, unknown>): string =>
+    computeEntityAccountLeafDigest(Object.entries(projection)
+      .filter(([, value]) => value !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)))
+      .toLowerCase();
+  const target = rustLeaf.toLowerCase();
+  if (digest({ ...now, ...seeded }) === target) return 'allSeeded';
+  for (const field of movedCarriedFields(session, accountId, account)) {
+    if (digest({ ...now, [field]: seeded[field] }) === target) return field;
+  }
+  return 'none';
+};
+
 const safeStringify = (value: unknown): string => {
   try {
     return JSON.stringify(value, (_key, entry) =>
@@ -340,12 +375,75 @@ const safeStringify = (value: unknown): string => {
   }
 };
 
-const compareWithTypescript = (
+/**
+ * The engine's own leaf projection, field by field, as it holds it. Read only
+ * when a leaf already disagrees: it turns "these two hashes differ" into the
+ * name of the field and the two values.
+ */
+const engineLeafFields = async (
+  session: Session,
+  accountId: string,
+): Promise<Record<string, unknown>> => {
+  const reply = (await session.client.readAccountEnvelope(
+    Uint8Array.from(Buffer.from(accountId.slice(2), 'hex')),
+  )) as unknown[];
+  const rows = (reply[1] ?? []) as unknown[];
+  const fields: Record<string, unknown> = {};
+  for (const row of rows) {
+    const pair = row as unknown[];
+    fields[String(pair[0])] = canonicalFromWire(pair[1]);
+  }
+  return fields;
+};
+
+/** The nine-variant canonical model, back from the wire. */
+const canonicalFromWire = (value: unknown): unknown => {
+  if (!Array.isArray(value)) return value;
+  const [tag, payload] = value as [number, unknown];
+  switch (tag) {
+    case 0: return null;
+    case 1: return payload === 1 || payload === true;
+    case 2: return Number(payload);
+    case 3: return BigInt(String(payload));
+    case 4: return String(payload);
+    case 5: return (payload as unknown[]).map(canonicalFromWire);
+    case 6: return new Map((payload as unknown[]).map(entry => {
+      const pair = entry as unknown[];
+      return [canonicalFromWire(pair[0]), canonicalFromWire(pair[1])] as const;
+    }));
+    case 7: return new Set((payload as unknown[]).map(canonicalFromWire));
+    case 8: return Object.fromEntries((payload as unknown[]).map(entry => {
+      const pair = entry as unknown[];
+      return [String(pair[0]), canonicalFromWire(pair[1])] as const;
+    }));
+    default: return value;
+  }
+};
+
+/** Every field where the two projections disagree, with both values. */
+const projectionDiff = (
+  typescript: Record<string, unknown>,
+  engine: Record<string, unknown>,
+): Record<string, { typescript: string; rust: string }> => {
+  const names = new Set([...Object.keys(typescript), ...Object.keys(engine)]);
+  const diff: Record<string, { typescript: string; rust: string }> = {};
+  for (const name of [...names].sort()) {
+    // The engine derives these two from what it holds, so it never carries
+    // them and their absence is not a disagreement.
+    if (name === 'accountStateRoot' || name === 'mempoolRoot') continue;
+    const left = safeStringify(typescript[name]);
+    const right = safeStringify(engine[name]);
+    if (left !== right) diff[name] = { typescript: left, rust: right };
+  }
+  return diff;
+};
+
+const compareWithTypescript = async (
   env: RuntimeReplica,
   ownerEntityId: string,
   wave: Wave,
   session?: Session,
-): void => {
+): Promise<void> => {
   const accounts = accountsOf(env, ownerEntityId);
   const proposed = new Map(wave.proposals
     .filter(row => row.frame !== null)
@@ -359,7 +457,11 @@ const compareWithTypescript = (
     }
     const expected = computeEntityAccountValueHash(account).toLowerCase();
     if (expected !== leaf.entityAccountLeaf.toLowerCase()) {
+      const fields = session === undefined
+        ? {}
+        : projectionDiff(projectEntityAccountLeaf(account), await engineLeafFields(session, leaf.accountId));
       halt('LEAF_MISMATCH', {
+        fields,
         account: leaf.accountId,
         typescript: expected,
         rust: leaf.entityAccountLeaf,
@@ -383,6 +485,7 @@ const compareWithTypescript = (
         },
         currentFrame: account.currentFrame?.height ?? null,
         movedSinceSeed: movedCarriedFields(session, leaf.accountId, account),
+        staleField: fieldExplainingLeaf(session, leaf.accountId, account, leaf.entityAccountLeaf),
         pendingAccountInput: account.pendingAccountInput !== undefined,
         lastOutboundFrameAck: account.lastOutboundFrameAck?.height ?? null,
       });

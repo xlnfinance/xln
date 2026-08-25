@@ -276,6 +276,7 @@ fn main() {
                     height: *height,
                     state_hash: *state_hash,
                     hanko: ack_hanko.clone(),
+                    dispute: None,
                 },
             });
         }

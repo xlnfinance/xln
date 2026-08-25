@@ -580,6 +580,9 @@ pub struct AccountReplica {
     /// The replica shell the Entity commits around this state: mempool, frame
     /// bindings, hankos, acks. Carried verbatim until the engine derives it.
     envelope: crate::AccountEnvelope,
+    /// The jurisdiction's `DeltaTransformer`, when this session builds its own
+    /// recovery proofs.
+    delta_transformer: Option<[u8; 20]>,
 }
 
 impl AccountReplica {
@@ -593,6 +596,7 @@ impl AccountReplica {
             owner_side,
             state,
             envelope: crate::AccountEnvelope::default(),
+            delta_transformer: None,
         })
     }
 
@@ -600,6 +604,23 @@ impl AccountReplica {
     /// transition of the frame that produced it.
     pub fn set_envelope(&mut self, envelope: crate::AccountEnvelope) {
         self.envelope = envelope;
+    }
+
+    /// Stop carrying one shell field, because the engine now owns what it
+    /// said.
+    pub fn forget_envelope_field(&mut self, name: &str) {
+        self.envelope.forget_field(name);
+    }
+
+    /// The `DeltaTransformer` this account's jurisdiction runs, which the
+    /// recovery proof names. Absent for a mirror session, which is told what
+    /// each frame was and never builds a proof of its own.
+    pub const fn delta_transformer(&self) -> Option<&[u8; 20]> {
+        self.delta_transformer.as_ref()
+    }
+
+    pub const fn set_delta_transformer(&mut self, address: [u8; 20]) {
+        self.delta_transformer = Some(address);
     }
 
     pub const fn envelope(&self) -> &crate::AccountEnvelope {

@@ -104,6 +104,28 @@ pub fn capacity_rows(
     ])
 }
 
+/// One account's committed leaf projection: the field names and their
+/// canonical values, in the order the engine holds them.
+pub fn account_envelope(
+    revision: u64,
+    fields: &[(String, xln_rscore_engine::CanonicalValue)],
+) -> BodyTuple {
+    body(vec![
+        integer(revision),
+        tuple(
+            fields
+                .iter()
+                .map(|(name, value)| {
+                    tuple(vec![
+                        AbiValue::Text(name.clone()),
+                        crate::canonical::canonical_wire(value),
+                    ])
+                })
+                .collect(),
+        ),
+    ])
+}
+
 pub fn summary_page(
     revision: u64,
     rows: &[xln_rscore_batch::AccountSummaryRow],

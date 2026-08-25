@@ -10,6 +10,7 @@
 mod commitment;
 mod consensus;
 mod crypto;
+mod dispute;
 mod error;
 mod input;
 mod state;
@@ -30,14 +31,15 @@ pub use consensus::proposal::propose::{
     Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
 };
 pub use consensus::replica::{
-    AccountConsensus, CommittedFrame, ConsensusSnapshot, OutboundAck, PendingFrame,
-    PendingFrameSnapshot,
+    AccountConsensus, CommittedFrame, ConsensusSnapshot, CounterpartyDispute, DisputeDraft,
+    OutboundAck, PendingFrame, PendingFrameSnapshot,
 };
 pub use consensus::signing::{SigningIdentity, verify_frame_hanko};
 pub use crypto::{
     address_of_private_key, derive_signer_address, derive_signer_key, normalize_recovery_byte,
     recover_signer_address, sign_digest,
 };
+pub use dispute::{DisputeProof, build_dispute_proof, dispute_proof_hash, proof_body_hash};
 pub use input::mempool::ACCOUNT_MEMPOOL_SIZE;
 pub use state::account_replica_shell::{AccountEnvelope, EnvelopeError};
 pub use state::delta::{Delta, DeltaPerspective, TokenId};

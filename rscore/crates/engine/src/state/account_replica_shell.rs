@@ -104,6 +104,18 @@ impl AccountEnvelope {
 
     /// The carried projection fields, so a caller that owns part of the
     /// projection can replace exactly those.
+    /// Drop one carried field. Used when the engine takes ownership of a
+    /// field it used to carry — a certificate over a proof that no longer
+    /// stands, for instance.
+    pub fn forget_field(&mut self, name: &str) {
+        self.fields.retain(|(field, _)| field != name);
+    }
+
+    /// Whether the shell still carries a field the engine does not own.
+    pub fn has_field(&self, name: &str) -> bool {
+        self.fields.iter().any(|(field, _)| field == name)
+    }
+
     pub fn fields(&self) -> &[(String, CanonicalValue)] {
         &self.fields
     }

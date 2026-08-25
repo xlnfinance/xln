@@ -25,14 +25,26 @@ import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../t
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
+/**
+ * The counterparty's recovery proof as their message carried it. The hash they
+ * claim is deliberately absent: the receiving side rebuilds it from the rest,
+ * because a signature is over one exact message.
+ */
+export type PeerDispute = {
+  hanko: string;
+  proofBodyHash: string;
+  proofNonce: number;
+  proposerIsLeft: boolean;
+};
+
 export type RawAccountInputKind = 'enqueue' | 'frame' | 'ack' | 'frame_ack' | 'dispute'
   | 'external_finality' | 'other';
 
 /** What arrived for one account, as the engine would be handed it. */
 type RecordedPayload =
   | { kind: 'admit'; txs: readonly AccountTx[] }
-  | { kind: 'frame'; frame: AccountFrame; hanko: string }
-  | { kind: 'ack'; height: number; frameHash: string; hanko: string }
+  | { kind: 'frame'; frame: AccountFrame; hanko: string; dispute?: PeerDispute }
+  | { kind: 'ack'; height: number; frameHash: string; hanko: string; dispute?: PeerDispute }
   /** Inputs no wave can carry: they are counted, and the frame is not driven. */
   | { kind: 'unsupported'; reason: string };
 
@@ -178,24 +190,67 @@ const payloadsOf = (input: AccountInput): RecordedPayload[] => {
   }
   const payloads: RecordedPayload[] = [];
   const record = input as unknown as Record<string, unknown>;
-  const ack = record['ack'] as { height?: number; frameHash?: string; frameHanko?: string } | undefined;
+  const ack = record['ack'] as {
+    height?: number;
+    frameHash?: string;
+    frameHanko?: string;
+    disputeHanko?: unknown;
+  } | undefined;
   if (ack !== undefined) {
-    if (typeof ack.height !== 'number' || typeof ack.frameHash !== 'string' || typeof ack.frameHanko !== 'string') {
+    const dispute = peerDispute(ack.disputeHanko);
+    if (typeof ack.height !== 'number' || typeof ack.frameHash !== 'string'
+      || typeof ack.frameHanko !== 'string' || dispute === 'invalid') {
       payloads.push({ kind: 'unsupported', reason: 'ackIncomplete' });
     } else {
-      payloads.push({ kind: 'ack', height: ack.height, frameHash: ack.frameHash, hanko: ack.frameHanko });
+      payloads.push({
+        kind: 'ack',
+        height: ack.height,
+        frameHash: ack.frameHash,
+        hanko: ack.frameHanko,
+        ...(dispute === undefined ? {} : { dispute }),
+      });
     }
   }
-  const proposal = record['proposal'] as { frame?: AccountFrame; frameHanko?: string } | undefined;
+  const proposal = record['proposal'] as {
+    frame?: AccountFrame;
+    frameHanko?: string;
+    disputeHanko?: unknown;
+  } | undefined;
   if (proposal !== undefined) {
-    if (!proposal.frame || typeof proposal.frameHanko !== 'string') {
+    const dispute = peerDispute(proposal.disputeHanko);
+    if (!proposal.frame || typeof proposal.frameHanko !== 'string' || dispute === 'invalid') {
       payloads.push({ kind: 'unsupported', reason: 'proposalIncomplete' });
     } else {
-      payloads.push({ kind: 'frame', frame: proposal.frame, hanko: proposal.frameHanko });
+      payloads.push({
+        kind: 'frame',
+        frame: proposal.frame,
+        hanko: proposal.frameHanko,
+        ...(dispute === undefined ? {} : { dispute }),
+      });
     }
   }
   if (payloads.length === 0) payloads.push({ kind: 'unsupported', reason: input.kind });
   return payloads;
+};
+
+/**
+ * The proof attached to a peer's message, refused rather than half-read: an
+ * account that stored three of its four fields would commit a proof the
+ * counterparty never sent.
+ */
+const peerDispute = (value: unknown): PeerDispute | undefined | 'invalid' => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object') return 'invalid';
+  const row = value as Record<string, unknown>;
+  const hanko = row['hanko'];
+  const proofBodyHash = row['proofBodyHash'];
+  const proofNonce = row['proofNonce'];
+  const proposerIsLeft = row['proposerIsLeft'];
+  if (typeof hanko !== 'string' || typeof proofBodyHash !== 'string'
+    || typeof proofNonce !== 'number' || typeof proposerIsLeft !== 'boolean') {
+    return 'invalid';
+  }
+  return { hanko, proofBodyHash, proofNonce, proposerIsLeft };
 };
 
 /**
@@ -447,7 +502,13 @@ const peerInputRow = (
       inputIndex,
       accountId,
       from,
-      [1, payload.height, hexToWireBytes(payload.frameHash, 32, 'AUTHORITY_ACK_STATE_HASH'), hankoBytes(payload.hanko)],
+      [
+        1,
+        payload.height,
+        hexToWireBytes(payload.frameHash, 32, 'AUTHORITY_ACK_STATE_HASH'),
+        hankoBytes(payload.hanko),
+        peerDisputeWire(payload.dispute),
+      ],
     ];
   }
   const frame = payload.frame;
@@ -472,9 +533,19 @@ const peerInputRow = (
       frame.byLeft,
       hexToWireBytes(frame.stateHash ?? '', 32, 'AUTHORITY_FRAME_STATE_HASH'),
       hankoBytes(payload.hanko),
+      peerDisputeWire(payload.dispute),
     ],
   ];
 };
+
+/** Their signature, and the three fields that say which proof it is. */
+const peerDisputeWire = (dispute: PeerDispute | undefined): RscoreWireValue =>
+  (dispute === undefined ? null : [
+    hankoBytes(dispute.hanko),
+    hexToWireBytes(dispute.proofBodyHash, 32, 'AUTHORITY_PEER_PROOF_BODY_HASH'),
+    dispute.proofNonce,
+    dispute.proposerIsLeft,
+  ]);
 
 /**
  * A Hanko as bytes, refusing anything that is not hex. `parseInt` reads

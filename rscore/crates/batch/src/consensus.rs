@@ -31,6 +31,9 @@ pub enum AccountInputKind {
         height: u64,
         state_hash: [u8; 32],
         hanko: Vec<u8>,
+        /// The counterparty's recovery proof for the state their ack commits,
+        /// when their message carried one.
+        dispute: Option<xln_rscore_engine::CounterpartyDispute>,
     },
 }
 
@@ -158,6 +161,8 @@ pub struct ProposedRow {
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
+    /// The recovery proof the proposal travels with, when it carries one.
+    pub dispute: Option<xln_rscore_engine::DisputeDraft>,
 }
 
 impl ProposalRow {
@@ -176,6 +181,18 @@ impl ProposalRow {
                 by_left: proposed.frame.by_left,
                 state_hash: proposed.state_hash,
                 hanko: proposed.hanko.clone(),
+                // The proposer's signature over their proof is not modelled
+                // here: this path hands one engine's own proposal to another
+                // inside a test, where both sides build the same proof from
+                // the same state.
+                dispute: proposed.dispute.as_ref().map(|draft| {
+                    xln_rscore_engine::CounterpartyDispute {
+                        hanko: Vec::new(),
+                        proof_body_hash: draft.proof_body_hash,
+                        nonce: draft.nonce,
+                        proposer_is_left: draft.proposer_is_left,
+                    }
+                }),
             })
     }
 }
@@ -453,6 +470,7 @@ impl StatefulConsensusEngine {
                                 frame: proposed.frame,
                                 state_hash: proposed.state_hash,
                                 hanko: proposed.hanko,
+                                dispute: proposed.dispute,
                             }),
                             dropped: dropped_rows(account_id, &proposed.dropped)?,
                         },
@@ -1194,7 +1212,15 @@ fn apply_one(
             height,
             state_hash,
             hanko,
-        } => match apply_incoming_ack(account, from_entity_id, height, &state_hash, &hanko) {
+            dispute,
+        } => match apply_incoming_ack(
+            account,
+            from_entity_id,
+            height,
+            &state_hash,
+            &hanko,
+            dispute,
+        ) {
             Ok(outcome) => AccountInputVerdict::Ack(outcome),
             Err(error) => AccountInputVerdict::Failed(error.to_string()),
         },

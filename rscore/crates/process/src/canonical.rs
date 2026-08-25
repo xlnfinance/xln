@@ -112,3 +112,64 @@ fn list(value: &AbiValue, depth: usize) -> Result<Vec<CanonicalValue>, ProcessEr
         .map(|entry| decode(entry, depth + 1))
         .collect()
 }
+
+fn wire_tuple(fields: Vec<AbiValue>) -> AbiValue {
+    AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields))
+}
+
+/// The same nine-variant model back on the wire, so a runtime can read the
+/// projection the engine committed and name the field that disagrees instead
+/// of comparing two opaque leaves.
+pub fn canonical_wire(value: &CanonicalValue) -> AbiValue {
+    match value {
+        CanonicalValue::Null => wire_tuple(vec![AbiValue::Integer(0)]),
+        CanonicalValue::Bool(flag) => wire_tuple(vec![
+            AbiValue::Integer(1),
+            AbiValue::Integer(i128::from(*flag)),
+        ]),
+        CanonicalValue::Number(number) => wire_tuple(vec![
+            AbiValue::Integer(2),
+            AbiValue::Text({
+                let mut buffer = ryu_js::Buffer::new();
+                buffer.format(*number).to_string()
+            }),
+        ]),
+        CanonicalValue::BigInt(value) => wire_tuple(vec![
+            AbiValue::Integer(3),
+            AbiValue::Text(value.to_string()),
+        ]),
+        CanonicalValue::String(text) => {
+            wire_tuple(vec![AbiValue::Integer(4), AbiValue::Text(text.clone())])
+        }
+        CanonicalValue::Array(items) => wire_tuple(vec![
+            AbiValue::Integer(5),
+            wire_tuple(items.iter().map(canonical_wire).collect()),
+        ]),
+        CanonicalValue::Map(entries) => wire_tuple(vec![
+            AbiValue::Integer(6),
+            wire_tuple(
+                entries
+                    .iter()
+                    .map(|(key, value)| {
+                        wire_tuple(vec![canonical_wire(key), canonical_wire(value)])
+                    })
+                    .collect(),
+            ),
+        ]),
+        CanonicalValue::Set(items) => wire_tuple(vec![
+            AbiValue::Integer(7),
+            wire_tuple(items.iter().map(canonical_wire).collect()),
+        ]),
+        CanonicalValue::Object(entries) => wire_tuple(vec![
+            AbiValue::Integer(8),
+            wire_tuple(
+                entries
+                    .iter()
+                    .map(|(key, value)| {
+                        wire_tuple(vec![AbiValue::Text(key.clone()), canonical_wire(value)])
+                    })
+                    .collect(),
+            ),
+        ]),
+    }
+}

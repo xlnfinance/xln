@@ -71,6 +71,8 @@ pub struct ProposedFrame {
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
     pub dropped: Vec<DroppedTx>,
+    /// The recovery proof this proposal travels with, when it carries one.
+    pub dispute: Option<crate::consensus::replica::DisputeDraft>,
 }
 
 #[derive(Debug)]
@@ -234,6 +236,17 @@ pub fn propose_account_frame(
         return Ok(ProposalOutcome::Idle { dropped });
     }
     let account_state_root = candidate.refresh_account_state_root()?;
+    // The recovery proof for the state this frame commits to. Not part of the
+    // frame — the counterparty checks the state root, not our proof — but the
+    // Entity commits it in the account leaf, so a frame that moved the state
+    // and left last frame's proof standing is a leaf nobody else computes.
+    //
+    // A mirror session carries no transformer address and builds no proof: it
+    // is handed each frame and told what it was.
+    let proposal_dispute = match candidate.delta_transformer().copied() {
+        None => None,
+        Some(transformer) => account.refresh_dispute_draft(&candidate, &transformer)?,
+    };
     let frame = AccountFrame {
         height,
         timestamp,
@@ -249,6 +262,7 @@ pub fn propose_account_frame(
     account.set_pending(PendingFrame {
         // `set_pending` decides whether this proposal carries the ack we owe.
         bundled_ack: None,
+        proposal_dispute: proposal_dispute.clone(),
         frame: frame.clone(),
         state_hash,
         hanko: hanko.clone(),
@@ -260,6 +274,7 @@ pub fn propose_account_frame(
         state_hash,
         hanko,
         dropped,
+        dispute: proposal_dispute,
     })))
 }
 

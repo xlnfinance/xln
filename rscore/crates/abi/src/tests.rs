@@ -179,11 +179,11 @@ fn rejects_unknown_tags_and_wrong_fixed_width_identifiers() {
     let mut unknown_op = encoded.clone();
     // One past the last operation, so this stays a real unknown tag as the op
     // set grows.
-    unknown_op[op_position] = OpTag::PrepareAccountWave as u8 + 1;
+    unknown_op[op_position] = OpTag::ReadAccountEnvelope as u8 + 1;
     assert_eq!(
         decode_envelope(&unknown_op, BODY_ARITY),
         Err(AbiError::UnknownOpTag(u64::from(
-            OpTag::PrepareAccountWave as u8 + 1
+            OpTag::ReadAccountEnvelope as u8 + 1
         )))
     );
     assert_eq!(parser.read_unsigned(), Ok(5));

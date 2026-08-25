@@ -48,6 +48,9 @@ pub struct IncomingFrame {
     pub by_left: bool,
     pub state_hash: [u8; 32],
     pub hanko: Vec<u8>,
+    /// The proposer's own recovery proof for the state this frame commits to,
+    /// when their message carried one.
+    pub dispute: Option<crate::consensus::replica::CounterpartyDispute>,
 }
 
 #[derive(Debug)]
@@ -288,11 +291,27 @@ pub fn apply_incoming_frame(
     };
 
     let ack_hanko = identity.sign_frame(&state_hash)?;
+    // Their proof of the state they just proposed, kept as it arrived. This
+    // process does not verify the signature on it: TypeScript does, and while
+    // it still decides, the engine is checked against that decision rather
+    // than trusted in place of it.
+    if let Some(dispute) = incoming.dispute.clone() {
+        account.store_counterparty_dispute(dispute);
+    }
+    // Our own proof of the same state, which the acknowledgement carries. It
+    // is built for the side that proposed the frame, because that is the side
+    // the jurisdiction checks it against.
+    let ack_dispute = match candidate.delta_transformer().copied() {
+        None => None,
+        Some(transformer) => {
+            account.refresh_ack_dispute_draft(&candidate, &transformer, incoming.by_left)?
+        }
+    };
     account.commit_from_peer(candidate, &frame, state_hash, incoming.hanko);
     // The ack this outcome carries is one the Entity commits in the account
     // leaf until a later proposal carries it, so the account remembers sending
     // it rather than the wire remembering for it.
-    account.note_outbound_ack(frame.height, state_hash);
+    account.note_outbound_ack(frame.height, state_hash, ack_dispute);
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,
@@ -309,6 +328,7 @@ pub fn apply_incoming_ack(
     height: u64,
     state_hash: &[u8; 32],
     hanko: &[u8],
+    dispute: Option<crate::consensus::replica::CounterpartyDispute>,
 ) -> Result<AckOutcome, StateError> {
     // SECURITY: an ack is only evidence when it comes from the party bound to
     // this account.
@@ -337,6 +357,13 @@ pub fn apply_incoming_ack(
         });
     }
     verify_frame_hanko(hanko, state_hash, counterparty_entity_id)?;
+    // Their proof of the state this ack commits, kept as it arrived.
+    //
+    // Parity target: `storeCounterpartyDisputeHanko` in
+    // core/account/consensus/incoming/ack-commit.ts.
+    if let Some(dispute) = dispute {
+        account.store_counterparty_dispute(dispute);
+    }
     let pending = account.pending().expect("pending checked above").clone();
     let outputs = pending.outputs;
     account.commit_from_ack(
