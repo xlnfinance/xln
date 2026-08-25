@@ -827,6 +827,43 @@ export const runAuthorityCutoverOperation = async (
   return { wave, row };
 };
 
+/**
+ * Hand this Entity input's arrivals to the engine in one call.
+ *
+ * The frame knows every account input it carries before it dispatches any of
+ * them, so they cross together. The savepoint this Entity input opens is the
+ * same one a single operation would open.
+ */
+export const handAccountInbound = async (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+  clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
+  rows: readonly RscoreWireValue[],
+): Promise<Wave | null> => {
+  if (!authorityDriverEnabled(env)) return null;
+  const owner = ownerEntityId.trim().toLowerCase();
+  const frame = candidateForOwner(env, owner);
+  if (frame === undefined) return null;
+  if (frame.entityInput === null) {
+    await frame.session.client.pushSavepoint();
+    frame.entityInput = { ownerEntityId: owner };
+  }
+  const startedMs = performance.now();
+  const wave = await frame.session.client.accountInbound({
+    ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_OWNER'),
+    entityTimestamp: clock.entityTimestamp,
+    finalizedJHeight: clock.finalizedJHeight,
+    rows,
+    postAccounts: true,
+  });
+  report.waves += 1;
+  report.engineMicros += wave.engineMicros;
+  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
+  report.inputsApplied += wave.applied.length;
+  frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
+  return wave;
+};
+
 /** Keep everything this Entity input's accounts did. */
 export const acceptAuthorityEntityStage = async (
   env: RuntimeReplica,

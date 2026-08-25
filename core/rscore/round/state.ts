@@ -8,6 +8,15 @@
  * not, and that must stop the frame rather than survive into a signed one.
  */
 import type { RuntimeReplica } from '../../runtime/types';
+
+/**
+ * A round is bound to one Runtime by identity, not by object.
+ *
+ * The Entity frame that opens it and the executor that drains it hold two
+ * different views of the same Runtime; the id is what both agree on.
+ */
+type RuntimeScope = Readonly<{ runtimeId?: unknown }>;
+import { handAccountInbound } from '../authority-driver';
 import type { Wave } from '../wave-decode';
 import {
   inboundArrivals,
@@ -16,6 +25,7 @@ import {
   inboundSlice,
   type InboundArrival,
 } from './inbound';
+
 import type { EntityTx } from '../../types/entity-tx';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
@@ -33,7 +43,7 @@ type OpenRound = {
 
 const open = new Map<string, OpenRound>();
 
-const runtimeKey = (env: RuntimeReplica): string => String(env.runtimeId ?? '');
+const runtimeKey = (env: RuntimeScope): string => String(env.runtimeId ?? '');
 
 /** How many engine calls the open rounds of this Runtime have made so far. */
 export const accountRoundCalls = { inbound: 0 };
@@ -45,7 +55,7 @@ export const accountRoundCalls = { inbound: 0 };
  * frame's, not the nesting level's.
  */
 export const openAccountRound = (
-  env: RuntimeReplica,
+  env: RuntimeScope,
   ownerEntityId: string,
   entityTxs: readonly EntityTx[],
 ): boolean => {
@@ -60,12 +70,18 @@ export const openAccountRound = (
   return true;
 };
 
-/** Close the round this frame opened, refusing anything it left behind. */
-export const closeAccountRound = (env: RuntimeReplica): void => {
+/**
+ * Close the round this frame opened, refusing anything it left behind.
+ *
+ * `settled` says the frame finished its own dispatch. A frame that threw is
+ * abandoned by the savepoint above it, and its leftovers say nothing: raising
+ * here would replace the error that actually stopped it.
+ */
+export const closeAccountRound = (env: RuntimeScope, settled: boolean): void => {
   const key = runtimeKey(env);
   const round = open.get(key);
   open.delete(key);
-  if (round === undefined || round.handed.length === 0) return;
+  if (!settled || round === undefined || round.handed.length === 0) return;
   fail('INBOUND_VERDICT_UNCONSUMED', {
     owner: round.ownerEntityId,
     accounts: round.handed.map(entry => entry.accountId),
@@ -84,7 +100,7 @@ export const takeInboundVerdict = async (
   env: RuntimeReplica,
   ownerEntityId: string,
   accountId: string,
-  hand: (rows: readonly ReturnType<typeof inboundRows>[number][]) => Promise<Wave>,
+  clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
 ): Promise<Wave | null> => {
   const round = open.get(runtimeKey(env));
   if (round === undefined) return null;
@@ -99,7 +115,11 @@ export const takeInboundVerdict = async (
   if (round.pending.length === 0 || round.pending[0]?.accountId !== account) return null;
   const next = inboundRound(round.pending);
   round.pending = round.pending.slice(next.length);
-  const wave = await hand(inboundRows(next));
+  const wave = await handAccountInbound(env, ownerEntityId, clock, inboundRows(next));
+  if (wave === null) {
+    round.pending = [...next, ...round.pending];
+    return null;
+  }
   round.calls += 1;
   accountRoundCalls.inbound += 1;
   round.handed = next.map((arrival, index) => ({
