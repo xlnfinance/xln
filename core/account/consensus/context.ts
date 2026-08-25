@@ -2,6 +2,13 @@ import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 
+export type AccountAuthorityExecutionScope = Readonly<{
+  beforeTypeScriptAccountExecution(
+    kind: 'applyAccountInput' | 'proposeAccountFrame',
+    accountId: string,
+  ): Promise<void>;
+}>;
+
 /**
  * Read-only capabilities supplied by Entity before entering Account consensus.
  *
@@ -19,6 +26,8 @@ export type AccountConsensusContext = Readonly<{
   runtimeId?: string;
   /** Ephemeral parent-frame identity; null explicitly suppresses observation. */
   accountAuthorityFrameId?: string | null;
+  /** Ephemeral pre-TypeScript authority hook; absent on the canonical TS path. */
+  accountAuthorityExecutionScope?: AccountAuthorityExecutionScope;
   quietLogs: boolean;
   emitRuntimeEvents: boolean;
   jReplicas: ReadonlyMap<string, JReplica>;

@@ -25,6 +25,12 @@ import {
   authorityRecordEnabled,
   runAuthorityFrameScope,
 } from '../../rscore/authority-wave.ts';
+import {
+  runAccountAuthorityEntityStage,
+  resolveAccountAuthorityEntityStageOptions,
+  type AccountAuthorityEntityStageOptions,
+  type AccountAuthorityEntityOccurrence,
+} from '../../rscore/authority/entity-stage.ts';
 
 export type AppliedEntityReplicaInput = {
   outcome: EntityInputOutcome;
@@ -166,6 +172,15 @@ const logEntityInputProfile = (
   });
 };
 
+const requireAuthorityOccurrence = (
+  occurrence: AccountAuthorityEntityOccurrence | undefined,
+): AccountAuthorityEntityOccurrence => {
+  if (occurrence === undefined) {
+    throw new Error('RSCORE_AUTHORITY_ENTITY_OCCURRENCE_MISSING');
+  }
+  return occurrence;
+};
+
 export const applyEntityInputToReplica = async (
   env: RuntimeReplica,
   entityReplica: EntityReplica,
@@ -177,6 +192,7 @@ export const applyEntityInputToReplica = async (
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work',
   deferProposal = false,
   requiredEntityTxIndex?: number,
+  authorityOccurrence?: AccountAuthorityEntityOccurrence,
 ): Promise<AppliedEntityReplicaInput> => {
   if (DEBUG) {
     entityInputLog.debug('input.processing', {
@@ -199,30 +215,51 @@ export const applyEntityInputToReplica = async (
   }
 
   const driverEnabled = authorityDriverEnabled(env);
-  const recordingEnabled = authorityRecordEnabled(driverEnabled)
+  const migrationRecordingEnabled = authorityRecordEnabled(driverEnabled)
     && !authorityRuntimeSuppressed(env);
+  const executionMode = env.accountAuthorityExecutionMode;
+  const preTsOptions: AccountAuthorityEntityStageOptions | null =
+    resolveAccountAuthorityEntityStageOptions(
+      env,
+      {
+        ownerEntityId: entityReplica.entityId,
+        ...(authorityOccurrence === undefined ? {} : { occurrence: authorityOccurrence }),
+        ...(trustedLocalRuntimeProtocol === undefined
+          ? {}
+          : { trustedLocalRuntimeProtocol }),
+        deferProposal,
+        ...(requiredEntityTxIndex === undefined
+          ? {}
+          : { requiredEntityTxIndex }),
+      },
+      migrationRecordingEnabled,
+    );
   const runtimeId = String(env.runtimeId ?? '');
   return runAuthorityFrameScope(
     env,
     runtimeId,
-    recordingEnabled,
+    migrationRecordingEnabled,
     async collectorFrameId => {
       const applyStartedAt = getPerfMs();
       let applied: Awaited<ReturnType<typeof applyEntityInput>>;
       try {
-        applied = await applyEntityInput(
+        applied = await runAccountAuthorityEntityStage(
           env,
-          entityReplica,
-          normalizedInput,
-          trustedLocalRuntimeProtocol
-            ? { trustedLocalRuntimeProtocol, promoteCandidateState }
-            : {
-                promoteCandidateState,
-                deferProposal,
-                ...(requiredEntityTxIndex === undefined
-                  ? {}
-                  : { requiredEntityTxIndex }),
-              },
+          preTsOptions,
+          () => applyEntityInput(
+            env,
+            entityReplica,
+            normalizedInput,
+            trustedLocalRuntimeProtocol
+              ? { trustedLocalRuntimeProtocol, promoteCandidateState }
+              : {
+                  promoteCandidateState,
+                  deferProposal,
+                  ...(requiredEntityTxIndex === undefined
+                    ? {}
+                    : { requiredEntityTxIndex }),
+                },
+          ),
         );
       } catch (error) {
         throw new RuntimeEntityInputApplyError(
@@ -251,10 +288,11 @@ export const applyEntityInputToReplica = async (
         entityInput,
         actualSignerId,
       );
-      const authorityStage = driverEnabled
+      const authorityStage = driverEnabled && executionMode === undefined
         ? await stageAuthorityEntityInput(env, {
             collectorFrameId,
             ownerEntityId: entityReplica.entityId,
+            occurrence: requireAuthorityOccurrence(authorityOccurrence),
             appliedInput,
             ...(trustedLocalRuntimeProtocol === undefined
               ? {}

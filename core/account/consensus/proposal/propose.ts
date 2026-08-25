@@ -137,6 +137,12 @@ export async function proposeAccountFrame(
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   selectedMempoolTxs?: readonly AccountTx[],
 ): Promise<ProposeAccountFrameResult> {
+  if (context.accountAuthorityExecutionScope !== undefined) {
+    await context.accountAuthorityExecutionScope.beforeTypeScriptAccountExecution(
+      'proposeAccountFrame',
+      account.proofHeader.toEntity,
+    );
+  }
   const profileStartMs = getPerfMs();
   const profileCheckpoints: Record<string, number> = {};
   const checkpointProfile = (label: string): void => {

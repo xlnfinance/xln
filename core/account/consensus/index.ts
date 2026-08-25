@@ -1211,6 +1211,12 @@ export async function applyAccountInput(
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> {
+  if (context.accountAuthorityExecutionScope !== undefined) {
+    await context.accountAuthorityExecutionScope.beforeTypeScriptAccountExecution(
+      'applyAccountInput',
+      account.proofHeader.toEntity,
+    );
+  }
   // The authoritative engine is handed the same raw inputs, in this order,
   // before TypeScript executes them (no-op unless recording is on).
   const recorded = noteRawAccountInput(context.accountAuthorityFrameId, account, input);

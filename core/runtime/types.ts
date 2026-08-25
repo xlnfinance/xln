@@ -709,6 +709,12 @@ export interface RuntimeReplica {
   accountAuthorityFrameId?: string | null | undefined;
   /** Detached/read-only replicas never arm or mutate authority sessions. */
   accountAuthoritySuppressed?: boolean | undefined;
+  /** Explicit pre-TS lifecycle mode; absent keeps the canonical TS path. */
+  accountAuthorityExecutionMode?: import('../rscore/authority/entity-stage').AccountAuthorityExecutionMode | undefined;
+  /** Injected lifecycle only; production leaves this absent until result ABI cutover. */
+  accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
+  /** Active for one EntityInput and always cleared before returning to Runtime. */
+  accountAuthorityEntityStage?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStage | undefined;
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   /** Ephemeral wall-clock boundary for the active process(); never consensus or WAL state. */
   activeProcessProgressAt?: number;

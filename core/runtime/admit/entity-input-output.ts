@@ -348,6 +348,9 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       options.isReplay,
       true,
       command.kind === 'entity-txs' ? 'cross-j' : 'account-work',
+      false,
+      undefined,
+      { kind: 'local-event', ordinal: context.localEventCount },
     );
     if (result.outcome.kind !== 'committed') {
       await discardAuthorityEntityStage(env, result.authorityStage);

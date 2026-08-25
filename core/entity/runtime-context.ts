@@ -5,9 +5,15 @@ import type { LogCategory } from '../types/logging';
 import type {
   ConsumptionNodeStore,
 } from './consumption/consumption-accumulator-types';
-import type { EntityReplica } from './types';
+import type { EntityInput, EntityReplica } from './types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { EntityProposalReplayOracleEntry } from './consensus/proposal/replay-oracle';
+import type { AccountAuthorityExecutionScope } from '../account/consensus/context';
+
+/** Narrow child-machine capability; lifecycle ownership remains in Runtime. */
+export interface AccountAuthorityEntityStageCapability extends AccountAuthorityExecutionScope {
+  bindCanonicalInput(input: EntityInput): void;
+}
 
 /**
  * Runtime-owned capabilities visible during one Entity transition.
@@ -32,6 +38,8 @@ export interface EntityRuntimeContext {
   runtimeId?: string | undefined;
   /** Ephemeral Runtime-envelope identity, never committed Entity state. */
   accountAuthorityFrameId?: string | null | undefined;
+  /** Active only during one EntityInput; never State, WAL, or recovery data. */
+  accountAuthorityEntityStage?: AccountAuthorityEntityStageCapability | undefined;
   activeJurisdiction?: string | undefined;
   quietRuntimeLogs?: boolean | undefined;
   runtimeConfig?: {

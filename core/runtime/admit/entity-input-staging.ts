@@ -167,6 +167,7 @@ export const stageExternalEntityInput = async (
     undefined,
     deferProposal,
     requiredEntityTxIndex,
+    { kind: 'runtime-input', inputIndex },
   );
   return {
     input,

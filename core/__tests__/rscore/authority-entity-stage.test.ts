@@ -89,6 +89,7 @@ describe('per-Entity authority stage identity', () => {
       RUNTIME,
       OWNER_A,
       7,
+      { kind: 'runtime-input', inputIndex: 4 },
       canonical,
       undefined,
       false,
@@ -98,6 +99,7 @@ describe('per-Entity authority stage identity', () => {
       RUNTIME,
       OWNER_A,
       7,
+      { kind: 'runtime-input', inputIndex: 4 },
       { signerId: '1', entityTxs: [], entityId: OWNER_A },
       undefined,
       false,
@@ -108,15 +110,27 @@ describe('per-Entity authority stage identity', () => {
       RUNTIME,
       OWNER_A,
       8,
+      { kind: 'runtime-input', inputIndex: 4 },
       canonical,
       undefined,
       false,
       undefined,
     ))).toBe(false);
+    expect(() => deriveAuthorityEntityStageKey(
+      RUNTIME,
+      OWNER_A,
+      7,
+      { kind: 'runtime-input', inputIndex: -1 },
+      canonical,
+      undefined,
+      false,
+      undefined,
+    )).toThrow('RSCORE_AUTHORITY_STAGE_OCCURRENCE:-1');
     expect(first.equals(deriveAuthorityEntityStageKey(
       RUNTIME,
       OWNER_A,
       7,
+      { kind: 'runtime-input', inputIndex: 4 },
       canonical,
       'account-work',
       false,
@@ -126,10 +140,31 @@ describe('per-Entity authority stage identity', () => {
       RUNTIME,
       OWNER_A,
       7,
+      { kind: 'runtime-input', inputIndex: 4 },
       canonical,
       undefined,
       true,
       0,
+    ))).toBe(false);
+    expect(first.equals(deriveAuthorityEntityStageKey(
+      RUNTIME,
+      OWNER_A,
+      7,
+      { kind: 'runtime-input', inputIndex: 5 },
+      canonical,
+      undefined,
+      false,
+      undefined,
+    ))).toBe(false);
+    expect(first.equals(deriveAuthorityEntityStageKey(
+      RUNTIME,
+      OWNER_A,
+      7,
+      { kind: 'local-event', ordinal: 4 },
+      canonical,
+      undefined,
+      false,
+      undefined,
     ))).toBe(false);
   });
 

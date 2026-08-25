@@ -54,6 +54,9 @@ export const createAccountConsensusContext = (
   ...(env.accountAuthorityFrameId === undefined
     ? {}
     : { accountAuthorityFrameId: env.accountAuthorityFrameId }),
+  ...(env.accountAuthorityEntityStage === undefined
+    ? {}
+    : { accountAuthorityExecutionScope: env.accountAuthorityEntityStage }),
   quietLogs: env.quietRuntimeLogs === true,
   emitRuntimeEvents: true,
   jReplicas: env.state.jReplicas,

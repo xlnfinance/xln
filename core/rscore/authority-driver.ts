@@ -64,6 +64,7 @@ import type { RoutedEntityInput, RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 import { encodeCanonicalConsensusBytes } from '../protocol/serialization/binary-codec';
 import { verifyHankoForHash } from '../hanko/signing';
+import type { AccountAuthorityEntityOccurrence } from './authority/entity-stage';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -160,6 +161,7 @@ export type AuthorityEntityStageHandle = Readonly<{
 export type AuthorityEntityStageInput = Readonly<{
   collectorFrameId: string | null;
   ownerEntityId: string;
+  occurrence: AccountAuthorityEntityOccurrence;
   appliedInput: RoutedEntityInput;
   trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
   deferProposal: boolean;
@@ -704,21 +706,33 @@ const u64be = (value: number, label: string): Buffer => {
   return bytes;
 };
 
+const authorityOccurrenceBytes = (
+  occurrence: AccountAuthorityEntityOccurrence,
+): Buffer => {
+  const value = occurrence.kind === 'runtime-input' ? occurrence.inputIndex : occurrence.ordinal;
+  const bytes = Buffer.alloc(9);
+  bytes[0] = occurrence.kind === 'runtime-input' ? 0 : 1;
+  u64be(value, 'RSCORE_AUTHORITY_STAGE_OCCURRENCE').copy(bytes, 1);
+  return bytes;
+};
+
 /** Exact retry-stable identity of one parent Entity transition savepoint. */
 export const deriveAuthorityEntityStageKey = (
   runtimeId: string,
   ownerEntityId: string,
   acceptedStageOrdinal: number,
+  occurrence: AccountAuthorityEntityOccurrence,
   appliedInput: RoutedEntityInput,
   trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
   deferProposal: boolean,
   requiredEntityTxIndex: number | undefined,
 ): Buffer => createHash('sha256')
-  .update('xln.rscore.entity-input-stage.v1', 'utf8')
+  .update('xln.rscore.entity-input-stage.v2', 'utf8')
   .update(Buffer.from([0]))
   .update(Buffer.from(hexToWireBytes(runtimeId, 20, 'AUTHORITY_STAGE_RUNTIME_ID')))
   .update(Buffer.from(hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER_ID')))
   .update(u64be(acceptedStageOrdinal, 'RSCORE_AUTHORITY_STAGE_ORDINAL'))
+  .update(authorityOccurrenceBytes(occurrence))
   .update(Buffer.from(encodeCanonicalConsensusBytes([
     appliedInput,
     trustedLocalRuntimeProtocol ?? null,
@@ -824,6 +838,7 @@ export const stageAuthorityEntityInput = async (
     runtimeId,
     ownerEntityId,
     candidate.acceptedStageOrdinal,
+    input.occurrence,
     input.appliedInput,
     input.trustedLocalRuntimeProtocol,
     input.deferProposal,
