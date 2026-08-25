@@ -129,6 +129,12 @@ type WaveFrameVerdict =
       outputs: WaveOutput[];
       rolledBackTxs: number;
       committedFrame: WaveCommittedFrame;
+      /**
+       * Exactly what the committed transactions said they did. The Entity
+       * frame hashes these strings, so the publisher relays them rather than
+       * writing its own.
+       */
+      events: string[];
     }
   | { kind: 'frameCollisionIgnored'; height: number }
   | { kind: 'frameDuplicate'; height: number; stateHash: string; ackHanko: string }
@@ -142,6 +148,8 @@ type WaveAckVerdict =
       stateHash: string;
       outputs: WaveOutput[];
       committedFrame: WaveCommittedFrame;
+      /** The pending frame's own events, released with its outputs. */
+      events: string[];
     }
   | { kind: 'ackStale'; height: number }
   | { kind: 'ackRejected'; reason: string };
@@ -398,7 +406,7 @@ const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => 
   const tag = rscoreWireInt(row[0], `${field}.tag`);
   switch (tag) {
     case 0: {
-      const fields = rscoreWireTuple(row, 7, `${field}.frameCommitted`);
+      const fields = rscoreWireTuple(row, 8, `${field}.frameCommitted`);
       const height = rscoreWireInt(fields[1], `${field}.height`);
       const stateHash = rscoreWireHex(fields[2], `${field}.stateHash`, 32);
       return {
@@ -414,6 +422,8 @@ const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => 
           stateHash,
           true,
         ),
+        events: rscoreWireList(fields[7], `${field}.events`)
+          .map((entry, index) => rscoreWireText(entry, `${field}.events.${index}`)),
       };
     }
     case 1: {
@@ -451,7 +461,7 @@ const decodeAckVerdict = (value: unknown, field: string): WaveAckVerdict => {
   const tag = rscoreWireInt(row[0], `${field}.tag`);
   switch (tag) {
     case 5: {
-      const fields = rscoreWireTuple(row, 5, `${field}.ackCommitted`);
+      const fields = rscoreWireTuple(row, 6, `${field}.ackCommitted`);
       const height = rscoreWireInt(fields[1], `${field}.height`);
       const stateHash = rscoreWireHex(fields[2], `${field}.stateHash`, 32);
       return {
@@ -465,6 +475,8 @@ const decodeAckVerdict = (value: unknown, field: string): WaveAckVerdict => {
           stateHash,
           false,
         ),
+        events: rscoreWireList(fields[5], `${field}.events`)
+          .map((entry, index) => rscoreWireText(entry, `${field}.events.${index}`)),
       };
     }
     case 6: {
@@ -773,6 +785,7 @@ const frameVerdictWire = (verdict: WaveFrameVerdict): RscoreWireValue => {
         verdict.outputs.map(outputWire),
         verdict.rolledBackTxs,
         committedFrameWire(verdict.committedFrame),
+        [...verdict.events],
       ];
     case 'frameCollisionIgnored':
       return [1, verdict.height];
@@ -799,6 +812,7 @@ const ackVerdictWire = (verdict: WaveAckVerdict): RscoreWireValue => {
         hexToBytes(verdict.stateHash, 'transcript.stateHash'),
         verdict.outputs.map(outputWire),
         committedFrameWire(verdict.committedFrame),
+        [...verdict.events],
       ];
     case 'ackStale':
       return [6, verdict.height];

@@ -1510,6 +1510,20 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       // Profiling a load run means profiling the Hub: it is the single writer
       // every payment and every swap passes through. The child builds none of
       // this unless the operator asked for it.
+      // The Rust Account authority is enabled for one hub at a time. Every
+      // hub in this mesh shares one orchestrator environment, and an Entity
+      // the engine cannot sign for must never inherit the switch.
+      ...(process.env[`XLN_HUB_RSCORE_AUTHORITY_${child.name.toUpperCase()}`] === '1'
+        ? {
+            XLN_RSCORE_AUTHORITY: '1',
+            ...(process.env['XLN_RSCORE_BINARY']
+              ? { XLN_RSCORE_BINARY: process.env['XLN_RSCORE_BINARY'] }
+              : {}),
+            ...(process.env['XLN_RSCORE_AUTHORITY_WORKERS']
+              ? { XLN_RSCORE_AUTHORITY_WORKERS: process.env['XLN_RSCORE_AUTHORITY_WORKERS'] }
+              : {}),
+          }
+        : {}),
       ...(process.env['XLN_RUNTIME_APPLY_PROFILE']
         ? { XLN_RUNTIME_APPLY_PROFILE: process.env['XLN_RUNTIME_APPLY_PROFILE'] }
         : {}),

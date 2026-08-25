@@ -194,15 +194,15 @@ const rawOk = (reply: RawProcessReply): unknown => {
   return reply.result;
 };
 
-describe.skipIf(!existsSync(BINARY))('rscore ABI14 process binding', () => {
+describe.skipIf(!existsSync(BINARY))('rscore ABI15 process binding', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(14);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(15);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
       .toBe('0720c839d3874f4a70e358f5f7e2b7f78cf2a3cb2132906ae05cdd7365f8b3a7');
     const staleAbi = new RawProcessSession(identity());
     try {
       expect(rawErrorCode(await staleAbi.request(RSCORE_OP.hello, [
-        13,
+        14,
         2,
         swapMarketPolicyWire(),
         null,
@@ -236,7 +236,7 @@ describe.skipIf(!existsSync(BINARY))('rscore ABI14 process binding', () => {
       ]));
       const loaded = exactTuple(rawOk(await raw.request(
         RSCORE_OP.bootstrapAccounts,
-        [RSCORE_PROCESS_PROFILE, 0, []],
+        [RSCORE_PROCESS_PROFILE, 0, [], false],
       )), 2, 'raw bootstrap');
       const prepared = exactTuple(rawOk(await raw.request(
         RSCORE_OP.prepareAccountWave,

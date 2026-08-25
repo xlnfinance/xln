@@ -595,6 +595,17 @@ fn admission_result(value: &xln_rscore_batch::AccountAdmissionResult) -> AbiValu
     ])
 }
 
+/// What the committed transactions said they did, in transaction order. The
+/// Entity frame hashes these strings, so they cross the wire verbatim.
+fn frame_events(events: &[String]) -> AbiValue {
+    tuple(
+        events
+            .iter()
+            .map(|event| AbiValue::Text(event.clone()))
+            .collect(),
+    )
+}
+
 /// Tagged so the runtime can tell a commit from an ignored collision without
 /// parsing text. The tags are the wire's, not the engine's: a new outcome adds
 /// a tag rather than changing an old one.
@@ -606,6 +617,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             state_hash,
             ack_hanko,
             outputs,
+            events,
             rolled_back_txs,
             committed_frame: evidence,
         } => tuple(vec![
@@ -616,6 +628,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             tuple(outputs.iter().map(account_output).collect()),
             integer(*rolled_back_txs),
             committed_frame(evidence, *state_hash)?,
+            frame_events(events),
         ]),
         AccountInputVerdict::FrameCollisionIgnored { height } => {
             tuple(vec![integer(1), integer(*height)])
@@ -641,6 +654,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             height,
             state_hash,
             outputs,
+            events,
             committed_frame: evidence,
         } => tuple(vec![
             integer(5),
@@ -648,6 +662,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             AbiValue::Bytes(state_hash.to_vec()),
             tuple(outputs.iter().map(account_output).collect()),
             committed_frame(evidence, *state_hash)?,
+            frame_events(events),
         ]),
         AccountInputVerdict::AckStale { height } => tuple(vec![integer(6), integer(*height)]),
         AccountInputVerdict::AckRejected { reason } => {

@@ -215,7 +215,11 @@ impl ProcessSession {
         }
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
-            Command::BootstrapAccounts { revision, accounts } => self.load(revision, accounts),
+            Command::BootstrapAccounts {
+                revision,
+                accounts,
+                import_existing,
+            } => self.load(revision, accounts, import_existing),
             Command::GetCheckpointChanges { candidate_token } => {
                 self.get_checkpoint_changes(candidate_token)
             }
@@ -649,6 +653,7 @@ impl ProcessSession {
         &mut self,
         revision: u64,
         accounts: Vec<xln_rscore_batch::AccountSeed>,
+        import_existing: bool,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         if self.engine.is_some() || self.authority.is_some() {
             return Err(ProcessError::EngineAlreadyLoaded);
@@ -658,7 +663,11 @@ impl ProcessSession {
             // Bootstrap creates only a brand-new empty authority. Any account
             // or nonzero revision is durable history and must arrive through
             // RestoreExact, whose token binds every leaf, signer and revision.
-            if revision != 0 || !accounts.is_empty() {
+            // A declared import is the caller taking responsibility for the
+            // starting state: a read-only replay of a recording made before
+            // the authority existed has no checkpoint to restore from. It
+            // still may not invent history — the revision must be zero.
+            if revision != 0 || (!accounts.is_empty() && !import_existing) {
                 return Err(ProcessError::AuthorityBootstrapInvalid {
                     revision,
                     accounts: accounts.len(),

@@ -61,6 +61,10 @@ pub enum AccountInputVerdict {
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
         outputs: Vec<AccountOutput>,
+        /// Exactly what the committed transactions said they did. The Entity
+        /// frame hashes these strings, so a publisher that re-derived them
+        /// would be signing its own guess.
+        events: Vec<String>,
         rolled_back_txs: usize,
         committed_frame: CommittedFrameEvidence,
     },
@@ -83,6 +87,9 @@ pub enum AccountInputVerdict {
         height: u64,
         state_hash: [u8; 32],
         outputs: Vec<AccountOutput>,
+        /// The pending frame's own events, released on the same ACK as its
+        /// outputs.
+        events: Vec<String>,
         committed_frame: CommittedFrameEvidence,
     },
     AckStale {
@@ -2187,6 +2194,7 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             state_hash,
             ack_hanko,
             outputs,
+            events,
             rolled_back_txs,
             committed_frame,
         } => AccountInputVerdict::FrameCommitted {
@@ -2194,6 +2202,7 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             state_hash,
             ack_hanko,
             outputs,
+            events,
             rolled_back_txs,
             committed_frame,
         },
@@ -2226,12 +2235,14 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
             height,
             state_hash,
             outputs,
+            events,
             committed_frame,
         } => AccountInputVerdict::AckCommitted {
             height,
             state_hash,
             outputs,
-            committed_frame,
+            events,
+            committed_frame: *committed_frame,
         },
         AckOutcome::Stale { height } => AccountInputVerdict::AckStale { height },
         AckOutcome::Rejected { reason } => AccountInputVerdict::AckRejected { reason },

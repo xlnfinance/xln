@@ -1549,7 +1549,7 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
         "restart must reproduce root, verdict and held output bytes",
     );
     let applied = tuple_fields(&body_fields(&resumed_ack)[2]);
-    let verdict = exact_tuple(&exact_tuple(&applied[0], 3, "applied")[2], 5, "ack verdict");
+    let verdict = exact_tuple(&exact_tuple(&applied[0], 3, "applied")[2], 6, "ack verdict");
     assert_eq!(verdict[0], AbiValue::Integer(5));
     assert_eq!(
         tuple_fields(&verdict[3]).len(),

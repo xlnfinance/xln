@@ -5,6 +5,7 @@
  * Keeping the decoder below either higher-level path prevents recovery from
  * depending back on the wave/checkpoint graph and keeps one canonical codec.
  */
+import { HTLC_OPAQUE_CIPHERTEXT_VERSION } from '../protocol/htlc/multi-recipient';
 import type { AccountTx } from '../types/account';
 
 export const rscoreWireDecodeFail = (code: string): never => {
@@ -116,9 +117,19 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
           amount: rscoreWireBig(fields[5], 'tx.amount'),
           tokenId: rscoreWireInt(fields[6], 'tx.tokenId'),
           ...(mode === null ? {} : { deliveryMode: mode }),
+          // The wire carries only the ciphertext: the version is the one
+          // constant this profile accepts, and the engine's own canonical
+          // form states it. A decoded envelope that omitted it would
+          // re-encode into a different canonical transaction than the one
+          // that arrived.
           ...(envelope === null
             ? {}
-            : { envelope: { ciphertext: Buffer.from(envelope).toString('base64') } }),
+            : {
+                envelope: {
+                  version: HTLC_OPAQUE_CIPHERTEXT_VERSION,
+                  ciphertext: Buffer.from(envelope).toString('base64'),
+                },
+              }),
         },
       } as AccountTx;
     }

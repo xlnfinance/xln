@@ -15,6 +15,7 @@ import type { PersistedStorageReadApi } from '../../read/persisted-read';
 import { buildRecoveryJournalFromStorageFrame } from '../../queries';
 import type { RuntimeStorageApiDeps } from '../../runtime-storage-deps';
 import { assertStorageSafetyOverridesAllowed } from '../../commit/safety';
+import { authorityReplayEnabled } from '../../../rscore/authority-driver';
 import type { LoadedRuntimeStorage } from '../load';
 import { verifyPersistedFrameState } from '../verify';
 import { borrowOpenRuntimeWalDb } from '../../runtime-dbs';
@@ -274,7 +275,7 @@ export const createRuntimeReplayLoader = (
   if (!restored) return null;
   let returningEnv = false;
   try {
-    if (options.readOnly) {
+    if (options.readOnly && !authorityReplayEnabled()) {
       deps.setAccountAuthoritySuppressed(restored.env, true);
     } else {
       await restoreAccountAuthorityAtCheckpoint(

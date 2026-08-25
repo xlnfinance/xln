@@ -96,6 +96,7 @@ pub fn load_profile(id: u64, profile: &str, revision: u64, locks: Vec<AbiValue>)
             AbiValue::Text(profile.into()),
             AbiValue::Integer(i128::from(revision)),
             tuple(vec![account(locks)]),
+            AbiValue::Bool(false),
         ],
     )
 }
@@ -560,6 +561,7 @@ pub fn load_accounts(id: u64, revision: u64, accounts: Vec<AbiValue>) -> Envelop
             AbiValue::Text(crate::PROCESS_PROFILE.into()),
             AbiValue::Integer(i128::from(revision)),
             tuple(accounts),
+            AbiValue::Bool(false),
         ],
     )
 }

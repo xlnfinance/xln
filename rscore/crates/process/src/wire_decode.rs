@@ -37,6 +37,13 @@ pub enum Command {
     BootstrapAccounts {
         revision: u64,
         accounts: Vec<AccountSeed>,
+        /// Explicit, caller-declared import of existing TypeScript Account
+        /// state. Production never sets it: durable history enters through
+        /// RestoreExact, whose token binds every leaf, signer and revision.
+        /// A read-only benchmark replay of a recording that predates the
+        /// authority has no such checkpoint, and says so here rather than
+        /// having the engine guess.
+        import_existing: bool,
     },
     GetCheckpointChanges {
         candidate_token: [u8; 32],
@@ -212,7 +219,7 @@ fn decode_swap_market(value: &AbiValue) -> Result<SwapMarketPolicy, ProcessError
 }
 
 fn decode_bootstrap(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 3, "bootstrapAccounts")?;
+    let fields = exact(fields, 4, "bootstrapAccounts")?;
     let profile = text(&fields[0])?;
     if profile != PROCESS_PROFILE {
         return Err(ProcessError::Profile(profile.into()));
@@ -223,6 +230,7 @@ fn decode_bootstrap(fields: &[AbiValue]) -> Result<Command, ProcessError> {
             .iter()
             .map(decode_seed_account)
             .collect::<Result<_, _>>()?,
+        import_existing: boolean(&fields[3], "importExisting")?,
     })
 }
 

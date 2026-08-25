@@ -15,6 +15,7 @@ import { rehydrateRestoredRuntimeInfra } from '../../runtime/recovery/j-adapter-
 import { runtimeIsBrowser } from '../../support/process/runtime-process';
 import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
 import { replayPersistedRuntimeJournals, type RecoveryReplayOptions } from './journal';
+import { authorityReplayEnabled } from '../../rscore/authority-driver';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';
 import type { RuntimeRecoveryBundleV1 } from './bundle/types';
@@ -88,7 +89,12 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       snapshot,
       options,
     );
-    if (options.readOnly === true) setAccountAuthoritySuppressed(env, true);
+    // A read-only restore never writes, so the engine it starts can never
+    // become durable. That is why the benchmark replay may opt in explicitly;
+    // silence stays the default.
+    if (options.readOnly === true && !authorityReplayEnabled()) {
+      setAccountAuthoritySuppressed(env, true);
+    }
     if (!options.readOnly) {
       await rehydrateRestoredRuntimeInfra(env, {
         isBrowser: runtimeIsBrowser,

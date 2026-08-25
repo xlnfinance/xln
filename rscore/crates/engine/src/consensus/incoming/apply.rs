@@ -65,6 +65,10 @@ pub enum IncomingOutcome {
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
         outputs: Vec<AccountOutput>,
+        /// What this frame's transactions said they did, in transaction order.
+        /// The Entity frame commits them, so they travel with the verdict
+        /// rather than being re-derived by whoever publishes it.
+        events: Vec<String>,
         /// Set when our own same-height proposal lost the collision and its
         /// transactions went back to the queue.
         rolled_back_txs: usize,
@@ -100,7 +104,11 @@ pub enum AckOutcome {
         height: u64,
         state_hash: [u8; 32],
         outputs: Vec<AccountOutput>,
-        committed_frame: CommittedFrameEvidence,
+        /// The pending frame's own events, released with its outputs.
+        events: Vec<String>,
+        /// Boxed: an ACK outcome is mostly the tiny stale/rejected cases, and
+        /// the committed frame is the only large thing in the enum.
+        committed_frame: Box<CommittedFrameEvidence>,
     },
     /// Nothing is pending at that height any more — a retransmitted ack.
     Stale {
@@ -284,6 +292,7 @@ pub fn apply_incoming_frame(
         mut candidate,
         applied,
         outputs,
+        events,
         dropped,
     } = execution;
     if let Some(first) = dropped.first() {
@@ -363,6 +372,7 @@ pub fn apply_incoming_frame(
         state_hash,
         ack_hanko,
         outputs,
+        events,
         rolled_back_txs,
         committed_frame: CommittedFrameEvidence {
             frame,
@@ -474,6 +484,7 @@ pub fn apply_incoming_ack(
     }
     let pending = account.pending().expect("pending checked above").clone();
     let outputs = pending.outputs;
+    let events = pending.events;
     account.commit_from_ack(
         pending.candidate,
         &pending.frame,
@@ -485,10 +496,11 @@ pub fn apply_incoming_ack(
         height,
         state_hash: pending.state_hash,
         outputs,
-        committed_frame: CommittedFrameEvidence {
+        events,
+        committed_frame: Box::new(CommittedFrameEvidence {
             frame: pending.frame,
             committed_via_new_frame: false,
-        },
+        }),
     })
 }
 

@@ -418,9 +418,13 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
     account.counterpartyDisputeProofHanko === undefined
       || account.counterpartyDisputeProofBodyHash === undefined
       || account.counterpartyDisputeProofNonce === undefined
+      || account.counterpartyDisputeHash === undefined
       ? null
       : [
           hankoWireBytes(account.counterpartyDisputeProofHanko),
+          // The exact hash they signed. Rebuilding it from the rest would
+          // accept a proof whose signature covers something else.
+          hexToWireBytes(account.counterpartyDisputeHash, 32, 'SHADOW_PEER_DISPUTE_HASH'),
           hexToWireBytes(account.counterpartyDisputeProofBodyHash, 32, 'SHADOW_PEER_PROOF_BODY_HASH'),
           Number(account.counterpartyDisputeProofNonce),
           account.counterpartyDisputeProofProposerIsLeft === true,
@@ -455,15 +459,21 @@ const outboundAckWire = (
   ack: {
     height: number;
     frameHash: string;
+    frameHanko?: string;
     disputeHanko?: { hash: string; proofBodyHash: string; proofNonce: number; proposerIsLeft: boolean };
   } | undefined,
-): RscoreWireValue => (ack === undefined
-  ? null
-  : [
-      ack.height,
-      hexToWireBytes(ack.frameHash, 32, 'SHADOW_OUTBOUND_ACK_HASH'),
-      disputeDraftWire(ack.disputeHanko),
-    ]);
+): RscoreWireValue => {
+  if (ack === undefined) return null;
+  // The retained ACK is evidence, and evidence without its signature proves
+  // nothing: an engine handed a hankoless ACK could not retransmit it.
+  if (ack.frameHanko === undefined) throw new Error('SHADOW_OUTBOUND_ACK_HANKO_MISSING');
+  return [
+    ack.height,
+    hexToWireBytes(ack.frameHash, 32, 'SHADOW_OUTBOUND_ACK_HASH'),
+    hankoWireBytes(ack.frameHanko),
+    disputeDraftWire(ack.disputeHanko),
+  ];
+};
 
 /**
  * Our own signature over the proposed frame. It is not a field of the frame:

@@ -103,6 +103,10 @@ pub struct PendingFrame {
     /// `candidateEffects` in the prepared commit; the proposal result carries
     /// none, and the ACK path releases them.
     pub(crate) outputs: Vec<crate::AccountOutput>,
+    /// What this frame's transactions said they did, held with the outputs
+    /// and released on the same ACK: the Entity frame that publishes the
+    /// effects is the one that records the events.
+    pub(crate) events: Vec<String>,
     /// The acknowledgement carried by the message that sent this proposal, if
     /// it carried one. Present means the message was a `frame_ack` rather than
     /// a `frame`, which the account leaf commits.
@@ -759,13 +763,14 @@ impl AccountConsensus {
         }
         // The replay reproduces the effects too, so a restart does not lose
         // what the pending frame will release when it is acked.
-        let (candidate, outputs) = replay_pending(&account.replica, &pending, swap_market)?;
+        let (candidate, outputs, events) = replay_pending(&account.replica, &pending, swap_market)?;
         account.pending = Some(PendingFrame {
             frame: pending.frame,
             state_hash: pending.state_hash,
             hanko: pending.hanko,
             candidate,
             outputs,
+            events,
             bundled_ack: pending.bundled_ack,
             proposal_dispute: pending.proposal_dispute,
         });
@@ -793,7 +798,7 @@ fn replay_pending(
     replica: &AccountReplica,
     pending: &PendingFrameSnapshot,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
-) -> Result<(AccountReplica, Vec<crate::AccountOutput>), StateError> {
+) -> Result<(AccountReplica, Vec<crate::AccountOutput>, Vec<String>), StateError> {
     let context = crate::AccountExecutionContext::with_market(
         pending.frame.timestamp,
         pending.frame.timestamp,
@@ -807,6 +812,7 @@ fn replay_pending(
         mut candidate,
         applied,
         outputs,
+        events,
         ..
     } = execute_window(replica, proposer, pending.frame.txs.clone(), &context, true)?;
     if applied.len() != pending.frame.txs.len() {
@@ -827,7 +833,7 @@ fn replay_pending(
             "PENDING_FRAME_HASH_MISMATCH".to_string(),
         ));
     }
-    Ok((candidate, outputs))
+    Ok((candidate, outputs, events))
 }
 
 impl AccountConsensus {

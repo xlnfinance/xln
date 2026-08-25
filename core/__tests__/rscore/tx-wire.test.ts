@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { HTLC_OPAQUE_CIPHERTEXT_VERSION } from '../../protocol/htlc/multi-recipient';
 import { packWireValue, unpackWireValue } from '../../rscore/client';
 import { accountTxWire } from '../../rscore/shadow-wire';
 import { decodeRscoreAccountTx } from '../../rscore/wave-decode';
@@ -41,7 +42,7 @@ export const TX_WIRE_CASES: { name: string; tx: AccountTx }[] = [
   { name: 'direct_payment/full', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 25n, route: [B], description: 'memo', fromEntityId: A, toEntityId: B, deliveryMode: 'trusted', trustedGatewayEntityId: B } } },
   { name: 'direct_payment/minimal', tx: { type: 'direct_payment', data: { tokenId: 1, amount: 1n, route: [], fromEntityId: A, toEntityId: B, deliveryMode: 'direct' } } },
   { name: 'htlc_lock/full', tx: { type: 'htlc_lock', data: { lockId: 'lock-1', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 12, amount: 500n, tokenId: 1, deliveryMode: 'async' } } },
-  { name: 'htlc_lock/envelope', tx: { type: 'htlc_lock', data: { lockId: 'lock-3', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 5, amount: 10n, tokenId: 1, deliveryMode: 'instant', envelope: { ciphertext: Buffer.alloc(80, 0x5a).toString('base64') } } } },
+  { name: 'htlc_lock/envelope', tx: { type: 'htlc_lock', data: { lockId: 'lock-3', hashlock: HASHLOCK, timelock: 1_700_000_000_000n, revealBeforeHeight: 5, amount: 10n, tokenId: 1, deliveryMode: 'instant', envelope: { version: HTLC_OPAQUE_CIPHERTEXT_VERSION, ciphertext: Buffer.alloc(80, 0x5a).toString('base64') } } } },
   { name: 'htlc_lock/minimal', tx: { type: 'htlc_lock', data: { lockId: 'lock-2', hashlock: HASHLOCK, timelock: 1n, revealBeforeHeight: 0, amount: 1n, tokenId: 1 } } },
   { name: 'htlc_resolve/secret', tx: { type: 'htlc_resolve', data: { lockId: 'lock-1', outcome: 'secret', secret: SECRET } } },
   { name: 'htlc_resolve/error', tx: { type: 'htlc_resolve', data: { lockId: 'lock-1', outcome: 'error', reason: 'expired' } } },

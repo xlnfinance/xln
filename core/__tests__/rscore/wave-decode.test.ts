@@ -274,6 +274,7 @@ describe('rscore staged wave decoder', () => {
       [],
       0,
       committedFrameEvidence(frameStateHash, true),
+      ['\u{1F91D} Accepted frame 1 from Entity 2222'],
     ];
     const frameVerdict = decodeWave(withParityDigest(frameCommit)).applied[0]?.verdict;
     expect(frameVerdict).toMatchObject({
@@ -294,6 +295,7 @@ describe('rscore staged wave decoder', () => {
       ackStateHash,
       [],
       committedFrameEvidence(ackStateHash, false),
+      ['\u2705 Frame 1 confirmed and committed'],
     ];
     const ackVerdict = decodeWave(withParityDigest(ackCommit)).applied[0]?.verdict;
     expect(ackVerdict).toMatchObject({
@@ -322,6 +324,7 @@ describe('rscore staged wave decoder', () => {
           [1, 'ack-lock', 'ack-hashlock', 'ack-secret', 7, '12'],
         ],
         committedFrameEvidence(ackStateHash, false),
+        ['\u2705 Frame 1 confirmed and committed'],
       ],
       [
         0,
@@ -334,6 +337,7 @@ describe('rscore staged wave decoder', () => {
         ],
         4,
         committedFrameEvidence(frameStateHash, true),
+        [],
       ],
     ];
 
@@ -465,6 +469,7 @@ describe('rscore staged wave decoder', () => {
       [],
       0,
       committedFrameEvidence(stateHash, false),
+      [],
     ];
     expect(() => decodeWave(withParityDigest(raw))).toThrow('committedFrame.binding');
   });

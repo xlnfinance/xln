@@ -607,7 +607,8 @@ export type AuthorityWaveOperation = {
   resultKind: AuthorityWaveOperationResultKind;
   /** Global position before grouping the Runtime frame by owner Entity. */
   arrivalIndex: number;
-  expectedVerdict: AuthorityExpectedOperationVerdict;
+  /** Absent only in cutover, where TypeScript produces no result to compare. */
+  expectedVerdict?: AuthorityExpectedOperationVerdict;
 };
 
 export type AuthorityWaveEntity = {
@@ -657,6 +658,18 @@ export type AuthorityWave =
 export type AuthorityWaveBuildOptions = Readonly<{
   operationIndexStart?: number;
   arrivalIndexStart?: number;
+  /**
+   * Recorded payload rows already staged in this Entity input. The cutover
+   * driver stages one operation at a time, so each call must encode only what
+   * arrived since the previous one.
+   */
+  payloadSkip?: number;
+  /**
+   * `absent` when TypeScript will not execute this operation at all. Parity
+   * mode compares Rust against a TypeScript result and refuses a row that has
+   * none; the cutover has no such row to compare, by construction.
+   */
+  expectations?: 'required' | 'absent';
   fallbackEntity?: Readonly<{
     ownerEntityId: string;
     timestamp: number;
@@ -735,6 +748,8 @@ export const buildAuthorityWave = (
   const frameProposals = proposalSelections.get(runtimeId) ?? [];
   const operationIndexStart = options.operationIndexStart ?? 0;
   const arrivalIndexStart = options.arrivalIndexStart ?? 0;
+  const payloadSkip = options.payloadSkip ?? 0;
+  const expectations = options.expectations ?? 'required';
   if (
     !Number.isSafeInteger(operationIndexStart)
     || operationIndexStart < 0
@@ -756,8 +771,13 @@ export const buildAuthorityWave = (
   const arrived: ArrivedOp[] = [];
   const accountActivity = new Set<string>();
   const createdAccounts = new Set<string>();
+  let payloadOrdinal = 0;
   for (const row of frame) {
     for (const payload of row.payloads) {
+      // Rows this Entity input already staged. Their side effects on the
+      // create/activity guards stay recorded; only the encoding is skipped.
+      const alreadyStaged = payloadOrdinal < payloadSkip;
+      payloadOrdinal += 1;
       // One thing this frame carries that no wave can express makes the whole
       // frame undrivable — never "skip this one and drive the rest".
       if (payload.kind === 'unsupported') {
@@ -775,6 +795,7 @@ export const buildAuthorityWave = (
       } else {
         accountActivity.add(accountKey);
       }
+      if (alreadyStaged) continue;
       arrived.push({
         arrivalIndex: arrivalIndexStart + arrived.length,
         ownerEntityId: row.ownerEntityId,
@@ -847,7 +868,7 @@ export const buildAuthorityWave = (
     const expectedProposals = frameProposals
       .filter(row => row.ownerEntityId === ownerEntityId)
       .map(row => row.expected);
-    if (expectedProposals.some(row => row === undefined)) {
+    if (expectations === 'required' && expectedProposals.some(row => row === undefined)) {
       return { kind: 'ineligible', reason: `proposal:result-missing:${ownerEntityId}` };
     }
     if (new Set(selected).size !== selected.length) {
@@ -872,7 +893,7 @@ export const buildAuthorityWave = (
         continue;
       }
       if (payload.kind === 'admit') {
-        if (row.expectedVerdict?.kind !== 'admission') {
+        if (expectations === 'required' && row.expectedVerdict?.kind !== 'admission') {
           return { kind: 'ineligible', reason: `result:admission:${row.ownerEntityId}/${row.accountId}` };
         }
         const txs: RscoreWireValue[] = [];
@@ -888,13 +909,13 @@ export const buildAuthorityWave = (
         operations.push({
           ...describeAuthorityWaveOperation(encoded),
           arrivalIndex: row.arrivalIndex,
-          expectedVerdict: row.expectedVerdict,
+          ...(row.expectedVerdict === undefined ? {} : { expectedVerdict: row.expectedVerdict }),
         });
         operationIndex += 1;
         continue;
       }
       let encoded: RscoreWireValue;
-      if (row.expectedVerdict?.kind !== 'peer') {
+      if (expectations === 'required' && row.expectedVerdict?.kind !== 'peer') {
         return { kind: 'ineligible', reason: `result:peer:${row.ownerEntityId}/${row.accountId}` };
       }
       try {
@@ -910,7 +931,7 @@ export const buildAuthorityWave = (
       operations.push({
         ...describeAuthorityWaveOperation(operation),
         arrivalIndex: row.arrivalIndex,
-        expectedVerdict: row.expectedVerdict,
+        ...(row.expectedVerdict === undefined ? {} : { expectedVerdict: row.expectedVerdict }),
       });
       inputs.push({
         operationIndex,
@@ -939,7 +960,9 @@ export const buildAuthorityWave = (
       finalizedJHeight: clock.finalizedJHeight,
       propose: selected.length > 0,
       proposalAccountIds: selected,
-      expectedProposals: expectedProposals as AuthorityExpectedProposalAttempt[],
+      expectedProposals: expectations === 'required'
+        ? (expectedProposals as AuthorityExpectedProposalAttempt[])
+        : [],
       ops,
       operations,
     });

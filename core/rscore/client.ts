@@ -82,7 +82,7 @@ const RSCORE_ABI_VERSION = 1;
 // 14: peer inputs carry the exact Account envelope plus the closed
 // Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
 // returns one ordered composite result row.
-export const RSCORE_PROCESS_ABI_VERSION = 14;
+export const RSCORE_PROCESS_ABI_VERSION = 15;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -1013,8 +1013,22 @@ export class RscoreProcessClient {
     });
   }
 
-  async bootstrapAccounts(revision: number, accounts: RscoreWireValue[]): Promise<unknown> {
-    return this.#request(RSCORE_OP.bootstrapAccounts, [RSCORE_PROCESS_PROFILE, revision, accounts]);
+  /**
+   * Create a brand-new empty authority, or — only when the caller declares it
+   * — import Account state the engine has no checkpoint for. Production never
+   * imports: durable history enters through `restoreExact`.
+   */
+  async bootstrapAccounts(
+    revision: number,
+    accounts: RscoreWireValue[],
+    importExisting = false,
+  ): Promise<unknown> {
+    return this.#request(RSCORE_OP.bootstrapAccounts, [
+      RSCORE_PROCESS_PROFILE,
+      revision,
+      accounts,
+      importExisting,
+    ]);
   }
 
   /** Incremental exact rows since the last checkpoint Rust acknowledged. */

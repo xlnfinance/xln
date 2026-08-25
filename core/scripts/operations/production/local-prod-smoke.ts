@@ -166,6 +166,11 @@ const PROFILING_ENV_KEYS = [
   // Rust account-engine shadow mirror (diagnostic; off unless explicitly set).
   'XLN_RSCORE_SHADOW', 'XLN_RSCORE_SHADOW_ENTITY', 'XLN_RSCORE_SHADOW_WORKERS',
   'XLN_RSCORE_SHADOW_MAX_ENTITIES', 'XLN_RSCORE_SHADOW_TRACE', 'XLN_RSCORE_BINARY',
+  // Rust account authority, enabled per hub (XLN_HUB_RSCORE_AUTHORITY_H1=1).
+  // The mesh runs every hub in one orchestrator, so this is never a
+  // process-wide switch: an Entity the engine cannot sign for must not be
+  // handed to it by inheritance.
+  'XLN_RSCORE_AUTHORITY_WORKERS', 'XLN_RSCORE_AUTHORITY_RECORD',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -1184,6 +1189,12 @@ const main = async (): Promise<void> => {
     // forward the operator's profiler choice to the hub child unchanged.
     ...Object.fromEntries(
       Object.entries(process.env).filter(([name]) => name.startsWith('XLN_HUB_ENGINE_ARGS_')),
+    ),
+    // Per-hub Rust account authority (XLN_HUB_RSCORE_AUTHORITY_H1=1).
+    ...Object.fromEntries(
+      Object.entries(process.env)
+        .filter(([name]) => name.startsWith('XLN_HUB_RSCORE_AUTHORITY_'))
+        .map(([name, value]) => [name, String(value)]),
     ),
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,

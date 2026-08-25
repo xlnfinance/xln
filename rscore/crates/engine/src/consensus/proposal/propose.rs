@@ -114,6 +114,10 @@ pub(crate) struct WindowExecution {
     pub candidate: AccountReplica,
     pub applied: Vec<AccountTx>,
     pub outputs: Vec<AccountOutput>,
+    /// What each applied transaction said it did, in transaction order. The
+    /// Entity frame commits these strings, so they are part of the transition,
+    /// not a log: a cutover that dropped them would sign a different frame.
+    pub events: Vec<String>,
     pub dropped: Vec<DroppedTx>,
 }
 
@@ -127,6 +131,7 @@ pub(crate) fn execute_window(
     let mut candidate = base.clone();
     let mut applied = Vec::with_capacity(window.len());
     let mut outputs = Vec::new();
+    let mut events = Vec::new();
     let mut dropped = Vec::new();
     for (index, tx) in window.into_iter().enumerate() {
         let transition =
@@ -135,6 +140,7 @@ pub(crate) fn execute_window(
         match transition.verdict() {
             AccountVerdict::Applied => {
                 outputs.extend_from_slice(transition.outputs());
+                events.extend(transition.events().iter().cloned());
                 candidate = transition.committed().expect("applied transition commits");
                 applied.push(tx);
             }
@@ -156,6 +162,7 @@ pub(crate) fn execute_window(
                         candidate,
                         applied,
                         outputs,
+                        events,
                         dropped,
                     });
                 }
@@ -166,6 +173,7 @@ pub(crate) fn execute_window(
         candidate,
         applied,
         outputs,
+        events,
         dropped,
     })
 }
@@ -209,6 +217,7 @@ pub fn propose_account_frame(
         mut candidate,
         applied,
         outputs,
+        events,
         dropped,
     } = execution;
     // A rejection the machine itself caused is not a dropped transaction.
@@ -260,6 +269,7 @@ pub fn propose_account_frame(
     let state_hash = frame.hash()?;
     let hanko = identity.sign_frame(&state_hash)?;
     account.set_pending(PendingFrame {
+        events,
         // `set_pending` decides whether this proposal carries the ack we owe.
         bundled_ack: None,
         proposal_dispute: proposal_dispute.clone(),
