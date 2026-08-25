@@ -11,7 +11,6 @@ mod execution;
 mod fanout;
 mod query;
 mod round;
-mod shard;
 mod stateful;
 mod types;
 

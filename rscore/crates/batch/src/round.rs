@@ -23,7 +23,7 @@ use crate::consensus::{
     StatefulConsensusEngine, state_error,
 };
 use crate::error::BatchError;
-use crate::shard::map_accounts;
+use crate::fanout::map_accounts;
 use crate::types::{AccountId, AccountSeed};
 use xln_rscore_engine::{AccountConsensus, SigningIdentity};
 

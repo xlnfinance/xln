@@ -26,7 +26,7 @@ use crate::checkpoint::{
     AccountCheckpointRows, AccountRestore, AccountsCheckpoint, CheckpointExpectation,
     CheckpointToken, account_rows,
 };
-use crate::shard::map_accounts;
+use crate::fanout::map_accounts;
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, CandidateId, EngineGeneration};
 
