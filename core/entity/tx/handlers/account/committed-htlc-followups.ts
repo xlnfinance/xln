@@ -167,22 +167,40 @@ export async function applyCommittedHtlcLockFollowup(
   // outbound Account state; requiring recipient context there would execute the
   // payment twice and ask the sender to decrypt ciphertext addressed to its peer.
   if (!committedViaNewFrame) return;
-  const { account } = ctx;
-  const lock = account.state.locks.get(accountTx.data.lockId);
-  if (!lock || accountTx.data.envelope === undefined) return;
+  if (accountTx.data.envelope === undefined) return;
   const layer = encryptedHtlcLayer(accountTx.data.envelope);
   if (!layer) {
     throw haltRuntimeFailure(
       'HTLC_ONION_ENCRYPTED_LAYER_REQUIRED',
-      `HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`,
+      `HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${accountTx.data.lockId}`,
     );
   }
-  if (lock.envelopeHash !== hashEncryptedHtlcLayer(layer)) {
+  if (!Number.isSafeInteger(committedFrame.height) || committedFrame.height <= 0) {
     throw haltRuntimeFailure(
-      'HTLC_ONION_COMMITTED_HASH_MISMATCH',
-      `HTLC_ONION_COMMITTED_HASH_MISMATCH:${lock.lockId}`,
+      'HTLC_COMMITTED_FRAME_HEIGHT_INVALID',
+      `HTLC_COMMITTED_FRAME_HEIGHT_INVALID:${committedFrame.height}`,
     );
   }
+  // The committed frame is the signed authority for this exact lock. Reading
+  // it back from a mirrored Account body forced the Rust cutover to ship the
+  // whole tree between its inbound and outbound visits. These fields are the
+  // canonical lock constructor used by both engines; rejected locks never
+  // appear in `frame.accountTxs`.
+  const lock: HtlcLock = {
+    lockId: accountTx.data.lockId,
+    hashlock: accountTx.data.hashlock,
+    timelock: accountTx.data.timelock,
+    revealBeforeHeight: accountTx.data.revealBeforeHeight,
+    amount: accountTx.data.amount,
+    tokenId: accountTx.data.tokenId,
+    senderIsLeft: committedFrame.byLeft,
+    // The Account handler stamps the pre-proposal height. The containing
+    // frame is exactly the next height (proposal/frame.ts); using the frame
+    // height here would synthesize a different lock than either engine did.
+    createdHeight: committedFrame.height - 1,
+    createdTimestamp: committedFrame.timestamp,
+    envelopeHash: hashEncryptedHtlcLayer(layer),
+  };
   const prepared = requirePreparedHtlcEntry(ctx, lock, committedFrame);
   // A hashlock is the Entity-wide identity of one live routed payment. Without
   // this guard, a peer can commit a second lock through another Account and

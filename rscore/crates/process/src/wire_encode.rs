@@ -863,7 +863,7 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
         AccountTx::HtlcLock(lock) => vec![
             integer(1),
             AbiValue::Text(lock.lock_id.clone()),
-            hex_bytes(lock.hashlock.as_str(), 32),
+            hex_bytes(lock.hashlock.as_str(), 32)?,
             big(&lock.timelock),
             integer(lock.reveal_before_height),
             big(&lock.amount),
@@ -880,7 +880,7 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
         ],
         AccountTx::HtlcResolve(resolve) => {
             let (outcome, payload) = match &resolve.outcome {
-                HtlcResolveOutcome::Secret { secret } => (integer(0), hex_bytes(secret, 32)),
+                HtlcResolveOutcome::Secret { secret } => (integer(0), hex_bytes(secret, 32)?),
                 HtlcResolveOutcome::Error { reason } => (integer(1), optional_text(reason)),
             };
             vec![
@@ -997,14 +997,24 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
 /// A `0x`-prefixed hex string as the bytes the decoder expects. The wire is
 /// binary for fixed-width identifiers: encoding one as text here would produce
 /// a frame this ABI cannot read back.
-fn hex_bytes(value: &str, length: usize) -> AbiValue {
+fn hex_bytes(value: &str, length: usize) -> Result<AbiValue, crate::ProcessError> {
     let hex = value.strip_prefix("0x").unwrap_or(value);
+    if hex.len() != length * 2 {
+        return Err(crate::ProcessError::Expected("wireHexLength"));
+    }
     let mut bytes = Vec::with_capacity(length);
     for pair in hex.as_bytes().chunks_exact(2) {
-        let text = std::str::from_utf8(pair).unwrap_or("");
-        bytes.push(u8::from_str_radix(text, 16).unwrap_or(0));
+        let nibble = |value: u8| match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        };
+        let high = nibble(pair[0]).ok_or(crate::ProcessError::Expected("wireHexDigit"))?;
+        let low = nibble(pair[1]).ok_or(crate::ProcessError::Expected("wireHexDigit"))?;
+        bytes.push((high << 4) | low);
     }
-    AbiValue::Bytes(bytes)
+    Ok(AbiValue::Bytes(bytes))
 }
 
 pub(crate) fn big(value: &num_bigint::BigInt) -> AbiValue {

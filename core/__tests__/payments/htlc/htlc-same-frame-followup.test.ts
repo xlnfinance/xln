@@ -70,7 +70,10 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides =
   const context = {
     env: {}, state, newState: state,
     input: { fromEntityId: from, toEntityId: to, domain },
-    account: { state: { locks: new Map([[lockId, lock]]) } }, outputs: [], accountTxs,
+    // The Rust cutover intentionally does not materialize the Account body on
+    // inbound. The signed committed frame, not this stale read model, must be
+    // sufficient to drive the Entity followup.
+    account: { state: { locks: new Map() } }, outputs: [], accountTxs,
     candidateEffects: [], consumedPreparedHtlcBindings,
     infraContext: { htlc: { entries: [preparedEntry] } },
     preparedHtlcEntriesByBinding: new Map([[`${frameHash}:${lockId}`, preparedEntry]]),

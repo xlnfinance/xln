@@ -45,19 +45,29 @@ const committedOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   ...overrides,
 });
 
-const makeAdmissionState = (offer: SwapOffer): EntityState => {
+const makeAdmissionState = (
+  offer: SwapOffer,
+  options: Readonly<{ hold?: bigint; queuedCancel?: boolean }> = {},
+): EntityState => {
   const state = makeState(MAKER, addr('a1'), jurisdiction, TAKER);
   const account = makeAccount(MAKER, TAKER, jurisdiction);
-  account.state.swapOffers.set(offer.offerId, offer);
+  account.state.swapOffers = account.state.swapOffers.updated(offer.offerId, offer);
   // The maker's hold must already be committed for a same-jurisdiction offer.
   const giveDelta = account.state.deltas.get(1)!;
-  account.state.deltas.set(offer.giveTokenId, {
+  const hold = options.hold ?? offer.quantizedGive ?? offer.giveAmount;
+  account.state.deltas = account.state.deltas.updated(offer.giveTokenId, {
     ...giveDelta,
     tokenId: offer.giveTokenId,
     ...(offer.makerIsLeft
-      ? { leftHold: offer.quantizedGive }
-      : { rightHold: offer.quantizedGive }),
+      ? { leftHold: hold }
+      : { rightHold: hold }),
   });
+  if (options.queuedCancel) {
+    account.mempool.push({
+      type: 'swap_cancel_request',
+      data: { offerId: offer.offerId },
+    });
+  }
   account.currentHeight = 1;
   if (!(state.accounts instanceof PersistentEntityAccountMap)) {
     throw new Error('ORDERBOOK_ADMISSION_TEST_ACCOUNT_MAP_INVALID');
@@ -117,6 +127,38 @@ describe('orderbook admission', () => {
       .toThrow('ORDERBOOK_ORDER_NOT_COMMITTED');
   });
 
+  test('admits a typed authoritative Account output before final materialization', () => {
+    const offer = committedOffer();
+    const state = createEntityFrameCandidateState(
+      makeState(MAKER, addr('a1'), jurisdiction, TAKER),
+    );
+    state.accounts.set(TAKER, makeAccount(MAKER, TAKER, jurisdiction));
+    const admitted = admitOrderbookOfferForMatching(
+      env,
+      state,
+      candidateFor(offer, { accountOutputVerified: true }),
+    );
+    expect(admitted?.offerId).toBe(offer.offerId);
+  });
+
+  test('authoritative output still waits behind an already queued lifecycle tx', () => {
+    const offer = committedOffer();
+    const state = createEntityFrameCandidateState(
+      makeState(MAKER, addr('a1'), jurisdiction, TAKER),
+    );
+    const account = makeAccount(MAKER, TAKER, jurisdiction);
+    account.mempool.push({
+      type: 'swap_cancel_request',
+      data: { offerId: offer.offerId },
+    });
+    state.accounts.set(TAKER, account);
+    expect(() => admitOrderbookOfferForMatching(
+      env,
+      state,
+      candidateFor(offer, { accountOutputVerified: true }),
+    )).toThrow('ORDERBOOK_ORDER_NOT_READY');
+  });
+
   test.each([
     ['priceTicks', { priceTicks: undefined }],
     ['quantizedGive', { quantizedGive: undefined }],
@@ -173,21 +215,14 @@ describe('orderbook admission', () => {
 
   test('rejects an offer whose maker hold is not committed on the Account', () => {
     const offer = committedOffer();
-    const state = makeAdmissionState(offer);
-    const account = state.accounts.get(TAKER)!;
-    const delta = account.state.deltas.get(offer.giveTokenId)!;
-    account.state.deltas.set(offer.giveTokenId, { ...delta, leftHold: 0n, rightHold: 0n });
+    const state = makeAdmissionState(offer, { hold: 0n });
     expect(() => admitOrderbookOfferForMatching(env, state, candidateFor(offer)))
       .toThrow('ORDERBOOK_ORDER_HOLD_NOT_COMMITTED');
   });
 
   test('defers admission while a lifecycle tx for the offer is still queued', () => {
     const offer = committedOffer();
-    const state = makeAdmissionState(offer);
-    state.accounts.get(TAKER)!.mempool.push({
-      type: 'swap_cancel_request',
-      data: { offerId: offer.offerId },
-    });
+    const state = makeAdmissionState(offer, { queuedCancel: true });
     expect(() => admitOrderbookOfferForMatching(env, state, candidateFor(offer)))
       .toThrow('ORDERBOOK_ORDER_NOT_READY');
   });

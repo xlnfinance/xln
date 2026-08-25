@@ -535,11 +535,12 @@ fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> 
 
 /// One Entity input's outbound half: creates, admissions, proposal worklist.
 fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 7, "accountOutbound")?;
+    let fields = exact(fields, 8, "accountOutbound")?;
     let creates = tuple(&fields[3])?;
     let admits = tuple(&fields[4])?;
     let propose = tuple(&fields[5])?;
-    if creates.len() + admits.len() + propose.len() > MAX_WAVE_OP_ROWS {
+    let materialize = tuple(&fields[6])?;
+    if creates.len() + admits.len() + propose.len() + materialize.len() > MAX_WAVE_OP_ROWS {
         return Err(ProcessError::Expected("waveOpRows"));
     }
     Ok(Command::AccountOutbound {
@@ -568,7 +569,11 @@ fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError>
                 .iter()
                 .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
                 .collect::<Result<_, ProcessError>>()?,
-            post_accounts: strict_boolean(&fields[6], "postAccounts")?,
+            materialize: materialize
+                .iter()
+                .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
+                .collect::<Result<_, ProcessError>>()?,
+            post_accounts: strict_boolean(&fields[7], "postAccounts")?,
         }),
     })
 }

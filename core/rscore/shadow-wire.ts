@@ -37,11 +37,11 @@ export const hexToWireBytes = (value: string, expectedBytes: number, code: strin
   if (clean.length !== expectedBytes * 2 || !/^[0-9a-f]*$/.test(clean)) {
     throw new Error(`${code}:${value}`);
   }
-  const bytes = new Uint8Array(expectedBytes);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(clean.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
+  // Validation above makes Buffer's native hex decoder exact: odd, malformed
+  // or truncated input can never reach it. The authority path converts tens
+  // of thousands of ids and hashes per frame, so parsing one byte at a time in
+  // JavaScript is measurable serialization work outside the Rust engine.
+  return Buffer.from(clean, 'hex');
 };
 
 const deltaWire = (delta: Delta): RscoreWireValue[] => [

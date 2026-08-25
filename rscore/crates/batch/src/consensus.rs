@@ -9,7 +9,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
     AccountConsensus, AccountEnvelope, AccountFrame, AccountOutput, AccountPeerEnvelope,
@@ -591,6 +590,8 @@ pub struct StatefulConsensusEngine {
     swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     pending: Option<PendingWave>,
     pub(crate) savepoints: Vec<crate::round::RuntimeSavepoint>,
+    /// Persistent pre-inbound tree for the currently open two-visit Entity round.
+    entity_round_base: Option<crate::round::EntityRoundBase>,
 }
 
 impl StatefulConsensusEngine {
@@ -628,6 +629,7 @@ impl StatefulConsensusEngine {
             identities: BTreeMap::new(),
             swap_market,
             pending: None,
+            entity_round_base: None,
         };
         engine.upsert_accounts(seeds)?;
         // Seeding is not a state change: the engine comes up at the revision
@@ -660,6 +662,18 @@ impl StatefulConsensusEngine {
 
     pub(crate) fn savepoints_mut(&mut self) -> &mut Vec<crate::round::RuntimeSavepoint> {
         &mut self.savepoints
+    }
+
+    pub(crate) const fn entity_round_base(&self) -> Option<&crate::round::EntityRoundBase> {
+        self.entity_round_base.as_ref()
+    }
+
+    pub(crate) fn set_entity_round_base(&mut self, base: crate::round::EntityRoundBase) {
+        self.entity_round_base = Some(base);
+    }
+
+    pub(crate) fn clear_entity_round_base(&mut self) {
+        self.entity_round_base = None;
     }
 
     pub(crate) fn identities_snapshot(&self) -> BTreeMap<[u8; 32], SigningIdentity> {
@@ -2390,28 +2404,15 @@ impl StatefulConsensusEngine {
         base: &PersistentRadixMap<AccountConsensus>,
         entries: Vec<(Vec<u8>, AccountConsensus, [u8; 32])>,
     ) -> Result<PersistentRadixMap<AccountConsensus>, BatchError> {
-        base.updated_batch(entries, |slots| {
-            // Sixteen slots are always handed over; only the ones holding
-            // leaves are work. A wave that moved one account would otherwise
-            // pay a pool hand-off to hash fifteen empty slots.
-            if slots.iter().filter(|slot| slot.has_work()).count()
-                <= crate::fanout::SEQUENTIAL_SLOT_FANOUT_MAX
-            {
-                return slots.map(xln_rscore_protocol::SlotWork::apply);
-            }
-            self.pool.install(|| {
-                let mut results = slots
-                    .into_par_iter()
-                    .map(xln_rscore_protocol::SlotWork::apply)
-                    .collect::<Vec<_>>()
-                    .into_iter();
-                std::array::from_fn(|_| {
-                    results.next().unwrap_or_else(|| {
-                        Err(xln_rscore_protocol::PersistentRadixMapError::EmptyKey)
-                    })
-                })
+        let wide = self.pool.current_num_threads() > 16
+            && entries.len() >= crate::fanout::SECOND_LEVEL_FANOUT_MIN;
+        if wide {
+            base.updated_batch_two_levels(entries, |slots| {
+                crate::fanout::map_slots(&self.pool, slots)
             })
-        })
+        } else {
+            base.updated_batch(entries, |slots| crate::fanout::map_slots(&self.pool, slots))
+        }
         .map_err(|error| BatchError::AccountsTree {
             account_id: AccountId::from_bytes([0; 32]),
             detail: error.to_string(),
@@ -2960,7 +2961,29 @@ fn validate_terminal_replay(
 }
 
 fn proposable(account: &AccountConsensus) -> bool {
-    account.pending().is_none() && !account.mempool().is_empty()
+    if account.pending().is_some() {
+        return false;
+    }
+    let active = match account
+        .replica()
+        .envelope()
+        .fields()
+        .iter()
+        .find(|(name, _)| name == "status")
+        .map(|(_, value)| value)
+    {
+        None => true,
+        Some(CanonicalValue::String(value)) => value == "active",
+        Some(_) => false,
+    };
+    if !active {
+        return false;
+    }
+    let locks_full = account.replica().state().htlc_slots_full();
+    account
+        .mempool()
+        .iter()
+        .any(|tx| !locks_full || !matches!(tx, AccountTx::HtlcLock(_)))
 }
 
 /// The leaf commits the consensus state too, so a queued transaction or a new

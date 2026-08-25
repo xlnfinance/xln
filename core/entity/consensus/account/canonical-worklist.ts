@@ -4,8 +4,9 @@ import { compareStableText } from '../../../protocol/serialization';
  * One frame-local Account work authority.
  *
  * `true` means the Account transition owes a peer response even when its
- * mempool is empty. The response bytes never live here: the AccountReplica is
- * the sole authority for its pending proposal or last outbound ACK.
+ * mempool is empty. The exact response bytes travel in the frame-local
+ * `forcedAccountInputs` map beside this bit; reconstructing them from a stale
+ * Entity-side Account mirror would make the Rust cutover non-authoritative.
  */
 export type ProposableAccountMap = Map<string, boolean>;
 

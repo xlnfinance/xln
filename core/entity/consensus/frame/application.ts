@@ -324,6 +324,15 @@ const collectEntityTxResult = (
       accountId,
       result.accountInputWork.force,
     );
+    if (result.accountInputWork.force) {
+      const response = result.accountInputWork.response;
+      if (response === undefined) {
+        throw new Error(`ACCOUNT_FORCED_RESPONSE_BYTES_MISSING:${accountId}`);
+      }
+      context.forcedAccountInputs.set(accountId, response);
+    } else {
+      context.forcedAccountInputs.delete(accountId);
+    }
     const account = result.newState.accounts.get(accountId);
     if (!account) throw new Error(`ACCOUNT_INPUT_WORK_ACCOUNT_MISSING:${accountId}`);
     if (result.accountInputWork.force) {
@@ -494,6 +503,7 @@ type ProposePendingAccountFramesContext = {
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   proposableAccounts: ProposableAccountMap;
+  forcedAccountInputs: ReadonlyMap<string, AccountPeerInput>;
   allOutputs: EntityOutput[];
   candidateEffects: EntityCandidateEffect[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
@@ -703,51 +713,6 @@ const proposeAccountFrameCandidate = async (
   return proposal;
 };
 
-const liveOutboundAck = (
-  account: AccountReplica,
-  accountKey: string,
-): Extract<AccountPeerInput, { kind: 'ack' }> | undefined => {
-  const saved = account.lastOutboundFrameAck;
-  if (!saved) return undefined;
-  if (saved.counterpartyEntityId.toLowerCase() !== accountKey.toLowerCase()) {
-    throw new Error(`ACCOUNT_FORCED_ACK_COUNTERPARTY_MISMATCH:${accountKey}`);
-  }
-  if (Number(saved.height) !== Number(account.currentHeight)) {
-    throw new Error(
-      `ACCOUNT_FORCED_ACK_HEIGHT_MISMATCH:${accountKey}:${saved.height}:${account.currentHeight}`,
-    );
-  }
-  const ack = accountInputAck(saved.response);
-  if (!ack || Number(ack.height) !== Number(saved.height)) {
-    throw new Error(`ACCOUNT_FORCED_ACK_BYTES_INVALID:${accountKey}:${saved.height}`);
-  }
-  if (ack.frameHash.toLowerCase() !== account.currentFrame.stateHash.toLowerCase()) {
-    throw new Error(`ACCOUNT_FORCED_ACK_HASH_MISMATCH:${accountKey}:${saved.height}`);
-  }
-  return structuredClone(saved.response);
-};
-
-/**
- * Channel.ts flushes from live channel state, never from a second response
- * cache. XLN does the same, retaining only exact Hanko-bearing proposal/ACK
- * bytes in the AccountReplica so a flush cannot invent new bytes.
- */
-const resolveForcedAccountInput = (
-  account: AccountReplica,
-  accountKey: string,
-): AccountPeerInput | undefined => {
-  const ack = liveOutboundAck(account, accountKey);
-  if (!account.pendingFrame) {
-    if (!ack) throw new Error(`ACCOUNT_FORCED_RESPONSE_MISSING:${accountKey}:${account.currentHeight}`);
-    return ack;
-  }
-
-  // A proposal leaves exactly once with the Runtime frame that created it.
-  // While it is pending, a forced flush may add a newly available ACK but may
-  // never reconstruct or re-carry the old proposal from Account state.
-  return ack;
-};
-
 const assertForcedAccountInputPreserved = (
   accountKey: string,
   required: AccountPeerInput,
@@ -813,22 +778,6 @@ const routeFinalAccountInput = (
 };
 
 /**
- * The authoritative engine selects a proposal worklist before the admissions it
- * was handed this frame are visible in the replica mirror. Gate each candidate
- * on the mempool it will actually hold, so Rust never proposes a frame the
- * TypeScript engine would have withheld.
- */
-const authorityProposalGate = (
-  state: EntityState,
-): ((account: AccountReplica, pendingAdmissions: readonly AccountTx[]) => boolean) =>
-  (account, pendingAdmissions) => accountHasProposableMempool(
-    pendingAdmissions.length === 0
-      ? account
-      : { ...account, mempool: [...account.mempool, ...pendingAdmissions] },
-    state,
-  );
-
-/**
  * A cross-jurisdiction opening either waits for its cohort or proposes a subset
  * of the mempool. Neither is something the authoritative engine can express: it
  * was asked for a whole-mempool frame and has already built one. Refuse rather
@@ -885,8 +834,11 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     }
 
     const requiredResponse = force
-      ? resolveForcedAccountInput(account, accountKey)
+      ? context.forcedAccountInputs.get(accountKey)
       : undefined;
+    if (force && requiredResponse === undefined) {
+      throw new Error(`ACCOUNT_FORCED_RESPONSE_MISSING:${accountKey}:${account.currentHeight}`);
+    }
     traceAccountFlushHop(
       'entity-flush-start',
       currentEntityState.entityId,
@@ -1030,6 +982,7 @@ type OrderbookMatchResult = ReturnType<typeof processOrderbookSwaps>;
 const applyOrderbookAccountTxs = async (
   context: ApplyOrderbookMatchingContext,
   result: OrderbookMatchResult,
+  accountOutputVerifiedOffers: ReadonlySet<string>,
 ): Promise<void> => {
   const {
     env,
@@ -1051,7 +1004,10 @@ const applyOrderbookAccountTxs = async (
         });
         continue;
       }
-      if (!visible?.state.swapOffers?.has(tx.data.offerId)) {
+      if (
+        !visible?.state.swapOffers?.has(tx.data.offerId)
+        && !accountOutputVerifiedOffers.has(swapKey(accountId, tx.data.offerId))
+      ) {
         throw haltRuntimeFailure("ORDERBOOK_SWAP_OWNER_NOT_LOCAL", `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`);
       }
     } else if (tx.type === 'cross_swap_fill_ack' && !visible?.state.swapOffers?.has(tx.data.offerId)) {
@@ -1177,6 +1133,11 @@ async function applyOrderbookMatching(
   });
 
   const offersToMatch = collectOffersForMatching(env, currentEntityState, allSwapOffersCreated);
+  const accountOutputVerifiedOffers = new Set(
+    offersToMatch
+      .filter(offer => offer.accountOutputVerified)
+      .map(offer => swapKey(offer.accountId, offer.offerId)),
+  );
   const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, {
     candidateEffects: context.candidateEffects,
   });
@@ -1186,7 +1147,7 @@ async function applyOrderbookMatching(
   stats.orderbookCrossFills = matchResult.crossJurisdictionFills.length;
 
   // Matching is pure; only these two stages mutate the isolated Entity frame.
-  await applyOrderbookAccountTxs(context, matchResult);
+  await applyOrderbookAccountTxs(context, matchResult, accountOutputVerifiedOffers);
   commitOrderbookMatchResult(context, matchResult);
   return stats;
 }
@@ -1367,6 +1328,7 @@ const createEntityFrameApplyContext = (
     collectedHashes: [],
     collectedHashManifest: new Map(),
     proposableAccounts: new Map(),
+    forcedAccountInputs: new Map(),
     allSwapOffersCreated: [],
     allSwapCancelRequests: [],
     allSwapOffersCancelled: [],
@@ -1655,7 +1617,6 @@ const applyPostEntityTxPhases = async (
     ?.prepareEntityAccountOutbound?.({
       accounts: currentEntityState.accounts,
       proposalAccountIds,
-      isProposable: authorityProposalGate(currentEntityState),
       timestamp: currentEntityState.timestamp,
       jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
     });
@@ -1666,6 +1627,7 @@ const applyPostEntityTxPhases = async (
         accountConsensusContext: context.accountConsensusContext,
         currentEntityState,
         proposableAccounts: context.proposableAccounts,
+        forcedAccountInputs: context.forcedAccountInputs,
         allOutputs: context.allOutputs,
         candidateEffects: context.candidateEffects,
         collectedHashes: context.collectedHashes,
@@ -1782,7 +1744,6 @@ const applyEntityFrameWithIsolation = async (
       ?.prepareEntityAccountOutbound?.({
         accounts: working.currentEntityState.accounts,
         proposalAccountIds: [],
-        isProposable: authorityProposalGate(working.currentEntityState),
         timestamp: working.currentEntityState.timestamp,
         jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
       });

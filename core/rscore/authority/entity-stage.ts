@@ -8,7 +8,7 @@ import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
 } from '../../account/consensus/types';
-import type { AccountInput, AccountTx } from '../../types/account';
+import type { AccountInput } from '../../types/account';
 import type { EntityInput } from '../../entity/types';
 import type {
   AccountAuthorityEntityStageCapability,
@@ -78,6 +78,10 @@ export type AccountAuthorityEntityBatchInbound = AccountAuthorityEntityParent & 
 export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent & Readonly<{
   admissions: readonly AccountAuthorityInputRequest[];
   proposals: readonly AccountAuthorityProposalRequest[];
+  materializeAccounts: readonly Readonly<{
+    accountId: string;
+    account: AccountAuthorityInputRequest['account'];
+  }>[];
 }>;
 
 export interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
@@ -315,26 +319,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNCONSUMED:${this.inboundCursor}:${this.inboundRequests.length}`);
     }
     this.frameOutboundPrepared = true;
-    // The gate is the Entity's, not a second one written here: an account in
-    // dispute preparation, one holding a transaction that still waits on a
-    // post-commit Hanko, one at the lock ceiling or one carrying a signed
-    // settlement error is not proposable, and none of that is visible from
-    // `pendingFrame` and a mempool count alone.
-    const pendingAdmissions = new Map<string, AccountTx[]>();
-    for (const entry of this.admissionRequests) {
-      if (entry.input.kind !== 'enqueue') continue;
-      const accountId = normalizeEntityId(entry.account.proofHeader.toEntity);
-      pendingAdmissions.set(accountId, [
-        ...(pendingAdmissions.get(accountId) ?? []),
-        ...entry.input.txs,
-      ]);
-    }
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
-      .filter(accountId => {
-        const account = request.accounts.get(accountId);
-        return account !== undefined
-          && request.isProposable(account, pendingAdmissions.get(accountId) ?? []);
-      })
+      .filter(accountId => request.accounts.has(accountId))
       .toSorted();
     const proposals = proposalIds.map(accountId => {
       const account = request.accounts.get(accountId);
@@ -350,10 +336,17 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       };
     });
     const run = this.requireBatchProvider('executeAccountOutboundBatch');
+    const materializeById = new Map(this.inboundRequests.map(request => {
+      const accountId = normalizeEntityId(request.account.proofHeader.toEntity);
+      return [accountId, { accountId, account: request.account }] as const;
+    }));
     this.proposalResults = [...await run.call(this.options.provider, {
       ...this.parentOf(),
       admissions: this.admissionRequests,
       proposals,
+      materializeAccounts: [...materializeById.values()].toSorted((left, right) =>
+        left.accountId.localeCompare(right.accountId),
+      ),
     })];
     this.preparedProposalIds = proposalIds;
     if (this.proposalResults.length !== proposals.length) {

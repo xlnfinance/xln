@@ -127,6 +127,12 @@ pub enum BatchError {
     WaveOpen,
     #[error("RSCORE_BATCH_WAVE_SEALED")]
     WaveSealed,
+    #[error("RSCORE_BATCH_ENTITY_ROUND_OPEN")]
+    EntityRoundOpen,
+    #[error("RSCORE_BATCH_ENTITY_ROUND_MISSING")]
+    EntityRoundMissing,
+    #[error("RSCORE_BATCH_ENTITY_ROUND_OWNER:{actual}:{expected}")]
+    EntityRoundOwner { actual: String, expected: String },
     #[error("RSCORE_BATCH_ENTITY_STAGE_OPEN:{0}")]
     EntityStageOpen(crate::StageKey),
     #[error("RSCORE_BATCH_ENTITY_STAGE_MISSING:{0}")]

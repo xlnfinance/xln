@@ -20,6 +20,8 @@ export interface SwapOfferEvent {
   priceTicks?: bigint | undefined;
   timeInForce?: 0 | 1 | 2 | undefined;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
+  /** The authoritative Account machine emitted this from a committed transition. */
+  accountOutputVerified?: true;
 }
 
 export interface SwapCancelEvent {

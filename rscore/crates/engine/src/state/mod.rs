@@ -389,6 +389,11 @@ impl AccountState {
         self.locks.len()
     }
 
+    /// Whether another lock must wait for an existing lock to resolve.
+    pub fn htlc_slots_full(&self) -> bool {
+        self.locks.len() >= MAX_ACCOUNT_HTLC_LOCKS
+    }
+
     pub fn htlc_locks_root(&self) -> [u8; 32] {
         self.locks.root_hash()
     }

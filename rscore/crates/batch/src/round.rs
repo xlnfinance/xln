@@ -47,6 +47,11 @@ pub(crate) struct RuntimeSavepoint {
     revision: u64,
 }
 
+pub(crate) struct EntityRoundBase {
+    owner_entity_id: [u8; 32],
+    accounts: PersistentRadixMap<AccountConsensus>,
+}
+
 impl RuntimeSavepoint {
     pub(crate) fn into_parts(
         self,
@@ -83,6 +88,9 @@ pub struct EntityOutboundRequest {
     pub admits: Vec<(AccountId, Vec<AccountTx>)>,
     /// The accounts asked to propose once their transactions are queued.
     pub propose: Vec<AccountId>,
+    /// Accounts changed on the inbound visit whose final bodies the parent
+    /// needs only after all Entity-derived work has run.
+    pub materialize: Vec<AccountId>,
     pub post_accounts: bool,
 }
 
@@ -167,6 +175,9 @@ impl StatefulConsensusEngine {
 
     /// Keep everything done since the innermost savepoint.
     pub fn keep_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
+        if self.entity_round_base().is_some() {
+            return Err(BatchError::EntityRoundOpen);
+        }
         if self.savepoints_mut().pop().is_none() {
             return Err(BatchError::WaveMissing);
         }
@@ -176,6 +187,7 @@ impl StatefulConsensusEngine {
     /// Put every account back to the innermost savepoint.
     pub fn undo_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
         let savepoint = self.savepoints_mut().pop().ok_or(BatchError::WaveMissing)?;
+        self.clear_entity_round_base();
         self.restore_savepoint(savepoint);
         Ok((self.revision(), self.accounts_root()))
     }
@@ -185,6 +197,9 @@ impl StatefulConsensusEngine {
         &mut self,
         request: EntityInboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
+        if self.entity_round_base().is_some() {
+            return Err(BatchError::EntityRoundOpen);
+        }
         let named: BTreeSet<AccountId> = request.rows.iter().map(|row| row.account_id).collect();
         self.assert_owner(request.owner_entity_id, &named)?;
         let snapshot_at = std::time::Instant::now();
@@ -193,6 +208,10 @@ impl StatefulConsensusEngine {
         let apply_at = std::time::Instant::now();
         let applied = self.apply_inputs(request.clock, request.rows)?;
         phase::add(&phase::APPLY, apply_at);
+        self.set_entity_round_base(EntityRoundBase {
+            owner_entity_id: request.owner_entity_id,
+            accounts: base.clone(),
+        });
         let settle_at = std::time::Instant::now();
         let mut result = self.settle(&base, &named, request.post_accounts)?;
         phase::add(&phase::SETTLE, settle_at);
@@ -210,14 +229,24 @@ impl StatefulConsensusEngine {
             request.creates.iter().map(|seed| seed.account_id).collect();
         named.extend(request.admits.iter().map(|(account_id, _)| *account_id));
         named.extend(request.propose.iter().copied());
+        named.extend(request.materialize.iter().copied());
         let created: BTreeSet<AccountId> =
             request.creates.iter().map(|seed| seed.account_id).collect();
         self.assert_owner(
             request.owner_entity_id,
             &named.difference(&created).copied().collect(),
         )?;
+        let round = self
+            .entity_round_base()
+            .ok_or(BatchError::EntityRoundMissing)?;
+        if round.owner_entity_id != request.owner_entity_id {
+            return Err(BatchError::EntityRoundOwner {
+                actual: hex_of(&request.owner_entity_id),
+                expected: hex_of(&round.owner_entity_id),
+            });
+        }
         let snapshot_at = std::time::Instant::now();
-        let base = self.accounts_snapshot();
+        let base = round.accounts.clone();
         phase::add(&phase::SNAPSHOT, snapshot_at);
         if !request.creates.is_empty() {
             self.upsert_accounts(request.creates)?;
@@ -236,6 +265,7 @@ impl StatefulConsensusEngine {
         phase::tick();
         result.admissions = admissions;
         result.proposals = proposals;
+        self.clear_entity_round_base();
         Ok(result)
     }
 

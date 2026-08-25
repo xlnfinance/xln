@@ -228,6 +228,109 @@ impl<V: Clone> PersistentRadixMap<V> {
         })
     }
 
+    /// Apply a large batch as 256 independent two-nibble Patricia prefixes.
+    ///
+    /// `updated_batch` deliberately exposes only the root's sixteen children,
+    /// which is the cheapest shape for ordinary waves. A large hub wave on a
+    /// pool wider than sixteen cores would otherwise leave every extra core
+    /// idle while one worker folds all leaves under each root child. This
+    /// variant decomposes an existing compressed child at the next canonical
+    /// nibble, lets the caller schedule those 256 subtrees, then reconnects
+    /// them at sixteen prefix branches and one root. No Account work crosses a
+    /// prefix and only completed subtree roots meet above that boundary.
+    pub fn updated_batch_two_levels(
+        &self,
+        entries: Vec<(Vec<u8>, V, [u8; 32])>,
+        map_slots: impl Fn([SlotWork<V>; 256]) -> [Result<SlotOutcome<V>, PersistentRadixMapError>; 256],
+    ) -> Result<Self, PersistentRadixMapError>
+    where
+        V: Send + Sync,
+    {
+        if entries.is_empty() {
+            return Ok(self.clone());
+        }
+        for (key, _, _) in &entries {
+            if key.is_empty() {
+                return Err(PersistentRadixMapError::EmptyKey);
+            }
+        }
+        let Some(root) = self.root.as_ref() else {
+            return self.fold_updates(entries);
+        };
+        let Node::Branch { path, children, .. } = &**root else {
+            return self.fold_updates(entries);
+        };
+        if !path.is_empty() {
+            return self.fold_updates(entries);
+        }
+
+        let mut existing: [Option<NodeRef<V>>; 256] = std::array::from_fn(|_| None);
+        for (root_slot, child) in children.iter().enumerate() {
+            let Some(child) = child else { continue };
+            match &**child {
+                Node::Branch {
+                    path,
+                    children: grandchildren,
+                    ..
+                } if path.len() == 1 => {
+                    for (second_slot, grandchild) in grandchildren.iter().enumerate() {
+                        if let Some(grandchild) = grandchild {
+                            existing[root_slot * 16 + second_slot] = Some(Arc::clone(grandchild));
+                        }
+                    }
+                }
+                _ => {
+                    let child_path = node_path(child);
+                    let second_slot = usize::from(
+                        *child_path
+                            .get(1)
+                            .ok_or(PersistentRadixMapError::KeyPrefixCollision)?,
+                    );
+                    existing[root_slot * 16 + second_slot] = Some(Arc::clone(child));
+                }
+            }
+        }
+
+        let mut buckets: [Vec<NodeRef<V>>; 256] = std::array::from_fn(|_| Vec::new());
+        for (key, value, digest) in entries {
+            let path = path_slots(&key);
+            let slot = usize::from(path[0]) * 16 + usize::from(path[1]);
+            buckets[slot].push(make_leaf(key, value, digest));
+        }
+        let mut existing = existing.into_iter();
+        let mut buckets = buckets.into_iter();
+        let work: [SlotWork<V>; 256] = std::array::from_fn(|_| SlotWork {
+            child: existing.next().flatten(),
+            leaves: buckets.next().unwrap_or_default(),
+        });
+        let updated = map_slots(work);
+        let mut outcomes = updated.into_iter();
+        let mut root_children: [Option<NodeRef<V>>; 16] = std::array::from_fn(|_| None);
+        let mut inserted = 0;
+        for (root_slot, root_child) in root_children.iter_mut().enumerate() {
+            let mut children = Vec::new();
+            for _ in 0..16 {
+                let outcome = outcomes.next().ok_or(PersistentRadixMapError::EmptyKey)??;
+                inserted += outcome.inserted;
+                if let Some(child) = outcome.child {
+                    children.push(child);
+                }
+            }
+            *root_child = match children.len() {
+                0 => None,
+                1 => children.into_iter().next(),
+                _ => Some(make_branch(vec![root_slot as u8], &children)),
+            };
+        }
+        Ok(Self {
+            root: Some(make_branch(
+                Vec::new(),
+                &root_children.iter().flatten().cloned().collect::<Vec<_>>(),
+            )),
+            len: self.len + inserted,
+        })
+    }
+
     fn fold_updates(
         &self,
         entries: Vec<(Vec<u8>, V, [u8; 32])>,

@@ -1,4 +1,4 @@
-use crate::{PersistentNodeRecord, PersistentRadixMap};
+use crate::{PersistentNodeRecord, PersistentRadixMap, SlotWork};
 
 fn digest(byte: u8) -> [u8; 32] {
     [byte; 32]
@@ -90,4 +90,76 @@ fn deletion_emits_only_unreachable_nodes() {
     let changes = removed.node_changes_since(&two);
     assert!(!changes.puts.is_empty());
     assert_eq!(changes.dels.len(), 2);
+}
+
+fn sequential_slots<V: Clone, const N: usize>(
+    slots: [SlotWork<V>; N],
+) -> [Result<crate::SlotOutcome<V>, crate::PersistentRadixMapError>; N] {
+    slots.map(SlotWork::apply)
+}
+
+#[test]
+fn two_level_batch_matches_serial_with_compressed_children() {
+    let mut base = PersistentRadixMap::empty();
+    for (key, byte) in [
+        (vec![0x12, 0x34], 1),
+        (vec![0x20, 0x00], 2),
+        (vec![0x34, 0x50], 3),
+        (vec![0x34, 0x5f], 4),
+    ] {
+        base = base.updated(key, digest(byte), digest(byte)).expect("base");
+    }
+    let updates = vec![
+        (vec![0x12, 0x34], digest(11), digest(11)),
+        (vec![0x1f, 0x00], digest(12), digest(12)),
+        (vec![0x34, 0xa0], digest(13), digest(13)),
+        (vec![0xfe, 0xdc], digest(14), digest(14)),
+    ];
+    let mut serial = base.clone();
+    for (key, value, value_digest) in updates.clone() {
+        serial = serial
+            .updated(key, value, value_digest)
+            .expect("serial update");
+    }
+    let batched = base
+        .updated_batch_two_levels(updates, sequential_slots)
+        .expect("two-level update");
+    assert_eq!(batched.len(), serial.len());
+    assert_eq!(batched.root_hash(), serial.root_hash());
+    assert_eq!(batched.get(&[0x12, 0x34]), Some(&digest(11)));
+    assert_eq!(batched.get(&[0xfe, 0xdc]), Some(&digest(14)));
+}
+
+#[test]
+fn two_level_batch_matches_serial_for_large_replacements_and_inserts() {
+    let mut base = PersistentRadixMap::empty();
+    for index in 0_u16..768 {
+        let key = vec![index as u8, (index >> 8) as u8, 0x55];
+        base = base
+            .updated(key, digest(index as u8), digest(index as u8))
+            .expect("base");
+    }
+    let updates = (256_u16..1_280)
+        .map(|index| {
+            let key = vec![index as u8, (index >> 8) as u8, 0x55];
+            let byte = (index as u8).wrapping_add(17);
+            (key, digest(byte), digest(byte))
+        })
+        .collect::<Vec<_>>();
+    let mut serial = base.clone();
+    for (key, value, value_digest) in updates.clone() {
+        serial = serial
+            .updated(key, value, value_digest)
+            .expect("serial update");
+    }
+    let batched = base
+        .updated_batch_two_levels(updates, sequential_slots)
+        .expect("two-level update");
+    assert_eq!(batched.len(), serial.len());
+    assert_eq!(batched.root_hash(), serial.root_hash());
+    for index in 256_u16..1_280 {
+        let key = [index as u8, (index >> 8) as u8, 0x55];
+        let byte = (index as u8).wrapping_add(17);
+        assert_eq!(batched.get(&key), Some(&digest(byte)));
+    }
 }

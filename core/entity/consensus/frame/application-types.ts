@@ -1,4 +1,4 @@
-import type { RuntimeOverlayRecord } from '../../../types/account';
+import type { AccountPeerInput, RuntimeOverlayRecord } from '../../../types/account';
 import type { EntityCandidateEffect, EntityOutput, EntityState, HashType } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
@@ -32,6 +32,8 @@ export type ApplyEntityTxsInOrderContext = {
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   collectedHashManifest: Map<string, { type: HashType; context: string }>;
   proposableAccounts: ProposableAccountMap;
+  /** Exact forced peer responses produced by Account transitions in this frame. */
+  forcedAccountInputs: Map<string, AccountPeerInput>;
   allSwapOffersCreated: SwapOfferEvent[];
   allSwapCancelRequests: SwapCancelRequestEvent[];
   allSwapOffersCancelled: SwapCancelEvent[];

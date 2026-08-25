@@ -69,6 +69,12 @@ export type CommittedAccountEffects = {
   hashesToSign: AccountHashToSign[];
 };
 
+export type AccountInputFlushWork = Readonly<{
+  force: boolean;
+  /** Exact response emitted by the Account machine; never reconstructed by Entity. */
+  response?: AccountPeerInput;
+}>;
+
 type SuccessfulAccountInputContext = {
   env: EntityRuntimeContext;
   state: EntityState;
@@ -130,6 +136,7 @@ const buildSameJurisdictionSwapOfferEvent = (
   minNetReceive: offer.minNetReceive,
   priceTicks: offer.priceTicks,
   ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
+  ...(offer.accountOutputVerified ? { accountOutputVerified: true as const } : {}),
 });
 
 export const hubRebalanceTaskAlreadyRanAtTimestamp = (
@@ -482,7 +489,7 @@ const logCommittedSwapEffects = (effects: CommittedAccountEffects): void => {
 
 export const applySuccessfulAccountInput = async (
   context: SuccessfulAccountInputContext,
-): Promise<boolean | undefined> => {
+): Promise<AccountInputFlushWork | undefined> => {
   const { env, state, input, account, counterpartyId, createdAccount, result, effects } = context;
   const accountOutputs = collectCommittedAccountOutputs(
     effects,
@@ -532,7 +539,7 @@ export const applySuccessfulAccountInput = async (
     // re-answer and deadlocks the bilateral lane.
     const committedOurPending = !accountInputProposal(input)
       && (result.committedFrames ?? []).some(frame => !frame.committedViaNewFrame);
-    return committedOurPending ? false : undefined;
+    return committedOurPending ? { force: false } : undefined;
   }
   accountHandlerLog.debug('response.deferred_to_entity_flush', {
     from: shortId(state.entityId),
@@ -541,5 +548,5 @@ export const applySuccessfulAccountInput = async (
     prevHanko: Boolean(accountInputAck(result.response)),
   });
   context.checkpointProfile('responseDeferred');
-  return true;
+  return { force: true, response: result.response };
 };

@@ -48,6 +48,7 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   timeInForce: 0 | 1 | 2;
   createdHeight: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
+  accountOutputVerified?: true;
 }
 
 export interface OrderbookOfferInput {
@@ -67,6 +68,7 @@ export interface OrderbookOfferInput {
   priceTicks?: bigint | undefined;
   timeInForce?: 0 | 1 | 2 | undefined;
   crossJurisdiction?: CrossJurisdictionSwapRoute | undefined;
+  accountOutputVerified?: true | undefined;
 }
 
 /** Convert an Account-owned committed offer event into the book's one shape. */
@@ -102,6 +104,7 @@ export const normalizeSwapOfferForOrderbook = (
     priceTicks,
     timeInForce: offer.timeInForce ?? 0,
     ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
+    ...(offer.accountOutputVerified ? { accountOutputVerified: true as const } : {}),
   };
 };
 
