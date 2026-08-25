@@ -11,6 +11,7 @@ rust-version = "1.94"
 [workspace.dependencies]
 base64 = "0.22.1"
 hex = "0.4.3"
+mimalloc = "0.1.52"
 getrandom = "0.3.4"
 num-bigint = "0.4.6"
 num-integer = "0.1.46"

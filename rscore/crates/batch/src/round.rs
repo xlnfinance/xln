@@ -14,15 +14,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rayon::prelude::*;
 use xln_rscore_engine::{AccountTx, ReceiverClock};
 use xln_rscore_protocol::PersistentRadixMap;
 
 use crate::checkpoint::{AccountCheckpointRows, account_rows};
 use crate::consensus::{
-    AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
-    ProposalRow, StatefulConsensusEngine, leaf_root, state_error,
+    AccountAdmissionResult, AccountInputResult, AccountInputRow, ProposalRow,
+    StatefulConsensusEngine, state_error,
 };
 use crate::error::BatchError;
+use crate::shard::partition_accounts;
 use crate::types::{AccountId, AccountSeed};
 use xln_rscore_engine::{AccountConsensus, SigningIdentity};
 
@@ -106,8 +108,7 @@ pub struct EntityRoundResult {
 pub mod phase {
     use std::sync::atomic::{AtomicU64, Ordering};
     pub static APPLY: AtomicU64 = AtomicU64::new(0);
-    pub static ADMIT: AtomicU64 = AtomicU64::new(0);
-    pub static PROPOSE: AtomicU64 = AtomicU64::new(0);
+    pub static OUTBOUND: AtomicU64 = AtomicU64::new(0);
     pub static SETTLE: AtomicU64 = AtomicU64::new(0);
     pub static SNAPSHOT: AtomicU64 = AtomicU64::new(0);
     pub static ROUNDS: AtomicU64 = AtomicU64::new(0);
@@ -115,6 +116,17 @@ pub mod phase {
     pub fn enabled() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ON.get_or_init(|| std::env::var("XLN_RSCORE_PHASE_LOG").as_deref() == Ok("1"))
+    }
+
+    fn log_every() -> u64 {
+        static EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+        *EVERY.get_or_init(|| {
+            std::env::var("XLN_RSCORE_PHASE_LOG_EVERY")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(4_000)
+        })
     }
 
     pub fn add(counter: &AtomicU64, started: std::time::Instant) {
@@ -129,14 +141,13 @@ pub mod phase {
             return;
         }
         let rounds = ROUNDS.fetch_add(1, Ordering::Relaxed) + 1;
-        if !rounds.is_multiple_of(4000) {
+        if !rounds.is_multiple_of(log_every()) {
             return;
         }
         eprintln!(
-            "PHASE rounds={rounds} apply={} admit={} propose={} settle={} snapshot={}",
+            "PHASE rounds={rounds} apply={} outbound={} settle={} snapshot={}",
             APPLY.load(Ordering::Relaxed),
-            ADMIT.load(Ordering::Relaxed),
-            PROPOSE.load(Ordering::Relaxed),
+            OUTBOUND.load(Ordering::Relaxed),
             SETTLE.load(Ordering::Relaxed),
             SNAPSHOT.load(Ordering::Relaxed),
         );
@@ -212,16 +223,14 @@ impl StatefulConsensusEngine {
         if !request.creates.is_empty() {
             self.upsert_accounts(request.creates)?;
         }
-        let admit_at = std::time::Instant::now();
-        let admissions = self.admit_named(request.admits)?;
-        phase::add(&phase::ADMIT, admit_at);
-        let propose_at = std::time::Instant::now();
-        let proposals = if request.propose.is_empty() {
-            Vec::new()
-        } else {
-            self.propose_frames(request.timestamp, request.j_height, Some(&request.propose))?
-        };
-        phase::add(&phase::PROPOSE, propose_at);
+        let outbound_at = std::time::Instant::now();
+        let (admissions, proposals) = self.admit_and_propose(
+            request.admits,
+            &request.propose,
+            request.timestamp,
+            request.j_height,
+        )?;
+        phase::add(&phase::OUTBOUND, outbound_at);
         let settle_at = std::time::Instant::now();
         let mut result = self.settle(&base, &named, request.post_accounts)?;
         phase::add(&phase::SETTLE, settle_at);
@@ -229,30 +238,6 @@ impl StatefulConsensusEngine {
         result.admissions = admissions;
         result.proposals = proposals;
         Ok(result)
-    }
-
-    /// Queue the Entity's own transactions and say how many each account took.
-    fn admit_named(
-        &mut self,
-        admits: Vec<(AccountId, Vec<AccountTx>)>,
-    ) -> Result<Vec<AccountAdmissionResult>, BatchError> {
-        if admits.is_empty() {
-            return Ok(Vec::new());
-        }
-        let counted: Vec<(AccountId, usize)> = admits
-            .iter()
-            .map(|(account_id, txs)| (*account_id, txs.len()))
-            .collect();
-        self.admit_txs(admits)?;
-        Ok(counted
-            .into_iter()
-            .enumerate()
-            .map(|(index, (account_id, count))| AccountAdmissionResult {
-                operation_index: index as u64,
-                account_id,
-                verdict: AccountAdmissionVerdict::Admitted { count },
-            })
-            .collect())
     }
 
     /// Refuse an account this Entity does not own before anything executes.
@@ -294,18 +279,49 @@ impl StatefulConsensusEngine {
             accounts_root: self.accounts_root(),
             ..EntityRoundResult::default()
         };
-        for account_id in named {
-            let Some(account) = self.account(account_id) else {
+        let ids = named.iter().copied().collect::<Vec<_>>();
+        let shards = partition_accounts(ids, |account_id| *account_id);
+        let settled = self.pool().install(|| {
+            shards
+                .into_par_iter()
+                .map(|shard| {
+                    shard
+                        .into_iter()
+                        .map(|account_id| {
+                            let Some((account, leaf)) = self.account_with_leaf(&account_id) else {
+                                return Ok(None);
+                            };
+                            let post_account = if post_accounts {
+                                let previous = base.get(account_id.as_bytes());
+                                Some(
+                                    account_rows(
+                                        account_id,
+                                        account,
+                                        previous,
+                                        leaf,
+                                        self.signer_id(),
+                                    )
+                                    .map_err(|error| state_error(account_id, &error))?,
+                                )
+                            } else {
+                                None
+                            };
+                            Ok(Some((account_id, leaf, post_account)))
+                        })
+                        .collect::<Vec<Result<_, BatchError>>>()
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+        });
+        for row in settled {
+            let Some((account_id, leaf, post_account)) = row? else {
                 continue;
             };
-            let leaf = leaf_root(*account_id, account)?;
-            let previous = base.get(account_id.as_bytes());
-            result.touched.push((*account_id, leaf));
-            if post_accounts {
-                result.post_accounts.push(
-                    account_rows(*account_id, account, previous, leaf, self.signer_id())
-                        .map_err(|error| state_error(*account_id, &error))?,
-                );
+            result.touched.push((account_id, leaf));
+            if let Some(post_account) = post_account {
+                result.post_accounts.push(post_account);
             }
         }
         Ok(result)

@@ -37,6 +37,10 @@ fn matches_typescript_persistent_root_sequence() {
         "5cfc156151b8d22dde3a6bb90a049fd45d186c2f355e3fee4d70ca97ca17b3ae",
     );
     assert_eq!(changed.get(&[0x12]), Some(&digest(3)));
+    assert_eq!(
+        changed.get_with_digest(&[0x12]),
+        Some((&digest(3), digest(3)))
+    );
     assert_eq!(changed.get(&[0x1f]), Some(&digest(2)));
 }
 

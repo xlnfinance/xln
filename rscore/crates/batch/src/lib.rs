@@ -10,6 +10,7 @@ mod error;
 mod execution;
 mod query;
 mod round;
+mod shard;
 mod stateful;
 mod types;
 

@@ -101,6 +101,15 @@ impl<V: Clone> PersistentRadixMap<V> {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<&V> {
+        self.get_with_digest(key).map(|(value, _)| value)
+    }
+
+    /// Return the stored value and its canonical value digest in one walk.
+    ///
+    /// Callers that need the digest must reuse this byte string: recomputing
+    /// it from `V` repeats canonical projection work and risks introducing a
+    /// second encoder beside the tree's own committed value.
+    pub fn get_with_digest(&self, key: &[u8]) -> Option<(&V, [u8; 32])> {
         let key_path = path_slots(key);
         let mut node = self.root.as_deref();
         while let Some(current) = node {
@@ -109,8 +118,11 @@ impl<V: Clone> PersistentRadixMap<V> {
             }
             match current {
                 Node::Leaf {
-                    key: stored, value, ..
-                } => return (stored == key).then_some(value),
+                    key: stored,
+                    value,
+                    value_digest,
+                    ..
+                } => return (stored == key).then_some((value, *value_digest)),
                 Node::Branch { path, children, .. } => {
                     node = key_path
                         .get(path.len())
