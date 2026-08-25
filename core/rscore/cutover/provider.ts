@@ -172,10 +172,7 @@ const executeOutboundBatch = async (
     }
   }
   const proposalIds = new Set(proposals.map(row => row.accountId));
-  const accountsToPublish = new Map<string, AccountReplica>(
-    [...grouped].map(([accountId, row]) => [accountId, row.account] as const),
-  );
-  for (const [accountId, account] of accountsToPublish) {
+  for (const [accountId, { account }] of grouped) {
     if (proposalIds.has(accountId)) continue;
     const row = rowFor(full.wave, accountId);
     if (row === null) return halt('OUTBOUND_POST_ACCOUNT_MISSING', { account: accountId });
