@@ -330,7 +330,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
           && account.pendingFrame === undefined
           && (account.mempool.length > 0 || admittedIds.has(accountId));
       })
-      .sort();
+      .toSorted();
     const proposals = proposalIds.map(accountId => {
       const account = request.accounts.get(accountId);
       if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
