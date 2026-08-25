@@ -120,17 +120,25 @@ export const publishAccountOverlay = (
   live: AccountReplica,
   prepared: AccountReplica,
 ): AccountReplica => {
-  const keys = new Set<keyof AccountReplica>([
-    ...(Object.keys(live) as (keyof AccountReplica)[]),
-    ...(Object.keys(prepared) as (keyof AccountReplica)[]),
-  ]);
-  for (const key of keys) {
+  // The union of both key sets, without materializing it. Every published
+  // Account allocated a Set of ~20 keys here, and under cutover this runs once
+  // per touched Account per wave. `Object.keys` snapshots, so deleting from
+  // `live` while walking its own keys is safe.
+  for (const key of Object.keys(prepared) as (keyof AccountReplica)[]) {
     if (ACCOUNT_LIVE_ENVELOPE.has(key)) continue;
     const value = prepared[key];
     const applied = value === undefined
       ? Reflect.deleteProperty(live, key)
       : Reflect.set(live, key, value);
     if (!applied) throw new Error(`ACCOUNT_OVERLAY_PUBLISH_FAILED:${String(key)}`);
+  }
+  for (const key of Object.keys(live) as (keyof AccountReplica)[]) {
+    if (ACCOUNT_LIVE_ENVELOPE.has(key)) continue;
+    // Present in `prepared` means the loop above already settled it.
+    if (Object.hasOwn(prepared, key)) continue;
+    if (!Reflect.deleteProperty(live, key)) {
+      throw new Error(`ACCOUNT_OVERLAY_PUBLISH_FAILED:${String(key)}`);
+    }
   }
   overlayLog.debug('overlay.folded', {
     from: live.proofHeader.fromEntity.slice(-8),
