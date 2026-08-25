@@ -226,8 +226,10 @@ impl ProcessSession {
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
         let result = engine.prepare_wave(request)?;
-        let response = wire_encode::wave(&result)?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let response = wire_encode::wave(&result, engine_micros)?;
         self.pending_wave = Some(PendingWave {
             prepare_request_id: request_id,
             revision: result.revision,

@@ -122,6 +122,12 @@ export type Wave = {
   proposals: WaveProposal[];
   touched: { accountId: string; entityAccountLeaf: string }[];
   parityDigest: string;
+  /**
+   * Wall microseconds inside the engine, so a caller can separate the cost of
+   * the work from the cost of reaching it. Deliberately outside the parity
+   * digest: it measures this run, not what the two engines must agree on.
+   */
+  engineMicros: number;
 };
 
 // ------------------------------------------------------------- strict reads
@@ -192,7 +198,7 @@ const big = (value: unknown, code: string): bigint => {
 // --------------------------------------------------------------- the decoder
 
 export const decodeWave = (value: unknown): Wave => {
-  const fields = tupleOf(value, 6, 'wave');
+  const fields = tupleOf(value, 7, 'wave');
   return {
     revision: int(fields[0], 'wave.revision'),
     accountsRoot: hex(fields[1], 'wave.accountsRoot', 32),
@@ -206,6 +212,7 @@ export const decodeWave = (value: unknown): Wave => {
       };
     }),
     parityDigest: hex(fields[5], 'wave.parityDigest', 32),
+    engineMicros: int(fields[6], 'wave.engineMicros'),
   };
 };
 

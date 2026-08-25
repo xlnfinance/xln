@@ -291,7 +291,10 @@ fn integer(value: impl TryInto<i128>) -> AbiValue {
 // ---------------------------------------------------------- authority wave
 
 /// What one wave produced, against a candidate the runtime has not committed.
-pub fn wave(result: &xln_rscore_batch::WaveResult) -> Result<BodyTuple, crate::ProcessError> {
+pub fn wave(
+    result: &xln_rscore_batch::WaveResult,
+    engine_micros: u64,
+) -> Result<BodyTuple, crate::ProcessError> {
     let mut proposals = Vec::with_capacity(result.proposals.len());
     for row in &result.proposals {
         proposals.push(proposal(row)?);
@@ -318,6 +321,11 @@ pub fn wave(result: &xln_rscore_batch::WaveResult) -> Result<BodyTuple, crate::P
         proposals,
         touched,
         AbiValue::Bytes(digest.to_vec()),
+        // Wall time inside the engine, so a caller can tell the cost of the
+        // work from the cost of reaching it. Excluded from the parity digest:
+        // it is a measurement of this run, not part of what the two engines
+        // must agree on.
+        integer(engine_micros),
     ]))
 }
 

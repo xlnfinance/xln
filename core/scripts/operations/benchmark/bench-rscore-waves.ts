@@ -1,9 +1,13 @@
 /**
- * Honest throughput of the Rust account engine over the real process wire:
- * restore N hub-owned accounts, then drive waves of direct payments through
- * Prepare -> Commit exactly the way the orchestrator integration will.
- * Measures end-to-end tx/s including IPC framing and result decode — this is
- * the ceiling the TS orchestrator can buy by delegating account application.
+ * The mirror path, not the authority path: this drives `executeWave`, where
+ * the engine re-applies transitions TypeScript already decided, with no
+ * consensus of its own — no mempool, no proposal, no signature, no clocks.
+ * It measures what the shadow comparison costs per transition.
+ *
+ * For what the runtime will actually delegate — the engine owning the
+ * accounts, signing frames and verifying acks — use
+ * `bench-rscore-authority.ts`. Numbers from this script are not payments per
+ * second and must never be quoted as such.
  *
  * Usage: bun core/scripts/operations/benchmark/bench-rscore-waves.ts \
  *          [accounts=1000] [waves=20] [txsPerWave=10000] [workers=8]
