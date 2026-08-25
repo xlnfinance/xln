@@ -18,9 +18,27 @@
  */
 
 import { createHash } from '../support/platform-crypto';
-import { packWireValue, type RscoreWireValue } from './client';
+import { packWireValue, type RscoreWireValue } from './process-wire-value';
+import {
+  decodeRscoreAccountTx,
+  rscoreWireBig,
+  rscoreWireBool,
+  rscoreWireBytes,
+  rscoreWireDecodeFail,
+  rscoreWireHex,
+  rscoreWireInt,
+  rscoreWireList,
+  rscoreWireOptionalText,
+  rscoreWireText,
+  rscoreWireTuple,
+  rscoreWireUint,
+} from './account-tx-wire-decode';
+import { decodeRscoreWavePostAccount } from './checkpoint/wave-checkpoint-decode';
+import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import { accountTxWire, type ShadowOutputRow } from './shadow-wire';
-import type { AccountFrame, AccountTx, Delta } from '../types/account';
+import type { AccountFrame, Delta } from '../types/account';
+
+export { decodeRscoreAccountTx };
 
 const WAVE_PARITY_DOMAIN = 'xln.rscore.wave-parity.v1';
 
@@ -113,14 +131,31 @@ type WaveVerdict =
   | { kind: 'ackRejected'; reason: string }
   | { kind: 'failed'; message: string };
 
-type WaveInputResult = { inputIndex: number; accountId: string; verdict: WaveVerdict };
+type WaveInputResult = { operationIndex: number; accountId: string; verdict: WaveVerdict };
+
+type WaveAdmissionVerdict =
+  | { kind: 'admitted'; count: number }
+  | { kind: 'rejected'; code: string; message: string };
+
+type WaveAdmissionResult = Readonly<{
+  operationIndex: number;
+  accountId: string;
+  verdict: WaveAdmissionVerdict;
+}>;
 
 export type Wave = {
   revision: number;
   accountsRoot: string;
   applied: WaveInputResult[];
+  admissions: WaveAdmissionResult[];
   proposals: WaveProposal[];
   touched: { accountId: string; entityAccountLeaf: string }[];
+  /**
+   * Full checkpoint node rows for touched Accounts. These are not RestoreExact
+   * rows: storage must apply their node changes before constructing the
+   * 9-field materialized restore row.
+   */
+  postAccounts: RscoreAccountCheckpointRow[];
   parityDigest: string;
   /**
    * Wall microseconds inside the engine, so a caller can separate the cost of
@@ -130,219 +165,233 @@ export type Wave = {
   engineMicros: number;
 };
 
-// ------------------------------------------------------------- strict reads
-
-const fail = (code: string): never => {
-  throw new Error(`RSCORE_WAVE_DECODE:${code}`);
-};
-
-const tupleOf = (value: unknown, arity: number, code: string): unknown[] => {
-  if (!Array.isArray(value)) return fail(`${code}:tuple`);
-  if (value.length !== arity) return fail(`${code}:arity:${value.length}:${arity}`);
-  return value;
-};
-
-const list = (value: unknown, code: string): unknown[] =>
-  Array.isArray(value) ? value : fail(`${code}:list`);
-
-/**
- * A wire integer as a safe JavaScript number. The engine speaks 64-bit
- * heights and timestamps; silently rounding one past 2^53 would make a frame
- * that hashes differently on the two sides.
- */
-const int = (value: unknown, code: string): number => {
-  if (typeof value === 'bigint') {
-    if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(-Number.MAX_SAFE_INTEGER)) {
-      return fail(`${code}:unsafeInteger`);
-    }
-    return Number(value);
-  }
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) return fail(`${code}:integer`);
-  return value;
-};
-
-const text = (value: unknown, code: string): string =>
-  typeof value === 'string' ? value : fail(`${code}:text`);
-
-const bool = (value: unknown, code: string): boolean =>
-  typeof value === 'boolean' ? value : fail(`${code}:bool`);
-
-/** A wire flag: 0 or 1, never a msgpack boolean. */
-const flag = (value: unknown, code: string): boolean => {
-  const parsed = int(value, code);
-  if (parsed !== 0 && parsed !== 1) return fail(`${code}:flag:${parsed}`);
-  return parsed === 1;
-};
-
-const optionalText = (value: unknown, code: string): string | null =>
-  value === null ? null : text(value, code);
-
-const bytes = (value: unknown, code: string, length?: number): Uint8Array => {
-  if (!(value instanceof Uint8Array)) return fail(`${code}:bytes`);
-  if (length !== undefined && value.byteLength !== length) {
-    return fail(`${code}:length:${value.byteLength}:${length}`);
-  }
-  return value;
-};
-
-const hex = (value: unknown, code: string, length?: number): string =>
-  `0x${Buffer.from(bytes(value, code, length)).toString('hex')}`;
-
-/** A decimal string the engine wrote from a big integer. */
-const big = (value: unknown, code: string): bigint => {
-  const raw = text(value, code);
-  if (!/^-?\d+$/.test(raw)) return fail(`${code}:bigint`);
-  return BigInt(raw);
-};
-
 // --------------------------------------------------------------- the decoder
 
-export const decodeWave = (value: unknown): Wave => {
-  const fields = tupleOf(value, 7, 'wave');
+const decodeWavePayload = (value: unknown): Wave => {
+  const fields = rscoreWireTuple(value, 9, 'wave');
+  const applied = rscoreWireList(fields[2], 'wave.applied').map(decodeInputResult);
+  const admissions = rscoreWireList(fields[3], 'wave.admissions').map(decodeAdmissionResult);
+  const proposals = rscoreWireList(fields[4], 'wave.proposals').map(decodeProposal);
+  const touched = rscoreWireList(fields[5], 'wave.touched').map(row => {
+    const pair = rscoreWireTuple(row, 2, 'wave.touched.row');
+    return {
+      accountId: rscoreWireHex(pair[0], 'wave.touched.accountId', 32),
+      entityAccountLeaf: rscoreWireHex(pair[1], 'wave.touched.leaf', 32),
+    };
+  });
+  const postAccounts = rscoreWireList(fields[6], 'wave.postAccounts').map(decodeRscoreWavePostAccount);
+  for (const [name, rows] of [['applied', applied], ['admissions', admissions]] as const) {
+    for (let index = 1; index < rows.length; index += 1) {
+      const previous = rows[index - 1];
+      const current = rows[index];
+      if (previous === undefined || current === undefined) {
+        return rscoreWireDecodeFail(`wave.${name}:operationBounds:${index}`);
+      }
+      if (previous.operationIndex >= current.operationIndex) {
+        return rscoreWireDecodeFail(`wave.${name}:operationOrder`);
+      }
+    }
+  }
+  const operationIndices = [...applied, ...admissions].map(row => row.operationIndex);
+  if (new Set(operationIndices).size !== operationIndices.length) {
+    return rscoreWireDecodeFail('wave.operationIndex:duplicate');
+  }
+  const touchedKeys = touched.map(row => row.accountId);
+  const postKeys = postAccounts.map(row => row.accountId);
+  if (new Set(touchedKeys).size !== touchedKeys.length) return rscoreWireDecodeFail('wave.touched:duplicate');
+  if (new Set(postKeys).size !== postKeys.length) return rscoreWireDecodeFail('wave.postAccounts:duplicate');
+  if (touched.length !== postAccounts.length) return rscoreWireDecodeFail('wave.postAccounts:length');
+  for (const [index, post] of postAccounts.entries()) {
+    const touchedRow = touched[index];
+    if (
+      touchedRow === undefined ||
+      touchedRow.accountId !== post.accountId ||
+      touchedRow.entityAccountLeaf !== post.entityAccountLeaf
+    ) {
+      return rscoreWireDecodeFail(`wave.postAccounts:binding:${index}`);
+    }
+  }
   return {
-    revision: int(fields[0], 'wave.revision'),
-    accountsRoot: hex(fields[1], 'wave.accountsRoot', 32),
-    applied: list(fields[2], 'wave.applied').map(decodeInputResult),
-    proposals: list(fields[3], 'wave.proposals').map(decodeProposal),
-    touched: list(fields[4], 'wave.touched').map(row => {
-      const pair = tupleOf(row, 2, 'wave.touched.row');
-      return {
-        accountId: hex(pair[0], 'wave.touched.accountId', 32),
-        entityAccountLeaf: hex(pair[1], 'wave.touched.leaf', 32),
-      };
-    }),
-    parityDigest: hex(fields[5], 'wave.parityDigest', 32),
-    engineMicros: int(fields[6], 'wave.engineMicros'),
+    revision: rscoreWireUint(fields[0], 'wave.revision'),
+    accountsRoot: rscoreWireHex(fields[1], 'wave.accountsRoot', 32),
+    applied,
+    admissions,
+    proposals,
+    touched,
+    postAccounts,
+    parityDigest: rscoreWireHex(fields[7], 'wave.parityDigest', 32),
+    engineMicros: rscoreWireUint(fields[8], 'wave.engineMicros'),
   };
 };
 
+/** Decode and bind every relayed field to Rust's cumulative wave digest. */
+export const decodeWave = (value: unknown): Wave => {
+  const wave = decodeWavePayload(value);
+  const computed = waveParityDigest(wave);
+  if (computed !== wave.parityDigest) {
+    return rscoreWireDecodeFail(`wave.parityDigest:${wave.parityDigest}:${computed}`);
+  }
+  return wave;
+};
+
+/** Build fixture digests through the same decoder without accepting them. */
+export const waveParityDigestFromWireForTests = (value: unknown): string =>
+  waveParityDigest(decodeWavePayload(value));
+
 const decodeProposal = (value: unknown): WaveProposal => {
-  const row = tupleOf(value, 3, 'proposal');
+  const row = rscoreWireTuple(value, 3, 'proposal');
   return {
-    accountId: hex(row[0], 'proposal.accountId', 32),
+    accountId: rscoreWireHex(row[0], 'proposal.accountId', 32),
     frame: row[1] === null ? null : decodeFrame(row[1]),
-    dropped: list(row[2], 'proposal.dropped').map(decodeDropped),
+    dropped: rscoreWireList(row[2], 'proposal.dropped').map(decodeDropped),
   };
 };
 
 const decodeFrame = (value: unknown): AccountFrame & { hanko: string } => {
-  const row = tupleOf(value, 10, 'frame');
+  const row = rscoreWireTuple(value, 10, 'frame');
   return {
-    height: int(row[0], 'frame.height'),
-    timestamp: int(row[1], 'frame.timestamp'),
-    jHeight: int(row[2], 'frame.jHeight'),
-    accountTxs: list(row[3], 'frame.txs').map(decodeAccountTx),
-    prevFrameHash: text(row[4], 'frame.prevFrameHash'),
-    accountStateRoot: hex(row[5], 'frame.accountStateRoot', 32),
-    byLeft: bool(row[6], 'frame.byLeft'),
-    deltas: list(row[7], 'frame.deltas').map(decodeDelta),
-    stateHash: hex(row[8], 'frame.stateHash', 32),
-    hanko: `0x${Buffer.from(bytes(row[9], 'frame.hanko')).toString('hex')}`,
+    height: rscoreWireInt(row[0], 'frame.height'),
+    timestamp: rscoreWireInt(row[1], 'frame.timestamp'),
+    jHeight: rscoreWireInt(row[2], 'frame.jHeight'),
+    accountTxs: rscoreWireList(row[3], 'frame.txs').map(decodeRscoreAccountTx),
+    prevFrameHash: rscoreWireText(row[4], 'frame.prevFrameHash'),
+    accountStateRoot: rscoreWireHex(row[5], 'frame.accountStateRoot', 32),
+    byLeft: rscoreWireBool(row[6], 'frame.byLeft'),
+    deltas: rscoreWireList(row[7], 'frame.deltas').map(decodeDelta),
+    stateHash: rscoreWireHex(row[8], 'frame.stateHash', 32),
+    hanko: `0x${Buffer.from(rscoreWireBytes(row[9], 'frame.hanko')).toString('hex')}`,
   };
 };
 
 const decodeDelta = (value: unknown): Delta => {
-  const row = tupleOf(value, 10, 'delta');
+  const row = rscoreWireTuple(value, 10, 'delta');
   return {
-    tokenId: int(row[0], 'delta.tokenId'),
-    collateral: big(row[1], 'delta.collateral'),
-    ondelta: big(row[2], 'delta.ondelta'),
-    offdelta: big(row[3], 'delta.offdelta'),
-    leftCreditLimit: big(row[4], 'delta.leftCreditLimit'),
-    rightCreditLimit: big(row[5], 'delta.rightCreditLimit'),
-    leftAllowance: big(row[6], 'delta.leftAllowance'),
-    rightAllowance: big(row[7], 'delta.rightAllowance'),
-    leftHold: big(row[8], 'delta.leftHold'),
-    rightHold: big(row[9], 'delta.rightHold'),
+    tokenId: rscoreWireInt(row[0], 'delta.tokenId'),
+    collateral: rscoreWireBig(row[1], 'delta.collateral'),
+    ondelta: rscoreWireBig(row[2], 'delta.ondelta'),
+    offdelta: rscoreWireBig(row[3], 'delta.offdelta'),
+    leftCreditLimit: rscoreWireBig(row[4], 'delta.leftCreditLimit'),
+    rightCreditLimit: rscoreWireBig(row[5], 'delta.rightCreditLimit'),
+    leftAllowance: rscoreWireBig(row[6], 'delta.leftAllowance'),
+    rightAllowance: rscoreWireBig(row[7], 'delta.rightAllowance'),
+    leftHold: rscoreWireBig(row[8], 'delta.leftHold'),
+    rightHold: rscoreWireBig(row[9], 'delta.rightHold'),
   };
 };
 
 const DISPOSITIONS = ['deferred', 'removed'] as const;
 
 const decodeDropped = (value: unknown): WaveDroppedRow => {
-  const row = tupleOf(value, 5, 'dropped');
-  const disposition = DISPOSITIONS[int(row[4], 'dropped.disposition')];
-  if (disposition === undefined) return fail('dropped.disposition:unknown');
+  const row = rscoreWireTuple(value, 5, 'dropped');
+  const disposition = DISPOSITIONS[rscoreWireInt(row[4], 'dropped.disposition')];
+  if (disposition === undefined) return rscoreWireDecodeFail('dropped.disposition:unknown');
   return {
-    index: int(row[0], 'dropped.index'),
-    txDigest: hex(row[1], 'dropped.txDigest', 32),
-    code: text(row[2], 'dropped.code'),
-    message: text(row[3], 'dropped.message'),
+    index: rscoreWireInt(row[0], 'dropped.index'),
+    txDigest: rscoreWireHex(row[1], 'dropped.txDigest', 32),
+    code: rscoreWireText(row[2], 'dropped.code'),
+    message: rscoreWireText(row[3], 'dropped.message'),
     disposition,
   };
 };
 
 const decodeInputResult = (value: unknown): WaveInputResult => {
-  const row = tupleOf(value, 3, 'inputResult');
+  const row = rscoreWireTuple(value, 3, 'inputResult');
   return {
-    inputIndex: int(row[0], 'inputResult.inputIndex'),
-    accountId: hex(row[1], 'inputResult.accountId', 32),
+    operationIndex: rscoreWireUint(row[0], 'inputResult.operationIndex'),
+    accountId: rscoreWireHex(row[1], 'inputResult.accountId', 32),
     verdict: decodeVerdict(row[2]),
   };
 };
 
+const decodeAdmissionResult = (value: unknown): WaveAdmissionResult => {
+  const row = rscoreWireTuple(value, 3, 'admissionResult');
+  const verdict = rscoreWireList(row[2], 'admissionResult.verdict');
+  const tag = rscoreWireUint(verdict[0], 'admissionResult.verdict.tag');
+  if (tag === 0) {
+    const fields = rscoreWireTuple(verdict, 2, 'admissionResult.admitted');
+    return {
+      operationIndex: rscoreWireUint(row[0], 'admissionResult.operationIndex'),
+      accountId: rscoreWireHex(row[1], 'admissionResult.accountId', 32),
+      verdict: { kind: 'admitted', count: rscoreWireUint(fields[1], 'admissionResult.count') },
+    };
+  }
+  if (tag === 1) {
+    const fields = rscoreWireTuple(verdict, 3, 'admissionResult.rejected');
+    return {
+      operationIndex: rscoreWireUint(row[0], 'admissionResult.operationIndex'),
+      accountId: rscoreWireHex(row[1], 'admissionResult.accountId', 32),
+      verdict: {
+        kind: 'rejected',
+        code: rscoreWireText(fields[1], 'admissionResult.code'),
+        message: rscoreWireText(fields[2], 'admissionResult.message'),
+      },
+    };
+  }
+  return rscoreWireDecodeFail(`admissionResult.verdict.tag:${tag}`);
+};
+
 const decodeVerdict = (value: unknown): WaveVerdict => {
-  const row = list(value, 'verdict');
-  switch (int(row[0], 'verdict.tag')) {
+  const row = rscoreWireList(value, 'verdict');
+  switch (rscoreWireInt(row[0], 'verdict.tag')) {
     case 0: {
-      const fields = tupleOf(row, 6, 'verdict.frameCommitted');
+      const fields = rscoreWireTuple(row, 6, 'verdict.frameCommitted');
       return {
         kind: 'frameCommitted',
-        height: int(fields[1], 'verdict.height'),
-        stateHash: hex(fields[2], 'verdict.stateHash', 32),
-        ackHanko: `0x${Buffer.from(bytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
-        outputs: list(fields[4], 'verdict.outputs').map(decodeOutput),
-        rolledBackTxs: int(fields[5], 'verdict.rolledBackTxs'),
+        height: rscoreWireInt(fields[1], 'verdict.height'),
+        stateHash: rscoreWireHex(fields[2], 'verdict.stateHash', 32),
+        ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
+        outputs: rscoreWireList(fields[4], 'verdict.outputs').map(decodeOutput),
+        rolledBackTxs: rscoreWireInt(fields[5], 'verdict.rolledBackTxs'),
       };
     }
     case 1: {
-      const fields = tupleOf(row, 2, 'verdict.collision');
-      return { kind: 'frameCollisionIgnored', height: int(fields[1], 'verdict.height') };
+      const fields = rscoreWireTuple(row, 2, 'verdict.collision');
+      return { kind: 'frameCollisionIgnored', height: rscoreWireInt(fields[1], 'verdict.height') };
     }
     case 2: {
-      const fields = tupleOf(row, 4, 'verdict.duplicate');
+      const fields = rscoreWireTuple(row, 4, 'verdict.duplicate');
       return {
         kind: 'frameDuplicate',
-        height: int(fields[1], 'verdict.height'),
-        stateHash: hex(fields[2], 'verdict.stateHash', 32),
-        ackHanko: `0x${Buffer.from(bytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
+        height: rscoreWireInt(fields[1], 'verdict.height'),
+        stateHash: rscoreWireHex(fields[2], 'verdict.stateHash', 32),
+        ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
       };
     }
     case 3: {
-      const fields = tupleOf(row, 3, 'verdict.stale');
+      const fields = rscoreWireTuple(row, 3, 'verdict.stale');
       return {
         kind: 'frameStale',
-        height: int(fields[1], 'verdict.height'),
-        currentHeight: int(fields[2], 'verdict.currentHeight'),
+        height: rscoreWireInt(fields[1], 'verdict.height'),
+        currentHeight: rscoreWireInt(fields[2], 'verdict.currentHeight'),
       };
     }
     case 4: {
-      const fields = tupleOf(row, 2, 'verdict.rejected');
-      return { kind: 'frameRejected', reason: text(fields[1], 'verdict.reason') };
+      const fields = rscoreWireTuple(row, 2, 'verdict.rejected');
+      return { kind: 'frameRejected', reason: rscoreWireText(fields[1], 'verdict.reason') };
     }
     case 5: {
-      const fields = tupleOf(row, 4, 'verdict.ackCommitted');
+      const fields = rscoreWireTuple(row, 4, 'verdict.ackCommitted');
       return {
         kind: 'ackCommitted',
-        height: int(fields[1], 'verdict.height'),
-        stateHash: hex(fields[2], 'verdict.stateHash', 32),
-        outputs: list(fields[3], 'verdict.outputs').map(decodeOutput),
+        height: rscoreWireInt(fields[1], 'verdict.height'),
+        stateHash: rscoreWireHex(fields[2], 'verdict.stateHash', 32),
+        outputs: rscoreWireList(fields[3], 'verdict.outputs').map(decodeOutput),
       };
     }
     case 6: {
-      const fields = tupleOf(row, 2, 'verdict.ackStale');
-      return { kind: 'ackStale', height: int(fields[1], 'verdict.height') };
+      const fields = rscoreWireTuple(row, 2, 'verdict.ackStale');
+      return { kind: 'ackStale', height: rscoreWireInt(fields[1], 'verdict.height') };
     }
     case 7: {
-      const fields = tupleOf(row, 2, 'verdict.ackRejected');
-      return { kind: 'ackRejected', reason: text(fields[1], 'verdict.reason') };
+      const fields = rscoreWireTuple(row, 2, 'verdict.ackRejected');
+      return { kind: 'ackRejected', reason: rscoreWireText(fields[1], 'verdict.reason') };
     }
     case 8: {
-      const fields = tupleOf(row, 2, 'verdict.failed');
-      return { kind: 'failed', message: text(fields[1], 'verdict.message') };
+      const fields = rscoreWireTuple(row, 2, 'verdict.failed');
+      return { kind: 'failed', message: rscoreWireText(fields[1], 'verdict.message') };
     }
     default:
-      return fail('verdict.tag:unknown');
+      return rscoreWireDecodeFail('verdict.tag:unknown');
   }
 };
 
@@ -352,81 +401,81 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
  * would only add a second place for the two shapes to drift.
  */
 const decodeOutput = (value: unknown): WaveOutput => {
-  const row = list(value, 'output');
-  switch (int(row[0], 'output.tag')) {
+  const row = rscoreWireList(value, 'output');
+  switch (rscoreWireInt(row[0], 'output.tag')) {
     case 0: {
-      const fields = tupleOf(row, 7, 'output.directPaymentForward');
+      const fields = rscoreWireTuple(row, 7, 'output.directPaymentForward');
       return {
         kind: 'directPaymentForward',
-        tokenId: int(fields[1], 'output.tokenId'),
-        amount: big(fields[2], 'output.amount').toString(),
-        route: list(fields[3], 'output.route').map((hop, index) => text(hop, `output.route.${index}`)),
-        description: optionalText(fields[4], 'output.description'),
-        deliveryMode: int(fields[5], 'output.deliveryMode') === 1
+        tokenId: rscoreWireInt(fields[1], 'output.tokenId'),
+        amount: rscoreWireBig(fields[2], 'output.amount').toString(),
+        route: rscoreWireList(fields[3], 'output.route').map((hop, index) => rscoreWireText(hop, `output.route.${index}`)),
+        description: rscoreWireOptionalText(fields[4], 'output.description'),
+        deliveryMode: rscoreWireInt(fields[5], 'output.deliveryMode') === 1
           ? 'trusted'
-          : fail(`output.deliveryMode:${String(fields[5])}`),
-        trustedGatewayEntityId: text(fields[6], 'output.trustedGatewayEntityId'),
+          : rscoreWireDecodeFail(`output.deliveryMode:${String(fields[5])}`),
+        trustedGatewayEntityId: rscoreWireText(fields[6], 'output.trustedGatewayEntityId'),
       };
     }
     case 1: {
-      const fields = tupleOf(row, 6, 'output.htlcSecret');
+      const fields = rscoreWireTuple(row, 6, 'output.htlcSecret');
       return {
         kind: 'htlcSecret',
-        lockId: text(fields[1], 'output.lockId'),
-        hashlock: text(fields[2], 'output.hashlock'),
-        secret: text(fields[3], 'output.secret'),
-        tokenId: int(fields[4], 'output.tokenId'),
-        amount: big(fields[5], 'output.amount').toString(),
+        lockId: rscoreWireText(fields[1], 'output.lockId'),
+        hashlock: rscoreWireText(fields[2], 'output.hashlock'),
+        secret: rscoreWireText(fields[3], 'output.secret'),
+        tokenId: rscoreWireInt(fields[4], 'output.tokenId'),
+        amount: rscoreWireBig(fields[5], 'output.amount').toString(),
       };
     }
     case 2: {
-      const fields = tupleOf(row, 6, 'output.htlcError');
+      const fields = rscoreWireTuple(row, 6, 'output.htlcError');
       return {
         kind: 'htlcError',
-        lockId: text(fields[1], 'output.lockId'),
-        hashlock: text(fields[2], 'output.hashlock'),
-        tokenId: int(fields[3], 'output.tokenId'),
-        amount: big(fields[4], 'output.amount').toString(),
-        reason: optionalText(fields[5], 'output.reason'),
+        lockId: rscoreWireText(fields[1], 'output.lockId'),
+        hashlock: rscoreWireText(fields[2], 'output.hashlock'),
+        tokenId: rscoreWireInt(fields[3], 'output.tokenId'),
+        amount: rscoreWireBig(fields[4], 'output.amount').toString(),
+        reason: rscoreWireOptionalText(fields[5], 'output.reason'),
       };
     }
     case 3: {
-      const fields = tupleOf(row, 18, 'output.swapOfferUpsert');
-      const makerIsRight = int(fields[14], 'output.makerIsRight');
-      if (makerIsRight !== 0 && makerIsRight !== 1) return fail(`output.makerIsRight:${makerIsRight}`);
+      const fields = rscoreWireTuple(row, 18, 'output.swapOfferUpsert');
+      const makerIsRight = rscoreWireInt(fields[14], 'output.makerIsRight');
+      if (makerIsRight !== 0 && makerIsRight !== 1) return rscoreWireDecodeFail(`output.makerIsRight:${makerIsRight}`);
       return {
         kind: 'swapOfferUpsert',
         offer: {
-          offerId: text(fields[1], 'output.offerId'),
-          leftEntity: text(fields[2], 'output.leftEntity'),
-          rightEntity: text(fields[3], 'output.rightEntity'),
-          giveTokenId: int(fields[4], 'output.giveTokenId'),
-          giveTokenDecimals: int(fields[5], 'output.giveTokenDecimals'),
-          giveAmount: big(fields[6], 'output.giveAmount').toString(),
-          wantTokenId: int(fields[7], 'output.wantTokenId'),
-          wantTokenDecimals: int(fields[8], 'output.wantTokenDecimals'),
-          wantAmount: big(fields[9], 'output.wantAmount').toString(),
-          maxFee: big(fields[10], 'output.maxFee').toString(),
-          minNetReceive: big(fields[11], 'output.minNetReceive').toString(),
-          priceTicks: big(fields[12], 'output.priceTicks').toString(),
-          timeInForce: fields[13] === null ? null : int(fields[13], 'output.timeInForce'),
+          offerId: rscoreWireText(fields[1], 'output.offerId'),
+          leftEntity: rscoreWireText(fields[2], 'output.leftEntity'),
+          rightEntity: rscoreWireText(fields[3], 'output.rightEntity'),
+          giveTokenId: rscoreWireInt(fields[4], 'output.giveTokenId'),
+          giveTokenDecimals: rscoreWireInt(fields[5], 'output.giveTokenDecimals'),
+          giveAmount: rscoreWireBig(fields[6], 'output.giveAmount').toString(),
+          wantTokenId: rscoreWireInt(fields[7], 'output.wantTokenId'),
+          wantTokenDecimals: rscoreWireInt(fields[8], 'output.wantTokenDecimals'),
+          wantAmount: rscoreWireBig(fields[9], 'output.wantAmount').toString(),
+          maxFee: rscoreWireBig(fields[10], 'output.maxFee').toString(),
+          minNetReceive: rscoreWireBig(fields[11], 'output.minNetReceive').toString(),
+          priceTicks: rscoreWireBig(fields[12], 'output.priceTicks').toString(),
+          timeInForce: fields[13] === null ? null : rscoreWireInt(fields[13], 'output.timeInForce'),
           makerIsRight,
-          createdHeight: int(fields[15], 'output.createdHeight'),
-          quantizedGive: big(fields[16], 'output.quantizedGive').toString(),
-          quantizedWant: big(fields[17], 'output.quantizedWant').toString(),
+          createdHeight: rscoreWireInt(fields[15], 'output.createdHeight'),
+          quantizedGive: rscoreWireBig(fields[16], 'output.quantizedGive').toString(),
+          quantizedWant: rscoreWireBig(fields[17], 'output.quantizedWant').toString(),
         },
       };
     }
     case 4: {
-      const fields = tupleOf(row, 2, 'output.swapOfferRemove');
-      return { kind: 'swapOfferRemove', offerId: text(fields[1], 'output.offerId') };
+      const fields = rscoreWireTuple(row, 2, 'output.swapOfferRemove');
+      return { kind: 'swapOfferRemove', offerId: rscoreWireText(fields[1], 'output.offerId') };
     }
     case 5: {
-      const fields = tupleOf(row, 2, 'output.swapCancelRequest');
-      return { kind: 'swapCancelRequest', offerId: text(fields[1], 'output.offerId') };
+      const fields = rscoreWireTuple(row, 2, 'output.swapCancelRequest');
+      return { kind: 'swapCancelRequest', offerId: rscoreWireText(fields[1], 'output.offerId') };
     }
     default:
-      return fail(`output.tag:${String(row[0])}`);
+      return rscoreWireDecodeFail(`output.tag:${String(row[0])}`);
   }
 };
 
@@ -489,198 +538,11 @@ export const waveOutputRow = (output: WaveOutput): ShadowOutputRow => {
   }
 };
 
-// ------------------------------------------------------- the inverse tx codec
-
-const DELIVERY_MODES = ['direct', 'trusted'] as const;
-const HTLC_DELIVERY_MODES = ['instant', 'async'] as const;
-
-export const decodeAccountTx = (value: unknown): AccountTx => {
-  const row = list(value, 'tx');
-  switch (int(row[0], 'tx.tag')) {
-    case 0: {
-      const fields = tupleOf(row, 9, 'tx.directPayment');
-      const deliveryMode = DELIVERY_MODES[int(fields[7], 'tx.deliveryMode')];
-      if (deliveryMode === undefined) return fail('tx.deliveryMode:unknown');
-      const gateway = optionalText(fields[8], 'tx.trustedGateway');
-      return {
-        type: 'direct_payment',
-        data: {
-          tokenId: int(fields[1], 'tx.tokenId'),
-          amount: big(fields[2], 'tx.amount'),
-          route: list(fields[3], 'tx.route').map(hop => text(hop, 'tx.route.hop')),
-          ...(optionalText(fields[4], 'tx.description') === null
-            ? {}
-            : { description: text(fields[4], 'tx.description') }),
-          fromEntityId: text(fields[5], 'tx.fromEntityId'),
-          toEntityId: text(fields[6], 'tx.toEntityId'),
-          deliveryMode,
-          ...(gateway === null ? {} : { trustedGatewayEntityId: gateway }),
-        },
-      } as AccountTx;
-    }
-    case 1: {
-      const fields = tupleOf(row, 9, 'tx.htlcLock');
-      const mode = fields[7] === null
-        ? null
-        : HTLC_DELIVERY_MODES[int(fields[7], 'tx.htlcDeliveryMode')];
-      if (mode === undefined) return fail('tx.htlcDeliveryMode:unknown');
-      const envelope = fields[8] === null ? null : bytes(fields[8], 'tx.envelope');
-      return {
-        type: 'htlc_lock',
-        data: {
-          lockId: text(fields[1], 'tx.lockId'),
-          hashlock: hex(fields[2], 'tx.hashlock', 32),
-          timelock: big(fields[3], 'tx.timelock'),
-          revealBeforeHeight: int(fields[4], 'tx.revealBeforeHeight'),
-          amount: big(fields[5], 'tx.amount'),
-          tokenId: int(fields[6], 'tx.tokenId'),
-          ...(mode === null ? {} : { deliveryMode: mode }),
-          ...(envelope === null
-            ? {}
-            : { envelope: { ciphertext: Buffer.from(envelope).toString('base64') } }),
-        },
-      } as AccountTx;
-    }
-    case 2: {
-      const fields = tupleOf(row, 4, 'tx.htlcResolve');
-      const outcome = int(fields[2], 'tx.htlcOutcome');
-      if (outcome === 0) {
-        return {
-          type: 'htlc_resolve',
-          data: {
-            lockId: text(fields[1], 'tx.lockId'),
-            // The tag is the discriminator TypeScript models as a field, and
-            // a resolve without it is not the transaction that was sent.
-            outcome: 'secret',
-            secret: hex(fields[3], 'tx.secret', 32),
-          },
-        } as AccountTx;
-      }
-      if (outcome !== 1) return fail('tx.htlcOutcome:unknown');
-      const reason = optionalText(fields[3], 'tx.reason');
-      return {
-        type: 'htlc_resolve',
-        data: {
-          lockId: text(fields[1], 'tx.lockId'),
-          outcome: 'error',
-          ...(reason === null ? {} : { reason }),
-        },
-      } as AccountTx;
-    }
-    case 3: {
-      const fields = tupleOf(row, 2, 'tx.addDelta');
-      return { type: 'add_delta', data: { tokenId: int(fields[1], 'tx.tokenId') } } as AccountTx;
-    }
-    case 4: {
-      const fields = tupleOf(row, 3, 'tx.setCreditLimit');
-      return {
-        type: 'set_credit_limit',
-        data: { tokenId: int(fields[1], 'tx.tokenId'), amount: big(fields[2], 'tx.amount') },
-      } as AccountTx;
-    }
-    case 5: {
-      const fields = tupleOf(row, 6, 'tx.rebalancePolicy');
-      return {
-        type: 'rebalance_policy',
-        data: {
-          tokenId: int(fields[1], 'tx.tokenId'),
-          policyVersion: int(fields[2], 'tx.policyVersion'),
-          baseFee: big(fields[3], 'tx.baseFee'),
-          liquidityFeeBps: big(fields[4], 'tx.liquidityFeeBps'),
-          gasFee: big(fields[5], 'tx.gasFee'),
-        },
-      } as AccountTx;
-    }
-    case 6: {
-      const fields = tupleOf(row, 12, 'tx.swapOffer');
-      const timeInForce = fields[10] === null ? null : int(fields[10], 'tx.timeInForce');
-      const priceTicks = fields[11] === null ? null : big(fields[11], 'tx.priceTicks');
-      return {
-        type: 'swap_offer',
-        data: {
-          offerId: text(fields[1], 'tx.offerId'),
-          giveTokenId: int(fields[2], 'tx.giveTokenId'),
-          giveTokenDecimals: int(fields[3], 'tx.giveTokenDecimals'),
-          giveAmount: big(fields[4], 'tx.giveAmount'),
-          wantTokenId: int(fields[5], 'tx.wantTokenId'),
-          wantTokenDecimals: int(fields[6], 'tx.wantTokenDecimals'),
-          wantAmount: big(fields[7], 'tx.wantAmount'),
-          maxFee: big(fields[8], 'tx.maxFee'),
-          minNetReceive: big(fields[9], 'tx.minNetReceive'),
-          ...(timeInForce === null ? {} : { timeInForce }),
-          ...(priceTicks === null ? {} : { priceTicks }),
-        },
-      } as AccountTx;
-    }
-    case 7: {
-      const fields = tupleOf(row, 2, 'tx.swapCancelRequest');
-      return {
-        type: 'swap_cancel_request',
-        data: { offerId: text(fields[1], 'tx.offerId') },
-      } as AccountTx;
-    }
-    case 8:
-      return decodeSwapResolve(row);
-    default:
-      return fail('tx.tag:unknown');
-  }
-};
-
-const decodeSwapResolve = (row: readonly unknown[]): AccountTx => {
-  const fields = tupleOf(row, 18, 'tx.swapResolve');
-  const optionalBig = (value: unknown, code: string): bigint | null =>
-    value === null ? null : big(value, code);
-  const optionalInt = (value: unknown, code: string): number | null =>
-    value === null ? null : int(value, code);
-  // Every field but the offer, the coarse ratio and the cancel flag is
-  // optional on the wire, and each one absent is a different transaction from
-  // that one present: reading them as required turned a legitimate partial
-  // fill into a decode failure.
-  const fillNumerator = optionalBig(fields[3], 'tx.fillNumerator');
-  const fillDenominator = optionalBig(fields[4], 'tx.fillDenominator');
-  const comment = optionalText(fields[6], 'tx.comment');
-  const restingGiveTokenId = optionalInt(fields[7], 'tx.restingGiveTokenId');
-  const restingWantTokenId = optionalInt(fields[8], 'tx.restingWantTokenId');
-  const feeTokenId = optionalInt(fields[9], 'tx.feeTokenId');
-  const feeAmount = optionalBig(fields[10], 'tx.feeAmount');
-  const executionGiveAmount = optionalBig(fields[11], 'tx.executionGiveAmount');
-  const executionWantAmount = optionalBig(fields[12], 'tx.executionWantAmount');
-  const restingPriceTicks = optionalBig(fields[13], 'tx.restingPriceTicks');
-  const restingGive = optionalBig(fields[14], 'tx.restingGiveAmount');
-  const restingWant = optionalBig(fields[15], 'tx.restingWantAmount');
-  const quantizedGive = optionalBig(fields[16], 'tx.restingQuantizedGive');
-  const quantizedWant = optionalBig(fields[17], 'tx.restingQuantizedWant');
-  return {
-    type: 'swap_resolve',
-    data: {
-      offerId: text(fields[1], 'tx.offerId'),
-      fillRatio: int(fields[2], 'tx.fillRatio'),
-      ...(fillNumerator === null ? {} : { fillNumerator }),
-      ...(fillDenominator === null ? {} : { fillDenominator }),
-      // 0/1, matching both encoders. Reading a boolean here rejected every
-      // swap_resolve either engine produced.
-      cancelRemainder: flag(fields[5], 'tx.cancelRemainder'),
-      ...(comment === null ? {} : { comment }),
-      ...(restingGiveTokenId === null ? {} : { restingGiveTokenId }),
-      ...(restingWantTokenId === null ? {} : { restingWantTokenId }),
-      ...(feeTokenId === null ? {} : { feeTokenId }),
-      ...(feeAmount === null ? {} : { feeAmount }),
-      ...(executionGiveAmount === null ? {} : { executionGiveAmount }),
-      ...(executionWantAmount === null ? {} : { executionWantAmount }),
-      ...(restingPriceTicks === null ? {} : { restingPriceTicks }),
-      ...(restingGive === null ? {} : { restingGiveAmount: restingGive }),
-      ...(restingWant === null ? {} : { restingWantAmount: restingWant }),
-      ...(quantizedGive === null ? {} : { restingQuantizedGive: quantizedGive }),
-      ...(quantizedWant === null ? {} : { restingQuantizedWant: quantizedWant }),
-    },
-  } as AccountTx;
-};
-
 // ------------------------------------------------------------ the transcript
 
 const hexToBytes = (value: string, code: string): Uint8Array => {
   const raw = value.startsWith('0x') ? value.slice(2) : value;
-  if (raw.length % 2 !== 0 || !/^[0-9a-f]*$/.test(raw)) fail(`${code}:hex`);
+  if (raw.length % 2 !== 0 || !/^[0-9a-f]*$/.test(raw)) rscoreWireDecodeFail(`${code}:hex`);
   return Uint8Array.from(Buffer.from(raw, 'hex'));
 };
 
@@ -703,7 +565,7 @@ const frameWire = (frame: AccountFrame & { hanko: string }): RscoreWireValue => 
   frame.jHeight,
   frame.accountTxs.map(tx => {
     const wire = accountTxWire(tx);
-    if (wire === null) return fail('transcript.tx:unsupported');
+    if (wire === null) return rscoreWireDecodeFail('transcript.tx:unsupported');
     return wire;
   }),
   frame.prevFrameHash,
@@ -808,6 +670,13 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
   }
 };
 
+const admissionVerdictWire = (verdict: WaveAdmissionVerdict): RscoreWireValue => {
+  switch (verdict.kind) {
+    case 'admitted': return [0, verdict.count];
+    case 'rejected': return [1, verdict.code, verdict.message];
+  }
+};
+
 /**
  * The wave's whole result in one hash, rebuilt from the decoded model rather
  * than from the bytes that arrived. Equal to the engine's digest only if this
@@ -824,9 +693,14 @@ export const waveParityDigest = (wave: Wave): string => {
       hexToBytes(row.entityAccountLeaf, 'transcript.leaf'),
     ]),
     wave.applied.map(row => [
-      row.inputIndex,
+      row.operationIndex,
       hexToBytes(row.accountId, 'transcript.accountId'),
       verdictWire(row.verdict),
+    ]),
+    wave.admissions.map(row => [
+      row.operationIndex,
+      hexToBytes(row.accountId, 'transcript.accountId'),
+      admissionVerdictWire(row.verdict),
     ]),
     wave.proposals.map(row => [
       hexToBytes(row.accountId, 'transcript.accountId'),

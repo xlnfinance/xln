@@ -4,12 +4,14 @@ import {
   authorityRecordReport,
   beginAuthorityFrame,
   buildAuthorityWave,
+  describeAuthorityWaveOperation,
   flushAuthorityFrame,
   noteAuthorityEntityClock,
   noteRawAccountInput,
   resetAuthorityRecordForTests,
   runAuthorityFrameScope,
 } from '../../rscore/authority-wave';
+import { waveCreateOp } from '../../rscore/shadow-wire';
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../types/account';
 
 /**
@@ -178,12 +180,18 @@ describe('authority wave', () => {
     expect(wave.kind).toBe('wave');
     if (wave.kind !== 'wave') throw new Error('expected a wave');
     expect(wave.entities).toHaveLength(1);
-    const ops = wave.entities[0]!.ops as unknown[][];
+    const entity = wave.entities[0];
+    if (entity === undefined) throw new Error('expected one Entity');
+    const ops = entity.ops as unknown[][];
     expect(ops).toHaveLength(2);
     // TypeScript runs the ack phase before the proposal phase, and so does the
     // wave: the ack advances the account the frame is then judged against.
     expect(wave.inputs.map(row => row.kind)).toEqual(['ack', 'frame']);
     expect(wave.inputs.map(row => row.operationIndex)).toEqual([0, 1]);
+    expect(entity.operations).toEqual([
+      { operationIndex: 0, arrivalIndex: 0, accountId: B, resultKind: 'applied' },
+      { operationIndex: 1, arrivalIndex: 1, accountId: B, resultKind: 'applied' },
+    ]);
     // Both are input operations (tag 1), addressed to the same account.
     expect(ops.map(op => op[0])).toEqual([1, 1]);
     expect(ops.map(op => (op[1] as unknown[])[0])).toEqual([0, 1]);
@@ -245,6 +253,15 @@ describe('authority wave', () => {
     expect(buildAuthorityWave('r').kind).toBe('empty');
     flushAuthorityFrame('r');
   });
+
+  test('Create is explicitly classified as an operation with no result row', () => {
+    const seed = [Uint8Array.from(Buffer.from(B.slice(2), 'hex'))];
+    expect(describeAuthorityWaveOperation(waveCreateOp(9, seed))).toEqual({
+      operationIndex: 9,
+      accountId: B,
+      resultKind: 'none',
+    });
+  });
 });
 
 /**
@@ -301,6 +318,16 @@ describe('authority wave guards', () => {
     expect(wave.inputs.map(row => row.operationIndex)).toEqual([1, 2, 3, 4]);
     expect(wave.inputs.map(row => row.arrivalIndex)).toEqual([3, 4, 1, 2]);
     expect(wave.inputs.map(row => row.ownerEntityId)).toEqual([A, A, C, C]);
+    expect(wave.entities.flatMap(entity => entity.operations)).toEqual([
+      { operationIndex: 0, arrivalIndex: 0, accountId: B, resultKind: 'admission' },
+      { operationIndex: 1, arrivalIndex: 3, accountId: B, resultKind: 'applied' },
+      { operationIndex: 2, arrivalIndex: 4, accountId: B, resultKind: 'applied' },
+      { operationIndex: 3, arrivalIndex: 1, accountId: B, resultKind: 'applied' },
+      { operationIndex: 4, arrivalIndex: 2, accountId: B, resultKind: 'applied' },
+    ]);
+    expect(wave.entities.flatMap(entity => entity.operations)
+      .sort((left, right) => left.arrivalIndex - right.arrivalIndex)
+      .map(row => row.operationIndex)).toEqual([0, 3, 4, 1, 2]);
     const groupedOps = wave.entities.flatMap(entity => entity.ops) as unknown[][];
     expect(groupedOps.map(op => op[0] === 0 ? op[1] : (op[1] as unknown[])[0]))
       .toEqual([0, 1, 2, 3, 4]);

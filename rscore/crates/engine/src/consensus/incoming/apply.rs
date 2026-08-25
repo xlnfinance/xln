@@ -9,6 +9,10 @@ use crate::consensus::frame::hash::AccountFrame;
 use crate::consensus::proposal::propose::{WindowExecution, collect_frame_deltas, execute_window};
 use crate::consensus::replica::AccountConsensus;
 use crate::consensus::signing::{SigningIdentity, verify_frame_hanko};
+use crate::dispute::{
+    counterparty_dispute_requirement_error, proof_body_hash, validate_counterparty_dispute_shape,
+    verify_counterparty_dispute,
+};
 use crate::error::StateError;
 use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
 use crate::{AccountExecutionContext, AccountOutput, AccountTx, Side};
@@ -129,6 +133,9 @@ pub fn apply_incoming_frame(
     if counterparty_entity_id != account.replica().counterparty().as_bytes() {
         return Ok(rejected("ACCOUNT_PEER_FRAME_PROPOSER_INVALID"));
     }
+    if let Some(dispute) = incoming.dispute.as_ref() {
+        validate_counterparty_dispute_shape(dispute)?;
+    }
     // SECURITY: authenticate before touching any state, exactly as preflight
     // does. An unsigned frame is not evidence of anything.
     verify_frame_hanko(
@@ -176,6 +183,15 @@ pub fn apply_incoming_frame(
             height: incoming.height,
             current_height,
         });
+    }
+
+    // TypeScript's at-least-once replay gate runs before dispute-witness
+    // validation: an exact duplicate or stale ancestor is a no-op even if its
+    // obsolete optional witness cannot be decoded under today's board. Every
+    // input that can still move consensus authenticates the witness here,
+    // before replay or collision handling mutates anything.
+    if let Some(dispute) = incoming.dispute.as_ref() {
+        verify_counterparty_dispute(account.replica(), counterparty_entity_id, dispute)?;
     }
 
     // Each side may propose once at a height. If both race, the LEFT entity's
@@ -279,6 +295,19 @@ pub fn apply_incoming_frame(
         return Ok(rejected("ACCOUNT_PEER_FRAME_HASH_MISMATCH"));
     }
 
+    let expected_proof_body_hash = candidate
+        .delta_transformer()
+        .map(|transformer| proof_body_hash(&candidate, transformer))
+        .transpose()?;
+    if let Some(reason) = counterparty_dispute_requirement_error(
+        expected_proof_body_hash.as_ref(),
+        account.counterparty_dispute(),
+        candidate.state().j_nonce(),
+        incoming.dispute.as_ref(),
+    ) {
+        return Ok(rejected(reason));
+    }
+
     // Only now, with the frame proven to be one we can commit, does our own
     // proposal give way to it.
     //
@@ -291,10 +320,9 @@ pub fn apply_incoming_frame(
     };
 
     let ack_hanko = identity.sign_frame(&state_hash)?;
-    // Their proof of the state they just proposed, kept as it arrived. This
-    // process does not verify the signature on it: TypeScript does, and while
-    // it still decides, the engine is checked against that decision rather
-    // than trusted in place of it.
+    // Their proof of the state they just proposed was authenticated against
+    // the reconstructed Solidity digest before replay, then checked against
+    // this exact candidate proof body above. Only now may it be retained.
     if let Some(dispute) = incoming.dispute.clone() {
         account.store_counterparty_dispute(dispute);
     }
@@ -346,9 +374,23 @@ pub fn apply_incoming_ack(
             reason: "ACCOUNT_PEER_ACK_SIGNER_INVALID".to_string(),
         });
     }
+    if let Some(dispute) = dispute.as_ref() {
+        validate_counterparty_dispute_shape(dispute)?;
+    }
     let Some(pending) = account.pending() else {
+        if height > account.current_height()
+            && let Some(dispute) = dispute.as_ref()
+        {
+            verify_counterparty_dispute(account.replica(), counterparty_entity_id, dispute)?;
+        }
         return Ok(AckOutcome::Stale { height });
     };
+    if height < pending.frame.height {
+        return Ok(AckOutcome::Stale { height });
+    }
+    if let Some(dispute) = dispute.as_ref() {
+        verify_counterparty_dispute(account.replica(), counterparty_entity_id, dispute)?;
+    }
     if pending.frame.height != height {
         return Ok(AckOutcome::Rejected {
             reason: format!(
@@ -356,6 +398,14 @@ pub fn apply_incoming_ack(
                 pending.frame.height
             ),
         });
+    }
+    if let Some(reason) = counterparty_dispute_requirement_error(
+        account.dispute().map(|draft| &draft.proof_body_hash),
+        account.counterparty_dispute(),
+        account.replica().state().j_nonce(),
+        dispute.as_ref(),
+    ) {
+        return Ok(AckOutcome::Rejected { reason });
     }
     if &pending.state_hash != state_hash {
         return Ok(AckOutcome::Rejected {

@@ -402,6 +402,23 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   }
 };
 
+type AuthorityWaveOperationResultKind = 'admission' | 'applied' | 'none';
+
+/**
+ * One operation actually encoded into an Entity's Rust request.
+ *
+ * `resultKind` names the only result collection allowed to answer it. Create
+ * mutates the candidate but deliberately has no verdict, so it is recorded as
+ * `none` rather than disappearing from the coverage ledger.
+ */
+export type AuthorityWaveOperation = {
+  operationIndex: number;
+  accountId: string;
+  resultKind: AuthorityWaveOperationResultKind;
+  /** Global position before grouping the Runtime frame by owner Entity. */
+  arrivalIndex: number;
+};
+
 type AuthorityWaveEntity = {
   ownerEntityId: string;
   timestamp: number;
@@ -410,6 +427,8 @@ type AuthorityWaveEntity = {
   finalizedJHeight: number;
   propose: boolean;
   ops: RscoreWireValue[];
+  /** Exact bijection target for the admissions/applied rows Rust returns. */
+  operations: AuthorityWaveOperation[];
   /**
    * Per counterparty, everything TypeScript's commits published in this frame,
    * in commit order. The engine must reproduce exactly this list from its own
@@ -439,6 +458,50 @@ export type AuthorityWave =
   | { kind: 'empty' }
   /** Something in this frame no wave can carry. The driver must not run it. */
   | { kind: 'ineligible'; reason: string };
+
+/**
+ * Classify the three candidate-operation variants without executing them.
+ * This stays next to their encoder rather than the Rust reply decoder: its
+ * purpose is to prove that every submitted operation entered the coverage
+ * ledger, including Create which produces no result row.
+ */
+export const describeAuthorityWaveOperation = (
+  value: RscoreWireValue,
+): Omit<AuthorityWaveOperation, 'arrivalIndex'> => {
+  if (!Array.isArray(value)) throw new Error('AUTHORITY_OPERATION_NOT_LIST');
+  const tag = value[0];
+  let operationIndex: unknown;
+  let accountIdValue: unknown;
+  let resultKind: AuthorityWaveOperationResultKind;
+  if (tag === 0 && value.length === 4) {
+    operationIndex = value[1];
+    accountIdValue = value[2];
+    resultKind = 'admission';
+  } else if (tag === 1 && value.length === 2 && Array.isArray(value[1])) {
+    const input = value[1];
+    operationIndex = input[0];
+    accountIdValue = input[1];
+    resultKind = 'applied';
+  } else if (tag === 2 && value.length === 3 && Array.isArray(value[2])) {
+    const seed = value[2];
+    operationIndex = value[1];
+    accountIdValue = seed[0];
+    resultKind = 'none';
+  } else {
+    throw new Error(`AUTHORITY_OPERATION_SHAPE:${String(tag)}:${value.length}`);
+  }
+  if (!Number.isSafeInteger(operationIndex) || (operationIndex as number) < 0) {
+    throw new Error(`AUTHORITY_OPERATION_INDEX:${String(operationIndex)}`);
+  }
+  if (!(accountIdValue instanceof Uint8Array) || accountIdValue.byteLength !== 32) {
+    throw new Error('AUTHORITY_OPERATION_ACCOUNT_ID');
+  }
+  return {
+    operationIndex: operationIndex as number,
+    accountId: `0x${Buffer.from(accountIdValue).toString('hex')}`,
+    resultKind,
+  };
+};
 
 /**
  * The Runtime frame as a grouped wave request: one group per owner Entity,
@@ -505,6 +568,7 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
     const clock = enforce ?? propose;
     if (!clock) return { kind: 'ineligible', reason: `clock:missing:${ownerEntityId}` };
     const ops: RscoreWireValue[] = [];
+    const operations: AuthorityWaveOperation[] = [];
     for (const row of rows) {
       const payload = row.payload;
       if (payload.kind === 'admit') {
@@ -516,7 +580,12 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
           if (wire === null) return { kind: 'ineligible', reason: `tx:${tx.type}` };
           txs.push(wire);
         }
-        ops.push(waveAdmitOp(operationIndex, row.accountId, txs));
+        const encoded = waveAdmitOp(operationIndex, row.accountId, txs);
+        ops.push(encoded);
+        operations.push({
+          ...describeAuthorityWaveOperation(encoded),
+          arrivalIndex: row.arrivalIndex,
+        });
         operationIndex += 1;
         continue;
       }
@@ -528,7 +597,12 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
         // engine would judge a different input than TypeScript did.
         return { kind: 'ineligible', reason: `input:${(error as Error).message}` };
       }
-      ops.push(waveInputOp(encoded));
+      const operation = waveInputOp(encoded);
+      ops.push(operation);
+      operations.push({
+        ...describeAuthorityWaveOperation(operation),
+        arrivalIndex: row.arrivalIndex,
+      });
       inputs.push({
         operationIndex,
         arrivalIndex: row.arrivalIndex,
@@ -556,6 +630,7 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
       finalizedJHeight: clock.finalizedJHeight,
       propose: propose !== undefined,
       ops,
+      operations,
     });
   }
   return { kind: 'wave', entities, inputs };

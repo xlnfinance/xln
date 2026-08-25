@@ -57,6 +57,8 @@ pub enum BatchError {
     StaleCandidate { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_REVISION_OVERFLOW")]
     RevisionOverflow,
+    #[error("RSCORE_BATCH_CANDIDATE_ATTEMPT_OVERFLOW")]
+    CandidateAttemptOverflow,
     /// An account input whose signature does not recover the expected signer.
     ///
     /// Not a transaction rejection: the authority verifies before it hands the
@@ -84,6 +86,39 @@ pub enum BatchError {
         account_id: AccountId,
         entity_id: String,
     },
+    #[error("RSCORE_BATCH_WAVE_CREATE_EXISTING:{0}")]
+    WaveCreateExisting(AccountId),
+    #[error("RSCORE_BATCH_WAVE_CREATE_DUPLICATE:{0}")]
+    WaveCreateDuplicate(AccountId),
+    #[error("RSCORE_BATCH_WAVE_CREATE_AFTER_USE:{0}")]
+    WaveCreateAfterUse(AccountId),
+    #[error("RSCORE_BATCH_WAVE_CREATE_COUNTERPARTY:{account_id}:{counterparty}")]
+    WaveCreateCounterparty {
+        account_id: AccountId,
+        counterparty: String,
+    },
+    #[error("RSCORE_BATCH_WAVE_CREATE_CONSENSUS:{0}")]
+    WaveCreateConsensus(AccountId),
+    #[error("RSCORE_BATCH_WAVE_CREATE_MEMPOOL:{account_id}:{actual}")]
+    WaveCreateMempool {
+        account_id: AccountId,
+        actual: usize,
+    },
+    #[error("RSCORE_BATCH_WAVE_CREATE_TRANSFORMER:{0}")]
+    WaveCreateTransformer(AccountId),
+    #[error("RSCORE_BATCH_WAVE_CREATE_ENVELOPE:{account_id}:{detail}")]
+    WaveCreateEnvelope {
+        account_id: AccountId,
+        detail: String,
+    },
+    #[error("RSCORE_BATCH_WAVE_CREATE_NON_GENESIS:{account_id}:{actual}:{expected}")]
+    WaveCreateNonGenesis {
+        account_id: AccountId,
+        actual: String,
+        expected: String,
+    },
+    #[error("RSCORE_BATCH_WAVE_CREATE_UNUSED:{0}")]
+    WaveCreateUnused(AccountId),
     #[error("RSCORE_BATCH_WAVE_PENDING")]
     WavePending,
     #[error("RSCORE_BATCH_WAVE_MISSING")]
@@ -94,6 +129,11 @@ pub enum BatchError {
     WaveSealed,
     #[error("RSCORE_BATCH_WAVE_REVISION:{actual}:{expected}")]
     WaveRevision { actual: u64, expected: u64 },
+    #[error("RSCORE_BATCH_WAVE_CANDIDATE:{actual}:{expected}")]
+    WaveCandidate {
+        actual: crate::CandidateId,
+        expected: crate::CandidateId,
+    },
     #[error("RSCORE_BATCH_CHECKPOINT_REVISION:{actual}:{expected}")]
     CheckpointRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY:{width}")]

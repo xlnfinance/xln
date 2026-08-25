@@ -1,5 +1,6 @@
 //! Long-lived, framed binary host for the deterministic Account batch engine.
 
+mod candidate;
 mod canonical;
 mod checkpoint_wire;
 mod error;
@@ -47,13 +48,24 @@ pub use transport::{read_frame, serve, write_frame};
 // return separate live-commit and durable-restore tokens.
 // 9: authority waves are staged apply/propose rounds, sealed before checkpoint
 // or commit, with candidate-wide operation indices and admission receipts.
-pub const PROCESS_ABI_VERSION: u64 = 9;
+// 10: WaveOp::Create installs a strictly validated genesis Account atomically
+// inside the same staged candidate as its first admission or peer input.
+// 11: Prepare returns a server-issued 32-byte candidate capability bound to a
+// fresh process incarnation, the complete session identity, request id and
+// monotonic batch candidate id. Every later candidate operation consumes it.
+pub const PROCESS_ABI_VERSION: u64 = 11;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=15")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=17")
+        // wire=17: request ids no longer masquerade as candidate handles;
+        // Prepare returns one opaque bin32 token consumed by every later
+        // stage, checkpoint read, Commit and Abort.
+        // wire=16: ordered wave operations add Create as
+        // [2, operationIndex, accountSeed], allowing the first Account input
+        // to execute without a non-atomic bootstrap/upsert escape hatch.
         // wire=15: Prepare opens and applies only; Apply/Propose repeat under
         // one candidate token and Seal freezes the cumulative transcript.
         // wire=14: GetCheckpointChanges names the pending PrepareAccountWave
@@ -86,9 +98,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x00, 0x62, 0x69, 0x15, 0xee, 0x0c, 0xab, 0xe3, 0x4e, 0x77, 0x9f, 0xaa, 0xbe, 0xea,
-            0xc0, 0x14, 0xe8, 0x24, 0xf4, 0x5f, 0xf0, 0xeb, 0x8b, 0x08, 0xda, 0xa7, 0xa1, 0x7a,
-            0x0c, 0xc9, 0x3f, 0x3d,
+            0x2f, 0xc3, 0x8f, 0xd6, 0xf6, 0xcb, 0x7b, 0xa7, 0x93, 0x82, 0x69, 0x82, 0x6a, 0xaa,
+            0x47, 0xc6, 0x2e, 0xe6, 0xa3, 0xac, 0x3e, 0xed, 0xa0, 0xbe, 0xd6, 0xa9, 0x03, 0x94,
+            0xa9, 0x31, 0x7f, 0xd1,
         ],
     };
 

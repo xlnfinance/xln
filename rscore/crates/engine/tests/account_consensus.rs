@@ -5,9 +5,10 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId,
-    IncomingFrame, IncomingOutcome, ProposalOutcome, ProposedFrame, ReceiverClock, SigningIdentity,
-    TokenId, WatchSeed, apply_incoming_ack, apply_incoming_frame, propose_account_frame,
+    AccountState, AccountTx, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
+    DepositoryAddress, DisputeDraft, EntityId, IncomingFrame, IncomingOutcome, ProposalOutcome,
+    ProposedFrame, ReceiverClock, SigningIdentity, TokenId, WatchSeed, apply_incoming_ack,
+    apply_incoming_frame, dispute_proof_hash, propose_account_frame,
 };
 
 /// The receiver's own clock, at the same moment the frames below are proposed.
@@ -71,6 +72,10 @@ fn account_state(left: &EntityId, right: &EntityId) -> AccountState {
 /// Both parties are lazy single-signer entities, so each verifies the other's
 /// Hanko from the frame alone.
 fn parties() -> (Party, Party) {
+    parties_with_transformer(None)
+}
+
+fn parties_with_transformer(delta_transformer: Option<[u8; 20]>) -> (Party, Party) {
     let first = SigningIdentity::lazy_from_seed(SEED, "1", 1, 1, BoardDelays::default())
         .expect("identity 1");
     let second = SigningIdentity::lazy_from_seed(SEED, "2", 1, 1, BoardDelays::default())
@@ -84,17 +89,21 @@ fn parties() -> (Party, Party) {
             (second_entity, first_entity, second, first)
         };
     let state = account_state(&left_entity, &right_entity);
+    let mut left_replica =
+        AccountReplica::new(left_entity.clone(), state.clone()).expect("left replica");
+    let mut right_replica =
+        AccountReplica::new(right_entity.clone(), state).expect("right replica");
+    if let Some(delta_transformer) = delta_transformer {
+        left_replica.set_delta_transformer(delta_transformer);
+        right_replica.set_delta_transformer(delta_transformer);
+    }
     let left = Party {
-        account: AccountConsensus::new(
-            AccountReplica::new(left_entity.clone(), state.clone()).expect("left replica"),
-        ),
+        account: AccountConsensus::new(left_replica),
         identity: left_identity,
         entity_id: left_entity,
     };
     let right = Party {
-        account: AccountConsensus::new(
-            AccountReplica::new(right_entity.clone(), state).expect("right replica"),
-        ),
+        account: AccountConsensus::new(right_replica),
         identity: right_identity,
         entity_id: right_entity,
     };
@@ -131,6 +140,49 @@ fn incoming_of(
         state_hash,
         hanko,
     }
+}
+
+fn certify_dispute(identity: &SigningIdentity, draft: &DisputeDraft) -> CounterpartyDispute {
+    CounterpartyDispute {
+        hanko: identity
+            .sign_frame(&draft.hash)
+            .expect("sign dispute digest"),
+        proof_body_hash: draft.proof_body_hash,
+        nonce: draft.nonce,
+        proposer_is_left: draft.proposer_is_left,
+    }
+}
+
+fn resign_dispute(
+    account: &AccountConsensus,
+    identity: &SigningIdentity,
+    dispute: &mut CounterpartyDispute,
+) {
+    let account_identity = account.replica().state().identity();
+    let digest = dispute_proof_hash(
+        account_identity.domain().chain_id(),
+        account_identity.domain().depository_address().bytes(),
+        account_identity
+            .entity(xln_rscore_engine::Side::Left)
+            .as_bytes(),
+        account_identity
+            .entity(xln_rscore_engine::Side::Right)
+            .as_bytes(),
+        dispute.nonce,
+        dispute.proposer_is_left,
+        &dispute.proof_body_hash,
+        account_identity.watch_seed().bytes(),
+    );
+    dispute.hanko = identity.sign_frame(&digest).expect("sign rebuilt dispute");
+}
+
+fn incoming_with_dispute(proposed: &ProposedFrame, identity: &SigningIdentity) -> IncomingFrame {
+    let mut incoming = incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone());
+    incoming.dispute = proposed
+        .dispute
+        .as_ref()
+        .map(|draft| certify_dispute(identity, draft));
+    incoming
 }
 
 /// One payment, proposed by LEFT and committed by both sides at the same
@@ -471,7 +523,7 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
         counterparty_frame_hanko: None,
         last_outbound_ack: None,
         dispute: None,
-        next_proof_nonce: 0,
+        next_proof_nonce: 1,
         counterparty_dispute: None,
         local_committed_frame_hanko: None,
     };
@@ -1234,6 +1286,368 @@ fn outputs_are_held_until_the_peer_acks() {
             .iter()
             .any(|output| matches!(output, AccountOutput::HtlcSecret { .. })),
         "{outputs:?}",
+    );
+}
+
+/// A recovery witness is a second, independent certificate: the receiver
+/// rebuilds its Solidity digest, recovers the account counterparty, and only
+/// then retains it. The ACK path performs the same check in the other
+/// direction before releasing the pending frame's effects.
+#[test]
+fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
+    let transformer = [0x77_u8; 20];
+    let (mut left, mut right) = parties_with_transformer(Some(transformer));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+    let proposal_dispute = proposed.dispute.clone().expect("proposal dispute");
+
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_with_dispute(&proposed, &left.identity),
+        &market(),
+    )
+    .expect("verified frame");
+    let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
+        panic!("expected commit, got {outcome:?}");
+    };
+    let stored = right
+        .account
+        .counterparty_dispute()
+        .expect("stored peer dispute");
+    assert_eq!(stored.proof_body_hash, proposal_dispute.proof_body_hash);
+    assert_eq!(stored.nonce, proposal_dispute.nonce);
+
+    let ack_draft = right
+        .account
+        .consensus_snapshot()
+        .last_outbound_ack
+        .and_then(|ack| ack.dispute)
+        .expect("ack dispute");
+    let ack = apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &proposed.state_hash,
+        &ack_hanko,
+        Some(certify_dispute(&right.identity, &ack_draft)),
+    )
+    .expect("verified ack");
+    assert!(matches!(
+        ack,
+        xln_rscore_engine::AckOutcome::Committed { .. }
+    ));
+    assert_eq!(
+        left.account
+            .counterparty_dispute()
+            .expect("stored ack dispute")
+            .proof_body_hash,
+        ack_draft.proof_body_hash,
+    );
+}
+
+/// A valid frame certificate does not bless its attached dispute witness. A
+/// foreign signer and a role bit changed underneath the original signature
+/// are both rejected before replay, leaving the account at H=0.
+#[test]
+fn a_forged_or_retargeted_dispute_hanko_is_refused_before_frame_replay() {
+    let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+
+    let mut wrong_signer = incoming_with_dispute(&proposed, &left.identity);
+    let draft = proposed.dispute.as_ref().expect("dispute");
+    wrong_signer.dispute.as_mut().expect("wire dispute").hanko = right
+        .identity
+        .sign_frame(&draft.hash)
+        .expect("foreign signature");
+    let error = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        wrong_signer,
+        &market(),
+    )
+    .expect_err("foreign dispute signer");
+    assert!(
+        error
+            .to_string()
+            .starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
+    );
+    assert_eq!(right.account.current_height(), 0);
+
+    let mut wrong_role = incoming_with_dispute(&proposed, &left.identity);
+    let dispute = wrong_role.dispute.as_mut().expect("wire dispute");
+    dispute.proposer_is_left = !dispute.proposer_is_left;
+    let error = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        wrong_role,
+        &market(),
+    )
+    .expect_err("role is part of signed digest");
+    let error = error.to_string();
+    assert!(
+        error.starts_with("ACCOUNT_PEER_DISPUTE_HANKO_INVALID")
+            || error == "ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE",
+        "{error}",
+    );
+    assert_eq!(right.account.current_height(), 0);
+}
+
+/// Even a genuine Hanko by the correct counterparty is not enough: its proof
+/// body must be the body Rust independently derives from the replayed frame.
+#[test]
+fn a_signed_dispute_for_another_proof_body_is_refused() {
+    let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+    let mut incoming = incoming_with_dispute(&proposed, &left.identity);
+    let dispute = incoming.dispute.as_mut().expect("wire dispute");
+    dispute.proof_body_hash[0] ^= 0x01;
+    resign_dispute(&right.account, &left.identity, dispute);
+
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming,
+        &market(),
+    )
+    .expect("valid signature, invalid candidate binding");
+    let IncomingOutcome::Rejected { reason } = outcome else {
+        panic!("expected rejection, got {outcome:?}");
+    };
+    assert!(
+        reason.starts_with("DISPUTE_HANKO_PROOFBODY_MISMATCH"),
+        "{reason}"
+    );
+    assert_eq!(right.account.current_height(), 0);
+    assert!(right.account.counterparty_dispute().is_none());
+}
+
+/// Account leaves encode proof nonces through the same safe-integer domain as
+/// TypeScript. The inclusive boundary remains valid; the next u64 is refused
+/// before signature recovery so it can never be rounded in the leaf.
+#[test]
+fn dispute_nonce_respects_the_typescript_safe_integer_boundary() {
+    const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+    let transformer = [0x77_u8; 20];
+    let (mut left, mut right) = parties_with_transformer(Some(transformer));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+    let mut incoming = incoming_with_dispute(&proposed, &left.identity);
+    let dispute = incoming.dispute.as_mut().expect("wire dispute");
+    dispute.nonce = MAX_SAFE_INTEGER;
+    resign_dispute(&right.account, &left.identity, dispute);
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming,
+        &market(),
+    )
+    .expect("safe boundary");
+    assert!(matches!(outcome, IncomingOutcome::Committed { .. }));
+    assert_eq!(
+        right.account.counterparty_dispute().expect("stored").nonce,
+        MAX_SAFE_INTEGER,
+    );
+
+    let (mut left, mut right) = parties_with_transformer(Some(transformer));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let mut incoming = incoming_with_dispute(&proposed, &left.identity);
+    incoming.dispute.as_mut().expect("wire dispute").nonce = MAX_SAFE_INTEGER + 1;
+    let error = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming,
+        &market(),
+    )
+    .expect_err("unsafe nonce");
+    assert_eq!(
+        error.to_string(),
+        "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:PROOF_NONCE:9007199254740992",
+    );
+    assert_eq!(right.account.current_height(), 0);
+}
+
+/// Empty evidence is malformed before replay classification. Once the witness
+/// has a valid wire shape, at-least-once delivery classifies an obsolete
+/// frame/ACK before cryptographic verification and keeps it a no-op.
+#[test]
+fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
+    let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected proposal");
+    };
+    let proposed = *proposed;
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_with_dispute(&proposed, &left.identity),
+        &market(),
+    )
+    .expect("frame");
+    let IncomingOutcome::Committed { ack_hanko, .. } = outcome else {
+        panic!("expected commit");
+    };
+    let ack_draft = right
+        .account
+        .consensus_snapshot()
+        .last_outbound_ack
+        .and_then(|ack| ack.dispute)
+        .expect("ack dispute");
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &proposed.state_hash,
+        &ack_hanko,
+        Some(certify_dispute(&right.identity, &ack_draft)),
+    )
+    .expect("ack");
+
+    let right_leaf = right.account.entity_account_leaf().expect("right leaf");
+    let mut malformed = incoming_with_dispute(&proposed, &left.identity);
+    malformed.dispute.as_mut().expect("dispute").hanko.clear();
+    let error = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        malformed,
+        &market(),
+    )
+    .expect_err("empty witness is malformed before replay classification");
+    assert_eq!(
+        error.to_string(),
+        "ACCOUNT_PEER_DISPUTE_HANKO_INVALID:SHAPE_INVALID:HANKO_MISSING",
+    );
+
+    let mut duplicate = incoming_with_dispute(&proposed, &left.identity);
+    duplicate.dispute.as_mut().expect("dispute").hanko = vec![0];
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        duplicate,
+        &market(),
+    )
+    .expect("duplicate ignores obsolete witness");
+    assert!(matches!(
+        outcome,
+        IncomingOutcome::Duplicate { height: 1, .. }
+    ));
+    assert_eq!(
+        right
+            .account
+            .entity_account_leaf()
+            .expect("right leaf after"),
+        right_leaf,
+    );
+
+    let left_leaf = left.account.entity_account_leaf().expect("left leaf");
+    let mut obsolete_dispute = certify_dispute(&right.identity, &ack_draft);
+    obsolete_dispute.hanko = vec![0];
+    let ack = apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &proposed.state_hash,
+        &ack_hanko,
+        Some(obsolete_dispute),
+    )
+    .expect("stale ack ignores obsolete witness");
+    assert!(matches!(
+        ack,
+        xln_rscore_engine::AckOutcome::Stale { height: 1 }
+    ));
+    assert_eq!(
+        left.account.entity_account_leaf().expect("left leaf after"),
+        left_leaf,
     );
 }
 

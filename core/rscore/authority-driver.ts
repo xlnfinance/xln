@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 
 import { createStructuredLogger } from '../support/logger';
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
+import { computeFrameHash, getAccountFrameStructuralError } from '../account/consensus/frame/hash';
 import { generateLazyEntityId } from '../entity/factory';
 import {
   computeEntityAccountLeafDigest,
@@ -35,7 +36,12 @@ import {
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import { findAccountByCounterparty } from '../account/state/account-lookup';
-import { buildAuthorityWave, type AuthorityWave } from './authority-wave';
+import {
+  buildAuthorityWave,
+  describeAuthorityWaveOperation,
+  type AuthorityWave,
+  type AuthorityWaveOperation,
+} from './authority-wave';
 import {
   accountConsensusWire,
   accountEnvelopeWire,
@@ -45,7 +51,7 @@ import {
   swapMarketPolicyWire,
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
-import { decodeWave, waveOutputRow, type Wave } from './wave-decode';
+import { waveOutputRow, type Wave } from './wave-decode';
 import type { ShadowOutputRow } from './shadow-wire';
 import {
   RSCORE_PROCESS_ABI_VERSION,
@@ -56,10 +62,11 @@ import {
   type RscoreExactCheckpoint,
   type RscoreProcessClient,
 } from './client';
-import { assertRscoreCheckpointCandidate } from './checkpoint-wire';
-import type { AccountReplica } from '../types/account';
+import { assertRscoreCheckpointCandidate } from './checkpoint/checkpoint-wire';
+import type { AccountFrame, AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
+import { verifyHankoForHash } from '../hanko/signing';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -585,7 +592,22 @@ const prepareTrackedCandidate = async (
     throw error;
   }
   try {
-    const result = decodeWave(prepared.result);
+    const selections = request.entities.flatMap(entity => {
+      if (!entity.propose) return [];
+      const accountIds = [...new Set(entity.ops
+        .map(accountIdOf)
+        .filter((accountId): accountId is string => accountId !== null))]
+        .sort()
+        .map(accountId => hexToWireBytes(accountId, 32, 'AUTHORITY_PROPOSAL_ACCOUNT'));
+      return accountIds.length === 0 ? [] : [{
+        ownerEntityId: entity.ownerEntityId,
+        accountIds,
+      }];
+    });
+    if (selections.length > 0) {
+      await session.client.proposeAccountWave(prepared.token, { entities: selections });
+    }
+    const result = await session.client.sealAccountWave(prepared.token);
     await validate(result);
     return { session, token: prepared.token, result };
   } catch (error) {
@@ -622,6 +644,7 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
     halt('WAVE_INELIGIBLE', { reason: wave.reason });
     return;
   }
+  assertAuthorityWaveOperationLedger(wave);
   const candidates: PendingWave[] = [];
   pending.set(env, candidates);
   const runtimeSessions = sessionMap(env, false);
@@ -644,13 +667,16 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
         ...entity,
         ownerEntityId: Uint8Array.from(Buffer.from(ownerEntityId.slice(2), 'hex')),
       }],
-    }, decoded => compareWithTypescript(
-      env,
-      ownerEntityId,
-      decoded,
-      entity.expectedOutputs,
-      session,
-    ));
+    }, decoded => {
+      assertAuthorityOperationCoverage(ownerEntityId, entity.operations, decoded);
+      return compareWithTypescript(
+        env,
+        ownerEntityId,
+        decoded,
+        entity.expectedOutputs,
+        session,
+      );
+    });
     report.waves += 1;
     report.framesProposed += candidate.result.proposals.filter(row => row.frame !== null).length;
     report.inputsApplied += candidate.result.applied.length;
@@ -673,16 +699,224 @@ const assertWaveAccountsSeeded = (session: Session, ops: readonly unknown[]): vo
   }
 };
 
-/** The account id inside an encoded operation: `[0, accountId, txs]` or `[1, row]`. */
+/** Account id inside Admit, Apply or Create candidate operations. */
 const accountIdOf = (op: unknown): string | null => {
   if (!Array.isArray(op)) return null;
-  if (op[0] === 0) return hexOf(op[1]);
+  if (op[0] === 0) return hexOf(op[2]);
   if (op[0] === 1 && Array.isArray(op[1])) return hexOf(op[1][1]);
+  if (op[0] === 2 && Array.isArray(op[2])) return hexOf(op[2][0]);
   return null;
 };
 
 const hexOf = (value: unknown): string | null =>
   value instanceof Uint8Array ? `0x${Buffer.from(value).toString('hex')}` : null;
+
+const operationMatches = (
+  left: Pick<AuthorityWaveOperation, 'operationIndex' | 'accountId' | 'resultKind'>,
+  right: Pick<AuthorityWaveOperation, 'operationIndex' | 'accountId' | 'resultKind'>,
+): boolean =>
+  left.operationIndex === right.operationIndex
+  && left.accountId === right.accountId
+  && left.resultKind === right.resultKind;
+
+/**
+ * The collector ledger must itself be a bijection with what is put on the
+ * process wire. Otherwise a missing Create is invisible (it returns no row),
+ * and a missing Admit/Input can be misreported later as an engine omission.
+ */
+export const assertAuthorityWaveOperationLedger = (
+  wave: Extract<AuthorityWave, { kind: 'wave' }>,
+): void => {
+  const operationIndices = new Set<number>();
+  const arrivalIndices = new Set<number>();
+  const appliedMetadata = new Map(wave.inputs.map(input => [input.operationIndex, input]));
+  if (appliedMetadata.size !== wave.inputs.length) {
+    halt('OPERATION_LEDGER_MISMATCH', { reason: 'duplicateInputMetadata' });
+  }
+  let operationCount = 0;
+  let appliedCount = 0;
+  for (const entity of wave.entities) {
+    if (entity.ops.length !== entity.operations.length) {
+      halt('OPERATION_LEDGER_MISMATCH', {
+        reason: 'length',
+        owner: entity.ownerEntityId,
+        encoded: entity.ops.length,
+        ledger: entity.operations.length,
+      });
+    }
+    for (const [position, encoded] of entity.ops.entries()) {
+      const ledger = entity.operations[position];
+      if (ledger === undefined) {
+        return halt('OPERATION_LEDGER_MISMATCH', {
+          reason: 'missingLedgerRow',
+          owner: entity.ownerEntityId,
+          position,
+        });
+      }
+      const described = (() => {
+        try {
+          return describeAuthorityWaveOperation(encoded);
+        } catch (error) {
+          return halt('OPERATION_LEDGER_MISMATCH', {
+            reason: 'encodedShape',
+            owner: entity.ownerEntityId,
+            position,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+      if (!operationMatches(described, ledger)) {
+        halt('OPERATION_LEDGER_MISMATCH', {
+          reason: 'encodedBinding',
+          owner: entity.ownerEntityId,
+          position,
+          encoded: described,
+          ledger,
+        });
+      }
+      if (!Number.isSafeInteger(ledger.arrivalIndex) || ledger.arrivalIndex < 0) {
+        halt('OPERATION_LEDGER_MISMATCH', {
+          reason: 'arrivalIndex',
+          owner: entity.ownerEntityId,
+          operationIndex: ledger.operationIndex,
+          arrivalIndex: ledger.arrivalIndex,
+        });
+      }
+      if (operationIndices.has(ledger.operationIndex)) {
+        halt('OPERATION_LEDGER_MISMATCH', {
+          reason: 'duplicateOperationIndex',
+          operationIndex: ledger.operationIndex,
+        });
+      }
+      if (arrivalIndices.has(ledger.arrivalIndex)) {
+        halt('OPERATION_LEDGER_MISMATCH', {
+          reason: 'duplicateArrivalIndex',
+          arrivalIndex: ledger.arrivalIndex,
+        });
+      }
+      operationIndices.add(ledger.operationIndex);
+      arrivalIndices.add(ledger.arrivalIndex);
+      operationCount += 1;
+
+      const metadata = appliedMetadata.get(ledger.operationIndex);
+      if (ledger.resultKind === 'applied') {
+        appliedCount += 1;
+        if (
+          metadata === undefined
+          || metadata.ownerEntityId !== entity.ownerEntityId
+          || metadata.accountId !== ledger.accountId
+          || metadata.arrivalIndex !== ledger.arrivalIndex
+        ) {
+          halt('OPERATION_LEDGER_MISMATCH', {
+            reason: 'inputMetadataBinding',
+            owner: entity.ownerEntityId,
+            operation: ledger,
+            metadata: metadata ?? null,
+          });
+        }
+      } else if (metadata !== undefined) {
+        halt('OPERATION_LEDGER_MISMATCH', {
+          reason: 'unexpectedInputMetadata',
+          owner: entity.ownerEntityId,
+          operation: ledger,
+        });
+      }
+    }
+  }
+  if (appliedCount !== wave.inputs.length) {
+    halt('OPERATION_LEDGER_MISMATCH', {
+      reason: 'inputMetadataCount',
+      applied: appliedCount,
+      metadata: wave.inputs.length,
+    });
+  }
+  const orderedArrivals = [...arrivalIndices].sort((left, right) => left - right);
+  for (let expected = 0; expected < operationCount; expected += 1) {
+    if (orderedArrivals[expected] !== expected) {
+      halt('OPERATION_LEDGER_MISMATCH', {
+        reason: 'arrivalCoverage',
+        expected,
+        actual: orderedArrivals[expected] ?? null,
+      });
+    }
+  }
+};
+
+/**
+ * Require a one-to-one answer for every result-bearing submitted operation.
+ * This deliberately checks only coverage and binding; whether an individual
+ * verdict is semantically the same verdict TypeScript produced is a separate
+ * parity gate.
+ */
+export const assertAuthorityOperationCoverage = (
+  ownerEntityId: string,
+  submitted: readonly AuthorityWaveOperation[],
+  result: Pick<Wave, 'admissions' | 'applied'>,
+): void => {
+  const expected = new Map<number, AuthorityWaveOperation>();
+  for (const operation of submitted) {
+    if (expected.has(operation.operationIndex)) {
+      halt('OPERATION_COVERAGE_MISMATCH', {
+        reason: 'duplicateSubmitted',
+        owner: ownerEntityId,
+        operationIndex: operation.operationIndex,
+      });
+    }
+    expected.set(operation.operationIndex, operation);
+  }
+  const actual = [
+    ...result.admissions.map(row => ({
+      operationIndex: row.operationIndex,
+      accountId: row.accountId,
+      resultKind: 'admission' as const,
+    })),
+    ...result.applied.map(row => ({
+      operationIndex: row.operationIndex,
+      accountId: row.accountId,
+      resultKind: 'applied' as const,
+    })),
+  ];
+  const answered = new Set<number>();
+  for (const row of actual) {
+    if (answered.has(row.operationIndex)) {
+      halt('OPERATION_COVERAGE_MISMATCH', {
+        reason: 'duplicateResult',
+        owner: ownerEntityId,
+        operationIndex: row.operationIndex,
+      });
+    }
+    answered.add(row.operationIndex);
+    const operation = expected.get(row.operationIndex);
+    if (operation === undefined) {
+      return halt('OPERATION_COVERAGE_MISMATCH', {
+        reason: 'extraResult',
+        owner: ownerEntityId,
+        result: row,
+      });
+    }
+    if (!operationMatches(operation, row)) {
+      halt('OPERATION_COVERAGE_MISMATCH', {
+        reason: 'resultBinding',
+        owner: ownerEntityId,
+        submitted: operation,
+        result: row,
+      });
+    }
+  }
+  const missing = submitted.filter(operation =>
+    operation.resultKind !== 'none' && !answered.has(operation.operationIndex));
+  if (missing.length > 0) {
+    halt('OPERATION_COVERAGE_MISMATCH', {
+      reason: 'missingResult',
+      owner: ownerEntityId,
+      missing: missing.map(operation => ({
+        operationIndex: operation.operationIndex,
+        accountId: operation.accountId,
+        resultKind: operation.resultKind,
+      })),
+    });
+  }
+};
 
 /**
  * Parity, in safe mode: every leaf the engine says it moved must be the leaf
@@ -856,6 +1090,91 @@ const compareOutputs = (
   }
 };
 
+/**
+ * Verify a Rust-authored proposal independently before parity accepts it.
+ *
+ * Matching an engine-supplied `stateHash` to TypeScript is insufficient: a
+ * malformed frame could carry that same copied hash, and a forged Hanko does
+ * not change any state root. H1 authority is currently restricted to a lazy
+ * one-of-one Entity, so retired-board grace is deliberately disabled here.
+ */
+export const assertAuthorityProposalParity = async (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+  accountId: string,
+  frame: AccountFrame & { hanko: string },
+  typescriptCandidate: AccountFrame,
+): Promise<void> => {
+  const structuralError = getAccountFrameStructuralError(frame, env.state.timestamp);
+  if (structuralError !== '') {
+    halt('FRAME_STRUCTURE_INVALID', {
+      owner: ownerEntityId,
+      account: accountId,
+      height: frame.height,
+      error: structuralError,
+    });
+  }
+
+  const recomputedHash = (() => {
+    try {
+      return computeFrameHash(frame).toLowerCase();
+    } catch (error) {
+      return halt('FRAME_HASH_COMPUTE_FAILED', {
+        owner: ownerEntityId,
+        account: accountId,
+        height: frame.height,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+  if (recomputedHash !== frame.stateHash.toLowerCase()) {
+    halt('FRAME_SELF_HASH_MISMATCH', {
+      owner: ownerEntityId,
+      account: accountId,
+      height: frame.height,
+      recomputed: recomputedHash,
+      rust: frame.stateHash,
+    });
+  }
+  if (recomputedHash !== typescriptCandidate.stateHash.toLowerCase()) {
+    halt('FRAME_HASH_MISMATCH', {
+      owner: ownerEntityId,
+      account: accountId,
+      height: frame.height,
+      typescript: typescriptCandidate.stateHash,
+      rust: frame.stateHash,
+      recomputed: recomputedHash,
+    });
+  }
+
+  const verified = await (async () => {
+    try {
+      return await verifyHankoForHash(
+        frame.hanko,
+        recomputedHash,
+        ownerEntityId,
+        env,
+        { allowPreviousBoard: false },
+      );
+    } catch (error) {
+      return halt('FRAME_HANKO_VERIFICATION_FAILED', {
+        owner: ownerEntityId,
+        account: accountId,
+        height: frame.height,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+  if (!verified.valid || verified.entityId?.toLowerCase() !== ownerEntityId.toLowerCase()) {
+    halt('FRAME_HANKO_INVALID', {
+      owner: ownerEntityId,
+      account: accountId,
+      height: frame.height,
+      signedEntity: verified.entityId,
+    });
+  }
+};
+
 const compareWithTypescript = async (
   env: RuntimeReplica,
   ownerEntityId: string,
@@ -948,14 +1267,13 @@ const compareWithTypescript = async (
       });
       return;
     }
-    if ((candidate.stateHash ?? '').toLowerCase() !== frame.stateHash.toLowerCase()) {
-      halt('FRAME_HASH_MISMATCH', {
-        account: proposal.accountId,
-        height: frame.height,
-        typescript: candidate.stateHash ?? null,
-        rust: frame.stateHash,
-      });
-    }
+    await assertAuthorityProposalParity(
+      env,
+      ownerEntityId,
+      proposal.accountId,
+      frame,
+      candidate,
+    );
   }
 };
 

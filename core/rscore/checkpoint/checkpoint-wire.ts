@@ -1,5 +1,5 @@
-import type { RscoreWireValue } from './client';
-import { buffersEqual } from '../protocol/serialization';
+import type { RscoreWireValue } from '../client';
+import { buffersEqual } from '../../protocol/serialization';
 
 export type RscoreCheckpointToken = [
   baseRevision: number | bigint,

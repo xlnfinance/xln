@@ -23,12 +23,21 @@ import {
   rscoreCheckpointBytes,
   type RscoreCheckpointChanges,
   type RscoreCheckpointToken,
-} from './checkpoint-wire';
+} from './checkpoint/checkpoint-wire';
+import {
+  packWireValue,
+  unpackWireValue,
+  unpackWireValueAt,
+  type RscoreWireValue,
+} from './process-wire-value';
+import { decodeWave, type Wave } from './wave-decode';
+export { packWireValue, unpackWireValue } from './process-wire-value';
+export type { RscoreWireValue } from './process-wire-value';
 export type {
   RscoreCheckpointChanges,
   RscoreCheckpointToken,
   RscoreExactCheckpoint,
-} from './checkpoint-wire';
+} from './checkpoint/checkpoint-wire';
 
 const RSCORE_ABI_MAGIC = 0x03;
 const RSCORE_ABI_DOMAIN = 'xln.rscore.account';
@@ -58,13 +67,19 @@ const RSCORE_ABI_VERSION = 1;
 // distinct tags in one closed operation set.
 // 8: checkpoint rows are bound to one pending authority wave and carry
 // separate commit and exact-restore tokens.
-export const RSCORE_PROCESS_ABI_VERSION = 8;
+// 9: an authority wave is one held candidate with repeatable Apply/Propose
+// stages and an explicit Seal before checkpoint or commit.
+// 10: Account creation is an atomic candidate operation rather than a
+// committed upsert performed before or after the Runtime frame.
+// 11: Prepare returns one opaque server-issued bin32 capability consumed by
+// every later operation on that candidate.
+export const RSCORE_PROCESS_ABI_VERSION = 11;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=14")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=17")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'e7e3866f0237ff5cdabfe52813f51185eba7484c8374b2b74edf3c8792e261b3',
+  '2fc38fd6f6cb7ba7938269826aaa47c62ee6a3ac3eeda0bed6a90394a9317fd1',
   'hex',
 );
 
@@ -85,10 +100,14 @@ export const RSCORE_OP = {
   getCheckpointChanges: 19,
   commitCheckpoint: 20,
   restoreExact: 21,
+  applyAccountWave: 22,
+  proposeAccountWave: 23,
+  sealAccountWave: 24,
 } as const;
 
 const MESSAGE_KIND_REQUEST = 0;
 const MESSAGE_KIND_OK = 1;
+const MESSAGE_KIND_ERROR = 2;
 // Rust accepts a 63 MiB request body inside a 64 MiB framed response. Keep the
 // two directions distinct: allowing a 64 MiB request here would kill the
 // session after the client had already consumed its request id.
@@ -96,193 +115,6 @@ const MAX_REQUEST_FRAME_BYTES = 63 * 1024 * 1024;
 const MAX_RESPONSE_FRAME_BYTES = 64 * 1024 * 1024;
 const MAX_BUFFERED_BYTES = MAX_RESPONSE_FRAME_BYTES + 4;
 const STDERR_TAIL_BYTES = 4096;
-
-export type RscoreWireValue =
-  | null
-  | boolean
-  | number
-  | bigint
-  | string
-  | Uint8Array
-  | RscoreWireValue[];
-
-
-// Bit-exact MessagePack writer/reader mirroring rscore's abi encoder: the
-// Rust decoder re-encodes every envelope and byte-compares, so the TS side
-// must produce exactly the same minimal encodings (unsigned-minimal ints,
-// bin8/16/32 for bytes, fixstr/str8+, fixarray/array16/32).
-export const packWireValue = (value: RscoreWireValue): Buffer => {
-  const chunks: Buffer[] = [];
-  writeValue(chunks, value);
-  return Buffer.concat(chunks);
-};
-
-const writeValue = (out: Buffer[], value: RscoreWireValue): void => {
-  if (value === null) { out.push(Buffer.from([0xc0])); return; }
-  if (typeof value === 'boolean') { out.push(Buffer.from([value ? 0xc3 : 0xc2])); return; }
-  if (typeof value === 'number' || typeof value === 'bigint') { writeInteger(out, BigInt(value)); return; }
-  if (typeof value === 'string') { writeText(out, value); return; }
-  if (value instanceof Uint8Array) { writeBinary(out, value); return; }
-  if (Array.isArray(value)) {
-    writeArrayHeader(out, value.length);
-    for (const item of value) writeValue(out, item);
-    return;
-  }
-  throw new Error(`RSCORE_CLIENT_VALUE_UNSUPPORTED:${typeof value}`);
-};
-
-const writeInteger = (out: Buffer[], value: bigint): void => {
-  if (value >= 0n && value <= 127n) { out.push(Buffer.from([Number(value)])); return; }
-  if (value >= 128n && value <= 255n) { out.push(Buffer.from([0xcc, Number(value)])); return; }
-  if (value >= 256n && value <= 65_535n) { out.push(tagged(0xcd, be(value, 2))); return; }
-  if (value >= 65_536n && value <= 0xffff_ffffn) { out.push(tagged(0xce, be(value, 4))); return; }
-  if (value >= 0n && value <= 0xffff_ffff_ffff_ffffn) { out.push(tagged(0xcf, be(value, 8))); return; }
-  if (value >= -32n && value < 0n) { out.push(Buffer.from([Number(value) & 0xff])); return; }
-  if (value >= -128n) { out.push(tagged(0xd0, be(value & 0xffn, 1))); return; }
-  if (value >= -32_768n) { out.push(tagged(0xd1, be(value & 0xffffn, 2))); return; }
-  if (value >= -2_147_483_648n) { out.push(tagged(0xd2, be(value & 0xffff_ffffn, 4))); return; }
-  out.push(tagged(0xd3, be(value & 0xffff_ffff_ffff_ffffn, 8)));
-};
-
-const be = (value: bigint, bytes: number): Buffer => {
-  const buffer = Buffer.alloc(bytes);
-  let cursor = value;
-  for (let index = bytes - 1; index >= 0; index -= 1) {
-    buffer[index] = Number(cursor & 0xffn);
-    cursor >>= 8n;
-  }
-  return buffer;
-};
-
-const tagged = (tag: number, payload: Buffer): Buffer => Buffer.concat([Buffer.from([tag]), payload]);
-
-const writeText = (out: Buffer[], value: string): void => {
-  const bytes = Buffer.from(value, 'utf8');
-  if (bytes.length <= 31) out.push(Buffer.from([0xa0 | bytes.length]));
-  else out.push(lengthHeader(bytes.length, [0xd9, 0xda, 0xdb]));
-  out.push(bytes);
-};
-
-const writeBinary = (out: Buffer[], value: Uint8Array): void => {
-  out.push(lengthHeader(value.length, [0xc4, 0xc5, 0xc6]), Buffer.from(value));
-};
-
-const lengthHeader = (length: number, tags: [number, number, number]): Buffer => {
-  if (length <= 255) return Buffer.from([tags[0], length]);
-  if (length <= 65_535) return tagged(tags[1], be(BigInt(length), 2));
-  return tagged(tags[2], be(BigInt(length), 4));
-};
-
-const writeArrayHeader = (out: Buffer[], length: number): void => {
-  if (length <= 15) out.push(Buffer.from([0x90 | length]));
-  else if (length <= 65_535) out.push(tagged(0xdc, be(BigInt(length), 2)));
-  else out.push(tagged(0xdd, be(BigInt(length), 4)));
-};
-
-type ReadCursor = { buffer: Buffer; offset: number };
-
-/** One byte of the frame, or a truncation reported as such. */
-const readByte = (cursor: ReadCursor, offset: number): number => {
-  const byte = cursor.buffer[offset];
-  if (byte === undefined) throw new Error(`RSCORE_CLIENT_TRUNCATED:${offset}`);
-  return byte;
-};
-
-/**
- * One canonical value from its bytes — the exact inverse of `packWireValue`.
- * Exported so a decoder can be tested against bytes rather than against the
- * objects this client happened to build.
- */
-export const unpackWireValue = (bytes: Buffer): unknown => {
-  const cursor: ReadCursor = { buffer: bytes, offset: 0 };
-  const value = readValue(cursor);
-  if (cursor.offset !== bytes.length) {
-    throw new Error(`RSCORE_CLIENT_TRAILING_BYTES:${cursor.offset}:${bytes.length}`);
-  }
-  return value;
-};
-
-const readValue = (cursor: ReadCursor): unknown => {
-  const marker = readByte(cursor, cursor.offset);
-  cursor.offset += 1;
-  if (marker <= 0x7f) return marker;
-  if (marker >= 0xe0) return marker - 256;
-  if (marker >= 0x90 && marker <= 0x9f) return readArray(cursor, marker & 0x0f);
-  if (marker >= 0xa0 && marker <= 0xbf) return readText(cursor, marker & 0x1f);
-  switch (marker) {
-    case 0xc0: return null;
-    case 0xc2: return false;
-    case 0xc3: return true;
-    case 0xcc: return readUint(cursor, 1);
-    case 0xcd: return readUint(cursor, 2);
-    case 0xce: return readUint(cursor, 4);
-    case 0xcf: return readBigUint(cursor);
-    case 0xd0: return readInt(cursor, 1);
-    case 0xd1: return readInt(cursor, 2);
-    case 0xd2: return readInt(cursor, 4);
-    case 0xd3: return readBigInt(cursor);
-    case 0xc4: return readBin(cursor, readUint(cursor, 1));
-    case 0xc5: return readBin(cursor, readUint(cursor, 2));
-    case 0xc6: return readBin(cursor, readUint(cursor, 4));
-    case 0xd9: return readText(cursor, readUint(cursor, 1));
-    case 0xda: return readText(cursor, readUint(cursor, 2));
-    case 0xdb: return readText(cursor, readUint(cursor, 4));
-    case 0xdc: return readArray(cursor, readUint(cursor, 2));
-    case 0xdd: return readArray(cursor, readUint(cursor, 4));
-    default: throw new Error(`RSCORE_CLIENT_MARKER_UNSUPPORTED:0x${marker.toString(16)}`);
-  }
-};
-
-const readUint = (cursor: ReadCursor, bytes: number): number => {
-  let value = 0;
-  for (let index = 0; index < bytes; index += 1) {
-    value = value * 256 + readByte(cursor, cursor.offset + index);
-  }
-  cursor.offset += bytes;
-  return value;
-};
-
-const readInt = (cursor: ReadCursor, bytes: number): number => {
-  const unsigned = readUint(cursor, bytes);
-  const bound = 2 ** (bytes * 8 - 1);
-  return unsigned >= bound ? unsigned - bound * 2 : unsigned;
-};
-
-const readBigUint = (cursor: ReadCursor): number | bigint => {
-  let value = 0n;
-  for (let index = 0; index < 8; index += 1) {
-    value = (value << 8n) + BigInt(readByte(cursor, cursor.offset + index));
-  }
-  cursor.offset += 8;
-  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
-};
-
-const readBigInt = (cursor: ReadCursor): number | bigint => {
-  const unsigned = readBigUint(cursor);
-  const value = typeof unsigned === 'number' ? BigInt(unsigned) : unsigned;
-  const signed = value >= 0x8000_0000_0000_0000n ? value - 0x1_0000_0000_0000_0000n : value;
-  return signed >= BigInt(Number.MIN_SAFE_INTEGER) && signed <= BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number(signed)
-    : signed;
-};
-
-const readBin = (cursor: ReadCursor, length: number): Buffer => {
-  const value = cursor.buffer.subarray(cursor.offset, cursor.offset + length);
-  cursor.offset += length;
-  return Buffer.from(value);
-};
-
-const readText = (cursor: ReadCursor, length: number): string => {
-  const value = cursor.buffer.toString('utf8', cursor.offset, cursor.offset + length);
-  cursor.offset += length;
-  return value;
-};
-
-const readArray = (cursor: ReadCursor, length: number): unknown[] => {
-  const values: unknown[] = [];
-  for (let index = 0; index < length; index += 1) values.push(readValue(cursor));
-  return values;
-};
 
 const bodyDigest = (
   runtimeId: Buffer,
@@ -309,16 +141,41 @@ export type RscoreSessionIdentity = Readonly<{
   sessionId: Buffer; // 16 bytes
 }>;
 
+export type RscoreAuthorityWaveEntity = Readonly<{
+  ownerEntityId: Uint8Array;
+  timestamp: number;
+  jHeight: number;
+  entityTimestamp: number;
+  finalizedJHeight: number;
+  /** Authorizes later `proposeAccountWave` stages for this owner. */
+  propose: boolean;
+  /**
+   * `[0, operationIndex, accountId, txs]`, `[1, inputRow]`, or
+   * `[2, operationIndex, accountSeed15]` for atomic candidate creation.
+   */
+  ops: readonly RscoreWireValue[];
+}>;
+
+export type RscoreAuthorityWaveOpsEntity = Readonly<{
+  ownerEntityId: Uint8Array;
+  /** Operation indices are candidate-wide, unique and monotonically increasing. */
+  ops: readonly RscoreWireValue[];
+}>;
+
+export type RscoreAuthorityProposalSelection = Readonly<{
+  ownerEntityId: Uint8Array;
+  /** Strictly sorted Account ids selected by the Entity's canonical worklist. */
+  accountIds: readonly Uint8Array[];
+}>;
+
 const encodeEnvelope = (
   identity: RscoreSessionIdentity,
   requestId: bigint,
   opTag: number,
-  payload: RscoreWireValue[],
+  bodyBytes: Buffer,
 ): Buffer => {
   const requestIdBytes = Buffer.alloc(8);
   requestIdBytes.writeBigUInt64BE(requestId);
-  // body = one payload tuple (BODY_ARITY = 1 on the Rust side)
-  const bodyBytes = packWireValue([payload]);
   const digest = bodyDigest(identity.runtimeId, opTag, MESSAGE_KIND_REQUEST, bodyBytes);
   const head = [
     RSCORE_ABI_DOMAIN,
@@ -349,6 +206,49 @@ type DecodedReply = Readonly<{
   body: unknown;
 }>;
 
+type ResponseWaiter = Readonly<{
+  resolve: (frame: Buffer) => void;
+  reject: (error: Error) => void;
+}>;
+
+type AuthorityCandidate = {
+  token: Buffer;
+  sealed: boolean;
+};
+
+/** Own caller-retained arrays and bytes before this request joins the queue. */
+const ownWireValue = (value: RscoreWireValue): RscoreWireValue => {
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'number' ||
+    typeof value === 'bigint' ||
+    typeof value === 'string'
+  ) {
+    return value;
+  }
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (Array.isArray(value)) return value.map(ownWireValue);
+  throw new Error(`RSCORE_CLIENT_VALUE_UNSUPPORTED:${typeof value}`);
+};
+
+const ownWirePayload = (payload: RscoreWireValue[]): RscoreWireValue[] =>
+  payload.map(ownWireValue);
+
+const exactUnsigned = (value: unknown, code: string): number => {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  if (
+    typeof value === 'bigint' &&
+    value >= 0n &&
+    value <= BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    return Number(value);
+  }
+  throw new Error(`${code}:${String(value)}`);
+};
+
 /**
  * Decode one reply and bind it to the request it answers.
  *
@@ -368,10 +268,14 @@ const decodeEnvelope = (
 ): DecodedReply => {
   if (frame[0] !== RSCORE_ABI_MAGIC) throw new Error(`RSCORE_CLIENT_MAGIC_INVALID:${frame[0]}`);
   if (frame[1] !== 0x9e) throw new Error(`RSCORE_CLIENT_ENVELOPE_HEADER:${frame[1]}`);
-  const cursor: ReadCursor = { buffer: frame, offset: 2 };
   const head: unknown[] = [];
-  for (let index = 0; index < 13; index += 1) head.push(readValue(cursor));
-  const bodyBytes = frame.subarray(cursor.offset);
+  let offset = 2;
+  for (let index = 0; index < 13; index += 1) {
+    const decoded = unpackWireValueAt(frame, offset);
+    head.push(decoded.value);
+    offset = decoded.nextOffset;
+  }
+  const bodyBytes = frame.subarray(offset);
 
   const bytesEqual = (value: unknown, want: Buffer): boolean =>
     Buffer.isBuffer(value) && value.equals(want);
@@ -379,9 +283,14 @@ const decodeEnvelope = (
   requestIdBytes.writeBigUInt64BE(expected.requestId);
 
   if (head[0] !== RSCORE_ABI_DOMAIN) throw new Error('RSCORE_CLIENT_DOMAIN_INVALID');
-  if (Number(head[1]) !== RSCORE_ABI_VERSION) throw new Error(`RSCORE_CLIENT_ABI_VERSION:${head[1]}`);
-  if (Number(head[2]) !== RSCORE_PROTOCOL_VERSION) throw new Error(`RSCORE_CLIENT_PROTOCOL_VERSION:${head[2]}`);
-  if (Number(head[3]) !== RSCORE_STORAGE_SCHEMA_VERSION) {
+  const abiVersion = exactUnsigned(head[1], 'RSCORE_CLIENT_ABI_VERSION');
+  if (abiVersion !== RSCORE_ABI_VERSION) throw new Error(`RSCORE_CLIENT_ABI_VERSION:${abiVersion}`);
+  const protocolVersion = exactUnsigned(head[2], 'RSCORE_CLIENT_PROTOCOL_VERSION');
+  if (protocolVersion !== RSCORE_PROTOCOL_VERSION) {
+    throw new Error(`RSCORE_CLIENT_PROTOCOL_VERSION:${protocolVersion}`);
+  }
+  const storageVersion = exactUnsigned(head[3], 'RSCORE_CLIENT_STORAGE_VERSION');
+  if (storageVersion !== RSCORE_STORAGE_SCHEMA_VERSION) {
     throw new Error(`RSCORE_CLIENT_STORAGE_VERSION:${head[3]}`);
   }
   if (!bytesEqual(head[4], RSCORE_PROTOCOL_FINGERPRINT)) throw new Error('RSCORE_CLIENT_FINGERPRINT');
@@ -391,20 +300,20 @@ const decodeEnvelope = (
   if (!bytesEqual(head[8], requestIdBytes)) {
     throw new Error(`RSCORE_CLIENT_REQUEST_ID:${Buffer.isBuffer(head[8]) ? head[8].toString('hex') : 'invalid'}`);
   }
-  const opTag = Number(head[9]);
+  const opTag = exactUnsigned(head[9], 'RSCORE_CLIENT_OP_TAG');
   if (opTag !== expected.opTag) throw new Error(`RSCORE_CLIENT_OP_TAG:${opTag}`);
-  const messageKind = Number(head[10]);
-  if (Number(head[11]) !== bodyBytes.length) {
+  const messageKind = exactUnsigned(head[10], 'RSCORE_CLIENT_MESSAGE_KIND');
+  if (messageKind !== MESSAGE_KIND_OK && messageKind !== MESSAGE_KIND_ERROR) {
+    throw new Error(`RSCORE_CLIENT_MESSAGE_KIND:${messageKind}`);
+  }
+  const bodyLength = exactUnsigned(head[11], 'RSCORE_CLIENT_BODY_LENGTH');
+  if (bodyLength !== bodyBytes.length) {
     throw new Error(`RSCORE_CLIENT_BODY_LENGTH:${head[11]}!=${bodyBytes.length}`);
   }
   const digest = bodyDigest(expected.identity.runtimeId, opTag, messageKind, bodyBytes);
   if (!bytesEqual(head[12], digest)) throw new Error('RSCORE_CLIENT_BODY_DIGEST');
 
-  const bodyCursor: ReadCursor = { buffer: bodyBytes, offset: 0 };
-  const body = readValue(bodyCursor);
-  if (bodyCursor.offset !== bodyBytes.length) {
-    throw new Error(`RSCORE_CLIENT_BODY_TRAILING:${bodyBytes.length - bodyCursor.offset}`);
-  }
+  const body = unpackWireValue(bodyBytes);
   return { opTag, messageKind, body };
 };
 
@@ -416,9 +325,12 @@ export class RscoreProcessClient {
   #chunkOffset = 0;
   #bufferedBytes = 0;
   #expectedFrameBytes: number | null = null;
-  #waiters: Array<{ resolve: (frame: Buffer) => void; reject: (error: Error) => void }> = [];
+  #waiter: ResponseWaiter | null = null;
+  #requestTurn: Promise<void> = Promise.resolve();
   #dead: Error | null = null;
   #stderrTail = '';
+  #authorityCandidate: AuthorityCandidate | null = null;
+  #authoritySession: boolean | null = null;
 
   constructor(binaryPath: string, identity: RscoreSessionIdentity) {
     this.#identity = identity;
@@ -449,7 +361,9 @@ export class RscoreProcessClient {
     this.#chunkOffset = 0;
     this.#bufferedBytes = 0;
     this.#expectedFrameBytes = null;
-    for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
+    const waiter = this.#waiter;
+    this.#waiter = null;
+    waiter?.reject(error);
     if (this.#child.exitCode === null && !this.#child.killed) {
       this.#child.kill('SIGKILL');
     }
@@ -457,6 +371,13 @@ export class RscoreProcessClient {
 
   #onData(chunk: Buffer): void {
     if (this.#dead || chunk.length === 0) return;
+    // Requests are serialized and install their sole waiter before writing.
+    // Therefore any stdout byte observed without that waiter is unsolicited,
+    // even when it is only a fragment too short to contain a frame header.
+    if (this.#waiter === null) {
+      this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
+      return;
+    }
     this.#chunks.push(chunk);
     this.#bufferedBytes += chunk.length;
     if (this.#bufferedBytes > MAX_BUFFERED_BYTES) {
@@ -479,11 +400,19 @@ export class RscoreProcessClient {
       if (this.#bufferedBytes < this.#expectedFrameBytes) return;
       const frame = this.#takeBytes(this.#expectedFrameBytes, true);
       this.#expectedFrameBytes = null;
-      const waiter = this.#waiters.shift();
+      const waiter = this.#waiter;
       if (!waiter) {
         this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
         return;
       }
+      // No second request can have been sent yet. A single buffered byte after
+      // this response is consequently the prefix of an unsolicited frame; do
+      // not resolve the otherwise-valid response before that corruption wins.
+      if (this.#bufferedBytes !== 0) {
+        this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
+        return;
+      }
+      this.#waiter = null;
       waiter.resolve(frame);
     }
   }
@@ -522,10 +451,63 @@ export class RscoreProcessClient {
     return output;
   }
 
-  async request(opTag: number, payload: RscoreWireValue[]): Promise<unknown> {
+  async #requestWithId(
+    opTag: number,
+    payload: RscoreWireValue[],
+  ): Promise<{ result: unknown; requestId: bigint }> {
+    const ownedPayload = ownWirePayload(payload);
+    return this.#withRequestTurn(() => this.#requestOwnedNow(opTag, ownedPayload));
+  }
+
+  async #withRequestTurn<T>(operation: () => Promise<T>): Promise<T> {
+    let releaseTurn = (): void => {};
+    const previousTurn = this.#requestTurn;
+    this.#requestTurn = new Promise<void>(resolve => { releaseTurn = resolve; });
+    await previousTurn;
+    try {
+      return await operation();
+    } finally {
+      releaseTurn();
+    }
+  }
+
+  async #requestOwnedNow(
+    opTag: number,
+    payload: RscoreWireValue[],
+  ): Promise<{ result: unknown; requestId: bigint }> {
+    // body = one payload tuple (BODY_ARITY = 1 on the Rust side). Encoding is
+    // inside the serialized turn; caller-owned values were copied before it.
+    const bodyBytes = packWireValue([payload]);
+    return this.#requestNow(opTag, bodyBytes);
+  }
+
+  async #authorityRequestOwnedNow(
+    opTag: number,
+    payload: RscoreWireValue[],
+  ): Promise<{ result: unknown; requestId: bigint }> {
+    let requestCommitted = false;
+    try {
+      const bodyBytes = packWireValue([payload]);
+      return await this.#requestNow(opTag, bodyBytes, () => { requestCommitted = true; });
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      // Encoding and frame-size failures happen before the request id is
+      // consumed, so the held candidate is still exact and may be retried or
+      // aborted. Once consumption starts, an authority error is ambiguous:
+      // Rust may have mutated the candidate even if no usable reply survived.
+      if (requestCommitted) throw this.#poisonAuthority(error);
+      throw error;
+    }
+  }
+
+  async #requestNow(
+    opTag: number,
+    bodyBytes: Buffer,
+    onRequestCommitted?: () => void,
+  ): Promise<{ result: unknown; requestId: bigint }> {
     if (this.#dead) throw this.#dead;
     const requestId = this.#nextRequestId;
-    const envelope = encodeEnvelope(this.#identity, requestId, opTag, payload);
+    const envelope = encodeEnvelope(this.#identity, requestId, opTag, bodyBytes);
     // The engine refuses an oversized frame and exits, so the caller would
     // otherwise see EPIPE and a dead mirror instead of the actual cause. A
     // wave that does not fit is the caller's to split.
@@ -538,6 +520,7 @@ export class RscoreProcessClient {
     // spent on a request that was never written would make every later request
     // fail the sequence check and take the process down with it. Encoding and
     // the size check both happen before the id is consumed.
+    onRequestCommitted?.();
     this.#nextRequestId += 1n;
     const framed = Buffer.alloc(4 + envelope.length);
     framed.writeUInt32BE(envelope.length);
@@ -546,16 +529,30 @@ export class RscoreProcessClient {
     // otherwise leave this promise pending forever and hang every caller that
     // waits on the mirror. The deadline turns that into a loud failure.
     const reply = new Promise<Buffer>((resolve, reject) => {
+      if (this.#waiter !== null) {
+        const error = new Error('RSCORE_CLIENT_CONCURRENT_WAITER');
+        this.#fail(error);
+        reject(error);
+        return;
+      }
       const timer = setTimeout(() => {
         this.#fail(new Error(`RSCORE_CLIENT_REQUEST_TIMEOUT:op=${opTag}:ms=${REQUEST_TIMEOUT_MS}`));
       }, REQUEST_TIMEOUT_MS);
       timer.unref?.();
-      this.#waiters.push({
+      this.#waiter = {
         resolve: (frame: Buffer) => { clearTimeout(timer); resolve(frame); },
         reject: (error: Error) => { clearTimeout(timer); reject(error); },
-      });
+      };
     });
-    if (!this.#child.stdin.write(framed)) {
+    let backpressured: boolean;
+    try {
+      backpressured = !this.#child.stdin.write(framed);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this.#fail(error);
+      throw error;
+    }
+    if (backpressured) {
       // Backpressure is raced against the reply, which already carries the
       // request deadline and every process-death path. Awaiting 'drain' alone
       // parked this call forever when the engine died with a full pipe: the
@@ -565,18 +562,73 @@ export class RscoreProcessClient {
         reply.then(() => undefined),
       ]);
     }
-    const decoded = decodeEnvelope(await reply, {
-      identity: this.#identity,
-      requestId,
-      opTag,
-    });
+    let decoded: DecodedReply;
+    try {
+      decoded = decodeEnvelope(await reply, {
+        identity: this.#identity,
+        requestId,
+        opTag,
+      });
+    } catch (cause) {
+      // The reply was already consumed. Continuing would shift the strict
+      // request sequence and, for an authority stage, could strand a mutated
+      // candidate whose token the caller never received. A binding/codec
+      // failure therefore poisons the whole session.
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this.#fail(error);
+      throw error;
+    }
+    // stdout can contain more than the frame that just resolved `reply`.
+    // `#onData` parses the whole chunk synchronously, so an unsolicited next
+    // frame may already have poisoned the session before this continuation
+    // decodes the otherwise valid current frame. Never return success from a
+    // session whose framing invariant has failed.
+    if (this.#dead) throw this.#dead;
     if (decoded.messageKind !== MESSAGE_KIND_OK) {
       const body = decoded.body as unknown[];
       const error = Array.isArray(body) && Array.isArray(body[0]) ? body[0] : body;
       throw new Error(`RSCORE_PROCESS_ERROR:${safeStringify(error)}`);
     }
     const body = decoded.body as unknown[];
-    return Array.isArray(body) && body.length === 1 ? body[0] : body;
+    return {
+      result: Array.isArray(body) && body.length === 1 ? body[0] : body,
+      requestId,
+    };
+  }
+
+  async #request(opTag: number, payload: RscoreWireValue[]): Promise<unknown> {
+    return (await this.#requestWithId(opTag, payload)).result;
+  }
+
+  #poisonAuthority(cause: unknown): Error {
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    this.#fail(error);
+    return error;
+  }
+
+  #decodeAuthorityWave(value: unknown): Wave {
+    try {
+      return decodeWave(value);
+    } catch (cause) {
+      throw this.#poisonAuthority(cause);
+    }
+  }
+
+  #requireAuthorityCandidate(
+    token: Uint8Array,
+    stage: string,
+    requireOpen: boolean,
+  ): AuthorityCandidate {
+    rscoreCheckpointBytes(token, 32, 'CANDIDATE_TOKEN');
+    const candidate = this.#authorityCandidate;
+    if (candidate === null) throw new Error(`RSCORE_CLIENT_AUTHORITY_CANDIDATE_MISSING:${stage}`);
+    if (!candidate.token.equals(Buffer.from(token))) {
+      throw new Error(`RSCORE_CLIENT_AUTHORITY_TOKEN_MISMATCH:${stage}`);
+    }
+    if (requireOpen && candidate.sealed) {
+      throw new Error(`RSCORE_CLIENT_AUTHORITY_ALREADY_SEALED:${stage}`);
+    }
+    return candidate;
   }
 
   /**
@@ -594,18 +646,34 @@ export class RscoreProcessClient {
     swapMarket: RscoreWireValue[],
     authority?: Readonly<{ privateKey: Uint8Array; signerId: string }>,
   ): Promise<unknown> {
-    return this.request(RSCORE_OP.hello, [
+    const payload = ownWirePayload([
       RSCORE_PROCESS_ABI_VERSION,
       workerCount,
       swapMarket,
       authority ? [Buffer.from(authority.privateKey), authority.signerId] : null,
     ]);
+    return this.#withRequestTurn(async () => {
+      // A rejected authority Hello has crossed the trust boundary: even when
+      // the server rejected it before installing a binding, the caller must
+      // not catch that error and reuse this child as a mirror. Authority is a
+      // session role, never a best-effort capability negotiation.
+      const response = authority === undefined
+        ? await this.#requestOwnedNow(RSCORE_OP.hello, payload)
+        : await this.#authorityRequestOwnedNow(RSCORE_OP.hello, payload);
+      this.#authoritySession = authority !== undefined;
+      return response.result;
+    });
   }
 
   /**
-   * One runtime frame for an authoritative session, grouped by the Entity that
-   * owns the work. The reply is a candidate — it is only kept once `commit`
-   * names this request.
+   * Open one authoritative Runtime candidate and apply its first ordered ops.
+   * The returned token identifies the candidate for every later Apply,
+   * Propose, Seal, checkpoint, Commit and Abort request.
+   *
+   * Prepare does not propose or seal. `propose` records whether this owner may
+   * be selected by later proposal stages. The runtime can therefore consume
+   * applied results, perform its same-frame Entity continuation and send the
+   * derived Account operations back without changing protocol timing.
    *
    * Each group carries its own clocks because each Entity has its own: a
    * runtime frame that stamped every Entity's proposal with one timestamp, or
@@ -615,19 +683,9 @@ export class RscoreProcessClient {
    * order decides what a rolled-back proposal puts back in the queue.
    */
   async prepareAccountWave(wave: Readonly<{
-    entities: readonly Readonly<{
-      ownerEntityId: Uint8Array;
-      timestamp: number;
-      jHeight: number;
-      entityTimestamp: number;
-      finalizedJHeight: number;
-      propose: boolean;
-      /** `[0, accountId, txs]` to queue, `[1, inputRow]` for an arrival. */
-      ops: readonly RscoreWireValue[];
-    }>[];
-  }>): Promise<{ result: unknown; token: Buffer }> {
-    const token = this.requestIdBytes(this.#nextRequestId);
-    const result = await this.request(RSCORE_OP.prepareAccountWave, [
+    entities: readonly RscoreAuthorityWaveEntity[];
+  }>): Promise<{ result: Wave; token: Buffer }> {
+    const payload = ownWirePayload([
       wave.entities.map(entity => [
         entity.ownerEntityId,
         entity.timestamp,
@@ -638,30 +696,117 @@ export class RscoreProcessClient {
         [...entity.ops],
       ]),
     ]);
-    return { result, token };
+    return this.#withRequestTurn(async () => {
+      if (this.#authorityCandidate !== null) {
+        throw new Error('RSCORE_CLIENT_AUTHORITY_CANDIDATE_PENDING');
+      }
+      const prepared = await this.#authorityRequestOwnedNow(
+        RSCORE_OP.prepareAccountWave,
+        payload,
+      );
+      if (!Array.isArray(prepared.result) || prepared.result.length !== 10) {
+        throw this.#poisonAuthority(new Error('RSCORE_CLIENT_PREPARED_WAVE_ARITY'));
+      }
+      const token = Buffer.from(rscoreCheckpointBytes(
+        prepared.result[9],
+        32,
+        'CANDIDATE_TOKEN',
+      ));
+      const result = this.#decodeAuthorityWave(prepared.result.slice(0, 9));
+      this.#authorityCandidate = { token, sealed: false };
+      return {
+        result,
+        token,
+      };
+    });
+  }
+
+  /** Continue ordered Account operations on the candidate opened by Prepare. */
+  async applyAccountWave(
+    candidateToken: Uint8Array,
+    wave: Readonly<{ entities: readonly RscoreAuthorityWaveOpsEntity[] }>,
+  ): Promise<Wave> {
+    const payload = ownWirePayload([
+      Buffer.from(candidateToken),
+      wave.entities.map(entity => [entity.ownerEntityId, [...entity.ops]]),
+    ]);
+    return this.#withRequestTurn(async () => {
+      this.#requireAuthorityCandidate(candidateToken, 'APPLY', true);
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.applyAccountWave, payload);
+      return this.#decodeAuthorityWave(response.result);
+    });
+  }
+
+  /** Propose exactly the sorted per-owner Account worklists for this round. */
+  async proposeAccountWave(
+    candidateToken: Uint8Array,
+    wave: Readonly<{ entities: readonly RscoreAuthorityProposalSelection[] }>,
+  ): Promise<Wave> {
+    const payload = ownWirePayload([
+      Buffer.from(candidateToken),
+      wave.entities.map(entity => [entity.ownerEntityId, [...entity.accountIds]]),
+    ]);
+    return this.#withRequestTurn(async () => {
+      this.#requireAuthorityCandidate(candidateToken, 'PROPOSE', true);
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.proposeAccountWave, payload);
+      return this.#decodeAuthorityWave(response.result);
+    });
+  }
+
+  /** Freeze the cumulative candidate transcript before checkpoint/WAL/Commit. */
+  async sealAccountWave(candidateToken: Uint8Array): Promise<Wave> {
+    const payload = ownWirePayload([Buffer.from(candidateToken)]);
+    return this.#withRequestTurn(async () => {
+      const candidate = this.#requireAuthorityCandidate(candidateToken, 'SEAL', true);
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.sealAccountWave, payload);
+      const result = this.#decodeAuthorityWave(response.result);
+      candidate.sealed = true;
+      return result;
+    });
   }
 
   async bootstrapAccounts(revision: number, accounts: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.bootstrapAccounts, [RSCORE_PROCESS_PROFILE, revision, accounts]);
+    return this.#request(RSCORE_OP.bootstrapAccounts, [RSCORE_PROCESS_PROFILE, revision, accounts]);
   }
 
   /** Incremental exact rows since the last checkpoint Rust acknowledged. */
-  async getCheckpointChanges(prepareRequestId: Uint8Array): Promise<RscoreCheckpointChanges> {
-    rscoreCheckpointBytes(prepareRequestId, 8, 'PREPARE_REQUEST_ID');
-    const response = await this.request(RSCORE_OP.getCheckpointChanges, [prepareRequestId]);
-    if (!Array.isArray(response) || response.length !== 1) {
-      throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
-    }
-    return decodeRscoreCheckpointChanges(response[0]);
+  async getCheckpointChanges(candidateToken: Uint8Array): Promise<RscoreCheckpointChanges> {
+    const payload = ownWirePayload([Buffer.from(candidateToken)]);
+    return this.#withRequestTurn(async () => {
+      const candidate = this.#requireAuthorityCandidate(candidateToken, 'CHECKPOINT', false);
+      if (!candidate.sealed) throw new Error('RSCORE_CLIENT_AUTHORITY_NOT_SEALED:CHECKPOINT');
+      const response = (await this.#authorityRequestOwnedNow(
+        RSCORE_OP.getCheckpointChanges,
+        payload,
+      )).result;
+      try {
+        if (!Array.isArray(response) || response.length !== 1) {
+          throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
+        }
+        return decodeRscoreCheckpointChanges(response[0]);
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
+    });
   }
 
   /** Acknowledge only the exact token returned with the durable rows. */
   async commitCheckpoint(token: RscoreCheckpointToken): Promise<RscoreCheckpointToken> {
-    const response = await this.request(RSCORE_OP.commitCheckpoint, [token]);
-    if (!Array.isArray(response) || response.length !== 1) {
-      throw new Error('RSCORE_CLIENT_CHECKPOINT_COMMIT_RESPONSE_ARITY');
-    }
-    return decodeRscoreCheckpointToken(response[0], 'COMMITTED');
+    const payload = ownWirePayload([token]);
+    return this.#withRequestTurn(async () => {
+      const response = (await this.#authorityRequestOwnedNow(
+        RSCORE_OP.commitCheckpoint,
+        payload,
+      )).result;
+      try {
+        if (!Array.isArray(response) || response.length !== 1) {
+          throw new Error('RSCORE_CLIENT_CHECKPOINT_COMMIT_RESPONSE_ARITY');
+        }
+        return decodeRscoreCheckpointToken(response[0], 'COMMITTED');
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
+    });
   }
 
   /** Replace an authority session from materialized canonical Account rows. */
@@ -669,43 +814,86 @@ export class RscoreProcessClient {
     token: RscoreCheckpointToken,
     accounts: RscoreWireValue[],
   ): Promise<RscoreCheckpointToken> {
-    const response = await this.request(RSCORE_OP.restoreExact, [token, accounts]);
-    if (!Array.isArray(response) || response.length !== 1) {
-      throw new Error('RSCORE_CLIENT_EXACT_RESTORE_RESPONSE_ARITY');
-    }
-    return decodeRscoreCheckpointToken(response[0], 'RESTORED');
+    const payload = ownWirePayload([token, accounts]);
+    return this.#withRequestTurn(async () => {
+      const response = (await this.#authorityRequestOwnedNow(
+        RSCORE_OP.restoreExact,
+        payload,
+      )).result;
+      try {
+        if (!Array.isArray(response) || response.length !== 1) {
+          throw new Error('RSCORE_CLIENT_EXACT_RESTORE_RESPONSE_ARITY');
+        }
+        return decodeRscoreCheckpointToken(response[0], 'RESTORED');
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
+    });
   }
 
   /**
    * Prepare one wave and return the candidate together with the token that
-   * commits it. Deriving the token from the client's last request id made any
-   * interleaved read (a summary page, a capacity batch) silently retarget the
-   * commit at that read instead.
+   * commits it. The opaque server capability is distinct from protocol request
+   * sequencing and is invalid after abort, commit, session change or restart.
    */
   async prepareCandidate(jobs: RscoreWireValue[]): Promise<{
     candidate: unknown;
     token: Buffer;
   }> {
-    const token = this.requestIdBytes(this.#nextRequestId);
-    const candidate = await this.request(RSCORE_OP.executeWave, [jobs]);
-    return { candidate, token };
+    const prepared = await this.#requestWithId(RSCORE_OP.executeWave, [jobs]);
+    try {
+      if (!Array.isArray(prepared.result) || prepared.result.length !== 7) {
+        throw new Error('RSCORE_CLIENT_PREPARED_BATCH_ARITY');
+      }
+      return {
+        candidate: prepared.result.slice(0, 6),
+        token: Buffer.from(rscoreCheckpointBytes(
+          prepared.result[6],
+          32,
+          'CANDIDATE_TOKEN',
+        )),
+      };
+    } catch (cause) {
+      throw this.#poisonAuthority(cause);
+    }
   }
 
-  async prepare(jobs: RscoreWireValue[]): Promise<unknown> {
-    return (await this.prepareCandidate(jobs)).candidate;
+  async commit(candidateToken: Buffer): Promise<unknown> {
+    const payload = ownWirePayload([candidateToken]);
+    return this.#withRequestTurn(async () => {
+      if (this.#authoritySession !== true) {
+        return (await this.#requestOwnedNow(RSCORE_OP.commitRuntime, payload)).result;
+      }
+      const candidate = this.#requireAuthorityCandidate(candidateToken, 'COMMIT', false);
+      if (!candidate.sealed) throw new Error('RSCORE_CLIENT_AUTHORITY_NOT_SEALED:COMMIT');
+      const response = (await this.#authorityRequestOwnedNow(
+        RSCORE_OP.commitRuntime,
+        payload,
+      )).result;
+      this.#authorityCandidate = null;
+      return response;
+    });
   }
 
-  async commit(prepareRequestId: Buffer): Promise<unknown> {
-    return this.request(RSCORE_OP.commitRuntime, [prepareRequestId]);
-  }
-
-  async abort(prepareRequestId: Buffer): Promise<unknown> {
-    return this.request(RSCORE_OP.abortRuntime, [prepareRequestId]);
+  async abort(candidateToken: Buffer): Promise<unknown> {
+    const payload = ownWirePayload([candidateToken]);
+    return this.#withRequestTurn(async () => {
+      if (this.#authoritySession !== true) {
+        return (await this.#requestOwnedNow(RSCORE_OP.abortRuntime, payload)).result;
+      }
+      this.#requireAuthorityCandidate(candidateToken, 'ABORT', false);
+      const response = (await this.#authorityRequestOwnedNow(
+        RSCORE_OP.abortRuntime,
+        payload,
+      )).result;
+      this.#authorityCandidate = null;
+      return response;
+    });
   }
 
   /** Create or replace accounts between waves; replies [revision, accountsRoot]. */
   async upsertAccounts(accounts: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.upsertAccounts, [accounts]);
+    return this.#request(RSCORE_OP.upsertAccounts, [accounts]);
   }
 
   /**
@@ -714,16 +902,16 @@ export class RscoreProcessClient {
    * the way a reseed would.
    */
   async updateAccountShells(shells: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.updateAccountShells, [shells]);
+    return this.#request(RSCORE_OP.updateAccountShells, [shells]);
   }
 
   /** Drop accounts the mirror stopped following, so the trees stay comparable. */
   async removeAccounts(accountIds: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.removeAccounts, [accountIds]);
+    return this.#request(RSCORE_OP.removeAccounts, [accountIds]);
   }
 
   async readCapacityBatch(rows: Array<[Uint8Array, number, number]>): Promise<unknown> {
-    return this.request(RSCORE_OP.readCapacityBatch, [rows as RscoreWireValue[]]);
+    return this.#request(RSCORE_OP.readCapacityBatch, [rows as RscoreWireValue[]]);
   }
 
   /**
@@ -731,7 +919,7 @@ export class RscoreProcessClient {
    * disagrees says only that something differs; this says what.
    */
   async readAccountEnvelope(accountId: Uint8Array): Promise<unknown> {
-    return this.request(RSCORE_OP.readAccountEnvelope, [accountId]);
+    return this.#request(RSCORE_OP.readAccountEnvelope, [accountId]);
   }
 
   async readAccountSummaryPage(
@@ -739,22 +927,12 @@ export class RscoreProcessClient {
     limit: number,
     tokenIds: number[],
   ): Promise<unknown> {
-    return this.request(RSCORE_OP.readAccountSummaryPage, [cursor, limit, tokenIds]);
+    return this.#request(RSCORE_OP.readAccountSummaryPage, [cursor, limit, tokenIds]);
   }
 
   async shutdown(): Promise<void> {
-    await this.request(RSCORE_OP.shutdown, []);
+    await this.#request(RSCORE_OP.shutdown, []);
     this.#child.stdin.end();
-  }
-
-  requestIdBytes(requestId: bigint): Buffer {
-    const bytes = Buffer.alloc(8);
-    bytes.writeBigUInt64BE(requestId);
-    return bytes;
-  }
-
-  get lastRequestId(): bigint {
-    return this.#nextRequestId - 1n;
   }
 
   kill(): void {

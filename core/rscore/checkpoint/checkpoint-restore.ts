@@ -7,12 +7,12 @@
  * returned seed is complete for Rust-owned state and explicit about the four
  * root-only sections.
  */
-import { canonicalAccountTxForFrameHash } from '../account/consensus/frame/hash';
-import { computeCanonicalMerkleRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../account/commitment/state-root';
-import { createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
-import { computeEntityAccountLeafDigest } from '../entity/consensus/state-root';
-import { computeIntegrityDigest } from '../support/bytes/integrity-checksum';
-import { assertSameRscoreCanonicalValue } from './canonical-wire';
+import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
+import { computeCanonicalMerkleRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../account/commitment/state-root';
+import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
+import { computeEntityAccountLeafDigest } from '../../entity/consensus/state-root';
+import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
+import { assertSameRscoreCanonicalValue } from '../canonical-wire';
 import type {
   RscoreConsensusSeed,
   RscoreDisputeDraft,
@@ -25,7 +25,7 @@ import type { RscoreAccountStateSeed } from './checkpoint-restore-state';
 import { decodeRscoreAccountStateSeed } from './checkpoint-restore-state';
 import { rscoreCheckpointTuple } from './checkpoint-wire';
 
-export const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
+const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
   'pulls',
   'subcontracts',
   'requestedRebalance',
@@ -190,7 +190,11 @@ const computeRestoredEntityLeaf = (
   );
   projection['currentHeight'] = consensus.currentFrame?.height ?? 0;
   projection['rollbackCount'] = consensus.rollbackCount;
-  if (consensus.currentFrame) projection['currentFrameHash'] = consensus.currentFrame.stateHash;
+  // H=0 is represented by an explicit empty frame hash in both the canonical
+  // TypeScript AccountReplica and Rust's projected envelope. Omitting the
+  // field here would make the offline checkpoint verifier reject a valid
+  // freshly-created authority Account—or accept a leaf for a third shape.
+  projection['currentFrameHash'] = consensus.currentFrame?.stateHash ?? '';
   if (consensus.pending) projection['pendingFrameHash'] = consensus.pending.frame.stateHash;
   if (consensus.lastRollbackFrameHash) projection['lastRollbackFrameHash'] = consensus.lastRollbackFrameHash;
   if (consensus.pending) projection['pendingAccountInput'] = pendingBinding(consensus.pending, seed);

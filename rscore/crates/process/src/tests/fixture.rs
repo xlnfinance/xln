@@ -33,10 +33,15 @@ pub fn hello(id: u64) -> Envelope {
 /// sends: `(privateKey, signerId)`. The fixture derives the key from a seed
 /// the way the runtime does, because the tests still name signers by label.
 pub fn hello_authority(id: u64, seed: &str, signer_id: &str) -> Envelope {
+    hello_authority_key(id, authority_key(seed, signer_id), signer_id)
+}
+
+/// Authority Hello with an exact key, including invalid-key boundary tests.
+pub fn hello_authority_key(id: u64, private_key: [u8; 32], signer_id: &str) -> Envelope {
     hello_with_authority(
         id,
         tuple(vec![
-            AbiValue::Bytes(authority_key(seed, signer_id).to_vec()),
+            AbiValue::Bytes(private_key.to_vec()),
             AbiValue::Text(signer_id.into()),
         ]),
     )
@@ -302,19 +307,15 @@ fn job(input_index: u32, proposer: i128, tx: AbiValue) -> AbiValue {
     ])
 }
 
-pub fn candidate_command(id: u64, op_tag: OpTag, prepare_id: u64) -> Envelope {
-    request(
-        id,
-        op_tag,
-        vec![AbiValue::Bytes(prepare_id.to_be_bytes().to_vec())],
-    )
+pub fn candidate_command(id: u64, op_tag: OpTag, candidate_token: [u8; 32]) -> Envelope {
+    request(id, op_tag, vec![AbiValue::Bytes(candidate_token.to_vec())])
 }
 
-pub fn get_checkpoint_changes(id: u64, prepare_id: u64) -> Envelope {
+pub fn get_checkpoint_changes(id: u64, candidate_token: [u8; 32]) -> Envelope {
     request(
         id,
         OpTag::GetCheckpointChanges,
-        vec![AbiValue::Bytes(prepare_id.to_be_bytes().to_vec())],
+        vec![AbiValue::Bytes(candidate_token.to_vec())],
     )
 }
 
@@ -324,6 +325,77 @@ pub fn commit_checkpoint(id: u64, token: AbiValue) -> Envelope {
 
 pub fn restore_exact(id: u64, token: AbiValue, accounts: Vec<AbiValue>) -> Envelope {
     request(id, OpTag::RestoreExact, vec![token, tuple(accounts)])
+}
+
+/// Build the exact durable rows old authority tests need without reopening the
+/// production Bootstrap import path. Production authority Bootstrap is empty
+/// revision zero only; every nonempty/revisioned start is RestoreExact.
+pub fn restore_authority_accounts(
+    id: u64,
+    seed: &str,
+    signer_id: &str,
+    accounts: Vec<AbiValue>,
+) -> Envelope {
+    restore_authority_accounts_with_rows(id, seed, signer_id, accounts).0
+}
+
+pub fn restore_authority_accounts_with_rows(
+    id: u64,
+    seed: &str,
+    signer_id: &str,
+    accounts: Vec<AbiValue>,
+) -> (Envelope, Vec<AbiValue>) {
+    use xln_rscore_batch::{EngineGeneration, StatefulConsensusEngine};
+    use xln_rscore_engine::{SwapMarketPolicy, SwapToken};
+
+    let seeds = accounts
+        .iter()
+        .map(crate::wire_decode::decode_seed_account)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("authority restore seeds");
+    let engine = StatefulConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x42; 8]),
+        20,
+        0,
+        authority_key(seed, signer_id),
+        signer_id.to_string(),
+        std::sync::Arc::new(SwapMarketPolicy::new(
+            vec![
+                SwapToken {
+                    token_id: 1,
+                    decimals: 6,
+                    liquid: true,
+                },
+                SwapToken {
+                    token_id: 2,
+                    decimals: 18,
+                    liquid: false,
+                },
+            ],
+            vec![((2, 1), 1)],
+        )),
+        seeds,
+    )
+    .expect("authority restore engine");
+    let checkpoint = engine.checkpoint_changes().expect("authority checkpoint");
+    let incremental_rows = checkpoint
+        .accounts
+        .iter()
+        .map(crate::checkpoint_wire::account_rows)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("authority checkpoint rows");
+    let rows: Vec<AbiValue> = incremental_rows
+        .iter()
+        .map(crate::tests::materialize_restore_row)
+        .collect();
+    (
+        restore_exact(
+            id,
+            crate::checkpoint_wire::token(&checkpoint.restore_token()),
+            rows.clone(),
+        ),
+        rows,
+    )
 }
 
 pub fn shutdown(id: u64) -> Envelope {
@@ -363,6 +435,34 @@ pub fn authority_entity(seed: &str, signer_id: &str) -> [u8; 32] {
 
 /// One account between two lazy entities, seeded with a funded delta.
 pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
+    authority_account_with(
+        owner,
+        counterparty,
+        vec![funded_delta()],
+        AbiValue::Nil,
+        AbiValue::Nil,
+    )
+}
+
+/// The exact seed WaveOp::Create accepts: financial genesis, empty mempool,
+/// no consensus snapshot and a jurisdiction DeltaTransformer.
+pub fn authority_genesis_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
+    authority_account_with(
+        owner,
+        counterparty,
+        Vec::new(),
+        authority_genesis_envelope(owner, counterparty),
+        AbiValue::Bytes(vec![0x77; 20]),
+    )
+}
+
+fn authority_account_with(
+    owner: [u8; 32],
+    counterparty: [u8; 32],
+    deltas: Vec<AbiValue>,
+    envelope: AbiValue,
+    delta_transformer: AbiValue,
+) -> AbiValue {
     let (left, right) = if owner <= counterparty {
         (owner, counterparty)
     } else {
@@ -377,7 +477,7 @@ pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
         AbiValue::Bytes(vec![0x88; 20]),
         AbiValue::Bytes(vec![0x99; 32]),
         tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
-        tuple(vec![funded_delta()]),
+        tuple(deltas),
         tuple(Vec::new()),
         tuple(vec![AbiValue::Integer(0), AbiValue::Integer(0)]),
         tuple(vec![
@@ -396,10 +496,59 @@ pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
                 AbiValue::Integer(0),
             ]),
         ]),
+        envelope,
         AbiValue::Nil,
-        AbiValue::Nil,
-        AbiValue::Nil,
+        delta_transformer,
     ])
+}
+
+fn authority_genesis_envelope(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
+    use xln_rscore_engine::{AccountEnvelope, CanonicalValue};
+
+    let entity = |value: [u8; 32]| format!("0x{}", hex::encode(value));
+    let zero_root = CanonicalValue::String(format!("0x{}", "00".repeat(32)));
+    let envelope = AccountEnvelope::new(
+        vec![
+            (
+                "status".to_string(),
+                CanonicalValue::String("active".to_string()),
+            ),
+            ("currentHeight".to_string(), CanonicalValue::Number(0.0)),
+            ("rollbackCount".to_string(), CanonicalValue::Number(0.0)),
+            (
+                "proofHeader".to_string(),
+                CanonicalValue::Object(vec![
+                    (
+                        "fromEntity".to_string(),
+                        CanonicalValue::String(entity(owner)),
+                    ),
+                    (
+                        "toEntity".to_string(),
+                        CanonicalValue::String(entity(counterparty)),
+                    ),
+                    ("nextProofNonce".to_string(), CanonicalValue::Number(1.0)),
+                ]),
+            ),
+            (
+                "currentFrameHash".to_string(),
+                CanonicalValue::String(String::new()),
+            ),
+            ("pendingWithdrawals".to_string(), zero_root.clone()),
+            (
+                "shadow".to_string(),
+                CanonicalValue::Object(vec![(
+                    "rebalance".to_string(),
+                    CanonicalValue::Object(vec![
+                        ("policyRoot".to_string(), zero_root.clone()),
+                        ("submittedAtByTokenRoot".to_string(), zero_root),
+                    ]),
+                )]),
+            ),
+        ],
+        Vec::new(),
+    )
+    .expect("canonical authority genesis envelope");
+    crate::canonical::encode_envelope(&envelope)
 }
 
 /// `BootstrapAccounts` carrying accounts an authoritative session owns.
@@ -450,6 +599,16 @@ pub fn prepare_wave(
         ops.push(tuple(vec![AbiValue::Integer(1), tuple(fields)]));
         operation_index += 1;
     }
+    prepare_wave_ops(id, owner_entity_id, timestamp, ops, propose)
+}
+
+pub fn prepare_wave_ops(
+    id: u64,
+    owner_entity_id: [u8; 32],
+    timestamp: u64,
+    ops: Vec<AbiValue>,
+    propose: bool,
+) -> Envelope {
     request(
         id,
         OpTag::PrepareAccountWave,
@@ -465,9 +624,29 @@ pub fn prepare_wave(
     )
 }
 
+pub fn wave_create(operation_index: u64, seed: AbiValue) -> AbiValue {
+    tuple(vec![
+        AbiValue::Integer(2),
+        AbiValue::Integer(i128::from(operation_index)),
+        seed,
+    ])
+}
+
+pub fn wave_add_delta(operation_index: u64, account_id: [u8; 32], token_id: u32) -> AbiValue {
+    tuple(vec![
+        AbiValue::Integer(0),
+        AbiValue::Integer(i128::from(operation_index)),
+        AbiValue::Bytes(account_id.to_vec()),
+        tuple(vec![tuple(vec![
+            AbiValue::Integer(3),
+            AbiValue::Integer(i128::from(token_id)),
+        ])]),
+    ])
+}
+
 pub fn apply_wave(
     id: u64,
-    prepare_id: u64,
+    candidate_token: [u8; 32],
     owner_entity_id: [u8; 32],
     ops: Vec<AbiValue>,
 ) -> Envelope {
@@ -475,7 +654,7 @@ pub fn apply_wave(
         id,
         OpTag::ApplyAccountWave,
         vec![
-            AbiValue::Bytes(prepare_id.to_be_bytes().to_vec()),
+            AbiValue::Bytes(candidate_token.to_vec()),
             tuple(vec![tuple(vec![
                 AbiValue::Bytes(owner_entity_id.to_vec()),
                 tuple(ops),
@@ -486,7 +665,7 @@ pub fn apply_wave(
 
 pub fn propose_wave(
     id: u64,
-    prepare_id: u64,
+    candidate_token: [u8; 32],
     owner_entity_id: [u8; 32],
     account_ids: Vec<[u8; 32]>,
 ) -> Envelope {
@@ -494,7 +673,7 @@ pub fn propose_wave(
         id,
         OpTag::ProposeAccountWave,
         vec![
-            AbiValue::Bytes(prepare_id.to_be_bytes().to_vec()),
+            AbiValue::Bytes(candidate_token.to_vec()),
             tuple(vec![tuple(vec![
                 AbiValue::Bytes(owner_entity_id.to_vec()),
                 tuple(
@@ -508,11 +687,11 @@ pub fn propose_wave(
     )
 }
 
-pub fn seal_wave(id: u64, prepare_id: u64) -> Envelope {
+pub fn seal_wave(id: u64, candidate_token: [u8; 32]) -> Envelope {
     request(
         id,
         OpTag::SealAccountWave,
-        vec![AbiValue::Bytes(prepare_id.to_be_bytes().to_vec())],
+        vec![AbiValue::Bytes(candidate_token.to_vec())],
     )
 }
 

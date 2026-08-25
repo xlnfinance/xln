@@ -12,7 +12,7 @@ import {
   type RscoreCheckpointChanges,
   type RscoreExactCheckpoint,
   type RscoreCheckpointToken,
-} from '../../../rscore/checkpoint-wire';
+} from '../../../rscore/checkpoint/checkpoint-wire';
 import type { RscoreWireValue } from '../../../rscore/client';
 import { buffersEqual } from '../../../protocol/serialization';
 import { decodeBuffer, encodeBuffer } from '../../codec/codec';

@@ -66,6 +66,19 @@ const CASES: { name: string; wire: RscoreWireValue[]; row: unknown[] }[] = [
 ];
 
 describe('wave outputs', () => {
+  test('the wire refuses integers MessagePack cannot represent exactly', () => {
+    expect(unpackWireValue(packWireValue(0xffff_ffff_ffff_ffffn)))
+      .toBe(0xffff_ffff_ffff_ffffn);
+    expect(unpackWireValue(packWireValue(-0x8000_0000_0000_0000n)))
+      .toBe(-0x8000_0000_0000_0000n);
+    expect(() => packWireValue(0x1_0000_0000_0000_0000n))
+      .toThrow('RSCORE_CLIENT_INTEGER_RANGE');
+    expect(() => packWireValue(-0x8000_0000_0000_0001n))
+      .toThrow('RSCORE_CLIENT_INTEGER_RANGE');
+    expect(() => packWireValue(Number.MAX_SAFE_INTEGER + 1))
+      .toThrow('RSCORE_CLIENT_INTEGER_UNSAFE');
+  });
+
   test('every variant decodes into the row TypeScript compares against', () => {
     for (const { name, wire, row } of CASES) {
       const decoded = decodeWaveOutputForTests(unpackWireValue(packWireValue(wire)));

@@ -369,7 +369,8 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
 
       // One payment per account, distinct amounts: every leaf rebranches.
       const jobs = accounts.map((account, index) => paymentJob(account, index, index, BigInt(7 + index)));
-      const prepared = (await client.prepare(jobs)) as unknown[];
+      const firstCandidate = await client.prepareCandidate(jobs);
+      const prepared = firstCandidate.candidate as unknown[];
       const verdicts = (prepared[2] as unknown[]).map(row => Number(((row as unknown[])[2] as unknown[])[0]));
       expect(verdicts).toEqual(accounts.map(() => 0)); // all applied
 
@@ -385,7 +386,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         if (!result.ok) throw new Error(`TS_APPLY_REJECTED:${index}:${result.rejection.code}`);
       }
 
-      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      const committed = (await client.commit(firstCandidate.token)) as unknown[];
       expect(committed[0]).toBe(1); // revision
       expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
 
@@ -418,7 +419,10 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       )) as unknown[];
       expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(referenceRoot(accounts));
 
-      const prepared = (await client.prepare(accounts.map((_, index) => swapOfferJob(index)))) as unknown[];
+      const offerCandidate = await client.prepareCandidate(
+        accounts.map((_, index) => swapOfferJob(index)),
+      );
+      const prepared = offerCandidate.candidate as unknown[];
       const verdicts = (prepared[2] as unknown[]).map(row => Number(((row as unknown[])[2] as unknown[])[0]));
       expect(verdicts).toEqual(accounts.map(() => 0)); // all applied
       // One offer event per input, in input order, decoded through the same
@@ -466,7 +470,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         ]]);
       }
 
-      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      const committed = (await client.commit(offerCandidate.token)) as unknown[];
       // The hold and the resting row are hashed state: the committed root must
       // both match TypeScript and differ from the pre-offer root.
       expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
@@ -509,7 +513,8 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         tx[9] = entry.want.toString();
         return job;
       });
-      const prepared = (await client.prepare(jobs)) as unknown[];
+      const gridCandidate = await client.prepareCandidate(jobs);
+      const prepared = gridCandidate.candidate as unknown[];
       const verdicts = (prepared[2] as unknown[])
         .map(row => Number((((row as unknown[])[2]) as unknown[])[0]));
 
@@ -550,7 +555,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       // nothing about the boundary.
       expect(applied.some(Boolean) && applied.some(value => !value)).toBe(true);
 
-      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      const committed = (await client.commit(gridCandidate.token)) as unknown[];
       expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
       await client.shutdown();
     } finally {
@@ -586,7 +591,8 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         (job[4] as RscoreWireValue[])[11] = explicit.toString();
         return job;
       });
-      const prepared = (await client.prepare(jobs)) as unknown[];
+      const tickCandidate = await client.prepareCandidate(jobs);
+      const prepared = tickCandidate.candidate as unknown[];
       expect((prepared[2] as unknown[])
         .map(row => Number((((row as unknown[])[2]) as unknown[])[0])))
         .toEqual(accounts.map(() => 0));
@@ -609,7 +615,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         );
         expect(engineRows.map(row => row[2])).toEqual(shadowOutputRows(result));
       }
-      const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+      const committed = (await client.commit(tickCandidate.token)) as unknown[];
       expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
       await client.shutdown();
     } finally {
@@ -631,8 +637,10 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         await client.bootstrapAccounts(0, accounts.map((account, index) => seedWire(index, account)));
 
         // Wave 1: rest the offer on both sides.
-        await client.prepare(accounts.map((_, index) => swapOfferJob(index)));
-        await client.commit(client.requestIdBytes(client.lastRequestId));
+        const offerCandidate = await client.prepareCandidate(
+          accounts.map((_, index) => swapOfferJob(index)),
+        );
+        await client.commit(offerCandidate.token);
         for (const [index, account] of accounts.entries()) {
           const result = await applyAccountTxToMutableReplica(
             account, swapOfferTx(index), false, 0, SWAP_J_HEIGHT, false,
@@ -653,8 +661,9 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
           deriveExactSwapFillRatio(quantizedGive, filledGive),
         );
 
-        const prepared = (await client.prepare(accounts.map((_, index) =>
-          swapResolveJob(index, fillRatio, filledGive, filledWant, false)))) as unknown[];
+        const resolveCandidate = await client.prepareCandidate(accounts.map((_, index) =>
+          swapResolveJob(index, fillRatio, filledGive, filledWant, false)));
+        const prepared = resolveCandidate.candidate as unknown[];
         const verdicts = (prepared[2] as unknown[])
           .map(row => (((row as unknown[])[2] as unknown[])));
         if (Number(verdicts[0]![0]) !== 0) throw new Error(JSON.stringify(verdicts[0]));
@@ -680,7 +689,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         expect(accounts[0]!.state.swapOffers.get('parity-offer-0') === undefined)
           .toBe(mode === 'full');
 
-        const committed = (await client.commit(client.requestIdBytes(client.lastRequestId))) as unknown[];
+        const committed = (await client.commit(resolveCandidate.token)) as unknown[];
         expect(new Uint8Array(committed[1] as Uint8Array)).toEqual(referenceRoot(accounts));
         await client.shutdown();
       } finally {

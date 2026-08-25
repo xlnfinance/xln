@@ -187,7 +187,7 @@ import {
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
 import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
-import type { RscoreExactCheckpoint } from '../rscore/checkpoint-wire';
+import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
 export { resolveStorageRuntimeConfig } from './database/config';
 export {
   readHistoryViewAccountFrames,

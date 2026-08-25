@@ -29,6 +29,7 @@ pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};
 pub use stateful::{MAX_BATCH_WORKERS, StatefulBatchEngine};
 pub use types::{
     AccountId, AccountInputAuthority, AccountSeed, BatchJob, BatchResponse, BatchVerdict,
-    EngineGeneration, IndexedOutput, IndexedResult, PreparedBatch, PreparedPaymentProfileRoot,
+    CandidateId, EngineGeneration, IndexedOutput, IndexedResult, PreparedBatch,
+    PreparedPaymentProfileRoot,
 };
 pub use xln_rscore_engine::ReceiverClock;

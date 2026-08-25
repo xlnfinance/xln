@@ -54,7 +54,7 @@ import { runCommittedRuntimeEffects } from './lifecycle/post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './lifecycle/finish';
 import type { RuntimeInputReducer } from './intake/reducer';
 import { getLiveJAdapterEntries } from '../j-submit/live-jadapters';
-import type { RscoreExactCheckpoint } from '../../rscore/checkpoint-wire';
+import type { RscoreExactCheckpoint } from '../../rscore/checkpoint/checkpoint-wire';
 
 const runtimeLog = createStructuredLogger('runtime');
 

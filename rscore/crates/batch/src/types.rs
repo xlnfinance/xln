@@ -1,5 +1,6 @@
 use std::fmt;
 
+use sha2::{Digest, Sha256};
 use xln_rscore_engine::{
     AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, EntityId,
     Side,
@@ -42,14 +43,73 @@ impl EngineGeneration {
     pub const fn from_bytes(bytes: [u8; 8]) -> Self {
         Self(bytes)
     }
+
+    pub const fn as_bytes(&self) -> &[u8; 8] {
+        &self.0
+    }
 }
 
+/// The identity of one abortable batch attempt inside an engine instance.
+///
+/// Revisions and roots describe state, not an attempt: aborting and preparing
+/// the same inputs again deliberately reproduces both.  The monotonic attempt
+/// makes those candidates distinct, while the process layer adds its fresh
+/// incarnation and session binding before exposing an opaque capability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CandidateId([u8; 32]);
+
+impl CandidateId {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub(crate) fn derive(
+        engine_generation: EngineGeneration,
+        attempt: u64,
+        base_revision: u64,
+        base_accounts_root: [u8; 32],
+    ) -> Self {
+        let mut digest = Sha256::new();
+        digest.update(b"xln.rscore.batch-candidate.v1\0");
+        digest.update(engine_generation.as_bytes());
+        digest.update(attempt.to_be_bytes());
+        digest.update(base_revision.to_be_bytes());
+        digest.update(base_accounts_root);
+        Self(digest.finalize().into())
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl fmt::Display for CandidateId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
 pub struct AccountSeed {
     pub account_id: AccountId,
     pub replica: AccountReplica,
     /// Where consensus stands for this account, when the seed carries it. A
     /// mirror seed does not: it is handed each frame and never proposes one.
     pub consensus: Option<xln_rscore_engine::ConsensusSnapshot>,
+}
+
+impl fmt::Debug for AccountSeed {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AccountSeed")
+            .field("account_id", &self.account_id)
+            .field("owner", self.replica.owner())
+            .field("has_consensus", &self.consensus.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +183,7 @@ pub struct BatchResponse {
 }
 
 pub struct PreparedBatch {
+    pub(crate) candidate_id: CandidateId,
     pub(crate) engine_generation: EngineGeneration,
     pub(crate) base_revision: u64,
     pub(crate) next_revision: u64,
@@ -138,6 +199,10 @@ pub struct PreparedPaymentProfileRoot {
 }
 
 impl PreparedBatch {
+    pub const fn candidate_id(&self) -> CandidateId {
+        self.candidate_id
+    }
+
     pub const fn base_revision(&self) -> u64 {
         self.base_revision
     }

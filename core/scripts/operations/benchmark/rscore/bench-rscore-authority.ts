@@ -31,7 +31,7 @@ import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../../account/j-claims/j-claim
 import { generateLazyEntityId } from '../../../../entity/factory';
 import { RscoreProcessClient, type RscoreWireValue } from '../../../../rscore/client';
 import { swapMarketPolicyWire, waveAdmitOp, waveInputOp } from '../../../../rscore/shadow-wire';
-import { decodeWave, type Wave } from '../../../../rscore/wave-decode';
+import type { Wave } from '../../../../rscore/wave-decode';
 import { safeStringify } from '../../../../protocol/serialization';
 
 const BINARY = join(import.meta.dir, '../../../../../rscore/target/release/xln-rscore');
@@ -134,6 +134,18 @@ const report = (name: string, phase: Phase): void => {
   );
 };
 
+const operationAccountId = (op: RscoreWireValue): Uint8Array | null => {
+  if (!Array.isArray(op)) return null;
+  const value = op[0] === 0
+    ? op[2]
+    : op[0] === 1 && Array.isArray(op[1])
+      ? op[1][1]
+      : op[0] === 2 && Array.isArray(op[2])
+        ? op[2][0]
+        : null;
+  return value instanceof Uint8Array ? value : null;
+};
+
 const runWave = async (
   client: RscoreProcessClient,
   hub: string,
@@ -143,7 +155,7 @@ const runWave = async (
   phase: Phase,
 ): Promise<Wave> => {
   const started = performance.now();
-  const { result, token } = await client.prepareAccountWave({
+  const { token } = await client.prepareAccountWave({
     entities: [{
       ownerEntityId: hexToBytes(hub),
       timestamp,
@@ -155,7 +167,19 @@ const runWave = async (
     }],
   });
   const decodeStarted = performance.now();
-  const wave = decodeWave(result);
+  if (propose) {
+    const accountIds = [...new Map(ops
+      .map(operationAccountId)
+      .filter((accountId): accountId is Uint8Array => accountId !== null)
+      .map(accountId => [Buffer.from(accountId).toString('hex'), accountId])).values()]
+      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+    if (accountIds.length > 0) {
+      await client.proposeAccountWave(token, {
+        entities: [{ ownerEntityId: hexToBytes(hub), accountIds }],
+      });
+    }
+  }
+  const wave = await client.sealAccountWave(token);
   const commitStarted = performance.now();
   await client.commit(token);
   const finished = performance.now();

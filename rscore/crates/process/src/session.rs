@@ -1,8 +1,9 @@
 use xln_rscore_abi::{EngineIdentity, Envelope, MessageKind, ProtocolBinding};
 use xln_rscore_batch::{
-    EngineGeneration, PreparedBatch, StatefulBatchEngine, StatefulConsensusEngine,
+    CandidateId, EngineGeneration, PreparedBatch, StatefulBatchEngine, StatefulConsensusEngine,
 };
 
+use crate::candidate::{CandidateToken, ProcessIncarnation};
 use crate::wire_decode::{AuthorityConfig, Command, decode_command};
 use crate::{ProcessError, wire_encode};
 
@@ -12,6 +13,7 @@ pub struct ProcessReply {
 }
 
 pub struct ProcessSession {
+    incarnation: ProcessIncarnation,
     binding: Option<SessionBinding>,
     worker_count: usize,
     swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
@@ -35,7 +37,8 @@ pub struct ProcessSession {
 
 /// The wave the engine is holding, and the request that produced it.
 struct PendingWave {
-    prepare_request_id: [u8; 8],
+    token: CandidateToken,
+    candidate_id: CandidateId,
     revision: u64,
     sealed: bool,
     checkpoint: Option<PendingCheckpoint>,
@@ -55,13 +58,22 @@ struct SessionBinding {
 }
 
 struct PendingBatch {
-    prepare_request_id: [u8; 8],
+    token: CandidateToken,
     candidate: PreparedBatch,
 }
 
 impl ProcessSession {
     pub fn new() -> Self {
+        Self::try_new().expect("operating-system entropy is required for rscore candidate tokens")
+    }
+
+    pub fn try_new() -> Result<Self, ProcessError> {
+        Ok(Self::with_incarnation(ProcessIncarnation::fresh()?))
+    }
+
+    fn with_incarnation(incarnation: ProcessIncarnation) -> Self {
         Self {
+            incarnation,
             binding: None,
             worker_count: 0,
             swap_market: std::sync::Arc::default(),
@@ -74,6 +86,11 @@ impl ProcessSession {
             pending_checkpoint: None,
             stopped: false,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_incarnation(bytes: [u8; 32]) -> Self {
+        Self::with_incarnation(ProcessIncarnation::from_bytes(bytes))
     }
 
     pub fn handle(&mut self, request: Envelope) -> ProcessReply {
@@ -136,14 +153,23 @@ impl ProcessSession {
         if !(1..=xln_rscore_batch::MAX_BATCH_WORKERS).contains(&worker_count) {
             return Err(xln_rscore_batch::BatchError::InvalidWorkerCount(worker_count).into());
         }
-        self.binding = Some(SessionBinding::from_request(request));
+        // Hello defines the role of this process for its whole lifetime. Build
+        // every fallible value beside the live session first: if authority key
+        // validation failed after installing the binding, the same session
+        // could continue at request 1 with `authority_config = None` and load a
+        // mirror engine even though request 0 explicitly asked for authority.
+        let binding = SessionBinding::from_request(request);
+        let digest = swap_market.digest();
+        let swap_market = std::sync::Arc::new(swap_market);
+        let identity = authority.as_ref().map(authority_identity).transpose()?;
+        let response = wire_encode::hello(worker_count, digest, identity);
+
+        self.binding = Some(binding);
         self.worker_count = worker_count;
         self.last_request_id = Some(0);
-        let digest = swap_market.digest();
-        self.swap_market = std::sync::Arc::new(swap_market);
-        let identity = authority.as_ref().map(authority_identity).transpose()?;
+        self.swap_market = swap_market;
         self.authority_config = authority;
-        Ok((wire_encode::hello(worker_count, digest, identity), false))
+        Ok((response, false))
     }
 
     fn validate_bound_request(&self, request: &Envelope) -> Result<(), ProcessError> {
@@ -187,34 +213,34 @@ impl ProcessSession {
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
             Command::BootstrapAccounts { revision, accounts } => self.load(revision, accounts),
-            Command::GetCheckpointChanges { prepare_request_id } => {
-                self.get_checkpoint_changes(prepare_request_id)
+            Command::GetCheckpointChanges { candidate_token } => {
+                self.get_checkpoint_changes(candidate_token)
             }
             Command::CommitCheckpoint { token } => self.commit_checkpoint(&token),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
             Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
             Command::ApplyAccountWave {
-                prepare_request_id,
+                candidate_token,
                 request,
-            } => self.apply_wave(prepare_request_id, *request),
+            } => self.apply_wave(candidate_token, *request),
             Command::ProposeAccountWave {
-                prepare_request_id,
+                candidate_token,
                 request,
-            } => self.propose_wave(prepare_request_id, *request),
-            Command::SealAccountWave { prepare_request_id } => self.seal_wave(prepare_request_id),
+            } => self.propose_wave(candidate_token, *request),
+            Command::SealAccountWave { candidate_token } => self.seal_wave(candidate_token),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
-            Command::Commit { prepare_request_id } => {
+            Command::Commit { candidate_token } => {
                 if self.authority.is_some() {
-                    self.commit_wave(prepare_request_id)
+                    self.commit_wave(candidate_token)
                 } else {
-                    self.commit(prepare_request_id)
+                    self.commit(candidate_token)
                 }
             }
-            Command::Abort { prepare_request_id } => {
+            Command::Abort { candidate_token } => {
                 if self.authority.is_some() {
-                    self.abort_wave(prepare_request_id)
+                    self.abort_wave(candidate_token)
                 } else {
-                    self.abort(prepare_request_id)
+                    self.abort(candidate_token)
                 }
             }
             Command::Shutdown => self.shutdown(),
@@ -283,6 +309,23 @@ impl ProcessSession {
 
     /// One runtime frame, against a candidate this process keeps until the
     /// runtime has made its own record of it durable.
+    fn issue_candidate_token(
+        &self,
+        prepare_request_id: [u8; 8],
+        candidate_id: CandidateId,
+    ) -> Result<CandidateToken, ProcessError> {
+        let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
+        Ok(CandidateToken::issue(
+            self.incarnation,
+            binding.protocol.protocol_fingerprint,
+            binding.engine_generation,
+            binding.runtime_id,
+            binding.session_id,
+            prepare_request_id,
+            candidate_id,
+        ))
+    }
+
     fn prepare_wave(
         &mut self,
         request_id: [u8; 8],
@@ -291,16 +334,21 @@ impl ProcessSession {
         if self.pending_wave.is_some() {
             return Err(ProcessError::PreparePending);
         }
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let started = std::time::Instant::now();
-        let result = engine.prepare_wave(request)?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = wire_encode::wave(&result, engine_micros)?;
+        let (result, engine_micros) = {
+            let engine = self
+                .authority
+                .as_mut()
+                .ok_or(ProcessError::EngineNotLoaded)?;
+            let started = std::time::Instant::now();
+            let result = engine.prepare_wave(request)?;
+            let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+            (result, engine_micros)
+        };
+        let token = self.issue_candidate_token(request_id, result.candidate_id)?;
+        let response = self.encode_wave_after_mutation(&result, engine_micros, Some(token))?;
         self.pending_wave = Some(PendingWave {
-            prepare_request_id: request_id,
+            token,
+            candidate_id: result.candidate_id,
             revision: result.revision,
             sealed: false,
             checkpoint: None,
@@ -310,10 +358,10 @@ impl ProcessSession {
 
     fn apply_wave(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
         request: xln_rscore_batch::WaveOpsRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.pending_wave_for(prepare_request_id)?;
+        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
         let engine = self
             .authority
             .as_mut()
@@ -321,7 +369,11 @@ impl ProcessSession {
         let started = std::time::Instant::now();
         let result = engine.apply_wave_ops(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = wire_encode::wave(&result, engine_micros)?;
+        if result.candidate_id != candidate_id {
+            self.stopped = true;
+            return Err(ProcessError::CandidateTokenMismatch);
+        }
+        let response = self.encode_wave_after_mutation(&result, engine_micros, None)?;
         self.pending_wave
             .as_mut()
             .ok_or(ProcessError::PrepareNotPending)?
@@ -331,10 +383,10 @@ impl ProcessSession {
 
     fn propose_wave(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
         request: xln_rscore_batch::WaveProposalRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.pending_wave_for(prepare_request_id)?;
+        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
         let engine = self
             .authority
             .as_mut()
@@ -342,7 +394,11 @@ impl ProcessSession {
         let started = std::time::Instant::now();
         let result = engine.propose_wave(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = wire_encode::wave(&result, engine_micros)?;
+        if result.candidate_id != candidate_id {
+            self.stopped = true;
+            return Err(ProcessError::CandidateTokenMismatch);
+        }
+        let response = self.encode_wave_after_mutation(&result, engine_micros, None)?;
         self.pending_wave
             .as_mut()
             .ok_or(ProcessError::PrepareNotPending)?
@@ -352,9 +408,9 @@ impl ProcessSession {
 
     fn seal_wave(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.pending_wave_for(prepare_request_id)?;
+        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
         let engine = self
             .authority
             .as_mut()
@@ -362,7 +418,11 @@ impl ProcessSession {
         let started = std::time::Instant::now();
         let result = engine.seal_wave()?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = wire_encode::wave(&result, engine_micros)?;
+        if result.candidate_id != candidate_id {
+            self.stopped = true;
+            return Err(ProcessError::CandidateTokenMismatch);
+        }
+        let response = self.encode_wave_after_mutation(&result, engine_micros, None)?;
         let pending = self
             .pending_wave
             .as_mut()
@@ -372,16 +432,41 @@ impl ProcessSession {
         Ok((response, false))
     }
 
+    /// A successful staged call has already mutated the authority candidate.
+    /// Returning a recoverable encoding error would expose that mutation while
+    /// session metadata can still name the preceding revision. In particular,
+    /// a later Abort could miss the engine revision and leave the candidate
+    /// usable without any reply that described it. Make the error reply this
+    /// process's last reply; restart restores the last durable checkpoint.
+    fn encode_wave_after_mutation(
+        &mut self,
+        result: &xln_rscore_batch::WaveResult,
+        engine_micros: u64,
+        token: Option<CandidateToken>,
+    ) -> Result<xln_rscore_abi::BodyTuple, ProcessError> {
+        let encoded = match token {
+            Some(token) => wire_encode::prepared_wave(result, engine_micros, token.as_bytes()),
+            None => wire_encode::wave(result, engine_micros),
+        };
+        match encoded {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                self.stopped = true;
+                Err(error)
+            }
+        }
+    }
+
     fn commit_wave(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let revision = self.sealed_wave_for(prepare_request_id)?.revision;
+        let candidate_id = self.sealed_wave_for(candidate_token)?.candidate_id;
         let engine = self
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        match engine.commit_wave(revision) {
+        match engine.commit_wave(candidate_id) {
             Ok(accounts_root) => {
                 let pending = self
                     .pending_wave
@@ -405,14 +490,14 @@ impl ProcessSession {
 
     fn abort_wave(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let revision = self.pending_wave_for(prepare_request_id)?.revision;
+        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
         let engine = self
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        let revision = engine.abort_wave(revision)?;
+        let revision = engine.abort_wave(candidate_id)?;
         self.pending_wave = None;
         Ok((
             wire_encode::wave_aborted(revision, engine.accounts_root()),
@@ -420,18 +505,18 @@ impl ProcessSession {
         ))
     }
 
-    fn pending_wave_for(&self, actual: [u8; 8]) -> Result<&PendingWave, ProcessError> {
+    fn pending_wave_for(&self, actual: [u8; 32]) -> Result<&PendingWave, ProcessError> {
         let pending = self
             .pending_wave
             .as_ref()
             .ok_or(ProcessError::PrepareNotPending)?;
-        if pending.prepare_request_id != actual {
-            return Err(ProcessError::PrepareIdMismatch);
+        if pending.token != CandidateToken::from_bytes(actual) {
+            return Err(ProcessError::CandidateTokenMismatch);
         }
         Ok(pending)
     }
 
-    fn sealed_wave_for(&self, actual: [u8; 8]) -> Result<&PendingWave, ProcessError> {
+    fn sealed_wave_for(&self, actual: [u8; 32]) -> Result<&PendingWave, ProcessError> {
         let pending = self.pending_wave_for(actual)?;
         if !pending.sealed {
             return Err(xln_rscore_batch::BatchError::WaveOpen.into());
@@ -449,6 +534,15 @@ impl ProcessSession {
         }
         let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
         if let Some(config) = self.authority_config.as_ref() {
+            // Bootstrap creates only a brand-new empty authority. Any account
+            // or nonzero revision is durable history and must arrive through
+            // RestoreExact, whose token binds every leaf, signer and revision.
+            if revision != 0 || !accounts.is_empty() {
+                return Err(ProcessError::AuthorityBootstrapInvalid {
+                    revision,
+                    accounts: accounts.len(),
+                });
+            }
             let engine = StatefulConsensusEngine::restore(
                 EngineGeneration::from_bytes(binding.engine_generation),
                 self.worker_count,
@@ -475,14 +569,14 @@ impl ProcessSession {
 
     fn get_checkpoint_changes(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let revision = self.sealed_wave_for(prepare_request_id)?.revision;
+        let candidate_id = self.sealed_wave_for(candidate_token)?.candidate_id;
         let engine = self
             .authority
             .as_ref()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        let checkpoint = engine.checkpoint_changes_for_wave(revision)?;
+        let checkpoint = engine.checkpoint_changes_for_wave(candidate_id)?;
         let response = crate::checkpoint_wire::changes(&checkpoint)?;
         let ticket = PendingCheckpoint {
             commit_token: checkpoint.token,
@@ -492,8 +586,8 @@ impl ProcessSession {
             .pending_wave
             .as_mut()
             .ok_or(ProcessError::PrepareNotPending)?;
-        if pending.prepare_request_id != prepare_request_id {
-            return Err(ProcessError::PrepareIdMismatch);
+        if pending.token != CandidateToken::from_bytes(candidate_token) {
+            return Err(ProcessError::CandidateTokenMismatch);
         }
         pending.checkpoint = Some(ticket);
         Ok((response, false))
@@ -576,15 +670,15 @@ impl ProcessSession {
         &mut self,
         accounts: Vec<xln_rscore_batch::AccountSeed>,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        // Authority membership is created only by a staged WaveOp::Create or
+        // exact recovery. Upsert is a mirror import primitive: allowing it
+        // here would mutate the authoritative tree outside the Runtime-frame
+        // candidate and leave WAL/abort unable to account for the new leaf.
+        if self.authority.is_some() {
+            return Err(ProcessError::AuthorityUpsertForbidden);
+        }
         if self.pending.is_some() || self.pending_wave.is_some() {
             return Err(ProcessError::PreparePending);
-        }
-        if let Some(engine) = self.authority.as_mut() {
-            let accounts_root = engine.upsert_accounts(accounts)?;
-            return Ok((
-                wire_encode::upserted(engine.revision(), accounts_root),
-                false,
-            ));
         }
         let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
         let accounts_root = engine.upsert_accounts(accounts)?;
@@ -639,7 +733,6 @@ impl ProcessSession {
         if self.pending.is_some() {
             return Err(ProcessError::PreparePending);
         }
-        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
         // The session owns the market tables; every job executes against the
         // exact policy installed at Hello.
         let jobs: Vec<xln_rscore_batch::BatchJob> = jobs
@@ -653,22 +746,24 @@ impl ProcessSession {
         // Engine-side execution time, excluding transport and encoding: the
         // caller compares it against its own reducer to see which side is
         // actually faster, not how fast the pipe is.
-        let started = std::time::Instant::now();
-        let candidate = engine.prepare(&jobs)?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let response = wire_encode::prepared(&candidate, engine_micros)?;
-        self.pending = Some(PendingBatch {
-            prepare_request_id: request_id,
-            candidate,
-        });
+        let (candidate, engine_micros) = {
+            let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
+            let started = std::time::Instant::now();
+            let candidate = engine.prepare(&jobs)?;
+            let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+            (candidate, engine_micros)
+        };
+        let token = self.issue_candidate_token(request_id, candidate.candidate_id())?;
+        let response = wire_encode::prepared(&candidate, engine_micros, token.as_bytes())?;
+        self.pending = Some(PendingBatch { token, candidate });
         Ok((response, false))
     }
 
     fn commit(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.validate_pending_id(prepare_request_id)?;
+        self.validate_pending_token(candidate_token)?;
         let pending = self.pending.take().ok_or(ProcessError::PrepareNotPending)?;
         let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
         match engine.commit(pending.candidate) {
@@ -682,9 +777,9 @@ impl ProcessSession {
 
     fn abort(
         &mut self,
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.validate_pending_id(prepare_request_id)?;
+        self.validate_pending_token(candidate_token)?;
         self.pending = None;
         let revision = self
             .engine
@@ -694,13 +789,13 @@ impl ProcessSession {
         Ok((wire_encode::aborted(revision), false))
     }
 
-    fn validate_pending_id(&self, actual: [u8; 8]) -> Result<(), ProcessError> {
+    fn validate_pending_token(&self, actual: [u8; 32]) -> Result<(), ProcessError> {
         let pending = self
             .pending
             .as_ref()
             .ok_or(ProcessError::PrepareNotPending)?;
-        if pending.prepare_request_id != actual {
-            return Err(ProcessError::PrepareIdMismatch);
+        if pending.token != CandidateToken::from_bytes(actual) {
+            return Err(ProcessError::CandidateTokenMismatch);
         }
         Ok(())
     }

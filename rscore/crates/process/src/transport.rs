@@ -8,7 +8,7 @@ const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const BODY_ARITY: usize = 1;
 
 pub fn serve(reader: &mut impl Read, writer: &mut impl Write) -> Result<(), ProcessError> {
-    let mut session = ProcessSession::new();
+    let mut session = ProcessSession::try_new()?;
     loop {
         let frame = read_frame(reader)?.ok_or(ProcessError::EofBeforeShutdown)?;
         let request = decode_envelope(&frame, BODY_ARITY)?;

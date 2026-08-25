@@ -1,6 +1,6 @@
 import { buffersEqual } from '../protocol/serialization';
 import { encodeAccountStateValue } from '../account/commitment/account-state-value';
-import { rscoreCheckpointList, rscoreCheckpointTuple } from './checkpoint-wire';
+import { rscoreCheckpointList, rscoreCheckpointTuple } from './checkpoint/checkpoint-wire';
 
 const MAX_CANONICAL_DEPTH = 32;
 

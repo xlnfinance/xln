@@ -194,11 +194,42 @@ pub fn verify_frame_hanko(
     digest: &[u8; 32],
     expected_entity_id: &[u8; 32],
 ) -> Result<(), StateError> {
+    verify_peer_hanko(
+        hanko,
+        digest,
+        expected_entity_id,
+        StateError::FrameHankoInvalid,
+    )
+}
+
+/// Check the counterparty's Hanko over the exact dispute digest rebuilt from
+/// the committed Account identity. A frame Hanko cannot certify this message:
+/// the two digests have different Solidity domains and both signatures must
+/// be verified independently before either witness is retained.
+pub fn verify_dispute_hanko(
+    hanko: &[u8],
+    digest: &[u8; 32],
+    expected_entity_id: &[u8; 32],
+) -> Result<(), StateError> {
+    verify_peer_hanko(
+        hanko,
+        digest,
+        expected_entity_id,
+        StateError::DisputeHankoInvalid,
+    )
+}
+
+fn verify_peer_hanko(
+    hanko: &[u8],
+    digest: &[u8; 32],
+    expected_entity_id: &[u8; 32],
+    invalid: fn(String) -> StateError,
+) -> Result<(), StateError> {
     match verify_canonical_hanko(hanko, digest, Some(expected_entity_id), None) {
         Ok(_) => Ok(()),
         Err(xln_rscore_hanko::HankoError::BoardAuthorityUnavailable) => {
             Err(StateError::BoardAuthorityUnavailable)
         }
-        Err(error) => Err(StateError::FrameHankoInvalid(error.to_string())),
+        Err(error) => Err(invalid(error.to_string())),
     }
 }

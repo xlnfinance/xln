@@ -23,6 +23,11 @@ pub fn signer_key(signer_id: &str) -> [u8; 32] {
     xln_rscore_engine::derive_signer_key(SEED, signer_id).expect("signer key")
 }
 
+pub fn signing_identity(signer_id: &str) -> SigningIdentity {
+    SigningIdentity::lazy_from_seed(SEED, signer_id, 1, 1, BoardDelays::default())
+        .expect("signing identity")
+}
+
 pub const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 const WORKERS: usize = 4;
 
@@ -38,8 +43,7 @@ pub fn hex_of(bytes: &[u8]) -> String {
 }
 
 pub fn entity_of(signer_id: &str) -> ([u8; 32], EntityId) {
-    let identity = SigningIdentity::lazy_from_seed(SEED, signer_id, 1, 1, BoardDelays::default())
-        .expect("identity");
+    let identity = signing_identity(signer_id);
     let bytes = *identity.entity_id();
     let parsed = EntityId::parse(&format!("0x{}", hex_of(&bytes))).expect("entity");
     (bytes, parsed)

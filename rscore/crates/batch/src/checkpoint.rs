@@ -11,7 +11,7 @@
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountEnvelope, AccountIdentity, AccountReplica,
     BilateralRebalanceFeePolicy, CarriedSections, ConsensusSnapshot, Delta, EntityId, HtlcLock,
-    LendingIntentKind, SwapOffer,
+    LendingIntentKind, StateError, SwapOffer,
 };
 use xln_rscore_protocol::PersistentNodeChanges;
 
@@ -245,7 +245,7 @@ pub(crate) fn account_rows(
     previous: Option<&AccountConsensus>,
     account_leaf: [u8; 32],
     signer_id: &str,
-) -> AccountCheckpointRows {
+) -> Result<AccountCheckpointRows, StateError> {
     let state = account.replica().state();
     let (deltas, locks, lending_intents, swap_offers, rebalance_fee_policies) = match previous {
         Some(previous) => {
@@ -266,7 +266,7 @@ pub(crate) fn account_rows(
             full(state.rebalance_policy_node_records()),
         ),
     };
-    AccountCheckpointRows {
+    Ok(AccountCheckpointRows {
         account_id,
         account_leaf,
         header: AccountCheckpointHeader {
@@ -277,7 +277,7 @@ pub(crate) fn account_rows(
             j_nonce: state.j_nonce(),
             last_finalized_j_height: state.last_finalized_j_height(),
             carried: state.carried().clone(),
-            envelope: account.replica().envelope().clone(),
+            envelope: account.checkpoint_envelope()?,
             delta_transformer: account.replica().delta_transformer().copied(),
         },
         sections: AccountCheckpointSections {
@@ -308,7 +308,7 @@ pub(crate) fn account_rows(
         swap_offers,
         rebalance_fee_policies,
         consensus: account.consensus_snapshot(),
-    }
+    })
 }
 
 fn full<V>(records: Vec<xln_rscore_protocol::PersistentNodeRecord<V>>) -> PersistentNodeChanges<V> {

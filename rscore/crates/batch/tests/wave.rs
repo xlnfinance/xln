@@ -5,10 +5,157 @@ mod fixture;
 
 use fixture::{Stand, clock, payment, stand};
 use xln_rscore_batch::{
-    AccountAdmissionVerdict, AccountInputKind, AccountInputRow, AccountInputVerdict, BatchError,
-    EntityProposalSelection, EntityWave, EntityWaveOps, StatefulConsensusEngine, WaveOp,
-    WaveOpsRequest, WaveProposalRequest, WaveRequest, WaveResult,
+    AccountAdmissionVerdict, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
+    AccountSeed, BatchError, EngineGeneration, EntityProposalSelection, EntityWave, EntityWaveOps,
+    StatefulConsensusEngine, WaveOp, WaveOpsRequest, WaveProposalRequest, WaveRequest, WaveResult,
 };
+use xln_rscore_engine::{
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity,
+    AccountReplica, AccountState, AccountTx, DepositoryAddress, TokenId, WatchSeed,
+};
+use xln_rscore_protocol::CanonicalValue;
+
+fn fresh_engine(signer_id: &str) -> StatefulConsensusEngine {
+    StatefulConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x42; 8]),
+        4,
+        0,
+        fixture::signer_key(signer_id),
+        signer_id.to_string(),
+        std::sync::Arc::default(),
+        Vec::new(),
+    )
+    .expect("fresh authority engine")
+}
+
+fn genesis_seed(owner_signer: &str, peer_signer: &str) -> (AccountSeed, [u8; 32], [u8; 32]) {
+    let (owner_bytes, owner) = fixture::entity_of(owner_signer);
+    let (peer_bytes, peer) = fixture::entity_of(peer_signer);
+    let (left, right) = if owner < peer {
+        (owner.clone(), peer.clone())
+    } else {
+        (peer.clone(), owner.clone())
+    };
+    let identity = AccountIdentity::new(
+        AccountDomain::new(
+            31_337,
+            DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).expect("depository"),
+        )
+        .expect("domain"),
+        left,
+        right,
+        WatchSeed::parse(&format!("0x{}", "99".repeat(32))).expect("watch seed"),
+    )
+    .expect("identity");
+    let state = AccountState::new(
+        identity,
+        AccountDisputeConfig::new(10, 10).expect("dispute config"),
+        Vec::new(),
+    )
+    .expect("genesis state");
+    let mut replica = AccountReplica::new(owner, state).expect("genesis replica");
+    replica.set_envelope(canonical_genesis_envelope(&replica, false));
+    replica.set_delta_transformer([0x77; 20]);
+    (
+        AccountSeed {
+            account_id: AccountId::from_bytes(peer_bytes),
+            replica,
+            consensus: None,
+        },
+        owner_bytes,
+        peer_bytes,
+    )
+}
+
+fn canonical_genesis_envelope(replica: &AccountReplica, public_pinned: bool) -> AccountEnvelope {
+    canonical_genesis_envelope_with_policy(
+        replica,
+        public_pinned,
+        &format!("0x{}", "00".repeat(32)),
+    )
+}
+
+fn canonical_genesis_envelope_with_policy(
+    replica: &AccountReplica,
+    public_pinned: bool,
+    policy_root: &str,
+) -> AccountEnvelope {
+    let zero_root = CanonicalValue::String(format!("0x{}", "00".repeat(32)));
+    let mut fields = vec![(
+        "status".to_string(),
+        CanonicalValue::String("active".to_string()),
+    )];
+    if public_pinned {
+        fields.push(("publicPinned".to_string(), CanonicalValue::Bool(true)));
+    }
+    fields.extend([
+        ("currentHeight".to_string(), CanonicalValue::Number(0.0)),
+        ("rollbackCount".to_string(), CanonicalValue::Number(0.0)),
+        (
+            "proofHeader".to_string(),
+            CanonicalValue::Object(vec![
+                (
+                    "fromEntity".to_string(),
+                    CanonicalValue::String(replica.owner().to_string()),
+                ),
+                (
+                    "toEntity".to_string(),
+                    CanonicalValue::String(replica.counterparty().to_string()),
+                ),
+                ("nextProofNonce".to_string(), CanonicalValue::Number(1.0)),
+            ]),
+        ),
+        (
+            "currentFrameHash".to_string(),
+            CanonicalValue::String(String::new()),
+        ),
+        ("pendingWithdrawals".to_string(), zero_root.clone()),
+        (
+            "shadow".to_string(),
+            CanonicalValue::Object(vec![(
+                "rebalance".to_string(),
+                CanonicalValue::Object(vec![
+                    (
+                        "policyRoot".to_string(),
+                        CanonicalValue::String(policy_root.to_string()),
+                    ),
+                    ("submittedAtByTokenRoot".to_string(), zero_root),
+                ]),
+            )]),
+        ),
+    ]);
+    AccountEnvelope::new(fields, Vec::new()).expect("canonical H=0 envelope")
+}
+
+fn replace_genesis_envelope_field(
+    seed: &mut AccountSeed,
+    field: &str,
+    replacement: CanonicalValue,
+) {
+    let mut fields = seed.replica.envelope().fields().to_vec();
+    let entry = fields
+        .iter_mut()
+        .find(|(name, _)| name == field)
+        .expect("genesis field");
+    entry.1 = replacement;
+    let mempool = seed.replica.envelope().mempool().to_vec();
+    let envelope = AccountEnvelope::new(fields, mempool).expect("replacement envelope");
+    seed.replica.set_envelope(envelope);
+}
+
+fn create_op(operation_index: u64, seed: AccountSeed) -> WaveOp {
+    WaveOp::Create {
+        operation_index,
+        seed: Box::new(seed),
+    }
+}
+
+fn prepare_error(engine: &mut StatefulConsensusEngine, request: WaveRequest) -> BatchError {
+    match engine.prepare_wave(request) {
+        Ok(_) => panic!("expected wave preparation to fail"),
+        Err(error) => error,
+    }
+}
 
 fn wave(stand: &Stand, timestamp: u64) -> WaveRequest {
     wave_amount(stand, timestamp, 25)
@@ -57,7 +204,10 @@ fn one_call_admits_applies_and_proposes() {
     assert_eq!(result.accounts_root, stand.payer.accounts_root());
     assert!(stand.payer.wave_pending());
 
-    let root = stand.payer.commit_wave(result.revision).expect("commit");
+    let root = stand
+        .payer
+        .commit_wave(result.candidate_id)
+        .expect("commit");
     assert_eq!(root, result.accounts_root);
     assert!(!stand.payer.wave_pending());
 }
@@ -74,7 +224,7 @@ fn an_aborted_wave_leaves_no_trace() {
     let result = stand.payer.prepare_wave(request).expect("wave");
     assert_ne!(result.accounts_root, before_root);
 
-    let revision = stand.payer.abort_wave(result.revision).expect("abort");
+    let revision = stand.payer.abort_wave(result.candidate_id).expect("abort");
     assert_eq!(revision, before_revision);
     assert_eq!(stand.payer.accounts_root(), before_root);
     assert!(!stand.payer.wave_pending());
@@ -84,6 +234,18 @@ fn an_aborted_wave_leaves_no_trace() {
     let again = stand.payer.prepare_wave(request).expect("wave again");
     assert_eq!(again.accounts_root, result.accounts_root);
     assert_eq!(again.revision, result.revision);
+    assert_ne!(
+        again.candidate_id, result.candidate_id,
+        "a deterministic re-execution is still a distinct candidate attempt",
+    );
+    assert!(matches!(
+        stand.payer.abort_wave(result.candidate_id),
+        Err(BatchError::WaveCandidate { .. }),
+    ));
+    stand
+        .payer
+        .abort_wave(again.candidate_id)
+        .expect("current candidate remains abortable");
 }
 
 /// Nothing else may touch the engine while a wave is uncommitted: a second
@@ -110,17 +272,19 @@ fn a_pending_wave_closes_every_other_door() {
         Err(BatchError::WavePending),
     ));
     assert!(matches!(
-        stand.payer.checkpoint_changes_for_wave(result.revision - 1),
+        stand
+            .payer
+            .checkpoint_changes_for_wave(xln_rscore_batch::CandidateId::from_bytes([0xff; 32])),
         Err(BatchError::WaveOpen),
     ));
     assert!(matches!(
-        stand.payer.checkpoint_changes_for_wave(result.revision),
+        stand.payer.checkpoint_changes_for_wave(result.candidate_id),
         Err(BatchError::WaveOpen),
     ));
     let sealed = stand.payer.seal_wave().expect("seal");
     let candidate_checkpoint = stand
         .payer
-        .checkpoint_changes_for_wave(sealed.revision)
+        .checkpoint_changes_for_wave(sealed.candidate_id)
         .expect("candidate checkpoint");
     assert_eq!(candidate_checkpoint.accounts_root(), sealed.accounts_root);
     assert_eq!(candidate_checkpoint.revision(), sealed.revision);
@@ -132,12 +296,17 @@ fn a_pending_wave_closes_every_other_door() {
         stand.payer.commit_checkpoint(&candidate_checkpoint.token),
         Err(BatchError::WavePending),
     ));
-    // Only the revision that was prepared may be committed.
+    // Only the candidate that was prepared may be committed.
     assert!(matches!(
-        stand.payer.commit_wave(sealed.revision - 1),
-        Err(BatchError::WaveRevision { .. }),
+        stand
+            .payer
+            .commit_wave(xln_rscore_batch::CandidateId::from_bytes([0xff; 32])),
+        Err(BatchError::WaveCandidate { .. }),
     ));
-    stand.payer.commit_wave(sealed.revision).expect("commit");
+    stand
+        .payer
+        .commit_wave(sealed.candidate_id)
+        .expect("commit");
     stand
         .payer
         .commit_checkpoint(&candidate_checkpoint.token)
@@ -147,7 +316,7 @@ fn a_pending_wave_closes_every_other_door() {
         candidate_checkpoint.restore_token(),
     );
     assert!(matches!(
-        stand.payer.commit_wave(sealed.revision),
+        stand.payer.commit_wave(sealed.candidate_id),
         Err(BatchError::WaveMissing),
     ));
 }
@@ -163,7 +332,7 @@ fn two_engines_settle_a_payment_in_three_waves() {
     let proposed = run_staged_wave(&mut stand.payer, request);
     stand
         .payer
-        .commit_wave(proposed.revision)
+        .commit_wave(proposed.candidate_id)
         .expect("commit propose");
 
     let frames = fixture::frame_ops(&stand, &proposed.proposals);
@@ -171,7 +340,7 @@ fn two_engines_settle_a_payment_in_three_waves() {
     let applied: WaveResult = run_staged_wave(&mut stand.payee, request);
     stand
         .payee
-        .commit_wave(applied.revision)
+        .commit_wave(applied.candidate_id)
         .expect("commit apply");
     assert_eq!(applied.applied.len(), 2);
     for row in &applied.applied {
@@ -185,7 +354,10 @@ fn two_engines_settle_a_payment_in_three_waves() {
     let acks = fixture::ack_ops(&stand, &applied.applied);
     let request = fixture::wave_of(acks, timestamp, false);
     let acked = run_staged_wave(&mut stand.payer, request);
-    stand.payer.commit_wave(acked.revision).expect("commit ack");
+    stand
+        .payer
+        .commit_wave(acked.candidate_id)
+        .expect("commit ack");
     for row in &acked.applied {
         assert!(
             matches!(row.verdict, AccountInputVerdict::AckCommitted { .. }),
@@ -297,7 +469,7 @@ fn a_wave_reports_every_leaf_it_moved() {
     }
 
     // Aborting and re-running the same wave reaches the same tree.
-    stand.payer.abort_wave(first.revision).expect("abort");
+    stand.payer.abort_wave(first.candidate_id).expect("abort");
     let request = wave(&stand, 1_700_000_000_000);
     let again = run_staged_wave(&mut stand.payer, request);
     assert_eq!(again.accounts_root, first.accounts_root);
@@ -433,7 +605,7 @@ fn admission_receipts_match_lifecycle_dedupe_and_payment_multiplicity() {
     let sealed = stand.payer.seal_wave().expect("seal offer");
     stand
         .payer
-        .commit_wave(sealed.revision)
+        .commit_wave(sealed.candidate_id)
         .expect("commit offer");
 
     let pending_duplicate = stand
@@ -457,7 +629,7 @@ fn admission_receipts_match_lifecycle_dedupe_and_payment_multiplicity() {
     ));
     stand
         .payer
-        .abort_wave(pending_duplicate.revision)
+        .abort_wave(pending_duplicate.candidate_id)
         .expect("abort duplicate probe");
 
     let (_, payments) = payment(pair, 25);
@@ -577,7 +749,10 @@ fn each_entity_judges_arrivals_with_its_own_clock() {
     let timestamp = 1_700_000_000_000;
     let request = wave(&stand, timestamp);
     let proposed = run_staged_wave(&mut stand.payer, request);
-    stand.payer.commit_wave(proposed.revision).expect("commit");
+    stand
+        .payer
+        .commit_wave(proposed.candidate_id)
+        .expect("commit");
 
     let ops = fixture::frame_ops(&stand, &proposed.proposals);
     let mut request = fixture::wave_of(ops, timestamp, false);
@@ -686,7 +861,10 @@ fn input_indices_are_sequential_across_entity_groups() {
     let timestamp = 1_700_000_000_000;
     let request = wave(&stand, timestamp);
     let proposed = run_staged_wave(&mut stand.payer, request);
-    stand.payer.commit_wave(proposed.revision).expect("commit");
+    stand
+        .payer
+        .commit_wave(proposed.candidate_id)
+        .expect("commit");
 
     let mut ops = fixture::frame_ops(&stand, &proposed.proposals);
     // Both groups now start at zero, which is exactly the collision the check
@@ -751,7 +929,10 @@ fn an_account_replays_its_operations_in_arrival_order() {
         // The payer proposes at the same height, which is the collision.
         let request = wave(&stand, timestamp);
         let proposed = run_staged_wave(&mut stand.payer, request);
-        stand.payer.commit_wave(proposed.revision).expect("commit");
+        stand
+            .payer
+            .commit_wave(proposed.candidate_id)
+            .expect("commit");
         let incoming = fixture::frame_ops(&stand, &proposed.proposals)
             .into_iter()
             .find(|(_, op)| op.account_id() == account_id)
@@ -779,11 +960,18 @@ fn an_account_replays_its_operations_in_arrival_order() {
                     ..
                 } => *index = operation_index as u64,
                 WaveOp::Input(row) => row.operation_index = operation_index as u64,
+                WaveOp::Create {
+                    operation_index: index,
+                    ..
+                } => *index = operation_index as u64,
             }
         }
         let request = fixture::wave_of(ops, timestamp, false);
         let applied = run_staged_wave(&mut stand.payee, request);
-        stand.payee.commit_wave(applied.revision).expect("commit");
+        stand
+            .payee
+            .commit_wave(applied.candidate_id)
+            .expect("commit");
         stand
             .payee
             .account(&account_id)
@@ -796,4 +984,645 @@ fn an_account_replays_its_operations_in_arrival_order() {
     // so the exact offer survives once whichever order the collision took.
     assert_eq!(queued(true), 1);
     assert_eq!(queued(false), 1);
+}
+
+#[test]
+fn create_local_genesis_proposes_height_one_and_survives_checkpoint_commit() {
+    let timestamp = 1_700_000_000_000;
+    let (seed, owner, peer) = genesis_seed("1", "2");
+    let mut engine = fresh_engine("1");
+    let prepared = engine
+        .prepare_wave(fixture::wave_of(
+            vec![
+                (owner, create_op(0, seed)),
+                (
+                    owner,
+                    WaveOp::Admit {
+                        operation_index: 1,
+                        account_id: AccountId::from_bytes(peer),
+                        txs: vec![AccountTx::AddDelta {
+                            token_id: TokenId::new(1).expect("token"),
+                        }],
+                    },
+                ),
+            ],
+            timestamp,
+            true,
+        ))
+        .expect("create and admit");
+    assert_eq!(prepared.admissions.len(), 1);
+    assert_eq!(prepared.touched.len(), 1);
+    assert_eq!(prepared.post_accounts.len(), 1);
+    assert_eq!(engine.account_count(), 1);
+
+    let proposed = engine
+        .propose_wave(WaveProposalRequest {
+            entities: vec![EntityProposalSelection {
+                owner_entity_id: owner,
+                account_ids: vec![AccountId::from_bytes(peer)],
+            }],
+        })
+        .expect("propose genesis frame");
+    let frame = &proposed.proposals[0]
+        .proposed
+        .as_ref()
+        .expect("height-one frame")
+        .frame;
+    assert_eq!(frame.height, 1);
+    assert_eq!(frame.prev_frame_hash, "genesis");
+
+    let sealed = engine.seal_wave().expect("seal");
+    let checkpoint = engine
+        .checkpoint_changes_for_wave(sealed.candidate_id)
+        .expect("candidate checkpoint");
+    assert_eq!(checkpoint.accounts.len(), 1);
+    engine
+        .commit_wave(sealed.candidate_id)
+        .expect("commit wave");
+    engine
+        .commit_checkpoint(&checkpoint.token)
+        .expect("commit checkpoint");
+    assert!(engine.account(&AccountId::from_bytes(peer)).is_some());
+    assert_eq!(
+        engine
+            .checkpoint_token()
+            .expect("checkpoint token")
+            .account_count,
+        1
+    );
+}
+
+#[test]
+fn create_inbound_genesis_applies_the_peers_height_one_frame() {
+    let timestamp = 1_700_000_000_000;
+    let (left_seed, left, right) = genesis_seed("1", "2");
+    let mut left_engine = fresh_engine("1");
+    left_engine
+        .prepare_wave(fixture::wave_of(
+            vec![
+                (left, create_op(0, left_seed)),
+                (
+                    left,
+                    WaveOp::Admit {
+                        operation_index: 1,
+                        account_id: AccountId::from_bytes(right),
+                        txs: vec![AccountTx::AddDelta {
+                            token_id: TokenId::new(1).expect("token"),
+                        }],
+                    },
+                ),
+            ],
+            timestamp,
+            true,
+        ))
+        .expect("left create");
+    let proposed = left_engine
+        .propose_wave(WaveProposalRequest {
+            entities: vec![EntityProposalSelection {
+                owner_entity_id: left,
+                account_ids: vec![AccountId::from_bytes(right)],
+            }],
+        })
+        .expect("left proposal");
+    let proposal = &proposed.proposals[0];
+    let mut incoming = proposal.incoming().expect("incoming frame");
+    if let Some(draft) = proposal
+        .proposed
+        .as_ref()
+        .and_then(|proposed| proposed.dispute.as_ref())
+    {
+        incoming.dispute = Some(xln_rscore_engine::CounterpartyDispute {
+            hanko: fixture::signing_identity("1")
+                .sign_frame(&draft.hash)
+                .expect("dispute Hanko"),
+            proof_body_hash: draft.proof_body_hash,
+            nonce: draft.nonce,
+            proposer_is_left: draft.proposer_is_left,
+        });
+    }
+    let sealed = left_engine.seal_wave().expect("seal left");
+    left_engine
+        .commit_wave(sealed.candidate_id)
+        .expect("commit left");
+
+    let (right_seed, right_owner, left_peer) = genesis_seed("2", "1");
+    assert_eq!(right_owner, right);
+    assert_eq!(left_peer, left);
+    let mut right_engine = fresh_engine("2");
+    let applied = right_engine
+        .prepare_wave(fixture::wave_of(
+            vec![
+                (right, create_op(0, right_seed)),
+                (
+                    right,
+                    WaveOp::Input(AccountInputRow {
+                        operation_index: 1,
+                        account_id: AccountId::from_bytes(left),
+                        from_entity_id: left,
+                        kind: AccountInputKind::Frame(Box::new(incoming)),
+                    }),
+                ),
+            ],
+            timestamp,
+            false,
+        ))
+        .expect("create and apply inbound genesis");
+    assert_eq!(applied.applied.len(), 1);
+    assert!(
+        matches!(
+            applied.applied[0].verdict,
+            AccountInputVerdict::FrameCommitted { height: 1, .. }
+        ),
+        "{:?}",
+        applied.applied[0].verdict
+    );
+    assert_eq!(applied.touched.len(), 1);
+    assert_eq!(applied.post_accounts.len(), 1);
+}
+
+#[test]
+fn create_is_removed_by_abort_and_by_a_failed_prepare() {
+    let timestamp = 1_700_000_000_000;
+    let (seed, owner, peer) = genesis_seed("1", "2");
+    let mut engine = fresh_engine("1");
+    let base_root = engine.accounts_root();
+    let base_revision = engine.revision();
+    let prepared = engine
+        .prepare_wave(fixture::wave_of(
+            vec![(owner, create_op(0, seed.clone()))],
+            timestamp,
+            false,
+        ))
+        .expect("create candidate");
+    assert!(engine.account(&AccountId::from_bytes(peer)).is_some());
+    assert!(engine.signer_of(&owner).is_some());
+    engine
+        .abort_wave(prepared.candidate_id)
+        .expect("abort create");
+    assert_eq!(engine.accounts_root(), base_root);
+    assert_eq!(engine.revision(), base_revision);
+    assert!(engine.account(&AccountId::from_bytes(peer)).is_none());
+    assert!(engine.signer_of(&owner).is_none());
+
+    let missing = AccountId::from_bytes([0xaa; 32]);
+    let refused = prepare_error(
+        &mut engine,
+        fixture::wave_of(
+            vec![
+                (owner, create_op(0, seed)),
+                (
+                    owner,
+                    WaveOp::Admit {
+                        operation_index: 1,
+                        account_id: missing,
+                        txs: vec![AccountTx::AddDelta {
+                            token_id: TokenId::new(1).expect("token"),
+                        }],
+                    },
+                ),
+            ],
+            timestamp,
+            false,
+        ),
+    );
+    assert!(matches!(refused, BatchError::AccountNotFound { .. }));
+    assert_eq!(engine.accounts_root(), base_root);
+    assert_eq!(engine.revision(), base_revision);
+    assert!(!engine.wave_pending());
+    assert!(engine.signer_of(&owner).is_none());
+}
+
+#[test]
+fn create_rejects_duplicate_existing_and_after_use() {
+    let timestamp = 1_700_000_000_000;
+    let (seed, owner, peer) = genesis_seed("1", "2");
+    let mut duplicate_engine = fresh_engine("1");
+    let duplicate = prepare_error(
+        &mut duplicate_engine,
+        fixture::wave_of(
+            vec![
+                (owner, create_op(0, seed.clone())),
+                (owner, create_op(1, seed.clone())),
+            ],
+            timestamp,
+            false,
+        ),
+    );
+    assert!(matches!(duplicate, BatchError::WaveCreateDuplicate(_)));
+    assert_eq!(duplicate_engine.account_count(), 0);
+
+    let mut existing_engine = fresh_engine("1");
+    existing_engine
+        .prepare_wave(fixture::wave_of(
+            vec![
+                (owner, create_op(0, seed.clone())),
+                (
+                    owner,
+                    WaveOp::Admit {
+                        operation_index: 1,
+                        account_id: AccountId::from_bytes(peer),
+                        txs: vec![AccountTx::AddDelta {
+                            token_id: TokenId::new(1).expect("token"),
+                        }],
+                    },
+                ),
+            ],
+            timestamp,
+            false,
+        ))
+        .expect("create existing base");
+    let sealed = existing_engine.seal_wave().expect("seal");
+    existing_engine
+        .commit_wave(sealed.candidate_id)
+        .expect("commit create");
+    let existing = prepare_error(
+        &mut existing_engine,
+        fixture::wave_of(
+            vec![(owner, create_op(0, seed.clone()))],
+            timestamp + 1,
+            false,
+        ),
+    );
+    assert!(matches!(existing, BatchError::WaveCreateExisting(_)));
+
+    let mut after_use_engine = fresh_engine("1");
+    let missing = after_use_engine
+        .prepare_wave(fixture::wave_of(
+            vec![(
+                owner,
+                WaveOp::Input(AccountInputRow {
+                    operation_index: 0,
+                    account_id: AccountId::from_bytes(peer),
+                    from_entity_id: peer,
+                    kind: AccountInputKind::Ack {
+                        height: 1,
+                        state_hash: [0; 32],
+                        hanko: Vec::new(),
+                        dispute: None,
+                    },
+                }),
+            )],
+            timestamp,
+            false,
+        ))
+        .expect("missing input is a typed verdict");
+    assert!(matches!(
+        missing.applied[0].verdict,
+        AccountInputVerdict::Failed(_)
+    ));
+    let after_use = after_use_engine.apply_wave_ops(WaveOpsRequest {
+        entities: vec![EntityWaveOps {
+            owner_entity_id: owner,
+            ops: vec![create_op(1, seed)],
+        }],
+    });
+    assert!(matches!(after_use, Err(BatchError::WaveCreateAfterUse(_))));
+    assert_eq!(after_use_engine.account_count(), 0);
+    after_use_engine
+        .abort_wave(missing.candidate_id)
+        .expect("abort missing-input candidate");
+}
+
+#[test]
+fn create_rejects_wrong_owner_counterparty_and_non_genesis_material() {
+    let timestamp = 1_700_000_000_000;
+    let (seed, owner, peer) = genesis_seed("1", "2");
+
+    let mut wrong_owner_engine = fresh_engine("1");
+    let wrong_owner = prepare_error(
+        &mut wrong_owner_engine,
+        fixture::wave_of(vec![(peer, create_op(0, seed.clone()))], timestamp, false),
+    );
+    assert!(matches!(wrong_owner, BatchError::WaveAccountOwner { .. }));
+
+    let mut wrong_id_seed = seed.clone();
+    wrong_id_seed.account_id = AccountId::from_bytes([0xab; 32]);
+    let mut wrong_id_engine = fresh_engine("1");
+    let wrong_id = prepare_error(
+        &mut wrong_id_engine,
+        fixture::wave_of(vec![(owner, create_op(0, wrong_id_seed))], timestamp, false),
+    );
+    assert!(matches!(
+        wrong_id,
+        BatchError::WaveCreateCounterparty { .. }
+    ));
+
+    let mut consensus_seed = seed.clone();
+    consensus_seed.consensus =
+        Some(AccountConsensus::new(consensus_seed.replica.clone()).consensus_snapshot());
+    let mut consensus_engine = fresh_engine("1");
+    let consensus = prepare_error(
+        &mut consensus_engine,
+        fixture::wave_of(
+            vec![(owner, create_op(0, consensus_seed))],
+            timestamp,
+            false,
+        ),
+    );
+    assert!(matches!(consensus, BatchError::WaveCreateConsensus(_)));
+
+    let mut mempool_seed = seed.clone();
+    let genesis_fields = mempool_seed.replica.envelope().fields().to_vec();
+    mempool_seed.replica.set_envelope(
+        AccountEnvelope::new(
+            genesis_fields,
+            vec![CanonicalValue::String("queued-at-genesis".into())],
+        )
+        .expect("envelope"),
+    );
+    let mut mempool_engine = fresh_engine("1");
+    let mempool = prepare_error(
+        &mut mempool_engine,
+        fixture::wave_of(vec![(owner, create_op(0, mempool_seed))], timestamp, false),
+    );
+    assert!(matches!(mempool, BatchError::WaveCreateMempool { .. }));
+
+    let mut transformer_seed = seed.clone();
+    transformer_seed.replica = AccountReplica::new(
+        transformer_seed.replica.owner().clone(),
+        transformer_seed.replica.state().clone(),
+    )
+    .expect("replica without transformer");
+    let mut transformer_engine = fresh_engine("1");
+    let transformer = prepare_error(
+        &mut transformer_engine,
+        fixture::wave_of(
+            vec![(owner, create_op(0, transformer_seed))],
+            timestamp,
+            false,
+        ),
+    );
+    assert!(matches!(transformer, BatchError::WaveCreateTransformer(_)));
+
+    let (_, owner_entity) = fixture::entity_of("1");
+    let (_, peer_entity) = fixture::entity_of("2");
+    let (left, right) = if owner_entity < peer_entity {
+        (owner_entity.clone(), peer_entity.clone())
+    } else {
+        (peer_entity.clone(), owner_entity.clone())
+    };
+    let mut non_genesis_replica =
+        AccountReplica::new(owner_entity, fixture::account_state(&left, &right))
+            .expect("funded replica");
+    non_genesis_replica.set_delta_transformer([0x77; 20]);
+    let non_genesis_seed = AccountSeed {
+        account_id: AccountId::from_bytes(peer),
+        replica: non_genesis_replica,
+        consensus: None,
+    };
+    let mut non_genesis_engine = fresh_engine("1");
+    let non_genesis = prepare_error(
+        &mut non_genesis_engine,
+        fixture::wave_of(
+            vec![(owner, create_op(0, non_genesis_seed))],
+            timestamp,
+            false,
+        ),
+    );
+    assert!(matches!(
+        non_genesis,
+        BatchError::WaveCreateNonGenesis { .. }
+    ));
+}
+
+#[test]
+fn create_requires_the_exact_canonical_h0_entity_envelope() {
+    let timestamp = 1_700_000_000_000;
+    let (seed, owner, _) = genesis_seed("1", "2");
+    let mut variants: Vec<(&str, AccountSeed)> = Vec::new();
+
+    let mut inactive = seed.clone();
+    replace_genesis_envelope_field(
+        &mut inactive,
+        "status",
+        CanonicalValue::String("inactive".to_string()),
+    );
+    variants.push(("inactive status", inactive));
+
+    let mut wrong_height = seed.clone();
+    replace_genesis_envelope_field(
+        &mut wrong_height,
+        "currentHeight",
+        CanonicalValue::Number(1.0),
+    );
+    variants.push(("nonzero height", wrong_height));
+
+    let mut wrong_proof = seed.clone();
+    let proof = CanonicalValue::Object(vec![
+        (
+            "fromEntity".to_string(),
+            CanonicalValue::String(wrong_proof.replica.owner().to_string()),
+        ),
+        (
+            "toEntity".to_string(),
+            CanonicalValue::String(wrong_proof.replica.counterparty().to_string()),
+        ),
+        ("nextProofNonce".to_string(), CanonicalValue::Number(0.0)),
+    ]);
+    replace_genesis_envelope_field(&mut wrong_proof, "proofHeader", proof);
+    variants.push(("nonce zero", wrong_proof));
+
+    let mut nonempty_withdrawals = seed.clone();
+    replace_genesis_envelope_field(
+        &mut nonempty_withdrawals,
+        "pendingWithdrawals",
+        CanonicalValue::String(format!("0x{}", "01".repeat(32))),
+    );
+    variants.push(("nonempty withdrawals", nonempty_withdrawals));
+
+    let mut nonempty_shadow = seed.clone();
+    replace_genesis_envelope_field(
+        &mut nonempty_shadow,
+        "shadow",
+        CanonicalValue::Object(vec![(
+            "rebalance".to_string(),
+            CanonicalValue::Object(vec![
+                (
+                    "policyRoot".to_string(),
+                    CanonicalValue::String(format!("0x{}", "00".repeat(32))),
+                ),
+                (
+                    "submittedAtByTokenRoot".to_string(),
+                    CanonicalValue::String(format!("0x{}", "02".repeat(32))),
+                ),
+            ]),
+        )]),
+    );
+    variants.push(("nonempty submitted-at shadow", nonempty_shadow));
+
+    let mut malformed_policy_root = seed.clone();
+    replace_genesis_envelope_field(
+        &mut malformed_policy_root,
+        "shadow",
+        CanonicalValue::Object(vec![(
+            "rebalance".to_string(),
+            CanonicalValue::Object(vec![
+                (
+                    "policyRoot".to_string(),
+                    CanonicalValue::String(format!("0x{}", "AB".repeat(32))),
+                ),
+                (
+                    "submittedAtByTokenRoot".to_string(),
+                    CanonicalValue::String(format!("0x{}", "00".repeat(32))),
+                ),
+            ]),
+        )]),
+    );
+    variants.push(("noncanonical policy root", malformed_policy_root));
+
+    let mut false_pin = seed.clone();
+    let mut false_pin_fields = false_pin.replica.envelope().fields().to_vec();
+    false_pin_fields.push(("publicPinned".to_string(), CanonicalValue::Bool(false)));
+    false_pin
+        .replica
+        .set_envelope(AccountEnvelope::new(false_pin_fields, Vec::new()).expect("false pin"));
+    variants.push(("false pin must be omitted", false_pin));
+
+    let mut extra = seed.clone();
+    let mut extra_fields = extra.replica.envelope().fields().to_vec();
+    extra_fields.push(("activeDispute".to_string(), CanonicalValue::Null));
+    extra
+        .replica
+        .set_envelope(AccountEnvelope::new(extra_fields, Vec::new()).expect("extra field"));
+    variants.push(("extra carried field", extra));
+
+    let mut duplicate = seed;
+    let mut duplicate_fields = duplicate.replica.envelope().fields().to_vec();
+    duplicate_fields.push((
+        "status".to_string(),
+        CanonicalValue::String("active".to_string()),
+    ));
+    duplicate.replica.set_envelope(
+        AccountEnvelope::new(duplicate_fields, Vec::new()).expect("duplicate field envelope"),
+    );
+    variants.push(("duplicate field", duplicate));
+
+    for (label, variant) in variants {
+        let mut engine = fresh_engine("1");
+        let error = prepare_error(
+            &mut engine,
+            fixture::wave_of(vec![(owner, create_op(0, variant))], timestamp, false),
+        );
+        assert!(
+            matches!(error, BatchError::WaveCreateEnvelope { .. }),
+            "{label}: {error:?}"
+        );
+        assert_eq!(engine.account_count(), 0, "{label}");
+    }
+}
+
+#[test]
+fn create_is_rebuilt_from_canonical_fields_and_must_be_used_before_seal() {
+    let timestamp = 1_700_000_000_000;
+    let (mut seed, owner, peer) = genesis_seed("1", "2");
+    let policy_root = format!("0x{}", "03".repeat(32));
+    let pinned_envelope = canonical_genesis_envelope_with_policy(&seed.replica, true, &policy_root);
+    seed.replica.set_envelope(pinned_envelope);
+    let expected_genesis_leaf = seed
+        .replica
+        .entity_account_leaf()
+        .expect("TS H=0 leaf shape");
+    let mut engine = fresh_engine("1");
+    let prepared = engine
+        .prepare_wave(fixture::wave_of(
+            vec![(owner, create_op(0, seed))],
+            timestamp,
+            false,
+        ))
+        .expect("staged create");
+    assert_eq!(
+        engine
+            .account(&AccountId::from_bytes(peer))
+            .expect("created account")
+            .entity_account_leaf()
+            .expect("Rust H=0 leaf"),
+        expected_genesis_leaf,
+        "sanitized reconstruction preserves the canonical Entity leaf"
+    );
+    let unused = match engine.seal_wave() {
+        Ok(_) => panic!("bare Create cannot seal"),
+        Err(error) => error,
+    };
+    assert!(matches!(unused, BatchError::WaveCreateUnused(_)));
+
+    let empty = engine
+        .apply_wave_ops(WaveOpsRequest {
+            entities: vec![EntityWaveOps {
+                owner_entity_id: owner,
+                ops: vec![WaveOp::Admit {
+                    operation_index: 1,
+                    account_id: AccountId::from_bytes(peer),
+                    txs: Vec::new(),
+                }],
+            }],
+        })
+        .expect("empty admission is a typed no-op");
+    assert!(matches!(
+        empty.admissions[0].verdict,
+        AccountAdmissionVerdict::Admitted { count: 0 }
+    ));
+    assert!(matches!(
+        engine.seal_wave(),
+        Err(BatchError::WaveCreateUnused(_))
+    ));
+
+    let rejected = engine
+        .apply_wave_ops(WaveOpsRequest {
+            entities: vec![EntityWaveOps {
+                owner_entity_id: owner,
+                ops: vec![WaveOp::Admit {
+                    operation_index: 2,
+                    account_id: AccountId::from_bytes(peer),
+                    txs: vec![AccountTx::RebalancePolicy {
+                        token_id: 1,
+                        policy_version: 1,
+                        base_fee: 0.into(),
+                        liquidity_fee_bps: 0.into(),
+                        gas_fee: 0.into(),
+                    }],
+                }],
+            }],
+        })
+        .expect("unsupported frame tx is a typed rejection");
+    assert!(matches!(
+        rejected.admissions[0].verdict,
+        AccountAdmissionVerdict::Rejected { .. }
+    ));
+    assert!(matches!(
+        engine.seal_wave(),
+        Err(BatchError::WaveCreateUnused(_))
+    ));
+
+    let applied = engine
+        .apply_wave_ops(WaveOpsRequest {
+            entities: vec![EntityWaveOps {
+                owner_entity_id: owner,
+                ops: vec![WaveOp::Admit {
+                    operation_index: 3,
+                    account_id: AccountId::from_bytes(peer),
+                    txs: vec![AccountTx::AddDelta {
+                        token_id: TokenId::new(1).expect("token"),
+                    }],
+                }],
+            }],
+        })
+        .expect("first real account operation");
+    assert_eq!(applied.admissions.len(), 1);
+    let raw_fields = engine
+        .account(&AccountId::from_bytes(peer))
+        .expect("created account")
+        .replica()
+        .envelope()
+        .fields();
+    assert_eq!(
+        raw_fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["status", "publicPinned", "pendingWithdrawals", "shadow"],
+        "derived H=0 fields are rebuilt by AccountConsensus, never carried"
+    );
+    let sealed = engine.seal_wave().expect("used Create can seal");
+    engine.commit_wave(sealed.candidate_id).expect("commit");
+    assert_ne!(sealed.revision, prepared.revision);
 }

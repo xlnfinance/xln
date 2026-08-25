@@ -153,7 +153,11 @@ impl AccountConsensus {
             counterparty_frame_hanko_digest: None,
             last_outbound_ack: None,
             dispute: None,
-            next_proof_nonce: 0,
+            // TypeScript's canonical H=0 Account genesis starts at nonce 1.
+            // Nonce 0 is not a usable proof nonce: proposal/ACK construction
+            // already clamps against jNonce + 1, but the Entity account leaf
+            // commits this value before the first proposal too.
+            next_proof_nonce: 1,
             counterparty_dispute: None,
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,
@@ -486,6 +490,10 @@ impl AccountConsensus {
 
     pub const fn dispute(&self) -> Option<&DisputeDraft> {
         self.dispute.as_ref()
+    }
+
+    pub const fn counterparty_dispute(&self) -> Option<&CounterpartyDispute> {
+        self.counterparty_dispute.as_ref()
     }
 
     pub const fn next_proof_nonce(&self) -> u64 {
@@ -823,6 +831,14 @@ impl AccountConsensus {
         Ok(self.projected_envelope()?.fields().to_vec())
     }
 
+    /// Exact shell stored beside a checkpoint. The raw replica envelope is
+    /// only the seed/carried subset; mempool and consensus-owned fields must
+    /// be projected from the live candidate or RestoreExact cannot reproduce
+    /// the Entity leaf that this same Account reports.
+    pub fn checkpoint_envelope(&self) -> Result<AccountEnvelope, StateError> {
+        self.projected_envelope()
+    }
+
     fn projected_envelope(&self) -> Result<AccountEnvelope, StateError> {
         let mut mempool = Vec::with_capacity(self.mempool.len());
         for tx in &self.mempool {
@@ -844,12 +860,18 @@ impl AccountConsensus {
             "rollbackCount".to_string(),
             CanonicalValue::Number(self.rollback_count as f64),
         ));
-        if let Some(current) = &self.current {
-            fields.push((
-                "currentFrameHash".to_string(),
-                CanonicalValue::String(hex_prefixed(&current.state_hash)),
-            ));
-        }
+        // The TypeScript AccountReplica always has an H=0 currentFrame whose
+        // stateHash is the empty string. Absence here would make a freshly
+        // created Rust Account occupy a different Entity leaf before its first
+        // proposal, even though both sides agree that no signed frame exists.
+        fields.push((
+            "currentFrameHash".to_string(),
+            CanonicalValue::String(
+                self.current
+                    .as_ref()
+                    .map_or_else(String::new, |current| hex_prefixed(&current.state_hash)),
+            ),
+        ));
         if let Some(pending) = &self.pending {
             fields.push((
                 "pendingFrameHash".to_string(),

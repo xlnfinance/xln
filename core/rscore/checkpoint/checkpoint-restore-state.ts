@@ -1,12 +1,12 @@
-import { canonicalAccountDisputeConfig } from '../account/config/dispute-config';
-import { assertAccountJClaimAccumulatorState } from '../account/j-claims/j-claim-accumulator';
-import { PersistentAccountStateMap } from '../account/state/persistent-state-map';
-import { validateDelta } from '../account/validation/delta-validation';
-import { LIMITS } from '../config/constants';
-import type { AccountLendingIntentKind, AccountStateDomain, Delta, HtlcLock, SwapOffer } from '../types/account';
-import type { AccountJClaimAccumulatorState } from '../types/finance/account-j-claims';
-import type { BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot } from '../types/finance/rebalance';
-import { decodeRscoreCanonicalValue } from './canonical-wire';
+import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
+import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-claim-accumulator';
+import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
+import { validateDelta } from '../../account/validation/delta-validation';
+import { LIMITS } from '../../config/constants';
+import type { AccountLendingIntentKind, AccountStateDomain, Delta, HtlcLock, SwapOffer } from '../../types/account';
+import type { AccountJClaimAccumulatorState } from '../../types/finance/account-j-claims';
+import type { BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot } from '../../types/finance/rebalance';
+import { decodeRscoreCanonicalValue } from '../canonical-wire';
 import { rscoreCheckpointList, rscoreCheckpointTuple } from './checkpoint-wire';
 import {
   checkpointBigInt,
@@ -20,7 +20,7 @@ import {
   checkpointUint64,
 } from './checkpoint-restore-read';
 
-export type RscoreCarriedAccountRoots = Readonly<{
+type RscoreCarriedAccountRoots = Readonly<{
   pullsRoot: string;
   subcontractsRoot: string;
   requestedRebalanceRoot: string;
@@ -29,7 +29,7 @@ export type RscoreCarriedAccountRoots = Readonly<{
   rightPendingJClaims: AccountJClaimAccumulatorState;
 }>;
 
-export type RscoreAccountEnvelope = Readonly<{
+type RscoreAccountEnvelope = Readonly<{
   fields: Readonly<Record<string, unknown>>;
   canonicalMempool: readonly unknown[];
 }>;
@@ -145,9 +145,14 @@ const LENDING_KINDS = [
 
 const decodeLending = (value: unknown, index: number): readonly [string, AccountLendingIntentKind] => {
   const row = rscoreCheckpointTuple(value, 2, `RESTORE_LENDING_${index}`);
-  const kind = LENDING_KINDS[checkpointSafeInt(row[1], `LENDING_${index}_KIND`)];
-  if (kind === undefined) return checkpointRestoreFail(`LENDING_${index}_KIND`);
+  const kind = decodeLendingKind(row[1], index);
   return [checkpointText(row[0], `LENDING_${index}_KEY`), kind];
+};
+
+const decodeLendingKind = (value: unknown, index: number): AccountLendingIntentKind => {
+  const kind = LENDING_KINDS[checkpointSafeInt(value, `LENDING_${index}_KIND`)];
+  if (kind === undefined) return checkpointRestoreFail(`LENDING_${index}_KIND`);
+  return kind;
 };
 
 const decodeOffer = (value: unknown, index: number): SwapOffer => {
@@ -206,14 +211,72 @@ const decodePolicySnapshot = (value: unknown, field: string): RebalanceFeePolicy
 
 const decodePolicy = (value: unknown, index: number): readonly [number, BilateralRebalanceFeePolicy] => {
   const row = rscoreCheckpointTuple(value, 2, `RESTORE_POLICY_${index}`);
-  const sides = rscoreCheckpointTuple(row[1], 2, `RESTORE_POLICY_${index}_SIDES`);
+  return [
+    checkpointTokenId(row[0], `POLICY_${index}_TOKEN_ID`),
+    decodePolicyValue(row[1], index),
+  ];
+};
+
+const decodePolicyValue = (value: unknown, index: number): BilateralRebalanceFeePolicy => {
+  const sides = rscoreCheckpointTuple(value, 2, `RESTORE_POLICY_${index}_SIDES`);
   const left = decodePolicySnapshot(sides[0], `POLICY_${index}_LEFT`);
   const right = decodePolicySnapshot(sides[1], `POLICY_${index}_RIGHT`);
   if (left === undefined && right === undefined) return checkpointRestoreFail(`POLICY_${index}_EMPTY`);
-  return [
-    checkpointTokenId(row[0], `POLICY_${index}_TOKEN_ID`),
-    { ...(left ? { left } : {}), ...(right ? { right } : {}) },
-  ];
+  return { ...(left ? { left } : {}), ...(right ? { right } : {}) };
+};
+
+export type RscoreCheckpointSectionName =
+  | 'deltas'
+  | 'locks'
+  | 'lendingIntents'
+  | 'swapOffers'
+  | 'rebalanceFeePolicies';
+
+const checkpointTextKey = (keyBytes: Uint8Array, field: string): string => {
+  const bytes = Buffer.from(keyBytes);
+  if (bytes.byteLength < 2 || bytes.readUInt16BE(0) !== bytes.byteLength - 2) {
+    return checkpointRestoreFail(`${field}_TEXT_KEY`);
+  }
+  const value = bytes.subarray(2).toString('utf8');
+  if (!Buffer.from(value, 'utf8').equals(bytes.subarray(2))) {
+    return checkpointRestoreFail(`${field}_TEXT_KEY_UTF8`);
+  }
+  return value;
+};
+
+const checkpointTokenKey = (keyBytes: Uint8Array, field: string): number => {
+  const bytes = Buffer.from(keyBytes);
+  if (bytes.byteLength !== 32 || bytes.subarray(0, 30).some(byte => byte !== 0)) {
+    return checkpointRestoreFail(`${field}_TOKEN_KEY`);
+  }
+  return checkpointTokenId(bytes.readUInt16BE(30), field);
+};
+
+/** Decode one typed leaf without trusting the persisted raw radix key. */
+export const decodeRscoreCheckpointSectionEntry = (
+  section: RscoreCheckpointSectionName,
+  keyBytes: Uint8Array,
+  value: unknown,
+  index: number,
+): readonly [number | string, unknown] => {
+  switch (section) {
+    case 'deltas': {
+      const delta = decodeRscoreCheckpointDelta(value, index);
+      return [delta.tokenId, delta];
+    }
+    case 'locks': {
+      const lock = decodeLock(value, index);
+      return [lock.lockId, lock];
+    }
+    case 'lendingIntents':
+      return [checkpointTextKey(keyBytes, `LENDING_${index}`), decodeLendingKind(value, index)];
+    case 'swapOffers': {
+      const offer = decodeOffer(value, index);
+      return [offer.offerId, offer];
+    }
+    case 'rebalanceFeePolicies':
+      return [checkpointTokenKey(keyBytes, `POLICY_${index}`), decodePolicyValue(value, index)];
+  }
 };
 
 export const decodeRscoreAccountStateSeed = (

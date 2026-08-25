@@ -12,6 +12,8 @@ pub enum ProcessError {
     Htlc(#[from] xln_rscore_engine::HtlcBoundaryError),
     #[error("RSCORE_PROCESS_IO:{0}")]
     Io(#[from] std::io::Error),
+    #[error("RSCORE_PROCESS_ENTROPY:{0}")]
+    Entropy(String),
     #[error("RSCORE_PROCESS_ENVELOPE:{0}")]
     Envelope(String),
     #[error("RSCORE_PROCESS_EXPECTED:{0}")]
@@ -63,12 +65,16 @@ pub enum ProcessError {
     EngineAlreadyLoaded,
     #[error("RSCORE_PROCESS_ENGINE_NOT_LOADED")]
     EngineNotLoaded,
+    #[error("RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID:revision={revision}:accounts={accounts}")]
+    AuthorityBootstrapInvalid { revision: u64, accounts: usize },
+    #[error("RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN")]
+    AuthorityUpsertForbidden,
     #[error("RSCORE_PROCESS_PREPARE_PENDING")]
     PreparePending,
     #[error("RSCORE_PROCESS_PREPARE_NOT_PENDING")]
     PrepareNotPending,
-    #[error("RSCORE_PROCESS_PREPARE_ID_MISMATCH")]
-    PrepareIdMismatch,
+    #[error("RSCORE_PROCESS_CANDIDATE_TOKEN_MISMATCH")]
+    CandidateTokenMismatch,
     #[error("RSCORE_PROCESS_CHECKPOINT_PENDING")]
     CheckpointPending,
     #[error("RSCORE_PROCESS_CHECKPOINT_NOT_PENDING")]
@@ -93,6 +99,7 @@ impl ProcessError {
             Self::State(_) => "RSCORE_PROCESS_STATE",
             Self::Htlc(_) => "RSCORE_PROCESS_HTLC",
             Self::Io(_) => "RSCORE_PROCESS_IO",
+            Self::Entropy(_) => "RSCORE_PROCESS_ENTROPY",
             Self::Envelope(_) => "RSCORE_PROCESS_ENVELOPE",
             Self::Expected(_) => "RSCORE_PROCESS_EXPECTED",
             Self::Arity { .. } => "RSCORE_PROCESS_ARITY",
@@ -115,9 +122,11 @@ impl ProcessError {
             Self::RequestIdOverflow => "RSCORE_PROCESS_REQUEST_ID_OVERFLOW",
             Self::EngineAlreadyLoaded => "RSCORE_PROCESS_ENGINE_ALREADY_LOADED",
             Self::EngineNotLoaded => "RSCORE_PROCESS_ENGINE_NOT_LOADED",
+            Self::AuthorityBootstrapInvalid { .. } => "RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID",
+            Self::AuthorityUpsertForbidden => "RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN",
             Self::PreparePending => "RSCORE_PROCESS_PREPARE_PENDING",
             Self::PrepareNotPending => "RSCORE_PROCESS_PREPARE_NOT_PENDING",
-            Self::PrepareIdMismatch => "RSCORE_PROCESS_PREPARE_ID_MISMATCH",
+            Self::CandidateTokenMismatch => "RSCORE_PROCESS_CANDIDATE_TOKEN_MISMATCH",
             Self::CheckpointPending => "RSCORE_PROCESS_CHECKPOINT_PENDING",
             Self::CheckpointNotPending => "RSCORE_PROCESS_CHECKPOINT_NOT_PENDING",
             Self::Stopped => "RSCORE_PROCESS_STOPPED",
@@ -152,17 +161,29 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::CandidateFingerprint { .. } => "RSCORE_BATCH_CANDIDATE_FINGERPRINT",
         BatchError::StaleCandidate { .. } => "RSCORE_BATCH_CANDIDATE_STALE",
         BatchError::RevisionOverflow => "RSCORE_BATCH_REVISION_OVERFLOW",
+        BatchError::CandidateAttemptOverflow => "RSCORE_BATCH_CANDIDATE_ATTEMPT_OVERFLOW",
         BatchError::InputSignatureInvalid { .. } => "RSCORE_BATCH_INPUT_SIGNATURE_INVALID",
         BatchError::WaveEntityDuplicate { .. } => "RSCORE_BATCH_WAVE_ENTITY_DUPLICATE",
         BatchError::WaveEntityUnknown { .. } => "RSCORE_BATCH_WAVE_ENTITY_UNKNOWN",
         BatchError::WaveEntityNotProposer { .. } => "RSCORE_BATCH_WAVE_ENTITY_NOT_PROPOSER",
         BatchError::WaveProposalOrder { .. } => "RSCORE_BATCH_WAVE_PROPOSAL_ORDER",
         BatchError::WaveAccountOwner { .. } => "RSCORE_BATCH_WAVE_ACCOUNT_OWNER",
+        BatchError::WaveCreateExisting(_) => "RSCORE_BATCH_WAVE_CREATE_EXISTING",
+        BatchError::WaveCreateDuplicate(_) => "RSCORE_BATCH_WAVE_CREATE_DUPLICATE",
+        BatchError::WaveCreateAfterUse(_) => "RSCORE_BATCH_WAVE_CREATE_AFTER_USE",
+        BatchError::WaveCreateCounterparty { .. } => "RSCORE_BATCH_WAVE_CREATE_COUNTERPARTY",
+        BatchError::WaveCreateConsensus(_) => "RSCORE_BATCH_WAVE_CREATE_CONSENSUS",
+        BatchError::WaveCreateMempool { .. } => "RSCORE_BATCH_WAVE_CREATE_MEMPOOL",
+        BatchError::WaveCreateTransformer(_) => "RSCORE_BATCH_WAVE_CREATE_TRANSFORMER",
+        BatchError::WaveCreateEnvelope { .. } => "RSCORE_BATCH_WAVE_CREATE_ENVELOPE",
+        BatchError::WaveCreateNonGenesis { .. } => "RSCORE_BATCH_WAVE_CREATE_NON_GENESIS",
+        BatchError::WaveCreateUnused(_) => "RSCORE_BATCH_WAVE_CREATE_UNUSED",
         BatchError::WavePending => "RSCORE_BATCH_WAVE_PENDING",
         BatchError::WaveMissing => "RSCORE_BATCH_WAVE_MISSING",
         BatchError::WaveOpen => "RSCORE_BATCH_WAVE_OPEN",
         BatchError::WaveSealed => "RSCORE_BATCH_WAVE_SEALED",
         BatchError::WaveRevision { .. } => "RSCORE_BATCH_WAVE_REVISION",
+        BatchError::WaveCandidate { .. } => "RSCORE_BATCH_WAVE_CANDIDATE",
         BatchError::CheckpointRevision { .. } => "RSCORE_BATCH_CHECKPOINT_REVISION",
         BatchError::CheckpointAccountKey { .. } => "RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY",
         BatchError::CheckpointIncomplete { .. } => "RSCORE_BATCH_CHECKPOINT_INCOMPLETE",

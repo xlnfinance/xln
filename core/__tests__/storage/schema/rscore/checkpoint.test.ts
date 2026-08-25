@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { RscoreCheckpointChanges } from '../../../../rscore/checkpoint-wire';
+import type { RscoreCheckpointChanges } from '../../../../rscore/checkpoint/checkpoint-wire';
 import type { RscoreWireValue } from '../../../../rscore/client';
 import { MAX_PHYSICAL_STORAGE_VALUE_BYTES } from '../../../../storage/codec/bounded-value';
 import { keyRscoreAccountNodePrefix } from '../../../../storage/keys';

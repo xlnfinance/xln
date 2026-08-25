@@ -8,7 +8,8 @@ use xln_rscore_protocol::PersistentRadixMap;
 use crate::execution::{AccountExecution, AccountWork, execute_account_caught, supported, tx_tag};
 use crate::types::ReplicaFingerprint;
 use crate::{
-    AccountId, AccountSeed, BatchError, BatchJob, BatchResponse, EngineGeneration, PreparedBatch,
+    AccountId, AccountSeed, BatchError, BatchJob, BatchResponse, CandidateId, EngineGeneration,
+    PreparedBatch,
 };
 
 pub const MAX_BATCH_WORKERS: usize = 256;
@@ -17,6 +18,7 @@ const MAX_BATCH_JOBS: usize = 1_000_000;
 pub struct StatefulBatchEngine {
     engine_generation: EngineGeneration,
     revision: u64,
+    candidate_attempt: u64,
     pool: ThreadPool,
     // The one canonical account store: a radix-16 Patricia tree keyed by the
     // 32-byte account id, replicas living in the leaves, leaf digest = the
@@ -64,6 +66,7 @@ impl StatefulBatchEngine {
         Ok(Self {
             engine_generation,
             revision,
+            candidate_attempt: 0,
             pool,
             accounts,
         })
@@ -185,7 +188,7 @@ impl StatefulBatchEngine {
             .skip_while(move |(account_id, _)| cursor.is_some_and(|cursor| *account_id <= cursor))
     }
 
-    pub fn prepare(&self, jobs: &[BatchJob]) -> Result<PreparedBatch, BatchError> {
+    pub fn prepare(&mut self, jobs: &[BatchJob]) -> Result<PreparedBatch, BatchError> {
         self.validate_jobs(jobs)?;
         let next_revision = self
             .revision
@@ -198,7 +201,19 @@ impl StatefulBatchEngine {
                 .collect::<Vec<_>>()
         });
         let completed = collect_executions(attempted)?;
+        let attempt = self
+            .candidate_attempt
+            .checked_add(1)
+            .ok_or(BatchError::CandidateAttemptOverflow)?;
+        let candidate_id = CandidateId::derive(
+            self.engine_generation,
+            attempt,
+            self.revision,
+            self.accounts.root_hash(),
+        );
+        self.candidate_attempt = attempt;
         Ok(build_prepared(
+            candidate_id,
             self.engine_generation,
             self.revision,
             next_revision,
@@ -381,6 +396,7 @@ fn collect_executions(
 }
 
 fn build_prepared(
+    candidate_id: CandidateId,
     engine_generation: EngineGeneration,
     base_revision: u64,
     next_revision: u64,
@@ -399,6 +415,7 @@ fn build_prepared(
     results.sort_unstable_by_key(|result| result.input_index);
     outputs.sort_unstable_by_key(|output| (output.input_index, output.output_index));
     PreparedBatch {
+        candidate_id,
         engine_generation,
         base_revision,
         next_revision,

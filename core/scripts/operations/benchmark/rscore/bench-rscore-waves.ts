@@ -152,7 +152,8 @@ const main = async (): Promise<void> => {
   for (let wave = 0; wave < waves; wave += 1) {
     const jobs = Array.from({ length: txsPerWave }, (_, index) =>
       directPayment(index, (wave * 7 + index) % accounts, 5n, (wave + index) % 2 === 0));
-    const prepared = (await client.prepare(jobs)) as unknown[];
+    const { candidate, token } = await client.prepareCandidate(jobs);
+    const prepared = candidate as unknown[];
     const results = prepared[2] as unknown[];
     if (wave === 0 && Array.isArray(results[0])) {
       const verdict = (results[0] as unknown[])[2];
@@ -164,7 +165,7 @@ const main = async (): Promise<void> => {
     }
     engineUs += Number(prepared[5]);
     const commitStarted = performance.now();
-    await client.commit(client.requestIdBytes(client.lastRequestId));
+    await client.commit(token);
     commitMs += performance.now() - commitStarted;
   }
   const elapsedMs = performance.now() - started;

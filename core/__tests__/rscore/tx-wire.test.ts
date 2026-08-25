@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { packWireValue, unpackWireValue } from '../../rscore/client';
 import { accountTxWire } from '../../rscore/shadow-wire';
-import { decodeAccountTx } from '../../rscore/wave-decode';
+import { decodeRscoreAccountTx } from '../../rscore/wave-decode';
 import type { AccountTx } from '../../types/account';
 
 /**
@@ -83,7 +83,7 @@ describe('account transaction wire', () => {
   test('TypeScript reads back the transaction it wrote', () => {
     const byName = new Map(TX_WIRE_CASES.map(row => [row.name, row.tx]));
     for (const { name, bytes } of vectors()) {
-      const decoded = decodeAccountTx(unpackWireValue(Buffer.from(bytes, 'hex')));
+      const decoded = decodeRscoreAccountTx(unpackWireValue(Buffer.from(bytes, 'hex')));
       // Structural equality, not a rendered string: stringifying compared
       // arrays and nested objects by their `String()` form, where two
       // different routes and two different envelopes can read the same.

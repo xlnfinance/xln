@@ -141,6 +141,12 @@ export const waveAdmitOp = (
 
 export const waveInputOp = (row: RscoreWireValue): RscoreWireValue => [1, row];
 
+/** Create a financially empty Account inside the abortable Rust candidate. */
+export const waveCreateOp = (
+  operationIndex: number,
+  seed: RscoreWireValue,
+): RscoreWireValue => [2, operationIndex, seed];
+
 export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue => {
   const projected = projectEntityAccountLeaf(account);
   for (const field of ENGINE_DERIVED_LEAF_FIELDS) {

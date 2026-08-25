@@ -38,6 +38,7 @@ pub fn loaded(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
 pub fn prepared(
     candidate: &PreparedBatch,
     engine_micros: u64,
+    candidate_token: &[u8; 32],
 ) -> Result<BodyTuple, crate::ProcessError> {
     let roots = candidate.payment_profile_roots()?;
     Ok(body(vec![
@@ -57,6 +58,9 @@ pub fn prepared(
                 .collect(),
         ),
         integer(engine_micros),
+        // Ephemeral process capability. It is outside every financial digest
+        // and is stripped by the client before exposing the prepared result.
+        AbiValue::Bytes(candidate_token.to_vec()),
     ]))
 }
 
@@ -317,6 +321,25 @@ pub fn wave(
     result: &xln_rscore_batch::WaveResult,
     engine_micros: u64,
 ) -> Result<BodyTuple, crate::ProcessError> {
+    Ok(body(wave_fields(result, engine_micros)?))
+}
+
+/// The first staged reply also carries the opaque capability that names this
+/// candidate. Later replies remain the canonical nine-field Wave value.
+pub fn prepared_wave(
+    result: &xln_rscore_batch::WaveResult,
+    engine_micros: u64,
+    candidate_token: &[u8; 32],
+) -> Result<BodyTuple, crate::ProcessError> {
+    let mut fields = wave_fields(result, engine_micros)?;
+    fields.push(AbiValue::Bytes(candidate_token.to_vec()));
+    Ok(body(fields))
+}
+
+fn wave_fields(
+    result: &xln_rscore_batch::WaveResult,
+    engine_micros: u64,
+) -> Result<Vec<AbiValue>, crate::ProcessError> {
     let mut proposals = Vec::with_capacity(result.proposals.len());
     for row in &result.proposals {
         proposals.push(proposal(row)?);
@@ -350,7 +373,7 @@ pub fn wave(
         &admissions,
         &proposals,
     )?;
-    Ok(body(vec![
+    Ok(vec![
         integer(result.revision),
         AbiValue::Bytes(result.accounts_root.to_vec()),
         applied,
@@ -364,7 +387,7 @@ pub fn wave(
         // it is a measurement of this run, not part of what the two engines
         // must agree on.
         integer(engine_micros),
-    ]))
+    ])
 }
 
 /// The whole wave in one hash: the accounts root, the leaves it moved, the

@@ -3,7 +3,7 @@ import type { Level } from 'level';
 import type { RuntimeReplica } from '../runtime/types';
 import type { PersistedFrameJournal } from './types';
 import type { StorageDbRole } from './runtime-dbs';
-import type { RscoreExactCheckpoint } from '../rscore/checkpoint-wire';
+import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
 
 type RuntimeModule = typeof import('../runtime');
 

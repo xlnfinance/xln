@@ -21,7 +21,7 @@ fn engine(workers: usize) -> StatefulBatchEngine {
 
 #[test]
 fn restore_starts_at_committed_revision_and_prepares_the_next_revision() {
-    let restored = StatefulBatchEngine::restore(generation(), 2, 41, vec![seed(0)])
+    let mut restored = StatefulBatchEngine::restore(generation(), 2, 41, vec![seed(0)])
         .expect("restored batch engine");
     assert_eq!(restored.revision(), 41);
     let prepared = restored
@@ -114,7 +114,8 @@ fn prepare_is_private_until_commit_and_stale_candidates_do_not_publish() {
 #[test]
 fn commit_rejects_different_payment_base_before_any_update() {
     let source_seeds = vec![seed(0), seed(1)];
-    let source = StatefulBatchEngine::new(generation(), 2, source_seeds).expect("source engine");
+    let mut source =
+        StatefulBatchEngine::new(generation(), 2, source_seeds).expect("source engine");
     let prepared = source
         .prepare(&[direct_job(0, 0, 5), direct_job(1, 1, 7)])
         .expect("source prepare");
@@ -135,7 +136,8 @@ fn commit_rejects_different_payment_base_before_any_update() {
 
 #[test]
 fn commit_rejects_different_replica_identity() {
-    let source = StatefulBatchEngine::new(generation(), 1, vec![seed(0)]).expect("source engine");
+    let mut source =
+        StatefulBatchEngine::new(generation(), 1, vec![seed(0)]).expect("source engine");
     let prepared = source
         .prepare(&[direct_job(0, 0, 5)])
         .expect("source prepare");
@@ -158,7 +160,7 @@ fn commit_rejects_different_replica_identity() {
 
 #[test]
 fn commit_rejects_same_maps_with_different_dispute_config() {
-    let source =
+    let mut source =
         StatefulBatchEngine::new(generation(), 1, vec![seed_with_dispute_config(0, 10, 10)])
             .expect("source engine");
     let prepared = source
@@ -200,7 +202,7 @@ fn protocol_rejection_is_indexed_and_later_same_account_job_applies() {
 
 #[test]
 fn unsupported_or_malformed_batches_fail_before_any_candidate_publish() {
-    let engine = engine(2);
+    let mut engine = engine(2);
     let base = delta_root(&engine, 0);
     let mut unsupported = direct_job(1, 0, 1);
     // A tx the engine models but cannot execute yet — add_delta and
@@ -215,7 +217,7 @@ fn unsupported_or_malformed_batches_fail_before_any_candidate_publish() {
     };
     let jobs = [direct_job(0, 0, 1), unsupported];
     assert_eq!(
-        prepare_error(&engine, &jobs),
+        prepare_error(&mut engine, &jobs),
         BatchError::UnsupportedTx {
             input_index: 1,
             tag: "reserve_to_collateral"
@@ -226,7 +228,7 @@ fn unsupported_or_malformed_batches_fail_before_any_candidate_publish() {
 
     let out_of_order = [direct_job(1, 0, 1)];
     assert_eq!(
-        prepare_error(&engine, &out_of_order),
+        prepare_error(&mut engine, &out_of_order),
         BatchError::InputIndex {
             actual: 1,
             expected: 0
@@ -237,7 +239,7 @@ fn unsupported_or_malformed_batches_fail_before_any_candidate_publish() {
         ..direct_job(0, 0, 1)
     }];
     assert_eq!(
-        prepare_error(&engine, &missing),
+        prepare_error(&mut engine, &missing),
         BatchError::AccountNotFound {
             input_index: 0,
             account_id: account_id(999),
@@ -249,7 +251,7 @@ fn unsupported_or_malformed_batches_fail_before_any_candidate_publish() {
 #[test]
 fn parallel_infrastructure_failure_discards_every_account_candidate() {
     let seeds = vec![seed(0), full_seed(1)];
-    let engine = StatefulBatchEngine::new(generation(), 2, seeds).expect("batch engine");
+    let mut engine = StatefulBatchEngine::new(generation(), 2, seeds).expect("batch engine");
     let first_root = delta_root(&engine, 0);
     let second_root = delta_root(&engine, 1);
     let valid = direct_job(0, 0, 5);
@@ -258,7 +260,7 @@ fn parallel_infrastructure_failure_discards_every_account_candidate() {
         panic!("direct-payment fixture changed")
     };
     *token_id = token(128);
-    let error = prepare_error(&engine, &[valid, fatal]);
+    let error = prepare_error(&mut engine, &[valid, fatal]);
     assert!(matches!(
         error,
         BatchError::Transition {
@@ -318,7 +320,10 @@ fn same_account_htlc_lock_and_secret_resolve_are_sequential() {
     );
 }
 
-fn prepare_error(engine: &StatefulBatchEngine, jobs: &[xln_rscore_batch::BatchJob]) -> BatchError {
+fn prepare_error(
+    engine: &mut StatefulBatchEngine,
+    jobs: &[xln_rscore_batch::BatchJob],
+) -> BatchError {
     match engine.prepare(jobs) {
         Ok(_) => panic!("expected batch preparation error"),
         Err(error) => error,

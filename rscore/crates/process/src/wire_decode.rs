@@ -38,7 +38,7 @@ pub enum Command {
         accounts: Vec<AccountSeed>,
     },
     GetCheckpointChanges {
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     },
     CommitCheckpoint {
         token: xln_rscore_batch::CheckpointToken,
@@ -51,10 +51,10 @@ pub enum Command {
         jobs: Vec<BatchJob>,
     },
     Commit {
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     },
     Abort {
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     },
     Shutdown,
     ReadCapacityBatch {
@@ -82,15 +82,15 @@ pub enum Command {
         request: Box<xln_rscore_batch::WaveRequest>,
     },
     ApplyAccountWave {
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
         request: Box<xln_rscore_batch::WaveOpsRequest>,
     },
     ProposeAccountWave {
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
         request: Box<xln_rscore_batch::WaveProposalRequest>,
     },
     SealAccountWave {
-        prepare_request_id: [u8; 8],
+        candidate_token: [u8; 32],
     },
 }
 
@@ -215,7 +215,7 @@ fn decode_read_envelope(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 fn decode_get_checkpoint_changes(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 1, "getCheckpointChanges")?;
     Ok(Command::GetCheckpointChanges {
-        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
     })
 }
 
@@ -341,6 +341,13 @@ fn decode_wave_op(value: &AbiValue) -> Result<xln_rscore_batch::WaveOp, ProcessE
                 &fields[1],
             )?))
         }
+        2 => {
+            let fields = exact(fields, 3, "waveCreate")?;
+            Ok(xln_rscore_batch::WaveOp::Create {
+                operation_index: js_number(&fields[1], "operationIndex")?,
+                seed: Box::new(decode_seed_account(&fields[2])?),
+            })
+        }
         value => Err(ProcessError::Tag {
             field: "waveOp",
             value,
@@ -365,7 +372,7 @@ fn decode_apply_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
         return Err(ProcessError::Expected("waveEntityRows"));
     }
     Ok(Command::ApplyAccountWave {
-        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
         request: Box::new(xln_rscore_batch::WaveOpsRequest {
             entities: entities
                 .iter()
@@ -396,7 +403,7 @@ fn decode_propose_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
         return Err(ProcessError::Expected("waveEntityRows"));
     }
     Ok(Command::ProposeAccountWave {
-        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
         request: Box::new(xln_rscore_batch::WaveProposalRequest {
             entities: entities
                 .iter()
@@ -420,7 +427,7 @@ fn decode_propose_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 fn decode_seal_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 1, "sealWave")?;
     Ok(Command::SealAccountWave {
-        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
     })
 }
 
@@ -467,14 +474,14 @@ fn decode_input_kind(value: &AbiValue) -> Result<xln_rscore_batch::AccountInputK
 fn decode_commit(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 1, "commit")?;
     Ok(Command::Commit {
-        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
     })
 }
 
 fn decode_abort(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let fields = exact(fields, 1, "abort")?;
     Ok(Command::Abort {
-        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
     })
 }
 
@@ -526,7 +533,7 @@ fn decode_summary_page(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
+pub(crate) fn decode_seed_account(value: &AbiValue) -> Result<AccountSeed, ProcessError> {
     let fields = exact(tuple(value)?, 15, "accountSeed")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let owner = entity(&fields[1], "owner")?;

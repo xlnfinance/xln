@@ -1,7 +1,7 @@
-import { computeFrameHash, getAccountFrameStructuralError } from '../account/consensus/frame/hash';
-import { assertAccountMempoolWithinLimit } from '../account/input/mempool';
-import type { AccountFrame, AccountTx } from '../types/account';
-import { decodeAccountTx } from './wave-decode';
+import { computeFrameHash, getAccountFrameStructuralError } from '../../account/consensus/frame/hash';
+import { assertAccountMempoolWithinLimit } from '../../account/input/mempool';
+import type { AccountFrame, AccountTx } from '../../types/account';
+import { decodeRscoreAccountTx } from '../account-tx-wire-decode';
 import { rscoreCheckpointList, rscoreCheckpointTuple } from './checkpoint-wire';
 import {
   checkpointBool,
@@ -36,7 +36,7 @@ export type RscorePendingFrame = Readonly<{
   proposalDispute?: RscoreDisputeDraft;
 }>;
 
-export type RscoreCounterpartyDispute = Readonly<{
+type RscoreCounterpartyDispute = Readonly<{
   hanko: string;
   proofBodyHash: string;
   nonce: number;
@@ -64,7 +64,7 @@ const decodeFrame = (value: unknown, stateHashValue: unknown, field: string): Ac
     height: checkpointSafeInt(row[0], `${field}_HEIGHT`),
     timestamp: checkpointSafeInt(row[1], `${field}_TIMESTAMP`),
     jHeight: checkpointSafeInt(row[2], `${field}_J_HEIGHT`),
-    accountTxs: rscoreCheckpointList(row[3], `RESTORE_${field}_TXS`).map(decodeAccountTx),
+    accountTxs: rscoreCheckpointList(row[3], `RESTORE_${field}_TXS`).map(decodeRscoreAccountTx),
     prevFrameHash: checkpointText(row[4], `${field}_PREV_HASH`),
     accountStateRoot: checkpointHex(row[5], 32, `${field}_ACCOUNT_ROOT`),
     byLeft: checkpointBool(row[6], `${field}_BY_LEFT`),
@@ -137,7 +137,7 @@ const decodeCounterpartyDispute = (value: unknown): RscoreCounterpartyDispute | 
 
 export const decodeRscoreConsensusSeed = (value: unknown): RscoreConsensusSeed => {
   const row = rscoreCheckpointTuple(value, 11, 'RESTORE_CONSENSUS');
-  const mempool = rscoreCheckpointList(row[0], 'RESTORE_CONSENSUS_MEMPOOL').map(decodeAccountTx);
+  const mempool = rscoreCheckpointList(row[0], 'RESTORE_CONSENSUS_MEMPOOL').map(decodeRscoreAccountTx);
   const currentFrame = decodeCurrent(row[1]);
   const pending = decodePending(row[2]);
   const counterpartyFrameHanko = checkpointOptionalHanko(row[5], 'COUNTERPARTY_FRAME');

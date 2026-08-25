@@ -14,9 +14,13 @@
 use num_bigint::{BigInt, Sign};
 use sha3::{Digest, Keccak256};
 
+use crate::consensus::replica::CounterpartyDispute;
+use crate::consensus::signing::verify_dispute_hanko;
 use crate::error::StateError;
 use crate::state::AccountReplica;
 use crate::state::identity::Side;
+
+const JS_MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 
 /// One `DeltaTransformer.Batch` payment clause.
 struct Payment {
@@ -100,6 +104,130 @@ fn word_from_address(address: &[u8; 20]) -> [u8; 32] {
 pub struct DisputeProof {
     pub proof_body_hash: [u8; 32],
     pub dispute_hash: [u8; 32],
+}
+
+/// The byte wire has already made hash widths, integer sign and the role bit
+/// structural. Empty Hanko bytes remain representable, and TypeScript rejects
+/// them before its stale/duplicate replay gate rather than treating malformed
+/// evidence as an obsolete no-op.
+pub(crate) fn validate_counterparty_dispute_shape(
+    dispute: &CounterpartyDispute,
+) -> Result<(), StateError> {
+    if dispute.hanko.is_empty() {
+        return Err(StateError::DisputeHankoInvalid(
+            "SHAPE_INVALID:HANKO_MISSING".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Rebuild and authenticate a peer's recovery proof from the Account's own
+/// identity. The peer does not get to supply the hash: accepting that would
+/// permit a valid Hanko over another Account/domain/watch-seed to be retained
+/// as if it were enforceable evidence for this one.
+pub(crate) fn verify_counterparty_dispute(
+    replica: &AccountReplica,
+    expected_counterparty: &[u8; 32],
+    dispute: &CounterpartyDispute,
+) -> Result<[u8; 32], StateError> {
+    validate_counterparty_dispute_shape(dispute)?;
+    if expected_counterparty != replica.counterparty().as_bytes() {
+        return Err(StateError::DisputeHankoInvalid(
+            "COUNTERPARTY_ACCOUNT_BINDING".to_string(),
+        ));
+    }
+    if dispute.nonce > JS_MAX_SAFE_INTEGER {
+        return Err(StateError::DisputeHankoInvalid(format!(
+            "SHAPE_INVALID:PROOF_NONCE:{}",
+            dispute.nonce
+        )));
+    }
+    let identity = replica.state().identity();
+    let digest = dispute_proof_hash(
+        identity.domain().chain_id(),
+        identity.domain().depository_address().bytes(),
+        identity.entity(Side::Left).as_bytes(),
+        identity.entity(Side::Right).as_bytes(),
+        dispute.nonce,
+        dispute.proposer_is_left,
+        &dispute.proof_body_hash,
+        identity.watch_seed().bytes(),
+    );
+    verify_dispute_hanko(&dispute.hanko, &digest, expected_counterparty)?;
+    Ok(digest)
+}
+
+/// Apply the canonical nonce/body requirement after the candidate proof body
+/// is known. Active traffic authenticates the witness before collision or
+/// replay can mutate state; stale/duplicate traffic has already left through
+/// the at-least-once no-op gate. Only a replayed frame can be compared with its
+/// post-frame body.
+///
+/// Parity target: `getDisputeHankoRequirementError`
+/// (core/account/consensus/dispute/hanko.ts). `proposer_is_left` is bound into
+/// the reconstructed Solidity digest above; TypeScript does not separately
+/// compare it with a locally inferred side, so neither does this predicate.
+pub(crate) fn counterparty_dispute_requirement_error(
+    expected_proof_body_hash: Option<&[u8; 32]>,
+    previous: Option<&CounterpartyDispute>,
+    j_nonce: u64,
+    received: Option<&CounterpartyDispute>,
+) -> Option<String> {
+    let Some(expected) = expected_proof_body_hash else {
+        return received
+            .is_some()
+            .then(|| "DISPUTE_HANKO_UNEXPECTED_WITHOUT_LOCAL_PROOF".to_string());
+    };
+    if let Some(dispute) = received {
+        if dispute.nonce <= j_nonce {
+            return Some(format!(
+                "DISPUTE_HANKO_NONCE_ALREADY_FINALIZED: received={} jNonce={j_nonce}",
+                dispute.nonce
+            ));
+        }
+        if let Some(previous) = previous {
+            if dispute.nonce < previous.nonce {
+                return Some(format!(
+                    "DISPUTE_HANKO_NONCE_REGRESSION: received={} previous={}",
+                    dispute.nonce, previous.nonce
+                ));
+            }
+            if dispute.nonce == previous.nonce
+                && dispute.proof_body_hash != previous.proof_body_hash
+            {
+                return Some(format!(
+                    "DISPUTE_HANKO_NONCE_REUSE: nonce={}",
+                    dispute.nonce
+                ));
+            }
+        }
+        if &dispute.proof_body_hash != expected {
+            return Some(format!(
+                "DISPUTE_HANKO_PROOFBODY_MISMATCH: expected={} received={}",
+                prefixed_hex(expected),
+                prefixed_hex(&dispute.proof_body_hash)
+            ));
+        }
+    }
+    let proof_changed = previous.is_none_or(|proof| &proof.proof_body_hash != expected);
+    let proof_nonce_consumed = previous.map_or(0, |proof| proof.nonce) <= j_nonce;
+    if (proof_changed || proof_nonce_consumed) && received.is_none() {
+        return Some(format!(
+            "DISPUTE_HANKO_REQUIRED: proofBodyHash={} jNonce={j_nonce}",
+            prefixed_hex(expected)
+        ));
+    }
+    None
+}
+
+fn prefixed_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut output = String::with_capacity(2 + bytes.len() * 2);
+    output.push_str("0x");
+    for byte in bytes {
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
 }
 
 /// Build this account's proof body and the dispute hash for one nonce.
@@ -434,4 +562,107 @@ pub fn dispute_proof_hash(
     encoded.extend_from_slice(&word_from_u64(account_key.len() as u64));
     encoded.extend_from_slice(&account_key);
     Keccak256::digest(&encoded).into()
+}
+
+#[cfg(test)]
+mod counterparty_requirement_tests {
+    use super::*;
+
+    fn dispute(nonce: u64, proof_body_hash: [u8; 32]) -> CounterpartyDispute {
+        CounterpartyDispute {
+            hanko: vec![1],
+            proof_body_hash,
+            nonce,
+            proposer_is_left: true,
+        }
+    }
+
+    #[test]
+    fn fresh_and_exact_unconsumed_proofs_are_accepted() {
+        let body = [0x11; 32];
+        let fresh = dispute(5, body);
+        assert_eq!(
+            counterparty_dispute_requirement_error(Some(&body), None, 4, Some(&fresh)),
+            None,
+        );
+        assert_eq!(
+            counterparty_dispute_requirement_error(Some(&body), Some(&fresh), 4, Some(&fresh)),
+            None,
+        );
+        assert_eq!(
+            counterparty_dispute_requirement_error(Some(&body), Some(&fresh), 4, None),
+            None,
+        );
+    }
+
+    #[test]
+    fn finalized_regressing_and_retargeted_nonces_are_rejected() {
+        let body = [0x11; 32];
+        let other = [0x22; 32];
+        let previous = dispute(5, body);
+        assert_eq!(
+            counterparty_dispute_requirement_error(
+                Some(&body),
+                Some(&previous),
+                5,
+                Some(&previous),
+            )
+            .as_deref(),
+            Some("DISPUTE_HANKO_NONCE_ALREADY_FINALIZED: received=5 jNonce=5"),
+        );
+        let regressing = dispute(4, body);
+        assert_eq!(
+            counterparty_dispute_requirement_error(
+                Some(&body),
+                Some(&previous),
+                3,
+                Some(&regressing),
+            )
+            .as_deref(),
+            Some("DISPUTE_HANKO_NONCE_REGRESSION: received=4 previous=5"),
+        );
+        let retargeted = dispute(5, other);
+        assert_eq!(
+            counterparty_dispute_requirement_error(
+                Some(&other),
+                Some(&previous),
+                3,
+                Some(&retargeted),
+            )
+            .as_deref(),
+            Some("DISPUTE_HANKO_NONCE_REUSE: nonce=5"),
+        );
+    }
+
+    #[test]
+    fn changed_consumed_missing_and_unexpected_proofs_are_rejected() {
+        let body = [0x11; 32];
+        let other = [0x22; 32];
+        let previous = dispute(5, body);
+        let wrong_body = dispute(6, other);
+        assert!(
+            counterparty_dispute_requirement_error(
+                Some(&body),
+                Some(&previous),
+                3,
+                Some(&wrong_body),
+            )
+            .expect("body mismatch")
+            .starts_with("DISPUTE_HANKO_PROOFBODY_MISMATCH"),
+        );
+        assert!(
+            counterparty_dispute_requirement_error(Some(&other), Some(&previous), 3, None)
+                .expect("changed proof requires witness")
+                .starts_with("DISPUTE_HANKO_REQUIRED"),
+        );
+        assert!(
+            counterparty_dispute_requirement_error(Some(&body), Some(&previous), 5, None)
+                .expect("consumed proof requires witness")
+                .starts_with("DISPUTE_HANKO_REQUIRED"),
+        );
+        assert_eq!(
+            counterparty_dispute_requirement_error(None, None, 0, Some(&previous)).as_deref(),
+            Some("DISPUTE_HANKO_UNEXPECTED_WITHOUT_LOCAL_PROOF"),
+        );
+    }
 }

@@ -8,12 +8,12 @@ import { computeEntityAccountLeafDigest } from '../../entity/consensus/state-roo
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import type { AccountFrame, AccountState, Delta, HtlcLock, SwapOffer } from '../../types/account';
 import type { BilateralRebalanceFeePolicy } from '../../types/finance/rebalance';
-import { decodeRscoreAccountRestoreRow } from '../../rscore/checkpoint-restore';
+import { decodeRscoreAccountRestoreRow } from '../../rscore/checkpoint/checkpoint-restore';
 import {
   assertRscoreCheckpointCandidate,
   decodeRscoreCheckpointChanges,
   type RscoreCheckpointToken,
-} from '../../rscore/checkpoint-wire';
+} from '../../rscore/checkpoint/checkpoint-wire';
 
 const root = Buffer.alloc(32, 0x31);
 const signer = Buffer.alloc(32, 0x42);

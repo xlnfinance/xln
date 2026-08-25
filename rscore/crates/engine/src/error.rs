@@ -57,6 +57,8 @@ pub enum StateError {
     Signing(String),
     #[error("ACCOUNT_PEER_FRAME_HANKO_INVALID:{0}")]
     FrameHankoInvalid(String),
+    #[error("ACCOUNT_PEER_DISPUTE_HANKO_INVALID:{0}")]
+    DisputeHankoInvalid(String),
     #[error("ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE")]
     BoardAuthorityUnavailable,
     #[error("ACCOUNT_FRAME_TX_UNSUPPORTED:{0}")]
