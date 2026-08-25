@@ -48,12 +48,19 @@ export const CAPABILITIES = [
     owner: 'wallet',
     routes: ['/app', '/address', '/testnet'],
     currentSources: [
+      'frontend/packages/browser/src/wallet-boot-lifecycle.ts',
       'frontend/src/routes/app/+page.svelte',
       'frontend/src/routes/address/+page.svelte',
       'frontend/src/routes/testnet/+page.svelte',
       'frontend/apps/wallet/src/testnet-page.tsx',
     ],
-    behavior: ['boot and shell', 'identity selection', 'onboarding and settings', 'testnet launcher and disposable identities'],
+    behavior: [
+      'boot and shell',
+      'generation-safe local and remote boot sequencing',
+      'identity selection',
+      'onboarding and settings',
+      'testnet launcher and disposable identities',
+    ],
     status: 'in_progress',
   },
   {

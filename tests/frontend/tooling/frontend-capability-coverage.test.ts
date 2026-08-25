@@ -56,6 +56,10 @@ describe('frontend capability inventory', () => {
       ({ status }) => status === 'unstarted',
     )).toBe(true);
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.status).toBe('in_progress');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
+      .toContain('frontend/packages/browser/src/wallet-boot-lifecycle.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
+      .toContain('generation-safe local and remote boot sequencing');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)

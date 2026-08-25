@@ -61,6 +61,7 @@
     isRemoteRuntimeAdapterPreferred,
     writeEmbeddedRuntimeAdapterSession,
   } from '../../../packages/browser/src/runtime-adapter-session';
+  import { runWalletBootLifecycle } from '../../../packages/browser/src/wallet-boot-lifecycle';
 
   let { children } = $props();
 
@@ -471,28 +472,22 @@
   async function bootApp(): Promise<void> {
     if (!hasActiveTabLock) return;
     const generation = ++bootGeneration;
+    const isCurrentBoot = () => generation === bootGeneration && hasActiveTabLock;
     try {
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      settingsOperations.initialize();
-      tabOperations.loadFromStorage();
-      tabOperations.initializeDefaultTabs();
-      const bootingRemoteRuntime = shouldBootRemoteRuntime();
-      if (!bootingRemoteRuntime) {
-        await vaultOperations.initialize();
-      }
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      await initializeXLN();
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      if (!bootingRemoteRuntime && $runtimeControllerHandle.mode !== 'remote') {
-        await vaultOperations.initialize();
-      }
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      await tick();
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
-      timeOperations.initialize();
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
+      await runWalletBootLifecycle({
+        isCurrent: isCurrentBoot,
+        initializeSettings: () => settingsOperations.initialize(),
+        loadTabs: () => tabOperations.loadFromStorage(),
+        initializeDefaultTabs: () => tabOperations.initializeDefaultTabs(),
+        isRemoteRuntimePreferred: shouldBootRemoteRuntime,
+        initializeVault: () => vaultOperations.initialize(),
+        initializeRuntime: () => initializeXLN(),
+        readRuntimeMode: () => $runtimeControllerHandle.mode,
+        afterRuntimeReady: () => tick(),
+        initializeTime: () => timeOperations.initialize(),
+      });
     } catch (err) {
-      if (generation !== bootGeneration || !hasActiveTabLock) return;
+      if (!isCurrentBoot()) return;
       logAppShellDiagnostic('XLN initialization failed', err);
       error.set((err as Error)?.message || 'Initialization failed');
     }

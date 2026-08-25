@@ -631,6 +631,7 @@ test('embedded env initialization publishes active runtime snapshot before app s
 
 test('app embedded boot restores vault runtimes before default browser runtime initialization', () => {
   const source = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const boundary = readFileSync('frontend/packages/browser/src/wallet-boot-lifecycle.ts', 'utf8');
   const helperStart = source.indexOf('function shouldBootRemoteRuntime()');
   const bootStart = source.indexOf('async function bootApp()');
   const mountStart = source.indexOf('onMount(() => {', bootStart);
@@ -640,10 +641,15 @@ test('app embedded boot restores vault runtimes before default browser runtime i
 
   const bootSource = source.slice(bootStart, mountStart);
   expect(source.slice(helperStart, bootStart)).toContain('isRemoteRuntimeAdapterPreferred(localStorage)');
-  expect(bootSource).toContain('const bootingRemoteRuntime = shouldBootRemoteRuntime();');
-  expect(bootSource).toContain('if (!bootingRemoteRuntime) {');
-  expect(bootSource.indexOf('await vaultOperations.initialize();')).toBeLessThan(bootSource.indexOf('await initializeXLN();'));
-  expect(bootSource).toContain("if (!bootingRemoteRuntime && $runtimeControllerHandle.mode !== 'remote')");
+  expect(bootSource).toContain('await runWalletBootLifecycle({');
+  expect(bootSource).toContain('isRemoteRuntimePreferred: shouldBootRemoteRuntime');
+  expect(bootSource).toContain('initializeVault: () => vaultOperations.initialize()');
+  expect(bootSource).toContain('initializeRuntime: () => initializeXLN()');
+  expect(bootSource).toContain('readRuntimeMode: () => $runtimeControllerHandle.mode');
+  expect(boundary.indexOf('await dependencies.initializeVault()')).toBeLessThan(
+    boundary.indexOf('await dependencies.initializeRuntime()'),
+  );
+  expect(boundary).toContain("if (!bootingRemoteRuntime && dependencies.readRuntimeMode() !== 'remote')");
 });
 
 test('vault bootstrap commands submit explicit runtime env through command bus helper', () => {
