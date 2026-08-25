@@ -15,6 +15,11 @@ import { createRuntimeFrameTransaction } from '../../../runtime/frame/transactio
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { ensureRuntimeInfrastructure } from '../../../runtime/envelope/replica-envelope';
 import { classifyRuntimeFrameCommitProof } from '../../../storage/commit/commit';
+import {
+  computeStorageFrameHash,
+  type RuntimeFrame,
+  type StorageAuthoritativeFrameIdentity,
+} from '../../../storage';
 
 const fixture = join(import.meta.dir, '..', '..', 'fixtures/storage/runtime-storage-timeout-child.ts');
 
@@ -42,44 +47,82 @@ const prepareFrame = (seed: string) => {
   return { live, transaction, frame, stopped };
 };
 
-describe('Runtime WAL storage failure boundary', () => {
-  test('requires the exact post Runtime root before classifying a timed-out write', () => {
-    const runtimeInput = { runtimeTxs: [], entityInputs: [] };
-    const postStateHash = `0x${'11'.repeat(32)}`;
+const prepareCommitProof = (
+  postStateHash = `0x${'11'.repeat(32)}`,
+): {
+  frame: RuntimeFrame;
+  identity: StorageAuthoritativeFrameIdentity;
+} => {
+  const runtimeInput = { runtimeTxs: [], entityInputs: [] };
+  const frameBase: RuntimeFrame = {
+    height: 8,
+    timestamp: 800,
+    prevFrameHash: `0x${'00'.repeat(32)}`,
+    replicaMetaDigest: `0x${'22'.repeat(32)}`,
+    replicaMetaCheckpoint: false,
+    replicaMetaStateMode: 'live-head',
+    postStateHash,
+    materializedState: false,
+    runtimeInput,
+    touchedEntities: [],
+    touchedAccounts: [],
+    touchedBookEntities: [],
+  };
+  const frame = {
+    ...frameBase,
+    frameHash: computeStorageFrameHash(frameBase),
+  };
+  return {
+    frame,
+    identity: {
+      frameHash: frame.frameHash,
+      postStateHash,
+      runtimeInput,
+      accountAuthorityCheckpoints: [],
+    },
+  };
+};
 
+describe('Runtime WAL storage failure boundary', () => {
+  test('requires exact frame, Runtime root, input, and Rust checkpoint refs', () => {
+    const { frame, identity } = prepareCommitProof();
     expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput },
-      runtimeInput,
-      postStateHash,
+      { ...frame, frameHash: undefined },
+      identity,
     )).toBe('unknown');
+    expect(classifyRuntimeFrameCommitProof(frame, identity)).toBe('committed');
     expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput, postStateHash },
-      runtimeInput,
-      postStateHash,
-    )).toBe('committed');
-    expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput, postStateHash: `0x${'00'.repeat(32)}` },
-      runtimeInput,
-      postStateHash,
+      { ...frame, postStateHash: `0x${'00'.repeat(32)}` },
+      identity,
     )).toBe('conflict');
     expect(classifyRuntimeFrameCommitProof(
       {
+        ...frame,
         runtimeInput: { runtimeTxs: [], entityInputs: [], timestamp: 1 },
-        postStateHash,
       },
-      runtimeInput,
-      postStateHash,
+      identity,
     )).toBe('conflict');
+    expect(classifyRuntimeFrameCommitProof(frame, {
+      ...identity,
+      frameHash: `0x${'33'.repeat(32)}`,
+    })).toBe('conflict');
+    expect(classifyRuntimeFrameCommitProof(frame, {
+      ...identity,
+      accountAuthorityCheckpoints: [{
+        ownerEntityId: `0x${'44'.repeat(32)}`,
+        protocolFingerprint: `0x${'55'.repeat(32)}`,
+        baseRevision: '1',
+        revision: '1',
+        accountsRoot: `0x${'66'.repeat(32)}`,
+        signerDigest: `0x${'77'.repeat(32)}`,
+        accountCount: 1,
+      }],
+    })).toBe('conflict');
   });
 
   test('does not require a full Runtime-machine blob to prove the frame', () => {
-    const runtimeInput = { runtimeTxs: [], entityInputs: [] };
-    const postStateHash = `0x${'22'.repeat(32)}`;
-    expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput, postStateHash },
-      runtimeInput,
-      postStateHash,
-    )).toBe('committed');
+    const { frame, identity } = prepareCommitProof(`0x${'88'.repeat(32)}`);
+    expect(classifyRuntimeFrameCommitProof(frame, identity)).toBe('committed');
   });
 
   test('leaves a known-undurable in-place frame for the failure path to halt and reload', async () => {

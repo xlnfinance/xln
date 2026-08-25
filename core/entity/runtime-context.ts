@@ -30,6 +30,8 @@ export interface EntityRuntimeContext {
   };
   runtimeSeed?: string | undefined;
   runtimeId?: string | undefined;
+  /** Ephemeral Runtime-envelope identity, never committed Entity state. */
+  accountAuthorityFrameId?: string | null | undefined;
   activeJurisdiction?: string | undefined;
   quietRuntimeLogs?: boolean | undefined;
   runtimeConfig?: {

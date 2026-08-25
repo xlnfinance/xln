@@ -710,6 +710,7 @@ describe('storage frame journal retention', () => {
     expect(Object.keys(persistence?.prepareStages ?? {})).toEqual([
       'historyRead',
       'pendingNodes',
+      'accountAuthorityCheckpoint',
       'materializedGraph',
       'bookGraph',
       'runtimeMachine',

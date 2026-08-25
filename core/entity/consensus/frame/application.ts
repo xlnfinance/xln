@@ -627,7 +627,7 @@ const proposeAccountFrameCandidate = async (
   // Runtime frame: a wave carries one clock, so which unit that wave covers
   // depends on whether an Entity ever uses two inside one Runtime frame.
   noteAuthorityEntityClock(
-    context.accountConsensusContext.runtimeId,
+    context.accountConsensusContext.accountAuthorityFrameId,
     state.entityId,
     'propose',
     state.timestamp,

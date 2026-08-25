@@ -17,9 +17,14 @@ import { verifyHankoForHash } from '../../hanko/signing';
 import {
   RSCORE_OP,
   RSCORE_PROCESS_ABI_VERSION,
+  RSCORE_PROTOCOL_FINGERPRINT,
   RscoreProcessClient,
-  type RscoreWireValue,
 } from '../../rscore/client';
+import {
+  loadRscoreCheckpoint,
+  prepareRscoreCheckpointStorage,
+} from '../../storage/schema/rscore/checkpoint';
+import type { RuntimeDbLike } from '../../storage/types';
 import { computeFrameHash } from '../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../account/commitment/state-root';
 import { handleDirectPayment } from '../../account/tx/handlers/balance/direct-payment';
@@ -32,6 +37,33 @@ import { makeAccount } from '../helpers/cross-j';
 import type { AccountTx } from '../../types/account';
 
 const BINARY = join(import.meta.dir, '../../../rscore/target/release/xln-rscore');
+
+const memoryDb = (): RuntimeDbLike => {
+  const rows = new Map<string, { key: Buffer; value: Buffer }>();
+  return {
+    get: async key => {
+      const row = rows.get(key.toString('hex'));
+      if (row) return Buffer.from(row.value);
+      const error = new Error('NotFound') as Error & { code?: string };
+      error.code = 'LEVEL_NOT_FOUND';
+      throw error;
+    },
+    batch: () => ({
+      put: (key, value) => { rows.set(key.toString('hex'), { key: Buffer.from(key), value: Buffer.from(value) }); },
+      del: key => { rows.delete(key.toString('hex')); },
+      write: async () => {},
+    }),
+    keys: async function* (options = {}) {
+      const keys = [...rows.values()].map(row => row.key).sort(Buffer.compare);
+      if (options.reverse) keys.reverse();
+      for (const key of keys) {
+        if (options.gte && Buffer.compare(key, options.gte) < 0) continue;
+        if (options.lt && Buffer.compare(key, options.lt) >= 0) continue;
+        yield Buffer.from(key);
+      }
+    },
+  };
+};
 
 const identity = () => ({
   engineGeneration: Buffer.alloc(8, 0xa0),
@@ -253,13 +285,38 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       // The exact candidate is read before the Runtime WAL boundary. Its
       // first token acknowledges the live engine after fsync; the second is
       // already normalized for RestoreExact if the process dies after fsync.
-      const checkpoint = exactTuple(
-        await client.getCheckpointChanges(second.token),
-        4,
-        'checkpoint',
-      );
-      const changed = exactTuple(checkpoint[2], 1, 'checkpoint accounts');
-      const restoreRows = changed.map(materializeFirstCheckpointRow);
+      const checkpoint = await client.getCheckpointChanges(second.token);
+      expect(checkpoint.accounts).toHaveLength(1);
+      const db = memoryDb();
+      const storage = await prepareRscoreCheckpointStorage(db, [{
+        ownerEntityId: owner,
+        protocolFingerprint: `0x${RSCORE_PROTOCOL_FINGERPRINT.toString('hex')}`,
+        checkpoint,
+      }]);
+      const projected = storage.exactCheckpoints[0];
+      if (!projected) throw new Error('expected projected rscore checkpoint');
+      const preWalValidator = new RscoreProcessClient(BINARY, identity());
+      try {
+        await preWalValidator.hello(2, market, {
+          privateKey: deriveSignerKeySync(seed, '1'),
+          signerId: '1',
+        });
+        expect(await preWalValidator.restoreExact(
+          projected.restoreToken,
+          projected.accounts,
+        )).toEqual(checkpoint.restoreToken);
+        await preWalValidator.shutdown();
+      } finally {
+        preWalValidator.kill();
+      }
+      const batch = db.batch();
+      for (const key of storage.dels) batch.del(key);
+      for (const row of storage.puts) batch.put(row.key, row.value);
+      await batch.write({ sync: true });
+      const persisted = await loadRscoreCheckpoint(db, owner);
+      if (!persisted) throw new Error('expected persisted rscore checkpoint');
+      expect(persisted.restoreToken).toEqual(checkpoint.restoreToken);
+      expect(persisted.accounts).toHaveLength(1);
 
       const committed = (await client.commit(second.token)) as unknown[];
       expect(`0x${Buffer.from(committed[1] as Uint8Array).toString('hex')}`)
@@ -269,8 +326,37 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       // by reseeding financial state. The checkpoint still contains our
       // unacknowledged Account proposal; RestoreExact must rebuild it and make
       // that checkpoint its own empty diff base.
-      const durableToken = await client.commitCheckpoint(checkpoint[0] as RscoreWireValue);
-      expect(durableToken).toEqual(checkpoint[1]);
+      const durableToken = await client.commitCheckpoint(checkpoint.commitToken);
+      expect(durableToken).toEqual(checkpoint.restoreToken);
+
+      // A token with a deliberately omitted incremental account row still
+      // passes count/base bookkeeping when the owner already has one account.
+      // Reconstructing through the physical overlay exposes the stale leaf,
+      // and the same RestoreExact validation used before WAL rejects it.
+      const third = await client.prepareAccountWave(request);
+      const thirdCheckpoint = await client.getCheckpointChanges(third.token);
+      expect(thirdCheckpoint.accounts).toHaveLength(1);
+      const staleStorage = await prepareRscoreCheckpointStorage(db, [{
+        ownerEntityId: owner,
+        protocolFingerprint: `0x${RSCORE_PROTOCOL_FINGERPRINT.toString('hex')}`,
+        checkpoint: { ...thirdCheckpoint, accounts: [] },
+      }]);
+      const staleProjected = staleStorage.exactCheckpoints[0];
+      if (!staleProjected) throw new Error('expected stale projected checkpoint');
+      const staleValidator = new RscoreProcessClient(BINARY, identity());
+      try {
+        await staleValidator.hello(2, market, {
+          privateKey: deriveSignerKeySync(seed, '1'),
+          signerId: '1',
+        });
+        await expect(staleValidator.restoreExact(
+          staleProjected.restoreToken,
+          staleProjected.accounts,
+        )).rejects.toThrow('RSCORE_PROCESS_ERROR');
+      } finally {
+        staleValidator.kill();
+      }
+      await client.abort(third.token);
 
       const restarted = new RscoreProcessClient(BINARY, identity());
       try {
@@ -279,17 +365,13 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
           signerId: '1',
         });
         expect(await restarted.restoreExact(
-          durableToken as RscoreWireValue,
-          restoreRows as RscoreWireValue[],
+          persisted.restoreToken,
+          persisted.accounts,
         )).toEqual(durableToken);
         const idle = await restarted.prepareAccountWave({ entities: [] });
-        const afterRestore = exactTuple(
-          await restarted.getCheckpointChanges(idle.token),
-          4,
-          'restored checkpoint',
-        );
-        expect(afterRestore[2]).toEqual([]);
-        expect(afterRestore[3]).toEqual([]);
+        const afterRestore = await restarted.getCheckpointChanges(idle.token);
+        expect(afterRestore.accounts).toEqual([]);
+        expect(afterRestore.removed).toEqual([]);
         await restarted.abort(idle.token);
         await restarted.shutdown();
       } finally {
@@ -390,52 +472,3 @@ const exactTuple = (value: unknown, arity: number, field: string): unknown[] => 
   }
   return value;
 };
-
-/** Materialize the full first checkpoint without reading engine internals. */
-const materializeFirstCheckpointRow = (value: unknown): unknown[] => {
-  const row = exactTuple(value, 10, 'checkpoint account');
-  return [
-    row[0],
-    row[1],
-    row[2],
-    leafValues(row[4]),
-    leafValues(row[5]),
-    lendingValues(row[6]),
-    leafValues(row[7]),
-    policyValues(row[8]),
-    row[9],
-  ];
-};
-
-const leafRows = (value: unknown): unknown[][] => {
-  const [puts, dels] = exactTuple(value, 2, 'node changes');
-  if (!Array.isArray(puts) || !Array.isArray(dels) || dels.length !== 0) {
-    throw new Error('RSCORE_TEST_FIRST_CHECKPOINT_NODE_CHANGES_INVALID');
-  }
-  return puts
-    .map(record => {
-      if (!Array.isArray(record) || (record[0] !== 0 && record[0] !== 1)) {
-        throw new Error('RSCORE_TEST_NODE_RECORD_TAG_INVALID');
-      }
-      return exactTuple(record, record[0] === 0 ? 3 : 4, 'node record');
-    })
-    .filter(record => record[0] === 1);
-};
-
-const leafValues = (value: unknown): unknown[] => leafRows(value).map(row => row[3]);
-
-const lendingValues = (value: unknown): unknown[] => leafRows(value).map(row => {
-  const key = Buffer.from(row[2] as Uint8Array);
-  if (key.length < 2 || key.readUInt16BE(0) !== key.length - 2) {
-    throw new Error('RSCORE_TEST_LENDING_KEY_INVALID');
-  }
-  return [key.subarray(2).toString('utf8'), row[3]];
-});
-
-const policyValues = (value: unknown): unknown[] => leafRows(value).map(row => {
-  const key = Buffer.from(row[2] as Uint8Array);
-  if (key.length !== 32 || key.subarray(0, 30).some(byte => byte !== 0)) {
-    throw new Error('RSCORE_TEST_POLICY_KEY_INVALID');
-  }
-  return [key.readUInt16BE(30), row[3]];
-});

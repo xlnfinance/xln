@@ -80,6 +80,12 @@ export const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
 export const KEY_RUNTIME_MACHINE_BRANCH = 0x15;
 /** Runtime checkpoint Patricia leaf, scoped by the materialized frame height. */
 export const KEY_RUNTIME_MACHINE_LEAF = 0x16;
+/** Exact Rust Account-authority checkpoint token, one per owning Entity. */
+const KEY_RSCORE_CHECKPOINT = 0x17;
+/** Exact Rust Account header/consensus sidecar, one per bilateral Account. */
+const KEY_RSCORE_ACCOUNT = 0x18;
+/** Rust-owned Account Patricia records, scoped by owner, peer and namespace. */
+const KEY_RSCORE_ACCOUNT_NODE = 0x19;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;
 export const KEY_LIVE_BOOK = 0x23;
@@ -284,6 +290,56 @@ export const parseRuntimeMachineLeafKey = (key: Buffer) =>
     KEY_RUNTIME_MACHINE_LEAF,
     'STORAGE_RUNTIME_MACHINE_LEAF',
   );
+
+export const keyRscoreCheckpoint = (ownerEntityId: string): Buffer =>
+  Buffer.concat([Buffer.from([KEY_RSCORE_CHECKPOINT]), hexBytes(ownerEntityId)]);
+
+export const keyRscoreAccount = (ownerEntityId: string, accountId: string): Buffer =>
+  Buffer.concat([
+    Buffer.from([KEY_RSCORE_ACCOUNT]),
+    hexBytes(ownerEntityId),
+    hexBytes(accountId),
+  ]);
+
+export const keyRscoreAccountPrefix = (ownerEntityId: string): Buffer =>
+  Buffer.concat([Buffer.from([KEY_RSCORE_ACCOUNT]), hexBytes(ownerEntityId)]);
+
+export const keyRscoreAccountNode = (
+  ownerEntityId: string,
+  accountId: string,
+  namespaceTag: number,
+  kind: 0 | 1,
+  payload: Uint8Array,
+): Buffer => {
+  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 5) {
+    throw new Error(`STORAGE_RSCORE_NAMESPACE_INVALID:${String(namespaceTag)}`);
+  }
+  return Buffer.concat([
+    Buffer.from([KEY_RSCORE_ACCOUNT_NODE]),
+    hexBytes(ownerEntityId),
+    hexBytes(accountId),
+    Buffer.from([namespaceTag, kind]),
+    Buffer.from(payload),
+  ]);
+};
+
+export const keyRscoreAccountNodePrefix = (
+  ownerEntityId: string,
+  accountId: string,
+  namespaceTag?: number,
+  kind?: 0 | 1,
+): Buffer => {
+  if (kind !== undefined && namespaceTag === undefined) {
+    throw new Error('STORAGE_RSCORE_NODE_KIND_WITHOUT_NAMESPACE');
+  }
+  return Buffer.concat([
+    Buffer.from([KEY_RSCORE_ACCOUNT_NODE]),
+    hexBytes(ownerEntityId),
+    hexBytes(accountId),
+    ...(namespaceTag === undefined ? [] : [Buffer.from([namespaceTag])]),
+    ...(kind === undefined ? [] : [Buffer.from([kind])]),
+  ]);
+};
 
 export const keySnapshotGraph = (height: number, liveKey: Buffer): Buffer =>
   Buffer.concat([Buffer.from([KEY_SNAPSHOT_GRAPH]), encodeHeight(height), liveKey]);

@@ -9,17 +9,17 @@
  * `bench-rscore-authority.ts`. Numbers from this script are not payments per
  * second and must never be quoted as such.
  *
- * Usage: bun core/scripts/operations/benchmark/bench-rscore-waves.ts \
+ * Usage: bun core/scripts/operations/benchmark/rscore/bench-rscore-waves.ts \
  *          [accounts=1000] [waves=20] [txsPerWave=10000] [workers=8]
  */
 import { join } from 'node:path';
 
-import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../account/j-claims/j-claim-codec';
-import { RscoreProcessClient, type RscoreWireValue } from '../../../rscore/client';
-import { swapMarketPolicyWire } from '../../../rscore/shadow-wire';
-import { safeStringify } from '../../../protocol/serialization';
+import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../../account/j-claims/j-claim-codec';
+import { RscoreProcessClient, type RscoreWireValue } from '../../../../rscore/client';
+import { swapMarketPolicyWire } from '../../../../rscore/shadow-wire';
+import { safeStringify } from '../../../../protocol/serialization';
 
-const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../../rscore/target/release/xln-rscore');
 
 const accounts = Number(process.argv[2] ?? '1000');
 const waves = Number(process.argv[3] ?? '20');

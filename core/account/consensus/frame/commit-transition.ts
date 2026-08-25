@@ -114,6 +114,9 @@ export const commitAccountFrameTransition = async (
     // engine when shadow mode is on (no-op otherwise, one env check).
     noteAccountFrameForShadow({
       ...(options.context.runtimeId === undefined ? {} : { runtimeId: options.context.runtimeId }),
+      ...(options.context.accountAuthorityFrameId === undefined
+        ? {}
+        : { accountAuthorityFrameId: options.context.accountAuthorityFrameId }),
       ownerEntityId: account.proofHeader.fromEntity,
       counterpartyEntityId: account.proofHeader.toEntity,
       frameHeight: frame.height,

@@ -17,6 +17,8 @@ export type AccountConsensusContext = Readonly<{
    * inferring it from whichever frame opened last.
    */
   runtimeId?: string;
+  /** Ephemeral parent-frame identity; null explicitly suppresses observation. */
+  accountAuthorityFrameId?: string | null;
   quietLogs: boolean;
   emitRuntimeEvents: boolean;
   jReplicas: ReadonlyMap<string, JReplica>;

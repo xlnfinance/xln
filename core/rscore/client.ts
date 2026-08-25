@@ -17,9 +17,21 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../protocol/serialization';
+import {
+  decodeRscoreCheckpointChanges,
+  decodeRscoreCheckpointToken,
+  rscoreCheckpointBytes,
+  type RscoreCheckpointChanges,
+  type RscoreCheckpointToken,
+} from './checkpoint-wire';
+export type {
+  RscoreCheckpointChanges,
+  RscoreCheckpointToken,
+  RscoreExactCheckpoint,
+} from './checkpoint-wire';
 
-export const RSCORE_ABI_MAGIC = 0x03;
-export const RSCORE_ABI_DOMAIN = 'xln.rscore.account';
+const RSCORE_ABI_MAGIC = 0x03;
+const RSCORE_ABI_DOMAIN = 'xln.rscore.account';
 /**
  * Deadline for one request/response round trip. Generous next to the largest
  * observed wave, tight enough that a wedged engine fails the run instead of
@@ -37,7 +49,7 @@ const requestTimeoutMs = (): number => {
 };
 const REQUEST_TIMEOUT_MS = requestTimeoutMs();
 
-export const RSCORE_ABI_VERSION = 1;
+const RSCORE_ABI_VERSION = 1;
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An engine built against the old Hello fails at Hello, not later.
 // 5: that config carries the signer key instead of the runtime seed.
@@ -48,8 +60,8 @@ export const RSCORE_ABI_VERSION = 1;
 // separate commit and exact-restore tokens.
 export const RSCORE_PROCESS_ABI_VERSION = 8;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
-export const RSCORE_PROTOCOL_VERSION = 1;
-export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
+const RSCORE_PROTOCOL_VERSION = 1;
+const RSCORE_STORAGE_SCHEMA_VERSION = 1;
 // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=14")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
   'e7e3866f0237ff5cdabfe52813f51185eba7484c8374b2b74edf3c8792e261b3',
@@ -93,6 +105,7 @@ export type RscoreWireValue =
   | string
   | Uint8Array
   | RscoreWireValue[];
+
 
 // Bit-exact MessagePack writer/reader mirroring rscore's abi encoder: the
 // Rust decoder re-encodes every envelope and byte-compares, so the TS side
@@ -633,33 +646,34 @@ export class RscoreProcessClient {
   }
 
   /** Incremental exact rows since the last checkpoint Rust acknowledged. */
-  async getCheckpointChanges(prepareRequestId: Uint8Array): Promise<unknown> {
+  async getCheckpointChanges(prepareRequestId: Uint8Array): Promise<RscoreCheckpointChanges> {
+    rscoreCheckpointBytes(prepareRequestId, 8, 'PREPARE_REQUEST_ID');
     const response = await this.request(RSCORE_OP.getCheckpointChanges, [prepareRequestId]);
     if (!Array.isArray(response) || response.length !== 1) {
       throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
     }
-    return response[0];
+    return decodeRscoreCheckpointChanges(response[0]);
   }
 
   /** Acknowledge only the exact token returned with the durable rows. */
-  async commitCheckpoint(token: RscoreWireValue): Promise<unknown> {
+  async commitCheckpoint(token: RscoreCheckpointToken): Promise<RscoreCheckpointToken> {
     const response = await this.request(RSCORE_OP.commitCheckpoint, [token]);
     if (!Array.isArray(response) || response.length !== 1) {
       throw new Error('RSCORE_CLIENT_CHECKPOINT_COMMIT_RESPONSE_ARITY');
     }
-    return response[0];
+    return decodeRscoreCheckpointToken(response[0], 'COMMITTED');
   }
 
   /** Replace an authority session from materialized canonical Account rows. */
   async restoreExact(
-    token: RscoreWireValue,
+    token: RscoreCheckpointToken,
     accounts: RscoreWireValue[],
-  ): Promise<unknown> {
+  ): Promise<RscoreCheckpointToken> {
     const response = await this.request(RSCORE_OP.restoreExact, [token, accounts]);
     if (!Array.isArray(response) || response.length !== 1) {
       throw new Error('RSCORE_CLIENT_EXACT_RESTORE_RESPONSE_ARITY');
     }
-    return response[0];
+    return decodeRscoreCheckpointToken(response[0], 'RESTORED');
   }
 
   /**

@@ -676,13 +676,6 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
   return rows;
 };
 
-/**
- * Support is a property of the payload, not of the tx type: a cross-jurisdiction
- * swap offer is the same `swap_offer` type as a same-j one and the engine
- * cannot execute it. Callers must treat a null wire as unsupported.
- */
-export const shadowTxSupported = (tx: AccountTx): boolean => accountTxWire(tx) !== null;
-
 /** Absent stays absent on the wire: several resolve checks distinguish it from zero. */
 const optionalAmount = (value: bigint | undefined): string | null =>
   value === undefined ? null : value.toString();

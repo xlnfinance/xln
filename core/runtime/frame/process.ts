@@ -27,8 +27,12 @@ import {
 } from '../observability/env-events';
 import {
   abortAuthorityWave,
+  authorityDriverEnabled,
   commitAuthorityWave,
+  discardAuthorityRuntime,
+  prepareAuthorityCheckpoint,
   prepareAuthorityWave,
+  validateAuthorityCheckpointMaterialization,
 } from '../../rscore/authority-driver';
 import { recordCommittedRuntimeEntityMetrics } from '../observability/entity-metrics';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
@@ -50,6 +54,7 @@ import { runCommittedRuntimeEffects } from './lifecycle/post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './lifecycle/finish';
 import type { RuntimeInputReducer } from './intake/reducer';
 import { getLiveJAdapterEntries } from '../j-submit/live-jadapters';
+import type { RscoreExactCheckpoint } from '../../rscore/checkpoint-wire';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -400,6 +405,17 @@ const commitRuntimeFrame = async (
       candidateEnv.pendingNetworkOutputs,
       previewPublishedRuntimeInput(frame.transaction),
       frame.entityContexts,
+      ...(authorityDriverEnabled(candidateEnv)
+        ? [{
+            prepareCheckpoint: (checkpointRequested: boolean) =>
+              prepareAuthorityCheckpoint(candidateEnv, checkpointRequested),
+            validateCheckpointMaterialization: (
+              checkpoints: readonly RscoreExactCheckpoint[],
+            ) =>
+              validateAuthorityCheckpointMaterialization(candidateEnv, checkpoints),
+            afterWalCommit: () => commitAuthorityWave(candidateEnv),
+          }]
+        : []),
     );
     profile.metrics.storageMs = outcome.persistencePerfMs;
     if (outcome.persistencePerfMs) {
@@ -418,6 +434,26 @@ const commitRuntimeFrame = async (
     );
   } catch (error) {
     if (error instanceof deps.storage.RuntimeFrameStorageError) {
+      if (error.publicationBlocked) {
+        if (error.commitStatus !== 'committed') {
+          throw new AggregateError(
+            [error],
+            'RSCORE_AUTHORITY_PUBLICATION_BLOCKED_WITHOUT_DURABLE_WAL',
+          );
+        }
+        await discardAuthorityRuntime(candidateEnv);
+        clearPendingAuditEvents(candidateEnv);
+        frame.failureHandled = true;
+        frame.commitDisposition = 'committed';
+        haltRuntimeRequiresOperator(liveEnv, error);
+        throw error;
+      }
+      if (
+        (error.commitStatus === 'unknown' || error.commitStatus === 'conflict') &&
+        !error.operationStillRunning
+      ) {
+        await discardAuthorityRuntime(candidateEnv);
+      }
       await handleRuntimeFrameStorageFailure(
         error.commitStatus,
         error,
@@ -467,6 +503,16 @@ const applyRuntimeFrameCandidate = async (
       setApplyAllowed: deps.setApplyAllowed,
     },
   );
+};
+
+const abortAuthorityWaveWithoutWal = async (
+  env: RuntimeReplica,
+  frameAdvanced: boolean,
+): Promise<void> => {
+  if (frameAdvanced) return;
+  // An empty Runtime transition has no durable record and therefore cannot
+  // commit any Account candidate, even if a future collector bug opens one.
+  await abortAuthorityWave(env);
 };
 
 const applyAndCommitRuntimeFrame = async (
@@ -545,8 +591,7 @@ const applyAndCommitRuntimeFrame = async (
     await abortAuthorityWave(env);
     return commit;
   }
-  // The Runtime's own record is durable now, and only now.
-  await commitAuthorityWave(commit.env);
+  await abortAuthorityWaveWithoutWal(env, frameAdvanced);
 
   await runCommittedRuntimeEffects(
     commit.env,
@@ -627,6 +672,16 @@ const processRuntimeFrameOnce = async (
     profile.outcome = 'completed';
     return env;
   } catch (error) {
+    if (frame.commitDisposition === 'undurable') {
+      try {
+        await abortAuthorityWave(liveEnv);
+      } catch (abortError) {
+        error = new AggregateError(
+          [error, abortError],
+          'RSCORE_AUTHORITY_PRE_WAL_ABORT_FAILED',
+        );
+      }
+    }
     const failure = await handleRuntimeFrameFailure(error, liveEnv, frame, {
       isStorageError: candidate => candidate instanceof deps.storage.RuntimeFrameStorageError,
       isDiscardedInputError: candidate => candidate instanceof deps.loop.RuntimeInputDiscardedError,

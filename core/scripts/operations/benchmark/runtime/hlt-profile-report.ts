@@ -6,7 +6,7 @@
  * hlt-payment-load-report.json and/or production-swap-load-report.json,
  * optional Bun .cpuprofile file(s). Output: <runDir>/profile-report.html.
  *
- * Usage: bun core/scripts/operations/benchmark/hlt-profile-report.ts <runDir> [--title LABEL]
+ * Usage: bun core/scripts/operations/benchmark/runtime/hlt-profile-report.ts <runDir> [--title LABEL]
  */
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

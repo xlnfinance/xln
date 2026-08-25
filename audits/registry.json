@@ -139,10 +139,13 @@
       "criticality": "critical",
       "structuralDebt": 0,
       "sourceGlobs": [
-        "core/account/**/*.ts"
+        "core/account/**/*.ts",
+        "core/rscore/**/*.ts"
       ],
       "testGlobs": [
-        "core/__tests__/**/*account*"
+        "core/__tests__/**/*account*",
+        "core/__tests__/rscore/**/*.ts",
+        "tests/rscore/**/*.ts"
       ],
       "dependencies": [
         "protocol-primitives"
@@ -580,10 +583,13 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "core/account/**/*.ts"
+        "core/account/**/*.ts",
+        "core/rscore/**/*.ts"
       ],
       "testGlobs": [
-        "core/__tests__/**/*account*"
+        "core/__tests__/**/*account*",
+        "core/__tests__/rscore/**/*.ts",
+        "tests/rscore/**/*.ts"
       ]
     },
     {

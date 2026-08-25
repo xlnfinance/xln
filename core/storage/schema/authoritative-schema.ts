@@ -5,6 +5,7 @@ import type {
   RuntimeFrame,
   StorageHead,
   StorageSnapshotManifest,
+  StorageRscoreCheckpointRef,
 } from '../types';
 import {
   requireBoundaryInteger,
@@ -64,6 +65,39 @@ const validateFrameEntityHashes = (value: unknown, code: string): StorageFrameEn
     return item as StorageFrameEntityHash;
   });
 
+const validateRscoreCheckpointRefs = (
+  value: unknown,
+  code: string,
+): StorageRscoreCheckpointRef[] => {
+  const owners = new Set<string>();
+  let previous = '';
+  return requireStorageArray(value, code).map((raw, index) => {
+    const itemCode = `${code}_${index}`;
+    const item = requireBoundaryRecord(raw, itemCode);
+    requireExactBoundaryKeys(item, [
+      'ownerEntityId', 'protocolFingerprint', 'baseRevision', 'revision',
+      'accountsRoot', 'signerDigest', 'accountCount',
+    ], [], `${itemCode}_FIELDS`);
+    const owner = requireStorageHash(item['ownerEntityId'], `${itemCode}_OWNER`).toLowerCase();
+    requireStorageHash(item['protocolFingerprint'], `${itemCode}_FINGERPRINT`);
+    requireStorageHash(item['accountsRoot'], `${itemCode}_ACCOUNTS_ROOT`);
+    requireStorageHash(item['signerDigest'], `${itemCode}_SIGNER_DIGEST`);
+    for (const field of ['baseRevision', 'revision'] as const) {
+      const revision = requireStorageString(item[field], `${itemCode}_${field}`);
+      if (!/^(0|[1-9][0-9]*)$/.test(revision)) throw new Error(`${itemCode}_${field}_INVALID`);
+    }
+    if (item['baseRevision'] !== item['revision']) throw new Error(`${itemCode}_RESTORE_BASE`);
+    const accountCount = requireBoundaryInteger(item['accountCount'], `${itemCode}_ACCOUNT_COUNT`);
+    if (accountCount > 65_536) throw new Error(`${itemCode}_ACCOUNT_COUNT_MAX`);
+    if (owners.has(owner) || (previous !== '' && previous >= owner)) {
+      throw new Error(`${itemCode}_OWNER_ORDER`);
+    }
+    owners.add(owner);
+    previous = owner;
+    return item as StorageRscoreCheckpointRef;
+  });
+};
+
 export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame => {
   const code = 'STORAGE_FRAME_INVALID';
   const frame = requireBoundaryRecord(value, code);
@@ -72,7 +106,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     'replicaMetaStateMode', 'postStateHash', 'materializedState', 'runtimeInput',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs'], `${code}_FIELDS`);
+  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -98,6 +132,12 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   }
   if (frame['runtimeStateHash'] !== undefined) {
     requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);
+  }
+  if (frame['accountAuthorityCheckpoints'] !== undefined) {
+    frame['accountAuthorityCheckpoints'] = validateRscoreCheckpointRefs(
+      frame['accountAuthorityCheckpoints'],
+      `${code}_ACCOUNT_AUTHORITY_CHECKPOINTS`,
+    );
   }
   const requiresRuntimeMachine = frame['materializedState'] === true || frame['canonicalStateHash'] !== undefined;
   if (requiresRuntimeMachine || frame['runtimeMachineRoot'] !== undefined) {

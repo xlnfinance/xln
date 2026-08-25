@@ -20,20 +20,21 @@
  * own WAL, and everything TypeScript does around the call. This is the
  * engine's ceiling, not the system's throughput.
  *
- * Usage: bun core/scripts/operations/benchmark/bench-rscore-authority.ts \
+ * Usage: bun core/scripts/operations/benchmark/rscore/bench-rscore-authority.ts \
  *          [accounts=1000] [waves=10] [paymentsPerWave=1000] [workers=8]
  */
 import { join } from 'node:path';
 
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../account/crypto';
-import { buildSingleSignerHanko } from '../../../hanko/batch';
-import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../account/j-claims/j-claim-codec';
-import { generateLazyEntityId } from '../../../entity/factory';
-import { RscoreProcessClient, type RscoreWireValue } from '../../../rscore/client';
-import { swapMarketPolicyWire, waveAdmitOp, waveInputOp } from '../../../rscore/shadow-wire';
-import { decodeWave, type Wave } from '../../../rscore/wave-decode';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../../account/crypto';
+import { buildSingleSignerHanko } from '../../../../hanko/batch';
+import { EMPTY_ACCOUNT_J_CLAIM_ROOT } from '../../../../account/j-claims/j-claim-codec';
+import { generateLazyEntityId } from '../../../../entity/factory';
+import { RscoreProcessClient, type RscoreWireValue } from '../../../../rscore/client';
+import { swapMarketPolicyWire, waveAdmitOp, waveInputOp } from '../../../../rscore/shadow-wire';
+import { decodeWave, type Wave } from '../../../../rscore/wave-decode';
+import { safeStringify } from '../../../../protocol/serialization';
 
-const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
+const BINARY = join(import.meta.dir, '../../../../../rscore/target/release/xln-rscore');
 
 const accounts = Number(process.argv[2] ?? '1000');
 const waves = Number(process.argv[3] ?? '10');
@@ -240,7 +241,7 @@ const main = async (): Promise<void> => {
     ack.rows += applied.applied.length;
     for (const row of applied.applied) {
       if (row.verdict.kind === 'ackCommitted') ackCommits += 1;
-      else throw new Error(`BENCH_ACK_NOT_COMMITTED:${row.verdict.kind}:${JSON.stringify(row.verdict)}`);
+      else throw new Error(`BENCH_ACK_NOT_COMMITTED:${row.verdict.kind}:${safeStringify(row.verdict)}`);
     }
   }
 

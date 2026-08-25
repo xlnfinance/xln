@@ -171,12 +171,24 @@ export type RuntimeFrame = {
   pendingRuntimeInput?: RuntimeInput;
   /** Root of the exact typed Runtime checkpoint Patricia graph for this height. */
   runtimeMachineRoot?: RuntimeMachineGraphRoot;
+  /** Exact Rust Account-authority restore tokens made durable by this frame. */
+  accountAuthorityCheckpoints?: StorageRscoreCheckpointRef[];
   /** Ordered immutable payload references; bodies live once in the outbox keyspace. */
   runtimeOutputRefs?: RuntimeOutputPayloadHash[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
 };
+
+export type StorageRscoreCheckpointRef = Readonly<{
+  ownerEntityId: string;
+  protocolFingerprint: string;
+  baseRevision: string;
+  revision: string;
+  accountsRoot: string;
+  signerDigest: string;
+  accountCount: number;
+}>;
 
 /** Bodies addressed by one RuntimeFrame. They are never fields of the frame itself. */
 export type RuntimeFramePayloads = {

@@ -51,6 +51,8 @@ export type RuntimeRecoveryDeps = Pick<
   infraGossipDbAccess: Parameters<typeof loadGossipProfilesFromInfraDb>[1];
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
   applyRuntimeInput: RuntimeModule['applyRuntimeInput'];
+  accountAuthorityConfigured(): boolean;
+  setAccountAuthoritySuppressed(env: RuntimeReplica, suppressed: boolean): void;
 };
 
 export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
@@ -70,17 +72,23 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     startJurisdictionWatchers,
     getRuntimeOutputRoutingDeps,
     applyRuntimeInput,
+    accountAuthorityConfigured,
+    setAccountAuthoritySuppressed,
   } = deps;
 
   const restoreEnvFromCheckpointSnapshot = async (
     snapshot: Record<string, unknown>,
     options: CheckpointRestoreOptions = {},
   ): Promise<RuntimeReplica> => {
+    if (accountAuthorityConfigured() && options.readOnly !== true) {
+      throw new Error('RSCORE_PORTABLE_RESTORE_EXACT_CHECKPOINT_REQUIRED');
+    }
     const { env, gossipProfiles } = await decodeCheckpointSnapshot(
       { createEmptyEnv },
       snapshot,
       options,
     );
+    if (options.readOnly === true) setAccountAuthoritySuppressed(env, true);
     if (!options.readOnly) {
       await rehydrateRestoredRuntimeInfra(env, {
         isBrowser: runtimeIsBrowser,
@@ -144,8 +152,11 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   const persistRestoredEnvToDB = async (
     env: RuntimeReplica,
     options: PersistRestoredRuntimeOptions = {},
-  ): Promise<void> =>
-    persistRestoredRuntimeState({
+  ): Promise<void> => {
+    if (accountAuthorityConfigured()) {
+      throw new Error('RSCORE_PORTABLE_PERSIST_EXACT_CHECKPOINT_REQUIRED');
+    }
+    return persistRestoredRuntimeState({
       getStorageDb,
       getRuntimeWalDb,
       getHistoryViewDb,
@@ -153,6 +164,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       tryOpenRuntimeWalDb,
       tryOpenHistoryViewDb,
     }, env, options);
+  };
 
   const reconcileCommittedRuntimeInfraEffects = (env: RuntimeReplica, runtimeTxs: readonly RuntimeTx[]) =>
     reconcileRecoveryInfraEffects(env, runtimeTxs, startJurisdictionWatchers);

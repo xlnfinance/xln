@@ -51,6 +51,9 @@ export const createAccountConsensusContext = (
 ): AccountConsensusContext => ({
   runtimeTimestamp: env.state.timestamp,
   ...(env.runtimeId === undefined ? {} : { runtimeId: env.runtimeId }),
+  ...(env.accountAuthorityFrameId === undefined
+    ? {}
+    : { accountAuthorityFrameId: env.accountAuthorityFrameId }),
   quietLogs: env.quietRuntimeLogs === true,
   emitRuntimeEvents: true,
   jReplicas: env.state.jReplicas,

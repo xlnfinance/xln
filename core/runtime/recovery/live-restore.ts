@@ -22,6 +22,7 @@ export type RuntimeLiveRestoreDeps = {
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[],
   ): Promise<void>;
   registerCommittedSingleSignerWallets(env: RuntimeReplica): void;
+  discardAccountAuthority(env: RuntimeReplica): Promise<void>;
 };
 
 export const loadLiveRuntimeFromDB = async (
@@ -30,12 +31,13 @@ export const loadLiveRuntimeFromDB = async (
   runtimeSeed?: string | null,
   options?: RuntimeLoadOptions,
 ): Promise<RuntimeReplica | null> => {
+  let env: RuntimeReplica | null = null;
   try {
     const snapshotHeight = Number.isFinite(options?.fromSnapshotHeight)
       ? Math.floor(Number(options?.fromSnapshotHeight))
       : undefined;
     const restored = await deps.loadByReplay(runtimeId, runtimeSeed, snapshotHeight, {});
-    const env = restored?.env ?? null;
+    env = restored?.env ?? null;
     if (!env) return null;
 
     await deps.rehydrate(env, options?.trustedJurisdictionRpcBindings);
@@ -50,6 +52,7 @@ export const loadLiveRuntimeFromDB = async (
     await adoptShadowRuntimeState(env.state);
     return env;
   } catch (error) {
+    if (env) await deps.discardAccountAuthority(env);
     const message = error instanceof Error
       ? `${error.name}: ${error.message}`
       : String(error);

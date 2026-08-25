@@ -51,7 +51,7 @@ const shadowEnabled = (): boolean => {
   enabled = (() => {
     if (typeof process === 'undefined' || typeof process.env === 'undefined') return false;
     if (process.env['XLN_RSCORE_SHADOW'] !== '1') return false;
-    return typeof globalThis.Bun !== 'undefined' || typeof process.versions?.node === 'string';
+    return Reflect.has(globalThis, 'Bun') || typeof process.versions?.node === 'string';
   })();
   return enabled;
 };
@@ -155,7 +155,7 @@ export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
   // The authority driver reads the same commits, and it must see them whether
   // or not the mirror is running: its parity check is against these outputs.
   noteAuthorityCommittedOutputs(
-    input.runtimeId,
+    input.accountAuthorityFrameId,
     input.ownerEntityId,
     input.counterpartyEntityId,
     input.txResults,
@@ -306,7 +306,7 @@ const haltOnGap = (gap: ShadowGap, printStats: () => void): void => {
 };
 
 /** Distinct exit code so a harness can tell a parity halt from a crash. */
-export const RSCORE_SHADOW_HALT_EXIT_CODE = 70;
+const RSCORE_SHADOW_HALT_EXIT_CODE = 70;
 
 export const assertShadowParity = async (
   label = 'end-of-run',
@@ -447,13 +447,3 @@ export const flushShadowWave = (state?: RuntimeState): void => {
 
 /** Test/shutdown access to the live mirror (null when disabled or not started). */
 export const currentShadowMirror = (): MirrorLike | null => mirror ?? null;
-
-/** Test seam: reset module state between test cases. */
-export const resetShadowForTests = async (): Promise<void> => {
-  const active = mirror;
-  mirror = undefined;
-  pending = null;
-  arming = null;
-  lastRuntimeState = null;
-  if (active) await active.shutdown();
-};

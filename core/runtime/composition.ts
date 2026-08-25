@@ -40,6 +40,12 @@ import {
   notifyRuntimeFrameCommitted,
   notifyRuntimeStateChanged,
 } from './frame/notifications';
+import {
+  authorityDriverEnabled,
+  discardAuthorityRuntime,
+  restoreAuthorityExact,
+  setAuthorityRuntimeSuppressed,
+} from '../rscore/authority-driver';
 
 export { admitAtomicCrossJAccountInputs };
 export { quoteHtlcPaymentRoute } from '../pathfinding/htlc-quote';
@@ -252,6 +258,8 @@ const runtimeRecoveryApi = createRuntimeRecoveryApi({
   startJurisdictionWatchers,
   getRuntimeOutputRoutingDeps,
   applyRuntimeInput,
+  accountAuthorityConfigured: () => authorityDriverEnabled(),
+  setAccountAuthoritySuppressed: setAuthorityRuntimeSuppressed,
 });
 
 export const restoreEnvFromCheckpointSnapshot = runtimeRecoveryApi.restoreEnvFromCheckpointSnapshot;
@@ -275,6 +283,10 @@ const runtimeStorageApi = createRuntimeStorageApi({
   waitForPromiseBeforeTimeout,
   createEmptyEnv,
   replayRecoveryFrameJournals,
+  restoreAccountAuthorityExact: restoreAuthorityExact,
+  discardAccountAuthority: discardAuthorityRuntime,
+  setAccountAuthoritySuppressed: setAuthorityRuntimeSuppressed,
+  accountAuthorityConfigured: () => authorityDriverEnabled(),
 });
 
 processRuntimeImpl = createRuntimeProcessor({
@@ -357,8 +369,9 @@ export const loadEnvFromDB = async (
       assertPersistedContractConfigReady,
       assertBrowserVMJurisdiction,
       ...(trustedJurisdictionRpcBindings ? { trustedJurisdictionRpcBindings } : {}),
-    }),
+  }),
   registerCommittedSingleSignerWallets,
+  discardAccountAuthority: discardAuthorityRuntime,
 }, runtimeId, runtimeSeed, options);
 
 export const clearDB = async (env?: RuntimeReplica): Promise<void> => {

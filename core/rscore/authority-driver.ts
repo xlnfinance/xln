@@ -38,19 +38,42 @@ import {
   accountConsensusWire,
   accountEnvelopeWire,
   accountSeedWire,
+  swapMarketPolicyDigest,
   swapMarketPolicyWire,
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
 import { decodeWave, waveOutputRow, type Wave } from './wave-decode';
 import type { ShadowOutputRow } from './shadow-wire';
-import type { RscoreProcessClient } from './client';
+import {
+  RSCORE_PROCESS_ABI_VERSION,
+  RSCORE_PROCESS_PROFILE,
+  RSCORE_PROTOCOL_FINGERPRINT,
+  type RscoreCheckpointChanges,
+  type RscoreCheckpointToken,
+  type RscoreExactCheckpoint,
+  type RscoreProcessClient,
+} from './client';
+import { assertRscoreCheckpointCandidate } from './checkpoint-wire';
 import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
+import { buffersEqual, safeStringify } from '../protocol/serialization';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
-export const authorityDriverEnabled = (): boolean =>
-  process.env['XLN_RSCORE_AUTHORITY'] === '1';
+export const authorityDriverEnabled = (env?: RuntimeReplica): boolean =>
+  process.env['XLN_RSCORE_AUTHORITY'] === '1' &&
+  (env === undefined || env.accountAuthoritySuppressed !== true);
+
+export const authorityRuntimeSuppressed = (env: RuntimeReplica): boolean =>
+  env.accountAuthoritySuppressed === true;
+
+export const setAuthorityRuntimeSuppressed = (
+  env: RuntimeReplica,
+  suppressed: boolean,
+): void => {
+  if (suppressed) env.accountAuthoritySuppressed = true;
+  else delete env.accountAuthoritySuppressed;
+};
 
 type Session = {
   client: RscoreProcessClient;
@@ -69,17 +92,26 @@ type PendingWave = {
   session: Session;
   token: Buffer;
   result: Wave;
+  checkpoint?: RscoreCheckpointChanges;
 };
 
+export type AuthorityCheckpointStorageInput = Readonly<{
+  ownerEntityId: string;
+  protocolFingerprint: string;
+  checkpoint: RscoreCheckpointChanges;
+}>;
+
 /**
- * One session per Entity that holds accounts, keyed `runtimeId|entityId`: the
+ * One session per Entity that holds accounts, keyed by Runtime object identity
+ * and then Entity id: the
  * engine signs as one board, and a Runtime hosts more than one Entity — a hub
  * and its book live side by side in the H1 Runtime.
  */
-const sessions = new Map<string, Session | 'disabled'>();
-const captured = new Map<string, AuthorityWave>();
+const sessions = new Map<RuntimeReplica, Map<string, Session | 'disabled'>>();
+const allSessions = new Set<Session>();
+const captured = new Map<RuntimeReplica, AuthorityWave>();
 /** Candidates open in each Entity's engine, by Runtime. */
-const pending = new Map<string, PendingWave[]>();
+const pending = new Map<RuntimeReplica, PendingWave[]>();
 
 const report = {
   waves: 0,
@@ -91,14 +123,18 @@ const report = {
   emptyFrames: 0,
   commits: 0,
   aborts: 0,
+  checkpointsPrepared: 0,
+  checkpointValidations: 0,
+  checkpointsCommitted: 0,
+  restores: 0,
 };
 
-export const authorityDriverReport = (): typeof report => ({ ...report });
+const authorityDriverReport = (): typeof report => ({ ...report });
 
 /** A halt, not a warning: in safe mode the two engines must agree exactly. */
 const halt = (code: string, detail: Record<string, unknown>): never => {
   authorityLog.error('authority.halt', { code, ...detail });
-  console.error(`RSCORE_AUTHORITY_HALT ${code} ${JSON.stringify(detail)}`);
+  console.error(`RSCORE_AUTHORITY_HALT ${code} ${safeStringify(detail)}`);
   throw new Error(`RSCORE_AUTHORITY_HALT:${code}`);
 };
 
@@ -107,17 +143,36 @@ const halt = (code: string, detail: Record<string, unknown>): never => {
  * the Runtime frame boundary; the wave is prepared later, outside the mutation
  * the collector was watching.
  */
-export const captureAuthorityWave = (runtimeId: string): void => {
-  if (!authorityDriverEnabled()) return;
-  // The collector is keyed by the id exactly as the reducer saw it; the driver
-  // is keyed by its normalised form, because it is reached from a different
-  // env object. Normalising only on one side loses every frame silently.
-  captured.set(normalisedKey(runtimeId), buildAuthorityWave(runtimeId));
+export const captureAuthorityWave = (env: RuntimeReplica, frameId: string): void => {
+  if (!authorityDriverEnabled(env)) return;
+  captured.set(env, buildAuthorityWave(frameId));
 };
 
-const normalisedKey = (runtimeId: unknown): string => String(runtimeId ?? '').trim().toLowerCase();
+function sessionMap(
+  env: RuntimeReplica,
+  create: true,
+): Map<string, Session | 'disabled'>;
+function sessionMap(
+  env: RuntimeReplica,
+  create: false,
+): Map<string, Session | 'disabled'> | undefined;
+function sessionMap(
+  env: RuntimeReplica,
+  create: boolean,
+): Map<string, Session | 'disabled'> | undefined {
+  const existing = sessions.get(env);
+  if (existing || !create) return existing;
+  const created = new Map<string, Session | 'disabled'>();
+  sessions.set(env, created);
+  return created;
+}
 
-const runtimeKey = (env: RuntimeReplica): string => normalisedKey(env.runtimeId);
+const sessionEntriesForRuntime = (env: RuntimeReplica): Session[] =>
+  [...(sessionMap(env, false)?.values() ?? [])]
+  .filter((session): session is Session => session !== 'disabled')
+  .sort((left, right) => left.ownerEntityId.localeCompare(right.ownerEntityId));
+
+const protocolFingerprint = `0x${RSCORE_PROTOCOL_FINGERPRINT.toString('hex')}`;
 
 /**
  * The signer this Runtime holds for an Entity, as the replica itself records
@@ -135,7 +190,10 @@ const accountsOf = (env: RuntimeReplica, entityId: string): ReadonlyMap<string, 
   return replica?.state.accounts ?? new Map<string, AccountReplica>();
 };
 
-const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<Session | 'disabled'> => {
+const openAuthoritySession = async (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+): Promise<Session | 'disabled'> => {
   const signerId = signerIdFor(env, ownerEntityId);
   if (!signerId) return disable(ownerEntityId, 'SIGNER_UNKNOWN');
   // The engine signs as one member of a one-of-one board, so the Entity it
@@ -159,12 +217,63 @@ const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<S
     sessionId: Buffer.alloc(16, 0x5d),
   });
   const workers = Number(process.env['XLN_RSCORE_AUTHORITY_WORKERS'] ?? '8');
-  const hello = (await client.hello(workers, swapMarketPolicyWire(), { privateKey, signerId })) as unknown[];
-  const derived = `0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`.toLowerCase();
-  if (derived !== ownerEntityId) {
+  const market = swapMarketPolicyWire();
+  try {
+    const rawHello = await client.hello(workers, market, { privateKey, signerId });
+    if (!Array.isArray(rawHello) || rawHello.length !== 6) {
+      throw new Error('RSCORE_AUTHORITY_HELLO_ARITY');
+    }
+    const [abi, profile, actualWorkers, rawMarketDigest, rawSigner, rawEntity] = rawHello;
+    if (abi !== RSCORE_PROCESS_ABI_VERSION) {
+      throw new Error(`RSCORE_AUTHORITY_HELLO_ABI:${String(abi)}:${RSCORE_PROCESS_ABI_VERSION}`);
+    }
+    if (profile !== RSCORE_PROCESS_PROFILE) {
+      throw new Error(`RSCORE_AUTHORITY_HELLO_PROFILE:${String(profile)}:${RSCORE_PROCESS_PROFILE}`);
+    }
+    if (actualWorkers !== workers) {
+      throw new Error(`RSCORE_AUTHORITY_HELLO_WORKERS:${String(actualWorkers)}:${workers}`);
+    }
+    if (!(rawMarketDigest instanceof Uint8Array) || rawMarketDigest.byteLength !== 32) {
+      throw new Error('RSCORE_AUTHORITY_HELLO_MARKET_BYTES');
+    }
+    const actualMarketDigest = `0x${Buffer.from(rawMarketDigest).toString('hex')}`;
+    const expectedMarketDigest = swapMarketPolicyDigest(market);
+    if (actualMarketDigest !== expectedMarketDigest) {
+      throw new Error(
+        `RSCORE_AUTHORITY_HELLO_MARKET:${actualMarketDigest}:${expectedMarketDigest}`,
+      );
+    }
+    if (!(rawSigner instanceof Uint8Array) || rawSigner.byteLength !== 20) {
+      throw new Error('RSCORE_AUTHORITY_HELLO_SIGNER_BYTES');
+    }
+    const derivedSigner = `0x${Buffer.from(rawSigner).toString('hex')}`.toLowerCase();
+    if (derivedSigner !== signerId) {
+      throw new Error(`RSCORE_AUTHORITY_HELLO_SIGNER:${derivedSigner}:${signerId}`);
+    }
+    if (!(rawEntity instanceof Uint8Array) || rawEntity.byteLength !== 32) {
+      throw new Error('RSCORE_AUTHORITY_HELLO_ENTITY_BYTES');
+    }
+    const derivedEntity = `0x${Buffer.from(rawEntity).toString('hex')}`.toLowerCase();
+    if (derivedEntity !== ownerEntityId) {
+      throw new Error(`RSCORE_AUTHORITY_HELLO_ENTITY:${derivedEntity}:${ownerEntityId}`);
+    }
+  } catch (error) {
     client.kill();
-    return disable(ownerEntityId, `ENGINE_ENTITY_MISMATCH:${derived}`);
+    throw error;
   }
+  const accounts = accountsOf(env, ownerEntityId);
+  return {
+    client,
+    ownerEntityId,
+    seeded: new Set(accounts.keys()),
+    seededProjection: new Map([...accounts.entries()]
+      .map(([counterpartyId, account]) => [counterpartyId, projectEntityAccountLeaf(account)])),
+  };
+};
+
+const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<Session | 'disabled'> => {
+  const session = await openAuthoritySession(env, ownerEntityId);
+  if (session === 'disabled') return session;
   const accounts = accountsOf(env, ownerEntityId);
   const seeds = [...accounts.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
@@ -176,16 +285,14 @@ const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<S
       accountConsensusWire(account),
       requireAccountDeltaTransformerAddress(env.state, account.state),
     ));
-  await client.bootstrapAccounts(0, seeds);
+  await session.client.bootstrapAccounts(0, seeds);
   report.accountsSeeded += seeds.length;
-  authorityLog.error('authority.armed', { owner: ownerEntityId, accounts: seeds.length, workers });
-  return {
-    client,
-    ownerEntityId,
-    seeded: new Set(accounts.keys()),
-    seededProjection: new Map([...accounts.entries()]
-      .map(([counterpartyId, account]) => [counterpartyId, projectEntityAccountLeaf(account)])),
-  };
+  authorityLog.error('authority.armed', {
+    owner: ownerEntityId,
+    accounts: seeds.length,
+    workers: Number(process.env['XLN_RSCORE_AUTHORITY_WORKERS'] ?? '8'),
+  });
+  return session;
 };
 
 const disable = (ownerEntityId: string, reason: string): 'disabled' => {
@@ -204,18 +311,24 @@ const disable = (ownerEntityId: string, reason: string): 'disabled' => {
  * bug rather than a seeding one.
  */
 export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
-  if (!authorityDriverEnabled()) return;
-  const key = runtimeKey(env);
+  if (!authorityDriverEnabled(env)) return;
+  const runtimeSessions = sessionMap(env, true);
   // Entities holding no accounts have nothing for this engine to own; an
   // Entity that opens its first account is armed at the frame after it did.
   for (const replica of env.state.eReplicas.values()) {
     if (replica.state.accounts.size === 0) continue;
     const ownerEntityId = replica.entityId.trim().toLowerCase();
-    const sessionKey = `${key}|${ownerEntityId}`;
-    const existing = sessions.get(sessionKey);
-    if (existing === 'disabled') continue;
+    const existing = runtimeSessions.get(ownerEntityId);
+    if (existing === 'disabled') {
+      return halt('OWNER_AUTHORITY_INELIGIBLE', { owner: ownerEntityId });
+    }
     if (existing === undefined) {
-      sessions.set(sessionKey, await armSession(env, ownerEntityId));
+      const armed = await armSession(env, ownerEntityId);
+      if (armed === 'disabled') {
+        return halt('OWNER_AUTHORITY_INELIGIBLE', { owner: ownerEntityId });
+      }
+      runtimeSessions.set(ownerEntityId, armed);
+      allSessions.add(armed);
       continue;
     }
     // Accounts opened by earlier frames: seeded here, before this frame moves
@@ -240,16 +353,185 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
   }
 };
 
+const exactCheckpointRoot = (checkpoint: RscoreExactCheckpoint): string =>
+  `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`.toLowerCase();
+
+const accountMapRoot = (
+  accounts: ReadonlyMap<string, AccountReplica>,
+  ownerEntityId: string,
+): string => {
+  const rootHash = (accounts as ReadonlyMap<string, AccountReplica> & {
+    rootHash?: () => string;
+  }).rootHash;
+  if (typeof rootHash !== 'function') {
+    return halt('ACCOUNT_FOREST_NOT_CANONICAL', { owner: ownerEntityId });
+  }
+  return rootHash.call(accounts).trim().toLowerCase();
+};
+
+/**
+ * Rebuild every Rust authority session from the exact materialized rows before
+ * WAL-tail replay. In authority mode a missing owner or token is corruption,
+ * never permission to bootstrap from the already-restored TypeScript answer.
+ */
+export const restoreAuthorityExact = async (
+  env: RuntimeReplica,
+  checkpoints: readonly RscoreExactCheckpoint[],
+): Promise<void> => {
+  if (!authorityDriverEnabled(env)) return;
+  const expectedOwnerForests = new Map<string, { root: string; count: number }>();
+  const requiredOwners = new Set<string>();
+  for (const replica of env.state.eReplicas.values()) {
+    const ownerEntityId = replica.entityId.trim().toLowerCase();
+    const forest = {
+      root: accountMapRoot(replica.state.accounts, ownerEntityId),
+      count: replica.state.accounts.size,
+    };
+    const previous = expectedOwnerForests.get(ownerEntityId);
+    if (previous !== undefined && (
+      previous.root !== forest.root || previous.count !== forest.count
+    )) {
+      halt('DUPLICATE_OWNER_STATE_MISMATCH', {
+        owner: ownerEntityId,
+        firstRoot: previous.root,
+        secondRoot: forest.root,
+        firstCount: previous.count,
+        secondCount: forest.count,
+      });
+    }
+    expectedOwnerForests.set(ownerEntityId, forest);
+    if (forest.count > 0) requiredOwners.add(ownerEntityId);
+  }
+  const ordered = [...checkpoints]
+    .sort((left, right) => left.ownerEntityId.localeCompare(right.ownerEntityId));
+  const actualOwners = ordered.map(checkpoint => checkpoint.ownerEntityId.trim().toLowerCase());
+  const actualOwnerSet = new Set(actualOwners);
+  const missingOwners = [...requiredOwners]
+    .filter(owner => !actualOwnerSet.has(owner))
+    .sort();
+  const unknownOwners = actualOwners
+    .filter(owner => !expectedOwnerForests.has(owner))
+    .sort();
+  if (
+    actualOwnerSet.size !== actualOwners.length ||
+    missingOwners.length > 0 ||
+    unknownOwners.length > 0
+  ) {
+    halt('RESTORE_OWNER_SET_MISMATCH', {
+      required: [...requiredOwners].sort(),
+      actual: actualOwners,
+      missing: missingOwners,
+      unknown: unknownOwners,
+    });
+  }
+
+  const opened: Array<{ ownerEntityId: string; session: Session }> = [];
+  try {
+    for (const checkpoint of ordered) {
+      const ownerEntityId = checkpoint.ownerEntityId.trim().toLowerCase();
+      if (checkpoint.protocolFingerprint.toLowerCase() !== protocolFingerprint) {
+        halt('RESTORE_FINGERPRINT_MISMATCH', {
+          owner: ownerEntityId,
+          expected: protocolFingerprint,
+          actual: checkpoint.protocolFingerprint,
+        });
+      }
+      const expectedForest = expectedOwnerForests.get(ownerEntityId);
+      if (expectedForest === undefined) {
+        return halt('RESTORE_OWNER_MISSING', { owner: ownerEntityId });
+      }
+      const checkpointRoot = exactCheckpointRoot(checkpoint);
+      if (
+        checkpointRoot !== expectedForest.root ||
+        checkpoint.restoreToken[4] !== expectedForest.count
+      ) {
+        halt('RESTORE_TYPESCRIPT_FOREST_MISMATCH', {
+          owner: ownerEntityId,
+          typescriptRoot: expectedForest.root,
+          checkpointRoot,
+          typescriptCount: expectedForest.count,
+          checkpointCount: checkpoint.restoreToken[4],
+        });
+      }
+      const session = await openAuthoritySession(env, ownerEntityId);
+      if (session === 'disabled') {
+        return halt('RESTORE_SESSION_DISABLED', { owner: ownerEntityId });
+      }
+      opened.push({ ownerEntityId, session });
+      const restored = await session.client.restoreExact(
+        checkpoint.restoreToken,
+        checkpoint.accounts,
+      );
+      if (!checkpointTokensEqual(restored, checkpoint.restoreToken)) {
+        halt('RESTORE_TOKEN_MISMATCH', {
+          owner: ownerEntityId,
+          expectedRevision: String(checkpoint.restoreToken[1]),
+          restoredRevision: String(restored[1]),
+        });
+      }
+      report.restores += 1;
+    }
+  } catch (error) {
+    for (const { session } of opened) session.client.kill();
+    throw error;
+  }
+  for (const existing of sessionMap(env, false)?.values() ?? []) {
+    if (existing === 'disabled') continue;
+    existing.client.kill();
+    allSessions.delete(existing);
+  }
+  const installed = new Map<string, Session | 'disabled'>();
+  for (const entry of opened) {
+    installed.set(entry.ownerEntityId, entry.session);
+    allSessions.add(entry.session);
+  }
+  sessions.set(env, installed);
+  captured.delete(env);
+  pending.delete(env);
+};
+
+const prepareTrackedCandidate = async (
+  session: Session,
+  request: Parameters<RscoreProcessClient['prepareAccountWave']>[0],
+  validate: (result: Wave) => Promise<void>,
+): Promise<PendingWave> => {
+  let prepared: Awaited<ReturnType<RscoreProcessClient['prepareAccountWave']>>;
+  try {
+    prepared = await session.client.prepareAccountWave(request);
+  } catch (error) {
+    // A malformed/truncated reply can hide a live candidate token. Kill the
+    // process; only exact durable recovery may decide its next state.
+    session.client.kill();
+    throw error;
+  }
+  try {
+    const result = decodeWave(prepared.result);
+    await validate(result);
+    return { session, token: prepared.token, result };
+  } catch (error) {
+    try {
+      await session.client.abort(prepared.token);
+      report.aborts += 1;
+    } catch (abortError) {
+      session.client.kill();
+      throw new AggregateError(
+        [error, abortError],
+        `RSCORE_AUTHORITY_PREPARE_VALIDATION_ABORT_FAILED:${session.ownerEntityId}`,
+      );
+    }
+    throw error;
+  }
+};
+
 /**
  * Hand the collected frame to the engine and hold its answer against
  * TypeScript's. Returns with a candidate pending in the engine, which the
  * caller must either commit (after its own record is durable) or abort.
  */
 export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
-  if (!authorityDriverEnabled()) return;
-  const key = runtimeKey(env);
-  const wave = captured.get(key);
-  captured.delete(key);
+  if (!authorityDriverEnabled(env)) return;
+  const wave = captured.get(env);
+  captured.delete(env);
   if (wave === undefined || wave.kind === 'empty') {
     if (wave?.kind === 'empty') report.emptyFrames += 1;
     return;
@@ -261,11 +543,14 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
     return;
   }
   const candidates: PendingWave[] = [];
-  pending.set(key, candidates);
+  pending.set(env, candidates);
+  const runtimeSessions = sessionMap(env, false);
   for (const entity of wave.entities) {
     const ownerEntityId = entity.ownerEntityId;
-    const session = sessions.get(`${key}|${ownerEntityId}`);
-    if (session === 'disabled') continue;
+    const session = runtimeSessions?.get(ownerEntityId);
+    if (session === 'disabled') {
+      return halt('OWNER_AUTHORITY_INELIGIBLE', { owner: ownerEntityId });
+    }
     if (session === undefined) {
       // The frame opened with this Entity holding no accounts and closed with
       // a wave for it: the accounts it touches were opened inside the frame,
@@ -274,18 +559,22 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
       return;
     }
     assertWaveAccountsSeeded(session, entity.ops);
-    const { result, token } = await session.client.prepareAccountWave({
+    const candidate = await prepareTrackedCandidate(session, {
       entities: [{
         ...entity,
         ownerEntityId: Uint8Array.from(Buffer.from(ownerEntityId.slice(2), 'hex')),
       }],
-    });
-    const decoded = decodeWave(result);
+    }, decoded => compareWithTypescript(
+      env,
+      ownerEntityId,
+      decoded,
+      entity.expectedOutputs,
+      session,
+    ));
     report.waves += 1;
-    report.framesProposed += decoded.proposals.filter(row => row.frame !== null).length;
-    report.inputsApplied += decoded.applied.length;
-    await compareWithTypescript(env, ownerEntityId, decoded, entity.expectedOutputs, session);
-    candidates.push({ session, token, result: decoded });
+    report.framesProposed += candidate.result.proposals.filter(row => row.frame !== null).length;
+    report.inputsApplied += candidate.result.applied.length;
+    candidates.push(candidate);
   }
 };
 
@@ -366,15 +655,6 @@ const fieldExplainingLeaf = (
     if (digest({ ...now, [field]: seeded[field] }) === target) return field;
   }
   return 'none';
-};
-
-const safeStringify = (value: unknown): string => {
-  try {
-    return JSON.stringify(value, (_key, entry) =>
-      typeof entry === 'bigint' ? entry.toString() : entry) ?? 'undefined';
-  } catch {
-    return String(value);
-  }
 };
 
 /**
@@ -505,9 +785,19 @@ const compareWithTypescript = async (
 ): Promise<void> => {
   compareOutputs(ownerEntityId, wave, expectedOutputs);
   const accounts = accountsOf(env, ownerEntityId);
-  const proposed = new Map(wave.proposals
-    .filter(row => row.frame !== null)
-    .map(row => [row.accountId, row.frame!]));
+  const typescriptAccountsRoot = accountMapRoot(accounts, ownerEntityId);
+  if (typescriptAccountsRoot !== wave.accountsRoot.toLowerCase()) {
+    halt('ACCOUNTS_ROOT_MISMATCH', {
+      owner: ownerEntityId,
+      typescript: typescriptAccountsRoot,
+      rust: wave.accountsRoot,
+      accountCount: accounts.size,
+    });
+  }
+  const proposed = new Map<string, NonNullable<Wave['proposals'][number]['frame']>>();
+  for (const row of wave.proposals) {
+    if (row.frame !== null) proposed.set(row.accountId, row.frame);
+  }
   for (const leaf of wave.touched) {
     const account = accounts.get(leaf.accountId)
       ?? findAccountByCounterparty(accounts, ownerEntityId, leaf.accountId);
@@ -517,6 +807,7 @@ const compareWithTypescript = async (
     }
     const expected = computeEntityAccountValueHash(account).toLowerCase();
     if (expected !== leaf.entityAccountLeaf.toLowerCase()) {
+      const rustProposal = proposed.get(leaf.accountId);
       const fields = session === undefined
         ? {}
         : projectionDiff(projectEntityAccountLeaf(account), await engineLeafFields(session, leaf.accountId));
@@ -537,11 +828,11 @@ const compareWithTypescript = async (
           accountStateRoot: account.pendingFrame.accountStateRoot,
           txs: account.pendingFrame.accountTxs.length,
         },
-        rustProposal: proposed.get(leaf.accountId) === undefined ? null : {
-          height: proposed.get(leaf.accountId)!.height,
-          stateHash: proposed.get(leaf.accountId)!.stateHash,
-          accountStateRoot: proposed.get(leaf.accountId)!.accountStateRoot,
-          txs: proposed.get(leaf.accountId)!.accountTxs.length,
+        rustProposal: rustProposal === undefined ? null : {
+          height: rustProposal.height,
+          stateHash: rustProposal.stateHash,
+          accountStateRoot: rustProposal.accountStateRoot,
+          txs: rustProposal.accountTxs.length,
         },
         currentFrame: account.currentFrame?.height ?? null,
         movedSinceSeed: movedCarriedFields(session, leaf.accountId, account),
@@ -588,50 +879,282 @@ const compareWithTypescript = async (
   }
 };
 
+const openEmptyCandidate = async (
+  env: RuntimeReplica,
+  session: Session,
+): Promise<PendingWave> => {
+  const candidate = await prepareTrackedCandidate(
+    session,
+    { entities: [] },
+    result => compareWithTypescript(env, session.ownerEntityId, result, new Map(), session),
+  );
+  report.waves += 1;
+  return candidate;
+};
+
+const assertCheckpointMatchesCandidate = (
+  env: RuntimeReplica,
+  candidate: PendingWave,
+  checkpoint: RscoreCheckpointChanges,
+): void => {
+  const owner = candidate.session.ownerEntityId;
+  const accounts = accountsOf(env, owner);
+  const typescriptRoot = accountMapRoot(accounts, owner);
+  const checkpointRoot = `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`;
+  try {
+    assertRscoreCheckpointCandidate(checkpoint, {
+      revision: candidate.result.revision,
+      accountsRoot: candidate.result.accountsRoot,
+      accountCount: accounts.size,
+    });
+  } catch {
+    halt('CHECKPOINT_CANDIDATE_MISMATCH', {
+      owner,
+      candidateRevision: candidate.result.revision,
+      checkpointRevision: String(checkpoint.restoreToken[1]),
+      candidateRoot: candidate.result.accountsRoot,
+      checkpointRoot,
+      typescriptRoot,
+      checkpointCount: checkpoint.restoreToken[4],
+      typescriptCount: accounts.size,
+    });
+  }
+  if (
+    candidate.result.accountsRoot.toLowerCase() !== typescriptRoot
+  ) {
+    halt('CHECKPOINT_CANDIDATE_MISMATCH', {
+      owner,
+      candidateRevision: candidate.result.revision,
+      checkpointRevision: String(checkpoint.restoreToken[1]),
+      candidateRoot: candidate.result.accountsRoot,
+      checkpointRoot,
+      typescriptRoot,
+      checkpointCount: checkpoint.restoreToken[4],
+      typescriptCount: accounts.size,
+    });
+  }
+};
+
+/**
+ * Export candidate-bound checkpoint changes before the authoritative WAL
+ * append. A materialization frame covers every armed owner, including owners
+ * whose Account machine was idle in this Runtime frame; those receive one
+ * explicit empty candidate so the exported rows and token name this exact
+ * Runtime boundary.
+ */
+export const prepareAuthorityCheckpoint = async (
+  env: RuntimeReplica,
+  checkpointRequested: boolean,
+): Promise<readonly AuthorityCheckpointStorageInput[]> => {
+  if (!authorityDriverEnabled(env) || !checkpointRequested) return [];
+  const candidates = pending.get(env) ?? [];
+  if (!pending.has(env)) pending.set(env, candidates);
+  const byOwner = new Map(candidates.map(candidate => [candidate.session.ownerEntityId, candidate]));
+  for (const session of sessionEntriesForRuntime(env)) {
+    if (byOwner.has(session.ownerEntityId)) continue;
+    const candidate = await openEmptyCandidate(env, session);
+    candidates.push(candidate);
+    byOwner.set(session.ownerEntityId, candidate);
+  }
+  const inputs: AuthorityCheckpointStorageInput[] = [];
+  for (const candidate of [...candidates]
+    .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
+    if (candidate.checkpoint) {
+      halt('CHECKPOINT_ALREADY_EXPORTED', { owner: candidate.session.ownerEntityId });
+    }
+    const checkpoint = await candidate.session.client.getCheckpointChanges(candidate.token);
+    assertCheckpointMatchesCandidate(env, candidate, checkpoint);
+    candidate.checkpoint = checkpoint;
+    report.checkpointsPrepared += 1;
+    inputs.push({
+      ownerEntityId: candidate.session.ownerEntityId,
+      protocolFingerprint,
+      checkpoint,
+    });
+  }
+  return inputs;
+};
+
+const checkpointTokensEqual = (
+  left: RscoreCheckpointToken,
+  right: RscoreCheckpointToken,
+): boolean =>
+  BigInt(left[0]) === BigInt(right[0]) &&
+  BigInt(left[1]) === BigInt(right[1]) &&
+  buffersEqual(Buffer.from(left[2]), Buffer.from(right[2])) &&
+  buffersEqual(Buffer.from(left[3]), Buffer.from(right[3])) &&
+  left[4] === right[4];
+
+/**
+ * Re-read the exact physical projection through the storage overlay and make
+ * a disposable Rust authority restore it before WAL fsync. This binds the
+ * incremental node changes—not just their token—to the candidate root.
+ */
+export const validateAuthorityCheckpointMaterialization = async (
+  env: RuntimeReplica,
+  checkpoints: readonly RscoreExactCheckpoint[],
+): Promise<void> => {
+  if (!authorityDriverEnabled(env)) return;
+  const expected = new Map(
+    (pending.get(env) ?? [])
+      .filter(candidate => candidate.checkpoint !== undefined)
+      .map(candidate => [candidate.session.ownerEntityId, candidate]),
+  );
+  const ordered = [...checkpoints]
+    .sort((left, right) => left.ownerEntityId.localeCompare(right.ownerEntityId));
+  if (ordered.length !== expected.size) {
+    halt('CHECKPOINT_MATERIALIZATION_OWNER_COUNT', {
+      expected: [...expected.keys()].sort(),
+      actual: ordered.map(checkpoint => checkpoint.ownerEntityId),
+    });
+  }
+  const seen = new Set<string>();
+  for (const checkpoint of ordered) {
+    const owner = checkpoint.ownerEntityId.trim().toLowerCase();
+    const candidate = expected.get(owner);
+    if (
+      seen.has(owner) ||
+      candidate?.checkpoint === undefined ||
+      checkpoint.protocolFingerprint.toLowerCase() !== protocolFingerprint ||
+      !checkpointTokensEqual(
+        checkpoint.restoreToken,
+        candidate.checkpoint.restoreToken,
+      )
+    ) {
+      halt('CHECKPOINT_MATERIALIZATION_IDENTITY_MISMATCH', {
+        owner,
+        duplicate: seen.has(owner),
+        expectedOwner: candidate?.session.ownerEntityId ?? null,
+        expectedRevision: candidate?.checkpoint === undefined
+          ? null
+          : String(candidate.checkpoint.restoreToken[1]),
+        actualRevision: String(checkpoint.restoreToken[1]),
+      });
+    }
+    seen.add(owner);
+    const validator = await openAuthoritySession(env, owner);
+    if (validator === 'disabled') {
+      return halt('CHECKPOINT_MATERIALIZATION_VALIDATOR_DISABLED', { owner });
+    }
+    try {
+      const restored = await validator.client.restoreExact(
+        checkpoint.restoreToken,
+        checkpoint.accounts,
+      );
+      if (!checkpointTokensEqual(restored, checkpoint.restoreToken)) {
+        halt('CHECKPOINT_MATERIALIZATION_RESTORE_MISMATCH', {
+          owner,
+          expectedRevision: String(checkpoint.restoreToken[1]),
+          actualRevision: String(restored[1]),
+        });
+      }
+      report.checkpointValidations += 1;
+    } finally {
+      validator.client.kill();
+    }
+  }
+};
+
+const decodeCommitResponse = (
+  ownerEntityId: string,
+  value: unknown,
+): Readonly<{ revision: number; root: Uint8Array }> => {
+  if (!Array.isArray(value) || value.length !== 2) {
+    return halt('COMMIT_RESPONSE_INVALID', { owner: ownerEntityId });
+  }
+  const revision = value[0];
+  const root = value[1];
+  if (
+    typeof revision !== 'number' ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0 ||
+    !(root instanceof Uint8Array) ||
+    root.byteLength !== 32
+  ) {
+    return halt('COMMIT_RESPONSE_INVALID', { owner: ownerEntityId });
+  }
+  return { revision, root };
+};
+
 /** The Runtime's own record is durable: every engine may keep its wave. */
 export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
-  if (!authorityDriverEnabled()) return;
-  const key = runtimeKey(env);
-  const candidates = pending.get(key);
+  if (!authorityDriverEnabled(env)) return;
+  const candidates = pending.get(env);
   if (candidates === undefined) return;
-  pending.delete(key);
-  for (const candidate of candidates) {
-    const committed = (await candidate.session.client.commit(candidate.token)) as unknown[];
-    const root = `0x${Buffer.from(committed[1] as Uint8Array).toString('hex')}`;
-    if (root.toLowerCase() !== candidate.result.accountsRoot.toLowerCase()) {
+  const ordered = [...candidates]
+    .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId));
+  for (const candidate of ordered) {
+    const committed = decodeCommitResponse(
+      candidate.session.ownerEntityId,
+      await candidate.session.client.commit(candidate.token),
+    );
+    const root = `0x${Buffer.from(committed.root).toString('hex')}`;
+    if (
+      committed.revision !== candidate.result.revision ||
+      root.toLowerCase() !== candidate.result.accountsRoot.toLowerCase()
+    ) {
       halt('COMMIT_ROOT_MISMATCH', {
         owner: candidate.session.ownerEntityId,
+        preparedRevision: candidate.result.revision,
+        committedRevision: committed.revision,
         prepared: candidate.result.accountsRoot,
         committed: root,
       });
     }
     report.commits += 1;
   }
+  for (const candidate of ordered) {
+    if (!candidate.checkpoint) continue;
+    const committed = await candidate.session.client.commitCheckpoint(
+      candidate.checkpoint.commitToken,
+    );
+    if (!checkpointTokensEqual(committed, candidate.checkpoint.restoreToken)) {
+      halt('CHECKPOINT_COMMIT_TOKEN_MISMATCH', {
+        owner: candidate.session.ownerEntityId,
+        expectedRevision: String(candidate.checkpoint.restoreToken[1]),
+        committedRevision: String(committed[1]),
+      });
+    }
+    report.checkpointsCommitted += 1;
+  }
+  pending.delete(env);
 };
 
 /** The Runtime could not make its record durable: the engines take it back. */
 export const abortAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
-  if (!authorityDriverEnabled()) return;
-  const key = runtimeKey(env);
-  const candidates = pending.get(key);
+  if (!authorityDriverEnabled(env)) return;
+  const candidates = pending.get(env);
   if (candidates === undefined) return;
-  pending.delete(key);
-  for (const candidate of candidates) {
+  for (const candidate of [...candidates]
+    .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
     await candidate.session.client.abort(candidate.token);
     report.aborts += 1;
   }
+  pending.delete(env);
 };
 
 export const printAuthorityDriverReport = (): void => {
   if (!authorityDriverEnabled()) return;
-  console.error(`RSCORE_AUTHORITY_DRIVER ${JSON.stringify(authorityDriverReport())}`);
+  console.error(`RSCORE_AUTHORITY_DRIVER ${safeStringify(authorityDriverReport())}`);
+};
+
+export const discardAuthorityRuntime = async (env: RuntimeReplica): Promise<void> => {
+  for (const session of sessionMap(env, false)?.values() ?? []) {
+    if (session === 'disabled') continue;
+    session.client.kill();
+    allSessions.delete(session);
+  }
+  sessions.delete(env);
+  captured.delete(env);
+  pending.delete(env);
+  delete env.accountAuthorityFrameId;
 };
 
 export const shutdownAuthorityDriver = async (): Promise<void> => {
-  for (const session of sessions.values()) {
-    if (session === 'disabled') continue;
+  for (const session of allSessions) {
     try { await session.client.shutdown(); } catch { session.client.kill(); }
   }
+  allSessions.clear();
   sessions.clear();
   captured.clear();
   pending.clear();

@@ -194,7 +194,11 @@ const main = async (): Promise<void> => {
   const args = process.argv.slice(2);
   const logPath = args.find(arg => !arg.startsWith('--'));
   const jsonOutput = args.includes('--json');
-  if (!logPath) throw new Error('USAGE: bun core/scripts/operations/benchmark/analyze-runtime-perf.ts <log-file> [--json]');
+  if (!logPath) {
+    throw new Error(
+      'USAGE: bun core/scripts/operations/benchmark/analyze-runtime-perf.ts <log-file> [--json]',
+    );
+  }
   const lines = createInterface({ input: createReadStream(logPath), crlfDelay: Number.POSITIVE_INFINITY });
   const profiles: ParsedProfile[] = [];
   for await (const line of lines) {

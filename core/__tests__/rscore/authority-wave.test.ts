@@ -8,6 +8,7 @@ import {
   noteAuthorityEntityClock,
   noteRawAccountInput,
   resetAuthorityRecordForTests,
+  runAuthorityFrameScope,
 } from '../../rscore/authority-wave';
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../types/account';
 
@@ -101,6 +102,41 @@ describe('authority record', () => {
     const report = authorityRecordReport();
     expect(report.skippedNoFrame).toBe(1);
     expect(report.inputs).toBe(0);
+  });
+
+  test('a detached replay cannot append to a live frame with the same Runtime id', async () => {
+    const live: { accountAuthorityFrameId?: string | null | undefined } = {};
+    const detached: { accountAuthorityFrameId?: string | null | undefined } = {};
+    await runAuthorityFrameScope(live, 'runtime-a', true, async frameId => {
+      if (frameId === null) throw new Error('expected live authority frame');
+      noteAuthorityEntityClock(live.accountAuthorityFrameId, A, 'enforce', 1_700_000_000_000, 100);
+      noteRawAccountInput(live.accountAuthorityFrameId, replica(A, B), enqueue());
+
+      await runAuthorityFrameScope(detached, 'runtime-a', false, async () => {
+        noteAuthorityEntityClock(
+          detached.accountAuthorityFrameId,
+          A,
+          'enforce',
+          1_700_000_000_999,
+          999,
+        );
+        noteRawAccountInput(detached.accountAuthorityFrameId, replica(A, C), enqueue());
+      });
+
+      const wave = buildAuthorityWave(frameId);
+      expect(wave.kind).toBe('wave');
+      if (wave.kind !== 'wave') throw new Error('expected a wave');
+      expect(wave.entities).toHaveLength(1);
+      const entity = wave.entities[0];
+      if (!entity) throw new Error('expected one authority Entity');
+      expect(entity.ops).toHaveLength(1);
+      expect(entity.finalizedJHeight).toBe(100);
+    });
+
+    const report = authorityRecordReport();
+    expect(report.frames).toBe(1);
+    expect(report.inputs).toBe(1);
+    expect(report.skippedNoFrame).toBe(0);
   });
 
   test('a frame touching two owner Entities is reported as such', () => {

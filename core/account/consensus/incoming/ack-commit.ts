@@ -174,6 +174,9 @@ const applyPendingFrameTransactions = async (
     // the shadow engine and its account silently falls behind.
     noteAccountFrameForShadow({
       ...(context.runtimeId === undefined ? {} : { runtimeId: context.runtimeId }),
+      ...(context.accountAuthorityFrameId === undefined
+        ? {}
+        : { accountAuthorityFrameId: context.accountAuthorityFrameId }),
       ownerEntityId: account.proofHeader.fromEntity,
       counterpartyEntityId: account.proofHeader.toEntity,
       frameHeight: pendingFrame.height,

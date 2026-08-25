@@ -89,6 +89,7 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     };
 
 #[cfg(test)]
+#[path = "tests/fixture.rs"]
 mod test_fixture;
 #[cfg(test)]
 mod tests;

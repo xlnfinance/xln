@@ -1,6 +1,7 @@
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
+  getRuntimeWalDb,
   processRuntime,
 } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
@@ -57,7 +58,31 @@ enqueueRuntimeInput(env, { runtimeTxs: [importTx('1')], entityInputs: [] });
 await processRuntime(env);
 if (env.state.height !== 1) throw new Error(`fixture baseline height ${env.state.height}`);
 
-process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = '1';
+// Delay the real next LevelDB write past the deadline. A one-millisecond
+// deadline alone races a fast filesystem and does not prove the timeout path.
+const walDb = getRuntimeWalDb(env);
+const originalBatch = walDb.batch.bind(walDb);
+Object.defineProperty(walDb, 'batch', {
+  configurable: true,
+  value: () => {
+    Object.defineProperty(walDb, 'batch', {
+      configurable: true,
+      value: originalBatch,
+    });
+    const batch = originalBatch();
+    const originalWrite = batch.write.bind(batch);
+    Object.defineProperty(batch, 'write', {
+      configurable: true,
+      value: async (options?: { sync?: boolean }): Promise<void> => {
+        await Bun.sleep(50);
+        await originalWrite(options);
+      },
+    });
+    return batch;
+  },
+});
+
+process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = '5';
 enqueueRuntimeInput(env, { runtimeTxs: [importTx('2')], entityInputs: [] });
 let failure = '';
 try {

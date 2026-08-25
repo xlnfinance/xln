@@ -12,6 +12,7 @@ import type {
   AccountInput,
   AccountOutput,
   AccountPeerInput,
+  AccountState,
   Delta,
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
@@ -468,6 +469,7 @@ async function validateIncomingFrameOnDraft(
 
 async function commitIncomingFrameOnRealState(
   runtimeId: string | undefined,
+  accountAuthorityFrameId: string | null | undefined,
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
@@ -502,32 +504,17 @@ async function commitIncomingFrameOnRealState(
   if (account.state !== validation.clonedMachine.state) {
     throw new Error('ACCOUNT_OVERLAY_PUBLISH_STATE_IDENTITY_MISMATCH');
   }
-  // Fire-and-forget: mirror the receiver-side committed frame into the Rust
-  // account engine when shadow mode is on (no-op otherwise).
-  {
-    const shadowJHeight = receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
-    noteAccountFrameForShadow({
-      ...(runtimeId === undefined ? {} : { runtimeId }),
-      ownerEntityId: ourEntityId,
-      counterpartyEntityId: cpForCommitLog,
-      frameHeight: receivedFrame.height,
-      byLeft: receivedFrame.byLeft,
-      timestamp: receivedFrame.timestamp,
-      jHeight: shadowJHeight,
-      // The enforcement clock is the Entity's, not the frame's: TS replayed
-      // this frame with securityContext.entityTimestamp/finalizedJHeight, so
-      // handing the engine the signed frame clock made a legitimately accepted
-      // late timeout look like a divergence.
-      enforcementTimestamp: securityContext.entityTimestamp,
-      enforcementJHeight: securityContext.finalizedJHeight,
-      accountTxs: receivedFrame.accountTxs,
-      txResults: validation.txResults,
-      tsApplyUs: validation.tsApplyUs,
-      committedStateRoot: receivedFrame.accountStateRoot,
-      account,
-      ...(preFrameState ? { preFrameState } : {}),
-    });
-  }
+  noteCommittedIncomingFrameForShadow({
+    runtimeId,
+    accountAuthorityFrameId,
+    account,
+    receivedFrame,
+    validation,
+    ownerEntityId: ourEntityId,
+    counterpartyEntityId: cpForCommitLog,
+    securityContext,
+    preFrameState,
+  });
   timedOutHashlocks.push(...validation.timedOutHashlocks);
   candidateEffects.push(...validation.candidateEffects);
   if (validation.accountJClaimNodeChanges) {
@@ -572,6 +559,42 @@ async function commitIncomingFrameOnRealState(
     events.push(`🔄 Auto-rebalance queued ${postCommitAutoRebalanceTxs.length} tx(s) after frame commit`);
   }
 }
+
+const noteCommittedIncomingFrameForShadow = (value: Readonly<{
+  runtimeId: string | undefined;
+  accountAuthorityFrameId: string | null | undefined;
+  account: AccountReplica;
+  receivedFrame: AccountFrame;
+  validation: IncomingFrameValidation;
+  ownerEntityId: string;
+  counterpartyEntityId: string;
+  securityContext: AccountInputSecurityContext;
+  preFrameState: AccountState | undefined;
+}>): void => {
+  const { receivedFrame, validation, securityContext } = value;
+  const shadowJHeight = receivedFrame.jHeight ?? value.account.state.lastFinalizedJHeight ?? 0;
+  noteAccountFrameForShadow({
+    ...(value.runtimeId === undefined ? {} : { runtimeId: value.runtimeId }),
+    ...(value.accountAuthorityFrameId === undefined
+      ? {}
+      : { accountAuthorityFrameId: value.accountAuthorityFrameId }),
+    ownerEntityId: value.ownerEntityId,
+    counterpartyEntityId: value.counterpartyEntityId,
+    frameHeight: receivedFrame.height,
+    byLeft: receivedFrame.byLeft,
+    timestamp: receivedFrame.timestamp,
+    jHeight: shadowJHeight,
+    // Enforcement uses the receiving Entity's clock, never the signed frame's.
+    enforcementTimestamp: securityContext.entityTimestamp,
+    enforcementJHeight: securityContext.finalizedJHeight,
+    accountTxs: receivedFrame.accountTxs,
+    txResults: validation.txResults,
+    tsApplyUs: validation.tsApplyUs,
+    committedStateRoot: receivedFrame.accountStateRoot,
+    account: value.account,
+    ...(value.preFrameState ? { preFrameState: value.preFrameState } : {}),
+  });
+};
 
 type IncomingFrameAckMaterial = {
   response: Extract<AccountPeerInput, { kind: 'ack' }>;
@@ -915,6 +938,7 @@ async function handleIncomingAccountFrame(
 
   await commitIncomingFrameOnRealState(
     context.runtimeId,
+    context.accountAuthorityFrameId,
     account,
     input,
     preflight.receivedFrame,
@@ -959,6 +983,28 @@ type AccountInputSession = {
   committedJClaims: ReturnType<typeof createAccountJClaimSession>;
   candidateEffects: AccountOutput[];
 };
+
+const createPeerAccountInputSession = (
+  context: AccountConsensusContext,
+  account: AccountReplica,
+  input: AccountPeerInput,
+  securityContext: AccountInputSecurityContext,
+  normalizedInputHeight: number,
+  replay: ReturnType<typeof classifyAccountInputReplay>,
+  events: string[],
+): AccountInputSession => ({
+  context,
+  account,
+  input,
+  securityContext,
+  normalizedInputHeight,
+  replay,
+  events,
+  timedOutHashlocks: [],
+  committedFrames: [],
+  committedJClaims: createAccountJClaimSession(context.jClaimNodeStore),
+  candidateEffects: [],
+});
 
 const finishAccountInput = (
   session: AccountInputSession,
@@ -1163,7 +1209,7 @@ export async function applyAccountInput(
 ): Promise<HandleAccountInputResult> {
   // The authoritative engine is handed the same raw inputs, in this order,
   // before TypeScript executes them (no-op unless recording is on).
-  noteRawAccountInput(context.runtimeId, account, input);
+  noteRawAccountInput(context.accountAuthorityFrameId, account, input);
   if (input.kind === 'enqueue') return applyAccountEnqueue(account, input);
   const envelopeError = getAccountInputEnvelopeError(account.state, input);
   if (envelopeError) {
@@ -1184,12 +1230,11 @@ const applyPeerAccountInput = async (
   input: Exclude<AccountInput, { kind: 'enqueue' | 'external_finality' }>,
   providedSecurityContext: AccountInputSecurityContext | undefined,
 ): Promise<HandleAccountInputResult> => {
-  const accountJClaimNodeStore = context.jClaimNodeStore;
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
   // The receiver's enforcement clock, which is the Entity's and not the
   // frame's: the same question as the proposal clock, from the other side.
   noteAuthorityEntityClock(
-    context.runtimeId,
+    context.accountAuthorityFrameId,
     account.proofHeader?.fromEntity ?? '',
     'enforce',
     securityContext.entityTimestamp,
@@ -1234,25 +1279,21 @@ const applyPeerAccountInput = async (
   }
   const boardHankoRefresh = await handleBoardHankoRefresh(account, input, securityContext);
   if (boardHankoRefresh) {
-    const session = {
+    const session = createPeerAccountInputSession(
       context,
       account,
       input,
       securityContext,
       normalizedInputHeight,
-      replay: classifyAccountInputReplay(account, input),
+      classifyAccountInputReplay(account, input),
       events,
-      timedOutHashlocks: [],
-      committedFrames: [],
-      committedJClaims: createAccountJClaimSession(accountJClaimNodeStore),
-      candidateEffects: [],
-    };
+    );
     return finishAccountInput(session, boardHankoRefresh);
   }
   const replay = classifyAccountInputReplay(account, input);
   const replayGateResult = await handleReplayOrObsoleteAccountInput(account, input, replay, events);
   if (replayGateResult) return replayGateResult;
-  const session: AccountInputSession = {
+  const session = createPeerAccountInputSession(
     context,
     account,
     input,
@@ -1260,11 +1301,7 @@ const applyPeerAccountInput = async (
     normalizedInputHeight,
     replay,
     events,
-    timedOutHashlocks: [],
-    committedFrames: [],
-    committedJClaims: createAccountJClaimSession(accountJClaimNodeStore),
-    candidateEffects: [],
-  };
+  );
   const ack = await timePerfPhase(
     'account.peer.ackPhase',
     () => handleAccountAckPhase(session),

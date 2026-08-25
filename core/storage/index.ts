@@ -167,6 +167,7 @@ import type {
   StorageDoc,
   StorageDocRef,
   RuntimeFrame,
+  StorageRscoreCheckpointRef,
   StorageHead,
   StoragePersistenceBoundaryHook,
   StoragePersistenceProgressHook,
@@ -176,11 +177,17 @@ import { resolveStorageRuntimeConfig } from './database/config';
 import { prepareStorageBookGraphWrite } from './commit/book-graph';
 import { prepareLiveStateGraph } from './commit/live-state-graph';
 import {
+  prepareRscoreCheckpointStorage,
+  type PreparedRscoreCheckpointStorage,
+  type RscoreCheckpointStorageInput,
+} from './schema/rscore/checkpoint';
+import {
   prepareRuntimeOutputPayloadRows,
 } from './wal/outbox-payload';
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
 import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
+import type { RscoreExactCheckpoint } from '../rscore/checkpoint-wire';
 export { resolveStorageRuntimeConfig } from './database/config';
 export {
   readHistoryViewAccountFrames,
@@ -885,7 +892,34 @@ export type StorageFrameSaveOptions = {
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
   onPersistenceProgress?: StoragePersistenceProgressHook;
+  accountAuthority?: Readonly<{
+    /** Called after stale-writer detection, while the Rust wave is abortable. */
+    prepareCheckpoint: (
+      checkpointRequested: boolean,
+    ) => Promise<readonly RscoreCheckpointStorageInput[]>;
+    /** Proves the planned physical projection is accepted by exact Rust restore. */
+    validateCheckpointMaterialization: (
+      checkpoints: readonly RscoreExactCheckpoint[],
+    ) => Promise<void>;
+    /** Runs immediately after the sole authoritative WAL fsync. */
+    afterWalCommit: () => Promise<void>;
+  }>;
+  /**
+   * Internal crash-proof seam. Captures the exact frame identity before the
+   * authoritative write starts, so an apply-then-reject result can be proven
+   * against bytes read back from the WAL before Rust is completed.
+   */
+  onAuthoritativeFramePrepared?: (
+    identity: StorageAuthoritativeFrameIdentity,
+  ) => void;
 } & PerfDeps;
+
+export type StorageAuthoritativeFrameIdentity = Readonly<{
+  frameHash: string;
+  postStateHash: string;
+  runtimeInput: RuntimeInput;
+  accountAuthorityCheckpoints: readonly StorageRscoreCheckpointRef[];
+}>;
 
 type StorageSnapshotLifecycleResult = {
   snapshotMs: number;
@@ -1054,6 +1088,32 @@ const runStorageSnapshotLifecycle = async (
   };
 };
 
+const buildStorageCheckpointRequest = (
+  height: number,
+  head: StorageHead,
+  config: Required<StorageRuntimeConfig>,
+  appliedRuntimeInput: RuntimeInput,
+) => {
+  const finiteEpochByteBudget = config.epochMaxBytes !== Number.MAX_SAFE_INTEGER;
+  const appliedRuntimeInputBytes = finiteEpochByteBudget
+    ? encodeBufferPrepared(appliedRuntimeInput, { omitSymbolKeys: true }).buffer.byteLength
+    : 0;
+  const snapshotRequested =
+    height === 1 || height - head.latestSnapshotHeight >= config.snapshotPeriodFrames;
+  const snapshotRequiredByBytesRequested =
+    finiteEpochByteBudget &&
+    head.epochReplayBytes + appliedRuntimeInputBytes >= config.epochMaxBytes;
+  return {
+    snapshotRequested,
+    snapshotRequiredByBytesRequested,
+    materializationRequested:
+      height === 1 ||
+      height - head.latestMaterializedHeight >= config.materializePeriodFrames ||
+      snapshotRequested ||
+      snapshotRequiredByBytesRequested,
+  };
+};
+
 /**
  * Resolve databases and build the deterministic frame diff before any write.
  * Everything returned here is still pre-commit and may be discarded safely.
@@ -1061,6 +1121,11 @@ const runStorageSnapshotLifecycle = async (
 const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const config = resolveStorageRuntimeConfig(options.env);
   if (!config.enabled || options.env.infrastructure?.persistencePaused) {
+    if (options.accountAuthority) {
+      throw new AccountAuthorityPreWalError(
+        !config.enabled ? 'STORAGE_DISABLED' : 'PERSISTENCE_PAUSED',
+      );
+    }
     return {
       skipped: {
         materialized: false,
@@ -1126,26 +1191,19 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     appliedRuntimeInput,
     { omitSymbolKeys: true },
   ) as RuntimeInput;
-  const finiteEpochByteBudget = config.epochMaxBytes !== Number.MAX_SAFE_INTEGER;
-  const appliedRuntimeInputBytes = finiteEpochByteBudget
-    ? encodeBufferPrepared(canonicalAppliedRuntimeInput, { omitSymbolKeys: true }).buffer.byteLength
-    : 0;
-  const snapshotRequested =
-    options.env.state.height === 1 ||
-    options.env.state.height - head.latestSnapshotHeight >= config.snapshotPeriodFrames;
-  const snapshotRequiredByBytesRequested =
-    finiteEpochByteBudget &&
-    head.epochReplayBytes + appliedRuntimeInputBytes >= config.epochMaxBytes;
-  const materializationRequested =
-    options.env.state.height === 1 ||
-    options.env.state.height - head.latestMaterializedHeight >= config.materializePeriodFrames ||
-    snapshotRequested ||
-    snapshotRequiredByBytesRequested;
+  const checkpointRequest = buildStorageCheckpointRequest(
+    options.env.state.height,
+    head,
+    config,
+    canonicalAppliedRuntimeInput,
+  );
   const checkpointEligible =
-    !materializationRequested || areStorageCheckpointReplicasQuiescent(options.env);
-  const snapshotDue = snapshotRequested && checkpointEligible;
-  const snapshotRequiredByBytes = snapshotRequiredByBytesRequested && checkpointEligible;
-  const shouldMaterialize = materializationRequested && checkpointEligible;
+    !checkpointRequest.materializationRequested ||
+    areStorageCheckpointReplicasQuiescent(options.env);
+  const snapshotDue = checkpointRequest.snapshotRequested && checkpointEligible;
+  const snapshotRequiredByBytes =
+    checkpointRequest.snapshotRequiredByBytesRequested && checkpointEligible;
+  const shouldMaterialize = checkpointRequest.materializationRequested && checkpointEligible;
 
   const planningStartedAt = options.getPerfMs();
   const planningMarks: Record<string, number> = {};
@@ -1585,6 +1643,7 @@ const buildStorageRuntimeFrame = (
   runtimeOutputRefs: readonly RuntimeOutputPayloadHash[],
   entityContextRefs: ReadonlyMap<string, EntityContextPayloadHash>,
   runtimeMachineRoot: import('./types').RuntimeMachineGraphRoot | undefined,
+  accountAuthorityCheckpoints: PreparedRscoreCheckpointStorage['refs'],
 ): RuntimeFrame => {
   const {
     appliedRuntimeInput,
@@ -1629,6 +1688,9 @@ const buildStorageRuntimeFrame = (
     ...(runtimeMachineRoot
       ? { runtimeMachineRoot }
       : {}),
+    ...(accountAuthorityCheckpoints.length > 0
+      ? { accountAuthorityCheckpoints: [...accountAuthorityCheckpoints] }
+      : {}),
     ...(runtimeOutputRefs.length > 0
       ? { runtimeOutputRefs: [...runtimeOutputRefs] }
       : {}),
@@ -1639,6 +1701,23 @@ const buildStorageRuntimeFrame = (
 };
 
 const WAL_SYNC_ENABLED = process.env['XLN_STORAGE_WAL_SYNC'] !== '0';
+
+/** WAL is durable but the Rust authority did not acknowledge the same wave. */
+export class AccountAuthorityWalCommitError extends Error {
+  constructor(cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`RSCORE_AUTHORITY_AFTER_WAL_FAILED:${detail}`, { cause });
+    this.name = 'AccountAuthorityWalCommitError';
+  }
+}
+
+/** The Rust candidate is proven abortable because no WAL write was attempted. */
+export class AccountAuthorityPreWalError extends Error {
+  constructor(reason: string, cause?: unknown) {
+    super(`RSCORE_AUTHORITY_PRE_WAL:${reason}`, { cause });
+    this.name = 'AccountAuthorityPreWalError';
+  }
+}
 
 /** Stage durations become op-counters so a load run can split save time. */
 const countStorageStages = (
@@ -1659,6 +1738,7 @@ const buildStorageFrameRecordPlan = (
   commitments: PreparedStorageCommitments,
   pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
   prevFrameHash: string,
+  accountAuthorityCheckpoint: PreparedRscoreCheckpointStorage,
   mark: (label: string) => void = () => {},
 ) => {
   const touches = summarizeStorageFrameTouches(options, prepared);
@@ -1688,6 +1768,7 @@ const buildStorageFrameRecordPlan = (
     outputPayloads.refs,
     entityContextPayloads.refs,
     runtimeMachineGraph.root,
+    accountAuthorityCheckpoint.refs,
   ), { omitSymbolKeys: true });
   mark('frameEncode.frameBase');
   const frameRecord = {
@@ -1719,10 +1800,22 @@ const buildStorageFrameRecordPlan = (
     runtimeMachineGraph.rows.reduce(
       (total, row) => total + row.key.byteLength + row.value.byteLength,
       0,
-    );
+    ) +
+    accountAuthorityCheckpoint.puts.reduce(
+      (total, row) => total + row.key.byteLength + row.value.byteLength,
+      0,
+    ) +
+    accountAuthorityCheckpoint.dels.reduce((total, key) => total + key.byteLength, 0);
   return {
     frameKey,
     frameHash: frameRecord.frameHash,
+    authoritativeIdentity: {
+      frameHash: frameRecord.frameHash,
+      postStateHash: frameRecord.postStateHash,
+      runtimeInput: frameRecord.runtimeInput,
+      accountAuthorityCheckpoints: (frameRecord.accountAuthorityCheckpoints ?? [])
+        .map(checkpoint => ({ ...checkpoint })),
+    } satisfies StorageAuthoritativeFrameIdentity,
     frameBuffer,
     frameRows,
     outputPayloadRows: outputPayloads.rows,
@@ -1845,6 +1938,7 @@ const buildStorageCommitBatches = (
   pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
   frame: RuntimeFramePlan,
   certifiedHistoryPuts: HistoryViewPut[],
+  accountAuthorityCheckpoint: PreparedRscoreCheckpointStorage,
 ) => {
   const walBatch = prepared.walDb.batch();
   const certifiedHistoryRows = certifiedHistoryPuts.flatMap(put =>
@@ -1871,6 +1965,8 @@ const buildStorageCommitBatches = (
   for (const row of frame.runtimeMachineGraphRows) {
     walBatch.put(row.key, row.value);
   }
+  for (const key of accountAuthorityCheckpoint.dels) walBatch.del(key);
+  for (const row of accountAuthorityCheckpoint.puts) walBatch.put(row.key, row.value);
   // The synced WAL DB also owns the latest materialized direct state graph.
   // Mirroring the exact graph mutations here prevents a crash between the
   // authoritative commit and the disposable current-cache write from losing
@@ -1963,6 +2059,20 @@ type StorageCommitBatches = ReturnType<typeof buildStorageCommitBatches>;
 const writeAuthoritativeWalBatch = (batches: StorageCommitBatches): Promise<void> =>
   writeBatch(batches.walBatch, { sync: WAL_SYNC_ENABLED });
 
+const buildHistoryViewReconciliationPlan = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  frame: RuntimeFramePlan,
+): Parameters<typeof reconcileHistoryViews>[0] => ({
+  viewDb: options.getHistoryViewDb(options.env),
+  firstWalHeight: async () => (await listSnapshotHeights(prepared.walDb))[0] ?? 1,
+  latestWalHeight: options.env.state.height,
+  latestWalPuts: frame.historyViewPuts,
+  readWalFrame: height => readStorageFrameRecord(prepared.walDb, height),
+  readWalActivity: height => readHistoryViewRuntimeActivity(prepared.walDb, height),
+  config: prepared.config,
+});
+
 const commitStorageFrame = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
@@ -1981,6 +2091,12 @@ const commitStorageFrame = async (
   await writeAuthoritativeWalBatch(batches);
   const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
+  try {
+    await options.accountAuthority?.afterWalCommit();
+  } catch (error) {
+    throw new AccountAuthorityWalCommitError(error);
+  }
+  options.onPersistenceProgress?.('account-authority-committed');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');
 
   let historyViewBytes = 0;
@@ -1998,17 +2114,9 @@ const commitStorageFrame = async (
             `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.state.height}`,
           );
         }
-        return reconcileHistoryViews({
-          viewDb: options.getHistoryViewDb(options.env),
-          firstWalHeight: async () => (await listSnapshotHeights(prepared.walDb))[0] ?? 1,
-          latestWalHeight: options.env.state.height,
-          latestWalPuts: frame.historyViewPuts,
-          readWalFrame: height =>
-            readStorageFrameRecord(prepared.walDb, height),
-          readWalActivity: height =>
-            readHistoryViewRuntimeActivity(prepared.walDb, height),
-          config: prepared.config,
-        });
+        return reconcileHistoryViews(
+          buildHistoryViewReconciliationPlan(options, prepared, frame),
+        );
       })()
     : Promise.resolve(null);
   const currentWriteStartedAt = options.getPerfMs();
@@ -2224,6 +2332,9 @@ const finishStorageFrameSave = (
 export const saveRuntimeFrameToStorage = async (
   options: StorageFrameSaveOptions,
 ): Promise<StorageFrameSaveResult> => {
+  if (options.accountAuthority && !WAL_SYNC_ENABLED) {
+    throw new AccountAuthorityPreWalError('SYNC_WAL_REQUIRED');
+  }
   const prepared = await prepareStorageFrameSave(options);
   if ('skipped' in prepared) return prepared.skipped;
   const {
@@ -2259,6 +2370,28 @@ export const saveRuntimeFrameToStorage = async (
   const pendingNodes = collectPendingStorageNodes(options.env);
   checkpointPrepare('pendingNodes');
 
+  const authorityCheckpointInputs = options.accountAuthority
+    ? await options.accountAuthority.prepareCheckpoint(prepared.shouldMaterialize)
+    : [];
+  const accountAuthorityCheckpoint = await prepareRscoreCheckpointStorage(
+    walDb,
+    authorityCheckpointInputs,
+  );
+  if (options.accountAuthority && accountAuthorityCheckpoint.refs.length > 0) {
+    try {
+      await options.accountAuthority.validateCheckpointMaterialization(
+        accountAuthorityCheckpoint.exactCheckpoints,
+      );
+    } catch (error) {
+      throw new AccountAuthorityPreWalError(
+        'CHECKPOINT_MATERIALIZATION_INVALID',
+        error,
+      );
+    }
+  }
+  options.onPersistenceProgress?.('account-authority-checkpoint-built');
+  checkpointPrepare('accountAuthorityCheckpoint');
+
   const commitments = await prepareStorageStateCommitments(
     options,
     prepared,
@@ -2271,9 +2404,11 @@ export const saveRuntimeFrameToStorage = async (
     commitments,
     pendingNodes,
     prevFrameHash,
+    accountAuthorityCheckpoint,
     // Sub-stage marks split `frameEncode`; keep the default stage shape stable.
     FRAME_ENCODE_SUBSTAGE_PROFILE ? checkpointPrepare : undefined,
   );
+  options.onAuthoritativeFramePrepared?.(framePlan.authoritativeIdentity);
   options.onPersistenceProgress?.('frame-encoded');
   checkpointPrepare('frameEncode');
   const certifiedHistoryPuts = await prepareCertifiedHistoryPuts(
@@ -2288,6 +2423,7 @@ export const saveRuntimeFrameToStorage = async (
     pendingNodes,
     framePlan,
     certifiedHistoryPuts,
+    accountAuthorityCheckpoint,
   );
   checkpointPrepare('batchPlan');
   const committed = await commitStorageFrame(

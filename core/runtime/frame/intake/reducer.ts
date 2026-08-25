@@ -1,8 +1,16 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
-import { beginAuthorityFrame, flushAuthorityFrame } from '../../../rscore/authority-wave';
-import { armAuthorityWave, captureAuthorityWave } from '../../../rscore/authority-driver';
+import {
+  authorityRecordEnabled,
+  runAuthorityFrameScope,
+} from '../../../rscore/authority-wave';
+import {
+  armAuthorityWave,
+  authorityDriverEnabled,
+  authorityRuntimeSuppressed,
+  captureAuthorityWave,
+} from '../../../rscore/authority-driver';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
@@ -288,15 +296,12 @@ const applyRuntimeInputPhases = async (
   isReplay: boolean,
   ingress: PreparedRuntimeIngress,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
-  // One Runtime frame, one recording. Opened here and closed in the `finally`
-  // below so a frame that throws is discarded instead of being attributed to
-  // whichever Runtime opens the next one — this process hosts many.
   const authorityFrameId = env.runtimeId ?? '';
-  beginAuthorityFrame(authorityFrameId);
-  // Before anything of this frame is applied: the authoritative engine has to
-  // start where TypeScript starts, not where it ends up.
-  await armAuthorityWave(env);
-  try {
+  const recordingEnabled = authorityRecordEnabled() && !authorityRuntimeSuppressed(env);
+  return runAuthorityFrameScope(env, authorityFrameId, recordingEnabled, async scopedFrameId => {
+    // Before anything of this frame is applied: the authoritative engine has
+    // to start where TypeScript starts, not where it ends up.
+    await armAuthorityWave(env);
     const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
     const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
       hasVerifiedEntityCommitPrecertificate(env, input));
@@ -320,15 +325,12 @@ const applyRuntimeInputPhases = async (
     // The authoritative engine is handed this frame after the Runtime's own
     // record of it is durable, which is outside this function — so the raw
     // wave is taken here, while the collector still holds it.
-    captureAuthorityWave(authorityFrameId);
+    if (authorityDriverEnabled(env)) {
+      if (scopedFrameId === null) throw new Error('RSCORE_AUTHORITY_FRAME_SCOPE_MISSING');
+      captureAuthorityWave(env, scopedFrameId);
+    }
     return { result, profiledRuntimeTxs: ingress.runtimeTxs };
-  } finally {
-    // The boundary lives in the reducer, not at the live-loop frame apply:
-    // recovery replays a journal through here without passing through that
-    // path, and a boundary that fires in only one of the two reports a
-    // frame's inputs as belonging to the next.
-    flushAuthorityFrame(authorityFrameId);
-  }
+  });
 };
 
 export const createRuntimeInputReducer = (

@@ -30,6 +30,7 @@ import {
 import type { RscoreWireValue } from './client';
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../types/account';
 import type { ApplyAccountTxOk } from '../account/tx/apply-types';
+import { safeStringify } from '../protocol/serialization';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -38,14 +39,14 @@ const authorityLog = createStructuredLogger('rscore.authority');
  * claim is deliberately absent: the receiving side rebuilds it from the rest,
  * because a signature is over one exact message.
  */
-export type PeerDispute = {
+type PeerDispute = {
   hanko: string;
   proofBodyHash: string;
   proofNonce: number;
   proposerIsLeft: boolean;
 };
 
-export type RawAccountInputKind = 'enqueue' | 'frame' | 'ack' | 'frame_ack' | 'dispute'
+type RawAccountInputKind = 'enqueue' | 'frame' | 'ack' | 'frame_ack' | 'dispute'
   | 'external_finality' | 'other';
 
 /** What arrived for one account, as the engine would be handed it. */
@@ -110,6 +111,7 @@ const clocks = new Map<string, RecordedClock[]>();
  * publishing a different forward, secret or resting offer.
  */
 const outputs = new Map<string, RecordedOutputs[]>();
+let frameSequence = 0;
 
 let report = {
   frames: 0,
@@ -147,16 +149,15 @@ let report = {
 };
 
 const classify = (input: AccountInput): RawAccountInputKind => {
-  if (input.kind === 'enqueue') return 'enqueue';
-  if (input.kind === 'external_finality') return 'external_finality';
-  if (input.kind === 'dispute') return 'dispute';
-  const record = input as unknown as Record<string, unknown>;
-  const hasFrame = record['proposal'] !== undefined || record['frame'] !== undefined;
-  const hasAck = record['ack'] !== undefined;
-  if (hasFrame && hasAck) return 'frame_ack';
-  if (hasFrame) return 'frame';
-  if (hasAck) return 'ack';
-  return 'other';
+  switch (input.kind) {
+    case 'enqueue': return 'enqueue';
+    case 'external_finality': return 'external_finality';
+    case 'dispute': return 'dispute';
+    case 'frame': return 'frame';
+    case 'ack': return 'ack';
+    case 'frame_ack': return 'frame_ack';
+    case 'board_hanko_refresh': return 'other';
+  }
 };
 
 /**
@@ -166,12 +167,15 @@ const classify = (input: AccountInput): RawAccountInputKind => {
  */
 export const noteRawAccountInput = (
   /** From the caller's own consensus context, never from module state. */
-  runtimeId: string | undefined,
+  frameId: string | null | undefined,
   account: AccountReplica,
   input: AccountInput,
 ): void => {
   if (!authorityRecordEnabled()) return;
-  if (runtimeId === undefined) {
+  // `null` is an explicit detached/read-only scope. It is not a gap and must
+  // not touch or poison the live replica's collector even if runtimeIds match.
+  if (frameId === null) return;
+  if (frameId === undefined) {
     // An input outside any Runtime frame belongs to no wave. Counted, because
     // an authority that never saw it would diverge and this is where that
     // would first be visible.
@@ -186,7 +190,7 @@ export const noteRawAccountInput = (
     report.skippedNoHeader += 1;
     return;
   }
-  const open = frames.get(runtimeId);
+  const open = frames.get(frameId);
   if (open === undefined) {
     report.skippedNoFrame += 1;
     return;
@@ -207,17 +211,15 @@ export const noteRawAccountInput = (
  */
 const payloadsOf = (input: AccountInput): RecordedPayload[] => {
   if (input.kind === 'enqueue') return [{ kind: 'admit', txs: input.txs }];
-  if (input.kind === 'external_finality' || input.kind === 'dispute') {
+  if (
+    input.kind === 'external_finality' ||
+    input.kind === 'dispute' ||
+    input.kind === 'board_hanko_refresh'
+  ) {
     return [{ kind: 'unsupported', reason: input.kind }];
   }
   const payloads: RecordedPayload[] = [];
-  const record = input as unknown as Record<string, unknown>;
-  const ack = record['ack'] as {
-    height?: number;
-    frameHash?: string;
-    frameHanko?: string;
-    disputeHanko?: unknown;
-  } | undefined;
+  const ack = input.kind === 'ack' || input.kind === 'frame_ack' ? input.ack : undefined;
   if (ack !== undefined) {
     const dispute = peerDispute(ack.disputeHanko);
     if (typeof ack.height !== 'number' || typeof ack.frameHash !== 'string'
@@ -233,11 +235,9 @@ const payloadsOf = (input: AccountInput): RecordedPayload[] => {
       });
     }
   }
-  const proposal = record['proposal'] as {
-    frame?: AccountFrame;
-    frameHanko?: string;
-    disputeHanko?: unknown;
-  } | undefined;
+  const proposal = input.kind === 'frame' || input.kind === 'frame_ack'
+    ? input.proposal
+    : undefined;
   if (proposal !== undefined) {
     const dispute = peerDispute(proposal.disputeHanko);
     if (!proposal.frame || typeof proposal.frameHanko !== 'string' || dispute === 'invalid') {
@@ -281,15 +281,15 @@ const peerDispute = (value: unknown): PeerDispute | undefined | 'invalid' => {
  * rather than merged into the next one.
  */
 export const noteAuthorityEntityClock = (
-  runtimeId: string | undefined,
+  frameId: string | null | undefined,
   ownerEntityId: string,
   role: 'propose' | 'enforce',
   timestamp: number,
   finalizedJHeight: number,
 ): void => {
   if (!authorityRecordEnabled()) return;
-  if (runtimeId === undefined) return;
-  const open = clocks.get(runtimeId);
+  if (frameId === null || frameId === undefined) return;
+  const open = clocks.get(frameId);
   if (open === undefined) return;
   open.push({
     ownerEntityId: ownerEntityId.trim().toLowerCase(),
@@ -306,14 +306,14 @@ export const noteAuthorityEntityClock = (
  * verdict outputs against this list before the wave is committed.
  */
 export const noteAuthorityCommittedOutputs = (
-  runtimeId: string | undefined,
+  frameId: string | null | undefined,
   ownerEntityId: string,
   counterpartyEntityId: string,
   txResults: readonly ApplyAccountTxOk[],
 ): void => {
   if (!authorityRecordEnabled()) return;
-  if (runtimeId === undefined) return;
-  const open = outputs.get(runtimeId);
+  if (frameId === null || frameId === undefined) return;
+  const open = outputs.get(frameId);
   if (open === undefined) return;
   const rows = txResults.flatMap(result => shadowOutputRows(result));
   if (rows.length === 0) return;
@@ -334,6 +334,31 @@ export const beginAuthorityFrame = (runtimeId: string): void => {
   frames.set(runtimeId, []);
   clocks.set(runtimeId, []);
   outputs.set(runtimeId, []);
+};
+
+/**
+ * Instance-scoped recorder boundary. The frame id lives on the Runtime
+ * replica envelope and is copied into AccountConsensusContext. This stays
+ * browser-safe and makes a detached replay with the same runtimeId a distinct
+ * object rather than implicit process-global state.
+ */
+export const runAuthorityFrameScope = async <T>(
+  env: { accountAuthorityFrameId?: string | null | undefined },
+  runtimeId: string,
+  enabled: boolean,
+  work: (frameId: string | null) => Promise<T>,
+): Promise<T> => {
+  const previousFrameId = env.accountAuthorityFrameId;
+  const frameId = enabled ? `${runtimeId}\u0000${++frameSequence}` : null;
+  env.accountAuthorityFrameId = frameId;
+  if (frameId !== null) beginAuthorityFrame(frameId);
+  try {
+    return await work(frameId);
+  } finally {
+    if (frameId !== null) flushAuthorityFrame(frameId);
+    if (previousFrameId === undefined) delete env.accountAuthorityFrameId;
+    else env.accountAuthorityFrameId = previousFrameId;
+  }
 };
 
 /**
@@ -375,7 +400,7 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   }
 };
 
-export type AuthorityWaveEntity = {
+type AuthorityWaveEntity = {
   ownerEntityId: string;
   timestamp: number;
   jHeight: number;
@@ -393,7 +418,7 @@ export type AuthorityWaveEntity = {
 };
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
-export type AuthorityWaveInput = {
+type AuthorityWaveInput = {
   /** Position in the request, which is what the engine numbers its verdicts by. */
   inputIndex: number;
   /**
@@ -647,7 +672,7 @@ export const printAuthorityRecordReport = (): void => {
   if (!authorityRecordEnabled()) return;
   authorityLog.error('authority.record', authorityRecordReport());
   // Structured logs are filtered in most harnesses; this line is the record.
-  console.error(`RSCORE_AUTHORITY_RECORD ${JSON.stringify(authorityRecordReport())}`);
+  console.error(`RSCORE_AUTHORITY_RECORD ${safeStringify(authorityRecordReport())}`);
 };
 
 export const resetAuthorityRecordForTests = (): void => {

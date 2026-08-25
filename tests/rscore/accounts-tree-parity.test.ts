@@ -360,7 +360,10 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
     });
     try {
       await client.hello(2, swapMarketPolicyWire());
-      const loaded = (await client.restore(0, accounts.map((account, index) => seedWire(index, account)))) as unknown[];
+      const loaded = (await client.bootstrapAccounts(
+        0,
+        accounts.map((account, index) => seedWire(index, account)),
+      )) as unknown[];
       expect(loaded[0]).toBe(0);
       expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(referenceRoot(accounts));
 
@@ -409,7 +412,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
     });
     try {
       await client.hello(2, swapMarketPolicyWire());
-      const loaded = (await client.restore(
+      const loaded = (await client.bootstrapAccounts(
         0,
         accounts.map((account, index) => seedWire(index, account)),
       )) as unknown[];
@@ -496,7 +499,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
     });
     try {
       await client.hello(2, swapMarketPolicyWire());
-      await client.restore(0, accounts.map((account, index) => seedWire(index, account)));
+      await client.bootstrapAccounts(0, accounts.map((account, index) => seedWire(index, account)));
       const jobs = GRID.map((entry, index) => {
         const job = swapOfferJob(index);
         const tx = job[4] as RscoreWireValue[];
@@ -564,7 +567,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
     });
     try {
       await client.hello(2, swapMarketPolicyWire());
-      await client.restore(0, accounts.map((account, index) => seedWire(index, account)));
+      await client.bootstrapAccounts(0, accounts.map((account, index) => seedWire(index, account)));
       // One step below the deterministic tick: aligned, drift within a step, so
       // the signed intent owns the level and the quote is recomputed from it.
       const derived = 20_000n;
@@ -625,7 +628,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       });
       try {
         await client.hello(2, swapMarketPolicyWire());
-        await client.restore(0, accounts.map((account, index) => seedWire(index, account)));
+        await client.bootstrapAccounts(0, accounts.map((account, index) => seedWire(index, account)));
 
         // Wave 1: rest the offer on both sides.
         await client.prepare(accounts.map((_, index) => swapOfferJob(index)));
@@ -700,7 +703,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
       });
       try {
         await client.hello(2, swapMarketPolicyWire());
-        const loaded = (await client.restore(
+        const loaded = (await client.bootstrapAccounts(
           0,
           accounts.map((account, index) => seedWire(index, account)),
         )) as unknown[];
@@ -761,7 +764,7 @@ describe.skipIf(!existsSync(BINARY))('rscore accounts-tree parity', () => {
         await client.hello(2, swapMarketPolicyWire());
         const seeds = accounts.map((account, index) => seedWire(index, account));
         perturb(seeds[0]!);
-        const loaded = (await client.restore(0, seeds)) as unknown[];
+        const loaded = (await client.bootstrapAccounts(0, seeds)) as unknown[];
         expect(new Uint8Array(loaded[1] as Uint8Array)).not.toEqual(referenceRoot(accounts));
       } finally {
         client.kill();

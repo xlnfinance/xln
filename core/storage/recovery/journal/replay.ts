@@ -18,6 +18,11 @@ import { assertStorageSafetyOverridesAllowed } from '../../commit/safety';
 import type { LoadedRuntimeStorage } from '../load';
 import { verifyPersistedFrameState } from '../verify';
 import { borrowOpenRuntimeWalDb } from '../../runtime-dbs';
+import {
+  loadRscoreCheckpoint,
+  type LoadedRscoreCheckpoint,
+} from '../../schema/rscore/checkpoint';
+import type { StorageRscoreCheckpointRef } from '../../types';
 
 type ReplayTarget = {
   latestHeight: number;
@@ -162,6 +167,51 @@ const reconcileMaterializedHistory = async (
   });
 };
 
+const checkpointRefMatches = (
+  loaded: LoadedRscoreCheckpoint,
+  ref: StorageRscoreCheckpointRef,
+): boolean => {
+  const token = loaded.restoreToken;
+  return loaded.ownerEntityId === ref.ownerEntityId &&
+    loaded.protocolFingerprint === ref.protocolFingerprint &&
+    String(token[0]) === ref.baseRevision &&
+    String(token[1]) === ref.revision &&
+    `0x${Buffer.from(token[2]).toString('hex')}` === ref.accountsRoot &&
+    `0x${Buffer.from(token[3]).toString('hex')}` === ref.signerDigest &&
+    token[4] === ref.accountCount;
+};
+
+/** Restore the Account authority at the materialized TS boundary, before any
+ * WAL-tail Runtime input is replayed through it. */
+const restoreAccountAuthorityAtCheckpoint = async (
+  deps: RuntimeStorageApiDeps,
+  reads: PersistedStorageReadApi,
+  restored: LoadedRuntimeStorage,
+  checkpointHeight: number,
+): Promise<void> => {
+  const frame = await reads.readPersistedStorageFrameRecord(restored.env, checkpointHeight);
+  if (!frame) throw new Error(`RSCORE_RESTORE_FRAME_MISSING:height=${checkpointHeight}`);
+  const refs = frame.accountAuthorityCheckpoints ?? [];
+  if (refs.length === 0) {
+    await deps.restoreAccountAuthorityExact(restored.env, []);
+    return;
+  }
+  if (!(await deps.tryOpenRuntimeWalDb(restored.env))) {
+    throw new Error(`RSCORE_RESTORE_WAL_DB_OPEN_FAILED:height=${checkpointHeight}`);
+  }
+  const db = deps.getRuntimeWalDb(restored.env);
+  const checkpoints: LoadedRscoreCheckpoint[] = [];
+  for (const ref of refs) {
+    const loaded = await loadRscoreCheckpoint(db, ref.ownerEntityId);
+    if (!loaded) throw new Error(`RSCORE_RESTORE_ROWS_MISSING:${ref.ownerEntityId}`);
+    if (!checkpointRefMatches(loaded, ref)) {
+      throw new Error(`RSCORE_RESTORE_REF_MISMATCH:${ref.ownerEntityId}`);
+    }
+    checkpoints.push(loaded);
+  }
+  await deps.restoreAccountAuthorityExact(restored.env, checkpoints);
+};
+
 const finalizeReplay = async (
   reads: PersistedStorageReadApi,
   restored: LoadedRuntimeStorage,
@@ -205,6 +255,16 @@ export const createRuntimeReplayLoader = (
     options,
   );
   if (!target) return null;
+  if (
+    deps.accountAuthorityConfigured() &&
+    options.readOnly !== true &&
+    target.targetHeight !== target.latestHeight
+  ) {
+    throw new Error(
+      `RSCORE_HISTORICAL_LIVE_RESTORE_UNSUPPORTED:` +
+      `target=${target.targetHeight}:latest=${target.latestHeight}`,
+    );
+  }
   const restored = await loadPersistedRuntime(
     runtimeId,
     runtimeSeed,
@@ -214,6 +274,16 @@ export const createRuntimeReplayLoader = (
   if (!restored) return null;
   let returningEnv = false;
   try {
+    if (options.readOnly) {
+      deps.setAccountAuthoritySuppressed(restored.env, true);
+    } else {
+      await restoreAccountAuthorityAtCheckpoint(
+        deps,
+        reads,
+        restored,
+        target.selectedCheckpointHeight,
+      );
+    }
     let targetFrame: RuntimeFrame | null = null;
     for (
       let height = target.selectedCheckpointHeight;
@@ -257,6 +327,7 @@ export const createRuntimeReplayLoader = (
     return restored;
   } finally {
     if (!returningEnv) {
+      if (!options.readOnly) await deps.discardAccountAuthority(restored.env);
       await deps.closeRuntimeDb(restored.env);
       await deps.closeInfraDb(restored.env);
     }

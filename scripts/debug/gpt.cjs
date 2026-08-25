@@ -694,7 +694,7 @@ const PERFORMANCE_FILES = {
     'core/scripts/operations/hlt/replay/build-hub-recording.ts',
     'core/scripts/operations/hlt/lanes/sovereign-runtime-host.ts',
     'core/scripts/operations/hlt/boundary/environment-manifest.ts',
-    'core/scripts/operations/benchmark/hlt-profile-report.ts',
+    'core/scripts/operations/benchmark/runtime/hlt-profile-report.ts',
     'core/__tests__/operations/hlt/hlt-payments.test.ts',
     'core/__tests__/operations/hlt/hlt-report.test.ts',
     'core/__tests__/runtime/transport/runtime-output-routing.test.ts',

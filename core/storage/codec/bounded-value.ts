@@ -210,6 +210,24 @@ const prepareBoundedStorageDelete = async (
   return { keys: [...chunkKeys, ownerKey], removedBytes };
 };
 
+/** Plan one logical replacement/removal inside a caller-owned atomic batch. */
+export const prepareBoundedStorageValueMutation = async (
+  db: RuntimeDbLike,
+  ownerKey: Buffer,
+  encodedValue: Buffer | null,
+): Promise<Readonly<{
+  puts: readonly BoundedStorageRow[];
+  dels: readonly Buffer[];
+}>> => {
+  const previous = await prepareBoundedStorageDelete(db, ownerKey);
+  const puts = encodedValue === null
+    ? []
+    : prepareBoundedStorageValueRows(ownerKey, encodedValue);
+  const replacementKeys = new Set(puts.map(row => row.key.toString('hex')));
+  const dels = (previous?.keys ?? []).filter(key => !replacementKeys.has(key.toString('hex')));
+  return { puts, dels };
+};
+
 /**
  * Delete logical values in bounded LevelDB batches. Every owner's manifest and
  * continuations share one batch, while range pruning never regresses to one

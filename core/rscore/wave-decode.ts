@@ -24,7 +24,7 @@ import type { AccountFrame, AccountTx, Delta } from '../types/account';
 
 const WAVE_PARITY_DOMAIN = 'xln.rscore.wave-parity.v1';
 
-export type WaveDroppedRow = {
+type WaveDroppedRow = {
   index: number;
   txDigest: string;
   code: string;
@@ -32,7 +32,7 @@ export type WaveDroppedRow = {
   disposition: 'deferred' | 'removed';
 };
 
-export type WaveProposal = {
+type WaveProposal = {
   accountId: string;
   /** Absent when every transaction in the window was rejected. */
   frame: (AccountFrame & { hanko: string }) | null;
@@ -81,7 +81,7 @@ export type WaveOutput =
   | { kind: 'swapOfferRemove'; offerId: string }
   | { kind: 'swapCancelRequest'; offerId: string };
 
-export type WaveSwapOffer = {
+type WaveSwapOffer = {
   offerId: string;
   leftEntity: string;
   rightEntity: string;
@@ -102,7 +102,7 @@ export type WaveSwapOffer = {
   quantizedWant: string;
 };
 
-export type WaveVerdict =
+type WaveVerdict =
   | { kind: 'frameCommitted'; height: number; stateHash: string; ackHanko: string; outputs: WaveOutput[]; rolledBackTxs: number }
   | { kind: 'frameCollisionIgnored'; height: number }
   | { kind: 'frameDuplicate'; height: number; stateHash: string; ackHanko: string }
@@ -113,7 +113,7 @@ export type WaveVerdict =
   | { kind: 'ackRejected'; reason: string }
   | { kind: 'failed'; message: string };
 
-export type WaveInputResult = { inputIndex: number; accountId: string; verdict: WaveVerdict };
+type WaveInputResult = { inputIndex: number; accountId: string; verdict: WaveVerdict };
 
 export type Wave = {
   revision: number;
