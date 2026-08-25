@@ -93,7 +93,7 @@ import {
   getQueuedAccountIds,
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
-import { noteAuthorityEntityClock } from '../../../rscore/authority-record';
+import { noteAuthorityEntityClock } from '../../../rscore/authority-wave';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { assertEntityFrameTxByteBudget } from '../frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from '../output/certification';

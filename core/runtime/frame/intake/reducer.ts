@@ -1,7 +1,7 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
-import { beginAuthorityFrame, flushAuthorityFrame } from '../../../rscore/authority-record';
+import { beginAuthorityFrame, flushAuthorityFrame } from '../../../rscore/authority-wave';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
