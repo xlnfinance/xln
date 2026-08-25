@@ -310,8 +310,12 @@ pub fn candidate_command(id: u64, op_tag: OpTag, prepare_id: u64) -> Envelope {
     )
 }
 
-pub fn get_checkpoint_changes(id: u64) -> Envelope {
-    request(id, OpTag::GetCheckpointChanges, Vec::new())
+pub fn get_checkpoint_changes(id: u64, prepare_id: u64) -> Envelope {
+    request(
+        id,
+        OpTag::GetCheckpointChanges,
+        vec![AbiValue::Bytes(prepare_id.to_be_bytes().to_vec())],
+    )
 }
 
 pub fn commit_checkpoint(id: u64, token: AbiValue) -> Envelope {

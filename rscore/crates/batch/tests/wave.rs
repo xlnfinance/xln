@@ -87,12 +87,38 @@ fn a_pending_wave_closes_every_other_door() {
         stand.payer.checkpoint_changes(),
         Err(BatchError::WavePending),
     ));
+    assert!(matches!(
+        stand.payer.checkpoint_changes_for_wave(result.revision - 1),
+        Err(BatchError::WaveRevision { .. }),
+    ));
+    let candidate_checkpoint = stand
+        .payer
+        .checkpoint_changes_for_wave(result.revision)
+        .expect("candidate checkpoint");
+    assert_eq!(candidate_checkpoint.accounts_root(), result.accounts_root);
+    assert_eq!(candidate_checkpoint.revision(), result.revision);
+    assert_eq!(
+        candidate_checkpoint.restore_token().base_revision,
+        result.revision,
+    );
+    assert!(matches!(
+        stand.payer.commit_checkpoint(&candidate_checkpoint.token),
+        Err(BatchError::WavePending),
+    ));
     // Only the revision that was prepared may be committed.
     assert!(matches!(
         stand.payer.commit_wave(result.revision - 1),
         Err(BatchError::WaveRevision { .. }),
     ));
     stand.payer.commit_wave(result.revision).expect("commit");
+    stand
+        .payer
+        .commit_checkpoint(&candidate_checkpoint.token)
+        .expect("checkpoint after runtime WAL");
+    assert_eq!(
+        stand.payer.checkpoint_token().expect("durable token"),
+        candidate_checkpoint.restore_token(),
+    );
     assert!(matches!(
         stand.payer.commit_wave(result.revision),
         Err(BatchError::WaveMissing),

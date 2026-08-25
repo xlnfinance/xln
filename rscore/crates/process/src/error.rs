@@ -69,6 +69,10 @@ pub enum ProcessError {
     PrepareNotPending,
     #[error("RSCORE_PROCESS_PREPARE_ID_MISMATCH")]
     PrepareIdMismatch,
+    #[error("RSCORE_PROCESS_CHECKPOINT_PENDING")]
+    CheckpointPending,
+    #[error("RSCORE_PROCESS_CHECKPOINT_NOT_PENDING")]
+    CheckpointNotPending,
     #[error("RSCORE_PROCESS_STOPPED")]
     Stopped,
     #[error("RSCORE_PROCESS_FRAME_EMPTY")]
@@ -114,6 +118,8 @@ impl ProcessError {
             Self::PreparePending => "RSCORE_PROCESS_PREPARE_PENDING",
             Self::PrepareNotPending => "RSCORE_PROCESS_PREPARE_NOT_PENDING",
             Self::PrepareIdMismatch => "RSCORE_PROCESS_PREPARE_ID_MISMATCH",
+            Self::CheckpointPending => "RSCORE_PROCESS_CHECKPOINT_PENDING",
+            Self::CheckpointNotPending => "RSCORE_PROCESS_CHECKPOINT_NOT_PENDING",
             Self::Stopped => "RSCORE_PROCESS_STOPPED",
             Self::EmptyFrame => "RSCORE_PROCESS_FRAME_EMPTY",
             Self::FrameTooLarge { .. } => "RSCORE_PROCESS_FRAME_TOO_LARGE",

@@ -37,7 +37,9 @@ pub enum Command {
         revision: u64,
         accounts: Vec<AccountSeed>,
     },
-    GetCheckpointChanges,
+    GetCheckpointChanges {
+        prepare_request_id: [u8; 8],
+    },
     CommitCheckpoint {
         token: xln_rscore_batch::CheckpointToken,
     },
@@ -197,8 +199,10 @@ fn decode_read_envelope(fields: &[AbiValue]) -> Result<Command, ProcessError> {
 }
 
 fn decode_get_checkpoint_changes(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    exact(fields, 0, "getCheckpointChanges")?;
-    Ok(Command::GetCheckpointChanges)
+    let fields = exact(fields, 1, "getCheckpointChanges")?;
+    Ok(Command::GetCheckpointChanges {
+        prepare_request_id: fixed_bytes(&fields[0], "prepareRequestId")?,
+    })
 }
 
 fn decode_commit_checkpoint(fields: &[AbiValue]) -> Result<Command, ProcessError> {

@@ -250,6 +250,17 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       const again = decodeWave(second.result);
       expect(again.parityDigest).toBe(wave.parityDigest);
 
+      // The exact candidate is read before the Runtime WAL boundary. Its
+      // first token acknowledges the live engine after fsync; the second is
+      // already normalized for RestoreExact if the process dies after fsync.
+      const checkpoint = exactTuple(
+        await client.getCheckpointChanges(second.token),
+        4,
+        'checkpoint',
+      );
+      const changed = exactTuple(checkpoint[2], 1, 'checkpoint accounts');
+      const restoreRows = changed.map(materializeFirstCheckpointRow);
+
       const committed = (await client.commit(second.token)) as unknown[];
       expect(`0x${Buffer.from(committed[1] as Uint8Array).toString('hex')}`)
         .toBe(again.accountsRoot);
@@ -258,14 +269,8 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       // by reseeding financial state. The checkpoint still contains our
       // unacknowledged Account proposal; RestoreExact must rebuild it and make
       // that checkpoint its own empty diff base.
-      const checkpoint = exactTuple(
-        await client.getCheckpointChanges(),
-        3,
-        'checkpoint',
-      );
-      const changed = exactTuple(checkpoint[1], 1, 'checkpoint accounts');
-      const restoreRows = changed.map(materializeFirstCheckpointRow);
       const durableToken = await client.commitCheckpoint(checkpoint[0] as RscoreWireValue);
+      expect(durableToken).toEqual(checkpoint[1]);
 
       const restarted = new RscoreProcessClient(BINARY, identity());
       try {
@@ -277,13 +282,15 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
           durableToken as RscoreWireValue,
           restoreRows as RscoreWireValue[],
         )).toEqual(durableToken);
+        const idle = await restarted.prepareAccountWave({ entities: [] });
         const afterRestore = exactTuple(
-          await restarted.getCheckpointChanges(),
-          3,
+          await restarted.getCheckpointChanges(idle.token),
+          4,
           'restored checkpoint',
         );
-        expect(afterRestore[1]).toEqual([]);
         expect(afterRestore[2]).toEqual([]);
+        expect(afterRestore[3]).toEqual([]);
+        await restarted.abort(idle.token);
         await restarted.shutdown();
       } finally {
         restarted.kill();

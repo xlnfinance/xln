@@ -14,6 +14,7 @@ use crate::wire_encode::{big, delta, integer, tuple, tx};
 pub fn checkpoint(value: &AccountsCheckpoint) -> Result<AbiValue, ProcessError> {
     Ok(tuple(vec![
         super::token(&value.token),
+        super::token(&value.restore_token()),
         tuple(
             value
                 .accounts

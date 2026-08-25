@@ -940,6 +940,32 @@ impl StatefulConsensusEngine {
         // A wave the runtime has not committed is not part of the world yet,
         // so it must not reach the database that outlives this process.
         self.assert_no_pending_wave()?;
+        self.build_checkpoint_changes()
+    }
+
+    /// Snapshot the candidate held for one exact runtime wave.
+    ///
+    /// The runtime calls this before its WAL fsync. Binding the read to the
+    /// wave revision prevents a stale or unrelated candidate from being
+    /// written under the frame that is about to become durable. The candidate
+    /// remains abortable until `commit_wave`; this method only reads it.
+    pub fn checkpoint_changes_for_wave(
+        &self,
+        revision: u64,
+    ) -> Result<AccountsCheckpoint, BatchError> {
+        if self.pending.is_none() {
+            return Err(BatchError::WaveMissing);
+        }
+        if revision != self.revision {
+            return Err(BatchError::WaveRevision {
+                actual: revision,
+                expected: self.revision,
+            });
+        }
+        self.build_checkpoint_changes()
+    }
+
+    fn build_checkpoint_changes(&self) -> Result<AccountsCheckpoint, BatchError> {
         let diff = self.accounts.node_changes_since(&self.checkpoint);
         let mut accounts = Vec::new();
         for record in &diff.puts {

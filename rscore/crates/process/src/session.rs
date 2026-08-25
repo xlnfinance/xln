@@ -25,6 +25,11 @@ pub struct ProcessSession {
     authority_config: Option<AuthorityConfig>,
     pending: Option<PendingBatch>,
     pending_wave: Option<PendingWave>,
+    /// A candidate checkpoint whose Runtime frame is durable and whose wave
+    /// was committed, but whose incremental debt has not yet been
+    /// acknowledged. While this exists, CommitCheckpoint is the only legal
+    /// next operation.
+    pending_checkpoint: Option<PendingCheckpoint>,
     stopped: bool,
 }
 
@@ -32,6 +37,13 @@ pub struct ProcessSession {
 struct PendingWave {
     prepare_request_id: [u8; 8],
     revision: u64,
+    checkpoint: Option<PendingCheckpoint>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingCheckpoint {
+    commit_token: xln_rscore_batch::CheckpointToken,
+    restore_token: xln_rscore_batch::CheckpointToken,
 }
 
 struct SessionBinding {
@@ -58,6 +70,7 @@ impl ProcessSession {
             authority_config: None,
             pending: None,
             pending_wave: None,
+            pending_checkpoint: None,
             stopped: false,
         }
     }
@@ -152,10 +165,17 @@ impl ProcessSession {
         request_id: [u8; 8],
         command: Command,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending_checkpoint.is_some()
+            && !matches!(&command, Command::CommitCheckpoint { .. })
+        {
+            return Err(ProcessError::CheckpointPending);
+        }
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
             Command::BootstrapAccounts { revision, accounts } => self.load(revision, accounts),
-            Command::GetCheckpointChanges => self.get_checkpoint_changes(),
+            Command::GetCheckpointChanges { prepare_request_id } => {
+                self.get_checkpoint_changes(prepare_request_id)
+            }
             Command::CommitCheckpoint { token } => self.commit_checkpoint(&token),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
             Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
@@ -259,6 +279,7 @@ impl ProcessSession {
         self.pending_wave = Some(PendingWave {
             prepare_request_id: request_id,
             revision: result.revision,
+            checkpoint: None,
         });
         Ok((response, false))
     }
@@ -267,16 +288,23 @@ impl ProcessSession {
         &mut self,
         prepare_request_id: [u8; 8],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let pending = self.take_pending_wave(prepare_request_id)?;
+        let revision = self.pending_wave_for(prepare_request_id)?.revision;
         let engine = self
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        match engine.commit_wave(pending.revision) {
-            Ok(accounts_root) => Ok((
-                wire_encode::wave_committed(engine.revision(), accounts_root),
-                false,
-            )),
+        match engine.commit_wave(revision) {
+            Ok(accounts_root) => {
+                let pending = self
+                    .pending_wave
+                    .take()
+                    .ok_or(ProcessError::PrepareNotPending)?;
+                self.pending_checkpoint = pending.checkpoint;
+                Ok((
+                    wire_encode::wave_committed(engine.revision(), accounts_root),
+                    false,
+                ))
+            }
             Err(error) => {
                 // A commit that cannot be honoured leaves this process and the
                 // runtime disagreeing about what happened; there is nothing
@@ -291,19 +319,20 @@ impl ProcessSession {
         &mut self,
         prepare_request_id: [u8; 8],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let pending = self.take_pending_wave(prepare_request_id)?;
+        let revision = self.pending_wave_for(prepare_request_id)?.revision;
         let engine = self
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        let revision = engine.abort_wave(pending.revision)?;
+        let revision = engine.abort_wave(revision)?;
+        self.pending_wave = None;
         Ok((
             wire_encode::wave_aborted(revision, engine.accounts_root()),
             false,
         ))
     }
 
-    fn take_pending_wave(&mut self, actual: [u8; 8]) -> Result<PendingWave, ProcessError> {
+    fn pending_wave_for(&self, actual: [u8; 8]) -> Result<&PendingWave, ProcessError> {
         let pending = self
             .pending_wave
             .as_ref()
@@ -311,9 +340,7 @@ impl ProcessSession {
         if pending.prepare_request_id != actual {
             return Err(ProcessError::PrepareIdMismatch);
         }
-        self.pending_wave
-            .take()
-            .ok_or(ProcessError::PrepareNotPending)
+        Ok(pending)
     }
 
     fn load(
@@ -350,25 +377,61 @@ impl ProcessSession {
         Ok((wire_encode::loaded(revision, accounts_root), false))
     }
 
-    fn get_checkpoint_changes(&self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+    fn get_checkpoint_changes(
+        &mut self,
+        prepare_request_id: [u8; 8],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let revision = self.pending_wave_for(prepare_request_id)?.revision;
         let engine = self
             .authority
             .as_ref()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        let checkpoint = engine.checkpoint_changes()?;
-        Ok((crate::checkpoint_wire::changes(&checkpoint)?, false))
+        let checkpoint = engine.checkpoint_changes_for_wave(revision)?;
+        let response = crate::checkpoint_wire::changes(&checkpoint)?;
+        let ticket = PendingCheckpoint {
+            commit_token: checkpoint.token,
+            restore_token: checkpoint.restore_token(),
+        };
+        let pending = self
+            .pending_wave
+            .as_mut()
+            .ok_or(ProcessError::PrepareNotPending)?;
+        if pending.prepare_request_id != prepare_request_id {
+            return Err(ProcessError::PrepareIdMismatch);
+        }
+        pending.checkpoint = Some(ticket);
+        Ok((response, false))
     }
 
     fn commit_checkpoint(
         &mut self,
         token: &xln_rscore_batch::CheckpointToken,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let ticket = self
+            .pending_checkpoint
+            .ok_or(ProcessError::CheckpointNotPending)?;
+        if *token != ticket.commit_token {
+            return Err(xln_rscore_batch::BatchError::CheckpointToken {
+                actual: format!("{token:?}"),
+                expected: format!("{:?}", ticket.commit_token),
+            }
+            .into());
+        }
         let engine = self
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
         engine.commit_checkpoint(token)?;
         let normalized = engine.checkpoint_token()?;
+        if normalized != ticket.restore_token {
+            self.stopped = true;
+            return Err(xln_rscore_batch::BatchError::CheckpointToken {
+                actual: format!("{normalized:?}"),
+                expected: format!("{:?}", ticket.restore_token),
+            }
+            .into());
+        }
+        self.pending_checkpoint = None;
         Ok((
             crate::checkpoint_wire::checkpoint_committed(&normalized),
             false,
@@ -547,6 +610,9 @@ impl ProcessSession {
     }
 
     fn shutdown(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.pending_checkpoint.is_some() {
+            return Err(ProcessError::CheckpointPending);
+        }
         if self.pending_wave.is_some() {
             return Err(ProcessError::PreparePending);
         }

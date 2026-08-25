@@ -44,13 +44,15 @@ export const RSCORE_ABI_VERSION = 1;
 // 6: exact recovery carries the full durable Account consensus snapshot.
 // 7: the diagnostic envelope read and exact checkpoint operations coexist at
 // distinct tags in one closed operation set.
-export const RSCORE_PROCESS_ABI_VERSION = 7;
+// 8: checkpoint rows are bound to one pending authority wave and carry
+// separate commit and exact-restore tokens.
+export const RSCORE_PROCESS_ABI_VERSION = 8;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=13")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=14")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'ce1dace265c99e503944bbbcf011366b8a00f58f7325a88e718e50706eb2acab',
+  'e7e3866f0237ff5cdabfe52813f51185eba7484c8374b2b74edf3c8792e261b3',
   'hex',
 );
 
@@ -631,8 +633,8 @@ export class RscoreProcessClient {
   }
 
   /** Incremental exact rows since the last checkpoint Rust acknowledged. */
-  async getCheckpointChanges(): Promise<unknown> {
-    const response = await this.request(RSCORE_OP.getCheckpointChanges, []);
+  async getCheckpointChanges(prepareRequestId: Uint8Array): Promise<unknown> {
+    const response = await this.request(RSCORE_OP.getCheckpointChanges, [prepareRequestId]);
     if (!Array.isArray(response) || response.length !== 1) {
       throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
     }

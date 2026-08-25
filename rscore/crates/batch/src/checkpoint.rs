@@ -111,6 +111,22 @@ pub struct CheckpointToken {
     pub account_count: usize,
 }
 
+impl CheckpointToken {
+    /// The token persisted beside checkpoint rows and handed to
+    /// `RestoreExact` after a process restart. The old base revision only
+    /// matters while acknowledging the incremental write to the live engine;
+    /// once those rows are durable, that revision is its own restore base.
+    pub const fn restore_token(self) -> Self {
+        Self {
+            base_revision: self.revision,
+            revision: self.revision,
+            accounts_root: self.accounts_root,
+            signer_digest: self.signer_digest,
+            account_count: self.account_count,
+        }
+    }
+}
+
 /// One checkpoint: everything that moved between two revisions.
 #[derive(Clone)]
 pub struct AccountsCheckpoint {
@@ -133,6 +149,13 @@ impl AccountsCheckpoint {
 
     pub const fn accounts_root(&self) -> [u8; 32] {
         self.token.accounts_root
+    }
+
+    /// Exact token stored with the materialized rows. This is intentionally
+    /// distinct from `token`, which still names the previous durable base and
+    /// is the only token `commit_checkpoint` will acknowledge.
+    pub const fn restore_token(&self) -> CheckpointToken {
+        self.token.restore_token()
     }
 }
 

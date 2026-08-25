@@ -43,13 +43,18 @@ pub use transport::{read_frame, serve, write_frame};
 // older runtime fails at Hello rather than losing dispute evidence on restart.
 // 7: the diagnostic Account-envelope read and checkpoint operations occupy
 // distinct tags in one closed operation set.
-pub const PROCESS_ABI_VERSION: u64 = 7;
+// 8: checkpoint changes are bound to the exact pending authority wave and
+// return separate live-commit and durable-restore tokens.
+pub const PROCESS_ABI_VERSION: u64 = 8;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=13")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=14")
+        // wire=14: GetCheckpointChanges names the pending PrepareAccountWave
+        // request and returns both the live commit token and normalized
+        // RestoreExact token before the runtime WAL is written.
         // wire=13: ReadAccountEnvelope keeps tag 18 and the exact checkpoint
         // operations follow at tags 19-21, with no request alias between them.
         // wire=12: the exact consensus snapshot carries the local committed
@@ -77,9 +82,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xce, 0x1d, 0xac, 0xe2, 0x65, 0xc9, 0x9e, 0x50, 0x39, 0x44, 0xbb, 0xbc, 0xf0, 0x11,
-            0x36, 0x6b, 0x8a, 0x00, 0xf5, 0x8f, 0x73, 0x25, 0xa8, 0x8e, 0x71, 0x8e, 0x50, 0x70,
-            0x6e, 0xb2, 0xac, 0xab,
+            0xe7, 0xe3, 0x86, 0x6f, 0x02, 0x37, 0xff, 0x5c, 0xda, 0xbf, 0xe5, 0x28, 0x13, 0xf5,
+            0x11, 0x85, 0xeb, 0xa7, 0x48, 0x4c, 0x83, 0x74, 0xb2, 0xb7, 0x4e, 0xdf, 0x3c, 0x87,
+            0x92, 0xe2, 0x61, 0xb3,
         ],
     };
 
