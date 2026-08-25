@@ -1,10 +1,10 @@
+import { engineAccountValueHash } from '../../rscore/cutover/leaf-cache';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../../account/utils';
 import { applyRuntimeStorageChanges } from '../observability/env-events';
 import { normalizeEntitySwapTradingPairs } from '../swap-cmd/swap-pairs';
 import { initCrontab } from '../../entity/scheduler';
 import {
   buildEntityFrameAuthority,
-  computeEntityAccountValueHash,
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
@@ -425,7 +425,7 @@ const buildGenesisReplica = (
       config,
       entityEncryptionPublicKey: deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey,
       reserves: new Map(),
-      accounts: PersistentEntityAccountMap.empty(identity.entityId, computeEntityAccountValueHash),
+      accounts: PersistentEntityAccountMap.empty(identity.entityId, engineAccountValueHash(identity.entityId)),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: getJHistoryRegistrationBaseHeight(config.jurisdiction),
       profile: {

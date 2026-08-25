@@ -13,6 +13,7 @@
  * request per client. The engine is OPTIONAL: nothing in the runtime imports
  * this module unless the rscore flag wiring asks for it.
  */
+import { RSCORE_CUTOVER_VERIFY } from './cutover/verify';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
@@ -421,7 +422,12 @@ export class RscoreProcessClient {
     // stderr is piped, not inherited: a panic or an abort message is the only
     // evidence of why the engine died, and inheriting it makes that evidence
     // unattributable in a busy host log.
-    this.#child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.#child = spawn(binaryPath, [], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // The engine never authors the Account envelope, so it echoes one back
+      // only when this side intends to re-derive the leaf from it.
+      env: { ...process.env, XLN_RSCORE_CARRY_ENVELOPE: RSCORE_CUTOVER_VERIFY ? '1' : '0' },
+    });
     this.#child.stdout.on('data', chunk => this.#onData(chunk as Buffer));
     this.#child.stderr.on('data', (chunk: Buffer) => {
       const text = String(chunk);

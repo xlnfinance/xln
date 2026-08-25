@@ -1,3 +1,4 @@
+import { engineAccountValueHash } from '../../rscore/cutover/leaf-cache';
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../../orderbook';
 import type { AccountReplica } from '../../types/account';
 import type { EntityState } from '../../entity/types';
@@ -12,7 +13,6 @@ const hydrationLog = createStructuredLogger('storage.hydration');
 import {
   withDefinedProperty,
 } from './entity-core-boundary';
-import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
 import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
 import {
@@ -139,7 +139,7 @@ export const hydrateEntityStateFromStorage = (options: {
         for (const [key, value] of accounts) yield [key, hydrateAccountDocFromStorage(value)] as const;
       })(),
       core.entityId,
-      computeEntityAccountValueHash,
+      engineAccountValueHash(core.entityId),
     ),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
     ...withDefinedProperty('jHistoryFinality', core.jHistoryFinality),

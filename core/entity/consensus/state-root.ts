@@ -4,6 +4,7 @@
  * Key projections: bounded Entity fields and nested Account/Book Patricia roots.
  * Human-audit importance: 100/100 — this root is the Entity quorum's signed state.
  */
+import { forgetEngineAccountLeaf } from '../../rscore/cutover/leaf-registry';
 import { keccakBytesHash } from '../../protocol/crypto/keccak-text';
 
 import type {
@@ -700,6 +701,8 @@ const computeEntityAccountValueHashCold = (account: AccountReplica): string => {
 };
 
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
+  // In-place envelope mutation: the engine's leaf certified the bytes before it.
+  forgetEngineAccountLeaf(state.entityId, counterpartyId);
   if (state.accounts instanceof EntityAccountCandidateMap) {
     state.accounts.dropCachedProjection();
     return;

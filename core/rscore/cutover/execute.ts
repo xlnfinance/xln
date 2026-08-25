@@ -11,6 +11,7 @@
  * Anything the profile cannot express refuses loudly. A cutover that guessed
  * would sign a frame nobody executed.
  */
+import { rememberEngineAccountLeaf } from './leaf-registry';
 import { publishAccountOverlay } from '../../account/state/candidate-overlay';
 import {
   accountInputApplied,
@@ -91,6 +92,13 @@ const materialize = (
     plan,
   );
   publishAccountOverlay(prior, materialized.account);
+  // The fold that computes the Entity root will ask for this leaf next; the
+  // engine already sealed it over the very bytes just published.
+  rememberEngineAccountLeaf(
+    request.binding.sessionOwnerEntityId,
+    request.accountId,
+    row.entityAccountLeaf,
+  );
   for (const key of ['mempool', 'currentFrame', 'currentHeight', 'rollbackCount'] as const) {
     Reflect.set(prior, key, materialized.account[key]);
   }

@@ -1,3 +1,4 @@
+import { forgetEngineAccountLeaf } from '../../rscore/cutover/leaf-registry';
 import { ethers } from 'ethers';
 
 import type { AccountReplica } from '../../types/account';
@@ -402,6 +403,9 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     this.#requireActive();
     this.#projection = undefined;
     this.#hashProjection = undefined;
+    // A leaf the engine computed certifies bytes this caller is about to
+    // change. Drop it here, at the one boundary every write passes through.
+    forgetEngineAccountLeaf(this.#base.ownerEntityId, entityId);
     if (this.#deleted.has(entityId)) return undefined;
     const existing = this.#shells.get(entityId);
     if (existing) {
@@ -434,6 +438,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     this.#requireActive();
     this.#projection = undefined;
     this.#hashProjection = undefined;
+    forgetEngineAccountLeaf(this.#base.ownerEntityId, entityId);
     this.#deleted.delete(entityId);
     this.#shells.set(entityId, account);
     this.#bumpRevision(entityId);
@@ -443,6 +448,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
 
   delete(entityId: string): boolean {
     this.#requireActive();
+    forgetEngineAccountLeaf(this.#base.ownerEntityId, entityId);
     this.#projection = undefined;
     this.#hashProjection = undefined;
     const existed = this.has(entityId);

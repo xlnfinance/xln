@@ -371,6 +371,18 @@ fn wave_fields(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Whether a reply echoes the Account envelope back to its owner.
+///
+/// The engine stores envelope fields and hands them back untouched; it never
+/// authors one. A caller that trusts the engine's leaf has no use for the
+/// echo, and it was 39% of every reply. A caller that re-derives the leaf
+/// itself needs the exact fields the leaf was sealed over, and asks for them
+/// by setting this on the process it spawns.
+fn carry_envelope() -> bool {
+    static CARRY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CARRY.get_or_init(|| std::env::var("XLN_RSCORE_CARRY_ENVELOPE").as_deref() == Ok("1"))
+}
+
 fn round_fields(
     revision: u64,
     accounts_root: [u8; 32],
@@ -407,7 +419,7 @@ fn round_fields(
     let post_accounts = tuple(
         post_account_rows
             .iter()
-            .map(|row| crate::checkpoint_wire::account_rows(row, false))
+            .map(|row| crate::checkpoint_wire::account_rows(row, carry_envelope()))
             .collect::<Result<_, _>>()?,
     );
     let digest = parity_digest(accounts_root, &touched, &applied, &admissions, &proposals)?;
