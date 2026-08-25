@@ -33,6 +33,7 @@ import {
   type MeshHealthPayload,
 } from '../../../scenarios/cross-j/mm-mesh-adversary';
 import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
+import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
 
 type ManagedProcess = {
@@ -197,7 +198,9 @@ const apiPort = portBase + 4;
 const custodyPort = portBase + 7;
 const custodyDaemonPort = portBase + 8;
 const nodePortBase = portBase + 10;
-const marketMakerApiPort = nodePortBase + 3;
+// The mesh hosts HUB_COUNT hubs on nodePortBase+0..HUB_COUNT-1; the market
+// maker takes the next port. Hard-coding +3 polls a hub once the mesh grows.
+const marketMakerApiPort = nodePortBase + HUB_COUNT;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
 const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
 const useSnapshotTemplate = templateDir.length > 0;
@@ -1139,10 +1142,7 @@ const main = async (): Promise<void> => {
     apiPort,
     custodyPort,
     custodyDaemonPort,
-    nodePortBase,
-    nodePortBase + 1,
-    nodePortBase + 2,
-    nodePortBase + 3,
+    ...Array.from({ length: HUB_COUNT + 1 }, (_unused, index) => nodePortBase + index),
   ]);
   if (existsSync(workDir)) rmSync(workDir, { recursive: true, force: true });
   mkdirSync(workDir, { recursive: true });
