@@ -13,7 +13,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
-import { applyHubRuntimeFrameDelay } from './process/hub-runtime-env';
+import { buildHubChildProcessEnv, buildHubEngineArgs } from './process/hub-runtime-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../support/process/child-secrets';
 import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
 import {
@@ -1467,10 +1467,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   // Runtime-level profiling belongs to the process that owns the frame loop.
   // Operators pass engine flags (e.g. --cpu-prof) per hub without the
   // orchestrator knowing which profiler is in use.
-  const engineArgs = String(process.env[`XLN_HUB_ENGINE_ARGS_${child.name.toUpperCase()}`] ?? '')
-    .split(' ')
-    .map(part => part.trim())
-    .filter(Boolean);
+  const engineArgs = buildHubEngineArgs(child.name);
   const cmd = [
     ...engineArgs,
     'core/orchestrator/hub-node.ts',
@@ -1492,66 +1489,17 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    env: sanitizeChildProcessEnv(applyHubRuntimeFrameDelay({
-      ...buildManagedRuntimeChildSecretEnv(process.env),
-      XLN_DB_PATH: child.dbPath,
-      XLN_BRAINVAULT_OWNER_PATH: join(child.dbPath, 'brainvault-owner.json'),
-      XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
-      ...buildRpcChildEnv(),
-      USE_ANVIL: 'true',
-      XLN_ORCHESTRATOR_PID: String(process.pid),
-      XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
-      XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
-      XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
-      XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
-      // Hub bootstrap drains at zero delay. Once direct routes, Accounts,
-      // credits and reserves are ready, the child activates this start-to-start
-      // period so steady traffic batches without adding post-processing sleep.
-      // Profiling a load run means profiling the Hub: it is the single writer
-      // every payment and every swap passes through. The child builds none of
-      // this unless the operator asked for it.
-      // The Rust Account authority is enabled for one hub at a time. Every
-      // hub in this mesh shares one orchestrator environment, and an Entity
-      // the engine cannot sign for must never inherit the switch.
-      ...(process.env[`XLN_HUB_RSCORE_AUTHORITY_${child.name.toUpperCase()}`] === '1'
-        ? {
-            XLN_RSCORE_AUTHORITY: '1',
-            ...(process.env['XLN_RSCORE_BINARY']
-              ? { XLN_RSCORE_BINARY: process.env['XLN_RSCORE_BINARY'] }
-              : {}),
-            ...(process.env['XLN_RSCORE_AUTHORITY_WORKERS']
-              ? { XLN_RSCORE_AUTHORITY_WORKERS: process.env['XLN_RSCORE_AUTHORITY_WORKERS'] }
-              : {}),
-          }
-        : {}),
-      ...(process.env['XLN_RUNTIME_APPLY_PROFILE']
-        ? { XLN_RUNTIME_APPLY_PROFILE: process.env['XLN_RUNTIME_APPLY_PROFILE'] }
-        : {}),
-      ...(process.env['XLN_ENTITY_FRAME_PROFILE']
-        ? { XLN_ENTITY_FRAME_PROFILE: process.env['XLN_ENTITY_FRAME_PROFILE'] }
-        : {}),
-      ...(process.env['XLN_RUNTIME_PROCESS_PROFILE']
-        ? { XLN_RUNTIME_PROCESS_PROFILE: process.env['XLN_RUNTIME_PROCESS_PROFILE'] }
-        : {}),
-      ...(process.env['XLN_RUNTIME_OP_COUNTERS']
-        ? { XLN_RUNTIME_OP_COUNTERS: process.env['XLN_RUNTIME_OP_COUNTERS'] }
-        : {}),
-      ...(process.env['XLN_RUNTIME_OP_COUNTERS_DIR']
-        ? { XLN_RUNTIME_OP_COUNTERS_DIR: process.env['XLN_RUNTIME_OP_COUNTERS_DIR'] }
-        : {}),
-      ...(process.env['XLN_ENTITY_PROPOSAL_TRACE']
-        ? { XLN_ENTITY_PROPOSAL_TRACE: process.env['XLN_ENTITY_PROPOSAL_TRACE'] }
-        : {}),
-      ...(process.env['XLN_HEAVY_LOGS']
-        ? { XLN_HEAVY_LOGS: process.env['XLN_HEAVY_LOGS'] }
-        : {}),
-      ...(process.env['XLN_LOG_FORMAT']
-        ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
-        : {}),
-      ...(process.env['XLN_ENTITY_STATE_ROOT_PROFILE']
-        ? { XLN_ENTITY_STATE_ROOT_PROFILE: process.env['XLN_ENTITY_STATE_ROOT_PROFILE'] }
-        : {}),
-    }, process.env['XLN_HUB_MIN_FRAME_DELAY_MS'])),
+    env: sanitizeChildProcessEnv(buildHubChildProcessEnv({
+      hubName: child.name,
+      dbPath: child.dbPath,
+      brainvaultOwnerPath: join(child.dbPath, 'brainvault-owner.json'),
+      jurisdictionsPath: shardJurisdictionsPath,
+      rpcEnv: buildRpcChildEnv(),
+      orchestratorPid: process.pid,
+      orchestratorOwnerId,
+      startupTimeoutMs: STARTUP_TIMEOUT_MS,
+      hubDelayMs: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'],
+    })),
   });
   child.proc = proc;
   if (!proc.pid) {

@@ -8,6 +8,7 @@ import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
 } from '../../account/consensus/types';
+import type { AccountInput } from '../../types/account';
 import type { EntityInput } from '../../entity/types';
 import type {
   AccountAuthorityEntityStageCapability,
@@ -197,315 +198,311 @@ export const assertNoTypeScriptAccountExecution = (
   );
 };
 
-export const createAccountAuthorityEntityStage = (
-  options: AccountAuthorityEntityStageOptions,
-): AccountAuthorityEntityStage => {
-  assertOccurrence(options.occurrence);
-  const occurrence: AccountAuthorityEntityOccurrence = options.occurrence.kind === 'runtime-input'
-    ? { kind: 'runtime-input', inputIndex: options.occurrence.inputIndex }
-    : { kind: 'local-event', ordinal: options.occurrence.ordinal };
-  const ownerEntityId = normalizeEntityId(options.ownerEntityId);
-  let canonicalEntityInput: EntityInput | null = null;
-  let beginPromise: Promise<AccountAuthorityEntitySavepoint> | null = null;
-  let savepoint: AccountAuthorityEntitySavepoint | null = null;
-  let beginFailed = false;
-  let discarded = false;
-  let applyAccountInput = 0;
-  let proposeAccountFrame = 0;
-  let authoritativeExecutions = 0;
-  let frameOpened = false;
-  let frameOutboundPrepared = false;
-  let inboundRequests: AccountAuthorityInputRequest[] = [];
-  let inboundResults: HandleAccountInputResult[] = [];
-  let inboundCursor = 0;
-  let admissionRequests: AccountAuthorityInputRequest[] = [];
-  let preparedProposalIds: string[] = [];
-  let proposalResults: ProposeAccountFrameResult[] = [];
-  let proposalCursor = 0;
+class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
+  readonly mode: AccountAuthorityExecutionMode;
+  readonly ownerEntityId: string;
+  private readonly options: AccountAuthorityEntityStageOptions;
+  private readonly occurrence: AccountAuthorityEntityOccurrence;
+  private canonicalEntityInput: EntityInput | null = null;
+  private beginPromise: Promise<AccountAuthorityEntitySavepoint> | null = null;
+  private savepoint: AccountAuthorityEntitySavepoint | null = null;
+  private beginFailed = false;
+  private discarded = false;
+  private applyAccountInputCount = 0;
+  private proposeAccountFrameCount = 0;
+  private authoritativeExecutions = 0;
+  private frameOpened = false;
+  private frameOutboundPrepared = false;
+  private inboundRequests: AccountAuthorityInputRequest[] = [];
+  private inboundResults: HandleAccountInputResult[] = [];
+  private inboundCursor = 0;
+  private admissionRequests: AccountAuthorityInputRequest[] = [];
+  private preparedProposalIds: string[] = [];
+  private proposalResults: ProposeAccountFrameResult[] = [];
+  private proposalCursor = 0;
 
-  const counts = (): TypeScriptAccountExecutionCounts => ({
-    applyAccountInput,
-    proposeAccountFrame,
-  });
+  constructor(options: AccountAuthorityEntityStageOptions) {
+    assertOccurrence(options.occurrence);
+    this.options = options;
+    this.mode = options.mode;
+    this.ownerEntityId = normalizeEntityId(options.ownerEntityId);
+    this.occurrence = options.occurrence.kind === 'runtime-input'
+      ? { kind: 'runtime-input', inputIndex: options.occurrence.inputIndex }
+      : { kind: 'local-event', ordinal: options.occurrence.ordinal };
+  }
 
-  const parentOf = (): Readonly<{
-    ownerEntityId: string;
-    canonicalEntityInput: EntityInput;
-    occurrence: AccountAuthorityEntityOccurrence;
-    trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
-    deferProposal: boolean;
-    requiredEntityTxIndex?: number;
-  }> => {
-    if (discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
-    if (canonicalEntityInput === null) {
-      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${ownerEntityId}`);
+  private parentOf(): AccountAuthorityEntityParent {
+    if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
+    if (this.canonicalEntityInput === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${this.ownerEntityId}`);
     }
     return {
-      ownerEntityId,
-      canonicalEntityInput: cloneIsolatedEntityInput(canonicalEntityInput),
-      occurrence,
-      ...(options.trustedLocalRuntimeProtocol === undefined
+      ownerEntityId: this.ownerEntityId,
+      canonicalEntityInput: cloneIsolatedEntityInput(this.canonicalEntityInput),
+      occurrence: this.occurrence,
+      ...(this.options.trustedLocalRuntimeProtocol === undefined
         ? {}
-        : { trustedLocalRuntimeProtocol: options.trustedLocalRuntimeProtocol }),
-      deferProposal: options.deferProposal,
-      ...(options.requiredEntityTxIndex === undefined
+        : { trustedLocalRuntimeProtocol: this.options.trustedLocalRuntimeProtocol }),
+      deferProposal: this.options.deferProposal,
+      ...(this.options.requiredEntityTxIndex === undefined
         ? {}
-        : { requiredEntityTxIndex: options.requiredEntityTxIndex }),
+        : { requiredEntityTxIndex: this.options.requiredEntityTxIndex }),
     };
-  };
+  }
 
-  const requireBatchProvider = <K extends 'executeAccountInboundBatch' | 'executeAccountOutboundBatch'>(
+  private requireBatchProvider<K extends 'executeAccountInboundBatch' | 'executeAccountOutboundBatch'>(
     key: K,
-  ): NonNullable<AccountAuthorityEntityStageProvider[K]> => {
-    const value = options.provider[key];
+  ): NonNullable<AccountAuthorityEntityStageProvider[K]> {
+    const value = this.options.provider[key];
     if (value === undefined) {
-      throw new Error(`ACCOUNT_AUTHORITY_BATCH_EXECUTOR_REQUIRED:${key}:${ownerEntityId}`);
+      throw new Error(`ACCOUNT_AUTHORITY_BATCH_EXECUTOR_REQUIRED:${key}:${this.ownerEntityId}`);
     }
     return value as NonNullable<AccountAuthorityEntityStageProvider[K]>;
-  };
+  }
 
-  const normalizeAccountId = (value: string): string => value.trim().toLowerCase();
+  bindCanonicalInput(input: EntityInput): void {
+    if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
+    if (this.canonicalEntityInput !== null) {
+      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_ALREADY_BOUND:${this.ownerEntityId}`);
+    }
+    if (normalizeEntityId(input.entityId) !== this.ownerEntityId) {
+      throw new Error(
+        `ACCOUNT_AUTHORITY_CANONICAL_INPUT_OWNER_MISMATCH:${this.ownerEntityId}:${input.entityId}`,
+      );
+    }
+    this.canonicalEntityInput = cloneIsolatedEntityInput(input);
+  }
 
-  const stage: AccountAuthorityEntityStage = {
-    mode: options.mode,
-    ownerEntityId,
-    bindCanonicalInput(input) {
-      if (discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
-      if (canonicalEntityInput !== null) {
-        throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_ALREADY_BOUND:${ownerEntityId}`);
+  async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
+    if (this.mode !== 'cutover') return;
+    if (this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_DUPLICATE:${this.ownerEntityId}`);
+    if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
+      throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
+    }
+    this.frameOpened = true;
+    this.inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
+      const accountId = normalizeEntityId(arrival.accountId);
+      const account = request.accountForWrite(accountId);
+      if (account === undefined) {
+        throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ACCOUNT_MISSING:${accountId}`);
       }
-      if (normalizeEntityId(input.entityId) !== ownerEntityId) {
-        throw new Error(
-          `ACCOUNT_AUTHORITY_CANONICAL_INPUT_OWNER_MISMATCH:${ownerEntityId}:${input.entityId}`,
-        );
-      }
-      canonicalEntityInput = cloneIsolatedEntityInput(input);
-    },
-    async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest) {
-      if (options.mode !== 'cutover') return;
-      if (frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_DUPLICATE:${ownerEntityId}`);
-      if (normalizeAccountId(request.ownerEntityId) !== ownerEntityId) {
-        throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${ownerEntityId}:${request.ownerEntityId}`);
-      }
-      frameOpened = true;
-      inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
-        const accountId = normalizeAccountId(arrival.accountId);
-        const account = request.accountForWrite(accountId);
-        if (account === undefined) {
-          throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ACCOUNT_MISSING:${accountId}`);
-        }
-        return {
-          collectorFrameId: String(request.ownerEntityId),
-          account,
-          input: arrival.input,
-          entityTimestamp: request.entityTimestamp,
-          finalizedJHeight: request.finalizedJHeight,
-        };
-      });
-      const run = requireBatchProvider('executeAccountInboundBatch');
-      const materializers = [...await run.call(options.provider, {
-        ...parentOf(),
-        requests: inboundRequests,
-      })];
-      if (materializers.length !== inboundRequests.length) {
-        throw new Error(
-          `ACCOUNT_AUTHORITY_INBOUND_RESULT_ARITY:${inboundRequests.length}:${materializers.length}`,
-        );
-      }
-      inboundResults = materializers.map((materializeResult, index) => {
-        const expected = inboundRequests[index];
-        if (expected === undefined) throw new Error(`ACCOUNT_AUTHORITY_INBOUND_REQUEST_MISSING:${index}`);
-        return materializeResult(expected);
-      });
-      authoritativeExecutions += inboundRequests.length;
-      executionLedger.authoritativeOperations += inboundRequests.length;
-    },
-    async prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest) {
-      if (options.mode !== 'cutover') return;
-      if (!frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${ownerEntityId}`);
-      if (frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_DUPLICATE:${ownerEntityId}`);
-      if (inboundCursor !== inboundRequests.length) {
-        throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNCONSUMED:${inboundCursor}:${inboundRequests.length}`);
-      }
-      frameOutboundPrepared = true;
-      const admittedIds = new Set(admissionRequests.map(entry =>
-        normalizeAccountId(entry.account.proofHeader.toEntity)));
-      const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeAccountId))]
-        .filter(accountId => {
-          const account = request.accounts.get(accountId);
-          return account !== undefined
-            && account.pendingFrame === undefined
-            && (account.mempool.length > 0 || admittedIds.has(accountId));
-        })
-        .sort();
-      const proposals = proposalIds.map(accountId => {
+      return {
+        collectorFrameId: String(request.ownerEntityId),
+        account,
+        input: arrival.input,
+        entityTimestamp: request.entityTimestamp,
+        finalizedJHeight: request.finalizedJHeight,
+      };
+    });
+    const run = this.requireBatchProvider('executeAccountInboundBatch');
+    const materializers = [...await run.call(this.options.provider, {
+      ...this.parentOf(),
+      requests: this.inboundRequests,
+    })];
+    if (materializers.length !== this.inboundRequests.length) {
+      throw new Error(
+        `ACCOUNT_AUTHORITY_INBOUND_RESULT_ARITY:${this.inboundRequests.length}:${materializers.length}`,
+      );
+    }
+    this.inboundResults = materializers.map((materializeResult, index) => {
+      const expected = this.inboundRequests[index];
+      if (expected === undefined) throw new Error(`ACCOUNT_AUTHORITY_INBOUND_REQUEST_MISSING:${index}`);
+      return materializeResult(expected);
+    });
+    this.authoritativeExecutions += this.inboundRequests.length;
+    executionLedger.authoritativeOperations += this.inboundRequests.length;
+  }
+
+  async prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void> {
+    if (this.mode !== 'cutover') return;
+    if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
+    if (this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_DUPLICATE:${this.ownerEntityId}`);
+    if (this.inboundCursor !== this.inboundRequests.length) {
+      throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNCONSUMED:${this.inboundCursor}:${this.inboundRequests.length}`);
+    }
+    this.frameOutboundPrepared = true;
+    const admittedIds = new Set(this.admissionRequests.map(entry =>
+      normalizeEntityId(entry.account.proofHeader.toEntity)));
+    const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
+      .filter(accountId => {
         const account = request.accounts.get(accountId);
-        if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
-        return {
-          collectorFrameId: ownerEntityId,
-          account,
-          timestamp: request.timestamp,
-          jHeight: request.jHeight,
-          entityTimestamp: request.timestamp,
-          finalizedJHeight: request.jHeight,
-          selectionIsWholeMempool: true,
-        };
-      });
-      const run = requireBatchProvider('executeAccountOutboundBatch');
-      proposalResults = [...await run.call(options.provider, {
-        ...parentOf(),
-        admissions: admissionRequests,
-        proposals,
-      })];
-      preparedProposalIds = proposalIds;
-      if (proposalResults.length !== proposals.length) {
-        throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_RESULT_ARITY:${proposals.length}:${proposalResults.length}`);
-      }
-      authoritativeExecutions += admissionRequests.length + proposals.length;
-      executionLedger.authoritativeOperations += admissionRequests.length + proposals.length;
-    },
-    hasPreparedAccountProposal(accountId: string) {
-      return preparedProposalIds.includes(normalizeAccountId(accountId));
-    },
-    hasPreparedAccountInput(accountId, input) {
-      const normalized = normalizeAccountId(accountId);
-      return inboundRequests.slice(inboundCursor).some(request =>
-        normalizeAccountId(request.account.proofHeader.toEntity) === normalized
-        && safeStringify(request.input) === safeStringify(input));
-    },
-    finishEntityAccountFrame() {
-      if (options.mode !== 'cutover') return;
-      if (!frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_NOT_PREPARED:${ownerEntityId}`);
-      if (proposalCursor !== proposalResults.length) {
-        throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_UNCONSUMED:${proposalCursor}:${proposalResults.length}`);
-      }
-    },
-    async beforeTypeScriptAccountExecution(kind, accountId) {
-      if (discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
-      if (canonicalEntityInput === null) {
-        throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${ownerEntityId}`);
-      }
-      if (beginPromise === null) {
-        beginPromise = options.provider.beginEntityStage({
-          ownerEntityId,
-          canonicalEntityInput: cloneIsolatedEntityInput(canonicalEntityInput),
-          occurrence,
-          ...(options.trustedLocalRuntimeProtocol === undefined
-            ? {}
-            : { trustedLocalRuntimeProtocol: options.trustedLocalRuntimeProtocol }),
-          deferProposal: options.deferProposal,
-          ...(options.requiredEntityTxIndex === undefined
-            ? {}
-            : { requiredEntityTxIndex: options.requiredEntityTxIndex }),
-          firstOperation: {
-            kind,
-            accountId: normalizeEntityId(accountId),
-          },
-        }).then(opened => {
-          savepoint = opened;
-          return opened;
-        }, error => {
-          beginFailed = true;
-          throw error;
-        });
-      }
-      await beginPromise;
-      if (kind === 'applyAccountInput') {
-        applyAccountInput += 1;
-        executionLedger.typescriptApplyAccountInput += 1;
-      } else {
-        proposeAccountFrame += 1;
-        executionLedger.typescriptProposeAccountFrame += 1;
-      }
-      if (options.mode === 'cutover') assertNoTypeScriptAccountExecution(stage);
-    },
-    async executeAccountInput(request) {
-      if (options.mode === 'cutover' && frameOpened) {
-        if (request.input.kind === 'enqueue') {
-          if (frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_ADMISSION_AFTER_OUTBOUND');
-          admissionRequests.push(request);
-          return accountInputApplied({
-            events: [],
-            admittedAccountTxCount: request.input.txs.length,
-          });
-        }
-        const expected = inboundRequests[inboundCursor];
-        const result = inboundResults[inboundCursor];
-        if (expected === undefined || result === undefined) {
-          throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNPREPARED:${request.account.proofHeader.toEntity}`);
-        }
-        const expectedAccount = normalizeAccountId(expected.account.proofHeader.toEntity);
-        const actualAccount = normalizeAccountId(request.account.proofHeader.toEntity);
-        if (expectedAccount !== actualAccount || safeStringify(expected.input) !== safeStringify(request.input)) {
-          throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ORDER_MISMATCH:${expectedAccount}:${actualAccount}`);
-        }
-        inboundRequests[inboundCursor] = { ...expected, account: request.account };
-        inboundCursor += 1;
-        // The two-call architecture applies peer rows in Rust before Entity
-        // follow-ups are admitted. The canonical TS event, however, reports
-        // how many earlier follow-ups in this same Entity frame were waiting
-        // when a losing collision arrived. Reattach that orchestration fact;
-        // it changes no Account verdict or state, but Entity hashes the event.
-        const collision = result.ok && result.events.some(event =>
-          event.startsWith('📤 LEFT-WINS: Ignored RIGHT'));
-        const alreadyQueued = admissionRequests
-          .filter(entry => normalizeAccountId(entry.account.proofHeader.toEntity) === actualAccount)
-          .reduce((count, entry) => count + (entry.input.kind === 'enqueue' ? entry.input.txs.length : 0), 0);
-        if (
-          collision
-          && alreadyQueued > 0
-          && !result.events.some(event => event.startsWith('⚠️ LEFT has '))
-        ) {
-          return {
-            ...result,
-            events: [
-              ...result.events,
-              `⚠️ LEFT has ${alreadyQueued} pending txs while waiting for RIGHT's ACK`,
-            ],
-          };
-        }
-        return result;
-      }
-      if (options.mode === 'cutover') {
-        throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${ownerEntityId}`);
-      }
-      return null;
-    },
-    async executeAccountProposal(request) {
-      if (options.mode === 'cutover' && frameOpened) {
-        if (!frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_BEFORE_OUTBOUND');
-        const expectedId = preparedProposalIds[proposalCursor];
-        const actualId = normalizeAccountId(request.account.proofHeader.toEntity);
-        const result = proposalResults[proposalCursor];
-        if (expectedId === undefined || result === undefined || expectedId !== actualId) {
-          throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${expectedId ?? 'none'}:${actualId}`);
-        }
-        proposalCursor += 1;
-        return result;
-      }
-      if (options.mode === 'cutover') {
-        throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${ownerEntityId}`);
-      }
-      return null;
-    },
-    typeScriptExecutionCounts: counts,
-    authoritativeExecutionCount: () => authoritativeExecutions,
-    async discard() {
-      if (discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARD_DUPLICATE');
-      discarded = true;
-      // Cutover stages are not probes: the engine's stage is accepted or
-      // discarded with the Entity input itself, by the runtime that decided.
-      if (options.mode === 'cutover') return;
-      if (beginPromise === null || beginFailed) return;
-      await beginPromise;
-      if (savepoint === null) {
-        throw new Error(`ACCOUNT_AUTHORITY_ENTITY_SAVEPOINT_MISSING:${ownerEntityId}`);
-      }
-      await savepoint.discard();
-    },
-  };
-  return stage;
-};
+        return account !== undefined
+          && account.pendingFrame === undefined
+          && (account.mempool.length > 0 || admittedIds.has(accountId));
+      })
+      .sort();
+    const proposals = proposalIds.map(accountId => {
+      const account = request.accounts.get(accountId);
+      if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
+      return {
+        collectorFrameId: this.ownerEntityId,
+        account,
+        timestamp: request.timestamp,
+        jHeight: request.jHeight,
+        entityTimestamp: request.timestamp,
+        finalizedJHeight: request.jHeight,
+        selectionIsWholeMempool: true,
+      };
+    });
+    const run = this.requireBatchProvider('executeAccountOutboundBatch');
+    this.proposalResults = [...await run.call(this.options.provider, {
+      ...this.parentOf(),
+      admissions: this.admissionRequests,
+      proposals,
+    })];
+    this.preparedProposalIds = proposalIds;
+    if (this.proposalResults.length !== proposals.length) {
+      throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_RESULT_ARITY:${proposals.length}:${this.proposalResults.length}`);
+    }
+    const executed = this.admissionRequests.length + proposals.length;
+    this.authoritativeExecutions += executed;
+    executionLedger.authoritativeOperations += executed;
+  }
+
+  hasPreparedAccountProposal(accountId: string): boolean {
+    return this.preparedProposalIds.includes(normalizeEntityId(accountId));
+  }
+
+  hasPreparedAccountInput(accountId: string, input: AccountInput): boolean {
+    const normalized = normalizeEntityId(accountId);
+    return this.inboundRequests.slice(this.inboundCursor).some(request =>
+      normalizeEntityId(request.account.proofHeader.toEntity) === normalized
+      && safeStringify(request.input) === safeStringify(input));
+  }
+
+  finishEntityAccountFrame(): void {
+    if (this.mode !== 'cutover') return;
+    if (!this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_NOT_PREPARED:${this.ownerEntityId}`);
+    if (this.proposalCursor !== this.proposalResults.length) {
+      throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_UNCONSUMED:${this.proposalCursor}:${this.proposalResults.length}`);
+    }
+  }
+
+  async beforeTypeScriptAccountExecution(
+    kind: 'applyAccountInput' | 'proposeAccountFrame',
+    accountId: string,
+  ): Promise<void> {
+    if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARDED');
+    if (this.canonicalEntityInput === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${this.ownerEntityId}`);
+    }
+    if (this.beginPromise === null) this.openObservationStage(kind, accountId);
+    await this.beginPromise;
+    if (kind === 'applyAccountInput') {
+      this.applyAccountInputCount += 1;
+      executionLedger.typescriptApplyAccountInput += 1;
+    } else {
+      this.proposeAccountFrameCount += 1;
+      executionLedger.typescriptProposeAccountFrame += 1;
+    }
+    if (this.mode === 'cutover') assertNoTypeScriptAccountExecution(this);
+  }
+
+  private openObservationStage(
+    kind: 'applyAccountInput' | 'proposeAccountFrame',
+    accountId: string,
+  ): void {
+    if (this.canonicalEntityInput === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_CANONICAL_INPUT_REQUIRED:${this.ownerEntityId}`);
+    }
+    this.beginPromise = this.options.provider.beginEntityStage({
+      ...this.parentOf(),
+      firstOperation: { kind, accountId: normalizeEntityId(accountId) },
+    }).then(opened => {
+      this.savepoint = opened;
+      return opened;
+    }, error => {
+      this.beginFailed = true;
+      throw error;
+    });
+  }
+
+  async executeAccountInput(request: AccountAuthorityInputRequest): Promise<HandleAccountInputResult | null> {
+    if (this.mode !== 'cutover') return null;
+    if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
+    if (request.input.kind === 'enqueue') {
+      if (this.frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_ADMISSION_AFTER_OUTBOUND');
+      this.admissionRequests.push(request);
+      return accountInputApplied({ events: [], admittedAccountTxCount: request.input.txs.length });
+    }
+    const expected = this.inboundRequests[this.inboundCursor];
+    const result = this.inboundResults[this.inboundCursor];
+    if (expected === undefined || result === undefined) {
+      throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNPREPARED:${request.account.proofHeader.toEntity}`);
+    }
+    const expectedAccount = normalizeEntityId(expected.account.proofHeader.toEntity);
+    const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
+    if (expectedAccount !== actualAccount || safeStringify(expected.input) !== safeStringify(request.input)) {
+      throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ORDER_MISMATCH:${expectedAccount}:${actualAccount}`);
+    }
+    this.inboundRequests[this.inboundCursor] = { ...expected, account: request.account };
+    this.inboundCursor += 1;
+    return this.restoreCollisionQueueEvent(result, actualAccount);
+  }
+
+  private restoreCollisionQueueEvent(
+    result: HandleAccountInputResult,
+    accountId: string,
+  ): HandleAccountInputResult {
+    const collision = result.ok && result.events.some(event =>
+      event.startsWith('📤 LEFT-WINS: Ignored RIGHT'));
+    const alreadyQueued = this.admissionRequests
+      .filter(entry => normalizeEntityId(entry.account.proofHeader.toEntity) === accountId)
+      .reduce((count, entry) => count + (entry.input.kind === 'enqueue' ? entry.input.txs.length : 0), 0);
+    if (!collision || alreadyQueued === 0 || result.events.some(event => event.startsWith('⚠️ LEFT has '))) {
+      return result;
+    }
+    return {
+      ...result,
+      events: [
+        ...result.events,
+        `⚠️ LEFT has ${alreadyQueued} pending txs while waiting for RIGHT's ACK`,
+      ],
+    };
+  }
+
+  async executeAccountProposal(
+    request: AccountAuthorityProposalRequest,
+  ): Promise<ProposeAccountFrameResult | null> {
+    if (this.mode !== 'cutover') return null;
+    if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
+    if (!this.frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_BEFORE_OUTBOUND');
+    const expectedId = this.preparedProposalIds[this.proposalCursor];
+    const actualId = normalizeEntityId(request.account.proofHeader.toEntity);
+    const result = this.proposalResults[this.proposalCursor];
+    if (expectedId === undefined || result === undefined || expectedId !== actualId) {
+      throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${expectedId ?? 'none'}:${actualId}`);
+    }
+    this.proposalCursor += 1;
+    return result;
+  }
+
+  typeScriptExecutionCounts(): TypeScriptAccountExecutionCounts {
+    return {
+      applyAccountInput: this.applyAccountInputCount,
+      proposeAccountFrame: this.proposeAccountFrameCount,
+    };
+  }
+
+  authoritativeExecutionCount(): number {
+    return this.authoritativeExecutions;
+  }
+
+  async discard(): Promise<void> {
+    if (this.discarded) throw new Error('ACCOUNT_AUTHORITY_ENTITY_STAGE_DISCARD_DUPLICATE');
+    this.discarded = true;
+    if (this.mode === 'cutover' || this.beginPromise === null || this.beginFailed) return;
+    await this.beginPromise;
+    if (this.savepoint === null) {
+      throw new Error(`ACCOUNT_AUTHORITY_ENTITY_SAVEPOINT_MISSING:${this.ownerEntityId}`);
+    }
+    await this.savepoint.discard();
+  }
+}
+
+export const createAccountAuthorityEntityStage = (
+  options: AccountAuthorityEntityStageOptions,
+): AccountAuthorityEntityStage => new AccountAuthorityEntityStageImpl(options);
 
 type AccountAuthorityStageHost = EntityRuntimeContext & {
   accountAuthorityEntityStage?: AccountAuthorityEntityStage | undefined;

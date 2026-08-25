@@ -589,6 +589,26 @@ const assertCurrentDisputeDraftOrder = (
   }
 };
 
+const assertMaterializedAccount = (
+  account: AccountReplica,
+  row: RscoreResolvedAccountRow,
+): void => {
+  if (!RSCORE_CUTOVER_VERIFY) return;
+  validateAccountReplica(account, 'rscore.materialize.result');
+  const expectedProjection = {
+    ...row.decoded.stateSeed.envelope?.fields,
+    accountStateRoot: row.decoded.accountStateRoot,
+    mempoolRoot: row.decoded.mempoolRoot,
+  };
+  const projected = projectEntityAccountLeaf(account);
+  requireCanonicalEqual(projected, expectedProjection, 'ENTITY_PROJECTION');
+  const projectedLeaf = computeEntityAccountLeafDigest(
+    Object.entries(projected).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  if (projectedLeaf !== row.entityAccountLeaf) fail('PROJECTED_LEAF_MISMATCH');
+  if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
+};
+
 /**
  * Rebuild a fresh AccountReplica from one already-decoded Rust post-account
  * row. No TypeScript Account transition or proposal code is called.
@@ -729,21 +749,7 @@ export const materializeRscoreAccountReplica = (
       ?? fail('LOCAL_FRAME_DRAFT_UNREACHABLE');
   }
 
-  if (RSCORE_CUTOVER_VERIFY) {
-    validateAccountReplica(account, 'rscore.materialize.result');
-    const expectedProjection = {
-      ...fields,
-      accountStateRoot,
-      mempoolRoot: row.decoded.mempoolRoot,
-    };
-    const projected = projectEntityAccountLeaf(account);
-    requireCanonicalEqual(projected, expectedProjection, 'ENTITY_PROJECTION');
-    const projectedLeaf = computeEntityAccountLeafDigest(
-      Object.entries(projected).sort(([left], [right]) => left.localeCompare(right)),
-    );
-    if (projectedLeaf !== row.entityAccountLeaf) fail('PROJECTED_LEAF_MISMATCH');
-    if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
-  }
+  assertMaterializedAccount(account, row);
   return { account, hashesToSign: witnesses.finish() };
 };
 
