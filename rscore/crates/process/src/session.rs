@@ -237,6 +237,9 @@ impl ProcessSession {
                 expected_accepted_ordinal,
                 context,
             ),
+            Command::PushSavepoint => self.savepoint(StatefulConsensusEngine::push_savepoint),
+            Command::KeepSavepoint => self.savepoint(StatefulConsensusEngine::keep_savepoint),
+            Command::UndoSavepoint => self.savepoint(StatefulConsensusEngine::undo_savepoint),
             Command::AccountInbound { request } => self.account_inbound(*request),
             Command::AccountOutbound { request } => self.account_outbound(*request),
             Command::ApplyAccountWave {
@@ -404,6 +407,19 @@ impl ProcessSession {
             checkpoint: None,
         });
         Ok((response, false))
+    }
+
+    /// Where the accounts stand after marking, keeping or undoing a savepoint.
+    fn savepoint(
+        &mut self,
+        act: fn(&mut StatefulConsensusEngine) -> Result<(u64, [u8; 32]), xln_rscore_batch::BatchError>,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let (revision, root) = act(engine)?;
+        Ok((crate::wire_encode::savepoint(revision, root), false))
     }
 
     /// One Entity input's inbound half. Nothing is staged: the accounts move

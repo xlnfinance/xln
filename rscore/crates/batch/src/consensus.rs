@@ -555,6 +555,7 @@ pub struct StatefulConsensusEngine {
     /// until after it is signed.
     swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     pending: Option<PendingWave>,
+    pub(crate) savepoints: Vec<crate::round::RuntimeSavepoint>,
 }
 
 impl StatefulConsensusEngine {
@@ -579,6 +580,7 @@ impl StatefulConsensusEngine {
             .build()
             .map_err(|error| BatchError::ThreadPoolBuild(error.to_string()))?;
         let mut engine = Self {
+            savepoints: Vec::new(),
             engine_generation,
             revision,
             candidate_attempt: 0,
@@ -617,6 +619,21 @@ impl StatefulConsensusEngine {
         &self.signer_id
     }
 
+    pub(crate) fn savepoints_mut(&mut self) -> &mut Vec<crate::round::RuntimeSavepoint> {
+        &mut self.savepoints
+    }
+
+    pub(crate) fn identities_snapshot(&self) -> BTreeMap<[u8; 32], SigningIdentity> {
+        self.identities.clone()
+    }
+
+    pub(crate) fn restore_savepoint(&mut self, savepoint: crate::round::RuntimeSavepoint) {
+        let (accounts, identities, revision) = savepoint.into_parts();
+        self.accounts = accounts;
+        self.identities = identities;
+        self.revision = revision;
+    }
+
     /// The committed tree as it stands, kept so a round can name what it moved.
     /// The map is persistent: this shares structure rather than copying it.
     pub(crate) fn accounts_snapshot(&self) -> PersistentRadixMap<AccountConsensus> {
@@ -640,8 +657,7 @@ impl StatefulConsensusEngine {
     /// restored to exactly where the runtime holds the account, and its pending
     /// proposal is replayed rather than trusted.
     pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
-        self.assert_no_pending_wave()?;
-        let mut entries = Vec::with_capacity(seeds.len());
+                let mut entries = Vec::with_capacity(seeds.len());
         let mut seen = BTreeSet::new();
         for seed in seeds {
             // Two seeds for one account in a wave is a caller bug: one of them
@@ -683,8 +699,7 @@ impl StatefulConsensusEngine {
         &mut self,
         requests: Vec<(AccountId, Vec<xln_rscore_engine::AccountTx>)>,
     ) -> Result<[u8; 32], BatchError> {
-        self.assert_no_pending_wave()?;
-        let mut merged: BTreeMap<AccountId, Vec<xln_rscore_engine::AccountTx>> = BTreeMap::new();
+                let mut merged: BTreeMap<AccountId, Vec<xln_rscore_engine::AccountTx>> = BTreeMap::new();
         for (account_id, txs) in requests {
             merged.entry(account_id).or_default().extend(txs);
         }
@@ -721,8 +736,7 @@ impl StatefulConsensusEngine {
         j_height: u64,
         selected: Option<&[AccountId]>,
     ) -> Result<Vec<ProposalRow>, BatchError> {
-        self.assert_no_pending_wave()?;
-        let candidates: Vec<(AccountId, AccountConsensus)> = match selected {
+                let candidates: Vec<(AccountId, AccountConsensus)> = match selected {
             Some(ids) => ids
                 .iter()
                 .filter_map(|account_id| {
@@ -820,8 +834,7 @@ impl StatefulConsensusEngine {
         clock: ReceiverClock,
         rows: Vec<AccountInputRow>,
     ) -> Result<Vec<AccountInputResult>, BatchError> {
-        self.assert_no_pending_wave()?;
-        if rows.is_empty() {
+                if rows.is_empty() {
             return Ok(Vec::new());
         }
         for pair in rows.windows(2) {

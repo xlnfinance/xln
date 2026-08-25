@@ -11,7 +11,7 @@
 //! candidate, no account body crossing back so the caller can re-derive what
 //! the engine already committed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use xln_rscore_engine::{AccountTx, ReceiverClock};
 use xln_rscore_protocol::PersistentRadixMap;
@@ -23,7 +23,7 @@ use crate::consensus::{
 };
 use crate::error::BatchError;
 use crate::types::{AccountId, AccountSeed};
-use xln_rscore_engine::AccountConsensus;
+use xln_rscore_engine::{AccountConsensus, SigningIdentity};
 
 fn hex_of(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
@@ -31,6 +31,30 @@ fn hex_of(bytes: &[u8]) -> String {
         let _ = write!(text, "{byte:02x}");
         text
     })
+}
+
+/// The committed tree as it stood when something abortable opened.
+///
+/// A Runtime frame is one transaction, and so is each Entity input inside it:
+/// either can be abandoned after its accounts have already moved. Savepoints
+/// nest for exactly that reason. The tree is persistent, so holding one costs
+/// a pointer, not a copy.
+pub(crate) struct RuntimeSavepoint {
+    accounts: PersistentRadixMap<AccountConsensus>,
+    identities: BTreeMap<[u8; 32], SigningIdentity>,
+    revision: u64,
+}
+
+impl RuntimeSavepoint {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        PersistentRadixMap<AccountConsensus>,
+        BTreeMap<[u8; 32], SigningIdentity>,
+        u64,
+    ) {
+        (self.accounts, self.identities, self.revision)
+    }
 }
 
 /// Everything one Entity input carries inward.
@@ -75,6 +99,32 @@ pub struct EntityRoundResult {
 }
 
 impl StatefulConsensusEngine {
+    /// Mark a point every account can be put back to.
+    pub fn push_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
+        let savepoint = RuntimeSavepoint {
+            accounts: self.accounts_snapshot(),
+            identities: self.identities_snapshot(),
+            revision: self.revision(),
+        };
+        self.savepoints_mut().push(savepoint);
+        Ok((self.revision(), self.accounts_root()))
+    }
+
+    /// Keep everything done since the innermost savepoint.
+    pub fn keep_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
+        if self.savepoints_mut().pop().is_none() {
+            return Err(BatchError::WaveMissing);
+        }
+        Ok((self.revision(), self.accounts_root()))
+    }
+
+    /// Put every account back to the innermost savepoint.
+    pub fn undo_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
+        let savepoint = self.savepoints_mut().pop().ok_or(BatchError::WaveMissing)?;
+        self.restore_savepoint(savepoint);
+        Ok((self.revision(), self.accounts_root()))
+    }
+
     /// Apply everything that arrived from peers and report what happened.
     pub fn entity_inbound(
         &mut self,

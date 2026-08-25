@@ -125,6 +125,13 @@ pub enum OpTag {
     /// One Entity input's outbound half: the transactions the Entity's own
     /// logic produced, and the accounts that now propose.
     AccountOutbound = 26,
+    /// Mark a point every account can be put back to. A Runtime frame opens
+    /// one, and so does each Entity input inside it.
+    PushSavepoint = 27,
+    /// Keep everything done since the innermost savepoint.
+    KeepSavepoint = 28,
+    /// Put every account back to the innermost savepoint.
+    UndoSavepoint = 29,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -159,6 +166,9 @@ impl TryFrom<u64> for OpTag {
             24 => Ok(Self::SealAccountWave),
             25 => Ok(Self::AccountInbound),
             26 => Ok(Self::AccountOutbound),
+            27 => Ok(Self::PushSavepoint),
+            28 => Ok(Self::KeepSavepoint),
+            29 => Ok(Self::UndoSavepoint),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

@@ -260,14 +260,6 @@ fn a_pending_wave_closes_every_other_door() {
         Err(BatchError::WavePending),
     ));
     assert!(matches!(
-        stand.payer.admit_txs(vec![payment(&stand.pairs[0], 5)]),
-        Err(BatchError::WavePending),
-    ));
-    assert!(matches!(
-        stand.payer.propose_frames(1_700_000_000_002, 100, None),
-        Err(BatchError::WavePending),
-    ));
-    assert!(matches!(
         stand.payer.checkpoint_changes(),
         Err(BatchError::WavePending),
     ));

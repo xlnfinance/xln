@@ -98,3 +98,35 @@ fn a_round_refuses_an_account_another_entity_owns() {
         "named the owner mismatch: {refused}"
     );
 }
+
+/// A Runtime frame is one transaction: what its Entity inputs moved is undone
+/// exactly if the frame never lands.
+#[test]
+fn an_aborted_runtime_frame_puts_every_account_back() {
+    let mut stand = stand(1);
+    let payer_entity = stand.pairs[0].payer_entity;
+    let payer_account = stand.pairs[0].payer_account;
+    let (_, txs) = fixture::payment(&stand.pairs[0], 25);
+
+    let (_, before) = stand.payer.push_savepoint().expect("savepoint");
+    stand
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: payer_entity,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: vec![(payer_account, txs)],
+            propose: vec![payer_account],
+            post_accounts: false,
+        })
+        .expect("outbound");
+    assert_ne!(stand.payer.accounts_root(), before, "the frame moved the tree");
+
+    let (_, after) = stand.payer.undo_savepoint().expect("undo");
+    assert_eq!(after, before, "an abandoned frame leaves nothing behind");
+    assert!(
+        stand.payer.keep_savepoint().is_err(),
+        "there is nothing left to keep"
+    );
+}
