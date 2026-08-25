@@ -82,7 +82,7 @@ const RSCORE_ABI_VERSION = 1;
 // 14: peer inputs carry the exact Account envelope plus the closed
 // Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
 // returns one ordered composite result row.
-export const RSCORE_PROCESS_ABI_VERSION = 15;
+export const RSCORE_PROCESS_ABI_VERSION = 16;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;

@@ -424,6 +424,12 @@ pub struct ProposedRow {
     pub hanko: Vec<u8>,
     /// The recovery proof the proposal travels with, when it carries one.
     pub dispute: Option<xln_rscore_engine::DisputeDraft>,
+    /// What the proposer publishes at signing time, before any ack exists.
+    /// The frame's committed effects are released with the peer's ack; these
+    /// are the strings the Entity frame commits and the outputs it acts on
+    /// the moment the window executed.
+    pub events: Vec<String>,
+    pub outputs: Vec<AccountOutput>,
 }
 
 impl ProposalRow {
@@ -747,6 +753,8 @@ impl StatefulConsensusEngine {
                                 state_hash: proposed.state_hash,
                                 hanko: proposed.hanko,
                                 dispute: proposed.dispute,
+                                events: proposed.events,
+                                outputs: proposed.outputs,
                             }),
                             dropped: dropped_rows(account_id, &proposed.dropped)?,
                         },

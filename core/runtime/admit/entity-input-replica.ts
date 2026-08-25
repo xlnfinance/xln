@@ -18,6 +18,7 @@ import {
 import {
   authorityDriverEnabled,
   authorityRuntimeSuppressed,
+  authorityCutoverStageHandle,
   stageAuthorityEntityInput,
   type AuthorityEntityStageHandle,
 } from '../../rscore/authority-driver.ts';
@@ -288,7 +289,11 @@ export const applyEntityInputToReplica = async (
         entityInput,
         actualSignerId,
       );
-      const authorityStage = driverEnabled && executionMode === undefined
+      // Cutover already opened its stage while executing; there is no
+      // TypeScript transition left to stage after the fact.
+      const authorityStage = driverEnabled && executionMode === 'cutover'
+        ? authorityCutoverStageHandle(env, entityReplica.entityId)
+        : driverEnabled && executionMode === undefined
         ? await stageAuthorityEntityInput(env, {
             collectorFrameId,
             ownerEntityId: entityReplica.entityId,

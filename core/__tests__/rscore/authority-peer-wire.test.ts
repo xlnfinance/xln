@@ -146,6 +146,7 @@ describe('authority canonical peer wire', () => {
         outcome: 'applied',
         committedFrames: [],
         responseAckHanko: null,
+        events: [],
       },
     }]);
     expect(wave.entities[0]?.ops).toEqual([[

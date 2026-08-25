@@ -1,12 +1,49 @@
+import type { AccountInput, AccountReplica } from '../../types/account';
+import type { HandleAccountInputResult, ProposeAccountFrameResult } from './types';
 import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 
+/**
+ * The authoritative engine's seat inside Account consensus.
+ *
+ * In observation mode it only counts what TypeScript is about to execute. In
+ * cutover it executes instead: `executeAccountInput` and
+ * `executeAccountProposal` return the transition's result and leave the live
+ * replica already holding the engine's post-state, so the TypeScript
+ * transition below them never runs. `null` means the scope declined this
+ * operation and TypeScript remains the executor.
+ */
 export type AccountAuthorityExecutionScope = Readonly<{
   beforeTypeScriptAccountExecution(
     kind: 'applyAccountInput' | 'proposeAccountFrame',
     accountId: string,
   ): Promise<void>;
+  executeAccountInput(
+    request: AccountAuthorityInputRequest,
+  ): Promise<HandleAccountInputResult | null>;
+  executeAccountProposal(
+    request: AccountAuthorityProposalRequest,
+  ): Promise<ProposeAccountFrameResult | null>;
+}>;
+
+export type AccountAuthorityInputRequest = Readonly<{
+  collectorFrameId: string;
+  account: AccountReplica;
+  input: AccountInput;
+  entityTimestamp: number;
+  finalizedJHeight: number;
+}>;
+
+
+export type AccountAuthorityProposalRequest = Readonly<{
+  collectorFrameId: string;
+  account: AccountReplica;
+  timestamp: number;
+  jHeight: number;
+  entityTimestamp: number;
+  finalizedJHeight: number;
+  selectionIsWholeMempool: boolean;
 }>;
 
 /**
@@ -28,6 +65,12 @@ export type AccountConsensusContext = Readonly<{
   accountAuthorityFrameId?: string | null;
   /** Ephemeral pre-TypeScript authority hook; absent on the canonical TS path. */
   accountAuthorityExecutionScope?: AccountAuthorityExecutionScope;
+  /**
+   * The clock of the Entity frame this Account work belongs to. Peer inputs
+   * carry their own copy in their security context; a local admission carries
+   * none, and one Entity input must not straddle two clocks.
+   */
+  entityClock?: Readonly<{ timestamp: number; finalizedJHeight: number }>;
   quietLogs: boolean;
   emitRuntimeEvents: boolean;
   jReplicas: ReadonlyMap<string, JReplica>;

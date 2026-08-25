@@ -52,6 +52,7 @@ import {
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
 import { waveOutputRow, type Wave } from './wave-decode';
+import { cutoverAccountInputEvents } from './cutover/execute';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import type { ShadowOutputRow } from './shadow-wire';
 import {
@@ -189,6 +190,12 @@ type PendingWave = {
   nextOperationIndex: number;
   operations: AuthorityWaveOperation[];
   expectedOutputs: Map<string, ShadowOutputRow[]>;
+  /**
+   * True once this candidate executed an operation authoritatively. There is
+   * then no TypeScript output list to compare against — the engine's is the
+   * only one — so publishing it is the whole answer.
+   */
+  cutover: boolean;
   openStage: OpenAuthorityEntityStage | null;
   /** Candidate-created membership promoted only after the Runtime WAL and Rust commit. */
   createdAccounts: string[];
@@ -792,6 +799,7 @@ const openTrackedCandidate = async (
       nextOperationIndex: 0,
       operations: [],
       expectedOutputs: new Map(),
+      cutover: false,
       openStage: null,
       createdAccounts: [],
     };
@@ -1202,6 +1210,7 @@ const openCutoverStage = async (
       actualRoot: openedRoot,
     });
   }
+  candidate.cutover = true;
   const state: CutoverStageState = {
     stageKey,
     expectedAcceptedOrdinal: candidate.acceptedStageOrdinal,
@@ -1445,7 +1454,7 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
       env,
       ownerEntityId,
       result,
-      candidate.expectedOutputs,
+      candidate.cutover ? null : candidate.expectedOutputs,
       candidate.session,
     );
     candidate.result = result;
@@ -1685,6 +1694,17 @@ export const assertAuthorityStageVerdictParity = (
     // two only where TypeScript already has one to compare, which is the
     // duplicate/re-send path replaying a cached ACK.
     const ackHankoComparable = expected.responseAckHanko !== null;
+    // The events the frame publishes are consensus material, so the engine's
+    // own list is checked against TypeScript's here — this is the same
+    // synthesis a cutover run publishes with no TypeScript list to check.
+    const engineEvents = cutoverAccountInputEvents(actualRow.verdict, operation.accountId);
+    if (safeStringify(engineEvents) !== safeStringify([...expected.events])) {
+      halt('ENTITY_STAGE_PEER_EVENTS_MISMATCH', {
+        ...detail,
+        typescript: expected.events,
+        rust: engineEvents,
+      });
+    }
     if (
       actual.outcome !== expected.outcome
       || (ackHankoComparable && actual.responseAckHanko !== expected.responseAckHanko)
@@ -2156,10 +2176,10 @@ const compareWithTypescript = async (
   env: RuntimeReplica,
   ownerEntityId: string,
   wave: Wave,
-  expectedOutputs: ReadonlyMap<string, readonly ShadowOutputRow[]>,
+  expectedOutputs: ReadonlyMap<string, readonly ShadowOutputRow[]> | null,
   session?: Session,
 ): Promise<void> => {
-  compareOutputs(ownerEntityId, wave, expectedOutputs);
+  if (expectedOutputs !== null) compareOutputs(ownerEntityId, wave, expectedOutputs);
   const accounts = accountsOf(env, ownerEntityId);
   const typescriptAccountsRoot = accountMapRoot(accounts, ownerEntityId);
   // A partial import is a forest the engine was never given in full, so the

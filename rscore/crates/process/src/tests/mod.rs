@@ -737,7 +737,7 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
         1,
         "one account had something to propose: {fields:?}"
     );
-    let proposal = exact_tuple(&proposals[0], 3, "proposal");
+    let proposal = exact_tuple(&proposals[0], 5, "proposal");
     let frame = exact_tuple(&proposal[1], 10, "frame");
     assert_eq!(frame[0], AbiValue::Integer(1), "height 1");
     assert_eq!(tuple_fields(&frame[3]).len(), 1, "one transaction");
@@ -1400,7 +1400,7 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
             .handle(finalize_entity(6, uninterrupted_token, stage_key, 0))
             .envelope,
     );
-    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 3, "proposal");
+    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 5, "proposal");
     assert!(
         !matches!(proposal[1], AbiValue::Nil),
         "swap proposal rejected: {:?}",

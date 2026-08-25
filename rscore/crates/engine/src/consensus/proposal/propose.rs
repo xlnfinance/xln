@@ -63,8 +63,10 @@ fn critical_kind(tx: &AccountTx) -> Option<&'static str> {
 
 /// A frame this side built, signed, and is waiting to have acknowledged.
 ///
-/// It carries no outputs: what the frame's transactions produced stays with
-/// the pending frame until the peer acks it.
+/// The frame's own effects stay with the pending frame until the peer acks
+/// it. What travels here instead is what the proposer publishes the moment it
+/// signs: the transactions' events, and the outputs its Entity acts on before
+/// any acknowledgement exists — a revealed secret, a resting order.
 #[derive(Debug)]
 pub struct ProposedFrame {
     pub frame: AccountFrame,
@@ -73,6 +75,8 @@ pub struct ProposedFrame {
     pub dropped: Vec<DroppedTx>,
     /// The recovery proof this proposal travels with, when it carries one.
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
+    pub events: Vec<String>,
+    pub outputs: Vec<AccountOutput>,
 }
 
 #[derive(Debug)]
@@ -268,6 +272,8 @@ pub fn propose_account_frame(
     };
     let state_hash = frame.hash()?;
     let hanko = identity.sign_frame(&state_hash)?;
+    let published_events = events.clone();
+    let published_outputs = outputs.clone();
     account.set_pending(PendingFrame {
         events,
         // `set_pending` decides whether this proposal carries the ack we owe.
@@ -285,6 +291,8 @@ pub fn propose_account_frame(
         hanko,
         dropped,
         dispute: proposal_dispute,
+        events: published_events,
+        outputs: published_outputs,
     })))
 }
 

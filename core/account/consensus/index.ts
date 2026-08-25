@@ -1211,8 +1211,23 @@ export async function applyAccountInput(
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> {
-  if (context.accountAuthorityExecutionScope !== undefined) {
-    await context.accountAuthorityExecutionScope.beforeTypeScriptAccountExecution(
+  const authorityScope = context.accountAuthorityExecutionScope;
+  if (authorityScope !== undefined) {
+    // Cutover answers here and the transition below never runs: the engine
+    // executed it and the replica already holds its post-state.
+    const delegated = await authorityScope.executeAccountInput({
+      collectorFrameId: String(context.accountAuthorityFrameId ?? ''),
+      account,
+      input,
+      entityTimestamp: providedSecurityContext?.entityTimestamp
+        ?? context.entityClock?.timestamp
+        ?? context.runtimeTimestamp,
+      finalizedJHeight: providedSecurityContext?.finalizedJHeight
+        ?? context.entityClock?.finalizedJHeight
+        ?? account.state.lastFinalizedJHeight ?? 0,
+    });
+    if (delegated !== null) return delegated;
+    await authorityScope.beforeTypeScriptAccountExecution(
       'applyAccountInput',
       account.proofHeader.toEntity,
     );

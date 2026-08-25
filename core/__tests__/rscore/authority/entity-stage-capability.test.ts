@@ -111,7 +111,7 @@ describe('pre-TypeScript Account authority capability', () => {
     expect(env.accountAuthorityEntityStage).toBeUndefined();
   });
 
-  test('cutover rejects the first TypeScript Account call before replica mutation', async () => {
+  test('cutover with no executor refuses the Account call before replica mutation', async () => {
     const env = createEmptyEnv('account-authority-cutover-gate');
     const lifecycle = lifecycleProvider();
     const account = makeAccount(OWNER, PEER);
@@ -136,12 +136,12 @@ describe('pre-TypeScript Account authority capability', () => {
           }],
         });
       },
-    )).rejects.toThrow(
-      `ACCOUNT_AUTHORITY_CUTOVER_TS_EXECUTION:${OWNER}:apply=1:propose=0`,
-    );
+    )).rejects.toThrow(`ACCOUNT_AUTHORITY_CUTOVER_EXECUTOR_REQUIRED:${OWNER}`);
 
     expect(account.mempool).toEqual([]);
-    expect(lifecycle.discardCount()).toBe(1);
+    // Cutover stages are accepted or discarded with the Entity input, by the
+    // runtime that decided; the stage itself never discards its own work.
+    expect(lifecycle.discardCount()).toBe(0);
     expect(env.accountAuthorityEntityStage).toBeUndefined();
   });
 

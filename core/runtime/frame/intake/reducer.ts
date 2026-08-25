@@ -11,6 +11,7 @@ import {
   authorityRuntimeSuppressed,
   captureAuthorityWave,
 } from '../../../rscore/authority-driver';
+import { installAuthorityCutover } from '../../../rscore/cutover/provider';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
@@ -302,6 +303,7 @@ const applyRuntimeInputPhases = async (
   return runAuthorityFrameScope(env, authorityFrameId, recordingEnabled, async scopedFrameId => {
     // Before anything of this frame is applied: the authoritative engine has
     // to start where TypeScript starts, not where it ends up.
+    installAuthorityCutover(env);
     await armAuthorityWave(env);
     const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
     const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>

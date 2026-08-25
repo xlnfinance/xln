@@ -276,12 +276,14 @@ describe('per-Entity authority stage identity', () => {
         outcome: 'applied',
         committedFrames: [],
         responseAckHanko: null,
+        events: [],
       }),
       operation(2, {
         kind: 'peer',
         outcome: 'rejected',
         committedFrames: [],
         responseAckHanko: null,
+        events: [],
       }),
       operation(3, {
         kind: 'peer',
@@ -291,6 +293,10 @@ describe('per-Entity authority stage identity', () => {
           { frame: nextFrame, committedViaNewFrame: true },
         ],
         responseAckHanko: '0x1234',
+        events: [
+          '✅ Frame 1 confirmed and committed',
+          `🤝 Accepted frame 2 from Entity ${PEER.slice(-4)}`,
+        ],
       }),
     ];
     const result: Pick<Wave, 'admissions' | 'applied'> = {
@@ -312,6 +318,7 @@ describe('per-Entity authority stage identity', () => {
               height: 1,
               stateHash: ackFrame.stateHash,
               outputs: [],
+              events: [],
               committedFrame: { frame: ackFrame, committedViaNewFrame: false },
             },
             frameVerdict: {
@@ -321,6 +328,7 @@ describe('per-Entity authority stage identity', () => {
               ackHanko: '0x1234',
               outputs: [],
               rolledBackTxs: 0,
+              events: [],
               committedFrame: { frame: nextFrame, committedViaNewFrame: true },
             },
           },
@@ -339,6 +347,7 @@ describe('per-Entity authority stage identity', () => {
       outcome: 'dispute',
       committedFrames: [],
       responseAckHanko: null,
+      events: [],
     });
     expect(() => assertAuthorityStageVerdictParity(
       OWNER_A,
@@ -355,6 +364,10 @@ describe('per-Entity authority stage identity', () => {
         { frame: ackFrame, committedViaNewFrame: false },
       ],
       responseAckHanko: '0x1234',
+      events: [
+        '✅ Frame 1 confirmed and committed',
+        `🤝 Accepted frame 2 from Entity ${PEER.slice(-4)}`,
+      ],
     });
     expect(() => assertAuthorityStageVerdictParity(
       OWNER_A,

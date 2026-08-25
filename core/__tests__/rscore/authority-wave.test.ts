@@ -224,6 +224,7 @@ describe('authority wave', () => {
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
+          events: [],
         },
       },
     ]);
@@ -378,6 +379,7 @@ describe('authority wave guards', () => {
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
+          events: [],
         },
       },
       {
@@ -390,6 +392,7 @@ describe('authority wave guards', () => {
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
+          events: [],
         },
       },
     ]);

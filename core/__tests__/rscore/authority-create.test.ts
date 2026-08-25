@@ -200,6 +200,7 @@ describe('authority Account creation collection', () => {
           outcome: 'rejected',
           committedFrames: [],
           responseAckHanko: null,
+          events: [],
         },
       },
     ]);

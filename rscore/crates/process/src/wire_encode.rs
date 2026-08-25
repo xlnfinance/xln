@@ -495,6 +495,19 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
         AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
         proposed,
         tuple(row.dropped.iter().map(dropped).collect()),
+        tuple(match row.proposed.as_ref() {
+            None => Vec::new(),
+            Some(proposed) => proposed
+                .events
+                .iter()
+                .cloned()
+                .map(AbiValue::Text)
+                .collect(),
+        }),
+        tuple(match row.proposed.as_ref() {
+            None => Vec::new(),
+            Some(proposed) => proposed.outputs.iter().map(account_output).collect(),
+        }),
     ]))
 }
 

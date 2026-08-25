@@ -46,6 +46,7 @@ const operation = (
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
+          events: [],
         },
 });
 
@@ -273,6 +274,7 @@ describe('rscore authority Runtime scope', () => {
           outcome: 'applied',
           committedFrames: [],
           responseAckHanko: null,
+          events: [],
         },
       },
     ];

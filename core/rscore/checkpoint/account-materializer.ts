@@ -726,3 +726,58 @@ export const materializeRscoreAccountReplica = (
   if (computeEntityAccountValueHash(account) !== row.entityAccountLeaf) fail('ENTITY_LEAF_MISMATCH');
   return { account, hashesToSign: witnesses.finish() };
 };
+
+/**
+ * The local witnesses this row needs and the prior Account cannot supply.
+ *
+ * Materialization refuses a Hanko it can neither reuse nor account for, so
+ * the caller has to say up front which ones are new. That list is exactly the
+ * set of hashes the Entity's own witness pass must sign, in the order
+ * TypeScript would have produced them: the acknowledgement first, then the
+ * proposal, each with its dispute draft behind it.
+ */
+export const planRscoreLocalWitnesses = (
+  accountIdValue: string,
+  row: RscoreAccountCheckpointRow,
+  prior: AccountReplica | null,
+): RscoreAccountLocalWitnessPlan => {
+  const accountId = canonicalEntityId(accountIdValue, 'PLAN_ACCOUNT');
+  const prefix = `account:${accountId.slice(-8)}`;
+  const witnesses = priorLocalWitnesses(prior);
+  const fresh: RscoreAccountLocalHashToSign[] = [];
+  const claimed = new Set<string>();
+  const needFrame = (hash: string, context: string): void => {
+    const normalized = hash.trim().toLowerCase();
+    if (normalized.length === 0 || claimed.has(normalized)) return;
+    if (witnesses.frames.has(normalized)) return;
+    claimed.add(normalized);
+    fresh.push({ hash: normalized, type: 'accountFrame', context });
+  };
+  const needDispute = (draft: RscoreDisputeDraft, context: string): void => {
+    const key = disputeKey(draft);
+    const normalized = draft.hash.trim().toLowerCase();
+    if (claimed.has(key)) return;
+    if (witnesses.disputes.has(key)) return;
+    claimed.add(key);
+    fresh.push({ hash: normalized, type: 'dispute', context });
+  };
+  const { consensus } = row.decoded;
+  // Both, not one of them: a proposal may bundle an acknowledgement the
+  // stored outbound copy no longer matches, and materialization asks for each
+  // separately.
+  for (const ack of [consensus.pending?.bundledAck, consensus.lastOutboundAck]) {
+    if (ack === undefined) continue;
+    needFrame(ack.frameHash, `${prefix}:ack:${ack.height}`);
+    if (ack.dispute) needDispute(ack.dispute, `${prefix}:ack-dispute`);
+  }
+  if (consensus.pending) {
+    needFrame(
+      consensus.pending.frame.stateHash,
+      `${prefix}:frame:${consensus.pending.frame.height}`,
+    );
+    if (consensus.pending.proposalDispute) {
+      needDispute(consensus.pending.proposalDispute, `${prefix}:dispute`);
+    }
+  }
+  return { freshHashesToSign: fresh };
+};

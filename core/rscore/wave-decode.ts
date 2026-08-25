@@ -55,6 +55,15 @@ type WaveProposal = {
   /** Absent when every transaction in the window was rejected. */
   frame: (AccountFrame & { hanko: string }) | null;
   dropped: WaveDroppedRow[];
+  /**
+   * What the proposer publishes the moment it signs, before any
+   * acknowledgement exists: the window's transaction events, which the Entity
+   * frame commits, and the outputs it acts on immediately — a revealed
+   * secret, a resting order. The frame's committed effects are released with
+   * the peer's ack instead, which is where `ackCommitted` carries them.
+   */
+  events: string[];
+  outputs: WaveOutput[];
 };
 
 /**
@@ -280,11 +289,14 @@ export const waveParityDigestFromWireForTests = (value: unknown): string =>
   waveParityDigest(decodeWavePayload(value));
 
 const decodeProposal = (value: unknown): WaveProposal => {
-  const row = rscoreWireTuple(value, 3, 'proposal');
+  const row = rscoreWireTuple(value, 5, 'proposal');
   return {
     accountId: rscoreWireHex(row[0], 'proposal.accountId', 32),
     frame: row[1] === null ? null : decodeFrame(row[1]),
     dropped: rscoreWireList(row[2], 'proposal.dropped').map(decodeDropped),
+    events: rscoreWireList(row[3], 'proposal.events')
+      .map((entry, index) => rscoreWireText(entry, `proposal.events.${index}`)),
+    outputs: rscoreWireList(row[4], 'proposal.outputs').map(decodeOutput),
   };
 };
 
@@ -882,6 +894,8 @@ export const waveParityDigest = (wave: Wave): string => {
       hexToBytes(row.accountId, 'transcript.accountId'),
       row.frame === null ? null : frameWire(row.frame),
       row.dropped.map(droppedWire),
+      [...row.events],
+      row.outputs.map(outputWire),
     ]),
   ];
   const digest = createHash('sha256');

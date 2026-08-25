@@ -60,7 +60,7 @@ pub use transport::{read_frame, serve, write_frame};
 // Entity inputs roll back their Account mutations and operation indices.
 // 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
 // shapes. FrameAck is one atomic operation with one ordered composite result.
-pub const PROCESS_ABI_VERSION: u64 = 15;
+pub const PROCESS_ABI_VERSION: u64 = 16;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {

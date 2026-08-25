@@ -97,6 +97,12 @@ export type AuthorityExpectedOperationVerdict =
       }>[];
       /** ACK Hanko TypeScript produced for an accepted or duplicate frame. */
       responseAckHanko: string | null;
+      /**
+       * The exact strings TypeScript published. The Entity frame hashes
+       * these, so an engine that executes the transition has to produce the
+       * same list, and this is the only place both lists exist at once.
+       */
+      events: readonly string[];
     }>;
 
 /**
@@ -314,6 +320,7 @@ export const noteAuthorityAccountInputResult = (
         }))
       : [],
     responseAckHanko: responseAckHanko(result),
+    events: [...result.events],
   };
 };
 

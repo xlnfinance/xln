@@ -137,8 +137,22 @@ export async function proposeAccountFrame(
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   selectedMempoolTxs?: readonly AccountTx[],
 ): Promise<ProposeAccountFrameResult> {
-  if (context.accountAuthorityExecutionScope !== undefined) {
-    await context.accountAuthorityExecutionScope.beforeTypeScriptAccountExecution(
+  const authorityScope = context.accountAuthorityExecutionScope;
+  if (authorityScope !== undefined) {
+    const delegated = await authorityScope.executeAccountProposal({
+      collectorFrameId: String(context.accountAuthorityFrameId ?? ''),
+      account,
+      timestamp: entityFrameTimestamp,
+      jHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
+      entityTimestamp: entityFrameTimestamp,
+      finalizedJHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
+      // The engine proposes the whole queue. A caller that picked a subset is
+      // asking for a frame the engine cannot build, so it must not be driven.
+      selectionIsWholeMempool: selectedMempoolTxs === undefined
+        || selectedMempoolTxs.length === account.mempool.length,
+    });
+    if (delegated !== null) return delegated;
+    await authorityScope.beforeTypeScriptAccountExecution(
       'proposeAccountFrame',
       account.proofHeader.toEntity,
     );

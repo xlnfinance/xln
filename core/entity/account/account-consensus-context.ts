@@ -57,6 +57,14 @@ export const createAccountConsensusContext = (
   ...(env.accountAuthorityEntityStage === undefined
     ? {}
     : { accountAuthorityExecutionScope: env.accountAuthorityEntityStage }),
+  ...(observerState === undefined
+    ? {}
+    : {
+        entityClock: {
+          timestamp: observerState.timestamp,
+          finalizedJHeight: observerState.lastFinalizedJHeight ?? 0,
+        },
+      }),
   quietLogs: env.quietRuntimeLogs === true,
   emitRuntimeEvents: true,
   jReplicas: env.state.jReplicas,
