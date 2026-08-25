@@ -15,6 +15,7 @@ import {
   DEFAULT_HUB_RUNTIME_FRAME_PERIOD_MS,
   readHubSteadyRuntimeFramePeriodMs,
 } from '../../../orchestrator/process/hub-runtime-env';
+import { buildRuntimeChildGcEnv } from '../../../support/process/runtime-gc-env';
 
 const repoRoot = process.cwd();
 const readPlatformDeploy = (): string =>
@@ -54,6 +55,13 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('co-located Runtime children use one GC marker unless the operator overrides it', () => {
+    expect(buildRuntimeChildGcEnv({})).toEqual({ BUN_JSC_numberOfGCMarkers: '1' });
+    expect(buildRuntimeChildGcEnv({ BUN_JSC_numberOfGCMarkers: '3' })).toEqual({
+      BUN_JSC_numberOfGCMarkers: '3',
+    });
+  });
+
   test('Hub child drains by default and activates an explicit steady start period after bootstrap', () => {
     const orchestrator = readFileSync(join(repoRoot, 'core/orchestrator/orchestrator.ts'), 'utf8');
     const inherited = applyHubRuntimeFrameDelay({
