@@ -1370,6 +1370,37 @@ const primeEntityFrameAccountWork = async (
   }
 };
 
+const assertEntityFrameInfraBinding = (
+  entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
+): void => {
+  const expectedEntityId = entityState.entityId.trim().toLowerCase();
+  const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
+  if (
+    entityContext.entityId === expectedEntityId
+    && entityContext.proposerReplicaId === `${expectedEntityId}:${entityContext.proposerSignerId}`
+    && entityContext.parentFrameHash === expectedParentFrameHash
+    && entityContext.height === entityState.height + 1
+  ) return;
+  throw new Error(
+    `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
+      actual: {
+        entityId: entityContext.entityId,
+        height: entityContext.height,
+        parentFrameHash: entityContext.parentFrameHash,
+        proposerReplicaId: entityContext.proposerReplicaId,
+        proposerSignerId: entityContext.proposerSignerId,
+      },
+      expected: {
+        entityId: expectedEntityId,
+        height: entityState.height + 1,
+        parentFrameHash: expectedParentFrameHash,
+        proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
+      },
+    })}`,
+  );
+};
+
 const prepareEntityFrameWorkingSet = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
@@ -1378,32 +1409,7 @@ const prepareEntityFrameWorkingSet = async (
   frameTimestamp: number | undefined,
   isolateState: boolean,
 ): Promise<EntityFrameWorkingSet> => {
-  const expectedEntityId = entityState.entityId.trim().toLowerCase();
-  const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
-  if (
-    entityContext.entityId !== expectedEntityId ||
-    entityContext.proposerReplicaId !== `${expectedEntityId}:${entityContext.proposerSignerId}` ||
-    entityContext.parentFrameHash !== expectedParentFrameHash ||
-    entityContext.height !== entityState.height + 1
-  ) {
-    throw new Error(
-      `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
-        actual: {
-          entityId: entityContext.entityId,
-          height: entityContext.height,
-          parentFrameHash: entityContext.parentFrameHash,
-          proposerReplicaId: entityContext.proposerReplicaId,
-          proposerSignerId: entityContext.proposerSignerId,
-        },
-        expected: {
-          entityId: expectedEntityId,
-          height: entityState.height + 1,
-          parentFrameHash: expectedParentFrameHash,
-          proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
-        },
-      })}`,
-    );
-  }
+  assertEntityFrameInfraBinding(entityState, entityContext);
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
   assertScheduledWakeFrameOrder(entityTxs);
@@ -1538,6 +1544,37 @@ const refreshChangedAccountCommitments = (
   );
 };
 
+const drainPostOrderbookAccountWork = async (
+  context: ApplyEntityTxsInOrderContext,
+  currentEntityState: EntityState,
+): Promise<void> => {
+  await drainPendingCrossJurisdictionFillAcks(
+    context.env,
+    context.accountConsensusContext,
+    currentEntityState,
+    context.proposableAccounts,
+    context.storageChanges,
+    context.candidateEffects,
+    context.allOutputs,
+  );
+  await drainCommittedCrossJurisdictionCancelAcks(
+    context.accountConsensusContext,
+    currentEntityState,
+    context.proposableAccounts,
+    context.storageChanges,
+    context.allOutputs,
+  );
+  refreshStaleUncommittedSettlementHankos(currentEntityState, context.storageChanges);
+  await materializeDeferredSettlementApprovals(
+    context.env,
+    context.accountConsensusContext,
+    currentEntityState,
+    context.proposableAccounts,
+    context.collectedHashes,
+    context.storageChanges,
+  );
+};
+
 const applyPostEntityTxPhases = async (
   working: EntityFrameWorkingSet,
 ): Promise<PostEntityTxPhases> => {
@@ -1572,31 +1609,7 @@ const applyPostEntityTxPhases = async (
     storageChanges: context.storageChanges,
   });
   markFrameProfile('orderbook');
-  await drainPendingCrossJurisdictionFillAcks(
-    context.env,
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.candidateEffects,
-    context.allOutputs,
-  );
-  await drainCommittedCrossJurisdictionCancelAcks(
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.allOutputs,
-  );
-  refreshStaleUncommittedSettlementHankos(currentEntityState, context.storageChanges);
-  await materializeDeferredSettlementApprovals(
-    context.env,
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.collectedHashes,
-    context.storageChanges,
-  );
+  await drainPostOrderbookAccountWork(context, currentEntityState);
   const proposalAccountIds = crossJSetupPhase
     ? []
     : [...context.proposableAccounts.keys()].sort(compareStableText);

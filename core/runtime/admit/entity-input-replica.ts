@@ -172,6 +172,99 @@ const logEntityInputProfile = (
   });
 };
 
+const resolveReplicaAuthorityStage = (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+  occurrence: AccountAuthorityEntityOccurrence | undefined,
+  trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
+  deferProposal: boolean,
+  requiredEntityTxIndex: number | undefined,
+): Readonly<{
+  driverEnabled: boolean;
+  migrationRecordingEnabled: boolean;
+  options: AccountAuthorityEntityStageOptions | null;
+}> => {
+  const driverEnabled = authorityDriverEnabled(env);
+  const migrationRecordingEnabled = authorityRecordEnabled(driverEnabled)
+    && !authorityRuntimeSuppressed(env);
+  return {
+    driverEnabled,
+    migrationRecordingEnabled,
+    options: resolveAccountAuthorityEntityStageOptions(
+      env,
+      {
+        ownerEntityId,
+        ...(occurrence === undefined ? {} : { occurrence }),
+        ...(trustedLocalRuntimeProtocol === undefined ? {} : { trustedLocalRuntimeProtocol }),
+        deferProposal,
+        ...(requiredEntityTxIndex === undefined ? {} : { requiredEntityTxIndex }),
+      },
+      migrationRecordingEnabled,
+    ),
+  };
+};
+
+const executeNormalizedEntityInput = async (
+  env: RuntimeReplica,
+  entityReplica: EntityReplica,
+  normalizedInput: EntityInput,
+  routedInput: RoutedEntityInput,
+  authorityOptions: AccountAuthorityEntityStageOptions | null,
+  promoteCandidateState: boolean,
+  trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
+  deferProposal: boolean,
+  requiredEntityTxIndex: number | undefined,
+): Promise<Awaited<ReturnType<typeof applyEntityInput>>> => {
+  try {
+    return await runAccountAuthorityEntityStage(
+      env,
+      authorityOptions,
+      () => applyEntityInput(
+        env,
+        entityReplica,
+        normalizedInput,
+        trustedLocalRuntimeProtocol
+          ? { trustedLocalRuntimeProtocol, promoteCandidateState }
+          : {
+              promoteCandidateState,
+              deferProposal,
+              ...(requiredEntityTxIndex === undefined ? {} : { requiredEntityTxIndex }),
+            },
+      ),
+    );
+  } catch (error) {
+    throw new RuntimeEntityInputApplyError(
+      routedInput,
+      trustedLocalRuntimeProtocol !== undefined,
+      error,
+    );
+  }
+};
+
+const normalizeRoutedEntityInput = (
+  replicaKey: string,
+  entityInput: RoutedEntityInput,
+  actualSignerId: string,
+  isReplay: boolean,
+): EntityInput => {
+  if (DEBUG) {
+    entityInputLog.debug('input.processing', {
+      replica: shortId(replicaKey, 10),
+      txs: entityInput.entityTxs?.length ?? 0,
+      proposedFrame: entityInput.proposedFrame?.hash ?? '',
+      hashPrecommits: entityInput.hashPrecommits?.size ?? 0,
+    });
+  }
+  const normalized = normalizeEntityInputForReplica(entityInput, actualSignerId);
+  if (isReplay) {
+    entityInputLog.debug('replay.apply_input', {
+      replica: shortId(replicaKey, 10),
+      txs: normalized.entityTxs?.length ?? 0,
+    });
+  }
+  return normalized;
+};
+
 export const applyEntityInputToReplica = async (
   env: RuntimeReplica,
   entityReplica: EntityReplica,
@@ -185,79 +278,34 @@ export const applyEntityInputToReplica = async (
   requiredEntityTxIndex?: number,
   authorityOccurrence?: AccountAuthorityEntityOccurrence,
 ): Promise<AppliedEntityReplicaInput> => {
-  if (DEBUG) {
-    entityInputLog.debug('input.processing', {
-      replica: shortId(replicaKey, 10),
-      txs: entityInput.entityTxs?.length ?? 0,
-      proposedFrame: entityInput.proposedFrame?.hash ?? '',
-      hashPrecommits: entityInput.hashPrecommits?.size ?? 0,
-    });
-  }
+  const normalizedInput = normalizeRoutedEntityInput(replicaKey, entityInput, actualSignerId, isReplay);
 
-  const normalizedInput = normalizeEntityInputForReplica(
-    entityInput,
-    actualSignerId,
+  const authority = resolveReplicaAuthorityStage(
+    env,
+    entityReplica.entityId,
+    authorityOccurrence,
+    trustedLocalRuntimeProtocol,
+    deferProposal,
+    requiredEntityTxIndex,
   );
-  if (isReplay) {
-    entityInputLog.debug('replay.apply_input', {
-      replica: shortId(replicaKey, 10),
-      txs: normalizedInput.entityTxs?.length ?? 0,
-    });
-  }
-
-  const driverEnabled = authorityDriverEnabled(env);
-  const migrationRecordingEnabled = authorityRecordEnabled(driverEnabled)
-    && !authorityRuntimeSuppressed(env);
-  const preTsOptions: AccountAuthorityEntityStageOptions | null =
-    resolveAccountAuthorityEntityStageOptions(
-      env,
-      {
-        ownerEntityId: entityReplica.entityId,
-        ...(authorityOccurrence === undefined ? {} : { occurrence: authorityOccurrence }),
-        ...(trustedLocalRuntimeProtocol === undefined
-          ? {}
-          : { trustedLocalRuntimeProtocol }),
-        deferProposal,
-        ...(requiredEntityTxIndex === undefined
-          ? {}
-          : { requiredEntityTxIndex }),
-      },
-      migrationRecordingEnabled,
-    );
   const runtimeId = String(env.runtimeId ?? '');
   return runAuthorityFrameScope(
     env,
     runtimeId,
-    migrationRecordingEnabled,
+    authority.migrationRecordingEnabled,
     async () => {
       const applyStartedAt = getPerfMs();
-      let applied: Awaited<ReturnType<typeof applyEntityInput>>;
-      try {
-        applied = await runAccountAuthorityEntityStage(
-          env,
-          preTsOptions,
-          () => applyEntityInput(
-            env,
-            entityReplica,
-            normalizedInput,
-            trustedLocalRuntimeProtocol
-              ? { trustedLocalRuntimeProtocol, promoteCandidateState }
-              : {
-                  promoteCandidateState,
-                  deferProposal,
-                  ...(requiredEntityTxIndex === undefined
-                    ? {}
-                    : { requiredEntityTxIndex }),
-                },
-          ),
-        );
-      } catch (error) {
-        throw new RuntimeEntityInputApplyError(
-          entityInput,
-          trustedLocalRuntimeProtocol !== undefined,
-          error,
-        );
-      }
+      const applied = await executeNormalizedEntityInput(
+        env,
+        entityReplica,
+        normalizedInput,
+        entityInput,
+        authority.options,
+        promoteCandidateState,
+        trustedLocalRuntimeProtocol,
+        deferProposal,
+        requiredEntityTxIndex,
+      );
       const applyEntityInputMs = Math.round(getPerfMs() - applyStartedAt);
 
       const committed = isCommittedEntityInput(applied.outcome);
@@ -280,7 +328,7 @@ export const applyEntityInputToReplica = async (
       );
       // The engine opened its savepoint while executing this input, if the
       // input moved any account at all. Nothing is staged after the fact.
-      const authorityStage = driverEnabled
+      const authorityStage = authority.driverEnabled
         ? authorityCutoverStageHandle(env, entityReplica.entityId)
         : null;
       return {

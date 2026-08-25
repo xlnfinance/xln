@@ -224,6 +224,45 @@ const discardAtomicAuthorityStages = async (
   }
 };
 
+const assertAtomicPairEligibility = (
+  env: RuntimeReplica,
+  pair: readonly [RoutedEntityInput, RoutedEntityInput],
+): void => {
+  // A plain payment input is never stamped and must never be entangled with
+  // cross-J atomicity by a future routing bug.
+  if (!pair[0].atomicCrossJurisdictionPair || !pair[1].atomicCrossJurisdictionPair) {
+    throw new Error(
+      `RUNTIME_ATOMIC_PAIR_MISSING_CROSS_J_STAMP:${pair[0].entityId}:${pair[1].entityId}`,
+    );
+  }
+  // One authority owner cannot hold two sibling savepoints. The TypeScript-only
+  // path handles same-Entity pairs as ordinary inputs before this boundary.
+  if (
+    authorityDriverEnabled(env)
+    && normalizeEntityKey(pair[0].entityId) === normalizeEntityKey(pair[1].entityId)
+  ) {
+    throw new Error(`RUNTIME_CROSS_J_ATOMIC_PAIR_ENTITY_COLLISION:${pair[0].entityId}`);
+  }
+};
+
+const publishCommittedAtomicPair = async (
+  env: RuntimeReplica,
+  staged: readonly [StagedEntityInput, StagedEntityInput],
+  options: RuntimeEntityInputApplyOptions,
+  context: RuntimeEntityInputBatchContext,
+): Promise<void> => {
+  // No effect escapes before both touched Account candidates are committable.
+  for (const entry of staged) {
+    commitEntityFrameCandidateState(
+      entry.result.nextReplica.state,
+      committedEntityStateRoot(entry.result.nextReplica),
+    );
+  }
+  for (const entry of staged) await settleStagedAuthority(env, entry, true);
+  for (const entry of staged) collectStagedEntityInput(env, entry, options, context);
+  publishStagedEntityNodeChanges(env, staged);
+};
+
 export const applyAtomicEntityInputPair = async (
   env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
@@ -231,28 +270,7 @@ export const applyAtomicEntityInputPair = async (
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {
-  // This path is reached only via atomicPairInputsMatch, which requires both
-  // legs to carry a matching atomicCrossJurisdictionPair stamp — a plain
-  // payment input is never tagged and never routes here. Assert it directly
-  // at the entry point rather than trusting the caller's filter transitively,
-  // so a future router bug that mis-pairs a payment input surfaces loudly
-  // instead of silently entangling payment state with cross-J atomicity.
-  if (!pair[0].atomicCrossJurisdictionPair || !pair[1].atomicCrossJurisdictionPair) {
-    throw new Error(
-      `RUNTIME_ATOMIC_PAIR_MISSING_CROSS_J_STAMP:${pair[0].entityId}:${pair[1].entityId}`,
-    );
-  }
-  // The ordinary TypeScript path deliberately treats a same-Entity stamped
-  // pair as two normal inputs (see atomicPairInputsMatch). A direct/misrouted
-  // call must preserve that behavior while authority is off. With authority
-  // on, however, one owner session cannot hold two sibling savepoints, so fail
-  // before either replica or Rust candidate is touched.
-  if (
-    authorityDriverEnabled(env)
-    && normalizeEntityKey(pair[0].entityId) === normalizeEntityKey(pair[1].entityId)
-  ) {
-    throw new Error(`RUNTIME_CROSS_J_ATOMIC_PAIR_ENTITY_COLLISION:${pair[0].entityId}`);
-  }
+  assertAtomicPairEligibility(env, pair);
   const entityIds: [string, string] = [pair[0].entityId, pair[1].entityId];
   const indexes: [number, number] = [
     firstInputIndex,
@@ -336,18 +354,5 @@ export const applyAtomicEntityInputPair = async (
     return;
   }
 
-  // No effect escapes before both touched Account candidates are committable.
-  for (const entry of staged) {
-    commitEntityFrameCandidateState(
-      entry.result.nextReplica.state,
-      committedEntityStateRoot(entry.result.nextReplica),
-    );
-  }
-  for (const entry of staged) {
-    await settleStagedAuthority(env, entry, true);
-  }
-  for (const entry of staged) {
-    collectStagedEntityInput(env, entry, options, context);
-  }
-  publishStagedEntityNodeChanges(env, staged);
+  await publishCommittedAtomicPair(env, staged, options, context);
 };

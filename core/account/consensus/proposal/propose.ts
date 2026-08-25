@@ -130,6 +130,33 @@ const rememberProposalForAck = (
   });
 };
 
+const executeAuthoritativeProposal = async (
+  context: AccountConsensusContext,
+  account: AccountReplica,
+  entityFrameTimestamp: number,
+  entityJHeight: number | undefined,
+  selectedMempoolTxs: readonly AccountTx[] | undefined,
+): Promise<ProposeAccountFrameResult | null> => {
+  const authorityScope = context.accountAuthorityExecutionScope;
+  if (authorityScope === undefined) return null;
+  const delegated = await authorityScope.executeAccountProposal({
+    collectorFrameId: String(context.accountAuthorityFrameId ?? ''),
+    account,
+    timestamp: entityFrameTimestamp,
+    jHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
+    entityTimestamp: entityFrameTimestamp,
+    finalizedJHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
+    selectionIsWholeMempool: selectedMempoolTxs === undefined
+      || selectedMempoolTxs.length === account.mempool.length,
+  });
+  if (delegated !== null) return delegated;
+  await authorityScope.beforeTypeScriptAccountExecution(
+    'proposeAccountFrame',
+    account.proofHeader.toEntity,
+  );
+  return null;
+};
+
 export async function proposeAccountFrame(
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -137,26 +164,14 @@ export async function proposeAccountFrame(
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   selectedMempoolTxs?: readonly AccountTx[],
 ): Promise<ProposeAccountFrameResult> {
-  const authorityScope = context.accountAuthorityExecutionScope;
-  if (authorityScope !== undefined) {
-    const delegated = await authorityScope.executeAccountProposal({
-      collectorFrameId: String(context.accountAuthorityFrameId ?? ''),
-      account,
-      timestamp: entityFrameTimestamp,
-      jHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
-      entityTimestamp: entityFrameTimestamp,
-      finalizedJHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
-      // The engine proposes the whole queue. A caller that picked a subset is
-      // asking for a frame the engine cannot build, so it must not be driven.
-      selectionIsWholeMempool: selectedMempoolTxs === undefined
-        || selectedMempoolTxs.length === account.mempool.length,
-    });
-    if (delegated !== null) return delegated;
-    await authorityScope.beforeTypeScriptAccountExecution(
-      'proposeAccountFrame',
-      account.proofHeader.toEntity,
-    );
-  }
+  const delegated = await executeAuthoritativeProposal(
+    context,
+    account,
+    entityFrameTimestamp,
+    entityJHeight,
+    selectedMempoolTxs,
+  );
+  if (delegated !== null) return delegated;
   const profileStartMs = getPerfMs();
   const profileCheckpoints: Record<string, number> = {};
   const checkpointProfile = (label: string): void => {
@@ -239,13 +254,6 @@ export async function proposeAccountFrame(
     checkpointProfile,
   );
   // Timing is operational telemetry and never affects proposal validity.
-  logProposalProfile(
-    proof,
-    frameBuild,
-    counterparty,
-    optimisticBatch,
-    profileCheckpoints,
-    profileStartMs,
-  );
+  logProposalProfile(proof, frameBuild, counterparty, optimisticBatch, profileCheckpoints, profileStartMs);
   return finalResult;
 }
