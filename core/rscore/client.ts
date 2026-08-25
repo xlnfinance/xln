@@ -115,6 +115,8 @@ export const RSCORE_OP = {
   applyAccountWave: 22,
   proposeAccountWave: 23,
   sealAccountWave: 24,
+  accountInbound: 25,
+  accountOutbound: 26,
 } as const;
 
 /**
@@ -893,6 +895,63 @@ export class RscoreProcessClient {
         contextBytes,
       };
       return receipt;
+    });
+  }
+
+  /**
+   * One Entity input's inbound half: everything that arrived from peers.
+   *
+   * The whole arrival list crosses once. The engine shards it by account
+   * across its pool, applies each account's rows in the order they arrived,
+   * and answers with what happened — not with the accounts themselves.
+   */
+  async accountInbound(wave: Readonly<{
+    ownerEntityId: Uint8Array;
+    entityTimestamp: number;
+    finalizedJHeight: number;
+    rows: readonly RscoreWireValue[];
+    postAccounts: boolean;
+  }>): Promise<Wave> {
+    const payload = ownWirePayload([
+      Buffer.from(wave.ownerEntityId),
+      [wave.entityTimestamp, wave.finalizedJHeight],
+      [...wave.rows],
+      wave.postAccounts,
+    ]);
+    return this.#withRequestTurn(async () => {
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.accountInbound, payload);
+      return this.#decodeAuthorityWave(response.result);
+    });
+  }
+
+  /**
+   * One Entity input's outbound half: what its own logic decided to send.
+   *
+   * Accounts opened by this input, the transactions it queued, and the
+   * accounts that should now propose, all in one call. The reply is what to
+   * put on the wire.
+   */
+  async accountOutbound(wave: Readonly<{
+    ownerEntityId: Uint8Array;
+    timestamp: number;
+    jHeight: number;
+    creates: readonly RscoreWireValue[];
+    admits: readonly RscoreWireValue[];
+    propose: readonly RscoreWireValue[];
+    postAccounts: boolean;
+  }>): Promise<Wave> {
+    const payload = ownWirePayload([
+      Buffer.from(wave.ownerEntityId),
+      wave.timestamp,
+      wave.jHeight,
+      [...wave.creates],
+      [...wave.admits],
+      [...wave.propose],
+      wave.postAccounts,
+    ]);
+    return this.#withRequestTurn(async () => {
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.accountOutbound, payload);
+      return this.#decodeAuthorityWave(response.result);
     });
   }
 

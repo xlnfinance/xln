@@ -926,7 +926,7 @@ export const buildAuthorityWave = (
         return { kind: 'ineligible', reason: `result:peer:${row.ownerEntityId}/${row.accountId}` };
       }
       try {
-        encoded = peerInputRow(operationIndex, row.accountId, payload);
+        encoded = authorityPeerInputRow(operationIndex, row.accountId, payload);
       } catch (error) {
         // A malformed Hanko or hash is not something to drive around: the
         // engine would judge a different input than TypeScript did.
@@ -996,7 +996,11 @@ const soleClock = (
   return found;
 };
 
-const peerInputRow = (
+/**
+ * One arrival as the engine reads it: its index, the account it moves, and
+ * the exact envelope the peer sent.
+ */
+export const authorityPeerInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
   payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' | 'frame_ack' }>,
