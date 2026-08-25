@@ -223,9 +223,16 @@ export const findForbiddenHltHubIo = (
     .sort(([left], [right]) => left.localeCompare(right));
 };
 
+/**
+ * @param loadHubLabels hubs the workload actually drives. A hub carrying load
+ * is held only to "no boundary HTTP"; every other hub must be fully idle, which
+ * is what proves the measured work happened where the report says it did.
+ */
 export const assertHltHubProcessIsolation = async (
   args: Pick<WorkerArgs, 'portBase' | 'workDir'>,
+  loadHubLabels: readonly string[] = ['H1'],
 ): Promise<Readonly<Record<string, Readonly<Record<string, HltOpCounter>>>>> => {
+  const carriesLoad = new Set(loadHubLabels.map(label => label.toUpperCase()));
   const ioByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
   const countersByHub: Record<string, Readonly<Record<string, HltOpCounter>>> = {};
   for (const [offset, label] of [[10, 'H1'], [11, 'H2'], [12, 'H3']] as const) {
@@ -234,9 +241,11 @@ export const assertHltHubProcessIsolation = async (
     ioByHub[label] = summarizeHltIoCounters(counters);
     countersByHub[label] = Object.fromEntries(counters);
     const calls = new Map([...counters].map(([name, counter]) => [name, counter.calls]));
-    if (label === 'H1') {
+    if (carriesLoad.has(label)) {
       const http = [...calls].filter(([name, count]) => count > 0 && name.startsWith('boundary.http.'));
-      if (http.length > 0) throw new Error(`HLT_PAYMENT_BACKGROUND_IO:H1:${safeStringify(Object.fromEntries(http))}`);
+      if (http.length > 0) {
+        throw new Error(`HLT_PAYMENT_BACKGROUND_IO:${label}:${safeStringify(Object.fromEntries(http))}`);
+      }
       continue;
     }
     const active = findForbiddenHltHubIo(calls);

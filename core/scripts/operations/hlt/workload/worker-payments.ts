@@ -446,16 +446,21 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     shards.push(...built);
     users = built.flatMap(shard => shard.users);
 
-    await Promise.all(shards.map(shard => waitForRoutableReceivers(
-      shard.users,
-      shard.hubIdentity.entityId,
-      shard.users.map((_lane, senderIndex) => Array.from(
-        { length: args.rounds },
-        (_, round) => shard.users[
-          paymentReceiverIndexSamePopulation(senderIndex, round, shard.users.length)
-        ]!.identity.entityId,
-      )),
-    )));
+    // One shard at a time: READ_CONCURRENCY caps gossip reads per process, and
+    // running the barriers together multiplies that cap by the shard count,
+    // which is what overflows a daemon's accept queue.
+    for (const shard of shards) {
+      await waitForRoutableReceivers(
+        shard.users,
+        shard.hubIdentity.entityId,
+        shard.users.map((_lane, senderIndex) => Array.from(
+          { length: args.rounds },
+          (_, round) => shard.users[
+            paymentReceiverIndexSamePopulation(senderIndex, round, shard.users.length)
+          ]!.identity.entityId,
+        )),
+      );
+    }
 
     await stopHltHubBackgroundIo(args);
     await Promise.all([
@@ -577,7 +582,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       settlementSamples: mergeSettlementSamples(settlements.map(row => row.settlementSamples)),
     };
     const [hubIo, laneIo] = await Promise.all([
-      assertHltHubProcessIsolation(args),
+      assertHltHubProcessIsolation(args, hubLabels),
       assertLaneHostSocketCounterCoverage(users),
     ]);
     console.log(`[load] economic-io ${safeStringify({ hubIo, laneIo })}`);
