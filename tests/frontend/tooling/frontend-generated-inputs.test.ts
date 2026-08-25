@@ -41,6 +41,8 @@ const writeImplementedSources = async (repositoryRoot: string): Promise<void> =>
     'frontend/static/android-chrome-192x192.png',
     'frontend/static/android-chrome-512x512.png',
     'frontend/static/site.webmanifest',
+    'frontend/static/push-wake-sw.js',
+    'frontend/static/route-mode.js',
     'frontend/static/comparative-results.json',
   ]) await writeSource(repositoryRoot, pathname);
   await writeSource(repositoryRoot, 'frontend/static/img/logo.png', 'logo');
@@ -100,6 +102,48 @@ describe('frontend generated input preparation', () => {
     );
 
     expect(manifests.map(({ id }) => id)).toEqual(['ops-comparative-results']);
+  });
+
+  test('publishes wallet PWA inputs from one deterministic owner', async () => {
+    const { repositoryRoot, frontendRoot } = await createWorkspace();
+    await writeImplementedSources(repositoryRoot);
+
+    const first = await prepareGeneratedInputs(
+      repositoryRoot,
+      frontendRoot,
+      ['wallet'],
+      COPY_GENERATED_INPUTS,
+    );
+    const firstManifest = await readFile(
+      join(frontendRoot, '.artifacts/inputs/wallet-pwa-static/input-manifest.json'),
+      'utf8',
+    );
+    const second = await prepareGeneratedInputs(
+      repositoryRoot,
+      frontendRoot,
+      ['wallet'],
+      COPY_GENERATED_INPUTS,
+    );
+    const secondManifest = await readFile(
+      join(frontendRoot, '.artifacts/inputs/wallet-pwa-static/input-manifest.json'),
+      'utf8',
+    );
+
+    expect(first.map(({ id }) => id)).toEqual(['wallet-pwa-static']);
+    expect(second).toEqual(first);
+    expect(secondManifest).toBe(firstManifest);
+    expect(first[0]?.files.map(({ destinationPath }) => destinationPath)).toEqual([
+      'android-chrome-192x192.png',
+      'android-chrome-512x512.png',
+      'apple-touch-icon.png',
+      'push-wake-sw.js',
+      'route-mode.js',
+      'site.webmanifest',
+    ]);
+    expect(await readFile(
+      join(frontendRoot, '.artifacts/public/wallet/site.webmanifest'),
+      'utf8',
+    )).toBe('frontend/static/site.webmanifest');
   });
 
   test('rejects prepared payload bytes that no longer match their manifest', async () => {

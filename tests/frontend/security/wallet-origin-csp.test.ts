@@ -6,15 +6,22 @@ const source = (path: string): string => readFileSync(path, 'utf8');
 
 test('wallet origin ships no third-party executable code and enforces hashed scripts', () => {
   const appHtml = source('frontend/src/app.html');
+  const reactWalletHtml = source('frontend/apps/wallet/index.html');
   const routeMode = source('frontend/static/route-mode.js');
   const config = source('frontend/svelte.config.js');
   const css = `${source('frontend/src/lib/styles/apple-glass.css')}\n${source('frontend/src/lib/components/Landing/landing-page.css')}`;
 
   expect(appHtml).not.toMatch(/<script[^>]+src=["']https?:\/\//i);
   expect(appHtml).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
+  expect(reactWalletHtml).not.toMatch(/<script[^>]+src=["']https?:\/\//i);
+  expect(reactWalletHtml).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
   expect(appHtml).toContain('<script src="/route-mode.js"></script>');
+  expect(reactWalletHtml).toContain('<script vite-ignore src="/route-mode.js"></script>');
+  expect(reactWalletHtml).toContain('<link rel="manifest" href="/site.webmanifest" />');
+  expect(reactWalletHtml).toContain('href="/apple-touch-icon.png"');
   expect(routeMode).toContain("setAttribute('data-xln-route-mode'");
   expect(appHtml).not.toContain('plausible.io');
+  expect(reactWalletHtml).not.toContain('plausible.io');
   expect(css).not.toContain('fonts.googleapis.com');
   expect(config).toContain("mode: 'hash'");
   expect(config).toContain("'script-src': ['self']");

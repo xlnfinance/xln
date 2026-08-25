@@ -24,6 +24,14 @@ describe('frontend route ownership', () => {
     });
   });
 
+  test('declares wallet-owned PWA assets separately from application routes', () => {
+    expect(getSurface('wallet').assetRoutes).toEqual(expect.arrayContaining([
+      { kind: 'exact', pathname: '/site.webmanifest' },
+      { kind: 'exact', pathname: '/push-wake-sw.js' },
+      { kind: 'exact', pathname: '/route-mode.js' },
+    ]));
+  });
+
   test('keeps server routes and unknown paths edge-owned', () => {
     expect(resolveRouteOwner('/admin')).toBe('edge');
     expect(resolveRouteOwner('/api/tower/healthz')).toBe('edge');

@@ -69,6 +69,10 @@ export const SURFACES = [
     assetDirectory: 'assets/wallet',
     routes: [exact('/app'), prefix('/address'), exact('/testnet')],
     assetRoutes: [
+      exact('/apple-touch-icon.png'),
+      exact('/android-chrome-192x192.png'),
+      exact('/android-chrome-512x512.png'),
+      exact('/site.webmanifest'),
       prefix('/contracts'),
       exact('/brainvault-worker.js'),
       stem('/hash-wasm-'),

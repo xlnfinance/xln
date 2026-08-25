@@ -31,6 +31,7 @@ describe('frontend generated input ownership', () => {
   test('keeps implemented copy producers aligned with their source inventory', () => {
     expect(COPY_GENERATED_INPUTS.map(({ id }) => id)).toEqual([
       'site-public-static',
+      'wallet-pwa-static',
       'ops-comparative-results',
     ]);
     for (const input of COPY_GENERATED_INPUTS) {
@@ -44,6 +45,7 @@ describe('frontend generated input ownership', () => {
     expect(PREPARED_GENERATED_INPUTS.map(({ id }) => id)).toEqual([
       'docs-catalog',
       'site-public-static',
+      'wallet-pwa-static',
       'wallet-browser-assets',
       'ops-comparative-results',
       'ops-scenario-assets',

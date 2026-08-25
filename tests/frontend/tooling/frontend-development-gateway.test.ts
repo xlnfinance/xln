@@ -153,6 +153,9 @@ describe('React development gateway', () => {
     expect(rewriteDevelopmentGatewayUrl('/docs?view=reader', docs)).toBe('/__app/docs/docs?view=reader');
     expect(resolveDevelopmentGatewayRequest('/llms-runtime.txt')).toMatchObject({ owner: 'docs' });
     expect(resolveDevelopmentGatewayRequest('/contracts/Account.json')).toMatchObject({ owner: 'wallet' });
+    expect(resolveDevelopmentGatewayRequest('/site.webmanifest')).toMatchObject({ owner: 'wallet' });
+    expect(resolveDevelopmentGatewayRequest('/push-wake-sw.js')).toMatchObject({ owner: 'wallet' });
+    expect(resolveDevelopmentGatewayRequest('/route-mode.js')).toMatchObject({ owner: 'wallet' });
     expect(resolveDevelopmentGatewayRequest('/__app/wallet/src/main.tsx')).toEqual({
       kind: 'proxy', owner: 'wallet', rewrite: 'none',
     });

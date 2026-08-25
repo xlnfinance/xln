@@ -46,6 +46,8 @@ const writeGeneratedInputSources = async (frontendRoot: string): Promise<void> =
     'static/android-chrome-192x192.png',
     'static/android-chrome-512x512.png',
     'static/site.webmanifest',
+    'static/push-wake-sw.js',
+    'static/route-mode.js',
     'static/comparative-results.json',
   ]) await writeInputSource(frontendRoot, pathname);
   await writeInputSource(frontendRoot, 'static/img/logo.png', 'logo');
@@ -54,7 +56,7 @@ const writeGeneratedInputSources = async (frontendRoot: string): Promise<void> =
   await prepareGeneratedInputs(
     join(frontendRoot, '..'),
     frontendRoot,
-    ['site', 'ops'],
+    ['site', 'wallet', 'ops'],
     COPY_GENERATED_INPUTS,
   );
 };
@@ -101,8 +103,11 @@ describe('React candidate release assembly', () => {
     expect(first.manifest.edgeRoutes).toContainEqual({ kind: 'exact', pathname: '/runtime.js' });
     expect(first.manifest.files.map(({ path }) => path)).toContain('assets/docs/index.js');
     expect(first.manifest.files.map(({ path }) => path)).toContain('install.sh');
+    expect(first.manifest.files.map(({ path }) => path)).toContain('site.webmanifest');
+    expect(first.manifest.files.map(({ path }) => path)).toContain('push-wake-sw.js');
     expect(first.manifest.generatedInputs.map(({ id }) => id)).toEqual([
       'site-public-static',
+      'wallet-pwa-static',
       'ops-comparative-results',
     ]);
   });

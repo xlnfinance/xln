@@ -84,10 +84,6 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
       'frontend/static/favicon.ico',
       'frontend/static/favicon-16x16.png',
       'frontend/static/favicon-32x32.png',
-      'frontend/static/apple-touch-icon.png',
-      'frontend/static/android-chrome-192x192.png',
-      'frontend/static/android-chrome-512x512.png',
-      'frontend/static/site.webmanifest',
     ],
     outputNamespace: 'site-public-static',
     producer: {
@@ -99,6 +95,24 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
         { sourcePath: 'frontend/static/favicon.ico', destinationPath: 'favicon.ico' },
         { sourcePath: 'frontend/static/favicon-16x16.png', destinationPath: 'favicon-16x16.png' },
         { sourcePath: 'frontend/static/favicon-32x32.png', destinationPath: 'favicon-32x32.png' },
+      ],
+    },
+  },
+  {
+    id: 'wallet-pwa-static',
+    owner: 'wallet',
+    sourcePaths: [
+      'frontend/static/apple-touch-icon.png',
+      'frontend/static/android-chrome-192x192.png',
+      'frontend/static/android-chrome-512x512.png',
+      'frontend/static/site.webmanifest',
+      'frontend/static/push-wake-sw.js',
+      'frontend/static/route-mode.js',
+    ],
+    outputNamespace: 'wallet-pwa-static',
+    producer: {
+      kind: 'copy',
+      entries: [
         { sourcePath: 'frontend/static/apple-touch-icon.png', destinationPath: 'apple-touch-icon.png' },
         {
           sourcePath: 'frontend/static/android-chrome-192x192.png',
@@ -109,6 +123,8 @@ export const GENERATED_INPUTS: readonly GeneratedInputDefinition[] = [
           destinationPath: 'android-chrome-512x512.png',
         },
         { sourcePath: 'frontend/static/site.webmanifest', destinationPath: 'site.webmanifest' },
+        { sourcePath: 'frontend/static/push-wake-sw.js', destinationPath: 'push-wake-sw.js' },
+        { sourcePath: 'frontend/static/route-mode.js', destinationPath: 'route-mode.js' },
       ],
     },
   },

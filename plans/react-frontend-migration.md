@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, SITE, DOCS, AND WALLET TESTNET IMPLEMENTED`
+**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, SITE, DOCS, WALLET TESTNET, AND WALLET PWA INPUTS IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -192,6 +192,7 @@ Replace the all-purpose copy step incrementally:
 |---|---|
 | docs catalog, docs-static, `llms*` | docs |
 | public release/install/static content | site |
+| wallet PWA icons, manifest, push-wake worker, route mode | wallet |
 | Runtime browser bundle, BrainVault worker, contract browser artifacts | wallet; ops only if consumed |
 | scenario catalog/media | ops |
 | route map, artifact hashes, release manifest | assembly |
@@ -235,7 +236,7 @@ candidate output cannot overwrite `frontend/build`.
 
 ### WP2 — Establish routing, assets, and assembly
 
-**Status:** `IN PROGRESS — DOCS, WALLET, AND OPS CATALOG INPUTS ASSEMBLED`
+**Status:** `IN PROGRESS — DOCS, WALLET PWA/BROWSER, AND OPS CATALOG INPUTS ASSEMBLED`
 
 - Materialize the route/asset table and edge exclusions.
 - Implement the same-origin development gateway and per-app HMR paths.
@@ -405,13 +406,24 @@ and authority behavior.
 
 ### WP8 — Integrate PWA, native, deployment, and rollback
 
-**Status:** `READY AFTER RELEVANT APP ARTIFACTS`
+**Status:** `IN PROGRESS — WALLET PWA INPUT OWNERSHIP ASSEMBLED`
 
 - Point PWA/native/deployment consumers at the assembled candidate artifact.
 - Preserve service-worker scope, storage origin, CSP, deep links, and packaging.
 - Exercise corrupt, missing, duplicate, and mixed-artifact rejection.
 - Prove atomic activation and immediate whole-release rollback in an isolated
   environment while Svelte remains canonical in production.
+
+The wallet now owns one deterministic `wallet-pwa-static` input containing the
+touch icon, both Android icons, manifest, push-wake service worker, and route
+mode bootstrap. Exact asset routes keep those files with the wallet surface;
+the React wallet entry consumes its icons, manifest, and route mode without
+embedding executable code. Focused ownership, copy, assembly, CSP, and gateway
+tests pass, and the four-app candidate assembles as
+`sha256-5b0e12e67cc85c3bdbf3617a1e00be106622fb1cc778f7c61108d7811154c566`
+with 353 files. This captures inputs only: canonical Svelte activation,
+service-worker registration, native packaging, deployment, and cutover remain
+unchanged.
 
 **Done:** all consumers use one candidate release identity and isolated smoke
 tests can activate, reject invalid candidates, and roll back.
@@ -480,8 +492,9 @@ any mismatch. Never compile on production.
    mnemonic identity choices, onboarding, recovery, settings, and diagnostics;
    keep Runtime projections in shared client adapters and do not move
    transition logic into the frontend.
-3. Capture the remaining wallet-owned static/PWA inputs before wallet boot
-   begins consuming them.
+3. Wire PWA/native consumers to the assembled candidate after the React
+   `/app` boot flow exists; wallet static/PWA input ownership is ready and does
+   not require production activation.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are
    checked in. The generated catalog currently records an empty media inventory
    and never publishes the 46 TypeScript scenario files.
