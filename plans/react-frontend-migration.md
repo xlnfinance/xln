@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, AND ALL SEVEN SITE ROUTES IMPLEMENTED`
+**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, SITE, AND DOCS IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -296,11 +296,36 @@ behavior/browser checks pass.
 
 ### WP4 — Migrate docs
 
-**Status:** `READY AFTER DOCS ROOT`
+**Status:** `IMPLEMENTED — CATALOG, READER, SEARCH, AND GENERATED INPUTS GREEN`
 
 - Move the docs catalog/static producer to docs ownership.
 - Migrate navigation, reader, deep links, anchors, search, and sanitization.
 - Preserve deterministic `llms*` and catalog output.
+
+The React docs app now owns `/docs` and consumes the same strict manifest
+decoder, search/filter model, link and image resolution, heading extraction,
+and sanitized Markdown renderer as the canonical Svelte reader. It preserves
+the 102 live / 34 archive catalog, three reading paths, featured documents,
+direct document URLs, internal Markdown navigation, catalog-owned HTML assets,
+browser history, anchors, raw-source links, visible loading/failure states, and
+fail-loud retry. The docs
+producer publishes 294 deterministic files; the catalog manifest is
+`sha256-8754e6fc6b1224a080a8a1d8248ef6398b3f908584713880190a71f1d88d811d`
+and `llms.txt` is
+`sha256-174223c25cb65b065dbe0a6055e84f77cbd7c6f4e535ea8058f716caeec20122`.
+Seventy tooling tests (462 assertions), the focused sanitization/diagnostic checks, the docs
+typecheck, all four app builds, and same-origin browser flows are green. Browser
+evidence covers search, empty results, live/archive scope, deep links, 76px
+anchor landing, back navigation, injected catalog failure and retry, and
+malicious Markdown rejection at 390×844, 1366×900, and 1920×1080 with exact
+document widths. Normal flows have zero console errors or warnings; the
+injected failure emits only its expected HTTP 503 before recovery. The
+four-app candidate assembles as
+`sha256-795c0b047b60b813a17bcf4ce229c985b5d0b68d7a9d61ca7cd5e72c3a7ce924`
+with 351 files. The legacy Svelte workspace still reports 30 existing errors
+and one warning in 16 unrelated files, with no docs diagnostics. The required
+root gate passes all 26 BrainVault checks before the existing contract-sync
+environment stops at Hardhat `HH19` under unsupported Node 25.
 
 **Done:** docs builds independently and current public docs URLs and content
 behavior pass focused checks.
@@ -423,8 +448,9 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Begin WP4 with the docs catalog, navigation, reader, deep links, and search;
-   retain the deterministic generated-input owner already used by the docs app.
+2. Begin WP5/WP6 together with the wallet boot, shell, identity, onboarding,
+   recovery, settings, and diagnostics boundary; keep Runtime projections in
+   shared client adapters and do not move transition logic into the frontend.
 3. Capture the remaining wallet-owned static/PWA inputs before the first wallet
    flow migrates.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are

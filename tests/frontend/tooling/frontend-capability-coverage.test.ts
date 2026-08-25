@@ -45,8 +45,17 @@ describe('frontend capability inventory', () => {
     expect(site?.currentSources).toContain('frontend/apps/site/src/releases-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/reviews-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/market-cap-page.tsx');
-    expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information').every(
+    expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information' && id !== 'docs-reader').every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
+  });
+
+  test('records the implemented docs reader and its generated-output boundary', () => {
+    const docs = CAPABILITIES.find(({ id }) => id === 'docs-reader');
+    expect(docs?.status).toBe('implemented');
+    expect(docs?.routes).toEqual(['/docs']);
+    expect(docs?.currentSources).toContain('frontend/apps/docs/src/docs-app.tsx');
+    expect(docs?.behavior).toContain('catalog navigation and search');
+    expect(docs?.behavior).toContain('deterministic docs and llms outputs');
   });
 });

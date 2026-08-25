@@ -34,9 +34,14 @@ export const CAPABILITIES = [
     id: 'docs-reader',
     owner: 'docs',
     routes: ['/docs'],
-    currentSources: ['frontend/src/routes/docs/+page.svelte', 'frontend/docs-catalog.js'],
-    behavior: ['catalog navigation', 'safe Markdown rendering', 'deep links and anchors'],
-    status: 'unstarted',
+    currentSources: [
+      'frontend/src/routes/docs/+page.svelte',
+      'frontend/src/lib/docs/docs-page-model.ts',
+      'frontend/apps/docs/src/docs-app.tsx',
+      'frontend/docs-catalog.js',
+    ],
+    behavior: ['catalog navigation and search', 'live/archive scope', 'safe Markdown rendering', 'deep links, anchors, and history', 'deterministic docs and llms outputs'],
+    status: 'implemented',
   },
   {
     id: 'wallet-shell-and-identity',
