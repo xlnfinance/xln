@@ -100,7 +100,8 @@ export type ResetState = {
 };
 
 type HubProcessSpec = {
-  name: 'H1' | 'H2' | 'H3';
+  /** `H1`..`HN` — see HUB_NAMES. */
+  name: string;
   region: string;
   seed: string;
   authSeed: string;

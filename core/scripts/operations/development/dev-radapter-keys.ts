@@ -3,18 +3,17 @@
 import { chmodSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { randomBytes } from 'crypto';
-import { REMOTE_RUNTIME } from '../../../config/constants';
+import { HUB_COUNT, HUB_NAMES, REMOTE_RUNTIME } from '../../../config/constants';
 
 type DevRuntime = {
-  name: 'H1' | 'H2' | 'H3' | 'MM';
+  /** `H1`..`HN` from HUB_NAMES, plus the market maker. */
+  name: string;
   portOffset: number;
 };
 
 const RUNTIMES: DevRuntime[] = [
-  { name: 'H1', portOffset: 10 },
-  { name: 'H2', portOffset: 11 },
-  { name: 'H3', portOffset: 12 },
-  { name: 'MM', portOffset: 13 },
+  ...HUB_NAMES.map((name, index) => ({ name, portOffset: 10 + index })),
+  { name: 'MM', portOffset: 10 + HUB_COUNT },
 ];
 
 const args = process.argv.slice(2);

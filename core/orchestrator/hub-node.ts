@@ -120,6 +120,7 @@ import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registrati
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { HUB_NAMES } from '../config/constants';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
@@ -282,7 +283,7 @@ const parseArgs = (): HubNodeArgs => {
     rpcUrl: rpcUrls[1] || '',
     rpc2Url: rpcUrls[2] || '',
     rpcUrls,
-    meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
+    meshHubNames: getArg('--mesh-hub-names', HUB_NAMES.join(','))
       .split(',')
       .map(part => part.trim())
       .filter(Boolean),
@@ -296,12 +297,15 @@ const DEFAULT_ANVIL_MNEMONIC = 'test test test test test test test test test tes
 const FAUCET_SIGNER_LABEL = 'faucet-1';
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('10');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
+/**
+ * `H<n>` takes Anvil dev account `n - 1`. Naming the three hubs one by one
+ * silently gave every hub past H3 the same key as H1, which is fine until a
+ * stand runs more than three shards and two of them sign as the same address.
+ */
 const resolveHubSignerIndex = (name: string): number => {
-  const normalized = String(name || '').trim().toUpperCase();
-  if (normalized === 'H1') return 0;
-  if (normalized === 'H2') return 1;
-  if (normalized === 'H3') return 2;
-  return 0;
+  const match = /^H(\d+)$/.exec(String(name || '').trim().toUpperCase());
+  const ordinal = match ? Number(match[1]) : 1;
+  return Number.isSafeInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : 0;
 };
 
 const deriveAnvilDevPrivateKey = (index: number): string => {

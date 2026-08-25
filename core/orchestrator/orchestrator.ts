@@ -74,6 +74,7 @@ import {
   HUB_BASELINE_TIMEOUT_MS,
   HUB_BASELINE_STALL_TIMEOUT_MS,
   HUB_BASELINE_STATUS_LOG_INTERVAL_MS,
+  HUB_COUNT,
   HUB_NAMES,
   HUB_REQUIRED_TOKEN_COUNT,
   MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
@@ -382,8 +383,10 @@ const marketMakerChild: MarketMakerChild = {
   seed: runtimeSeedFor('MM'),
   authSeed: radapterAuthSeedFor('MM'),
   signerLabel: 'mm-1',
-  apiPort: args.nodeApiPortBase + 3,
-  publicPort: args.nodePublicPortBase + 3,
+  // MM sits immediately past the hub block. The literal 3 was "just past the
+  // three hubs", which put MM on top of H4 the moment the mesh grew.
+  apiPort: args.nodeApiPortBase + HUB_COUNT,
+  publicPort: args.nodePublicPortBase + HUB_COUNT,
   dbPath: join(args.dbRoot, 'mm'),
   proc: null,
   startedAt: null,

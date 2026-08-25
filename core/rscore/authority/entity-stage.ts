@@ -449,8 +449,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const expectedAccount = normalizeEntityId(expected.account.proofHeader.toEntity);
     const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
     // Identity is the common case and is exactly as strong as comparing the
-    // canonical bytes: both sides hold the same `entityTx.data`. Serializing
-    // is the fallback for a frame that rebuilt its inputs.
+    // canonical bytes: both sides hold the same `entityTx.data`. A frame that
+    // rebuilt its inputs still gets the full byte comparison.
     const sameInput = expected.input === request.input
       || safeStringify(expected.input) === safeStringify(request.input);
     if (expectedAccount !== actualAccount || !sameInput) {
