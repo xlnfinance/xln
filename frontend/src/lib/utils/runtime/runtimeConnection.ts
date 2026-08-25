@@ -1,6 +1,5 @@
 import { replaceState } from '$app/navigation';
 import { get } from 'svelte/store';
-import type { RuntimeHandle } from '$lib/stores/runtimeControllerStore';
 import {
   getRuntimeControllerAdapter,
   isRuntimeControllerConfigCurrent,
@@ -31,6 +30,7 @@ import {
   runtimeImportSourceFromHash,
 } from '../../../../packages/runtime-client/src/remote-runtime-request';
 import type { RemoteRuntimeRequest } from '../../../../packages/runtime-client/src/remote-runtime-request';
+import type { RuntimeHandle } from '../../../../packages/runtime-client/src/runtime-handle';
 import {
   hasAcceptedRemoteRuntimeRequest,
   isRemoteRuntimeAdapterPreferred,

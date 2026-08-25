@@ -29,6 +29,7 @@ test('runtime selector hot-swaps adapters instead of reloading the app', () => {
 
 test('runtime controller is the single adapter lifecycle owner', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
+  const handleSource = readFileSync('frontend/packages/runtime-client/src/runtime-handle.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const contextSwitcherSource = readFileSync('frontend/src/lib/components/Entity/workspace/shell/ContextSwitcher.svelte', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
@@ -37,9 +38,9 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(controllerSource).toContain('new RemoteRuntimeAdapter');
   expect(controllerSource).toContain('export const connectRuntimeAdapter');
   expect(controllerSource).toContain('export const runtimeControllerHandle');
-  expect(controllerSource).toContain('pendingRuntimeId: string');
+  expect(handleSource).toContain('pendingRuntimeId: string');
   expect(controllerSource).toContain('export const setRuntimeControllerPendingRuntimeId');
-  expect(controllerSource).toContain('runtimeId: id');
+  expect(handleSource).toContain('runtimeId: id');
   expect(queryClientSource).toContain('const adapter = getRuntimeControllerAdapter();');
   expect(queryClientSource).toContain('const handle = get(runtimeControllerHandle)');
   expect(queryClientSource).toContain('runtimeId: handle.runtimeId');
@@ -185,11 +186,11 @@ test('remote time-machine history requires radapter batch reads', () => {
 test('remote adapter resolver restores active auth from the remote runtime registry', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).toContain('resolveStoredRemoteRuntimeAuthKey');
-  expect(source).toContain("const storedAuthKey = readStoredAdapterValue('xln-runtime-adapter-key').trim()");
+  expect(source).toContain('const storedAuthKey = readStoredAdapterValue(RUNTIME_ADAPTER_AUTH_KEY).trim()');
   expect(source).toContain('restoredAuthKey = resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl).trim()');
   expect(source).toContain("readRemoteRuntimeTokenAccess(storedAuthKey) !== 'admin'");
   expect(source).toContain('const authKey = restoredAuthKey || storedAuthKey;');
-  expect(source).toContain("sessionStorage.setItem('xln-runtime-adapter-key', restoredAuthKey)");
+  expect(source).toContain('writeRemoteRuntimeAdapterAuth(');
 });
 
 test('direct remote runtime URL reuses saved capability before showing paste prompt', () => {
@@ -534,6 +535,7 @@ test('runtime selection persists websocket before switch with rollback and reaff
 
 test('runtime controller handle carries selected runtime identity', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
+  const handleSource = readFileSync('frontend/packages/runtime-client/src/runtime-handle.ts', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const activeStart = runtimeStoreSource.indexOf('export const activeRuntimeId = derived');
@@ -542,12 +544,12 @@ test('runtime controller handle carries selected runtime identity', () => {
   expect(activeEnd).toBeGreaterThan(activeStart);
   const activeSource = runtimeStoreSource.slice(activeStart, activeEnd);
 
-  expect(controllerSource).toContain('runtimeId: string');
-  expect(controllerSource).toContain('pendingRuntimeId: string');
-  expect(controllerSource).toContain('const adapterRuntimeId =');
-  expect(controllerSource).toContain('normalizeRuntimeId(adapter?.runtimeId) || configId(config)');
-  expect(controllerSource).toContain('const id = adapterRuntimeId(adapter, config)');
-  expect(controllerSource).toContain('currentRuntimeId === nextRuntimeId');
+  expect(handleSource).toContain('runtimeId: string');
+  expect(handleSource).toContain('pendingRuntimeId: string');
+  expect(handleSource).toContain('export const runtimeAdapterId =');
+  expect(handleSource).toContain('normalizeRuntimeHandleId(adapter?.runtimeId) || runtimeAdapterConfigId(config)');
+  expect(controllerSource).toContain('const handle = createRuntimeHandle({');
+  expect(handleSource).toContain('currentRuntimeId === nextRuntimeId');
   expect(runtimeStoreSource).toContain("await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id })");
   expect(runtimeStoreSource).toContain('runtimeId: id');
   expect(activeSource).toContain('if (pendingId && $runtimes.has(pendingId))');
