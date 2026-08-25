@@ -467,6 +467,7 @@ async function validateIncomingFrameOnDraft(
 }
 
 async function commitIncomingFrameOnRealState(
+  runtimeId: string | undefined,
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
@@ -506,6 +507,7 @@ async function commitIncomingFrameOnRealState(
   {
     const shadowJHeight = receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
     noteAccountFrameForShadow({
+      ...(runtimeId === undefined ? {} : { runtimeId }),
       ownerEntityId: ourEntityId,
       counterpartyEntityId: cpForCommitLog,
       frameHeight: receivedFrame.height,
@@ -912,6 +914,7 @@ async function handleIncomingAccountFrame(
   }
 
   await commitIncomingFrameOnRealState(
+    context.runtimeId,
     account,
     input,
     preflight.receivedFrame,

@@ -19,9 +19,17 @@
  */
 
 import { createStructuredLogger } from '../support/logger';
-import { accountTxWire, hexToWireBytes, waveAdmitOp, waveInputOp } from './shadow-wire';
+import {
+  accountTxWire,
+  hexToWireBytes,
+  shadowOutputRows,
+  waveAdmitOp,
+  waveInputOp,
+  type ShadowOutputRow,
+} from './shadow-wire';
 import type { RscoreWireValue } from './client';
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../types/account';
+import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -60,6 +68,13 @@ type RecordedInput = {
  * finalized J height a proposal was built with, or the enforcement clock a
  * received frame was judged against.
  */
+/** One committed account frame's outputs, projected the way the engine's are. */
+type RecordedOutputs = {
+  ownerEntityId: string;
+  counterpartyEntityId: string;
+  rows: ShadowOutputRow[];
+};
+
 type RecordedClock = {
   ownerEntityId: string;
   role: 'propose' | 'enforce';
@@ -88,6 +103,13 @@ export const authorityRecordEnabled = (): boolean =>
  */
 const frames = new Map<string, RecordedInput[]>();
 const clocks = new Map<string, RecordedClock[]>();
+/**
+ * What TypeScript's own commits made observable in this frame, per account, in
+ * commit order. The engine reports the same thing per verdict; comparing the
+ * two is the only way a wave that agrees on every root can still be caught
+ * publishing a different forward, secret or resting offer.
+ */
+const outputs = new Map<string, RecordedOutputs[]>();
 
 let report = {
   frames: 0,
@@ -278,6 +300,30 @@ export const noteAuthorityEntityClock = (
   });
 };
 
+/**
+ * One account frame TypeScript just committed, with the outputs it produced.
+ * Recorded per Runtime frame and per account; the driver holds the engine's
+ * verdict outputs against this list before the wave is committed.
+ */
+export const noteAuthorityCommittedOutputs = (
+  runtimeId: string | undefined,
+  ownerEntityId: string,
+  counterpartyEntityId: string,
+  txResults: readonly ApplyAccountTxOk[],
+): void => {
+  if (!authorityRecordEnabled()) return;
+  if (runtimeId === undefined) return;
+  const open = outputs.get(runtimeId);
+  if (open === undefined) return;
+  const rows = txResults.flatMap(result => shadowOutputRows(result));
+  if (rows.length === 0) return;
+  open.push({
+    ownerEntityId: ownerEntityId.trim().toLowerCase(),
+    counterpartyEntityId: counterpartyEntityId.trim().toLowerCase(),
+    rows,
+  });
+};
+
 export const beginAuthorityFrame = (runtimeId: string): void => {
   if (!authorityRecordEnabled()) return;
   if (frames.has(runtimeId)) {
@@ -287,6 +333,7 @@ export const beginAuthorityFrame = (runtimeId: string): void => {
   }
   frames.set(runtimeId, []);
   clocks.set(runtimeId, []);
+  outputs.set(runtimeId, []);
 };
 
 /**
@@ -302,6 +349,7 @@ export const flushAuthorityFrame = (runtimeId: string): void => {
   const frameClocks = clocks.get(runtimeId) ?? [];
   frames.delete(runtimeId);
   clocks.delete(runtimeId);
+  outputs.delete(runtimeId);
   recordClocks(frameClocks);
   if (frame.length === 0) return;
   report.frames += 1;
@@ -335,6 +383,13 @@ export type AuthorityWaveEntity = {
   finalizedJHeight: number;
   propose: boolean;
   ops: RscoreWireValue[];
+  /**
+   * Per counterparty, everything TypeScript's commits published in this frame,
+   * in commit order. The engine must reproduce exactly this list from its own
+   * execution; a root that matches while an output is missing is a hub that
+   * agrees about money and disagrees about what it forwarded.
+   */
+  expectedOutputs: Map<string, ShadowOutputRow[]>;
 };
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
@@ -374,6 +429,7 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
   const frame = frames.get(runtimeId);
   if (frame === undefined || frame.length === 0) return { kind: 'empty' };
   const frameClocks = clocks.get(runtimeId) ?? [];
+  const frameOutputs = outputs.get(runtimeId) ?? [];
   // Arrival order first, grouping second. The index is assigned while the
   // frame is still in the sequence the authority saw, so grouping can reorder
   // the request without reordering what comes out of it.
@@ -454,8 +510,16 @@ export const buildAuthorityWave = (runtimeId: string): AuthorityWave => {
       });
       inputIndex += 1;
     }
+    const expectedOutputs = new Map<string, ShadowOutputRow[]>();
+    for (const committed of frameOutputs) {
+      if (committed.ownerEntityId !== ownerEntityId) continue;
+      const rows = expectedOutputs.get(committed.counterpartyEntityId) ?? [];
+      rows.push(...committed.rows);
+      expectedOutputs.set(committed.counterpartyEntityId, rows);
+    }
     entities.push({
       ownerEntityId,
+      expectedOutputs,
       // An Entity that never proposed in this frame carries no proposal clock;
       // it must not stamp one from somewhere else, so it does not propose.
       timestamp: propose?.timestamp ?? clock.timestamp,
@@ -589,6 +653,7 @@ export const printAuthorityRecordReport = (): void => {
 export const resetAuthorityRecordForTests = (): void => {
   frames.clear();
   clocks.clear();
+  outputs.clear();
   report = {
     frames: 0,
     inputs: 0,

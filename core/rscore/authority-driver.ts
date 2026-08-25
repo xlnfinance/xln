@@ -41,7 +41,8 @@ import {
   swapMarketPolicyWire,
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
-import { decodeWave, type Wave } from './wave-decode';
+import { decodeWave, waveOutputRow, type Wave } from './wave-decode';
+import type { ShadowOutputRow } from './shadow-wire';
 import type { RscoreProcessClient } from './client';
 import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
@@ -85,6 +86,7 @@ const report = {
   framesProposed: 0,
   inputsApplied: 0,
   leavesChecked: 0,
+  outputsChecked: 0,
   accountsSeeded: 0,
   emptyFrames: 0,
   commits: 0,
@@ -282,7 +284,7 @@ export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> =
     report.waves += 1;
     report.framesProposed += decoded.proposals.filter(row => row.frame !== null).length;
     report.inputsApplied += decoded.applied.length;
-    await compareWithTypescript(env, ownerEntityId, decoded, session);
+    await compareWithTypescript(env, ownerEntityId, decoded, entity.expectedOutputs, session);
     candidates.push({ session, token, result: decoded });
   }
 };
@@ -438,12 +440,70 @@ const projectionDiff = (
   return diff;
 };
 
+/**
+ * The outputs the engine published for one wave, per account, in the order its
+ * verdicts released them. A proposal publishes nothing: what its transactions
+ * produced stays with the pending frame until the peer acks it, which is the
+ * same rule TypeScript follows.
+ */
+const engineOutputsByAccount = (wave: Wave): Map<string, ShadowOutputRow[]> => {
+  const byAccount = new Map<string, ShadowOutputRow[]>();
+  for (const applied of wave.applied) {
+    const verdict = applied.verdict;
+    if (verdict.kind !== 'frameCommitted' && verdict.kind !== 'ackCommitted') continue;
+    if (verdict.outputs.length === 0) continue;
+    const rows = byAccount.get(applied.accountId) ?? [];
+    rows.push(...verdict.outputs.map(waveOutputRow));
+    byAccount.set(applied.accountId, rows);
+  }
+  return byAccount;
+};
+
+/**
+ * Every output TypeScript published in this frame, and nothing else. Two
+ * engines that agree on every root can still disagree here — a forward that
+ * never leaves, a secret that settles nothing upstream, a resting offer the
+ * book never sees — and that disagreement is invisible to a state comparison.
+ */
+const compareOutputs = (
+  ownerEntityId: string,
+  wave: Wave,
+  expected: ReadonlyMap<string, readonly ShadowOutputRow[]>,
+): void => {
+  const engine = engineOutputsByAccount(wave);
+  for (const accountId of new Set([...expected.keys(), ...engine.keys()])) {
+    const typescript = expected.get(accountId) ?? [];
+    const rust = engine.get(accountId) ?? [];
+    const left = safeStringify(typescript);
+    const right = safeStringify(rust);
+    if (left === right) {
+      report.outputsChecked += typescript.length;
+      continue;
+    }
+    halt('OUTPUT_MISMATCH', {
+      owner: ownerEntityId,
+      account: accountId,
+      typescriptCount: typescript.length,
+      rustCount: rust.length,
+      // The first row that differs, which is the one to read: a whole-list
+      // dump of a busy hub frame buries it.
+      firstDivergentIndex: [...Array(Math.max(typescript.length, rust.length)).keys()]
+        .find(index => safeStringify(typescript[index]) !== safeStringify(rust[index])) ?? -1,
+      typescript: left,
+      rust: right,
+    });
+    return;
+  }
+};
+
 const compareWithTypescript = async (
   env: RuntimeReplica,
   ownerEntityId: string,
   wave: Wave,
+  expectedOutputs: ReadonlyMap<string, readonly ShadowOutputRow[]>,
   session?: Session,
 ): Promise<void> => {
+  compareOutputs(ownerEntityId, wave, expectedOutputs);
   const accounts = accountsOf(env, ownerEntityId);
   const proposed = new Map(wave.proposals
     .filter(row => row.frame !== null)

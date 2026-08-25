@@ -113,6 +113,7 @@ export const commitAccountFrameTransition = async (
     // Fire-and-forget: mirror this committed frame into the Rust account
     // engine when shadow mode is on (no-op otherwise, one env check).
     noteAccountFrameForShadow({
+      ...(options.context.runtimeId === undefined ? {} : { runtimeId: options.context.runtimeId }),
       ownerEntityId: account.proofHeader.fromEntity,
       counterpartyEntityId: account.proofHeader.toEntity,
       frameHeight: frame.height,

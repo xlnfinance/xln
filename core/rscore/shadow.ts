@@ -284,6 +284,12 @@ const RECONCILE_EVERY = Number(
 );
 
 export type ShadowFrameInput = Readonly<{
+  /**
+   * The Runtime frame this commit belongs to, from the caller's own consensus
+   * context. The authority driver attributes outputs by it: a process hosts
+   * many Runtimes, and module state would mix their frames.
+   */
+  runtimeId?: string;
   ownerEntityId: string;
   counterpartyEntityId: string;
   frameHeight: number;

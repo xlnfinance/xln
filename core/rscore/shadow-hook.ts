@@ -5,6 +5,7 @@
  * loaded dynamically only when XLN_RSCORE_SHADOW=1 in a Bun/Node runtime, so
  * browser bundles and non-shadow servers pay one env check per frame.
  */
+import { noteAuthorityCommittedOutputs } from './authority-wave';
 import type { ShadowFrameInput, ShadowGap, ShadowReconciliation, ShadowStats } from './shadow';
 import type { RuntimeState } from '../runtime/types';
 import { safeStringify } from '../protocol/serialization';
@@ -151,6 +152,14 @@ export const shadowPreFrameState = <T>(state: T): T | undefined =>
   (shadowEnabled() ? state : undefined);
 
 export const noteAccountFrameForShadow = (input: ShadowFrameInput): void => {
+  // The authority driver reads the same commits, and it must see them whether
+  // or not the mirror is running: its parity check is against these outputs.
+  noteAuthorityCommittedOutputs(
+    input.runtimeId,
+    input.ownerEntityId,
+    input.counterpartyEntityId,
+    input.txResults,
+  );
   if (mirror === null) return;
   if (mirror === undefined) {
     if (!shadowEnabled()) {

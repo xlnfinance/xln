@@ -173,6 +173,7 @@ const applyPendingFrameTransactions = async (
     // every proposer-side frame that hits the prepared cache is invisible to
     // the shadow engine and its account silently falls behind.
     noteAccountFrameForShadow({
+      ...(context.runtimeId === undefined ? {} : { runtimeId: context.runtimeId }),
       ownerEntityId: account.proofHeader.fromEntity,
       counterpartyEntityId: account.proofHeader.toEntity,
       frameHeight: pendingFrame.height,
