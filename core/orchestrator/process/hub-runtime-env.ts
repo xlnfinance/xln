@@ -1,4 +1,5 @@
 import { buildManagedRuntimeChildSecretEnv } from '../../support/process/child-secrets';
+import { buildRuntimeChildGcEnv } from '../../support/process/runtime-gc-env';
 
 const RUNTIME_FRAME_DELAY_KEY = 'XLN_RUNTIME_MIN_FRAME_DELAY_MS';
 const HUB_STEADY_FRAME_PERIOD_KEY = 'XLN_HUB_STEADY_FRAME_PERIOD_MS';
@@ -73,6 +74,7 @@ export const buildHubChildProcessEnv = (
   const source = options.sourceEnv ?? process.env;
   const child: NodeJS.ProcessEnv = {
     ...buildManagedRuntimeChildSecretEnv(source),
+    ...buildRuntimeChildGcEnv(source),
     XLN_DB_PATH: options.dbPath,
     XLN_BRAINVAULT_OWNER_PATH: options.brainvaultOwnerPath,
     XLN_JURISDICTIONS_PATH: options.jurisdictionsPath,

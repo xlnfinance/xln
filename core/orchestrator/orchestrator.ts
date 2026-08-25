@@ -15,6 +15,7 @@ import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { buildHubChildProcessEnv, buildHubEngineArgs } from './process/hub-runtime-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../support/process/child-secrets';
+import { buildRuntimeChildGcEnv } from '../support/process/runtime-gc-env';
 import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
 import {
   clearDebugTimeline,
@@ -1592,6 +1593,7 @@ const spawnMarketMaker = async (): Promise<void> => {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
+      ...buildRuntimeChildGcEnv(process.env),
       XLN_DB_PATH: marketMakerChild.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
