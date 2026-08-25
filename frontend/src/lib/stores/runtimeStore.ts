@@ -31,6 +31,12 @@ import {
   writeRemoteRuntimeAdapterSession,
   type RuntimeAdapterStorageSnapshot,
 } from '../../../packages/browser/src/runtime-adapter-session';
+import {
+  createRuntimeSelectionCoordinator,
+  type RuntimeSelectionLease,
+} from '../../../packages/runtime-client/src/runtime-selection';
+
+export type { RuntimeSelectionLease };
 
 export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
@@ -228,41 +234,11 @@ const fetchRemoteRuntimeImportSource = async (
   return parseRemoteRuntimeImportSourcePayload(await response.json());
 };
 
-export type RuntimeSelectionLease = Readonly<{
-  revision: number;
-  token: symbol;
-}>;
-
-let runtimeSelectionRevision = 0;
-let runtimeSelectionQueue: Promise<void> = Promise.resolve();
-let activeRuntimeSelectionLease: RuntimeSelectionLease | null = null;
-
-const runtimeSelectionLeaseIsCurrent = (lease: RuntimeSelectionLease): boolean =>
-  activeRuntimeSelectionLease === lease && lease.revision === runtimeSelectionRevision;
+const runtimeSelectionCoordinator = createRuntimeSelectionCoordinator();
 
 export const coordinateRuntimeSelection = async <T>(
   operation: (lease: RuntimeSelectionLease) => Promise<T>,
-): Promise<T | null> => {
-  const lease: RuntimeSelectionLease = Object.freeze({
-    revision: ++runtimeSelectionRevision,
-    token: Symbol('runtime-selection'),
-  });
-  const previous = runtimeSelectionQueue;
-  let release!: () => void;
-  runtimeSelectionQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await previous;
-  try {
-    if (lease.revision !== runtimeSelectionRevision) return null;
-    activeRuntimeSelectionLease = lease;
-    const result = await operation(lease);
-    return runtimeSelectionLeaseIsCurrent(lease) ? result : null;
-  } finally {
-    if (activeRuntimeSelectionLease === lease) activeRuntimeSelectionLease = null;
-    release();
-  }
-};
+): Promise<T | null> => runtimeSelectionCoordinator.runLatest(operation);
 
 const performRuntimeSelection = async (id: string): Promise<boolean> => {
   const runtime = get(runtimes).get(id);
@@ -369,12 +345,10 @@ export const runtimeOperations = {
   // Switch active runtime
   async selectRuntime(id: string, lease?: RuntimeSelectionLease): Promise<boolean> {
     if (lease) {
-      if (activeRuntimeSelectionLease !== lease) {
-        throw new Error('RUNTIME_SELECTION_LEASE_INVALID');
-      }
-      if (!runtimeSelectionLeaseIsCurrent(lease)) return false;
+      runtimeSelectionCoordinator.assertActive(lease);
+      if (!runtimeSelectionCoordinator.isCurrent(lease)) return false;
       const selected = await performRuntimeSelection(id);
-      return runtimeSelectionLeaseIsCurrent(lease) && selected;
+      return runtimeSelectionCoordinator.isCurrent(lease) && selected;
     }
     const selected = await coordinateRuntimeSelection((currentLease) =>
       runtimeOperations.selectRuntime(id, currentLease)
