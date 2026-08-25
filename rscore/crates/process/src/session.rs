@@ -37,6 +37,7 @@ pub struct ProcessSession {
 struct PendingWave {
     prepare_request_id: [u8; 8],
     revision: u64,
+    sealed: bool,
     checkpoint: Option<PendingCheckpoint>,
 }
 
@@ -170,6 +171,19 @@ impl ProcessSession {
         {
             return Err(ProcessError::CheckpointPending);
         }
+        if self.pending_wave.is_some()
+            && !matches!(
+                &command,
+                Command::ApplyAccountWave { .. }
+                    | Command::ProposeAccountWave { .. }
+                    | Command::SealAccountWave { .. }
+                    | Command::GetCheckpointChanges { .. }
+                    | Command::Commit { .. }
+                    | Command::Abort { .. }
+            )
+        {
+            return Err(ProcessError::PreparePending);
+        }
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
             Command::BootstrapAccounts { revision, accounts } => self.load(revision, accounts),
@@ -179,6 +193,15 @@ impl ProcessSession {
             Command::CommitCheckpoint { token } => self.commit_checkpoint(&token),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
             Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
+            Command::ApplyAccountWave {
+                prepare_request_id,
+                request,
+            } => self.apply_wave(prepare_request_id, *request),
+            Command::ProposeAccountWave {
+                prepare_request_id,
+                request,
+            } => self.propose_wave(prepare_request_id, *request),
+            Command::SealAccountWave { prepare_request_id } => self.seal_wave(prepare_request_id),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
             Command::Commit { prepare_request_id } => {
                 if self.authority.is_some() {
@@ -279,8 +302,73 @@ impl ProcessSession {
         self.pending_wave = Some(PendingWave {
             prepare_request_id: request_id,
             revision: result.revision,
+            sealed: false,
             checkpoint: None,
         });
+        Ok((response, false))
+    }
+
+    fn apply_wave(
+        &mut self,
+        prepare_request_id: [u8; 8],
+        request: xln_rscore_batch::WaveOpsRequest,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.pending_wave_for(prepare_request_id)?;
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
+        let result = engine.apply_wave_ops(request)?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let response = wire_encode::wave(&result, engine_micros)?;
+        self.pending_wave
+            .as_mut()
+            .ok_or(ProcessError::PrepareNotPending)?
+            .revision = result.revision;
+        Ok((response, false))
+    }
+
+    fn propose_wave(
+        &mut self,
+        prepare_request_id: [u8; 8],
+        request: xln_rscore_batch::WaveProposalRequest,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.pending_wave_for(prepare_request_id)?;
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
+        let result = engine.propose_wave(request)?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let response = wire_encode::wave(&result, engine_micros)?;
+        self.pending_wave
+            .as_mut()
+            .ok_or(ProcessError::PrepareNotPending)?
+            .revision = result.revision;
+        Ok((response, false))
+    }
+
+    fn seal_wave(
+        &mut self,
+        prepare_request_id: [u8; 8],
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        self.pending_wave_for(prepare_request_id)?;
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
+        let result = engine.seal_wave()?;
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let response = wire_encode::wave(&result, engine_micros)?;
+        let pending = self
+            .pending_wave
+            .as_mut()
+            .ok_or(ProcessError::PrepareNotPending)?;
+        pending.revision = result.revision;
+        pending.sealed = true;
         Ok((response, false))
     }
 
@@ -288,7 +376,7 @@ impl ProcessSession {
         &mut self,
         prepare_request_id: [u8; 8],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let revision = self.pending_wave_for(prepare_request_id)?.revision;
+        let revision = self.sealed_wave_for(prepare_request_id)?.revision;
         let engine = self
             .authority
             .as_mut()
@@ -343,6 +431,14 @@ impl ProcessSession {
         Ok(pending)
     }
 
+    fn sealed_wave_for(&self, actual: [u8; 8]) -> Result<&PendingWave, ProcessError> {
+        let pending = self.pending_wave_for(actual)?;
+        if !pending.sealed {
+            return Err(xln_rscore_batch::BatchError::WaveOpen.into());
+        }
+        Ok(pending)
+    }
+
     fn load(
         &mut self,
         revision: u64,
@@ -381,7 +477,7 @@ impl ProcessSession {
         &mut self,
         prepare_request_id: [u8; 8],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let revision = self.pending_wave_for(prepare_request_id)?.revision;
+        let revision = self.sealed_wave_for(prepare_request_id)?.revision;
         let engine = self
             .authority
             .as_ref()

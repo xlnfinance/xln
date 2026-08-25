@@ -17,6 +17,8 @@ pub enum BatchError {
     BatchTooLarge { actual: usize, maximum: usize },
     #[error("RSCORE_BATCH_INPUT_INDEX:{actual}:{expected}")]
     InputIndex { actual: u32, expected: u32 },
+    #[error("RSCORE_BATCH_OPERATION_INDEX:{actual}:after={after:?}")]
+    OperationIndex { actual: u64, after: Option<u64> },
     #[error("RSCORE_BATCH_ACCOUNT_NOT_FOUND:{input_index}:{account_id}")]
     AccountNotFound {
         input_index: u32,
@@ -69,6 +71,12 @@ pub enum BatchError {
     /// that Entity two clocks and the wave no single answer about expiry.
     #[error("RSCORE_BATCH_WAVE_ENTITY_DUPLICATE:{entity_id}")]
     WaveEntityDuplicate { entity_id: String },
+    #[error("RSCORE_BATCH_WAVE_ENTITY_UNKNOWN:{entity_id}")]
+    WaveEntityUnknown { entity_id: String },
+    #[error("RSCORE_BATCH_WAVE_ENTITY_NOT_PROPOSER:{entity_id}")]
+    WaveEntityNotProposer { entity_id: String },
+    #[error("RSCORE_BATCH_WAVE_PROPOSAL_ORDER:{entity_id}")]
+    WaveProposalOrder { entity_id: String },
     /// An Entity's group naming an account owned by someone else. The account
     /// says who owns it; the group is not trusted to.
     #[error("RSCORE_BATCH_WAVE_ACCOUNT_OWNER:{account_id}:{entity_id}")]
@@ -80,6 +88,10 @@ pub enum BatchError {
     WavePending,
     #[error("RSCORE_BATCH_WAVE_MISSING")]
     WaveMissing,
+    #[error("RSCORE_BATCH_WAVE_OPEN")]
+    WaveOpen,
+    #[error("RSCORE_BATCH_WAVE_SEALED")]
+    WaveSealed,
     #[error("RSCORE_BATCH_WAVE_REVISION:{actual}:{expected}")]
     WaveRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_CHECKPOINT_REVISION:{actual}:{expected}")]

@@ -45,13 +45,17 @@ pub use transport::{read_frame, serve, write_frame};
 // distinct tags in one closed operation set.
 // 8: checkpoint changes are bound to the exact pending authority wave and
 // return separate live-commit and durable-restore tokens.
-pub const PROCESS_ABI_VERSION: u64 = 8;
+// 9: authority waves are staged apply/propose rounds, sealed before checkpoint
+// or commit, with candidate-wide operation indices and admission receipts.
+pub const PROCESS_ABI_VERSION: u64 = 9;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=14")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=15")
+        // wire=15: Prepare opens and applies only; Apply/Propose repeat under
+        // one candidate token and Seal freezes the cumulative transcript.
         // wire=14: GetCheckpointChanges names the pending PrepareAccountWave
         // request and returns both the live commit token and normalized
         // RestoreExact token before the runtime WAL is written.
@@ -82,9 +86,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xe7, 0xe3, 0x86, 0x6f, 0x02, 0x37, 0xff, 0x5c, 0xda, 0xbf, 0xe5, 0x28, 0x13, 0xf5,
-            0x11, 0x85, 0xeb, 0xa7, 0x48, 0x4c, 0x83, 0x74, 0xb2, 0xb7, 0x4e, 0xdf, 0x3c, 0x87,
-            0x92, 0xe2, 0x61, 0xb3,
+            0x00, 0x62, 0x69, 0x15, 0xee, 0x0c, 0xab, 0xe3, 0x4e, 0x77, 0x9f, 0xaa, 0xbe, 0xea,
+            0xc0, 0x14, 0xe8, 0x24, 0xf4, 0x5f, 0xf0, 0xeb, 0x8b, 0x08, 0xda, 0xa7, 0xa1, 0x7a,
+            0x0c, 0xc9, 0x3f, 0x3d,
         ],
     };
 

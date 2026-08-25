@@ -12,7 +12,7 @@ use crate::{ProcessSession, read_frame, serve, write_frame};
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "e7e3866f0237ff5cdabfe52813f51185eba7484c8374b2b74edf3c8792e261b3"
+        "00626915ee0cabe34e779faabeeac014e824f45ff0eb8b08daa7a17a0cc93f3d"
     );
 
     let mut session = ProcessSession::new();
@@ -512,8 +512,8 @@ fn tuple_fields(value: &AbiValue) -> Vec<AbiValue> {
 #[test]
 fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
     use crate::test_fixture::{
-        authority_account, authority_entity, hello_authority, load_accounts, prepare_wave,
-        wave_payment,
+        apply_wave, authority_account, authority_entity, hello_authority, load_accounts,
+        prepare_wave, propose_wave, seal_wave, wave_payment,
     };
 
     const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
@@ -533,14 +533,40 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
             2,
             owner,
             1_700_000_000_000,
-            vec![wave_payment(peer, owner, peer, 25)],
+            Vec::new(),
             Vec::new(),
             true,
         ))
         .envelope;
     assert_ok(prepared.clone());
-    let fields = body_fields(&prepared);
-    let proposals = tuple_fields(&fields[3]);
+    assert!(
+        tuple_fields(&body_fields(&prepared)[4]).is_empty(),
+        "Prepare applies without proposing"
+    );
+    let admission = exact_tuple(&wave_payment(peer, owner, peer, 25), 2, "local admission");
+    let applied = session
+        .handle(apply_wave(
+            3,
+            2,
+            owner,
+            vec![tuple_of(vec![
+                AbiValue::Integer(0),
+                AbiValue::Integer(0),
+                admission[0].clone(),
+                admission[1].clone(),
+            ])],
+        ))
+        .envelope;
+    assert_ok(applied.clone());
+    assert_eq!(tuple_fields(&body_fields(&applied)[3]).len(), 1);
+    let proposed = session
+        .handle(propose_wave(4, 2, owner, vec![peer]))
+        .envelope;
+    assert_ok(proposed.clone());
+    let sealed = session.handle(seal_wave(5, 2)).envelope;
+    assert_ok(sealed.clone());
+    let fields = body_fields(&sealed);
+    let proposals = tuple_fields(&fields[4]);
     assert_eq!(
         proposals.len(),
         1,
@@ -569,10 +595,32 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
     };
     assert!(!hanko.is_empty(), "the frame is signed");
     assert_eq!(tuple_fields(&proposal[2]).len(), 0, "nothing was dropped");
-    // Touched leaves and the parity digest travel with every wave.
-    assert_eq!(tuple_fields(&fields[4]).len(), 1, "one account moved");
-    let AbiValue::Bytes(digest) = &fields[5] else {
-        panic!("expected a parity digest: {:?}", fields[5]);
+    // Touched leaves and full post-account rows travel with every wave.
+    let touched = tuple_fields(&fields[5]);
+    assert_eq!(touched.len(), 1, "one account moved");
+    let touched_row = exact_tuple(&touched[0], 2, "touched account");
+    let post_accounts = tuple_fields(&fields[6]);
+    assert_eq!(post_accounts.len(), 1, "one account materialized");
+    let post_account = exact_tuple(&post_accounts[0], 10, "post account");
+    assert_eq!(post_account[0], touched_row[0], "same account id");
+    assert_eq!(post_account[1], touched_row[1], "same post-wave leaf");
+    assert_eq!(
+        exact_tuple(&post_account[3], 5, "post account sections").len(),
+        5,
+        "all Rust-owned Account trees are described"
+    );
+    let delta_changes = exact_tuple(&post_account[4], 2, "post account delta changes");
+    assert!(
+        !tuple_fields(&delta_changes[0]).is_empty(),
+        "the full delta tree is materialized"
+    );
+    let consensus = exact_tuple(&post_account[9], 11, "post account consensus");
+    assert!(
+        matches!(&consensus[2], AbiValue::Tuple(_)),
+        "the post-proposal consensus envelope is materialized"
+    );
+    let AbiValue::Bytes(digest) = &fields[7] else {
+        panic!("expected a parity digest: {:?}", fields[7]);
     };
     assert_eq!(digest.len(), 32);
 
@@ -580,7 +628,7 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
     assert_error(
         session
             .handle(prepare_wave(
-                3,
+                6,
                 owner,
                 1_700_000_000_001,
                 Vec::new(),
@@ -593,13 +641,13 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
     // Only the request that prepared it may commit it.
     assert_error(
         session
-            .handle(candidate_command(4, OpTag::CommitRuntime, 3))
+            .handle(candidate_command(7, OpTag::CommitRuntime, 6))
             .envelope,
         "RSCORE_PROCESS_PREPARE_ID_MISMATCH",
     );
     assert_ok(
         session
-            .handle(candidate_command(5, OpTag::CommitRuntime, 2))
+            .handle(candidate_command(8, OpTag::CommitRuntime, 2))
             .envelope,
     );
 }
@@ -671,8 +719,8 @@ fn an_aborted_wave_puts_the_authority_engine_back() {
 fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
     use crate::test_fixture::{
         authority_account, authority_entity, candidate_command, commit_checkpoint,
-        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, restore_exact,
-        wave_ack, wave_swap_offer,
+        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, propose_wave,
+        restore_exact, seal_wave, wave_ack, wave_swap_offer,
     };
     use xln_rscore_engine::{BoardDelays, SigningIdentity};
 
@@ -697,7 +745,11 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
         ))
         .envelope;
     assert_ok(proposed.clone());
-    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[3])[0], 3, "proposal");
+    let proposed = uninterrupted
+        .handle(propose_wave(3, 2, owner, vec![peer]))
+        .envelope;
+    assert_ok(proposed.clone());
+    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 3, "proposal");
     assert!(
         !matches!(proposal[1], AbiValue::Nil),
         "swap proposal rejected: {:?}",
@@ -709,10 +761,11 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
         value => panic!("state hash expected: {value:?}"),
     };
     assert_error(
-        uninterrupted.handle(get_checkpoint_changes(3, 1)).envelope,
+        uninterrupted.handle(get_checkpoint_changes(4, 1)).envelope,
         "RSCORE_PROCESS_PREPARE_ID_MISMATCH",
     );
-    let checkpoint = uninterrupted.handle(get_checkpoint_changes(4, 2)).envelope;
+    assert_ok(uninterrupted.handle(seal_wave(5, 2)).envelope);
+    let checkpoint = uninterrupted.handle(get_checkpoint_changes(6, 2)).envelope;
     assert_ok(checkpoint.clone());
     let checkpoint_fields = exact_tuple(&body_fields(&checkpoint)[0], 4, "checkpoint");
     let commit_token = checkpoint_fields[0].clone();
@@ -722,11 +775,11 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
     let restore_row = materialize_restore_row(&changed[0]);
     assert_ok(
         uninterrupted
-            .handle(candidate_command(5, OpTag::CommitRuntime, 2))
+            .handle(candidate_command(7, OpTag::CommitRuntime, 2))
             .envelope,
     );
     let committed = uninterrupted
-        .handle(commit_checkpoint(6, commit_token))
+        .handle(commit_checkpoint(8, commit_token))
         .envelope;
     assert_ok(committed.clone());
     assert_eq!(body_fields(&committed)[0], durable_token);
@@ -755,7 +808,8 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
             ))
             .envelope,
     );
-    let empty = restarted.handle(get_checkpoint_changes(3, 2)).envelope;
+    assert_ok(restarted.handle(seal_wave(3, 2)).envelope);
+    let empty = restarted.handle(get_checkpoint_changes(4, 2)).envelope;
     assert_ok(empty.clone());
     let empty_fields = exact_tuple(&body_fields(&empty)[0], 4, "checkpoint");
     assert!(
@@ -764,14 +818,14 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
     );
     assert_ok(
         restarted
-            .handle(candidate_command(4, OpTag::AbortRuntime, 2))
+            .handle(candidate_command(5, OpTag::AbortRuntime, 2))
             .envelope,
     );
 
     let ack_input = wave_ack(0, peer, peer, 1, state_hash, ack_hanko);
     let resumed_ack = restarted
         .handle(prepare_wave(
-            5,
+            6,
             owner,
             1_700_000_000_001,
             Vec::new(),
@@ -781,7 +835,7 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
         .envelope;
     let live_ack = uninterrupted
         .handle(prepare_wave(
-            7,
+            9,
             owner,
             1_700_000_000_001,
             Vec::new(),
@@ -815,7 +869,7 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
 fn checkpoint_ticket_is_bound_to_the_wave_lifecycle() {
     use crate::test_fixture::{
         authority_account, authority_entity, candidate_command, commit_checkpoint,
-        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave,
+        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, seal_wave,
     };
 
     let owner = authority_entity(EXACT_RESTORE_SEED, "1");
@@ -844,18 +898,19 @@ fn checkpoint_ticket_is_bound_to_the_wave_lifecycle() {
             ))
             .envelope,
     );
-    let abandoned = session.handle(get_checkpoint_changes(3, 2)).envelope;
+    assert_ok(session.handle(seal_wave(3, 2)).envelope);
+    let abandoned = session.handle(get_checkpoint_changes(4, 2)).envelope;
     assert_ok(abandoned.clone());
     let abandoned = exact_tuple(&body_fields(&abandoned)[0], 4, "checkpoint");
     assert_eq!(tuple_fields(&abandoned[2]).len(), 1);
     assert_ok(
         session
-            .handle(candidate_command(4, OpTag::AbortRuntime, 2))
+            .handle(candidate_command(5, OpTag::AbortRuntime, 2))
             .envelope,
     );
     assert_error(
         session
-            .handle(commit_checkpoint(5, abandoned[0].clone()))
+            .handle(commit_checkpoint(6, abandoned[0].clone()))
             .envelope,
         "RSCORE_PROCESS_CHECKPOINT_NOT_PENDING",
     );
@@ -864,7 +919,7 @@ fn checkpoint_ticket_is_bound_to_the_wave_lifecycle() {
     assert_ok(
         session
             .handle(prepare_wave(
-                6,
+                7,
                 owner,
                 1_700_000_000_001,
                 Vec::new(),
@@ -873,19 +928,20 @@ fn checkpoint_ticket_is_bound_to_the_wave_lifecycle() {
             ))
             .envelope,
     );
-    let checkpoint = session.handle(get_checkpoint_changes(7, 6)).envelope;
+    assert_ok(session.handle(seal_wave(8, 7)).envelope);
+    let checkpoint = session.handle(get_checkpoint_changes(9, 7)).envelope;
     assert_ok(checkpoint.clone());
     let checkpoint = exact_tuple(&body_fields(&checkpoint)[0], 4, "checkpoint");
     assert_eq!(tuple_fields(&checkpoint[2]).len(), 1);
     assert_ok(
         session
-            .handle(candidate_command(8, OpTag::CommitRuntime, 6))
+            .handle(candidate_command(10, OpTag::CommitRuntime, 7))
             .envelope,
     );
     assert_error(
         session
             .handle(prepare_wave(
-                9,
+                11,
                 owner,
                 1_700_000_000_002,
                 Vec::new(),
@@ -903,11 +959,11 @@ fn checkpoint_ticket_is_bound_to_the_wave_lifecycle() {
         "checkpoint token",
     );
     assert_error(
-        session.handle(commit_checkpoint(10, wrong_token)).envelope,
+        session.handle(commit_checkpoint(12, wrong_token)).envelope,
         "RSCORE_BATCH_CHECKPOINT_TOKEN",
     );
     let committed = session
-        .handle(commit_checkpoint(11, checkpoint[0].clone()))
+        .handle(commit_checkpoint(13, checkpoint[0].clone()))
         .envelope;
     assert_ok(committed.clone());
     assert_eq!(body_fields(&committed)[0], checkpoint[1]);
@@ -1045,7 +1101,8 @@ const EXACT_RESTORE_SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a
 fn durable_pending_checkpoint() -> (AbiValue, AbiValue) {
     use crate::test_fixture::{
         authority_account, authority_entity, candidate_command, commit_checkpoint,
-        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, wave_swap_offer,
+        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, propose_wave,
+        seal_wave, wave_swap_offer,
     };
 
     let owner = authority_entity(EXACT_RESTORE_SEED, "1");
@@ -1073,7 +1130,13 @@ fn durable_pending_checkpoint() -> (AbiValue, AbiValue) {
             ))
             .envelope,
     );
-    let checkpoint = session.handle(get_checkpoint_changes(3, 2)).envelope;
+    assert_ok(
+        session
+            .handle(propose_wave(3, 2, owner, vec![peer]))
+            .envelope,
+    );
+    assert_ok(session.handle(seal_wave(4, 2)).envelope);
+    let checkpoint = session.handle(get_checkpoint_changes(5, 2)).envelope;
     assert_ok(checkpoint.clone());
     let checkpoint_fields = exact_tuple(&body_fields(&checkpoint)[0], 4, "checkpoint");
     let changed = tuple_fields(&checkpoint_fields[2]);
@@ -1081,11 +1144,11 @@ fn durable_pending_checkpoint() -> (AbiValue, AbiValue) {
     let restore_row = materialize_restore_row(&changed[0]);
     assert_ok(
         session
-            .handle(candidate_command(4, OpTag::CommitRuntime, 2))
+            .handle(candidate_command(6, OpTag::CommitRuntime, 2))
             .envelope,
     );
     let committed = session
-        .handle(commit_checkpoint(5, checkpoint_fields[0].clone()))
+        .handle(commit_checkpoint(7, checkpoint_fields[0].clone()))
         .envelope;
     assert_ok(committed.clone());
     assert_eq!(body_fields(&committed)[0], checkpoint_fields[1]);
@@ -1095,7 +1158,7 @@ fn durable_pending_checkpoint() -> (AbiValue, AbiValue) {
 fn durable_committed_checkpoint() -> (AbiValue, AbiValue) {
     use crate::test_fixture::{
         authority_entity, candidate_command, commit_checkpoint, get_checkpoint_changes,
-        hello_authority, prepare_wave, restore_exact, wave_ack,
+        hello_authority, prepare_wave, restore_exact, seal_wave, wave_ack,
     };
     use xln_rscore_engine::{BoardDelays, SigningIdentity};
 
@@ -1141,7 +1204,8 @@ fn durable_committed_checkpoint() -> (AbiValue, AbiValue) {
             ))
             .envelope,
     );
-    let checkpoint = session.handle(get_checkpoint_changes(3, 2)).envelope;
+    assert_ok(session.handle(seal_wave(3, 2)).envelope);
+    let checkpoint = session.handle(get_checkpoint_changes(4, 2)).envelope;
     assert_ok(checkpoint.clone());
     let checkpoint_fields = exact_tuple(&body_fields(&checkpoint)[0], 4, "checkpoint");
     let changed = tuple_fields(&checkpoint_fields[2]);
@@ -1149,11 +1213,11 @@ fn durable_committed_checkpoint() -> (AbiValue, AbiValue) {
     let restore_row = materialize_restore_row(&changed[0]);
     assert_ok(
         session
-            .handle(candidate_command(4, OpTag::CommitRuntime, 2))
+            .handle(candidate_command(5, OpTag::CommitRuntime, 2))
             .envelope,
     );
     let committed = session
-        .handle(commit_checkpoint(5, checkpoint_fields[0].clone()))
+        .handle(commit_checkpoint(6, checkpoint_fields[0].clone()))
         .envelope;
     assert_ok(committed.clone());
     assert_eq!(body_fields(&committed)[0], checkpoint_fields[1]);
@@ -1168,7 +1232,7 @@ fn assert_restore_failure_is_retryable(
 ) {
     use crate::test_fixture::{
         authority_entity, candidate_command, get_checkpoint_changes, hello_authority, prepare_wave,
-        restore_exact,
+        restore_exact, seal_wave,
     };
 
     let mut session = ProcessSession::new();
@@ -1202,7 +1266,8 @@ fn assert_restore_failure_is_retryable(
             ))
             .envelope,
     );
-    let changes = session.handle(get_checkpoint_changes(4, 3)).envelope;
+    assert_ok(session.handle(seal_wave(4, 3)).envelope);
+    let changes = session.handle(get_checkpoint_changes(5, 3)).envelope;
     assert_ok(changes.clone());
     let checkpoint = exact_tuple(&body_fields(&changes)[0], 4, "checkpoint");
     assert!(
@@ -1211,7 +1276,7 @@ fn assert_restore_failure_is_retryable(
     );
     assert_ok(
         session
-            .handle(candidate_command(5, OpTag::AbortRuntime, 3))
+            .handle(candidate_command(6, OpTag::AbortRuntime, 3))
             .envelope,
     );
 }

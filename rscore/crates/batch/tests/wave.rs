@@ -5,10 +5,10 @@ mod fixture;
 
 use fixture::{Stand, clock, payment, stand};
 use xln_rscore_batch::{
-    AccountInputKind, AccountInputRow, AccountInputVerdict, BatchError, EntityWave, WaveOp,
-    WaveRequest, WaveResult,
+    AccountAdmissionVerdict, AccountInputKind, AccountInputRow, AccountInputVerdict, BatchError,
+    EntityProposalSelection, EntityWave, EntityWaveOps, StatefulConsensusEngine, WaveOp,
+    WaveOpsRequest, WaveProposalRequest, WaveRequest, WaveResult,
 };
-use xln_rscore_engine::{AckOutcome, IncomingOutcome};
 
 fn wave(stand: &Stand, timestamp: u64) -> WaveRequest {
     wave_amount(stand, timestamp, 25)
@@ -18,12 +18,40 @@ fn wave_amount(stand: &Stand, timestamp: u64, amount: i64) -> WaveRequest {
     fixture::wave_of(fixture::admit_ops(stand, amount), timestamp, true)
 }
 
+fn run_staged_wave(engine: &mut StatefulConsensusEngine, request: WaveRequest) -> WaveResult {
+    let selections = request
+        .entities
+        .iter()
+        .filter(|entity| entity.propose)
+        .map(|entity| {
+            let mut account_ids = entity
+                .ops
+                .iter()
+                .map(WaveOp::account_id)
+                .collect::<Vec<_>>();
+            account_ids.sort();
+            account_ids.dedup();
+            EntityProposalSelection {
+                owner_entity_id: entity.owner_entity_id,
+                account_ids,
+            }
+        })
+        .collect();
+    engine.prepare_wave(request).expect("prepare staged wave");
+    engine
+        .propose_wave(WaveProposalRequest {
+            entities: selections,
+        })
+        .expect("propose staged wave");
+    engine.seal_wave().expect("seal staged wave")
+}
+
 /// The wave does all three steps and reports what each produced.
 #[test]
 fn one_call_admits_applies_and_proposes() {
     let mut stand = stand(3);
     let request = wave(&stand, 1_700_000_000_000);
-    let result = stand.payer.prepare_wave(request).expect("wave");
+    let result = run_staged_wave(&mut stand.payer, request);
     assert_eq!(result.proposals.len(), 3);
     assert!(result.applied.is_empty());
     assert_eq!(result.accounts_root, stand.payer.accounts_root());
@@ -42,10 +70,8 @@ fn an_aborted_wave_leaves_no_trace() {
     let before_root = stand.payer.accounts_root();
     let before_revision = stand.payer.revision();
 
-    let result = stand
-        .payer
-        .prepare_wave(wave(&stand, 1_700_000_000_000))
-        .expect("wave");
+    let request = wave(&stand, 1_700_000_000_000);
+    let result = stand.payer.prepare_wave(request).expect("wave");
     assert_ne!(result.accounts_root, before_root);
 
     let revision = stand.payer.abort_wave(result.revision).expect("abort");
@@ -54,10 +80,8 @@ fn an_aborted_wave_leaves_no_trace() {
     assert!(!stand.payer.wave_pending());
 
     // And the same wave can be run again, reaching the same candidate.
-    let again = stand
-        .payer
-        .prepare_wave(wave(&stand, 1_700_000_000_000))
-        .expect("wave again");
+    let request = wave(&stand, 1_700_000_000_000);
+    let again = stand.payer.prepare_wave(request).expect("wave again");
     assert_eq!(again.accounts_root, result.accounts_root);
     assert_eq!(again.revision, result.revision);
 }
@@ -67,10 +91,8 @@ fn an_aborted_wave_leaves_no_trace() {
 #[test]
 fn a_pending_wave_closes_every_other_door() {
     let mut stand = stand(2);
-    let result = stand
-        .payer
-        .prepare_wave(wave(&stand, 1_700_000_000_000))
-        .expect("wave");
+    let request = wave(&stand, 1_700_000_000_000);
+    let result = stand.payer.prepare_wave(request).expect("wave");
     assert!(matches!(
         stand.payer.prepare_wave(wave(&stand, 1_700_000_000_001)),
         Err(BatchError::WavePending),
@@ -89,17 +111,22 @@ fn a_pending_wave_closes_every_other_door() {
     ));
     assert!(matches!(
         stand.payer.checkpoint_changes_for_wave(result.revision - 1),
-        Err(BatchError::WaveRevision { .. }),
+        Err(BatchError::WaveOpen),
     ));
+    assert!(matches!(
+        stand.payer.checkpoint_changes_for_wave(result.revision),
+        Err(BatchError::WaveOpen),
+    ));
+    let sealed = stand.payer.seal_wave().expect("seal");
     let candidate_checkpoint = stand
         .payer
-        .checkpoint_changes_for_wave(result.revision)
+        .checkpoint_changes_for_wave(sealed.revision)
         .expect("candidate checkpoint");
-    assert_eq!(candidate_checkpoint.accounts_root(), result.accounts_root);
-    assert_eq!(candidate_checkpoint.revision(), result.revision);
+    assert_eq!(candidate_checkpoint.accounts_root(), sealed.accounts_root);
+    assert_eq!(candidate_checkpoint.revision(), sealed.revision);
     assert_eq!(
         candidate_checkpoint.restore_token().base_revision,
-        result.revision,
+        sealed.revision,
     );
     assert!(matches!(
         stand.payer.commit_checkpoint(&candidate_checkpoint.token),
@@ -107,10 +134,10 @@ fn a_pending_wave_closes_every_other_door() {
     ));
     // Only the revision that was prepared may be committed.
     assert!(matches!(
-        stand.payer.commit_wave(result.revision - 1),
+        stand.payer.commit_wave(sealed.revision - 1),
         Err(BatchError::WaveRevision { .. }),
     ));
-    stand.payer.commit_wave(result.revision).expect("commit");
+    stand.payer.commit_wave(sealed.revision).expect("commit");
     stand
         .payer
         .commit_checkpoint(&candidate_checkpoint.token)
@@ -120,7 +147,7 @@ fn a_pending_wave_closes_every_other_door() {
         candidate_checkpoint.restore_token(),
     );
     assert!(matches!(
-        stand.payer.commit_wave(result.revision),
+        stand.payer.commit_wave(sealed.revision),
         Err(BatchError::WaveMissing),
     ));
 }
@@ -132,20 +159,16 @@ fn a_pending_wave_closes_every_other_door() {
 fn two_engines_settle_a_payment_in_three_waves() {
     let mut stand = stand(2);
     let timestamp = 1_700_000_000_000;
-    let proposed = stand
-        .payer
-        .prepare_wave(wave(&stand, timestamp))
-        .expect("propose wave");
+    let request = wave(&stand, timestamp);
+    let proposed = run_staged_wave(&mut stand.payer, request);
     stand
         .payer
         .commit_wave(proposed.revision)
         .expect("commit propose");
 
     let frames = fixture::frame_ops(&stand, &proposed.proposals);
-    let applied: WaveResult = stand
-        .payee
-        .prepare_wave(fixture::wave_of(frames, timestamp, false))
-        .expect("apply wave");
+    let request = fixture::wave_of(frames, timestamp, false);
+    let applied: WaveResult = run_staged_wave(&mut stand.payee, request);
     stand
         .payee
         .commit_wave(applied.revision)
@@ -153,27 +176,19 @@ fn two_engines_settle_a_payment_in_three_waves() {
     assert_eq!(applied.applied.len(), 2);
     for row in &applied.applied {
         assert!(
-            matches!(
-                row.verdict,
-                AccountInputVerdict::Frame(IncomingOutcome::Committed { .. })
-            ),
+            matches!(row.verdict, AccountInputVerdict::FrameCommitted { .. }),
             "{:?}",
             row.verdict,
         );
     }
 
     let acks = fixture::ack_ops(&stand, &applied.applied);
-    let acked = stand
-        .payer
-        .prepare_wave(fixture::wave_of(acks, timestamp, false))
-        .expect("ack wave");
+    let request = fixture::wave_of(acks, timestamp, false);
+    let acked = run_staged_wave(&mut stand.payer, request);
     stand.payer.commit_wave(acked.revision).expect("commit ack");
     for row in &acked.applied {
         assert!(
-            matches!(
-                row.verdict,
-                AccountInputVerdict::Ack(AckOutcome::Committed { .. })
-            ),
+            matches!(row.verdict, AccountInputVerdict::AckCommitted { .. }),
             "{:?}",
             row.verdict,
         );
@@ -247,7 +262,7 @@ fn the_market_from_hello_reaches_the_proposal() {
 fn a_wave_reports_every_leaf_it_moved() {
     let mut stand = stand(2);
     let request = wave(&stand, 1_700_000_000_000);
-    let first = stand.payer.prepare_wave(request).expect("wave");
+    let first = run_staged_wave(&mut stand.payer, request);
 
     assert_eq!(first.touched.len(), 2);
     for (account_id, leaf) in &first.touched {
@@ -258,13 +273,33 @@ fn a_wave_reports_every_leaf_it_moved() {
         first.touched.windows(2).all(|pair| pair[0].0 < pair[1].0),
         "leaves are in account order, so the digest over them is stable"
     );
+    assert_eq!(first.post_accounts.len(), first.touched.len());
+    for ((account_id, leaf), post_account) in first.touched.iter().zip(&first.post_accounts) {
+        let account = stand.payer.account(account_id).expect("account");
+        assert_eq!(post_account.account_id, *account_id);
+        assert_eq!(post_account.account_leaf, *leaf);
+        assert_eq!(
+            post_account.header.signer_id,
+            stand
+                .payer
+                .signer_of(account.replica().owner().as_bytes())
+                .expect("account signer")
+        );
+        assert!(
+            post_account.put_count() > 0,
+            "full account rows, not a diff"
+        );
+        assert_eq!(post_account.del_count(), 0, "full rows delete nothing");
+        assert!(
+            post_account.consensus.pending.is_some(),
+            "the materialization carries the post-proposal envelope"
+        );
+    }
 
     // Aborting and re-running the same wave reaches the same tree.
     stand.payer.abort_wave(first.revision).expect("abort");
-    let again = stand
-        .payer
-        .prepare_wave(wave(&stand, 1_700_000_000_000))
-        .expect("wave");
+    let request = wave(&stand, 1_700_000_000_000);
+    let again = run_staged_wave(&mut stand.payer, request);
     assert_eq!(again.accounts_root, first.accounts_root);
     assert_eq!(again.touched, first.touched);
 }
@@ -284,13 +319,21 @@ fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
         .expect("admit");
     let before = stand.payer.accounts_root();
 
+    let owner = stand.pairs[0].payer_entity;
+    let account_id = stand.pairs[0].payer_account;
+    stand
+        .payer
+        .prepare_wave(fixture::propose_only_wave(owner, 1_700_000_000_000))
+        .expect("prepare");
     let result = stand
         .payer
-        .prepare_wave(fixture::propose_only_wave(
-            stand.pairs[0].payer_entity,
-            1_700_000_000_000,
-        ))
-        .expect("wave");
+        .propose_wave(WaveProposalRequest {
+            entities: vec![EntityProposalSelection {
+                owner_entity_id: owner,
+                account_ids: vec![account_id],
+            }],
+        })
+        .expect("propose");
 
     assert_eq!(result.proposals.len(), 1, "the attempt is reported");
     assert!(result.proposals[0].proposed.is_none(), "no frame survived");
@@ -307,15 +350,15 @@ fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
     assert_eq!(result.touched[0].0, stand.pairs[0].payer_account);
 }
 
-/// The driver pairs its own Nth raw input with the Nth verdict. Indices that
-/// repeat or skip would still line up somewhere, and the comparison would
-/// report agreement about the wrong input.
+/// Operation indices are stable arrival identities. They must increase and be
+/// unique, while gaps remain legal when a multi-owner collector sends only one
+/// owner's subset to this engine.
 #[test]
-fn input_indices_must_be_unique_and_sequential() {
+fn operation_indices_are_monotonic_unique_and_allow_gaps() {
     let mut stand = stand(1);
     let pair = &stand.pairs[0];
-    let row = |input_index: u32| AccountInputRow {
-        input_index,
+    let row = |operation_index: u64| AccountInputRow {
+        operation_index,
         account_id: pair.payer_account,
         from_entity_id: pair.payee_entity,
         kind: AccountInputKind::Ack {
@@ -332,9 +375,9 @@ fn input_indices_must_be_unique_and_sequential() {
     assert!(
         matches!(
             duplicate,
-            Err(BatchError::InputIndex {
+            Err(BatchError::OperationIndex {
                 actual: 0,
-                expected: 1
+                after: Some(0)
             })
         ),
         "{duplicate:?}"
@@ -342,17 +385,160 @@ fn input_indices_must_be_unique_and_sequential() {
 
     let gap = stand
         .payer
-        .apply_inputs(clock(1_700_000_000_000), vec![row(0), row(2)]);
-    assert!(
-        matches!(
-            gap,
-            Err(BatchError::InputIndex {
-                actual: 2,
-                expected: 1
-            })
-        ),
-        "{gap:?}"
-    );
+        .apply_inputs(clock(1_700_000_000_000), vec![row(0), row(2)])
+        .expect("gapped subset");
+    assert_eq!(gap[0].operation_index, 0);
+    assert_eq!(gap[1].operation_index, 2);
+}
+
+/// Local admission is itself an ordered candidate operation. Lifecycle rows
+/// are idempotent across both queued and pending work, while direct payments
+/// deliberately retain exact multiplicity.
+#[test]
+fn admission_receipts_match_lifecycle_dedupe_and_payment_multiplicity() {
+    let timestamp = 1_700_000_000_000;
+    let mut stand = fixture::stand_with_market(1, fixture::market());
+    let pair = &stand.pairs[0];
+    let (account_id, offer) = fixture::swap_offer(pair);
+    let mut repeated_offer = offer.clone();
+    repeated_offer.extend(offer.clone());
+    let initial = stand
+        .payer
+        .prepare_wave(fixture::wave_of(
+            vec![(
+                pair.payer_entity,
+                WaveOp::Admit {
+                    operation_index: 10,
+                    account_id,
+                    txs: repeated_offer,
+                },
+            )],
+            timestamp,
+            true,
+        ))
+        .expect("admit duplicate lifecycle rows");
+    assert!(matches!(
+        initial.admissions[0].verdict,
+        AccountAdmissionVerdict::Admitted { count: 1 }
+    ));
+    stand
+        .payer
+        .propose_wave(WaveProposalRequest {
+            entities: vec![EntityProposalSelection {
+                owner_entity_id: pair.payer_entity,
+                account_ids: vec![account_id],
+            }],
+        })
+        .expect("move offer to pending");
+    let sealed = stand.payer.seal_wave().expect("seal offer");
+    stand
+        .payer
+        .commit_wave(sealed.revision)
+        .expect("commit offer");
+
+    let pending_duplicate = stand
+        .payer
+        .prepare_wave(fixture::wave_of(
+            vec![(
+                pair.payer_entity,
+                WaveOp::Admit {
+                    operation_index: 20,
+                    account_id,
+                    txs: offer,
+                },
+            )],
+            timestamp + 1,
+            false,
+        ))
+        .expect("admit pending duplicate");
+    assert!(matches!(
+        pending_duplicate.admissions[0].verdict,
+        AccountAdmissionVerdict::Admitted { count: 0 }
+    ));
+    stand
+        .payer
+        .abort_wave(pending_duplicate.revision)
+        .expect("abort duplicate probe");
+
+    let (_, payments) = payment(pair, 25);
+    let mut repeated_payments = payments.clone();
+    repeated_payments.extend(payments);
+    let payment_result = stand
+        .payer
+        .prepare_wave(fixture::wave_of(
+            vec![(
+                pair.payer_entity,
+                WaveOp::Admit {
+                    operation_index: 30,
+                    account_id,
+                    txs: repeated_payments,
+                },
+            )],
+            timestamp + 2,
+            false,
+        ))
+        .expect("admit repeated payments");
+    assert!(matches!(
+        payment_result.admissions[0].verdict,
+        AccountAdmissionVerdict::Admitted { count: 2 }
+    ));
+}
+
+#[test]
+fn apply_continues_candidate_global_indices_and_rolls_back_a_bad_step() {
+    let timestamp = 1_700_000_000_000;
+    let mut stand = stand(1);
+    let pair = &stand.pairs[0];
+    let (account_id, txs) = payment(pair, 10);
+    let prepared = stand
+        .payer
+        .prepare_wave(fixture::wave_of(
+            vec![(
+                pair.payer_entity,
+                WaveOp::Admit {
+                    operation_index: 10,
+                    account_id,
+                    txs: txs.clone(),
+                },
+            )],
+            timestamp,
+            false,
+        ))
+        .expect("prepare");
+    let root_before_bad_step = prepared.accounts_root;
+    let repeated = stand.payer.apply_wave_ops(WaveOpsRequest {
+        entities: vec![EntityWaveOps {
+            owner_entity_id: pair.payer_entity,
+            ops: vec![WaveOp::Admit {
+                operation_index: 10,
+                account_id,
+                txs: txs.clone(),
+            }],
+        }],
+    });
+    assert!(matches!(
+        repeated,
+        Err(BatchError::OperationIndex {
+            actual: 10,
+            after: Some(10)
+        })
+    ));
+    assert_eq!(stand.payer.accounts_root(), root_before_bad_step);
+
+    let continued = stand
+        .payer
+        .apply_wave_ops(WaveOpsRequest {
+            entities: vec![EntityWaveOps {
+                owner_entity_id: pair.payer_entity,
+                ops: vec![WaveOp::Admit {
+                    operation_index: 12,
+                    account_id,
+                    txs,
+                }],
+            }],
+        })
+        .expect("gapped continuation");
+    assert_eq!(continued.admissions[0].operation_index, 12);
 }
 
 /// Every Entity stamps its own proposals. A wave that carried one timestamp
@@ -369,7 +555,7 @@ fn each_entity_stamps_its_proposals_with_its_own_clock() {
     request.entities[1].timestamp = second;
     request.entities[1].clock = clock(second);
 
-    let result = stand.payer.prepare_wave(request).expect("wave");
+    let result = run_staged_wave(&mut stand.payer, request);
     assert_eq!(result.proposals.len(), 2);
     for row in &result.proposals {
         let proposed = row.proposed.as_ref().expect("frame");
@@ -389,10 +575,8 @@ fn each_entity_stamps_its_proposals_with_its_own_clock() {
 fn each_entity_judges_arrivals_with_its_own_clock() {
     let mut stand = stand(2);
     let timestamp = 1_700_000_000_000;
-    let proposed = stand
-        .payer
-        .prepare_wave(wave(&stand, timestamp))
-        .expect("propose");
+    let request = wave(&stand, timestamp);
+    let proposed = run_staged_wave(&mut stand.payer, request);
     stand.payer.commit_wave(proposed.revision).expect("commit");
 
     let ops = fixture::frame_ops(&stand, &proposed.proposals);
@@ -408,24 +592,21 @@ fn each_entity_judges_arrivals_with_its_own_clock() {
     let stale = applied
         .applied
         .iter()
-        .find(|row| row.input_index == 0)
+        .find(|row| row.operation_index == 0)
         .expect("first verdict");
     let current = applied
         .applied
         .iter()
-        .find(|row| row.input_index == 1)
+        .find(|row| row.operation_index == 1)
         .expect("second verdict");
     match &stale.verdict {
-        AccountInputVerdict::Frame(IncomingOutcome::Rejected { reason }) => {
+        AccountInputVerdict::FrameRejected { reason } => {
             assert!(reason.contains("skew"), "{reason}");
         }
         other => panic!("expected a skew rejection, got {other:?}"),
     }
     assert!(
-        matches!(
-            current.verdict,
-            AccountInputVerdict::Frame(IncomingOutcome::Committed { .. })
-        ),
+        matches!(current.verdict, AccountInputVerdict::FrameCommitted { .. }),
         "{:?}",
         current.verdict,
     );
@@ -448,7 +629,14 @@ fn two_groups_for_one_entity_are_refused() {
     };
     let refused = stand.payer.prepare_wave(WaveRequest {
         entities: vec![
-            group(vec![WaveOp::Admit { account_id, txs }], timestamp),
+            group(
+                vec![WaveOp::Admit {
+                    operation_index: 0,
+                    account_id,
+                    txs,
+                }],
+                timestamp,
+            ),
             group(Vec::new(), timestamp + 1_000),
         ],
     });
@@ -474,7 +662,11 @@ fn an_account_named_by_another_entity_is_refused() {
             timestamp,
             j_height: 100,
             clock: clock(timestamp),
-            ops: vec![WaveOp::Admit { account_id, txs }],
+            ops: vec![WaveOp::Admit {
+                operation_index: 0,
+                account_id,
+                txs,
+            }],
             propose: false,
         }],
     });
@@ -492,17 +684,15 @@ fn an_account_named_by_another_entity_is_refused() {
 fn input_indices_are_sequential_across_entity_groups() {
     let mut stand = stand(2);
     let timestamp = 1_700_000_000_000;
-    let proposed = stand
-        .payer
-        .prepare_wave(wave(&stand, timestamp))
-        .expect("propose");
+    let request = wave(&stand, timestamp);
+    let proposed = run_staged_wave(&mut stand.payer, request);
     stand.payer.commit_wave(proposed.revision).expect("commit");
 
     let mut ops = fixture::frame_ops(&stand, &proposed.proposals);
     // Both groups now start at zero, which is exactly the collision the check
     // exists for: two verdicts would answer to the same raw input.
     if let (_, WaveOp::Input(row)) = &mut ops[1] {
-        row.input_index = 0;
+        row.operation_index = 0;
     }
     let refused = stand
         .payee
@@ -510,9 +700,9 @@ fn input_indices_are_sequential_across_entity_groups() {
     assert!(
         matches!(
             refused,
-            Err(BatchError::InputIndex {
+            Err(BatchError::OperationIndex {
                 actual: 0,
-                expected: 1
+                after: Some(0)
             })
         ),
         "{:?}",
@@ -559,10 +749,8 @@ fn an_account_replays_its_operations_in_arrival_order() {
             .expect("payee propose");
 
         // The payer proposes at the same height, which is the collision.
-        let proposed = stand
-            .payer
-            .prepare_wave(wave(&stand, timestamp))
-            .expect("payer wave");
+        let request = wave(&stand, timestamp);
+        let proposed = run_staged_wave(&mut stand.payer, request);
         stand.payer.commit_wave(proposed.revision).expect("commit");
         let incoming = fixture::frame_ops(&stand, &proposed.proposals)
             .into_iter()
@@ -572,6 +760,7 @@ fn an_account_replays_its_operations_in_arrival_order() {
         let admit = (
             pair.payee_entity,
             WaveOp::Admit {
+                operation_index: 0,
                 account_id,
                 txs: offer,
             },
@@ -583,17 +772,17 @@ fn an_account_replays_its_operations_in_arrival_order() {
         };
         // Indices are per wave, so the input's index depends on where it sits.
         let mut ops = ops;
-        let mut next = 0;
-        for (_, op) in &mut ops {
-            if let WaveOp::Input(row) = op {
-                row.input_index = next;
-                next += 1;
+        for (operation_index, (_, op)) in ops.iter_mut().enumerate() {
+            match op {
+                WaveOp::Admit {
+                    operation_index: index,
+                    ..
+                } => *index = operation_index as u64,
+                WaveOp::Input(row) => row.operation_index = operation_index as u64,
             }
         }
-        let applied = stand
-            .payee
-            .prepare_wave(fixture::wave_of(ops, timestamp, false))
-            .expect("payee wave");
+        let request = fixture::wave_of(ops, timestamp, false);
+        let applied = run_staged_wave(&mut stand.payee, request);
         stand.payee.commit_wave(applied.revision).expect("commit");
         stand
             .payee
@@ -603,8 +792,8 @@ fn an_account_replays_its_operations_in_arrival_order() {
             .len()
     };
 
-    // Admitted first, the rollback finds the offer already queued and drops
-    // its own copy. Admitted after, there is nothing to match against yet.
+    // Lifecycle admissions are idempotent across both pending and queued work,
+    // so the exact offer survives once whichever order the collision took.
     assert_eq!(queued(true), 1);
-    assert_eq!(queued(false), 2);
+    assert_eq!(queued(false), 1);
 }

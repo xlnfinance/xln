@@ -109,6 +109,12 @@ pub enum OpTag {
     CommitCheckpoint = 20,
     /// Replace an authority engine from an exact durable checkpoint.
     RestoreExact = 21,
+    /// Continue ordered operations on the open authoritative Account candidate.
+    ApplyAccountWave = 22,
+    /// Propose the exact per-Entity Account worklist for one candidate round.
+    ProposeAccountWave = 23,
+    /// Freeze the candidate transcript before checkpoint/WAL commit.
+    SealAccountWave = 24,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -138,6 +144,9 @@ impl TryFrom<u64> for OpTag {
             19 => Ok(Self::GetCheckpointChanges),
             20 => Ok(Self::CommitCheckpoint),
             21 => Ok(Self::RestoreExact),
+            22 => Ok(Self::ApplyAccountWave),
+            23 => Ok(Self::ProposeAccountWave),
+            24 => Ok(Self::SealAccountWave),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

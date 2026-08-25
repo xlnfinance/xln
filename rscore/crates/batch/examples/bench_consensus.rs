@@ -26,8 +26,8 @@ use xln_rscore_batch::{
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
-    AckOutcome, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingOutcome,
-    SigningIdentity, TokenId, WatchSeed,
+    BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, SigningIdentity, TokenId,
+    WatchSeed,
 };
 
 fn signer_key(signer_id: &str) -> [u8; 32] {
@@ -234,7 +234,7 @@ fn main() {
                 // pairs were built in.
                 let pair = &pairs[by_account_id[proposal.account_id.as_bytes()]];
                 AccountInputRow {
-                    input_index: index as u32,
+                    operation_index: index as u64,
                     // The payee holds this account under the payer's id.
                     account_id: AccountId::from_bytes(pair.payer_entity),
                     from_entity_id: pair.payer_entity,
@@ -258,18 +258,18 @@ fn main() {
         let mut acks = Vec::with_capacity(applied.len());
         for (index, result) in applied.iter().enumerate() {
             let pair = &pairs[by_payee_account_id[result.account_id.as_bytes()]];
-            let AccountInputVerdict::Frame(IncomingOutcome::Committed {
+            let AccountInputVerdict::FrameCommitted {
                 height,
                 state_hash,
                 ack_hanko,
                 ..
-            }) = &result.verdict
+            } = &result.verdict
             else {
                 panic!("expected a commit: {:?}", result.verdict);
             };
             committed += 1;
             acks.push(AccountInputRow {
-                input_index: index as u32,
+                operation_index: index as u64,
                 account_id: pair.account_id,
                 from_entity_id: pair.payee_entity,
                 kind: AccountInputKind::Ack {
@@ -283,10 +283,7 @@ fn main() {
         inputs += acks.len();
         for result in payer_engine.apply_inputs(clock, acks).expect("apply acks") {
             assert!(
-                matches!(
-                    result.verdict,
-                    AccountInputVerdict::Ack(AckOutcome::Committed { .. })
-                ),
+                matches!(result.verdict, AccountInputVerdict::AckCommitted { .. }),
                 "expected an ack commit: {:?}",
                 result.verdict,
             );

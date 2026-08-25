@@ -18,9 +18,9 @@ use xln_rscore_batch::{
     CheckpointToken,
 };
 use xln_rscore_engine::{
-    AccountConsensus, AccountReplica, AccountState, AccountStateSeed, AckOutcome,
-    BilateralRebalanceFeePolicy, ConsensusSnapshot, Delta, IncomingOutcome, LendingIntentKind,
-    RebalanceFeePolicySnapshot, Side, SwapOffer, TokenId,
+    AccountConsensus, AccountReplica, AccountState, AccountStateSeed, BilateralRebalanceFeePolicy,
+    ConsensusSnapshot, Delta, LendingIntentKind, RebalanceFeePolicySnapshot, Side, SwapOffer,
+    TokenId,
 };
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
@@ -702,19 +702,19 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .apply_inputs(
             clock(1_700_000_000_000),
             vec![AccountInputRow {
-                input_index: 0,
+                operation_index: 0,
                 account_id: stand.pairs[0].payee_account,
                 from_entity_id: stand.pairs[0].payer_entity,
                 kind: AccountInputKind::Frame(Box::new(frame)),
             }],
         )
         .expect("apply frame");
-    let AccountInputVerdict::Frame(IncomingOutcome::Committed {
+    let AccountInputVerdict::FrameCommitted {
         height,
         state_hash,
         ack_hanko,
         ..
-    }) = &applied[0].verdict
+    } = &applied[0].verdict
     else {
         panic!("expected a commit: {:?}", applied[0].verdict);
     };
@@ -723,7 +723,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
         .apply_inputs(
             clock(1_700_000_000_000),
             vec![AccountInputRow {
-                input_index: 0,
+                operation_index: 0,
                 account_id: pair_payer_account,
                 from_entity_id: stand.pairs[0].payee_entity,
                 kind: AccountInputKind::Ack {
@@ -735,9 +735,9 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
             }],
         )
         .expect("apply ack");
-    let AccountInputVerdict::Ack(AckOutcome::Committed {
+    let AccountInputVerdict::AckCommitted {
         height, outputs, ..
-    }) = &acked[0].verdict
+    } = &acked[0].verdict
     else {
         panic!("expected an ack commit: {:?}", acked[0].verdict);
     };
@@ -756,7 +756,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
                 .apply_inputs(
                     clock(1_700_000_000_000),
                     vec![AccountInputRow {
-                        input_index: 0,
+                        operation_index: 0,
                         account_id: pair_payer_account,
                         from_entity_id: stand.pairs[0].payee_entity,
                         kind: AccountInputKind::Ack {
@@ -770,7 +770,7 @@ fn a_pending_frame_survives_a_restore_and_still_commits() {
                 .expect("apply ack");
             assert!(matches!(
                 acked_live[0].verdict,
-                AccountInputVerdict::Ack(AckOutcome::Committed { .. })
+                AccountInputVerdict::AckCommitted { .. }
             ));
             stand.payer.accounts_root()
         },

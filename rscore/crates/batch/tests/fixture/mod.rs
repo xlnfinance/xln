@@ -13,8 +13,8 @@ use xln_rscore_batch::{
 };
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountIdentity, AccountReplica, AccountState, AccountTx,
-    AckOutcome, BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, IncomingOutcome,
-    SigningIdentity, TokenId, WatchSeed,
+    BoardDelays, DeliveryMode, Delta, DepositoryAddress, EntityId, SigningIdentity, TokenId,
+    WatchSeed,
 };
 
 /// The key the runtime would derive for a signer label, which is what the
@@ -318,7 +318,7 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
         .map(|(index, proposal)| {
             let pair = &stand.pairs[pair_by_payer_account(&stand.pairs, &proposal.account_id)];
             AccountInputRow {
-                input_index: index as u32,
+                operation_index: index as u64,
                 account_id: pair.payee_account,
                 from_entity_id: pair.payer_entity,
                 kind: AccountInputKind::Frame(Box::new(
@@ -336,17 +336,17 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
         .enumerate()
         .map(|(index, result)| {
             let pair = &stand.pairs[pair_by_payee_account(&stand.pairs, &result.account_id)];
-            let AccountInputVerdict::Frame(IncomingOutcome::Committed {
+            let AccountInputVerdict::FrameCommitted {
                 height,
                 state_hash,
                 ack_hanko,
                 ..
-            }) = &result.verdict
+            } = &result.verdict
             else {
                 panic!("expected a commit: {:?}", result.verdict);
             };
             AccountInputRow {
-                input_index: index as u32,
+                operation_index: index as u64,
                 account_id: pair.payer_account,
                 from_entity_id: pair.payee_entity,
                 kind: AccountInputKind::Ack {
@@ -364,10 +364,7 @@ pub fn round(stand: &mut Stand, timestamp: u64, amount: i64) {
         .expect("apply acks");
     for result in &acked {
         assert!(
-            matches!(
-                result.verdict,
-                AccountInputVerdict::Ack(AckOutcome::Committed { .. })
-            ),
+            matches!(result.verdict, AccountInputVerdict::AckCommitted { .. }),
             "expected an ack commit: {:?}",
             result.verdict,
         );
@@ -421,9 +418,17 @@ pub fn admit_ops(stand: &Stand, amount: i64) -> Vec<([u8; 32], WaveOp)> {
     stand
         .pairs
         .iter()
-        .map(|pair| {
+        .enumerate()
+        .map(|(operation_index, pair)| {
             let (account_id, txs) = payment(pair, amount);
-            (pair.payer_entity, WaveOp::Admit { account_id, txs })
+            (
+                pair.payer_entity,
+                WaveOp::Admit {
+                    operation_index: operation_index as u64,
+                    account_id,
+                    txs,
+                },
+            )
         })
         .collect()
 }
@@ -458,7 +463,7 @@ pub fn frames_for(stand: &Stand, proposals: &[ProposalRow]) -> Vec<AccountInputR
         .map(|(index, proposal)| {
             let pair = &stand.pairs[pair_by_payer_account(&stand.pairs, &proposal.account_id)];
             AccountInputRow {
-                input_index: index as u32,
+                operation_index: index as u64,
                 account_id: pair.payee_account,
                 from_entity_id: pair.payer_entity,
                 kind: AccountInputKind::Frame(Box::new(
@@ -476,17 +481,17 @@ pub fn acks_for(stand: &Stand, applied: &[AccountInputResult]) -> Vec<AccountInp
         .enumerate()
         .map(|(index, result)| {
             let pair = &stand.pairs[pair_by_payee_account(&stand.pairs, &result.account_id)];
-            let AccountInputVerdict::Frame(IncomingOutcome::Committed {
+            let AccountInputVerdict::FrameCommitted {
                 height,
                 state_hash,
                 ack_hanko,
                 ..
-            }) = &result.verdict
+            } = &result.verdict
             else {
                 panic!("expected a commit: {:?}", result.verdict);
             };
             AccountInputRow {
-                input_index: index as u32,
+                operation_index: index as u64,
                 account_id: pair.payer_account,
                 from_entity_id: pair.payee_entity,
                 kind: AccountInputKind::Ack {

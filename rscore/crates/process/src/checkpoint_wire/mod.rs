@@ -2,7 +2,9 @@ mod decode;
 mod encode;
 
 use xln_rscore_abi::{AbiValue, BodyTuple};
-use xln_rscore_batch::{AccountRestore, AccountsCheckpoint, CheckpointToken};
+use xln_rscore_batch::{
+    AccountCheckpointRows, AccountRestore, AccountsCheckpoint, CheckpointToken,
+};
 
 use crate::ProcessError;
 use crate::wire_encode::{body, integer, tuple};
@@ -10,6 +12,10 @@ use crate::wire_value::{exact, fixed_bytes, js_number, tuple as decode_tuple};
 
 pub fn changes(value: &AccountsCheckpoint) -> Result<BodyTuple, ProcessError> {
     Ok(body(vec![encode::checkpoint(value)?]))
+}
+
+pub(crate) fn account_rows(value: &AccountCheckpointRows) -> Result<AbiValue, ProcessError> {
+    encode::account_rows(value)
 }
 
 pub fn checkpoint_committed(value: &CheckpointToken) -> BodyTuple {

@@ -426,25 +426,30 @@ pub fn prepare_wave(
     inputs: Vec<AbiValue>,
     propose: bool,
 ) -> Envelope {
-    let ops = admissions
-        .into_iter()
-        .map(|admission| {
-            let AbiValue::Tuple(fields) = admission else {
-                panic!("an admission is [accountId, txs]")
-            };
-            let fields = fields.fields().to_vec();
-            tuple(vec![
-                AbiValue::Integer(0),
-                fields[0].clone(),
-                fields[1].clone(),
-            ])
-        })
-        .chain(
-            inputs
-                .into_iter()
-                .map(|input| tuple(vec![AbiValue::Integer(1), input])),
-        )
-        .collect();
+    let mut operation_index = 0_u64;
+    let mut ops = Vec::new();
+    for admission in admissions {
+        let AbiValue::Tuple(fields) = admission else {
+            panic!("an admission is [accountId, txs]")
+        };
+        let fields = fields.fields().to_vec();
+        ops.push(tuple(vec![
+            AbiValue::Integer(0),
+            AbiValue::Integer(i128::from(operation_index)),
+            fields[0].clone(),
+            fields[1].clone(),
+        ]));
+        operation_index += 1;
+    }
+    for input in inputs {
+        let AbiValue::Tuple(fields) = input else {
+            panic!("an input is [operationIndex, accountId, from, kind]")
+        };
+        let mut fields = fields.fields().to_vec();
+        fields[0] = AbiValue::Integer(i128::from(operation_index));
+        ops.push(tuple(vec![AbiValue::Integer(1), tuple(fields)]));
+        operation_index += 1;
+    }
     request(
         id,
         OpTag::PrepareAccountWave,
@@ -457,6 +462,57 @@ pub fn prepare_wave(
             AbiValue::Bool(propose),
             tuple(ops),
         ])])],
+    )
+}
+
+pub fn apply_wave(
+    id: u64,
+    prepare_id: u64,
+    owner_entity_id: [u8; 32],
+    ops: Vec<AbiValue>,
+) -> Envelope {
+    request(
+        id,
+        OpTag::ApplyAccountWave,
+        vec![
+            AbiValue::Bytes(prepare_id.to_be_bytes().to_vec()),
+            tuple(vec![tuple(vec![
+                AbiValue::Bytes(owner_entity_id.to_vec()),
+                tuple(ops),
+            ])]),
+        ],
+    )
+}
+
+pub fn propose_wave(
+    id: u64,
+    prepare_id: u64,
+    owner_entity_id: [u8; 32],
+    account_ids: Vec<[u8; 32]>,
+) -> Envelope {
+    request(
+        id,
+        OpTag::ProposeAccountWave,
+        vec![
+            AbiValue::Bytes(prepare_id.to_be_bytes().to_vec()),
+            tuple(vec![tuple(vec![
+                AbiValue::Bytes(owner_entity_id.to_vec()),
+                tuple(
+                    account_ids
+                        .into_iter()
+                        .map(|account_id| AbiValue::Bytes(account_id.to_vec()))
+                        .collect(),
+                ),
+            ])]),
+        ],
+    )
+}
+
+pub fn seal_wave(id: u64, prepare_id: u64) -> Envelope {
+    request(
+        id,
+        OpTag::SealAccountWave,
+        vec![AbiValue::Bytes(prepare_id.to_be_bytes().to_vec())],
     )
 }
 

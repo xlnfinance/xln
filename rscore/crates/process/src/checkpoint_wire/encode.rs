@@ -32,7 +32,7 @@ pub fn checkpoint(value: &AccountsCheckpoint) -> Result<AbiValue, ProcessError> 
     ]))
 }
 
-fn account_rows(value: &AccountCheckpointRows) -> Result<AbiValue, ProcessError> {
+pub(crate) fn account_rows(value: &AccountCheckpointRows) -> Result<AbiValue, ProcessError> {
     Ok(tuple(vec![
         AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
         AbiValue::Bytes(value.account_leaf.to_vec()),

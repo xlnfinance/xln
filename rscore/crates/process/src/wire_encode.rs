@@ -322,6 +322,7 @@ pub fn wave(
         proposals.push(proposal(row)?);
     }
     let applied = tuple(result.applied.iter().map(input_result).collect());
+    let admissions = tuple(result.admissions.iter().map(admission_result).collect());
     let touched = tuple(
         result
             .touched
@@ -335,13 +336,28 @@ pub fn wave(
             .collect(),
     );
     let proposals = tuple(proposals);
-    let digest = parity_digest(result.accounts_root, &touched, &applied, &proposals)?;
+    let post_accounts = tuple(
+        result
+            .post_accounts
+            .iter()
+            .map(crate::checkpoint_wire::account_rows)
+            .collect::<Result<_, _>>()?,
+    );
+    let digest = parity_digest(
+        result.accounts_root,
+        &touched,
+        &applied,
+        &admissions,
+        &proposals,
+    )?;
     Ok(body(vec![
         integer(result.revision),
         AbiValue::Bytes(result.accounts_root.to_vec()),
         applied,
+        admissions,
         proposals,
         touched,
+        post_accounts,
         AbiValue::Bytes(digest.to_vec()),
         // Wall time inside the engine, so a caller can tell the cost of the
         // work from the cost of reaching it. Excluded from the parity digest:
@@ -370,6 +386,7 @@ fn parity_digest(
     accounts_root: [u8; 32],
     touched: &AbiValue,
     applied: &AbiValue,
+    admissions: &AbiValue,
     proposals: &AbiValue,
 ) -> Result<[u8; 32], crate::ProcessError> {
     use sha2::{Digest, Sha256};
@@ -380,6 +397,7 @@ fn parity_digest(
         AbiValue::Bytes(accounts_root.to_vec()),
         touched.clone(),
         applied.clone(),
+        admissions.clone(),
         proposals.clone(),
     ]);
     let encoded = xln_rscore_abi::encode_tuple(&transcript)?;
@@ -474,9 +492,26 @@ fn dropped(value: &xln_rscore_batch::DroppedRow) -> AbiValue {
 
 fn input_result(value: &xln_rscore_batch::AccountInputResult) -> AbiValue {
     tuple(vec![
-        integer(value.input_index),
+        integer(value.operation_index),
         AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
         verdict(&value.verdict),
+    ])
+}
+
+fn admission_result(value: &xln_rscore_batch::AccountAdmissionResult) -> AbiValue {
+    use xln_rscore_batch::AccountAdmissionVerdict;
+    let verdict = match &value.verdict {
+        AccountAdmissionVerdict::Admitted { count } => tuple(vec![integer(0), integer(*count)]),
+        AccountAdmissionVerdict::Rejected { code, message } => tuple(vec![
+            integer(1),
+            AbiValue::Text(code.clone()),
+            AbiValue::Text(message.clone()),
+        ]),
+    };
+    tuple(vec![
+        integer(value.operation_index),
+        AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
+        verdict,
     ])
 }
 
@@ -485,15 +520,14 @@ fn input_result(value: &xln_rscore_batch::AccountInputResult) -> AbiValue {
 /// a tag rather than changing an old one.
 fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
     use xln_rscore_batch::AccountInputVerdict;
-    use xln_rscore_engine::{AckOutcome, IncomingOutcome};
     match value {
-        AccountInputVerdict::Frame(IncomingOutcome::Committed {
+        AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
             ack_hanko,
             outputs,
             rolled_back_txs,
-        }) => tuple(vec![
+        } => tuple(vec![
             integer(0),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
@@ -501,40 +535,38 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
             tuple(outputs.iter().map(account_output).collect()),
             integer(*rolled_back_txs),
         ]),
-        AccountInputVerdict::Frame(IncomingOutcome::CollisionIgnored { height }) => {
+        AccountInputVerdict::FrameCollisionIgnored { height } => {
             tuple(vec![integer(1), integer(*height)])
         }
-        AccountInputVerdict::Frame(IncomingOutcome::Duplicate {
+        AccountInputVerdict::FrameDuplicate {
             height,
             state_hash,
             ack_hanko,
-        }) => tuple(vec![
+        } => tuple(vec![
             integer(2),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
             AbiValue::Bytes(ack_hanko.clone()),
         ]),
-        AccountInputVerdict::Frame(IncomingOutcome::Stale {
+        AccountInputVerdict::FrameStale {
             height,
             current_height,
-        }) => tuple(vec![integer(3), integer(*height), integer(*current_height)]),
-        AccountInputVerdict::Frame(IncomingOutcome::Rejected { reason }) => {
+        } => tuple(vec![integer(3), integer(*height), integer(*current_height)]),
+        AccountInputVerdict::FrameRejected { reason } => {
             tuple(vec![integer(4), AbiValue::Text(reason.clone())])
         }
-        AccountInputVerdict::Ack(AckOutcome::Committed {
+        AccountInputVerdict::AckCommitted {
             height,
             state_hash,
             outputs,
-        }) => tuple(vec![
+        } => tuple(vec![
             integer(5),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
             tuple(outputs.iter().map(account_output).collect()),
         ]),
-        AccountInputVerdict::Ack(AckOutcome::Stale { height }) => {
-            tuple(vec![integer(6), integer(*height)])
-        }
-        AccountInputVerdict::Ack(AckOutcome::Rejected { reason }) => {
+        AccountInputVerdict::AckStale { height } => tuple(vec![integer(6), integer(*height)]),
+        AccountInputVerdict::AckRejected { reason } => {
             tuple(vec![integer(7), AbiValue::Text(reason.clone())])
         }
         AccountInputVerdict::Failed(message) => {
