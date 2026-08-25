@@ -166,11 +166,16 @@ test('remote time-machine history requires radapter batch reads', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const source = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');
   const querySource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
+  const queryBoundarySource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-query-client.ts',
+    'utf8',
+  );
   const scanStart = source.indexOf('export const scanRuntimeAdapterHistoryAtHeight');
   expect(scanStart).toBeGreaterThan(0);
   const scanSource = source.slice(scanStart);
   expect(source).toContain('runtimeQueryClient.readHistoryFrameBatch');
-  expect(querySource).toContain("'history-frame-batch'");
+  expect(queryBoundarySource).toContain("'history-frame-batch'");
+  expect(querySource).toContain('extends RuntimeQueryClientBoundary<');
   expect(xlnStoreSource).not.toContain('export const scanRuntimeAdapterHistoryAtHeight');
   expect(source).not.toContain('unsupported adapter path: history-frame-batch');
   expect(source).not.toContain('buildRemoteAdapterEnvSnapshot');

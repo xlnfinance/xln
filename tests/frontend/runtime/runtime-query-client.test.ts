@@ -35,27 +35,34 @@ const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => voi
 
 test('runtime query client exposes typed projection reads and bounded cache', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
+  const boundary = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-query-client.ts',
+    'utf8',
+  );
 
   expect(source).toContain('export class RuntimeQueryClient');
-  expect(source).toContain('readHead()');
-  expect(source).toContain('readFrameSummary');
-  expect(source).toContain('readEntities');
-  expect(source).toContain('readViewFrame');
-  expect(source).toContain('readHistoryFrameBatch');
-  expect(source).toContain('readActivity');
-  expect(source).toContain('readSolvencySummary');
-  expect(source).toContain('readSwapHistory');
-  expect(source).toContain('/swap-history`');
-  expect(source).toContain('readReceiptStatus');
-  expect(source).toContain('readRecoveryBundles');
-  expect(source).toContain("'solvency-summary'");
-  expect(source).toContain("`receipt/${encodeURIComponent(id)}`");
-  expect(source).toContain("`recovery/bundles/${encodeURIComponent(key)}`");
-  expect(source).toContain('MAX_QUERY_CACHE_ENTRIES = 200');
+  expect(source).toContain('extends RuntimeQueryClientBoundary<');
+  expect(boundary).toContain('readHead()');
+  expect(boundary).toContain('readFrameSummary');
+  expect(boundary).toContain('readEntities');
+  expect(boundary).toContain('readViewFrame');
+  expect(boundary).toContain('readHistoryFrameBatch');
+  expect(boundary).toContain('readActivity');
+  expect(boundary).toContain('readSolvencySummary');
+  expect(boundary).toContain('readSwapHistory');
+  expect(boundary).toContain('/swap-history`');
+  expect(boundary).toContain('readReceiptStatus');
+  expect(boundary).toContain('readRecoveryBundles');
+  expect(boundary).toContain("'solvency-summary'");
+  expect(boundary).toContain("`receipt/${encodeURIComponent(id)}`");
+  expect(boundary).toContain("`recovery/bundles/${encodeURIComponent(key)}`");
+  expect(boundary).toContain('MAX_QUERY_CACHE_ENTRIES = 200');
   expect(source).toContain('clearRuntimeQueryCache');
   expect(source).toContain('runtimeAdapter.subscribe(() => clearRuntimeQueryCache())');
-  expect(source).toContain('private readonly cacheRuntimeId?: string');
-  expect(source).toContain('this.cacheRuntimeId || handle.id');
+  expect(boundary).toContain('private readonly cacheRuntimeId?: string');
+  expect(boundary).toContain('this.cacheRuntimeId || this.dependencies.readRuntimeId()');
+  expect(boundary).not.toContain('svelte');
+  expect(boundary).not.toContain('@xln/core');
 });
 
 test('remote history cache clears synchronously and rejects a superseded selection', () => {
@@ -469,6 +476,10 @@ test('runtime recovery bundles read through typed query client without cache reu
 test('runtime controller exposes only typed debug projection queries', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
   const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
+  const queryBoundarySource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-query-client.ts',
+    'utf8',
+  );
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const remoteE2ESource = [
@@ -497,8 +508,9 @@ test('runtime controller exposes only typed debug projection queries', () => {
   expect(storeSource).not.toContain("adapter.read<RuntimeReceiptStatus>(`receipt/");
   expect(storeSource).not.toContain("adapter.read<RemoteRuntimeReceiptStatus>(`receipt/");
   expect(queryClientSource).not.toContain('export const runtimeQueryRead');
-  expect(queryClientSource).toContain('private async read<T>');
-  expect(queryClientSource).toContain('private async cachedRead<T>');
+  expect(queryClientSource).toContain('extends RuntimeQueryClientBoundary<');
+  expect(queryBoundarySource).toContain('private async read<T>');
+  expect(queryBoundarySource).toContain('private async cachedRead<T>');
   expect(remoteE2ESource).toContain('RuntimeAdapterDebugSurface');
   expect(remoteE2ESource).toContain('adapter.query.viewFrame');
   expect(remoteE2ESource).not.toContain('adapter.read');

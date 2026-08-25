@@ -19,17 +19,25 @@ import {
   runtimeControllerHandle,
 } from './runtimeControllerStore';
 import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import {
+  RuntimeQueryClient as RuntimeQueryClientBoundary,
+  clearRuntimeQueryCache,
+} from '../../../packages/runtime-client/src/runtime-query-client';
 
-type RuntimeQueryCacheEntry<T> = {
-  height: number;
-  data: T;
-};
+export { clearRuntimeQueryCache };
 
 type RuntimeReadState<T> = {
   loading: boolean;
   data: T | null;
   error: string | null;
   height: number;
+};
+
+export type RuntimeReceiptStatus = {
+  status?: string | null;
+  enqueuedHeight?: number | null;
+  observedHeight?: number | null;
+  note?: string | null;
 };
 
 export type RuntimePeerRecoveryBundleResponse = {
@@ -40,163 +48,41 @@ export type RuntimePeerRecoveryBundleResponse = {
   bundles?: EncryptedRuntimeRecoveryBundleV1[];
 };
 
-const MAX_QUERY_CACHE_ENTRIES = 200;
-const queryCache = new Map<string, RuntimeQueryCacheEntry<unknown>>();
-
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error || 'Runtime query failed');
-
-const normalizeHeight = (height: unknown): number => {
-  const normalized = Math.floor(Number(height || 0));
-  return Number.isFinite(normalized) && normalized >= 0 ? normalized : 0;
+type XlnRuntimeQueryResults = {
+  head: StorageHead;
+  frameSummary: RuntimeAdapterFrameSummary;
+  entities: RuntimeAdapterEntitySummary[];
+  viewFrame: RuntimeAdapterViewFrame;
+  account: StorageAccountDoc;
+  swapHistory: unknown;
+  historyFrameBatch: RuntimeAdapterHistoryFrameBatch;
+  timelineIndex: RuntimeAdapterTimelineIndexPage;
+  activity: RuntimeAdapterActivityPage;
+  solvencySummary: RuntimeAdapterSolvencySummary;
+  checkpoints: Array<{ height?: number }>;
+  receiptStatus: RuntimeReceiptStatus;
+  recoveryBundles: RuntimePeerRecoveryBundleResponse;
 };
 
-const responseHeight = (value: unknown): number | null => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const headValue = record['head'];
-  const head = headValue && typeof headValue === 'object' && !Array.isArray(headValue)
-    ? headValue as Record<string, unknown>
-    : null;
-  const candidates = [record['height'], record['latestHeight'], head?.['latestHeight']]
-    .filter((candidate) => candidate !== undefined && candidate !== null)
-    .map(normalizeHeight);
-  return candidates.length > 0 ? Math.max(...candidates) : null;
-};
-
-const stableQueryValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stableQueryValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, entryValue]) => entryValue !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entryValue]) => [key, stableQueryValue(entryValue)]),
-    );
-  }
-  return value;
-};
-
-const cacheKey = (runtimeId: string, path: string, query?: RuntimeAdapterReadQuery): string =>
-  `${runtimeId}|${path}|${JSON.stringify(stableQueryValue(query ?? {}))}`;
-
-const trimQueryCache = (): void => {
-  while (queryCache.size > MAX_QUERY_CACHE_ENTRIES) {
-    const first = queryCache.keys().next().value;
-    if (!first) return;
-    queryCache.delete(first);
-  }
-};
-
-export const clearRuntimeQueryCache = (): void => {
-  queryCache.clear();
-};
-
-export class RuntimeQueryClient {
+export class RuntimeQueryClient extends RuntimeQueryClientBoundary<
+  RuntimeAdapterReadQuery,
+  XlnRuntimeQueryResults
+> {
   constructor(
-    private readonly resolveAdapter: () => RuntimeAdapter | null = getRuntimeControllerAdapter,
-    private readonly cacheRuntimeId?: string,
-  ) {}
-
-  private async read<T>(path: string, query?: RuntimeAdapterReadQuery): Promise<T> {
-    const adapter = this.resolveAdapter();
-    if (!adapter) throw new Error('Runtime adapter is not connected');
-    return adapter.read<T>(path, query);
-  }
-
-  private async cachedRead<T>(path: string, query?: RuntimeAdapterReadQuery): Promise<T> {
-    const adapter = this.resolveAdapter();
-    if (!adapter) throw new Error('Runtime adapter is not connected');
-    const handle = get(runtimeControllerHandle);
-    const requestHeight = normalizeHeight(query?.atHeight ?? adapter.currentHeight ?? get(runtimeAdapterHeight));
-    const key = cacheKey(this.cacheRuntimeId || handle.id, path, query);
-    const cached = queryCache.get(key) as RuntimeQueryCacheEntry<T> | undefined;
-    if (cached && cached.height === requestHeight) return cached.data;
-    const data = await adapter.read<T>(path, query);
-    const observedHeight = query?.atHeight === undefined ? responseHeight(data) : null;
-    queryCache.set(key, { height: observedHeight ?? requestHeight, data });
-    trimQueryCache();
-    return data;
-  }
-
-  readHead(): Promise<StorageHead> {
-    return this.cachedRead<StorageHead>('head');
-  }
-
-  async readFrameSummary(height: number): Promise<RuntimeAdapterFrameSummary> {
-    const normalized = Math.floor(Number(height));
-    if (!Number.isSafeInteger(normalized) || normalized < 1) {
-      throw new Error('RUNTIME_FRAME_HEIGHT_INVALID');
-    }
-    return this.read<RuntimeAdapterFrameSummary>(`frame/${normalized}`);
-  }
-
-  readEntities(query?: RuntimeAdapterReadQuery): Promise<RuntimeAdapterEntitySummary[]> {
-    return this.cachedRead<RuntimeAdapterEntitySummary[]>('entities', query);
-  }
-
-  readViewFrame(query: RuntimeAdapterReadQuery = {}): Promise<RuntimeAdapterViewFrame> {
-    return this.cachedRead<RuntimeAdapterViewFrame>('view-frame', query);
-  }
-
-  readAccount(
-    entityId: string,
-    counterpartyId: string,
-    query: RuntimeAdapterReadQuery = {},
-  ): Promise<StorageAccountDoc> {
-    const owner = String(entityId || '').trim().toLowerCase();
-    const counterparty = String(counterpartyId || '').trim().toLowerCase();
-    if (!owner || !counterparty) throw new Error('RUNTIME_ACCOUNT_PROJECTION_ID_MISSING');
-    return this.cachedRead<StorageAccountDoc>(
-      `entity/${encodeURIComponent(owner)}/account/${encodeURIComponent(counterparty)}`,
-      query,
-    );
-  }
-
-  /**
-   * Certified Account-frame history is intentionally a separate paged read.
-   * The caller owns its exact unknown-to-view decoder at the UI boundary.
-   */
-  readSwapHistory(
-    entityId: string,
-    counterpartyId: string,
-    query: RuntimeAdapterReadQuery = {},
-  ): Promise<unknown> {
-    const owner = String(entityId || '').trim().toLowerCase();
-    const counterparty = String(counterpartyId || '').trim().toLowerCase();
-    if (!owner || !counterparty) throw new Error('RUNTIME_SWAP_HISTORY_ID_MISSING');
-    return this.cachedRead<unknown>(
-      `entity/${encodeURIComponent(owner)}/account/${encodeURIComponent(counterparty)}/swap-history`,
-      query,
-    );
-  }
-
-  readHistoryFrameBatch(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterHistoryFrameBatch> {
-    if (!query.heights) throw new Error('history-frame-batch requires heights');
-    return this.cachedRead<RuntimeAdapterHistoryFrameBatch>('history-frame-batch', query);
-  }
-
-  readTimelineIndex(query: RuntimeAdapterReadQuery = {}): Promise<RuntimeAdapterTimelineIndexPage> {
-    return this.cachedRead<RuntimeAdapterTimelineIndexPage>('timeline-index', query);
-  }
-
-  readActivity(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterActivityPage> {
-    return this.cachedRead<RuntimeAdapterActivityPage>('activity', query);
-  }
-
-  readSolvencySummary(query: RuntimeAdapterReadQuery = {}): Promise<RuntimeAdapterSolvencySummary> {
-    return this.cachedRead<RuntimeAdapterSolvencySummary>('solvency-summary', query);
-  }
-
-  readCheckpoints(): Promise<Array<{ height?: number }>> {
-    return this.cachedRead<Array<{ height?: number }>>('checkpoints');
-  }
-
-  async readRecoveryBundles(lookupKey: string): Promise<RuntimePeerRecoveryBundleResponse> {
-    const key = String(lookupKey || '').trim();
-    if (!key) throw new Error('REMOTE_RUNTIME_RECOVERY_LOOKUP_KEY_MISSING');
-    return this.read<RuntimePeerRecoveryBundleResponse>(`recovery/bundles/${encodeURIComponent(key)}`);
+    resolveAdapter: () => RuntimeAdapter | null = getRuntimeControllerAdapter,
+    cacheRuntimeId?: string,
+  ) {
+    super({
+      resolveAdapter,
+      readRuntimeId: () => get(runtimeControllerHandle).id,
+      readCurrentHeight: () => get(runtimeAdapterHeight),
+      createEmptyQuery: () => ({}),
+    }, cacheRuntimeId);
   }
 }
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error || 'Runtime query failed');
 
 export const runtimeQueryClient = new RuntimeQueryClient();
 
@@ -214,6 +100,7 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
       activity: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readActivity(query),
       solvencySummary: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readSolvencySummary(query),
       checkpoints: async () => runtimeQueryClient.readCheckpoints(),
+      receiptStatus: async (receiptId: string) => runtimeQueryClient.readReceiptStatus(receiptId),
     },
     status: () => {
       const adapter = getRuntimeControllerAdapter();
