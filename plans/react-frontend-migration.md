@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, SITE, DOCS, WALLET TESTNET, AND WALLET PWA INPUTS IMPLEMENTED`
+**Status:** `IN PROGRESS — SITE/DOCS COMPLETE; WALLET TESTNET, PWA INPUTS, AND CLIENT BOUNDARIES IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -333,7 +333,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `IN PROGRESS — DESTRUCTIVE RESET LIFECYCLE SHARED`
+**Status:** `IN PROGRESS — RESET AND REMOTE REQUEST BOUNDARIES SHARED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -355,6 +355,17 @@ Runtime suspension remains injected by the Svelte adapter and no Runtime or
 financial logic moved into the package. Six focused reset tests cover durable
 deletion, blocked deletion, lifecycle ordering, duplicate execution,
 confirmation, cross-tab publication, and the existing hash-reset integration.
+
+The first `packages/runtime-client` slice now owns framework-neutral WebSocket
+URL normalization, remote Runtime hash decoding, forbidden query detection,
+import-parameter removal, capability-role validation, and the pure consent
+decision. The canonical Svelte wallet remains the live adapter for
+session-scoped capability persistence, history replacement, RuntimeController
+activation, and recovery imports; no Runtime state or transition logic moved
+into the package. Seven direct boundary tests cover URL normalization,
+authenticated and stored-authority links, missing capability prompts, query
+rejection before authority resolution, import stripping, and consent. The
+wallet local check covers 424 files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
@@ -491,7 +502,9 @@ any mismatch. Never compile on production.
 2. Continue WP5/WP6 with the wallet boot, shell, canonical Brain Vault and
    mnemonic identity choices, onboarding, recovery, settings, and diagnostics;
    keep Runtime projections in shared client adapters and do not move
-   transition logic into the frontend.
+   transition logic into the frontend. Remote link decoding and consent are
+   ready in `packages/runtime-client`; boot activation and projections remain
+   with the canonical Svelte adapter until a complete React consumer exists.
 3. Wire PWA/native consumers to the assembled candidate after the React
    `/app` boot flow exists; wallet static/PWA input ownership is ready and does
    not require production activation.

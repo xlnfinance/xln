@@ -72,9 +72,18 @@ export const CAPABILITIES = [
     id: 'wallet-runtime-discovery',
     owner: 'wallet',
     routes: ['/app'],
-    currentSources: ['frontend/src/lib/utils/runtime/runtimeConnection.ts'],
-    behavior: ['Runtime discovery', 'remote attachment', 'reconnect and failure states'],
-    status: 'unstarted',
+    currentSources: [
+      'frontend/packages/runtime-client/src/remote-runtime-request.ts',
+      'frontend/packages/runtime-client/src/ws-url.ts',
+      'frontend/src/lib/utils/runtime/runtimeConnection.ts',
+    ],
+    behavior: [
+      'Runtime discovery',
+      'validated hash bootstrap and query rejection',
+      'explicit remote attachment consent',
+      'reconnect and failure states',
+    ],
+    status: 'in_progress',
   },
   {
     id: 'wallet-recovery',

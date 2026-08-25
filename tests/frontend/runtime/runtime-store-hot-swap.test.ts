@@ -193,21 +193,32 @@ test('remote adapter resolver restores active auth from the remote runtime regis
 });
 
 test('direct remote runtime URL reuses saved capability before showing paste prompt', () => {
-  const source = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
-  const readStart = source.indexOf('export function readRemoteRuntimeRequestFromUrl');
-  const payloadStart = source.indexOf('export function runtimeImportPayloadFromParams', readStart);
+  const adapter = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
+  const boundary = readFileSync('frontend/packages/runtime-client/src/remote-runtime-request.ts', 'utf8');
+  const readStart = adapter.indexOf('export function readRemoteRuntimeRequestFromUrl');
+  const readEnd = adapter.indexOf('export function readRemoteRuntimeImportPayloadFromHash', readStart);
   expect(readStart).toBeGreaterThan(0);
-  expect(payloadStart).toBeGreaterThan(readStart);
-  const readSource = source.slice(readStart, payloadStart);
+  expect(readEnd).toBeGreaterThan(readStart);
+  const readSource = adapter.slice(readStart, readEnd);
 
   expect(readSource).toContain('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
   expect(readSource).toContain('window.location.hash');
-  expect(readSource).not.toContain("params.get('token')");
-  expect(readSource).toContain('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()');
-  expect(readSource).toContain('const requiresAuthPaste = !authKey');
-  expect(readSource).not.toContain('if (keyParam) stripRemoteRuntimeParamsFromHistory()');
-  expect(readSource.indexOf('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()'))
-    .toBeLessThan(readSource.indexOf('const requiresAuthPaste = !authKey'));
+  expect(readSource).toContain('stripRemoteRuntimeParamsFromHistory()');
+  expect(readSource).toContain('decodeRemoteRuntimeRequest(');
+  expect(readSource).toContain('resolveStoredAuthKey: resolveStoredRemoteRuntimeAuthKey');
+
+  const decodeStart = boundary.indexOf('export const decodeRemoteRuntimeRequest =');
+  const decodeEnd = boundary.indexOf('export const runtimeImportPayloadFromParams', decodeStart);
+  expect(decodeStart).toBeGreaterThan(0);
+  expect(decodeEnd).toBeGreaterThan(decodeStart);
+  const decodeSource = boundary.slice(decodeStart, decodeEnd);
+  expect(decodeSource).toContain("hash.get('token')");
+  expect(decodeSource).toContain('dependencies.resolveStoredAuthKey(wsUrl).trim()');
+  expect(decodeSource).toContain('const requiresAuthPaste = !authKey');
+  expect(decodeSource).not.toContain('window');
+  expect(decodeSource).not.toContain('Storage');
+  expect(decodeSource.indexOf('dependencies.resolveStoredAuthKey(wsUrl).trim()'))
+    .toBeLessThan(decodeSource.indexOf('const requiresAuthPaste = !authKey'));
 });
 
 test('remote projection never materializes fake RuntimeReplica snapshots', () => {

@@ -12,6 +12,7 @@
     "src/**/*.tsx",
     "../../config/surfaces.ts",
     "../../packages/browser/src/**/*.ts",
+    "../../packages/runtime-client/src/**/*.ts",
     "../../packages/ui/src/**/*.ts",
     "../../packages/ui/src/**/*.tsx"
   ]

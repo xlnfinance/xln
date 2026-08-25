@@ -50,12 +50,14 @@ describe('frontend capability inventory', () => {
       'docs-reader',
       'wallet-shell-and-identity',
       'wallet-browser-lifecycle',
+      'wallet-runtime-discovery',
       'wallet-native-and-offline',
     ].includes(id)).every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.status).toBe('in_progress');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-native-and-offline')?.status).toBe('in_progress');
   });
 

@@ -16,30 +16,34 @@ import {
   waitForActiveTabLockLoss,
 } from '../control/activeTabLock';
 import {
-  REMOTE_RUNTIME_IMPORT_HASH_PARAM,
-  REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
   persistRemoteRuntimeImports,
   remoteRuntimeIdForWsUrl,
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
 } from '../onboarding/remoteRuntimeImport';
-import { normalizeWsConnectUrl } from './wsUrl';
+import {
+  decodeRemoteRuntimeRequest,
+  hasRemoteRuntimeQueryBootstrap,
+  remoteAccessFromAuthKey,
+  remoteRuntimeRequestRequiresConsent,
+  removeRemoteRuntimeImportParams,
+  runtimeImportPayloadFromHash,
+  runtimeImportSourceFromHash,
+} from '../../../../packages/runtime-client/src/remote-runtime-request';
+import type { RemoteRuntimeRequest } from '../../../../packages/runtime-client/src/remote-runtime-request';
 
-export const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
+export {
+  REMOTE_ACCEPT_PREFIX,
+  describeAuthKey,
+  hostLabelForWsUrl,
+  normalizeRuntimeWsUrl,
+  remoteAcceptKey,
+  remoteAccessFromAuthKey,
+  runtimeImportPayloadFromParams,
+  runtimeImportSourceFromParams,
+} from '../../../../packages/runtime-client/src/remote-runtime-request';
+export type { RemoteRuntimeRequest } from '../../../../packages/runtime-client/src/remote-runtime-request';
 
-export type RemoteRuntimeRequest = {
-  wsUrl: string;
-  authKey: string;
-  hostLabel: string;
-  keyLabel: string;
-  acceptKey: string;
-  requiresAuthPaste?: boolean;
-};
-
-const RUNTIME_PARAM_KEYS = [
-  REMOTE_RUNTIME_IMPORT_HASH_PARAM,
-  REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
-];
 const PROJECTION_RUNTIME_CONNECT_TIMEOUT_MS = 6_000;
 const PROJECTION_RUNTIME_REQUEST_TIMEOUT_MS = 5_000;
 const PROJECTION_RUNTIME_RECONNECT_MAX_MS = 2_000;
@@ -78,41 +82,6 @@ const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
   await projectionRuntimeLockPromise;
 };
 
-export function normalizeRuntimeWsUrl(value: string): string {
-  const parsed = new URL(normalizeWsConnectUrl(String(value || '').trim()));
-  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-    throw new Error('REMOTE_RUNTIME_WS_REQUIRED');
-  }
-  return parsed.toString();
-}
-
-export function describeAuthKey(key: string): string {
-  if (!key) return 'no key';
-  if (key.startsWith('xlnra1.full.') || key.startsWith('xlnra1.admin.')) return 'full capability';
-  return `${key.slice(0, 6)}...${key.slice(-4)}`;
-}
-
-export function hostLabelForWsUrl(wsUrl: string): string {
-  try {
-    const parsed = new URL(wsUrl);
-    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
-  } catch {
-    return wsUrl;
-  }
-}
-
-export function remoteAcceptKey(wsUrl: string, authKey: string): string {
-  return `${REMOTE_ACCEPT_PREFIX}${wsUrl}|${authKey.slice(0, 16)}|${authKey.slice(-16)}`;
-}
-
-export function remoteAccessFromAuthKey(authKey: string): 'admin' {
-  const role = String(authKey || '').split('.')[1]?.toLowerCase() || '';
-  if (role !== 'admin' && role !== 'full' && role !== 'write') {
-    throw new Error('REMOTE_RUNTIME_ADMIN_CAPABILITY_REQUIRED');
-  }
-  return 'admin';
-}
-
 /**
  * Persist a runtime adapter session opened outside the URL-import flow (the
  * /health adapter panel). Same confinement contract as the import flow: the
@@ -130,57 +99,24 @@ export function persistRuntimeAdapterSession(wsUrl: string, authKey: string): vo
 
 export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
   if (typeof window === 'undefined') return null;
-  const query = new URLSearchParams(window.location.search);
-  if (RUNTIME_PARAM_KEYS.some(key => query.has(key))) {
+  if (hasRemoteRuntimeQueryBootstrap(window.location.search)) {
     stripRemoteRuntimeParamsFromHistory();
     throw new Error('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
   }
-  const hash = new URLSearchParams(window.location.hash.replace(/^#\??/, ''));
-  const mode = String(hash.get('runtime') || hash.get('adapter') || '').trim().toLowerCase();
-  const wsParam = String(hash.get('ws') || hash.get('runtimeWs') || '').trim();
-  if (mode !== 'remote' || !wsParam) return null;
-  const keyParam = String(
-    hash.get('token') || hash.get('authKey') || hash.get('key') || hash.get('auth') || '',
-  ).trim();
-  const wsUrl = normalizeRuntimeWsUrl(wsParam);
-  const authKey = keyParam.startsWith('xlnra1.')
-    ? keyParam
-    : resolveStoredRemoteRuntimeAuthKey(wsUrl).trim();
-  const requiresAuthPaste = !authKey;
-  return {
-    wsUrl,
-    authKey,
-    hostLabel: hostLabelForWsUrl(wsUrl),
-    keyLabel: requiresAuthPaste ? 'capability must be pasted' : describeAuthKey(authKey),
-    acceptKey: remoteAcceptKey(wsUrl, authKey),
-    requiresAuthPaste,
-  };
-}
-
-export function runtimeImportPayloadFromParams(params: URLSearchParams): string {
-  return String(params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) || '').trim();
-}
-
-export function runtimeImportSourceFromParams(params: URLSearchParams): string {
-  return String(params.get(REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM) || '').trim();
+  return decodeRemoteRuntimeRequest(
+    { search: window.location.search, hash: window.location.hash },
+    { resolveStoredAuthKey: resolveStoredRemoteRuntimeAuthKey },
+  );
 }
 
 export function readRemoteRuntimeImportPayloadFromHash(): string {
   if (typeof window === 'undefined') return '';
-  const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-  const hash = rawHash.trim();
-  if (!hash) return '';
-  const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-  return runtimeImportPayloadFromParams(params);
+  return runtimeImportPayloadFromHash(window.location.hash);
 }
 
 export function readRemoteRuntimeImportSourceFromHash(): string {
   if (typeof window === 'undefined') return '';
-  const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-  const hash = rawHash.trim();
-  if (!hash) return '';
-  const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-  return runtimeImportSourceFromParams(params);
+  return runtimeImportSourceFromHash(window.location.hash);
 }
 
 export function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
@@ -218,30 +154,12 @@ export function hasAcceptedRemoteRuntime(request: RemoteRuntimeRequest): boolean
 }
 
 export function remoteRuntimeRequiresConsent(request: RemoteRuntimeRequest): boolean {
-  return request.requiresAuthPaste === true || !hasAcceptedRemoteRuntime(request);
+  return remoteRuntimeRequestRequiresConsent(request, hasAcceptedRemoteRuntime(request));
 }
 
 export function stripRemoteRuntimeParamsFromHistory(): void {
   if (typeof window === 'undefined') return;
-  const url = new URL(window.location.href);
-  for (const key of RUNTIME_PARAM_KEYS) {
-    url.searchParams.delete(key);
-  }
-  const rawHash = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
-  if (rawHash.trim()) {
-    const hashParams = new URLSearchParams(rawHash);
-    let changed = false;
-    for (const key of RUNTIME_PARAM_KEYS) {
-      if (!hashParams.has(key)) continue;
-      hashParams.delete(key);
-      changed = true;
-    }
-    if (changed) {
-      const nextHash = hashParams.toString();
-      url.hash = nextHash ? `#${nextHash}` : '';
-    }
-  }
-  const nextPath = `${url.pathname}${url.search}${url.hash}`;
+  const nextPath = removeRemoteRuntimeImportParams(window.location.href);
   try {
     replaceState(nextPath, {});
   } catch {
