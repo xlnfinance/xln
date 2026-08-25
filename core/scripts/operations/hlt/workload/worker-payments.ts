@@ -324,11 +324,71 @@ export const waitForHubSettlement = async (
   );
 };
 
+/**
+ * One hub and the users that pay through it.
+ *
+ * Payments stay inside a shard: a sender and its receiver share a hub, so
+ * adding a hub adds a whole independent path rather than more load on one.
+ */
+type PaymentShard = Readonly<{
+  label: string;
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  users: LaneRuntime[];
+  walPath: string;
+}>;
+
+/** Lanes per shard, remainder to the first, every shard at least one. */
+const shardLaneCounts = (lanes: number, shards: number): number[] => {
+  if (shards < 1) throw new Error('HLT_PAYMENT_SHARD_COUNT_INVALID');
+  if (lanes < shards) throw new Error(`HLT_PAYMENT_LANES_BELOW_SHARDS:${lanes}:${shards}`);
+  const base = Math.floor(lanes / shards);
+  const remainder = lanes - base * shards;
+  return Array.from({ length: shards }, (_, index) => base + (index < remainder ? 1 : 0));
+};
+
+/**
+ * One settlement series for the whole run, from one series per shard.
+ *
+ * Every shard samples its own hub on its own clock, so the sum is taken at
+ * each observed instant using each shard's most recent sample. The result is
+ * monotone because every input series is, and it reaches the run's totals at
+ * the moment the slowest shard does.
+ */
+const mergeSettlementSamples = (
+  perShard: readonly (readonly PaymentSettlementSample[])[],
+): PaymentSettlementSample[] => {
+  if (perShard.length === 1) return [...perShard[0]!];
+  const instants = [...new Set(perShard.flatMap(series => series.map(sample => sample.elapsedMs)))]
+    .sort((left, right) => left - right);
+  const cursors = perShard.map(() => 0);
+  const latest = perShard.map(() => null as PaymentSettlementSample | null);
+  return instants.map(elapsedMs => {
+    perShard.forEach((series, shardIndex) => {
+      while (cursors[shardIndex]! < series.length && series[cursors[shardIndex]!]!.elapsedMs <= elapsedMs) {
+        latest[shardIndex] = series[cursors[shardIndex]!]!;
+        cursors[shardIndex] = cursors[shardIndex]! + 1;
+      }
+    });
+    const sum = (read: (sample: PaymentSettlementSample) => number): number =>
+      latest.reduce((total, sample) => total + (sample === null ? 0 : read(sample)), 0);
+    return {
+      elapsedMs,
+      runtimeHeight: sum(sample => sample.runtimeHeight),
+      acceptedPayments: sum(sample => sample.acceptedPayments),
+      completedPayments: sum(sample => sample.completedPayments),
+      lockBookOpen: sum(sample => sample.lockBookOpen),
+    };
+  });
+};
+
 export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> => {
   const manifestPath = join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json');
   const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown);
-  const hubLabel = args.plan?.economy.hubLabels[0] ?? 'H1';
+  const hubLabels = args.plan?.economy.hubLabels ?? ['H1'];
+  const hubLabel = hubLabels[0] ?? 'H1';
   const hub = await connectRuntime(entryByLabel(entries, hubLabel));
+  const shards: PaymentShard[] = [];
   let users: LaneRuntime[] = [];
   try {
     const hubIdentity = selectLocalHubIdentity(
@@ -337,6 +397,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       31_337,
     );
     const lanes = args.lanes;
+    const laneCounts = shardLaneCounts(lanes, hubLabels.length);
     const amountRange = args.plan?.economy.paymentAmountRange ?? HLT_DEFAULT_PAYMENT_AMOUNT_RANGE;
     const perSender = Array.from(
       { length: lanes },
@@ -349,25 +410,52 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         `HLT_PAYMENT_FAUCET_INSUFFICIENT:required=${requiredFaucet}:available=${HLT_FAUCET_AMOUNT}`,
       );
     }
-    const setup = await setupParallelLoadLanes({
-      workDir: args.workDir,
-      portBase: args.portBase,
-      hub,
-      hubIdentity,
-      lanes,
-      laneOffset: args.laneOffset,
-      role: 'taker',
-    });
-    users = setup.runtimes;
-
-    await waitForRoutableReceivers(
-      users,
-      hubIdentity.entityId,
-      users.map((_lane, senderIndex) => Array.from(
-        { length: args.rounds },
-        (_, round) => users[paymentReceiverIndexSamePopulation(senderIndex, round, users.length)]!.identity.entityId,
-      )),
+    // One population per hub, offset so lane identities and ports never
+    // overlap. Built together: a shard provisioned first would otherwise sit
+    // idle for as long as the last one takes, and its host connections with it.
+    const laneOffsets = laneCounts.reduce<number[]>(
+      (offsets, count, index) => [...offsets, (offsets[index] ?? args.laneOffset) + count],
+      [args.laneOffset],
     );
+    const built = await Promise.all(hubLabels.map(async (label, shardIndex) => {
+      const shardHub = shardIndex === 0 ? hub : await connectRuntime(entryByLabel(entries, label));
+      const shardIdentity = shardIndex === 0
+        ? hubIdentity
+        : selectLocalHubIdentity(
+          decodeEntitySummaries(await readWithRateLimitRetry<unknown>(shardHub, 'entities')),
+          shardHub.adapter.runtimeId,
+          31_337,
+        );
+      const setup = await setupParallelLoadLanes({
+        workDir: args.workDir,
+        portBase: args.portBase,
+        hub: shardHub,
+        hubIdentity: shardIdentity,
+        lanes: laneCounts[shardIndex]!,
+        laneOffset: laneOffsets[shardIndex]!,
+        role: 'taker',
+      });
+      return {
+        label,
+        hub: shardHub,
+        hubIdentity: shardIdentity,
+        users: setup.runtimes,
+        walPath: resolveWalPath(join(args.workDir, 'prod-mesh', label.toLowerCase())),
+      } satisfies PaymentShard;
+    }));
+    shards.push(...built);
+    users = built.flatMap(shard => shard.users);
+
+    await Promise.all(shards.map(shard => waitForRoutableReceivers(
+      shard.users,
+      shard.hubIdentity.entityId,
+      shard.users.map((_lane, senderIndex) => Array.from(
+        { length: args.rounds },
+        (_, round) => shard.users[
+          paymentReceiverIndexSamePopulation(senderIndex, round, shard.users.length)
+        ]!.identity.entityId,
+      )),
+    )));
 
     await stopHltHubBackgroundIo(args);
     await Promise.all([
@@ -376,12 +464,18 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     ]);
 
     await exportReplayBaseSnapshotIfConfigured(hub);
-    const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
-    const walBytesBefore = directoryBytes(walPath);
+    const walBytesBefore = shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0);
     const hubDurableBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
-    const hubCountersBefore = decodeHubSettlementCounters(
-      await readWithRateLimitRetry<unknown>(hub, `entity/${hubIdentity.entityId}/settlement-counters`),
-    );
+    const countersBefore = await Promise.all(shards.map(async shard => decodeHubSettlementCounters(
+      await readWithRateLimitRetry<unknown>(shard.hub, `entity/${shard.hubIdentity.entityId}/settlement-counters`),
+    )));
+    const hubCountersBefore = {
+      completedPayments: countersBefore.reduce((sum, row) => sum + row.completedPayments, 0),
+      acceptedPayments: countersBefore.reduce((sum, row) => sum + row.acceptedPayments, 0),
+    };
+    // Global lane index -> the shard that lane pays through.
+    const laneShard = shards.flatMap((shard, shardIndex) =>
+      shard.users.map((_lane, localIndex) => ({ shard, shardIndex, localIndex })));
 
     const startedAt = performance.now();
     let enqueueAckElapsedMs = 0;
@@ -393,34 +487,55 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       rounds: args.rounds,
       cadenceMs: args.cadenceMs,
     });
+    // Operations due within the same window travel in one wave. The pacer
+    // gives every user its own instant, which at high offered rates means one
+    // HTTP request per payment; the load host's accept queue, not the mesh,
+    // was what gave out first. Payments themselves are unchanged.
+    const submitWindowMs = Number(process.env['XLN_HLT_SUBMIT_WINDOW_MS'] ?? '0');
+    const batches: Array<typeof schedule> = [];
+    let batchParticipants = new Set<number>();
     for (const operation of schedule) {
+      const open = batches.at(-1);
+      const first = open?.[0];
+      // A wave carries one input per Runtime, so a user that already appears
+      // closes the batch even inside the window.
+      const fits = open !== undefined && first !== undefined
+        && operation.dueOffsetMs - first.dueOffsetMs <= submitWindowMs
+        && !batchParticipants.has(operation.participantIndex);
+      if (fits && open) open.push(operation);
+      else {
+        batches.push([operation]);
+        batchParticipants = new Set<number>();
+      }
+      batchParticipants.add(operation.participantIndex);
+    }
+    for (const [batchIndex, batch] of batches.entries()) {
+      const operation = batch[0]!;
       const scheduledAt = startedAt + operation.dueOffsetMs;
       const waitMs = scheduledAt - performance.now();
       if (waitMs > 0) await sleep(waitMs);
       if (submissionFailure !== null) throw submissionFailure;
       const waveStartedAt = performance.now();
-      const lane = users[operation.participantIndex]!;
-      const receiver = users[paymentReceiverIndexSamePopulation(
-        operation.participantIndex,
-        operation.round,
-        users.length,
-      )]!;
-      const entityInput = buildRoundPayment(
-        lane.identity,
-        hubIdentity.entityId,
-        receiver.identity,
-        operation.participantIndex,
-        operation.round,
-        amountRange,
-      );
-      if (entityInput.entityTxs?.length !== 1) throw new Error('HLT_PAYMENT_TX_MISSING');
-      const pending = queueLaneRuntimeInputWave(operation.ordinal, [{
-        lane,
-        input: {
-          runtimeTxs: [],
-          entityInputs: [entityInput],
-        },
-      }]).then(
+      const submissions = batch.map(entry => {
+        const placement = laneShard[entry.participantIndex]!;
+        const lane = placement.shard.users[placement.localIndex]!;
+        const receiver = placement.shard.users[paymentReceiverIndexSamePopulation(
+          placement.localIndex,
+          entry.round,
+          placement.shard.users.length,
+        )]!;
+        const entityInput = buildRoundPayment(
+          lane.identity,
+          placement.shard.hubIdentity.entityId,
+          receiver.identity,
+          entry.participantIndex,
+          entry.round,
+          amountRange,
+        );
+        if (entityInput.entityTxs?.length !== 1) throw new Error('HLT_PAYMENT_TX_MISSING');
+        return { lane, input: { runtimeTxs: [], entityInputs: [entityInput] } };
+      });
+      const pending = queueLaneRuntimeInputWave(batchIndex, submissions).then(
         () => ({ ackMs: Math.max(0, Math.ceil(performance.now() - waveStartedAt)), error: null }),
         error => {
           submissionFailure ??= error;
@@ -428,7 +543,9 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
         },
       );
       pendingSubmissions.push(pending);
-      roundSubmissionLagMs.push(Math.max(0, Math.ceil(performance.now() - scheduledAt)));
+      // One lag per payment: the report counts payments, not waves.
+      const lagMs = Math.max(0, Math.ceil(performance.now() - scheduledAt));
+      for (let index = 0; index < batch.length; index += 1) roundSubmissionLagMs.push(lagMs);
     }
     const sourceDispatchFinishedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const submissionResults = await Promise.all(pendingSubmissions);
@@ -440,17 +557,25 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       Math.ceil(performance.now() - startedAt),
     );
     const submittedPayments = lanes * args.rounds;
-    const paymentSettlement = await waitForHubSettlement(
-      hub,
-      hubIdentity.entityId,
-      hubCountersBefore.completedPayments,
-      hubCountersBefore.acceptedPayments,
-      submittedPayments,
+    // Each shard settles against its own hub; the run is done when the
+    // slowest one is, and the rates below are the sum over shards.
+    const settlements = await Promise.all(shards.map((shard, shardIndex) => waitForHubSettlement(
+      shard.hub,
+      shard.hubIdentity.entityId,
+      countersBefore[shardIndex]!.completedPayments,
+      countersBefore[shardIndex]!.acceptedPayments,
+      shard.users.length * args.rounds,
       startedAt,
-    );
-    const hubCountersAfter = paymentSettlement.counters;
-    const hubIngressElapsedMs = paymentSettlement.hubIngressElapsedMs;
-    const deliveredElapsedMs = paymentSettlement.deliveredElapsedMs;
+    )));
+    const hubCountersAfter = {
+      completedPayments: settlements.reduce((sum, row) => sum + row.counters.completedPayments, 0),
+      acceptedPayments: settlements.reduce((sum, row) => sum + row.counters.acceptedPayments, 0),
+    };
+    const hubIngressElapsedMs = Math.max(...settlements.map(row => row.hubIngressElapsedMs));
+    const deliveredElapsedMs = Math.max(...settlements.map(row => row.deliveredElapsedMs));
+    const paymentSettlement = {
+      settlementSamples: mergeSettlementSamples(settlements.map(row => row.settlementSamples)),
+    };
     const [hubIo, laneIo] = await Promise.all([
       assertHltHubProcessIsolation(args),
       assertLaneHostSocketCounterCoverage(users),
@@ -488,7 +613,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       settlementSamples: paymentSettlement.settlementSamples,
       roundSubmissionLagMs,
       walBytesBefore,
-      walBytesAfter: directoryBytes(walPath),
+      walBytesAfter: shards.reduce((total, shard) => total + directoryBytes(shard.walPath), 0),
       hubDurableBefore,
       hubDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest')),
       environment: collectHltEnvironmentManifest(),
@@ -505,6 +630,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     );
   } finally {
     await stopLaneRuntimes(users);
-    hub.adapter.disconnect();
+    for (const shard of shards) shard.hub.adapter.disconnect();
+    if (shards.length === 0) hub.adapter.disconnect();
   }
 };
