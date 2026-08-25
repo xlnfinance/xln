@@ -370,9 +370,20 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
 
   hasPreparedAccountInput(accountId: string, input: AccountInput): boolean {
     const normalized = normalizeEntityId(accountId);
-    return this.inboundRequests.slice(this.inboundCursor).some(request =>
-      normalizeEntityId(request.account.proofHeader.toEntity) === normalized
-      && safeStringify(request.input) === safeStringify(input));
+    // Serialize the needle at most once, and only if no arrival is the very
+    // object the Entity is holding. The frame hands the engine the same
+    // `entityTx.data` references it later dispatches, so the scan is normally
+    // a pointer compare over a queue that can be hundreds of arrivals long.
+    let serializedInput: string | undefined;
+    for (let index = this.inboundCursor; index < this.inboundRequests.length; index += 1) {
+      const request = this.inboundRequests[index];
+      if (request === undefined) continue;
+      if (normalizeEntityId(request.account.proofHeader.toEntity) !== normalized) continue;
+      if (request.input === input) return true;
+      serializedInput ??= safeStringify(input);
+      if (safeStringify(request.input) === serializedInput) return true;
+    }
+    return false;
   }
 
   finishEntityAccountFrame(): void {
@@ -437,7 +448,12 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     }
     const expectedAccount = normalizeEntityId(expected.account.proofHeader.toEntity);
     const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
-    if (expectedAccount !== actualAccount || safeStringify(expected.input) !== safeStringify(request.input)) {
+    // Identity is the common case and is exactly as strong as comparing the
+    // canonical bytes: both sides hold the same `entityTx.data`. Serializing
+    // is the fallback for a frame that rebuilt its inputs.
+    const sameInput = expected.input === request.input
+      || safeStringify(expected.input) === safeStringify(request.input);
+    if (expectedAccount !== actualAccount || !sameInput) {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ORDER_MISMATCH:${expectedAccount}:${actualAccount}`);
     }
     this.inboundRequests[this.inboundCursor] = { ...expected, account: request.account };
