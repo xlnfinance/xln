@@ -657,7 +657,7 @@ impl StatefulConsensusEngine {
     /// restored to exactly where the runtime holds the account, and its pending
     /// proposal is replayed rather than trusted.
     pub fn upsert_accounts(&mut self, seeds: Vec<AccountSeed>) -> Result<[u8; 32], BatchError> {
-                let mut entries = Vec::with_capacity(seeds.len());
+        let mut entries = Vec::with_capacity(seeds.len());
         let mut seen = BTreeSet::new();
         for seed in seeds {
             // Two seeds for one account in a wave is a caller bug: one of them
@@ -699,7 +699,7 @@ impl StatefulConsensusEngine {
         &mut self,
         requests: Vec<(AccountId, Vec<xln_rscore_engine::AccountTx>)>,
     ) -> Result<[u8; 32], BatchError> {
-                let mut merged: BTreeMap<AccountId, Vec<xln_rscore_engine::AccountTx>> = BTreeMap::new();
+        let mut merged: BTreeMap<AccountId, Vec<xln_rscore_engine::AccountTx>> = BTreeMap::new();
         for (account_id, txs) in requests {
             merged.entry(account_id).or_default().extend(txs);
         }
@@ -736,16 +736,37 @@ impl StatefulConsensusEngine {
         j_height: u64,
         selected: Option<&[AccountId]>,
     ) -> Result<Vec<ProposalRow>, BatchError> {
-                let candidates: Vec<(AccountId, AccountConsensus)> = match selected {
-            Some(ids) => ids
-                .iter()
-                .filter_map(|account_id| {
-                    self.accounts
-                        .get(account_id.as_bytes())
-                        .map(|account| (*account_id, account.clone()))
-                })
-                .filter(|(_, account)| proposable(account))
-                .collect(),
+        let mut idle = Vec::new();
+        let candidates: Vec<(AccountId, AccountConsensus)> = match selected {
+            Some(ids) => {
+                let mut seen = BTreeSet::new();
+                let mut candidates = Vec::new();
+                for account_id in ids {
+                    if !seen.insert(*account_id) {
+                        return Err(BatchError::DuplicateAccount(*account_id));
+                    }
+                    let account = self.accounts.get(account_id.as_bytes()).ok_or(
+                        BatchError::AccountNotFound {
+                            input_index: 0,
+                            account_id: *account_id,
+                        },
+                    )?;
+                    if proposable(account) {
+                        candidates.push((*account_id, account.clone()));
+                    } else {
+                        // A selected worklist is a request/response contract:
+                        // every named Account gets one row. The Entity cannot
+                        // consult its stale pre-outbound replica to predict
+                        // whether Rust's post-inbound Account is proposable.
+                        idle.push(ProposalRow {
+                            account_id: *account_id,
+                            proposed: None,
+                            dropped: Vec::new(),
+                        });
+                    }
+                }
+                candidates
+            }
             None => self
                 .accounts
                 .iter()
@@ -753,7 +774,10 @@ impl StatefulConsensusEngine {
                 .map(|(key, account)| (AccountId::from_key(key), account.clone()))
                 .collect(),
         };
-        self.propose_candidates(candidates, timestamp, j_height)
+        let mut rows = self.propose_candidates(candidates, timestamp, j_height)?;
+        rows.append(&mut idle);
+        rows.sort_by_key(|row| *row.account_id.as_bytes());
+        Ok(rows)
     }
 
     /// Build, hash and sign one clock's worth of proposals. Split out of
@@ -834,7 +858,7 @@ impl StatefulConsensusEngine {
         clock: ReceiverClock,
         rows: Vec<AccountInputRow>,
     ) -> Result<Vec<AccountInputResult>, BatchError> {
-                if rows.is_empty() {
+        if rows.is_empty() {
             return Ok(Vec::new());
         }
         for pair in rows.windows(2) {
@@ -1696,7 +1720,8 @@ impl StatefulConsensusEngine {
             )
         };
         let include_post_accounts = self.open_wave()?.post_accounts;
-        let (leaves, post_accounts) = self.materialize_wave_rows(&touched, include_post_accounts)?;
+        let (leaves, post_accounts) =
+            self.materialize_wave_rows(&touched, include_post_accounts)?;
         self.open_wave_mut()?.sealed = true;
         Ok(WaveResult {
             candidate_id: self
@@ -1742,12 +1767,12 @@ impl StatefulConsensusEngine {
                     .as_ref()
                     .and_then(|pending| pending.base_accounts.get(account_id.as_bytes()));
                 post_accounts.push(
-                    account_rows(*account_id, account, previous, leaf, signer_id).map_err(|error| {
-                        BatchError::AccountsTree {
+                    account_rows(*account_id, account, previous, leaf, signer_id).map_err(
+                        |error| BatchError::AccountsTree {
                             account_id: *account_id,
                             detail: error.to_string(),
-                        }
-                    })?,
+                        },
+                    )?,
                 );
             }
         }
@@ -2280,7 +2305,7 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             outputs,
             events,
             rolled_back,
-            committed_frame,
+            committed_frame: *committed_frame,
             ack_dispute,
         },
         IncomingOutcome::CollisionIgnored { height, queued } => {
@@ -2759,7 +2784,10 @@ fn proposable(account: &AccountConsensus) -> bool {
 
 /// The leaf commits the consensus state too, so a queued transaction or a new
 /// frame moves the tree even when the financial root did not change.
-pub(crate) fn leaf_root(account_id: AccountId, account: &AccountConsensus) -> Result<[u8; 32], BatchError> {
+pub(crate) fn leaf_root(
+    account_id: AccountId,
+    account: &AccountConsensus,
+) -> Result<[u8; 32], BatchError> {
     account
         .entity_account_leaf()
         .map_err(|error| BatchError::AccountsTree {

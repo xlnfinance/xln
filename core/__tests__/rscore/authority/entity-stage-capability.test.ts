@@ -136,13 +136,87 @@ describe('pre-TypeScript Account authority capability', () => {
           }],
         });
       },
-    )).rejects.toThrow(`ACCOUNT_AUTHORITY_CUTOVER_EXECUTOR_REQUIRED:${OWNER}`);
+    )).rejects.toThrow(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${OWNER}`);
 
     expect(account.mempool).toEqual([]);
     // Cutover stages are accepted or discarded with the Entity input, by the
     // runtime that decided; the stage itself never discards its own work.
     expect(lifecycle.discardCount()).toBe(0);
     expect(env.accountAuthorityEntityStage).toBeUndefined();
+  });
+
+  test('cutover visits the Account engine exactly once inbound and once outbound', async () => {
+    const account = makeAccount(OWNER, PEER);
+    let inboundBatches = 0;
+    let outboundBatches = 0;
+    let outboundAdmissions = 0;
+    const provider: AccountAuthorityEntityStageProvider = {
+      async beginEntityStage() {
+        throw new Error('TEST_PER_OPERATION_STAGE_MUST_NOT_OPEN');
+      },
+      async executeAccountInboundBatch(batch) {
+        inboundBatches += 1;
+        expect(batch.requests).toHaveLength(0);
+        return [];
+      },
+      async executeAccountOutboundBatch(batch) {
+        outboundBatches += 1;
+        outboundAdmissions = batch.admissions.length;
+        expect(batch.proposals).toHaveLength(0);
+        return [];
+      },
+    };
+    const stage = createAccountAuthorityEntityStage(options(provider, 'cutover'));
+    stage.bindCanonicalInput(canonicalInput());
+
+    await stage.beginEntityAccountFrame?.({
+      ownerEntityId: OWNER,
+      entityTxs: [],
+      accounts: new Map([[PEER, account]]),
+      accountForWrite: accountId => accountId === PEER ? account : undefined,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    const admitted = await stage.executeAccountInput({
+      collectorFrameId: 'test-frame',
+      account,
+      input: {
+        kind: 'enqueue',
+        txs: [{
+          type: 'direct_payment',
+          data: {
+            tokenId: 1,
+            amount: 1n,
+            route: [PEER],
+            fromEntityId: OWNER,
+            toEntityId: PEER,
+            description: 'two-batch contract',
+          },
+        }],
+      },
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    expect(admitted?.ok).toBe(true);
+    await stage.prepareEntityAccountOutbound?.({
+      accounts: new Map([[PEER, account]]),
+      proposalAccountIds: [],
+      timestamp: 100,
+      jHeight: 7,
+    });
+    stage.finishEntityAccountFrame?.();
+
+    expect({ inboundBatches, outboundBatches, outboundAdmissions }).toEqual({
+      inboundBatches: 1,
+      outboundBatches: 1,
+      outboundAdmissions: 1,
+    });
+    expect(stage.authoritativeExecutionCount()).toBe(1);
+    expect(stage.typeScriptExecutionCounts()).toEqual({
+      applyAccountInput: 0,
+      proposeAccountFrame: 0,
+    });
+    await stage.discard();
   });
 
   test('accepted canonical ingress binds before Account work without eager Begin', async () => {

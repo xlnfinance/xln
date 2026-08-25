@@ -342,35 +342,34 @@ pub fn round(
     result: &xln_rscore_batch::EntityRoundResult,
     engine_micros: u64,
 ) -> Result<BodyTuple, crate::ProcessError> {
-    Ok(body(round_fields(
-        result.revision,
-        result.accounts_root,
-        &result.applied,
-        &result.admissions,
-        &result.proposals,
-        &result.touched,
-        &result.post_accounts,
+    Ok(body(round_fields(RoundFields {
+        revision: result.revision,
+        accounts_root: result.accounts_root,
+        applied: &result.applied,
+        admissions: &result.admissions,
+        proposals: &result.proposals,
+        touched: &result.touched,
+        post_accounts: &result.post_accounts,
         engine_micros,
-    )?))
+    })?))
 }
 
 fn wave_fields(
     result: &xln_rscore_batch::WaveResult,
     engine_micros: u64,
 ) -> Result<Vec<AbiValue>, crate::ProcessError> {
-    round_fields(
-        result.revision,
-        result.accounts_root,
-        &result.applied,
-        &result.admissions,
-        &result.proposals,
-        &result.touched,
-        &result.post_accounts,
+    round_fields(RoundFields {
+        revision: result.revision,
+        accounts_root: result.accounts_root,
+        applied: &result.applied,
+        admissions: &result.admissions,
+        proposals: &result.proposals,
+        touched: &result.touched,
+        post_accounts: &result.post_accounts,
         engine_micros,
-    )
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Whether a reply echoes the Account envelope back to its owner.
 ///
 /// The engine stores envelope fields and hands them back untouched; it never
@@ -383,29 +382,33 @@ fn carry_envelope() -> bool {
     *CARRY.get_or_init(|| std::env::var("XLN_RSCORE_CARRY_ENVELOPE").as_deref() == Ok("1"))
 }
 
-fn round_fields(
+struct RoundFields<'a> {
     revision: u64,
     accounts_root: [u8; 32],
-    applied_rows: &[xln_rscore_batch::AccountInputResult],
-    admission_rows: &[xln_rscore_batch::AccountAdmissionResult],
-    proposal_rows: &[xln_rscore_batch::ProposalRow],
-    touched_rows: &[(xln_rscore_batch::AccountId, [u8; 32])],
-    post_account_rows: &[xln_rscore_batch::AccountCheckpointRows],
+    applied: &'a [xln_rscore_batch::AccountInputResult],
+    admissions: &'a [xln_rscore_batch::AccountAdmissionResult],
+    proposals: &'a [xln_rscore_batch::ProposalRow],
+    touched: &'a [(xln_rscore_batch::AccountId, [u8; 32])],
+    post_accounts: &'a [xln_rscore_batch::AccountCheckpointRows],
     engine_micros: u64,
-) -> Result<Vec<AbiValue>, crate::ProcessError> {
-    let mut proposals = Vec::with_capacity(proposal_rows.len());
-    for row in proposal_rows {
+}
+
+fn round_fields(fields: RoundFields<'_>) -> Result<Vec<AbiValue>, crate::ProcessError> {
+    let mut proposals = Vec::with_capacity(fields.proposals.len());
+    for row in fields.proposals {
         proposals.push(proposal(row)?);
     }
     let applied = tuple(
-        applied_rows
+        fields
+            .applied
             .iter()
             .map(input_result)
             .collect::<Result<Vec<_>, _>>()?,
     );
-    let admissions = tuple(admission_rows.iter().map(admission_result).collect());
+    let admissions = tuple(fields.admissions.iter().map(admission_result).collect());
     let touched = tuple(
-        touched_rows
+        fields
+            .touched
             .iter()
             .map(|(account_id, leaf)| {
                 tuple(vec![
@@ -417,15 +420,22 @@ fn round_fields(
     );
     let proposals = tuple(proposals);
     let post_accounts = tuple(
-        post_account_rows
+        fields
+            .post_accounts
             .iter()
             .map(|row| crate::checkpoint_wire::account_rows(row, carry_envelope()))
             .collect::<Result<_, _>>()?,
     );
-    let digest = parity_digest(accounts_root, &touched, &applied, &admissions, &proposals)?;
+    let digest = parity_digest(
+        fields.accounts_root,
+        &touched,
+        &applied,
+        &admissions,
+        &proposals,
+    )?;
     Ok(vec![
-        integer(revision),
-        AbiValue::Bytes(accounts_root.to_vec()),
+        integer(fields.revision),
+        AbiValue::Bytes(fields.accounts_root.to_vec()),
         applied,
         admissions,
         proposals,
@@ -436,7 +446,7 @@ fn round_fields(
         // work from the cost of reaching it. Excluded from the parity digest:
         // it is a measurement of this run, not part of what the two engines
         // must agree on.
-        integer(engine_micros),
+        integer(fields.engine_micros),
     ])
 }
 
@@ -548,7 +558,11 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
         proposed,
         tuple(row.dropped.iter().map(dropped).collect()),
         dispute_draft(row.proposed.as_ref().and_then(|row| row.dispute.as_ref())),
-        match row.proposed.as_ref().and_then(|row| row.bundled_ack.as_ref()) {
+        match row
+            .proposed
+            .as_ref()
+            .and_then(|row| row.bundled_ack.as_ref())
+        {
             None => AbiValue::Nil,
             Some(ack) => tuple(vec![
                 integer(ack.height),

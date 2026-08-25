@@ -141,7 +141,11 @@ pub fn header(value: &AccountCheckpointHeader, carry_envelope: bool) -> AbiValue
             accumulator(&carried.left_pending_j_claims),
             accumulator(&carried.right_pending_j_claims),
         ]),
-        if carry_envelope { encode_envelope(&value.envelope) } else { AbiValue::Nil },
+        if carry_envelope {
+            encode_envelope(&value.envelope)
+        } else {
+            AbiValue::Nil
+        },
         value
             .delta_transformer
             .map_or(AbiValue::Nil, |address| AbiValue::Bytes(address.to_vec())),

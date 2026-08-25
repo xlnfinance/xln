@@ -46,7 +46,6 @@ import {
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
 import type { Wave } from './wave-decode';
-import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import {
   RSCORE_PROCESS_ABI_VERSION,
   RSCORE_PROCESS_PROFILE,
@@ -191,6 +190,8 @@ const arrivalCursors = new Map<RuntimeReplica, number>();
 
 const report = {
   waves: 0,
+  inboundRounds: 0,
+  outboundRounds: 0,
   framesProposed: 0,
   inputsApplied: 0,
   leavesChecked: 0,
@@ -724,106 +725,12 @@ const candidateForOwner = (
 ): OpenFrame | undefined => (pending.get(env) ?? [])
   .find(frame => frame.session.ownerEntityId === ownerEntityId);
 
-/**
- * One of the two things an Entity input asks of its accounts.
- *
- * On the way in: what arrived from peers. On the way out: the accounts this
- * input opened, the transactions its own logic queued, and the accounts that
- * should now propose. There is nothing else, and nothing in between.
- */
-export type AuthorityCutoverOperation =
-  | Readonly<{
-      kind: 'applyAccountInput';
-      ownerEntityId: string;
-      accountId: string;
-      /** Exactly what the peer sent, not a reference to something recorded. */
-      input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
-      entityTimestamp: number;
-      finalizedJHeight: number;
-    }>
-  | Readonly<{
-      kind: 'accountOutbound';
-      ownerEntityId: string;
-      /** The account whose answer the caller is waiting for, if any. */
-      accountId: string;
-      creates: readonly RscoreWireValue[];
-      admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
-      propose: readonly string[];
-      timestamp: number;
-      jHeight: number;
-    }>;
-
-export type AuthorityCutoverResult = Readonly<{
-  wave: Wave;
-  /** Exact post-state row for the operation's own Account, when it moved. */
-  row: RscoreAccountCheckpointRow | null;
-}>;
-
 /** The Entity input whose account work this frame can still undo. */
 export const authorityCutoverStageHandle = (
   env: RuntimeReplica,
   ownerEntityId: string,
 ): AuthorityEntityStageHandle | null =>
   candidateForOwner(env, ownerEntityId.trim().toLowerCase())?.entityInput ?? null;
-
-/**
- * Hand one account operation to the engine.
- *
- * Two shapes, and nothing between them: what arrived from a peer goes in, and
- * what this Entity decided goes out. Neither carries a candidate, a stage key
- * or an operation index — the engine owns the accounts, and the savepoint the
- * Entity input opened is what makes the work undoable.
- */
-export const runAuthorityCutoverOperation = async (
-  env: RuntimeReplica,
-  operation: AuthorityCutoverOperation,
-): Promise<AuthorityCutoverResult | null> => {
-  if (!authorityDriverEnabled(env)) return null;
-  const ownerEntityId = operation.ownerEntityId.trim().toLowerCase();
-  const accountId = operation.accountId.trim().toLowerCase();
-  const frame = candidateForOwner(env, ownerEntityId);
-  if (frame === undefined) return null;
-  if (frame.entityInput === null) {
-    await frame.session.client.pushSavepoint();
-    frame.entityInput = { ownerEntityId };
-  }
-  const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_OWNER');
-  const startedMs = performance.now();
-  const wave = operation.kind === 'applyAccountInput'
-    ? await frame.session.client.accountInbound({
-        ownerEntityId: ownerBytes,
-        entityTimestamp: operation.entityTimestamp,
-        finalizedJHeight: operation.finalizedJHeight,
-        rows: [authorityPeerInputRow(0, accountId, {
-          kind: operation.input.kind,
-          input: operation.input,
-        } as Parameters<typeof authorityPeerInputRow>[2])],
-        postAccounts: true,
-      })
-    : await frame.session.client.accountOutbound({
-        ownerEntityId: ownerBytes,
-        timestamp: operation.timestamp,
-        jHeight: operation.jHeight,
-        creates: [...operation.creates],
-        admits: operation.admits.map(row => [
-          hexToWireBytes(row.accountId, 32, 'AUTHORITY_ACCOUNT'),
-          row.txs.map(accountTxRow),
-        ]),
-        propose: operation.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
-        postAccounts: true,
-      });
-  if (operation.kind === 'accountOutbound') {
-    for (const created of operation.creates.keys()) void created;
-  }
-  report.waves += 1;
-  report.engineMicros += wave.engineMicros;
-  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
-  report.inputsApplied += wave.applied.length;
-  report.framesProposed += wave.proposals.filter(row => row.frame !== null).length;
-  frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
-  const row = wave.postAccounts.find(candidate => candidate.accountId === accountId) ?? null;
-  return { wave, row };
-};
 
 /**
  * Hand this Entity input's arrivals to the engine in one call.
@@ -855,9 +762,69 @@ export const handAccountInbound = async (
     postAccounts: true,
   });
   report.waves += 1;
+  report.inboundRounds += 1;
   report.engineMicros += wave.engineMicros;
   report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
   report.inputsApplied += wave.applied.length;
+  frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
+  return wave;
+};
+
+/** One IPC visit for every peer arrival carried by one Entity frame. */
+export const runAuthorityCutoverInboundBatch = async (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+  clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
+  inputs: readonly Readonly<{
+    accountId: string;
+    input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+  }>[],
+): Promise<Wave | null> => {
+  const rows = inputs.map((entry, index) => authorityPeerInputRow(
+    index,
+    entry.accountId,
+    { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
+  ));
+  return handAccountInbound(env, ownerEntityId, clock, rows);
+};
+
+/** One IPC visit for every admission and proposal of one Entity frame. */
+export const runAuthorityCutoverOutboundBatch = async (
+  env: RuntimeReplica,
+  request: Readonly<{
+    ownerEntityId: string;
+    admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
+    propose: readonly string[];
+    timestamp: number;
+    jHeight: number;
+  }>,
+): Promise<Wave | null> => {
+  if (!authorityDriverEnabled(env)) return null;
+  const owner = request.ownerEntityId.trim().toLowerCase();
+  const frame = candidateForOwner(env, owner);
+  if (frame === undefined) return null;
+  if (frame.entityInput === null) {
+    await frame.session.client.pushSavepoint();
+    frame.entityInput = { ownerEntityId: owner };
+  }
+  const startedMs = performance.now();
+  const wave = await frame.session.client.accountOutbound({
+    ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_OWNER'),
+    timestamp: request.timestamp,
+    jHeight: request.jHeight,
+    creates: [],
+    admits: request.admits.map(row => [
+      hexToWireBytes(row.accountId, 32, 'AUTHORITY_ACCOUNT'),
+      row.txs.map(accountTxRow),
+    ]),
+    propose: request.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
+    postAccounts: true,
+  });
+  report.waves += 1;
+  report.outboundRounds += 1;
+  report.engineMicros += wave.engineMicros;
+  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
+  report.framesProposed += wave.proposals.filter(row => row.frame !== null).length;
   frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
   return wave;
 };

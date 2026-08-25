@@ -625,7 +625,9 @@ const proposeAccountFrameCandidate = async (
   scheduleAccount: (accountId: string) => void,
 ): Promise<AccountFrameProposal | undefined> => {
   const { currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
-  if (!accountHasProposableMempool(account, state)) return undefined;
+  const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
+    ?.hasPreparedAccountProposal?.(accountKey) === true;
+  if (!authorityPrepared && !accountHasProposableMempool(account, state)) return undefined;
   // The clock a proposal is built with belongs to this Entity, not to the
   // Runtime frame: a wave carries one clock, so which unit that wave covers
   // depends on whether an Entity ever uses two inside one Runtime frame.
@@ -831,7 +833,11 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
 
-    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
+    const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
+      ?.hasPreparedAccountProposal?.(accountKey) === true;
+    const crossJOpeningProposalTxs = authorityPrepared
+      ? undefined
+      : selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
     if (crossJOpeningProposalTxs === null && !force) {
       entityLog.debug('account.cross_j_opening_cohort_wait', {
         account: shortId(accountKey),
@@ -1446,6 +1452,14 @@ const prepareEntityFrameWorkingSet = async (
     verifiedCertifiedOutputs,
     authorizedBoardHandoverConfig ?? undefined,
   );
+  await context.accountConsensusContext.accountAuthorityExecutionScope?.beginEntityAccountFrame?.({
+    ownerEntityId: currentEntityState.entityId,
+    entityTxs,
+    accounts: currentEntityState.accounts,
+    accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
+    entityTimestamp: currentEntityState.timestamp,
+    finalizedJHeight: currentEntityState.lastFinalizedJHeight ?? 0,
+  });
   if (!authorityTransitionOnly) {
     await primeEntityFrameAccountWork(context);
   }
@@ -1583,6 +1597,16 @@ const applyPostEntityTxPhases = async (
     context.collectedHashes,
     context.storageChanges,
   );
+  const proposalAccountIds = crossJSetupPhase
+    ? []
+    : [...context.proposableAccounts.keys()].sort(compareStableText);
+  await context.accountConsensusContext.accountAuthorityExecutionScope
+    ?.prepareEntityAccountOutbound?.({
+      accounts: currentEntityState.accounts,
+      proposalAccountIds,
+      timestamp: currentEntityState.timestamp,
+      jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
+    });
   const accountsToProposeFramesCount = crossJSetupPhase
     ? 0
     : await proposePendingAccountFrames({
@@ -1596,6 +1620,7 @@ const applyPostEntityTxPhases = async (
         accountJClaimNodeStore: context.accountJClaimNodeStore,
         storageChanges: context.storageChanges,
       });
+  context.accountConsensusContext.accountAuthorityExecutionScope?.finishEntityAccountFrame?.();
   markFrameProfile('accountProposals');
   // Account proposal construction mutates the Account replica envelope
   // (pending frame and Hanko state). Refresh each dirty leaf only
@@ -1701,6 +1726,14 @@ const applyEntityFrameWithIsolation = async (
     }
   };
   if (working.authorityTransitionOnly) {
+    await working.context.accountConsensusContext.accountAuthorityExecutionScope
+      ?.prepareEntityAccountOutbound?.({
+        accounts: working.currentEntityState.accounts,
+        proposalAccountIds: [],
+        timestamp: working.currentEntityState.timestamp,
+        jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
+      });
+    working.context.accountConsensusContext.accountAuthorityExecutionScope?.finishEntityAccountFrame?.();
     working.currentEntityState = assignCertifiedOutputIdentities(
       working.currentEntityState,
       working.context.allOutputs,

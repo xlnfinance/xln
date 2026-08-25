@@ -77,7 +77,7 @@ type MaterializedOperation = Readonly<{
  * reference in its accounts forest, and the Account's committed root is
  * recomputed from the published state, not copied from the engine.
  */
-const materialize = (
+export const materializeCutoverAccount = (
   request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
   row: RscoreAccountCheckpointRow,
 ): MaterializedOperation => {
@@ -197,11 +197,11 @@ export const cutoverAccountInputEvents = (
 export const cutoverAccountInputResult = (
   request: CutoverInputRequest,
   result: CutoverWaveResult,
+  publishPostState = true,
 ): HandleAccountInputResult => {
   const accountId = request.accountId;
   const verdict = verdictOf(result, accountId, request.operationIndex);
   const priorSnapshot = request.account;
-  const row = requireRow(result, accountId);
   const events: string[] = [];
   const committedFrames: AccountCommittedFrame[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
@@ -278,7 +278,9 @@ export const cutoverAccountInputResult = (
   const hashesToSign = outbound === null
     ? []
     : cutoverAckHashes(accountId, outbound.height, outbound.frameHash, outbound.dispute);
-  materialize(request, row);
+  if (publishPostState) {
+    materializeCutoverAccount(request, requireRow(result, accountId));
+  }
   const response = outbound === null
     ? undefined
     : cutoverAck(envelope, outbound.height, outbound.frameHash, outbound.dispute);
@@ -313,7 +315,7 @@ export const cutoverAccountAdmissionResult = (
       message: verdict.message,
     });
   }
-  materialize(request, requireRow(result, accountId));
+  materializeCutoverAccount(request, requireRow(result, accountId));
   return accountInputApplied({ events: [], admittedAccountTxCount: verdict.count });
 };
 
@@ -339,7 +341,7 @@ export const cutoverAccountProposalResult = (
     // The window produced no frame. The mempool still moved when something was
     // dropped, so the row is materialized either way.
     const row = result.row;
-    if (row !== null) materialize(request, row);
+    if (row !== null) materializeCutoverAccount(request, row);
     return proposeAccountFrameIdle({
       message: dropped.length > 0
         ? 'Proposal window produced no frame'
@@ -356,7 +358,7 @@ export const cutoverAccountProposalResult = (
     return fail('PROPOSAL_EFFECT_TIMING', { account: accountId });
   }
   const envelope = cutoverEnvelope(priorSnapshot);
-  materialize(request, row);
+  materializeCutoverAccount(request, row);
   // The bundled acknowledgement was produced — and published for signing —
   // when the frame it answers was committed. Carrying it again here would put
   // the same hash in the Entity's manifest twice; the certificate the Entity

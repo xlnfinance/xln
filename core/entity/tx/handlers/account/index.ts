@@ -162,6 +162,8 @@ const prepareAccountInputToEntity = (
       input,
       Boolean(incomingAck),
       Boolean(incomingProposal),
+      accountConsensusContext.accountAuthorityExecutionScope
+        ?.hasPreparedAccountInput?.(input.fromEntityId, input) === true,
     );
   } catch (error) {
     if (!(error instanceof AccountPeerEvidenceError)) throw error;

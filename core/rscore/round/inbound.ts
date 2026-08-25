@@ -3,10 +3,10 @@
  *
  * The Entity frame knows every account input it carries before it dispatches
  * any of them. Rather than asking the engine one arrival at a time, it hands
- * over a whole round — at most one arrival per account, so every verdict names
- * an unambiguous post-state — and then reads the verdicts back as its own
- * handlers reach them. A frame with more than one arrival for the same account
- * takes one round per repeat, which is a handful of calls, not one per input.
+ * over one whole batch and then reads the verdicts back as its own handlers
+ * reach them. If an account occurs more than once, only its last verdict
+ * publishes the final post-state row; every earlier verdict still publishes
+ * its own events and effects. The batch is never split into extra IPC calls.
  *
  * The verdicts are a queue, not a lookup: a verdict TypeScript never consumed
  * means the engine applied something the Entity decided not to, so the round

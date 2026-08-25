@@ -1,4 +1,5 @@
 import type { AccountInput, AccountReplica } from '../../types/account';
+import type { EntityTx } from '../../types/entity-tx';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from './types';
 import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
@@ -15,6 +16,19 @@ import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claim
  * operation and TypeScript remains the executor.
  */
 export type AccountAuthorityExecutionScope = Readonly<{
+  /**
+   * Open the Account half of one canonical Entity frame. In cutover mode this
+   * hands every peer arrival to Rust in one call before Entity logic runs.
+   */
+  beginEntityAccountFrame?(request: AccountAuthorityFrameBeginRequest): Promise<void>;
+  /**
+   * Hand Rust every locally-produced admission and the final proposal
+   * worklist in one call. Per-operation hooks below only consume this result.
+   */
+  prepareEntityAccountOutbound?(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
+  hasPreparedAccountProposal?(accountId: string): boolean;
+  hasPreparedAccountInput?(accountId: string, input: AccountInput): boolean;
+  finishEntityAccountFrame?(): void;
   beforeTypeScriptAccountExecution(
     kind: 'applyAccountInput' | 'proposeAccountFrame',
     accountId: string,
@@ -25,6 +39,22 @@ export type AccountAuthorityExecutionScope = Readonly<{
   executeAccountProposal(
     request: AccountAuthorityProposalRequest,
   ): Promise<ProposeAccountFrameResult | null>;
+}>;
+
+export type AccountAuthorityFrameBeginRequest = Readonly<{
+  ownerEntityId: string;
+  entityTxs: readonly EntityTx[];
+  accounts: ReadonlyMap<string, AccountReplica>;
+  accountForWrite(accountId: string): AccountReplica | undefined;
+  entityTimestamp: number;
+  finalizedJHeight: number;
+}>;
+
+export type AccountAuthorityFrameOutboundRequest = Readonly<{
+  accounts: ReadonlyMap<string, AccountReplica>;
+  proposalAccountIds: readonly string[];
+  timestamp: number;
+  jHeight: number;
 }>;
 
 export type AccountAuthorityInputRequest = Readonly<{

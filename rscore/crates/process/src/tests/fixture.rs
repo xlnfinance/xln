@@ -625,16 +625,17 @@ pub fn prepare_wave_ops(
     request(
         id,
         OpTag::PrepareAccountWave,
-        vec![tuple(vec![tuple(vec![
-            AbiValue::Bytes(owner_entity_id.to_vec()),
-            AbiValue::Integer(i128::from(timestamp)),
-            AbiValue::Integer(100),
-            AbiValue::Integer(i128::from(timestamp)),
-            AbiValue::Integer(100),
-            AbiValue::Bool(propose),
-            tuple(ops),
-        ])]),
-        AbiValue::Bool(true),
+        vec![
+            tuple(vec![tuple(vec![
+                AbiValue::Bytes(owner_entity_id.to_vec()),
+                AbiValue::Integer(i128::from(timestamp)),
+                AbiValue::Integer(100),
+                AbiValue::Integer(i128::from(timestamp)),
+                AbiValue::Integer(100),
+                AbiValue::Bool(propose),
+                tuple(ops),
+            ])]),
+            AbiValue::Bool(true),
         ],
     )
 }

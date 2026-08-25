@@ -1,34 +1,36 @@
 /**
  * Install the engine as the Account layer's executor for one Runtime.
  *
- * The driver stages and compares; this replaces. Every Account operation an
- * Entity input performs is executed by the Rust engine, and the TypeScript
- * replica is rebuilt from the engine's own post-state row. TypeScript keeps
- * exactly two jobs at the Account layer: naming the operation, and signing
- * the hashes the engine says are new.
+ * The driver stages and compares; this replaces. One Entity frame enters the
+ * Rust engine twice: all peer arrivals in one inbound batch, then all local
+ * admissions and proposals in one outbound batch. TypeScript materializes the
+ * returned state and signs only the hashes the engine says are new.
  *
  * Off unless `XLN_RSCORE_AUTHORITY_CUTOVER=1` alongside the authority driver.
  */
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica } from '../../runtime/types';
-import type { AccountInput, AccountReplica } from '../../types/account';
+import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../account/consensus/types';
 import type {
-  AccountAuthorityEntityOperation,
+  AccountAuthorityEntityBatchInbound,
+  AccountAuthorityEntityBatchOutbound,
   AccountAuthorityEntityStageProvider,
 } from '../authority/entity-stage';
 import {
   authorityDriverEnabled,
-  runAuthorityCutoverOperation,
+  runAuthorityCutoverInboundBatch,
+  runAuthorityCutoverOutboundBatch,
 } from '../authority-driver';
 import type { RscoreAccountMaterializerBinding } from '../checkpoint/account-materializer';
 import { authorityCutoverEnabled } from './enabled';
 import {
-  cutoverAccountAdmissionResult,
   cutoverAccountInputResult,
   cutoverAccountProposalResult,
+  materializeCutoverAccount,
   type CutoverWaveResult,
 } from './execute';
+import { inboundSlice } from '../round/inbound';
 
 const halt = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_CUTOVER_${code}:${JSON.stringify(detail)}`);
@@ -59,90 +61,141 @@ const requireResult = (
 ): CutoverWaveResult =>
   value ?? halt('OPERATION_DECLINED', { owner: ownerEntityId, account: accountId });
 
-const executeInput = async (
+const rowFor = (wave: CutoverWaveResult['wave'], accountId: string) =>
+  wave.postAccounts.find(row => row.accountId === accountId) ?? null;
+
+const executeInboundBatch = async (
   env: RuntimeReplica,
-  operation: Extract<AccountAuthorityEntityOperation, { kind: 'applyAccountInput' }>,
-): Promise<HandleAccountInputResult> => {
-  const { request } = operation;
-  const accountId = accountIdOf(request.account);
-  const { input } = request;
-  if (input.kind !== 'enqueue' && input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'frame_ack') {
-    return halt('INPUT_OUTSIDE_PROFILE', { account: accountId, kind: input.kind });
+  batch: AccountAuthorityEntityBatchInbound,
+): Promise<readonly ((request: AccountAuthorityEntityBatchInbound['requests'][number]) => HandleAccountInputResult)[]> => {
+  const binding = bindingFor(env, batch.ownerEntityId);
+  const requests = batch.requests.map((request, operationIndex) => {
+    const accountId = accountIdOf(request.account);
+    const input = request.input;
+    if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'frame_ack') {
+      return halt('INBOUND_BATCH_KIND', { account: accountId, kind: input.kind });
+    }
+    return { request, accountId, input, operationIndex };
+  });
+  const clock = requests[0]?.request ?? {
+    entityTimestamp: env.state.timestamp,
+    finalizedJHeight: 0,
+  };
+  const wave = await runAuthorityCutoverInboundBatch(
+    env,
+    batch.ownerEntityId,
+    {
+      entityTimestamp: clock.entityTimestamp,
+      finalizedJHeight: clock.finalizedJHeight,
+    },
+    requests.map(({ accountId, input }) => ({ accountId, input })),
+  );
+  const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
+  const lastOperationByAccount = new Map<string, number>();
+  for (const { accountId, operationIndex } of requests) {
+    lastOperationByAccount.set(accountId, operationIndex);
   }
-  const binding = bindingFor(env, operation.ownerEntityId);
-  const common = { binding, account: request.account, accountId };
-  if (input.kind === 'enqueue') {
-    // Queued now, not at the end of the frame: a later arrival for this same
-    // account is judged against the mempool this transaction is already in.
-    const result = requireResult(
-      await runAuthorityCutoverOperation(env, {
-        kind: 'accountOutbound',
-        ownerEntityId: operation.ownerEntityId,
+  return requests.map(({ accountId, input, operationIndex }) => actualRequest => {
+    const slice = inboundSlice(full.wave, accountId, operationIndex);
+    return cutoverAccountInputResult(
+      {
+        binding,
+        account: actualRequest.account,
         accountId,
-        creates: [],
-        admits: [{ accountId, txs: input.txs }],
-        propose: [],
-        timestamp: request.entityTimestamp,
-        jHeight: request.finalizedJHeight,
-      }),
-      operation.ownerEntityId,
-      accountId,
+        fromEntityId: peerOf(input, accountId),
+        operationIndex,
+      },
+      { wave: slice, row: rowFor(slice, accountId) },
+      lastOperationByAccount.get(accountId) === operationIndex,
     );
-    return cutoverAccountAdmissionResult(common, result);
-  }
-  const result = requireResult(
-    await runAuthorityCutoverOperation(env, {
-      kind: 'applyAccountInput',
-      ownerEntityId: operation.ownerEntityId,
-      accountId,
-      input,
-      entityTimestamp: request.entityTimestamp,
-      finalizedJHeight: request.finalizedJHeight,
-    }),
-    operation.ownerEntityId,
-    accountId,
-  );
-  return cutoverAccountInputResult(
-    { ...common, fromEntityId: peerOf(input, accountId), operationIndex: 0 },
-    result,
-  );
+  });
 };
 
-const executeProposal = async (
+const executeOutboundBatch = async (
   env: RuntimeReplica,
-  operation: Extract<AccountAuthorityEntityOperation, { kind: 'proposeAccountFrame' }>,
-): Promise<ProposeAccountFrameResult> => {
-  const { request } = operation;
-  const accountId = accountIdOf(request.account);
-  if (!request.selectionIsWholeMempool) {
-    return halt('PROPOSAL_SUBSET_UNSUPPORTED', { account: accountId });
+  batch: AccountAuthorityEntityBatchOutbound,
+): Promise<readonly ProposeAccountFrameResult[]> => {
+  const binding = bindingFor(env, batch.ownerEntityId);
+  const grouped = new Map<string, { account: AccountReplica; txs: AccountTx[] }>();
+  for (const request of batch.admissions) {
+    if (request.input.kind !== 'enqueue') {
+      return halt('OUTBOUND_BATCH_INPUT_KIND', { kind: request.input.kind });
+    }
+    const accountId = accountIdOf(request.account);
+    const existing = grouped.get(accountId);
+    if (existing) existing.txs.push(...request.input.txs);
+    else grouped.set(accountId, { account: request.account, txs: [...request.input.txs] });
   }
-  const binding = bindingFor(env, operation.ownerEntityId);
-  const result = requireResult(
-    await runAuthorityCutoverOperation(env, {
-      kind: 'accountOutbound',
-      ownerEntityId: operation.ownerEntityId,
-      accountId,
-      creates: [],
-      admits: [],
-      propose: [accountId],
-      timestamp: request.timestamp,
-      jHeight: request.jHeight,
-    }),
-    operation.ownerEntityId,
-    accountId,
+  const admits = [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([accountId, value]) => ({ accountId, txs: value.txs }));
+  const proposals = batch.proposals.map(request => ({
+    request,
+    accountId: accountIdOf(request.account),
+  }));
+  const timestamp = proposals[0]?.request.timestamp
+    ?? batch.admissions[0]?.entityTimestamp
+    ?? env.state.timestamp;
+  const jHeight = proposals[0]?.request.jHeight
+    ?? batch.admissions[0]?.finalizedJHeight
+    ?? 0;
+  const wave = await runAuthorityCutoverOutboundBatch(env, {
+    ownerEntityId: batch.ownerEntityId,
+    admits,
+    propose: proposals.map(row => row.accountId),
+    timestamp,
+    jHeight,
+  });
+  const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
+  if (full.wave.admissions.length !== admits.length) {
+    return halt('OUTBOUND_ADMISSION_ARITY', {
+      expected: admits.length,
+      actual: full.wave.admissions.length,
+    });
+  }
+  for (const [index, admit] of admits.entries()) {
+    const result = full.wave.admissions[index];
+    if (
+      result === undefined
+      || result.operationIndex !== index
+      || result.accountId !== admit.accountId
+      || result.verdict.kind !== 'admitted'
+      || result.verdict.count !== admit.txs.length
+    ) {
+      return halt('OUTBOUND_ADMISSION_MISMATCH', {
+        index,
+        account: admit.accountId,
+        expected: admit.txs.length,
+        actual: result ?? null,
+      });
+    }
+  }
+  const proposalIds = new Set(proposals.map(row => row.accountId));
+  const accountsToPublish = new Map<string, AccountReplica>(
+    [...grouped].map(([accountId, row]) => [accountId, row.account] as const),
   );
-  return cutoverAccountProposalResult({ binding, account: request.account, accountId }, result);
+  for (const [accountId, account] of accountsToPublish) {
+    if (proposalIds.has(accountId)) continue;
+    const row = rowFor(full.wave, accountId);
+    if (row === null) return halt('OUTBOUND_POST_ACCOUNT_MISSING', { account: accountId });
+    materializeCutoverAccount(
+      { binding, account, accountId },
+      row,
+    );
+  }
+  return proposals.map(({ request, accountId }) =>
+    cutoverAccountProposalResult(
+      { binding, account: request.account, accountId },
+      { wave: full.wave, row: rowFor(full.wave, accountId) },
+    ));
 };
 
 export const createAuthorityCutoverProvider = (
   env: RuntimeReplica,
 ): AccountAuthorityEntityStageProvider => ({
   beginEntityStage: () => halt('STAGE_BEGIN_UNREACHABLE'),
-  executeAccountOperation: async operation =>
-    operation.kind === 'applyAccountInput'
-      ? executeInput(env, operation)
-      : executeProposal(env, operation),
+  executeAccountInboundBatch: batch => executeInboundBatch(env, batch),
+  executeAccountOutboundBatch: batch => executeOutboundBatch(env, batch),
 });
 
 /** Idempotent: one Runtime installs one executor, before its first frame. */

@@ -8,8 +8,7 @@ use xln_rscore_engine::{
     AccountReplica, AccountState, AccountTx, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
     DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame, IncomingOutcome,
     ProposalOutcome, ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity, TokenId,
-    WatchSeed,
-    apply_incoming_ack as apply_exact_incoming_ack,
+    WatchSeed, apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, dispute_proof_hash, propose_account_frame,
 };
 

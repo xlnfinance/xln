@@ -442,7 +442,10 @@ pub fn wave_of(rows: Vec<([u8; 32], WaveOp)>, timestamp: u64, propose: bool) -> 
             propose,
         });
     }
-    WaveRequest { entities, post_accounts: true }
+    WaveRequest {
+        entities,
+        post_accounts: true,
+    }
 }
 
 /// A wave in which one Entity queues nothing and only proposes what it
