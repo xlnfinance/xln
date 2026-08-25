@@ -407,7 +407,7 @@ fn round_fields(
     let post_accounts = tuple(
         post_account_rows
             .iter()
-            .map(crate::checkpoint_wire::account_rows)
+            .map(|row| crate::checkpoint_wire::account_rows(row, false))
             .collect::<Result<_, _>>()?,
     );
     let digest = parity_digest(accounts_root, &touched, &applied, &admissions, &proposals)?;

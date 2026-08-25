@@ -311,7 +311,9 @@ const header = (
     rscoreCheckpointBytes(accumulator[0], 32, `WAVE_POST_ACCOUNT_ACCUMULATOR_ROOT_${index}`);
     uint(accumulator[1], `postAccount.header.accumulator.${index}.count`);
   }
-  rscoreCheckpointTuple(row[7], 2, 'WAVE_POST_ACCOUNT_ENVELOPE');
+  // Null on the round wire: the engine hands the envelope back only to a
+  // reader that holds no Account of its own.
+  if (row[7] !== null) rscoreCheckpointTuple(row[7], 2, 'WAVE_POST_ACCOUNT_ENVELOPE');
   if (row[8] !== null) rscoreCheckpointBytes(row[8], 20, 'WAVE_POST_ACCOUNT_DELTA_TRANSFORMER');
   return row;
 };

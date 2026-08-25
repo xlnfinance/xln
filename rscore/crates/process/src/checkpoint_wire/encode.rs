@@ -19,7 +19,7 @@ pub fn checkpoint(value: &AccountsCheckpoint) -> Result<AbiValue, ProcessError> 
             value
                 .accounts
                 .iter()
-                .map(account_rows)
+                .map(|row| account_rows(row, true))
                 .collect::<Result<_, _>>()?,
         ),
         tuple(
@@ -32,11 +32,21 @@ pub fn checkpoint(value: &AccountsCheckpoint) -> Result<AbiValue, ProcessError> 
     ]))
 }
 
-pub(crate) fn account_rows(value: &AccountCheckpointRows) -> Result<AbiValue, ProcessError> {
+/// `carry_envelope` is false on the round wire and true in a checkpoint.
+///
+/// The envelope is the Account's opaque half: fields the engine stores and
+/// hands back untouched, never authors (`execution.rs` installs only what the
+/// caller sent). Echoing it to the caller that just sent it was 39% of every
+/// reply. A checkpoint is read by a process that holds no prior Account, so
+/// that one still carries it.
+pub(crate) fn account_rows(
+    value: &AccountCheckpointRows,
+    carry_envelope: bool,
+) -> Result<AbiValue, ProcessError> {
     Ok(tuple(vec![
         AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
         AbiValue::Bytes(value.account_leaf.to_vec()),
-        header(&value.header),
+        header(&value.header, carry_envelope),
         sections(&value.sections),
         changes(&value.deltas, delta),
         changes(&value.locks, lock),
@@ -70,32 +80,19 @@ fn changes<V>(value: &PersistentNodeChanges<V>, encode: impl Fn(&V) -> AbiValue)
             value
                 .puts
                 .iter()
-                .map(|record| match record {
-                    PersistentNodeRecord::Branch { path, children } => tuple(vec![
-                        integer(0),
-                        AbiValue::Bytes(path.clone()),
-                        tuple(
-                            children
-                                .iter()
-                                .map(|child| {
-                                    tuple(vec![
-                                        integer(child.slot),
-                                        integer(if child.kind == "branch" { 0 } else { 1 }),
-                                        AbiValue::Bytes(child.path.clone()),
-                                        AbiValue::Bytes(child.edge_hash.to_vec()),
-                                    ])
-                                })
-                                .collect(),
-                        ),
-                    ]),
+                .filter_map(|record| match record {
+                    // Branch records rebuild a tree the reader rebuilds itself
+                    // from the leaves. Sending them was the largest single item
+                    // on this wire, and nothing on the other side read them.
+                    PersistentNodeRecord::Branch { .. } => None,
                     PersistentNodeRecord::Leaf {
                         path, key, value, ..
-                    } => tuple(vec![
+                    } => Some(tuple(vec![
                         integer(1),
                         AbiValue::Bytes(path.clone()),
                         AbiValue::Bytes(key.clone()),
                         encode(value),
-                    ]),
+                    ])),
                 })
                 .collect(),
         ),
@@ -103,22 +100,20 @@ fn changes<V>(value: &PersistentNodeChanges<V>, encode: impl Fn(&V) -> AbiValue)
             value
                 .dels
                 .iter()
-                .map(|record| match record {
-                    PersistentNodeRef::Branch { path } => {
-                        tuple(vec![integer(0), AbiValue::Bytes(path.clone())])
-                    }
-                    PersistentNodeRef::Leaf { path, key } => tuple(vec![
+                .filter_map(|record| match record {
+                    PersistentNodeRef::Branch { .. } => None,
+                    PersistentNodeRef::Leaf { path, key } => Some(tuple(vec![
                         integer(1),
                         AbiValue::Bytes(path.clone()),
                         AbiValue::Bytes(key.clone()),
-                    ]),
+                    ])),
                 })
                 .collect(),
         ),
     ])
 }
 
-pub fn header(value: &AccountCheckpointHeader) -> AbiValue {
+pub fn header(value: &AccountCheckpointHeader, carry_envelope: bool) -> AbiValue {
     let identity = &value.identity;
     let domain = identity.domain();
     let carried = &value.carried;
@@ -146,7 +141,7 @@ pub fn header(value: &AccountCheckpointHeader) -> AbiValue {
             accumulator(&carried.left_pending_j_claims),
             accumulator(&carried.right_pending_j_claims),
         ]),
-        encode_envelope(&value.envelope),
+        if carry_envelope { encode_envelope(&value.envelope) } else { AbiValue::Nil },
         value
             .delta_transformer
             .map_or(AbiValue::Nil, |address| AbiValue::Bytes(address.to_vec())),

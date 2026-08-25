@@ -72,12 +72,16 @@ const executeInput = async (
   const binding = bindingFor(env, operation.ownerEntityId);
   const common = { binding, account: request.account, accountId };
   if (input.kind === 'enqueue') {
+    // Queued now, not at the end of the frame: a later arrival for this same
+    // account is judged against the mempool this transaction is already in.
     const result = requireResult(
       await runAuthorityCutoverOperation(env, {
-        kind: 'admitAccountTxs',
+        kind: 'accountOutbound',
         ownerEntityId: operation.ownerEntityId,
         accountId,
-        txs: input.txs,
+        creates: [],
+        admits: [{ accountId, txs: input.txs }],
+        propose: [],
         timestamp: request.entityTimestamp,
         jHeight: request.finalizedJHeight,
       }),
@@ -116,9 +120,12 @@ const executeProposal = async (
   const binding = bindingFor(env, operation.ownerEntityId);
   const result = requireResult(
     await runAuthorityCutoverOperation(env, {
-      kind: 'proposeAccountFrame',
+      kind: 'accountOutbound',
       ownerEntityId: operation.ownerEntityId,
       accountId,
+      creates: [],
+      admits: [],
+      propose: [accountId],
       timestamp: request.timestamp,
       jHeight: request.jHeight,
     }),

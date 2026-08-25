@@ -14,8 +14,11 @@ pub fn changes(value: &AccountsCheckpoint) -> Result<BodyTuple, ProcessError> {
     Ok(body(vec![encode::checkpoint(value)?]))
 }
 
-pub(crate) fn account_rows(value: &AccountCheckpointRows) -> Result<AbiValue, ProcessError> {
-    encode::account_rows(value)
+pub(crate) fn account_rows(
+    value: &AccountCheckpointRows,
+    carry_envelope: bool,
+) -> Result<AbiValue, ProcessError> {
+    encode::account_rows(value, carry_envelope)
 }
 
 pub fn checkpoint_committed(value: &CheckpointToken) -> BodyTuple {

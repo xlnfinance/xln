@@ -46,7 +46,12 @@ export type RscoreAccountStateSeed = Readonly<{
   jNonce: number;
   lastFinalizedJHeight: number;
   carried: RscoreCarriedAccountRoots;
-  envelope: RscoreAccountEnvelope;
+  /**
+   * Absent on the round wire: the engine never authors envelope fields, so the
+   * Entity that sent them still holds them. A checkpoint carries it, because
+   * the process reading one holds no prior Account.
+   */
+  envelope: RscoreAccountEnvelope | null;
   deltaTransformer?: string;
   deltas: PersistentAccountStateMap<number, Delta>;
   locks: PersistentAccountStateMap<string, HtlcLock>;
@@ -394,7 +399,7 @@ export const decodeRscoreAccountStateSeed = (
       leftPendingJClaims: decodeAccumulator(carried[4], 'LEFT_CLAIMS'),
       rightPendingJClaims: decodeAccumulator(carried[5], 'RIGHT_CLAIMS'),
     },
-    envelope: decodeEnvelope(header[7]),
+    envelope: header[7] === null ? null : decodeEnvelope(header[7]),
     ...(header[8] === null ? {} : { deltaTransformer: checkpointHex(header[8], 20, 'DELTA_TRANSFORMER') }),
     ...trees,
   };

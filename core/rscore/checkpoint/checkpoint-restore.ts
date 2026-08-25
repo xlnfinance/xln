@@ -195,8 +195,9 @@ const computeRestoredEntityLeaf = (
   accountStateRoot: string,
   mempoolRoot: string,
 ): string => {
+  const envelope = seed.envelope ?? checkpointRestoreFail('RESTORE_ENVELOPE_MISSING');
   const projection = Object.fromEntries(
-    Object.entries(seed.envelope.fields).filter(([field]) => !DERIVED_CONSENSUS_FIELDS.has(field)),
+    Object.entries(envelope.fields).filter(([field]) => !DERIVED_CONSENSUS_FIELDS.has(field)),
   );
   projection['currentHeight'] = consensus.currentFrame?.height ?? 0;
   projection['rollbackCount'] = consensus.rollbackCount;
@@ -252,12 +253,13 @@ const restoredMempoolRoot = (
 ): string => {
   const canonicalMempool = consensus.mempool.map(canonicalAccountTxForFrameHash);
   if (verify) {
-    if (stateSeed.envelope.canonicalMempool.length !== canonicalMempool.length) {
+    const envelope = stateSeed.envelope ?? checkpointRestoreFail('RESTORE_ENVELOPE_MISSING');
+    if (envelope.canonicalMempool.length !== canonicalMempool.length) {
       checkpointRestoreFail('ENVELOPE_MEMPOOL_LENGTH');
     }
     for (const [index, expected] of canonicalMempool.entries()) {
       assertSameRscoreCanonicalValue(
-        stateSeed.envelope.canonicalMempool[index],
+        envelope.canonicalMempool[index],
         expected,
         `RESTORE_ENVELOPE_MEMPOOL_${index}`,
       );

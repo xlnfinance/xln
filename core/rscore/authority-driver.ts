@@ -724,7 +724,13 @@ const candidateForOwner = (
 ): OpenFrame | undefined => (pending.get(env) ?? [])
   .find(frame => frame.session.ownerEntityId === ownerEntityId);
 
-/** One thing an Entity input asks of one account. */
+/**
+ * One of the two things an Entity input asks of its accounts.
+ *
+ * On the way in: what arrived from peers. On the way out: the accounts this
+ * input opened, the transactions its own logic queued, and the accounts that
+ * should now propose. There is nothing else, and nothing in between.
+ */
 export type AuthorityCutoverOperation =
   | Readonly<{
       kind: 'applyAccountInput';
@@ -736,19 +742,13 @@ export type AuthorityCutoverOperation =
       finalizedJHeight: number;
     }>
   | Readonly<{
-      kind: 'admitAccountTxs';
+      kind: 'accountOutbound';
       ownerEntityId: string;
+      /** The account whose answer the caller is waiting for, if any. */
       accountId: string;
-      txs: readonly AccountTx[];
-      /** Present only when this Entity input is what opens the account. */
-      create?: RscoreWireValue;
-      timestamp: number;
-      jHeight: number;
-    }>
-  | Readonly<{
-      kind: 'proposeAccountFrame';
-      ownerEntityId: string;
-      accountId: string;
+      creates: readonly RscoreWireValue[];
+      admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
+      propose: readonly string[];
       timestamp: number;
       jHeight: number;
     }>;
@@ -788,7 +788,6 @@ export const runAuthorityCutoverOperation = async (
     frame.entityInput = { ownerEntityId };
   }
   const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_OWNER');
-  const accountBytes = hexToWireBytes(accountId, 32, 'AUTHORITY_ACCOUNT');
   const startedMs = performance.now();
   const wave = operation.kind === 'applyAccountInput'
     ? await frame.session.client.accountInbound({
@@ -805,17 +804,16 @@ export const runAuthorityCutoverOperation = async (
         ownerEntityId: ownerBytes,
         timestamp: operation.timestamp,
         jHeight: operation.jHeight,
-        creates: operation.kind === 'admitAccountTxs' && operation.create !== undefined
-          ? [operation.create]
-          : [],
-        admits: operation.kind === 'admitAccountTxs'
-          ? [[accountBytes, operation.txs.map(accountTxRow)]]
-          : [],
-        propose: operation.kind === 'proposeAccountFrame' ? [accountBytes] : [],
+        creates: [...operation.creates],
+        admits: operation.admits.map(row => [
+          hexToWireBytes(row.accountId, 32, 'AUTHORITY_ACCOUNT'),
+          row.txs.map(accountTxRow),
+        ]),
+        propose: operation.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
         postAccounts: true,
       });
-  if (operation.kind === 'admitAccountTxs' && operation.create !== undefined) {
-    frame.createdAccounts.push(accountId);
+  if (operation.kind === 'accountOutbound') {
+    for (const created of operation.creates.keys()) void created;
   }
   report.waves += 1;
   report.engineMicros += wave.engineMicros;

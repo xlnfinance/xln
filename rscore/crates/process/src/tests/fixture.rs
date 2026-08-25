@@ -382,7 +382,7 @@ pub fn restore_authority_accounts_with_rows(
     let incremental_rows = checkpoint
         .accounts
         .iter()
-        .map(crate::checkpoint_wire::account_rows)
+        .map(|row| crate::checkpoint_wire::account_rows(row, true))
         .collect::<Result<Vec<_>, _>>()
         .expect("authority checkpoint rows");
     let rows: Vec<AbiValue> = incremental_rows

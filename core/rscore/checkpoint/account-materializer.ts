@@ -412,10 +412,19 @@ const assertPriorBinding = (
   }
 };
 
+/**
+ * The carried halves the engine does not author. With no envelope on the wire
+ * there is nothing to reconcile: the Entity's own Account already holds them,
+ * and a row that changed them would have carried the change in a section.
+ */
 const envelopeCollections = (
-  fields: Readonly<Record<string, unknown>>,
+  fields: Readonly<Record<string, unknown>> | null,
   prior: AccountReplica | null,
 ): Pick<AccountReplica, 'pendingWithdrawals' | 'shadow'> => {
+  if (fields === null) {
+    if (prior === null) return fail('ENVELOPE_REQUIRED_ON_CREATE');
+    return { pendingWithdrawals: prior.pendingWithdrawals, shadow: prior.shadow };
+  }
   const create = prior === null;
   const withdrawalRoot = canonicalRoot(fields['pendingWithdrawals'], 'PENDING_WITHDRAWALS');
   const pendingWithdrawals = carriedMap(
@@ -625,17 +634,20 @@ export const materializeRscoreAccountReplica = (
   if (prior !== null) {
     assertPriorBinding(prior, ownerEntityId, accountId, seed, currentFrame);
   }
-  const fields = seed.envelope.fields;
+  const fields = seed.envelope?.fields ?? null;
   const collections = envelopeCollections(fields, prior);
-  if (prior === null && fields['status'] !== 'active') fail('CREATE_STATUS_NON_CANONICAL');
-  if (prior === null && fields['publicPinned'] !== undefined && fields['publicPinned'] !== true) {
-    fail('CREATE_PUBLIC_PIN_NON_CANONICAL');
+  if (prior === null) {
+    if (fields === null) return fail('ENVELOPE_REQUIRED_ON_CREATE');
+    if (fields['status'] !== 'active') fail('CREATE_STATUS_NON_CANONICAL');
+    if (fields['publicPinned'] !== undefined && fields['publicPinned'] !== true) {
+      fail('CREATE_PUBLIC_PIN_NON_CANONICAL');
+    }
   }
   const account: AccountReplica = prior === null
     ? {
         state,
         status: 'active',
-        ...(fields['publicPinned'] === true ? { publicPinned: true } : {}),
+        ...(fields?.['publicPinned'] === true ? { publicPinned: true } : {}),
         mempool: [],
         currentFrame,
         currentHeight: currentFrame.height,
