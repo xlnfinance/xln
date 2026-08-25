@@ -467,10 +467,14 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   ): HandleAccountInputResult {
     const collision = result.ok && result.events.some(event =>
       event.startsWith('📤 LEFT-WINS: Ignored RIGHT'));
+    // A collision is exceptional. Scanning every admission for every ordinary
+    // inbound result made this path quadratic in a busy Entity frame even
+    // though the scan can only affect the collision-only diagnostic below.
+    if (!collision) return result;
     const alreadyQueued = this.admissionRequests
       .filter(entry => normalizeEntityId(entry.account.proofHeader.toEntity) === accountId)
       .reduce((count, entry) => count + (entry.input.kind === 'enqueue' ? entry.input.txs.length : 0), 0);
-    if (!collision || alreadyQueued === 0 || result.events.some(event => event.startsWith('⚠️ LEFT has '))) {
+    if (alreadyQueued === 0 || result.events.some(event => event.startsWith('⚠️ LEFT has '))) {
       return result;
     }
     return {

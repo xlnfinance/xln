@@ -31,7 +31,7 @@ import {
   materializeCutoverAccount,
   type CutoverWaveResult,
 } from './execute';
-import { inboundSlice } from '../round/inbound';
+import { inboundSlice, indexInboundWave } from '../round/inbound';
 
 const halt = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
@@ -92,12 +92,13 @@ const executeInboundBatch = async (
     requests.map(({ accountId, input }) => ({ accountId, input })),
   );
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
+  const waveIndex = indexInboundWave(full.wave);
   const lastOperationByAccount = new Map<string, number>();
   for (const { accountId, operationIndex } of requests) {
     lastOperationByAccount.set(accountId, operationIndex);
   }
   return requests.map(({ accountId, input, operationIndex }) => actualRequest => {
-    const slice = inboundSlice(full.wave, accountId, operationIndex);
+    const slice = inboundSlice(full.wave, accountId, operationIndex, waveIndex);
     return cutoverAccountInputResult(
       {
         binding,

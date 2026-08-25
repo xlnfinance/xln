@@ -30,6 +30,27 @@ export type InboundArrival = Readonly<{
   input: PeerArrivalInput;
 }>;
 
+export type InboundWaveIndex = Readonly<{
+  appliedByOperation: ReadonlyMap<number, Wave['applied'][number]>;
+  postAccountById: ReadonlyMap<string, Wave['postAccounts'][number]>;
+  touchedById: ReadonlyMap<string, Wave['touched'][number]>;
+}>;
+
+/** Build once per bulk response; slicing every arrival must stay O(1). */
+export const indexInboundWave = (wave: Wave): InboundWaveIndex => {
+  const appliedByOperation = new Map(wave.applied.map(row => [row.operationIndex, row]));
+  const postAccountById = new Map(wave.postAccounts.map(row => [row.accountId, row]));
+  const touchedById = new Map(wave.touched.map(row => [row.accountId, row]));
+  if (
+    appliedByOperation.size !== wave.applied.length
+    || postAccountById.size !== wave.postAccounts.length
+    || touchedById.size !== wave.touched.length
+  ) {
+    return fail('INDEX_DUPLICATE');
+  }
+  return { appliedByOperation, postAccountById, touchedById };
+};
+
 /**
  * The arrivals one Entity frame carries, in order.
  *
@@ -56,17 +77,28 @@ export const inboundArrivals = (entityTxs: readonly EntityTx[]): InboundArrival[
  * verdict, and the post-state row of the account it moved. Slicing the round
  * here keeps that publisher unaware that anything was batched.
  */
-export const inboundSlice = (wave: Wave, accountId: string, operationIndex: number): Wave => {
-  const applied = wave.applied.filter(row => row.operationIndex === operationIndex);
-  if (applied.length !== 1 || applied[0]?.accountId !== accountId) {
-    return fail('VERDICT_UNBOUND', { account: accountId, operationIndex, rows: applied.length });
+export const inboundSlice = (
+  wave: Wave,
+  accountId: string,
+  operationIndex: number,
+  index: InboundWaveIndex = indexInboundWave(wave),
+): Wave => {
+  const applied = index.appliedByOperation.get(operationIndex);
+  if (applied === undefined || applied.accountId !== accountId) {
+    return fail('VERDICT_UNBOUND', {
+      account: accountId,
+      operationIndex,
+      rows: applied === undefined ? 0 : 1,
+    });
   }
+  const postAccount = index.postAccountById.get(accountId);
+  const touched = index.touchedById.get(accountId);
   return {
     ...wave,
-    applied,
+    applied: [applied],
     admissions: [],
     proposals: [],
-    postAccounts: wave.postAccounts.filter(row => row.accountId === accountId),
-    touched: wave.touched.filter(row => row.accountId === accountId),
+    postAccounts: postAccount === undefined ? [] : [postAccount],
+    touched: touched === undefined ? [] : [touched],
   };
 };
