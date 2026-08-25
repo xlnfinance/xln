@@ -19,7 +19,6 @@ import {
   authorityDriverEnabled,
   authorityRuntimeSuppressed,
   authorityCutoverStageHandle,
-  stageAuthorityEntityInput,
   type AuthorityEntityStageHandle,
 } from '../../rscore/authority-driver.ts';
 import {
@@ -173,15 +172,6 @@ const logEntityInputProfile = (
   });
 };
 
-const requireAuthorityOccurrence = (
-  occurrence: AccountAuthorityEntityOccurrence | undefined,
-): AccountAuthorityEntityOccurrence => {
-  if (occurrence === undefined) {
-    throw new Error('RSCORE_AUTHORITY_ENTITY_OCCURRENCE_MISSING');
-  }
-  return occurrence;
-};
-
 export const applyEntityInputToReplica = async (
   env: RuntimeReplica,
   entityReplica: EntityReplica,
@@ -218,7 +208,6 @@ export const applyEntityInputToReplica = async (
   const driverEnabled = authorityDriverEnabled(env);
   const migrationRecordingEnabled = authorityRecordEnabled(driverEnabled)
     && !authorityRuntimeSuppressed(env);
-  const executionMode = env.accountAuthorityExecutionMode;
   const preTsOptions: AccountAuthorityEntityStageOptions | null =
     resolveAccountAuthorityEntityStageOptions(
       env,
@@ -240,7 +229,7 @@ export const applyEntityInputToReplica = async (
     env,
     runtimeId,
     migrationRecordingEnabled,
-    async collectorFrameId => {
+    async () => {
       const applyStartedAt = getPerfMs();
       let applied: Awaited<ReturnType<typeof applyEntityInput>>;
       try {
@@ -289,26 +278,10 @@ export const applyEntityInputToReplica = async (
         entityInput,
         actualSignerId,
       );
-      // Cutover already opened its stage while executing; there is no
-      // TypeScript transition left to stage after the fact.
-      const authorityStage = driverEnabled && executionMode === 'cutover'
+      // The engine opened its savepoint while executing this input, if the
+      // input moved any account at all. Nothing is staged after the fact.
+      const authorityStage = driverEnabled
         ? authorityCutoverStageHandle(env, entityReplica.entityId)
-        : driverEnabled && executionMode === undefined
-        ? await stageAuthorityEntityInput(env, {
-            collectorFrameId,
-            ownerEntityId: entityReplica.entityId,
-            occurrence: requireAuthorityOccurrence(authorityOccurrence),
-            appliedInput,
-            ...(trustedLocalRuntimeProtocol === undefined
-              ? {}
-              : { trustedLocalRuntimeProtocol }),
-            deferProposal,
-            ...(requiredEntityTxIndex === undefined
-              ? {}
-              : { requiredEntityTxIndex }),
-            fallbackTimestamp: entityReplica.state.timestamp,
-            fallbackFinalizedJHeight: entityReplica.state.lastFinalizedJHeight,
-          })
         : null;
       return {
         outcome: applied.outcome,

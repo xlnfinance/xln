@@ -237,6 +237,7 @@ impl ProcessSession {
                 expected_accepted_ordinal,
                 context,
             ),
+            Command::Checkpoint => self.checkpoint(),
             Command::PushSavepoint => self.savepoint(StatefulConsensusEngine::push_savepoint),
             Command::KeepSavepoint => self.savepoint(StatefulConsensusEngine::keep_savepoint),
             Command::UndoSavepoint => self.savepoint(StatefulConsensusEngine::undo_savepoint),
@@ -405,6 +406,24 @@ impl ProcessSession {
             revision: result.revision,
             sealed: false,
             checkpoint: None,
+        });
+        Ok((response, false))
+    }
+
+    /// The rows that moved since the last durable checkpoint.
+    ///
+    /// Taken from the committed tree at a Runtime frame boundary: the runtime
+    /// writes them, fsyncs, and only then acknowledges the token.
+    fn checkpoint(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_ref()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let checkpoint = engine.checkpoint_changes()?;
+        let response = crate::checkpoint_wire::changes(&checkpoint)?;
+        self.pending_checkpoint = Some(PendingCheckpoint {
+            commit_token: checkpoint.token,
+            restore_token: checkpoint.restore_token(),
         });
         Ok((response, false))
     }

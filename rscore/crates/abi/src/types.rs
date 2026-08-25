@@ -132,6 +132,9 @@ pub enum OpTag {
     KeepSavepoint = 28,
     /// Put every account back to the innermost savepoint.
     UndoSavepoint = 29,
+    /// Incremental canonical rows since the last durable checkpoint, taken at
+    /// the Runtime frame boundary rather than from a staged candidate.
+    Checkpoint = 30,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -169,6 +172,7 @@ impl TryFrom<u64> for OpTag {
             27 => Ok(Self::PushSavepoint),
             28 => Ok(Self::KeepSavepoint),
             29 => Ok(Self::UndoSavepoint),
+            30 => Ok(Self::Checkpoint),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

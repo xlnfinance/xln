@@ -26,24 +26,18 @@ import { createHash } from 'node:crypto';
 
 import { createStructuredLogger } from '../support/logger';
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
-import { computeFrameHash, getAccountFrameStructuralError } from '../account/consensus/frame/hash';
 import { generateLazyEntityId } from '../entity/factory';
-import {
-  computeEntityAccountLeafDigest,
-  computeEntityAccountValueHash,
-  projectEntityAccountLeaf,
-} from '../entity/consensus/state-root';
-import { computeAccountStateRoot } from '../account/commitment/state-root';
+import { projectEntityAccountLeaf } from '../entity/consensus/state-root';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import { findAccountByCounterparty } from '../account/state/account-lookup';
 import {
+  authorityPeerInputRow,
   buildAuthorityWave,
-  describeAuthorityWaveOperation,
   type AuthorityWave,
-  type AuthorityWaveOperation,
 } from './authority-wave';
 import {
   accountConsensusWire,
+  accountTxWire,
   accountEnvelopeWire,
   accountSeedWire,
   hexToWireBytes,
@@ -51,11 +45,8 @@ import {
   swapMarketPolicyWire,
 } from './shadow-wire';
 import { requireAccountDeltaTransformerAddress } from '../account/consensus/helpers';
-import { waveOutputRow, type Wave } from './wave-decode';
-import { cutoverAccountInputEvents } from './cutover/execute';
-import { authorityCutoverEnabled } from './cutover/enabled';
+import type { Wave } from './wave-decode';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
-import type { ShadowOutputRow } from './shadow-wire';
 import {
   RSCORE_PROCESS_ABI_VERSION,
   RSCORE_PROCESS_PROFILE,
@@ -67,11 +58,9 @@ import {
   type RscoreWireValue,
 } from './client';
 import { assertRscoreCheckpointCandidate } from './checkpoint/checkpoint-wire';
-import type { AccountFrame, AccountReplica } from '../types/account';
+import type { AccountPeerInput, AccountReplica, AccountTx } from '../types/account';
 import type { RoutedEntityInput, RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
-import { encodeCanonicalConsensusBytes } from '../protocol/serialization/binary-codec';
-import { verifyHankoForHash } from '../hanko/signing';
 import type { AccountAuthorityEntityOccurrence } from './authority/entity-stage';
 
 const authorityLog = createStructuredLogger('rscore.authority');
@@ -153,66 +142,20 @@ type Session = {
   seededProjection: Map<string, Record<string, unknown>>;
 };
 
-type OpenAuthorityEntityStage = {
-  handle: AuthorityEntityStageHandle;
-  priorResult: Wave;
-  latestResult: Wave;
-  /**
-   * Present only in cutover, where the stage is opened before TypeScript would
-   * have executed and then grows one operation at a time. The handle the
-   * Runtime accepts is built from this once the Entity input is done.
-   */
-  cutover?: CutoverStageState;
-};
-
-/** What one cutover stage has staged so far, in submission order. */
-type CutoverStageState = {
-  stageKey: Buffer;
-  expectedAcceptedOrdinal: number;
-  nextOperationIndex: number;
-  operations: AuthorityWaveOperation[];
-  createdAccounts: string[];
-  payloadCursor: number;
-  clock: Readonly<{
-    timestamp: number;
-    jHeight: number;
-    entityTimestamp: number;
-    finalizedJHeight: number;
-  }>;
-};
-
-type PendingWave = {
+type OpenFrame = {
   session: Session;
-  token: Buffer;
-  /** Latest cumulative candidate view; final only once sealed. */
-  result: Wave;
-  sealed: boolean;
-  acceptedStageOrdinal: number;
-  nextOperationIndex: number;
-  operations: AuthorityWaveOperation[];
-  expectedOutputs: Map<string, ShadowOutputRow[]>;
-  /**
-   * True once this candidate executed an operation authoritatively. There is
-   * then no TypeScript output list to compare against — the engine's is the
-   * only one — so publishing it is the whole answer.
-   */
-  cutover: boolean;
-  openStage: OpenAuthorityEntityStage | null;
-  /** Candidate-created membership promoted only after the Runtime WAL and Rust commit. */
+  /** The Entity input currently able to be undone, if one has moved anything. */
+  entityInput: AuthorityEntityStageHandle | null;
+  /** Accounts opened by this frame, promoted to membership only on commit. */
   createdAccounts: string[];
+  /** Where the accounts stood after the last thing this frame did to them. */
+  latest: Readonly<{ revision: number; accountsRoot: string }> | null;
+  /** Rows exported for this frame's durable checkpoint, once taken. */
   checkpoint?: RscoreCheckpointChanges;
 };
 
-/** Runtime-envelope handle for one still-abortable parent Entity transition. */
-export type AuthorityEntityStageHandle = Readonly<{
-  ownerEntityId: string;
-  stageKey: Buffer;
-  expectedAcceptedOrdinal: number;
-  nextOperationIndex: number;
-  operations: readonly AuthorityWaveOperation[];
-  expectedOutputs: ReadonlyMap<string, readonly ShadowOutputRow[]>;
-  createdAccounts: readonly string[];
-}>;
+/** Names the Entity input whose account work can still be undone. */
+export type AuthorityEntityStageHandle = Readonly<{ ownerEntityId: string }>;
 
 export type AuthorityEntityStageInput = Readonly<{
   collectorFrameId: string | null;
@@ -242,7 +185,7 @@ const sessions = new Map<RuntimeReplica, Map<string, Session | 'disabled'>>();
 const allSessions = new Set<Session>();
 const captured = new Map<RuntimeReplica, AuthorityWave>();
 /** Candidates open in each Entity's engine, by Runtime. */
-const pending = new Map<RuntimeReplica, PendingWave[]>();
+const pending = new Map<RuntimeReplica, OpenFrame[]>();
 /** Original Account-operation arrival cursor for the active Runtime frame. */
 const arrivalCursors = new Map<RuntimeReplica, number>();
 
@@ -598,18 +541,19 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       owners: (pending.get(env) ?? []).map(candidate => candidate.session.ownerEntityId),
     });
   }
-  const candidates: PendingWave[] = [];
+  const candidates: OpenFrame[] = [];
   pending.set(env, candidates);
   arrivalCursors.set(env, 0);
   try {
     for (const session of sessionEntriesForRuntime(env)) {
-      candidates.push(await openTrackedCandidate(env, session));
+      await session.client.pushSavepoint();
+      candidates.push({ session, entityInput: null, createdAccounts: [], latest: null });
     }
   } catch (error) {
     const abortErrors: unknown[] = [];
     for (const candidate of candidates) {
       try {
-        await candidate.session.client.abort(candidate.token);
+        await candidate.session.client.undoSavepoint();
         report.aborts += 1;
       } catch (abortError) {
         candidate.session.client.kill();
@@ -774,344 +718,39 @@ export const restoreAuthorityExact = async (
   arrivalCursors.delete(env);
 };
 
-const openTrackedCandidate = async (
-  env: RuntimeReplica,
-  session: Session,
-): Promise<PendingWave> => {
-  let prepared: Awaited<ReturnType<RscoreProcessClient['prepareAccountWave']>>;
-  try {
-    // Prepare only allocates the Runtime-frame candidate. Every mutation is
-    // subsequently owned by one abortable parent-Entity stage.
-    prepared = await session.client.prepareAccountWave({
-      entities: [],
-      // Only the cutover needs account bodies back, and only until it reads
-      // its post-state from the leaf instead. Parity compares leaves and
-      // roots, which the wave already carries.
-      postAccounts: authorityCutoverEnabled(),
-    });
-  } catch (error) {
-    session.client.kill();
-    throw error;
-  }
-  try {
-    await compareWithTypescript(
-      env,
-      session.ownerEntityId,
-      prepared.result,
-      new Map(),
-      session,
-    );
-    return {
-      session,
-      token: prepared.token,
-      result: prepared.result,
-      sealed: false,
-      acceptedStageOrdinal: 0,
-      nextOperationIndex: 0,
-      operations: [],
-      expectedOutputs: new Map(),
-      cutover: false,
-      openStage: null,
-      createdAccounts: [],
-    };
-  } catch (error) {
-    try {
-      await session.client.abort(prepared.token);
-      report.aborts += 1;
-    } catch (abortError) {
-      session.client.kill();
-      throw new AggregateError(
-        [error, abortError],
-        `RSCORE_AUTHORITY_CANDIDATE_OPEN_ABORT_FAILED:${session.ownerEntityId}`,
-      );
-    }
-    throw error;
-  }
-};
-
-const u64be = (value: number, label: string): Buffer => {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${label}:${String(value)}`);
-  }
-  const bytes = Buffer.alloc(8);
-  bytes.writeBigUInt64BE(BigInt(value));
-  return bytes;
-};
-
-const authorityOccurrenceBytes = (
-  occurrence: AccountAuthorityEntityOccurrence,
-): Buffer => {
-  const value = occurrence.kind === 'runtime-input' ? occurrence.inputIndex : occurrence.ordinal;
-  const bytes = Buffer.alloc(9);
-  bytes[0] = occurrence.kind === 'runtime-input' ? 0 : 1;
-  u64be(value, 'RSCORE_AUTHORITY_STAGE_OCCURRENCE').copy(bytes, 1);
-  return bytes;
-};
-
-/** Exact retry-stable identity of one parent Entity transition savepoint. */
-export const deriveAuthorityEntityStageKey = (
-  runtimeId: string,
-  ownerEntityId: string,
-  acceptedStageOrdinal: number,
-  occurrence: AccountAuthorityEntityOccurrence,
-  appliedInput: RoutedEntityInput,
-  trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
-  deferProposal: boolean,
-  requiredEntityTxIndex: number | undefined,
-): Buffer => createHash('sha256')
-  .update('xln.rscore.entity-input-stage.v2', 'utf8')
-  .update(Buffer.from([0]))
-  .update(Buffer.from(hexToWireBytes(runtimeId, 20, 'AUTHORITY_STAGE_RUNTIME_ID')))
-  .update(Buffer.from(hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER_ID')))
-  .update(u64be(acceptedStageOrdinal, 'RSCORE_AUTHORITY_STAGE_ORDINAL'))
-  .update(authorityOccurrenceBytes(occurrence))
-  .update(Buffer.from(encodeCanonicalConsensusBytes([
-    appliedInput,
-    trustedLocalRuntimeProtocol ?? null,
-    deferProposal,
-    requiredEntityTxIndex ?? null,
-  ])))
-  .digest();
-
 const candidateForOwner = (
   env: RuntimeReplica,
   ownerEntityId: string,
-): PendingWave | undefined => (pending.get(env) ?? [])
-  .find(candidate => candidate.session.ownerEntityId === ownerEntityId);
+): OpenFrame | undefined => (pending.get(env) ?? [])
+  .find(frame => frame.session.ownerEntityId === ownerEntityId);
 
-const mergeExpectedOutputs = (
-  target: Map<string, ShadowOutputRow[]>,
-  source: ReadonlyMap<string, readonly ShadowOutputRow[]>,
-): void => {
-  for (const [accountId, rows] of source) {
-    const current = target.get(accountId) ?? [];
-    current.push(...rows);
-    target.set(accountId, current);
-  }
-};
-
-const entityOfStageWave = (
-  ownerEntityId: string,
-  wave: AuthorityWave,
-): Extract<AuthorityWave, { kind: 'wave' }>['entities'][number] => {
-  if (wave.kind === 'ineligible') {
-    return halt('ENTITY_STAGE_INELIGIBLE', { owner: ownerEntityId, reason: wave.reason });
-  }
-  if (wave.kind !== 'wave' || wave.entities.length !== 1) {
-    return halt('ENTITY_STAGE_ARITY', {
-      owner: ownerEntityId,
-      kind: wave.kind,
-      entities: wave.kind === 'wave' ? wave.entities.map(entity => entity.ownerEntityId) : [],
-    });
-  }
-  const entity = wave.entities[0];
-  if (entity === undefined || entity.ownerEntityId !== ownerEntityId) {
-    return halt('ENTITY_STAGE_OWNER', {
-      owner: ownerEntityId,
-      actual: entity?.ownerEntityId ?? null,
-    });
-  }
-  assertAuthorityWaveOperationLedger(wave);
-  return entity;
-};
-
-/**
- * Replay the Account work observed while TypeScript evaluated one EntityInput
- * into its exact Rust savepoint. The caller owns accept/discard after deciding
- * whether the parent Entity transition commits.
- */
-export const stageAuthorityEntityInput = async (
-  env: RuntimeReplica,
-  input: AuthorityEntityStageInput,
-): Promise<AuthorityEntityStageHandle | null> => {
-  if (!authorityDriverEnabled(env)) return null;
-  const ownerEntityId = input.ownerEntityId.trim().toLowerCase();
-  const candidate = candidateForOwner(env, ownerEntityId);
-  if (input.collectorFrameId === null) {
-    return halt('ENTITY_STAGE_COLLECTOR_MISSING', { owner: ownerEntityId });
-  }
-  if (candidate === undefined) {
-    const unowned = buildAuthorityWave(input.collectorFrameId);
-    if (unowned.kind === 'empty') return null;
-    return halt('ENTITY_STAGE_OWNER_UNARMED', { owner: ownerEntityId, kind: unowned.kind });
-  }
-  if (candidate.sealed || candidate.openStage !== null) {
-    return halt('ENTITY_STAGE_CANDIDATE_STATE', {
-      owner: ownerEntityId,
-      sealed: candidate.sealed,
-      open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
-    });
-  }
-  const wave = buildAuthorityWave(input.collectorFrameId, {
-    operationIndexStart: candidate.nextOperationIndex,
-    arrivalIndexStart: arrivalCursors.get(env) ?? 0,
-    fallbackEntity: {
-      ownerEntityId,
-      timestamp: input.fallbackTimestamp,
-      finalizedJHeight: input.fallbackFinalizedJHeight,
-    },
-  });
-  const entity = entityOfStageWave(ownerEntityId, wave);
-  arrivalCursors.set(
-    env,
-    (arrivalCursors.get(env) ?? 0) + entity.operations.length,
-  );
-  const visibleAccounts = new Set([
-    ...candidate.session.seeded,
-    ...candidate.createdAccounts,
-  ]);
-  const createdAccounts = deriveAuthorityCandidateCreates(
-    ownerEntityId,
-    visibleAccounts,
-    entity.ops,
-  );
-  const runtimeId = String(env.runtimeId ?? '');
-  const stageKey = deriveAuthorityEntityStageKey(
-    runtimeId,
-    ownerEntityId,
-    candidate.acceptedStageOrdinal,
-    input.occurrence,
-    input.appliedInput,
-    input.trustedLocalRuntimeProtocol,
-    input.deferProposal,
-    input.requiredEntityTxIndex,
-  );
-  const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER');
-  const priorResult = candidate.result;
-  let latestResult = priorResult;
-  try {
-    const opened = await candidate.session.client.beginEntityStage(
-      candidate.token,
-      stageKey,
-      candidate.acceptedStageOrdinal,
-      {
-        ownerEntityId: ownerBytes,
-        timestamp: entity.timestamp,
-        jHeight: entity.jHeight,
-        entityTimestamp: entity.entityTimestamp,
-        finalizedJHeight: entity.finalizedJHeight,
-        propose: entity.propose,
-      },
-    );
-    const openedRoot = `0x${opened.accountsRoot.toString('hex')}`.toLowerCase();
-    if (
-      opened.revision !== priorResult.revision
-      || openedRoot !== priorResult.accountsRoot.toLowerCase()
-    ) {
-      return halt('ENTITY_STAGE_BEGIN_STATE', {
-        owner: ownerEntityId,
-        expectedRevision: priorResult.revision,
-        actualRevision: opened.revision,
-        expectedRoot: priorResult.accountsRoot,
-        actualRoot: openedRoot,
-      });
-    }
-    if (entity.ops.length > 0) {
-      latestResult = await candidate.session.client.applyAccountWave(
-        candidate.token,
-        stageKey,
-        { entities: [{ ownerEntityId: ownerBytes, ops: entity.ops }] },
-      );
-      // Apply returns the step-local admission/peer verdict rows. Propose is a
-      // distinct step and intentionally returns none of those rows, so bind
-      // parity before advancing to it while retaining the later root as the
-      // stage's terminal candidate view.
-      assertAuthorityStageVerdictParity(
-        ownerEntityId,
-        stageKey,
-        entity.operations,
-        latestResult,
-      );
-    }
-    if (entity.proposalAccountIds.length > 0) {
-      latestResult = await candidate.session.client.proposeAccountWave(
-        candidate.token,
-        stageKey,
-        {
-          entities: [{
-            ownerEntityId: ownerBytes,
-            accountIds: entity.proposalAccountIds.map(accountId =>
-              hexToWireBytes(accountId, 32, 'AUTHORITY_PROPOSAL_ACCOUNT')),
-          }],
-        },
-      );
-      assertAuthorityStageProposalParity(
-        ownerEntityId,
-        stageKey,
-        entity.expectedProposals,
-        latestResult,
-      );
-    }
-  } catch (error) {
-    try {
-      await candidate.session.client.discardEntityStage(
-        candidate.token,
-        stageKey,
-        candidate.acceptedStageOrdinal,
-      );
-    } catch (discardError) {
-      candidate.session.client.kill();
-      throw new AggregateError(
-        [error, discardError],
-        `RSCORE_AUTHORITY_ENTITY_STAGE_ABORT_FAILED:${ownerEntityId}`,
-      );
-    }
-    throw error;
-  }
-  const handle: AuthorityEntityStageHandle = {
-    ownerEntityId,
-    stageKey,
-    expectedAcceptedOrdinal: candidate.acceptedStageOrdinal,
-    nextOperationIndex: candidate.nextOperationIndex + entity.operations.length,
-    operations: [...entity.operations],
-    expectedOutputs: new Map(
-      [...entity.expectedOutputs].map(([accountId, rows]) => [accountId, [...rows]]),
-    ),
-    createdAccounts: [...createdAccounts],
-  };
-  candidate.openStage = { handle, priorResult, latestResult };
-  return handle;
-};
-
-/**
- * One Account operation the Rust authority performs *instead of* TypeScript.
- *
- * The parity driver stages a whole Entity input after TypeScript executed it
- * and compares. Cutover cannot: there is no TypeScript result to compare
- * against, because TypeScript never runs the transition. So the stage opens on
- * the first operation and grows one operation at a time, and every operation
- * answers with the exact post-state row the caller materializes.
- */
+/** One thing an Entity input asks of one account. */
 export type AuthorityCutoverOperation =
   | Readonly<{
       kind: 'applyAccountInput';
       ownerEntityId: string;
       accountId: string;
-      collectorFrameId: string;
-      timestamp: number;
-      jHeight: number;
+      /** Exactly what the peer sent, not a reference to something recorded. */
+      input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
       entityTimestamp: number;
       finalizedJHeight: number;
-      occurrence: AccountAuthorityEntityOccurrence;
-      appliedInput: RoutedEntityInput;
-      trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
-      deferProposal: boolean;
-      requiredEntityTxIndex?: number;
+    }>
+  | Readonly<{
+      kind: 'admitAccountTxs';
+      ownerEntityId: string;
+      accountId: string;
+      txs: readonly AccountTx[];
+      /** Present only when this Entity input is what opens the account. */
+      create?: RscoreWireValue;
+      timestamp: number;
+      jHeight: number;
     }>
   | Readonly<{
       kind: 'proposeAccountFrame';
       ownerEntityId: string;
       accountId: string;
-      collectorFrameId: string;
       timestamp: number;
       jHeight: number;
-      entityTimestamp: number;
-      finalizedJHeight: number;
-      occurrence: AccountAuthorityEntityOccurrence;
-      appliedInput: RoutedEntityInput;
-      trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
-      deferProposal: boolean;
-      requiredEntityTxIndex?: number;
     }>;
 
 export type AuthorityCutoverResult = Readonly<{
@@ -1120,144 +759,20 @@ export type AuthorityCutoverResult = Readonly<{
   row: RscoreAccountCheckpointRow | null;
 }>;
 
-/** The stage this cutover Entity input opened, if it opened one. */
+/** The Entity input whose account work this frame can still undo. */
 export const authorityCutoverStageHandle = (
   env: RuntimeReplica,
   ownerEntityId: string,
-): AuthorityEntityStageHandle | null => {
-  const candidate = candidateForOwner(env, ownerEntityId.trim().toLowerCase());
-  const open = candidate?.openStage;
-  if (candidate === undefined || open == null || open.cutover === undefined) return null;
-  const state = open.cutover;
-  const handle: AuthorityEntityStageHandle = {
-    ownerEntityId: candidate.session.ownerEntityId,
-    stageKey: state.stageKey,
-    expectedAcceptedOrdinal: state.expectedAcceptedOrdinal,
-    nextOperationIndex: state.nextOperationIndex,
-    operations: [...state.operations],
-    // Cutover has no TypeScript outputs to expect: the engine's are the only
-    // ones, and they are published from its own verdicts.
-    expectedOutputs: new Map(),
-    createdAccounts: [...state.createdAccounts],
-  };
-  open.handle = handle;
-  return handle;
-};
-
-const openCutoverStage = async (
-  env: RuntimeReplica,
-  candidate: PendingWave,
-  operation: AuthorityCutoverOperation,
-): Promise<OpenAuthorityEntityStage> => {
-  const existing = candidate.openStage;
-  if (existing !== null) {
-    const state = existing.cutover;
-    if (state === undefined) {
-      return halt('CUTOVER_STAGE_NOT_CUTOVER', { owner: operation.ownerEntityId });
-    }
-    // One Entity input signs with one clock. A second clock inside the same
-    // stage would stamp part of its work with a clock the Entity never used.
-    if (
-      state.clock.entityTimestamp !== operation.entityTimestamp
-      || state.clock.finalizedJHeight !== operation.finalizedJHeight
-      || (operation.kind === 'proposeAccountFrame'
-        && (state.clock.timestamp !== operation.timestamp
-          || state.clock.jHeight !== operation.jHeight))
-    ) {
-      return halt('CUTOVER_STAGE_CLOCK_CONFLICT', {
-        owner: operation.ownerEntityId,
-        stage: state.clock,
-        operation: {
-          kind: operation.kind,
-          timestamp: operation.timestamp,
-          jHeight: operation.jHeight,
-          entityTimestamp: operation.entityTimestamp,
-          finalizedJHeight: operation.finalizedJHeight,
-        },
-      });
-    }
-    return existing;
-  }
-  const runtimeId = String(env.runtimeId ?? '');
-  const stageKey = deriveAuthorityEntityStageKey(
-    runtimeId,
-    candidate.session.ownerEntityId,
-    candidate.acceptedStageOrdinal,
-    operation.occurrence,
-    operation.appliedInput,
-    operation.trustedLocalRuntimeProtocol,
-    operation.deferProposal,
-    operation.requiredEntityTxIndex,
-  );
-  const opened = await candidate.session.client.beginEntityStage(
-    candidate.token,
-    stageKey,
-    candidate.acceptedStageOrdinal,
-    {
-      ownerEntityId: hexToWireBytes(
-        candidate.session.ownerEntityId,
-        32,
-        'AUTHORITY_STAGE_OWNER',
-      ),
-      timestamp: operation.timestamp,
-      jHeight: operation.jHeight,
-      entityTimestamp: operation.entityTimestamp,
-      finalizedJHeight: operation.finalizedJHeight,
-      // Every cutover stage may propose: the Entity worklist decides per
-      // Account, and the engine refuses a proposal it has no clock for.
-      propose: true,
-    },
-  );
-  const openedRoot = `0x${opened.accountsRoot.toString('hex')}`.toLowerCase();
-  if (
-    opened.revision !== candidate.result.revision
-    || openedRoot !== candidate.result.accountsRoot.toLowerCase()
-  ) {
-    return halt('CUTOVER_STAGE_BEGIN_STATE', {
-      owner: candidate.session.ownerEntityId,
-      expectedRevision: candidate.result.revision,
-      actualRevision: opened.revision,
-      expectedRoot: candidate.result.accountsRoot,
-      actualRoot: openedRoot,
-    });
-  }
-  candidate.cutover = true;
-  const state: CutoverStageState = {
-    stageKey,
-    expectedAcceptedOrdinal: candidate.acceptedStageOrdinal,
-    nextOperationIndex: candidate.nextOperationIndex,
-    operations: [],
-    createdAccounts: [],
-    payloadCursor: 0,
-    clock: {
-      timestamp: operation.timestamp,
-      jHeight: operation.jHeight,
-      entityTimestamp: operation.entityTimestamp,
-      finalizedJHeight: operation.finalizedJHeight,
-    },
-  };
-  const open: OpenAuthorityEntityStage = {
-    handle: {
-      ownerEntityId: candidate.session.ownerEntityId,
-      stageKey,
-      expectedAcceptedOrdinal: candidate.acceptedStageOrdinal,
-      nextOperationIndex: candidate.nextOperationIndex,
-      operations: [],
-      expectedOutputs: new Map(),
-      createdAccounts: [],
-    },
-    priorResult: candidate.result,
-    latestResult: candidate.result,
-    cutover: state,
-  };
-  candidate.openStage = open;
-  return open;
-};
+): AuthorityEntityStageHandle | null =>
+  candidateForOwner(env, ownerEntityId.trim().toLowerCase())?.entityInput ?? null;
 
 /**
- * Perform one Account operation in Rust and hand back its exact post-state.
- * The caller materializes the row into the canonical TypeScript replica; the
- * engine's execution is the only one that happened.
+ * Hand one account operation to the engine.
+ *
+ * Two shapes, and nothing between them: what arrived from a peer goes in, and
+ * what this Entity decided goes out. Neither carries a candidate, a stage key
+ * or an operation index — the engine owns the accounts, and the savepoint the
+ * Entity input opened is what makes the work undoable.
  */
 export const runAuthorityCutoverOperation = async (
   env: RuntimeReplica,
@@ -1266,1036 +781,136 @@ export const runAuthorityCutoverOperation = async (
   if (!authorityDriverEnabled(env)) return null;
   const ownerEntityId = operation.ownerEntityId.trim().toLowerCase();
   const accountId = operation.accountId.trim().toLowerCase();
-  const candidate = candidateForOwner(env, ownerEntityId);
-  if (candidate === undefined) return null;
-  if (candidate.sealed) {
-    return halt('CUTOVER_CANDIDATE_SEALED', { owner: ownerEntityId });
+  const frame = candidateForOwner(env, ownerEntityId);
+  if (frame === undefined) return null;
+  if (frame.entityInput === null) {
+    await frame.session.client.pushSavepoint();
+    frame.entityInput = { ownerEntityId };
   }
-  const open = await openCutoverStage(env, candidate, operation);
-  const state = open.cutover;
-  if (state === undefined) return halt('CUTOVER_STAGE_MISSING', { owner: ownerEntityId });
-  const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_STAGE_OWNER');
-  const waveStartedMs = performance.now();
-  let result: Wave;
-  if (operation.kind === 'applyAccountInput') {
-    const wave = buildAuthorityWave(operation.collectorFrameId, {
-      operationIndexStart: state.nextOperationIndex,
-      arrivalIndexStart: arrivalCursors.get(env) ?? 0,
-      payloadSkip: state.payloadCursor,
-      expectations: 'absent',
-      fallbackEntity: {
-        ownerEntityId,
-        timestamp: operation.entityTimestamp,
+  const ownerBytes = hexToWireBytes(ownerEntityId, 32, 'AUTHORITY_OWNER');
+  const accountBytes = hexToWireBytes(accountId, 32, 'AUTHORITY_ACCOUNT');
+  const startedMs = performance.now();
+  const wave = operation.kind === 'applyAccountInput'
+    ? await frame.session.client.accountInbound({
+        ownerEntityId: ownerBytes,
+        entityTimestamp: operation.entityTimestamp,
         finalizedJHeight: operation.finalizedJHeight,
-      },
-    });
-    if (wave.kind === 'ineligible') {
-      return halt('CUTOVER_WAVE_INELIGIBLE', { owner: ownerEntityId, reason: wave.reason });
-    }
-    if (wave.kind === 'empty') {
-      return halt('CUTOVER_WAVE_EMPTY', { owner: ownerEntityId, account: accountId });
-    }
-    const entity = entityOfStageWave(ownerEntityId, wave);
-    if (entity.ops.length === 0) {
-      return halt('CUTOVER_WAVE_NO_OPERATION', { owner: ownerEntityId, account: accountId });
-    }
-    state.payloadCursor += entity.ops.length;
-    arrivalCursors.set(env, (arrivalCursors.get(env) ?? 0) + entity.operations.length);
-    result = await candidate.session.client.applyAccountWave(
-      candidate.token,
-      state.stageKey,
-      { entities: [{ ownerEntityId: ownerBytes, ops: entity.ops }] },
-    );
-    state.operations.push(...entity.operations);
-    state.nextOperationIndex += entity.operations.length;
-    state.createdAccounts.push(...deriveAuthorityCandidateCreates(
-      ownerEntityId,
-      new Set([...candidate.session.seeded, ...candidate.createdAccounts, ...state.createdAccounts]),
-      entity.ops,
-    ));
-    report.inputsApplied += result.applied.length;
-  } else {
-    result = await candidate.session.client.proposeAccountWave(
-      candidate.token,
-      state.stageKey,
-      {
-        entities: [{
-          ownerEntityId: ownerBytes,
-          accountIds: [hexToWireBytes(accountId, 32, 'AUTHORITY_PROPOSAL_ACCOUNT')],
-        }],
-      },
-    );
-    report.framesProposed += result.proposals.filter(row => row.frame !== null).length;
+        rows: [authorityPeerInputRow(0, accountId, {
+          kind: operation.input.kind,
+          input: operation.input,
+        } as Parameters<typeof authorityPeerInputRow>[2])],
+        postAccounts: true,
+      })
+    : await frame.session.client.accountOutbound({
+        ownerEntityId: ownerBytes,
+        timestamp: operation.timestamp,
+        jHeight: operation.jHeight,
+        creates: operation.kind === 'admitAccountTxs' && operation.create !== undefined
+          ? [operation.create]
+          : [],
+        admits: operation.kind === 'admitAccountTxs'
+          ? [[accountBytes, operation.txs.map(accountTxRow)]]
+          : [],
+        propose: operation.kind === 'proposeAccountFrame' ? [accountBytes] : [],
+        postAccounts: true,
+      });
+  if (operation.kind === 'admitAccountTxs' && operation.create !== undefined) {
+    frame.createdAccounts.push(accountId);
   }
-  open.latestResult = result;
   report.waves += 1;
-  report.engineMicros += result.engineMicros;
-  report.waveMicros += Math.round((performance.now() - waveStartedMs) * 1_000);
-  const row = result.postAccounts.find(candidateRow => candidateRow.accountId === accountId) ?? null;
-  return { wave: result, row };
+  report.engineMicros += wave.engineMicros;
+  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
+  report.inputsApplied += wave.applied.length;
+  report.framesProposed += wave.proposals.filter(row => row.frame !== null).length;
+  frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
+  const row = wave.postAccounts.find(candidate => candidate.accountId === accountId) ?? null;
+  return { wave, row };
 };
 
-const requireOpenStage = (
-  env: RuntimeReplica,
-  handle: AuthorityEntityStageHandle,
-): Readonly<{ candidate: PendingWave; open: OpenAuthorityEntityStage }> => {
-  const candidate = candidateForOwner(env, handle.ownerEntityId);
-  const open = candidate?.openStage;
-  if (
-    candidate === undefined
-    || open == null
-    || open.handle !== handle
-    || !buffersEqual(open.handle.stageKey, handle.stageKey)
-  ) {
-    return halt('ENTITY_STAGE_HANDLE_STALE', {
-      owner: handle.ownerEntityId,
-      key: handle.stageKey.toString('hex'),
-    });
-  }
-  return { candidate, open };
-};
-
+/** Keep everything this Entity input's accounts did. */
 export const acceptAuthorityEntityStage = async (
   env: RuntimeReplica,
   handle: AuthorityEntityStageHandle | null,
 ): Promise<void> => {
   if (handle === null) return;
-  const { candidate, open } = requireOpenStage(env, handle);
-  const receipt = await candidate.session.client.finalizeEntityStage(
-    candidate.token,
-    handle.stageKey,
-    handle.expectedAcceptedOrdinal,
-  );
-  const expectedRoot = open.latestResult.accountsRoot.toLowerCase();
-  const actualRoot = `0x${receipt.accountsRoot.toString('hex')}`.toLowerCase();
-  if (
-    receipt.acceptedStageOrdinal !== handle.expectedAcceptedOrdinal + 1
-    || receipt.revision !== open.latestResult.revision
-    || actualRoot !== expectedRoot
-  ) {
-    return halt('ENTITY_STAGE_ACCEPT_STATE', {
-      owner: handle.ownerEntityId,
-      expectedOrdinal: handle.expectedAcceptedOrdinal + 1,
-      actualOrdinal: receipt.acceptedStageOrdinal,
-      expectedRevision: open.latestResult.revision,
-      actualRevision: receipt.revision,
-      expectedRoot,
-      actualRoot,
-    });
-  }
-  candidate.result = open.latestResult;
-  candidate.acceptedStageOrdinal = receipt.acceptedStageOrdinal;
-  candidate.nextOperationIndex = handle.nextOperationIndex;
-  candidate.operations.push(...handle.operations);
-  mergeExpectedOutputs(candidate.expectedOutputs, handle.expectedOutputs);
-  candidate.createdAccounts.push(...handle.createdAccounts);
-  candidate.openStage = null;
+  const frame = requireOpenEntityInput(env, handle);
+  await frame.session.client.keepSavepoint();
+  frame.entityInput = null;
 };
 
+/** Put every account back where this Entity input found it. */
 export const discardAuthorityEntityStage = async (
   env: RuntimeReplica,
   handle: AuthorityEntityStageHandle | null,
 ): Promise<void> => {
   if (handle === null) return;
-  const { candidate, open } = requireOpenStage(env, handle);
-  const receipt = await candidate.session.client.discardEntityStage(
-    candidate.token,
-    handle.stageKey,
-    handle.expectedAcceptedOrdinal,
-  );
-  const expectedRoot = open.priorResult.accountsRoot.toLowerCase();
-  const actualRoot = `0x${receipt.accountsRoot.toString('hex')}`.toLowerCase();
-  if (
-    receipt.acceptedStageOrdinal !== handle.expectedAcceptedOrdinal
-    || receipt.revision !== open.priorResult.revision
-    || actualRoot !== expectedRoot
-  ) {
-    return halt('ENTITY_STAGE_DISCARD_STATE', {
-      owner: handle.ownerEntityId,
-      expectedOrdinal: handle.expectedAcceptedOrdinal,
-      actualOrdinal: receipt.acceptedStageOrdinal,
-      expectedRevision: open.priorResult.revision,
-      actualRevision: receipt.revision,
-      expectedRoot,
-      actualRoot,
-    });
-  }
-  candidate.result = open.priorResult;
-  candidate.openStage = null;
+  const frame = requireOpenEntityInput(env, handle);
+  const undone = await frame.session.client.undoSavepoint();
+  frame.latest = savepointPosition(undone);
+  frame.entityInput = null;
 };
 
-/**
- * Hand the collected frame to the engine and hold its answer against
- * TypeScript's. Returns with a candidate pending in the engine, which the
- * caller must either commit (after its own record is durable) or abort.
- */
+const requireOpenEntityInput = (
+  env: RuntimeReplica,
+  handle: AuthorityEntityStageHandle,
+): OpenFrame => {
+  const frame = candidateForOwner(env, handle.ownerEntityId);
+  if (frame === undefined || frame.entityInput !== handle) {
+    return halt('ENTITY_INPUT_HANDLE_STALE', { owner: handle.ownerEntityId });
+  }
+  return frame;
+};
+
+/** One queued transaction as the engine reads it. */
+const accountTxRow = (tx: AccountTx): RscoreWireValue =>
+  accountTxWire(tx) ?? halt('ACCOUNT_TX_OUTSIDE_PROFILE', { kind: tx.type });
+
+/** `[revision, accountsRoot]`, as every savepoint operation answers. */
+const savepointPosition = (
+  value: unknown,
+): Readonly<{ revision: number; accountsRoot: string }> => {
+  if (!Array.isArray(value) || value.length !== 2) {
+    return halt('SAVEPOINT_RESPONSE_ARITY', { arity: Array.isArray(value) ? value.length : null });
+  }
+  const [revision, root] = value;
+  if (!(root instanceof Uint8Array) || root.byteLength !== 32) {
+    return halt('SAVEPOINT_RESPONSE_ROOT', {});
+  }
+  return {
+    revision: Number(revision),
+    accountsRoot: `0x${Buffer.from(root).toString('hex')}`,
+  };
+};
+
+/** Nothing to seal: the accounts already moved, under an undoable savepoint. */
 export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
-  const leaked = captured.get(env);
-  captured.delete(env);
-  if (leaked !== undefined && leaked.kind !== 'empty') {
-    return halt('ACCOUNT_WORK_OUTSIDE_ENTITY_STAGE', {
-      kind: leaked.kind,
-      detail: leaked.kind === 'ineligible'
-        ? leaked.reason
-        : leaked.entities.map(entity => ({
-            owner: entity.ownerEntityId,
-            operations: entity.operations.length,
-            proposals: entity.proposalAccountIds,
-          })),
-    });
-  }
-  const candidates = pending.get(env);
-  if (candidates === undefined) {
-    return halt('AUTHORITY_FRAME_CANDIDATE_MISSING', {});
-  }
-  if (candidates.length === 0) {
+  const frames = pending.get(env);
+  if (frames === undefined) return halt('AUTHORITY_FRAME_CANDIDATE_MISSING', {});
+  if (frames.length === 0) {
     report.emptyFrames += 1;
     return;
   }
-  for (const candidate of candidates) {
-    const ownerEntityId = candidate.session.ownerEntityId;
-    if (candidate.openStage !== null || candidate.sealed) {
-      return halt('AUTHORITY_FRAME_SEAL_STATE', {
-        owner: ownerEntityId,
-        sealed: candidate.sealed,
-        open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
-      });
-    }
-    const result = await candidate.session.client.sealAccountWave(candidate.token);
-    assertAuthorityOperationCoverage(ownerEntityId, candidate.operations, result);
-    await compareWithTypescript(
-      env,
-      ownerEntityId,
-      result,
-      candidate.cutover ? null : candidate.expectedOutputs,
-      candidate.session,
-    );
-    candidate.result = result;
-    candidate.sealed = true;
-    report.waves += 1;
-    report.framesProposed += result.proposals.filter(row => row.frame !== null).length;
-    report.inputsApplied += result.applied.length;
-  }
-};
-
-/**
- * Every account the wave touches must already be in the engine, seeded from
- * the state it had before this frame. An account opened during this very frame
- * has no such state: TypeScript created it while applying, and seeding it now
- * would seed the answer. That case halts rather than being papered over.
- */
-export const deriveAuthorityCandidateCreates = (
-  ownerEntityId: string,
-  committedAccounts: ReadonlySet<string>,
-  ops: readonly unknown[],
-): readonly string[] => {
-  const visible = new Set(committedAccounts);
-  const created: string[] = [];
-  for (const op of ops) {
-    const accountId = accountIdOf(op);
-    if (accountId === null) continue;
-    if (Array.isArray(op) && op[0] === 2) {
-      if (visible.has(accountId)) {
-        halt('ACCOUNT_CREATE_ALREADY_COMMITTED', {
-          owner: ownerEntityId,
-          account: accountId,
-        });
-      }
-      visible.add(accountId);
-      created.push(accountId);
-      continue;
-    }
-    if (visible.has(accountId)) continue;
-    halt('ACCOUNT_OPENED_MID_FRAME', { owner: ownerEntityId, account: accountId });
-  }
-  return created;
-};
-
-/** Account id inside Admit, Apply or Create candidate operations. */
-const accountIdOf = (op: unknown): string | null => {
-  if (!Array.isArray(op)) return null;
-  if (op[0] === 0) return hexOf(op[2]);
-  if (op[0] === 1 && Array.isArray(op[1])) return hexOf(op[1][1]);
-  if (op[0] === 2 && Array.isArray(op[2])) return hexOf(op[2][0]);
-  return null;
-};
-
-const hexOf = (value: unknown): string | null =>
-  value instanceof Uint8Array ? `0x${Buffer.from(value).toString('hex')}` : null;
-
-const operationMatches = (
-  left: Pick<AuthorityWaveOperation, 'operationIndex' | 'accountId' | 'resultKind'>,
-  right: Pick<AuthorityWaveOperation, 'operationIndex' | 'accountId' | 'resultKind'>,
-): boolean =>
-  left.operationIndex === right.operationIndex
-  && left.accountId === right.accountId
-  && left.resultKind === right.resultKind;
-
-type RustPeerVerdictParity = Readonly<{
-  outcome: 'applied' | 'rejected' | 'failed';
-  committedFrames: readonly Readonly<{
-    frame: AccountFrame;
-    committedViaNewFrame: boolean;
-  }>[];
-  responseAckHanko: string | null;
-}>;
-
-const projectRustPeerVerdict = (
-  verdict: Wave['applied'][number]['verdict'],
-): RustPeerVerdictParity => {
-  switch (verdict.kind) {
-    case 'frameCommitted':
-      return {
-        outcome: 'applied',
-        committedFrames: [verdict.committedFrame],
-        responseAckHanko: verdict.ackHanko,
-      };
-    case 'ackCommitted':
-      return {
-        outcome: 'applied',
-        committedFrames: [verdict.committedFrame],
-        responseAckHanko: null,
-      };
-    case 'frameDuplicate':
-      return {
-        outcome: 'applied',
-        committedFrames: [],
-        responseAckHanko: verdict.ackHanko,
-      };
-    case 'frameCollisionIgnored':
-    case 'frameStale':
-    case 'ackStale':
-      return { outcome: 'applied', committedFrames: [], responseAckHanko: null };
-    case 'frameRejected':
-    case 'ackRejected':
-    case 'frameAckRejected':
-      return { outcome: 'rejected', committedFrames: [], responseAckHanko: null };
-    case 'failed':
-      return { outcome: 'failed', committedFrames: [], responseAckHanko: null };
-    case 'frameAckApplied': {
-      const ack = projectRustPeerVerdict(verdict.ackVerdict);
-      const frame = projectRustPeerVerdict(verdict.frameVerdict);
-      if (ack.outcome !== 'applied' || frame.outcome !== 'applied') {
-        return halt('FRAME_ACK_CHILD_TERMINAL_INVALID', {
-          ack: ack.outcome,
-          frame: frame.outcome,
-        });
-      }
-      return {
-        outcome: 'applied',
-        committedFrames: [...ack.committedFrames, ...frame.committedFrames],
-        responseAckHanko: frame.responseAckHanko,
-      };
-    }
-  }
-};
-
-const rustProposalFrame = (
-  frame: Wave['proposals'][number]['frame'],
-): AccountFrame | null => {
-  if (frame === null) return null;
-  const { hanko: _hanko, ...accountFrame } = frame;
-  return accountFrame;
-};
-
-/** Bind exact proposal order, terminal shape, frame and dropped rows. */
-export const assertAuthorityStageProposalParity = (
-  ownerEntityId: string,
-  stageKey: Uint8Array,
-  expected: Extract<AuthorityWave, { kind: 'wave' }>['entities'][number]['expectedProposals'],
-  actual: Pick<Wave, 'proposals'>,
-): void => {
-  const stageKeyHex = Buffer.from(stageKey).toString('hex');
-  if (actual.proposals.length !== expected.length) {
-    return halt('ENTITY_STAGE_PROPOSAL_COUNT_MISMATCH', {
-      owner: ownerEntityId,
-      stageKey: stageKeyHex,
-      typescript: expected.length,
-      rust: actual.proposals.length,
-    });
-  }
-  for (const [attemptIndex, expectedRow] of expected.entries()) {
-    const actualRow = actual.proposals[attemptIndex]
-      ?? halt('ENTITY_STAGE_PROPOSAL_ROW_MISSING', {
-        owner: ownerEntityId,
-        stageKey: stageKeyHex,
-        attemptIndex,
-      });
-    const actualFrame = rustProposalFrame(actualRow.frame);
-    if (
-      actualRow.accountId !== expectedRow.accountId
-      || (actualFrame !== null) !== (expectedRow.outcome === 'proposed')
-      || safeStringify(actualFrame) !== safeStringify(expectedRow.frame)
-      || safeStringify(actualRow.dropped) !== safeStringify(expectedRow.dropped)
-    ) {
-      halt('ENTITY_STAGE_PROPOSAL_VERDICT_MISMATCH', {
-        owner: ownerEntityId,
-        stageKey: stageKeyHex,
-        attemptIndex,
-        account: expectedRow.accountId,
-        typescript: expectedRow,
-        rust: {
-          accountId: actualRow.accountId,
-          frame: actualFrame,
-          dropped: actualRow.dropped,
-        },
-      });
-    }
-    if (actualFrame !== null && computeFrameHash(actualFrame) !== actualFrame.stateHash) {
-      halt('ENTITY_STAGE_PROPOSAL_FRAME_HASH_INVALID', {
-        owner: ownerEntityId,
-        stageKey: stageKeyHex,
-        attemptIndex,
-        account: expectedRow.accountId,
+  for (const frame of frames) {
+    if (frame.entityInput !== null) {
+      return halt('AUTHORITY_FRAME_ENTITY_INPUT_OPEN', {
+        owner: frame.session.ownerEntityId,
       });
     }
   }
 };
 
 /**
- * Bind every Rust result row to the exact TypeScript Account transition that
- * produced the parent Entity candidate. Full committed frame evidence stays
- * ordered; FrameAck is one operation whose evidence is ACK then frame.
- */
-export const assertAuthorityStageVerdictParity = (
-  ownerEntityId: string,
-  stageKey: Uint8Array,
-  operations: readonly AuthorityWaveOperation[],
-  result: Pick<Wave, 'admissions' | 'applied'>,
-): void => {
-  const admissions = new Map(result.admissions.map(row => [row.operationIndex, row]));
-  const applied = new Map(result.applied.map(row => [row.operationIndex, row]));
-  for (const operation of [...operations].sort((left, right) =>
-    left.arrivalIndex - right.arrivalIndex)) {
-    const detail = {
-      owner: ownerEntityId,
-      stageKey: Buffer.from(stageKey).toString('hex'),
-      arrivalIndex: operation.arrivalIndex,
-      operationIndex: operation.operationIndex,
-      account: operation.accountId,
-    };
-    // Parity only: a cutover operation has no TypeScript verdict, because
-    // TypeScript never executed it. Those stages are checked by the exact
-    // materialization instead.
-    if (operation.expectedVerdict === undefined) continue;
-    if (operation.expectedVerdict.kind === 'create') continue;
-    if (operation.expectedVerdict.kind === 'admission') {
-      const actual = admissions.get(operation.operationIndex)?.verdict;
-      if (
-        actual?.kind !== 'admitted'
-        || actual.count !== operation.expectedVerdict.admittedCount
-      ) {
-        halt('ENTITY_STAGE_ADMISSION_VERDICT_MISMATCH', {
-          ...detail,
-          typescript: operation.expectedVerdict,
-          rust: actual ?? null,
-        });
-      }
-      continue;
-    }
-    const actualRow = applied.get(operation.operationIndex)
-      ?? halt('ENTITY_STAGE_PEER_VERDICT_MISSING', detail);
-    const actual = projectRustPeerVerdict(actualRow.verdict);
-    const expected = operation.expectedVerdict;
-    if (expected.kind !== 'peer') {
-      return halt('ENTITY_STAGE_PEER_VERDICT_KIND', { ...detail, kind: expected.kind });
-    }
-    // TypeScript's ACK Hanko is not produced by the Account transition: the
-    // Entity signs the account frame hash in its own witness pass, after this
-    // point. So a TypeScript `null` here means "not signed yet", never "no
-    // ACK" — the engine holds its own key and signs immediately. Compare the
-    // two only where TypeScript already has one to compare, which is the
-    // duplicate/re-send path replaying a cached ACK.
-    const ackHankoComparable = expected.responseAckHanko !== null;
-    // The events the frame publishes are consensus material, so the engine's
-    // own list is checked against TypeScript's here — this is the same
-    // synthesis a cutover run publishes with no TypeScript list to check.
-    const engineEvents = cutoverAccountInputEvents(actualRow.verdict, operation.accountId);
-    if (safeStringify(engineEvents) !== safeStringify([...expected.events])) {
-      halt('ENTITY_STAGE_PEER_EVENTS_MISMATCH', {
-        ...detail,
-        typescript: expected.events,
-        rust: engineEvents,
-      });
-    }
-    if (
-      actual.outcome !== expected.outcome
-      || (ackHankoComparable && actual.responseAckHanko !== expected.responseAckHanko)
-      || safeStringify(actual.committedFrames) !== safeStringify(expected.committedFrames)
-    ) {
-      halt('ENTITY_STAGE_PEER_VERDICT_MISMATCH', {
-        ...detail,
-        typescript: expected,
-        rust: actual,
-        rustKind: actualRow.verdict.kind,
-      });
-    }
-  }
-};
-
-/**
- * The collector ledger must itself be a bijection with what is put on the
- * process wire. Otherwise a missing Create is invisible (it returns no row),
- * and a missing Admit/Input can be misreported later as an engine omission.
- */
-export const assertAuthorityWaveOperationLedger = (
-  wave: Extract<AuthorityWave, { kind: 'wave' }>,
-): void => {
-  const operationIndices = new Set<string>();
-  const arrivalIndices = new Set<number>();
-  const appliedMetadata = new Map(wave.inputs.map(input => [
-    `${input.ownerEntityId}/${input.operationIndex}`,
-    input,
-  ]));
-  if (appliedMetadata.size !== wave.inputs.length) {
-    halt('OPERATION_LEDGER_MISMATCH', { reason: 'duplicateInputMetadata' });
-  }
-  let appliedCount = 0;
-  for (const entity of wave.entities) {
-    if (entity.ops.length !== entity.operations.length) {
-      halt('OPERATION_LEDGER_MISMATCH', {
-        reason: 'length',
-        owner: entity.ownerEntityId,
-        encoded: entity.ops.length,
-        ledger: entity.operations.length,
-      });
-    }
-    for (const [position, encoded] of entity.ops.entries()) {
-      const ledger = entity.operations[position];
-      if (ledger === undefined) {
-        return halt('OPERATION_LEDGER_MISMATCH', {
-          reason: 'missingLedgerRow',
-          owner: entity.ownerEntityId,
-          position,
-        });
-      }
-      const described = (() => {
-        try {
-          return describeAuthorityWaveOperation(encoded);
-        } catch (error) {
-          return halt('OPERATION_LEDGER_MISMATCH', {
-            reason: 'encodedShape',
-            owner: entity.ownerEntityId,
-            position,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      })();
-      if (!operationMatches(described, ledger)) {
-        halt('OPERATION_LEDGER_MISMATCH', {
-          reason: 'encodedBinding',
-          owner: entity.ownerEntityId,
-          position,
-          encoded: described,
-          ledger,
-        });
-      }
-      if (!Number.isSafeInteger(ledger.arrivalIndex) || ledger.arrivalIndex < 0) {
-        halt('OPERATION_LEDGER_MISMATCH', {
-          reason: 'arrivalIndex',
-          owner: entity.ownerEntityId,
-          operationIndex: ledger.operationIndex,
-          arrivalIndex: ledger.arrivalIndex,
-        });
-      }
-      const operationKey = `${entity.ownerEntityId}/${ledger.operationIndex}`;
-      if (operationIndices.has(operationKey)) {
-        halt('OPERATION_LEDGER_MISMATCH', {
-          reason: 'duplicateOperationIndex',
-          operationIndex: ledger.operationIndex,
-        });
-      }
-      if (arrivalIndices.has(ledger.arrivalIndex)) {
-        halt('OPERATION_LEDGER_MISMATCH', {
-          reason: 'duplicateArrivalIndex',
-          arrivalIndex: ledger.arrivalIndex,
-        });
-      }
-      operationIndices.add(operationKey);
-      arrivalIndices.add(ledger.arrivalIndex);
-      const metadata = appliedMetadata.get(operationKey);
-      if (ledger.resultKind === 'applied') {
-        appliedCount += 1;
-        if (
-          metadata === undefined
-          || metadata.ownerEntityId !== entity.ownerEntityId
-          || metadata.accountId !== ledger.accountId
-          || metadata.arrivalIndex !== ledger.arrivalIndex
-        ) {
-          halt('OPERATION_LEDGER_MISMATCH', {
-            reason: 'inputMetadataBinding',
-            owner: entity.ownerEntityId,
-            operation: ledger,
-            metadata: metadata ?? null,
-          });
-        }
-      } else if (metadata !== undefined) {
-        halt('OPERATION_LEDGER_MISMATCH', {
-          reason: 'unexpectedInputMetadata',
-          owner: entity.ownerEntityId,
-          operation: ledger,
-        });
-      }
-    }
-  }
-  if (appliedCount !== wave.inputs.length) {
-    halt('OPERATION_LEDGER_MISMATCH', {
-      reason: 'inputMetadataCount',
-      applied: appliedCount,
-      metadata: wave.inputs.length,
-    });
-  }
-  // Discarded parent stages intentionally leave gaps. Retained global arrival
-  // values still preserve exact order and must never be renumbered.
-};
-
-/**
- * Require a one-to-one answer for every result-bearing submitted operation.
- * This deliberately checks only coverage and binding; whether an individual
- * verdict is semantically the same verdict TypeScript produced is a separate
- * parity gate.
- */
-export const assertAuthorityOperationCoverage = (
-  ownerEntityId: string,
-  submitted: readonly AuthorityWaveOperation[],
-  result: Pick<Wave, 'admissions' | 'applied'>,
-): void => {
-  const expected = new Map<number, AuthorityWaveOperation>();
-  for (const operation of submitted) {
-    if (expected.has(operation.operationIndex)) {
-      halt('OPERATION_COVERAGE_MISMATCH', {
-        reason: 'duplicateSubmitted',
-        owner: ownerEntityId,
-        operationIndex: operation.operationIndex,
-      });
-    }
-    expected.set(operation.operationIndex, operation);
-  }
-  const actual = [
-    ...result.admissions.map(row => ({
-      operationIndex: row.operationIndex,
-      accountId: row.accountId,
-      resultKind: 'admission' as const,
-    })),
-    ...result.applied.map(row => ({
-      operationIndex: row.operationIndex,
-      accountId: row.accountId,
-      resultKind: 'applied' as const,
-    })),
-  ];
-  const answered = new Set<number>();
-  for (const row of actual) {
-    if (answered.has(row.operationIndex)) {
-      halt('OPERATION_COVERAGE_MISMATCH', {
-        reason: 'duplicateResult',
-        owner: ownerEntityId,
-        operationIndex: row.operationIndex,
-      });
-    }
-    answered.add(row.operationIndex);
-    const operation = expected.get(row.operationIndex);
-    if (operation === undefined) {
-      return halt('OPERATION_COVERAGE_MISMATCH', {
-        reason: 'extraResult',
-        owner: ownerEntityId,
-        result: row,
-      });
-    }
-    if (!operationMatches(operation, row)) {
-      halt('OPERATION_COVERAGE_MISMATCH', {
-        reason: 'resultBinding',
-        owner: ownerEntityId,
-        submitted: operation,
-        result: row,
-      });
-    }
-  }
-  const missing = submitted.filter(operation =>
-    operation.resultKind !== 'none' && !answered.has(operation.operationIndex));
-  if (missing.length > 0) {
-    halt('OPERATION_COVERAGE_MISMATCH', {
-      reason: 'missingResult',
-      owner: ownerEntityId,
-      missing: missing.map(operation => ({
-        operationIndex: operation.operationIndex,
-        accountId: operation.accountId,
-        resultKind: operation.resultKind,
-      })),
-    });
-  }
-};
-
-/**
- * Parity, in safe mode: every leaf the engine says it moved must be the leaf
- * TypeScript's own replica commits, and every frame the engine signed must be
- * the frame TypeScript proposed. The first disagreement halts.
- */
-/**
- * Which carried fields this frame moved since the engine was seeded. The
- * engine derives the consensus fields itself and carries the rest verbatim, so
- * a leaf that disagrees while the frame itself matches is a carried field the
- * authority changed and the engine could not know about.
- */
-const movedCarriedFields = (
-  session: Session | undefined,
-  accountId: string,
-  account: AccountReplica,
-): string[] => {
-  const seeded = session?.seededProjection.get(accountId);
-  if (seeded === undefined) return [];
-  const now = projectEntityAccountLeaf(account);
-  const names = new Set([...Object.keys(seeded), ...Object.keys(now)]);
-  return [...names]
-    .filter(name => safeStringify(seeded[name]) !== safeStringify(now[name]))
-    .sort();
-};
-
-/**
- * Which single field, reverted to what the engine was seeded with, would make
- * TypeScript's leaf equal the engine's. It names the rule the engine got
- * wrong; nothing matching means the engine computed a value neither side has
- * seen, and the field is one it derives itself.
- */
-const fieldExplainingLeaf = (
-  session: Session | undefined,
-  accountId: string,
-  account: AccountReplica,
-  rustLeaf: string,
-): string => {
-  const seeded = session?.seededProjection.get(accountId);
-  if (seeded === undefined) return 'unseeded';
-  const now = projectEntityAccountLeaf(account);
-  const digest = (projection: Record<string, unknown>): string =>
-    computeEntityAccountLeafDigest(Object.entries(projection)
-      .filter(([, value]) => value !== undefined)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)))
-      .toLowerCase();
-  const target = rustLeaf.toLowerCase();
-  if (digest({ ...now, ...seeded }) === target) return 'allSeeded';
-  for (const field of movedCarriedFields(session, accountId, account)) {
-    if (digest({ ...now, [field]: seeded[field] }) === target) return field;
-  }
-  return 'none';
-};
-
-/**
- * The engine's own leaf projection, field by field, as it holds it. Read only
- * when a leaf already disagrees: it turns "these two hashes differ" into the
- * name of the field and the two values.
- */
-const engineLeafFields = async (
-  session: Session,
-  accountId: string,
-): Promise<Record<string, unknown>> => {
-  const reply = (await session.client.readAccountEnvelope(
-    Uint8Array.from(Buffer.from(accountId.slice(2), 'hex')),
-  )) as unknown[];
-  const rows = (reply[1] ?? []) as unknown[];
-  const fields: Record<string, unknown> = {};
-  for (const row of rows) {
-    const pair = row as unknown[];
-    fields[String(pair[0])] = canonicalFromWire(pair[1]);
-  }
-  return fields;
-};
-
-/** The nine-variant canonical model, back from the wire. */
-const canonicalFromWire = (value: unknown): unknown => {
-  if (!Array.isArray(value)) return value;
-  const [tag, payload] = value as [number, unknown];
-  switch (tag) {
-    case 0: return null;
-    case 1: return payload === 1 || payload === true;
-    case 2: return Number(payload);
-    case 3: return BigInt(String(payload));
-    case 4: return String(payload);
-    case 5: return (payload as unknown[]).map(canonicalFromWire);
-    case 6: return new Map((payload as unknown[]).map(entry => {
-      const pair = entry as unknown[];
-      return [canonicalFromWire(pair[0]), canonicalFromWire(pair[1])] as const;
-    }));
-    case 7: return new Set((payload as unknown[]).map(canonicalFromWire));
-    case 8: return Object.fromEntries((payload as unknown[]).map(entry => {
-      const pair = entry as unknown[];
-      return [String(pair[0]), canonicalFromWire(pair[1])] as const;
-    }));
-    default: return value;
-  }
-};
-
-/** Every field where the two projections disagree, with both values. */
-const projectionDiff = (
-  typescript: Record<string, unknown>,
-  engine: Record<string, unknown>,
-): Record<string, { typescript: string; rust: string }> => {
-  const names = new Set([...Object.keys(typescript), ...Object.keys(engine)]);
-  const diff: Record<string, { typescript: string; rust: string }> = {};
-  for (const name of [...names].sort()) {
-    // The engine derives these two from what it holds, so it never carries
-    // them and their absence is not a disagreement.
-    if (name === 'accountStateRoot' || name === 'mempoolRoot') continue;
-    const left = safeStringify(typescript[name]);
-    const right = safeStringify(engine[name]);
-    if (left !== right) diff[name] = { typescript: left, rust: right };
-  }
-  return diff;
-};
-
-/**
- * The outputs the engine published for one wave, per account, in the order its
- * verdicts released them. A proposal publishes nothing: what its transactions
- * produced stays with the pending frame until the peer acks it, which is the
- * same rule TypeScript follows.
- */
-const engineOutputsByAccount = (wave: Wave): Map<string, ShadowOutputRow[]> => {
-  const byAccount = new Map<string, ShadowOutputRow[]>();
-  for (const applied of wave.applied) {
-    const verdicts = applied.verdict.kind === 'frameAckApplied'
-      ? [applied.verdict.ackVerdict, applied.verdict.frameVerdict]
-      : [applied.verdict];
-    const rows = byAccount.get(applied.accountId) ?? [];
-    for (const verdict of verdicts) {
-      if (verdict.kind !== 'frameCommitted' && verdict.kind !== 'ackCommitted') continue;
-      rows.push(...verdict.outputs.map(waveOutputRow));
-    }
-    if (rows.length > 0) byAccount.set(applied.accountId, rows);
-  }
-  return byAccount;
-};
-
-/**
- * Every output TypeScript published in this frame, and nothing else. Two
- * engines that agree on every root can still disagree here — a forward that
- * never leaves, a secret that settles nothing upstream, a resting offer the
- * book never sees — and that disagreement is invisible to a state comparison.
- */
-const compareOutputs = (
-  ownerEntityId: string,
-  wave: Wave,
-  expected: ReadonlyMap<string, readonly ShadowOutputRow[]>,
-): void => {
-  const engine = engineOutputsByAccount(wave);
-  for (const accountId of new Set([...expected.keys(), ...engine.keys()])) {
-    const typescript = expected.get(accountId) ?? [];
-    const rust = engine.get(accountId) ?? [];
-    const left = safeStringify(typescript);
-    const right = safeStringify(rust);
-    if (left === right) {
-      report.outputsChecked += typescript.length;
-      continue;
-    }
-    halt('OUTPUT_MISMATCH', {
-      owner: ownerEntityId,
-      account: accountId,
-      typescriptCount: typescript.length,
-      rustCount: rust.length,
-      // The first row that differs, which is the one to read: a whole-list
-      // dump of a busy hub frame buries it.
-      firstDivergentIndex: [...Array(Math.max(typescript.length, rust.length)).keys()]
-        .find(index => safeStringify(typescript[index]) !== safeStringify(rust[index])) ?? -1,
-      typescript: left,
-      rust: right,
-    });
-    return;
-  }
-};
-
-/**
- * Verify a Rust-authored proposal independently before parity accepts it.
+ * The exported rows must name the tree both sides believe they are at.
  *
- * Matching an engine-supplied `stateHash` to TypeScript is insufficient: a
- * malformed frame could carry that same copied hash, and a forged Hanko does
- * not change any state root. H1 authority is currently restricted to a lazy
- * one-of-one Entity, so retired-board grace is deliberately disabled here.
+ * The engine's own position comes from the last thing this frame did to it,
+ * and TypeScript's from its own accounts forest. A checkpoint taken at a
+ * boundary where those disagree would restore into a divergence.
  */
-export const assertAuthorityProposalParity = async (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-  accountId: string,
-  frame: AccountFrame & { hanko: string },
-  typescriptCandidate: AccountFrame,
-): Promise<void> => {
-  const structuralError = getAccountFrameStructuralError(frame, env.state.timestamp);
-  if (structuralError !== '') {
-    halt('FRAME_STRUCTURE_INVALID', {
-      owner: ownerEntityId,
-      account: accountId,
-      height: frame.height,
-      error: structuralError,
-    });
-  }
-
-  const recomputedHash = (() => {
-    try {
-      return computeFrameHash(frame).toLowerCase();
-    } catch (error) {
-      return halt('FRAME_HASH_COMPUTE_FAILED', {
-        owner: ownerEntityId,
-        account: accountId,
-        height: frame.height,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  })();
-  if (recomputedHash !== frame.stateHash.toLowerCase()) {
-    halt('FRAME_SELF_HASH_MISMATCH', {
-      owner: ownerEntityId,
-      account: accountId,
-      height: frame.height,
-      recomputed: recomputedHash,
-      rust: frame.stateHash,
-    });
-  }
-  if (recomputedHash !== typescriptCandidate.stateHash.toLowerCase()) {
-    halt('FRAME_HASH_MISMATCH', {
-      owner: ownerEntityId,
-      account: accountId,
-      height: frame.height,
-      typescript: typescriptCandidate.stateHash,
-      rust: frame.stateHash,
-      recomputed: recomputedHash,
-    });
-  }
-
-  const verified = await (async () => {
-    try {
-      return await verifyHankoForHash(
-        frame.hanko,
-        recomputedHash,
-        ownerEntityId,
-        env,
-        { allowPreviousBoard: false },
-      );
-    } catch (error) {
-      return halt('FRAME_HANKO_VERIFICATION_FAILED', {
-        owner: ownerEntityId,
-        account: accountId,
-        height: frame.height,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  })();
-  if (!verified.valid || verified.entityId?.toLowerCase() !== ownerEntityId.toLowerCase()) {
-    halt('FRAME_HANKO_INVALID', {
-      owner: ownerEntityId,
-      account: accountId,
-      height: frame.height,
-      signedEntity: verified.entityId,
-    });
-  }
-};
-
-const compareWithTypescript = async (
-  env: RuntimeReplica,
-  ownerEntityId: string,
-  wave: Wave,
-  expectedOutputs: ReadonlyMap<string, readonly ShadowOutputRow[]> | null,
-  session?: Session,
-): Promise<void> => {
-  if (expectedOutputs !== null) compareOutputs(ownerEntityId, wave, expectedOutputs);
-  const accounts = accountsOf(env, ownerEntityId);
-  const typescriptAccountsRoot = accountMapRoot(accounts, ownerEntityId);
-  // A partial import is a forest the engine was never given in full, so the
-  // two roots are different by construction and comparing them would report
-  // the declared gap as a divergence. Each imported Account's own leaf is
-  // still compared below, and touching a refused one halts as unseeded.
-  const rootComparable = (session?.importRefused ?? 0) === 0;
-  if (rootComparable && typescriptAccountsRoot !== wave.accountsRoot.toLowerCase()) {
-    halt('ACCOUNTS_ROOT_MISMATCH', {
-      owner: ownerEntityId,
-      typescript: typescriptAccountsRoot,
-      rust: wave.accountsRoot,
-      accountCount: accounts.size,
-    });
-  }
-  const proposed = new Map<string, NonNullable<Wave['proposals'][number]['frame']>>();
-  for (const row of wave.proposals) {
-    if (row.frame !== null) proposed.set(row.accountId, row.frame);
-  }
-  for (const leaf of wave.touched) {
-    const account = accounts.get(leaf.accountId)
-      ?? findAccountByCounterparty(accounts, ownerEntityId, leaf.accountId);
-    if (!account) {
-      halt('TOUCHED_ACCOUNT_MISSING', { account: leaf.accountId });
-      return;
-    }
-    const expected = computeEntityAccountValueHash(account).toLowerCase();
-    if (expected !== leaf.entityAccountLeaf.toLowerCase()) {
-      const rustProposal = proposed.get(leaf.accountId);
-      const fields = session === undefined
-        ? {}
-        : projectionDiff(projectEntityAccountLeaf(account), await engineLeafFields(session, leaf.accountId));
-      halt('LEAF_MISMATCH', {
-        fields,
-        account: leaf.accountId,
-        typescript: expected,
-        rust: leaf.entityAccountLeaf,
-        height: account.currentHeight,
-        // The leaf covers state, mempool and both frame bindings at once, so
-        // the bare hashes never say which of them moved. These do.
-        typescriptStateRoot: computeAccountStateRoot(account.state, undefined, 'entityLeaf'),
-        mempool: account.mempool.length,
-        currentFrameHash: account.currentFrame?.stateHash ?? null,
-        typescriptPending: account.pendingFrame === undefined ? null : {
-          height: account.pendingFrame.height,
-          stateHash: account.pendingFrame.stateHash,
-          accountStateRoot: account.pendingFrame.accountStateRoot,
-          txs: account.pendingFrame.accountTxs.length,
-        },
-        rustProposal: rustProposal === undefined ? null : {
-          height: rustProposal.height,
-          stateHash: rustProposal.stateHash,
-          accountStateRoot: rustProposal.accountStateRoot,
-          txs: rustProposal.accountTxs.length,
-        },
-        currentFrame: account.currentFrame?.height ?? null,
-        movedSinceSeed: movedCarriedFields(session, leaf.accountId, account),
-        staleField: fieldExplainingLeaf(session, leaf.accountId, account, leaf.entityAccountLeaf),
-        pendingAccountInput: account.pendingAccountInput !== undefined,
-        lastOutboundFrameAck: account.lastOutboundFrameAck?.height ?? null,
-      });
-      return;
-    }
-    report.leavesChecked += 1;
-  }
-  for (const proposal of wave.proposals) {
-    const frame = proposal.frame;
-    if (frame === null) continue;
-    const account = accounts.get(proposal.accountId)
-      ?? findAccountByCounterparty(accounts, ownerEntityId, proposal.accountId);
-    if (!account) {
-      halt('PROPOSED_ACCOUNT_MISSING', { account: proposal.accountId });
-      return;
-    }
-    // TypeScript's own proposal for this height, still pending its ack. If it
-    // committed within this same frame the pending is gone, and the committed
-    // frame is the one to compare against.
-    const candidate = account.pendingFrame?.height === frame.height
-      ? account.pendingFrame
-      : account.currentFrame?.height === frame.height ? account.currentFrame : null;
-    if (!candidate) {
-      halt('PROPOSAL_UNMATCHED', {
-        account: proposal.accountId,
-        height: frame.height,
-        pending: account.pendingFrame?.height ?? null,
-        current: account.currentFrame?.height ?? null,
-      });
-      return;
-    }
-    await assertAuthorityProposalParity(
-      env,
-      ownerEntityId,
-      proposal.accountId,
-      frame,
-      candidate,
-    );
-  }
-};
-
 const assertCheckpointMatchesCandidate = (
   env: RuntimeReplica,
-  candidate: PendingWave,
+  candidate: OpenFrame,
+  position: Readonly<{ revision: number; accountsRoot: string }>,
   checkpoint: RscoreCheckpointChanges,
 ): void => {
   const owner = candidate.session.ownerEntityId;
@@ -2304,30 +919,28 @@ const assertCheckpointMatchesCandidate = (
   const checkpointRoot = `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`;
   try {
     assertRscoreCheckpointCandidate(checkpoint, {
-      revision: candidate.result.revision,
-      accountsRoot: candidate.result.accountsRoot,
+      revision: position.revision,
+      accountsRoot: position.accountsRoot,
       accountCount: accounts.size,
     });
   } catch {
     halt('CHECKPOINT_CANDIDATE_MISMATCH', {
       owner,
-      candidateRevision: candidate.result.revision,
+      candidateRevision: position.revision,
       checkpointRevision: String(checkpoint.restoreToken[1]),
-      candidateRoot: candidate.result.accountsRoot,
+      candidateRoot: position.accountsRoot,
       checkpointRoot,
       typescriptRoot,
       checkpointCount: checkpoint.restoreToken[4],
       typescriptCount: accounts.size,
     });
   }
-  if (
-    candidate.result.accountsRoot.toLowerCase() !== typescriptRoot
-  ) {
+  if (position.accountsRoot.toLowerCase() !== typescriptRoot) {
     halt('CHECKPOINT_CANDIDATE_MISMATCH', {
       owner,
-      candidateRevision: candidate.result.revision,
+      candidateRevision: position.revision,
       checkpointRevision: String(checkpoint.restoreToken[1]),
-      candidateRoot: candidate.result.accountsRoot,
+      candidateRoot: position.accountsRoot,
       checkpointRoot,
       typescriptRoot,
       checkpointCount: checkpoint.restoreToken[4],
@@ -2356,15 +969,15 @@ export const prepareAuthorityCheckpoint = async (
     if (candidate.checkpoint) {
       halt('CHECKPOINT_ALREADY_EXPORTED', { owner: candidate.session.ownerEntityId });
     }
-    if (!candidate.sealed || candidate.openStage !== null) {
-      return halt('CHECKPOINT_CANDIDATE_NOT_SEALED', {
-        owner: candidate.session.ownerEntityId,
-        sealed: candidate.sealed,
-        open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
-      });
+    if (candidate.entityInput !== null) {
+      return halt('CHECKPOINT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
     }
-    const checkpoint = await candidate.session.client.getCheckpointChanges(candidate.token);
-    assertCheckpointMatchesCandidate(env, candidate, checkpoint);
+    const position = candidate.latest ?? savepointPosition(
+      await candidate.session.client.pushSavepoint(),
+    );
+    if (candidate.latest === null) await candidate.session.client.keepSavepoint();
+    const checkpoint = await candidate.session.client.checkpointChanges();
+    assertCheckpointMatchesCandidate(env, candidate, position, checkpoint);
     candidate.checkpoint = checkpoint;
     report.checkpointsPrepared += 1;
     inputs.push({
@@ -2456,27 +1069,6 @@ export const validateAuthorityCheckpointMaterialization = async (
   }
 };
 
-const decodeCommitResponse = (
-  ownerEntityId: string,
-  value: unknown,
-): Readonly<{ revision: number; root: Uint8Array }> => {
-  if (!Array.isArray(value) || value.length !== 2) {
-    return halt('COMMIT_RESPONSE_INVALID', { owner: ownerEntityId });
-  }
-  const revision = value[0];
-  const root = value[1];
-  if (
-    typeof revision !== 'number' ||
-    !Number.isSafeInteger(revision) ||
-    revision < 0 ||
-    !(root instanceof Uint8Array) ||
-    root.byteLength !== 32
-  ) {
-    return halt('COMMIT_RESPONSE_INVALID', { owner: ownerEntityId });
-  }
-  return { revision, root };
-};
-
 /** The Runtime's own record is durable: every engine may keep its wave. */
 export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
@@ -2485,28 +1077,22 @@ export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> =>
   const ordered = [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId));
   for (const candidate of ordered) {
-    if (!candidate.sealed || candidate.openStage !== null) {
-      return halt('COMMIT_CANDIDATE_NOT_SEALED', {
-        owner: candidate.session.ownerEntityId,
-        sealed: candidate.sealed,
-        open: candidate.openStage?.handle.stageKey.toString('hex') ?? null,
-      });
+    if (candidate.entityInput !== null) {
+      return halt('COMMIT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
     }
-    const committed = decodeCommitResponse(
-      candidate.session.ownerEntityId,
-      await candidate.session.client.commit(candidate.token),
-    );
-    const root = `0x${Buffer.from(committed.root).toString('hex')}`;
+    const kept = savepointPosition(await candidate.session.client.keepSavepoint());
+    const expected = candidate.latest;
     if (
-      committed.revision !== candidate.result.revision ||
-      root.toLowerCase() !== candidate.result.accountsRoot.toLowerCase()
+      expected !== null
+      && (kept.revision !== expected.revision
+        || kept.accountsRoot.toLowerCase() !== expected.accountsRoot.toLowerCase())
     ) {
       halt('COMMIT_ROOT_MISMATCH', {
         owner: candidate.session.ownerEntityId,
-        preparedRevision: candidate.result.revision,
-        committedRevision: committed.revision,
-        prepared: candidate.result.accountsRoot,
-        committed: root,
+        preparedRevision: expected.revision,
+        committedRevision: kept.revision,
+        prepared: expected.accountsRoot,
+        committed: kept.accountsRoot,
       });
     }
     report.commits += 1;
@@ -2566,7 +1152,11 @@ export const abortAuthorityWave = async (env: RuntimeReplica): Promise<void> => 
   if (candidates === undefined) return;
   for (const candidate of [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
-    await candidate.session.client.abort(candidate.token);
+    if (candidate.entityInput !== null) {
+      await candidate.session.client.undoSavepoint();
+      candidate.entityInput = null;
+    }
+    await candidate.session.client.undoSavepoint();
     report.aborts += 1;
   }
   pending.delete(env);

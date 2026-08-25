@@ -212,7 +212,11 @@ impl StatefulConsensusEngine {
         Ok(())
     }
 
-    /// Collect the leaves and rows for every named account that moved.
+    /// Collect the leaf, and the changes, of every account the round named.
+    ///
+    /// Named rather than moved: an arrival the account refused still has to
+    /// answer with the leaf the Entity commits for it, and the caller reads
+    /// its own copy back from the same row either way.
     fn settle(
         &self,
         base: &PersistentRadixMap<AccountConsensus>,
@@ -230,11 +234,6 @@ impl StatefulConsensusEngine {
             };
             let leaf = leaf_root(*account_id, account)?;
             let previous = base.get(account_id.as_bytes());
-            if previous.is_some_and(|prior| {
-                leaf_root(*account_id, prior).is_ok_and(|prior| prior == leaf)
-            }) {
-                continue;
-            }
             result.touched.push((*account_id, leaf));
             if post_accounts {
                 result.post_accounts.push(

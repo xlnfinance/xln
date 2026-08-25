@@ -100,6 +100,7 @@ pub enum Command {
         stage_key: xln_rscore_batch::StageKey,
         request: Box<xln_rscore_batch::WaveOpsRequest>,
     },
+    Checkpoint,
     PushSavepoint,
     KeepSavepoint,
     UndoSavepoint,
@@ -149,6 +150,10 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::ApplyAccountWave => decode_apply_wave(payload),
         OpTag::ProposeAccountWave => decode_propose_wave(payload),
         OpTag::AccountInbound => decode_account_inbound(payload),
+        OpTag::Checkpoint => {
+            exact(payload, 0, "checkpoint")?;
+            Ok(Command::Checkpoint)
+        }
         OpTag::PushSavepoint => {
             exact(payload, 0, "pushSavepoint")?;
             Ok(Command::PushSavepoint)

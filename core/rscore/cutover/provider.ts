@@ -20,9 +20,7 @@ import type {
 import {
   authorityDriverEnabled,
   runAuthorityCutoverOperation,
-  type AuthorityCutoverOperation,
 } from '../authority-driver';
-import { noteRawAccountInput } from '../authority-wave';
 import type { RscoreAccountMaterializerBinding } from '../checkpoint/account-materializer';
 import { authorityCutoverEnabled } from './enabled';
 import {
@@ -54,32 +52,6 @@ const peerOf = (input: AccountInput, accountId: string): string =>
     ? accountId
     : String(input.fromEntityId ?? accountId).trim().toLowerCase();
 
-/**
- * Every operation carries the same parent identity, so the engine's stage is
- * bound to the Entity input that authorized it rather than to whichever frame
- * happened to be open.
- */
-const parentFields = (
-  operation: AccountAuthorityEntityOperation,
-): Pick<
-  AuthorityCutoverOperation,
-  'ownerEntityId' | 'occurrence' | 'appliedInput' | 'deferProposal'
-> & Readonly<{
-  trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
-  requiredEntityTxIndex?: number;
-}> => ({
-  ownerEntityId: operation.ownerEntityId,
-  occurrence: operation.occurrence,
-  appliedInput: operation.canonicalEntityInput,
-  deferProposal: operation.deferProposal,
-  ...(operation.trustedLocalRuntimeProtocol === undefined
-    ? {}
-    : { trustedLocalRuntimeProtocol: operation.trustedLocalRuntimeProtocol }),
-  ...(operation.requiredEntityTxIndex === undefined
-    ? {}
-    : { requiredEntityTxIndex: operation.requiredEntityTxIndex }),
-});
-
 const requireResult = (
   value: CutoverWaveResult | null,
   ownerEntityId: string,
@@ -93,37 +65,41 @@ const executeInput = async (
 ): Promise<HandleAccountInputResult> => {
   const { request } = operation;
   const accountId = accountIdOf(request.account);
-  if (request.input.kind === 'external_finality') {
-    return halt('INPUT_OUTSIDE_PROFILE', { account: accountId, kind: request.input.kind });
-  }
-  if (request.collectorFrameId.length === 0) {
-    return halt('COLLECTOR_FRAME_MISSING', { account: accountId });
-  }
-  // The engine is handed the raw input through the same collector the parity
-  // driver uses; nothing else may build the wave.
-  const recorded = noteRawAccountInput(request.collectorFrameId, request.account, request.input);
-  if (recorded === null) {
-    return halt('INPUT_NOT_RECORDED', { account: accountId, kind: request.input.kind });
+  const { input } = request;
+  if (input.kind !== 'enqueue' && input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'frame_ack') {
+    return halt('INPUT_OUTSIDE_PROFILE', { account: accountId, kind: input.kind });
   }
   const binding = bindingFor(env, operation.ownerEntityId);
+  const common = { binding, account: request.account, accountId };
+  if (input.kind === 'enqueue') {
+    const result = requireResult(
+      await runAuthorityCutoverOperation(env, {
+        kind: 'admitAccountTxs',
+        ownerEntityId: operation.ownerEntityId,
+        accountId,
+        txs: input.txs,
+        timestamp: request.entityTimestamp,
+        jHeight: request.finalizedJHeight,
+      }),
+      operation.ownerEntityId,
+      accountId,
+    );
+    return cutoverAccountAdmissionResult(common, result);
+  }
   const result = requireResult(
     await runAuthorityCutoverOperation(env, {
-      ...parentFields(operation),
       kind: 'applyAccountInput',
+      ownerEntityId: operation.ownerEntityId,
       accountId,
-      collectorFrameId: request.collectorFrameId,
-      timestamp: request.entityTimestamp,
-      jHeight: request.finalizedJHeight,
+      input,
       entityTimestamp: request.entityTimestamp,
       finalizedJHeight: request.finalizedJHeight,
     }),
     operation.ownerEntityId,
     accountId,
   );
-  const common = { binding, account: request.account, accountId };
-  if (request.input.kind === 'enqueue') return cutoverAccountAdmissionResult(common, result);
   return cutoverAccountInputResult(
-    { ...common, fromEntityId: peerOf(request.input, accountId), operationIndex: 0 },
+    { ...common, fromEntityId: peerOf(input, accountId), operationIndex: 0 },
     result,
   );
 };
@@ -140,14 +116,11 @@ const executeProposal = async (
   const binding = bindingFor(env, operation.ownerEntityId);
   const result = requireResult(
     await runAuthorityCutoverOperation(env, {
-      ...parentFields(operation),
       kind: 'proposeAccountFrame',
+      ownerEntityId: operation.ownerEntityId,
       accountId,
-      collectorFrameId: request.collectorFrameId,
       timestamp: request.timestamp,
       jHeight: request.jHeight,
-      entityTimestamp: request.entityTimestamp,
-      finalizedJHeight: request.finalizedJHeight,
     }),
     operation.ownerEntityId,
     accountId,

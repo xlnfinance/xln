@@ -117,6 +117,10 @@ export const RSCORE_OP = {
   sealAccountWave: 24,
   accountInbound: 25,
   accountOutbound: 26,
+  pushSavepoint: 27,
+  keepSavepoint: 28,
+  undoSavepoint: 29,
+  checkpoint: 30,
 } as const;
 
 /**
@@ -899,6 +903,32 @@ export class RscoreProcessClient {
   }
 
   /**
+   * Mark a point every account can be put back to.
+   *
+   * A Runtime frame opens one, and so does each Entity input inside it: either
+   * can be abandoned after its accounts have already moved.
+   */
+  async pushSavepoint(): Promise<unknown> {
+    return this.#authorityRequest(RSCORE_OP.pushSavepoint);
+  }
+
+  /** Keep everything done since the innermost savepoint. */
+  async keepSavepoint(): Promise<unknown> {
+    return this.#authorityRequest(RSCORE_OP.keepSavepoint);
+  }
+
+  /** Put every account back to the innermost savepoint. */
+  async undoSavepoint(): Promise<unknown> {
+    return this.#authorityRequest(RSCORE_OP.undoSavepoint);
+  }
+
+  async #authorityRequest(opTag: number): Promise<unknown> {
+    const payload = ownWirePayload([]);
+    return this.#withRequestTurn(async () =>
+      (await this.#authorityRequestOwnedNow(opTag, payload)).result);
+  }
+
+  /**
    * One Entity input's inbound half: everything that arrived from peers.
    *
    * The whole arrival list crosses once. The engine shards it by account
@@ -1111,6 +1141,25 @@ export class RscoreProcessClient {
   }
 
   /** Incremental exact rows since the last checkpoint Rust acknowledged. */
+  /** The rows that moved since the last durable checkpoint. */
+  async checkpointChanges(): Promise<RscoreCheckpointChanges> {
+    const payload = ownWirePayload([]);
+    return this.#withRequestTurn(async () => {
+      const response = (await this.#authorityRequestOwnedNow(
+        RSCORE_OP.checkpoint,
+        payload,
+      )).result;
+      try {
+        if (!Array.isArray(response) || response.length !== 1) {
+          throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
+        }
+        return decodeRscoreCheckpointChanges(response[0]);
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
+    });
+  }
+
   async getCheckpointChanges(candidateToken: Uint8Array): Promise<RscoreCheckpointChanges> {
     const payload = ownWirePayload([Buffer.from(candidateToken)]);
     return this.#withRequestTurn(async () => {
