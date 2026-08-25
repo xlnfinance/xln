@@ -48,7 +48,7 @@ if (
   throw new Error('ORDINARY_ENTITY_INPUT_CANDIDATE_BOUNDARY_MISSING');
 }
 if (
-  !/applyEntityInputToReplica\([\s\S]*?options\.isReplay,\s*true,\s*command\.kind === 'entity-txs' \? 'cross-j' : 'account-work',?\s*\)/.test(
+  !/applyEntityInputToReplica\([\s\S]*?options\.isReplay,\s*true,\s*command\.kind === 'entity-txs' \? 'cross-j' : 'account-work',\s*false,\s*undefined,\s*\{ kind: 'local-event', ordinal: context\.localEventCount \},\s*\)/.test(
     entityInputOutput,
   )
 ) {
