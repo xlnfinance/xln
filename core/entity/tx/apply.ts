@@ -1,4 +1,4 @@
-import type { RuntimeOverlayRecord } from '../../types/account';
+import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/machine/input';
@@ -111,7 +111,11 @@ export interface ApplyEntityTxResult {
   // Pure events for entity-level orchestration
   accountTxs?: AccountTxTarget[];
   /** Final Channel.ts-style work state for one peer AccountInput. */
-  accountInputWork?: Readonly<{ accountId: string; force: boolean }>;
+  accountInputWork?: Readonly<{
+    accountId: string;
+    force: boolean;
+    response?: AccountPeerInput;
+  }>;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   swapOffersCreated?: SwapOfferEvent[];
   swapCancelRequests?: SwapCancelRequestEvent[];
@@ -251,6 +255,9 @@ const accountHandlerResultToEntityTxResult = (
           accountInputWork: {
             accountId: counterpartyId,
             force: result.forceAccountFlush,
+            ...(result.forcedAccountInput === undefined
+              ? {}
+              : { response: result.forcedAccountInput }),
           },
         }),
     ...(result.accountJClaimNodeChanges ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges } : {}),

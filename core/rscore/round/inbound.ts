@@ -4,9 +4,10 @@
  * The Entity frame knows every account input it carries before it dispatches
  * any of them. Rather than asking the engine one arrival at a time, it hands
  * over one whole batch and then reads the verdicts back as its own handlers
- * reach them. If an account occurs more than once, only its last verdict
- * publishes the final post-state row; every earlier verdict still publishes
- * its own events and effects. The batch is never split into extra IPC calls.
+ * reach them. Inbound is effects-only: no full Account body crosses here.
+ * The final body and node diff span both visits and return once, after the
+ * Entity has derived every outbound admission. The batch is never split into
+ * extra IPC calls.
  *
  * The verdicts are a queue, not a lookup: a verdict TypeScript never consumed
  * means the engine applied something the Entity decided not to, so the round
@@ -73,9 +74,9 @@ export const inboundArrivals = (entityTxs: readonly EntityTx[]): InboundArrival[
 /**
  * One arrival's own view of the round it was answered in.
  *
- * The publisher downstream expects the reply for a single operation: one
- * verdict, and the post-state row of the account it moved. Slicing the round
- * here keeps that publisher unaware that anything was batched.
+ * The publisher downstream expects the reply for a single operation. Slicing
+ * the bulk verdict here keeps it unaware that anything was batched; the
+ * post-state row is deliberately absent until the outbound visit.
  */
 export const inboundSlice = (
   wave: Wave,

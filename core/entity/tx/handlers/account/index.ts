@@ -240,6 +240,7 @@ const finishPreparedAccountInput = async (
     context.effects,
     consensus.forceAccountFlush,
     consensus.accountJClaimNodeChanges,
+    consensus.forcedAccountInput,
   );
 };
 

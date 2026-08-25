@@ -62,9 +62,6 @@ const requireResult = (
 ): CutoverWaveResult =>
   value ?? halt('OPERATION_DECLINED', { owner: ownerEntityId, account: accountId });
 
-const rowFor = (wave: CutoverWaveResult['wave'], accountId: string) =>
-  wave.postAccounts.find(row => row.accountId === accountId) ?? null;
-
 const executeInboundBatch = async (
   env: RuntimeReplica,
   batch: AccountAuthorityEntityBatchInbound,
@@ -93,10 +90,6 @@ const executeInboundBatch = async (
   );
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const waveIndex = indexInboundWave(full.wave);
-  const lastOperationByAccount = new Map<string, number>();
-  for (const { accountId, operationIndex } of requests) {
-    lastOperationByAccount.set(accountId, operationIndex);
-  }
   return requests.map(({ accountId, input, operationIndex }) => actualRequest => {
     const slice = inboundSlice(full.wave, accountId, operationIndex, waveIndex);
     return cutoverAccountInputResult(
@@ -107,8 +100,8 @@ const executeInboundBatch = async (
         fromEntityId: peerOf(input, accountId),
         operationIndex,
       },
-      { wave: slice, row: rowFor(slice, accountId) },
-      lastOperationByAccount.get(accountId) === operationIndex,
+      { wave: slice, row: null },
+      false,
     );
   });
 };
@@ -145,10 +138,19 @@ const executeOutboundBatch = async (
     ownerEntityId: batch.ownerEntityId,
     admits,
     propose: proposals.map(row => row.accountId),
+    materialize: batch.materializeAccounts.map(row => row.accountId),
     timestamp,
     jHeight,
   });
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
+  const postAccountById = new Map(full.wave.postAccounts.map(row => [row.accountId, row]));
+  const proposalById = new Map(full.wave.proposals.map(row => [row.accountId, row]));
+  if (postAccountById.size !== full.wave.postAccounts.length) {
+    return halt('OUTBOUND_POST_ACCOUNT_DUPLICATE');
+  }
+  if (proposalById.size !== full.wave.proposals.length) {
+    return halt('OUTBOUND_PROPOSAL_DUPLICATE');
+  }
   if (full.wave.admissions.length !== admits.length) {
     return halt('OUTBOUND_ADMISSION_ARITY', {
       expected: admits.length,
@@ -172,21 +174,30 @@ const executeOutboundBatch = async (
       });
     }
   }
-  const proposalIds = new Set(proposals.map(row => row.accountId));
-  for (const [accountId, { account }] of grouped) {
-    if (proposalIds.has(accountId)) continue;
-    const row = rowFor(full.wave, accountId);
-    if (row === null) return halt('OUTBOUND_POST_ACCOUNT_MISSING', { account: accountId });
+  const accountsById = new Map<string, AccountReplica>();
+  for (const [accountId, { account }] of grouped) accountsById.set(accountId, account);
+  for (const { accountId, request } of proposals) accountsById.set(accountId, request.account);
+  for (const { accountId, account } of batch.materializeAccounts) {
+    accountsById.set(accountId, account);
+  }
+  for (const [accountId, account] of accountsById) {
+    const row = postAccountById.get(accountId);
+    if (row === undefined) return halt('OUTBOUND_POST_ACCOUNT_MISSING', { account: accountId });
     materializeCutoverAccount(
       { binding, account, accountId },
       row,
     );
   }
-  return proposals.map(({ request, accountId }) =>
-    cutoverAccountProposalResult(
+  return proposals.map(({ request, accountId }) => {
+    const proposal = proposalById.get(accountId);
+    if (proposal === undefined) return halt('OUTBOUND_PROPOSAL_MISSING', { account: accountId });
+    return cutoverAccountProposalResult(
       { binding, account: request.account, accountId },
-      { wave: full.wave, row: rowFor(full.wave, accountId) },
-    ));
+      { wave: full.wave, row: postAccountById.get(accountId) ?? null },
+      proposal,
+      false,
+    );
+  });
 };
 
 const createAuthorityCutoverProvider = (

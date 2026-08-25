@@ -2,17 +2,17 @@
  * The Rust engine as the authority for one Entity's accounts, inside a real
  * Runtime frame.
  *
- * The mirror follows TypeScript. This does not: it is handed the same raw
- * inputs, in the same order, with the same clocks, and must reach the same
- * frames on its own. Safe mode, which is the only mode there is today:
- * TypeScript still executes and still decides, and every disagreement halts
- * the Runtime rather than being repaired quietly.
+ * This is the canonical Account transition owner. Entity hands it raw peer
+ * inputs once, then admissions/proposal selection once; TypeScript does not
+ * execute Account transitions on this path. The engine keeps the candidate
+ * private until the Runtime WAL is durable, and every checked disagreement
+ * halts rather than repairing or falling back.
  *
  * Order inside a frame, and the reason for it:
  *
- *   collect raw wave  — while TypeScript applies it
- *   PrepareAccountWave — the engine reaches its own result, kept as candidate
- *   parity             — leaf by leaf, proposal by proposal, against TypeScript
+ *   inbound visit      — apply all peer inputs and return typed child effects
+ *   outbound visit     — admit/propose and return final Account materialization
+ *   parity             — verify commitments and typed effects at the boundary
  *   Runtime WAL fsync  — TypeScript's own record becomes durable
  *   Commit             — only now does the engine keep the wave
  *
@@ -41,6 +41,7 @@ import {
   accountEnvelopeWire,
   accountSeedWire,
   hexToWireBytes,
+  shadowIneligibilityReason,
   swapMarketPolicyDigest,
   swapMarketPolicyWire,
 } from './shadow-wire';
@@ -163,9 +164,8 @@ export type AuthorityCheckpointStorageInput = Readonly<{
 
 /**
  * One session per Entity that holds accounts, keyed by Runtime object identity
- * and then Entity id: the
- * engine signs as one board, and a Runtime hosts more than one Entity — a hub
- * and its book live side by side in the H1 Runtime.
+ * and then Entity id. The engine signs as one board, and a Runtime hosts more
+ * than one Entity — a hub and its book live side by side in the H1 Runtime.
  */
 const sessions = new Map<RuntimeReplica, Map<string, Session | 'disabled'>>();
 const allSessions = new Set<Session>();
@@ -181,8 +181,6 @@ const report = {
   outboundRounds: 0,
   framesProposed: 0,
   inputsApplied: 0,
-  leavesChecked: 0,
-  outputsChecked: 0,
   accountsSeeded: 0,
   emptyFrames: 0,
   commits: 0,
@@ -199,7 +197,7 @@ const report = {
 
 const authorityDriverReport = (): typeof report => ({ ...report });
 
-/** A halt, not a warning: in safe mode the two engines must agree exactly. */
+/** A halt, not a warning: authority boundary checks must agree exactly. */
 const halt = (code: string, detail: Record<string, unknown>): never => {
   authorityLog.error('authority.halt', { code, ...detail });
   console.error(`RSCORE_AUTHORITY_HALT ${code} ${safeStringify(detail)}`);
@@ -412,6 +410,10 @@ const importAccountsFromTypescript = async (
   for (const [counterpartyId, account] of [...accounts].sort(([left], [right]) =>
     (left < right ? -1 : left > right ? 1 : 0))) {
     try {
+      const ineligible = shadowIneligibilityReason(account.state);
+      if (ineligible !== null) {
+        throw new Error(`AUTHORITY_IMPORT_INELIGIBLE:${ineligible}`);
+      }
       seeds.push(accountSeedWire(
         session.ownerEntityId,
         counterpartyId,
@@ -746,7 +748,7 @@ const handAccountInbound = async (
     entityTimestamp: clock.entityTimestamp,
     finalizedJHeight: clock.finalizedJHeight,
     rows,
-    postAccounts: true,
+    postAccounts: false,
   });
   report.waves += 1;
   report.inboundRounds += 1;
@@ -782,6 +784,7 @@ export const runAuthorityCutoverOutboundBatch = async (
     ownerEntityId: string;
     admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
     propose: readonly string[];
+    materialize: readonly string[];
     timestamp: number;
     jHeight: number;
   }>,
@@ -805,6 +808,7 @@ export const runAuthorityCutoverOutboundBatch = async (
       row.txs.map(accountTxRow),
     ]),
     propose: request.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
+    materialize: request.materialize.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
     postAccounts: true,
   });
   report.waves += 1;

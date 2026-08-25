@@ -268,33 +268,20 @@ impl StatefulBatchEngine {
         &self,
         entries: Vec<(Vec<u8>, AccountReplica, [u8; 32])>,
     ) -> Result<PersistentRadixMap<AccountReplica>, BatchError> {
-        self.accounts
-            .updated_batch(entries, |slots| {
-                // Sixteen slots are always handed over; only the ones holding
-                // leaves are work. A commit that moved one account would
-                // otherwise pay a pool hand-off to hash fifteen empty slots.
-                if slots.iter().filter(|slot| slot.has_work()).count()
-                    <= crate::fanout::SEQUENTIAL_SLOT_FANOUT_MAX
-                {
-                    return slots.map(xln_rscore_protocol::SlotWork::apply);
-                }
-                self.pool.install(|| {
-                    let mut results = slots
-                        .into_par_iter()
-                        .map(xln_rscore_protocol::SlotWork::apply)
-                        .collect::<Vec<_>>()
-                        .into_iter();
-                    std::array::from_fn(|_| {
-                        results.next().unwrap_or_else(|| {
-                            Err(xln_rscore_protocol::PersistentRadixMapError::EmptyKey)
-                        })
-                    })
-                })
+        let wide = self.pool.current_num_threads() > 16
+            && entries.len() >= crate::fanout::SECOND_LEVEL_FANOUT_MIN;
+        let result = if wide {
+            self.accounts.updated_batch_two_levels(entries, |slots| {
+                crate::fanout::map_slots(&self.pool, slots)
             })
-            .map_err(|error| BatchError::AccountsTree {
-                account_id: AccountId::from_bytes([0; 32]),
-                detail: error.to_string(),
-            })
+        } else {
+            self.accounts
+                .updated_batch(entries, |slots| crate::fanout::map_slots(&self.pool, slots))
+        };
+        result.map_err(|error| BatchError::AccountsTree {
+            account_id: AccountId::from_bytes([0; 32]),
+            detail: error.to_string(),
+        })
     }
 
     fn validate_update_bases(&self, prepared: &PreparedBatch) -> Result<(), BatchError> {

@@ -731,12 +731,18 @@ impl AccountConsensus {
                     "CURRENT_FRAME_HASH_MISMATCH".to_string(),
                 ));
             }
-            if committed.frame.account_state_root
-                != replica.state().payment_profile_account_state_root()?
-            {
-                return Err(StateError::CheckpointRestore(
-                    "CURRENT_STATE_ROOT_MISMATCH".to_string(),
-                ));
+            let restored_state_root = replica.state().payment_profile_account_state_root()?;
+            if committed.frame.account_state_root != restored_state_root {
+                return Err(StateError::CheckpointRestore(format!(
+                    "CURRENT_STATE_ROOT_MISMATCH:expected={}:actual={}:deltas={}:locks={}:swaps={}:policies={}:pulls={}",
+                    hex_of(&committed.frame.account_state_root),
+                    hex_of(&restored_state_root),
+                    hex_of(&replica.state().deltas_root()),
+                    hex_of(&replica.state().htlc_locks_root()),
+                    hex_of(&replica.state().swap_offers_root()),
+                    hex_of(&replica.state().rebalance_fee_policies_root()),
+                    hex_of(&replica.state().carried().pulls_root),
+                )));
             }
         }
         assert_mempool_within_limit(

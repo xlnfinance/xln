@@ -273,3 +273,40 @@ impl SwapOffer {
         CanonicalValue::Object(fields)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use num_bigint::BigInt;
+    use sha2::{Digest as _, Sha256};
+
+    use super::SwapOffer;
+
+    fn bigint(value: &str) -> BigInt {
+        BigInt::parse_bytes(value.as_bytes(), 10).expect("decimal bigint")
+    }
+
+    #[test]
+    fn committed_offer_digest_matches_typescript() {
+        let offer = SwapOffer::new(
+            "mm-4f043e-2-1-ask-1".into(),
+            2,
+            18,
+            bigint("10179996000000000000"),
+            1,
+            6,
+            bigint("25455079998"),
+            bigint("2545508"),
+            bigint("25452534490"),
+            bigint("25005000"),
+            None,
+            true,
+            21,
+        );
+        let encoded = xln_rscore_protocol::encode_account_state_value(&offer.canonical())
+            .expect("canonical offer");
+        assert_eq!(
+            hex::encode(Sha256::digest(encoded)),
+            "2bcadbbf04f98b128428cb9e48e45e156ff000977c4f306c211a0386ec05c534",
+        );
+    }
+}

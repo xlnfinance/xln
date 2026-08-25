@@ -85,6 +85,40 @@ fn one_and_twenty_workers_are_byte_order_equivalent() {
     }
 }
 
+fn spread_account_id(value: u32) -> xln_rscore_batch::AccountId {
+    let mut bytes = [0_u8; 32];
+    bytes[0] = value as u8;
+    bytes[28..].copy_from_slice(&value.to_be_bytes());
+    xln_rscore_batch::AccountId::from_bytes(bytes)
+}
+
+fn spread_seed(value: u32) -> AccountSeed {
+    AccountSeed {
+        account_id: spread_account_id(value),
+        ..seed(value)
+    }
+}
+
+#[test]
+fn twenty_workers_publish_a_wide_two_level_tree_identical_to_serial() {
+    const WIDE_ACCOUNTS: u32 = 768;
+    let seeds = (0..WIDE_ACCOUNTS).map(spread_seed).collect::<Vec<_>>();
+    let jobs = (0..WIDE_ACCOUNTS)
+        .map(|account| {
+            let mut job = direct_job(account, account, 1);
+            job.account_id = spread_account_id(account);
+            job
+        })
+        .collect::<Vec<_>>();
+    let mut serial = StatefulBatchEngine::new(generation(), 1, seeds.clone()).expect("serial");
+    let mut parallel = StatefulBatchEngine::new(generation(), 20, seeds).expect("parallel");
+    let serial_prepared = serial.prepare(&jobs).expect("serial prepare");
+    let serial_response = serial.commit(serial_prepared).expect("serial commit");
+    let parallel_prepared = parallel.prepare(&jobs).expect("parallel prepare");
+    let parallel_response = parallel.commit(parallel_prepared).expect("parallel commit");
+    assert_eq!(parallel_response, serial_response);
+}
+
 #[test]
 fn prepare_is_private_until_commit_and_stale_candidates_do_not_publish() {
     let mut engine = engine(4);

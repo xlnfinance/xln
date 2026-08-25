@@ -1,4 +1,5 @@
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../../types';
+import type { AccountPeerInput } from '../../../../../types/account';
 import type { AccountJClaimNodeChanges } from '../../../../../types/finance/account-j-claims';
 import type { AccountTxTarget } from '../orderbook/queue';
 import type {
@@ -17,6 +18,8 @@ export interface AccountHandlerResult {
   swapOffersCancelled: SwapCancelEvent[];
   /** Channel.ts-style forced final flush after accepting/replaying a peer frame. */
   forceAccountFlush?: boolean;
+  /** Exact Account-machine response owed to the peer for this input. */
+  forcedAccountInput?: AccountPeerInput;
   /** Hashes that still require the Entity validator quorum. */
   hashesToSign?: Array<{
     hash: string;
@@ -32,6 +35,7 @@ export const buildAccountHandlerResult = (
   effects: CommittedAccountEffects,
   forceAccountFlush?: boolean,
   accountJClaimNodeChanges?: AccountJClaimNodeChanges,
+  forcedAccountInput?: AccountPeerInput,
 ): AccountHandlerResult => ({
   newState,
   outputs: effects.outputs,
@@ -41,6 +45,7 @@ export const buildAccountHandlerResult = (
   swapOffersCancelled: effects.swapOffersCancelled,
   candidateEffects: effects.candidateEffects,
   ...(forceAccountFlush === undefined ? {} : { forceAccountFlush }),
+  ...(forcedAccountInput === undefined ? {} : { forcedAccountInput }),
   ...(effects.hashesToSign.length > 0 ? { hashesToSign: effects.hashesToSign } : {}),
   ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
 });

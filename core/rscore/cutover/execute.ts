@@ -1,12 +1,11 @@
 /**
- * Hand one Account operation to the engine and publish what it did.
+ * Publish one Account result from a bulk Rust round.
  *
  * This is the cutover boundary. TypeScript does not execute the transition:
- * it names the operation, and then reads back the exact post-state row, the
- * verdict, the events the frame commits, and the outputs it publishes. The
- * Account replica the Entity keeps is rebuilt from that row, so the mempool,
- * the pending frame, the acknowledgement and the dispute drafts all live in
- * the engine and are mirrored here only as the Entity's read of them.
+ * it names every inbound operation in one visit and every admission/proposal
+ * in a second visit. Inbound returns only verdicts, events and effects. The
+ * second visit returns the exact final post-state rows once; those rebuild the
+ * Entity's Account read models after all same-frame Entity work has run.
  *
  * Anything the profile cannot express refuses loudly. A cutover that guessed
  * would sign a frame nobody executed.
@@ -53,7 +52,7 @@ const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): nev
   throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
 };
 
-/** One operation's answer: the engine's verdicts plus its post-state row. */
+/** One operation's sliced verdict plus its optional final post-state row. */
 export type CutoverWaveResult = Readonly<{ wave: Wave; row: RscoreAccountCheckpointRow | null }>;
 
 export type CutoverInputRequest = Readonly<{
@@ -302,12 +301,12 @@ export const cutoverAccountInputResult = (
 export const cutoverAccountProposalResult = (
   request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
   result: CutoverWaveResult,
+  proposal: Wave['proposals'][number],
+  publishPostState = true,
 ): ProposeAccountFrameResult => {
   const accountId = request.accountId;
-  const rows = result.wave.proposals.filter(row => row.accountId === accountId);
-  const proposal = rows[0];
-  if (rows.length !== 1 || proposal === undefined) {
-    return fail('PROPOSAL_ARITY', { account: accountId, rows: rows.length });
+  if (proposal.accountId !== accountId) {
+    return fail('PROPOSAL_BINDING', { account: accountId, proposal: proposal.accountId });
   }
   const dropped: ProposalDroppedTransaction[] = proposal.dropped.map(row => ({
     index: row.index,
@@ -321,7 +320,7 @@ export const cutoverAccountProposalResult = (
     // The window produced no frame. The mempool still moved when something was
     // dropped, so the row is materialized either way.
     const row = result.row;
-    if (row !== null) materializeCutoverAccount(request, row);
+    if (publishPostState && row !== null) materializeCutoverAccount(request, row);
     return proposeAccountFrameIdle({
       message: dropped.length > 0
         ? 'Proposal window produced no frame'
@@ -338,7 +337,7 @@ export const cutoverAccountProposalResult = (
     return fail('PROPOSAL_EFFECT_TIMING', { account: accountId });
   }
   const envelope = cutoverEnvelope(priorSnapshot);
-  materializeCutoverAccount(request, row);
+  if (publishPostState) materializeCutoverAccount(request, row);
   // The bundled acknowledgement was produced — and published for signing —
   // when the frame it answers was committed. Carrying it again here would put
   // the same hash in the Entity's manifest twice; the certificate the Entity

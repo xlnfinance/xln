@@ -60,13 +60,15 @@ pub use transport::{read_frame, serve, write_frame};
 // Entity inputs roll back their Account mutations and operation indices.
 // 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
 // shapes. FrameAck is one atomic operation with one ordered composite result.
-pub const PROCESS_ABI_VERSION: u64 = 17;
+pub const PROCESS_ABI_VERSION: u64 = 18;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=20")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=21")
+        // wire=21: AccountOutbound names inbound-touched accounts whose final
+        // bodies are returned only after all Entity-derived work has run.
         // wire=20: Account peer inputs carry from/to/domain/dispute/watch-seed
         // exactly, received frames retain deltas and optional Hankos, disputes
         // retain their claimed hash, and FrameAck is one ACK-first result row.
@@ -112,9 +114,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x07, 0x20, 0xc8, 0x39, 0xd3, 0x87, 0x4f, 0x4a, 0x70, 0xe3, 0x58, 0xf5, 0xf7, 0xe2,
-            0xb7, 0xf7, 0x8c, 0xf2, 0xa3, 0xcb, 0x21, 0x32, 0x90, 0x6a, 0xe0, 0x5c, 0xdd, 0x73,
-            0x65, 0xf8, 0xb3, 0xa7,
+            0xe5, 0xe7, 0x0b, 0xde, 0x1e, 0xa7, 0x9e, 0xd3, 0xa2, 0x95, 0x19, 0x3c, 0xf0, 0x06,
+            0x38, 0x48, 0x1d, 0xea, 0x37, 0xdb, 0x78, 0xc6, 0xf4, 0x95, 0x1b, 0x3d, 0x19, 0xcb,
+            0x2c, 0x38, 0x36, 0xe6,
         ],
     };
 

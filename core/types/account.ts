@@ -553,6 +553,8 @@ export type AccountSwapOfferSnapshot = Readonly<{
   createdHeight: number;
   quantizedGive: bigint;
   quantizedWant: bigint;
+  /** Internal proof that this row came from the authoritative child engine. */
+  accountOutputVerified?: true;
 }>;
 
 /**

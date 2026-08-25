@@ -48,6 +48,7 @@ fn two_visits_carry_a_whole_entity_frame() {
             creates: Vec::new(),
             admits: vec![(payer_account, txs)],
             propose: vec![payer_account],
+            materialize: Vec::new(),
             post_accounts: true,
         })
         .expect("outbound");
@@ -99,10 +100,74 @@ fn two_visits_carry_a_whole_entity_frame() {
             creates: Vec::new(),
             admits: Vec::new(),
             propose: Vec::new(),
+            materialize: vec![payee_account],
             post_accounts: true,
         })
         .expect("outbound half");
-    assert!(payee_final.post_accounts.is_empty());
+    assert_eq!(payee_final.post_accounts.len(), 1);
+    assert_eq!(payee_final.post_accounts[0].account_id, payee_account);
+    assert!(
+        payee_final.post_accounts[0].put_count() > 0,
+        "the outbound diff spans the inbound mutation, not merely outbound work"
+    );
+}
+
+#[test]
+fn the_two_visit_protocol_refuses_missing_or_overlapping_halves() {
+    let mut stand = stand(1);
+    let payer_entity = stand.pairs[0].payer_entity;
+
+    let missing = stand
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: payer_entity,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: Vec::new(),
+            propose: Vec::new(),
+            materialize: Vec::new(),
+            post_accounts: false,
+        })
+        .err()
+        .expect("outbound without inbound");
+    assert!(missing.to_string().contains("ENTITY_ROUND_MISSING"));
+
+    let (_, before) = stand.payer.push_savepoint().expect("savepoint");
+    enter(&mut stand.payer, payer_entity);
+    let overlapping = stand
+        .payer
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: payer_entity,
+            clock: clock(),
+            rows: Vec::new(),
+            post_accounts: false,
+        })
+        .err()
+        .expect("second inbound while the first is open");
+    assert!(overlapping.to_string().contains("ENTITY_ROUND_OPEN"));
+    assert!(
+        stand.payer.keep_savepoint().is_err(),
+        "an incomplete Entity round cannot become durable"
+    );
+    let (_, after) = stand.payer.undo_savepoint().expect("abort open round");
+    assert_eq!(after, before);
+
+    // Abort clears both the Account tree and the round marker.
+    enter(&mut stand.payer, payer_entity);
+    stand
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: payer_entity,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: Vec::new(),
+            propose: Vec::new(),
+            materialize: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("fresh round after abort");
 }
 
 /// An account this Entity does not own is refused before anything executes.
@@ -122,6 +187,7 @@ fn a_round_refuses_an_account_another_entity_owns() {
             creates: Vec::new(),
             admits: Vec::new(),
             propose: vec![payer_account],
+            materialize: Vec::new(),
             post_accounts: false,
         })
         .err()
@@ -139,6 +205,7 @@ fn a_round_refuses_an_account_another_entity_owns() {
             creates: Vec::new(),
             admits: Vec::new(),
             propose: Vec::new(),
+            materialize: Vec::new(),
             post_accounts: false,
         })
         .expect("a rejected outbound does not consume the inbound half");
@@ -164,6 +231,7 @@ fn an_aborted_runtime_frame_puts_every_account_back() {
             creates: Vec::new(),
             admits: vec![(payer_account, txs)],
             propose: vec![payer_account],
+            materialize: Vec::new(),
             post_accounts: false,
         })
         .expect("outbound");

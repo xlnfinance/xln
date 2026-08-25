@@ -47,7 +47,10 @@ import {
 } from '../state-root';
 import { fitEntityProposalToWireBudget } from './wire-budget';
 import { primeProposalHankos } from './hanko/prime-hankos';
-import { requireEntityProposalReplayOracleEntry } from './replay-oracle';
+import {
+  hashEntityProposalTxPrefix,
+  requireEntityProposalReplayOracleEntry,
+} from './replay-oracle';
 import { countOp, OP_COUNTERS_ENABLED } from '../../../support/performance/op-counters';
 import { assertEstimatedCertifiedEntityFrameWire } from '../frame/validation';
 import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
@@ -436,6 +439,31 @@ const fitAndApplyEntityProposal = async (
   };
 };
 
+const assertReplayOracleFrameHash = (
+  context: ApplyEntityInputContext,
+  state: EntityState,
+  height: number,
+  txs: readonly EntityTx[],
+  stateRoot: string,
+  frameHash: string,
+): void => {
+  const replayOracle = context.env.infrastructure?.replayEntityProposalOracle;
+  if (!replayOracle || !context.usePersistedReplayContext) return;
+  const expected = requireEntityProposalReplayOracleEntry(
+    replayOracle,
+    context.workingReplica.entityId,
+    height,
+  );
+  if (frameHash === expected.frameHash) return;
+  const txPrefixHash = hashEntityProposalTxPrefix(state.entityId, height, txs);
+  throw new Error(
+    `HLT_ENTITY_PROPOSAL_ORACLE_FRAME_HASH_MISMATCH:${height}:` +
+    `expected=${expected.frameHash}:actual=${frameHash}:` +
+    `txCount=${expected.txCount}:${txs.length}:` +
+    `txPrefix=${expected.txPrefixHash}:${txPrefixHash}:stateRoot=${stateRoot}`,
+  );
+};
+
 const certifyEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
@@ -459,13 +487,7 @@ const certifyEntityProposal = async (
     parentFrameHash, height, timestamp, txs, applied.events, state.entityId,
     stateRoot, authorityRoot, entityContext, jPrefixCertificate,
   );
-  const replayOracle = env.infrastructure?.replayEntityProposalOracle;
-  if (replayOracle && context.usePersistedReplayContext) {
-    const expected = requireEntityProposalReplayOracleEntry(replayOracle, workingReplica.entityId, height);
-    if (frameHash !== expected.frameHash) {
-      throw new Error(`HLT_ENTITY_PROPOSAL_ORACLE_FRAME_HASH_MISMATCH:${height}:${expected.frameHash}:${frameHash}`);
-    }
-  }
+  assertReplayOracleFrameHash(context, state, height, txs, stateRoot, frameHash);
   profile.checkpoint('frameHash');
   const outputHashes = buildCertifiedEntityOutputHashes(state, env, height, frameHash, applied.outputs);
   profile.checkpoint('outputHashes');

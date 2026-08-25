@@ -55,6 +55,7 @@ export type AccountInputPhaseContext = {
 
 export type AccountConsensusOutcome = {
   forceAccountFlush?: boolean;
+  forcedAccountInput?: AccountPeerInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   terminalResult?: AccountHandlerResult;
 };
@@ -113,14 +114,15 @@ const finishAppliedAccountInput = async (
   result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { ok: true }>,
 ): Promise<AccountConsensusOutcome> => {
   const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
-  const forceAccountFlush = await applySuccessfulAccountInput({
+  const flushWork = await applySuccessfulAccountInput({
     env, state, input, account, counterpartyId, createdAccount, result, effects,
     ...(options ? { options } : {}),
     checkpointProfile: context.checkpointProfile,
   });
   context.checkpointProfile('postConsensus');
   return {
-    ...(forceAccountFlush === undefined ? {} : { forceAccountFlush }),
+    ...(flushWork === undefined ? {} : { forceAccountFlush: flushWork.force }),
+    ...(flushWork?.response === undefined ? {} : { forcedAccountInput: flushWork.response }),
     ...(result.accountJClaimNodeChanges
       ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges }
       : {}),
@@ -141,6 +143,7 @@ const finishDisputedAccountInput = async (
     terminalResult: buildAccountHandlerResult(
       unsafe.newState,
       { ...effects, outputs: unsafe.outputs },
+      undefined,
       undefined,
       undefined,
     ),

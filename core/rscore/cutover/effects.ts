@@ -49,6 +49,7 @@ const snapshot = (
   createdHeight: offer.createdHeight,
   quantizedGive: BigInt(offer.quantizedGive),
   quantizedWant: BigInt(offer.quantizedWant),
+  accountOutputVerified: true,
 });
 
 const offerCreated = (row: AccountSwapOfferSnapshot): SwapOfferEvent => ({
@@ -67,6 +68,7 @@ const offerCreated = (row: AccountSwapOfferSnapshot): SwapOfferEvent => ({
   minNetReceive: row.minNetReceive,
   priceTicks: row.priceTicks,
   ...(row.timeInForce === undefined ? {} : { timeInForce: row.timeInForce }),
+  accountOutputVerified: true,
 });
 
 /**
