@@ -1,16 +1,16 @@
 import { writable } from 'svelte/store';
 import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
+import {
+  ACTIVE_TAB_CHANNEL_NAME,
+  ACTIVE_TAB_HARD_RESET_KEY,
+  ACTIVE_TAB_OWNED_KEY,
+  getOrCreateBrowserTabId,
+  publishBrowserHardResetRequest,
+  type ActiveTabLockChannelMessage,
+} from '../../../../packages/browser/src/hard-reset-request';
 
 const ACTIVE_TAB_WEB_LOCK_NAME = 'xln-active-runtime';
-const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
-const ACTIVE_TAB_ID_KEY = 'xln-tab-id';
-const ACTIVE_TAB_OWNED_KEY = 'xln-active-tab-owned';
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
-const ACTIVE_TAB_HARD_RESET_KEY = 'xln-hard-reset';
-
-type ActiveTabLockChannelMessage =
-  | { type: 'takeover-request'; tabId: string }
-  | { type: 'hard-reset'; tabId: string; timestamp: number };
 
 export type ActiveTabLockState = {
   tabId: string;
@@ -24,7 +24,6 @@ export const activeTabLock = writable<ActiveTabLockState>({
   isOwner: false,
 });
 
-let currentTabId = '';
 let activeChannel: BroadcastChannel | null = null;
 let onLoseLockHandler: (() => void | Promise<void>) | null = null;
 let releaseHeldLock: (() => void) | null = null;
@@ -55,16 +54,6 @@ export function clearInactiveTabStandby(): void {
   sessionStorage.removeItem(INACTIVE_TAB_STANDBY_KEY);
 }
 
-const getOrCreateTabId = (): string => {
-  if (currentTabId) return currentTabId;
-  currentTabId = typeof crypto?.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  sessionStorage.setItem(ACTIVE_TAB_ID_KEY, currentTabId);
-  sessionStorage.removeItem(ACTIVE_TAB_OWNED_KEY);
-  return currentTabId;
-};
-
 const postChannelMessage = (message: ActiveTabLockChannelMessage): void => {
   activeChannel?.postMessage(message);
 };
@@ -83,7 +72,7 @@ const failAsync = (error: unknown): void => {
 };
 
 const loseWebLockTo = async (requesterTabId: string): Promise<void> => {
-  const tabId = getOrCreateTabId();
+  const tabId = getOrCreateBrowserTabId();
   if (!ownsWebLock || !requesterTabId || requesterTabId === tabId) return;
   if (lossInFlight) return lossInFlight;
   lossInFlight = (async () => {
@@ -102,7 +91,7 @@ const loseWebLockTo = async (requesterTabId: string): Promise<void> => {
 };
 
 async function handleHardResetRequest(sourceTabId: string): Promise<void> {
-  const tabId = getOrCreateTabId();
+  const tabId = getOrCreateBrowserTabId();
   if (!sourceTabId || sourceTabId === tabId) return;
   await loseWebLockTo(sourceTabId);
   window.setTimeout(() => window.location.replace('about:blank'), 50);
@@ -110,10 +99,7 @@ async function handleHardResetRequest(sourceTabId: string): Promise<void> {
 
 export function broadcastHardResetRequest(): void {
   if (typeof window === 'undefined') return;
-  const tabId = getOrCreateTabId();
-  const timestamp = Date.now();
-  localStorage.setItem(ACTIVE_TAB_HARD_RESET_KEY, JSON.stringify({ tabId, timestamp }));
-  postChannelMessage({ type: 'hard-reset', tabId, timestamp });
+  publishBrowserHardResetRequest(activeChannel ?? undefined);
 }
 
 const acquireWebLock = async (tabId: string): Promise<void> => {
@@ -180,7 +166,7 @@ const tryAcquireWebLock = async (tabId: string): Promise<boolean> => {
 const installActiveTabCoordination = (
   handler: () => void | Promise<void>,
 ): { tabId: string; onStorage: (event: StorageEvent) => void } => {
-  const tabId = getOrCreateTabId();
+  const tabId = getOrCreateBrowserTabId();
   onLoseLockHandler = handler;
   activeChannel = new BroadcastChannel(ACTIVE_TAB_CHANNEL_NAME);
   activeChannel.onmessage = (event: MessageEvent<ActiveTabLockChannelMessage>) => {
@@ -275,5 +261,5 @@ export function adoptActiveTabLock(
 ): (() => void) | null {
   if (!ownsWebLock || !activeChannel || !releaseHeldLock || !activeStorageHandler) return null;
   onLoseLockHandler = onLoseLock;
-  return createActiveTabLockRelease(getOrCreateTabId(), activeStorageHandler);
+  return createActiveTabLockRelease(getOrCreateBrowserTabId(), activeStorageHandler);
 }

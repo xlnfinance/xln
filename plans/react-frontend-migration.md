@@ -1,6 +1,6 @@
 # React frontend migration work plan
 
-**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, SITE, AND DOCS IMPLEMENTED`
+**Status:** `IN PROGRESS — TOOLING, ASSEMBLY, SITE, DOCS, AND WALLET TESTNET IMPLEMENTED`
 
 This is the executable work plan for splitting the Svelte frontend into React
 applications. It is intentionally lightweight and should be updated as live
@@ -332,7 +332,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `READY WHEN FIRST CONSUMER NEEDS IT`
+**Status:** `IN PROGRESS — DESTRUCTIVE RESET LIFECYCLE SHARED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -346,9 +346,18 @@ behavior pass focused checks.
 **Done:** shared boundaries have real consumers, focused lifecycle/persistence
 tests, and no duplicate writer or financial implementation.
 
+The first `packages/browser` slice now owns explicit reset confirmation,
+single-flight execution, cross-tab hard-reset publication, the settle window,
+IndexedDB/cache/service-worker/storage deletion, and redirect ordering. The
+canonical Svelte wallet and the React `/testnet` route consume that boundary;
+Runtime suspension remains injected by the Svelte adapter and no Runtime or
+financial logic moved into the package. Six focused reset tests cover durable
+deletion, blocked deletion, lifecycle ordering, duplicate execution,
+confirmation, cross-tab publication, and the existing hash-reset integration.
+
 ### WP6 — Migrate wallet by flow
 
-**Status:** `READY AFTER WALLET ROOT AND REQUIRED BOUNDARIES`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER AND DISPOSABLE IDENTITIES IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -360,6 +369,25 @@ Migrate coherent flows in roughly this order:
 Preserve canonical Runtime projections and persisted state. A flow is complete
 when success and important failure states pass focused tests; incomplete later
 flows do not block earlier wallet slices.
+
+The React wallet now owns `/testnet` while `/app` and `/address` remain explicit
+pending routes. It preserves the wallet, custody, health, docs, GitHub, and
+social destinations; the five session-randomized disposable Brain Vault entry
+links; destructive confirmation; successful reset-to-`/app`; and a visible,
+retriable failure when durable deletion is blocked. Eighteen focused tests (141
+assertions), strict wallet/tooling typechecks across 422 files with zero unsafe
+type findings, and the wallet production build are green. The broader batch
+passed 80/82 tests in the sandbox; the two localhost-binding gateway cases then
+passed 5/5 outside it. The wallet artifact is 202.40 kB JavaScript / 64.17 kB
+gzip and 6.45 kB CSS / 2.02 kB gzip. Browser
+evidence covers cancellation, success, and blocked-database failure at 390×844,
+1366×900, and 1920×1080; normal flows have zero console errors or warnings, and
+the injected failure emits only the expected blocked-deletion error. The
+four-app candidate assembles as
+`sha256-74038d2cade7da80c14faea3596707d788a701f77ad4789b9429b2ed4742d71b`
+with 351 files. The required root gate passes all 26 BrainVault checks before
+the existing contract-sync environment stops at Hardhat `HH19` under
+unsupported Node 25.
 
 ### WP7 — Migrate ops by flow
 
@@ -448,11 +476,12 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Begin WP5/WP6 together with the wallet boot, shell, identity, onboarding,
-   recovery, settings, and diagnostics boundary; keep Runtime projections in
-   shared client adapters and do not move transition logic into the frontend.
-3. Capture the remaining wallet-owned static/PWA inputs before the first wallet
-   flow migrates.
+2. Continue WP5/WP6 with the wallet boot, shell, canonical Brain Vault and
+   mnemonic identity choices, onboarding, recovery, settings, and diagnostics;
+   keep Runtime projections in shared client adapters and do not move
+   transition logic into the frontend.
+3. Capture the remaining wallet-owned static/PWA inputs before wallet boot
+   begins consuming them.
 4. Attach scenario media only when scenario-specific browser-safe artifacts are
    checked in. The generated catalog currently records an empty media inventory
    and never publishes the 46 TypeScript scenario files.

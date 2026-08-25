@@ -1,7 +1,16 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { clearBrowserRuntimeData } from '../../../frontend/src/lib/utils/control/resetEverything';
+import {
+  clearBrowserRuntimeData,
+  createBrowserRuntimeReset,
+  type ResetEverythingRequest,
+} from '../../../frontend/packages/browser/src/browser-runtime-reset';
+import {
+  ACTIVE_TAB_CHANNEL_NAME,
+  ACTIVE_TAB_HARD_RESET_KEY,
+  publishBrowserHardResetRequest,
+} from '../../../frontend/packages/browser/src/hard-reset-request';
 
 const appLayoutSource = readFileSync(
   join(import.meta.dir, '../../../frontend/src/routes/app/+layout.svelte'),
@@ -64,6 +73,89 @@ test('browser reset fails loudly when a database deletion is blocked', async () 
     expect(cleared).toEqual([]);
   } finally {
     restore.reverse().forEach(restoreGlobal => restoreGlobal());
+  }
+});
+
+test('browser reset runs lifecycle hooks once and redirects only after durable data clears', async () => {
+  const events: string[] = [];
+  let releaseClear!: () => void;
+  const clearBarrier = new Promise<void>((resolve) => {
+    releaseClear = resolve;
+  });
+  const reset = createBrowserRuntimeReset({
+    clearBrowserData: async () => {
+      events.push('clear:start');
+      await clearBarrier;
+      events.push('clear:done');
+    },
+    waitForOtherTabs: () => {
+      events.push('wait');
+      return Promise.resolve();
+    },
+    replaceLocation: (pathname) => events.push(`replace:${pathname}`),
+  });
+  const request = { confirmed: true, reason: 'test' } as const;
+  const first = reset(request, { beforeClear: () => events.push('notify') });
+  const second = reset(request, { beforeClear: () => events.push('duplicate-notify') });
+  await Promise.resolve();
+  expect(events).toEqual(['notify', 'wait']);
+  releaseClear();
+  await Promise.all([first, second]);
+  expect(events).toEqual(['notify', 'wait', 'clear:start', 'clear:done', 'replace:/app']);
+});
+
+test('browser reset rejects missing explicit confirmation before lifecycle work', async () => {
+  const reset = createBrowserRuntimeReset({
+    clearBrowserData: () => Promise.reject(new Error('CLEAR_SHOULD_NOT_RUN')),
+    waitForOtherTabs: () => Promise.reject(new Error('WAIT_SHOULD_NOT_RUN')),
+    replaceLocation: () => {
+      throw new Error('REPLACE_SHOULD_NOT_RUN');
+    },
+  });
+  const invalid = { confirmed: false, reason: '' } as unknown as ResetEverythingRequest;
+  await expect(reset(invalid)).rejects.toThrow('RESET_CONFIRMATION_REQUIRED');
+});
+
+test('hard reset publishes the shared cross-tab protocol before storage is cleared', () => {
+  const channelMessages: unknown[] = [];
+  const localWrites: Array<[string, string]> = [];
+  const sessionWrites: Array<[string, string]> = [];
+  let openedChannel = '';
+  let channelClosed = false;
+  class TestBroadcastChannel {
+    constructor(name: string) {
+      openedChannel = name;
+    }
+
+    postMessage(message: unknown): void {
+      channelMessages.push(message);
+    }
+
+    close(): void {
+      channelClosed = true;
+    }
+  }
+  const restore = [
+    replaceGlobal('crypto', { randomUUID: () => 'tab-reset-test' }),
+    replaceGlobal('localStorage', { setItem: (key: string, value: string) => localWrites.push([key, value]) }),
+    replaceGlobal('sessionStorage', {
+      setItem: (key: string, value: string) => sessionWrites.push([key, value]),
+      removeItem: () => undefined,
+    }),
+    replaceGlobal('BroadcastChannel', TestBroadcastChannel),
+  ];
+  try {
+    publishBrowserHardResetRequest();
+    expect(openedChannel).toBe(ACTIVE_TAB_CHANNEL_NAME);
+    expect(channelMessages).toEqual([{ type: 'hard-reset', tabId: 'tab-reset-test', timestamp: expect.any(Number) }]);
+    expect(localWrites).toEqual([[
+      ACTIVE_TAB_HARD_RESET_KEY,
+      expect.stringContaining('"tabId":"tab-reset-test"'),
+    ]]);
+    expect(sessionWrites).toContainEqual(['xln-tab-id', 'tab-reset-test']);
+    expect(channelClosed).toBe(true);
+  } finally {
+    restore.reverse().forEach((restoreGlobal) => restoreGlobal());
   }
 });
 

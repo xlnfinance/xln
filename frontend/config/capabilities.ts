@@ -46,10 +46,27 @@ export const CAPABILITIES = [
   {
     id: 'wallet-shell-and-identity',
     owner: 'wallet',
-    routes: ['/app', '/address'],
-    currentSources: ['frontend/src/routes/app/+page.svelte', 'frontend/src/routes/address/+page.svelte'],
-    behavior: ['boot and shell', 'identity selection', 'onboarding and settings'],
-    status: 'unstarted',
+    routes: ['/app', '/address', '/testnet'],
+    currentSources: [
+      'frontend/src/routes/app/+page.svelte',
+      'frontend/src/routes/address/+page.svelte',
+      'frontend/src/routes/testnet/+page.svelte',
+      'frontend/apps/wallet/src/testnet-page.tsx',
+    ],
+    behavior: ['boot and shell', 'identity selection', 'onboarding and settings', 'testnet launcher and disposable identities'],
+    status: 'in_progress',
+  },
+  {
+    id: 'wallet-browser-lifecycle',
+    owner: 'wallet',
+    routes: ['/app', '/testnet'],
+    currentSources: [
+      'frontend/packages/browser/src/browser-runtime-reset.ts',
+      'frontend/packages/browser/src/hard-reset-request.ts',
+      'frontend/src/lib/utils/control/resetEverything.ts',
+    ],
+    behavior: ['validated destructive reset', 'cross-tab reset notification', 'storage, cache, and service-worker cleanup'],
+    status: 'in_progress',
   },
   {
     id: 'wallet-runtime-discovery',

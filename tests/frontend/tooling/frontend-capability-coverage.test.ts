@@ -45,9 +45,16 @@ describe('frontend capability inventory', () => {
     expect(site?.currentSources).toContain('frontend/apps/site/src/releases-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/reviews-page.tsx');
     expect(site?.currentSources).toContain('frontend/apps/site/src/market-cap-page.tsx');
-    expect(CAPABILITIES.filter(({ id }) => id !== 'site-public-information' && id !== 'docs-reader').every(
+    expect(CAPABILITIES.filter(({ id }) => ![
+      'site-public-information',
+      'docs-reader',
+      'wallet-shell-and-identity',
+      'wallet-browser-lifecycle',
+    ].includes(id)).every(
       ({ status }) => status === 'unstarted',
     )).toBe(true);
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.status).toBe('in_progress');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.status).toBe('in_progress');
   });
 
   test('records the implemented docs reader and its generated-output boundary', () => {

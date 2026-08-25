@@ -1,0 +1,274 @@
+:root {
+  color: #e4e4e7;
+  background: #09090b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: #09090b;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+.testnet-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100dvh;
+  padding: 48px 24px;
+  color: #e4e4e7;
+  background:
+    radial-gradient(circle at 50% -15%, rgb(251 191 36 / 8%), transparent 32rem),
+    #09090b;
+}
+
+.testnet-hero {
+  max-width: 600px;
+  margin-bottom: 48px;
+  text-align: center;
+}
+
+.testnet-badge {
+  display: inline-block;
+  margin-bottom: 16px;
+  padding: 4px 12px;
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  background: rgb(251 191 36 / 10%);
+  border: 1px solid rgb(251 191 36 / 25%);
+  border-radius: 999px;
+}
+
+.testnet-hero h1 {
+  margin: 0 0 12px;
+  font-size: clamp(32px, 6vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.testnet-hero p {
+  margin: 0;
+  color: #8b8b95;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.testnet-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  width: min(960px, 100%);
+}
+
+.testnet-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 28px 24px;
+  color: inherit;
+  text-decoration: none;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 16px;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.testnet-card:hover {
+  background: #1c1c20;
+  border-color: #fbbf24;
+  box-shadow: 0 8px 32px rgb(251 191 36 / 8%);
+  transform: translateY(-2px);
+}
+
+.testnet-card-icon {
+  margin-bottom: 12px;
+  font-size: 32px;
+}
+
+.testnet-card h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.testnet-card > p {
+  flex: 1;
+  margin: 0 0 16px;
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.testnet-card-badges {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.testnet-card-badge {
+  padding: 3px 8px;
+  color: #4ade80;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgb(74 222 128 / 8%);
+  border: 1px solid rgb(74 222 128 / 15%);
+  border-radius: 6px;
+}
+
+.testnet-card > strong {
+  color: #fbbf24;
+  font-size: 14px;
+}
+
+.testnet-card > small {
+  margin-top: 8px;
+  color: #6f6f79;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.testnet-tools {
+  width: min(960px, 100%);
+  margin-top: 28px;
+  padding: 24px;
+  background: #111113;
+  border: 1px solid #27272a;
+  border-radius: 16px;
+}
+
+.testnet-tools h2,
+.testnet-tools p {
+  margin: 0;
+}
+
+.testnet-tools > div > p {
+  margin-top: 6px;
+  color: #8b8b95;
+  font-size: 13px;
+}
+
+.testnet-demo-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.testnet-demo-account {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px;
+  color: #e4e4e7;
+  text-decoration: none;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+}
+
+.testnet-demo-account:hover {
+  border-color: #4ade80;
+}
+
+.testnet-demo-account span {
+  overflow: hidden;
+  color: #8b8b95;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.testnet-reset {
+  margin-top: 18px;
+  padding: 10px 14px;
+  color: #fca5a5;
+  cursor: pointer;
+  background: rgb(127 29 29 / 16%);
+  border: 1px solid rgb(248 113 113 / 35%);
+  border-radius: 9px;
+}
+
+.testnet-reset:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.testnet-reset-error {
+  margin-top: 12px !important;
+  color: #fca5a5;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px !important;
+}
+
+.testnet-footer {
+  margin-top: 64px;
+  color: #6f6f79;
+  font-size: 13px;
+  text-align: center;
+}
+
+.testnet-footer p {
+  margin: 0 0 12px;
+}
+
+.testnet-footer nav {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.testnet-footer a {
+  color: #8b8b95;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.testnet-footer a:hover {
+  color: #fbbf24;
+}
+
+.testnet-card:focus-visible,
+.testnet-demo-account:focus-visible,
+.testnet-reset:focus-visible,
+.testnet-footer a:focus-visible {
+  outline: 2px solid #fbbf24;
+  outline-offset: 3px;
+}
+
+@media (max-width: 760px) {
+  .testnet-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .testnet-demo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .testnet-page {
+    padding: 32px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .testnet-card {
+    transition: none;
+  }
+}
