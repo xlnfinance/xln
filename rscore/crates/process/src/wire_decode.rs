@@ -33,9 +33,17 @@ pub enum Command {
         /// them.
         authority: Option<AuthorityConfig>,
     },
-    Restore {
+    BootstrapAccounts {
         revision: u64,
         accounts: Vec<AccountSeed>,
+    },
+    GetCheckpointChanges,
+    CommitCheckpoint {
+        token: xln_rscore_batch::CheckpointToken,
+    },
+    RestoreExact {
+        expected: xln_rscore_batch::CheckpointToken,
+        accounts: Vec<xln_rscore_batch::AccountRestore>,
     },
     Prepare {
         jobs: Vec<BatchJob>,
@@ -78,7 +86,7 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
     let payload = tuple(&body[0])?;
     match envelope.op_tag {
         OpTag::Hello => decode_hello(payload),
-        OpTag::RestoreCheckpoint => decode_restore(payload),
+        OpTag::BootstrapAccounts => decode_bootstrap(payload),
         OpTag::ExecuteWave => decode_prepare(payload),
         OpTag::CommitRuntime => decode_commit(payload),
         OpTag::AbortRuntime => decode_abort(payload),
@@ -90,6 +98,9 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::UpsertAccounts => decode_upsert_accounts(payload),
         OpTag::PrepareAccountWave => decode_prepare_wave(payload),
         OpTag::ReadAccountEnvelope => decode_read_envelope(payload),
+        OpTag::GetCheckpointChanges => decode_get_checkpoint_changes(payload),
+        OpTag::CommitCheckpoint => decode_commit_checkpoint(payload),
+        OpTag::RestoreExact => decode_restore_exact(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
 }
@@ -162,13 +173,13 @@ fn decode_swap_market(value: &AbiValue) -> Result<SwapMarketPolicy, ProcessError
     Ok(SwapMarketPolicy::new(tokens, steps))
 }
 
-fn decode_restore(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 3, "restore")?;
+fn decode_bootstrap(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 3, "bootstrapAccounts")?;
     let profile = text(&fields[0])?;
     if profile != PROCESS_PROFILE {
         return Err(ProcessError::Profile(profile.into()));
     }
-    Ok(Command::Restore {
+    Ok(Command::BootstrapAccounts {
         revision: unsigned(&fields[1], "revision")?,
         accounts: tuple(&fields[2])?
             .iter()
@@ -183,6 +194,23 @@ fn decode_read_envelope(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     Ok(Command::ReadAccountEnvelope {
         account_id: AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?),
     })
+}
+
+fn decode_get_checkpoint_changes(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    exact(fields, 0, "getCheckpointChanges")?;
+    Ok(Command::GetCheckpointChanges)
+}
+
+fn decode_commit_checkpoint(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "commitCheckpoint")?;
+    Ok(Command::CommitCheckpoint {
+        token: crate::checkpoint_wire::decode_token(&fields[0])?,
+    })
+}
+
+fn decode_restore_exact(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let (expected, accounts) = crate::checkpoint_wire::restore_request(fields)?;
+    Ok(Command::RestoreExact { expected, accounts })
 }
 
 fn decode_upsert_accounts(fields: &[AbiValue]) -> Result<Command, ProcessError> {
@@ -496,45 +524,7 @@ fn decode_consensus_snapshot(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let fields = exact(tuple(value)?, 10, "accountConsensus")?;
-    let current = match &fields[0] {
-        AbiValue::Nil => None,
-        value => {
-            let row = exact(tuple(value)?, 4, "committedFrame")?;
-            Some(xln_rscore_engine::CommittedFrame {
-                height: js_number(&row[0], "committedHeight")?,
-                state_hash: fixed_bytes(&row[1], "committedStateHash")?,
-                timestamp: js_number(&row[2], "committedTimestamp")?,
-                j_height: js_number(&row[3], "committedJHeight")?,
-            })
-        }
-    };
-    let pending = match &fields[1] {
-        AbiValue::Nil => None,
-        value => Some(decode_pending_frame(value)?),
-    };
-    let mempool = tuple(&fields[2])?
-        .iter()
-        .map(decode_tx)
-        .collect::<Result<_, _>>()?;
-    Ok(Some(xln_rscore_engine::ConsensusSnapshot {
-        mempool,
-        current,
-        pending,
-        rollback_count: js_number(&fields[3], "rollbackCount")?,
-        last_rollback_frame_hash: match &fields[4] {
-            AbiValue::Nil => None,
-            value => Some(fixed_bytes(value, "lastRollbackFrameHash")?),
-        },
-        counterparty_frame_hanko: match &fields[5] {
-            AbiValue::Nil => None,
-            value => Some(bytes(value, "counterpartyFrameHanko")?.to_vec()),
-        },
-        last_outbound_ack: decode_outbound_ack(&fields[6], "lastOutboundAck")?,
-        dispute: decode_dispute_draft(&fields[7])?,
-        next_proof_nonce: js_number(&fields[8], "nextProofNonce")?,
-        counterparty_dispute: decode_counterparty_dispute(&fields[9])?,
-    }))
+    Ok(Some(crate::checkpoint_wire::decode_consensus(value)?))
 }
 
 /// The proposal this side signed and has not been acked for, whole. The engine
@@ -546,7 +536,7 @@ fn decode_consensus_snapshot(
 /// The counterparty's proof as their message carried it: their signature, and
 /// the three fields that say which proof it is. The hash is not on the wire —
 /// this side rebuilds it, because a signature is over one exact message.
-fn decode_counterparty_dispute(
+pub(crate) fn decode_counterparty_dispute(
     value: &AbiValue,
 ) -> Result<Option<xln_rscore_engine::CounterpartyDispute>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
@@ -561,7 +551,7 @@ fn decode_counterparty_dispute(
     }))
 }
 
-fn decode_dispute_draft(
+pub(crate) fn decode_dispute_draft(
     value: &AbiValue,
 ) -> Result<Option<xln_rscore_engine::DisputeDraft>, ProcessError> {
     if matches!(value, AbiValue::Nil) {
@@ -576,7 +566,7 @@ fn decode_dispute_draft(
     }))
 }
 
-fn decode_outbound_ack(
+pub(crate) fn decode_outbound_ack(
     value: &AbiValue,
     field: &'static str,
 ) -> Result<Option<xln_rscore_engine::OutboundAck>, ProcessError> {
@@ -591,38 +581,10 @@ fn decode_outbound_ack(
     }))
 }
 
-fn decode_pending_frame(
-    value: &AbiValue,
-) -> Result<xln_rscore_engine::PendingFrameSnapshot, ProcessError> {
-    let fields = exact(tuple(value)?, 12, "pendingFrame")?;
-    Ok(xln_rscore_engine::PendingFrameSnapshot {
-        frame: xln_rscore_engine::AccountFrame {
-            height: js_number(&fields[0], "pendingHeight")?,
-            timestamp: js_number(&fields[1], "pendingTimestamp")?,
-            j_height: js_number(&fields[2], "pendingJHeight")?,
-            txs: tuple(&fields[3])?
-                .iter()
-                .map(decode_tx)
-                .collect::<Result<_, _>>()?,
-            prev_frame_hash: text(&fields[4])?.into(),
-            account_state_root: fixed_bytes(&fields[5], "pendingAccountStateRoot")?,
-            by_left: boolean(&fields[6], "pendingByLeft")?,
-            deltas: tuple(&fields[7])?
-                .iter()
-                .map(decode_delta)
-                .collect::<Result<_, _>>()?,
-        },
-        state_hash: fixed_bytes(&fields[8], "pendingStateHash")?,
-        hanko: bytes(&fields[9], "pendingHanko")?.to_vec(),
-        bundled_ack: decode_outbound_ack(&fields[10], "pendingBundledAck")?,
-        proposal_dispute: decode_dispute_draft(&fields[11])?,
-    })
-}
-
 /// Sections the engine carries but never interprets: their roots are committed
 /// verbatim so a live account whose swap/pull/rebalance/J-claim state is
 /// non-empty still reproduces its exact TypeScript account state root.
-fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessError> {
+pub(crate) fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessError> {
     let fields = exact(tuple(value)?, 8, "carriedSections")?;
     Ok(CarriedSections {
         pulls_root: fixed_bytes(&fields[0], "pullsRoot")?,
@@ -639,44 +601,75 @@ fn decode_carried_sections(value: &AbiValue) -> Result<CarriedSections, ProcessE
 
 /// Slot 1 of the carried tuple is no longer a carried root either: the engine
 /// owns the resting same-jurisdiction offers and recomputes their root.
-fn decode_swap_offers(value: &AbiValue) -> Result<Vec<SwapOffer>, ProcessError> {
+pub(crate) fn decode_swap_offers(value: &AbiValue) -> Result<Vec<SwapOffer>, ProcessError> {
     let fields = exact(tuple(value)?, 8, "carriedSections")?;
     tuple(&fields[1])?
         .iter()
-        .map(|row| {
-            let row = exact(tuple(row)?, 13, "swapOffer")?;
-            Ok(SwapOffer::new(
-                text(&row[0])?.into(),
-                bounded_u32(&row[1], "giveTokenId")?,
-                bounded_u32(&row[2], "giveTokenDecimals")?,
-                bigint(&row[3], "giveAmount")?,
-                bounded_u32(&row[4], "wantTokenId")?,
-                bounded_u32(&row[5], "wantTokenDecimals")?,
-                bigint(&row[6], "wantAmount")?,
-                bigint(&row[7], "maxFee")?,
-                bigint(&row[8], "minNetReceive")?,
-                bigint(&row[9], "priceTicks")?,
-                match &row[10] {
-                    AbiValue::Nil => None,
-                    value => Some(
-                        u8::try_from(bounded_u32(value, "timeInForce")?)
-                            .map_err(|_| ProcessError::Expected("timeInForce"))?,
-                    ),
-                },
-                match integer(&row[11])? {
-                    0 => true,
-                    1 => false,
-                    value => {
-                        return Err(ProcessError::Tag {
-                            field: "makerIsLeft",
-                            value,
-                        });
-                    }
-                },
-                js_number(&row[12], "createdHeight")?,
-            ))
-        })
+        .map(decode_seed_swap_offer)
         .collect()
+}
+
+/// Bootstrap accepts only the legacy 13-field snapshot whose eligibility
+/// guard requires the quantized amounts to equal the resting amounts. Exact
+/// recovery has its own 15-field codec and never guesses these two values.
+fn decode_seed_swap_offer(value: &AbiValue) -> Result<SwapOffer, ProcessError> {
+    let row = exact(tuple(value)?, 13, "seedSwapOffer")?;
+    let give_amount = bigint(&row[3], "giveAmount")?;
+    let want_amount = bigint(&row[6], "wantAmount")?;
+    let mut offer = decode_swap_offer_fields(row, give_amount.clone(), want_amount.clone())?;
+    offer.restore_quantized(give_amount, want_amount)?;
+    Ok(offer)
+}
+
+pub(crate) fn decode_swap_offer_state(value: &AbiValue) -> Result<SwapOffer, ProcessError> {
+    let row = exact(tuple(value)?, 15, "swapOffer")?;
+    let mut offer = decode_swap_offer_fields(
+        row,
+        bigint(&row[3], "giveAmount")?,
+        bigint(&row[6], "wantAmount")?,
+    )?;
+    offer.restore_quantized(
+        bigint(&row[13], "quantizedGive")?,
+        bigint(&row[14], "quantizedWant")?,
+    )?;
+    Ok(offer)
+}
+
+fn decode_swap_offer_fields(
+    row: &[AbiValue],
+    give_amount: BigInt,
+    want_amount: BigInt,
+) -> Result<SwapOffer, ProcessError> {
+    Ok(SwapOffer::new(
+        text(&row[0])?.into(),
+        bounded_u32(&row[1], "giveTokenId")?,
+        bounded_u32(&row[2], "giveTokenDecimals")?,
+        give_amount,
+        bounded_u32(&row[4], "wantTokenId")?,
+        bounded_u32(&row[5], "wantTokenDecimals")?,
+        want_amount,
+        bigint(&row[7], "maxFee")?,
+        bigint(&row[8], "minNetReceive")?,
+        bigint(&row[9], "priceTicks")?,
+        match &row[10] {
+            AbiValue::Nil => None,
+            value => Some(
+                u8::try_from(bounded_u32(value, "timeInForce")?)
+                    .map_err(|_| ProcessError::Expected("timeInForce"))?,
+            ),
+        },
+        match integer(&row[11])? {
+            0 => true,
+            1 => false,
+            value => {
+                return Err(ProcessError::Tag {
+                    field: "makerIsLeft",
+                    value,
+                });
+            }
+        },
+        js_number(&row[12], "createdHeight")?,
+    ))
 }
 
 /// Optional bigints stay optional: absent is not zero for the resting-terms
@@ -737,7 +730,7 @@ fn decode_swap_cancel_request(fields: &[AbiValue]) -> Result<AccountTx, ProcessE
 /// Slot 5 of the carried tuple is no longer a carried root: the engine owns
 /// the rebalance fee registers, so the seed ships their full contents and the
 /// root is recomputed here.
-fn decode_rebalance_policies(
+pub(crate) fn decode_rebalance_policies(
     value: &AbiValue,
 ) -> Result<Vec<(TokenId, BilateralRebalanceFeePolicy)>, ProcessError> {
     let fields = exact(tuple(value)?, 8, "carriedSections")?;
@@ -781,7 +774,7 @@ fn decode_claim_accumulator(value: &AbiValue) -> Result<JClaimAccumulator, Proce
     })
 }
 
-fn decode_lock(value: &AbiValue) -> Result<HtlcLock, ProcessError> {
+pub(crate) fn decode_lock(value: &AbiValue) -> Result<HtlcLock, ProcessError> {
     let fields = exact(tuple(value)?, 10, "htlcState")?;
     Ok(HtlcLock::restore(
         text(&fields[0])?.into(),
@@ -797,7 +790,7 @@ fn decode_lock(value: &AbiValue) -> Result<HtlcLock, ProcessError> {
     )?)
 }
 
-fn decode_delta(value: &AbiValue) -> Result<Delta, ProcessError> {
+pub(crate) fn decode_delta(value: &AbiValue) -> Result<Delta, ProcessError> {
     let fields = exact(tuple(value)?, 10, "delta")?;
     Ok(Delta::new(
         token(&fields[0])?,

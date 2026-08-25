@@ -111,7 +111,7 @@ fn round_trips_nil_nested_tuple_and_independent_payload_bytes() {
 fn every_closed_operation_and_message_kind_round_trips() {
     let operations = [
         OpTag::Hello,
-        OpTag::RestoreCheckpoint,
+        OpTag::BootstrapAccounts,
         OpTag::BeginRuntime,
         OpTag::BeginEntity,
         OpTag::ReadCapacityBatch,
@@ -124,6 +124,14 @@ fn every_closed_operation_and_message_kind_round_trips() {
         OpTag::AbortRuntime,
         OpTag::ReadAccountSummaryPage,
         OpTag::Shutdown,
+        OpTag::UpsertAccounts,
+        OpTag::UpdateAccountShells,
+        OpTag::RemoveAccounts,
+        OpTag::PrepareAccountWave,
+        OpTag::ReadAccountEnvelope,
+        OpTag::GetCheckpointChanges,
+        OpTag::CommitCheckpoint,
+        OpTag::RestoreExact,
     ];
     let kinds = [MessageKind::Request, MessageKind::Ok, MessageKind::Error];
     for op_tag in operations {
@@ -179,11 +187,11 @@ fn rejects_unknown_tags_and_wrong_fixed_width_identifiers() {
     let mut unknown_op = encoded.clone();
     // One past the last operation, so this stays a real unknown tag as the op
     // set grows.
-    unknown_op[op_position] = OpTag::ReadAccountEnvelope as u8 + 1;
+    unknown_op[op_position] = OpTag::RestoreExact as u8 + 1;
     assert_eq!(
         decode_envelope(&unknown_op, BODY_ARITY),
         Err(AbiError::UnknownOpTag(u64::from(
-            OpTag::ReadAccountEnvelope as u8 + 1
+            OpTag::RestoreExact as u8 + 1
         )))
     );
     assert_eq!(parser.read_unsigned(), Ok(5));

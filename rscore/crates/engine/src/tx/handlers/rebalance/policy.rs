@@ -46,6 +46,22 @@ impl RebalanceFeePolicySnapshot {
         self.policy_version
     }
 
+    pub const fn base_fee(&self) -> &BigInt {
+        &self.base_fee
+    }
+
+    pub const fn liquidity_fee_bps(&self) -> &BigInt {
+        &self.liquidity_fee_bps
+    }
+
+    pub const fn gas_fee(&self) -> &BigInt {
+        &self.gas_fee
+    }
+
+    pub const fn updated_at(&self) -> u64 {
+        self.updated_at
+    }
+
     /// Terms only — `updatedAt` is deliberately excluded, so an exact retry of
     /// the same version at a later timestamp reads as a retry, not as
     /// equivocation. Mirrors `sameTerms` in the TypeScript handler.

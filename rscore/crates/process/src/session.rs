@@ -154,7 +154,10 @@ impl ProcessSession {
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
-            Command::Restore { revision, accounts } => self.load(revision, accounts),
+            Command::BootstrapAccounts { revision, accounts } => self.load(revision, accounts),
+            Command::GetCheckpointChanges => self.get_checkpoint_changes(),
+            Command::CommitCheckpoint { token } => self.commit_checkpoint(&token),
+            Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
             Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
             Command::Commit { prepare_request_id } => {
@@ -345,6 +348,69 @@ impl ProcessSession {
         let accounts_root = engine.accounts_root();
         self.engine = Some(engine);
         Ok((wire_encode::loaded(revision, accounts_root), false))
+    }
+
+    fn get_checkpoint_changes(&self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_ref()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let checkpoint = engine.checkpoint_changes()?;
+        Ok((crate::checkpoint_wire::changes(&checkpoint)?, false))
+    }
+
+    fn commit_checkpoint(
+        &mut self,
+        token: &xln_rscore_batch::CheckpointToken,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        engine.commit_checkpoint(token)?;
+        let normalized = engine.checkpoint_token()?;
+        Ok((
+            crate::checkpoint_wire::checkpoint_committed(&normalized),
+            false,
+        ))
+    }
+
+    /// Replace an authority session from exact durable rows. The candidate
+    /// engine is built beside the session and installed only after every leaf,
+    /// the forest root and signer digest have been verified.
+    fn restore_exact(
+        &mut self,
+        expected: xln_rscore_batch::CheckpointToken,
+        accounts: Vec<xln_rscore_batch::AccountRestore>,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.engine.is_some() || self.authority.is_some() {
+            return Err(ProcessError::EngineAlreadyLoaded);
+        }
+        let binding = self.binding.as_ref().ok_or(ProcessError::HelloRequired)?;
+        let config = self
+            .authority_config
+            .as_ref()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let mut restored = StatefulConsensusEngine::restore(
+            EngineGeneration::from_bytes(binding.engine_generation),
+            self.worker_count,
+            expected.revision,
+            config.private_key,
+            config.signer_id.clone(),
+            std::sync::Arc::clone(&self.swap_market),
+            Vec::new(),
+        )?;
+        restored.restore_accounts(accounts, &expected)?;
+        let normalized = restored.checkpoint_token()?;
+        if normalized != expected {
+            return Err(xln_rscore_batch::BatchError::CheckpointToken {
+                actual: format!("{normalized:?}"),
+                expected: format!("{expected:?}"),
+            }
+            .into());
+        }
+        self.authority = Some(Box::new(restored));
+        Ok((crate::checkpoint_wire::exact_restored(&normalized), false))
     }
 
     fn upsert_accounts(

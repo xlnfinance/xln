@@ -67,10 +67,10 @@ pub struct DisputeDraft {
 /// A frame both sides have committed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommittedFrame {
-    pub height: u64,
+    /// The complete frame, not only its binding. Exact recovery must preserve
+    /// the transaction/delta body the canonical Account document stores.
+    pub frame: AccountFrame,
     pub state_hash: [u8; 32],
-    pub timestamp: u64,
-    pub j_height: u64,
 }
 
 /// Our own proposal, signed and sent, waiting for the peer's ack. The
@@ -134,6 +134,10 @@ pub struct AccountConsensus {
     counterparty_dispute: Option<CounterpartyDispute>,
     counterparty_dispute_hash: Option<[u8; 32]>,
     counterparty_dispute_hanko_digest: Option<String>,
+    /// Our own certificate for the committed frame. It is not part of the
+    /// Entity leaf, but canonical Account storage persists it and dispute
+    /// recovery must not depend on re-signing historical evidence.
+    local_committed_frame_hanko: Option<Vec<u8>>,
 }
 
 impl AccountConsensus {
@@ -153,6 +157,7 @@ impl AccountConsensus {
             counterparty_dispute: None,
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,
+            local_committed_frame_hanko: None,
         }
     }
 
@@ -173,7 +178,7 @@ impl AccountConsensus {
     }
 
     pub fn current_height(&self) -> u64 {
-        self.current.as_ref().map_or(0, |frame| frame.height)
+        self.current.as_ref().map_or(0, |frame| frame.frame.height)
     }
 
     pub const fn rollback_count(&self) -> u64 {
@@ -381,9 +386,11 @@ impl AccountConsensus {
         frame: &AccountFrame,
         state_hash: [u8; 32],
         counterparty_hanko: Vec<u8>,
+        local_hanko: Vec<u8>,
     ) {
         self.install_commit(candidate, frame, state_hash);
         self.store_counterparty_hanko(counterparty_hanko);
+        self.local_committed_frame_hanko = Some(local_hanko);
     }
 
     /// Commit our own frame on the peer's ack. Their ack is the certificate,
@@ -399,9 +406,11 @@ impl AccountConsensus {
         frame: &AccountFrame,
         state_hash: [u8; 32],
         ack_hanko: Vec<u8>,
+        local_hanko: Vec<u8>,
     ) {
         self.install_commit(candidate, frame, state_hash);
         self.store_counterparty_hanko(ack_hanko);
+        self.local_committed_frame_hanko = Some(local_hanko);
         // Parity target: the same drop in `installPendingFrameCommit`
         // (core/account/consensus/incoming/ack-commit.ts).
         if self
@@ -430,10 +439,8 @@ impl AccountConsensus {
     ) {
         self.replica = candidate;
         self.current = Some(CommittedFrame {
-            height: frame.height,
+            frame: frame.clone(),
             state_hash,
-            timestamp: frame.timestamp,
-            j_height: frame.j_height,
         });
         self.pending = None;
     }
@@ -605,6 +612,9 @@ pub struct ConsensusSnapshot {
     pub next_proof_nonce: u64,
     /// The counterparty's proof as it last arrived.
     pub counterparty_dispute: Option<CounterpartyDispute>,
+    /// Our historical certificate for `current`. While a proposal is pending,
+    /// `pending.hanko` is the canonical `currentFrameHanko`; otherwise this is.
+    pub local_committed_frame_hanko: Option<Vec<u8>>,
 }
 
 impl AccountConsensus {
@@ -627,6 +637,7 @@ impl AccountConsensus {
             dispute: self.dispute.clone(),
             next_proof_nonce: self.next_proof_nonce,
             counterparty_dispute: self.counterparty_dispute.clone(),
+            local_committed_frame_hanko: self.local_committed_frame_hanko.clone(),
         }
     }
 
@@ -653,7 +664,39 @@ impl AccountConsensus {
             dispute,
             next_proof_nonce,
             counterparty_dispute,
+            local_committed_frame_hanko,
         } = snapshot;
+        match (
+            &current,
+            &counterparty_frame_hanko,
+            &local_committed_frame_hanko,
+        ) {
+            (None, Some(_), _) | (None, _, Some(_)) => {
+                return Err(StateError::CheckpointRestore(
+                    "ORPHAN_COMMITTED_FRAME_HANKO".to_string(),
+                ));
+            }
+            (Some(_), None, _) | (Some(_), _, None) => {
+                return Err(StateError::CheckpointRestore(
+                    "CURRENT_FRAME_CERTIFICATE_MISSING".to_string(),
+                ));
+            }
+            _ => {}
+        }
+        if let Some(committed) = &current {
+            if committed.frame.hash()? != committed.state_hash {
+                return Err(StateError::CheckpointRestore(
+                    "CURRENT_FRAME_HASH_MISMATCH".to_string(),
+                ));
+            }
+            if committed.frame.account_state_root
+                != replica.state().payment_profile_account_state_root()?
+            {
+                return Err(StateError::CheckpointRestore(
+                    "CURRENT_STATE_ROOT_MISMATCH".to_string(),
+                ));
+            }
+        }
         assert_mempool_within_limit(
             mempool.len(),
             pending
@@ -678,6 +721,7 @@ impl AccountConsensus {
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,
             counterparty_dispute: None,
+            local_committed_frame_hanko,
         };
         if let Some(dispute) = counterparty_dispute {
             account.store_counterparty_dispute(dispute);

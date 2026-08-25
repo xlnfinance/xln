@@ -86,7 +86,7 @@ pub fn load(id: u64, revision: u64, locks: Vec<AbiValue>) -> Envelope {
 pub fn load_profile(id: u64, profile: &str, revision: u64, locks: Vec<AbiValue>) -> Envelope {
     request(
         id,
-        OpTag::RestoreCheckpoint,
+        OpTag::BootstrapAccounts,
         vec![
             AbiValue::Text(profile.into()),
             AbiValue::Integer(i128::from(revision)),
@@ -310,6 +310,18 @@ pub fn candidate_command(id: u64, op_tag: OpTag, prepare_id: u64) -> Envelope {
     )
 }
 
+pub fn get_checkpoint_changes(id: u64) -> Envelope {
+    request(id, OpTag::GetCheckpointChanges, Vec::new())
+}
+
+pub fn commit_checkpoint(id: u64, token: AbiValue) -> Envelope {
+    request(id, OpTag::CommitCheckpoint, vec![token])
+}
+
+pub fn restore_exact(id: u64, token: AbiValue, accounts: Vec<AbiValue>) -> Envelope {
+    request(id, OpTag::RestoreExact, vec![token, tuple(accounts)])
+}
+
 pub fn shutdown(id: u64) -> Envelope {
     request(id, OpTag::Shutdown, Vec::new())
 }
@@ -386,11 +398,11 @@ pub fn authority_account(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
     ])
 }
 
-/// `RestoreCheckpoint` carrying accounts an authoritative session owns.
+/// `BootstrapAccounts` carrying accounts an authoritative session owns.
 pub fn load_accounts(id: u64, revision: u64, accounts: Vec<AbiValue>) -> Envelope {
     request(
         id,
-        OpTag::RestoreCheckpoint,
+        OpTag::BootstrapAccounts,
         vec![
             AbiValue::Text(crate::PROCESS_PROFILE.into()),
             AbiValue::Integer(i128::from(revision)),
@@ -459,6 +471,48 @@ pub fn wave_payment(account_id: [u8; 32], from: [u8; 32], to: [u8; 32], amount: 
             AbiValue::Integer(0),
             AbiValue::Nil,
         ])]),
+    ])
+}
+
+pub fn wave_swap_offer(account_id: [u8; 32]) -> AbiValue {
+    tuple(vec![
+        AbiValue::Bytes(account_id.to_vec()),
+        tuple(vec![tuple(vec![
+            AbiValue::Integer(6),
+            AbiValue::Text("checkpoint-offer".to_string()),
+            AbiValue::Integer(1),
+            AbiValue::Integer(6),
+            AbiValue::Text("100000".to_string()),
+            AbiValue::Integer(2),
+            AbiValue::Integer(6),
+            AbiValue::Text("200000".to_string()),
+            AbiValue::Text("0".to_string()),
+            AbiValue::Text("190000".to_string()),
+            AbiValue::Nil,
+            AbiValue::Nil,
+        ])]),
+    ])
+}
+
+pub fn wave_ack(
+    input_index: u32,
+    account_id: [u8; 32],
+    from: [u8; 32],
+    height: u64,
+    state_hash: [u8; 32],
+    hanko: Vec<u8>,
+) -> AbiValue {
+    tuple(vec![
+        AbiValue::Integer(i128::from(input_index)),
+        AbiValue::Bytes(account_id.to_vec()),
+        AbiValue::Bytes(from.to_vec()),
+        tuple(vec![
+            AbiValue::Integer(1),
+            AbiValue::Integer(i128::from(height)),
+            AbiValue::Bytes(state_hash.to_vec()),
+            AbiValue::Bytes(hanko),
+            AbiValue::Nil,
+        ]),
     ])
 }
 

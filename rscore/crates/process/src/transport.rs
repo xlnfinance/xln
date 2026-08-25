@@ -4,7 +4,7 @@ use xln_rscore_abi::{decode_envelope, encode_envelope};
 
 use crate::{ProcessError, ProcessSession};
 
-const MAX_FRAME_BYTES: usize = 1000 * 1024 * 1024;
+const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const BODY_ARITY: usize = 1;
 
 pub fn serve(reader: &mut impl Read, writer: &mut impl Write) -> Result<(), ProcessError> {

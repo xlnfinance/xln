@@ -473,6 +473,7 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
         dispute: None,
         next_proof_nonce: 0,
         counterparty_dispute: None,
+        local_committed_frame_hanko: None,
     };
     let saved = PendingFrameSnapshot {
         frame: frame.clone(),
@@ -998,10 +999,10 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
     )
     .expect("ack");
 
-    let with_certificate = left.account.entity_account_leaf().expect("leaf");
     let snapshot = left.account.consensus_snapshot();
     assert!(snapshot.counterparty_frame_hanko.is_some());
-    let stripped = AccountConsensus::restore_from_checkpoint(
+    assert!(snapshot.local_committed_frame_hanko.is_some());
+    let error = AccountConsensus::restore_from_checkpoint(
         left.account.replica().clone(),
         ConsensusSnapshot {
             counterparty_frame_hanko: None,
@@ -1009,11 +1010,12 @@ fn the_counterparty_certificate_is_committed_in_the_leaf() {
         },
         &market(),
     )
-    .expect("restore without the certificate");
-    assert_ne!(
-        with_certificate,
-        stripped.entity_account_leaf().expect("leaf"),
-        "the certificate must be part of the commitment",
+    .expect_err("restore without the bilateral certificate");
+    assert!(
+        error
+            .to_string()
+            .contains("CURRENT_FRAME_CERTIFICATE_MISSING"),
+        "{error}",
     );
 }
 

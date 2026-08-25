@@ -22,6 +22,67 @@ pub fn canonical_value(value: &AbiValue) -> Result<CanonicalValue, ProcessError>
     decode(value, 0)
 }
 
+pub fn encode_envelope(value: &xln_rscore_engine::AccountEnvelope) -> AbiValue {
+    let fields = CanonicalValue::Object(value.fields().to_vec());
+    AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(vec![
+        encode(&fields),
+        AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(
+            value.mempool().iter().map(encode).collect(),
+        )),
+    ]))
+}
+
+fn encode(value: &CanonicalValue) -> AbiValue {
+    let tuple = |fields| AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields));
+    match value {
+        CanonicalValue::Null => tuple(vec![AbiValue::Integer(0)]),
+        CanonicalValue::Bool(flag) => tuple(vec![
+            AbiValue::Integer(1),
+            AbiValue::Integer(i128::from(*flag)),
+        ]),
+        CanonicalValue::Number(number) => {
+            let mut buffer = ryu_js::Buffer::new();
+            tuple(vec![
+                AbiValue::Integer(2),
+                AbiValue::Text(buffer.format(*number).to_owned()),
+            ])
+        }
+        CanonicalValue::BigInt(number) => tuple(vec![
+            AbiValue::Integer(3),
+            AbiValue::Text(number.to_string()),
+        ]),
+        CanonicalValue::String(text) => {
+            tuple(vec![AbiValue::Integer(4), AbiValue::Text(text.clone())])
+        }
+        CanonicalValue::Array(values) => tuple(vec![
+            AbiValue::Integer(5),
+            tuple(values.iter().map(encode).collect()),
+        ]),
+        CanonicalValue::Map(entries) => tuple(vec![
+            AbiValue::Integer(6),
+            tuple(
+                entries
+                    .iter()
+                    .map(|(key, value)| tuple(vec![encode(key), encode(value)]))
+                    .collect(),
+            ),
+        ]),
+        CanonicalValue::Set(values) => tuple(vec![
+            AbiValue::Integer(7),
+            tuple(values.iter().map(encode).collect()),
+        ]),
+        CanonicalValue::Object(entries) => tuple(vec![
+            AbiValue::Integer(8),
+            tuple(
+                entries
+                    .iter()
+                    .map(|(key, value)| tuple(vec![AbiValue::Text(key.clone()), encode(value)]))
+                    .collect(),
+            ),
+        ]),
+    }
+}
+
 /// `[fields, mempool]`: the account-leaf projection minus the derived roots,
 /// and the canonical frame-hash form of every queued tx.
 pub fn envelope(

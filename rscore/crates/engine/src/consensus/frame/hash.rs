@@ -19,7 +19,7 @@ pub const GENESIS_PREV_FRAME_HASH: &str = "genesis";
 
 /// A frame as it is hashed and signed. `state_hash` is the result of hashing
 /// the other fields, so it is never part of its own preimage.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountFrame {
     pub height: u64,
     pub timestamp: u64,

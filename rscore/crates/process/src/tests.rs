@@ -12,7 +12,7 @@ use crate::{ProcessSession, read_frame, serve, write_frame};
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "4167098443193249c0830aaf379042961a1a8a0f84fef48afdaefa1e297e40c0"
+        "ce1dace265c99e503944bbbcf011366b8a00f58f7325a88e718e50706eb2acab"
     );
 
     let mut session = ProcessSession::new();
@@ -182,6 +182,43 @@ fn restore_profile_is_explicit_and_begin_runtime_is_not_repurposed() {
             .handle(request(3, OpTag::BeginRuntime, Vec::new()))
             .envelope,
         "RSCORE_PROCESS_OP_UNSUPPORTED:2",
+    );
+}
+
+#[test]
+fn bootstrap_accepts_the_canonical_thirteen_field_resting_offer() {
+    use crate::test_fixture::{
+        authority_account, authority_entity, hello_authority, load_accounts,
+    };
+
+    const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+    let owner = authority_entity(SEED, "1");
+    let peer = authority_entity(SEED, "2");
+    let mut account = exact_tuple(&authority_account(owner, peer), 15, "seed account");
+    let mut carried = exact_tuple(&account[11], 8, "carried sections");
+    carried[1] = tuple_of(vec![tuple_of(vec![
+        AbiValue::Text("resting-offer".to_string()),
+        AbiValue::Integer(1),
+        AbiValue::Integer(6),
+        AbiValue::Text("1000".to_string()),
+        AbiValue::Integer(2),
+        AbiValue::Integer(6),
+        AbiValue::Text("2000".to_string()),
+        AbiValue::Text("0".to_string()),
+        AbiValue::Text("1900".to_string()),
+        AbiValue::Text("2000000".to_string()),
+        AbiValue::Nil,
+        AbiValue::Integer(if owner <= peer { 0 } else { 1 }),
+        AbiValue::Integer(7),
+    ])]);
+    account[11] = tuple_of(carried);
+
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello_authority(0, SEED, "1")).envelope);
+    assert_ok(
+        session
+            .handle(load_accounts(1, 0, vec![tuple_of(account)]))
+            .envelope,
     );
 }
 
@@ -625,6 +662,569 @@ fn an_aborted_wave_puts_the_authority_engine_back() {
         body_fields(&first)[3],
         "the same wave reaches the same proposal",
     );
+}
+
+/// The process boundary preserves an in-flight proposal, replays its held
+/// effects on restore, and reaches the same ACK result as the uninterrupted
+/// engine. This is the crash point that seed-only restore could never cover.
+#[test]
+fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
+    use crate::test_fixture::{
+        authority_account, authority_entity, candidate_command, commit_checkpoint,
+        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, restore_exact,
+        wave_ack, wave_swap_offer,
+    };
+    use xln_rscore_engine::{BoardDelays, SigningIdentity};
+
+    const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+    let owner = authority_entity(SEED, "1");
+    let peer = authority_entity(SEED, "2");
+    let mut uninterrupted = ProcessSession::new();
+    assert_ok(uninterrupted.handle(hello_authority(0, SEED, "1")).envelope);
+    assert_ok(
+        uninterrupted
+            .handle(load_accounts(1, 0, vec![authority_account(owner, peer)]))
+            .envelope,
+    );
+    let proposed = uninterrupted
+        .handle(prepare_wave(
+            2,
+            owner,
+            1_700_000_000_000,
+            vec![wave_swap_offer(peer)],
+            Vec::new(),
+            true,
+        ))
+        .envelope;
+    assert_ok(proposed.clone());
+    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[3])[0], 3, "proposal");
+    assert!(
+        !matches!(proposal[1], AbiValue::Nil),
+        "swap proposal rejected: {:?}",
+        proposal[2],
+    );
+    let frame = exact_tuple(&proposal[1], 10, "frame");
+    let state_hash: [u8; 32] = match &frame[8] {
+        AbiValue::Bytes(bytes) => bytes.as_slice().try_into().expect("state hash"),
+        value => panic!("state hash expected: {value:?}"),
+    };
+    assert_error(
+        uninterrupted.handle(get_checkpoint_changes(3)).envelope,
+        "RSCORE_BATCH_WAVE_PENDING",
+    );
+    assert_ok(
+        uninterrupted
+            .handle(candidate_command(4, OpTag::CommitRuntime, 2))
+            .envelope,
+    );
+    let checkpoint = uninterrupted.handle(get_checkpoint_changes(5)).envelope;
+    assert_ok(checkpoint.clone());
+    let checkpoint_fields = exact_tuple(&body_fields(&checkpoint)[0], 3, "checkpoint");
+    let token = checkpoint_fields[0].clone();
+    let changed = tuple_fields(&checkpoint_fields[1]);
+    assert_eq!(changed.len(), 1);
+    let restore_row = materialize_restore_row(&changed[0]);
+    let committed = uninterrupted.handle(commit_checkpoint(6, token)).envelope;
+    assert_ok(committed.clone());
+    let durable_token = body_fields(&committed)[0].clone();
+
+    let peer_identity = SigningIdentity::lazy_from_seed(SEED, "2", 1, 1, BoardDelays::default())
+        .expect("peer identity");
+    assert_eq!(peer_identity.entity_id(), &peer);
+    let ack_hanko = peer_identity.sign_frame(&state_hash).expect("peer ack");
+
+    let mut restarted = ProcessSession::new();
+    assert_ok(restarted.handle(hello_authority(0, SEED, "1")).envelope);
+    assert_ok(
+        restarted
+            .handle(restore_exact(1, durable_token, vec![restore_row]))
+            .envelope,
+    );
+    let empty = restarted.handle(get_checkpoint_changes(2)).envelope;
+    assert_ok(empty.clone());
+    assert!(
+        tuple_fields(&exact_tuple(&body_fields(&empty)[0], 3, "checkpoint")[1]).is_empty(),
+        "a restored checkpoint is its own durable base",
+    );
+
+    let ack_input = wave_ack(0, peer, peer, 1, state_hash, ack_hanko);
+    let resumed_ack = restarted
+        .handle(prepare_wave(
+            3,
+            owner,
+            1_700_000_000_001,
+            Vec::new(),
+            vec![ack_input.clone()],
+            false,
+        ))
+        .envelope;
+    let live_ack = uninterrupted
+        .handle(prepare_wave(
+            7,
+            owner,
+            1_700_000_000_001,
+            Vec::new(),
+            vec![ack_input],
+            false,
+        ))
+        .envelope;
+    assert_ok(resumed_ack.clone());
+    assert_ok(live_ack.clone());
+    assert_eq!(
+        without_engine_micros(&resumed_ack.body),
+        without_engine_micros(&live_ack.body),
+        "restart must reproduce root, verdict and held output bytes",
+    );
+    let applied = tuple_fields(&body_fields(&resumed_ack)[2]);
+    let verdict = exact_tuple(&exact_tuple(&applied[0], 3, "applied")[2], 4, "ack verdict");
+    assert_eq!(verdict[0], AbiValue::Integer(5));
+    assert_eq!(
+        tuple_fields(&verdict[3]).len(),
+        1,
+        "held forward released once"
+    );
+}
+
+/// Every durable checkpoint claim is adversarial input at the process
+/// boundary. A rejected restore must not install a partial engine: the same
+/// session must still accept the unmodified durable rows on its next request.
+#[test]
+fn malformed_exact_restore_is_loud_and_does_not_poison_the_session() {
+    use crate::test_fixture::restore_exact;
+
+    let (token, row) = durable_pending_checkpoint();
+
+    let uncommitted_base =
+        replace_tuple_field(&token, 0, AbiValue::Integer(0), 5, "checkpoint token");
+    assert_restore_failure_is_retryable(
+        restore_exact(1, uncommitted_base, vec![row.clone()]),
+        "RSCORE_BATCH_CHECKPOINT_TOKEN",
+        &token,
+        &row,
+    );
+
+    let wrong_root = replace_bytes_field(&token, 2, "checkpoint token");
+    assert_restore_failure_is_retryable(
+        restore_exact(1, wrong_root, vec![row.clone()]),
+        "RSCORE_BATCH_CHECKPOINT_ROOT",
+        &token,
+        &row,
+    );
+
+    let wrong_signer_digest = replace_bytes_field(&token, 3, "checkpoint token");
+    assert_restore_failure_is_retryable(
+        restore_exact(1, wrong_signer_digest, vec![row.clone()]),
+        "RSCORE_BATCH_CHECKPOINT_SIGNER_DIGEST",
+        &token,
+        &row,
+    );
+
+    let wrong_account_leaf = replace_bytes_field(&row, 1, "account restore");
+    assert_restore_failure_is_retryable(
+        restore_exact(1, token.clone(), vec![wrong_account_leaf]),
+        "RSCORE_BATCH_CHECKPOINT_ACCOUNT_LEAF",
+        &token,
+        &row,
+    );
+
+    let wrong_account_id = replace_bytes_field(&row, 0, "account restore");
+    assert_restore_failure_is_retryable(
+        restore_exact(1, token.clone(), vec![wrong_account_id]),
+        "RSCORE_PROCESS_EXPECTED",
+        &token,
+        &row,
+    );
+
+    let duplicate_count =
+        replace_tuple_field(&token, 4, AbiValue::Integer(2), 5, "checkpoint token");
+    assert_restore_failure_is_retryable(
+        restore_exact(1, duplicate_count, vec![row.clone(), row.clone()]),
+        "RSCORE_BATCH_ACCOUNT_DUPLICATE",
+        &token,
+        &row,
+    );
+
+    assert_restore_failure_is_retryable(
+        restore_exact(1, token.clone(), vec![corrupt_pending_hanko(&row)]),
+        "RSCORE_BATCH_ACCOUNTS_TREE",
+        &token,
+        &row,
+    );
+
+    assert_restore_failure_is_retryable(
+        request(1, OpTag::RestoreExact, vec![token.clone()]),
+        "RSCORE_PROCESS_ARITY",
+        &token,
+        &row,
+    );
+
+    let (committed_token, committed_row) = durable_committed_checkpoint();
+    assert_restore_failure_is_retryable(
+        restore_exact(
+            1,
+            committed_token.clone(),
+            vec![tamper_current_frame_body(&committed_row)],
+        ),
+        "RSCORE_BATCH_ACCOUNTS_TREE",
+        &committed_token,
+        &committed_row,
+    );
+    assert_restore_failure_is_retryable(
+        restore_exact(
+            1,
+            committed_token.clone(),
+            vec![remove_current_frame_certificate(&committed_row)],
+        ),
+        "RSCORE_BATCH_ACCOUNTS_TREE",
+        &committed_token,
+        &committed_row,
+    );
+    assert_restore_failure_is_retryable(
+        restore_exact(
+            1,
+            committed_token.clone(),
+            vec![corrupt_local_committed_hanko(&committed_row)],
+        ),
+        "RSCORE_BATCH_ACCOUNTS_TREE",
+        &committed_token,
+        &committed_row,
+    );
+}
+
+/// J-claim accumulators are uint64 protocol counters, not JavaScript numbers.
+/// Exact recovery must accept the same full range that BootstrapAccounts and
+/// the checkpoint encoder already put on the wire.
+#[test]
+fn exact_restore_decodes_full_u64_j_claim_counts() {
+    let (token, row) = durable_pending_checkpoint();
+    let count = (1_u64 << 53) + 1;
+    let row = replace_left_claim_count(&row, count);
+    let request = vec![token, tuple_of(vec![row])];
+    let (_, accounts) = crate::checkpoint_wire::restore_request(&request).expect("decode restore");
+    assert_eq!(
+        accounts[0]
+            .replica
+            .state()
+            .carried()
+            .left_pending_j_claims
+            .count,
+        count,
+    );
+}
+
+const EXACT_RESTORE_SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+
+fn durable_pending_checkpoint() -> (AbiValue, AbiValue) {
+    use crate::test_fixture::{
+        authority_account, authority_entity, candidate_command, commit_checkpoint,
+        get_checkpoint_changes, hello_authority, load_accounts, prepare_wave, wave_swap_offer,
+    };
+
+    let owner = authority_entity(EXACT_RESTORE_SEED, "1");
+    let peer = authority_entity(EXACT_RESTORE_SEED, "2");
+    let mut session = ProcessSession::new();
+    assert_ok(
+        session
+            .handle(hello_authority(0, EXACT_RESTORE_SEED, "1"))
+            .envelope,
+    );
+    assert_ok(
+        session
+            .handle(load_accounts(1, 0, vec![authority_account(owner, peer)]))
+            .envelope,
+    );
+    assert_ok(
+        session
+            .handle(prepare_wave(
+                2,
+                owner,
+                1_700_000_000_000,
+                vec![wave_swap_offer(peer)],
+                Vec::new(),
+                true,
+            ))
+            .envelope,
+    );
+    assert_ok(
+        session
+            .handle(candidate_command(3, OpTag::CommitRuntime, 2))
+            .envelope,
+    );
+    let checkpoint = session.handle(get_checkpoint_changes(4)).envelope;
+    assert_ok(checkpoint.clone());
+    let checkpoint_fields = exact_tuple(&body_fields(&checkpoint)[0], 3, "checkpoint");
+    let changed = tuple_fields(&checkpoint_fields[1]);
+    assert_eq!(changed.len(), 1);
+    let restore_row = materialize_restore_row(&changed[0]);
+    let committed = session
+        .handle(commit_checkpoint(5, checkpoint_fields[0].clone()))
+        .envelope;
+    assert_ok(committed.clone());
+    (body_fields(&committed)[0].clone(), restore_row)
+}
+
+fn durable_committed_checkpoint() -> (AbiValue, AbiValue) {
+    use crate::test_fixture::{
+        authority_entity, candidate_command, commit_checkpoint, get_checkpoint_changes,
+        hello_authority, prepare_wave, restore_exact, wave_ack,
+    };
+    use xln_rscore_engine::{BoardDelays, SigningIdentity};
+
+    let (pending_token, pending_row) = durable_pending_checkpoint();
+    let owner = authority_entity(EXACT_RESTORE_SEED, "1");
+    let peer = authority_entity(EXACT_RESTORE_SEED, "2");
+    let pending_consensus = exact_tuple(
+        &exact_tuple(&pending_row, 9, "account restore")[8],
+        11,
+        "consensus snapshot",
+    );
+    let pending = exact_tuple(&pending_consensus[2], 5, "pending frame");
+    let state_hash: [u8; 32] = match &pending[1] {
+        AbiValue::Bytes(bytes) => bytes.as_slice().try_into().expect("pending state hash"),
+        value => panic!("pending state hash expected: {value:?}"),
+    };
+    let peer_identity =
+        SigningIdentity::lazy_from_seed(EXACT_RESTORE_SEED, "2", 1, 1, BoardDelays::default())
+            .expect("peer identity");
+    assert_eq!(peer_identity.entity_id(), &peer);
+    let ack_hanko = peer_identity.sign_frame(&state_hash).expect("peer ack");
+
+    let mut session = ProcessSession::new();
+    assert_ok(
+        session
+            .handle(hello_authority(0, EXACT_RESTORE_SEED, "1"))
+            .envelope,
+    );
+    assert_ok(
+        session
+            .handle(restore_exact(1, pending_token, vec![pending_row]))
+            .envelope,
+    );
+    assert_ok(
+        session
+            .handle(prepare_wave(
+                2,
+                owner,
+                1_700_000_000_001,
+                Vec::new(),
+                vec![wave_ack(0, peer, peer, 1, state_hash, ack_hanko)],
+                false,
+            ))
+            .envelope,
+    );
+    assert_ok(
+        session
+            .handle(candidate_command(3, OpTag::CommitRuntime, 2))
+            .envelope,
+    );
+    let checkpoint = session.handle(get_checkpoint_changes(4)).envelope;
+    assert_ok(checkpoint.clone());
+    let checkpoint_fields = exact_tuple(&body_fields(&checkpoint)[0], 3, "checkpoint");
+    let changed = tuple_fields(&checkpoint_fields[1]);
+    assert_eq!(changed.len(), 1);
+    let restore_row = materialize_restore_row(&changed[0]);
+    let committed = session
+        .handle(commit_checkpoint(5, checkpoint_fields[0].clone()))
+        .envelope;
+    assert_ok(committed.clone());
+    (body_fields(&committed)[0].clone(), restore_row)
+}
+
+fn assert_restore_failure_is_retryable(
+    invalid: Envelope,
+    expected_error: &str,
+    token: &AbiValue,
+    row: &AbiValue,
+) {
+    use crate::test_fixture::{get_checkpoint_changes, hello_authority, restore_exact};
+
+    let mut session = ProcessSession::new();
+    assert_ok(
+        session
+            .handle(hello_authority(0, EXACT_RESTORE_SEED, "1"))
+            .envelope,
+    );
+    assert_error(session.handle(invalid).envelope, expected_error);
+
+    let restored = session
+        .handle(restore_exact(2, token.clone(), vec![row.clone()]))
+        .envelope;
+    assert_ok(restored.clone());
+    assert_eq!(
+        body_fields(&restored)[0],
+        *token,
+        "valid retry must install exactly the durable checkpoint",
+    );
+
+    let changes = session.handle(get_checkpoint_changes(3)).envelope;
+    assert_ok(changes.clone());
+    assert!(
+        tuple_fields(&exact_tuple(&body_fields(&changes)[0], 3, "checkpoint")[1]).is_empty(),
+        "valid retry must establish the durable checkpoint as the diff base",
+    );
+}
+
+fn replace_bytes_field(value: &AbiValue, index: usize, what: &str) -> AbiValue {
+    let mut fields = tuple_fields(value);
+    let AbiValue::Bytes(mut bytes) = fields[index].clone() else {
+        panic!("{what}[{index}] must be bytes")
+    };
+    assert!(!bytes.is_empty(), "{what}[{index}] must not be empty");
+    bytes[0] ^= 1;
+    fields[index] = AbiValue::Bytes(bytes);
+    tuple_of(fields)
+}
+
+fn replace_tuple_field(
+    value: &AbiValue,
+    index: usize,
+    replacement: AbiValue,
+    arity: usize,
+    what: &str,
+) -> AbiValue {
+    let mut fields = exact_tuple(value, arity, what);
+    fields[index] = replacement;
+    tuple_of(fields)
+}
+
+fn corrupt_pending_hanko(row: &AbiValue) -> AbiValue {
+    let mut row_fields = exact_tuple(row, 9, "account restore");
+    let mut consensus = exact_tuple(&row_fields[8], 11, "consensus snapshot");
+    let mut pending = exact_tuple(&consensus[2], 5, "pending frame");
+    let AbiValue::Bytes(mut hanko) = pending[2].clone() else {
+        panic!("pending Hanko must be bytes")
+    };
+    assert!(!hanko.is_empty(), "pending Hanko must not be empty");
+    hanko[0] ^= 1;
+    pending[2] = AbiValue::Bytes(hanko);
+    consensus[2] = tuple_of(pending);
+    row_fields[8] = tuple_of(consensus);
+    tuple_of(row_fields)
+}
+
+fn tamper_current_frame_body(row: &AbiValue) -> AbiValue {
+    let mut row_fields = exact_tuple(row, 9, "account restore");
+    let mut consensus = exact_tuple(&row_fields[8], 11, "consensus snapshot");
+    let mut current = exact_tuple(&consensus[1], 2, "committed frame");
+    let mut frame = exact_tuple(&current[0], 8, "checkpoint frame");
+    let AbiValue::Integer(timestamp) = frame[1] else {
+        panic!("checkpoint timestamp must be integer")
+    };
+    frame[1] = AbiValue::Integer(timestamp + 1);
+    current[0] = tuple_of(frame);
+    consensus[1] = tuple_of(current);
+    row_fields[8] = tuple_of(consensus);
+    tuple_of(row_fields)
+}
+
+fn remove_current_frame_certificate(row: &AbiValue) -> AbiValue {
+    let mut row_fields = exact_tuple(row, 9, "account restore");
+    let mut consensus = exact_tuple(&row_fields[8], 11, "consensus snapshot");
+    assert!(
+        !matches!(consensus[1], AbiValue::Nil),
+        "fixture must contain a committed frame",
+    );
+    assert!(
+        !matches!(consensus[5], AbiValue::Nil),
+        "fixture must contain the counterparty certificate",
+    );
+    consensus[5] = AbiValue::Nil;
+    row_fields[8] = tuple_of(consensus);
+    tuple_of(row_fields)
+}
+
+fn corrupt_local_committed_hanko(row: &AbiValue) -> AbiValue {
+    let mut row_fields = exact_tuple(row, 9, "account restore");
+    let mut consensus = exact_tuple(&row_fields[8], 11, "consensus snapshot");
+    let AbiValue::Bytes(mut hanko) = consensus[6].clone() else {
+        panic!("local committed Hanko must be bytes")
+    };
+    assert!(!hanko.is_empty(), "local committed Hanko must not be empty");
+    hanko[0] ^= 1;
+    consensus[6] = AbiValue::Bytes(hanko);
+    row_fields[8] = tuple_of(consensus);
+    tuple_of(row_fields)
+}
+
+fn replace_left_claim_count(row: &AbiValue, count: u64) -> AbiValue {
+    let mut row_fields = exact_tuple(row, 9, "account restore");
+    let mut header = exact_tuple(&row_fields[2], 9, "checkpoint header");
+    let mut carried = exact_tuple(&header[6], 6, "checkpoint carried");
+    let mut left_claims = exact_tuple(&carried[4], 2, "left claims");
+    left_claims[1] = AbiValue::Integer(i128::from(count));
+    carried[4] = tuple_of(left_claims);
+    header[6] = tuple_of(carried);
+    row_fields[2] = tuple_of(header);
+    tuple_of(row_fields)
+}
+
+/// Convert a full first checkpoint row into the materialized values
+/// `RestoreExact` reads. Production does the same from canonical LevelDB;
+/// this helper deliberately understands node records rather than reaching
+/// into the engine that produced them.
+fn materialize_restore_row(value: &AbiValue) -> AbiValue {
+    let fields = exact_tuple(value, 10, "checkpoint account");
+    tuple_of(vec![
+        fields[0].clone(),
+        fields[1].clone(),
+        fields[2].clone(),
+        tuple_of(leaf_values(&fields[4])),
+        tuple_of(leaf_values(&fields[5])),
+        tuple_of(lending_values(&fields[6])),
+        tuple_of(leaf_values(&fields[7])),
+        tuple_of(policy_values(&fields[8])),
+        fields[9].clone(),
+    ])
+}
+
+fn leaf_rows(value: &AbiValue) -> Vec<Vec<AbiValue>> {
+    let changes = exact_tuple(value, 2, "node changes");
+    tuple_fields(&changes[0])
+        .iter()
+        .map(tuple_fields)
+        .filter(|row| row.first() == Some(&AbiValue::Integer(1)))
+        .collect()
+}
+
+fn leaf_values(value: &AbiValue) -> Vec<AbiValue> {
+    leaf_rows(value)
+        .into_iter()
+        .map(|row| row[3].clone())
+        .collect()
+}
+
+fn lending_values(value: &AbiValue) -> Vec<AbiValue> {
+    leaf_rows(value)
+        .into_iter()
+        .map(|row| {
+            let AbiValue::Bytes(key) = &row[2] else {
+                panic!("lending key")
+            };
+            let length = usize::from(u16::from_be_bytes([key[0], key[1]]));
+            assert_eq!(key.len(), length + 2);
+            tuple_of(vec![
+                AbiValue::Text(String::from_utf8(key[2..].to_vec()).expect("lending key utf8")),
+                row[3].clone(),
+            ])
+        })
+        .collect()
+}
+
+fn policy_values(value: &AbiValue) -> Vec<AbiValue> {
+    leaf_rows(value)
+        .into_iter()
+        .map(|row| {
+            let AbiValue::Bytes(key) = &row[2] else {
+                panic!("policy key")
+            };
+            assert_eq!(key.len(), 32);
+            let token_id = u16::from_be_bytes([key[30], key[31]]);
+            tuple_of(vec![
+                AbiValue::Integer(i128::from(token_id)),
+                row[3].clone(),
+            ])
+        })
+        .collect()
 }
 
 /// A tuple of exactly this many fields, so a shape change is a test failure

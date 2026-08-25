@@ -14,7 +14,12 @@ import { decodeWave, waveParityDigest } from '../../rscore/wave-decode';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { RSCORE_OP, RSCORE_PROCESS_ABI_VERSION, RscoreProcessClient } from '../../rscore/client';
+import {
+  RSCORE_OP,
+  RSCORE_PROCESS_ABI_VERSION,
+  RscoreProcessClient,
+  type RscoreWireValue,
+} from '../../rscore/client';
 import { computeFrameHash } from '../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../account/commitment/state-root';
 import { handleDirectPayment } from '../../account/tx/handlers/balance/direct-payment';
@@ -53,7 +58,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
       expect(hello[2]).toBe(4);
 
-      const loaded = (await client.restore(7, [])) as unknown[];
+      const loaded = (await client.bootstrapAccounts(7, [])) as unknown[];
       expect(loaded[0]).toBe(7);
       // Empty accounts tree commits to the all-zero root.
       expect(new Uint8Array(loaded[1] as Uint8Array)).toEqual(new Uint8Array(32));
@@ -83,7 +88,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       })) as unknown[];
       expect(hello[0]).toBe(RSCORE_PROCESS_ABI_VERSION);
 
-      const loaded = (await client.restore(0, [])) as unknown[];
+      const loaded = (await client.bootstrapAccounts(0, [])) as unknown[];
       expect(loaded[0]).toBe(0);
 
       const { result, token } = await client.prepareAccountWave({
@@ -159,7 +164,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
 
       const counterparty = `0x${'cc'.repeat(32)}`;
       const account = makeAccount(owner, counterparty);
-      const loaded = (await client.restore(0, [
+      const loaded = (await client.bootstrapAccounts(0, [
         accountSeedWire(owner, counterparty, account.state),
       ])) as unknown[];
       expect(loaded[0]).toBe(0);
@@ -249,6 +254,41 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       expect(`0x${Buffer.from(committed[1] as Uint8Array).toString('hex')}`)
         .toBe(again.accountsRoot);
 
+      // The durable boundary is exercised through a second real process, not
+      // by reseeding financial state. The checkpoint still contains our
+      // unacknowledged Account proposal; RestoreExact must rebuild it and make
+      // that checkpoint its own empty diff base.
+      const checkpoint = exactTuple(
+        await client.getCheckpointChanges(),
+        3,
+        'checkpoint',
+      );
+      const changed = exactTuple(checkpoint[1], 1, 'checkpoint accounts');
+      const restoreRows = changed.map(materializeFirstCheckpointRow);
+      const durableToken = await client.commitCheckpoint(checkpoint[0] as RscoreWireValue);
+
+      const restarted = new RscoreProcessClient(BINARY, identity());
+      try {
+        await restarted.hello(2, market, {
+          privateKey: deriveSignerKeySync(seed, '1'),
+          signerId: '1',
+        });
+        expect(await restarted.restoreExact(
+          durableToken as RscoreWireValue,
+          restoreRows as RscoreWireValue[],
+        )).toEqual(durableToken);
+        const afterRestore = exactTuple(
+          await restarted.getCheckpointChanges(),
+          3,
+          'restored checkpoint',
+        );
+        expect(afterRestore[1]).toEqual([]);
+        expect(afterRestore[2]).toEqual([]);
+        await restarted.shutdown();
+      } finally {
+        restarted.kill();
+      }
+
       await client.shutdown();
     } finally {
       client.kill();
@@ -262,7 +302,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
     const client = new RscoreProcessClient(BINARY, identity());
     try {
       await client.hello(2, swapMarketPolicyWire());
-      await client.restore(3, []);
+      await client.bootstrapAccounts(3, []);
 
       await expect(
         client.request(RSCORE_OP.readAccountSummaryPage, [undefined as never]),
@@ -291,7 +331,7 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       const owner = `0x${Buffer.from(hello[5] as Uint8Array).toString('hex')}`.toLowerCase();
       const counterparty = `0x${'ce'.repeat(32)}`;
       const account = makeAccount(owner, counterparty);
-      await client.restore(0, [accountSeedWire(owner, counterparty, account.state)]);
+      await client.bootstrapAccounts(0, [accountSeedWire(owner, counterparty, account.state)]);
 
       // Far beyond anything the account can cover, and not a rejection that is
       // retried, so the transaction leaves the mempool for good.
@@ -335,4 +375,60 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
       client.kill();
     }
   });
+});
+
+const exactTuple = (value: unknown, arity: number, field: string): unknown[] => {
+  if (!Array.isArray(value) || value.length !== arity) {
+    throw new Error(`RSCORE_TEST_${field.toUpperCase().replaceAll(' ', '_')}_ARITY`);
+  }
+  return value;
+};
+
+/** Materialize the full first checkpoint without reading engine internals. */
+const materializeFirstCheckpointRow = (value: unknown): unknown[] => {
+  const row = exactTuple(value, 10, 'checkpoint account');
+  return [
+    row[0],
+    row[1],
+    row[2],
+    leafValues(row[4]),
+    leafValues(row[5]),
+    lendingValues(row[6]),
+    leafValues(row[7]),
+    policyValues(row[8]),
+    row[9],
+  ];
+};
+
+const leafRows = (value: unknown): unknown[][] => {
+  const [puts, dels] = exactTuple(value, 2, 'node changes');
+  if (!Array.isArray(puts) || !Array.isArray(dels) || dels.length !== 0) {
+    throw new Error('RSCORE_TEST_FIRST_CHECKPOINT_NODE_CHANGES_INVALID');
+  }
+  return puts
+    .map(record => {
+      if (!Array.isArray(record) || (record[0] !== 0 && record[0] !== 1)) {
+        throw new Error('RSCORE_TEST_NODE_RECORD_TAG_INVALID');
+      }
+      return exactTuple(record, record[0] === 0 ? 3 : 4, 'node record');
+    })
+    .filter(record => record[0] === 1);
+};
+
+const leafValues = (value: unknown): unknown[] => leafRows(value).map(row => row[3]);
+
+const lendingValues = (value: unknown): unknown[] => leafRows(value).map(row => {
+  const key = Buffer.from(row[2] as Uint8Array);
+  if (key.length < 2 || key.readUInt16BE(0) !== key.length - 2) {
+    throw new Error('RSCORE_TEST_LENDING_KEY_INVALID');
+  }
+  return [key.subarray(2).toString('utf8'), row[3]];
+});
+
+const policyValues = (value: unknown): unknown[] => leafRows(value).map(row => {
+  const key = Buffer.from(row[2] as Uint8Array);
+  if (key.length !== 32 || key.subarray(0, 30).some(byte => byte !== 0)) {
+    throw new Error('RSCORE_TEST_POLICY_KEY_INVALID');
+  }
+  return [key.readUInt16BE(30), row[3]];
 });

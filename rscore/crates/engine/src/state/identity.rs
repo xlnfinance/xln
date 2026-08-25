@@ -68,6 +68,10 @@ impl DepositoryAddress {
     pub fn as_hex(&self) -> String {
         render_hex(&self.0)
     }
+
+    pub const fn as_bytes(&self) -> &[u8; 20] {
+        &self.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +94,10 @@ impl WatchSeed {
 
     pub fn as_hex(&self) -> String {
         render_hex(&self.0)
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 

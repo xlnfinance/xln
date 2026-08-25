@@ -176,7 +176,7 @@ const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<S
       accountConsensusWire(account),
       requireAccountDeltaTransformerAddress(env.state, account.state),
     ));
-  await client.restore(0, seeds);
+  await client.bootstrapAccounts(0, seeds);
   report.accountsSeeded += seeds.length;
   authorityLog.error('authority.armed', { owner: ownerEntityId, accounts: seeds.length, workers });
   return {

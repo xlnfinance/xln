@@ -120,6 +120,13 @@ impl AccountEnvelope {
         &self.fields
     }
 
+    /// Canonical frame-hash values in queue order. Checkpoint transport needs
+    /// the exact values, not only their root, so a restored replica can
+    /// reproduce the Entity account leaf byte for byte.
+    pub fn mempool(&self) -> &[CanonicalValue] {
+        &self.mempool
+    }
+
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty() && self.mempool.is_empty()
     }

@@ -560,6 +560,7 @@ dependencies = [
  "xln-rscore-abi",
  "xln-rscore-batch",
  "xln-rscore-engine",
+ "xln-rscore-protocol",
 ]
 
 [[package]]

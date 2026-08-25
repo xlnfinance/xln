@@ -357,28 +357,29 @@ const rebalanceFeePoliciesWire = (
 export const accountConsensusWire = (account: AccountReplica): RscoreWireValue => {
   const current = account.currentFrame;
   const pending = account.pendingFrame;
+  const committed = current === undefined || current.height === 0 ? null : [
+    accountFrameWire(current),
+    hexToWireBytes(current.stateHash, 32, 'SHADOW_CURRENT_STATE_HASH'),
+  ];
+  const localCommittedHanko = committedHankoWire(account, committed !== null, pending !== undefined);
   return [
-    // Height zero is no frame at all: the engine chains its first frame to the
-    // genesis marker, exactly as this side does.
-    current === undefined || current.height === 0 ? null : [
-      current.height,
-      hexToWireBytes(current.stateHash, 32, 'SHADOW_CURRENT_STATE_HASH'),
-      current.timestamp,
-      current.jHeight,
-    ],
-    pending === undefined ? null : frameWire(
-      pending,
-      pendingFrameHanko(account),
-      outboundAckWire(account.pendingAccountInput?.kind === 'frame_ack'
-        ? account.pendingAccountInput.ack
-        : undefined),
-      disputeDraftWire(account.pendingAccountInput?.proposal?.disputeHanko),
-    ),
     account.mempool.map(tx => {
       const wire = accountTxWire(tx);
       if (wire === null) throw new Error(`SHADOW_MEMPOOL_TX_UNSUPPORTED:${tx.type}`);
       return wire;
     }),
+    // Height zero is no frame at all: the engine chains its first frame to the
+    // genesis marker, exactly as this side does.
+    committed,
+    pending === undefined ? null : [
+      accountFrameWire(pending),
+      hexToWireBytes(pending.stateHash, 32, 'SHADOW_PENDING_STATE_HASH'),
+      hankoWireBytes(pendingFrameHanko(account)),
+      outboundAckWire(account.pendingAccountInput?.kind === 'frame_ack'
+        ? account.pendingAccountInput.ack
+        : undefined),
+      disputeDraftWire(account.pendingAccountInput?.proposal?.disputeHanko),
+    ],
     account.rollbackCount,
     account.lastRollbackFrameHash === undefined
       ? null
@@ -386,6 +387,7 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
     account.counterpartyFrameHanko === undefined
       ? null
       : hankoWireBytes(account.counterpartyFrameHanko),
+    localCommittedHanko,
     outboundAckWire(account.lastOutboundFrameAck?.response.ack),
     // The recovery proof this account already stands behind. The engine
     // replaces it the next time a frame moves the state, and spends the nonce
@@ -414,6 +416,24 @@ export const accountConsensusWire = (account: AccountReplica): RscoreWireValue =
           account.counterpartyDisputeProofProposerIsLeft === true,
         ],
   ];
+};
+
+const committedHankoWire = (
+  account: AccountReplica,
+  hasCommittedFrame: boolean,
+  hasPendingFrame: boolean,
+): RscoreWireValue => {
+  if (!hasCommittedFrame) return null;
+  if (hasPendingFrame) {
+    // TypeScript overwrites currentFrameHanko with the pending proposal's
+    // Hanko. It can no longer prove the local half of the older committed
+    // frame, so bootstrapping from this state would fabricate exact recovery.
+    throw new Error('RSCORE_BOOTSTRAP_PENDING_OVER_COMMITTED_UNSUPPORTED');
+  }
+  if (account.currentFrameHanko === undefined) {
+    throw new Error('RSCORE_BOOTSTRAP_LOCAL_FRAME_HANKO_MISSING');
+  }
+  return hankoWireBytes(account.currentFrameHanko);
 };
 
 /**
@@ -458,12 +478,7 @@ const disputeDraftWire = (
   draft.proposerIsLeft === true,
 ]);
 
-const frameWire = (
-  frame: AccountFrame,
-  hanko: string,
-  bundledAck: RscoreWireValue,
-  proposalDispute: RscoreWireValue,
-): RscoreWireValue => [
+const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
   frame.height,
   frame.timestamp,
   frame.jHeight,
@@ -476,10 +491,6 @@ const frameWire = (
   hexToWireBytes(frame.accountStateRoot, 32, 'SHADOW_FRAME_STATE_ROOT'),
   frame.byLeft,
   frame.deltas.map(deltaWire),
-  hexToWireBytes(frame.stateHash, 32, 'SHADOW_FRAME_STATE_HASH'),
-  hankoWireBytes(hanko),
-  bundledAck,
-  proposalDispute,
 ];
 
 const hankoWireBytes = (value: string): Uint8Array => {

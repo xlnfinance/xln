@@ -742,7 +742,7 @@ export class RscoreShadowMirror {
     const ordered = [...accounts.entries()]
       .sort(([left], [right]) => left.localeCompare(right));
     const { seeds, primed } = this.#checkpointSeeds(ownerKey, ownerEntityId, ordered);
-    const { client, restored } = await this.#restoreCheckpoint(seeds);
+    const { client, restored } = await this.#bootstrapAccounts(seeds);
     this.#clients.set(ownerKey, client);
     this.#noteRevision(ownerKey, restored);
     this.#mirrored.set(ownerKey, new Map());
@@ -1825,14 +1825,14 @@ export class RscoreShadowMirror {
     if (digest !== expected) throw new Error(`SHADOW_HELLO_MARKET_DIGEST:${digest}:${expected}`);
   }
 
-  async #restoreCheckpoint(seeds: RscoreWireValue[][]): Promise<Readonly<{
+  async #bootstrapAccounts(seeds: RscoreWireValue[][]): Promise<Readonly<{
     client: RscoreProcessClient;
     restored: unknown[];
   }>> {
     const client = this.#makeClient(this.#binaryPath);
     try {
       await this.#hello(client);
-      const restored = wireTuple(await client.restore(0, seeds), 'SHADOW_PRIME_RESTORE', 2);
+      const restored = wireTuple(await client.bootstrapAccounts(0, seeds), 'SHADOW_PRIME_RESTORE', 2);
       return { client, restored };
     } catch (error) {
       client.kill();
@@ -1879,7 +1879,7 @@ export class RscoreShadowMirror {
     if (existing) return existing;
     const client = this.#makeClient(this.#binaryPath);
     await this.#hello(client);
-    await client.restore(0, []);
+    await client.bootstrapAccounts(0, []);
     this.#clients.set(ownerKey, client);
     return client;
   }

@@ -142,7 +142,7 @@ const main = async (): Promise<void> => {
   await client.hello(workers, swapMarketPolicyWire());
   const seeds = Array.from({ length: accounts }, (_, index) => seed(index));
   const restoreStarted = performance.now();
-  await client.restore(0, seeds);
+  await client.bootstrapAccounts(0, seeds);
   console.log(`restore accounts=${accounts} ms=${Math.ceil(performance.now() - restoreStarted)}`);
 
   let applied = 0;

@@ -14,6 +14,7 @@ thiserror.workspace = true
 xln-rscore-abi = { path = "../abi" }
 xln-rscore-batch = { path = "../batch" }
 xln-rscore-engine = { path = "../engine" }
+xln-rscore-protocol = { path = "../protocol" }
 
 [dev-dependencies]
 hex.workspace = true

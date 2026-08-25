@@ -10,14 +10,17 @@ mod fixture;
 
 use std::collections::BTreeMap;
 
-use fixture::{clock, engine_knowing, payment, round, stand};
+use fixture::{account_state, clock, engine, engine_knowing, entity_of, payment, round, stand};
+use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountCheckpointRows, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
-    AccountRestore, AccountsCheckpoint, BatchError, CheckpointExpectation, CheckpointToken,
+    AccountRestore, AccountSeed, AccountsCheckpoint, BatchError, CheckpointExpectation,
+    CheckpointToken,
 };
 use xln_rscore_engine::{
-    AccountReplica, AccountState, AccountStateSeed, AckOutcome, ConsensusSnapshot, Delta,
-    IncomingOutcome,
+    AccountConsensus, AccountReplica, AccountState, AccountStateSeed, AckOutcome,
+    BilateralRebalanceFeePolicy, ConsensusSnapshot, Delta, IncomingOutcome, LendingIntentKind,
+    RebalanceFeePolicySnapshot, Side, SwapOffer, TokenId,
 };
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
@@ -65,6 +68,40 @@ impl<V: Clone> Section<V> {
     fn values(&self) -> Vec<V> {
         self.leaves.values().cloned().collect()
     }
+}
+
+fn decode_text_key(key: &[u8]) -> String {
+    assert!(key.len() >= 2, "text key has no length prefix");
+    let length = usize::from(u16::from_be_bytes([key[0], key[1]]));
+    assert_eq!(key.len(), length + 2, "text key length mismatch");
+    String::from_utf8(key[2..].to_vec()).expect("text key is UTF-8")
+}
+
+fn decode_token_key(key: &[u8]) -> TokenId {
+    assert_eq!(key.len(), 32, "token key is 32 bytes");
+    assert!(
+        key[..30].iter().all(|byte| *byte == 0),
+        "token key has a non-zero prefix",
+    );
+    TokenId::new(u32::from(u16::from_be_bytes([key[30], key[31]]))).expect("token key")
+}
+
+fn lending_entries(section: &Section<LendingIntentKind>) -> Vec<(String, LendingIntentKind)> {
+    section
+        .leaves
+        .iter()
+        .map(|(key, value)| (decode_text_key(key), *value))
+        .collect()
+}
+
+fn policy_entries(
+    section: &Section<BilateralRebalanceFeePolicy>,
+) -> Vec<(TokenId, BilateralRebalanceFeePolicy)> {
+    section
+        .leaves
+        .iter()
+        .map(|(key, value)| (decode_token_key(key), value.clone()))
+        .collect()
 }
 
 #[derive(Default)]
@@ -126,14 +163,17 @@ impl Database {
                     j_nonce: header.j_nonce,
                     last_finalized_j_height: header.last_finalized_j_height,
                     carried: header.carried.clone(),
-                    rebalance_fee_policies: Vec::new(),
+                    rebalance_fee_policies: policy_entries(&row.policies),
                     swap_offers: row.offers.values(),
-                    lending_intents: Vec::new(),
+                    lending_intents: lending_entries(&row.lending),
                 })
                 .expect("state");
                 let mut replica =
                     AccountReplica::new(header.owner.clone(), state).expect("replica");
                 replica.set_envelope(header.envelope.clone());
+                if let Some(address) = header.delta_transformer {
+                    replica.set_delta_transformer(address);
+                }
                 AccountRestore {
                     account_id: *account_id,
                     replica,
@@ -182,6 +222,176 @@ fn the_first_checkpoint_carries_every_account() {
         assert!(rows.consensus.current.is_none());
         assert!(rows.consensus.pending.is_none());
     }
+}
+
+/// Every Rust-owned non-balance section must survive the same materialized
+/// node-store path as deltas. Empty fixtures cannot catch a database adapter
+/// that writes the nodes but drops their logical keys when rebuilding rows.
+#[test]
+fn non_empty_lending_offers_and_policies_restore_exactly() {
+    let mut stand = stand(1);
+    let pair = &stand.pairs[0];
+    let account_id = pair.payer_account;
+    let base = stand
+        .payer
+        .account(&account_id)
+        .expect("account")
+        .replica()
+        .clone();
+    let mut database = Database::default();
+    let initial = stand
+        .payer
+        .checkpoint_changes()
+        .expect("initial checkpoint");
+    database.write(&initial);
+    stand
+        .payer
+        .commit_checkpoint(&initial.token)
+        .expect("commit initial checkpoint");
+    let token = TokenId::new(1).expect("token");
+
+    let policy = BilateralRebalanceFeePolicy::new(
+        Some(RebalanceFeePolicySnapshot::new(
+            7,
+            BigInt::from(11),
+            BigInt::from(13),
+            BigInt::from(17),
+            1_700_000_000_007,
+        )),
+        Some(RebalanceFeePolicySnapshot::new(
+            8,
+            BigInt::from(19),
+            BigInt::from(23),
+            BigInt::from(29),
+            1_700_000_000_008,
+        )),
+    );
+    let mut offer = SwapOffer::new(
+        "checkpoint-offer".to_string(),
+        1,
+        6,
+        BigInt::from(1_000),
+        2,
+        6,
+        BigInt::from(2_000),
+        BigInt::from(31),
+        BigInt::from(1_900),
+        BigInt::from(2_000_000),
+        Some(3),
+        base.owner_side() == Side::Left,
+        41,
+    );
+    offer
+        .restore_quantized(BigInt::from(333), BigInt::from(666))
+        .expect("quantized offer");
+    let lending = vec![
+        (
+            "fund:checkpoint-position".to_string(),
+            LendingIntentKind::Fund,
+        ),
+        (
+            "repay:checkpoint-loan".to_string(),
+            LendingIntentKind::Repay,
+        ),
+    ];
+    let state = AccountState::restore_full(AccountStateSeed {
+        identity: base.state().identity().clone(),
+        dispute_config: base.state().dispute_config(),
+        deltas: base.state().deltas().cloned().collect(),
+        locks: base.state().htlc_locks().cloned().collect(),
+        j_nonce: base.state().j_nonce(),
+        last_finalized_j_height: base.state().last_finalized_j_height(),
+        carried: base.state().carried().clone(),
+        rebalance_fee_policies: vec![(token, policy)],
+        swap_offers: vec![offer],
+        lending_intents: lending,
+    })
+    .expect("rich state");
+    let mut replica = AccountReplica::new(pair.payer.clone(), state).expect("replica");
+    replica.set_envelope(base.envelope().clone());
+    stand
+        .payer
+        .upsert_accounts(vec![AccountSeed {
+            account_id,
+            replica,
+            consensus: None,
+        }])
+        .expect("replace account");
+
+    let live_root = stand.payer.accounts_root();
+    let live = stand.payer.account(&account_id).expect("live account");
+    let checkpoint = stand.payer.checkpoint_changes().expect("checkpoint");
+    let rows = rows_for(&checkpoint, &account_id).expect("checkpoint rows");
+    assert!(
+        rows.deltas.puts.is_empty(),
+        "an unchanged delta tree is not resent",
+    );
+    assert_eq!(rows.sections.lending_intents.leaf_count, 2);
+    assert_eq!(rows.sections.swap_offers.leaf_count, 1);
+    assert_eq!(rows.sections.rebalance_fee_policies.leaf_count, 1);
+    assert_eq!(
+        rows.sections.lending_intents.root,
+        live.replica()
+            .state()
+            .lending_intents_root()
+            .expect("lending root"),
+    );
+    assert_eq!(
+        rows.sections.swap_offers.root,
+        live.replica().state().swap_offers_root()
+    );
+    assert_eq!(
+        rows.sections.rebalance_fee_policies.root,
+        live.replica().state().rebalance_fee_policies_root(),
+    );
+
+    database.write(&checkpoint);
+    let mut restored = engine_knowing(&stand);
+    let restored_root = restored
+        .restore_accounts(database.restore_rows(), &database.expectation())
+        .expect("restore");
+    assert_eq!(restored_root, live_root);
+
+    let back = restored.account(&account_id).expect("restored account");
+    assert_eq!(
+        back.replica()
+            .state()
+            .lending_intent_entries()
+            .expect("lending"),
+        live.replica()
+            .state()
+            .lending_intent_entries()
+            .expect("live lending"),
+    );
+    assert_eq!(
+        back.replica()
+            .state()
+            .rebalance_fee_policy_entries()
+            .expect("policies"),
+        live.replica()
+            .state()
+            .rebalance_fee_policy_entries()
+            .expect("live policies"),
+    );
+    assert_eq!(
+        back.replica()
+            .state()
+            .swap_offers()
+            .cloned()
+            .collect::<Vec<_>>(),
+        live.replica()
+            .state()
+            .swap_offers()
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        restored
+            .checkpoint_changes()
+            .expect("post-restore checkpoint")
+            .is_empty(),
+        "an exact restore must become its own checkpoint base",
+    );
 }
 
 /// Once committed, an idle engine has nothing more to say.
@@ -253,7 +463,15 @@ fn a_committed_payment_moves_one_delta_leaf() {
         assert_eq!(leaves, 1, "one token moved");
         assert!(rows.locks.puts.is_empty());
         assert!(rows.swap_offers.puts.is_empty());
-        assert_eq!(rows.consensus.current.as_ref().expect("current").height, 1);
+        assert_eq!(
+            rows.consensus
+                .current
+                .as_ref()
+                .expect("current")
+                .frame
+                .height,
+            1,
+        );
         assert!(rows.consensus.pending.is_none());
         assert!(rows.consensus.mempool.is_empty());
     }
@@ -364,6 +582,70 @@ fn commit_checkpoint_refuses_any_other_checkpoint() {
     ));
     let fresh = stand.payer.checkpoint_changes().expect("checkpoint");
     stand.payer.commit_checkpoint(&fresh.token).expect("commit");
+}
+
+#[test]
+fn a_bound_entity_cannot_change_its_durable_signer_id() {
+    let mut stand = stand(1);
+    let entity_id = stand.pairs[0].payer_entity;
+
+    stand
+        .payer
+        .register_signer(entity_id, fixture::signer_key("payer-0"), "payer-0")
+        .expect("the existing binding is idempotent");
+    let error = stand
+        .payer
+        .register_signer(
+            entity_id,
+            fixture::signer_key("payer-0"),
+            "different-spelling",
+        )
+        .expect_err("changing a durable signer id must fail");
+
+    assert!(
+        matches!(error, BatchError::SignerRebind { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn exact_restore_rejects_two_signer_spellings_for_one_owner() {
+    let (owner_bytes, owner) = entity_of("1");
+    let mut rows = Vec::new();
+    for (signer_id, peer_id) in [("1", "peer-a"), ("01", "peer-b")] {
+        let (peer_bytes, peer) = entity_of(peer_id);
+        let (left, right) = if owner.to_string() < peer.to_string() {
+            (owner.clone(), peer)
+        } else {
+            (peer, owner.clone())
+        };
+        let replica =
+            AccountReplica::new(owner.clone(), account_state(&left, &right)).expect("replica");
+        let account = AccountConsensus::new(replica.clone());
+        rows.push(AccountRestore {
+            account_id: AccountId::from_bytes(peer_bytes),
+            account_leaf: account.entity_account_leaf().expect("leaf"),
+            replica,
+            consensus: account.consensus_snapshot(),
+            signer_id: signer_id.to_string(),
+        });
+    }
+    let expected = CheckpointExpectation {
+        base_revision: 0,
+        revision: 0,
+        accounts_root: [0; 32],
+        signer_digest: [0; 32],
+        account_count: rows.len(),
+    };
+
+    let error = engine()
+        .restore_accounts(rows, &expected)
+        .expect_err("one owner cannot acquire two durable signer spellings");
+    assert!(
+        matches!(error, BatchError::SignerRebind { .. }),
+        "{error:?}"
+    );
+    assert_eq!(owner_bytes, entity_of("01").0, "the spellings must alias");
 }
 
 /// A frame in flight survives the restart: the restored engine holds the same
@@ -520,7 +802,11 @@ fn a_truncated_database_is_refused() {
         .restore_accounts(database.restore_rows(), &database.expectation())
         .expect_err("a truncated row is not an account");
     assert!(
-        matches!(error, BatchError::CheckpointAccountLeaf { .. }),
+        matches!(
+            error,
+            BatchError::AccountsTree { ref detail, .. }
+                if detail.contains("CURRENT_STATE_ROOT_MISMATCH")
+        ),
         "{error:?}",
     );
 }
@@ -672,7 +958,7 @@ fn a_failed_restore_changes_nothing() {
     rows[0].signer_id = "payer-9".to_string();
     assert!(matches!(
         live.payer.restore_accounts(rows, &database.expectation()),
-        Err(BatchError::SignerUnknownEntity { .. }),
+        Err(BatchError::SignerRebind { .. }),
     ));
     assert_eq!(live.payer.checkpoint_token().expect("token"), token_before);
 

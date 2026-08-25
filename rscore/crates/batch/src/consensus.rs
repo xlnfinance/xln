@@ -918,6 +918,16 @@ impl StatefulConsensusEngine {
         signer_id: &str,
     ) -> Result<(), BatchError> {
         let identity = self.build_identity(entity_id, private_key, signer_id)?;
+        if let Some(existing) = self.identities.get(&entity_id) {
+            if existing.signer_id() != signer_id {
+                return Err(BatchError::SignerRebind {
+                    entity_id: hex_of(&entity_id),
+                    actual: signer_id.to_string(),
+                    expected: existing.signer_id().to_string(),
+                });
+            }
+            return Ok(());
+        }
         self.identities.insert(entity_id, identity);
         Ok(())
     }
@@ -1044,9 +1054,13 @@ impl StatefulConsensusEngine {
         // leave this engine exactly as it was, not half-loaded from a database
         // that turned out not to match.
         let mut identities: BTreeMap<[u8; 32], SigningIdentity> = BTreeMap::new();
+        let mut seen = BTreeSet::new();
         let mut signer_rows = Vec::with_capacity(rows.len());
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
+            if !seen.insert(row.account_id) {
+                return Err(BatchError::DuplicateAccount(row.account_id));
+            }
             let owner = *row.replica.owner().as_bytes();
             // The key for an entity this session was told about is the one it
             // was given; for any other row the session's own key must bind the
@@ -1054,10 +1068,51 @@ impl StatefulConsensusEngine {
             // wrong signer. This process holds keys, not the seed that makes
             // them, so it cannot derive a stranger's.
             let identity = match self.identities.get(&owner) {
-                Some(known) if known.signer_id() == row.signer_id => known.clone(),
-                _ => self.build_identity(owner, self.private_key, &row.signer_id)?,
+                Some(known) => {
+                    if known.signer_id() != row.signer_id {
+                        return Err(BatchError::SignerRebind {
+                            entity_id: hex_of(&owner),
+                            actual: row.signer_id.clone(),
+                            expected: known.signer_id().to_string(),
+                        });
+                    }
+                    known.clone()
+                }
+                None => self.build_identity(owner, self.private_key, &row.signer_id)?,
             };
-            identities.insert(owner, identity);
+            if let Some(pending) = row.consensus.pending.as_ref() {
+                xln_rscore_engine::verify_frame_hanko(&pending.hanko, &pending.state_hash, &owner)
+                    .map_err(|error| state_error(row.account_id, &error))?;
+            }
+            if let (Some(current), Some(counterparty_hanko)) = (
+                row.consensus.current.as_ref(),
+                row.consensus.counterparty_frame_hanko.as_ref(),
+            ) {
+                xln_rscore_engine::verify_frame_hanko(
+                    counterparty_hanko,
+                    &current.state_hash,
+                    row.replica.counterparty().as_bytes(),
+                )
+                .map_err(|error| state_error(row.account_id, &error))?;
+            }
+            if let (Some(current), Some(local_hanko)) = (
+                row.consensus.current.as_ref(),
+                row.consensus.local_committed_frame_hanko.as_ref(),
+            ) {
+                xln_rscore_engine::verify_frame_hanko(local_hanko, &current.state_hash, &owner)
+                    .map_err(|error| state_error(row.account_id, &error))?;
+            }
+            if let Some(existing) = identities.get(&owner) {
+                if existing.signer_id() != row.signer_id {
+                    return Err(BatchError::SignerRebind {
+                        entity_id: hex_of(&owner),
+                        actual: row.signer_id.clone(),
+                        expected: existing.signer_id().to_string(),
+                    });
+                }
+            } else {
+                identities.insert(owner, identity);
+            }
             let account = AccountConsensus::restore_from_checkpoint(
                 row.replica,
                 row.consensus,
@@ -1076,6 +1131,12 @@ impl StatefulConsensusEngine {
             entries.push((row.account_id.as_bytes().to_vec(), account, leaf));
         }
         let restored = self.put_into(&PersistentRadixMap::empty(), entries)?;
+        if restored.len() != expected.account_count {
+            return Err(BatchError::CheckpointIncomplete {
+                actual: restored.len(),
+                expected: expected.account_count,
+            });
+        }
         let root = restored.root_hash();
         if root != expected.accounts_root {
             return Err(BatchError::CheckpointRoot {

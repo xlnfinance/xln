@@ -161,6 +161,7 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::SeedRestore { .. } => "RSCORE_BATCH_SEED_RESTORE",
         BatchError::SignerRequired => "RSCORE_BATCH_SIGNER_REQUIRED",
         BatchError::SignerUnknownEntity { .. } => "RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY",
+        BatchError::SignerRebind { .. } => "RSCORE_BATCH_SIGNER_REBIND",
         BatchError::Signing(_) => "RSCORE_BATCH_SIGNING",
         BatchError::AccountsTree { .. } => "RSCORE_BATCH_ACCOUNTS_TREE",
     }

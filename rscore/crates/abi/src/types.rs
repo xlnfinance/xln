@@ -4,15 +4,15 @@ pub const ABI_MAGIC: u8 = 0x03;
 pub const ABI_DOMAIN: &str = "xln.rscore.account";
 pub const ABI_VERSION: u16 = 1;
 
-const DEFAULT_MAX_ENVELOPE_BYTES: usize = 1000 * 1024 * 1024;
-const DEFAULT_MAX_BODY_BYTES: usize = 999 * 1024 * 1024;
+const DEFAULT_MAX_ENVELOPE_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_BODY_BYTES: usize = 63 * 1024 * 1024;
 const DEFAULT_MAX_BLOB_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_MAX_TEXT_BYTES: usize = 4 * 1024;
 const DEFAULT_MAX_TUPLE_FIELDS: usize = 4_000_000;
 const DEFAULT_MAX_TOTAL_VALUES: usize = 64_000_000;
 const DEFAULT_MAX_NESTING_DEPTH: usize = 32;
-const HARD_MAX_ENVELOPE_BYTES: usize = 1024 * 1024 * 1024;
-const HARD_MAX_BODY_BYTES: usize = 1023 * 1024 * 1024;
+const HARD_MAX_ENVELOPE_BYTES: usize = 64 * 1024 * 1024;
+const HARD_MAX_BODY_BYTES: usize = 63 * 1024 * 1024;
 const HARD_MAX_BLOB_BYTES: usize = 32 * 1024 * 1024;
 const HARD_MAX_TEXT_BYTES: usize = 64 * 1024;
 const HARD_MAX_TUPLE_FIELDS: usize = 4_000_000;
@@ -80,7 +80,9 @@ impl AbiLimits {
 #[repr(u8)]
 pub enum OpTag {
     Hello = 0,
-    RestoreCheckpoint = 1,
+    /// Initial import only. This deliberately does not restore consensus
+    /// state and therefore must never be used for crash recovery.
+    BootstrapAccounts = 1,
     BeginRuntime = 2,
     BeginEntity = 3,
     ReadCapacityBatch = 4,
@@ -101,6 +103,12 @@ pub enum OpTag {
     /// Read one account's committed leaf projection, field by field. A leaf
     /// that disagrees says only that something differs; this says what.
     ReadAccountEnvelope = 18,
+    /// Incremental canonical rows since the last durable Rust checkpoint.
+    GetCheckpointChanges = 19,
+    /// Acknowledge the exact checkpoint token after the runtime fsyncs it.
+    CommitCheckpoint = 20,
+    /// Replace an authority engine from an exact durable checkpoint.
+    RestoreExact = 21,
 }
 
 impl TryFrom<u64> for OpTag {
@@ -109,7 +117,7 @@ impl TryFrom<u64> for OpTag {
     fn try_from(value: u64) -> Result<Self, AbiError> {
         match value {
             0 => Ok(Self::Hello),
-            1 => Ok(Self::RestoreCheckpoint),
+            1 => Ok(Self::BootstrapAccounts),
             2 => Ok(Self::BeginRuntime),
             3 => Ok(Self::BeginEntity),
             4 => Ok(Self::ReadCapacityBatch),
@@ -127,6 +135,9 @@ impl TryFrom<u64> for OpTag {
             16 => Ok(Self::RemoveAccounts),
             17 => Ok(Self::PrepareAccountWave),
             18 => Ok(Self::ReadAccountEnvelope),
+            19 => Ok(Self::GetCheckpointChanges),
+            20 => Ok(Self::CommitCheckpoint),
+            21 => Ok(Self::RestoreExact),
             _ => Err(AbiError::UnknownOpTag(value)),
         }
     }

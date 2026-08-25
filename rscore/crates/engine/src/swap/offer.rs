@@ -151,6 +151,29 @@ impl SwapOffer {
         self.created_height
     }
 
+    /// Restore the exact committed quantized lots. They normally equal the
+    /// effective resting amounts, but are committed fields in their own right
+    /// and a checkpoint must not infer them.
+    pub fn restore_quantized(
+        &mut self,
+        quantized_give: BigInt,
+        quantized_want: BigInt,
+    ) -> Result<(), crate::StateError> {
+        let zero = BigInt::from(0);
+        if quantized_give <= zero
+            || quantized_want <= zero
+            || quantized_give > self.give_amount
+            || quantized_want > self.want_amount
+        {
+            return Err(crate::StateError::CheckpointRestore(
+                "SWAP_OFFER_QUANTIZED_BOUNDS".to_string(),
+            ));
+        }
+        self.quantized_give = quantized_give;
+        self.quantized_want = quantized_want;
+        Ok(())
+    }
+
     /// The market this offer rests in, for the per-side ceiling. Same-j only,
     /// so the key is the directed token pair.
     /// The snapshot the Entity layer consumes, read from the committed row.

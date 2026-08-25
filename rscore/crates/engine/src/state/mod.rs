@@ -345,12 +345,22 @@ impl AccountState {
             .map(PersistentRadixMap::root_hash)
     }
 
+    pub fn lending_intent_count(&self) -> usize {
+        self.lending_intents
+            .as_ref()
+            .map_or(0, PersistentRadixMap::len)
+    }
+
     pub fn rebalance_policy(&self, token_id: TokenId) -> Option<&BilateralRebalanceFeePolicy> {
         self.rebalance_fee_policies.get(&token_id.radix_key())
     }
 
     pub fn rebalance_fee_policies_root(&self) -> [u8; 32] {
         self.rebalance_fee_policies.root_hash()
+    }
+
+    pub fn rebalance_fee_policy_count(&self) -> usize {
+        self.rebalance_fee_policies.len()
     }
 
     pub fn swap_offer(&self, offer_id: &str) -> Option<&SwapOffer> {

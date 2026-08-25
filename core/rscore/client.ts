@@ -41,19 +41,22 @@ export const RSCORE_ABI_VERSION = 1;
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An engine built against the old Hello fails at Hello, not later.
 // 5: that config carries the signer key instead of the runtime seed.
-export const RSCORE_PROCESS_ABI_VERSION = 5;
+// 6: exact recovery carries the full durable Account consensus snapshot.
+// 7: the diagnostic envelope read and exact checkpoint operations coexist at
+// distinct tags in one closed operation set.
+export const RSCORE_PROCESS_ABI_VERSION = 7;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 export const RSCORE_PROTOCOL_VERSION = 1;
 export const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=10")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=13")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '4167098443193249c0830aaf379042961a1a8a0f84fef48afdaefa1e297e40c0',
+  'ce1dace265c99e503944bbbcf011366b8a00f58f7325a88e718e50706eb2acab',
   'hex',
 );
 
 export const RSCORE_OP = {
   hello: 0,
-  restoreCheckpoint: 1,
+  bootstrapAccounts: 1,
   readCapacityBatch: 4,
   executeWave: 5,
   commitRuntime: 10,
@@ -65,11 +68,19 @@ export const RSCORE_OP = {
   removeAccounts: 16,
   prepareAccountWave: 17,
   readAccountEnvelope: 18,
+  getCheckpointChanges: 19,
+  commitCheckpoint: 20,
+  restoreExact: 21,
 } as const;
 
 const MESSAGE_KIND_REQUEST = 0;
 const MESSAGE_KIND_OK = 1;
-const MAX_FRAME_BYTES = 1000 * 1024 * 1024;
+// Rust accepts a 63 MiB request body inside a 64 MiB framed response. Keep the
+// two directions distinct: allowing a 64 MiB request here would kill the
+// session after the client had already consumed its request id.
+const MAX_REQUEST_FRAME_BYTES = 63 * 1024 * 1024;
+const MAX_RESPONSE_FRAME_BYTES = 64 * 1024 * 1024;
+const MAX_BUFFERED_BYTES = MAX_RESPONSE_FRAME_BYTES + 4;
 const STDERR_TAIL_BYTES = 4096;
 
 export type RscoreWireValue =
@@ -386,7 +397,10 @@ export class RscoreProcessClient {
   #child: ChildProcessWithoutNullStreams;
   #identity: RscoreSessionIdentity;
   #nextRequestId = 0n;
-  #buffer: Buffer = Buffer.alloc(0);
+  #chunks: Buffer[] = [];
+  #chunkOffset = 0;
+  #bufferedBytes = 0;
+  #expectedFrameBytes: number | null = null;
   #waiters: Array<{ resolve: (frame: Buffer) => void; reject: (error: Error) => void }> = [];
   #dead: Error | null = null;
   #stderrTail = '';
@@ -416,27 +430,81 @@ export class RscoreProcessClient {
   #fail(error: Error): void {
     if (this.#dead) return;
     this.#dead = error;
+    this.#chunks = [];
+    this.#chunkOffset = 0;
+    this.#bufferedBytes = 0;
+    this.#expectedFrameBytes = null;
     for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
+    if (this.#child.exitCode === null && !this.#child.killed) {
+      this.#child.kill('SIGKILL');
+    }
   }
 
   #onData(chunk: Buffer): void {
-    this.#buffer = this.#buffer.length === 0 ? chunk : Buffer.concat([this.#buffer, chunk]);
-    while (this.#buffer.length >= 4) {
-      const length = this.#buffer.readUInt32BE(0);
-      if (length === 0 || length > MAX_FRAME_BYTES) {
-        this.#fail(new Error(`RSCORE_CLIENT_FRAME_LENGTH:${length}`));
-        return;
+    if (this.#dead || chunk.length === 0) return;
+    this.#chunks.push(chunk);
+    this.#bufferedBytes += chunk.length;
+    if (this.#bufferedBytes > MAX_BUFFERED_BYTES) {
+      this.#fail(new Error(
+        `RSCORE_CLIENT_BUFFER_LIMIT:${this.#bufferedBytes}:${MAX_BUFFERED_BYTES}`,
+      ));
+      return;
+    }
+    while (true) {
+      if (this.#expectedFrameBytes === null) {
+        if (this.#bufferedBytes < 4) return;
+        const header = this.#takeBytes(4, false);
+        const length = header.readUInt32BE(0);
+        if (length === 0 || length > MAX_RESPONSE_FRAME_BYTES) {
+          this.#fail(new Error(`RSCORE_CLIENT_FRAME_LENGTH:${length}`));
+          return;
+        }
+        this.#expectedFrameBytes = length;
       }
-      if (this.#buffer.length < 4 + length) return;
-      const frame = this.#buffer.subarray(4, 4 + length);
-      this.#buffer = this.#buffer.subarray(4 + length);
+      if (this.#bufferedBytes < this.#expectedFrameBytes) return;
+      const frame = this.#takeBytes(this.#expectedFrameBytes, true);
+      this.#expectedFrameBytes = null;
       const waiter = this.#waiters.shift();
       if (!waiter) {
         this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
         return;
       }
-      waiter.resolve(Buffer.from(frame));
+      waiter.resolve(frame);
     }
+  }
+
+  /** Consume exactly `length` bytes without ever recopying prior chunks. */
+  #takeBytes(length: number, isolate: boolean): Buffer {
+    if (length > this.#bufferedBytes) throw new Error('RSCORE_CLIENT_BUFFER_UNDERFLOW');
+    const first = this.#chunks[0];
+    if (!first) throw new Error('RSCORE_CLIENT_BUFFER_EMPTY');
+    const available = first.length - this.#chunkOffset;
+    if (available >= length) {
+      const view = first.subarray(this.#chunkOffset, this.#chunkOffset + length);
+      this.#chunkOffset += length;
+      this.#bufferedBytes -= length;
+      if (this.#chunkOffset === first.length) {
+        this.#chunks.shift();
+        this.#chunkOffset = 0;
+      }
+      return isolate ? Buffer.from(view) : view;
+    }
+    const output = Buffer.allocUnsafe(length);
+    let written = 0;
+    while (written < length) {
+      const next = this.#chunks[0];
+      if (!next) throw new Error('RSCORE_CLIENT_BUFFER_TRUNCATED');
+      const take = Math.min(length - written, next.length - this.#chunkOffset);
+      next.copy(output, written, this.#chunkOffset, this.#chunkOffset + take);
+      written += take;
+      this.#chunkOffset += take;
+      this.#bufferedBytes -= take;
+      if (this.#chunkOffset === next.length) {
+        this.#chunks.shift();
+        this.#chunkOffset = 0;
+      }
+    }
+    return output;
   }
 
   async request(opTag: number, payload: RscoreWireValue[]): Promise<unknown> {
@@ -446,9 +514,9 @@ export class RscoreProcessClient {
     // The engine refuses an oversized frame and exits, so the caller would
     // otherwise see EPIPE and a dead mirror instead of the actual cause. A
     // wave that does not fit is the caller's to split.
-    if (envelope.length > MAX_FRAME_BYTES) {
+    if (envelope.length > MAX_REQUEST_FRAME_BYTES) {
       throw new Error(
-        `RSCORE_CLIENT_REQUEST_TOO_LARGE:op=${opTag}:bytes=${envelope.length}:max=${MAX_FRAME_BYTES}`,
+        `RSCORE_CLIENT_REQUEST_TOO_LARGE:op=${opTag}:bytes=${envelope.length}:max=${MAX_REQUEST_FRAME_BYTES}`,
       );
     }
     // Only now: the session pins request ids to an exact sequence, so an id
@@ -558,8 +626,38 @@ export class RscoreProcessClient {
     return { result, token };
   }
 
-  async restore(revision: number, accounts: RscoreWireValue[]): Promise<unknown> {
-    return this.request(RSCORE_OP.restoreCheckpoint, [RSCORE_PROCESS_PROFILE, revision, accounts]);
+  async bootstrapAccounts(revision: number, accounts: RscoreWireValue[]): Promise<unknown> {
+    return this.request(RSCORE_OP.bootstrapAccounts, [RSCORE_PROCESS_PROFILE, revision, accounts]);
+  }
+
+  /** Incremental exact rows since the last checkpoint Rust acknowledged. */
+  async getCheckpointChanges(): Promise<unknown> {
+    const response = await this.request(RSCORE_OP.getCheckpointChanges, []);
+    if (!Array.isArray(response) || response.length !== 1) {
+      throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
+    }
+    return response[0];
+  }
+
+  /** Acknowledge only the exact token returned with the durable rows. */
+  async commitCheckpoint(token: RscoreWireValue): Promise<unknown> {
+    const response = await this.request(RSCORE_OP.commitCheckpoint, [token]);
+    if (!Array.isArray(response) || response.length !== 1) {
+      throw new Error('RSCORE_CLIENT_CHECKPOINT_COMMIT_RESPONSE_ARITY');
+    }
+    return response[0];
+  }
+
+  /** Replace an authority session from materialized canonical Account rows. */
+  async restoreExact(
+    token: RscoreWireValue,
+    accounts: RscoreWireValue[],
+  ): Promise<unknown> {
+    const response = await this.request(RSCORE_OP.restoreExact, [token, accounts]);
+    if (!Array.isArray(response) || response.length !== 1) {
+      throw new Error('RSCORE_CLIENT_EXACT_RESTORE_RESPONSE_ARITY');
+    }
+    return response[0];
   }
 
   /**

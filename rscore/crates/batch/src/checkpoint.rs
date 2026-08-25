@@ -33,6 +33,9 @@ pub struct AccountCheckpointHeader {
     pub last_finalized_j_height: u64,
     pub carried: CarriedSections,
     pub envelope: AccountEnvelope,
+    /// Jurisdiction proof code address. It is outside AccountState but a
+    /// restored authority needs it before it can build the next dispute.
+    pub delta_transformer: Option<[u8; 20]>,
 }
 
 /// One account's rows: the header, every state tree's node changes, and the
@@ -44,12 +47,32 @@ pub struct AccountCheckpointRows {
     /// be checked account by account rather than only at the root.
     pub account_leaf: [u8; 32],
     pub header: AccountCheckpointHeader,
+    /// Roots/counts for the five Rust-owned canonical Account namespaces.
+    /// Node changes alone cannot update the TS graph manifest without
+    /// rebuilding each tree, which would erase the point of an incremental
+    /// checkpoint.
+    pub sections: AccountCheckpointSections,
     pub deltas: PersistentNodeChanges<Delta>,
     pub locks: PersistentNodeChanges<HtlcLock>,
     pub lending_intents: PersistentNodeChanges<LendingIntentKind>,
     pub swap_offers: PersistentNodeChanges<SwapOffer>,
     pub rebalance_fee_policies: PersistentNodeChanges<BilateralRebalanceFeePolicy>,
     pub consensus: ConsensusSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckpointTreeDescriptor {
+    pub root: [u8; 32],
+    pub leaf_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountCheckpointSections {
+    pub deltas: CheckpointTreeDescriptor,
+    pub locks: CheckpointTreeDescriptor,
+    pub lending_intents: CheckpointTreeDescriptor,
+    pub swap_offers: CheckpointTreeDescriptor,
+    pub rebalance_fee_policies: CheckpointTreeDescriptor,
 }
 
 impl AccountCheckpointRows {
@@ -232,6 +255,29 @@ pub(crate) fn account_rows(
             last_finalized_j_height: state.last_finalized_j_height(),
             carried: state.carried().clone(),
             envelope: account.replica().envelope().clone(),
+            delta_transformer: account.replica().delta_transformer().copied(),
+        },
+        sections: AccountCheckpointSections {
+            deltas: CheckpointTreeDescriptor {
+                root: state.deltas_root(),
+                leaf_count: state.delta_count(),
+            },
+            locks: CheckpointTreeDescriptor {
+                root: state.htlc_locks_root(),
+                leaf_count: state.htlc_count(),
+            },
+            lending_intents: CheckpointTreeDescriptor {
+                root: state.lending_intents_root().unwrap_or([0; 32]),
+                leaf_count: state.lending_intent_count(),
+            },
+            swap_offers: CheckpointTreeDescriptor {
+                root: state.swap_offers_root(),
+                leaf_count: state.swap_offer_count(),
+            },
+            rebalance_fee_policies: CheckpointTreeDescriptor {
+                root: state.rebalance_fee_policies_root(),
+                leaf_count: state.rebalance_fee_policy_count(),
+            },
         },
         deltas,
         locks,

@@ -157,7 +157,7 @@ pub fn apply_incoming_frame(
     if incoming.height <= current_height {
         let committed = account.current();
         let duplicate = committed.is_some_and(|frame| {
-            frame.height == incoming.height && frame.state_hash == incoming.state_hash
+            frame.frame.height == incoming.height && frame.state_hash == incoming.state_hash
         });
         if duplicate {
             return Ok(IncomingOutcome::Duplicate {
@@ -307,7 +307,13 @@ pub fn apply_incoming_frame(
             account.refresh_ack_dispute_draft(&candidate, &transformer, incoming.by_left)?
         }
     };
-    account.commit_from_peer(candidate, &frame, state_hash, incoming.hanko);
+    account.commit_from_peer(
+        candidate,
+        &frame,
+        state_hash,
+        incoming.hanko,
+        ack_hanko.clone(),
+    );
     // The ack this outcome carries is one the Entity commits in the account
     // leaf until a later proposal carries it, so the account remembers sending
     // it rather than the wire remembering for it.
@@ -371,6 +377,7 @@ pub fn apply_incoming_ack(
         &pending.frame,
         pending.state_hash,
         hanko.to_vec(),
+        pending.hanko,
     );
     Ok(AckOutcome::Committed {
         height,

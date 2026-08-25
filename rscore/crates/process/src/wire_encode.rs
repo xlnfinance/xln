@@ -294,11 +294,11 @@ fn account_output(value: &AccountOutput) -> AbiValue {
     }
 }
 
-fn body(fields: Vec<AbiValue>) -> BodyTuple {
+pub(crate) fn body(fields: Vec<AbiValue>) -> BodyTuple {
     BodyTuple::from_array([tuple(fields)])
 }
 
-fn tuple(fields: Vec<AbiValue>) -> AbiValue {
+pub(crate) fn tuple(fields: Vec<AbiValue>) -> AbiValue {
     AbiValue::Tuple(BodyTuple::from_vec(fields))
 }
 
@@ -306,7 +306,7 @@ fn optional_text(value: &Option<String>) -> AbiValue {
     value.clone().map_or(AbiValue::Nil, AbiValue::Text)
 }
 
-fn integer(value: impl TryInto<i128>) -> AbiValue {
+pub(crate) fn integer(value: impl TryInto<i128>) -> AbiValue {
     AbiValue::Integer(value.try_into().ok().expect("wire integer fits i128"))
 }
 
@@ -439,7 +439,7 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
 
 /// One delta as the frame commits it. Same field order as `decode_delta`
 /// (wire_decode.rs), which is the order the frame hash reads them in.
-fn delta(value: &xln_rscore_engine::Delta) -> AbiValue {
+pub(crate) fn delta(value: &xln_rscore_engine::Delta) -> AbiValue {
     use xln_rscore_engine::Side;
     tuple(vec![
         integer(value.token_id().get()),
@@ -724,7 +724,7 @@ fn hex_bytes(value: &str, length: usize) -> AbiValue {
     AbiValue::Bytes(bytes)
 }
 
-fn big(value: &num_bigint::BigInt) -> AbiValue {
+pub(crate) fn big(value: &num_bigint::BigInt) -> AbiValue {
     AbiValue::Text(value.to_string())
 }
 

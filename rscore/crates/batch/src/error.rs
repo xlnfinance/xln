@@ -109,6 +109,12 @@ pub enum BatchError {
     SignerRequired,
     #[error("RSCORE_BATCH_SIGNER_UNKNOWN_ENTITY:{entity_id}")]
     SignerUnknownEntity { entity_id: String },
+    #[error("RSCORE_BATCH_SIGNER_REBIND:{entity_id}:{actual}:{expected}")]
+    SignerRebind {
+        entity_id: String,
+        actual: String,
+        expected: String,
+    },
     #[error("RSCORE_BATCH_SIGNING:{0}")]
     Signing(String),
     #[error("RSCORE_BATCH_ACCOUNTS_TREE:{account_id}:{detail}")]

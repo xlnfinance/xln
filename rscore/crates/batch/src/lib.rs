@@ -13,8 +13,8 @@ mod stateful;
 mod types;
 
 pub use checkpoint::{
-    AccountCheckpointHeader, AccountCheckpointRows, AccountRestore, AccountsCheckpoint,
-    CheckpointExpectation, CheckpointToken,
+    AccountCheckpointHeader, AccountCheckpointRows, AccountCheckpointSections, AccountRestore,
+    AccountsCheckpoint, CheckpointExpectation, CheckpointToken, CheckpointTreeDescriptor,
 };
 pub use consensus::{
     AccountInputKind, AccountInputResult, AccountInputRow, AccountInputVerdict, DroppedRow,

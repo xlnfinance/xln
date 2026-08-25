@@ -186,7 +186,7 @@ const main = async (): Promise<void> => {
 
   const users = Array.from({ length: accounts }, (_, index) => user(index));
   const restoreStarted = performance.now();
-  await client.restore(0, users.map(row => seedWire(hub, row.entityId)));
+  await client.bootstrapAccounts(0, users.map(row => seedWire(hub, row.entityId)));
   const restoreMs = performance.now() - restoreStarted;
 
   const propose = emptyPhase();

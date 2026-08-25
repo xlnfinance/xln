@@ -1,6 +1,7 @@
 //! Long-lived, framed binary host for the deterministic Account batch engine.
 
 mod canonical;
+mod checkpoint_wire;
 mod error;
 mod session;
 mod transport;
@@ -38,13 +39,23 @@ pub use transport::{read_frame, serve, write_frame};
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An older runtime fails at Hello rather than at the first wave.
 // 5: that config carries the signer key instead of the runtime seed.
-pub const PROCESS_ABI_VERSION: u64 = 5;
+// 6: exact recovery also carries our historical committed-frame Hanko. An
+// older runtime fails at Hello rather than losing dispute evidence on restart.
+// 7: the diagnostic Account-envelope read and checkpoint operations occupy
+// distinct tags in one closed operation set.
+pub const PROCESS_ABI_VERSION: u64 = 7;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=10")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=13")
+        // wire=13: ReadAccountEnvelope keeps tag 18 and the exact checkpoint
+        // operations follow at tags 19-21, with no request alias between them.
+        // wire=12: the exact consensus snapshot carries the local committed
+        // frame Hanko required by canonical Account storage and disputes.
+        // wire=11: exact checkpoint changes, acknowledgement and restore are
+        // part of the process contract; tag 1 is bootstrap, never recovery.
         // wire=10: every job carries the authority for its account input
         // (frame digest, signature, expected signer) or null, and the engine
         // recovers the signer itself before the transaction touches state.
@@ -66,9 +77,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x41, 0x67, 0x09, 0x84, 0x43, 0x19, 0x32, 0x49, 0xc0, 0x83, 0x0a, 0xaf, 0x37, 0x90,
-            0x42, 0x96, 0x1a, 0x1a, 0x8a, 0x0f, 0x84, 0xfe, 0xf4, 0x8a, 0xfd, 0xae, 0xfa, 0x1e,
-            0x29, 0x7e, 0x40, 0xc0,
+            0xce, 0x1d, 0xac, 0xe2, 0x65, 0xc9, 0x9e, 0x50, 0x39, 0x44, 0xbb, 0xbc, 0xf0, 0x11,
+            0x36, 0x6b, 0x8a, 0x00, 0xf5, 0x8f, 0x73, 0x25, 0xa8, 0x8e, 0x71, 0x8e, 0x50, 0x70,
+            0x6e, 0xb2, 0xac, 0xab,
         ],
     };
 
