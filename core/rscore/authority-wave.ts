@@ -675,13 +675,8 @@ export type AuthorityWaveBuildOptions = Readonly<{
    * `absent` when TypeScript will not execute this operation at all. Parity
    * mode compares Rust against a TypeScript result and refuses a row that has
    * none; the cutover has no such row to compare, by construction.
-   */
+  */
   expectations?: 'required' | 'absent';
-  fallbackEntity?: Readonly<{
-    ownerEntityId: string;
-    timestamp: number;
-    finalizedJHeight: number;
-  }>;
 }>;
 
 /**
@@ -741,19 +736,12 @@ type ArrivedAuthorityOperation = Readonly<{
   expectedVerdict?: AuthorityExpectedOperationVerdict;
 }>;
 
-type AuthorityWaveFallback = Readonly<{
-  ownerEntityId: string;
-  timestamp: number;
-  finalizedJHeight: number;
-}>;
-
 type AuthorityOwnerBuildRequest = Readonly<{
   ownerEntityId: string;
   rows: readonly ArrivedAuthorityOperation[];
   frameClocks: readonly RecordedClock[];
   frameOutputs: readonly RecordedOutputs[];
   frameProposals: readonly RecordedProposalSelection[];
-  fallback: AuthorityWaveFallback | undefined;
   operationIndexStart: number;
   expectations: 'required' | 'absent';
 }>;
@@ -771,7 +759,6 @@ const buildAuthorityOwnerWave = (
     frameClocks,
     frameOutputs,
     frameProposals,
-    fallback,
     expectations,
   } = request;
   let operationIndex = request.operationIndexStart;
@@ -779,8 +766,7 @@ const buildAuthorityOwnerWave = (
   const enforce = soleClock(frameClocks, ownerEntityId, 'enforce');
   if (propose === 'conflict') return { kind: 'ineligible', reason: `clock:propose:${ownerEntityId}` };
   if (enforce === 'conflict') return { kind: 'ineligible', reason: `clock:enforce:${ownerEntityId}` };
-  const fallbackClock = fallback?.ownerEntityId === ownerEntityId ? fallback : undefined;
-  const clock = enforce ?? propose ?? fallbackClock;
+  const clock = enforce ?? propose;
   if (!clock) return { kind: 'ineligible', reason: `clock:missing:${ownerEntityId}` };
   const selected = frameProposals
     .filter(row => row.ownerEntityId === ownerEntityId)
@@ -971,14 +957,6 @@ export const buildAuthorityWave = (
     rows.push(op);
     byOwner.set(op.ownerEntityId, rows);
   }
-  const fallback = options.fallbackEntity === undefined ? undefined : {
-    ownerEntityId: options.fallbackEntity.ownerEntityId.trim().toLowerCase(),
-    timestamp: options.fallbackEntity.timestamp,
-    finalizedJHeight: options.fallbackEntity.finalizedJHeight,
-  };
-  if (fallback !== undefined && !byOwner.has(fallback.ownerEntityId)) {
-    byOwner.set(fallback.ownerEntityId, []);
-  }
   for (const row of frameClocks) {
     if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
   }
@@ -989,12 +967,6 @@ export const buildAuthorityWave = (
     if (!byOwner.has(row.ownerEntityId)) byOwner.set(row.ownerEntityId, []);
   }
   if (byOwner.size === 0) return { kind: 'empty' };
-  if (
-    fallback !== undefined
-    && [...byOwner.keys()].some(ownerEntityId => ownerEntityId !== fallback.ownerEntityId)
-  ) {
-    return { kind: 'ineligible', reason: `owner:cross-scope:${fallback.ownerEntityId}` };
-  }
   const entities: AuthorityWaveEntity[] = [];
   const inputs: AuthorityWaveInput[] = [];
   for (const [ownerEntityId, rows] of byOwner) {
@@ -1004,7 +976,6 @@ export const buildAuthorityWave = (
       frameClocks,
       frameOutputs,
       frameProposals,
-      fallback,
       operationIndexStart,
       expectations,
     });

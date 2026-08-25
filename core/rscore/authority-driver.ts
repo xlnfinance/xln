@@ -58,9 +58,8 @@ import {
 } from './client';
 import { assertRscoreCheckpointCandidate } from './checkpoint/checkpoint-wire';
 import type { AccountPeerInput, AccountReplica, AccountTx } from '../types/account';
-import type { RoutedEntityInput, RuntimeReplica } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
-import type { AccountAuthorityEntityOccurrence } from './authority/entity-stage';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -155,18 +154,6 @@ type OpenFrame = {
 
 /** Names the Entity input whose account work can still be undone. */
 export type AuthorityEntityStageHandle = Readonly<{ ownerEntityId: string }>;
-
-export type AuthorityEntityStageInput = Readonly<{
-  collectorFrameId: string | null;
-  ownerEntityId: string;
-  occurrence: AccountAuthorityEntityOccurrence;
-  appliedInput: RoutedEntityInput;
-  trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
-  deferProposal: boolean;
-  requiredEntityTxIndex?: number;
-  fallbackTimestamp: number;
-  fallbackFinalizedJHeight: number;
-}>;
 
 export type AuthorityCheckpointStorageInput = Readonly<{
   ownerEntityId: string;
