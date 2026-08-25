@@ -726,7 +726,7 @@ export const authorityCutoverStageHandle = (
  * them, so they cross together. The savepoint this Entity input opens is the
  * same one a single operation would open.
  */
-export const handAccountInbound = async (
+const handAccountInbound = async (
   env: RuntimeReplica,
   ownerEntityId: string,
   clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,

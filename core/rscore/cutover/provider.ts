@@ -188,7 +188,7 @@ const executeOutboundBatch = async (
     ));
 };
 
-export const createAuthorityCutoverProvider = (
+const createAuthorityCutoverProvider = (
   env: RuntimeReplica,
 ): AccountAuthorityEntityStageProvider => ({
   beginEntityStage: () => halt('STAGE_BEGIN_UNREACHABLE'),

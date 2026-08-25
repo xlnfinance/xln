@@ -19,9 +19,9 @@ import { accountInputApplied } from '../../account/consensus/result';
 import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
 
-export type AccountAuthorityExecutionMode = 'pre-ts-observe' | 'cutover';
+type AccountAuthorityExecutionMode = 'pre-ts-observe' | 'cutover';
 
-export type TypeScriptAccountExecutionCounts = Readonly<{
+type TypeScriptAccountExecutionCounts = Readonly<{
   applyAccountInput: number;
   proposeAccountFrame: number;
 }>;
@@ -43,7 +43,7 @@ export type AccountAuthorityEntityStageBegin = Readonly<{
   }>;
 }>;
 
-export type AccountAuthorityEntitySavepoint = Readonly<{
+type AccountAuthorityEntitySavepoint = Readonly<{
   discard(): Promise<void>;
 }>;
 
@@ -170,12 +170,6 @@ export const printAccountAuthorityExecutionLedger = (): void => {
   console.error(`RSCORE_ACCOUNT_EXECUTION ${safeStringify(executionLedger)}`);
 };
 
-export const resetAccountAuthorityExecutionLedgerForTests = (): void => {
-  executionLedger.typescriptApplyAccountInput = 0;
-  executionLedger.typescriptProposeAccountFrame = 0;
-  executionLedger.authoritativeOperations = 0;
-};
-
 const normalizeEntityId = (value: string): string => value.trim().toLowerCase();
 
 const assertOccurrence = (occurrence: AccountAuthorityEntityOccurrence): void => {
@@ -187,7 +181,7 @@ const assertOccurrence = (occurrence: AccountAuthorityEntityOccurrence): void =>
   }
 };
 
-export const assertNoTypeScriptAccountExecution = (
+const assertNoTypeScriptAccountExecution = (
   scope: Pick<AccountAuthorityEntityStage, 'ownerEntityId' | 'typeScriptExecutionCounts'>,
 ): void => {
   const counts = scope.typeScriptExecutionCounts();

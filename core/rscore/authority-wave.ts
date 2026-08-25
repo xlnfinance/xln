@@ -84,7 +84,7 @@ export type AuthorityRecordedAccountInput = Readonly<{
   row: RecordedInput;
 }>;
 
-export type AuthorityExpectedOperationVerdict =
+type AuthorityExpectedOperationVerdict =
   | Readonly<{ kind: 'create' }>
   | Readonly<{ kind: 'admission'; admittedCount: number }>
   | Readonly<{
@@ -136,7 +136,7 @@ type RecordedProposalSelection = {
   expected?: AuthorityExpectedProposalAttempt;
 };
 
-export type AuthorityExpectedProposalAttempt = Readonly<{
+type AuthorityExpectedProposalAttempt = Readonly<{
   accountId: string;
   outcome: 'proposed' | 'idle';
   frame: AccountFrame | null;
@@ -618,7 +618,7 @@ export type AuthorityWaveOperation = {
   expectedVerdict?: AuthorityExpectedOperationVerdict;
 };
 
-export type AuthorityWaveEntity = {
+type AuthorityWaveEntity = {
   ownerEntityId: string;
   timestamp: number;
   jHeight: number;
@@ -642,7 +642,7 @@ export type AuthorityWaveEntity = {
 };
 
 /** One raw input, in the position the wave sends it, so a verdict can be paired back. */
-export type AuthorityWaveInput = {
+type AuthorityWaveInput = {
   /** Candidate-global position in the grouped request. Admissions consume one too. */
   operationIndex: number;
   /**

@@ -57,7 +57,7 @@ export type RscoreAccountMaterializerBinding = Readonly<{
   expectedSignerId: string;
 }>;
 
-export type RscoreAccountLocalHashToSign = Readonly<{
+type RscoreAccountLocalHashToSign = Readonly<{
   hash: string;
   type: 'accountFrame' | 'dispute';
   context: string;

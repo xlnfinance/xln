@@ -39,7 +39,7 @@ import {
 import type { Wave, WaveDisputeDraft, WaveOutput } from '../wave-decode';
 
 /** One applied operation's verdict, as the wave reports it. */
-export type CutoverVerdict = Wave['applied'][number]['verdict'];
+type CutoverVerdict = Wave['applied'][number]['verdict'];
 import { cutoverAccountEffects } from './effects';
 import {
   cutoverAck,
@@ -160,7 +160,7 @@ const appliedFromCommit = (
  * is checked against TypeScript's own list on every parity run, which is the
  * only place both engines produce one.
  */
-export const cutoverAccountInputEvents = (
+const cutoverAccountInputEvents = (
   verdict: CutoverVerdict,
   fromEntityId: string,
 ): string[] => {
@@ -297,28 +297,6 @@ export const cutoverAccountInputResult = (
     ...(committedFrames.length > 0 ? { committedFrames } : {}),
     ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
   });
-};
-
-export const cutoverAccountAdmissionResult = (
-  request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
-  result: CutoverWaveResult,
-): HandleAccountInputResult => {
-  const accountId = request.accountId;
-  const rows = result.wave.admissions.filter(row => row.accountId === accountId);
-  const row = rows[0];
-  if (rows.length !== 1 || row === undefined) {
-    return fail('ADMISSION_ARITY', { account: accountId, rows: rows.length });
-  }
-  const verdict = row.verdict;
-  if (verdict.kind !== 'admitted') {
-    return fail('ADMISSION_REJECTED', {
-      account: accountId,
-      code: verdict.code,
-      message: verdict.message,
-    });
-  }
-  materializeCutoverAccount(request, requireRow(result, accountId));
-  return accountInputApplied({ events: [], admittedAccountTxCount: verdict.count });
 };
 
 export const cutoverAccountProposalResult = (

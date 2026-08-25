@@ -14,9 +14,7 @@
  */
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountPeerInput } from '../../types/account';
-import type { RscoreWireValue } from '../client';
 import type { Wave } from '../wave-decode';
-import { authorityPeerInputRow } from '../authority-wave';
 import { safeStringify } from '../../protocol/serialization';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
@@ -30,13 +28,6 @@ type PeerArrivalInput = Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'fra
 export type InboundArrival = Readonly<{
   accountId: string;
   input: PeerArrivalInput;
-}>;
-
-/** The engine's answer for one arrival, sliced out of the round it came in. */
-export type InboundVerdict = Readonly<{
-  accountId: string;
-  wave: Wave;
-  operationIndex: number;
 }>;
 
 /**
@@ -57,32 +48,6 @@ export const inboundArrivals = (entityTxs: readonly EntityTx[]): InboundArrival[
     }
     return [{ accountId, input }];
   });
-
-/**
- * The longest leading run with no account named twice.
- *
- * Two arrivals for one account in one call would share a post-state row, and
- * the Entity reads that row between them. Splitting on the repeat keeps every
- * verdict bound to the state that produced it.
- */
-export const inboundRound = (pending: readonly InboundArrival[]): InboundArrival[] => {
-  const seen = new Set<string>();
-  const round: InboundArrival[] = [];
-  for (const arrival of pending) {
-    if (seen.has(arrival.accountId)) break;
-    seen.add(arrival.accountId);
-    round.push(arrival);
-  }
-  return round;
-};
-
-/** The wire rows for one round, indexed from zero. */
-export const inboundRows = (round: readonly InboundArrival[]): RscoreWireValue[] =>
-  round.map((arrival, index) => authorityPeerInputRow(
-    index,
-    arrival.accountId,
-    { kind: arrival.input.kind, input: arrival.input } as Parameters<typeof authorityPeerInputRow>[2],
-  ));
 
 /**
  * One arrival's own view of the round it was answered in.

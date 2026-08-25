@@ -38,7 +38,7 @@ export type RscorePendingFrame = Readonly<{
   proposalDispute?: RscoreDisputeDraft;
 }>;
 
-export type RscoreCounterpartyDispute = Readonly<{
+type RscoreCounterpartyDispute = Readonly<{
   hanko?: string;
   hash: string;
   proofBodyHash: string;
