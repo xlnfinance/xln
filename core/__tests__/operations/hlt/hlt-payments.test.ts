@@ -58,7 +58,10 @@ describe('hlt payment population', () => {
     expect(source).toContain('isTransientGossipSocketError');
     expect(source).toContain('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
     expect(source).toContain('buildPacedOperationSchedule');
-    expect(source).toContain('queueLaneRuntimeInputWave(operation.ordinal');
+    // One wave per batch of same-instant operations, not per payment: the
+    // pacer's own instants are what the load host's accept queue sees.
+    expect(source).toContain('queueLaneRuntimeInputWave(batchIndex, submissions)');
+    expect(source).toContain('batchParticipants.has(operation.participantIndex)');
     expect(source).not.toContain('sendEnqueued');
     expect(source).toContain('waitForHubSettlement');
     expect(source).toContain('core.completedPayments - completedPaymentsBefore');
