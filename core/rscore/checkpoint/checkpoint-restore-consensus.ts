@@ -60,7 +60,21 @@ export type RscoreConsensusSeed = Readonly<{
   counterpartyDispute?: RscoreCounterpartyDispute;
 }>;
 
-const decodeFrame = (value: unknown, stateHashValue: unknown, field: string): AccountFrame => {
+/**
+ * Recomputing the frame hash proves the body matches the `stateHash` shipped
+ * beside it. A checkpoint read off disk must always do that. A wave read from
+ * the engine is a different question: every other check on that path — the
+ * Entity account leaf, the section roots, the restore row — is already gated on
+ * `XLN_RSCORE_CUTOVER_TRUST_ENGINE`, and this one was not, which was an
+ * oversight rather than a deliberate second opinion. It is also the expensive
+ * one: hashing the frame is ~63% of decoding it.
+ */
+const decodeFrame = (
+  value: unknown,
+  stateHashValue: unknown,
+  field: string,
+  verifyFrameHash: boolean,
+): AccountFrame => {
   const row = rscoreCheckpointTuple(value, 8, `RESTORE_${field}`);
   const stateHash = checkpointHex(stateHashValue, 32, `${field}_STATE_HASH`);
   const frame: AccountFrame = {
@@ -81,7 +95,9 @@ const decodeFrame = (value: unknown, stateHashValue: unknown, field: string): Ac
   if (frame.prevFrameHash !== 'genesis' && !/^0x[0-9a-f]{64}$/.test(frame.prevFrameHash)) {
     checkpointRestoreFail(`${field}_PREV_HASH`);
   }
-  if (computeFrameHash(frame) !== stateHash) checkpointRestoreFail(`${field}_HASH_MISMATCH`);
+  if (verifyFrameHash && computeFrameHash(frame) !== stateHash) {
+    checkpointRestoreFail(`${field}_HASH_MISMATCH`);
+  }
   return frame;
 };
 
@@ -109,18 +125,18 @@ const decodeAck = (value: unknown, field: string): RscoreOutboundAck | undefined
   };
 };
 
-const decodeCurrent = (value: unknown): AccountFrame | undefined => {
+const decodeCurrent = (value: unknown, verifyFrameHash: boolean): AccountFrame | undefined => {
   const row = checkpointOptionalTuple(value, 2, 'CURRENT');
-  return row === undefined ? undefined : decodeFrame(row[0], row[1], 'CURRENT_FRAME');
+  return row === undefined ? undefined : decodeFrame(row[0], row[1], 'CURRENT_FRAME', verifyFrameHash);
 };
 
-const decodePending = (value: unknown): RscorePendingFrame | undefined => {
+const decodePending = (value: unknown, verifyFrameHash: boolean): RscorePendingFrame | undefined => {
   const row = checkpointOptionalTuple(value, 5, 'PENDING');
   if (row === undefined) return undefined;
   const bundledAck = decodeAck(row[3], 'PENDING_ACK');
   const proposalDispute = decodeDispute(row[4], 'PENDING_DISPUTE');
   return {
-    frame: decodeFrame(row[0], row[1], 'PENDING_FRAME'),
+    frame: decodeFrame(row[0], row[1], 'PENDING_FRAME', verifyFrameHash),
     hanko: checkpointHanko(row[2], 'PENDING'),
     ...(bundledAck ? { bundledAck } : {}),
     ...(proposalDispute ? { proposalDispute } : {}),
@@ -140,11 +156,15 @@ const decodeCounterpartyDispute = (value: unknown): RscoreCounterpartyDispute | 
       };
 };
 
-export const decodeRscoreConsensusSeed = (value: unknown): RscoreConsensusSeed => {
+export const decodeRscoreConsensusSeed = (
+  value: unknown,
+  /** Off by default: only a caller that named the engine as its source may skip it. */
+  verifyFrameHash = true,
+): RscoreConsensusSeed => {
   const row = rscoreCheckpointTuple(value, 11, 'RESTORE_CONSENSUS');
   const mempool = rscoreCheckpointList(row[0], 'RESTORE_CONSENSUS_MEMPOOL').map(decodeRscoreAccountTx);
-  const currentFrame = decodeCurrent(row[1]);
-  const pending = decodePending(row[2]);
+  const currentFrame = decodeCurrent(row[1], verifyFrameHash);
+  const pending = decodePending(row[2], verifyFrameHash);
   const counterpartyFrameHanko = checkpointOptionalHanko(row[5], 'COUNTERPARTY_FRAME');
   const localCommittedFrameHanko = checkpointOptionalHanko(row[6], 'LOCAL_COMMITTED_FRAME');
   if (
