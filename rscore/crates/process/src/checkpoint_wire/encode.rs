@@ -210,6 +210,7 @@ fn optional_ack(value: Option<&OutboundAck>) -> AbiValue {
         tuple(vec![
             integer(ack.height),
             AbiValue::Bytes(ack.frame_hash.to_vec()),
+            AbiValue::Bytes(ack.frame_hanko.clone()),
             optional_dispute(ack.dispute.as_ref()),
         ])
     })

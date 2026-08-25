@@ -271,6 +271,76 @@ fn a_signed_frame_commits_on_both_sides() {
     );
 }
 
+/// The Entity layer must receive the complete committed frame in canonical
+/// transaction order. Accepting a peer frame and receiving an ACK commit the
+/// same bytes, but only the former is new inbound work for this replica.
+#[test]
+fn committed_frame_evidence_preserves_body_order_and_provenance() {
+    let (mut left, mut right) = parties();
+    let first = payment(&left.entity_id, &right.entity_id, 17);
+    let second = payment(&left.entity_id, &right.entity_id, 29);
+    left.account
+        .admit_txs(vec![first.clone(), second.clone()], "test")
+        .expect("admit ordered payments");
+
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose") else {
+        panic!("expected a proposal");
+    };
+    let ProposedFrame {
+        frame,
+        state_hash,
+        hanko,
+        ..
+    } = *proposed;
+    assert_eq!(frame.txs, vec![first, second]);
+    let expected_frame = frame.clone();
+
+    let incoming = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&frame, state_hash, hanko),
+        &market(),
+    )
+    .expect("apply frame");
+    let IncomingOutcome::Committed {
+        ack_hanko,
+        committed_frame,
+        ..
+    } = incoming
+    else {
+        panic!("expected a frame commit, got {incoming:?}");
+    };
+    assert!(committed_frame.committed_via_new_frame);
+    assert_eq!(committed_frame.frame, expected_frame);
+
+    let ack = apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        expected_frame.height,
+        &state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("apply ack");
+    let xln_rscore_engine::AckOutcome::Committed {
+        committed_frame, ..
+    } = ack
+    else {
+        panic!("expected an ack commit, got {ack:?}");
+    };
+    assert!(!committed_frame.committed_via_new_frame);
+    assert_eq!(committed_frame.frame, expected_frame);
+}
+
 /// A frame signed by anyone but the counterparty is not evidence: the peer
 /// must refuse it before replaying a single transaction.
 #[test]

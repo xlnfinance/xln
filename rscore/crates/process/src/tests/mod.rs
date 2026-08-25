@@ -12,7 +12,7 @@ use crate::{ProcessSession, read_frame, serve};
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "2fc38fd6f6cb7ba7938269826aaa47c62ee6a3ac3eeda0bed6a90394a9317fd1"
+        "7d69bb5f6916df6e7a48711ae7b08bb1c1466b907bdb05dd989d0539a0316585"
     );
 
     let mut session = ProcessSession::new();
@@ -1046,12 +1046,21 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
         "restart must reproduce root, verdict and held output bytes",
     );
     let applied = tuple_fields(&body_fields(&resumed_ack)[2]);
-    let verdict = exact_tuple(&exact_tuple(&applied[0], 3, "applied")[2], 4, "ack verdict");
+    let verdict = exact_tuple(&exact_tuple(&applied[0], 3, "applied")[2], 5, "ack verdict");
     assert_eq!(verdict[0], AbiValue::Integer(5));
     assert_eq!(
         tuple_fields(&verdict[3]).len(),
         1,
         "held forward released once"
+    );
+    let committed = exact_tuple(&verdict[4], 2, "committed frame evidence");
+    let committed_frame = exact_tuple(&committed[0], 9, "committed frame");
+    assert_eq!(committed_frame[0], AbiValue::Integer(1));
+    assert_eq!(committed_frame[8], AbiValue::Bytes(state_hash.to_vec()));
+    assert_eq!(
+        committed[1],
+        AbiValue::Bool(false),
+        "ACK certifies our pending frame"
     );
 }
 

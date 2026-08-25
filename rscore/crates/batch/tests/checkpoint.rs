@@ -10,7 +10,9 @@ mod fixture;
 
 use std::collections::BTreeMap;
 
-use fixture::{account_state, clock, engine, engine_knowing, entity_of, payment, round, stand};
+use fixture::{
+    account_state, clock, engine, engine_knowing, entity_of, payment, round, signer_key, stand,
+};
 use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountCheckpointRows, AccountId, AccountInputKind, AccountInputRow, AccountInputVerdict,
@@ -18,9 +20,9 @@ use xln_rscore_batch::{
     CheckpointToken,
 };
 use xln_rscore_engine::{
-    AccountConsensus, AccountReplica, AccountState, AccountStateSeed, BilateralRebalanceFeePolicy,
-    ConsensusSnapshot, Delta, LendingIntentKind, RebalanceFeePolicySnapshot, Side, SwapOffer,
-    TokenId,
+    AccountConsensus, AccountReplica, AccountState, AccountStateSeed, AccountTx,
+    BilateralRebalanceFeePolicy, ConsensusSnapshot, DeliveryMode, Delta, LendingIntentKind,
+    RebalanceFeePolicySnapshot, Side, SwapOffer, TokenId,
 };
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
@@ -475,6 +477,145 @@ fn a_committed_payment_moves_one_delta_leaf() {
         assert!(rows.consensus.pending.is_none());
         assert!(rows.consensus.mempool.is_empty());
     }
+}
+
+/// An ACK is historical bilateral evidence, not a value we may regenerate
+/// after a crash. The compact Entity leaf intentionally excludes its raw
+/// Hanko bytes, while the exact consensus checkpoint retains the bytes both
+/// standalone and when the next proposal bundles the ACK.
+#[test]
+fn an_outbound_ack_hanko_survives_checkpoint_restore_and_bundling() {
+    let mut stand = stand(1);
+    let pair = &stand.pairs[0];
+    stand
+        .payer
+        .admit_txs(vec![payment(pair, 25)])
+        .expect("admit payer frame");
+    let proposals = stand
+        .payer
+        .propose_frames(1_700_000_000_000, 100, None)
+        .expect("propose payer frame");
+    let incoming = proposals[0]
+        .incoming()
+        .expect("payer proposal produced a frame");
+    let applied = stand
+        .payee
+        .apply_inputs(
+            clock(1_700_000_000_000),
+            vec![AccountInputRow {
+                operation_index: 0,
+                account_id: pair.payee_account,
+                from_entity_id: pair.payer_entity,
+                kind: AccountInputKind::Frame(Box::new(incoming)),
+            }],
+        )
+        .expect("payee applies payer frame");
+    let AccountInputVerdict::FrameCommitted { ack_hanko, .. } = &applied[0].verdict else {
+        panic!("expected frame commit: {:?}", applied[0].verdict);
+    };
+    let exact_ack_hanko = ack_hanko.clone();
+    assert_eq!(
+        stand
+            .payee
+            .account(&pair.payee_account)
+            .expect("payee account")
+            .consensus_snapshot()
+            .last_outbound_ack
+            .as_ref()
+            .expect("standalone outbound ACK")
+            .frame_hanko,
+        exact_ack_hanko,
+    );
+
+    let reverse = AccountTx::DirectPayment {
+        token_id: TokenId::new(1).expect("token"),
+        amount: BigInt::from(10),
+        route: vec![pair.payer.to_string()],
+        description: None,
+        from_entity_id: pair.payee.to_string(),
+        to_entity_id: pair.payer.to_string(),
+        delivery_mode: DeliveryMode::Direct,
+        trusted_gateway_entity_id: None,
+    };
+    stand
+        .payee
+        .admit_txs(vec![(pair.payee_account, vec![reverse])])
+        .expect("admit reverse payment");
+    let reverse_proposals = stand
+        .payee
+        .propose_frames(1_700_000_000_001, 100, None)
+        .expect("propose reverse payment");
+    assert_eq!(reverse_proposals.len(), 1);
+
+    let live = stand
+        .payee
+        .account(&pair.payee_account)
+        .expect("live payee account");
+    let live_snapshot = live.consensus_snapshot();
+    assert_eq!(
+        live_snapshot
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.bundled_ack.as_ref())
+            .expect("bundled ACK")
+            .frame_hanko,
+        exact_ack_hanko,
+    );
+
+    let checkpoint = stand.payee.checkpoint_changes().expect("checkpoint");
+    let rows = rows_for(&checkpoint, &pair.payee_account).expect("payee checkpoint row");
+    assert_eq!(
+        rows.consensus
+            .last_outbound_ack
+            .as_ref()
+            .expect("checkpoint standalone ACK")
+            .frame_hanko,
+        exact_ack_hanko,
+    );
+    assert_eq!(
+        rows.consensus
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.bundled_ack.as_ref())
+            .expect("checkpoint bundled ACK")
+            .frame_hanko,
+        exact_ack_hanko,
+    );
+
+    let mut database = Database::default();
+    database.write(&checkpoint);
+    stand
+        .payee
+        .commit_checkpoint(&checkpoint.token)
+        .expect("commit checkpoint");
+    let mut restored = engine();
+    restored
+        .register_signer(pair.payee_entity, signer_key("payee-0"), "payee-0")
+        .expect("payee signer");
+    restored
+        .restore_accounts(database.restore_rows(), &database.expectation())
+        .expect("exact restore");
+    let restored_snapshot = restored
+        .account(&pair.payee_account)
+        .expect("restored payee account")
+        .consensus_snapshot();
+    assert_eq!(
+        restored_snapshot
+            .last_outbound_ack
+            .as_ref()
+            .expect("restored standalone ACK")
+            .frame_hanko,
+        exact_ack_hanko,
+    );
+    assert_eq!(
+        restored_snapshot
+            .pending
+            .as_ref()
+            .and_then(|pending| pending.bundled_ack.as_ref())
+            .expect("restored bundled ACK")
+            .frame_hanko,
+        exact_ack_hanko,
+    );
 }
 
 /// The whole point: an engine rebuilt from the database is the same engine.

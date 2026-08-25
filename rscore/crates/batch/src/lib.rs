@@ -32,4 +32,5 @@ pub use types::{
     CandidateId, EngineGeneration, IndexedOutput, IndexedResult, PreparedBatch,
     PreparedPaymentProfileRoot,
 };
+pub use xln_rscore_engine::CommittedFrameEvidence;
 pub use xln_rscore_engine::ReceiverClock;

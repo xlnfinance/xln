@@ -31,6 +31,7 @@ import {
   type RscoreWireValue,
 } from './process-wire-value';
 import { decodeWave, type Wave } from './wave-decode';
+import { RscoreResponseFrameQueue } from './response-frame-queue';
 export { packWireValue, unpackWireValue } from './process-wire-value';
 export type { RscoreWireValue } from './process-wire-value';
 export type {
@@ -73,13 +74,15 @@ const RSCORE_ABI_VERSION = 1;
 // committed upsert performed before or after the Runtime frame.
 // 11: Prepare returns one opaque server-issued bin32 capability consumed by
 // every later operation on that candidate.
-export const RSCORE_PROCESS_ABI_VERSION = 11;
+// 12: commit verdicts carry exact committed-frame evidence and exact
+// checkpoint ACK rows retain the frame Hanko required after restart.
+export const RSCORE_PROCESS_ABI_VERSION = 12;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=17")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=18")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '2fc38fd6f6cb7ba7938269826aaa47c62ee6a3ac3eeda0bed6a90394a9317fd1',
+  '7d69bb5f6916df6e7a48711ae7b08bb1c1466b907bdb05dd989d0539a0316585',
   'hex',
 );
 
@@ -112,8 +115,6 @@ const MESSAGE_KIND_ERROR = 2;
 // two directions distinct: allowing a 64 MiB request here would kill the
 // session after the client had already consumed its request id.
 const MAX_REQUEST_FRAME_BYTES = 63 * 1024 * 1024;
-const MAX_RESPONSE_FRAME_BYTES = 64 * 1024 * 1024;
-const MAX_BUFFERED_BYTES = MAX_RESPONSE_FRAME_BYTES + 4;
 const STDERR_TAIL_BYTES = 4096;
 
 const bodyDigest = (
@@ -321,10 +322,7 @@ export class RscoreProcessClient {
   #child: ChildProcessWithoutNullStreams;
   #identity: RscoreSessionIdentity;
   #nextRequestId = 0n;
-  #chunks: Buffer[] = [];
-  #chunkOffset = 0;
-  #bufferedBytes = 0;
-  #expectedFrameBytes: number | null = null;
+  #responseFrames = new RscoreResponseFrameQueue();
   #waiter: ResponseWaiter | null = null;
   #requestTurn: Promise<void> = Promise.resolve();
   #dead: Error | null = null;
@@ -357,10 +355,7 @@ export class RscoreProcessClient {
   #fail(error: Error): void {
     if (this.#dead) return;
     this.#dead = error;
-    this.#chunks = [];
-    this.#chunkOffset = 0;
-    this.#bufferedBytes = 0;
-    this.#expectedFrameBytes = null;
+    this.#responseFrames.reset();
     const waiter = this.#waiter;
     this.#waiter = null;
     waiter?.reject(error);
@@ -378,77 +373,21 @@ export class RscoreProcessClient {
       this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
       return;
     }
-    this.#chunks.push(chunk);
-    this.#bufferedBytes += chunk.length;
-    if (this.#bufferedBytes > MAX_BUFFERED_BYTES) {
-      this.#fail(new Error(
-        `RSCORE_CLIENT_BUFFER_LIMIT:${this.#bufferedBytes}:${MAX_BUFFERED_BYTES}`,
-      ));
+    let frame: Buffer | null;
+    try {
+      frame = this.#responseFrames.push(chunk);
+    } catch (cause) {
+      this.#fail(cause instanceof Error ? cause : new Error(String(cause)));
       return;
     }
-    while (true) {
-      if (this.#expectedFrameBytes === null) {
-        if (this.#bufferedBytes < 4) return;
-        const header = this.#takeBytes(4, false);
-        const length = header.readUInt32BE(0);
-        if (length === 0 || length > MAX_RESPONSE_FRAME_BYTES) {
-          this.#fail(new Error(`RSCORE_CLIENT_FRAME_LENGTH:${length}`));
-          return;
-        }
-        this.#expectedFrameBytes = length;
-      }
-      if (this.#bufferedBytes < this.#expectedFrameBytes) return;
-      const frame = this.#takeBytes(this.#expectedFrameBytes, true);
-      this.#expectedFrameBytes = null;
-      const waiter = this.#waiter;
-      if (!waiter) {
-        this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
-        return;
-      }
-      // No second request can have been sent yet. A single buffered byte after
-      // this response is consequently the prefix of an unsolicited frame; do
-      // not resolve the otherwise-valid response before that corruption wins.
-      if (this.#bufferedBytes !== 0) {
-        this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
-        return;
-      }
-      this.#waiter = null;
-      waiter.resolve(frame);
+    if (frame === null) return;
+    const waiter = this.#waiter;
+    if (!waiter) {
+      this.#fail(new Error('RSCORE_CLIENT_UNEXPECTED_FRAME'));
+      return;
     }
-  }
-
-  /** Consume exactly `length` bytes without ever recopying prior chunks. */
-  #takeBytes(length: number, isolate: boolean): Buffer {
-    if (length > this.#bufferedBytes) throw new Error('RSCORE_CLIENT_BUFFER_UNDERFLOW');
-    const first = this.#chunks[0];
-    if (!first) throw new Error('RSCORE_CLIENT_BUFFER_EMPTY');
-    const available = first.length - this.#chunkOffset;
-    if (available >= length) {
-      const view = first.subarray(this.#chunkOffset, this.#chunkOffset + length);
-      this.#chunkOffset += length;
-      this.#bufferedBytes -= length;
-      if (this.#chunkOffset === first.length) {
-        this.#chunks.shift();
-        this.#chunkOffset = 0;
-      }
-      return isolate ? Buffer.from(view) : view;
-    }
-    const output = Buffer.allocUnsafe(length);
-    let written = 0;
-    while (written < length) {
-      const next = this.#chunks[0];
-      if (!next) throw new Error('RSCORE_CLIENT_BUFFER_TRUNCATED');
-      const take = Math.min(length - written, next.length - this.#chunkOffset);
-      next.copy(output, written, this.#chunkOffset, this.#chunkOffset + take);
-      written += take;
-      this.#chunkOffset += take;
-      this.#bufferedBytes -= take;
-      if (this.#chunkOffset === next.length) {
-        this.#chunks.shift();
-        this.#chunkOffset = 0;
-      }
-    }
-    return output;
+    this.#waiter = null;
+    waiter.resolve(frame);
   }
 
   async #requestWithId(

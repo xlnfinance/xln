@@ -26,6 +26,8 @@ export type RscoreDisputeDraft = Readonly<{
 export type RscoreOutboundAck = Readonly<{
   height: number;
   frameHash: string;
+  /** Exact resend certificate; intentionally excluded from the Entity leaf. */
+  frameHanko: string;
   dispute?: RscoreDisputeDraft;
 }>;
 
@@ -95,12 +97,13 @@ const decodeDispute = (value: unknown, field: string): RscoreDisputeDraft | unde
 };
 
 const decodeAck = (value: unknown, field: string): RscoreOutboundAck | undefined => {
-  const row = checkpointOptionalTuple(value, 3, field);
+  const row = checkpointOptionalTuple(value, 4, field);
   if (row === undefined) return undefined;
-  const dispute = decodeDispute(row[2], `${field}_DISPUTE`);
+  const dispute = decodeDispute(row[3], `${field}_DISPUTE`);
   return {
     height: checkpointSafeInt(row[0], `${field}_HEIGHT`),
     frameHash: checkpointHex(row[1], 32, `${field}_FRAME_HASH`),
+    frameHanko: checkpointHanko(row[2], `${field}_FRAME`),
     ...(dispute ? { dispute } : {}),
   };
 };

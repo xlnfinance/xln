@@ -665,11 +665,16 @@ pub(crate) fn decode_outbound_ack(
     if matches!(value, AbiValue::Nil) {
         return Ok(None);
     }
-    let row = exact(tuple(value)?, 3, field)?;
+    let row = exact(tuple(value)?, 4, field)?;
+    let frame_hanko = bytes(&row[2], "ackFrameHanko")?.to_vec();
+    if frame_hanko.is_empty() {
+        return Err(ProcessError::Expected("ackFrameHanko"));
+    }
     Ok(Some(xln_rscore_engine::OutboundAck {
         height: js_number(&row[0], "ackHeight")?,
         frame_hash: fixed_bytes(&row[1], "ackFrameHash")?,
-        dispute: decode_dispute_draft(&row[2])?,
+        frame_hanko,
+        dispute: decode_dispute_draft(&row[3])?,
     }))
 }
 

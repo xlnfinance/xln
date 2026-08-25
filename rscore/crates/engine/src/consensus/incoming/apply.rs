@@ -57,6 +57,19 @@ pub struct IncomingFrame {
     pub dispute: Option<crate::consensus::replica::CounterpartyDispute>,
 }
 
+/// The exact canonical frame whose bilateral commit an input completed.
+///
+/// Entity processing consumes the frame body, not only its hash: committed
+/// transactions drive HTLC and swap follow-up work. The provenance bit keeps
+/// the two commit paths distinct. A newly accepted peer frame is new work for
+/// this replica, while an ACK only certifies the pending frame we already
+/// proposed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommittedFrameEvidence {
+    pub frame: AccountFrame,
+    pub committed_via_new_frame: bool,
+}
+
 #[derive(Debug)]
 pub enum IncomingOutcome {
     /// The frame is now the chain head; the ack is ours to send.
@@ -68,6 +81,7 @@ pub enum IncomingOutcome {
         /// Set when our own same-height proposal lost the collision and its
         /// transactions went back to the queue.
         rolled_back_txs: usize,
+        committed_frame: CommittedFrameEvidence,
     },
     /// We are LEFT and the peer raced us at the same height: our proposal
     /// stands and their frame is ignored until they ack it.
@@ -99,6 +113,7 @@ pub enum AckOutcome {
         height: u64,
         state_hash: [u8; 32],
         outputs: Vec<AccountOutput>,
+        committed_frame: CommittedFrameEvidence,
     },
     /// Nothing is pending at that height any more — a retransmitted ack.
     Stale {
@@ -345,13 +360,17 @@ pub fn apply_incoming_frame(
     // The ack this outcome carries is one the Entity commits in the account
     // leaf until a later proposal carries it, so the account remembers sending
     // it rather than the wire remembering for it.
-    account.note_outbound_ack(frame.height, state_hash, ack_dispute);
+    account.note_outbound_ack(frame.height, state_hash, ack_hanko.clone(), ack_dispute);
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,
         ack_hanko,
         outputs,
         rolled_back_txs,
+        committed_frame: CommittedFrameEvidence {
+            frame,
+            committed_via_new_frame: true,
+        },
     })
 }
 
@@ -433,5 +452,9 @@ pub fn apply_incoming_ack(
         height,
         state_hash: pending.state_hash,
         outputs,
+        committed_frame: CommittedFrameEvidence {
+            frame: pending.frame,
+            committed_via_new_frame: false,
+        },
     })
 }

@@ -53,13 +53,17 @@ pub use transport::{read_frame, serve, write_frame};
 // 11: Prepare returns a server-issued 32-byte candidate capability bound to a
 // fresh process incarnation, the complete session identity, request id and
 // monotonic batch candidate id. Every later candidate operation consumes it.
-pub const PROCESS_ABI_VERSION: u64 = 11;
+// 12: committed input verdicts carry the exact Account frame and commit
+// provenance Entity needs, and exact checkpoints retain the ACK frame Hanko.
+pub const PROCESS_ABI_VERSION: u64 = 12;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=17")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=18")
+        // wire=18: commit verdicts carry the exact committed frame and
+        // provenance, and exact OutboundAck rows preserve their frame Hanko.
         // wire=17: request ids no longer masquerade as candidate handles;
         // Prepare returns one opaque bin32 token consumed by every later
         // stage, checkpoint read, Commit and Abort.
@@ -98,9 +102,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x2f, 0xc3, 0x8f, 0xd6, 0xf6, 0xcb, 0x7b, 0xa7, 0x93, 0x82, 0x69, 0x82, 0x6a, 0xaa,
-            0x47, 0xc6, 0x2e, 0xe6, 0xa3, 0xac, 0x3e, 0xed, 0xa0, 0xbe, 0xd6, 0xa9, 0x03, 0x94,
-            0xa9, 0x31, 0x7f, 0xd1,
+            0x7d, 0x69, 0xbb, 0x5f, 0x69, 0x16, 0xdf, 0x6e, 0x7a, 0x48, 0x71, 0x1a, 0xe7, 0xb0,
+            0x8b, 0xb1, 0xc1, 0x46, 0x6b, 0x90, 0x7b, 0xdb, 0x05, 0xdd, 0x98, 0x9d, 0x05, 0x39,
+            0xa0, 0x31, 0x65, 0x85,
         ],
     };
 

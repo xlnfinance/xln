@@ -30,6 +30,13 @@ use crate::{AccountReplica, AccountTx};
 pub struct OutboundAck {
     pub height: u64,
     pub frame_hash: [u8; 32],
+    /// The exact frame certificate this side sent to the counterparty.
+    ///
+    /// The Entity leaf deliberately commits only the compact ACK binding, not
+    /// these raw bytes. Durable recovery still has to retain the certificate:
+    /// a retry after a crash must resend the original Hanko rather than sign
+    /// historical evidence again.
+    pub frame_hanko: Vec<u8>,
     /// The recovery proof the acknowledgement carried. The counterparty needs
     /// it to hold the state it just committed, and the leaf commits that it
     /// was sent.
@@ -282,11 +289,13 @@ impl AccountConsensus {
         &mut self,
         height: u64,
         frame_hash: [u8; 32],
+        frame_hanko: Vec<u8>,
         dispute: Option<DisputeDraft>,
     ) {
         self.last_outbound_ack = Some(OutboundAck {
             height,
             frame_hash,
+            frame_hanko,
             dispute,
         });
     }
@@ -674,6 +683,15 @@ impl AccountConsensus {
             counterparty_dispute,
             local_committed_frame_hanko,
         } = snapshot;
+        if let Some(ack) = last_outbound_ack.as_ref() {
+            verify_restored_outbound_ack(&replica, ack)?;
+        }
+        if let Some(ack) = pending
+            .as_ref()
+            .and_then(|pending| pending.bundled_ack.as_ref())
+        {
+            verify_restored_outbound_ack(&replica, ack)?;
+        }
         match (
             &current,
             &counterparty_frame_hanko,
@@ -764,6 +782,20 @@ impl AccountConsensus {
         });
         Ok(account)
     }
+}
+
+/// Raw ACK Hanko bytes stay outside the compact Entity leaf, so exact restore
+/// authenticates them independently. Otherwise a storage bit flip could keep
+/// every root unchanged yet leave the node unable to retry its historical ACK.
+fn verify_restored_outbound_ack(
+    replica: &AccountReplica,
+    ack: &OutboundAck,
+) -> Result<(), StateError> {
+    crate::consensus::signing::verify_frame_hanko(
+        &ack.frame_hanko,
+        &ack.frame_hash,
+        replica.owner().as_bytes(),
+    )
 }
 
 /// Replay a saved proposal against the committed replica and prove it is the

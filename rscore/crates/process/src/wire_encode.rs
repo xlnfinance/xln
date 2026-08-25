@@ -344,7 +344,13 @@ fn wave_fields(
     for row in &result.proposals {
         proposals.push(proposal(row)?);
     }
-    let applied = tuple(result.applied.iter().map(input_result).collect());
+    let applied = tuple(
+        result
+            .applied
+            .iter()
+            .map(input_result)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     let admissions = tuple(result.admissions.iter().map(admission_result).collect());
     let touched = tuple(
         result
@@ -453,28 +459,50 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
     let proposed = match row.proposed.as_ref() {
         None => AbiValue::Nil,
         Some(proposed) => {
-            let mut txs = Vec::with_capacity(proposed.frame.txs.len());
-            for value in &proposed.frame.txs {
-                txs.push(tx(value)?);
-            }
-            tuple(vec![
-                integer(proposed.frame.height),
-                integer(proposed.frame.timestamp),
-                integer(proposed.frame.j_height),
-                tuple(txs),
-                AbiValue::Text(proposed.frame.prev_frame_hash.clone()),
-                AbiValue::Bytes(proposed.frame.account_state_root.to_vec()),
-                AbiValue::Bool(proposed.frame.by_left),
-                tuple(proposed.frame.deltas.iter().map(delta).collect()),
-                AbiValue::Bytes(proposed.state_hash.to_vec()),
-                AbiValue::Bytes(proposed.hanko.clone()),
-            ])
+            let mut fields = frame_fields(&proposed.frame, proposed.state_hash)?;
+            fields.push(AbiValue::Bytes(proposed.hanko.clone()));
+            tuple(fields)
         }
     };
     Ok(tuple(vec![
         AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
         proposed,
         tuple(row.dropped.iter().map(dropped).collect()),
+    ]))
+}
+
+/// The canonical Account frame body plus its derived state hash. Rust keeps
+/// the hash beside `AccountFrame`; TypeScript keeps it on the frame object.
+/// The process boundary carries the complete TypeScript shape so Entity can
+/// consume committed transactions without reconstructing consensus evidence.
+fn frame_fields(
+    frame: &xln_rscore_engine::AccountFrame,
+    state_hash: [u8; 32],
+) -> Result<Vec<AbiValue>, crate::ProcessError> {
+    let mut txs = Vec::with_capacity(frame.txs.len());
+    for value in &frame.txs {
+        txs.push(tx(value)?);
+    }
+    Ok(vec![
+        integer(frame.height),
+        integer(frame.timestamp),
+        integer(frame.j_height),
+        tuple(txs),
+        AbiValue::Text(frame.prev_frame_hash.clone()),
+        AbiValue::Bytes(frame.account_state_root.to_vec()),
+        AbiValue::Bool(frame.by_left),
+        tuple(frame.deltas.iter().map(delta).collect()),
+        AbiValue::Bytes(state_hash.to_vec()),
+    ])
+}
+
+fn committed_frame(
+    evidence: &xln_rscore_engine::CommittedFrameEvidence,
+    state_hash: [u8; 32],
+) -> Result<AbiValue, crate::ProcessError> {
+    Ok(tuple(vec![
+        tuple(frame_fields(&evidence.frame, state_hash)?),
+        AbiValue::Bool(evidence.committed_via_new_frame),
     ]))
 }
 
@@ -513,12 +541,14 @@ fn dropped(value: &xln_rscore_batch::DroppedRow) -> AbiValue {
     ])
 }
 
-fn input_result(value: &xln_rscore_batch::AccountInputResult) -> AbiValue {
-    tuple(vec![
+fn input_result(
+    value: &xln_rscore_batch::AccountInputResult,
+) -> Result<AbiValue, crate::ProcessError> {
+    Ok(tuple(vec![
         integer(value.operation_index),
         AbiValue::Bytes(value.account_id.as_bytes().to_vec()),
-        verdict(&value.verdict),
-    ])
+        verdict(&value.verdict)?,
+    ]))
 }
 
 fn admission_result(value: &xln_rscore_batch::AccountAdmissionResult) -> AbiValue {
@@ -541,15 +571,16 @@ fn admission_result(value: &xln_rscore_batch::AccountAdmissionResult) -> AbiValu
 /// Tagged so the runtime can tell a commit from an ignored collision without
 /// parsing text. The tags are the wire's, not the engine's: a new outcome adds
 /// a tag rather than changing an old one.
-fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
+fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, crate::ProcessError> {
     use xln_rscore_batch::AccountInputVerdict;
-    match value {
+    Ok(match value {
         AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
             ack_hanko,
             outputs,
             rolled_back_txs,
+            committed_frame: evidence,
         } => tuple(vec![
             integer(0),
             integer(*height),
@@ -557,6 +588,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
             AbiValue::Bytes(ack_hanko.clone()),
             tuple(outputs.iter().map(account_output).collect()),
             integer(*rolled_back_txs),
+            committed_frame(evidence, *state_hash)?,
         ]),
         AccountInputVerdict::FrameCollisionIgnored { height } => {
             tuple(vec![integer(1), integer(*height)])
@@ -582,11 +614,13 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
             height,
             state_hash,
             outputs,
+            committed_frame: evidence,
         } => tuple(vec![
             integer(5),
             integer(*height),
             AbiValue::Bytes(state_hash.to_vec()),
             tuple(outputs.iter().map(account_output).collect()),
+            committed_frame(evidence, *state_hash)?,
         ]),
         AccountInputVerdict::AckStale { height } => tuple(vec![integer(6), integer(*height)]),
         AccountInputVerdict::AckRejected { reason } => {
@@ -595,7 +629,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> AbiValue {
         AccountInputVerdict::Failed(message) => {
             tuple(vec![integer(8), AbiValue::Text(message.clone())])
         }
-    }
+    })
 }
 
 /// The exact inverse of `decode_tx` (wire_decode.rs): same tags, same field

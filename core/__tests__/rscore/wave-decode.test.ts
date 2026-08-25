@@ -138,6 +138,21 @@ const rawWave = (): RscoreWireValue[] => {
   ];
 };
 
+const committedFrameEvidence = (
+  stateHash: Buffer,
+  committedViaNewFrame: boolean,
+): RscoreWireValue => [[
+  1,
+  1_700_000_000_000,
+  100,
+  [],
+  'genesis',
+  bytes(32, 0x33),
+  true,
+  [],
+  stateHash,
+], committedViaNewFrame];
+
 const withParityDigest = (raw: RscoreWireValue[]): RscoreWireValue[] => {
   raw[7] = Buffer.from(waveParityDigestFromWireForTests(raw).slice(2), 'hex');
   return raw;
@@ -246,6 +261,65 @@ describe('rscore staged wave decoder', () => {
       code: 'ACCOUNT_ADMISSION_REJECTED',
       message: 'exact engine message',
     });
+  });
+
+  test('carries exact committed frames and distinguishes peer-frame from ACK commits', () => {
+    const frameCommit = rawWave();
+    const frameStateHash = bytes(32, 0x44);
+    requiredAt(frameCommit[2] as RscoreWireValue[][], 0, 'FRAME_COMMIT')[2] = [
+      0,
+      1,
+      frameStateHash,
+      bytes(65, 0x55),
+      [],
+      0,
+      committedFrameEvidence(frameStateHash, true),
+    ];
+    const frameVerdict = decodeWave(withParityDigest(frameCommit)).applied[0]?.verdict;
+    expect(frameVerdict).toMatchObject({
+      kind: 'frameCommitted',
+      height: 1,
+      stateHash: hex(32, 0x44),
+      committedFrame: {
+        committedViaNewFrame: true,
+        frame: { height: 1, stateHash: hex(32, 0x44), accountTxs: [] },
+      },
+    });
+
+    const ackCommit = rawWave();
+    const ackStateHash = bytes(32, 0x66);
+    requiredAt(ackCommit[2] as RscoreWireValue[][], 0, 'ACK_COMMIT')[2] = [
+      5,
+      1,
+      ackStateHash,
+      [],
+      committedFrameEvidence(ackStateHash, false),
+    ];
+    const ackVerdict = decodeWave(withParityDigest(ackCommit)).applied[0]?.verdict;
+    expect(ackVerdict).toMatchObject({
+      kind: 'ackCommitted',
+      height: 1,
+      stateHash: hex(32, 0x66),
+      committedFrame: {
+        committedViaNewFrame: false,
+        frame: { height: 1, stateHash: hex(32, 0x66), accountTxs: [] },
+      },
+    });
+  });
+
+  test('rejects committed-frame evidence not bound to its verdict', () => {
+    const raw = rawWave();
+    const stateHash = bytes(32, 0x44);
+    requiredAt(raw[2] as RscoreWireValue[][], 0, 'UNBOUND_COMMIT')[2] = [
+      0,
+      1,
+      stateHash,
+      bytes(65, 0x55),
+      [],
+      0,
+      committedFrameEvidence(stateHash, false),
+    ];
+    expect(() => decodeWave(withParityDigest(raw))).toThrow('committedFrame.binding');
   });
 
   test('rejects old replies, duplicate operation indices and malformed admission tags', () => {

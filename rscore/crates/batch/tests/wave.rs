@@ -343,11 +343,17 @@ fn two_engines_settle_a_payment_in_three_waves() {
         .commit_wave(applied.candidate_id)
         .expect("commit apply");
     assert_eq!(applied.applied.len(), 2);
-    for row in &applied.applied {
-        assert!(
-            matches!(row.verdict, AccountInputVerdict::FrameCommitted { .. }),
-            "{:?}",
-            row.verdict,
+    for (row, proposal) in applied.applied.iter().zip(&proposed.proposals) {
+        let AccountInputVerdict::FrameCommitted {
+            committed_frame, ..
+        } = &row.verdict
+        else {
+            panic!("expected a frame commit: {:?}", row.verdict);
+        };
+        assert!(committed_frame.committed_via_new_frame);
+        assert_eq!(
+            &committed_frame.frame,
+            &proposal.proposed.as_ref().expect("proposed frame").frame,
         );
     }
 
@@ -358,11 +364,17 @@ fn two_engines_settle_a_payment_in_three_waves() {
         .payer
         .commit_wave(acked.candidate_id)
         .expect("commit ack");
-    for row in &acked.applied {
-        assert!(
-            matches!(row.verdict, AccountInputVerdict::AckCommitted { .. }),
-            "{:?}",
-            row.verdict,
+    for (row, proposal) in acked.applied.iter().zip(&proposed.proposals) {
+        let AccountInputVerdict::AckCommitted {
+            committed_frame, ..
+        } = &row.verdict
+        else {
+            panic!("expected an ack commit: {:?}", row.verdict);
+        };
+        assert!(!committed_frame.committed_via_new_frame);
+        assert_eq!(
+            &committed_frame.frame,
+            &proposal.proposed.as_ref().expect("proposed frame").frame,
         );
     }
     // The two engines key their accounts by the counterparty, so their trees

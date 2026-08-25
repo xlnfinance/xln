@@ -121,15 +121,34 @@ type WaveSwapOffer = {
 };
 
 type WaveVerdict =
-  | { kind: 'frameCommitted'; height: number; stateHash: string; ackHanko: string; outputs: WaveOutput[]; rolledBackTxs: number }
+  | {
+      kind: 'frameCommitted';
+      height: number;
+      stateHash: string;
+      ackHanko: string;
+      outputs: WaveOutput[];
+      rolledBackTxs: number;
+      committedFrame: WaveCommittedFrame;
+    }
   | { kind: 'frameCollisionIgnored'; height: number }
   | { kind: 'frameDuplicate'; height: number; stateHash: string; ackHanko: string }
   | { kind: 'frameStale'; height: number; currentHeight: number }
   | { kind: 'frameRejected'; reason: string }
-  | { kind: 'ackCommitted'; height: number; stateHash: string; outputs: WaveOutput[] }
+  | {
+      kind: 'ackCommitted';
+      height: number;
+      stateHash: string;
+      outputs: WaveOutput[];
+      committedFrame: WaveCommittedFrame;
+    }
   | { kind: 'ackStale'; height: number }
   | { kind: 'ackRejected'; reason: string }
   | { kind: 'failed'; message: string };
+
+type WaveCommittedFrame = Readonly<{
+  frame: AccountFrame;
+  committedViaNewFrame: boolean;
+}>;
 
 type WaveInputResult = { operationIndex: number; accountId: string; verdict: WaveVerdict };
 
@@ -247,20 +266,50 @@ const decodeProposal = (value: unknown): WaveProposal => {
   };
 };
 
+const decodeFrameFields = (row: readonly unknown[], field: string): AccountFrame => ({
+  height: rscoreWireInt(row[0], `${field}.height`),
+  timestamp: rscoreWireInt(row[1], `${field}.timestamp`),
+  jHeight: rscoreWireInt(row[2], `${field}.jHeight`),
+  accountTxs: rscoreWireList(row[3], `${field}.txs`).map(decodeRscoreAccountTx),
+  prevFrameHash: rscoreWireText(row[4], `${field}.prevFrameHash`),
+  accountStateRoot: rscoreWireHex(row[5], `${field}.accountStateRoot`, 32),
+  byLeft: rscoreWireBool(row[6], `${field}.byLeft`),
+  deltas: rscoreWireList(row[7], `${field}.deltas`).map(decodeDelta),
+  stateHash: rscoreWireHex(row[8], `${field}.stateHash`, 32),
+});
+
 const decodeFrame = (value: unknown): AccountFrame & { hanko: string } => {
   const row = rscoreWireTuple(value, 10, 'frame');
   return {
-    height: rscoreWireInt(row[0], 'frame.height'),
-    timestamp: rscoreWireInt(row[1], 'frame.timestamp'),
-    jHeight: rscoreWireInt(row[2], 'frame.jHeight'),
-    accountTxs: rscoreWireList(row[3], 'frame.txs').map(decodeRscoreAccountTx),
-    prevFrameHash: rscoreWireText(row[4], 'frame.prevFrameHash'),
-    accountStateRoot: rscoreWireHex(row[5], 'frame.accountStateRoot', 32),
-    byLeft: rscoreWireBool(row[6], 'frame.byLeft'),
-    deltas: rscoreWireList(row[7], 'frame.deltas').map(decodeDelta),
-    stateHash: rscoreWireHex(row[8], 'frame.stateHash', 32),
+    ...decodeFrameFields(row, 'frame'),
     hanko: `0x${Buffer.from(rscoreWireBytes(row[9], 'frame.hanko')).toString('hex')}`,
   };
+};
+
+const decodeCommittedFrame = (value: unknown): WaveCommittedFrame => {
+  const row = rscoreWireTuple(value, 2, 'committedFrame');
+  return {
+    frame: decodeFrameFields(rscoreWireTuple(row[0], 9, 'committedFrame.frame'), 'committedFrame.frame'),
+    committedViaNewFrame: rscoreWireBool(row[1], 'committedFrame.committedViaNewFrame'),
+  };
+};
+
+const assertCommittedFrameBinding = (
+  evidence: WaveCommittedFrame,
+  height: number,
+  stateHash: string,
+  committedViaNewFrame: boolean,
+): WaveCommittedFrame => {
+  if (
+    evidence.frame.height !== height ||
+    evidence.frame.stateHash !== stateHash ||
+    evidence.committedViaNewFrame !== committedViaNewFrame
+  ) {
+    return rscoreWireDecodeFail(
+      `committedFrame.binding:${height}:${stateHash}:${String(committedViaNewFrame)}`,
+    );
+  }
+  return evidence;
 };
 
 const decodeDelta = (value: unknown): Delta => {
@@ -334,14 +383,22 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
   const row = rscoreWireList(value, 'verdict');
   switch (rscoreWireInt(row[0], 'verdict.tag')) {
     case 0: {
-      const fields = rscoreWireTuple(row, 6, 'verdict.frameCommitted');
+      const fields = rscoreWireTuple(row, 7, 'verdict.frameCommitted');
+      const height = rscoreWireInt(fields[1], 'verdict.height');
+      const stateHash = rscoreWireHex(fields[2], 'verdict.stateHash', 32);
       return {
         kind: 'frameCommitted',
-        height: rscoreWireInt(fields[1], 'verdict.height'),
-        stateHash: rscoreWireHex(fields[2], 'verdict.stateHash', 32),
+        height,
+        stateHash,
         ackHanko: `0x${Buffer.from(rscoreWireBytes(fields[3], 'verdict.ackHanko')).toString('hex')}`,
         outputs: rscoreWireList(fields[4], 'verdict.outputs').map(decodeOutput),
         rolledBackTxs: rscoreWireInt(fields[5], 'verdict.rolledBackTxs'),
+        committedFrame: assertCommittedFrameBinding(
+          decodeCommittedFrame(fields[6]),
+          height,
+          stateHash,
+          true,
+        ),
       };
     }
     case 1: {
@@ -370,12 +427,20 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
       return { kind: 'frameRejected', reason: rscoreWireText(fields[1], 'verdict.reason') };
     }
     case 5: {
-      const fields = rscoreWireTuple(row, 4, 'verdict.ackCommitted');
+      const fields = rscoreWireTuple(row, 5, 'verdict.ackCommitted');
+      const height = rscoreWireInt(fields[1], 'verdict.height');
+      const stateHash = rscoreWireHex(fields[2], 'verdict.stateHash', 32);
       return {
         kind: 'ackCommitted',
-        height: rscoreWireInt(fields[1], 'verdict.height'),
-        stateHash: rscoreWireHex(fields[2], 'verdict.stateHash', 32),
+        height,
+        stateHash,
         outputs: rscoreWireList(fields[3], 'verdict.outputs').map(decodeOutput),
+        committedFrame: assertCommittedFrameBinding(
+          decodeCommittedFrame(fields[4]),
+          height,
+          stateHash,
+          false,
+        ),
       };
     }
     case 6: {
@@ -559,7 +624,7 @@ const deltaWire = (delta: Delta): RscoreWireValue[] => [
   delta.rightHold.toString(),
 ];
 
-const frameWire = (frame: AccountFrame & { hanko: string }): RscoreWireValue => [
+const frameBodyWire = (frame: AccountFrame): RscoreWireValue[] => [
   frame.height,
   frame.timestamp,
   frame.jHeight,
@@ -573,7 +638,16 @@ const frameWire = (frame: AccountFrame & { hanko: string }): RscoreWireValue => 
   frame.byLeft,
   frame.deltas.map(deltaWire),
   hexToBytes(frame.stateHash, 'transcript.stateHash'),
+];
+
+const frameWire = (frame: AccountFrame & { hanko: string }): RscoreWireValue => [
+  ...frameBodyWire(frame),
   hexToBytes(frame.hanko, 'transcript.hanko'),
+];
+
+const committedFrameWire = (evidence: WaveCommittedFrame): RscoreWireValue => [
+  frameBodyWire(evidence.frame),
+  evidence.committedViaNewFrame,
 ];
 
 const droppedWire = (row: WaveDroppedRow): RscoreWireValue => [
@@ -640,6 +714,7 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
         hexToBytes(verdict.ackHanko, 'transcript.ackHanko'),
         verdict.outputs.map(outputWire),
         verdict.rolledBackTxs,
+        committedFrameWire(verdict.committedFrame),
       ];
     case 'frameCollisionIgnored':
       return [1, verdict.height];
@@ -660,6 +735,7 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
         verdict.height,
         hexToBytes(verdict.stateHash, 'transcript.stateHash'),
         verdict.outputs.map(outputWire),
+        committedFrameWire(verdict.committedFrame),
       ];
     case 'ackStale':
       return [6, verdict.height];

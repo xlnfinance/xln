@@ -24,8 +24,8 @@ pub use consensus::frame::hash::{
     is_frame_hashable, parse_root_hex, unsupported_kind as unsupported_frame_tx_kind,
 };
 pub use consensus::incoming::apply::{
-    AckOutcome, IncomingFrame, IncomingOutcome, ReceiverClock, apply_incoming_ack,
-    apply_incoming_frame,
+    AckOutcome, CommittedFrameEvidence, IncomingFrame, IncomingOutcome, ReceiverClock,
+    apply_incoming_ack, apply_incoming_frame,
 };
 pub use consensus::proposal::propose::{
     Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,

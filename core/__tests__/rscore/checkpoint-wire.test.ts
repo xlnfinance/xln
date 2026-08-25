@@ -140,6 +140,17 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
   };
   frame.stateHash = computeFrameHash(frame);
   const peerHanko = '0x010203';
+  const ackHanko = '0x040506';
+  const ackBinding = {
+    height: frame.height,
+    counterpartyEntityId: RIGHT,
+    response: {
+      kind: 'ack',
+      fromEntityId: LEFT,
+      toEntityId: RIGHT,
+      ack: { height: frame.height, frameHash: frame.stateHash },
+    },
+  };
   const leaf = computeEntityAccountLeafDigest(
     Object.entries({
       status: 'active',
@@ -148,6 +159,7 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
       rollbackCount: 0,
       currentFrameHash: frame.stateHash,
       proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 7 },
+      lastOutboundFrameAck: ackBinding,
       counterpartyFrameHanko: computeIntegrityDigest(new TextEncoder().encode(peerHanko)),
       accountStateRoot: stateRoot,
       mempoolRoot: `0x${'00'.repeat(32)}`,
@@ -230,7 +242,7 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
       null,
       Buffer.from([1, 2, 3]),
       Buffer.from([4]),
-      null,
+      [frame.height, bytes(frame.stateHash), bytes(ackHanko), null],
       null,
       7,
       null,
@@ -253,6 +265,11 @@ describe('rscore checkpoint wire', () => {
     expect(decoded.accountStateRoot).toBe(fixture.stateRoot);
     expect(decoded.entityAccountLeaf).toBe(fixture.leaf);
     expect(decoded.consensus.currentFrame?.stateHash).toBe(fixture.frameHash);
+    expect(decoded.consensus.lastOutboundAck).toEqual({
+      height: 3,
+      frameHash: fixture.frameHash,
+      frameHanko: '0x040506',
+    });
     expect(decoded.stateSeed.deltas.get(1)).toEqual(delta);
     expect(decoded.stateSeed.locks.get(lock.lockId)).toEqual(lock);
     expect(decoded.stateSeed.lendingIntents.get('intent-1')).toBe('fund');
@@ -264,6 +281,28 @@ describe('rscore checkpoint wire', () => {
       'requestedRebalance',
       'requestedRebalanceFeeState',
     ]);
+  });
+
+  test('keeps exact ACK Hanko bytes outside the compact Entity leaf binding', () => {
+    const first = restoreFixture();
+    const firstDecoded = decodeRscoreAccountRestoreRow(first.row);
+    const second = restoreFixture();
+    const consensus = second.row[8] as unknown[];
+    const ack = consensus[7] as unknown[];
+    ack[2] = Buffer.from([0x09, 0x08, 0x07, 0x06]);
+    const secondDecoded = decodeRscoreAccountRestoreRow(second.row);
+
+    expect(firstDecoded.entityAccountLeaf).toBe(secondDecoded.entityAccountLeaf);
+    expect(firstDecoded.consensus.lastOutboundAck?.frameHanko).toBe('0x040506');
+    expect(secondDecoded.consensus.lastOutboundAck?.frameHanko).toBe('0x09080706');
+
+    const oldShape = restoreFixture().row;
+    const oldConsensus = oldShape[8] as unknown[];
+    const oldAck = oldConsensus[7] as unknown[];
+    oldConsensus[7] = [oldAck[0], oldAck[1], oldAck[3]];
+    expect(() => decodeRscoreAccountRestoreRow(oldShape)).toThrow(
+      'RSCORE_CHECKPOINT_RESTORE_LAST_OUTBOUND_ACK_ARITY',
+    );
   });
 
   test('rejects corrupt frame, state-root and Entity-leaf commitments', () => {

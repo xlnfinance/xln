@@ -12,9 +12,9 @@ use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
     AccountConsensus, AccountEnvelope, AccountFrame, AccountOutput, AccountReplica, AccountState,
-    AccountTx, AckOutcome, BoardDelays, Disposition, IncomingFrame, IncomingOutcome,
-    ProposalOutcome, ReceiverClock, SigningIdentity, StateError, apply_incoming_ack,
-    apply_incoming_frame, canonical_tx_digest, propose_account_frame,
+    AccountTx, AckOutcome, BoardDelays, CommittedFrameEvidence, Disposition, IncomingFrame,
+    IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
+    apply_incoming_ack, apply_incoming_frame, canonical_tx_digest, propose_account_frame,
 };
 use xln_rscore_protocol::{
     CanonicalValue, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
@@ -59,6 +59,7 @@ pub enum AccountInputVerdict {
         ack_hanko: Vec<u8>,
         outputs: Vec<AccountOutput>,
         rolled_back_txs: usize,
+        committed_frame: CommittedFrameEvidence,
     },
     FrameCollisionIgnored {
         height: u64,
@@ -79,6 +80,7 @@ pub enum AccountInputVerdict {
         height: u64,
         state_hash: [u8; 32],
         outputs: Vec<AccountOutput>,
+        committed_frame: CommittedFrameEvidence,
     },
     AckStale {
         height: u64,
@@ -1776,12 +1778,14 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             ack_hanko,
             outputs,
             rolled_back_txs,
+            committed_frame,
         } => AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
             ack_hanko,
             outputs,
             rolled_back_txs,
+            committed_frame,
         },
         IncomingOutcome::CollisionIgnored { height } => {
             AccountInputVerdict::FrameCollisionIgnored { height }
@@ -1812,10 +1816,12 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
             height,
             state_hash,
             outputs,
+            committed_frame,
         } => AccountInputVerdict::AckCommitted {
             height,
             state_hash,
             outputs,
+            committed_frame,
         },
         AckOutcome::Stale { height } => AccountInputVerdict::AckStale { height },
         AckOutcome::Rejected { reason } => AccountInputVerdict::AckRejected { reason },
