@@ -2,6 +2,7 @@ import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus
 import { mergeEntityInputs } from '../../../entity/consensus';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { beginAuthorityFrame, flushAuthorityFrame } from '../../../rscore/authority-wave';
+import { armAuthorityWave, captureAuthorityWave } from '../../../rscore/authority-driver';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
@@ -292,6 +293,9 @@ const applyRuntimeInputPhases = async (
   // whichever Runtime opens the next one — this process hosts many.
   const authorityFrameId = env.runtimeId ?? '';
   beginAuthorityFrame(authorityFrameId);
+  // Before anything of this frame is applied: the authoritative engine has to
+  // start where TypeScript starts, not where it ends up.
+  await armAuthorityWave(env);
   try {
     const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
     const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
@@ -313,6 +317,10 @@ const applyRuntimeInputPhases = async (
       batch,
       profile,
     );
+    // The authoritative engine is handed this frame after the Runtime's own
+    // record of it is durable, which is outside this function — so the raw
+    // wave is taken here, while the collector still holds it.
+    captureAuthorityWave(authorityFrameId);
     return { result, profiledRuntimeTxs: ingress.runtimeTxs };
   } finally {
     // The boundary lives in the reducer, not at the live-loop frame apply:

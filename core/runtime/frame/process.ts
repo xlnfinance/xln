@@ -25,6 +25,11 @@ import {
   flushPendingAuditEvents,
   readRuntimeFrameEvents,
 } from '../observability/env-events';
+import {
+  abortAuthorityWave,
+  commitAuthorityWave,
+  prepareAuthorityWave,
+} from '../../rscore/authority-driver';
 import { recordCommittedRuntimeEntityMetrics } from '../observability/entity-metrics';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './intake/execution-state';
@@ -516,6 +521,11 @@ const applyAndCommitRuntimeFrame = async (
     },
   );
   profile.metrics.jOutputs = applied.jOutbox.length;
+  // The authoritative engine reaches its own result for this frame and is held
+  // against TypeScript's, before either record is durable. It keeps the wave as
+  // a candidate: committed below once the Runtime's log is on disk, taken back
+  // if that write never lands.
+  await prepareAuthorityWave(env);
   const frameAdvanced = prepareRuntimeFrameCommit(
     env,
     liveEnv,
@@ -531,7 +541,12 @@ const applyAndCommitRuntimeFrame = async (
     appliedInput: applied.appliedInput,
     quietLogs: candidate.quietRuntimeLogs,
   }, deps);
-  if (commit.staleWriterStopped) return commit;
+  if (commit.staleWriterStopped) {
+    await abortAuthorityWave(env);
+    return commit;
+  }
+  // The Runtime's own record is durable now, and only now.
+  await commitAuthorityWave(commit.env);
 
   await runCommittedRuntimeEffects(
     commit.env,

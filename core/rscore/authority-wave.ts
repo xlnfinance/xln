@@ -58,10 +58,14 @@ type RecordedClock = {
 
 /**
  * Observation only, and off by default: recording every input of every frame
- * costs allocations on the hub's hot path.
+ * costs allocations on the hub's hot path. The driver cannot run without it —
+ * the wave it hands the engine is exactly what this collects — so turning the
+ * driver on turns this on too, rather than leaving it silently collecting
+ * nothing.
  */
 export const authorityRecordEnabled = (): boolean =>
-  process.env['XLN_RSCORE_AUTHORITY_RECORD'] === '1';
+  process.env['XLN_RSCORE_AUTHORITY_RECORD'] === '1'
+  || process.env['XLN_RSCORE_AUTHORITY'] === '1';
 
 /**
  * The frame being recorded, and the Runtime it belongs to. A single process
