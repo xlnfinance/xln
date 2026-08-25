@@ -917,32 +917,36 @@ test('frontend surfaces do not bypass RuntimeController when switching active ru
 });
 
 test('active Runtime ownership uses Web Locks and releases only after quiesce', () => {
-  const lockSource = readFileSync('frontend/src/lib/utils/control/activeTabLock.ts', 'utf8');
+  const lockSource = readFileSync('frontend/packages/browser/src/active-tab-lock.ts', 'utf8');
+  const browserSource = readFileSync('frontend/packages/browser/src/active-tab-lock-support.ts', 'utf8');
   const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   const loseStart = lockSource.indexOf('const loseWebLockTo');
-  const loseEnd = lockSource.indexOf('async function handleHardResetRequest', loseStart);
+  const loseEnd = lockSource.indexOf('const handleHardResetRequest', loseStart);
   const loseSource = lockSource.slice(loseStart, loseEnd);
 
-  expect(lockSource).toContain("navigator.locks.request(ACTIVE_TAB_WEB_LOCK_NAME, { mode: 'exclusive' }");
+  expect(browserSource).toContain('navigator.locks.request(name, options, callback)');
+  expect(lockSource).toContain("browser.requestLock(ACTIVE_TAB_WEB_LOCK_NAME, { mode: 'exclusive' }");
   expect(lockSource).not.toContain("localStorage.getItem('xln-active-tab-lock')");
-  expect(lockSource).not.toContain("sessionStorage.getItem(ACTIVE_TAB_ID_KEY)");
-  expect(loseSource.indexOf('await onLoseLockHandler?.()')).toBeGreaterThan(0);
-  expect(loseSource.indexOf('releaseWebLock()')).toBeGreaterThan(loseSource.indexOf('await onLoseLockHandler?.()'));
+  expect(lockSource).not.toContain('ACTIVE_TAB_ID_KEY');
+  expect(loseSource.indexOf('await state.onLoseLockHandler?.()')).toBeGreaterThan(0);
+  expect(loseSource.indexOf('releaseWebLock(state)')).toBeGreaterThan(
+    loseSource.indexOf('await state.onLoseLockHandler?.()'),
+  );
   expect(layoutSource).toContain("logAppShellDiagnostic('Inactive tab activity suspension failed', err);\n      throw err;");
 });
 
 test('projection routes never evict or duplicate an active embedded Runtime', () => {
-  const lockSource = readFileSync('frontend/src/lib/utils/control/activeTabLock.ts', 'utf8');
+  const lockSource = readFileSync('frontend/packages/browser/src/active-tab-lock.ts', 'utf8');
   const connectionSource = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const ownershipStart = connectionSource.indexOf('const ensureProjectionEmbeddedRuntimeOwnership');
   const bootstrapStart = connectionSource.indexOf("if (!hasStoredRemoteRuntimePreference())");
   const bootstrapSource = connectionSource.slice(bootstrapStart);
 
   expect(lockSource).toContain("{ mode: 'exclusive', ifAvailable: true }");
-  expect(lockSource).toContain('if (!acquiredLock) rejectAttempt(error);');
-  expect(lockSource).toContain('await lossInFlight;');
-  expect(lockSource).toContain('acquireInFlight = true;');
-  expect(lockSource).toContain('activeChannel && !acquireInFlight && !releaseHeldLock && !ownsWebLock');
+  expect(lockSource).toContain('if (!acquiredLock) attempted.reject(error);');
+  expect(lockSource).toContain('await state.lossInFlight;');
+  expect(lockSource).toContain('state.acquireInFlight = true;');
+  expect(lockSource).toContain('state.activeChannel && !state.acquireInFlight && !state.releaseHeldLock && !state.ownsWebLock');
   expect(connectionSource).toContain('const release = adoptActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('?? await tryInitializeActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('if (ownsActiveTabLock()) {');

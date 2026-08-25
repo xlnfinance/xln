@@ -68,11 +68,17 @@ export const CAPABILITIES = [
     owner: 'wallet',
     routes: ['/app', '/testnet'],
     currentSources: [
+      'frontend/packages/browser/src/active-tab-lock.ts',
       'frontend/packages/browser/src/browser-runtime-reset.ts',
       'frontend/packages/browser/src/hard-reset-request.ts',
       'frontend/src/lib/utils/control/resetEverything.ts',
     ],
-    behavior: ['validated destructive reset', 'cross-tab reset notification', 'storage, cache, and service-worker cleanup'],
+    behavior: [
+      'validated destructive reset',
+      'cross-tab reset notification',
+      'exclusive cross-tab Runtime ownership and quiesced takeover',
+      'storage, cache, and service-worker cleanup',
+    ],
     status: 'in_progress',
   },
   {

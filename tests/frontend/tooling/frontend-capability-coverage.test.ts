@@ -61,6 +61,10 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('generation-safe local and remote boot sequencing');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.status).toBe('in_progress');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.currentSources)
+      .toContain('frontend/packages/browser/src/active-tab-lock.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.behavior)
+      .toContain('exclusive cross-tab Runtime ownership and quiesced takeover');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.status).toBe('in_progress');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/browser/src/runtime-adapter-session.ts');
