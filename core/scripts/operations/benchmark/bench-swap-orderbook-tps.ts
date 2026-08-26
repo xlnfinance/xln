@@ -1,6 +1,7 @@
 import {
   applyCommand,
   commitBookOverlay,
+  computeBookCommitmentHash,
   computeBookHash,
   createBook,
   forkBookState,
@@ -32,6 +33,7 @@ export type SwapOrderbookBenchmarkResult = {
   bookCommandsPerOverlay: number;
   tradeQtySum: string;
   bookHash: string;
+  bookRoot: string;
 };
 
 const argValue = (args: string[], name: string, defaultValue: string): string => {
@@ -85,6 +87,7 @@ export const runSwapOrderbookBenchmark = (cli: Cli): SwapOrderbookBenchmarkResul
     bookCommandsPerOverlay: cli.bookCommandsPerOverlay,
     tradeQtySum: result.book.tradeQtySum.toString(),
     bookHash: computeBookHash(result.book),
+    bookRoot: computeBookCommitmentHash(result.book),
   };
   if (!output.passed) {
     throw new Error(`SWAP_TPS_BELOW_TARGET:${tps.toFixed(2)}<${cli.minTps}`);

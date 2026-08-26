@@ -102,6 +102,7 @@
     "debug:persistence": "bun core/scripts/operations/diagnostics/inspect-persistence.ts",
     "bench:storage:hub": "bun core/scripts/operations/benchmark/bench-storage-hub.ts",
     "bench:swap:orderbook": "bun core/scripts/operations/benchmark/bench-swap-orderbook-tps.ts --swaps 100000 --warmup 10000 --min-tps 10000",
+    "bench:swap:orderbook:rust": "cargo run --quiet --release --manifest-path rscore/Cargo.toml -p xln-rscore-entity-kernel --features bench --bin rscore-orderbook-bench -- --swaps 100000 --warmup 10000 --levels 32",
     "bench:swap:runtime": "bun core/scripts/operations/benchmark/bench-swap-runtime-tps.ts --swaps 25000 --warmup 2500 --min-tps 10000",
     "bench:swap:consensus": "bun core/scripts/operations/benchmark/bench-swap-hub-consensus-tps.ts --swaps 1000 --warmup 100 --min-aggregate-account-consensus-tps 2000 --batch-size 20 --independent-hub-cohorts 1",
     "bench:swap:consensus:aggregate-scale": "bun core/scripts/operations/benchmark/bench-swap-hub-consensus-tps.ts --swaps 10000 --warmup 1000 --min-aggregate-account-consensus-tps 10000 --batch-size 20 --users 1000 --independent-hub-cohorts 16",

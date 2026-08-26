@@ -167,11 +167,29 @@ pub(crate) fn cancel_order(
     Ok(true)
 }
 
-fn ordered_ids(state: &BookState, side: Side) -> Vec<String> {
-    match side {
-        Side::Bid => state.bids.values().cloned().collect(),
-        Side::Ask => state.asks.values().cloned().collect(),
+fn next_indexed_maker<'a, F, I>(
+    state: &BookState,
+    taker: &AddOrder,
+    order_ids: I,
+    classify: &mut F,
+) -> Result<Option<BookOrder>, EntityKernelError>
+where
+    F: FnMut(&BookOrder) -> Result<MakerDisposition, EntityKernelError>,
+    I: Iterator<Item = &'a String>,
+{
+    for order_id in order_ids {
+        let order = state
+            .orders
+            .get(order_id)
+            .ok_or_else(|| EntityKernelError::orderbook("BOOK_ORDER_INDEX_MISSING"))?;
+        if !crosses(taker.side, &taker.price_ticks, &order.price_ticks) {
+            return Ok(None);
+        }
+        if classify(order)? == MakerDisposition::Eligible {
+            return Ok(Some(order.clone()));
+        }
     }
+    Ok(None)
 }
 
 fn next_maker<F>(
@@ -186,21 +204,10 @@ where
         Side::Bid => Side::Ask,
         Side::Ask => Side::Bid,
     };
-    for order_id in ordered_ids(state, maker_side) {
-        let order = state
-            .orders
-            .get(&order_id)
-            .cloned()
-            .ok_or_else(|| EntityKernelError::orderbook("BOOK_ORDER_INDEX_MISSING"))?;
-        if !crosses(taker.side, &taker.price_ticks, &order.price_ticks) {
-            return Ok(None);
-        }
-        match classify(&order)? {
-            MakerDisposition::Eligible => return Ok(Some(order)),
-            MakerDisposition::Suspended => continue,
-        }
+    match maker_side {
+        Side::Bid => next_indexed_maker(state, taker, state.bids.values(), classify),
+        Side::Ask => next_indexed_maker(state, taker, state.asks.values(), classify),
     }
-    Ok(None)
 }
 
 fn execution_qty(candidate: &BigInt, multiple: &BigInt) -> BigInt {
@@ -313,15 +320,16 @@ where
     if input.price_ticks <= BigInt::from(0) || state.orders.contains_key(&input.order_id) {
         return Err(EntityKernelError::orderbook("BOOK_ADD_INVALID"));
     }
-    let mut working = state.clone();
+    // The Entity transition owns this book value and drops it on any error.
+    // A second transactional clone here would make a sweep O(orders * offers).
     let mut events = Vec::new();
-    let matched = match_order(&mut working, &input, dimensions, &mut classify, &mut events)?;
+    let matched = match_order(state, &input, dimensions, &mut classify, &mut events)?;
     if matched.remaining > BigInt::from(0) && matched.blocking_order_id.is_none() {
         let multiple = exact_quote_lot_multiple(dimensions, &input.price_ticks)?;
         let resting = execution_qty(&matched.remaining, &multiple);
         if resting > BigInt::from(0) {
             add_resting(
-                &mut working,
+                state,
                 AddOrder {
                     qty_lots: resting,
                     ..input
@@ -335,7 +343,6 @@ where
             blocking_order_id: None,
         });
     }
-    *state = working;
     Ok(events)
 }
 

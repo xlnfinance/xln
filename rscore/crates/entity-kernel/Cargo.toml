@@ -5,6 +5,14 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+bench = []
+
+[[bin]]
+name = "rscore-orderbook-bench"
+path = "src/bin/rscore-orderbook-bench.rs"
+required-features = ["bench"]
+
 [dependencies]
 num-bigint.workspace = true
 sha2.workspace = true
