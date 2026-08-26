@@ -2,7 +2,6 @@ import { derived, get, readable, writable } from 'svelte/store';
 import type {
   RuntimeAdapterEntitySummary,
   RuntimeAdapterReadQuery,
-  RuntimeAdapterStatus,
   RuntimeAdapterViewFrame,
 } from '@xln/core/api/public/runtime-module';
 import type { StorageAccountDoc, StorageHead } from '@xln/core/storage/types';
@@ -40,6 +39,17 @@ import {
   RuntimeViewRefreshCoordinator,
   type RuntimeViewRefreshTarget,
 } from '../../../packages/runtime-client/src/runtime-view-refresh';
+import {
+  advanceRuntimeViewHeight,
+  createDisconnectedRuntimeViewState,
+  createEmptyRuntimeViewState,
+  createErrorRuntimeViewState,
+  createLoadingRuntimeViewState,
+  createSuccessRuntimeViewState,
+  runtimeViewErrorMessage,
+  selectRuntimeViewHeight,
+  type RuntimeViewState,
+} from '../../../packages/runtime-client/src/runtime-view-state';
 
 export {
   assertRuntimeViewIsLive,
@@ -56,20 +66,11 @@ export type { RuntimeViewHistoryScanState, RuntimeViewPageInfo };
 
 export const runtimeViewHeightRetryDelayMs = runtimeViewCatchupRetryDelayMs;
 
-export type RuntimeView = {
-  runtimeId: string;
-  mode: 'embedded' | 'remote';
-  authLevel: 'inspect' | 'admin' | null;
-  status: RuntimeAdapterStatus;
-  atHeight: number | null;
-  height: number;
-  loading: boolean;
-  error: string | null;
-  head: StorageHead | null;
-  frame: RuntimeAdapterViewFrame | null;
-  entities: RuntimeAdapterEntitySummary[];
-  activeEntityId: string;
-};
+export type RuntimeView = RuntimeViewState<
+  StorageHead,
+  RuntimeAdapterEntitySummary,
+  RuntimeAdapterViewFrame
+>;
 
 /**
  * Read one detached Entity projection without changing the workspace's active
@@ -214,26 +215,11 @@ export const resetRuntimeViewSelection = (): void => {
 
 const emptyRuntimeView = (
   atHeight = runtimeViewSelectionCoordinator.getSnapshot().atHeight,
-): RuntimeView => {
-  const handle = get(runtimeControllerHandle);
-  return {
-    runtimeId: handle.id,
-    mode: handle.mode,
-    authLevel: handle.authLevel,
-    status: handle.status,
-    atHeight,
-    height: atHeight ?? handle.height,
-    loading: false,
-    error: null,
-    head: null,
-    frame: null,
-    entities: [],
-    activeEntityId: '',
-  };
-};
-
-const errorMessage = (value: unknown): string =>
-  value instanceof Error ? value.message : String(value || 'RuntimeView refresh failed');
+): RuntimeView => createEmptyRuntimeViewState<
+  StorageHead,
+  RuntimeAdapterEntitySummary,
+  RuntimeAdapterViewFrame
+>(get(runtimeControllerHandle), atHeight);
 
 export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
 
@@ -253,24 +239,15 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
   const query = runtimeViewQueryAtHeight(inputQuery, expectedAtHeight);
   const requestStillCurrent = (): boolean =>
     runtimeViewRefreshCoordinator.isCurrent(refreshLease);
-  runtimeView.update((view) => ({
-    ...view,
-    runtimeId: handle.id,
-    mode: handle.mode,
-    authLevel: handle.authLevel,
-    status: handle.status,
-    atHeight: expectedAtHeight,
-    height: expectedAtHeight ?? handle.height,
-    loading: true,
-    error: null,
-  }));
+  runtimeView.update((view) =>
+    createLoadingRuntimeViewState(view, handle, expectedAtHeight));
 
   if (handle.status !== 'connected') {
-    const next: RuntimeView = {
-      ...emptyRuntimeView(expectedAtHeight),
-      loading: false,
-      error: 'Runtime adapter is not connected',
-    };
+    const next = createDisconnectedRuntimeViewState<
+      StorageHead,
+      RuntimeAdapterEntitySummary,
+      RuntimeAdapterViewFrame
+    >(handle, expectedAtHeight);
     if (requestStillCurrent()) {
       runtimeViewPageInfo.set(null);
       runtimeView.set(next);
@@ -286,20 +263,11 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
     if (!runtimeViewFrameMatchesAtHeight(frame, expectedAtHeight)) {
       throw new Error(`RuntimeView returned h${Number(frame.height || 0)} for selected h${expectedAtHeight}`);
     }
-    const next: RuntimeView = {
-      runtimeId: handle.id,
-      mode: handle.mode,
-      authLevel: handle.authLevel,
-      status: handle.status,
-      atHeight: expectedAtHeight,
-      height: expectedAtHeight ?? Math.max(Number(handle.height || 0), Number(frame.height || 0), Number(head.latestHeight || 0)),
-      loading: false,
-      error: null,
-      head,
-      frame,
-      entities: frame.entities ?? [],
-      activeEntityId: String(frame.activeEntityId || frame.activeEntity?.summary?.entityId || '').trim().toLowerCase(),
-    };
+    const next = createSuccessRuntimeViewState<
+      StorageHead,
+      RuntimeAdapterEntitySummary,
+      RuntimeAdapterViewFrame
+    >(handle, expectedAtHeight, head, frame);
     // A superseded read still owns its result. Latest-wins applies only to the
     // shared store; callers must never receive another request's transient state.
     if (requestStillCurrent()) {
@@ -309,22 +277,16 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
     }
     return next;
   } catch (error) {
-    const next: RuntimeView = {
-      ...emptyRuntimeView(expectedAtHeight),
-      loading: false,
-      error: errorMessage(error),
-    };
+    const current = get(runtimeControllerHandle);
+    const next = createErrorRuntimeViewState<
+      StorageHead,
+      RuntimeAdapterEntitySummary,
+      RuntimeAdapterViewFrame
+    >(current, expectedAtHeight, error);
     // A superseded read must not overwrite a newer RuntimeView, and must not
     // reject: void click-handlers and height catch-up would become unhandled
     // `runtime adapter socket closed` pageerrors during a runtime switch.
     if (!requestStillCurrent()) return next;
-    const current = get(runtimeControllerHandle);
-    next.runtimeId = current.id;
-    next.mode = current.mode;
-    next.authLevel = current.authLevel;
-    next.status = current.status;
-    next.atHeight = expectedAtHeight;
-    next.height = expectedAtHeight ?? current.height;
     runtimeViewPageInfo.set(null);
     runtimeView.set(next);
     return next;
@@ -361,7 +323,7 @@ const runtimeViewCatchup = new RuntimeViewCatchupCoordinator({
     runtimeView.update((view) => ({ ...view, loading: false, error: message }));
   },
   reportRefreshError: (error) => {
-    errorLog.log(errorMessage(error), 'Runtime View Catch-up', error);
+    errorLog.log(runtimeViewErrorMessage(error), 'Runtime View Catch-up', error);
   },
   scheduleRetry: (listener, delayMs) => setTimeout(listener, delayMs),
   cancelRetry: (timer) => clearTimeout(timer),
@@ -382,15 +344,8 @@ export const setRuntimeViewAtHeight = async (value: number | null): Promise<Runt
   runtimeViewSelectionCoordinator.setAtHeight(atHeight);
   runtimeViewCatchup.reset();
   runtimeViewPageInfo.set(null);
-  runtimeView.update((view) => ({
-    ...view,
-    atHeight,
-    height: atHeight ?? get(runtimeControllerHandle).height,
-    loading: true,
-    error: null,
-    frame: null,
-    entities: [],
-  }));
+  runtimeView.update((view) =>
+    selectRuntimeViewHeight(view, atHeight, get(runtimeControllerHandle).height));
   return refreshRuntimeView(currentRuntimeViewQuery());
 };
 
@@ -404,9 +359,6 @@ runtimeAdapter.subscribe(() => {
 
 runtimeAdapterHeight.subscribe((height) => {
   const nextHeight = Math.max(0, Math.floor(Number(height || 0)));
-  runtimeView.update((view) => ({
-    ...view,
-    height: view.atHeight ?? Math.max(view.height, nextHeight),
-  }));
+  runtimeView.update((view) => advanceRuntimeViewHeight(view, nextHeight));
   runtimeViewCatchup.observeHeight(nextHeight);
 });

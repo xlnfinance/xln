@@ -87,6 +87,10 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/runtime-client/src/runtime-view-selection.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
+      .toContain('framework-neutral RuntimeView snapshot and height transitions');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
+      .toContain('frontend/packages/runtime-client/src/runtime-view-state.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('tab-confined Runtime authority and rollback-safe adapter selection');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('framework-neutral Runtime handle identity, permissions, and readiness');

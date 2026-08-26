@@ -333,7 +333,7 @@ behavior pass focused checks.
 
 ### WP5 — Establish browser and Runtime-client boundaries
 
-**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, ACTIVATION, QUERY, OBSERVER, CATCH-UP, VIEW-SELECTION, VIEW-REFRESH, AND VIEW-MODEL BOUNDARIES SHARED`
+**Status:** `IN PROGRESS — RESET, REQUEST, SESSION, HANDLE, BOOT, TAB-OWNERSHIP, SELECTION, ACTIVATION, QUERY, OBSERVER, CATCH-UP, VIEW-SELECTION, VIEW-REFRESH, VIEW-STATE, AND VIEW-MODEL BOUNDARIES SHARED`
 
 - Extract validated storage, subscriptions, listener cleanup, workers, and
   service-worker integration into `packages/browser`.
@@ -499,6 +499,17 @@ Runtime identity and mode changes, complete and ABA selection changes,
 subscriber ordering, Runtime ABA invalidation, and thin Svelte wiring. The
 wallet local check covers 437 files with zero unsafe-type findings.
 
+The next `packages/runtime-client` slice now owns deterministic RuntimeView
+snapshot transitions: empty, loading, disconnected, successful, and failed
+states; live committed-height resolution; historical-height pinning; Entity
+identity normalization; selection clearing; and monotonic live-height advance.
+The canonical Svelte adapter still owns concrete typed reads, writable
+publication, page metadata, Runtime subscriptions, and catch-up effects. Ten
+direct tests cover live and historical empty states, retained loading data,
+disconnection, live and historical success, error normalization, height
+selection, committed-height advance, and thin Svelte wiring. The wallet local
+check covers 438 files with zero unsafe-type findings.
+
 ### WP6 — Migrate wallet by flow
 
 **Status:** `IN PROGRESS — TESTNET LAUNCHER AND DISPOSABLE IDENTITIES IMPLEMENTED`
@@ -640,8 +651,8 @@ any mismatch. Never compile on production.
    Runtime selection concurrency, adapter activation, and Runtime handle
    projection are shared; cached Runtime projection reads plus the RuntimeView
    query, pagination, height model, committed-height catch-up, and RuntimeView
-   selection snapshots and refresh leases are also shared. Latest-read Runtime
-   query subscriptions
+   selection snapshots, refresh leases, and snapshot transitions are also
+   shared. Latest-read Runtime query subscriptions
    expose stable external-store snapshots while concrete source wiring, core
    result typing, and live RuntimeView publication remain with the canonical
    Svelte adapter until a complete React consumer exists.
