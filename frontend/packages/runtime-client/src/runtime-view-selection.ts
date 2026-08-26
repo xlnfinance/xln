@@ -16,7 +16,7 @@ export type RuntimeViewSelection = Readonly<{
 const normalizePage = (value: unknown): number =>
   Math.max(0, Math.floor(Number(value) || 0));
 
-const selectionsEqual = (
+export const runtimeViewSelectionsEqual = (
   left: RuntimeViewSelection,
   right: RuntimeViewSelection,
 ): boolean => left.revision === right.revision &&
@@ -24,6 +24,10 @@ const selectionsEqual = (
   left.accountsPage === right.accountsPage &&
   left.booksPage === right.booksPage &&
   left.atHeight === right.atHeight;
+
+export type RuntimeViewSelectionCoordinatorDependencies = Readonly<{
+  beforePublish?: () => void;
+}>;
 
 export class RuntimeViewSelectionCoordinator {
   private snapshot: RuntimeViewSelection = {
@@ -35,6 +39,10 @@ export class RuntimeViewSelectionCoordinator {
   };
   private readonly listeners = new Set<() => void>();
 
+  constructor(
+    private readonly dependencies: RuntimeViewSelectionCoordinatorDependencies = {},
+  ) {}
+
   readonly getSnapshot = (): RuntimeViewSelection => this.snapshot;
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -43,7 +51,7 @@ export class RuntimeViewSelectionCoordinator {
   };
 
   readonly matches = (expected: RuntimeViewSelection): boolean =>
-    selectionsEqual(this.snapshot, expected);
+    runtimeViewSelectionsEqual(this.snapshot, expected);
 
   readonly publicationMatches = (
     expectedGeneration: number,
@@ -98,6 +106,7 @@ export class RuntimeViewSelectionCoordinator {
   };
 
   private publish(snapshot: RuntimeViewSelection): void {
+    this.dependencies.beforePublish?.();
     this.snapshot = snapshot;
     for (const listener of this.listeners) listener();
   }

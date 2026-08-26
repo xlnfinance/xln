@@ -131,12 +131,11 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).toContain('runtimeQueryClient.readViewFrame(query)');
   expect(source).toContain('runtimeControllerHandle');
   expect(source).toContain('export const resetRuntimeView');
-  expect(source).toContain('runtimeViewRefreshId += 1;');
-  expect(source).toContain('const expectedRuntimeId = handle.id;');
-  expect(source).toContain('const expectedRuntimeMode = handle.mode;');
+  expect(source).toContain('new RuntimeViewRefreshCoordinator({');
+  expect(source).toContain('const refreshLease = runtimeViewRefreshCoordinator.begin();');
   expect(source).toContain('const requestStillCurrent = (): boolean =>');
-  expect(source).toContain('current.id === expectedRuntimeId');
-  expect(source).toContain('current.mode === expectedRuntimeMode');
+  expect(source).toContain('runtimeViewRefreshCoordinator.isCurrent(refreshLease)');
+  expect(source).not.toContain('let runtimeViewRefreshId');
   expect(source).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
   expect(source).toContain('if (!requestStillCurrent()) return next;');
   expect(source).not.toContain('if (!requestStillCurrent()) throw error;');

@@ -145,7 +145,8 @@ describe('runtime-client RuntimeView selection coordinator', () => {
     expect(boundary).not.toContain('svelte');
     expect(boundary).not.toContain('@xln/core');
     expect(boundary).not.toContain('runtimeViewRefreshId');
-    expect(store).toContain('new RuntimeViewSelectionCoordinator()');
+    expect(store).toContain('new RuntimeViewSelectionCoordinator({');
+    expect(store).toContain('beforePublish: runtimeViewRefreshCoordinator.invalidate');
     expect(store).toContain('const runtimeViewSelectionStore = readable(');
     expect(store).toContain('export const runtimeViewActiveEntityId = derived(');
     expect(store).toContain('runtimeViewSelectionCoordinator.setAtHeight(atHeight);');

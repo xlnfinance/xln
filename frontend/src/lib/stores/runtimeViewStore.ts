@@ -36,6 +36,10 @@ import {
   type RuntimeViewPageKind,
   type RuntimeViewSelection,
 } from '../../../packages/runtime-client/src/runtime-view-selection';
+import {
+  RuntimeViewRefreshCoordinator,
+  type RuntimeViewRefreshTarget,
+} from '../../../packages/runtime-client/src/runtime-view-refresh';
 
 export {
   assertRuntimeViewIsLive,
@@ -138,7 +142,21 @@ export const readRuntimeSwapHistory = async (
   );
 };
 
-const runtimeViewSelectionCoordinator = new RuntimeViewSelectionCoordinator();
+const runtimeViewRefreshCoordinator: RuntimeViewRefreshCoordinator =
+  new RuntimeViewRefreshCoordinator({
+    readTarget: (): RuntimeViewRefreshTarget => {
+      const handle = get(runtimeControllerHandle);
+      return {
+        runtimeId: handle.id,
+        mode: handle.mode,
+        selection: runtimeViewSelectionCoordinator.getSnapshot(),
+      };
+    },
+  });
+const runtimeViewSelectionCoordinator: RuntimeViewSelectionCoordinator =
+  new RuntimeViewSelectionCoordinator({
+    beforePublish: runtimeViewRefreshCoordinator.invalidate,
+  });
 const runtimeViewSelectionStore = readable(
   runtimeViewSelectionCoordinator.getSnapshot(),
   (set) => {
@@ -164,7 +182,6 @@ export const runtimeViewPageInfo = writable<RuntimeViewPageInfo | null>(null);
 export const runtimeViewHistoryScan = writable<RuntimeViewHistoryScanState>(
   emptyRuntimeViewHistoryScan(),
 );
-let runtimeViewRefreshId = 0;
 export type { RuntimeViewSelection };
 
 export const readRuntimeViewSelection = runtimeViewSelectionCoordinator.getSnapshot;
@@ -182,18 +199,15 @@ export const runtimeViewPublicationMatches = (
 );
 
 export const setRuntimeViewActiveEntityId = (entityId: string): void => {
-  if (!runtimeViewSelectionCoordinator.setActiveEntityId(entityId)) return;
-  runtimeViewRefreshId += 1;
+  runtimeViewSelectionCoordinator.setActiveEntityId(entityId);
 };
 
 export const setRuntimeViewPage = (kind: RuntimeViewPageKind, pageIndex: number): void => {
-  if (!runtimeViewSelectionCoordinator.setPage(kind, pageIndex)) return;
-  runtimeViewRefreshId += 1;
+  runtimeViewSelectionCoordinator.setPage(kind, pageIndex);
 };
 
 export const resetRuntimeViewSelection = (): void => {
   runtimeViewSelectionCoordinator.resetNavigation();
-  runtimeViewRefreshId += 1;
   runtimeViewPageInfo.set(null);
   runtimeViewHistoryScan.set(emptyRuntimeViewHistoryScan());
 };
@@ -224,27 +238,21 @@ const errorMessage = (value: unknown): string =>
 export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
 
 export const resetRuntimeView = (): void => {
-  runtimeViewRefreshId += 1;
   runtimeViewCatchup.reset();
-  runtimeViewSelectionCoordinator.setAtHeight(null);
+  if (!runtimeViewSelectionCoordinator.setAtHeight(null)) {
+    runtimeViewRefreshCoordinator.invalidate();
+  }
   runtimeViewPageInfo.set(null);
   runtimeView.set(emptyRuntimeView());
 };
 
 export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {}): Promise<RuntimeView> => {
-  const refreshId = ++runtimeViewRefreshId;
+  const refreshLease = runtimeViewRefreshCoordinator.begin();
   const handle = get(runtimeControllerHandle);
-  const expectedRuntimeId = handle.id;
-  const expectedRuntimeMode = handle.mode;
-  const expectedAtHeight = runtimeViewSelectionCoordinator.getSnapshot().atHeight;
+  const expectedAtHeight = refreshLease.selection.atHeight;
   const query = runtimeViewQueryAtHeight(inputQuery, expectedAtHeight);
-  const requestStillCurrent = (): boolean => {
-    const current = get(runtimeControllerHandle);
-    return refreshId === runtimeViewRefreshId &&
-      current.id === expectedRuntimeId &&
-      current.mode === expectedRuntimeMode &&
-      runtimeViewSelectionCoordinator.getSnapshot().atHeight === expectedAtHeight;
-  };
+  const requestStillCurrent = (): boolean =>
+    runtimeViewRefreshCoordinator.isCurrent(refreshLease);
   runtimeView.update((view) => ({
     ...view,
     runtimeId: handle.id,
@@ -372,7 +380,6 @@ export const setRuntimeViewAtHeight = async (value: number | null): Promise<Runt
   }
 
   runtimeViewSelectionCoordinator.setAtHeight(atHeight);
-  runtimeViewRefreshId += 1;
   runtimeViewCatchup.reset();
   runtimeViewPageInfo.set(null);
   runtimeView.update((view) => ({
