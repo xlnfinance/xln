@@ -585,12 +585,14 @@ dependencies = [
 name = "xln-rscore-entity-kernel"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "num-bigint",
  "serde",
  "serde_json",
  "sha2",
  "sha3",
  "thiserror",
+ "xln-rscore-batch",
  "xln-rscore-engine",
  "xln-rscore-protocol",
 ]

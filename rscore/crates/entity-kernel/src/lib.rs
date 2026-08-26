@@ -11,12 +11,16 @@ mod error;
 mod kernel;
 mod orderbook;
 mod paybook;
+mod resident;
 mod types;
 
 pub use error::EntityKernelError;
 pub use kernel::apply_entity_kernel;
 pub use orderbook::{
     BookOrder, BookState, OrderbookState, PairDimensions, PairPolicy, SameJOffer, Side,
+};
+pub use resident::{
+    ResidentEntityError, ResidentEntityRequest, ResidentEntityResult, apply_resident_entity_round,
 };
 pub use types::{
     AccountProposalWork, CommittedAccountTransition, DeterministicContext, EntityKernelCommitments,

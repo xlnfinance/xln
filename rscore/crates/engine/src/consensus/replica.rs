@@ -121,6 +121,9 @@ pub struct PendingFrame {
     /// `candidateEffects` in the prepared commit; the proposal result carries
     /// none, and the ACK path releases them.
     pub(crate) outputs: Vec<crate::AccountOutput>,
+    /// Exact output rows in `frame.txs` order. This is rebuilt by replay on
+    /// restore, so the checkpoint stores no duplicate effect payload.
+    pub(crate) outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
     /// What this frame's transactions said they did, held with the outputs
     /// and released on the same ACK: the Entity frame that publishes the
     /// effects is the one that records the events.
@@ -824,13 +827,19 @@ impl AccountConsensus {
         }
         // The replay reproduces the effects too, so a restart does not lose
         // what the pending frame will release when it is acked.
-        let (candidate, outputs, events) = replay_pending(&account.replica, &pending, swap_market)?;
+        let PendingReplay {
+            candidate,
+            outputs,
+            outputs_by_tx,
+            events,
+        } = replay_pending(&account.replica, &pending, swap_market)?;
         account.pending = Some(PendingFrame {
             frame: pending.frame,
             state_hash: pending.state_hash,
             hanko: pending.hanko,
             candidate,
             outputs,
+            outputs_by_tx,
             events,
             bundled_ack: pending.bundled_ack,
             proposal_dispute: pending.proposal_dispute,
@@ -855,11 +864,18 @@ fn verify_restored_outbound_ack(
 
 /// Replay a saved proposal against the committed replica and prove it is the
 /// same frame: same transactions applied, same account state root, same hash.
+struct PendingReplay {
+    candidate: AccountReplica,
+    outputs: Vec<crate::AccountOutput>,
+    outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
+    events: Vec<String>,
+}
+
 fn replay_pending(
     replica: &AccountReplica,
     pending: &PendingFrameSnapshot,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
-) -> Result<(AccountReplica, Vec<crate::AccountOutput>, Vec<String>), StateError> {
+) -> Result<PendingReplay, StateError> {
     let context = crate::AccountExecutionContext::with_market(
         pending.frame.timestamp,
         pending.frame.timestamp,
@@ -873,6 +889,7 @@ fn replay_pending(
         mut candidate,
         applied,
         outputs,
+        outputs_by_tx,
         events,
         ..
     } = execute_window(replica, proposer, pending.frame.txs.clone(), &context, true)?;
@@ -894,7 +911,12 @@ fn replay_pending(
             "PENDING_FRAME_HASH_MISMATCH".to_string(),
         ));
     }
-    Ok((candidate, outputs, events))
+    Ok(PendingReplay {
+        candidate,
+        outputs,
+        outputs_by_tx,
+        events,
+    })
 }
 
 impl AccountConsensus {

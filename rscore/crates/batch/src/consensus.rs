@@ -456,6 +456,10 @@ pub struct ProposedRow {
     /// the moment the window executed.
     pub events: Vec<String>,
     pub outputs: Vec<AccountOutput>,
+    /// Exact outputs of each transaction in `frame.txs` order. The process
+    /// wire keeps its existing flattened output field; resident Entity
+    /// composition consumes this lossless form directly.
+    pub outputs_by_tx: Vec<Vec<AccountOutput>>,
     /// Present when this proposal also carries the acknowledgement this side
     /// owed, which makes it a `frame_ack` on the wire.
     pub bundled_ack: Option<xln_rscore_engine::OutboundAck>,
@@ -572,6 +576,7 @@ pub(crate) fn proposal_row(
                     dispute: proposed.dispute,
                     events: proposed.events,
                     outputs: proposed.outputs,
+                    outputs_by_tx: proposed.outputs_by_tx,
                     bundled_ack: proposed.bundled_ack,
                 }),
                 dropped: dropped_rows(account_id, &proposed.dropped)?,

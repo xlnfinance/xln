@@ -1382,20 +1382,37 @@ fn outputs_are_held_until_the_peer_acks() {
     let hashlock_bytes: [u8; 32] = Keccak256::digest(secret_bytes).into();
     let hashlock =
         HtlcHashlock::parse(&format!("0x{}", hex::encode(hashlock_bytes))).expect("hashlock");
+    let second_secret_bytes = [0x6b_u8; 32];
+    let second_secret = format!("0x{}", hex::encode(second_secret_bytes));
+    let second_hashlock_bytes: [u8; 32] = Keccak256::digest(second_secret_bytes).into();
+    let second_hashlock = HtlcHashlock::parse(&format!("0x{}", hex::encode(second_hashlock_bytes)))
+        .expect("second hashlock");
 
     // Height 1: LEFT locks, both sides commit.
     left.account
         .admit_txs(
-            vec![AccountTx::HtlcLock(HtlcLockTx {
-                lock_id: "lock-1".to_string(),
-                hashlock,
-                timelock: Big::from(1_700_000_900_000_u64),
-                reveal_before_height: 100,
-                amount: Big::from(50),
-                token_id: TokenId::new(1).expect("token"),
-                delivery_mode: None,
-                envelope: None,
-            })],
+            vec![
+                AccountTx::HtlcLock(HtlcLockTx {
+                    lock_id: "lock-1".to_string(),
+                    hashlock,
+                    timelock: Big::from(1_700_000_900_000_u64),
+                    reveal_before_height: 100,
+                    amount: Big::from(50),
+                    token_id: TokenId::new(1).expect("token"),
+                    delivery_mode: None,
+                    envelope: None,
+                }),
+                AccountTx::HtlcLock(HtlcLockTx {
+                    lock_id: "lock-2".to_string(),
+                    hashlock: second_hashlock,
+                    timelock: Big::from(1_700_000_900_000_u64),
+                    reveal_before_height: 100,
+                    amount: Big::from(30),
+                    token_id: TokenId::new(1).expect("token"),
+                    delivery_mode: None,
+                    envelope: None,
+                }),
+            ],
             "test",
         )
         .expect("admit lock");
@@ -1437,10 +1454,18 @@ fn outputs_are_held_until_the_peer_acks() {
     right
         .account
         .admit_txs(
-            vec![AccountTx::HtlcResolve(HtlcResolveTx {
-                lock_id: "lock-1".to_string(),
-                outcome: HtlcResolveOutcome::Secret { secret },
-            })],
+            vec![
+                AccountTx::HtlcResolve(HtlcResolveTx {
+                    lock_id: "lock-1".to_string(),
+                    outcome: HtlcResolveOutcome::Secret { secret },
+                }),
+                AccountTx::HtlcResolve(HtlcResolveTx {
+                    lock_id: "lock-2".to_string(),
+                    outcome: HtlcResolveOutcome::Secret {
+                        secret: second_secret,
+                    },
+                }),
+            ],
             "test",
         )
         .expect("admit resolve");
@@ -1455,6 +1480,13 @@ fn outputs_are_held_until_the_peer_acks() {
         panic!("expected a proposal");
     };
     let resolve = *resolve;
+    let pending_snapshot = right.account.consensus_snapshot();
+    right.account = AccountConsensus::restore_from_checkpoint(
+        right.account.replica().clone(),
+        pending_snapshot,
+        &market(),
+    )
+    .expect("restore pending resolve before ack");
 
     // LEFT holds the peer's signed frame, so its own effects are released at
     // commit.
@@ -1468,7 +1500,10 @@ fn outputs_are_held_until_the_peer_acks() {
     )
     .expect("apply resolve");
     let IncomingOutcome::Committed {
-        ack_hanko, outputs, ..
+        ack_hanko,
+        outputs,
+        committed_frame,
+        ..
     } = outcome
     else {
         panic!("expected a commit");
@@ -1478,6 +1513,26 @@ fn outputs_are_held_until_the_peer_acks() {
             .iter()
             .any(|output| matches!(output, AccountOutput::HtlcSecret { .. })),
         "{outputs:?}",
+    );
+    assert_eq!(committed_frame.outputs_by_tx.len(), 2);
+    for (row, expected_lock_id) in committed_frame
+        .outputs_by_tx
+        .iter()
+        .zip(["lock-1", "lock-2"])
+    {
+        assert!(
+            matches!(row.as_slice(), [AccountOutput::HtlcSecret { lock_id, .. }] if lock_id == expected_lock_id),
+            "{row:?}",
+        );
+    }
+    assert_eq!(
+        committed_frame
+            .outputs_by_tx
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>(),
+        outputs,
     );
 
     // RIGHT only learns the frame is committed when the ack arrives, and that
@@ -1491,7 +1546,12 @@ fn outputs_are_held_until_the_peer_acks() {
         None,
     )
     .expect("ack resolve");
-    let xln_rscore_engine::AckOutcome::Committed { outputs, .. } = ack else {
+    let xln_rscore_engine::AckOutcome::Committed {
+        outputs,
+        committed_frame,
+        ..
+    } = ack
+    else {
         panic!("expected an ack commit, got {ack:?}");
     };
     assert!(
@@ -1499,6 +1559,16 @@ fn outputs_are_held_until_the_peer_acks() {
             .iter()
             .any(|output| matches!(output, AccountOutput::HtlcSecret { .. })),
         "{outputs:?}",
+    );
+    assert_eq!(committed_frame.outputs_by_tx.len(), 2);
+    assert_eq!(
+        committed_frame
+            .outputs_by_tx
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>(),
+        outputs,
     );
 }
 

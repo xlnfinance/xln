@@ -77,6 +77,11 @@ pub struct ProposedFrame {
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
     pub events: Vec<String>,
     pub outputs: Vec<AccountOutput>,
+    /// Exact outputs of each applied transaction in `frame.txs` order.
+    /// Entity follow-ups are transaction-scoped; the flattened `outputs`
+    /// field cannot recover that binding when a frame contains repeated tx
+    /// kinds or optional outputs.
+    pub outputs_by_tx: Vec<Vec<AccountOutput>>,
     /// The acknowledgement this proposal carries, when it carries one. The
     /// publisher sends `frame_ack` rather than `frame` in that case, and must
     /// be told so by the verdict.
@@ -122,6 +127,7 @@ pub(crate) struct WindowExecution {
     pub candidate: AccountReplica,
     pub applied: Vec<AccountTx>,
     pub outputs: Vec<AccountOutput>,
+    pub outputs_by_tx: Vec<Vec<AccountOutput>>,
     /// What each applied transaction said it did, in transaction order. The
     /// Entity frame commits these strings, so they are part of the transition,
     /// not a log: a cutover that dropped them would sign a different frame.
@@ -139,6 +145,7 @@ pub(crate) fn execute_window(
     let mut candidate = base.clone();
     let mut applied = Vec::with_capacity(window.len());
     let mut outputs = Vec::new();
+    let mut outputs_by_tx = Vec::with_capacity(window.len());
     let mut events = Vec::new();
     let mut dropped = Vec::new();
     for (index, admitted_tx) in window.into_iter().enumerate() {
@@ -148,9 +155,17 @@ pub(crate) fn execute_window(
                 .map_err(|error| StateError::TransitionFailed(error.to_string()))?;
         match transition.verdict() {
             AccountVerdict::Applied => {
-                outputs.extend_from_slice(transition.outputs());
-                events.extend(transition.events().iter().cloned());
-                candidate = transition.committed().expect("applied transition commits");
+                let tx_outputs = transition.outputs().to_vec();
+                let tx_events = transition.events().to_vec();
+                let committed = transition.committed().ok_or_else(|| {
+                    StateError::TransitionFailed(
+                        "ACCOUNT_APPLIED_TRANSITION_WITHOUT_CANDIDATE".to_string(),
+                    )
+                })?;
+                outputs.extend_from_slice(&tx_outputs);
+                outputs_by_tx.push(tx_outputs);
+                events.extend(tx_events);
+                candidate = committed;
                 applied.push(tx);
             }
             AccountVerdict::Rejected(rejection) => {
@@ -171,6 +186,7 @@ pub(crate) fn execute_window(
                         candidate,
                         applied,
                         outputs,
+                        outputs_by_tx,
                         events,
                         dropped,
                     });
@@ -182,6 +198,7 @@ pub(crate) fn execute_window(
         candidate,
         applied,
         outputs,
+        outputs_by_tx,
         events,
         dropped,
     })
@@ -240,6 +257,7 @@ pub fn propose_account_frame(
         mut candidate,
         applied,
         outputs,
+        outputs_by_tx,
         events,
         dropped,
     } = execution;
@@ -293,6 +311,7 @@ pub fn propose_account_frame(
     let hanko = identity.sign_frame(&state_hash)?;
     let published_events = events.clone();
     let published_outputs = outputs.clone();
+    let published_outputs_by_tx = outputs_by_tx.clone();
     account.set_pending(PendingFrame {
         events,
         // `set_pending` decides whether this proposal carries the ack we owe.
@@ -303,6 +322,7 @@ pub fn propose_account_frame(
         hanko: hanko.clone(),
         candidate,
         outputs,
+        outputs_by_tx,
     });
     let bundled_ack = account
         .pending()
@@ -315,6 +335,7 @@ pub fn propose_account_frame(
         dispute: proposal_dispute,
         events: published_events,
         outputs: published_outputs,
+        outputs_by_tx: published_outputs_by_tx,
         bundled_ack,
     })))
 }

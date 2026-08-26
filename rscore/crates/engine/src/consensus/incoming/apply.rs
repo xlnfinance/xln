@@ -54,6 +54,13 @@ pub struct ReceiverClock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommittedFrameEvidence {
     pub frame: AccountFrame,
+    /// Domain of the resident Account that committed this frame. The frame
+    /// body does not carry identity metadata, but Entity HTLC bindings require
+    /// the exact domain and must not receive it as an unverified parent hint.
+    pub domain: crate::AccountDomain,
+    /// Exact outputs of each transaction in `frame.txs` order. Entity logic
+    /// must not infer this association from output kind or cardinality.
+    pub outputs_by_tx: Vec<Vec<AccountOutput>>,
     pub committed_via_new_frame: bool,
 }
 
@@ -308,6 +315,7 @@ pub fn apply_incoming_frame(
         mut candidate,
         applied,
         outputs,
+        outputs_by_tx,
         events,
         dropped,
     } = execution;
@@ -372,6 +380,7 @@ pub fn apply_incoming_frame(
             account.refresh_ack_dispute_draft(&candidate, &transformer, frame.by_left)?
         }
     };
+    let domain = candidate.state().identity().domain().clone();
     account.commit_from_peer(
         candidate,
         &frame,
@@ -398,6 +407,8 @@ pub fn apply_incoming_frame(
         ack_dispute,
         committed_frame: Box::new(CommittedFrameEvidence {
             frame,
+            domain,
+            outputs_by_tx,
             committed_via_new_frame: true,
         }),
     })
@@ -480,7 +491,9 @@ pub fn apply_incoming_ack(
             reason: "ACCOUNT_PEER_ACK_HANKO_MISSING".to_string(),
         });
     };
-    let pending = account.pending().expect("pending height checked above");
+    let pending = account.pending().cloned().ok_or_else(|| {
+        StateError::TransitionFailed("ACCOUNT_PENDING_DISAPPEARED_DURING_ACK".to_string())
+    })?;
     if let Some(reason) = counterparty_dispute_requirement_error(
         account.dispute().map(|draft| &draft.proof_body_hash),
         account.counterparty_dispute(),
@@ -504,8 +517,9 @@ pub fn apply_incoming_ack(
     if let Some(dispute) = dispute {
         account.store_counterparty_dispute(dispute);
     }
-    let pending = account.pending().expect("pending checked above").clone();
+    let domain = pending.candidate.state().identity().domain().clone();
     let outputs = pending.outputs;
+    let outputs_by_tx = pending.outputs_by_tx;
     let events = pending.events;
     account.commit_from_ack(
         pending.candidate,
@@ -521,6 +535,8 @@ pub fn apply_incoming_ack(
         events,
         committed_frame: Box::new(CommittedFrameEvidence {
             frame: pending.frame,
+            domain,
+            outputs_by_tx,
             committed_via_new_frame: false,
         }),
     })
