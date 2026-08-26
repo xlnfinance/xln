@@ -98,6 +98,12 @@ fn sequential_slots<V: Clone, const N: usize>(
     slots.map(SlotWork::apply)
 }
 
+fn sequential_slot_vec<V: Clone>(
+    slots: Vec<SlotWork<V>>,
+) -> Vec<Result<crate::SlotOutcome<V>, crate::PersistentRadixMapError>> {
+    slots.into_iter().map(SlotWork::apply).collect()
+}
+
 #[test]
 fn two_level_batch_matches_serial_with_compressed_children() {
     let mut base = PersistentRadixMap::empty();
@@ -162,4 +168,90 @@ fn two_level_batch_matches_serial_for_large_replacements_and_inserts() {
         let byte = (index as u8).wrapping_add(17);
         assert_eq!(batched.get(&key), Some(&digest(byte)));
     }
+}
+
+#[test]
+fn three_level_batch_matches_serial_across_every_prefix() {
+    let mut base = PersistentRadixMap::empty();
+    for prefix in 0_u16..4096 {
+        let key = vec![(prefix >> 4) as u8, ((prefix as u8) & 0x0f) << 4, 0x55];
+        base = base
+            .updated(key, digest(prefix as u8), digest(prefix as u8))
+            .expect("base");
+    }
+    let updates = (0_u16..4096)
+        .map(|prefix| {
+            let key = vec![
+                (prefix >> 4) as u8,
+                (((prefix as u8) & 0x0f) << 4) | 0x0a,
+                0x55,
+            ];
+            let byte = (prefix as u8).wrapping_add(37);
+            (key, digest(byte), digest(byte))
+        })
+        .collect::<Vec<_>>();
+    let mut serial = base.clone();
+    for (key, value, value_digest) in updates.clone() {
+        serial = serial
+            .updated(key, value, value_digest)
+            .expect("serial update");
+    }
+    let batched = base
+        .updated_batch_three_levels(updates, sequential_slot_vec)
+        .expect("three-level update");
+    assert_eq!(batched.len(), serial.len());
+    assert_eq!(batched.root_hash(), serial.root_hash());
+}
+
+#[test]
+fn three_level_batch_builds_an_empty_tree_in_parallel_shape() {
+    let updates = (0_u16..4096)
+        .map(|prefix| {
+            let key = vec![(prefix >> 4) as u8, ((prefix as u8) & 0x0f) << 4, 0x55];
+            (key, digest(prefix as u8), digest(prefix as u8))
+        })
+        .collect::<Vec<_>>();
+    let mut serial = PersistentRadixMap::empty();
+    for (key, value, value_digest) in updates.clone() {
+        serial = serial
+            .updated(key, value, value_digest)
+            .expect("serial update");
+    }
+    let batched = PersistentRadixMap::empty()
+        .updated_batch_three_levels(updates, sequential_slot_vec)
+        .expect("three-level update");
+    assert_eq!(batched.len(), serial.len());
+    assert_eq!(batched.root_hash(), serial.root_hash());
+}
+
+#[test]
+fn three_level_batch_matches_serial_with_compressed_children_and_replacements() {
+    let mut base = PersistentRadixMap::empty();
+    for (key, byte) in [
+        (vec![0x12, 0x34], 1),
+        (vec![0x12, 0x3f], 2),
+        (vec![0x12, 0x40], 3),
+        (vec![0xfe, 0xdc], 4),
+    ] {
+        base = base.updated(key, digest(byte), digest(byte)).expect("base");
+    }
+    let updates = vec![
+        (vec![0x12, 0x34], digest(11), digest(11)),
+        (vec![0x12, 0x3a], digest(12), digest(12)),
+        (vec![0x12, 0x4f], digest(13), digest(13)),
+        (vec![0xab, 0xcd], digest(14), digest(14)),
+    ];
+    let mut serial = base.clone();
+    for (key, value, value_digest) in updates.clone() {
+        serial = serial
+            .updated(key, value, value_digest)
+            .expect("serial update");
+    }
+    let batched = base
+        .updated_batch_three_levels(updates, sequential_slot_vec)
+        .expect("three-level update");
+    assert_eq!(batched.len(), serial.len());
+    assert_eq!(batched.root_hash(), serial.root_hash());
+    assert_eq!(batched.get(&[0x12, 0x34]), Some(&digest(11)));
+    assert_eq!(batched.get(&[0xab, 0xcd]), Some(&digest(14)));
 }

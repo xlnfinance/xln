@@ -26,7 +26,7 @@ use crate::checkpoint::{
     AccountCheckpointRows, AccountRestore, AccountsCheckpoint, CheckpointExpectation,
     CheckpointToken, account_rows,
 };
-use crate::fanout::map_accounts;
+use crate::parallel::map_accounts;
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, CandidateId, EngineGeneration};
 
@@ -618,6 +618,7 @@ pub struct StatefulConsensusEngine {
     revision: u64,
     candidate_attempt: u64,
     pool: ThreadPool,
+    account_shards: crate::parallel::AccountShardPlan,
     accounts: PersistentRadixMap<AccountConsensus>,
     /// The accounts tree as of the last checkpoint the runtime took, so the
     /// next checkpoint ships only what moved. The runtime asks for this every
@@ -662,11 +663,13 @@ impl StatefulConsensusEngine {
             .thread_name(|index| format!("rscore-consensus-{index}"))
             .build()
             .map_err(|error| BatchError::ThreadPoolBuild(error.to_string()))?;
+        let account_shards = crate::parallel::AccountShardPlan::balanced(worker_count)?;
         let mut engine = Self {
             engine_generation,
             revision,
             candidate_attempt: 0,
             pool,
+            account_shards,
             accounts: PersistentRadixMap::empty(),
             checkpoint: PersistentRadixMap::empty(),
             checkpoint_revision: revision,
@@ -700,6 +703,14 @@ impl StatefulConsensusEngine {
 
     pub(crate) fn pool(&self) -> &ThreadPool {
         &self.pool
+    }
+
+    pub(crate) fn account_shards(&self) -> &crate::parallel::AccountShardPlan {
+        &self.account_shards
+    }
+
+    pub fn account_shard_metrics(&self) -> Vec<crate::AccountShardMetric> {
+        self.account_shards.metrics()
     }
 
     pub(crate) fn signer_id(&self) -> &str {
@@ -825,6 +836,7 @@ impl StatefulConsensusEngine {
             .collect::<Result<Vec<_>, BatchError>>()?;
         let admitted = map_accounts(
             &self.pool,
+            &self.account_shards,
             work,
             |row| row.0,
             |(account_id, mut account, txs)| {
@@ -859,6 +871,7 @@ impl StatefulConsensusEngine {
         timestamp: u64,
         j_height: u64,
     ) -> Result<(Vec<AccountAdmissionResult>, Vec<ProposalRow>), BatchError> {
+        let group_at = std::time::Instant::now();
         let admissions = requests
             .iter()
             .enumerate()
@@ -893,11 +906,14 @@ impl StatefulConsensusEngine {
                 )
             })
             .collect::<Vec<_>>();
+        crate::round::phase::add(&crate::round::phase::ACCOUNT_GROUP, group_at);
         let accounts = &self.accounts;
         let identities = &self.identities;
         let swap_market = &self.swap_market;
+        let work_at = std::time::Instant::now();
         let outcomes: Vec<OutboundWork> = map_accounts(
             &self.pool,
+            &self.account_shards,
             work,
             |row| row.0,
             |(account_id, txs, selected)| {
@@ -950,6 +966,8 @@ impl StatefulConsensusEngine {
                 Ok((account_id, update, proposal))
             },
         );
+        crate::round::phase::add(&crate::round::phase::ACCOUNT_WORK, work_at);
+        let collect_at = std::time::Instant::now();
         let mut entries = Vec::with_capacity(outcomes.len());
         let mut proposals = Vec::with_capacity(selected.len());
         for outcome in outcomes {
@@ -961,8 +979,11 @@ impl StatefulConsensusEngine {
                 proposals.push(proposal);
             }
         }
+        crate::round::phase::add(&crate::round::phase::ACCOUNT_COLLECT, collect_at);
         if !entries.is_empty() {
+            let tree_at = std::time::Instant::now();
             self.accounts = self.put_accounts(entries)?;
+            crate::round::phase::add(&crate::round::phase::TREE_PUBLISH, tree_at);
             self.revision += 1;
         }
         proposals.sort_by_key(|row| *row.account_id.as_bytes());
@@ -1151,6 +1172,7 @@ impl StatefulConsensusEngine {
         let swap_market = &self.swap_market;
         let proposals: Vec<ProposalWork> = map_accounts(
             &self.pool,
+            &self.account_shards,
             candidates,
             |row| row.0,
             |(account_id, mut account)| {
@@ -1192,6 +1214,7 @@ impl StatefulConsensusEngine {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
+        let group_at = std::time::Instant::now();
         for pair in rows.windows(2) {
             if pair[0].operation_index >= pair[1].operation_index {
                 return Err(BatchError::OperationIndex {
@@ -1217,11 +1240,14 @@ impl StatefulConsensusEngine {
             by_account.entry(row.account_id).or_default().push(row);
         }
         let work: Vec<(AccountId, Vec<AccountInputRow>)> = by_account.into_iter().collect();
+        crate::round::phase::add(&crate::round::phase::ACCOUNT_GROUP, group_at);
         let accounts = &self.accounts;
         let identities = &self.identities;
         let swap_market = &self.swap_market;
+        let work_at = std::time::Instant::now();
         let applied: Vec<InputWork> = map_accounts(
             &self.pool,
+            &self.account_shards,
             work,
             |row| row.0,
             |(account_id, rows)| {
@@ -1258,6 +1284,8 @@ impl StatefulConsensusEngine {
                 Ok((account_id, account, results, Vec::new(), leaf))
             },
         );
+        crate::round::phase::add(&crate::round::phase::ACCOUNT_WORK, work_at);
+        let collect_at = std::time::Instant::now();
         let mut entries = Vec::with_capacity(applied.len());
         let mut results = missing;
         for outcome in applied {
@@ -1269,8 +1297,11 @@ impl StatefulConsensusEngine {
             entries.push((account_id.as_bytes().to_vec(), account, leaf));
             results.extend(rows);
         }
+        crate::round::phase::add(&crate::round::phase::ACCOUNT_COLLECT, collect_at);
         if !entries.is_empty() {
+            let tree_at = std::time::Instant::now();
             self.accounts = self.put_accounts(entries)?;
+            crate::round::phase::add(&crate::round::phase::TREE_PUBLISH, tree_at);
             self.revision += 1;
         }
         results.sort_by_key(|result| result.operation_index);
@@ -1416,6 +1447,7 @@ impl StatefulConsensusEngine {
         let swap_market = &self.swap_market;
         let applied: Vec<InputWork> = map_accounts(
             &self.pool,
+            &self.account_shards,
             units,
             |row| row.0,
             |(account_id, unit)| {
@@ -2082,6 +2114,7 @@ impl StatefulConsensusEngine {
         let ids = touched.iter().copied().collect::<Vec<_>>();
         let materialized = map_accounts(
             &self.pool,
+            &self.account_shards,
             ids,
             |account_id| *account_id,
             |account_id| {
@@ -2564,14 +2597,21 @@ impl StatefulConsensusEngine {
         base: &PersistentRadixMap<AccountConsensus>,
         entries: Vec<(Vec<u8>, AccountConsensus, [u8; 32])>,
     ) -> Result<PersistentRadixMap<AccountConsensus>, BatchError> {
-        let wide = self.pool.current_num_threads() > 16
-            && entries.len() >= crate::fanout::SECOND_LEVEL_FANOUT_MIN;
+        let wide = entries.len() >= crate::parallel::THREE_LEVEL_FANOUT_MIN;
         if wide {
+            base.updated_batch_three_levels(entries, |slots| {
+                crate::parallel::map_account_slots(&self.pool, &self.account_shards, slots)
+            })
+        } else if self.pool.current_num_threads() > 16
+            && entries.len() >= crate::parallel::SECOND_LEVEL_FANOUT_MIN
+        {
             base.updated_batch_two_levels(entries, |slots| {
-                crate::fanout::map_slots(&self.pool, slots)
+                crate::parallel::map_slots(&self.pool, slots)
             })
         } else {
-            base.updated_batch(entries, |slots| crate::fanout::map_slots(&self.pool, slots))
+            base.updated_batch(entries, |slots| {
+                crate::parallel::map_slots(&self.pool, slots)
+            })
         }
         .map_err(|error| BatchError::AccountsTree {
             account_id: AccountId::from_bytes([0; 32]),

@@ -12,7 +12,7 @@
 //! that post-inbound state. The outbound visit returns the final bodies and
 //! effects that the parent commits and routes.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use xln_rscore_engine::{AccountTx, ReceiverClock};
 use xln_rscore_protocol::PersistentRadixMap;
@@ -23,7 +23,7 @@ use crate::consensus::{
     StatefulConsensusEngine, state_error,
 };
 use crate::error::BatchError;
-use crate::fanout::map_accounts;
+use crate::parallel::map_accounts;
 use crate::types::{AccountId, AccountSeed};
 use xln_rscore_engine::{AccountConsensus, SigningIdentity};
 
@@ -117,6 +117,10 @@ pub mod phase {
     pub static OUTBOUND: AtomicU64 = AtomicU64::new(0);
     pub static SETTLE: AtomicU64 = AtomicU64::new(0);
     pub static SNAPSHOT: AtomicU64 = AtomicU64::new(0);
+    pub static ACCOUNT_GROUP: AtomicU64 = AtomicU64::new(0);
+    pub static ACCOUNT_WORK: AtomicU64 = AtomicU64::new(0);
+    pub static ACCOUNT_COLLECT: AtomicU64 = AtomicU64::new(0);
+    pub static TREE_PUBLISH: AtomicU64 = AtomicU64::new(0);
     pub static ROUNDS: AtomicU64 = AtomicU64::new(0);
 
     pub fn enabled() -> bool {
@@ -151,11 +155,15 @@ pub mod phase {
             return;
         }
         eprintln!(
-            "PHASE rounds={rounds} apply={} outbound={} settle={} snapshot={}",
+            "PHASE rounds={rounds} apply={} outbound={} settle={} snapshot={} group={} work={} collect={} tree={}",
             APPLY.load(Ordering::Relaxed),
             OUTBOUND.load(Ordering::Relaxed),
             SETTLE.load(Ordering::Relaxed),
             SNAPSHOT.load(Ordering::Relaxed),
+            ACCOUNT_GROUP.load(Ordering::Relaxed),
+            ACCOUNT_WORK.load(Ordering::Relaxed),
+            ACCOUNT_COLLECT.load(Ordering::Relaxed),
+            TREE_PUBLISH.load(Ordering::Relaxed),
         );
     }
 }
@@ -230,7 +238,12 @@ impl StatefulConsensusEngine {
         request: EntityInboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
         self.reconcile_parent_accounts_root(request.expected_accounts_root)?;
-        let named: BTreeSet<AccountId> = request.rows.iter().map(|row| row.account_id).collect();
+        let mut named = request
+            .rows
+            .iter()
+            .map(|row| row.account_id)
+            .collect::<Vec<_>>();
+        canonical_account_ids(&mut named);
         self.assert_owner(request.owner_entity_id, &named)?;
         let snapshot_at = std::time::Instant::now();
         let base = self.accounts_snapshot();
@@ -287,19 +300,29 @@ impl StatefulConsensusEngine {
             failed_htlc_routes,
             post_accounts,
         } = request;
-        let mut named: BTreeSet<AccountId> = creates.iter().map(|seed| seed.account_id).collect();
+        let mut named = creates
+            .iter()
+            .map(|seed| seed.account_id)
+            .collect::<Vec<_>>();
         named.extend(admits.iter().map(|(account_id, _)| *account_id));
         named.extend(propose.iter().copied());
         named.extend(materialize.iter().copied());
         for route in &failed_htlc_routes {
-            named.insert(route.outbound_account_id);
-            named.insert(route.inbound_account_id);
+            named.push(route.outbound_account_id);
+            named.push(route.inbound_account_id);
         }
-        let created: BTreeSet<AccountId> = creates.iter().map(|seed| seed.account_id).collect();
-        self.assert_owner(
-            owner_entity_id,
-            &named.difference(&created).copied().collect(),
-        )?;
+        canonical_account_ids(&mut named);
+        let mut created = creates
+            .iter()
+            .map(|seed| seed.account_id)
+            .collect::<Vec<_>>();
+        canonical_account_ids(&mut created);
+        let existing = named
+            .iter()
+            .copied()
+            .filter(|account_id| created.binary_search(account_id).is_err())
+            .collect::<Vec<_>>();
+        self.assert_owner(owner_entity_id, &existing)?;
         let round = self
             .entity_round_base()
             .ok_or(BatchError::EntityRoundMissing)?;
@@ -335,6 +358,7 @@ impl StatefulConsensusEngine {
                 admissions = ordered_admissions;
                 proposals = ordered_proposals;
                 named.extend(generated_accounts);
+                canonical_account_ids(&mut named);
             }
             phase::add(&phase::OUTBOUND, outbound_at);
             let settle_at = std::time::Instant::now();
@@ -360,7 +384,7 @@ impl StatefulConsensusEngine {
     fn assert_owner(
         &self,
         owner_entity_id: [u8; 32],
-        named: &BTreeSet<AccountId>,
+        named: &[AccountId],
     ) -> Result<(), BatchError> {
         for account_id in named {
             let Some(account) = self.account(account_id) else {
@@ -387,7 +411,7 @@ impl StatefulConsensusEngine {
     fn settle(
         &self,
         base: &PersistentRadixMap<AccountConsensus>,
-        named: &BTreeSet<AccountId>,
+        named: &[AccountId],
         post_accounts: bool,
     ) -> Result<EntityRoundResult, BatchError> {
         let mut result = EntityRoundResult {
@@ -395,10 +419,10 @@ impl StatefulConsensusEngine {
             accounts_root: self.accounts_root(),
             ..EntityRoundResult::default()
         };
-        let ids = named.iter().copied().collect::<Vec<_>>();
         let settled = map_accounts(
             self.pool(),
-            ids,
+            self.account_shards(),
+            named.to_vec(),
             |account_id| *account_id,
             |account_id| {
                 let Some((account, leaf)) = self.account_with_leaf(&account_id) else {
@@ -427,4 +451,9 @@ impl StatefulConsensusEngine {
         }
         Ok(result)
     }
+}
+
+fn canonical_account_ids(account_ids: &mut Vec<AccountId>) {
+    account_ids.sort_unstable();
+    account_ids.dedup();
 }

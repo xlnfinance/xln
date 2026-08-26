@@ -47,6 +47,10 @@ pub enum PersistentRadixMapError {
     EmptyKey,
     #[error("PERSISTENT_RADIX_KEY_PREFIX_COLLISION")]
     KeyPrefixCollision,
+    #[error("PERSISTENT_RADIX_KEY_DEPTH:{actual}:required={required}")]
+    KeyDepth { actual: usize, required: usize },
+    #[error("PERSISTENT_RADIX_SLOT_COUNT:{actual}:expected={expected}")]
+    SlotCount { actual: usize, expected: usize },
 }
 
 /// One top-level slot handed to the caller's mapper: the subtree that lives
@@ -69,6 +73,10 @@ impl<V: Clone> SlotWork<V> {
     /// where to run the batch and needs to see how much of it is real.
     pub fn has_work(&self) -> bool {
         !self.leaves.is_empty()
+    }
+
+    pub fn work_len(&self) -> usize {
+        self.leaves.len()
     }
 
     /// Fold this slot's leaves into its subtree, and hash the result while it
@@ -331,6 +339,101 @@ impl<V: Clone> PersistentRadixMap<V> {
         })
     }
 
+    /// Apply a large Account batch as 4096 independent three-nibble prefixes.
+    ///
+    /// The caller owns scheduling only. This map still owns the canonical
+    /// Patricia representation: it decomposes compressed branches at the
+    /// three-nibble boundary, accepts rebuilt subtree roots, and reconnects
+    /// exactly two parent levels plus the root. Values are ordinary keyed
+    /// leaves, not content-addressed nodes; unchanged branches are shared by
+    /// `Arc` only for in-memory path-copy efficiency.
+    pub fn updated_batch_three_levels(
+        &self,
+        entries: Vec<(Vec<u8>, V, [u8; 32])>,
+        map_slots: impl Fn(Vec<SlotWork<V>>) -> Vec<Result<SlotOutcome<V>, PersistentRadixMapError>>,
+    ) -> Result<Self, PersistentRadixMapError>
+    where
+        V: Send + Sync,
+    {
+        const SHARD_DEPTH: usize = 3;
+        const SHARD_COUNT: usize = 4096;
+
+        if entries.is_empty() {
+            return Ok(self.clone());
+        }
+        for (key, _, _) in &entries {
+            let depth = key.len() * 2;
+            if depth < SHARD_DEPTH {
+                return Err(PersistentRadixMapError::KeyDepth {
+                    actual: depth,
+                    required: SHARD_DEPTH,
+                });
+            }
+        }
+        let mut existing = (0..SHARD_COUNT).map(|_| None).collect::<Vec<_>>();
+        if let Some(root) = self.root.as_ref() {
+            let Node::Branch { path, .. } = &**root else {
+                return self.fold_updates(entries);
+            };
+            if !path.is_empty() {
+                return self.fold_updates(entries);
+            }
+            collect_prefix_subtrees(root, SHARD_DEPTH, &mut existing)?;
+        }
+        let mut buckets = (0..SHARD_COUNT).map(|_| Vec::new()).collect::<Vec<_>>();
+        for (key, value, digest) in entries {
+            let path = path_slots(&key);
+            buckets[prefix_index(&path, SHARD_DEPTH)?].push(make_leaf(key, value, digest));
+        }
+        let work = existing
+            .into_iter()
+            .zip(buckets)
+            .map(|(child, leaves)| SlotWork { child, leaves })
+            .collect::<Vec<_>>();
+        let updated = map_slots(work);
+        if updated.len() != SHARD_COUNT {
+            return Err(PersistentRadixMapError::SlotCount {
+                actual: updated.len(),
+                expected: SHARD_COUNT,
+            });
+        }
+
+        let mut outcomes = updated.into_iter();
+        let mut second_level = (0..256).map(|_| None).collect::<Vec<_>>();
+        let mut inserted = 0;
+        for (prefix, parent) in second_level.iter_mut().enumerate() {
+            let mut children = Vec::new();
+            for _ in 0..16 {
+                let outcome = outcomes.next().ok_or(PersistentRadixMapError::SlotCount {
+                    actual: SHARD_COUNT - outcomes.len(),
+                    expected: SHARD_COUNT,
+                })??;
+                inserted += outcome.inserted;
+                if let Some(child) = outcome.child {
+                    children.push(child);
+                }
+            }
+            *parent = compressed_parent(vec![(prefix / 16) as u8, (prefix % 16) as u8], children);
+        }
+
+        let mut root_children: [Option<NodeRef<V>>; 16] = std::array::from_fn(|_| None);
+        for (root_slot, root_child) in root_children.iter_mut().enumerate() {
+            let children = second_level[root_slot * 16..(root_slot + 1) * 16]
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>();
+            *root_child = compressed_parent(vec![root_slot as u8], children);
+        }
+        Ok(Self {
+            root: Some(make_branch(
+                Vec::new(),
+                &root_children.iter().flatten().cloned().collect::<Vec<_>>(),
+            )),
+            len: self.len + inserted,
+        })
+    }
+
     fn fold_updates(
         &self,
         entries: Vec<(Vec<u8>, V, [u8; 32])>,
@@ -388,6 +491,51 @@ impl<V: Clone> PersistentRadixMap<V> {
         PersistentRadixIter {
             stack: self.root.iter().map(Arc::as_ref).collect(),
         }
+    }
+}
+
+fn prefix_index(path: &[u8], depth: usize) -> Result<usize, PersistentRadixMapError> {
+    if path.len() < depth {
+        return Err(PersistentRadixMapError::KeyDepth {
+            actual: path.len(),
+            required: depth,
+        });
+    }
+    Ok(path[..depth]
+        .iter()
+        .fold(0_usize, |index, nibble| index * 16 + usize::from(*nibble)))
+}
+
+fn collect_prefix_subtrees<V>(
+    node: &NodeRef<V>,
+    depth: usize,
+    slots: &mut [Option<NodeRef<V>>],
+) -> Result<(), PersistentRadixMapError> {
+    let path = node_path(node);
+    if path.len() >= depth {
+        let index = prefix_index(path, depth)?;
+        if slots[index].replace(Arc::clone(node)).is_some() {
+            return Err(PersistentRadixMapError::KeyPrefixCollision);
+        }
+        return Ok(());
+    }
+    let Node::Branch { children, .. } = &**node else {
+        return Err(PersistentRadixMapError::KeyDepth {
+            actual: path.len(),
+            required: depth,
+        });
+    };
+    for child in children.iter().flatten() {
+        collect_prefix_subtrees(child, depth, slots)?;
+    }
+    Ok(())
+}
+
+fn compressed_parent<V>(path: Vec<u8>, mut children: Vec<NodeRef<V>>) -> Option<NodeRef<V>> {
+    match children.len() {
+        0 => None,
+        1 => children.pop(),
+        _ => Some(make_branch(path, &children)),
     }
 }
 

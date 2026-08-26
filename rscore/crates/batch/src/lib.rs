@@ -1,14 +1,14 @@
 //! Deterministic parallel batching over independently owned Account replicas.
 //!
 //! Account-local order and collected bytes are stable across worker counts.
-//! This layer deliberately does not promise persistent account-to-worker shard
-//! affinity across batches.
+//! The first three key nibbles select one of 4096 logical shards; a persistent
+//! startup plan assigns each shard to one physical worker for every batch.
 
 mod checkpoint;
 mod consensus;
 mod error;
 mod execution;
-mod fanout;
+mod parallel;
 mod query;
 mod round;
 mod stateful;
@@ -27,6 +27,7 @@ pub use consensus::{
     WaveResult,
 };
 pub use error::BatchError;
+pub use parallel::{AccountShardMetric, LOGICAL_ACCOUNT_SHARDS};
 pub use round::{EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute};
 // The receiver clock is part of this layer's boundary: a caller cannot apply
 // an input without saying what time it is on its own machine.

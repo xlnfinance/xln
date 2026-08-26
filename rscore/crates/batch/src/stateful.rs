@@ -20,6 +20,7 @@ pub struct StatefulBatchEngine {
     revision: u64,
     candidate_attempt: u64,
     pool: ThreadPool,
+    account_shards: crate::parallel::AccountShardPlan,
     // The one canonical account store: a radix-16 Patricia tree keyed by the
     // 32-byte account id, replicas living in the leaves, leaf digest = the
     // Entity's own account leaf (the replica shell plus this account's
@@ -53,6 +54,7 @@ impl StatefulBatchEngine {
             .thread_name(|index| format!("rscore-account-{index}"))
             .build()
             .map_err(|error| BatchError::ThreadPoolBuild(error.to_string()))?;
+        let account_shards = crate::parallel::AccountShardPlan::balanced(worker_count)?;
         let roots = pool.install(|| {
             seeded
                 .par_iter()
@@ -68,6 +70,7 @@ impl StatefulBatchEngine {
             revision,
             candidate_attempt: 0,
             pool,
+            account_shards,
             accounts,
         })
     }
@@ -195,7 +198,7 @@ impl StatefulBatchEngine {
             .checked_add(1)
             .ok_or(BatchError::RevisionOverflow)?;
         let work = self.group_work(jobs)?;
-        let attempted = crate::fanout::map_owned(&self.pool, work, execute_account_caught);
+        let attempted = crate::parallel::map_owned(&self.pool, work, execute_account_caught);
         let completed = collect_executions(attempted)?;
         let attempt = self
             .candidate_attempt
@@ -232,7 +235,7 @@ impl StatefulBatchEngine {
         // the engine untouched (commit stays atomic). Leaf digests are
         // independent per account — compute them on the pool; only the cheap
         // path-copy fold below is sequential.
-        let leaf_roots = crate::fanout::map_borrowed(
+        let leaf_roots = crate::parallel::map_borrowed(
             &self.pool,
             &prepared.updates,
             |(account_id, _, candidate)| leaf_root(*account_id, candidate),
@@ -268,15 +271,20 @@ impl StatefulBatchEngine {
         &self,
         entries: Vec<(Vec<u8>, AccountReplica, [u8; 32])>,
     ) -> Result<PersistentRadixMap<AccountReplica>, BatchError> {
-        let wide = self.pool.current_num_threads() > 16
-            && entries.len() >= crate::fanout::SECOND_LEVEL_FANOUT_MIN;
-        let result = if wide {
+        let result = if entries.len() >= crate::parallel::THREE_LEVEL_FANOUT_MIN {
+            self.accounts.updated_batch_three_levels(entries, |slots| {
+                crate::parallel::map_account_slots(&self.pool, &self.account_shards, slots)
+            })
+        } else if self.pool.current_num_threads() > 16
+            && entries.len() >= crate::parallel::SECOND_LEVEL_FANOUT_MIN
+        {
             self.accounts.updated_batch_two_levels(entries, |slots| {
-                crate::fanout::map_slots(&self.pool, slots)
+                crate::parallel::map_slots(&self.pool, slots)
             })
         } else {
-            self.accounts
-                .updated_batch(entries, |slots| crate::fanout::map_slots(&self.pool, slots))
+            self.accounts.updated_batch(entries, |slots| {
+                crate::parallel::map_slots(&self.pool, slots)
+            })
         };
         result.map_err(|error| BatchError::AccountsTree {
             account_id: AccountId::from_bytes([0; 32]),
