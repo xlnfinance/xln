@@ -11,7 +11,7 @@ import {
 import { dirname } from 'node:path';
 
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
-import { safeParse, serializeTaggedJson } from '../../../../protocol/serialization';
+import { safeParse, safeStringify, serializeTaggedJson } from '../../../../protocol/serialization';
 import {
   validateRuntimeRecording,
   type RuntimeRecording,
@@ -21,8 +21,16 @@ import {
   buildEntityProposalReplayOracleMap,
   type EntityProposalReplayOracleEntry,
 } from '../../../../entity/consensus/proposal/replay-oracle';
+import {
+  buildHltAuthorityEvidence,
+  type HltAuthorityEvidence,
+} from './authority-evidence';
+import {
+  decodeHltAuthorityFrameOracle,
+  type HltAuthorityFrameOracle,
+} from './authority-frame-oracle';
 
-export const HLT_HUB_RECORDING_SCHEMA = 'xln-hlt-hub-recording-v1' as const;
+export const HLT_HUB_RECORDING_SCHEMA = 'xln-hlt-account-authority-recording-v1' as const;
 
 export type HltHubRecordingTotals = Readonly<{
   runtimeFrames: number;
@@ -40,6 +48,13 @@ export type HltHubRecording = Readonly<{
   }>;
   recording: RuntimeRecording;
   totals: HltHubRecordingTotals;
+  featurePolicy: Readonly<{
+    mmCrossJurisdiction: false;
+    disputes: 'disabled';
+    lending: 'disabled';
+  }>;
+  authorityFrameOracle: HltAuthorityFrameOracle;
+  authorityEvidence: HltAuthorityEvidence;
   /** Exact certified Entity proposal boundaries. Optional for v1 recordings written before this oracle. */
   entityProposalOracle?: readonly EntityProposalReplayOracleEntry[];
 }>;
@@ -56,7 +71,7 @@ export const summarizeHltHubFrames = (
   outboxEnvelopes: 0,
 });
 
-const recordingFrames = (recording: RuntimeRecording): PersistedFrameJournal[] =>
+export const recordingFrames = (recording: RuntimeRecording): PersistedFrameJournal[] =>
   recording.bundles.flatMap(bundle => bundle.kind === 'journal_tail' ? bundle.frames ?? [] : []);
 
 const sameTotals = (left: HltHubRecordingTotals, right: HltHubRecordingTotals): boolean =>
@@ -87,7 +102,10 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   const root = requireBoundaryRecord(value, 'HLT_HUB_RECORDING_INVALID');
   requireExactBoundaryKeys(
     root,
-    ['schema', 'createdAt', 'source', 'recording', 'totals'],
+    [
+      'schema', 'createdAt', 'source', 'recording', 'totals', 'featurePolicy',
+      'authorityFrameOracle', 'authorityEvidence',
+    ],
     ['entityProposalOracle'],
     'HLT_HUB_RECORDING',
   );
@@ -102,6 +120,23 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
     'HLT_HUB_RECORDING_TOTALS',
   );
   const recording = validateRuntimeRecording(root['recording'] as RuntimeRecording);
+  const featurePolicy = requireBoundaryRecord(root['featurePolicy'], 'HLT_AUTHORITY_FEATURE_POLICY_INVALID');
+  requireExactBoundaryKeys(
+    featurePolicy,
+    ['mmCrossJurisdiction', 'disputes', 'lending'],
+    [],
+    'HLT_AUTHORITY_FEATURE_POLICY_FIELDS_INVALID',
+  );
+  if (
+    featurePolicy['mmCrossJurisdiction'] !== false ||
+    featurePolicy['disputes'] !== 'disabled' ||
+    featurePolicy['lending'] !== 'disabled'
+  ) throw new Error('HLT_AUTHORITY_FEATURE_POLICY_INVALID');
+  const authorityFrameOracle = decodeHltAuthorityFrameOracle(root['authorityFrameOracle']);
+  const authorityEvidence = buildHltAuthorityEvidence(recordingFrames(recording), authorityFrameOracle);
+  if (safeStringify(root['authorityEvidence']) !== safeStringify(authorityEvidence)) {
+    throw new Error('HLT_AUTHORITY_EVIDENCE_MISMATCH');
+  }
   const decoded: HltHubRecording = {
     schema: HLT_HUB_RECORDING_SCHEMA,
     createdAt: Number(root['createdAt']),
@@ -116,6 +151,13 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
       runtimeEntityInputs: Number(totals['runtimeEntityInputs']),
       outboxEnvelopes: Number(totals['outboxEnvelopes']),
     },
+    featurePolicy: {
+      mmCrossJurisdiction: false,
+      disputes: 'disabled',
+      lending: 'disabled',
+    },
+    authorityFrameOracle,
+    authorityEvidence,
     ...(root['entityProposalOracle'] !== undefined
       ? { entityProposalOracle: decodeEntityProposalOracle(root['entityProposalOracle']) }
       : {}),

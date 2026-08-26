@@ -55,6 +55,7 @@ import { countEntityInputTxKinds } from '../../../../runtime/frame/process-profi
 import { readHltHubRecording } from './recording';
 import { summarizePaymentWork } from './payment-work-ledger';
 import { buildEntityProposalReplayOracleMap } from '../../../../entity/consensus/proposal/replay-oracle';
+import { assertCompleteHltAuthorityEvidence } from './authority-evidence';
 
 configureCryptoPoolEntry(new URL('../../../../protocol/crypto/crypto-pool.ts', import.meta.url));
 
@@ -166,7 +167,7 @@ type ReplayAmplification = Readonly<{
 }>;
 
 type ReplayTrial = Readonly<{
-  offeredTps: number | null;
+  offeredEntityInputsPerSecond: number | null;
   frames: number;
   runtimeEntityInputs: number;
   entityInputsPerFrame: number;
@@ -182,9 +183,9 @@ type ReplayTrial = Readonly<{
   elapsedMs: number;
   cpuMs: number;
   deliveredPayments: number;
-  deliveredPaymentTps: number;
+  replayPaymentsPerSecond: number;
   matchedEconomicSwaps: number;
-  matchedEconomicSwapTps: number;
+  replaySwapsPerSecond: number;
   finalHeight: number;
   finalPendingOutbox: number;
   equivalent: true;
@@ -276,8 +277,11 @@ const proposalOracleEnabled = !process.argv.includes('--no-oracle');
 // Pure Hub apply cost: skips per-frame recovery equivalence checks (outbox,
 // journal, post-state). The report records verified=false.
 const recoveryVerifyEnabled = !process.argv.includes('--no-verify');
+const completeAuthorityEvidenceRequired = process.argv.includes('--require-complete-authority-evidence');
+const rustAccountAuthorityRequired = process.argv.includes('--require-rust-account-authority');
 await installGlobalOpCounters('hlt-replay');
 const artifact = readHltHubRecording(recordingPath);
+if (completeAuthorityEvidenceRequired) assertCompleteHltAuthorityEvidence(artifact.authorityEvidence);
 const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
 const tail = artifact.recording.bundles.find(bundle => bundle.kind === 'journal_tail');
 if (!snapshot || !tail) throw new Error('HLT_REPLAY_RECORDING_BUNDLES_MISSING');
@@ -319,12 +323,12 @@ const frameUnits = (frame: PersistedFrameJournal): number => {
 };
 
 const waitForOfferedRate = async (
-  offeredTps: number,
+  offeredEntityInputsPerSecond: number,
   cumulativeUnits: number,
   startedAt: number,
 ): Promise<void> => {
-  if (offeredTps <= 0 || cumulativeUnits <= 0) return;
-  const dueAt = startedAt + cumulativeUnits * 1_000 / offeredTps;
+  if (offeredEntityInputsPerSecond <= 0 || cumulativeUnits <= 0) return;
+  const dueAt = startedAt + cumulativeUnits * 1_000 / offeredEntityInputsPerSecond;
   const remaining = dueAt - performance.now();
   if (remaining > 0) await Bun.sleep(remaining);
 };
@@ -360,7 +364,7 @@ const assertReplayTerminalEquivalent = (finalHeight: number): true => {
   return true;
 };
 
-const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
+const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTrial> => {
   const env = await restoreEnvFromRecoveryBundles([snapshot as RuntimeRecoveryBundleV1], {
     runtimeSeed,
     runtimeId: artifact.recording.runtimeId,
@@ -368,6 +372,9 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     readOnly: true,
   });
   const authoritySelectedForRuntime = authorityDriverEnabled({ runtimeId: env.runtimeId });
+  if (rustAccountAuthorityRequired && !authoritySelectedForRuntime) {
+    throw new Error('HLT_REPLAY_RSCORE_AUTHORITY_REQUIRED');
+  }
   if (authoritySelectedForRuntime && env.accountAuthoritySuppressed === true) {
     throw new Error(
       'HLT_REPLAY_RSCORE_AUTHORITY_REPLAY_REQUIRED:' +
@@ -396,7 +403,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
   let cumulativeUnits = 0;
   const frameProfile: ReplayFrameProfile[] = [];
   try {
-    if (offeredTps === 0 && !frameProfileEnabled && !shadowStrictEnabled()) {
+    if (offeredEntityInputsPerSecond === 0 && !frameProfileEnabled && !shadowStrictEnabled()) {
       // Max mode measures the canonical recovery primitive over its native WAL
       // tail shape. Re-entering the public replay boundary for every frame
       // repeatedly toggled replay metadata and revalidated Runtime config; it
@@ -406,7 +413,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       for (const frame of frames) {
         replayIdleWatch.noteActivity();
         cumulativeUnits += frameUnits(frame);
-        await waitForOfferedRate(offeredTps, cumulativeUnits, startedAt);
+        await waitForOfferedRate(offeredEntityInputsPerSecond, cumulativeUnits, startedAt);
         const economicBefore = readEconomicCounters(env);
         const frameStartedAt = performance.now();
         await replayRecoveryFrameJournals(env, [frame], { verify: recoveryVerifyEnabled });
@@ -439,16 +446,27 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     const cpuMs = (cpu.user + cpu.system) / 1_000;
     const seconds = Math.max(elapsedMs / 1_000, Number.EPSILON);
     const economic = subtractEconomicCounters(readEconomicCounters(env), economicBaseline);
+    const authorityExecution = accountAuthorityExecutionLedger();
     if (
       authoritySelectedForRuntime
       && economic.deliveredPayments + economic.matchedEconomicSwaps > 0
-      && accountAuthorityExecutionLedger().authoritativeOperations === 0
+      && authorityExecution.authoritativeOperations === 0
     ) {
       throw new Error('HLT_REPLAY_RSCORE_UNARMED_ZERO_AUTHORITY_OPERATIONS');
     }
+    if (
+      rustAccountAuthorityRequired &&
+      (authorityExecution.authoritativeOperations < 1 ||
+        authorityExecution.typescriptApplyAccountInput !== 0 ||
+        authorityExecution.typescriptProposeAccountFrame !== 0)
+    ) {
+      throw new Error(
+        `HLT_REPLAY_RSCORE_NOT_EXCLUSIVE:${safeStringify(authorityExecution)}`,
+      );
+    }
     const operations = diffOpCounters(operationsBefore);
     return {
-      offeredTps: offeredTps > 0 ? offeredTps : null,
+      offeredEntityInputsPerSecond: offeredEntityInputsPerSecond > 0 ? offeredEntityInputsPerSecond : null,
       frames: artifact.totals.runtimeFrames,
       runtimeEntityInputs: artifact.totals.runtimeEntityInputs,
       entityInputsPerFrame: artifact.totals.runtimeEntityInputs / artifact.totals.runtimeFrames,
@@ -462,9 +480,9 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       elapsedMs,
       cpuMs,
       deliveredPayments: economic.deliveredPayments,
-      deliveredPaymentTps: economic.deliveredPayments / seconds,
+      replayPaymentsPerSecond: economic.deliveredPayments / seconds,
       matchedEconomicSwaps: economic.matchedEconomicSwaps,
-      matchedEconomicSwapTps: economic.matchedEconomicSwaps / seconds,
+      replaySwapsPerSecond: economic.matchedEconomicSwaps / seconds,
       finalHeight: env.state.height,
       finalPendingOutbox: env.pendingNetworkOutputs?.length ?? 0,
       equivalent: assertReplayTerminalEquivalent(env.state.height),
@@ -490,9 +508,10 @@ for (const rate of rates) {
   const trial = await runTrial(rate);
   trials.push(trial);
   console.log(
-    `HLT_REPLAY_EQUIVALENT offered=${trial.offeredTps ?? 'max'} frameVerified=${trial.frameVerified} ` +
-    `payments=${trial.deliveredPayments}/${trial.deliveredPaymentTps.toFixed(2)}tps ` +
-    `swaps=${trial.matchedEconomicSwaps}/${trial.matchedEconomicSwapTps.toFixed(2)}tps ` +
+    `HLT_REPLAY_EQUIVALENT offeredEntityInputsPerSecond=${trial.offeredEntityInputsPerSecond ?? 'max'} ` +
+    `frameVerified=${trial.frameVerified} ` +
+    `payments=${trial.deliveredPayments}/${trial.replayPaymentsPerSecond.toFixed(2)}pay/s ` +
+    `swaps=${trial.matchedEconomicSwaps}/${trial.replaySwapsPerSecond.toFixed(2)}swap/s ` +
     `entityInputs=${trial.runtimeEntityInputs}/${trial.entityInputsPerFrame.toFixed(2)}perFrame ` +
     `mainThreadBusy=${(trial.mainThreadBusyFraction * 100).toFixed(1)}%` +
     `(idleBaseline=${(trial.mainThreadIdleBaselineFraction * 100).toFixed(1)}%) ` +
@@ -524,6 +543,8 @@ const report = {
   createdAt: Date.now(),
   recordingPath,
   recordingManifestHash: artifact.recording.manifestHash,
+  authorityExpectations: artifact.authorityEvidence.expectations,
+  economicOperationLedger: artifact.authorityEvidence.economicOperations,
   mode,
   ...(artifact.source.workload === 'payments'
     ? { paymentWork: summarizePaymentWork(frames, trials[0]?.deliveredPayments ?? 0) }

@@ -105,6 +105,21 @@ const readRuntimeActivityJournal = async (
   }
 };
 
+const readRuntimeActivityRecord = async (
+  deps: PersistenceQueryDeps,
+  env: RuntimeReplica,
+  height: number,
+) => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) throw new Error(`STORAGE_ACTIVITY_RECORD_HEIGHT_INVALID:${String(height)}`);
+  await requireStorageDbOpen(
+    () => deps.tryOpenHistoryViewDb(env),
+    `history-view:runtime-activity-record:${targetHeight}`,
+  );
+  const activity = await readHistoryViewRuntimeActivity(deps.getHistoryViewDb(env), targetHeight);
+  return activity ? structuredClone(activity) : null;
+};
+
 type CertifiedHistoryReadDeps = Pick<
   PersistenceQueryDeps,
   'tryOpenRuntimeWalDb' | 'getRuntimeWalDb'
@@ -254,14 +269,14 @@ const cursorAfter = (
     || (lifecycle.lastUpdatedHeight === cursor.height && lifecycle.offerId < cursor.offerId);
 };
 
-export const readAccountFrameHistory = async (
+export const readAccountFrameHistoryRecords = async (
   deps: CertifiedHistoryReadDeps,
   env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
   limit = 50,
   opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
-): Promise<AccountFrame[]> => {
+) => {
   await requireStorageDbOpen(
     () => deps.tryOpenRuntimeWalDb(env),
     'runtime-wal:certified-account-frames',
@@ -282,8 +297,19 @@ export const readAccountFrameHistory = async (
       ...(Number.isSafeInteger(maxAccountHeight) ? { maxAccountHeight } : {}),
     },
   );
-  return records.map((record) => structuredClone(record.frame));
+  return records.map(record => structuredClone(record));
 };
+
+export const readAccountFrameHistory = async (
+  deps: CertifiedHistoryReadDeps,
+  env: RuntimeReplica,
+  entityId: string,
+  counterpartyId: string,
+  limit = 50,
+  opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+): Promise<AccountFrame[]> => (await readAccountFrameHistoryRecords(
+  deps, env, entityId, counterpartyId, limit, opts,
+)).map(record => record.frame);
 
 /**
  * Read a bounded, complete Account swap lifecycle projection from certified
@@ -389,6 +415,11 @@ const createFrameHistoryQueries = (deps: PersistenceQueryDeps) => {
     height: number,
   ) => readRuntimeActivityJournal(deps, env, height);
 
+  const readPersistedRuntimeActivityRecord = (
+    env: RuntimeReplica,
+    height: number,
+  ) => readRuntimeActivityRecord(deps, env, height);
+
   const readPersistedAccountFrameHistory = (
     env: RuntimeReplica,
     entityId: string,
@@ -396,6 +427,14 @@ const createFrameHistoryQueries = (deps: PersistenceQueryDeps) => {
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
   ) => readAccountFrameHistory(deps, env, entityId, counterpartyId, limit, opts);
+
+  const readPersistedAccountFrameHistoryRecords = (
+    env: RuntimeReplica,
+    entityId: string,
+    counterpartyId: string,
+    limit = 50,
+    opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+  ) => readAccountFrameHistoryRecords(deps, env, entityId, counterpartyId, limit, opts);
 
   const readPersistedAccountSwapHistoryPage = (
     env: RuntimeReplica,
@@ -410,18 +449,20 @@ const createFrameHistoryQueries = (deps: PersistenceQueryDeps) => {
   return {
     readPersistedFrameJournal,
     readPersistedRuntimeActivityJournal,
+    readPersistedRuntimeActivityRecord,
     readPersistedAccountFrameHistory,
+    readPersistedAccountFrameHistoryRecords,
     readPersistedAccountSwapHistoryPage,
   };
 };
 
-const readPersistedEntityFrameHistory = async (
+const readPersistedEntityFrameHistoryRecords = async (
   deps: PersistenceQueryDeps,
   env: RuntimeReplica,
   entityId: string,
   limit = 50,
   opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
-): Promise<CertifiedEntityFrameLink[]> => {
+) => {
   await requireStorageDbOpen(
     () => deps.tryOpenRuntimeWalDb(env),
     'runtime-wal:certified-entity-frames',
@@ -437,8 +478,18 @@ const readPersistedEntityFrameHistory = async (
     ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
     ...(Number.isSafeInteger(maxEntityHeight) ? { maxEntityHeight } : {}),
   });
-  return records.map((record) => structuredClone(record.link));
+  return records.map(record => structuredClone(record));
 };
+
+const readPersistedEntityFrameHistory = async (
+  deps: PersistenceQueryDeps,
+  env: RuntimeReplica,
+  entityId: string,
+  limit = 50,
+  opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
+): Promise<CertifiedEntityFrameLink[]> => (await readPersistedEntityFrameHistoryRecords(
+  deps, env, entityId, limit, opts,
+)).map(record => record.link);
 
 const readPersistedFrameJournals = async (
   deps: PersistenceQueryDeps,
@@ -567,6 +618,12 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
       limit = 50,
       opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
     ) => readPersistedEntityFrameHistory(deps, env, entityId, limit, opts),
+    readPersistedEntityFrameHistoryRecords: (
+      env: RuntimeReplica,
+      entityId: string,
+      limit = 50,
+      opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
+    ) => readPersistedEntityFrameHistoryRecords(deps, env, entityId, limit, opts),
     readPersistedFrameJournals: (
       env: RuntimeReplica,
       opts?: { fromHeight?: number; toHeight?: number; limit?: number; includeRuntimeMachine?: boolean },

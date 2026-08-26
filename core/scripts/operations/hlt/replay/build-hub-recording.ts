@@ -27,6 +27,10 @@ const outputPath = resolve(argument('output'));
 const snapshotPath = resolve(argument('snapshot'));
 const users = positiveIntegerArgument('users');
 const workload = argument('workload');
+const requireCompleteAuthorityEvidence = process.argv.includes('--require-complete-authority-evidence');
+if (process.env['XLN_MM_CROSS_J'] !== '0') {
+  throw new Error('HLT_AUTHORITY_RECORDING_MM_CROSS_J_MUST_BE_ZERO');
+}
 // Runtime DB paths are module constants. Set the exact H1 root before loading
 // any Runtime/storage module; changing process.env after an ESM import silently
 // opens the default DB and makes a populated WAL look empty.
@@ -48,7 +52,10 @@ const {
   createEmptyEnv,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
+  readPersistedRuntimeActivityRecord,
+  readPersistedAccountFrameHistoryRecords,
   readPersistedEntityFrameHistory,
+  readPersistedEntityFrameHistoryRecords,
   validateRuntimeRecoveryBundle,
 } = runtime;
 const { hashEntityProposalTxPrefix } = await import('../../../../entity/consensus/proposal/replay-oracle');
@@ -57,6 +64,10 @@ const {
   summarizeHltHubFrames,
   writeHltHubRecording,
 } = recordingApi;
+const {
+  buildHltAuthorityEvidence,
+  assertCompleteHltAuthorityEvidence,
+} = await import('./authority-evidence');
 const meshRootSeed = readFileSync(join(workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
 if (!meshRootSeed) throw new Error('HLT_HUB_RECORDING_MESH_ROOT_SEED_MISSING');
 const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
@@ -114,6 +125,46 @@ try {
     frames,
   });
   const recording = buildRuntimeRecording([snapshot, tail]);
+  const touchedEntities = new Set<string>();
+  const touchedAccounts = new Map<string, { entityId: string; counterpartyId: string }>();
+  for (const frame of frames) {
+    const activity = await readPersistedRuntimeActivityRecord(env, frame.height);
+    if (!activity) {
+      throw new Error(`HLT_AUTHORITY_RUNTIME_ACTIVITY_MISSING:${frame.height}`);
+    }
+    for (const entityId of activity.touchedEntities) touchedEntities.add(entityId.toLowerCase());
+    for (const account of activity.touchedAccounts) {
+      const entityId = account.entityId.toLowerCase();
+      const counterpartyId = account.counterpartyId.toLowerCase();
+      touchedAccounts.set(`${entityId}:${counterpartyId}`, { entityId, counterpartyId });
+    }
+  }
+  const entityFrames = (await Promise.all([...touchedEntities].sort().map(async entityId =>
+    readPersistedEntityFrameHistoryRecords(env, entityId, 1_000, { maxRuntimeHeight: targetHeight })
+  ))).flat().filter(record => record.runtimeHeight > baseHeight).map(record => ({
+    runtimeHeight: record.runtimeHeight,
+    entityId: record.entityId,
+    entityHeight: record.entityHeight,
+    frameHash: record.link.frame.hash,
+    stateRoot: record.link.frame.stateRoot,
+    authorityRoot: record.link.frame.authorityRoot,
+  })).sort((left, right) => left.runtimeHeight - right.runtimeHeight ||
+    left.entityId.localeCompare(right.entityId) || left.entityHeight - right.entityHeight);
+  const accountFrames = (await Promise.all([...touchedAccounts.values()].map(async account =>
+    readPersistedAccountFrameHistoryRecords(
+      env, account.entityId, account.counterpartyId, 1_000, { maxRuntimeHeight: targetHeight },
+    )
+  ))).flat().filter(record => record.runtimeHeight > baseHeight).map(record => ({
+    runtimeHeight: record.runtimeHeight,
+    entityId: record.entityId,
+    counterpartyId: record.counterpartyId,
+    source: record.source,
+    frame: record.frame,
+  })).sort((left, right) => left.runtimeHeight - right.runtimeHeight ||
+    left.entityId.localeCompare(right.entityId) || left.frame.height - right.frame.height);
+  const authorityFrameOracle = { entityFrames, accountFrames };
+  const authorityEvidence = buildHltAuthorityEvidence(frames, authorityFrameOracle);
+  if (requireCompleteAuthorityEvidence) assertCompleteHltAuthorityEvidence(authorityEvidence);
   const requestedFrames = new Map<string, { entityId: string; entityHeight: number }>();
   for (const frame of frames) {
     for (const context of frame.entityContexts.values()) {
@@ -149,10 +200,17 @@ try {
   );
   const artifact: HltHubRecording = {
     schema: HLT_HUB_RECORDING_SCHEMA,
-    createdAt: Date.now(),
+    createdAt: frames.at(-1)!.timestamp,
     source: { workDir, users, workload },
     recording,
     totals: summarizeHltHubFrames(frames),
+    featurePolicy: {
+      mmCrossJurisdiction: false,
+      disputes: 'disabled',
+      lending: 'disabled',
+    },
+    authorityFrameOracle,
+    authorityEvidence,
     ...(entityProposalOracle ? { entityProposalOracle } : {}),
   };
   mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
@@ -160,7 +218,9 @@ try {
   console.log(
     `HLT_BUILD_RECORDING_OK path=${outputPath} runtime=${runtimeId} ` +
     `heights=${baseHeight}-${targetHeight} frames=${frames.length} ` +
-    `entityInputs=${artifact.totals.runtimeEntityInputs} outbox=${artifact.totals.outboxEnvelopes}`,
+    `entityInputs=${artifact.totals.runtimeEntityInputs} outbox=${artifact.totals.outboxEnvelopes} ` +
+    `entityRoots=${entityFrames.length} accountRoots=${accountFrames.length} ` +
+    `operations=${authorityEvidence.economicOperations.operations.length}`,
   );
 } finally {
   await closeRuntimeDb(env);
