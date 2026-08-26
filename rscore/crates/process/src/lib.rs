@@ -60,13 +60,18 @@ pub use transport::{read_frame, serve, write_frame};
 // Entity inputs roll back their Account mutations and operation indices.
 // 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
 // shapes. FrameAck is one atomic operation with one ordered composite result.
-pub const PROCESS_ABI_VERSION: u64 = 19;
+pub const PROCESS_ABI_VERSION: u64 = 20;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=22")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=24")
+        // wire=24: outbound carries the reachable forwarded-HTLC route
+        // closure; failed-lock rows bind the lock and exact generated upstream
+        // resolution, so the second visit reaches fixed point without a third
+        // process request.
+        // wire=23: every proposal carries exact failed HTLC lock rows.
         // wire=22: direct two-visit authority has no rollback savepoint ops;
         // AccountInbound carries the parent's canonical forest root, which
         // promotes or drops the prior internal path-copy candidate.
@@ -117,9 +122,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xc1, 0x66, 0xc5, 0x7c, 0x35, 0xc6, 0x2e, 0x14, 0xda, 0xac, 0xbb, 0x31, 0x47, 0x46,
-            0xb3, 0xfd, 0x12, 0xff, 0xbe, 0x4a, 0xdc, 0xbf, 0x42, 0x36, 0xc0, 0xde, 0x0b, 0x9e,
-            0x16, 0xf7, 0xf1, 0x3a,
+            0xba, 0xc2, 0x67, 0x3d, 0xd7, 0x81, 0xfe, 0x5e, 0x63, 0x77, 0x3c, 0x77, 0x8f, 0x29,
+            0xce, 0x94, 0xe8, 0x2b, 0xa4, 0xbb, 0xa2, 0x29, 0xb6, 0x74, 0x0c, 0x55, 0xe6, 0x2a,
+            0x9d, 0x46, 0x5d, 0xab,
         ],
     };
 

@@ -315,6 +315,10 @@ export const cutoverAccountProposalResult = (
     message: row.message,
     disposition: row.disposition,
   }));
+  const failedHtlcLocks = proposal.failedHtlcLocks.map(failed => ({
+    hashlock: failed.hashlock,
+    reason: failed.reason,
+  }));
   const priorSnapshot = request.account;
   if (proposal.frame === null) {
     // The window produced no frame. The mempool still moved when something was
@@ -327,6 +331,7 @@ export const cutoverAccountProposalResult = (
         : 'No transactions to propose',
       events: [],
       proposalDroppedTransactions: dropped,
+      ...(failedHtlcLocks.length > 0 ? { failedHtlcLocks } : {}),
       ...(dropped.length > 0 ? { accountChanged: true as const } : {}),
     });
   }
@@ -372,5 +377,6 @@ export const cutoverAccountProposalResult = (
     swapCancelRequests: effects.swapCancelRequests,
     swapOffersCancelled: effects.swapOffersCancelled,
     hashesToSign: cutoverProposalHashes(accountId, proposal.frame, proposal.dispute),
+    ...(failedHtlcLocks.length > 0 ? { failedHtlcLocks } : {}),
   });
 };

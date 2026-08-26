@@ -525,12 +525,15 @@ fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> 
 
 /// One Entity input's outbound half: creates, admissions, proposal worklist.
 fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 8, "accountOutbound")?;
+    let fields = exact(fields, 9, "accountOutbound")?;
     let creates = tuple(&fields[3])?;
     let admits = tuple(&fields[4])?;
     let propose = tuple(&fields[5])?;
     let materialize = tuple(&fields[6])?;
-    if creates.len() + admits.len() + propose.len() + materialize.len() > MAX_WAVE_OP_ROWS {
+    let failed_htlc_routes = tuple(&fields[7])?;
+    if creates.len() + admits.len() + propose.len() + materialize.len() + failed_htlc_routes.len()
+        > MAX_WAVE_OP_ROWS
+    {
         return Err(ProcessError::Expected("waveOpRows"));
     }
     Ok(Command::AccountOutbound {
@@ -563,7 +566,26 @@ fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError>
                 .iter()
                 .map(|value| Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?)))
                 .collect::<Result<_, ProcessError>>()?,
-            post_accounts: strict_boolean(&fields[7], "postAccounts")?,
+            failed_htlc_routes: failed_htlc_routes
+                .iter()
+                .map(|value| {
+                    let row = exact(tuple(value)?, 5, "failedHtlcRoute")?;
+                    Ok(xln_rscore_batch::FailedHtlcRoute {
+                        hashlock: fixed_bytes(&row[0], "hashlock")?,
+                        outbound_account_id: AccountId::from_bytes(fixed_bytes(
+                            &row[1],
+                            "outboundAccountId",
+                        )?),
+                        outbound_lock_id: text(&row[2])?.to_owned(),
+                        inbound_account_id: AccountId::from_bytes(fixed_bytes(
+                            &row[3],
+                            "inboundAccountId",
+                        )?),
+                        inbound_lock_id: text(&row[4])?.to_owned(),
+                    })
+                })
+                .collect::<Result<_, ProcessError>>()?,
+            post_accounts: strict_boolean(&fields[8], "postAccounts")?,
         }),
     })
 }

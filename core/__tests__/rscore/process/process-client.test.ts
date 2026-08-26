@@ -1292,22 +1292,40 @@ describe.skipIf(!existsSync(BINARY))('rscore process client', () => {
           deliveryMode: 'direct',
         },
       };
+      const failedHashlock = `0x${'5a'.repeat(32)}`;
+      const failedLock: AccountTx = {
+        type: 'htlc_lock',
+        data: {
+          lockId: `0x${'4b'.repeat(32)}`,
+          hashlock: failedHashlock,
+          timelock: 1_699_999_999_999n,
+          revealBeforeHeight: 200,
+          amount: 10n,
+          tokenId: 1,
+        },
+      };
       const prepared = await client.prepareAccountWave({ entities: [], postAccounts: true });
       const wave = (await stageAndSeal(
         client,
         prepared.token,
         owner,
-        [waveAdmitOp(0, counterparty, [accountTxWire(tx)] as never)],
+        [waveAdmitOp(0, counterparty, [accountTxWire(tx), accountTxWire(failedLock)] as never)],
         [counterparty],
       )).sealed;
 
       expect(wave.proposals).toHaveLength(1);
       expect(wave.proposals[0]!.frame).toBeNull();
-      expect(wave.proposals[0]!.dropped).toHaveLength(1);
+      expect(wave.proposals[0]!.dropped).toHaveLength(2);
       const dropped = wave.proposals[0]!.dropped[0]!;
       expect(dropped.index).toBe(0);
       expect(dropped.disposition).toBe('removed');
       expect(dropped.code.length).toBeGreaterThan(0);
+      expect(wave.proposals[0]!.failedHtlcLocks).toEqual([{
+        hashlock: failedHashlock,
+        lockId: `0x${'4b'.repeat(32)}`,
+        reason: 'Timelock 1699999999999 already expired (timestamp)',
+        upstreamResolution: null,
+      }]);
       expect(wave.touched).toHaveLength(1);
       expect(waveParityDigest(wave)).toBe(wave.parityDigest);
 

@@ -194,11 +194,11 @@ const rawOk = (reply: RawProcessReply): unknown => {
   return reply.result;
 };
 
-describe.skipIf(!existsSync(BINARY))('rscore ABI19 process binding', () => {
+describe.skipIf(!existsSync(BINARY))('rscore ABI20 process binding', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(19);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(20);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
-      .toBe('c166c57c35c62e14daacbb314746b3fd12ffbe4adcbf4236c0de0b9e16f7f13a');
+      .toBe('bac2673dd781fe5e63773c778f29ce94e82ba4bba229b6740c55e62a9d465dab');
     const staleAbi = new RawProcessSession(identity());
     try {
       expect(rawErrorCode(await staleAbi.request(RSCORE_OP.hello, [
@@ -334,6 +334,7 @@ describe.skipIf(!existsSync(BINARY))('rscore ABI19 process binding', () => {
         ownerBytes,
         1_700_000_000_000,
         100,
+        [],
         [],
         [],
         [],

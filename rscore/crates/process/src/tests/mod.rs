@@ -14,7 +14,7 @@ mod peer_wire;
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "c166c57c35c62e14daacbb314746b3fd12ffbe4adcbf4236c0de0b9e16f7f13a"
+        "bac2673dd781fe5e63773c778f29ce94e82ba4bba229b6740c55e62a9d465dab"
     );
 
     let mut session = ProcessSession::new();
@@ -40,6 +40,47 @@ fn hello_requires_exact_build_owned_payment_profile_binding() {
     );
 
     assert_ok(session.handle(hello(0)).envelope);
+}
+
+#[test]
+fn account_outbound_decodes_the_exact_failed_htlc_route_closure() {
+    let tuple = |fields| AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields));
+    let hashlock = [0x5a; 32];
+    let outbound_account = [0x6b; 32];
+    let inbound_account = [0x7c; 32];
+    let envelope = request(
+        0,
+        OpTag::AccountOutbound,
+        vec![
+            AbiValue::Bytes([0x4d; 32].to_vec()),
+            AbiValue::Integer(1_700_000_000_000),
+            AbiValue::Integer(100),
+            tuple(Vec::new()),
+            tuple(Vec::new()),
+            tuple(vec![AbiValue::Bytes(outbound_account.to_vec())]),
+            tuple(Vec::new()),
+            tuple(vec![tuple(vec![
+                AbiValue::Bytes(hashlock.to_vec()),
+                AbiValue::Bytes(outbound_account.to_vec()),
+                AbiValue::Text("downstream-lock".into()),
+                AbiValue::Bytes(inbound_account.to_vec()),
+                AbiValue::Text("upstream-lock".into()),
+            ])]),
+            AbiValue::Bool(true),
+        ],
+    );
+    let crate::wire_decode::Command::AccountOutbound { request } =
+        crate::wire_decode::decode_command(&envelope).expect("decode route closure")
+    else {
+        panic!("expected AccountOutbound");
+    };
+    assert_eq!(request.failed_htlc_routes.len(), 1);
+    let route = &request.failed_htlc_routes[0];
+    assert_eq!(route.hashlock, hashlock);
+    assert_eq!(route.outbound_account_id.as_bytes(), &outbound_account);
+    assert_eq!(route.outbound_lock_id, "downstream-lock");
+    assert_eq!(route.inbound_account_id.as_bytes(), &inbound_account);
+    assert_eq!(route.inbound_lock_id, "upstream-lock");
 }
 
 #[test]
@@ -737,7 +778,7 @@ fn an_authority_session_proposes_a_signed_frame_in_one_wave() {
         1,
         "one account had something to propose: {fields:?}"
     );
-    let proposal = exact_tuple(&proposals[0], 7, "proposal");
+    let proposal = exact_tuple(&proposals[0], 8, "proposal");
     let frame = exact_tuple(&proposal[1], 10, "frame");
     assert_eq!(frame[0], AbiValue::Integer(1), "height 1");
     assert_eq!(tuple_fields(&frame[3]).len(), 1, "one transaction");
@@ -1398,7 +1439,7 @@ fn exact_checkpoint_restores_pending_frame_and_held_outputs() {
             .handle(finalize_entity(6, uninterrupted_token, stage_key, 0))
             .envelope,
     );
-    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 7, "proposal");
+    let proposal = exact_tuple(&tuple_fields(&body_fields(&proposed)[4])[0], 8, "proposal");
     assert!(
         !matches!(proposal[1], AbiValue::Nil),
         "swap proposal rejected: {:?}",

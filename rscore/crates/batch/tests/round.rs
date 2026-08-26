@@ -4,7 +4,8 @@ mod fixture;
 
 use fixture::stand;
 use xln_rscore_batch::{
-    AccountInputVerdict, EntityInboundRequest, EntityOutboundRequest, ReceiverClock,
+    AccountInputVerdict, EntityInboundRequest, EntityOutboundRequest, FailedHtlcRoute,
+    ReceiverClock,
 };
 
 const TIMESTAMP: u64 = 1_700_000_000_000;
@@ -51,6 +52,7 @@ fn two_visits_carry_a_whole_entity_frame() {
             admits: vec![(payer_account, txs)],
             propose: vec![payer_account],
             materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
             post_accounts: true,
         })
         .expect("outbound");
@@ -105,6 +107,7 @@ fn two_visits_carry_a_whole_entity_frame() {
             admits: Vec::new(),
             propose: Vec::new(),
             materialize: vec![payee_account],
+            failed_htlc_routes: Vec::new(),
             post_accounts: true,
         })
         .expect("outbound half");
@@ -134,6 +137,7 @@ fn the_next_parent_root_promotes_or_drops_the_path_copy_candidate() {
             admits: vec![(account, txs)],
             propose: vec![account],
             materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
             post_accounts: false,
         })
         .expect("candidate");
@@ -167,6 +171,7 @@ fn the_next_parent_root_promotes_or_drops_the_path_copy_candidate() {
             admits: vec![(account, txs)],
             propose: vec![account],
             materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
             post_accounts: false,
         })
         .expect("candidate");
@@ -199,6 +204,7 @@ fn the_two_visit_protocol_refuses_missing_or_overlapping_halves() {
             admits: Vec::new(),
             propose: Vec::new(),
             materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
             post_accounts: false,
         })
         .err()
@@ -239,6 +245,7 @@ fn a_round_refuses_an_account_another_entity_owns() {
             admits: Vec::new(),
             propose: vec![payer_account],
             materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
             post_accounts: false,
         })
         .err()
@@ -257,7 +264,109 @@ fn a_round_refuses_an_account_another_entity_owns() {
             admits: Vec::new(),
             propose: Vec::new(),
             materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
             post_accounts: false,
         })
         .expect("a rejected outbound does not consume the inbound half");
+}
+
+/// A downstream rejection is resolved upstream inside the same outbound
+/// visit. The parent later consumes these precomputed rows while running its
+/// canonical worklist; no third process request exists.
+#[test]
+fn a_failed_forward_reaches_the_upstream_account_in_one_outbound_visit() {
+    use num_bigint::BigInt;
+    use xln_rscore_batch::{AccountId, AccountSeed};
+    use xln_rscore_engine::{AccountReplica, AccountTx, HtlcHashlock, HtlcLockTx, TokenId};
+
+    let mut stand = stand(1);
+    let owner = stand.pairs[0].payer_entity;
+    let downstream_account = stand.pairs[0].payer_account;
+    let payer = stand.pairs[0].payer.clone();
+    let (upstream_bytes, upstream_peer) = fixture::entity_of("upstream-peer");
+    let (left, right) = if payer.to_string() < upstream_peer.to_string() {
+        (payer.clone(), upstream_peer)
+    } else {
+        (upstream_peer, payer.clone())
+    };
+    let upstream_account = AccountId::from_bytes(upstream_bytes);
+    stand
+        .payer
+        .upsert_accounts(vec![AccountSeed {
+            account_id: upstream_account,
+            replica: AccountReplica::new(payer, fixture::account_state(&left, &right))
+                .expect("upstream replica"),
+            consensus: None,
+        }])
+        .expect("second account owned by the same Entity");
+    let hashlock = HtlcHashlock::parse(&format!("0x{}", "5a".repeat(32))).expect("hashlock");
+    let downstream_lock_id = format!("0x{}", "4b".repeat(32));
+    let upstream_lock_id = format!("0x{}", "3c".repeat(32));
+    enter(&mut stand.payer, owner);
+
+    let result = stand
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: owner,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: vec![(
+                downstream_account,
+                vec![AccountTx::HtlcLock(HtlcLockTx {
+                    lock_id: downstream_lock_id.clone(),
+                    hashlock: hashlock.clone(),
+                    timelock: BigInt::from(TIMESTAMP - 1),
+                    reveal_before_height: 200,
+                    amount: BigInt::from(10),
+                    token_id: TokenId::new(1).expect("token"),
+                    delivery_mode: None,
+                    envelope: None,
+                })],
+            )],
+            propose: vec![downstream_account],
+            materialize: Vec::new(),
+            failed_htlc_routes: vec![FailedHtlcRoute {
+                hashlock: *hashlock.bytes(),
+                outbound_account_id: downstream_account,
+                outbound_lock_id: downstream_lock_id,
+                inbound_account_id: upstream_account,
+                inbound_lock_id: upstream_lock_id.clone(),
+            }],
+            post_accounts: true,
+        })
+        .expect("one outbound visit reaches fixed point");
+
+    assert_eq!(
+        result.admissions.len(),
+        2,
+        "original lock plus generated resolve"
+    );
+    assert_eq!(result.admissions[1].account_id, upstream_account);
+    assert_eq!(
+        result.proposals.len(),
+        2,
+        "generated account joins the worklist"
+    );
+    assert_eq!(result.proposals[0].account_id, downstream_account);
+    assert_eq!(result.proposals[1].account_id, upstream_account);
+    let failed = &result.proposals[0].failed_htlc_locks[0];
+    assert_eq!(failed.lock_id, format!("0x{}", "4b".repeat(32)));
+    let resolution = failed
+        .upstream_resolution
+        .as_ref()
+        .expect("failure carries its exact upstream admission");
+    assert_eq!(resolution.account_id, upstream_account);
+    assert_eq!(resolution.lock_id, upstream_lock_id);
+    assert_eq!(
+        resolution.reason,
+        "forward_failed:Timelock 1699999999999 already expired (timestamp)",
+    );
+    assert!(
+        result
+            .post_accounts
+            .iter()
+            .any(|row| row.account_id == upstream_account),
+        "the parent receives the generated account's final body",
+    );
 }

@@ -189,6 +189,8 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::EntityRoundMissing => "RSCORE_BATCH_ENTITY_ROUND_MISSING",
         BatchError::EntityRoundOwner { .. } => "RSCORE_BATCH_ENTITY_ROUND_OWNER",
         BatchError::EntityHeadRoot { .. } => "RSCORE_BATCH_ENTITY_HEAD_ROOT",
+        BatchError::FailedHtlcRouteDuplicate { .. } => "RSCORE_BATCH_FAILED_HTLC_ROUTE_DUPLICATE",
+        BatchError::FailedHtlcRouteMismatch { .. } => "RSCORE_BATCH_FAILED_HTLC_ROUTE_MISMATCH",
         BatchError::EntityStageOpen(_) => "RSCORE_BATCH_ENTITY_STAGE_OPEN",
         BatchError::EntityStageMissing(_) => "RSCORE_BATCH_ENTITY_STAGE_MISSING",
         BatchError::EntityStageKey { .. } => "RSCORE_BATCH_ENTITY_STAGE_KEY",

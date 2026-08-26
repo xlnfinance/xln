@@ -76,7 +76,21 @@ pub struct EntityOutboundRequest {
     /// Accounts changed on the inbound visit whose final bodies the parent
     /// needs only after all Entity-derived work has run.
     pub materialize: Vec<AccountId>,
+    /// Active forwarded-payment routes whose downstream Account may reject a
+    /// lock during this proposal pass. These are Entity-owned routing facts,
+    /// supplied before execution so Rust can enqueue the exact upstream
+    /// resolve and finish the canonical worklist without a third process call.
+    pub failed_htlc_routes: Vec<FailedHtlcRoute>,
     pub post_accounts: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct FailedHtlcRoute {
+    pub hashlock: [u8; 32],
+    pub outbound_account_id: AccountId,
+    pub outbound_lock_id: String,
+    pub inbound_account_id: AccountId,
+    pub inbound_lock_id: String,
 }
 
 /// What one visit changed.
@@ -262,23 +276,36 @@ impl StatefulConsensusEngine {
         &mut self,
         request: EntityOutboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
-        let mut named: BTreeSet<AccountId> =
-            request.creates.iter().map(|seed| seed.account_id).collect();
-        named.extend(request.admits.iter().map(|(account_id, _)| *account_id));
-        named.extend(request.propose.iter().copied());
-        named.extend(request.materialize.iter().copied());
-        let created: BTreeSet<AccountId> =
-            request.creates.iter().map(|seed| seed.account_id).collect();
+        let EntityOutboundRequest {
+            owner_entity_id,
+            timestamp,
+            j_height,
+            creates,
+            admits,
+            propose,
+            materialize,
+            failed_htlc_routes,
+            post_accounts,
+        } = request;
+        let mut named: BTreeSet<AccountId> = creates.iter().map(|seed| seed.account_id).collect();
+        named.extend(admits.iter().map(|(account_id, _)| *account_id));
+        named.extend(propose.iter().copied());
+        named.extend(materialize.iter().copied());
+        for route in &failed_htlc_routes {
+            named.insert(route.outbound_account_id);
+            named.insert(route.inbound_account_id);
+        }
+        let created: BTreeSet<AccountId> = creates.iter().map(|seed| seed.account_id).collect();
         self.assert_owner(
-            request.owner_entity_id,
+            owner_entity_id,
             &named.difference(&created).copied().collect(),
         )?;
         let round = self
             .entity_round_base()
             .ok_or(BatchError::EntityRoundMissing)?;
-        if round.owner_entity_id != request.owner_entity_id {
+        if round.owner_entity_id != owner_entity_id {
             return Err(BatchError::EntityRoundOwner {
-                actual: hex_of(&request.owner_entity_id),
+                actual: hex_of(&owner_entity_id),
                 expected: hex_of(&round.owner_entity_id),
             });
         }
@@ -286,19 +313,32 @@ impl StatefulConsensusEngine {
         let base = round.base_accounts.clone();
         phase::add(&phase::SNAPSHOT, snapshot_at);
         let outcome = (|| {
-            if !request.creates.is_empty() {
-                self.upsert_accounts(request.creates)?;
+            if !creates.is_empty() {
+                self.upsert_accounts(creates.clone())?;
             }
             let outbound_at = std::time::Instant::now();
-            let (admissions, proposals) = self.admit_and_propose(
-                request.admits,
-                &request.propose,
-                request.timestamp,
-                request.j_height,
-            )?;
+            let (mut admissions, mut proposals) =
+                self.admit_and_propose(admits.clone(), &propose, timestamp, j_height)?;
+            if Self::proposals_need_htlc_followup(&proposals, &failed_htlc_routes)? {
+                self.restore_entity_round_inbound();
+                if !creates.is_empty() {
+                    self.upsert_accounts(creates)?;
+                }
+                let (ordered_admissions, ordered_proposals, generated_accounts) = self
+                    .admit_and_propose_htlc_fixed_point(
+                        admits,
+                        &propose,
+                        timestamp,
+                        j_height,
+                        &failed_htlc_routes,
+                    )?;
+                admissions = ordered_admissions;
+                proposals = ordered_proposals;
+                named.extend(generated_accounts);
+            }
             phase::add(&phase::OUTBOUND, outbound_at);
             let settle_at = std::time::Instant::now();
-            let mut result = self.settle(&base, &named, request.post_accounts)?;
+            let mut result = self.settle(&base, &named, post_accounts)?;
             phase::add(&phase::SETTLE, settle_at);
             phase::tick();
             result.admissions = admissions;

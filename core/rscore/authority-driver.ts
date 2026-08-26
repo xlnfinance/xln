@@ -788,6 +788,13 @@ export const runAuthorityCutoverOutboundBatch = async (
     admits: readonly Readonly<{ accountId: string; txs: readonly AccountTx[] }>[];
     propose: readonly string[];
     materialize: readonly string[];
+    failedHtlcRoutes: readonly Readonly<{
+      hashlock: string;
+      outboundAccountId: string;
+      outboundLockId: string;
+      inboundAccountId: string;
+      inboundLockId: string;
+    }>[];
     timestamp: number;
     jHeight: number;
   }>,
@@ -811,6 +818,13 @@ export const runAuthorityCutoverOutboundBatch = async (
     ]),
     propose: request.propose.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
     materialize: request.materialize.map(id => hexToWireBytes(id, 32, 'AUTHORITY_ACCOUNT')),
+    failedHtlcRoutes: request.failedHtlcRoutes.map(route => [
+      hexToWireBytes(route.hashlock, 32, 'AUTHORITY_HASHLOCK'),
+      hexToWireBytes(route.outboundAccountId, 32, 'AUTHORITY_ACCOUNT'),
+      route.outboundLockId,
+      hexToWireBytes(route.inboundAccountId, 32, 'AUTHORITY_ACCOUNT'),
+      route.inboundLockId,
+    ]),
     postAccounts: true,
   });
   report.waves += 1;

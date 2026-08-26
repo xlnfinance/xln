@@ -524,6 +524,56 @@ fn a_window_that_proposes_nothing_still_reports_what_it_dropped() {
     assert_eq!(result.touched[0].0, stand.pairs[0].payer_account);
 }
 
+#[test]
+fn a_rejected_htlc_lock_reports_the_exact_entity_failure_output() {
+    use num_bigint::BigInt;
+    use xln_rscore_engine::{HtlcHashlock, HtlcLockTx};
+
+    let mut stand = stand(1);
+    let pair = &stand.pairs[0];
+    let hashlock = HtlcHashlock::parse(&format!("0x{}", "5a".repeat(32))).expect("hashlock");
+    stand
+        .payer
+        .admit_txs(vec![(
+            pair.payer_account,
+            vec![AccountTx::HtlcLock(HtlcLockTx {
+                lock_id: format!("0x{}", "4b".repeat(32)),
+                hashlock: hashlock.clone(),
+                timelock: BigInt::from(1_699_999_999_999_u64),
+                reveal_before_height: 200,
+                amount: BigInt::from(10),
+                token_id: TokenId::new(1).expect("token"),
+                delivery_mode: None,
+                envelope: None,
+            })],
+        )])
+        .expect("admit");
+
+    stand
+        .payer
+        .prepare_wave(fixture::propose_only_wave(
+            pair.payer_entity,
+            1_700_000_000_000,
+        ))
+        .expect("prepare");
+    let result = stand
+        .payer
+        .propose_wave(WaveProposalRequest {
+            entities: vec![EntityProposalSelection {
+                owner_entity_id: pair.payer_entity,
+                account_ids: vec![pair.payer_account],
+            }],
+        })
+        .expect("propose");
+    let proposal = &result.proposals[0];
+    assert_eq!(proposal.failed_htlc_locks.len(), 1);
+    assert_eq!(proposal.failed_htlc_locks[0].hashlock, *hashlock.bytes());
+    assert_eq!(
+        proposal.failed_htlc_locks[0].reason,
+        "Timelock 1699999999999 already expired (timestamp)",
+    );
+}
+
 /// Operation indices are stable arrival identities. They must increase and be
 /// unique, while gaps remain legal when a multi-owner collector sends only one
 /// owner's subset to this engine.

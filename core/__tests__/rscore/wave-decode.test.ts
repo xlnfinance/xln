@@ -264,6 +264,39 @@ describe('rscore staged wave decoder', () => {
     });
   });
 
+  test('binds a failed lock to the exact same-call upstream resolution', () => {
+    const raw = rawWave();
+    const accountId = bytes(32, 0x22);
+    const upstreamId = bytes(32, 0x44);
+    raw[4] = [[
+      accountId,
+      null,
+      [],
+      null,
+      null,
+      [],
+      [],
+      [[
+        bytes(32, 0x5a),
+        'downstream-lock',
+        'expired',
+        [upstreamId, 'upstream-lock', 'forward_failed:expired'],
+      ]],
+    ]];
+    const wave = decodeWave(withParityDigest(raw));
+    expect(wave.proposals[0]?.failedHtlcLocks).toEqual([{
+      hashlock: hex(32, 0x5a),
+      lockId: 'downstream-lock',
+      reason: 'expired',
+      upstreamResolution: {
+        accountId: hex(32, 0x44),
+        lockId: 'upstream-lock',
+        reason: 'forward_failed:expired',
+      },
+    }]);
+    expect(waveParityDigest(wave)).toBe(wave.parityDigest);
+  });
+
   test('carries exact committed frames and distinguishes peer-frame from ACK commits', () => {
     const frameCommit = rawWave();
     const frameStateHash = bytes(32, 0x44);

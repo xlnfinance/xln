@@ -11,7 +11,9 @@
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
-import type { HandleAccountInputResult, ProposeAccountFrameResult } from '../../account/consensus/types';
+import type { HandleAccountInputResult } from '../../account/consensus/types';
+import { accountInputApplied } from '../../account/consensus/result';
+import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { safeStringify } from '../../protocol/serialization';
 import type {
   AccountAuthorityEntityBatchInbound,
@@ -110,7 +112,7 @@ const executeInboundBatch = async (
 const executeOutboundBatch = async (
   env: RuntimeReplica,
   batch: AccountAuthorityEntityBatchOutbound,
-): Promise<readonly ProposeAccountFrameResult[]> => {
+) => {
   const binding = bindingFor(env, batch.ownerEntityId);
   const grouped = new Map<string, { account: AccountReplica; txs: AccountTx[] }>();
   for (const request of batch.admissions) {
@@ -140,21 +142,24 @@ const executeOutboundBatch = async (
     admits,
     propose: proposals.map(row => row.accountId),
     materialize: batch.materializeAccounts.map(row => row.accountId),
+    failedHtlcRoutes: batch.failedHtlcRoutes,
     timestamp,
     jHeight,
   });
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const postAccountById = new Map(full.wave.postAccounts.map(row => [row.accountId, row]));
-  const proposalById = new Map(full.wave.proposals.map(row => [row.accountId, row]));
   if (postAccountById.size !== full.wave.postAccounts.length) {
     return halt('OUTBOUND_POST_ACCOUNT_DUPLICATE');
   }
-  if (proposalById.size !== full.wave.proposals.length) {
+  if (new Set(full.wave.proposals.map(row => row.accountId)).size !== full.wave.proposals.length) {
     return halt('OUTBOUND_PROPOSAL_DUPLICATE');
   }
-  if (full.wave.admissions.length !== admits.length) {
+  const resolutions = full.wave.proposals.flatMap(proposal =>
+    proposal.failedHtlcLocks.flatMap(failed =>
+      failed.upstreamResolution === null ? [] : [failed.upstreamResolution]));
+  if (full.wave.admissions.length !== admits.length + resolutions.length) {
     return halt('OUTBOUND_ADMISSION_ARITY', {
-      expected: admits.length,
+      expected: admits.length + resolutions.length,
       actual: full.wave.admissions.length,
     });
   }
@@ -175,30 +180,68 @@ const executeOutboundBatch = async (
       });
     }
   }
-  const accountsById = new Map<string, AccountReplica>();
-  for (const [accountId, { account }] of grouped) accountsById.set(accountId, account);
-  for (const { accountId, request } of proposals) accountsById.set(accountId, request.account);
-  for (const { accountId, account } of batch.materializeAccounts) {
-    accountsById.set(accountId, account);
+  for (const [offset, resolution] of resolutions.entries()) {
+    const index = admits.length + offset;
+    const result = full.wave.admissions[index];
+    if (
+      result === undefined
+      || result.operationIndex !== index
+      || result.accountId !== resolution.accountId
+      || result.verdict.kind !== 'admitted'
+      || result.verdict.count !== 1
+    ) {
+      return halt('OUTBOUND_GENERATED_ADMISSION_MISMATCH', {
+        index,
+        resolution,
+        actual: result ?? null,
+      });
+    }
   }
-  for (const [accountId, account] of accountsById) {
-    const row = postAccountById.get(accountId);
-    if (row === undefined) return halt('OUTBOUND_POST_ACCOUNT_MISSING', { account: accountId });
+  const accountById = (accountId: string): AccountReplica =>
+    batch.accounts.get(accountId)
+    ?? batch.accounts.get(accountId.toLowerCase())
+    ?? halt('OUTBOUND_ACCOUNT_MISSING', { account: accountId });
+  const proposalPriors = full.wave.proposals.map(proposal =>
+    forkAccountReplicaShell(accountById(proposal.accountId)));
+  for (const [accountId, row] of postAccountById) {
+    const account = accountById(accountId);
     materializeCutoverAccount(
       { binding, account, accountId },
       row,
     );
   }
-  return proposals.map(({ request, accountId }) => {
-    const proposal = proposalById.get(accountId);
-    if (proposal === undefined) return halt('OUTBOUND_PROPOSAL_MISSING', { account: accountId });
-    return cutoverAccountProposalResult(
-      { binding, account: request.account, accountId },
+  const preparedProposals = full.wave.proposals.map((proposal, index) => {
+    const accountId = proposal.accountId;
+    const prior = proposalPriors[index]
+      ?? halt('OUTBOUND_PROPOSAL_PRIOR_MISSING', { account: accountId });
+    return {
+      accountId,
+      result: cutoverAccountProposalResult(
+      { binding, account: prior, accountId },
       { wave: full.wave, row: postAccountById.get(accountId) ?? null },
       proposal,
       false,
-    );
+      ),
+    };
   });
+  return {
+    proposals: preparedProposals,
+    generatedAdmissions: resolutions.map(resolution => ({
+      accountId: resolution.accountId,
+      input: {
+        kind: 'enqueue' as const,
+        txs: [{
+          type: 'htlc_resolve' as const,
+          data: {
+            lockId: resolution.lockId,
+            outcome: 'error' as const,
+            reason: resolution.reason,
+          },
+        }],
+      },
+      result: accountInputApplied({ events: [], admittedAccountTxCount: 1 }),
+    })),
+  };
 };
 
 const createAuthorityCutoverProvider = (

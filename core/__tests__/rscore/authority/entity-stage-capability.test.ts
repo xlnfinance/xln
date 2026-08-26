@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { applyAccountInput } from '../../../account/consensus';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
+import { accountInputApplied, proposeAccountFrameIdle } from '../../../account/consensus/result';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { applyEntityInput } from '../../../entity/consensus';
 import type { EntityInput } from '../../../entity/types';
@@ -21,6 +22,7 @@ import { createEntityProposalFixture } from '../../helpers/entity-proposal-fixtu
 const OWNER = `0x${'aa'.repeat(32)}`;
 const OTHER_OWNER = `0x${'bb'.repeat(32)}`;
 const PEER = `0x${'cc'.repeat(32)}`;
+const UPSTREAM = `0x${'dd'.repeat(32)}`;
 
 const canonicalInput = (owner = OWNER): EntityInput => ({
   entityId: owner,
@@ -163,7 +165,7 @@ describe('pre-TypeScript Account authority capability', () => {
         outboundBatches += 1;
         outboundAdmissions = batch.admissions.length;
         expect(batch.proposals).toHaveLength(0);
-        return [];
+        return { proposals: [], generatedAdmissions: [] };
       },
     };
     const stage = createAccountAuthorityEntityStage(options(provider, 'cutover'));
@@ -202,6 +204,7 @@ describe('pre-TypeScript Account authority capability', () => {
     await stage.prepareEntityAccountOutbound?.({
       accounts: new Map([[PEER, account]]),
       proposalAccountIds: [],
+      failedHtlcRoutes: [],
       timestamp: 100,
       jHeight: 7,
     });
@@ -218,6 +221,97 @@ describe('pre-TypeScript Account authority capability', () => {
       proposeAccountFrame: 0,
     });
     await stage.discard();
+  });
+
+  test('one outbound result carries a failed-forward admission and its dynamic proposal', async () => {
+    const downstream = makeAccount(OWNER, PEER);
+    const upstream = makeAccount(OWNER, UPSTREAM);
+    const generatedInput = {
+      kind: 'enqueue' as const,
+      txs: [{
+        type: 'htlc_resolve' as const,
+        data: {
+          lockId: `0x${'44'.repeat(32)}`,
+          outcome: 'error' as const,
+          reason: 'forward_failed:expired',
+        },
+      }],
+    };
+    const provider: AccountAuthorityEntityStageProvider = {
+      async beginEntityStage() {
+        throw new Error('TEST_PER_OPERATION_STAGE_MUST_NOT_OPEN');
+      },
+      async executeAccountInboundBatch() {
+        return [];
+      },
+      async executeAccountOutboundBatch() {
+        return {
+          proposals: [
+            {
+              accountId: PEER,
+              result: proposeAccountFrameIdle({ message: 'downstream rejected', events: [] }),
+            },
+            {
+              accountId: UPSTREAM,
+              result: proposeAccountFrameIdle({ message: 'upstream resolve rejected', events: [] }),
+            },
+          ],
+          generatedAdmissions: [{
+            accountId: UPSTREAM,
+            input: generatedInput,
+            result: accountInputApplied({ events: [], admittedAccountTxCount: 1 }),
+          }],
+        };
+      },
+    };
+    const stage = createAccountAuthorityEntityStage(options(provider, 'cutover'));
+    stage.bindCanonicalInput(canonicalInput());
+    const accounts = new Map([[PEER, downstream], [UPSTREAM, upstream]]);
+    await stage.beginEntityAccountFrame?.({
+      ownerEntityId: OWNER,
+      expectedAccountsRoot: `0x${'00'.repeat(32)}`,
+      entityTxs: [],
+      accounts,
+      accountForWrite: accountId => accounts.get(accountId),
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    await stage.prepareEntityAccountOutbound?.({
+      accounts,
+      proposalAccountIds: [PEER],
+      failedHtlcRoutes: [],
+      timestamp: 100,
+      jHeight: 7,
+    });
+
+    expect(stage.hasPreparedAccountProposal?.(PEER)).toBe(true);
+    expect(stage.hasPreparedAccountProposal?.(UPSTREAM)).toBe(true);
+    expect((await stage.executeAccountProposal({
+      collectorFrameId: OWNER,
+      account: downstream,
+      timestamp: 100,
+      jHeight: 7,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+      selectionIsWholeMempool: true,
+    }))?.ok).toBe(true);
+    expect((await stage.executeAccountInput({
+      collectorFrameId: OWNER,
+      account: upstream,
+      input: generatedInput,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    }))?.admittedAccountTxCount).toBe(1);
+    expect((await stage.executeAccountProposal({
+      collectorFrameId: OWNER,
+      account: upstream,
+      timestamp: 100,
+      jHeight: 7,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+      selectionIsWholeMempool: true,
+    }))?.ok).toBe(true);
+    stage.finishEntityAccountFrame?.();
   });
 
   test('accepted canonical ingress binds before Account work without eager Begin', async () => {

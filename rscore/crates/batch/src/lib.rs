@@ -22,11 +22,12 @@ pub use consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
     AccountInputRow, AccountInputVerdict, AccountPeerInput, DroppedRow, EntityProposalSelection,
     EntityStageContext, EntityStageReceipt, EntityStageStatus, EntityWave, EntityWaveOps,
-    ProposalRow, ProposedRow, StageKey, StatefulConsensusEngine, WaveOp, WaveOpsRequest,
-    WaveProposalRequest, WaveRequest, WaveResult,
+    FailedHtlcLockRow, ProposalRow, ProposedRow, StageKey, StatefulConsensusEngine,
+    UpstreamHtlcResolutionRow, WaveOp, WaveOpsRequest, WaveProposalRequest, WaveRequest,
+    WaveResult,
 };
 pub use error::BatchError;
-pub use round::{EntityInboundRequest, EntityOutboundRequest, EntityRoundResult};
+pub use round::{EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute};
 // The receiver clock is part of this layer's boundary: a caller cannot apply
 // an input without saying what time it is on its own machine.
 pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};

@@ -59,7 +59,19 @@ export type AccountAuthorityEntityStageProvider = Readonly<{
   ): Promise<readonly ((request: AccountAuthorityInputRequest) => HandleAccountInputResult)[]>;
   executeAccountOutboundBatch?(
     input: AccountAuthorityEntityBatchOutbound,
-  ): Promise<readonly ProposeAccountFrameResult[]>;
+  ): Promise<AccountAuthorityPreparedOutbound>;
+}>;
+
+type AccountAuthorityPreparedOutbound = Readonly<{
+  proposals: readonly Readonly<{
+    accountId: string;
+    result: ProposeAccountFrameResult;
+  }>[];
+  generatedAdmissions: readonly Readonly<{
+    accountId: string;
+    input: Extract<AccountInput, { kind: 'enqueue' }>;
+    result: HandleAccountInputResult;
+  }>[];
 }>;
 
 type AccountAuthorityEntityParent = Readonly<{
@@ -77,6 +89,8 @@ export type AccountAuthorityEntityBatchInbound = AccountAuthorityEntityParent & 
 }>;
 
 export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent & Readonly<{
+  accounts: ReadonlyMap<string, AccountAuthorityInputRequest['account']>;
+  failedHtlcRoutes: AccountAuthorityFrameOutboundRequest['failedHtlcRoutes'];
   admissions: readonly AccountAuthorityInputRequest[];
   proposals: readonly AccountAuthorityProposalRequest[];
   materializeAccounts: readonly Readonly<{
@@ -219,6 +233,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   private preparedProposalIds: string[] = [];
   private proposalResults: ProposeAccountFrameResult[] = [];
   private proposalCursor = 0;
+  private generatedAdmissions: AccountAuthorityPreparedOutbound['generatedAdmissions'] = [];
+  private generatedAdmissionCursor = 0;
 
   constructor(options: AccountAuthorityEntityStageOptions) {
     assertOccurrence(options.occurrence);
@@ -290,6 +306,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.preparedProposalIds = [];
     this.proposalResults = [];
     this.proposalCursor = 0;
+    this.generatedAdmissions = [];
+    this.generatedAdmissionCursor = 0;
     this.inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
       const accountId = normalizeEntityId(arrival.accountId);
       const account = request.accountForWrite(accountId);
@@ -353,19 +371,33 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       const accountId = normalizeEntityId(request.account.proofHeader.toEntity);
       return [accountId, { accountId, account: request.account }] as const;
     }));
-    this.proposalResults = [...await run.call(this.options.provider, {
+    const prepared = await run.call(this.options.provider, {
       ...this.parentOf(),
+      accounts: request.accounts,
+      failedHtlcRoutes: request.failedHtlcRoutes,
       admissions: this.admissionRequests,
       proposals,
       materializeAccounts: [...materializeById.values()].toSorted((left, right) =>
         left.accountId.localeCompare(right.accountId),
       ),
-    })];
-    this.preparedProposalIds = proposalIds;
-    if (this.proposalResults.length !== proposals.length) {
-      throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_RESULT_ARITY:${proposals.length}:${this.proposalResults.length}`);
+    });
+    this.preparedProposalIds = prepared.proposals.map(row => normalizeEntityId(row.accountId));
+    this.proposalResults = prepared.proposals.map(row => row.result);
+    this.generatedAdmissions = [...prepared.generatedAdmissions];
+    if (this.preparedProposalIds.length !== new Set(this.preparedProposalIds).size) {
+      throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_RESULT_DUPLICATE');
     }
-    const executed = this.admissionRequests.length + proposals.length;
+    const originalProposalIds = new Set(proposalIds);
+    const retainedOriginalOrder = this.preparedProposalIds.filter(accountId =>
+      originalProposalIds.has(accountId));
+    if (safeStringify(retainedOriginalOrder) !== safeStringify(proposalIds)) {
+      throw new Error(
+        `ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${safeStringify(proposalIds)}:${safeStringify(retainedOriginalOrder)}`,
+      );
+    }
+    const executed = this.admissionRequests.length
+      + this.generatedAdmissions.length
+      + this.proposalResults.length;
     this.authoritativeExecutions += executed;
     executionLedger.authoritativeOperations += executed;
   }
@@ -397,6 +429,11 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (!this.frameOutboundPrepared) throw new Error(`ACCOUNT_AUTHORITY_OUTBOUND_NOT_PREPARED:${this.ownerEntityId}`);
     if (this.proposalCursor !== this.proposalResults.length) {
       throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_UNCONSUMED:${this.proposalCursor}:${this.proposalResults.length}`);
+    }
+    if (this.generatedAdmissionCursor !== this.generatedAdmissions.length) {
+      throw new Error(
+        `ACCOUNT_AUTHORITY_GENERATED_ADMISSION_UNCONSUMED:${this.generatedAdmissionCursor}:${this.generatedAdmissions.length}`,
+      );
     }
   }
 
@@ -443,7 +480,23 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (this.mode !== 'cutover') return null;
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (request.input.kind === 'enqueue') {
-      if (this.frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_ADMISSION_AFTER_OUTBOUND');
+      if (this.frameOutboundPrepared) {
+        const prepared = this.generatedAdmissions[this.generatedAdmissionCursor];
+        const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
+        const sameInput = prepared?.input === request.input
+          || (prepared !== undefined && safeStringify(prepared.input) === safeStringify(request.input));
+        if (
+          prepared === undefined
+          || normalizeEntityId(prepared.accountId) !== actualAccount
+          || !sameInput
+        ) {
+          throw new Error(
+            `ACCOUNT_AUTHORITY_GENERATED_ADMISSION_MISMATCH:${prepared?.accountId ?? 'none'}:${actualAccount}`,
+          );
+        }
+        this.generatedAdmissionCursor += 1;
+        return prepared.result;
+      }
       this.admissionRequests.push(request);
       return accountInputApplied({ events: [], admittedAccountTxCount: request.input.txs.length });
     }

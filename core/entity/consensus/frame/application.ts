@@ -83,7 +83,10 @@ import {
   failOriginatedHtlcRoute,
   terminateHtlcRoute,
 } from '../../tx/j-events-htlc/route-lifecycle';
-import { hasInboundHtlcRoute } from '../../htlc/route-views';
+import {
+  failedForwardHtlcRouteClosure,
+  hasInboundHtlcRoute,
+} from '../../htlc/route-views';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
@@ -1618,6 +1621,10 @@ const applyPostEntityTxPhases = async (
     ?.prepareEntityAccountOutbound?.({
       accounts: currentEntityState.accounts,
       proposalAccountIds,
+      failedHtlcRoutes: failedForwardHtlcRouteClosure(
+        currentEntityState.htlcRoutes,
+        proposalAccountIds,
+      ),
       timestamp: currentEntityState.timestamp,
       jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
     });
@@ -1745,6 +1752,7 @@ const applyEntityFrameWithIsolation = async (
       ?.prepareEntityAccountOutbound?.({
         accounts: working.currentEntityState.accounts,
         proposalAccountIds: [],
+        failedHtlcRoutes: [],
         timestamp: working.currentEntityState.timestamp,
         jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
       });

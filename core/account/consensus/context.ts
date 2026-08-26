@@ -5,6 +5,14 @@ import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 
+type AccountAuthorityFailedHtlcRoute = Readonly<{
+  hashlock: string;
+  outboundAccountId: string;
+  outboundLockId: string;
+  inboundAccountId: string;
+  inboundLockId: string;
+}>;
+
 /**
  * The authoritative engine's seat inside Account consensus.
  *
@@ -61,6 +69,7 @@ export type AccountAuthorityFrameBeginRequest = Readonly<{
 export type AccountAuthorityFrameOutboundRequest = Readonly<{
   accounts: ReadonlyMap<string, AccountReplica>;
   proposalAccountIds: readonly string[];
+  failedHtlcRoutes: readonly AccountAuthorityFailedHtlcRoute[];
   timestamp: number;
   jHeight: number;
 }>;

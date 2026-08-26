@@ -83,13 +83,13 @@ const RSCORE_ABI_VERSION = 1;
 // 14: peer inputs carry the exact Account envelope plus the closed
 // Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
 // returns one ordered composite result row.
-export const RSCORE_PROCESS_ABI_VERSION = 19;
+export const RSCORE_PROCESS_ABI_VERSION = 20;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=22")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=24")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'c166c57c35c62e14daacbb314746b3fd12ffbe4adcbf4236c0de0b9e16f7f13a',
+  'bac2673dd781fe5e63773c778f29ce94e82ba4bba229b6740c55e62a9d465dab',
   'hex',
 );
 
@@ -948,6 +948,7 @@ export class RscoreProcessClient {
     admits: readonly RscoreWireValue[];
     propose: readonly RscoreWireValue[];
     materialize: readonly RscoreWireValue[];
+    failedHtlcRoutes: readonly RscoreWireValue[];
     postAccounts: boolean;
   }>): Promise<Wave> {
     const payload = ownWirePayload([
@@ -958,6 +959,7 @@ export class RscoreProcessClient {
       [...wave.admits],
       [...wave.propose],
       [...wave.materialize],
+      [...wave.failedHtlcRoutes],
       wave.postAccounts,
     ]);
     return this.#withRequestTurn(async () => {

@@ -13,9 +13,10 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
     AccountConsensus, AccountEnvelope, AccountFrame, AccountOutput, AccountPeerEnvelope,
     AccountReplica, AccountState, AccountTx, AckOutcome, BoardDelays, CommittedFrameEvidence,
-    Disposition, FrameAckOutcome, FrameAckPhase, IncomingAck, IncomingFrame, IncomingOutcome,
-    ProposalOutcome, ReceiverClock, SigningIdentity, StateError, apply_incoming_ack,
-    apply_incoming_frame, apply_incoming_frame_ack, canonical_tx_digest, propose_account_frame,
+    Disposition, FrameAckOutcome, FrameAckPhase, HtlcResolveOutcome, HtlcResolveTx, IncomingAck,
+    IncomingFrame, IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
+    apply_incoming_ack, apply_incoming_frame, apply_incoming_frame_ack, canonical_tx_digest,
+    propose_account_frame,
 };
 use xln_rscore_protocol::{
     CanonicalValue, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
@@ -432,6 +433,10 @@ pub struct ProposalRow {
     /// its canonical form. A count would say that something was dropped
     /// without saying what, which is not enough to compare two engines.
     pub dropped: Vec<DroppedRow>,
+    /// Non-retryable HTLC locks the parent Entity must resolve in this same
+    /// Entity frame. The exact hashlock and rejection reason are Account
+    /// outputs; the parent must not infer them from a digest or log string.
+    pub failed_htlc_locks: Vec<FailedHtlcLockRow>,
 }
 
 /// The frame an attempt produced.
@@ -490,6 +495,39 @@ pub struct DroppedRow {
     pub disposition: Disposition,
 }
 
+#[derive(Clone)]
+pub struct FailedHtlcLockRow {
+    pub hashlock: [u8; 32],
+    pub lock_id: String,
+    pub reason: String,
+    pub upstream_resolution: Option<UpstreamHtlcResolutionRow>,
+}
+
+#[derive(Clone)]
+pub struct UpstreamHtlcResolutionRow {
+    pub account_id: AccountId,
+    pub lock_id: String,
+    pub reason: String,
+}
+
+fn failed_htlc_locks(dropped: &[xln_rscore_engine::DroppedTx]) -> Vec<FailedHtlcLockRow> {
+    dropped
+        .iter()
+        .filter_map(|dropped| match (&dropped.tx, dropped.disposition) {
+            (
+                xln_rscore_engine::AccountTx::HtlcLock(lock),
+                xln_rscore_engine::Disposition::Removed,
+            ) => Some(FailedHtlcLockRow {
+                hashlock: *lock.hashlock.bytes(),
+                lock_id: lock.lock_id.clone(),
+                reason: dropped.rejection.message(),
+                upstream_resolution: None,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 fn dropped_rows(
     account_id: AccountId,
     dropped: &[xln_rscore_engine::DroppedTx],
@@ -517,27 +555,37 @@ fn proposal_row(
         ProposalOutcome::Idle { dropped } => ProposalRow {
             account_id,
             proposed: None,
+            failed_htlc_locks: failed_htlc_locks(&dropped),
             dropped: dropped_rows(account_id, &dropped)?,
         },
-        ProposalOutcome::Proposed(proposed) => ProposalRow {
-            account_id,
-            proposed: Some(ProposedRow {
-                frame: proposed.frame,
-                state_hash: proposed.state_hash,
-                hanko: proposed.hanko,
-                dispute: proposed.dispute,
-                events: proposed.events,
-                outputs: proposed.outputs,
-                bundled_ack: proposed.bundled_ack,
-            }),
-            dropped: dropped_rows(account_id, &proposed.dropped)?,
-        },
+        ProposalOutcome::Proposed(proposed) => {
+            let failed_htlc_locks = failed_htlc_locks(&proposed.dropped);
+            ProposalRow {
+                account_id,
+                proposed: Some(ProposedRow {
+                    frame: proposed.frame,
+                    state_hash: proposed.state_hash,
+                    hanko: proposed.hanko,
+                    dispute: proposed.dispute,
+                    events: proposed.events,
+                    outputs: proposed.outputs,
+                    bundled_ack: proposed.bundled_ack,
+                }),
+                dropped: dropped_rows(account_id, &proposed.dropped)?,
+                failed_htlc_locks,
+            }
+        }
     })
 }
 
 /// One account's work returned from the pool: the account it belongs to, the
 /// state it reached, and whatever the caller asked for.
 type ProposalWork = Result<(AccountId, AccountConsensus, [u8; 32], ProposalRow), BatchError>;
+type HtlcFixedPointResult = (
+    Vec<AccountAdmissionResult>,
+    Vec<ProposalRow>,
+    BTreeSet<AccountId>,
+);
 type OutboundWork = Result<
     (
         AccountId,
@@ -887,6 +935,7 @@ impl StatefulConsensusEngine {
                             account_id,
                             proposed: None,
                             dropped: Vec::new(),
+                            failed_htlc_locks: Vec::new(),
                         })
                     }
                 } else {
@@ -918,6 +967,118 @@ impl StatefulConsensusEngine {
         }
         proposals.sort_by_key(|row| *row.account_id.as_bytes());
         Ok((admissions, proposals))
+    }
+
+    pub(crate) fn proposals_need_htlc_followup(
+        proposals: &[ProposalRow],
+        routes: &[crate::round::FailedHtlcRoute],
+    ) -> Result<bool, BatchError> {
+        let mut hashlocks = BTreeSet::new();
+        for route in routes {
+            if !hashlocks.insert(route.hashlock) {
+                return Err(BatchError::FailedHtlcRouteDuplicate {
+                    hashlock: hex_of(&route.hashlock),
+                });
+            }
+        }
+        Ok(proposals.iter().any(|proposal| {
+            proposal
+                .failed_htlc_locks
+                .iter()
+                .any(|failed| hashlocks.contains(&failed.hashlock))
+        }))
+    }
+
+    /// Re-run the rare failed-forward path in canonical Entity worklist order.
+    ///
+    /// The fast path proposes independent accounts in parallel. Only an actual
+    /// rejected forwarded lock creates a same-frame cross-account dependency.
+    /// At that point the caller restores the post-inbound persistent snapshot
+    /// and uses this ordered path: all original admissions happen first, then
+    /// each failed lock queues its upstream resolve before the target's turn.
+    /// Accounts already visited are not proposed twice, matching the TS
+    /// worklist's permanent `scheduled` set.
+    pub(crate) fn admit_and_propose_htlc_fixed_point(
+        &mut self,
+        requests: Vec<(AccountId, Vec<AccountTx>)>,
+        selected: &[AccountId],
+        timestamp: u64,
+        j_height: u64,
+        routes: &[crate::round::FailedHtlcRoute],
+    ) -> Result<HtlcFixedPointResult, BatchError> {
+        let mut route_by_hashlock = BTreeMap::new();
+        for route in routes {
+            if route_by_hashlock.insert(route.hashlock, route).is_some() {
+                return Err(BatchError::FailedHtlcRouteDuplicate {
+                    hashlock: hex_of(&route.hashlock),
+                });
+            }
+        }
+        let mut admissions = requests
+            .iter()
+            .enumerate()
+            .map(|(index, (account_id, txs))| AccountAdmissionResult {
+                operation_index: index as u64,
+                account_id: *account_id,
+                verdict: AccountAdmissionVerdict::Admitted { count: txs.len() },
+            })
+            .collect::<Vec<_>>();
+        self.admit_txs(requests)?;
+
+        let mut scheduled = BTreeSet::new();
+        for account_id in selected {
+            if !scheduled.insert(*account_id) {
+                return Err(BatchError::DuplicateAccount(*account_id));
+            }
+        }
+        let mut remaining = scheduled.clone();
+        let mut generated_accounts = BTreeSet::new();
+        let mut proposals = Vec::new();
+        while let Some(account_id) = remaining.pop_first() {
+            let mut rows = self.propose_frames(timestamp, j_height, Some(&[account_id]))?;
+            let mut proposal = rows.pop().ok_or(BatchError::AccountNotFound {
+                input_index: 0,
+                account_id,
+            })?;
+            for failed in &mut proposal.failed_htlc_locks {
+                let Some(route) = route_by_hashlock.get(&failed.hashlock) else {
+                    continue;
+                };
+                if route.outbound_account_id != account_id
+                    || route.outbound_lock_id != failed.lock_id
+                {
+                    return Err(BatchError::FailedHtlcRouteMismatch {
+                        hashlock: hex_of(&failed.hashlock),
+                        account: hex_of(account_id.as_bytes()),
+                        lock_id: failed.lock_id.clone(),
+                    });
+                }
+                let reason = format!("forward_failed:{}", failed.reason);
+                let tx = AccountTx::HtlcResolve(HtlcResolveTx {
+                    lock_id: route.inbound_lock_id.clone(),
+                    outcome: HtlcResolveOutcome::Error {
+                        reason: Some(reason.clone()),
+                    },
+                });
+                self.admit_txs(vec![(route.inbound_account_id, vec![tx])])?;
+                admissions.push(AccountAdmissionResult {
+                    operation_index: admissions.len() as u64,
+                    account_id: route.inbound_account_id,
+                    verdict: AccountAdmissionVerdict::Admitted { count: 1 },
+                });
+                failed.upstream_resolution = Some(UpstreamHtlcResolutionRow {
+                    account_id: route.inbound_account_id,
+                    lock_id: route.inbound_lock_id.clone(),
+                    reason,
+                });
+                generated_accounts.insert(route.inbound_account_id);
+                if scheduled.insert(route.inbound_account_id) {
+                    remaining.insert(route.inbound_account_id);
+                }
+            }
+            proposals.push(proposal);
+        }
+        Ok((admissions, proposals, generated_accounts))
     }
 
     /// Propose a frame for every account that has something to propose. Frame
@@ -955,6 +1116,7 @@ impl StatefulConsensusEngine {
                             account_id: *account_id,
                             proposed: None,
                             dropped: Vec::new(),
+                            failed_htlc_locks: Vec::new(),
                         });
                     }
                 }

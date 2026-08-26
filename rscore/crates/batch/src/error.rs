@@ -139,6 +139,14 @@ pub enum BatchError {
         base: String,
         candidate: String,
     },
+    #[error("RSCORE_BATCH_FAILED_HTLC_ROUTE_DUPLICATE:{hashlock}")]
+    FailedHtlcRouteDuplicate { hashlock: String },
+    #[error("RSCORE_BATCH_FAILED_HTLC_ROUTE_MISMATCH:{hashlock}:{account}:{lock_id}")]
+    FailedHtlcRouteMismatch {
+        hashlock: String,
+        account: String,
+        lock_id: String,
+    },
     #[error("RSCORE_BATCH_ENTITY_STAGE_OPEN:{0}")]
     EntityStageOpen(crate::StageKey),
     #[error("RSCORE_BATCH_ENTITY_STAGE_MISSING:{0}")]

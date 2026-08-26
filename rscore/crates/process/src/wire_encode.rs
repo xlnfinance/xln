@@ -575,6 +575,26 @@ fn proposal(row: &xln_rscore_batch::ProposalRow) -> Result<AbiValue, crate::Proc
             None => Vec::new(),
             Some(proposed) => proposed.outputs.iter().map(account_output).collect(),
         }),
+        tuple(
+            row.failed_htlc_locks
+                .iter()
+                .map(|failed| {
+                    tuple(vec![
+                        AbiValue::Bytes(failed.hashlock.to_vec()),
+                        AbiValue::Text(failed.lock_id.clone()),
+                        AbiValue::Text(failed.reason.clone()),
+                        match &failed.upstream_resolution {
+                            None => AbiValue::Nil,
+                            Some(resolution) => tuple(vec![
+                                AbiValue::Bytes(resolution.account_id.as_bytes().to_vec()),
+                                AbiValue::Text(resolution.lock_id.clone()),
+                                AbiValue::Text(resolution.reason.clone()),
+                            ]),
+                        },
+                    ])
+                })
+                .collect(),
+        ),
     ]))
 }
 

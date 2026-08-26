@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { HtlcRoute } from '../../../../types/account';
 import {
+  failedForwardHtlcRouteClosure,
   isDisputeReadyHtlcRoute,
   isFinalRecipientHtlcRoute,
   isForwardingHtlcRoute,
@@ -41,5 +42,41 @@ describe('FinTS HTLC route views', () => {
     expect(isSecretAckPendingHtlcRoute(route)).toBe(true);
     expect(isDisputeReadyHtlcRoute(route, 149)).toBe(false);
     expect(isDisputeReadyHtlcRoute(route, 150)).toBe(true);
+  });
+
+  test('projects only the transitive route closure reachable by this worklist', () => {
+    const route = (
+      hashlock: string,
+      outboundEntity: string,
+      inboundEntity: string,
+    ): HtlcRoute => ({
+      hashlock,
+      outboundEntity,
+      outboundLockId: `out-${hashlock}`,
+      inboundEntity,
+      inboundLockId: `in-${hashlock}`,
+      createdTimestamp: 100,
+    });
+    const routes = new Map<string, HtlcRoute>([
+      ['0x02', route('0x02', 'middle', 'upstream')],
+      ['0x01', route('0x01', 'downstream', 'middle')],
+      ['0x03', route('0x03', 'unrelated', 'other')],
+    ]);
+    expect(failedForwardHtlcRouteClosure(routes, ['DOWNSTREAM'])).toEqual([
+      {
+        hashlock: '0x01',
+        outboundAccountId: 'downstream',
+        outboundLockId: 'out-0x01',
+        inboundAccountId: 'middle',
+        inboundLockId: 'in-0x01',
+      },
+      {
+        hashlock: '0x02',
+        outboundAccountId: 'middle',
+        outboundLockId: 'out-0x02',
+        inboundAccountId: 'upstream',
+        inboundLockId: 'in-0x02',
+      },
+    ]);
   });
 });

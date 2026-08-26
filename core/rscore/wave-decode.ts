@@ -76,6 +76,17 @@ type WaveProposal = {
    */
   events: string[];
   outputs: WaveOutput[];
+  /** Exact Account-owned failures that drive same-frame Entity resolution. */
+  failedHtlcLocks: Array<Readonly<{
+    hashlock: string;
+    lockId: string;
+    reason: string;
+    upstreamResolution: Readonly<{
+      accountId: string;
+      lockId: string;
+      reason: string;
+    }> | null;
+  }>>;
 };
 
 /**
@@ -368,7 +379,7 @@ const decodeBundledAck = (value: unknown): WaveProposal['bundledAck'] => {
 };
 
 const decodeProposal = (value: unknown): WaveProposal => {
-  const row = rscoreWireTuple(value, 7, 'proposal');
+  const row = rscoreWireTuple(value, 8, 'proposal');
   return {
     accountId: rscoreWireHex(row[0], 'proposal.accountId', 32),
     frame: row[1] === null ? null : decodeFrame(row[1]),
@@ -378,6 +389,24 @@ const decodeProposal = (value: unknown): WaveProposal => {
     events: rscoreWireList(row[5], 'proposal.events')
       .map((entry, index) => rscoreWireText(entry, `proposal.events.${index}`)),
     outputs: rscoreWireList(row[6], 'proposal.outputs').map(decodeOutput),
+    failedHtlcLocks: rscoreWireList(row[7], 'proposal.failedHtlcLocks')
+      .map((entry, index) => {
+        const field = `proposal.failedHtlcLocks.${index}`;
+        const failed = rscoreWireTuple(entry, 4, field);
+        const resolution = failed[3] === null
+          ? null
+          : rscoreWireTuple(failed[3], 3, `${field}.upstreamResolution`);
+        return {
+          hashlock: rscoreWireHex(failed[0], `${field}.hashlock`, 32),
+          lockId: rscoreWireText(failed[1], `${field}.lockId`),
+          reason: rscoreWireText(failed[2], `${field}.reason`),
+          upstreamResolution: resolution === null ? null : {
+            accountId: rscoreWireHex(resolution[0], `${field}.upstreamResolution.accountId`, 32),
+            lockId: rscoreWireText(resolution[1], `${field}.upstreamResolution.lockId`),
+            reason: rscoreWireText(resolution[2], `${field}.upstreamResolution.reason`),
+          },
+        };
+      }),
   };
 };
 
@@ -1005,6 +1034,21 @@ export const waveParityDigest = (wave: Wave): string => {
           ],
       [...row.events],
       row.outputs.map(outputWire),
+      row.failedHtlcLocks.map(failed => [
+        hexToBytes(failed.hashlock, 'transcript.failedHtlcLock.hashlock'),
+        failed.lockId,
+        failed.reason,
+        failed.upstreamResolution === null
+          ? null
+          : [
+              hexToBytes(
+                failed.upstreamResolution.accountId,
+                'transcript.failedHtlcLock.upstreamResolution.accountId',
+              ),
+              failed.upstreamResolution.lockId,
+              failed.upstreamResolution.reason,
+            ],
+      ]),
     ]),
   ];
   const digest = createHash('sha256');
