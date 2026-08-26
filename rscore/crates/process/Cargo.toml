@@ -6,6 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+bench = []
+
 [dependencies]
 getrandom.workspace = true
 mimalloc.workspace = true
@@ -24,3 +27,8 @@ hex.workspace = true
 [[bin]]
 name = "xln-rscore"
 path = "src/main.rs"
+
+[[bin]]
+name = "rscore-native-entity-replay"
+path = "src/bin/rscore-native-entity-replay.rs"
+required-features = ["bench"]

@@ -142,6 +142,7 @@
     "rscore:evidence:restart": "bun core/scripts/operations/hlt/replay/run-authority-bootstrap.ts --restart",
     "bench:rscore:ars": "bun core/scripts/operations/benchmark/rscore/bench-authority-replay.ts",
     "bench:rscore:apo": "bun core/scripts/operations/benchmark/rscore/bench-apo-transcript.ts",
+    "bench:rscore:apo:native": "cargo run --quiet --release --manifest-path rscore/Cargo.toml -p xln-rscore-process --features bench --bin rscore-native-entity-replay --",
     "native:all": "bun scripts/native/build-platforms.ts all",
     "native:package": "bun scripts/native/build-platforms.ts all --package --smoke",
     "native:mobile": "bun scripts/native/build-platforms.ts mobile",
