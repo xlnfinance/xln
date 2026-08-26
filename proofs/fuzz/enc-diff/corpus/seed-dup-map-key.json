@@ -1,0 +1,1 @@
+{"id":"seed-dup-map-key","kind":"value","class":"both-reject","value":{"t":"map","v":[[{"t":"str","v":"dup"},{"t":"num","v":"1"}],[{"t":"str","v":"dup"},{"t":"num","v":"2"}]]}}

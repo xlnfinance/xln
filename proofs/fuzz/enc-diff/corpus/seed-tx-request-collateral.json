@@ -1,0 +1,1 @@
+{"id":"seed-tx-request-collateral","kind":"tx","class":"ts-only","txKind":"request_collateral","data":{"tokenId":1,"amount":"7","feeTokenId":2,"feeAmount":"1","policyVersion":3}}

@@ -1,0 +1,1 @@
+{"id":"seed-tx-direct_payment-minimal","kind":"tx","class":"both-encode","txKind":"direct_payment","data":{"tokenId":0,"amount":"0","route":[],"fromEntityId":"0x0748c74a5190aa3fdb08f68a1a83ad8289cc1440cf3e15fb0d69395d135241af","toEntityId":"0x4a8c7912f3e08e233272a79d8dea14db3075a5383928e5938db9b754710ad0de","deliveryMode":"trusted"}}

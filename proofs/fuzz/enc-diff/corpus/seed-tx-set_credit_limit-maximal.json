@@ -1,0 +1,1 @@
+{"id":"seed-tx-set_credit_limit-maximal","kind":"tx","class":"both-encode","txKind":"set_credit_limit","data":{"tokenId":65535,"amount":"-79228162514264337593543950335"}}

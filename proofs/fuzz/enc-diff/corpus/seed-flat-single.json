@@ -1,0 +1,1 @@
+{"id":"seed-flat-single","kind":"flat-root","class":"both-encode","namespace":"account.state","entries":[["identity",{"t":"obj","v":[["chainId",{"t":"num","v":"31337"}],["seed",{"t":"str","v":"0x1111111111111111111111111111111111111111111111111111111111111111"}]]}]]}

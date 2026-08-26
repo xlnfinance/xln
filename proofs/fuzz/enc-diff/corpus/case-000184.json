@@ -1,0 +1,1 @@
+{"id":"case-000184","kind":"tx","class":"both-encode","txKind":"htlc_lock","data":{"lockId":"0x30848d767068f923e0c0fa3531d98fe671319c17509bbc80085771253c1c39ca","hashlock":"0x0dfe7b409676ddfb48b68e8d62db1981b3b7d78174138ea382c1215fc7ec0346","timelock":"-500451278564966","revealBeforeHeight":4256215807,"amount":"3034956736","tokenId":43086}}

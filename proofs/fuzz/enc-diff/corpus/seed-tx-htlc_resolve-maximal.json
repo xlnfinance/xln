@@ -1,0 +1,1 @@
+{"id":"seed-tx-htlc_resolve-maximal","kind":"tx","class":"both-encode","txKind":"htlc_resolve","data":{"lockId":"0x27f15bfabb31bc28f6be9567b80574216a57c0506f2bd95f72c4efe3eedd6a5f","outcome":"secret","secret":"0x9e3af49f9cb299cc0034ee7cd8d6116a261d2b08a1635d8fe057b763feb50f2a"}}

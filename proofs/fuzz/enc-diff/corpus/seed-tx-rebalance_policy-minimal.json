@@ -1,0 +1,1 @@
+{"id":"seed-tx-rebalance_policy-minimal","kind":"tx","class":"both-encode","txKind":"rebalance_policy","data":{"tokenId":0,"policyVersion":1,"baseFee":"0","liquidityFeeBps":"0","gasFee":"0"}}

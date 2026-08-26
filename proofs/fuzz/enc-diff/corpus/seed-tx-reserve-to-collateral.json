@@ -1,0 +1,1 @@
+{"id":"seed-tx-reserve-to-collateral","kind":"tx","class":"ts-only","txKind":"reserve_to_collateral","data":{"tokenId":1,"collateral":"5","ondelta":"0","side":"receiving","blockNumber":1,"transactionHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}

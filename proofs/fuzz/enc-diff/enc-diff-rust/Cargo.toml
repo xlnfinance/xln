@@ -1,0 +1,15 @@
+[package]
+name = "enc-diff-rust"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+hex = "0.4.3"
+num-bigint = "0.4.6"
+serde_json = "1.0"
+xln-rscore-protocol = { path = "../../../../rscore/crates/protocol" }
+xln-rscore-engine = { path = "../../../../rscore/crates/engine" }
+
+[profile.release]
+overflow-checks = true

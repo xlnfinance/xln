@@ -1,0 +1,1 @@
+{"id":"seed-tx-swap_resolve-minimal","kind":"tx","class":"both-encode","txKind":"swap_resolve","data":{"offerId":"0x80dd7da32eba0dd3cabfaf1471e6c9605b8176f22b3f062223a0217062c0a042","fillRatio":0,"cancelRemainder":false}}
