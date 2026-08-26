@@ -589,7 +589,6 @@ pub struct StatefulConsensusEngine {
     /// until after it is signed.
     swap_market: std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
     pending: Option<PendingWave>,
-    pub(crate) savepoints: Vec<crate::round::RuntimeSavepoint>,
     /// Persistent pre-inbound tree for the currently open two-visit Entity round.
     entity_round_base: Option<crate::round::EntityRoundBase>,
 }
@@ -616,7 +615,6 @@ impl StatefulConsensusEngine {
             .build()
             .map_err(|error| BatchError::ThreadPoolBuild(error.to_string()))?;
         let mut engine = Self {
-            savepoints: Vec::new(),
             engine_generation,
             revision,
             candidate_attempt: 0,
@@ -660,10 +658,6 @@ impl StatefulConsensusEngine {
         &self.signer_id
     }
 
-    pub(crate) fn savepoints_mut(&mut self) -> &mut Vec<crate::round::RuntimeSavepoint> {
-        &mut self.savepoints
-    }
-
     pub(crate) const fn entity_round_base(&self) -> Option<&crate::round::EntityRoundBase> {
         self.entity_round_base.as_ref()
     }
@@ -672,25 +666,29 @@ impl StatefulConsensusEngine {
         self.entity_round_base = Some(base);
     }
 
-    pub(crate) fn clear_entity_round_base(&mut self) {
-        self.entity_round_base = None;
-    }
-
-    pub(crate) fn identities_snapshot(&self) -> BTreeMap<[u8; 32], SigningIdentity> {
-        self.identities.clone()
-    }
-
-    pub(crate) fn restore_savepoint(&mut self, savepoint: crate::round::RuntimeSavepoint) {
-        let (accounts, identities, revision) = savepoint.into_parts();
-        self.accounts = accounts;
-        self.identities = identities;
-        self.revision = revision;
+    pub(crate) fn take_entity_round_base(&mut self) -> Option<crate::round::EntityRoundBase> {
+        self.entity_round_base.take()
     }
 
     /// The committed tree as it stands, kept so a round can name what it moved.
     /// The map is persistent: this shares structure rather than copying it.
     pub(crate) fn accounts_snapshot(&self) -> PersistentRadixMap<AccountConsensus> {
         self.accounts.clone()
+    }
+
+    pub(crate) fn identities_snapshot(&self) -> BTreeMap<[u8; 32], SigningIdentity> {
+        self.identities.clone()
+    }
+
+    pub(crate) fn restore_entity_snapshot(
+        &mut self,
+        accounts: PersistentRadixMap<AccountConsensus>,
+        identities: BTreeMap<[u8; 32], SigningIdentity>,
+        revision: u64,
+    ) {
+        self.accounts = accounts;
+        self.identities = identities;
+        self.revision = revision;
     }
 
     pub fn accounts_root(&self) -> [u8; 32] {

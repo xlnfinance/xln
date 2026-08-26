@@ -26,12 +26,12 @@ import {
   readRuntimeFrameEvents,
 } from '../observability/env-events';
 import {
-  abortAuthorityWave,
+  failStopAuthorityFrame,
   authorityDriverEnabled,
-  commitAuthorityWave,
+  finalizeAuthorityFrameAfterWal,
   discardAuthorityRuntime,
   prepareAuthorityCheckpoint,
-  prepareAuthorityWave,
+  assertAuthorityFrameSettled,
   validateAuthorityCheckpointMaterialization,
 } from '../../rscore/authority-driver';
 import { recordCommittedRuntimeEntityMetrics } from '../observability/entity-metrics';
@@ -413,7 +413,7 @@ const commitRuntimeFrame = async (
               checkpoints: readonly RscoreExactCheckpoint[],
             ) =>
               validateAuthorityCheckpointMaterialization(candidateEnv, checkpoints),
-            afterWalCommit: () => commitAuthorityWave(candidateEnv),
+            afterWalCommit: () => finalizeAuthorityFrameAfterWal(candidateEnv),
           }]
         : []),
     );
@@ -505,14 +505,14 @@ const applyRuntimeFrameCandidate = async (
   );
 };
 
-const abortAuthorityWaveWithoutWal = async (
+const closeEmptyAuthorityFrameWithoutWal = async (
   env: RuntimeReplica,
   frameAdvanced: boolean,
 ): Promise<void> => {
   if (frameAdvanced) return;
   // An empty Runtime transition has no durable record and therefore cannot
   // commit any Account candidate, even if a future collector bug opens one.
-  await abortAuthorityWave(env);
+  await failStopAuthorityFrame(env);
 };
 
 const applyAndCommitRuntimeFrame = async (
@@ -567,11 +567,10 @@ const applyAndCommitRuntimeFrame = async (
     },
   );
   profile.metrics.jOutputs = applied.jOutbox.length;
-  // The authoritative engine reaches its own result for this frame and is held
-  // against TypeScript's, before either record is durable. It keeps the wave as
-  // a candidate: committed below once the Runtime's log is on disk, taken back
-  // if that write never lands.
-  await prepareAuthorityWave(env);
+  // The authoritative engine reaches its own result before either record is
+  // durable. Rust retains only a persistent base pointer; the next parent root
+  // selects the accepted answer. A failed durable write is fail-stop.
+  await assertAuthorityFrameSettled(env);
   const frameAdvanced = prepareRuntimeFrameCommit(
     env,
     liveEnv,
@@ -588,10 +587,10 @@ const applyAndCommitRuntimeFrame = async (
     quietLogs: candidate.quietRuntimeLogs,
   }, deps);
   if (commit.staleWriterStopped) {
-    await abortAuthorityWave(env);
+    await failStopAuthorityFrame(env);
     return commit;
   }
-  await abortAuthorityWaveWithoutWal(env, frameAdvanced);
+  await closeEmptyAuthorityFrameWithoutWal(env, frameAdvanced);
 
   await runCommittedRuntimeEffects(
     commit.env,
@@ -674,7 +673,7 @@ const processRuntimeFrameOnce = async (
   } catch (error) {
     if (frame.commitDisposition === 'undurable') {
       try {
-        await abortAuthorityWave(liveEnv);
+        await failStopAuthorityFrame(liveEnv);
       } catch (abortError) {
         error = new AggregateError(
           [error, abortError],

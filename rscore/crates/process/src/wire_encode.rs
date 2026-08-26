@@ -492,14 +492,6 @@ fn parity_digest(
 
 const WAVE_PARITY_DOMAIN: &str = "xln.rscore.wave-parity.v1";
 
-/// Where the accounts stand after marking, keeping or undoing a savepoint.
-pub fn savepoint(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        AbiValue::Bytes(accounts_root.to_vec()),
-    ])
-}
-
 pub fn wave_committed(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
     body(vec![
         integer(revision),

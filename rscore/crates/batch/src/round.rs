@@ -35,33 +35,14 @@ fn hex_of(bytes: &[u8]) -> String {
     })
 }
 
-/// The committed tree as it stood when something abortable opened.
-///
-/// A Runtime frame is one transaction, and so is each Entity input inside it:
-/// either can be abandoned after its accounts have already moved. Savepoints
-/// nest for exactly that reason. The tree is persistent, so holding one costs
-/// a pointer, not a copy.
-pub(crate) struct RuntimeSavepoint {
-    accounts: PersistentRadixMap<AccountConsensus>,
-    identities: BTreeMap<[u8; 32], SigningIdentity>,
-    revision: u64,
-}
-
 pub(crate) struct EntityRoundBase {
     owner_entity_id: [u8; 32],
-    accounts: PersistentRadixMap<AccountConsensus>,
-}
-
-impl RuntimeSavepoint {
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        PersistentRadixMap<AccountConsensus>,
-        BTreeMap<[u8; 32], SigningIdentity>,
-        u64,
-    ) {
-        (self.accounts, self.identities, self.revision)
-    }
+    base_accounts: PersistentRadixMap<AccountConsensus>,
+    base_identities: BTreeMap<[u8; 32], SigningIdentity>,
+    base_revision: u64,
+    inbound_accounts: PersistentRadixMap<AccountConsensus>,
+    inbound_revision: u64,
+    complete: bool,
 }
 
 /// Everything one Entity input carries inward.
@@ -69,6 +50,10 @@ impl RuntimeSavepoint {
 pub struct EntityInboundRequest {
     /// The Entity that owns every named account. Checked, never trusted.
     pub owner_entity_id: [u8; 32],
+    /// The Account-forest root held by the parent Entity before this attempt.
+    /// A prior path-copy candidate is accepted or dropped from this assertion;
+    /// there is deliberately no separate Commit/Abort command.
+    pub expected_accounts_root: [u8; 32],
     /// The clock this Entity judges arrivals with.
     pub clock: ReceiverClock,
     pub rows: Vec<AccountInputRow>,
@@ -162,34 +147,67 @@ pub mod phase {
 }
 
 impl StatefulConsensusEngine {
-    /// Mark a point every account can be put back to.
-    pub fn push_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
-        let savepoint = RuntimeSavepoint {
-            accounts: self.accounts_snapshot(),
-            identities: self.identities_snapshot(),
-            revision: self.revision(),
+    /// Reconcile the previous attempt from the parent Entity's canonical head.
+    ///
+    /// A completed candidate whose root became the parent's head is promoted
+    /// by dropping only its base pointer. If the parent still names the base,
+    /// the candidate is discarded by restoring that pointer. An inbound-only
+    /// attempt is never a candidate and is always restored before retry.
+    pub fn reconcile_parent_accounts_root(&mut self, expected: [u8; 32]) -> Result<(), BatchError> {
+        let Some(round) = self.take_entity_round_base() else {
+            let actual = self.accounts_root();
+            return if actual == expected {
+                Ok(())
+            } else {
+                Err(BatchError::EntityHeadRoot {
+                    actual: hex_of(&expected),
+                    base: hex_of(&actual),
+                    candidate: hex_of(&actual),
+                })
+            };
         };
-        self.savepoints_mut().push(savepoint);
-        Ok((self.revision(), self.accounts_root()))
+        let base_root = round.base_accounts.root_hash();
+        let candidate_root = self.accounts_root();
+        if round.complete && expected == candidate_root {
+            return Ok(());
+        }
+        if expected == base_root {
+            self.restore_entity_snapshot(
+                round.base_accounts,
+                round.base_identities,
+                round.base_revision,
+            );
+            return Ok(());
+        }
+        self.set_entity_round_base(round);
+        Err(BatchError::EntityHeadRoot {
+            actual: hex_of(&expected),
+            base: hex_of(&base_root),
+            candidate: hex_of(&candidate_root),
+        })
     }
 
-    /// Keep everything done since the innermost savepoint.
-    pub fn keep_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
-        if self.entity_round_base().is_some() {
-            return Err(BatchError::EntityRoundOpen);
+    fn restore_entity_round_base(&mut self) {
+        if let Some(round) = self.take_entity_round_base() {
+            self.restore_entity_snapshot(
+                round.base_accounts,
+                round.base_identities,
+                round.base_revision,
+            );
         }
-        if self.savepoints_mut().pop().is_none() {
-            return Err(BatchError::WaveMissing);
-        }
-        Ok((self.revision(), self.accounts_root()))
     }
 
-    /// Put every account back to the innermost savepoint.
-    pub fn undo_savepoint(&mut self) -> Result<(u64, [u8; 32]), BatchError> {
-        let savepoint = self.savepoints_mut().pop().ok_or(BatchError::WaveMissing)?;
-        self.clear_entity_round_base();
-        self.restore_savepoint(savepoint);
-        Ok((self.revision(), self.accounts_root()))
+    fn restore_entity_round_inbound(&mut self) {
+        let Some(mut round) = self.take_entity_round_base() else {
+            return;
+        };
+        self.restore_entity_snapshot(
+            round.inbound_accounts.clone(),
+            round.base_identities.clone(),
+            round.inbound_revision,
+        );
+        round.complete = false;
+        self.set_entity_round_base(round);
     }
 
     /// Apply everything that arrived from peers and report what happened.
@@ -197,27 +215,46 @@ impl StatefulConsensusEngine {
         &mut self,
         request: EntityInboundRequest,
     ) -> Result<EntityRoundResult, BatchError> {
-        if self.entity_round_base().is_some() {
-            return Err(BatchError::EntityRoundOpen);
-        }
+        self.reconcile_parent_accounts_root(request.expected_accounts_root)?;
         let named: BTreeSet<AccountId> = request.rows.iter().map(|row| row.account_id).collect();
         self.assert_owner(request.owner_entity_id, &named)?;
         let snapshot_at = std::time::Instant::now();
         let base = self.accounts_snapshot();
-        phase::add(&phase::SNAPSHOT, snapshot_at);
-        let apply_at = std::time::Instant::now();
-        let applied = self.apply_inputs(request.clock, request.rows)?;
-        phase::add(&phase::APPLY, apply_at);
+        let base_identities = self.identities_snapshot();
+        let base_revision = self.revision();
         self.set_entity_round_base(EntityRoundBase {
             owner_entity_id: request.owner_entity_id,
-            accounts: base.clone(),
+            base_accounts: base.clone(),
+            base_identities,
+            base_revision,
+            inbound_accounts: base.clone(),
+            inbound_revision: base_revision,
+            complete: false,
         });
-        let settle_at = std::time::Instant::now();
-        let mut result = self.settle(&base, &named, request.post_accounts)?;
-        phase::add(&phase::SETTLE, settle_at);
-        phase::tick();
-        result.applied = applied;
-        Ok(result)
+        phase::add(&phase::SNAPSHOT, snapshot_at);
+        let outcome = (|| {
+            let apply_at = std::time::Instant::now();
+            let applied = self.apply_inputs(request.clock, request.rows)?;
+            phase::add(&phase::APPLY, apply_at);
+            let inbound_accounts = self.accounts_snapshot();
+            let inbound_revision = self.revision();
+            let mut round = self
+                .take_entity_round_base()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            round.inbound_accounts = inbound_accounts;
+            round.inbound_revision = inbound_revision;
+            self.set_entity_round_base(round);
+            let settle_at = std::time::Instant::now();
+            let mut result = self.settle(&base, &named, request.post_accounts)?;
+            phase::add(&phase::SETTLE, settle_at);
+            phase::tick();
+            result.applied = applied;
+            Ok(result)
+        })();
+        if outcome.is_err() {
+            self.restore_entity_round_base();
+        }
+        outcome
     }
 
     /// Queue what the Entity decided, propose, and report what to send onward.
@@ -246,27 +283,37 @@ impl StatefulConsensusEngine {
             });
         }
         let snapshot_at = std::time::Instant::now();
-        let base = round.accounts.clone();
+        let base = round.base_accounts.clone();
         phase::add(&phase::SNAPSHOT, snapshot_at);
-        if !request.creates.is_empty() {
-            self.upsert_accounts(request.creates)?;
+        let outcome = (|| {
+            if !request.creates.is_empty() {
+                self.upsert_accounts(request.creates)?;
+            }
+            let outbound_at = std::time::Instant::now();
+            let (admissions, proposals) = self.admit_and_propose(
+                request.admits,
+                &request.propose,
+                request.timestamp,
+                request.j_height,
+            )?;
+            phase::add(&phase::OUTBOUND, outbound_at);
+            let settle_at = std::time::Instant::now();
+            let mut result = self.settle(&base, &named, request.post_accounts)?;
+            phase::add(&phase::SETTLE, settle_at);
+            phase::tick();
+            result.admissions = admissions;
+            result.proposals = proposals;
+            let mut round = self
+                .take_entity_round_base()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            round.complete = true;
+            self.set_entity_round_base(round);
+            Ok(result)
+        })();
+        if outcome.is_err() {
+            self.restore_entity_round_inbound();
         }
-        let outbound_at = std::time::Instant::now();
-        let (admissions, proposals) = self.admit_and_propose(
-            request.admits,
-            &request.propose,
-            request.timestamp,
-            request.j_height,
-        )?;
-        phase::add(&phase::OUTBOUND, outbound_at);
-        let settle_at = std::time::Instant::now();
-        let mut result = self.settle(&base, &named, request.post_accounts)?;
-        phase::add(&phase::SETTLE, settle_at);
-        phase::tick();
-        result.admissions = admissions;
-        result.proposals = proposals;
-        self.clear_entity_round_base();
-        Ok(result)
+        outcome
     }
 
     /// Refuse an account this Entity does not own before anything executes.

@@ -83,13 +83,13 @@ const RSCORE_ABI_VERSION = 1;
 // 14: peer inputs carry the exact Account envelope plus the closed
 // Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
 // returns one ordered composite result row.
-export const RSCORE_PROCESS_ABI_VERSION = 18;
+export const RSCORE_PROCESS_ABI_VERSION = 19;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=21")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=22")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'e5e70bde1ea79ed3a295193cf00638481dea37db78c6f4951b3d19cb2c3836e6',
+  'c166c57c35c62e14daacbb314746b3fd12ffbe4adcbf4236c0de0b9e16f7f13a',
   'hex',
 );
 
@@ -118,9 +118,6 @@ export const RSCORE_OP = {
   sealAccountWave: 24,
   accountInbound: 25,
   accountOutbound: 26,
-  pushSavepoint: 27,
-  keepSavepoint: 28,
-  undoSavepoint: 29,
   checkpoint: 30,
 } as const;
 
@@ -909,32 +906,6 @@ export class RscoreProcessClient {
   }
 
   /**
-   * Mark a point every account can be put back to.
-   *
-   * A Runtime frame opens one, and so does each Entity input inside it: either
-   * can be abandoned after its accounts have already moved.
-   */
-  async pushSavepoint(): Promise<unknown> {
-    return this.#authorityRequest(RSCORE_OP.pushSavepoint);
-  }
-
-  /** Keep everything done since the innermost savepoint. */
-  async keepSavepoint(): Promise<unknown> {
-    return this.#authorityRequest(RSCORE_OP.keepSavepoint);
-  }
-
-  /** Put every account back to the innermost savepoint. */
-  async undoSavepoint(): Promise<unknown> {
-    return this.#authorityRequest(RSCORE_OP.undoSavepoint);
-  }
-
-  async #authorityRequest(opTag: number): Promise<unknown> {
-    const payload = ownWirePayload([]);
-    return this.#withRequestTurn(async () =>
-      (await this.#authorityRequestOwnedNow(opTag, payload)).result);
-  }
-
-  /**
    * One Entity input's inbound half: everything that arrived from peers.
    *
    * The whole arrival list crosses once. The engine shards it by account
@@ -943,6 +914,7 @@ export class RscoreProcessClient {
    */
   async accountInbound(wave: Readonly<{
     ownerEntityId: Uint8Array;
+    expectedAccountsRoot: Uint8Array;
     entityTimestamp: number;
     finalizedJHeight: number;
     rows: readonly RscoreWireValue[];
@@ -950,6 +922,7 @@ export class RscoreProcessClient {
   }>): Promise<Wave> {
     const payload = ownWirePayload([
       Buffer.from(wave.ownerEntityId),
+      Buffer.from(wave.expectedAccountsRoot),
       [wave.entityTimestamp, wave.finalizedJHeight],
       [...wave.rows],
       wave.postAccounts,
@@ -1150,8 +1123,8 @@ export class RscoreProcessClient {
 
   /** Incremental exact rows since the last checkpoint Rust acknowledged. */
   /** The rows that moved since the last durable checkpoint. */
-  async checkpointChanges(): Promise<RscoreCheckpointChanges> {
-    const payload = ownWirePayload([]);
+  async checkpointChanges(expectedAccountsRoot: Uint8Array): Promise<RscoreCheckpointChanges> {
+    const payload = ownWirePayload([Buffer.from(expectedAccountsRoot)]);
     return this.#withRequestTurn(async () => {
       const response = (await this.#authorityRequestOwnedNow(
         RSCORE_OP.checkpoint,

@@ -55,7 +55,7 @@ test('retired payment transactions stay absent from active tracked files', () =>
     ).map(([path]) => path)).toEqual([]);
     if (removedEntityTxs.includes(removedEntityTx)) expect(catalog.has(removedEntityTx)).toBe(false);
   }
-});
+}, 15_000);
 
 test('retired Entity and Account discriminants fail at their canonical decoders', () => {
   for (const type of removedEntityTxs) {

@@ -1460,6 +1460,7 @@ const prepareEntityFrameWorkingSet = async (
   );
   await context.accountConsensusContext.accountAuthorityExecutionScope?.beginEntityAccountFrame?.({
     ownerEntityId: currentEntityState.entityId,
+    expectedAccountsRoot: currentEntityState.accounts.rootHash(),
     entityTxs,
     accounts: currentEntityState.accounts,
     accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),

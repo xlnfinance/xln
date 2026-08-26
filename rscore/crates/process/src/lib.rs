@@ -60,13 +60,16 @@ pub use transport::{read_frame, serve, write_frame};
 // Entity inputs roll back their Account mutations and operation indices.
 // 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
 // shapes. FrameAck is one atomic operation with one ordered composite result.
-pub const PROCESS_ABI_VERSION: u64 = 18;
+pub const PROCESS_ABI_VERSION: u64 = 19;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=21")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=22")
+        // wire=22: direct two-visit authority has no rollback savepoint ops;
+        // AccountInbound carries the parent's canonical forest root, which
+        // promotes or drops the prior internal path-copy candidate.
         // wire=21: AccountOutbound names inbound-touched accounts whose final
         // bodies are returned only after all Entity-derived work has run.
         // wire=20: Account peer inputs carry from/to/domain/dispute/watch-seed
@@ -114,9 +117,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xe5, 0xe7, 0x0b, 0xde, 0x1e, 0xa7, 0x9e, 0xd3, 0xa2, 0x95, 0x19, 0x3c, 0xf0, 0x06,
-            0x38, 0x48, 0x1d, 0xea, 0x37, 0xdb, 0x78, 0xc6, 0xf4, 0x95, 0x1b, 0x3d, 0x19, 0xcb,
-            0x2c, 0x38, 0x36, 0xe6,
+            0xc1, 0x66, 0xc5, 0x7c, 0x35, 0xc6, 0x2e, 0x14, 0xda, 0xac, 0xbb, 0x31, 0x47, 0x46,
+            0xb3, 0xfd, 0x12, 0xff, 0xbe, 0x4a, 0xdc, 0xbf, 0x42, 0x36, 0xc0, 0xde, 0x0b, 0x9e,
+            0x16, 0xf7, 0xf1, 0x3a,
         ],
     };
 

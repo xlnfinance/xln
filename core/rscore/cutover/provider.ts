@@ -82,6 +82,7 @@ const executeInboundBatch = async (
   const wave = await runAuthorityCutoverInboundBatch(
     env,
     batch.ownerEntityId,
+    batch.expectedAccountsRoot,
     {
       entityTimestamp: clock.entityTimestamp,
       finalizedJHeight: clock.finalizedJHeight,

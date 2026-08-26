@@ -46,9 +46,9 @@ import {
 import { assertCrossJLocalCohorts } from '../../../runtime/delivery/topology/cross-j-topology';
 import { timePerfPhase } from '../../../support/performance/profile';
 import {
-  abortAuthorityWave,
-  commitAuthorityWave,
-  prepareAuthorityWave,
+  failStopAuthorityFrame,
+  finalizeAuthorityFrameAfterWal,
+  assertAuthorityFrameSettled,
 } from '../../../rscore/authority-driver';
 
 const APPLY_ALLOWED = Symbol.for('xln.runtime.env.apply.allowed');
@@ -217,14 +217,14 @@ const replayOneFrame = async (
     recordCommittedRuntimeEntityMetrics(env, height, committedEvents);
     clearRuntimeFrameEvents(env);
     // The authoritative engine takes the same frame the journal just proved.
-    // Replay has no WAL write of its own to wait for — the journal is already
-    // durable — so the candidate is opened and closed inside this frame.
-    await prepareAuthorityWave(env);
-    await commitAuthorityWave(env);
+    // Replay has no WAL write of its own to wait for: the journal is already
+    // durable, so only TS-side frame bookkeeping is released here.
+    await assertAuthorityFrameSettled(env);
+    await finalizeAuthorityFrameAfterWal(env);
   } finally {
-    // A frame that threw leaves a candidate open; the engine takes it back
-    // rather than keeping a wave this Runtime never accepted.
-    await abortAuthorityWave(env);
+    // A frame that threw after Account mutation cannot keep this process: the
+    // durable journal remains the sole recovery truth.
+    await failStopAuthorityFrame(env);
     if (env.infrastructure) delete env.infrastructure.replayEntityContexts;
     clearReplayOutputSignerHints(env);
     clearReplayOutputRuntimeRoutes(env);

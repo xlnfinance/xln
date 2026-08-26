@@ -14,12 +14,12 @@
  *   outbound visit     — admit/propose and return final Account materialization
  *   parity             — verify commitments and typed effects at the boundary
  *   Runtime WAL fsync  — TypeScript's own record becomes durable
- *   Commit             — only now does the engine keep the wave
  *
- * A commit before the WAL would leave the engine ahead of the log after a
- * crash; an abort after it would leave it behind. The candidate exists so the
- * window between them is the only place either can happen, and it is closed by
- * one call.
+ * Rust executes against an internal path-copy candidate. The next useful
+ * inbound/checkpoint call carries the Entity's canonical Account-forest root:
+ * naming the candidate promotes it, naming the base drops it. A failed WAL/DB
+ * write remains fail-stop. There is deliberately no second Commit/Abort
+ * protocol whose acknowledgement could disagree with the WAL.
  */
 
 import { createHash } from 'node:crypto';
@@ -29,7 +29,6 @@ import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { projectEntityAccountLeaf } from '../entity/consensus/state-root';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
-import { findAccountByCounterparty } from '../account/state/account-lookup';
 import {
   authorityPeerInputRow,
   buildAuthorityWave,
@@ -123,14 +122,6 @@ export const setAuthorityRuntimeSuppressed = (
 type Session = {
   client: RscoreProcessClient;
   ownerEntityId: string;
-  /**
-   * Accounts a declared import could not express, so the engine's forest is
-   * knowingly a subset of TypeScript's. Their whole-tree roots cannot agree
-   * while this is nonzero; every imported Account's own leaf still must.
-   */
-  importRefused: number;
-  /** Exact ids a declared import could not express, so membership excludes them. */
-  importSkipped: Set<string>;
   /** Membership committed by Create or proven by RestoreExact. */
   seeded: Set<string>;
   /**
@@ -143,18 +134,21 @@ type Session = {
 
 type OpenFrame = {
   session: Session;
-  /** The Entity input currently able to be undone, if one has moved anything. */
+  /** The Entity input whose Rust path-copy candidate is currently open. */
   entityInput: AuthorityEntityStageHandle | null;
-  /** Accounts opened by this frame, promoted to membership only on commit. */
-  createdAccounts: string[];
-  /** Where the accounts stood after the last thing this frame did to them. */
+  /** Where the Rust engine stood after its most recent response. */
   latest: Readonly<{ revision: number; accountsRoot: string }> | null;
+  /** Account forest selected by accepted Entity inputs in this Runtime frame. */
+  acceptedAccountsRoot: string;
   /** Rows exported for this frame's durable checkpoint, once taken. */
   checkpoint?: RscoreCheckpointChanges;
 };
 
-/** Names the Entity input whose account work can still be undone. */
-export type AuthorityEntityStageHandle = Readonly<{ ownerEntityId: string }>;
+/** Names the Entity input and the parent root from which it started. */
+export type AuthorityEntityStageHandle = Readonly<{
+  ownerEntityId: string;
+  baseAccountsRoot: string;
+}>;
 
 export type AuthorityCheckpointStorageInput = Readonly<{
   ownerEntityId: string;
@@ -183,11 +177,11 @@ const report = {
   inputsApplied: 0,
   accountsSeeded: 0,
   emptyFrames: 0,
-  commits: 0,
-  aborts: 0,
+  finalizedFrames: 0,
+  discardedEntityInputs: 0,
+  failStops: 0,
   checkpointsPrepared: 0,
   checkpointValidations: 0,
-  checkpointsCommitted: 0,
   restores: 0,
   /** Microseconds spent inside the engine, as the engine itself measured. */
   engineMicros: 0,
@@ -381,8 +375,6 @@ const openAuthoritySession = async (
   return {
     client,
     ownerEntityId,
-    importRefused: 0,
-    importSkipped: new Set(),
     seeded: new Set(),
     seededProjection: new Map(),
   };
@@ -405,7 +397,11 @@ const importAccountsFromTypescript = async (
   session: Session,
   accounts: ReadonlyMap<string, AccountReplica>,
 ): Promise<void> => {
-  const seeds: RscoreWireValue[] = [];
+  const seeds: Array<Readonly<{
+    counterpartyId: string;
+    seed: RscoreWireValue;
+    projection: Record<string, unknown>;
+  }>> = [];
   const refused: Record<string, string> = {};
   for (const [counterpartyId, account] of [...accounts].sort(([left], [right]) =>
     (left < right ? -1 : left > right ? 1 : 0))) {
@@ -414,36 +410,39 @@ const importAccountsFromTypescript = async (
       if (ineligible !== null) {
         throw new Error(`AUTHORITY_IMPORT_INELIGIBLE:${ineligible}`);
       }
-      seeds.push(accountSeedWire(
-        session.ownerEntityId,
+      seeds.push({
         counterpartyId,
-        account.state,
-        accountEnvelopeWire(account),
-        accountConsensusWire(account),
-        requireAccountDeltaTransformerAddress(env.state, account.state),
-      ));
+        seed: accountSeedWire(
+          session.ownerEntityId,
+          counterpartyId,
+          account.state,
+          accountEnvelopeWire(account),
+          accountConsensusWire(account),
+          requireAccountDeltaTransformerAddress(env.state, account.state),
+        ),
+        projection: projectEntityAccountLeaf(account),
+      });
     } catch (error) {
-      // An Account carrying something outside this profile — a cross-j pull in
-      // flight, say — cannot be expressed to the engine. It is left out and
-      // named, never quietly approximated: the first operation that touches it
-      // halts as unseeded rather than executing against a state nobody built.
       refused[counterpartyId] = error instanceof Error ? error.message : String(error);
-      session.importSkipped.add(counterpartyId);
-      continue;
     }
-    session.seeded.add(counterpartyId);
-    session.seededProjection.set(counterpartyId, projectEntityAccountLeaf(account));
   }
-  session.importRefused = Object.keys(refused).length;
-  await session.client.bootstrapAccounts(0, seeds, true);
+  if (Object.keys(refused).length > 0) {
+    return halt('AUTHORITY_IMPORT_UNSUPPORTED_ACCOUNTS', {
+      owner: session.ownerEntityId,
+      refused,
+    });
+  }
+  await session.client.bootstrapAccounts(0, seeds.map(row => row.seed), true);
+  for (const row of seeds) {
+    session.seeded.add(row.counterpartyId);
+    session.seededProjection.set(row.counterpartyId, row.projection);
+  }
   authorityLog.error('authority.imported', {
     owner: session.ownerEntityId,
     accounts: seeds.length,
-    refused,
   });
   console.error(
-    `RSCORE_AUTHORITY_IMPORT ${session.ownerEntityId} accounts=${seeds.length}`
-    + ` refused=${Object.keys(refused).length}`,
+    `RSCORE_AUTHORITY_IMPORT ${session.ownerEntityId} accounts=${seeds.length}`,
   );
   report.accountsSeeded += seeds.length;
 };
@@ -512,10 +511,7 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       allSessions.add(armed);
       continue;
     }
-    // Accounts a declared import refused are known-absent, not missing: the
-    // engine was told about the gap and any operation touching one halts.
-    const actual = new Set([...replica.state.accounts.keys()]
-      .filter(accountId => !existing.importSkipped.has(accountId)));
+    const actual = new Set(replica.state.accounts.keys());
     const missing = [...actual].filter(accountId => !existing.seeded.has(accountId)).sort();
     const removed = [...existing.seeded].filter(accountId => !actual.has(accountId)).sort();
     if (missing.length > 0 || removed.length > 0) {
@@ -531,35 +527,20 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       owners: (pending.get(env) ?? []).map(candidate => candidate.session.ownerEntityId),
     });
   }
-  const candidates: OpenFrame[] = [];
+  const candidates = sessionEntriesForRuntime(env).map(session => {
+    const acceptedAccountsRoot = accountMapRoot(
+      accountsOf(env, session.ownerEntityId),
+      session.ownerEntityId,
+    );
+    return {
+      session,
+      entityInput: null,
+      latest: null,
+      acceptedAccountsRoot,
+    } satisfies OpenFrame;
+  });
   pending.set(env, candidates);
   arrivalCursors.set(env, 0);
-  try {
-    for (const session of sessionEntriesForRuntime(env)) {
-      await session.client.pushSavepoint();
-      candidates.push({ session, entityInput: null, createdAccounts: [], latest: null });
-    }
-  } catch (error) {
-    const abortErrors: unknown[] = [];
-    for (const candidate of candidates) {
-      try {
-        await candidate.session.client.undoSavepoint();
-        report.aborts += 1;
-      } catch (abortError) {
-        candidate.session.client.kill();
-        abortErrors.push(abortError);
-      }
-    }
-    pending.delete(env);
-    arrivalCursors.delete(env);
-    if (abortErrors.length > 0) {
-      throw new AggregateError(
-        [error, ...abortErrors],
-        'RSCORE_AUTHORITY_FRAME_OPEN_ABORT_FAILED',
-      );
-    }
-    throw error;
-  }
 };
 
 const exactCheckpointRoot = (checkpoint: RscoreExactCheckpoint): string =>
@@ -714,7 +695,7 @@ const candidateForOwner = (
 ): OpenFrame | undefined => (pending.get(env) ?? [])
   .find(frame => frame.session.ownerEntityId === ownerEntityId);
 
-/** The Entity input whose account work this frame can still undo. */
+/** The Entity input whose Rust path-copy candidate is currently open. */
 export const authorityCutoverStageHandle = (
   env: RuntimeReplica,
   ownerEntityId: string,
@@ -725,12 +706,13 @@ export const authorityCutoverStageHandle = (
  * Hand this Entity input's arrivals to the engine in one call.
  *
  * The frame knows every account input it carries before it dispatches any of
- * them, so they cross together. The savepoint this Entity input opens is the
- * same one a single operation would open.
+ * them, so they cross together. A later rejection selects the base root on the
+ * next useful call; acceptance selects this attempt's candidate root.
  */
 const handAccountInbound = async (
   env: RuntimeReplica,
   ownerEntityId: string,
+  expectedAccountsRoot: string,
   clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
   rows: readonly RscoreWireValue[],
 ): Promise<Wave | null> => {
@@ -739,12 +721,32 @@ const handAccountInbound = async (
   const frame = candidateForOwner(env, owner);
   if (frame === undefined) return null;
   if (frame.entityInput === null) {
-    await frame.session.client.pushSavepoint();
-    frame.entityInput = { ownerEntityId: owner };
+    if (expectedAccountsRoot.toLowerCase() !== frame.acceptedAccountsRoot) {
+      return halt('ENTITY_INPUT_PARENT_ROOT_MISMATCH', {
+        owner,
+        accepted: frame.acceptedAccountsRoot,
+        requested: expectedAccountsRoot,
+      });
+    }
+    frame.entityInput = {
+      ownerEntityId: owner,
+      baseAccountsRoot: expectedAccountsRoot.toLowerCase(),
+    };
+  } else if (expectedAccountsRoot.toLowerCase() !== frame.entityInput.baseAccountsRoot) {
+    return halt('ENTITY_INPUT_RETRY_ROOT_MISMATCH', {
+      owner,
+      opened: frame.entityInput.baseAccountsRoot,
+      requested: expectedAccountsRoot,
+    });
   }
   const startedMs = performance.now();
   const wave = await frame.session.client.accountInbound({
     ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_OWNER'),
+    expectedAccountsRoot: hexToWireBytes(
+      expectedAccountsRoot,
+      32,
+      'AUTHORITY_EXPECTED_ACCOUNTS_ROOT',
+    ),
     entityTimestamp: clock.entityTimestamp,
     finalizedJHeight: clock.finalizedJHeight,
     rows,
@@ -763,6 +765,7 @@ const handAccountInbound = async (
 export const runAuthorityCutoverInboundBatch = async (
   env: RuntimeReplica,
   ownerEntityId: string,
+  expectedAccountsRoot: string,
   clock: Readonly<{ entityTimestamp: number; finalizedJHeight: number }>,
   inputs: readonly Readonly<{
     accountId: string;
@@ -774,7 +777,7 @@ export const runAuthorityCutoverInboundBatch = async (
     entry.accountId,
     { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
   ));
-  return handAccountInbound(env, ownerEntityId, clock, rows);
+  return handAccountInbound(env, ownerEntityId, expectedAccountsRoot, clock, rows);
 };
 
 /** One IPC visit for every admission and proposal of one Entity frame. */
@@ -794,8 +797,7 @@ export const runAuthorityCutoverOutboundBatch = async (
   const frame = candidateForOwner(env, owner);
   if (frame === undefined) return null;
   if (frame.entityInput === null) {
-    await frame.session.client.pushSavepoint();
-    frame.entityInput = { ownerEntityId: owner };
+    return halt('OUTBOUND_WITHOUT_INBOUND', { owner });
   }
   const startedMs = performance.now();
   const wave = await frame.session.client.accountOutbound({
@@ -820,27 +822,44 @@ export const runAuthorityCutoverOutboundBatch = async (
   return wave;
 };
 
-/** Keep everything this Entity input's accounts did. */
+/** Close the Entity bookkeeping marker; Rust already owns the new state. */
 export const acceptAuthorityEntityStage = async (
   env: RuntimeReplica,
   handle: AuthorityEntityStageHandle | null,
 ): Promise<void> => {
   if (handle === null) return;
   const frame = requireOpenEntityInput(env, handle);
-  await frame.session.client.keepSavepoint();
+  if (frame.latest === null) {
+    return halt('ENTITY_INPUT_ACCEPT_WITHOUT_ENGINE_RESULT', {
+      owner: handle.ownerEntityId,
+    });
+  }
+  frame.acceptedAccountsRoot = frame.latest.accountsRoot.toLowerCase();
   frame.entityInput = null;
 };
 
-/** Put every account back where this Entity input found it. */
+const killAuthorityRuntime = (env: RuntimeReplica): void => {
+  for (const session of sessionMap(env, false)?.values() ?? []) {
+    if (session === 'disabled') continue;
+    session.client.kill();
+    allSessions.delete(session);
+  }
+  sessions.delete(env);
+  captured.delete(env);
+  pending.delete(env);
+  arrivalCursors.delete(env);
+};
+
+/** Leave the held candidate for root reconciliation on the next useful call. */
 export const discardAuthorityEntityStage = async (
   env: RuntimeReplica,
   handle: AuthorityEntityStageHandle | null,
 ): Promise<void> => {
   if (handle === null) return;
   const frame = requireOpenEntityInput(env, handle);
-  const undone = await frame.session.client.undoSavepoint();
-  frame.latest = savepointPosition(undone);
+  frame.acceptedAccountsRoot = handle.baseAccountsRoot;
   frame.entityInput = null;
+  report.discardedEntityInputs += 1;
 };
 
 const requireOpenEntityInput = (
@@ -858,25 +877,8 @@ const requireOpenEntityInput = (
 const accountTxRow = (tx: AccountTx): RscoreWireValue =>
   accountTxWire(tx) ?? halt('ACCOUNT_TX_OUTSIDE_PROFILE', { kind: tx.type });
 
-/** `[revision, accountsRoot]`, as every savepoint operation answers. */
-const savepointPosition = (
-  value: unknown,
-): Readonly<{ revision: number; accountsRoot: string }> => {
-  if (!Array.isArray(value) || value.length !== 2) {
-    return halt('SAVEPOINT_RESPONSE_ARITY', { arity: Array.isArray(value) ? value.length : null });
-  }
-  const [revision, root] = value;
-  if (!(root instanceof Uint8Array) || root.byteLength !== 32) {
-    return halt('SAVEPOINT_RESPONSE_ROOT', {});
-  }
-  return {
-    revision: Number(revision),
-    accountsRoot: `0x${Buffer.from(root).toString('hex')}`,
-  };
-};
-
-/** Nothing to seal: the accounts already moved, under an undoable savepoint. */
-export const prepareAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
+/** Nothing to seal: the accounts already moved in their owning subsystem. */
+export const assertAuthorityFrameSettled = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const frames = pending.get(env);
   if (frames === undefined) return halt('AUTHORITY_FRAME_CANDIDATE_MISSING', {});
@@ -965,12 +967,23 @@ export const prepareAuthorityCheckpoint = async (
     if (candidate.entityInput !== null) {
       return halt('CHECKPOINT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
     }
-    const position = candidate.latest ?? savepointPosition(
-      await candidate.session.client.pushSavepoint(),
+    const expectedAccountsRoot = accountMapRoot(
+      accountsOf(env, candidate.session.ownerEntityId),
+      candidate.session.ownerEntityId,
     );
-    if (candidate.latest === null) await candidate.session.client.keepSavepoint();
-    const checkpoint = await candidate.session.client.checkpointChanges();
+    const checkpoint = await candidate.session.client.checkpointChanges(
+      hexToWireBytes(expectedAccountsRoot, 32, 'AUTHORITY_CHECKPOINT_ACCOUNTS_ROOT'),
+    );
+    // Checkpoint is itself a useful call: Rust first reconciles its held
+    // path-copy candidate to expectedAccountsRoot, then exports that exact
+    // position. Never compare against a rejected candidate left in `latest`.
+    const position = {
+      revision: Number(checkpoint.restoreToken[1]),
+      accountsRoot: `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`,
+    };
     assertCheckpointMatchesCandidate(env, candidate, position, checkpoint);
+    candidate.latest = position;
+    candidate.acceptedAccountsRoot = position.accountsRoot.toLowerCase();
     candidate.checkpoint = checkpoint;
     report.checkpointsPrepared += 1;
     inputs.push({
@@ -1062,8 +1075,8 @@ export const validateAuthorityCheckpointMaterialization = async (
   }
 };
 
-/** The Runtime's own record is durable: every engine may keep its wave. */
-export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
+/** The Runtime's own record is durable: release only TS-side frame bookkeeping. */
+export const finalizeAuthorityFrameAfterWal = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const candidates = pending.get(env);
   if (candidates === undefined) return;
@@ -1073,84 +1086,36 @@ export const commitAuthorityWave = async (env: RuntimeReplica): Promise<void> =>
     if (candidate.entityInput !== null) {
       return halt('COMMIT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
     }
-    const kept = savepointPosition(await candidate.session.client.keepSavepoint());
-    const expected = candidate.latest;
-    if (
-      expected !== null
-      && (kept.revision !== expected.revision
-        || kept.accountsRoot.toLowerCase() !== expected.accountsRoot.toLowerCase())
-    ) {
+    const typescriptRoot = accountMapRoot(
+      accountsOf(env, candidate.session.ownerEntityId),
+      candidate.session.ownerEntityId,
+    );
+    if (candidate.acceptedAccountsRoot !== typescriptRoot) {
       halt('COMMIT_ROOT_MISMATCH', {
         owner: candidate.session.ownerEntityId,
-        preparedRevision: expected.revision,
-        committedRevision: kept.revision,
-        prepared: expected.accountsRoot,
-        committed: kept.accountsRoot,
+        engineRevision: candidate.latest?.revision ?? null,
+        engineRoot: candidate.latest?.accountsRoot ?? null,
+        accepted: candidate.acceptedAccountsRoot,
+        typescriptRoot,
       });
     }
-    report.commits += 1;
-  }
-  for (const candidate of ordered) {
-    if (!candidate.checkpoint) continue;
-    const committed = await candidate.session.client.commitCheckpoint(
-      candidate.checkpoint.commitToken,
-    );
-    if (!checkpointTokensEqual(committed, candidate.checkpoint.restoreToken)) {
-      halt('CHECKPOINT_COMMIT_TOKEN_MISMATCH', {
-        owner: candidate.session.ownerEntityId,
-        expectedRevision: String(candidate.checkpoint.restoreToken[1]),
-        committedRevision: String(committed[1]),
-      });
-    }
-    report.checkpointsCommitted += 1;
-  }
-  // Membership becomes observable only after the Runtime WAL and every Rust
-  // candidate commit succeeded. Abort and pre-WAL failures therefore cannot
-  // leave a TS-side cache claiming that an uncommitted Create exists.
-  for (const candidate of ordered) {
-    const accounts = accountsOf(env, candidate.session.ownerEntityId);
-    for (const accountId of candidate.createdAccounts) {
-      if (candidate.session.seeded.has(accountId)) {
-        halt('ACCOUNT_CREATE_PROMOTION_DUPLICATE', {
-          owner: candidate.session.ownerEntityId,
-          account: accountId,
-        });
-      }
-      const account = accounts.get(accountId)
-        ?? findAccountByCounterparty(
-          accounts,
-          candidate.session.ownerEntityId,
-          accountId,
-        );
-      if (account == null) {
-        halt('ACCOUNT_CREATE_PROMOTION_MISSING', {
-          owner: candidate.session.ownerEntityId,
-          account: accountId,
-        });
-        continue;
-      }
-      candidate.session.seeded.add(accountId);
-      candidate.session.seededProjection.set(accountId, projectEntityAccountLeaf(account));
-      report.accountsSeeded += 1;
-    }
+    report.finalizedFrames += 1;
   }
   pending.delete(env);
   arrivalCursors.delete(env);
 };
 
-/** The Runtime could not make its record durable: the engines take it back. */
-export const abortAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
+/** A failed durable write after Account mutation is a mandatory restart. */
+export const failStopAuthorityFrame = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
   const candidates = pending.get(env);
   if (candidates === undefined) return;
-  for (const candidate of [...candidates]
-    .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
-    if (candidate.entityInput !== null) {
-      await candidate.session.client.undoSavepoint();
-      candidate.entityInput = null;
-    }
-    await candidate.session.client.undoSavepoint();
-    report.aborts += 1;
+  const mutated = candidates.filter(candidate => candidate.latest !== null || candidate.entityInput !== null);
+  if (mutated.length > 0) {
+    report.failStops += 1;
+    const owners = mutated.map(candidate => candidate.session.ownerEntityId).sort();
+    killAuthorityRuntime(env);
+    halt('WAL_FAILED_AFTER_ACCOUNT_MUTATION', { owners });
   }
   pending.delete(env);
   arrivalCursors.delete(env);
@@ -1162,15 +1127,7 @@ export const printAuthorityDriverReport = (): void => {
 };
 
 export const discardAuthorityRuntime = async (env: RuntimeReplica): Promise<void> => {
-  for (const session of sessionMap(env, false)?.values() ?? []) {
-    if (session === 'disabled') continue;
-    session.client.kill();
-    allSessions.delete(session);
-  }
-  sessions.delete(env);
-  captured.delete(env);
-  pending.delete(env);
-  arrivalCursors.delete(env);
+  killAuthorityRuntime(env);
   delete env.accountAuthorityFrameId;
 };
 

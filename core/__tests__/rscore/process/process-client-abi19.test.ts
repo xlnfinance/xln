@@ -194,11 +194,11 @@ const rawOk = (reply: RawProcessReply): unknown => {
   return reply.result;
 };
 
-describe.skipIf(!existsSync(BINARY))('rscore ABI18 process binding', () => {
+describe.skipIf(!existsSync(BINARY))('rscore ABI19 process binding', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(18);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(19);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
-      .toBe('e5e70bde1ea79ed3a295193cf00638481dea37db78c6f4951b3d19cb2c3836e6');
+      .toBe('c166c57c35c62e14daacbb314746b3fd12ffbe4adcbf4236c0de0b9e16f7f13a');
     const staleAbi = new RawProcessSession(identity());
     try {
       expect(rawErrorCode(await staleAbi.request(RSCORE_OP.hello, [
@@ -292,6 +292,60 @@ describe.skipIf(!existsSync(BINARY))('rscore ABI18 process binding', () => {
       expect(aborted[0]).toBe(baseline.revision);
       expect(`0x${exactBytes(aborted[1], 32, 'raw aborted root').toString('hex')}`)
         .toBe(baseline.accountsRoot);
+      rawOk(await raw.request(RSCORE_OP.shutdown, []));
+    } finally {
+      raw.kill();
+    }
+  });
+
+  test('Account inbound reconciles from the parent forest root without a commit command', async () => {
+    const raw = new RawProcessSession(identity());
+    try {
+      const seed = `0x${'6b'.repeat(32)}`;
+      const owner = generateLazyEntityId([deriveSignerAddressSync(seed, '1')], 1n);
+      rawOk(await raw.request(RSCORE_OP.hello, [
+        RSCORE_PROCESS_ABI_VERSION,
+        2,
+        swapMarketPolicyWire(),
+        [deriveSignerKeySync(seed, '1'), '1'],
+      ]));
+      const loaded = exactTuple(rawOk(await raw.request(
+        RSCORE_OP.bootstrapAccounts,
+        [RSCORE_PROCESS_PROFILE, 0, [], false],
+      )), 2, 'root bootstrap');
+      const expectedRoot = exactBytes(loaded[1], 32, 'root bootstrap root');
+      const ownerBytes = hexToWireBytes(owner, 32, 'TEST_ROOT_OWNER');
+      expect(rawErrorCode(await raw.request(RSCORE_OP.accountInbound, [
+        ownerBytes,
+        Buffer.alloc(32, 0x7a),
+        [1_700_000_000_000, 100],
+        [],
+        false,
+      ]))).toBe('RSCORE_BATCH_ENTITY_HEAD_ROOT');
+      const inbound = decodeWave(rawOk(await raw.request(RSCORE_OP.accountInbound, [
+        ownerBytes,
+        expectedRoot,
+        [1_700_000_000_000, 100],
+        [],
+        false,
+      ])));
+      expect(inbound.accountsRoot).toBe(`0x${expectedRoot.toString('hex')}`);
+      const outbound = decodeWave(rawOk(await raw.request(RSCORE_OP.accountOutbound, [
+        ownerBytes,
+        1_700_000_000_000,
+        100,
+        [],
+        [],
+        [],
+        [],
+        false,
+      ])));
+      expect(outbound.accountsRoot).toBe(inbound.accountsRoot);
+      const checkpoint = exactTuple(rawOk(await raw.request(
+        RSCORE_OP.checkpoint,
+        [expectedRoot],
+      )), 1, 'root checkpoint');
+      expect(checkpoint).toHaveLength(1);
       rawOk(await raw.request(RSCORE_OP.shutdown, []));
     } finally {
       raw.kill();

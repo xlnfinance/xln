@@ -17,9 +17,11 @@ fn clock() -> ReceiverClock {
 }
 
 fn enter(engine: &mut xln_rscore_batch::StatefulConsensusEngine, owner_entity_id: [u8; 32]) {
+    let expected_accounts_root = engine.accounts_root();
     engine
         .entity_inbound(EntityInboundRequest {
             owner_entity_id,
+            expected_accounts_root,
             clock: clock(),
             rows: Vec::new(),
             post_accounts: false,
@@ -68,10 +70,12 @@ fn two_visits_carry_a_whole_entity_frame() {
     assert_eq!(outbound.post_accounts.len(), 1, "one body, once");
 
     let rows = fixture::frames_for(&stand, &outbound.proposals);
+    let expected_accounts_root = stand.payee.accounts_root();
     let inbound = stand
         .payee
         .entity_inbound(EntityInboundRequest {
             owner_entity_id: payee_entity,
+            expected_accounts_root,
             clock: clock(),
             rows,
             post_accounts: false,
@@ -113,6 +117,74 @@ fn two_visits_carry_a_whole_entity_frame() {
 }
 
 #[test]
+fn the_next_parent_root_promotes_or_drops_the_path_copy_candidate() {
+    let mut accepted = stand(1);
+    let owner = accepted.pairs[0].payer_entity;
+    let account = accepted.pairs[0].payer_account;
+    let (_, txs) = fixture::payment(&accepted.pairs[0], 25);
+    let base_root = accepted.payer.accounts_root();
+    enter(&mut accepted.payer, owner);
+    accepted
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: owner,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: vec![(account, txs)],
+            propose: vec![account],
+            materialize: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("candidate");
+    let candidate_root = accepted.payer.accounts_root();
+    assert_ne!(candidate_root, base_root);
+    accepted
+        .payer
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: owner,
+            expected_accounts_root: candidate_root,
+            clock: clock(),
+            rows: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("the parent accepted the candidate root");
+    assert_eq!(accepted.payer.accounts_root(), candidate_root);
+
+    let mut rejected = stand(1);
+    let owner = rejected.pairs[0].payer_entity;
+    let account = rejected.pairs[0].payer_account;
+    let (_, txs) = fixture::payment(&rejected.pairs[0], 25);
+    let base_root = rejected.payer.accounts_root();
+    enter(&mut rejected.payer, owner);
+    rejected
+        .payer
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: owner,
+            timestamp: TIMESTAMP,
+            j_height: 100,
+            creates: Vec::new(),
+            admits: vec![(account, txs)],
+            propose: vec![account],
+            materialize: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("candidate");
+    assert_ne!(rejected.payer.accounts_root(), base_root);
+    rejected
+        .payer
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: owner,
+            expected_accounts_root: base_root,
+            clock: clock(),
+            rows: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("the parent retained the base root");
+    assert_eq!(rejected.payer.accounts_root(), base_root);
+}
+
+#[test]
 fn the_two_visit_protocol_refuses_missing_or_overlapping_halves() {
     let mut stand = stand(1);
     let payer_entity = stand.pairs[0].payer_entity;
@@ -133,41 +205,20 @@ fn the_two_visit_protocol_refuses_missing_or_overlapping_halves() {
         .expect("outbound without inbound");
     assert!(missing.to_string().contains("ENTITY_ROUND_MISSING"));
 
-    let (_, before) = stand.payer.push_savepoint().expect("savepoint");
     enter(&mut stand.payer, payer_entity);
+    let wrong_head = [0x7a; 32];
     let overlapping = stand
         .payer
         .entity_inbound(EntityInboundRequest {
             owner_entity_id: payer_entity,
+            expected_accounts_root: wrong_head,
             clock: clock(),
             rows: Vec::new(),
             post_accounts: false,
         })
         .err()
         .expect("second inbound while the first is open");
-    assert!(overlapping.to_string().contains("ENTITY_ROUND_OPEN"));
-    assert!(
-        stand.payer.keep_savepoint().is_err(),
-        "an incomplete Entity round cannot become durable"
-    );
-    let (_, after) = stand.payer.undo_savepoint().expect("abort open round");
-    assert_eq!(after, before);
-
-    // Abort clears both the Account tree and the round marker.
-    enter(&mut stand.payer, payer_entity);
-    stand
-        .payer
-        .entity_outbound(EntityOutboundRequest {
-            owner_entity_id: payer_entity,
-            timestamp: TIMESTAMP,
-            j_height: 100,
-            creates: Vec::new(),
-            admits: Vec::new(),
-            propose: Vec::new(),
-            materialize: Vec::new(),
-            post_accounts: false,
-        })
-        .expect("fresh round after abort");
+    assert!(overlapping.to_string().contains("ENTITY_HEAD_ROOT"));
 }
 
 /// An account this Entity does not own is refused before anything executes.
@@ -209,42 +260,4 @@ fn a_round_refuses_an_account_another_entity_owns() {
             post_accounts: false,
         })
         .expect("a rejected outbound does not consume the inbound half");
-}
-
-/// A Runtime frame is one transaction: what its Entity inputs moved is undone
-/// exactly if the frame never lands.
-#[test]
-fn an_aborted_runtime_frame_puts_every_account_back() {
-    let mut stand = stand(1);
-    let payer_entity = stand.pairs[0].payer_entity;
-    let payer_account = stand.pairs[0].payer_account;
-    let (_, txs) = fixture::payment(&stand.pairs[0], 25);
-
-    let (_, before) = stand.payer.push_savepoint().expect("savepoint");
-    enter(&mut stand.payer, payer_entity);
-    stand
-        .payer
-        .entity_outbound(EntityOutboundRequest {
-            owner_entity_id: payer_entity,
-            timestamp: TIMESTAMP,
-            j_height: 100,
-            creates: Vec::new(),
-            admits: vec![(payer_account, txs)],
-            propose: vec![payer_account],
-            materialize: Vec::new(),
-            post_accounts: false,
-        })
-        .expect("outbound");
-    assert_ne!(
-        stand.payer.accounts_root(),
-        before,
-        "the frame moved the tree"
-    );
-
-    let (_, after) = stand.payer.undo_savepoint().expect("undo");
-    assert_eq!(after, before, "an abandoned frame leaves nothing behind");
-    assert!(
-        stand.payer.keep_savepoint().is_err(),
-        "there is nothing left to keep"
-    );
 }

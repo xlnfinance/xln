@@ -62,9 +62,6 @@ struct PendingBatch {
     candidate: PreparedBatch,
 }
 
-type SavepointAction =
-    fn(&mut StatefulConsensusEngine) -> Result<(u64, [u8; 32]), xln_rscore_batch::BatchError>;
-
 impl ProcessSession {
     pub fn new() -> Self {
         Self::try_new().expect("operating-system entropy is required for rscore candidate tokens")
@@ -240,10 +237,9 @@ impl ProcessSession {
                 expected_accepted_ordinal,
                 context,
             ),
-            Command::Checkpoint => self.checkpoint(),
-            Command::PushSavepoint => self.savepoint(StatefulConsensusEngine::push_savepoint),
-            Command::KeepSavepoint => self.savepoint(StatefulConsensusEngine::keep_savepoint),
-            Command::UndoSavepoint => self.savepoint(StatefulConsensusEngine::undo_savepoint),
+            Command::Checkpoint {
+                expected_accounts_root,
+            } => self.checkpoint(expected_accounts_root),
             Command::AccountInbound { request } => self.account_inbound(*request),
             Command::AccountOutbound { request } => self.account_outbound(*request),
             Command::ApplyAccountWave {
@@ -415,33 +411,26 @@ impl ProcessSession {
 
     /// The rows that moved since the last durable checkpoint.
     ///
-    /// Taken from the committed tree at a Runtime frame boundary: the runtime
-    /// writes them, fsyncs, and only then acknowledges the token.
-    fn checkpoint(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let engine = self
-            .authority
-            .as_ref()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let checkpoint = engine.checkpoint_changes()?;
-        let response = crate::checkpoint_wire::changes(&checkpoint)?;
-        self.pending_checkpoint = Some(PendingCheckpoint {
-            commit_token: checkpoint.token,
-            restore_token: checkpoint.restore_token(),
-        });
-        Ok((response, false))
-    }
-
-    /// Where the accounts stand after marking, keeping or undoing a savepoint.
-    fn savepoint(
+    /// Taken at the Runtime frame boundary named by `checkpointDue`. The
+    /// engine advances its in-memory dirty baseline immediately: if the
+    /// caller cannot fsync these rows, continuing is forbidden and this whole
+    /// process is discarded. Recovery starts from the last durable Runtime
+    /// checkpoint and replays the authoritative WAL, so a second Account-side
+    /// CommitCheckpoint acknowledgement would only create another state
+    /// machine that could disagree with the WAL.
+    fn checkpoint(
         &mut self,
-        act: SavepointAction,
+        expected_accounts_root: [u8; 32],
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
         let engine = self
             .authority
             .as_mut()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        let (revision, root) = act(engine)?;
-        Ok((crate::wire_encode::savepoint(revision, root), false))
+        engine.reconcile_parent_accounts_root(expected_accounts_root)?;
+        let checkpoint = engine.checkpoint_changes()?;
+        let response = crate::checkpoint_wire::changes(&checkpoint)?;
+        engine.commit_checkpoint(&checkpoint.token)?;
+        Ok((response, false))
     }
 
     /// One Entity input's inbound half. Nothing is staged: the accounts move

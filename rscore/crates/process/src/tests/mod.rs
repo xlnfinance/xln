@@ -14,7 +14,7 @@ mod peer_wire;
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "e5e70bde1ea79ed3a295193cf00638481dea37db78c6f4951b3d19cb2c3836e6"
+        "c166c57c35c62e14daacbb314746b3fd12ffbe4adcbf4236c0de0b9e16f7f13a"
     );
 
     let mut session = ProcessSession::new();

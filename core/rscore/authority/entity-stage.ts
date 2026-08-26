@@ -72,6 +72,7 @@ type AccountAuthorityEntityParent = Readonly<{
 }>;
 
 export type AccountAuthorityEntityBatchInbound = AccountAuthorityEntityParent & Readonly<{
+  expectedAccountsRoot: string;
   requests: readonly AccountAuthorityInputRequest[];
 }>;
 
@@ -273,11 +274,22 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
 
   async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
     if (this.mode !== 'cutover') return;
-    if (this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_DUPLICATE:${this.ownerEntityId}`);
     if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
       throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
     }
+    // Entity fitting may reject one transaction after an isolated apply and
+    // rebuild the proposal. A retry is a new attempt against the same parent
+    // head, not a third Account phase. Rust reconciles its held path-copy
+    // candidate from expectedAccountsRoot before applying this batch.
     this.frameOpened = true;
+    this.frameOutboundPrepared = false;
+    this.inboundRequests = [];
+    this.inboundResults = [];
+    this.inboundCursor = 0;
+    this.admissionRequests = [];
+    this.preparedProposalIds = [];
+    this.proposalResults = [];
+    this.proposalCursor = 0;
     this.inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
       const accountId = normalizeEntityId(arrival.accountId);
       const account = request.accountForWrite(accountId);
@@ -295,6 +307,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const run = this.requireBatchProvider('executeAccountInboundBatch');
     const materializers = [...await run.call(this.options.provider, {
       ...this.parentOf(),
+      expectedAccountsRoot: request.expectedAccountsRoot,
       requests: this.inboundRequests,
     })];
     if (materializers.length !== this.inboundRequests.length) {

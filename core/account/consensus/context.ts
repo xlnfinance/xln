@@ -43,6 +43,14 @@ export type AccountAuthorityExecutionScope = Readonly<{
 
 export type AccountAuthorityFrameBeginRequest = Readonly<{
   ownerEntityId: string;
+  /**
+   * Canonical Account-forest head the parent Entity currently owns.
+   *
+   * The Rust engine uses this as an optimistic reconciliation assertion: a
+   * held path-copy candidate is promoted when this names its root, or dropped
+   * when this still names its base. No separate Commit/Abort message exists.
+   */
+  expectedAccountsRoot: string;
   entityTxs: readonly EntityTx[];
   accounts: ReadonlyMap<string, AccountReplica>;
   accountForWrite(accountId: string): AccountReplica | undefined;

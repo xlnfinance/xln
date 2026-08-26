@@ -100,10 +100,9 @@ pub enum Command {
         stage_key: xln_rscore_batch::StageKey,
         request: Box<xln_rscore_batch::WaveOpsRequest>,
     },
-    Checkpoint,
-    PushSavepoint,
-    KeepSavepoint,
-    UndoSavepoint,
+    Checkpoint {
+        expected_accounts_root: [u8; 32],
+    },
     AccountInbound {
         request: Box<xln_rscore_batch::EntityInboundRequest>,
     },
@@ -151,20 +150,10 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::ProposeAccountWave => decode_propose_wave(payload),
         OpTag::AccountInbound => decode_account_inbound(payload),
         OpTag::Checkpoint => {
-            exact(payload, 0, "checkpoint")?;
-            Ok(Command::Checkpoint)
-        }
-        OpTag::PushSavepoint => {
-            exact(payload, 0, "pushSavepoint")?;
-            Ok(Command::PushSavepoint)
-        }
-        OpTag::KeepSavepoint => {
-            exact(payload, 0, "keepSavepoint")?;
-            Ok(Command::KeepSavepoint)
-        }
-        OpTag::UndoSavepoint => {
-            exact(payload, 0, "undoSavepoint")?;
-            Ok(Command::UndoSavepoint)
+            let fields = exact(payload, 1, "checkpoint")?;
+            Ok(Command::Checkpoint {
+                expected_accounts_root: fixed_bytes(&fields[0], "expectedAccountsRoot")?,
+            })
         }
         OpTag::AccountOutbound => decode_account_outbound(payload),
         OpTag::FinalizeEntity => decode_finalize_entity(payload),
@@ -511,15 +500,16 @@ fn decode_entity_wave_ops(
 
 /// One Entity input's inbound half: owner, receiver clock, arrivals.
 fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 4, "accountInbound")?;
-    let rows = tuple(&fields[2])?;
+    let fields = exact(fields, 5, "accountInbound")?;
+    let rows = tuple(&fields[3])?;
     if rows.len() > MAX_WAVE_OP_ROWS {
         return Err(ProcessError::Expected("waveOpRows"));
     }
-    let clock = exact(tuple(&fields[1])?, 2, "receiverClock")?;
+    let clock = exact(tuple(&fields[2])?, 2, "receiverClock")?;
     Ok(Command::AccountInbound {
         request: Box::new(xln_rscore_batch::EntityInboundRequest {
             owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+            expected_accounts_root: fixed_bytes(&fields[1], "expectedAccountsRoot")?,
             clock: xln_rscore_batch::ReceiverClock {
                 entity_timestamp: js_number(&clock[0], "entityTimestamp")?,
                 finalized_j_height: js_number(&clock[1], "finalizedJHeight")?,
@@ -528,7 +518,7 @@ fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> 
                 .iter()
                 .map(decode_input_row)
                 .collect::<Result<_, _>>()?,
-            post_accounts: strict_boolean(&fields[3], "postAccounts")?,
+            post_accounts: strict_boolean(&fields[4], "postAccounts")?,
         }),
     })
 }

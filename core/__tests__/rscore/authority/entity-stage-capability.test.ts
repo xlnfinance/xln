@@ -171,6 +171,7 @@ describe('pre-TypeScript Account authority capability', () => {
 
     await stage.beginEntityAccountFrame?.({
       ownerEntityId: OWNER,
+      expectedAccountsRoot: `0x${'00'.repeat(32)}`,
       entityTxs: [],
       accounts: new Map([[PEER, account]]),
       accountForWrite: accountId => accountId === PEER ? account : undefined,
