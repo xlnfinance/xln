@@ -9,6 +9,8 @@ mod checkpoint_wire;
 mod entity_wire;
 mod error;
 mod session;
+#[cfg(feature = "bench")]
+pub mod transcript;
 mod transport;
 #[path = "wire/decode.rs"]
 mod wire_decode;
@@ -41,8 +43,39 @@ pub fn decode_wire_value(bytes: &[u8]) -> Result<xln_rscore_abi::AbiValue, Proce
 pub fn encode_wire_value(value: &xln_rscore_abi::AbiValue) -> Result<Vec<u8>, ProcessError> {
     Ok(xln_rscore_abi::encode_value(value)?)
 }
+#[cfg(feature = "bench")]
+pub use session::ResidentAuthorityBootstrap;
 pub use session::{ProcessReply, ProcessSession};
 pub use transport::{read_frame, serve, write_frame};
+
+/// Decode one captured Entity round for a native replay without retaining the
+/// process ABI in the execution loop. The capture is an import fixture; after
+/// this boundary Runtime, Entity and Account communicate through typed values.
+#[cfg(feature = "bench")]
+pub fn decode_resident_entity_round(
+    envelope: &xln_rscore_abi::Envelope,
+) -> Result<
+    (
+        xln_rscore_entity_kernel::ResidentEntityRequest,
+        xln_rscore_entity_kernel::DeterministicContext,
+    ),
+    ProcessError,
+> {
+    match wire_decode::decode_command(envelope)? {
+        wire_decode::Command::EntityRound { request, context } => Ok((*request, *context)),
+        _ => Err(ProcessError::Expected("entityRound")),
+    }
+}
+
+/// Encode parity evidence after a native replay sample has stopped timing.
+/// Production does not serialize this internal Entity/Account boundary.
+#[cfg(feature = "bench")]
+pub fn encode_resident_entity_round(
+    result: &xln_rscore_entity_kernel::ResidentEntityResult,
+    sections: &[xln_rscore_entity_kernel::EntityConsensusSection],
+) -> Result<xln_rscore_abi::BodyTuple, ProcessError> {
+    entity_wire::encode_entity_round(result, sections, 0)
+}
 
 // 2: Hello carries the authority config, and the authoritative wave joins the
 // op set. An older runtime fails at Hello rather than at the first wave.

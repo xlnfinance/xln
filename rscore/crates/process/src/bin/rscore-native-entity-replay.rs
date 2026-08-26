@@ -4,22 +4,17 @@
 //! transcript. This intentionally does not claim to be a Runtime replay: its
 //! purpose is to measure the resident Rust financial kernel without IPC.
 
-use std::fs;
 use std::time::{Duration, Instant};
 
-use xln_rscore_abi::{AbiValue, BodyTuple, Envelope, MessageKind, OpTag, decode_envelope};
-use xln_rscore_process::ProcessSession;
-
-const TRANSCRIPT_MAGIC: &[u8; 8] = b"XRSCTR01";
+use xln_rscore_abi::{AbiValue, BodyTuple, Envelope, MessageKind, OpTag};
+use xln_rscore_entity_kernel::{apply_resident_entity_round_core, compute_entity_owned_sections};
+use xln_rscore_process::transcript::{TranscriptPair, read_transcript};
+use xln_rscore_process::{
+    ProcessSession, decode_resident_entity_round, encode_resident_entity_round,
+};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-#[derive(Clone)]
-struct TranscriptPair {
-    request: Envelope,
-    expected: Envelope,
-}
 
 #[derive(Default)]
 struct ReplayMetrics {
@@ -69,62 +64,6 @@ fn bytes_hex(value: &AbiValue) -> Result<String, String> {
         output.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
     }
     Ok(output)
-}
-
-fn parse_transcript(path: &str) -> Result<Vec<TranscriptPair>, String> {
-    let bytes = fs::read(path).map_err(|error| format!("NATIVE_REPLAY_READ:{error}"))?;
-    if bytes.get(..TRANSCRIPT_MAGIC.len()) != Some(TRANSCRIPT_MAGIC) {
-        return Err("NATIVE_REPLAY_MAGIC".to_string());
-    }
-    let mut records = Vec::new();
-    let mut offset = TRANSCRIPT_MAGIC.len();
-    while offset < bytes.len() {
-        let header = bytes
-            .get(offset..offset.saturating_add(5))
-            .ok_or_else(|| "NATIVE_REPLAY_RECORD_HEADER".to_string())?;
-        let direction = *header
-            .first()
-            .ok_or_else(|| "NATIVE_REPLAY_RECORD_DIRECTION".to_string())?;
-        let length_bytes: [u8; 4] = header
-            .get(1..5)
-            .ok_or_else(|| "NATIVE_REPLAY_RECORD_LENGTH".to_string())?
-            .try_into()
-            .map_err(|_| "NATIVE_REPLAY_RECORD_LENGTH".to_string())?;
-        let length = usize::try_from(u32::from_be_bytes(length_bytes))
-            .map_err(|_| "NATIVE_REPLAY_RECORD_LENGTH_RANGE".to_string())?;
-        offset = offset.saturating_add(5);
-        let end = offset
-            .checked_add(length)
-            .ok_or_else(|| "NATIVE_REPLAY_RECORD_OVERFLOW".to_string())?;
-        let frame = bytes
-            .get(offset..end)
-            .ok_or_else(|| "NATIVE_REPLAY_RECORD_TRUNCATED".to_string())?;
-        let envelope = decode_envelope(frame, 1)
-            .or_else(|first_error| decode_envelope(frame, 2).map_err(|_| first_error))
-            .map_err(|error| {
-                format!(
-                    "NATIVE_REPLAY_ENVELOPE:index={}:direction={direction}:{error}",
-                    records.len()
-                )
-            })?;
-        records.push((direction, envelope));
-        offset = end;
-    }
-    if records.is_empty() || !records.len().is_multiple_of(2) {
-        return Err("NATIVE_REPLAY_RECORD_COUNT".to_string());
-    }
-    records
-        .chunks_exact(2)
-        .map(|pair| {
-            if pair[0].0 != 0 || pair[1].0 != 1 {
-                return Err("NATIVE_REPLAY_RECORD_ORDER".to_string());
-            }
-            Ok(TranscriptPair {
-                request: pair[0].1.clone(),
-                expected: pair[1].1.clone(),
-            })
-        })
-        .collect()
 }
 
 fn replace_tuple_field(
@@ -265,30 +204,82 @@ fn observe_entity(response: &Envelope, metrics: &mut ReplayMetrics) -> Result<()
     Ok(())
 }
 
-fn replay(pairs: &[TranscriptPair], workers: usize) -> Result<ReplayMetrics, String> {
+fn bootstrap(
+    pairs: &[TranscriptPair],
+    workers: usize,
+) -> Result<(xln_rscore_process::ResidentAuthorityBootstrap, usize), String> {
     let mut session = ProcessSession::try_new().map_err(|error| error.to_string())?;
-    let mut metrics = ReplayMetrics::default();
     for (pair_index, pair) in pairs.iter().enumerate() {
+        if pair.request.op_tag == OpTag::EntityRound {
+            return session
+                .into_resident_authority()
+                .map(|bootstrap| (bootstrap, pair_index))
+                .map_err(|error| error.to_string());
+        }
         let request = tune_request(pair.request.clone(), workers)?;
         let request_op = request.op_tag;
         let request_body = request.body.clone();
-        let started = Instant::now();
         let reply = session.handle(request);
-        if reply.envelope.op_tag == OpTag::EntityRound {
-            metrics.elapsed += started.elapsed();
-            observe_entity(&reply.envelope, &mut metrics)?;
-        }
         if reply.envelope.message_kind != MessageKind::Ok {
             return Err(format!(
-                "NATIVE_REPLAY_ENGINE_ERROR:index={pair_index}:op={request_op:?}:requestBody={request_body:?}:error={:?}",
+                "NATIVE_REPLAY_BOOTSTRAP_ERROR:index={pair_index}:op={request_op:?}:requestBody={request_body:?}:error={:?}",
                 reply.envelope.body,
             ));
         }
         let actual = normalize_response(reply.envelope)?;
         let expected = normalize_response(pair.expected.clone())?;
         if actual != expected {
-            return Err(format!("NATIVE_REPLAY_PARITY:{:?}", actual.op_tag));
+            return Err(format!(
+                "NATIVE_REPLAY_BOOTSTRAP_PARITY:{:?}",
+                actual.op_tag
+            ));
         }
+    }
+    Err("NATIVE_REPLAY_ENTITY_ROUND_MISSING".to_string())
+}
+
+fn replay(pairs: &[TranscriptPair], workers: usize) -> Result<ReplayMetrics, String> {
+    let (bootstrap, first_round) = bootstrap(pairs, workers)?;
+    let mut accounts = bootstrap.accounts;
+    let mut state = bootstrap.entity_state;
+    let mut current_root = bootstrap.accounts_root;
+    let mut metrics = ReplayMetrics::default();
+    for (pair_index, pair) in pairs.iter().enumerate().skip(first_round) {
+        if pair.request.op_tag == OpTag::Shutdown {
+            continue;
+        }
+        let request = tune_request(pair.request.clone(), workers)?;
+        let (request, context) = decode_resident_entity_round(&request)
+            .map_err(|error| format!("NATIVE_REPLAY_DECODE:index={pair_index}:{error}"))?;
+        if request.inbound.expected_accounts_root != current_root {
+            return Err(format!("NATIVE_REPLAY_PARENT_ROOT:index={pair_index}"));
+        }
+        let started = Instant::now();
+        let core = apply_resident_entity_round_core(&mut accounts, state, request, &context)
+            .map_err(|error| format!("NATIVE_REPLAY_ENGINE:index={pair_index}:{error}"))?;
+        let sections = compute_entity_owned_sections(
+            &core.state,
+            core.outbound.accounts_root,
+            accounts.account_count(),
+        )
+        .map_err(|error| format!("NATIVE_REPLAY_SECTIONS:index={pair_index}:{error}"))?;
+        metrics.elapsed += started.elapsed();
+
+        let result = core
+            .with_diagnostic_commitments()
+            .map_err(|error| format!("NATIVE_REPLAY_DIAGNOSTICS:index={pair_index}:{error}"))?;
+
+        let mut actual = pair.expected.clone();
+        actual.body = encode_resident_entity_round(&result, &sections)
+            .map_err(|error| format!("NATIVE_REPLAY_ENCODE:index={pair_index}:{error}"))?;
+        observe_entity(&actual, &mut metrics)?;
+        let actual = normalize_response(actual)?;
+        let expected = normalize_response(pair.expected.clone())?;
+        if actual != expected {
+            return Err(format!("NATIVE_REPLAY_PARITY:index={pair_index}"));
+        }
+        current_root = result.outbound.accounts_root;
+        state = result.state;
     }
     Ok(metrics)
 }
@@ -301,26 +292,34 @@ fn main() -> Result<(), String> {
         .unwrap_or_else(|| "16".to_string())
         .parse::<usize>()
         .map_err(|_| "NATIVE_REPLAY_WORKERS_INVALID".to_string())?;
-    let pairs = parse_transcript(&transcript)?;
+    let payments = argument(&args, "--payments")?
+        .ok_or_else(|| "NATIVE_REPLAY_ARG_MISSING:--payments".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "NATIVE_REPLAY_PAYMENTS_INVALID".to_string())?;
+    if payments == 0 {
+        return Err("NATIVE_REPLAY_PAYMENTS_INVALID".to_string());
+    }
+    let pairs = read_transcript(&transcript).map_err(|error| error.to_string())?;
     let result = replay(&pairs, workers)?;
     let seconds = result.elapsed.as_secs_f64().max(0.000_001);
     println!(
         concat!(
             "{{\"benchmark\":\"rscore-native-apo-replay\",\"workers\":{},",
-            "\"rounds\":{},\"ingress\":{},\"egress\":{},\"accountTxs\":{},",
-            "\"elapsedMs\":{:.3},\"ingressPerSecond\":{:.2},\"egressPerSecond\":{:.2},",
-            "\"protocolRowsPerSecond\":{:.2},\"accountsRoot\":\"{}\",",
+            "\"payments\":{},\"rounds\":{},\"ingress\":{},\"egress\":{},\"accountTxs\":{},",
+            "\"elapsedMs\":{:.3},\"paymentsPerSecond\":{:.2},",
+            "\"ingressPerSecond\":{:.2},\"egressPerSecond\":{:.2},\"accountsRoot\":\"{}\",",
             "\"paybookRoot\":\"{}\",\"orderbookRoot\":\"{}\"}}"
         ),
         workers,
+        payments,
         result.rounds,
         result.ingress,
         result.egress,
         result.account_txs,
         seconds * 1_000.0,
+        payments as f64 / seconds,
         result.ingress as f64 / seconds,
         result.egress as f64 / seconds,
-        (result.ingress + result.egress) as f64 / seconds,
         result.accounts_root,
         result.paybook_root,
         result.orderbook_root,

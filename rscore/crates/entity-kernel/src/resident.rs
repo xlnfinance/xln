@@ -99,6 +99,30 @@ pub struct ResidentEntityResult {
     pub outbound: EntityRoundResult,
 }
 
+/// Production result before shadow-only slice commitments are materialized.
+/// Canonical Entity sections are computed directly from this state; parity
+/// tools may add the three diagnostic roots after stopping their hot timer.
+pub struct ResidentEntityCoreResult {
+    pub state: EntityStateSlice,
+    pub outputs: Vec<EntityKernelOutput>,
+    pub inbound: EntityRoundResult,
+    pub outbound: EntityRoundResult,
+    proposal_work: Vec<crate::AccountProposalWork>,
+}
+
+impl ResidentEntityCoreResult {
+    pub fn with_diagnostic_commitments(self) -> Result<ResidentEntityResult, ResidentEntityError> {
+        let commitments = compute_commitments(&self.state, &self.proposal_work, &self.outputs)?;
+        Ok(ResidentEntityResult {
+            state: self.state,
+            outputs: self.outputs,
+            commitments,
+            inbound: self.inbound,
+            outbound: self.outbound,
+        })
+    }
+}
+
 fn hex_prefixed(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(2 + bytes.len() * 2);
@@ -210,13 +234,7 @@ fn validate_effect_binding(
             rows: evidence.outputs_by_tx.len(),
         });
     }
-    let derived_hash = evidence
-        .frame
-        .hash()
-        .map_err(|error| ResidentEntityError::FrameHash {
-            detail: error.to_string(),
-        })?;
-    if &derived_hash != state_hash {
+    if &evidence.state_hash != state_hash {
         return Err(ResidentEntityError::FrameHashMismatch {
             account_id: account_id.to_string(),
             height: evidence.frame.height,
@@ -345,10 +363,23 @@ fn apply_failed_proposal_routes(
 /// Apply one Entity transition over resident Account shards.
 pub fn apply_resident_entity_round(
     accounts: &mut ResidentConsensusEngine,
-    mut state: EntityStateSlice,
+    state: EntityStateSlice,
     request: ResidentEntityRequest,
     context: &DeterministicContext,
 ) -> Result<ResidentEntityResult, ResidentEntityError> {
+    apply_resident_entity_round_core(accounts, state, request, context)?
+        .with_diagnostic_commitments()
+}
+
+/// Apply the production Entity transition without computing the additional
+/// shadow paybook/orderbook/outbox digests. Runtime consensus commits the
+/// canonical Entity sections instead.
+pub fn apply_resident_entity_round_core(
+    accounts: &mut ResidentConsensusEngine,
+    mut state: EntityStateSlice,
+    request: ResidentEntityRequest,
+    context: &DeterministicContext,
+) -> Result<ResidentEntityCoreResult, ResidentEntityError> {
     let total_started = Instant::now();
     let owner_entity_id = request.inbound.owner_entity_id;
     let request_owner = hex_prefixed(&owner_entity_id);
@@ -418,7 +449,6 @@ pub fn apply_resident_entity_round(
     let outbound_micros = phase_started.elapsed().as_micros();
     let phase_started = Instant::now();
     apply_failed_proposal_routes(&mut kernel.state, &outbound, &mut kernel.outputs);
-    let commitments = compute_commitments(&kernel.state, &kernel.proposal_work, &kernel.outputs)?;
     let finalize_micros = phase_started.elapsed().as_micros();
     report_resident_round_profile(
         [
@@ -434,11 +464,11 @@ pub fn apply_resident_entity_round(
         ],
         total_started.elapsed().as_micros(),
     );
-    Ok(ResidentEntityResult {
+    Ok(ResidentEntityCoreResult {
         state: kernel.state,
         outputs: kernel.outputs,
-        commitments,
         inbound,
         outbound,
+        proposal_work: kernel.proposal_work,
     })
 }

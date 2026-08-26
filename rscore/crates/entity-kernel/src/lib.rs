@@ -31,7 +31,8 @@ pub use orderbook::{
 #[cfg(feature = "bench")]
 pub use orderbook::{OrderbookBenchmarkResult, run_orderbook_benchmark};
 pub use resident::{
-    ResidentEntityError, ResidentEntityRequest, ResidentEntityResult, apply_resident_entity_round,
+    ResidentEntityCoreResult, ResidentEntityError, ResidentEntityRequest, ResidentEntityResult,
+    apply_resident_entity_round, apply_resident_entity_round_core,
 };
 pub use snapshot::{EntityStateSnapshot, capture_entity_state, restore_entity_state};
 pub use types::{

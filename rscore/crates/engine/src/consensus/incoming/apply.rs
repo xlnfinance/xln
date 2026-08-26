@@ -54,6 +54,10 @@ pub struct ReceiverClock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommittedFrameEvidence {
     pub frame: AccountFrame,
+    /// Canonical frame hash already authenticated (peer frame) or authored
+    /// (our pending frame). Entity must bind to it, not hash the same body a
+    /// second time after Account consensus has committed it.
+    pub state_hash: [u8; 32],
     /// Domain of the resident Account that committed this frame. The frame
     /// body does not carry identity metadata, but Entity HTLC bindings require
     /// the exact domain and must not receive it as an unverified parent hint.
@@ -407,6 +411,7 @@ pub fn apply_incoming_frame(
         ack_dispute,
         committed_frame: Box::new(CommittedFrameEvidence {
             frame,
+            state_hash,
             domain,
             outputs_by_tx,
             committed_via_new_frame: true,
@@ -535,6 +540,7 @@ pub fn apply_incoming_ack(
         events,
         committed_frame: Box::new(CommittedFrameEvidence {
             frame: pending.frame,
+            state_hash: pending.state_hash,
             domain,
             outputs_by_tx,
             committed_via_new_frame: false,

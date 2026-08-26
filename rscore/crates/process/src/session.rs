@@ -53,6 +53,16 @@ struct ResidentEntityHead {
     candidate: Option<ResidentEntityCandidate>,
 }
 
+/// Benchmark/import boundary after an exact bootstrap has been decoded once.
+/// Production Runtime recovery constructs the same typed values from its
+/// checkpoint store; replay tools use this to avoid ABI work in every frame.
+#[cfg(feature = "bench")]
+pub struct ResidentAuthorityBootstrap {
+    pub accounts: ResidentConsensusEngine,
+    pub accounts_root: [u8; 32],
+    pub entity_state: xln_rscore_entity_kernel::EntityStateSlice,
+}
+
 impl ResidentEntityHead {
     fn select_parent(
         &mut self,
@@ -131,6 +141,30 @@ impl ProcessSession {
             },
             shutdown,
         }
+    }
+
+    /// Consume a bootstrap-only session and move the resident financial state
+    /// into a native Runtime replay. A session with an open Entity candidate
+    /// is rejected: transcript execution must never masquerade as recovery.
+    #[cfg(feature = "bench")]
+    pub fn into_resident_authority(self) -> Result<ResidentAuthorityBootstrap, ProcessError> {
+        let head = self.entity_state.ok_or(ProcessError::EntityNotLoaded)?;
+        if head.candidate.is_some() {
+            return Err(ProcessError::EntityHead(
+                "RESIDENT_BOOTSTRAP_CANDIDATE_OPEN".to_string(),
+            ));
+        }
+        let accounts = *self.authority.ok_or(ProcessError::EngineNotLoaded)?;
+        if accounts.accounts_root() != head.accepted_accounts_root {
+            return Err(ProcessError::EntityHead(
+                "RESIDENT_BOOTSTRAP_ROOT_MISMATCH".to_string(),
+            ));
+        }
+        Ok(ResidentAuthorityBootstrap {
+            accounts,
+            accounts_root: head.accepted_accounts_root,
+            entity_state: head.accepted,
+        })
     }
 
     fn dispatch_envelope(
