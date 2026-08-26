@@ -130,6 +130,10 @@ describe('HLT Rust Account-authority evidence', () => {
     expect(evidence.economicOperations.operations.map(operation => operation.key)).toContain('swap:authority-swap-1');
     expect(evidence.economicOperations.operations.find(operation => operation.key === 'lock:authority-lock-1')?.stages)
       .toHaveLength(2);
+    const lockStage = evidence.economicOperations.operations
+      .find(operation => operation.key === 'lock:authority-lock-1')?.stages[0];
+    expect(lockStage?.runtimeHeight).toBe(41);
+    expect(Object.hasOwn(lockStage ?? {}, 'effectRefs')).toBe(false);
     expect(evidence.expectations.runtimeFrames[0]?.runtimeStateHash).toBe(`0x${'06'.repeat(32)}`);
     expect(evidence.expectations.entityFrames[0]?.authorityRoot).toBe(`0x${'0e'.repeat(32)}`);
     expect(evidence.expectations.accountFrames[0]?.accountStateRoot).toBe(`0x${'02'.repeat(32)}`);

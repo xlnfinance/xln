@@ -26,7 +26,6 @@ type HltOperationStage = Readonly<{
   accountStateRoot: string;
   txIndex: number;
   txType: AccountTx['type'];
-  effectRefs: readonly string[];
 }>;
 
 export type HltEconomicOperationLedger = Readonly<{
@@ -146,7 +145,6 @@ export const buildHltAuthorityEvidence = (
   oracle: HltAuthorityFrameOracle,
 ): HltAuthorityEvidence => {
   assertFeaturePolicy(frames, oracle.accountFrames);
-  const effects = new Map(frames.map(frame => [frame.height, [...(frame.runtimeOutputRefs ?? [])]]));
   const grouped = new Map<string, { key: string; kind: HltOperationKind; stages: HltOperationStage[] }>();
   const coverage = {
     directPayments: 0,
@@ -173,7 +171,6 @@ export const buildHltAuthorityEvidence = (
         accountStateRoot: record.frame.accountStateRoot,
         txIndex,
         txType: tx.type,
-        effectRefs: effects.get(record.runtimeHeight) ?? [],
       });
       grouped.set(operation.key, row);
       if (tx.type === 'direct_payment') coverage.directPayments += 1;
