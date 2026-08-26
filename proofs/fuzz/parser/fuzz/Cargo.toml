@@ -1,0 +1,78 @@
+[package]
+name = "xln-parser-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+xln-rscore-abi = { path = "../../../../rscore/crates/abi" }
+xln-rscore-hanko = { path = "../../../../rscore/crates/hanko" }
+xln-rscore-process = { path = "../../../../rscore/crates/process" }
+xln-rscore-entity-kernel = { path = "../../../../rscore/crates/entity-kernel" }
+xln-rscore-protocol = { path = "../../../../rscore/crates/protocol" }
+num-bigint = "0.4"
+serde_json = "1.0"
+
+[lib]
+path = "src/lib.rs"
+name = "xln_parser_fuzz_harness"
+
+[[bin]]
+name = "hanko_envelope"
+path = "fuzz_targets/hanko_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "abi_envelope"
+path = "fuzz_targets/abi_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "process_wire"
+path = "fuzz_targets/process_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checkpoint_wire"
+path = "fuzz_targets/checkpoint_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "orderbook_page"
+path = "fuzz_targets/orderbook_page.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "msgpack_value"
+path = "fuzz_targets/msgpack_value.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "protocol_value"
+path = "fuzz_targets/protocol_value.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gen_seeds"
+path = "src/bin/gen_seeds.rs"
+test = false
+doc = false
+bench = false
