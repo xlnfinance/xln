@@ -15,7 +15,6 @@ import { runtimeQueryClient } from './runtimeQueryClient';
 import {
   assertRuntimeViewIsLive,
   emptyRuntimeViewHistoryScan,
-  normalizeEntityIdForRuntimeView,
   normalizeRuntimeViewAtHeight,
   runtimeViewFrameMatchesAtHeight,
   runtimeViewNeedsHeightRefresh,
@@ -39,6 +38,9 @@ import {
   RuntimeViewRefreshCoordinator,
   type RuntimeViewRefreshTarget,
 } from '../../../packages/runtime-client/src/runtime-view-refresh';
+import {
+  RuntimeViewProjectionReader,
+} from '../../../packages/runtime-client/src/runtime-view-projections';
 import {
   advanceRuntimeViewHeight,
   createDisconnectedRuntimeViewState,
@@ -79,23 +81,7 @@ export type RuntimeView = RuntimeViewState<
  */
 export const readRuntimeEntityProjectionFrame = async (
   entityId: string,
-): Promise<RuntimeAdapterViewFrame> => {
-  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
-  if (!normalizedEntityId) throw new Error('RUNTIME_ENTITY_PROJECTION_ID_MISSING');
-  const atHeight = get(runtimeView).atHeight;
-  const frame = await runtimeQueryClient.readViewFrame(runtimeViewQueryAtHeight({
-    entityId: normalizedEntityId,
-    accountsLimit: 10,
-    booksLimit: 10,
-  }, atHeight));
-  const projectedEntityId = normalizeEntityIdForRuntimeView(
-    frame.activeEntityId || frame.activeEntity?.summary?.entityId || frame.activeEntity?.core?.entityId,
-  );
-  if (projectedEntityId !== normalizedEntityId) {
-    throw new Error(`RUNTIME_ENTITY_PROJECTION_MISMATCH:${normalizedEntityId}:${projectedEntityId || 'missing'}`);
-  }
-  return frame;
-};
+): Promise<RuntimeAdapterViewFrame> => runtimeViewProjectionReader.readEntityFrame(entityId);
 
 /**
  * Point-read one Account when a panel needs bounded Account-owned detail.
@@ -107,19 +93,10 @@ export const readRuntimeEntityProjectionFrame = async (
 export const readRuntimeAccountProjection = async (
   entityId: string,
   counterpartyId: string,
-): Promise<StorageAccountDoc> => {
-  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
-  const normalizedCounterpartyId = normalizeEntityIdForRuntimeView(counterpartyId);
-  if (!normalizedEntityId || !normalizedCounterpartyId) {
-    throw new Error('RUNTIME_ACCOUNT_PROJECTION_ID_MISSING');
-  }
-  const atHeight = get(runtimeView).atHeight;
-  return runtimeQueryClient.readAccount(
-    normalizedEntityId,
-    normalizedCounterpartyId,
-    runtimeViewQueryAtHeight({}, atHeight),
-  );
-};
+): Promise<StorageAccountDoc> => runtimeViewProjectionReader.readAccount(
+  entityId,
+  counterpartyId,
+);
 
 /**
  * History is intentionally not part of the live Account projection. This
@@ -129,19 +106,11 @@ export const readRuntimeSwapHistory = async (
   entityId: string,
   counterpartyId: string,
   cursor: string | null,
-): Promise<unknown> => {
-  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
-  const normalizedCounterpartyId = normalizeEntityIdForRuntimeView(counterpartyId);
-  if (!normalizedEntityId || !normalizedCounterpartyId) {
-    throw new Error('RUNTIME_SWAP_HISTORY_ID_MISSING');
-  }
-  const atHeight = get(runtimeView).atHeight;
-  return runtimeQueryClient.readSwapHistory(
-    normalizedEntityId,
-    normalizedCounterpartyId,
-    runtimeViewQueryAtHeight({ ...(cursor === null ? {} : { cursor }), limit: 100 }, atHeight),
-  );
-};
+): Promise<unknown> => runtimeViewProjectionReader.readSwapHistory(
+  entityId,
+  counterpartyId,
+  cursor,
+);
 
 const runtimeViewRefreshCoordinator: RuntimeViewRefreshCoordinator =
   new RuntimeViewRefreshCoordinator({
@@ -222,6 +191,19 @@ const emptyRuntimeView = (
 >(get(runtimeControllerHandle), atHeight);
 
 export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
+
+const runtimeViewProjectionReader = new RuntimeViewProjectionReader<
+  RuntimeAdapterViewFrame,
+  StorageAccountDoc,
+  unknown
+>({
+  readAtHeight: () => get(runtimeView).atHeight,
+  readViewFrame: (query) => runtimeQueryClient.readViewFrame(query),
+  readAccount: (entityId, counterpartyId, query) =>
+    runtimeQueryClient.readAccount(entityId, counterpartyId, query),
+  readSwapHistory: (entityId, counterpartyId, query) =>
+    runtimeQueryClient.readSwapHistory(entityId, counterpartyId, query),
+});
 
 export const resetRuntimeView = (): void => {
   runtimeViewCatchup.reset();
