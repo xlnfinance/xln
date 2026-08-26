@@ -203,9 +203,13 @@ describe('runtime-client RuntimeView loader', () => {
     });
   });
 
-  test('keeps concrete reads, refresh leases, and publication in the Svelte adapter', () => {
+  test('keeps concrete reads and writable publication in the Svelte adapter', () => {
     const boundary = readFileSync(
       'frontend/packages/runtime-client/src/runtime-view-loader.ts',
+      'utf8',
+    );
+    const publication = readFileSync(
+      'frontend/packages/runtime-client/src/runtime-view-publication.ts',
       'utf8',
     );
     const store = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
@@ -222,9 +226,10 @@ describe('runtime-client RuntimeView loader', () => {
     expect(store).toContain('new RuntimeViewLoader<');
     expect(store).toContain('readHead: () => runtimeQueryClient.readHead()');
     expect(store).toContain('readFrame: (query) => runtimeQueryClient.readViewFrame(query)');
-    expect(store).toContain('runtimeViewLoader.load(handle, expectedAtHeight, query)');
-    expect(store).toContain('const requestStillCurrent = (): boolean =>');
-    expect(store).toContain("if (outcome.kind === 'success')");
+    expect(publication).toContain('this.dependencies.loader.load(handle, expectedAtHeight, query)');
+    expect(publication).toContain('const requestStillCurrent = (): boolean =>');
+    expect(publication).toContain("if (outcome.kind === 'success')");
+    expect(store).toContain('new RuntimeViewPublicationCoordinator<');
     expect(store).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
     expect(store).toContain('export const runtimeView = writable<RuntimeView>');
   });

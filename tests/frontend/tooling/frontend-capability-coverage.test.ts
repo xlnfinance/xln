@@ -87,6 +87,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/runtime-client/src/runtime-view-projections.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
+      .toContain('frontend/packages/runtime-client/src/runtime-view-publication.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/runtime-client/src/runtime-view-refresh.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.currentSources)
       .toContain('frontend/packages/runtime-client/src/runtime-view-selection.ts');
@@ -114,6 +116,8 @@ describe('frontend capability inventory', () => {
       .toContain('framework-neutral RuntimeView query, pagination, and height model');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('framework-neutral selection-scoped detached RuntimeView projection reads');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
+      .toContain('framework-neutral latest-wins RuntimeView publication coordination');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)
       .toContain('framework-neutral RuntimeView refresh leases and invalidation');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-runtime-discovery')?.behavior)

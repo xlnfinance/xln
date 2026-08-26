@@ -200,6 +200,10 @@ describe('runtime-client RuntimeView state boundary', () => {
       'frontend/packages/runtime-client/src/runtime-view-loader.ts',
       'utf8',
     );
+    const publication = readFileSync(
+      'frontend/packages/runtime-client/src/runtime-view-publication.ts',
+      'utf8',
+    );
     const store = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
 
     expect(boundary).not.toContain('svelte');
@@ -207,11 +211,12 @@ describe('runtime-client RuntimeView state boundary', () => {
     expect(boundary).not.toContain('runtimeQueryClient');
     expect(boundary).not.toContain('writable');
     expect(store).toContain('export type RuntimeView = RuntimeViewState<');
-    expect(store).toContain('createLoadingRuntimeViewState(view, handle, expectedAtHeight)');
+    expect(publication).toContain('createLoadingRuntimeViewState(');
     expect(loader).toContain('createDisconnectedRuntimeViewState<');
     expect(loader).toContain('createSuccessRuntimeViewState<');
     expect(loader).toContain('createErrorRuntimeViewState<');
     expect(store).toContain('new RuntimeViewLoader<');
+    expect(store).toContain('new RuntimeViewPublicationCoordinator<');
     expect(store).toContain('selectRuntimeViewHeight(view, atHeight');
     expect(store).toContain('advanceRuntimeViewHeight(view, nextHeight)');
     expect(store).not.toContain('next.runtimeId = current.id');

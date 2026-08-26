@@ -119,6 +119,10 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
     'frontend/packages/runtime-client/src/runtime-view-model.ts',
     'utf8',
   );
+  const publicationSource = readFileSync(
+    'frontend/packages/runtime-client/src/runtime-view-publication.ts',
+    'utf8',
+  );
 
   expect(source).toContain('export type RuntimeView');
   expect(source).toContain("from '../../../packages/runtime-client/src/runtime-view-model'");
@@ -132,13 +136,14 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).toContain('runtimeControllerHandle');
   expect(source).toContain('export const resetRuntimeView');
   expect(source).toContain('new RuntimeViewRefreshCoordinator({');
-  expect(source).toContain('const refreshLease = runtimeViewRefreshCoordinator.begin();');
-  expect(source).toContain('const requestStillCurrent = (): boolean =>');
-  expect(source).toContain('runtimeViewRefreshCoordinator.isCurrent(refreshLease)');
+  expect(source).toContain('new RuntimeViewPublicationCoordinator<');
+  expect(publicationSource).toContain('const refreshLease = this.dependencies.refresh.begin();');
+  expect(publicationSource).toContain('const requestStillCurrent = (): boolean =>');
+  expect(publicationSource).toContain('this.dependencies.refresh.isCurrent(refreshLease)');
   expect(source).not.toContain('let runtimeViewRefreshId');
   expect(source).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
-  expect(source).toContain('if (!requestStillCurrent()) return next;');
-  expect(source).not.toContain('if (!requestStillCurrent()) throw error;');
+  expect(publicationSource).toContain('if (!requestStillCurrent()) return next;');
+  expect(publicationSource).not.toContain('if (!requestStillCurrent()) throw error;');
   expect(source).toContain('runtimeAdapter.subscribe');
   expect(source).toContain('resetRuntimeView();');
   expect(source).toContain('runtimeAdapterHeight.subscribe');

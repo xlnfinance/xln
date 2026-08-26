@@ -45,9 +45,11 @@ import {
   RuntimeViewProjectionReader,
 } from '../../../packages/runtime-client/src/runtime-view-projections';
 import {
+  RuntimeViewPublicationCoordinator,
+} from '../../../packages/runtime-client/src/runtime-view-publication';
+import {
   advanceRuntimeViewHeight,
   createEmptyRuntimeViewState,
-  createLoadingRuntimeViewState,
   runtimeViewErrorMessage,
   selectRuntimeViewHeight,
   type RuntimeViewState,
@@ -216,6 +218,28 @@ const runtimeViewLoader = new RuntimeViewLoader<
   readFrame: (query) => runtimeQueryClient.readViewFrame(query),
 });
 
+const runtimeViewPublicationCoordinator = new RuntimeViewPublicationCoordinator<
+  RuntimeAdapterReadQuery,
+  StorageHead,
+  RuntimeAdapterEntitySummary,
+  RuntimeAdapterViewFrame
+>({
+  refresh: runtimeViewRefreshCoordinator,
+  loader: runtimeViewLoader,
+  readHandle: () => get(runtimeControllerHandle),
+  readView: () => get(runtimeView),
+  publishLoading: (view) => runtimeView.set(view),
+  publishSuccess: (view, frame) => {
+    runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));
+    runtimeView.set(view);
+    continueRuntimeViewCatchup();
+  },
+  publishUnavailable: (view) => {
+    runtimeViewPageInfo.set(null);
+    runtimeView.set(view);
+  },
+});
+
 export const resetRuntimeView = (): void => {
   runtimeViewCatchup.reset();
   if (!runtimeViewSelectionCoordinator.setAtHeight(null)) {
@@ -225,31 +249,9 @@ export const resetRuntimeView = (): void => {
   runtimeView.set(emptyRuntimeView());
 };
 
-export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {}): Promise<RuntimeView> => {
-  const refreshLease = runtimeViewRefreshCoordinator.begin();
-  const handle = get(runtimeControllerHandle);
-  const expectedAtHeight = refreshLease.selection.atHeight;
-  const query = runtimeViewQueryAtHeight(inputQuery, expectedAtHeight);
-  const requestStillCurrent = (): boolean =>
-    runtimeViewRefreshCoordinator.isCurrent(refreshLease);
-  runtimeView.update((view) =>
-    createLoadingRuntimeViewState(view, handle, expectedAtHeight));
-  const outcome = await runtimeViewLoader.load(handle, expectedAtHeight, query);
-  const next = outcome.view;
-  // A superseded read still owns its result. Latest-wins applies only to the
-  // shared store; callers must never receive another request's transient state.
-  if (!requestStillCurrent()) return next;
-  if (outcome.kind === 'success') {
-    const frame = outcome.frame;
-    runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));
-    runtimeView.set(next);
-    continueRuntimeViewCatchup();
-    return next;
-  }
-  runtimeViewPageInfo.set(null);
-  runtimeView.set(next);
-  return next;
-};
+export const refreshRuntimeView = (
+  inputQuery: RuntimeAdapterReadQuery = {},
+): Promise<RuntimeView> => runtimeViewPublicationCoordinator.refresh(inputQuery);
 
 const currentRuntimeViewQuery = (): RuntimeAdapterReadQuery => {
   const view = get(runtimeView);

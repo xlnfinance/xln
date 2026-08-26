@@ -149,6 +149,10 @@ describe('runtime-client RuntimeView refresh coordinator', () => {
       'frontend/packages/runtime-client/src/runtime-view-refresh.ts',
       'utf8',
     );
+    const publication = readFileSync(
+      'frontend/packages/runtime-client/src/runtime-view-publication.ts',
+      'utf8',
+    );
     const store = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
 
     expect(boundary).not.toContain('svelte');
@@ -156,8 +160,9 @@ describe('runtime-client RuntimeView refresh coordinator', () => {
     expect(boundary).not.toContain('writable');
     expect(store).toContain('new RuntimeViewRefreshCoordinator({');
     expect(store).toContain('beforePublish: runtimeViewRefreshCoordinator.invalidate');
-    expect(store).toContain('const refreshLease = runtimeViewRefreshCoordinator.begin();');
-    expect(store).toContain('runtimeViewRefreshCoordinator.isCurrent(refreshLease)');
+    expect(publication).toContain('const refreshLease = this.dependencies.refresh.begin();');
+    expect(publication).toContain('this.dependencies.refresh.isCurrent(refreshLease)');
+    expect(store).toContain('refresh: runtimeViewRefreshCoordinator');
     expect(store).not.toContain('let runtimeViewRefreshId');
     expect(store).not.toContain('const expectedRuntimeId');
     expect(store).not.toContain('const expectedRuntimeMode');
