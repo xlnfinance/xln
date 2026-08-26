@@ -9,7 +9,8 @@ use xln_rscore_engine::{
     SequentialAccountEngine, Side, SwapMarketPolicy, SwapToken, TokenId, WatchSeed,
 };
 use xln_rscore_entity_kernel::{
-    CommittedAccountTransition, JurisdictionScope, OrderedAccountCommit,
+    CommittedAccountTransition, EntityReferral, HubProfile, JurisdictionScope,
+    OrderbookConsensusMetadata, OrderedAccountCommit, SpreadDistribution,
 };
 
 pub const HUB: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
@@ -81,6 +82,27 @@ pub fn market() -> Arc<SwapMarketPolicy> {
         ],
         vec![((2, 1), 1)],
     ))
+}
+
+pub fn orderbook_metadata() -> OrderbookConsensusMetadata {
+    OrderbookConsensusMetadata {
+        hub_profile: HubProfile {
+            entity_id: HUB.to_string(),
+            name: "entity-kernel-fixture".to_string(),
+            spread_distribution: SpreadDistribution {
+                maker_bps: 0,
+                taker_bps: 10_000,
+                hub_bps: 0,
+                maker_referrer_bps: 0,
+                taker_referrer_bps: 0,
+            },
+            reference_token_id: 1,
+            usd_quote_authority_entity_id: HUB.to_string(),
+            min_trade_size: BigInt::from(0),
+            supported_pairs: vec!["1/2".to_string()],
+        },
+        referrals: std::collections::BTreeMap::<String, EntityReferral>::new(),
+    }
 }
 
 pub fn execution_context(account_height: u64, frame_j_height: u64) -> AccountExecutionContext {
@@ -159,4 +181,45 @@ pub fn fixture_text<'a>(fixture: &'a serde_json::Value, path: &[&str]) -> &'a st
         value = &value[*segment];
     }
     value.as_str().expect("fixture text")
+}
+
+pub fn fixture_u64(fixture: &serde_json::Value, path: &[&str]) -> u64 {
+    let mut value = fixture;
+    for segment in path {
+        value = &value[*segment];
+    }
+    value.as_u64().expect("fixture integer")
+}
+
+pub fn digest_bytes(value: &str) -> [u8; 32] {
+    let value = value.strip_prefix("0x").expect("fixture digest prefix");
+    assert_eq!(value.len(), 64, "fixture digest length");
+    let mut output = [0_u8; 32];
+    for (index, byte) in output.iter_mut().enumerate() {
+        *byte =
+            u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).expect("fixture digest hex");
+    }
+    output
+}
+
+pub fn assert_owned_sections(
+    actual: &[xln_rscore_entity_kernel::EntityConsensusSection],
+    fixture: &serde_json::Value,
+    case: &str,
+) {
+    let expected = fixture[case]["canonicalEntity"]["sections"]
+        .as_array()
+        .expect("canonical Entity sections");
+    for section in actual {
+        let row = expected
+            .iter()
+            .find(|row| row["field"].as_str() == Some(&section.field))
+            .unwrap_or_else(|| panic!("missing canonical Entity section {}", section.field));
+        assert_eq!(
+            section.digest,
+            row["digest"].as_str().expect("canonical Entity digest"),
+            "{} canonical Entity section",
+            section.field,
+        );
+    }
 }

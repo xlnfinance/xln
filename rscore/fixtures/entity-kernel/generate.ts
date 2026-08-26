@@ -102,6 +102,8 @@ const digest = (value: unknown): string =>
 const canonicalEntityEvidence = (state: EntityState) => ({
   root: computeCanonicalEntityConsensusStateHashCold(state),
   sections: computeEntityConsensusSectionDigestsCold(state),
+  accountsRoot: state.accounts.rootHash(),
+  accountCount: state.accounts.size,
 });
 
 const txDigest = (tx: AccountTx): string => digest(canonicalAccountTxForFrameHash(tx));

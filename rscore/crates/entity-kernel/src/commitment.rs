@@ -4,12 +4,18 @@
 use num_bigint::BigInt;
 use sha2::{Digest as _, Sha256};
 use xln_rscore_engine::canonical_tx_digest;
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_account_state_value};
+use xln_rscore_protocol::{
+    CanonicalNumber, CanonicalValue, PersistentRadixMap, encode_account_state_value,
+    encode_canonical_consensus_bytes,
+};
 
-use crate::orderbook::{BookOrder, BookState, OrderbookState, SameJOffer, Side};
+use crate::orderbook::{
+    BookOrder, BookState, OrderbookState, SameJOffer, Side, compute_book_commitment_hash,
+};
 use crate::{
-    AccountProposalWork, EntityKernelCommitments, EntityKernelError, EntityKernelOutput,
-    EntityStateSlice, HtlcRoute, LockBookEntry,
+    AccountProposalWork, EntityConsensusSection, EntityKernelCommitments, EntityKernelError,
+    EntityKernelOutput, EntityReferral, EntityStateSlice, HtlcRoute, HubProfile, LockBookEntry,
+    OrderbookConsensusMetadata, SpreadDistribution,
 };
 
 fn text(value: impl Into<String>) -> CanonicalValue {
@@ -83,6 +89,278 @@ fn digest(value: CanonicalValue) -> Result<String, EntityKernelError> {
         }
     })?;
     Ok(hex(&Sha256::digest(encoded)))
+}
+
+fn consensus_digest_bytes(value: &CanonicalValue) -> Result<[u8; 32], EntityKernelError> {
+    let encoded = encode_canonical_consensus_bytes(value).map_err(|error| {
+        EntityKernelError::CommitmentEncoding {
+            detail: error.to_string(),
+        }
+    })?;
+    Ok(Sha256::digest(encoded).into())
+}
+
+fn consensus_digest(value: &CanonicalValue) -> Result<String, EntityKernelError> {
+    Ok(hex(&consensus_digest_bytes(value)?))
+}
+
+fn raw_text_key(value: &str) -> Result<Vec<u8>, EntityKernelError> {
+    let bytes = value.as_bytes();
+    let length = u16::try_from(bytes.len()).map_err(|_| EntityKernelError::CommitmentEncoding {
+        detail: format!("ENTITY_COLLECTION_KEY_TOO_LONG:{}", bytes.len()),
+    })?;
+    let mut output = Vec::with_capacity(2 + bytes.len());
+    output.extend_from_slice(&length.to_be_bytes());
+    output.extend_from_slice(bytes);
+    Ok(output)
+}
+
+fn collection_commitment(
+    rows: impl Iterator<Item = Result<(String, CanonicalValue), EntityKernelError>>,
+) -> Result<CanonicalValue, EntityKernelError> {
+    let mut map = PersistentRadixMap::empty();
+    for row in rows {
+        let (key, value) = row?;
+        let digest = consensus_digest_bytes(&value)?;
+        map = map
+            .updated(raw_text_key(&key)?, value, digest)
+            .map_err(|error| EntityKernelError::CommitmentEncoding {
+                detail: error.to_string(),
+            })?;
+    }
+    let leaf_count =
+        u64::try_from(map.len()).map_err(|_| EntityKernelError::CommitmentEncoding {
+            detail: format!("ENTITY_COLLECTION_LEAF_COUNT_OVERFLOW:{}", map.len()),
+        })?;
+    Ok(object(vec![
+        ("radix", number_u32(16)),
+        (
+            "leafCount",
+            number("entityCollection.leafCount", leaf_count)?,
+        ),
+        ("root", text(hex(&map.root_hash()))),
+    ]))
+}
+
+fn canonical_htlc_route(route: &HtlcRoute) -> Result<CanonicalValue, EntityKernelError> {
+    let mut entries = vec![("hashlock", text(&route.hashlock))];
+    if let Some(token_id) = route.token_id {
+        entries.push(("tokenId", number_u16(token_id)));
+    }
+    if let Some(amount) = route.amount.as_ref() {
+        entries.push(("amount", big(amount)));
+    }
+    if let Some(started_at_ms) = route.started_at_ms {
+        entries.push(("startedAtMs", number("startedAtMs", started_at_ms)?));
+    }
+    if route.originated {
+        entries.push(("originated", boolean(true)));
+    }
+    if let Some(value) = route.inbound_entity.as_ref() {
+        entries.push(("inboundEntity", text(value)));
+    }
+    if let Some(value) = route.inbound_lock_id.as_ref() {
+        entries.push(("inboundLockId", text(value)));
+    }
+    if let Some(value) = route.outbound_entity.as_ref() {
+        entries.push(("outboundEntity", text(value)));
+    }
+    if let Some(value) = route.outbound_lock_id.as_ref() {
+        entries.push(("outboundLockId", text(value)));
+    }
+    if route.inbound_settled {
+        entries.push(("inboundSettled", boolean(true)));
+    }
+    if route.outbound_settled {
+        entries.push(("outboundSettled", boolean(true)));
+    }
+    if let Some(value) = route.secret.as_ref() {
+        entries.push(("secret", text(value)));
+    }
+    if route.secret_ack_pending {
+        entries.push(("secretAckPending", boolean(true)));
+    }
+    if let Some(value) = route.secret_ack_started_at {
+        entries.push(("secretAckStartedAt", number("secretAckStartedAt", value)?));
+    }
+    if let Some(value) = route.secret_ack_deadline_at {
+        entries.push(("secretAckDeadlineAt", number("secretAckDeadlineAt", value)?));
+    }
+    if let Some(value) = route.pending_fee.as_ref() {
+        entries.push(("pendingFee", big(value)));
+    }
+    entries.push((
+        "createdTimestamp",
+        number("createdTimestamp", route.created_timestamp)?,
+    ));
+    Ok(object(entries))
+}
+
+fn canonical_lock_entry(lock: &LockBookEntry) -> CanonicalValue {
+    object(vec![
+        ("lockId", text(&lock.lock_id)),
+        ("accountId", text(&lock.account_id)),
+        ("tokenId", number_u16(lock.token_id)),
+        ("amount", big(&lock.amount)),
+        ("hashlock", text(&lock.hashlock)),
+        ("timelock", big(&lock.timelock)),
+        (
+            "direction",
+            text(if lock.outgoing {
+                "outgoing"
+            } else {
+                "incoming"
+            }),
+        ),
+        ("createdAt", big(&lock.created_at)),
+    ])
+}
+
+fn spread_distribution(value: &SpreadDistribution) -> CanonicalValue {
+    object(vec![
+        ("makerBps", number_u32(value.maker_bps)),
+        ("takerBps", number_u32(value.taker_bps)),
+        ("hubBps", number_u32(value.hub_bps)),
+        ("makerReferrerBps", number_u32(value.maker_referrer_bps)),
+        ("takerReferrerBps", number_u32(value.taker_referrer_bps)),
+    ])
+}
+
+fn hub_profile(value: &HubProfile) -> CanonicalValue {
+    object(vec![
+        ("entityId", text(&value.entity_id)),
+        ("name", text(&value.name)),
+        (
+            "spreadDistribution",
+            spread_distribution(&value.spread_distribution),
+        ),
+        ("referenceTokenId", number_u32(value.reference_token_id)),
+        (
+            "usdQuoteAuthorityEntityId",
+            text(&value.usd_quote_authority_entity_id),
+        ),
+        ("minTradeSize", big(&value.min_trade_size)),
+        (
+            "supportedPairs",
+            CanonicalValue::Array(value.supported_pairs.iter().map(text).collect()),
+        ),
+    ])
+}
+
+fn referral(value: &EntityReferral) -> Result<CanonicalValue, EntityKernelError> {
+    Ok(object(vec![
+        ("entityId", text(&value.entity_id)),
+        ("referrerId", optional(value.referrer_id.as_ref(), text)),
+        ("timestamp", number("referral.timestamp", value.timestamp)?),
+    ]))
+}
+
+fn canonical_orderbook_ext(
+    state: &OrderbookState,
+    metadata: &OrderbookConsensusMetadata,
+) -> Result<CanonicalValue, EntityKernelError> {
+    let books = state
+        .books
+        .iter()
+        .map(|(pair, book)| {
+            compute_book_commitment_hash(book).map(|digest| (text(pair), text(digest)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let pair_dimensions = state
+        .pair_dimensions
+        .iter()
+        .map(|(pair, value)| {
+            (
+                text(pair),
+                object(vec![
+                    ("baseTokenDecimals", number_u32(value.base_token_decimals)),
+                    ("quoteTokenDecimals", number_u32(value.quote_token_decimals)),
+                ]),
+            )
+        })
+        .collect();
+    let referrals = metadata
+        .referrals
+        .iter()
+        .map(|(key, value)| Ok((text(key), referral(value)?)))
+        .collect::<Result<Vec<_>, EntityKernelError>>()?;
+    Ok(object(vec![
+        ("books", CanonicalValue::Map(books)),
+        ("pairDimensions", CanonicalValue::Map(pair_dimensions)),
+        ("hubProfile", hub_profile(&metadata.hub_profile)),
+        ("referrals", CanonicalValue::Map(referrals)),
+    ]))
+}
+
+/// Exact Entity consensus sections owned by the resident E+A subsystem.
+///
+/// The parent carries every unrelated section digest unchanged. Replacing
+/// these rows and rebuilding the top manifest yields the canonical Entity
+/// root without materializing Account replicas in TypeScript.
+pub fn compute_entity_owned_sections(
+    state: &EntityStateSlice,
+    accounts_root: [u8; 32],
+    account_count: usize,
+) -> Result<Vec<EntityConsensusSection>, EntityKernelError> {
+    let account_count =
+        u64::try_from(account_count).map_err(|_| EntityKernelError::CommitmentEncoding {
+            detail: format!("ENTITY_ACCOUNT_COUNT_OVERFLOW:{account_count}"),
+        })?;
+    let accounts = object(vec![
+        ("domain", text("xln.entity.accounts.radix-merkle:binary")),
+        ("radix", number_u32(16)),
+        ("hashAlgorithm", text("integrity")),
+        ("leafCount", number("accounts.leafCount", account_count)?),
+        ("root", text(hex(&accounts_root))),
+    ]);
+    let routes = collection_commitment(
+        state
+            .htlc_routes
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), canonical_htlc_route(value)?))),
+    )?;
+    let locks = collection_commitment(
+        state
+            .lock_book
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), canonical_lock_entry(value)))),
+    )?;
+    let mut values = vec![
+        ("accounts", accounts),
+        ("entityId", text(&state.entity_id)),
+        ("height", number("height", state.height)?),
+        ("timestamp", number("timestamp", state.timestamp)?),
+        (
+            "lastFinalizedJHeight",
+            number("lastFinalizedJHeight", state.last_finalized_j_height)?,
+        ),
+        ("htlcRoutes", routes),
+        ("htlcFeesEarned", big(&state.htlc_fees_earned)),
+        ("lockBook", locks),
+    ];
+    match (&state.orderbook, &state.orderbook_metadata) {
+        (Some(orderbook), Some(metadata)) => values.push((
+            "orderbookExt",
+            canonical_orderbook_ext(orderbook, metadata)?,
+        )),
+        (None, None) => {}
+        _ => {
+            return Err(EntityKernelError::CommitmentEncoding {
+                detail: "ENTITY_ORDERBOOK_METADATA_MISMATCH".to_string(),
+            });
+        }
+    }
+    let mut sections = values
+        .into_iter()
+        .map(|(field, value)| {
+            Ok(EntityConsensusSection {
+                field: field.to_string(),
+                digest: consensus_digest(&value)?,
+            })
+        })
+        .collect::<Result<Vec<_>, EntityKernelError>>()?;
+    sections.sort_by(|left, right| left.field.cmp(&right.field));
+    Ok(sections)
 }
 
 fn htlc_route(route: &HtlcRoute) -> Result<CanonicalValue, EntityKernelError> {

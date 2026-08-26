@@ -15,6 +15,7 @@ mod paybook;
 mod resident;
 mod types;
 
+pub use commitment::compute_entity_owned_sections;
 pub use consensus::{
     EntityConsensusError, EntityConsensusSection, compute_entity_consensus_root,
     compute_entity_section_digest,
@@ -30,7 +31,7 @@ pub use resident::{
 };
 pub use types::{
     AccountProposalWork, CommittedAccountTransition, DeterministicContext, EntityKernelCommitments,
-    EntityKernelOutput, EntityKernelResult, EntityStateSlice, HtlcPreparedBinding,
-    HtlcPreparedOutcome, HtlcRoute, JurisdictionScope, LockBookEntry, OrderedAccountCommit,
-    PreparedHtlcEntry,
+    EntityKernelOutput, EntityKernelResult, EntityReferral, EntityStateSlice, HtlcPreparedBinding,
+    HtlcPreparedOutcome, HtlcRoute, HubProfile, JurisdictionScope, LockBookEntry,
+    OrderbookConsensusMetadata, OrderedAccountCommit, PreparedHtlcEntry, SpreadDistribution,
 };

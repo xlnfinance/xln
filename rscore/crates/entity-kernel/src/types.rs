@@ -131,26 +131,67 @@ pub struct LockBookEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntityStateSlice {
     pub entity_id: String,
+    pub height: u64,
     pub timestamp: u64,
+    pub last_finalized_j_height: u64,
     pub known_accounts: BTreeSet<String>,
     pub htlc_routes: BTreeMap<String, HtlcRoute>,
     pub htlc_fees_earned: BigInt,
     pub lock_book: BTreeMap<String, LockBookEntry>,
     pub orderbook: Option<OrderbookState>,
+    /// Exact Entity-consensus fields that surround the mutable books. They are
+    /// installed once with the resident state; matching never rewrites them.
+    pub orderbook_metadata: Option<OrderbookConsensusMetadata>,
 }
 
 impl EntityStateSlice {
     pub fn empty(entity_id: impl Into<String>, timestamp: u64) -> Self {
         Self {
             entity_id: entity_id.into(),
+            height: 0,
             timestamp,
+            last_finalized_j_height: 0,
             known_accounts: BTreeSet::new(),
             htlc_routes: BTreeMap::new(),
             htlc_fees_earned: BigInt::from(0),
             lock_book: BTreeMap::new(),
             orderbook: None,
+            orderbook_metadata: None,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpreadDistribution {
+    pub maker_bps: u32,
+    pub taker_bps: u32,
+    pub hub_bps: u32,
+    pub maker_referrer_bps: u32,
+    pub taker_referrer_bps: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HubProfile {
+    pub entity_id: String,
+    pub name: String,
+    pub spread_distribution: SpreadDistribution,
+    pub reference_token_id: u32,
+    pub usd_quote_authority_entity_id: String,
+    pub min_trade_size: BigInt,
+    pub supported_pairs: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityReferral {
+    pub entity_id: String,
+    pub referrer_id: Option<String>,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OrderbookConsensusMetadata {
+    pub hub_profile: HubProfile,
+    pub referrals: BTreeMap<String, EntityReferral>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -24,6 +24,7 @@ type BenchRow = Readonly<{
   boundaryMs: number;
   inboundRounds: number;
   outboundRounds: number;
+  verification: 'recorded-runtime-root' | 'deep-account-diff';
 }>;
 
 const argument = (name: string): string | null => {
@@ -159,6 +160,7 @@ const runOne = async (
   workers: number,
   maxMs: number,
   completeEvidence: boolean,
+  deepVerify: boolean,
 ): Promise<BenchRow> => {
   const output = join(mkdtempSync(join(tmpdir(), `xln-ars-w${workers}-`)), 'report.json');
   const env: NodeJS.ProcessEnv = {
@@ -170,6 +172,11 @@ const runOne = async (
     XLN_RSCORE_AUTHORITY_RECORD: '1',
     XLN_RSCORE_AUTHORITY_WORKERS: String(workers),
     XLN_RSCORE_BINARY: binary,
+    // Replay recordings already contain the canonical TS Runtime root for
+    // every frame. Recomputing every Account leaf in TypeScript measures the
+    // retired implementation, not Rust authority. Keep that expensive oracle
+    // available explicitly for diagnosis without polluting the throughput run.
+    XLN_RSCORE_CUTOVER_TRUST_ENGINE: deepVerify ? '0' : '1',
   };
   delete env['XLN_RSCORE_AUTHORITY_RUNTIME_ID'];
   for (const key of Object.keys(env)) if (key.startsWith('XLN_RSCORE_SHADOW')) delete env[key];
@@ -221,6 +228,7 @@ const runOne = async (
     boundaryMs: number(driver['waveMicros'], 'RSCORE_ARS_BENCH_BOUNDARY_INVALID') / 1_000,
     inboundRounds,
     outboundRounds,
+    verification: deepVerify ? 'deep-account-diff' : 'recorded-runtime-root',
   };
 };
 
@@ -228,6 +236,7 @@ const recording = resolve(requiredArgument('recording'));
 const binary = resolve(argument('binary') ?? 'rscore/target/release/xln-rscore');
 const maxMs = Number(argument('max-ms') ?? '20000');
 const completeEvidence = process.argv.includes('--complete-evidence');
+const deepVerify = process.argv.includes('--deep-verify');
 if (!Number.isSafeInteger(maxMs) || maxMs < 1_000 || maxMs > 120_000) {
   throw new Error(`RSCORE_ARS_BENCH_MAX_MS_INVALID:${String(maxMs)}`);
 }
@@ -235,7 +244,7 @@ accessSync(recording, constants.R_OK);
 accessSync(binary, constants.X_OK);
 const rows: BenchRow[] = [];
 for (const workers of parseWorkers()) {
-  rows.push(await runOne(recording, binary, workers, maxMs, completeEvidence));
+  rows.push(await runOne(recording, binary, workers, maxMs, completeEvidence, deepVerify));
 }
 console.table(rows.map(row => ({
   workers: row.workers,
@@ -246,5 +255,6 @@ console.table(rows.map(row => ({
   engineMs: row.engineMs.toFixed(2),
   boundaryMs: row.boundaryMs.toFixed(2),
   visits: `${row.inboundRounds}+${row.outboundRounds}`,
+  verification: row.verification,
 })));
 console.log(`RSCORE_ARS_BENCH ${safeStringify({ recording, rows })}`);

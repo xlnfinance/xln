@@ -56,6 +56,7 @@ pub struct ResidentEntityRequest {
     pub inbound: EntityInboundRequest,
     pub creates: Vec<AccountSeed>,
     pub failed_htlc_routes: Vec<FailedHtlcRoute>,
+    pub entity_height: u64,
     pub outbound_timestamp: u64,
     pub outbound_j_height: u64,
     pub checkpoint_due: bool,
@@ -225,6 +226,9 @@ pub fn apply_resident_entity_round(
             request: request_owner,
         });
     }
+    state.height = request.entity_height;
+    state.timestamp = request.outbound_timestamp;
+    state.last_finalized_j_height = request.outbound_j_height;
     for seed in &request.creates {
         state.known_accounts.insert(account_text(seed.account_id));
     }

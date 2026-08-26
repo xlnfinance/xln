@@ -4,12 +4,13 @@ use std::collections::BTreeSet;
 
 use num_bigint::BigInt;
 use support::{
-    HUB, MAKER, NEXT, TAKER, account, apply_account, commit, fixture, fixture_text, tx_digest,
+    HUB, MAKER, NEXT, TAKER, account, apply_account, assert_owned_sections, commit, digest_bytes,
+    fixture, fixture_text, fixture_u64, orderbook_metadata, tx_digest,
 };
 use xln_rscore_engine::{AccountOutput, AccountReplica, AccountTx, Side};
 use xln_rscore_entity_kernel::{
     BookState, DeterministicContext, EntityKernelOutput, EntityStateSlice, OrderbookState,
-    apply_entity_kernel, compute_book_commitment_hash,
+    apply_entity_kernel, compute_book_commitment_hash, compute_entity_owned_sections,
 };
 
 fn assert_book_commitment(book: &BookState, oracle: &serde_json::Value, case: &str) {
@@ -94,6 +95,7 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
     let mut state = EntityStateSlice::empty(HUB, 2_000);
     state.known_accounts = BTreeSet::from([MAKER.to_string(), TAKER.to_string()]);
     state.orderbook = Some(OrderbookState::empty(10_000));
+    state.orderbook_metadata = Some(orderbook_metadata());
     let first = apply_entity_kernel(
         state,
         &[
@@ -126,6 +128,21 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
         first.commitments.ordered_outbox_digest,
         fixture_text(&oracle, &["sameJFullMatch", "orderedOutboxDigest"])
     );
+    let account_count = usize::try_from(fixture_u64(
+        &oracle,
+        &["sameJFullMatch", "canonicalEntity", "accountCount"],
+    ))
+    .expect("fixture account count");
+    let owned = compute_entity_owned_sections(
+        &first.state,
+        digest_bytes(fixture_text(
+            &oracle,
+            &["sameJFullMatch", "canonicalEntity", "accountsRoot"],
+        )),
+        account_count,
+    )
+    .expect("canonical Entity owned sections");
+    assert_owned_sections(&owned, &oracle, "sameJFullMatch");
     assert_eq!(
         tx_digest(&maker_resolve),
         fixture_text(&oracle, &["sameJFullMatch", "makerResolveDigest"])

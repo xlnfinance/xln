@@ -7,6 +7,8 @@
   },
   "paybookForward": {
     "canonicalEntity": {
+      "accountCount": 2,
+      "accountsRoot": "0xa5376bab253cc07ae0eb4afdca837595f146d92e26c6596bbdfde44a0ad1736a",
       "root": "0xf8a2933313db2e31db4f1620f728c40678c33a4c10da7008defd96e75b5aeb4b",
       "sections": [
         {
@@ -89,6 +91,8 @@
     "bidPagesRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "bookCommitmentHash": "0x6f30610314bcc9c27be280ba7297635a",
     "canonicalEntity": {
+      "accountCount": 2,
+      "accountsRoot": "0x5be8ec778f227f1c0407bc86aac54280299bce44e91d3d035b81b56b0acb6118",
       "root": "0x2f3c53700a546606e4aee3161f5cffbc42ff17906e242c46ad6455708cbd0cb7",
       "sections": [
         {

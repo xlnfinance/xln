@@ -5,14 +5,15 @@ use std::collections::BTreeSet;
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
 use support::{
-    HUB, MAKER, NEXT, account, apply_account, commit, fixture, fixture_text, hex, token, tx_digest,
+    HUB, MAKER, NEXT, account, apply_account, assert_owned_sections, commit, digest_bytes, fixture,
+    fixture_text, fixture_u64, hex, token, tx_digest,
 };
 use xln_rscore_engine::{
     AccountTx, DeliveryMode, HtlcHashlock, HtlcLockTx, OpaqueHtlcCiphertext, Side,
 };
 use xln_rscore_entity_kernel::{
     DeterministicContext, EntityKernelOutput, EntityStateSlice, HtlcPreparedBinding,
-    HtlcPreparedOutcome, PreparedHtlcEntry, apply_entity_kernel,
+    HtlcPreparedOutcome, PreparedHtlcEntry, apply_entity_kernel, compute_entity_owned_sections,
 };
 
 #[test]
@@ -137,6 +138,21 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
         result.commitments.ordered_outbox_digest,
         fixture_text(&oracle, &["paybookForward", "orderedOutboxDigest"])
     );
+    let account_count = usize::try_from(fixture_u64(
+        &oracle,
+        &["paybookForward", "canonicalEntity", "accountCount"],
+    ))
+    .expect("fixture account count");
+    let owned = compute_entity_owned_sections(
+        &result.state,
+        digest_bytes(fixture_text(
+            &oracle,
+            &["paybookForward", "canonicalEntity", "accountsRoot"],
+        )),
+        account_count,
+    )
+    .expect("canonical Entity owned sections");
+    assert_owned_sections(&owned, &oracle, "paybookForward");
     let expected_tx_digests = oracle["paybookForward"]["txDigests"]
         .as_array()
         .expect("tx digests");
