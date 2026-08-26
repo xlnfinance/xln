@@ -124,7 +124,10 @@ describe('frontend time-machine current env contract', () => {
     await live;
     rejectHistorical(new Error('stale historical read failed'));
 
-    await expect(historical).rejects.toThrow('stale historical read failed');
+    await expect(historical).resolves.toMatchObject({
+      atHeight: 7,
+      error: 'stale historical read failed',
+    });
     expect(readStore(runtimeView)).toMatchObject({ atHeight: null, height: 12, frame: { height: 12 }, error: null });
   });
 

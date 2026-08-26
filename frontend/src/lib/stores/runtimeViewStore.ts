@@ -39,15 +39,15 @@ import {
   type RuntimeViewRefreshTarget,
 } from '../../../packages/runtime-client/src/runtime-view-refresh';
 import {
+  RuntimeViewLoader,
+} from '../../../packages/runtime-client/src/runtime-view-loader';
+import {
   RuntimeViewProjectionReader,
 } from '../../../packages/runtime-client/src/runtime-view-projections';
 import {
   advanceRuntimeViewHeight,
-  createDisconnectedRuntimeViewState,
   createEmptyRuntimeViewState,
-  createErrorRuntimeViewState,
   createLoadingRuntimeViewState,
-  createSuccessRuntimeViewState,
   runtimeViewErrorMessage,
   selectRuntimeViewHeight,
   type RuntimeViewState,
@@ -205,6 +205,17 @@ const runtimeViewProjectionReader = new RuntimeViewProjectionReader<
     runtimeQueryClient.readSwapHistory(entityId, counterpartyId, query),
 });
 
+const runtimeViewLoader = new RuntimeViewLoader<
+  RuntimeAdapterReadQuery,
+  StorageHead,
+  RuntimeAdapterEntitySummary,
+  RuntimeAdapterViewFrame
+>({
+  readCurrentHandle: () => get(runtimeControllerHandle),
+  readHead: () => runtimeQueryClient.readHead(),
+  readFrame: (query) => runtimeQueryClient.readViewFrame(query),
+});
+
 export const resetRuntimeView = (): void => {
   runtimeViewCatchup.reset();
   if (!runtimeViewSelectionCoordinator.setAtHeight(null)) {
@@ -223,56 +234,21 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
     runtimeViewRefreshCoordinator.isCurrent(refreshLease);
   runtimeView.update((view) =>
     createLoadingRuntimeViewState(view, handle, expectedAtHeight));
-
-  if (handle.status !== 'connected') {
-    const next = createDisconnectedRuntimeViewState<
-      StorageHead,
-      RuntimeAdapterEntitySummary,
-      RuntimeAdapterViewFrame
-    >(handle, expectedAtHeight);
-    if (requestStillCurrent()) {
-      runtimeViewPageInfo.set(null);
-      runtimeView.set(next);
-    }
-    return next;
-  }
-
-  try {
-    const [head, frame] = await Promise.all([
-      runtimeQueryClient.readHead(),
-      runtimeQueryClient.readViewFrame(query),
-    ]);
-    if (!runtimeViewFrameMatchesAtHeight(frame, expectedAtHeight)) {
-      throw new Error(`RuntimeView returned h${Number(frame.height || 0)} for selected h${expectedAtHeight}`);
-    }
-    const next = createSuccessRuntimeViewState<
-      StorageHead,
-      RuntimeAdapterEntitySummary,
-      RuntimeAdapterViewFrame
-    >(handle, expectedAtHeight, head, frame);
-    // A superseded read still owns its result. Latest-wins applies only to the
-    // shared store; callers must never receive another request's transient state.
-    if (requestStillCurrent()) {
-      runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));
-      runtimeView.set(next);
-      continueRuntimeViewCatchup();
-    }
-    return next;
-  } catch (error) {
-    const current = get(runtimeControllerHandle);
-    const next = createErrorRuntimeViewState<
-      StorageHead,
-      RuntimeAdapterEntitySummary,
-      RuntimeAdapterViewFrame
-    >(current, expectedAtHeight, error);
-    // A superseded read must not overwrite a newer RuntimeView, and must not
-    // reject: void click-handlers and height catch-up would become unhandled
-    // `runtime adapter socket closed` pageerrors during a runtime switch.
-    if (!requestStillCurrent()) return next;
-    runtimeViewPageInfo.set(null);
+  const outcome = await runtimeViewLoader.load(handle, expectedAtHeight, query);
+  const next = outcome.view;
+  // A superseded read still owns its result. Latest-wins applies only to the
+  // shared store; callers must never receive another request's transient state.
+  if (!requestStillCurrent()) return next;
+  if (outcome.kind === 'success') {
+    const frame = outcome.frame;
+    runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));
     runtimeView.set(next);
+    continueRuntimeViewCatchup();
     return next;
   }
+  runtimeViewPageInfo.set(null);
+  runtimeView.set(next);
+  return next;
 };
 
 const currentRuntimeViewQuery = (): RuntimeAdapterReadQuery => {
