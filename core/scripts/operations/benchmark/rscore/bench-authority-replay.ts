@@ -16,6 +16,9 @@ type BenchRow = Readonly<{
   payments: number;
   swaps: number;
   economicOpsPerSecond: number;
+  rustEconomicOpsPerSecond: number;
+  accountProtocolRows: number;
+  accountProtocolRowsPerSecond: number;
   replayMs: number;
   childWallMs: number;
   averageCpuCores: number;
@@ -170,6 +173,7 @@ const runOne = async (
     XLN_RSCORE_AUTHORITY_REPLAY: '1',
     XLN_RSCORE_AUTHORITY_IMPORT: '1',
     XLN_RSCORE_AUTHORITY_RECORD: '1',
+    XLN_RSCORE_ENTITY_AUTHORITY: '1',
     XLN_RSCORE_AUTHORITY_WORKERS: String(workers),
     XLN_RSCORE_BINARY: binary,
     // Replay recordings already contain the canonical TS Runtime root for
@@ -214,17 +218,26 @@ const runOne = async (
   const replayMs = number(trial['elapsedMs'], 'RSCORE_ARS_BENCH_ELAPSED_INVALID');
   const inboundRounds = integer(driver['inboundRounds'], 'RSCORE_ARS_BENCH_INBOUND_INVALID');
   const outboundRounds = integer(driver['outboundRounds'], 'RSCORE_ARS_BENCH_OUTBOUND_INVALID');
+  const inputsApplied = integer(driver['inputsApplied'], 'RSCORE_ARS_BENCH_INPUTS_INVALID');
+  const framesProposed = integer(driver['framesProposed'], 'RSCORE_ARS_BENCH_PROPOSALS_INVALID');
   if (inboundRounds !== outboundRounds || inboundRounds < 1) throw new Error('RSCORE_ARS_BENCH_TWO_VISIT_INVALID');
+  const engineMs = number(driver['engineMicros'], 'RSCORE_ARS_BENCH_ENGINE_INVALID') / 1_000;
+  if (engineMs <= 0) throw new Error('RSCORE_ARS_BENCH_ENGINE_ZERO');
+  const economicOps = payments + swaps;
+  const accountProtocolRows = inputsApplied + framesProposed;
   return {
     workers,
     payments,
     swaps,
-    economicOpsPerSecond: (payments + swaps) * 1_000 / replayMs,
+    economicOpsPerSecond: economicOps * 1_000 / replayMs,
+    rustEconomicOpsPerSecond: economicOps * 1_000 / engineMs,
+    accountProtocolRows,
+    accountProtocolRowsPerSecond: accountProtocolRows * 1_000 / engineMs,
     replayMs,
     childWallMs,
     averageCpuCores: samples.reduce((sum, sample) => sum + sample.cpuCores, 0) / samples.length,
     peakRssMiB: Math.max(...samples.map(sample => sample.rssKiB)) / 1024,
-    engineMs: number(driver['engineMicros'], 'RSCORE_ARS_BENCH_ENGINE_INVALID') / 1_000,
+    engineMs,
     boundaryMs: number(driver['waveMicros'], 'RSCORE_ARS_BENCH_BOUNDARY_INVALID') / 1_000,
     inboundRounds,
     outboundRounds,
@@ -248,7 +261,9 @@ for (const workers of parseWorkers()) {
 }
 console.table(rows.map(row => ({
   workers: row.workers,
-  economicOpsPerSecond: row.economicOpsPerSecond.toFixed(2),
+  replayEconomicOpsPerSecond: row.economicOpsPerSecond.toFixed(2),
+  rustEconomicOpsPerSecond: row.rustEconomicOpsPerSecond.toFixed(2),
+  accountProtocolRowsPerSecond: row.accountProtocolRowsPerSecond.toFixed(2),
   replayMs: row.replayMs.toFixed(2),
   cpuCores: row.averageCpuCores.toFixed(2),
   peakRssMiB: row.peakRssMiB.toFixed(1),

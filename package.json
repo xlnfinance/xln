@@ -140,6 +140,7 @@
     "rscore:evidence:bootstrap": "bun core/scripts/operations/hlt/replay/run-authority-bootstrap.ts",
     "rscore:evidence:restart": "bun core/scripts/operations/hlt/replay/run-authority-bootstrap.ts --restart",
     "bench:rscore:ars": "bun core/scripts/operations/benchmark/rscore/bench-authority-replay.ts",
+    "bench:rscore:apo": "bun core/scripts/operations/benchmark/rscore/bench-apo-transcript.ts",
     "native:all": "bun scripts/native/build-platforms.ts all",
     "native:package": "bun scripts/native/build-platforms.ts all --package --smoke",
     "native:mobile": "bun scripts/native/build-platforms.ts mobile",
