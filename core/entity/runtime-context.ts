@@ -5,14 +5,55 @@ import type { LogCategory } from '../types/logging';
 import type {
   ConsumptionNodeStore,
 } from './consumption/consumption-accumulator-types';
-import type { EntityInput, EntityReplica } from './types';
+import type { EntityInput, EntityReplica, EntityState } from './types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { EntityProposalReplayOracleEntry } from './consensus/proposal/replay-oracle';
 import type { AccountAuthorityExecutionScope } from '../account/consensus/context';
+import type { AccountPeerInput, AccountReplica } from '../types/account';
+import type { EntityTx } from '../types/entity-tx';
+
+type AccountAuthorityFailedHtlcRoute = Readonly<{
+  hashlock: string;
+  outboundAccountId: string;
+  outboundLockId: string;
+  inboundAccountId: string;
+  inboundLockId: string;
+}>;
+
+export type AccountAuthorityFrameBeginRequest = Readonly<{
+  ownerEntityId: string;
+  /** Parent Account root reconciles a held Rust candidate without Commit/Abort RPCs. */
+  expectedAccountsRoot: string;
+  entityState: EntityState;
+  entityContext: EntityInfraContext;
+  entityTxs: readonly EntityTx[];
+  accounts: ReadonlyMap<string, AccountReplica>;
+  accountForWrite(accountId: string): AccountReplica | undefined;
+  createInboundAccount(input: AccountPeerInput): Readonly<{
+    account: AccountReplica;
+    deltaTransformer: string;
+  }>;
+  entityTimestamp: number;
+  finalizedJHeight: number;
+}>;
+
+export type AccountAuthorityFrameOutboundRequest = Readonly<{
+  entityState: EntityState;
+  entityHeight: number;
+  accounts: ReadonlyMap<string, AccountReplica>;
+  accountForWrite(accountId: string): AccountReplica | undefined;
+  proposalAccountIds: readonly string[];
+  failedHtlcRoutes: readonly AccountAuthorityFailedHtlcRoute[];
+  timestamp: number;
+  jHeight: number;
+}>;
 
 /** Narrow child-machine capability; lifecycle ownership remains in Runtime. */
 export interface AccountAuthorityEntityStageCapability extends AccountAuthorityExecutionScope {
   bindCanonicalInput(input: EntityInput): void;
+  beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void>;
+  prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
+  finishEntityAccountFrame(): void;
 }
 
 /**

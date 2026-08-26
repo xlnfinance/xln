@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
 use num_bigint::{BigInt, Sign};
@@ -6,10 +7,35 @@ use xln_rscore_protocol::PersistentRadixMap;
 
 use crate::EntityKernelError;
 
-use super::Side;
+use super::{BookOrder, Side};
 
 pub(crate) const BOOK_PRICE_PAGE_CAPACITY: usize = 16;
 const MAX_BOOK_PRICE_KEY_BYTES: usize = 255;
+const MAX_BOOK_PAGE_ORDER_ID_BYTES: usize = 323;
+const MAX_BOOK_PAGE_OWNER_ID_BYTES: usize = 66;
+const MAX_BOOK_PAGE_QTY_LOTS_POWER: u32 = 24;
+
+/// Exact persisted slot. A flat order list is insufficient because removals
+/// leave committed holes and moving a live order changes the page root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BookPricePageEntrySnapshot {
+    pub order_id: String,
+    pub owner_id: String,
+    pub qty_lots: BigInt,
+    pub seq: u64,
+}
+
+/// Exact cold boundary for one committed TypeScript price page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BookPricePageSnapshot {
+    pub price_ticks: BigInt,
+    pub page_sequence: u16,
+    pub head_slot: usize,
+    pub next_slot: usize,
+    pub live_count: usize,
+    pub total_qty_lots: BigInt,
+    pub slots: Vec<Option<BookPricePageEntrySnapshot>>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BookPricePageEntry {
@@ -162,6 +188,97 @@ fn page_sequence(key: &[u8]) -> Result<u16, EntityKernelError> {
     Ok(u16::from_be_bytes(bytes))
 }
 
+fn page_price(key: &[u8]) -> Result<BigInt, EntityKernelError> {
+    let Some(length) = key.first().copied().map(usize::from) else {
+        return Err(page_error("BOOK_PAGE_KEY_LENGTH_INVALID"));
+    };
+    if length == 0 || key.len() != 1 + length + 2 || key[1] == 0 {
+        return Err(page_error("BOOK_PAGE_KEY_NON_CANONICAL"));
+    }
+    Ok(BigInt::from_bytes_be(Sign::Plus, &key[1..1 + length]))
+}
+
+fn require_bounded_text(value: &str, maximum: usize, code: &str) -> Result<(), EntityKernelError> {
+    let length = value.len();
+    if length == 0 || length > maximum {
+        return Err(page_error(format!("{code}:{length}")));
+    }
+    Ok(())
+}
+
+fn restore_page(
+    snapshot: &BookPricePageSnapshot,
+) -> Result<(BookPricePage, Vec<(usize, BookPricePageEntry)>), EntityKernelError> {
+    if snapshot.slots.len() != BOOK_PRICE_PAGE_CAPACITY {
+        return Err(page_error(format!(
+            "BOOK_PAGE_SLOTS_INVALID:{}",
+            snapshot.slots.len()
+        )));
+    }
+    if snapshot.head_slot > BOOK_PRICE_PAGE_CAPACITY
+        || snapshot.next_slot > BOOK_PRICE_PAGE_CAPACITY
+        || snapshot.live_count > BOOK_PRICE_PAGE_CAPACITY
+    {
+        return Err(page_error("BOOK_PAGE_COUNTER_INVALID"));
+    }
+    let maximum_qty = BigInt::from(10_u8).pow(MAX_BOOK_PAGE_QTY_LOTS_POWER);
+    let mut slots = std::array::from_fn(|_| None);
+    let mut live = Vec::with_capacity(snapshot.live_count);
+    let mut total = BigInt::from(0);
+    let mut first = None;
+    let mut page_order_ids = BTreeSet::new();
+    for (slot, snapshot_entry) in snapshot.slots.iter().enumerate() {
+        let Some(snapshot_entry) = snapshot_entry else {
+            continue;
+        };
+        require_bounded_text(
+            &snapshot_entry.order_id,
+            MAX_BOOK_PAGE_ORDER_ID_BYTES,
+            "BOOK_PAGE_ORDER_ID_BYTES_INVALID",
+        )?;
+        require_bounded_text(
+            &snapshot_entry.owner_id,
+            MAX_BOOK_PAGE_OWNER_ID_BYTES,
+            "BOOK_PAGE_OWNER_ID_BYTES_INVALID",
+        )?;
+        if snapshot_entry.qty_lots <= BigInt::from(0) || snapshot_entry.qty_lots > maximum_qty {
+            return Err(page_error("BOOK_PAGE_ORDER_QTY_INVALID"));
+        }
+        if !page_order_ids.insert(snapshot_entry.order_id.clone()) {
+            return Err(page_error("BOOK_PAGE_DUPLICATE_ORDER_ID"));
+        }
+        first.get_or_insert(slot);
+        total += &snapshot_entry.qty_lots;
+        let entry = BookPricePageEntry {
+            order_id: snapshot_entry.order_id.clone(),
+            owner_id: snapshot_entry.owner_id.clone(),
+            qty_lots: snapshot_entry.qty_lots.clone(),
+            seq: snapshot_entry.seq,
+        };
+        slots[slot] = Some(entry.clone());
+        live.push((slot, entry));
+    }
+    if live.is_empty()
+        || live.len() != snapshot.live_count
+        || total != snapshot.total_qty_lots
+        || first != Some(snapshot.head_slot)
+        || snapshot.next_slot <= snapshot.head_slot
+        || slots[snapshot.next_slot..].iter().any(Option::is_some)
+    {
+        return Err(page_error("BOOK_PAGE_AGGREGATE_INVALID"));
+    }
+    Ok((
+        BookPricePage {
+            head_slot: snapshot.head_slot,
+            next_slot: snapshot.next_slot,
+            live_count: snapshot.live_count,
+            total_qty_lots: snapshot.total_qty_lots.clone(),
+            slots,
+        },
+        live,
+    ))
+}
+
 impl BookPricePageTree {
     pub(crate) fn empty() -> Self {
         Self {
@@ -171,6 +288,79 @@ impl BookPricePageTree {
 
     pub(crate) fn root_hash(&self) -> String {
         hex_digest(&self.map.root_hash())
+    }
+
+    pub(crate) fn restore(
+        side: Side,
+        snapshots: &[BookPricePageSnapshot],
+    ) -> Result<(Self, Vec<BookOrder>), EntityKernelError> {
+        let mut ordered = snapshots
+            .iter()
+            .map(|snapshot| {
+                Ok((
+                    page_key(&snapshot.price_ticks, snapshot.page_sequence)?,
+                    snapshot,
+                ))
+            })
+            .collect::<Result<Vec<_>, EntityKernelError>>()?;
+        ordered.sort_by(|(left, _), (right, _)| left.cmp(right));
+        if ordered.windows(2).any(|rows| rows[0].0 == rows[1].0) {
+            return Err(page_error("BOOK_PAGE_KEY_DUPLICATE"));
+        }
+        let mut map = PersistentRadixMap::empty();
+        let mut orders = Vec::new();
+        let mut order_ids = BTreeSet::new();
+        for (key, snapshot) in ordered {
+            let (page, live) = restore_page(snapshot)?;
+            for (slot, entry) in live {
+                if !order_ids.insert(entry.order_id.clone()) {
+                    return Err(page_error("BOOK_PAGE_DUPLICATE_ORDER_ID"));
+                }
+                orders.push(BookOrder {
+                    order_id: entry.order_id,
+                    owner_id: entry.owner_id,
+                    side,
+                    price_ticks: snapshot.price_ticks.clone(),
+                    qty_lots: entry.qty_lots,
+                    seq: entry.seq,
+                    page_sequence: snapshot.page_sequence,
+                    page_slot: slot,
+                });
+            }
+            let digest = page_digest(&page)?;
+            map = map
+                .updated(key, page, digest)
+                .map_err(|error| page_error(error.to_string()))?;
+        }
+        Ok((Self { map }, orders))
+    }
+
+    pub(crate) fn snapshot(&self) -> Result<Vec<BookPricePageSnapshot>, EntityKernelError> {
+        self.map
+            .iter()
+            .map(|(key, page)| {
+                Ok(BookPricePageSnapshot {
+                    price_ticks: page_price(key)?,
+                    page_sequence: page_sequence(key)?,
+                    head_slot: page.head_slot,
+                    next_slot: page.next_slot,
+                    live_count: page.live_count,
+                    total_qty_lots: page.total_qty_lots.clone(),
+                    slots: page
+                        .slots
+                        .iter()
+                        .map(|entry| {
+                            entry.as_ref().map(|entry| BookPricePageEntrySnapshot {
+                                order_id: entry.order_id.clone(),
+                                owner_id: entry.owner_id.clone(),
+                                qty_lots: entry.qty_lots.clone(),
+                                seq: entry.seq,
+                            })
+                        })
+                        .collect(),
+                })
+            })
+            .collect()
     }
 
     fn tail(

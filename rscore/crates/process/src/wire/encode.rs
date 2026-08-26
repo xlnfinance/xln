@@ -1,3 +1,5 @@
+//! Reply and Account transition encoder for the process ABI.
+
 use xln_rscore_abi::{AbiValue, BodyTuple};
 use xln_rscore_batch::{BatchResponse, BatchVerdict, IndexedOutput, IndexedResult, PreparedBatch};
 use xln_rscore_engine::{AccountOutput, DeliveryMode};

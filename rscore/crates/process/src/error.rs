@@ -10,6 +10,10 @@ pub enum ProcessError {
     State(#[from] xln_rscore_engine::StateError),
     #[error("RSCORE_PROCESS_HTLC:{0}")]
     Htlc(#[from] xln_rscore_engine::HtlcBoundaryError),
+    #[error("RSCORE_PROCESS_ENTITY:{0}")]
+    Entity(#[from] xln_rscore_entity_kernel::EntityKernelError),
+    #[error("RSCORE_PROCESS_RESIDENT_ENTITY:{0}")]
+    ResidentEntity(#[from] xln_rscore_entity_kernel::ResidentEntityError),
     #[error("RSCORE_PROCESS_IO:{0}")]
     Io(#[from] std::io::Error),
     #[error("RSCORE_PROCESS_ENTROPY:{0}")]
@@ -71,6 +75,14 @@ pub enum ProcessError {
     AuthorityUpsertForbidden,
     #[error("RSCORE_PROCESS_AUTHORITY_TWO_CALL_ONLY")]
     AuthorityTwoCallOnly,
+    #[error("RSCORE_PROCESS_ENTITY_ALREADY_LOADED")]
+    EntityAlreadyLoaded,
+    #[error("RSCORE_PROCESS_ENTITY_NOT_LOADED")]
+    EntityNotLoaded,
+    #[error("RSCORE_PROCESS_ENTITY_MODE_ONLY")]
+    EntityModeOnly,
+    #[error("RSCORE_PROCESS_ENTITY_HEAD:{0}")]
+    EntityHead(String),
     #[error("RSCORE_PROCESS_PREPARE_PENDING")]
     PreparePending,
     #[error("RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY:entities={entities}")]
@@ -102,6 +114,8 @@ impl ProcessError {
             Self::Batch(error) => batch_code(error),
             Self::State(_) => "RSCORE_PROCESS_STATE",
             Self::Htlc(_) => "RSCORE_PROCESS_HTLC",
+            Self::Entity(_) => "RSCORE_PROCESS_ENTITY",
+            Self::ResidentEntity(_) => "RSCORE_PROCESS_RESIDENT_ENTITY",
             Self::Io(_) => "RSCORE_PROCESS_IO",
             Self::Entropy(_) => "RSCORE_PROCESS_ENTROPY",
             Self::Envelope(_) => "RSCORE_PROCESS_ENVELOPE",
@@ -129,6 +143,10 @@ impl ProcessError {
             Self::AuthorityBootstrapInvalid { .. } => "RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID",
             Self::AuthorityUpsertForbidden => "RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN",
             Self::AuthorityTwoCallOnly => "RSCORE_PROCESS_AUTHORITY_TWO_CALL_ONLY",
+            Self::EntityAlreadyLoaded => "RSCORE_PROCESS_ENTITY_ALREADY_LOADED",
+            Self::EntityNotLoaded => "RSCORE_PROCESS_ENTITY_NOT_LOADED",
+            Self::EntityModeOnly => "RSCORE_PROCESS_ENTITY_MODE_ONLY",
+            Self::EntityHead(_) => "RSCORE_PROCESS_ENTITY_HEAD",
             Self::PreparePending => "RSCORE_PROCESS_PREPARE_PENDING",
             Self::PrepareWaveNonempty { .. } => "RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY",
             Self::PrepareNotPending => "RSCORE_PROCESS_PREPARE_NOT_PENDING",

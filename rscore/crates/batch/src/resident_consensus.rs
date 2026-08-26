@@ -234,6 +234,18 @@ impl ResidentConsensusEngine {
         self.forest.metrics()
     }
 
+    /// Exact resident worklist before Entity adds same-round transactions.
+    /// Values stay inside their owner workers; only matching Account ids cross
+    /// back to the coordinator.
+    pub fn proposable_account_ids(&mut self) -> Result<Vec<AccountId>, BatchError> {
+        Ok(self
+            .forest
+            .read_all(|_, account| Ok(proposable(account)))?
+            .into_iter()
+            .filter_map(|(account_id, ready)| ready.then_some(account_id))
+            .collect())
+    }
+
     /// First and only inward visit for one Entity input.
     pub fn entity_inbound(
         &mut self,

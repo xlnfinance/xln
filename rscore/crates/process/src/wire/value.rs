@@ -1,3 +1,5 @@
+//! Strict scalar and tuple readers shared by process wire decoders.
+
 use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::{EntityId, TokenId};

@@ -23,6 +23,8 @@ import {
   applyHtlcSecretFollowups,
 } from '../../../core/entity/tx/handlers/account/committed-htlc-followups';
 import {
+  applyCommand,
+  createBook,
   createOrderbookExtState,
   computeBookCommitmentHash,
   quoteAmountAtPrice,
@@ -30,6 +32,7 @@ import {
   type BookState,
   type HubProfile,
 } from '../../../core/orderbook';
+import type { BookPricePageTree } from '../../../core/orderbook/pages/page';
 import {
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,
@@ -309,6 +312,64 @@ const projectBook = (book: BookState) => ({
   lastAcceptedUsdAskPriceTicks: book.lastAcceptedUsdAskPriceTicks,
   eventHash: book.eventHash,
 });
+
+const projectExactPages = (tree: BookPricePageTree) => Array.from(
+  tree.entries(),
+  ([key, page]) => ({
+    priceTicks: key.priceTicks.toString(),
+    pageSequence: key.pageSequence,
+    headSlot: page.headSlot,
+    nextSlot: page.nextSlot,
+    liveCount: page.liveCount,
+    totalQtyLots: page.totalQtyLots.toString(),
+    slots: page.slots.map(entry => entry === null ? null : ({
+      orderId: entry.orderId,
+      ownerId: entry.ownerId,
+      qtyLots: entry.qtyLots.toString(),
+      seq: entry.seq,
+    })),
+  }),
+);
+
+const projectExactBookSnapshot = (book: BookState) => ({
+  bucketWidthTicks: book.params.bucketWidthTicks.toString(),
+  stpPolicy: book.params.stpPolicy,
+  maxOrders: book.params.maxOrders,
+  nextSeq: book.nextSeq,
+  tradeCount: book.tradeCount,
+  tradeQtySum: book.tradeQtySum.toString(),
+  lastTradePriceTicks: book.lastTradePriceTicks.toString(),
+  lastAcceptedUsdAskPriceTicks: book.lastAcceptedUsdAskPriceTicks.toString(),
+  eventHash: book.eventHash.toString(),
+  bidPages: projectExactPages(book.bidPages),
+  askPages: projectExactPages(book.askPages),
+  expectedBidPagesRoot: book.bidPages.rootHash(),
+  expectedAskPagesRoot: book.askPages.rootHash(),
+  expectedCommitmentHash: computeBookCommitmentHash(book),
+});
+
+let hydrationBook = createBook({ bucketWidthTicks: 10n, maxOrders: 100, stpPolicy: 1 });
+for (const [orderId, ownerId, qtyLots] of [
+  ['hydrate-a', MAKER, 7n],
+  ['hydrate-b', TAKER, 11n],
+  ['hydrate-c', NEXT, 13n],
+] as const) {
+  hydrationBook = applyCommand(hydrationBook, {
+    kind: 0,
+    ownerId,
+    orderId,
+    side: 0,
+    tif: 0,
+    postOnly: false,
+    priceTicks: 123_456n,
+    qtyLots,
+  }).state;
+}
+hydrationBook = applyCommand(hydrationBook, {
+  kind: 1,
+  ownerId: TAKER,
+  orderId: 'hydrate-b',
+}).state;
 
 const emptyPaybook = (knownAccounts: readonly string[]) => ({
   domain: 'xln.entity-kernel.paybook.v1',
@@ -865,6 +926,7 @@ const fixture = {
   sameJCancel: {
     resolveDigest: txDigest(cancelTx),
   },
+  bookHydration: projectExactBookSnapshot(hydrationBook),
 };
 
 process.stdout.write(`${safeStringify(fixture, 2)}\n`);

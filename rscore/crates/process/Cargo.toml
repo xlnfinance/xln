@@ -15,6 +15,7 @@ thiserror.workspace = true
 xln-rscore-abi = { path = "../abi" }
 xln-rscore-batch = { path = "../batch" }
 xln-rscore-engine = { path = "../engine" }
+xln-rscore-entity-kernel = { path = "../entity-kernel" }
 xln-rscore-protocol = { path = "../protocol" }
 
 [dev-dependencies]

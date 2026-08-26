@@ -1,17 +1,8 @@
-import type { AccountInput, AccountPeerInput, AccountReplica } from '../../types/account';
-import type { EntityTx } from '../../types/entity-tx';
+import type { AccountInput, AccountReplica } from '../../types/account';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from './types';
 import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
-
-type AccountAuthorityFailedHtlcRoute = Readonly<{
-  hashlock: string;
-  outboundAccountId: string;
-  outboundLockId: string;
-  inboundAccountId: string;
-  inboundLockId: string;
-}>;
 
 /**
  * The authoritative engine's seat inside Account consensus.
@@ -24,16 +15,6 @@ type AccountAuthorityFailedHtlcRoute = Readonly<{
  * operation and TypeScript remains the executor.
  */
 export type AccountAuthorityExecutionScope = Readonly<{
-  /**
-   * Open the Account half of one canonical Entity frame. In cutover mode this
-   * hands every peer arrival to Rust in one call before Entity logic runs.
-   */
-  beginEntityAccountFrame?(request: AccountAuthorityFrameBeginRequest): Promise<void>;
-  /**
-   * Hand Rust every locally-produced admission and the final proposal
-   * worklist in one call. Per-operation hooks below only consume this result.
-   */
-  prepareEntityAccountOutbound?(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
   hasPreparedAccountProposal?(accountId: string): boolean;
   hasPreparedAccountInput?(accountId: string, input: AccountInput): boolean;
   /**
@@ -45,7 +26,6 @@ export type AccountAuthorityExecutionScope = Readonly<{
    * successful verdict and proves that H=1 committed.
    */
   preparedInboundGenesis?(accountId: string, input: AccountInput): AccountReplica | null;
-  finishEntityAccountFrame?(): void;
   beforeTypeScriptAccountExecution(
     kind: 'applyAccountInput' | 'proposeAccountFrame',
     accountId: string,
@@ -56,38 +36,6 @@ export type AccountAuthorityExecutionScope = Readonly<{
   executeAccountProposal(
     request: AccountAuthorityProposalRequest,
   ): Promise<ProposeAccountFrameResult | null>;
-}>;
-
-export type AccountAuthorityFrameBeginRequest = Readonly<{
-  ownerEntityId: string;
-  /**
-   * Canonical Account-forest head the parent Entity currently owns.
-   *
-   * The Rust engine uses this as an optimistic reconciliation assertion: a
-   * held path-copy candidate is promoted when this names its root, or dropped
-   * when this still names its base. No separate Commit/Abort message exists.
-   */
-  expectedAccountsRoot: string;
-  entityTxs: readonly EntityTx[];
-  accounts: ReadonlyMap<string, AccountReplica>;
-  accountForWrite(accountId: string): AccountReplica | undefined;
-  /** Build the canonical local H=0 read model for a previously unknown peer. */
-  createInboundAccount(input: AccountPeerInput): Readonly<{
-    account: AccountReplica;
-    deltaTransformer: string;
-  }>;
-  entityTimestamp: number;
-  finalizedJHeight: number;
-}>;
-
-export type AccountAuthorityFrameOutboundRequest = Readonly<{
-  accounts: ReadonlyMap<string, AccountReplica>;
-  /** Claim a mutable Entity-frame shell after any intermediate root projection sealed it. */
-  accountForWrite(accountId: string): AccountReplica | undefined;
-  proposalAccountIds: readonly string[];
-  failedHtlcRoutes: readonly AccountAuthorityFailedHtlcRoute[];
-  timestamp: number;
-  jHeight: number;
 }>;
 
 export type AccountAuthorityInputRequest = Readonly<{

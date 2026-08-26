@@ -9,9 +9,107 @@ use support::{
 };
 use xln_rscore_engine::{AccountOutput, AccountReplica, AccountTx, Side};
 use xln_rscore_entity_kernel::{
-    BookState, DeterministicContext, EntityKernelOutput, EntityStateSlice, OrderbookState,
-    apply_entity_kernel, compute_book_commitment_hash, compute_entity_owned_sections,
+    BookPricePageEntrySnapshot, BookPricePageSnapshot, BookState, BookStateSnapshot,
+    DeterministicContext, EntityKernelOutput, EntityStateSlice, OrderbookState,
+    apply_entity_kernel, capture_entity_state, compute_book_commitment_hash,
+    compute_entity_owned_sections, restore_entity_state,
 };
+
+fn fixture_bigint(value: &serde_json::Value, field: &str) -> BigInt {
+    value[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("{field} fixture text"))
+        .parse()
+        .unwrap_or_else(|_| panic!("{field} fixture bigint"))
+}
+
+fn fixture_pages(value: &serde_json::Value, field: &str) -> Vec<BookPricePageSnapshot> {
+    value[field]
+        .as_array()
+        .unwrap_or_else(|| panic!("{field} fixture pages"))
+        .iter()
+        .map(|page| BookPricePageSnapshot {
+            price_ticks: fixture_bigint(page, "priceTicks"),
+            page_sequence: u16::try_from(page["pageSequence"].as_u64().expect("pageSequence"))
+                .expect("pageSequence u16"),
+            head_slot: usize::try_from(page["headSlot"].as_u64().expect("headSlot"))
+                .expect("headSlot usize"),
+            next_slot: usize::try_from(page["nextSlot"].as_u64().expect("nextSlot"))
+                .expect("nextSlot usize"),
+            live_count: usize::try_from(page["liveCount"].as_u64().expect("liveCount"))
+                .expect("liveCount usize"),
+            total_qty_lots: fixture_bigint(page, "totalQtyLots"),
+            slots: page["slots"]
+                .as_array()
+                .expect("slots")
+                .iter()
+                .map(|entry| {
+                    if entry.is_null() {
+                        return None;
+                    }
+                    Some(BookPricePageEntrySnapshot {
+                        order_id: entry["orderId"].as_str().expect("orderId").to_string(),
+                        owner_id: entry["ownerId"].as_str().expect("ownerId").to_string(),
+                        qty_lots: fixture_bigint(entry, "qtyLots"),
+                        seq: entry["seq"].as_u64().expect("seq"),
+                    })
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn hydration_snapshot(value: &serde_json::Value) -> BookStateSnapshot {
+    BookStateSnapshot {
+        bucket_width_ticks: fixture_bigint(value, "bucketWidthTicks"),
+        stp_policy: u8::try_from(value["stpPolicy"].as_u64().expect("stpPolicy"))
+            .expect("stpPolicy u8"),
+        max_orders: usize::try_from(value["maxOrders"].as_u64().expect("maxOrders"))
+            .expect("maxOrders usize"),
+        next_seq: value["nextSeq"].as_u64().expect("nextSeq"),
+        trade_count: value["tradeCount"].as_u64().expect("tradeCount"),
+        trade_qty_sum: fixture_bigint(value, "tradeQtySum"),
+        last_trade_price_ticks: fixture_bigint(value, "lastTradePriceTicks"),
+        last_accepted_usd_ask_price_ticks: fixture_bigint(value, "lastAcceptedUsdAskPriceTicks"),
+        event_hash: fixture_bigint(value, "eventHash"),
+        bid_pages: fixture_pages(value, "bidPages"),
+        ask_pages: fixture_pages(value, "askPages"),
+        expected_bid_pages_root: value["expectedBidPagesRoot"]
+            .as_str()
+            .expect("expectedBidPagesRoot")
+            .to_string(),
+        expected_ask_pages_root: value["expectedAskPagesRoot"]
+            .as_str()
+            .expect("expectedAskPagesRoot")
+            .to_string(),
+        expected_commitment_hash: value["expectedCommitmentHash"]
+            .as_str()
+            .expect("expectedCommitmentHash")
+            .to_string(),
+    }
+}
+
+#[test]
+fn exact_typescript_page_snapshot_restores_holes_without_repacking() {
+    let oracle = fixture();
+    let source = &oracle["bookHydration"];
+    let restored = BookState::restore(hydration_snapshot(source)).expect("exact book restore");
+    assert_eq!(restored.orders.len(), 2);
+    assert!(!restored.orders.contains_key("hydrate-b"));
+    assert_eq!(restored.orders["hydrate-a"].page_slot, 0);
+    assert_eq!(restored.orders["hydrate-c"].page_slot, 2);
+    assert_eq!(
+        compute_book_commitment_hash(&restored).expect("restored commitment"),
+        source["expectedCommitmentHash"]
+            .as_str()
+            .expect("commitment")
+    );
+
+    let mut corrupted = hydration_snapshot(source);
+    corrupted.bid_pages[0].head_slot = 1;
+    let error = BookState::restore(corrupted).expect_err("corrupt page must fail");
+    assert!(error.to_string().contains("BOOK_PAGE_AGGREGATE_INVALID"));
+}
 
 fn assert_book_commitment(book: &BookState, oracle: &serde_json::Value, case: &str) {
     assert_eq!(
@@ -143,6 +241,23 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
     )
     .expect("canonical Entity owned sections");
     assert_owned_sections(&owned, &oracle, "sameJFullMatch");
+    let account_root = digest_bytes(fixture_text(
+        &oracle,
+        &["sameJFullMatch", "canonicalEntity", "accountsRoot"],
+    ));
+    let snapshot = capture_entity_state(&first.state, account_root, account_count)
+        .expect("capture exact Entity state");
+    let restored = restore_entity_state(snapshot.clone(), account_root, account_count)
+        .expect("restore exact Entity state");
+    assert_eq!(restored, first.state);
+    let mut corrupted = snapshot;
+    corrupted.expected_owned_sections[0].digest = format!("0x{}", "ff".repeat(32));
+    assert!(
+        restore_entity_state(corrupted, account_root, account_count)
+            .expect_err("corrupt Entity snapshot must fail")
+            .to_string()
+            .contains("ENTITY_OWNED_SECTIONS_MISMATCH")
+    );
     assert_eq!(
         tx_digest(&maker_resolve),
         fixture_text(&oracle, &["sameJFullMatch", "makerResolveDigest"])

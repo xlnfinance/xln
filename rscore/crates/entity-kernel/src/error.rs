@@ -26,6 +26,8 @@ pub enum EntityKernelError {
     CommitmentUnsafeNumber { field: &'static str, value: u64 },
     #[error("ENTITY_KERNEL_COMMITMENT_ENCODING:{detail}")]
     CommitmentEncoding { detail: String },
+    #[error("ENTITY_KERNEL_SNAPSHOT_INVALID:{detail}")]
+    SnapshotInvalid { detail: String },
 }
 
 impl EntityKernelError {

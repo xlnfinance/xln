@@ -1,4 +1,57 @@
 {
+  "bookHydration": {
+    "askPages": [],
+    "bidPages": [
+      {
+        "headSlot": 0,
+        "liveCount": 2,
+        "nextSlot": 3,
+        "pageSequence": 0,
+        "priceTicks": "123456",
+        "slots": [
+          {
+            "orderId": "hydrate-a",
+            "ownerId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "qtyLots": "7",
+            "seq": 1
+          },
+          null,
+          {
+            "orderId": "hydrate-c",
+            "ownerId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "qtyLots": "13",
+            "seq": 3
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "totalQtyLots": "20"
+      }
+    ],
+    "bucketWidthTicks": "10",
+    "eventHash": "7115638073480840",
+    "expectedAskPagesRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "expectedBidPagesRoot": "0x90cc158cf6fb64af9bc56e937111e69184968a053fde71bb5f6f1e74fde70a26",
+    "expectedCommitmentHash": "0xa8435b1112b346d6c99318c7e3fd0ac5",
+    "lastAcceptedUsdAskPriceTicks": "0",
+    "lastTradePriceTicks": "0",
+    "maxOrders": 100,
+    "nextSeq": 4,
+    "stpPolicy": 1,
+    "tradeCount": 0,
+    "tradeQtySum": "0"
+  },
   "canonicalSource": "TypeScript Entity paybook follow-ups + processOrderbookSwaps/processOrderbookCancels",
   "paybookFinalResolve": {
     "orderedOutboxDigest": "0x927c3bad6560779a4296162ac75c71bf3b1b7e47836d7625a16d86644e981677",

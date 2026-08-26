@@ -63,6 +63,10 @@ import type { AccountPeerInput, AccountReplica, AccountTx } from '../types/accou
 import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 import { DEFAULT_MATERIALIZE_PERIOD_FRAMES } from '../storage/keys';
+import { entityOwnedSectionDigests, entitySnapshotWire } from './entity/snapshot-wire';
+import { entityDeterministicContextWire, type RscoreEntityRound } from './entity/round-wire';
+import type { EntityInfraContext } from '../types/entity/infra-context';
+import type { EntityState } from '../entity/types';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -111,6 +115,11 @@ export const authorityReplayEnabled = (): boolean =>
   process.env['XLN_RSCORE_AUTHORITY_REPLAY'] === '1'
   && process.env['XLN_RSCORE_AUTHORITY'] === '1';
 
+/** Explicit feature gate while the resident Entity profile is proved in HLT. */
+export const entityAuthorityDriverEnabled = (env?: AuthorityRuntimeScope): boolean =>
+  authorityDriverEnabled(env)
+  && process.env['XLN_RSCORE_ENTITY_AUTHORITY'] === '1';
+
 export const authorityRuntimeSuppressed = (env: RuntimeReplica): boolean =>
   env.accountAuthoritySuppressed === true;
 
@@ -127,6 +136,8 @@ type Session = {
   ownerEntityId: string;
   /** Membership held by the resident engine at its accepted Account root. */
   residentAccounts: Set<string>;
+  /** Exact Entity state is installed beside the resident Account forest. */
+  entityResident: boolean;
 };
 
 type OpenFrame = {
@@ -141,6 +152,8 @@ type OpenFrame = {
   candidateAccounts: Set<string>;
   /** Repeatable exports keyed by the exact candidate root they describe. */
   checkpoints: Map<string, RscoreCheckpointChanges>;
+  /** Produced during inbound and consumed during outbound without another IPC. */
+  entityRound: RscoreEntityRound | null;
 };
 
 /** Names the Entity input and the parent root from which it started. */
@@ -375,6 +388,7 @@ const openAuthoritySession = async (
     client,
     ownerEntityId,
     residentAccounts: new Set(),
+    entityResident: false,
   };
 };
 
@@ -442,22 +456,51 @@ const importAccountsFromTypescript = async (
   report.accountsSeeded += seeds.length;
 };
 
+const bootstrapResidentEntity = async (
+  env: RuntimeReplica,
+  session: Session,
+): Promise<void> => {
+  if (!entityAuthorityDriverEnabled(env)) return;
+  const replica = getEntityReplicaById(env, session.ownerEntityId);
+  if (replica == null) {
+    return halt('ENTITY_BOOTSTRAP_REPLICA_MISSING', { owner: session.ownerEntityId });
+  }
+  const loaded = await session.client.bootstrapEntity(entitySnapshotWire(replica.state));
+  const expectedRoot = accountMapRoot(replica.state.accounts, session.ownerEntityId);
+  if (loaded.accountsRoot.toLowerCase() !== expectedRoot) {
+    return halt('ENTITY_BOOTSTRAP_ACCOUNT_ROOT_MISMATCH', {
+      owner: session.ownerEntityId,
+      expected: expectedRoot,
+      actual: loaded.accountsRoot,
+    });
+  }
+  const expectedSections = entityOwnedSectionDigests(replica.state);
+  if (safeStringify(loaded.ownedSections) !== safeStringify(expectedSections)) {
+    return halt('ENTITY_BOOTSTRAP_SECTION_MISMATCH', {
+      owner: session.ownerEntityId,
+      expected: expectedSections,
+      actual: loaded.ownedSections,
+    });
+  }
+  session.entityResident = true;
+};
+
 const armSession = async (env: RuntimeReplica, ownerEntityId: string): Promise<Session | 'disabled'> => {
   const session = await openAuthoritySession(env, ownerEntityId);
   if (session === 'disabled') return session;
   const accounts = accountsOf(env, ownerEntityId);
   if (accounts.size !== 0 && authorityImportEnabled()) {
     await importAccountsFromTypescript(env, session, accounts);
-    return session;
-  }
-  if (accounts.size !== 0) {
+  } else if (accounts.size !== 0) {
     session.client.kill();
     return halt('AUTHORITY_EXACT_RESTORE_REQUIRED', {
       owner: ownerEntityId,
       accountCount: accounts.size,
     });
+  } else {
+    await session.client.bootstrapAccounts(0, []);
   }
-  await session.client.bootstrapAccounts(0, []);
+  await bootstrapResidentEntity(env, session);
   authorityLog.error('authority.armed', {
     owner: ownerEntityId,
     accounts: 0,
@@ -546,6 +589,7 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       acceptedAccountsRoot,
       candidateAccounts: new Set(session.residentAccounts),
       checkpoints: new Map(),
+      entityRound: null,
     } satisfies OpenFrame;
   });
   pending.set(env, candidates);
@@ -670,6 +714,7 @@ export const restoreAuthorityExact = async (
       }
       const restoredAccounts = accountsOf(env, ownerEntityId);
       session.residentAccounts = new Set(restoredAccounts.keys());
+      await bootstrapResidentEntity(env, session);
       report.restores += 1;
     }
   } catch (error) {
@@ -705,6 +750,33 @@ export const authorityCutoverStageHandle = (
 ): AuthorityEntityStageHandle | null =>
   candidateForOwner(env, ownerEntityId.trim().toLowerCase())?.entityInput ?? null;
 
+const openEntityInputCandidate = (
+  frame: OpenFrame,
+  owner: string,
+  expectedAccountsRoot: string,
+): void => {
+  const expected = expectedAccountsRoot.toLowerCase();
+  if (frame.entityInput === null) {
+    if (expected !== frame.acceptedAccountsRoot) {
+      return halt('ENTITY_INPUT_PARENT_ROOT_MISMATCH', {
+        owner,
+        accepted: frame.acceptedAccountsRoot,
+        requested: expectedAccountsRoot,
+      });
+    }
+    frame.entityInput = { ownerEntityId: owner, baseAccountsRoot: expected };
+    frame.entityRound = null;
+    return;
+  }
+  if (expected !== frame.entityInput.baseAccountsRoot) {
+    return halt('ENTITY_INPUT_RETRY_ROOT_MISMATCH', {
+      owner,
+      opened: frame.entityInput.baseAccountsRoot,
+      requested: expectedAccountsRoot,
+    });
+  }
+};
+
 /**
  * Hand this Entity input's arrivals to the engine in one call.
  *
@@ -723,25 +795,10 @@ const handAccountInbound = async (
   const owner = ownerEntityId.trim().toLowerCase();
   const frame = candidateForOwner(env, owner);
   if (frame === undefined) return null;
-  if (frame.entityInput === null) {
-    if (expectedAccountsRoot.toLowerCase() !== frame.acceptedAccountsRoot) {
-      return halt('ENTITY_INPUT_PARENT_ROOT_MISMATCH', {
-        owner,
-        accepted: frame.acceptedAccountsRoot,
-        requested: expectedAccountsRoot,
-      });
-    }
-    frame.entityInput = {
-      ownerEntityId: owner,
-      baseAccountsRoot: expectedAccountsRoot.toLowerCase(),
-    };
-  } else if (expectedAccountsRoot.toLowerCase() !== frame.entityInput.baseAccountsRoot) {
-    return halt('ENTITY_INPUT_RETRY_ROOT_MISMATCH', {
-      owner,
-      opened: frame.entityInput.baseAccountsRoot,
-      requested: expectedAccountsRoot,
-    });
+  if (frame.session.entityResident) {
+    return halt('ACCOUNT_INBOUND_CALLED_FOR_RESIDENT_ENTITY', { owner });
   }
+  openEntityInputCandidate(frame, owner, expectedAccountsRoot);
   const startedMs = performance.now();
   const wave = await frame.session.client.accountInbound({
     ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_OWNER'),
@@ -765,6 +822,134 @@ const handAccountInbound = async (
   }
   frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
   return wave;
+};
+
+/**
+ * One process crossing for Account inbound, Entity pay/orderbook work and
+ * Account outbound. TypeScript may execute the same Entity logic as an oracle,
+ * but the outbound phase consumes this cached result and performs no IPC.
+ */
+export const runAuthorityCutoverEntityBatch = async (
+  env: RuntimeReplica,
+  request: Readonly<{
+    ownerEntityId: string;
+    expectedAccountsRoot: string;
+    entityState: EntityState;
+    entityContext: EntityInfraContext;
+    entityTimestamp: number;
+    finalizedJHeight: number;
+    inputs: readonly Readonly<{
+      accountId: string;
+      input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+      genesisPolicy?: Readonly<{
+        expectedDomain: AccountReplica['state']['domain'];
+        shadowPolicyRoot: string;
+        deltaTransformer: string;
+        publicPinned: false;
+      }>;
+    }>[];
+  }>,
+): Promise<RscoreEntityRound | null> => {
+  if (!entityAuthorityDriverEnabled(env)) return null;
+  const owner = request.ownerEntityId.trim().toLowerCase();
+  const frame = candidateForOwner(env, owner);
+  if (frame === undefined) return null;
+  if (!frame.session.entityResident) {
+    return halt('ENTITY_RESIDENT_SESSION_REQUIRED', { owner });
+  }
+  if (request.entityState.entityId.trim().toLowerCase() !== owner) {
+    return halt('ENTITY_ROUND_OWNER_MISMATCH', {
+      owner,
+      state: request.entityState.entityId,
+    });
+  }
+  if (request.entityContext.height !== request.entityState.height + 1) {
+    return halt('ENTITY_ROUND_HEIGHT_MISMATCH', {
+      owner,
+      parent: request.entityState.height,
+      context: request.entityContext.height,
+    });
+  }
+  const parentRoot = accountMapRoot(request.entityState.accounts, owner);
+  if (parentRoot !== request.expectedAccountsRoot.toLowerCase()) {
+    return halt('ENTITY_ROUND_PARENT_ROOT_MISMATCH', {
+      owner,
+      expected: request.expectedAccountsRoot,
+      state: parentRoot,
+    });
+  }
+  openEntityInputCandidate(frame, owner, request.expectedAccountsRoot);
+  const rows = request.inputs.map((entry, index) => authorityPeerInputRow(
+    index,
+    entry.accountId,
+    { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
+    entry.genesisPolicy,
+  ));
+  const startedMs = performance.now();
+  const round = await frame.session.client.entityRound({
+    ownerEntityId: hexToWireBytes(owner, 32, 'AUTHORITY_ENTITY_OWNER'),
+    expectedAccountsRoot: hexToWireBytes(
+      request.expectedAccountsRoot,
+      32,
+      'AUTHORITY_ENTITY_EXPECTED_ACCOUNTS_ROOT',
+    ),
+    inboundTimestamp: request.entityTimestamp,
+    inboundJHeight: request.finalizedJHeight,
+    inboundRows: rows,
+    entityHeight: request.entityContext.height,
+    outboundTimestamp: request.entityTimestamp,
+    outboundJHeight: request.finalizedJHeight,
+    checkpointDue: env.accountAuthorityCheckpointDue === true,
+    postAccounts: true,
+    context: entityDeterministicContextWire(
+      request.entityState,
+      request.entityContext,
+      request.entityState.config?.jurisdiction?.name,
+    ),
+  });
+  if ((env.accountAuthorityCheckpointDue === true) !== (round.outbound.checkpoint !== null)) {
+    return halt('ENTITY_ROUND_CHECKPOINT_PRESENCE', {
+      owner,
+      requested: env.accountAuthorityCheckpointDue === true,
+      received: round.outbound.checkpoint !== null,
+    });
+  }
+  if (round.outbound.checkpoint !== null) {
+    const checkpointRoot = `0x${Buffer.from(
+      round.outbound.checkpoint.restoreToken[2],
+    ).toString('hex')}`.toLowerCase();
+    frame.checkpoints.set(checkpointRoot, round.outbound.checkpoint);
+  }
+  for (const created of round.inbound.createdAccounts) {
+    frame.candidateAccounts.add(created.accountId);
+  }
+  frame.latest = {
+    revision: round.outbound.revision,
+    accountsRoot: round.outbound.accountsRoot,
+  };
+  frame.entityRound = round;
+  report.waves += 1;
+  report.inboundRounds += 1;
+  report.outboundRounds += 1;
+  report.engineMicros += round.engineMicros;
+  report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
+  report.inputsApplied += round.inbound.applied.length;
+  report.framesProposed += round.outbound.proposals.filter(row => row.frame !== null).length;
+  return round;
+};
+
+export const authorityCutoverEntityRound = (
+  env: RuntimeReplica,
+  ownerEntityId: string,
+): RscoreEntityRound | null => {
+  if (!entityAuthorityDriverEnabled(env)) return null;
+  const owner = ownerEntityId.trim().toLowerCase();
+  const frame = candidateForOwner(env, owner);
+  if (frame === undefined) return null;
+  if (frame.entityInput === null || frame.entityRound === null) {
+    return halt('ENTITY_ROUND_RESULT_MISSING', { owner });
+  }
+  return frame.entityRound;
 };
 
 /** One IPC visit for every peer arrival carried by one Entity frame. */
@@ -817,6 +1002,9 @@ export const runAuthorityCutoverOutboundBatch = async (
   const owner = request.ownerEntityId.trim().toLowerCase();
   const frame = candidateForOwner(env, owner);
   if (frame === undefined) return null;
+  if (frame.session.entityResident) {
+    return halt('ACCOUNT_OUTBOUND_CALLED_FOR_RESIDENT_ENTITY', { owner });
+  }
   if (frame.entityInput === null) {
     return halt('OUTBOUND_WITHOUT_INBOUND', { owner });
   }
@@ -886,6 +1074,7 @@ export const acceptAuthorityEntityStage = async (
   // earlier, but a rejected Entity input must not advance this accepted set.
   frame.session.residentAccounts = new Set(frame.candidateAccounts);
   frame.entityInput = null;
+  frame.entityRound = null;
 };
 
 const killAuthorityRuntime = (env: RuntimeReplica): void => {
@@ -911,6 +1100,7 @@ export const discardAuthorityEntityStage = async (
   frame.acceptedAccountsRoot = handle.baseAccountsRoot;
   frame.candidateAccounts = new Set(frame.session.residentAccounts);
   frame.entityInput = null;
+  frame.entityRound = null;
   report.discardedEntityInputs += 1;
 };
 

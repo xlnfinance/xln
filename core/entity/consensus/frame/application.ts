@@ -1465,9 +1465,11 @@ const prepareEntityFrameWorkingSet = async (
     verifiedCertifiedOutputs,
     authorizedBoardHandoverConfig ?? undefined,
   );
-  await context.accountConsensusContext.accountAuthorityExecutionScope?.beginEntityAccountFrame?.({
+  await env.accountAuthorityEntityStage?.beginEntityAccountFrame({
     ownerEntityId: currentEntityState.entityId,
     expectedAccountsRoot: currentEntityState.accounts.rootHash(),
+    entityState: currentEntityState,
+    entityContext,
     entityTxs,
     accounts: currentEntityState.accounts,
     accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
@@ -1639,8 +1641,10 @@ const applyPostEntityTxPhases = async (
   const proposalAccountIds = crossJSetupPhase
     ? []
     : [...context.proposableAccounts.keys()].sort(compareStableText);
-  await context.accountConsensusContext.accountAuthorityExecutionScope
-    ?.prepareEntityAccountOutbound?.({
+  await context.env.accountAuthorityEntityStage
+    ?.prepareEntityAccountOutbound({
+      entityState: currentEntityState,
+      entityHeight: context.entityContext.height,
       accounts: currentEntityState.accounts,
       accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
       proposalAccountIds,
@@ -1665,7 +1669,7 @@ const applyPostEntityTxPhases = async (
         accountJClaimNodeStore: context.accountJClaimNodeStore,
         storageChanges: context.storageChanges,
       });
-  context.accountConsensusContext.accountAuthorityExecutionScope?.finishEntityAccountFrame?.();
+  context.env.accountAuthorityEntityStage?.finishEntityAccountFrame();
   markFrameProfile('accountProposals');
   // Account proposal construction mutates the Account replica envelope
   // (pending frame and Hanko state). Refresh each dirty leaf only
@@ -1717,6 +1721,32 @@ const logEntityFrameProfile = (
   });
 };
 
+const appendFinalProfileHash = (
+  working: EntityFrameWorkingSet,
+  initialState: EntityState,
+  finalState: EntityState,
+  previousProfileHash: string,
+  previousProfileHashMs: number,
+): void => {
+  const finalProfileHashStartedAt = getPerfMs();
+  const changed = buildChangedEntityProfileHashToSign(
+    finalState,
+    initialState.height === 0 ? null : previousProfileHash,
+  );
+  const finalProfileHashMs = Math.round(getPerfMs() - finalProfileHashStartedAt);
+  if (changed) working.context.collectedHashes.push(changed);
+  const totalProfileHashMs = previousProfileHashMs + finalProfileHashMs;
+  if (!entityFrameProfileEnabled() && totalProfileHashMs < entityFrameSlowMs()) return;
+  entityLog.info('frame.profile_descriptor', {
+    entity: shortId(initialState.entityId, 8),
+    accounts: initialState.accounts.size,
+    changed: Boolean(changed),
+    previousProfileHashMs,
+    finalProfileHashMs,
+    totalProfileHashMs,
+  });
+};
+
 const applyEntityFrameWithIsolation = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
@@ -1750,29 +1780,11 @@ const applyEntityFrameWithIsolation = async (
     working.currentEntityState,
   );
   working.markFrameProfile('entityTxLoop');
-  const appendFinalProfileHash = (state: EntityState): void => {
-    const finalProfileHashStartedAt = getPerfMs();
-    const changed = buildChangedEntityProfileHashToSign(
-      state,
-      entityState.height === 0 ? null : previousProfileHash,
-    );
-    const finalProfileHashMs = Math.round(getPerfMs() - finalProfileHashStartedAt);
-    if (changed) working.context.collectedHashes.push(changed);
-    const totalProfileHashMs = previousProfileHashMs + finalProfileHashMs;
-    if (entityFrameProfileEnabled() || totalProfileHashMs >= entityFrameSlowMs()) {
-      entityLog.info('frame.profile_descriptor', {
-        entity: shortId(entityState.entityId, 8),
-        accounts: entityState.accounts.size,
-        changed: Boolean(changed),
-        previousProfileHashMs,
-        finalProfileHashMs,
-        totalProfileHashMs,
-      });
-    }
-  };
   if (working.authorityTransitionOnly) {
-    await working.context.accountConsensusContext.accountAuthorityExecutionScope
-      ?.prepareEntityAccountOutbound?.({
+    await working.context.env.accountAuthorityEntityStage
+      ?.prepareEntityAccountOutbound({
+        entityState: working.currentEntityState,
+        entityHeight: entityContext.height,
         accounts: working.currentEntityState.accounts,
         accountForWrite: accountId => getEntityAccountForWrite(
           working.currentEntityState.accounts,
@@ -1783,7 +1795,7 @@ const applyEntityFrameWithIsolation = async (
         timestamp: working.currentEntityState.timestamp,
         jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
       });
-    working.context.accountConsensusContext.accountAuthorityExecutionScope?.finishEntityAccountFrame?.();
+    working.context.env.accountAuthorityEntityStage?.finishEntityAccountFrame();
     working.currentEntityState = assignCertifiedOutputIdentities(
       working.currentEntityState,
       working.context.allOutputs,
@@ -1809,7 +1821,13 @@ const applyEntityFrameWithIsolation = async (
     );
   }
   const post = await applyPostEntityTxPhases(working);
-  appendFinalProfileHash(post.currentEntityState);
+  appendFinalProfileHash(
+    working,
+    entityState,
+    post.currentEntityState,
+    previousProfileHash,
+    previousProfileHashMs,
+  );
   logEntityFrameProfile(working, entityTxs, post);
   return buildEntityFrameResult(
     post.currentEntityState,

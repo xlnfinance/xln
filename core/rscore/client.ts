@@ -30,6 +30,7 @@ import {
   type RscoreWireValue,
 } from './process-wire-value';
 import { decodeWave, type Wave } from './wave-decode';
+import { decodeEntityRound, type RscoreEntityRound } from './entity/round-wire';
 import { RscoreResponseFrameQueue } from './process/response-frame-queue';
 export { packWireValue, unpackWireValue } from './process-wire-value';
 export type { RscoreWireValue } from './process-wire-value';
@@ -92,13 +93,15 @@ const RSCORE_ABI_VERSION = 1;
 // 25: AccountSettled J-claim bodies, witnesses and typed finality output.
 // 26: exact checkpoints persist the J-claim Patricia nodes needed to prove
 // non-empty accumulator roots after a process restart.
-export const RSCORE_PROCESS_ABI_VERSION = 26;
+// 27: one resident Entity round owns Account inbound, paybook/orderbook work,
+// and Account outbound without returning Account replicas to TypeScript.
+export const RSCORE_PROCESS_ABI_VERSION = 27;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=30")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=31")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'c53168cc9945a471eea8b6f966fb4252aaa6bd0dfb1b4867044ade62b544f8be',
+  '2ba024e294f221b1d53d46fcef3bb214d55aee5d1284afb5f48afaf57a0cc6d2',
   'hex',
 );
 
@@ -118,6 +121,8 @@ export const RSCORE_OP = {
   restoreExact: 21,
   accountInbound: 25,
   accountOutbound: 26,
+  bootstrapEntity: 27,
+  entityRound: 28,
 } as const;
 
 /**
@@ -641,6 +646,90 @@ export class RscoreProcessClient {
     return this.#withRequestTurn(async () => {
       const response = await this.#authorityRequestOwnedNow(RSCORE_OP.accountOutbound, payload);
       return this.#decodeAuthorityWave(response.result);
+    });
+  }
+
+  /** Install the exact Entity-owned state beside an already restored Account forest. */
+  async bootstrapEntity(snapshot: RscoreWireValue[]): Promise<Readonly<{
+    accountsRoot: string;
+    ownedSections: readonly Readonly<{ field: string; digest: string }>[];
+  }>> {
+    const payload = ownWirePayload([snapshot]);
+    return this.#withRequestTurn(async () => {
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.bootstrapEntity, payload);
+      try {
+        const result = response.result;
+        if (!Array.isArray(result) || result.length !== 2) {
+          throw new Error('RSCORE_ENTITY_BOOTSTRAP_RESPONSE_ARITY');
+        }
+        const root = result[0];
+        const rows = result[1];
+        if (!(root instanceof Uint8Array) || root.byteLength !== 32 || !Array.isArray(rows)) {
+          throw new Error('RSCORE_ENTITY_BOOTSTRAP_RESPONSE_INVALID');
+        }
+        let previous = '';
+        const ownedSections = rows.map((value, index) => {
+          if (!Array.isArray(value) || value.length !== 2 || typeof value[0] !== 'string') {
+            throw new Error(`RSCORE_ENTITY_BOOTSTRAP_SECTION_INVALID:${index}`);
+          }
+          if (value[0] <= previous) {
+            throw new Error(`RSCORE_ENTITY_BOOTSTRAP_SECTION_ORDER:${value[0]}`);
+          }
+          previous = value[0];
+          if (!(value[1] instanceof Uint8Array) || value[1].byteLength !== 32) {
+            throw new Error(`RSCORE_ENTITY_BOOTSTRAP_SECTION_DIGEST:${value[0]}`);
+          }
+          return {
+            field: value[0],
+            digest: `0x${Buffer.from(value[1]).toString('hex')}`,
+          };
+        });
+        return {
+          accountsRoot: `0x${Buffer.from(root).toString('hex')}`,
+          ownedSections,
+        };
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
+    });
+  }
+
+  /** One process crossing for Account inbound + Entity financial work + Account outbound. */
+  async entityRound(round: Readonly<{
+    ownerEntityId: Uint8Array;
+    expectedAccountsRoot: Uint8Array;
+    inboundTimestamp: number;
+    inboundJHeight: number;
+    inboundRows: readonly RscoreWireValue[];
+    entityHeight: number;
+    outboundTimestamp: number;
+    outboundJHeight: number;
+    checkpointDue: boolean;
+    postAccounts: boolean;
+    context: RscoreWireValue[];
+  }>): Promise<RscoreEntityRound> {
+    const payload = ownWirePayload([
+      [
+        Buffer.from(round.ownerEntityId),
+        Buffer.from(round.expectedAccountsRoot),
+        [round.inboundTimestamp, round.inboundJHeight],
+        [...round.inboundRows],
+        false,
+      ],
+      round.entityHeight,
+      round.outboundTimestamp,
+      round.outboundJHeight,
+      round.checkpointDue,
+      round.postAccounts,
+      round.context,
+    ]);
+    return this.#withRequestTurn(async () => {
+      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.entityRound, payload);
+      try {
+        return decodeEntityRound(response.result);
+      } catch (cause) {
+        throw this.#poisonAuthority(cause);
+      }
     });
   }
 

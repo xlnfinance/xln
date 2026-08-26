@@ -9,11 +9,13 @@ use support::{
     fixture_text, fixture_u64, hex, token, tx_digest,
 };
 use xln_rscore_engine::{
-    AccountTx, DeliveryMode, HtlcHashlock, HtlcLockTx, OpaqueHtlcCiphertext, Side,
+    AccountOutput, AccountTx, DeliveryMode, HtlcHashlock, HtlcLockTx, HtlcResolveOutcome,
+    HtlcResolveTx, OpaqueHtlcCiphertext, Side,
 };
 use xln_rscore_entity_kernel::{
     DeterministicContext, EntityKernelOutput, EntityStateSlice, HtlcPreparedBinding,
-    HtlcPreparedOutcome, PreparedHtlcEntry, apply_entity_kernel, compute_entity_owned_sections,
+    HtlcPreparedOutcome, HtlcRoute, PreparedHtlcEntry, apply_entity_kernel,
+    compute_entity_owned_sections,
 };
 
 #[test]
@@ -281,4 +283,66 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
         settled.commitments.ordered_outbox_digest,
         fixture_text(&oracle, &["paybookFinalResolve", "orderedOutboxDigest"])
     );
+}
+
+#[test]
+fn zero_forwarding_fee_remains_present_after_secret_reveal() {
+    let secret = format!("0x{}", "44".repeat(32));
+    let hashlock_bytes: [u8; 32] = Keccak256::digest([0x44_u8; 32]).into();
+    let hashlock = hex(&hashlock_bytes);
+    let inbound_lock_id = format!("0x{}", "55".repeat(32));
+    let outbound_lock_id = format!("0x{}", "66".repeat(32));
+    let mut state = EntityStateSlice::empty(HUB, 2_000);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]);
+    state.htlc_routes.insert(
+        hashlock.clone(),
+        HtlcRoute {
+            hashlock: hashlock.clone(),
+            token_id: Some(1),
+            amount: Some(BigInt::from(1_000)),
+            started_at_ms: None,
+            originated: false,
+            inbound_entity: Some(MAKER.to_string()),
+            inbound_lock_id: Some(inbound_lock_id.clone()),
+            outbound_entity: Some(NEXT.to_string()),
+            outbound_lock_id: Some(outbound_lock_id.clone()),
+            inbound_settled: false,
+            outbound_settled: false,
+            secret: None,
+            secret_ack_pending: false,
+            secret_ack_started_at: None,
+            secret_ack_deadline_at: None,
+            pending_fee: Some(BigInt::from(0)),
+            created_timestamp: 1_000,
+        },
+    );
+    let resolve = AccountTx::HtlcResolve(HtlcResolveTx {
+        lock_id: outbound_lock_id.clone(),
+        outcome: HtlcResolveOutcome::Secret {
+            secret: secret.clone(),
+        },
+    });
+    let output = AccountOutput::HtlcSecret {
+        lock_id: outbound_lock_id,
+        hashlock: hashlock.clone(),
+        secret: secret.clone(),
+        token_id: token(1),
+        amount: BigInt::from(1_000),
+    };
+    let result = apply_entity_kernel(
+        state,
+        &[commit(NEXT, 0x81, 2, resolve, vec![output])],
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("forward secret");
+    let route = result
+        .state
+        .htlc_routes
+        .get(&hashlock)
+        .expect("forward route remains");
+    assert_eq!(route.secret.as_deref(), Some(secret.as_str()));
+    assert_eq!(route.pending_fee, Some(BigInt::from(0)));
+    assert!(route.secret_ack_pending);
+    assert_eq!(result.proposal_work.len(), 1);
+    assert_eq!(result.proposal_work[0].account_id, MAKER);
 }

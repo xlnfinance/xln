@@ -322,6 +322,30 @@ fn classify_maker(
     Ok(MakerDisposition::Eligible)
 }
 
+pub(super) fn validate_restored_state(state: &OrderbookState) -> Result<(), EntityKernelError> {
+    for (pair_id, book) in &state.books {
+        let expected_dimensions = state
+            .pair_dimensions
+            .get(pair_id)
+            .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_PAIR_DIMENSIONS_MISSING"))?;
+        for order in book.orders.values() {
+            classify_maker(&state.offers, &state.resolving_offers, order)?;
+            let (account_id, offer_id) = split_order_id(&order.order_id)?;
+            let offer = state
+                .offers
+                .get(&(account_id.clone(), offer_id))
+                .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_SAME_SNAPSHOT_MISSING"))?;
+            let materialized = materialize(&account_id, offer, &BigInt::from(0))?;
+            if materialized.pair_id != *pair_id || &materialized.dimensions != expected_dimensions {
+                return Err(EntityKernelError::orderbook(
+                    "ORDERBOOK_RESTORED_PAIR_MISMATCH",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn band_bounds(anchor: &BigInt) -> (BigInt, BigInt) {
     let offset = anchor * BigInt::from(3_000_u32) / BigInt::from(10_000_u32);
     (anchor - &offset, anchor + offset)

@@ -1,3 +1,5 @@
+//! Command and Account transition decoder for the process ABI.
+
 use num_bigint::BigInt;
 use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountInputAuthority, AccountSeed, BatchJob};
@@ -90,6 +92,13 @@ pub enum Command {
     AccountOutbound {
         request: Box<xln_rscore_batch::EntityOutboundRequest>,
     },
+    BootstrapEntity {
+        snapshot: Box<xln_rscore_entity_kernel::EntityStateSnapshot>,
+    },
+    EntityRound {
+        request: Box<xln_rscore_entity_kernel::ResidentEntityRequest>,
+        context: Box<xln_rscore_entity_kernel::DeterministicContext>,
+    },
 }
 
 pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
@@ -119,10 +128,34 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         | OpTag::CommitCheckpoint => Ok(Command::AuthorityTwoCallOnly),
         OpTag::AccountInbound => decode_account_inbound(payload),
         OpTag::AccountOutbound => decode_account_outbound(payload),
+        OpTag::BootstrapEntity => decode_bootstrap_entity(payload),
+        OpTag::EntityRound => decode_entity_round(payload),
         OpTag::ReadAccountEnvelope => decode_read_envelope(payload),
         OpTag::RestoreExact => decode_restore_exact(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
+}
+
+fn decode_bootstrap_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 1, "bootstrapEntity")?;
+    Ok(Command::BootstrapEntity {
+        snapshot: Box::new(crate::entity_wire::decode_entity_snapshot(&fields[0])?),
+    })
+}
+
+fn decode_entity_round(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    let fields = exact(fields, 7, "entityRound")?;
+    Ok(Command::EntityRound {
+        request: Box::new(xln_rscore_entity_kernel::ResidentEntityRequest {
+            inbound: decode_account_inbound_request(tuple(&fields[0])?)?,
+            entity_height: js_number(&fields[1], "entityHeight")?,
+            outbound_timestamp: js_number(&fields[2], "outboundTimestamp")?,
+            outbound_j_height: js_number(&fields[3], "outboundJHeight")?,
+            checkpoint_due: strict_boolean(&fields[4], "checkpointDue")?,
+            post_accounts: strict_boolean(&fields[5], "postAccounts")?,
+        }),
+        context: Box::new(crate::entity_wire::decode_context(&fields[6])?),
+    })
 }
 
 fn decode_hello(fields: &[AbiValue]) -> Result<Command, ProcessError> {
@@ -328,26 +361,32 @@ fn decode_peer_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountPeerIn
 
 /// One Entity input's inbound half: owner, receiver clock, arrivals.
 fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
+    Ok(Command::AccountInbound {
+        request: Box::new(decode_account_inbound_request(fields)?),
+    })
+}
+
+fn decode_account_inbound_request(
+    fields: &[AbiValue],
+) -> Result<xln_rscore_batch::EntityInboundRequest, ProcessError> {
     let fields = exact(fields, 5, "accountInbound")?;
     let rows = tuple(&fields[3])?;
     if rows.len() > MAX_WAVE_OP_ROWS {
         return Err(ProcessError::Expected("waveOpRows"));
     }
     let clock = exact(tuple(&fields[2])?, 2, "receiverClock")?;
-    Ok(Command::AccountInbound {
-        request: Box::new(xln_rscore_batch::EntityInboundRequest {
-            owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
-            expected_accounts_root: fixed_bytes(&fields[1], "expectedAccountsRoot")?,
-            clock: xln_rscore_batch::ReceiverClock {
-                entity_timestamp: js_number(&clock[0], "entityTimestamp")?,
-                finalized_j_height: js_number(&clock[1], "finalizedJHeight")?,
-            },
-            rows: rows
-                .iter()
-                .map(decode_input_row)
-                .collect::<Result<_, _>>()?,
-            post_accounts: strict_boolean(&fields[4], "postAccounts")?,
-        }),
+    Ok(xln_rscore_batch::EntityInboundRequest {
+        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
+        expected_accounts_root: fixed_bytes(&fields[1], "expectedAccountsRoot")?,
+        clock: xln_rscore_batch::ReceiverClock {
+            entity_timestamp: js_number(&clock[0], "entityTimestamp")?,
+            finalized_j_height: js_number(&clock[1], "finalizedJHeight")?,
+        },
+        rows: rows
+            .iter()
+            .map(decode_input_row)
+            .collect::<Result<_, _>>()?,
+        post_accounts: strict_boolean(&fields[4], "postAccounts")?,
     })
 }
 

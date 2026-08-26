@@ -24,6 +24,7 @@ pub struct ProcessSession {
     /// the accounts are different jobs, and a process that could switch would
     /// have two answers to "what is the account".
     authority: Option<Box<ResidentConsensusEngine>>,
+    entity_state: Option<ResidentEntityHead>,
     authority_config: Option<AuthorityConfig>,
     pending: Option<PendingBatch>,
     stopped: bool,
@@ -39,6 +40,49 @@ struct SessionBinding {
 struct PendingBatch {
     token: CandidateToken,
     candidate: PreparedBatch,
+}
+
+struct ResidentEntityCandidate {
+    accounts_root: [u8; 32],
+    state: xln_rscore_entity_kernel::EntityStateSlice,
+}
+
+struct ResidentEntityHead {
+    accepted_accounts_root: [u8; 32],
+    accepted: xln_rscore_entity_kernel::EntityStateSlice,
+    candidate: Option<ResidentEntityCandidate>,
+}
+
+impl ResidentEntityHead {
+    fn select_parent(
+        &mut self,
+        accounts_root: [u8; 32],
+        next_height: u64,
+    ) -> Result<xln_rscore_entity_kernel::EntityStateSlice, ProcessError> {
+        let accepts_candidate = self.candidate.as_ref().is_some_and(|candidate| {
+            candidate.accounts_root == accounts_root
+                && candidate.state.height.checked_add(1) == Some(next_height)
+        });
+        if accepts_candidate {
+            let candidate = self.candidate.take().ok_or(ProcessError::EntityNotLoaded)?;
+            self.accepted_accounts_root = candidate.accounts_root;
+            self.accepted = candidate.state;
+            return Ok(self.accepted.clone());
+        }
+        let retries_accepted = self.accepted_accounts_root == accounts_root
+            && self.accepted.height.checked_add(1) == Some(next_height);
+        if retries_accepted {
+            self.candidate = None;
+            return Ok(self.accepted.clone());
+        }
+        Err(ProcessError::EntityHead(format!(
+            "expected={accounts_root:?}:nextHeight={next_height}:accepted={:?}@{}:candidate={:?}@{:?}",
+            self.accepted_accounts_root,
+            self.accepted.height,
+            self.candidate.as_ref().map(|value| value.accounts_root),
+            self.candidate.as_ref().map(|value| value.state.height),
+        )))
+    }
 }
 
 impl ProcessSession {
@@ -59,6 +103,7 @@ impl ProcessSession {
             last_request_id: None,
             engine: None,
             authority: None,
+            entity_state: None,
             authority_config: None,
             pending: None,
             stopped: false,
@@ -180,6 +225,8 @@ impl ProcessSession {
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
             Command::AccountInbound { request } => self.account_inbound(*request),
             Command::AccountOutbound { request } => self.account_outbound(*request),
+            Command::BootstrapEntity { snapshot } => self.bootstrap_entity(*snapshot),
+            Command::EntityRound { request, context } => self.entity_round(*request, *context),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
             Command::Commit { candidate_token } => {
                 if self.authority.is_some() {
@@ -271,6 +318,9 @@ impl ProcessSession {
         &mut self,
         request: xln_rscore_batch::EntityInboundRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.entity_state.is_some() {
+            return Err(ProcessError::EntityModeOnly);
+        }
         let engine = self
             .authority
             .as_mut()
@@ -287,6 +337,9 @@ impl ProcessSession {
         &mut self,
         request: xln_rscore_batch::EntityOutboundRequest,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.entity_state.is_some() {
+            return Err(ProcessError::EntityModeOnly);
+        }
         let engine = self
             .authority
             .as_mut()
@@ -295,6 +348,97 @@ impl ProcessSession {
         let result = engine.entity_outbound(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         let response = self.encode_resident_round_after_mutation(&result, engine_micros)?;
+        Ok((response, false))
+    }
+
+    fn bootstrap_entity(
+        &mut self,
+        snapshot: xln_rscore_entity_kernel::EntityStateSnapshot,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        if self.entity_state.is_some() {
+            return Err(ProcessError::EntityAlreadyLoaded);
+        }
+        let engine = self
+            .authority
+            .as_ref()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let state = xln_rscore_entity_kernel::restore_entity_state(
+            snapshot,
+            engine.accounts_root(),
+            engine.account_count(),
+        )?;
+        let sections = xln_rscore_entity_kernel::compute_entity_owned_sections(
+            &state,
+            engine.accounts_root(),
+            engine.account_count(),
+        )?;
+        let response = crate::entity_wire::encode_entity_loaded(engine.accounts_root(), &sections)?;
+        self.entity_state = Some(ResidentEntityHead {
+            accepted_accounts_root: engine.accounts_root(),
+            accepted: state,
+            candidate: None,
+        });
+        Ok((response, false))
+    }
+
+    fn entity_round(
+        &mut self,
+        request: xln_rscore_entity_kernel::ResidentEntityRequest,
+        context: xln_rscore_entity_kernel::DeterministicContext,
+    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
+        let mut head = self
+            .entity_state
+            .take()
+            .ok_or(ProcessError::EntityNotLoaded)?;
+        let state = match head.select_parent(
+            request.inbound.expected_accounts_root,
+            request.entity_height,
+        ) {
+            Ok(state) => state,
+            Err(error) => {
+                self.entity_state = Some(head);
+                return Err(error);
+            }
+        };
+        let engine = self
+            .authority
+            .as_mut()
+            .ok_or(ProcessError::EngineNotLoaded)?;
+        let started = std::time::Instant::now();
+        let result = match xln_rscore_entity_kernel::apply_resident_entity_round(
+            engine, state, request, &context,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                self.stopped = true;
+                return Err(error.into());
+            }
+        };
+        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        let sections = match xln_rscore_entity_kernel::compute_entity_owned_sections(
+            &result.state,
+            result.outbound.accounts_root,
+            engine.account_count(),
+        ) {
+            Ok(sections) => sections,
+            Err(error) => {
+                self.stopped = true;
+                return Err(error.into());
+            }
+        };
+        let response =
+            match crate::entity_wire::encode_entity_round(&result, &sections, engine_micros) {
+                Ok(response) => response,
+                Err(error) => {
+                    self.stopped = true;
+                    return Err(error);
+                }
+            };
+        head.candidate = Some(ResidentEntityCandidate {
+            accounts_root: result.outbound.accounts_root,
+            state: result.state,
+        });
+        self.entity_state = Some(head);
         Ok((response, false))
     }
 

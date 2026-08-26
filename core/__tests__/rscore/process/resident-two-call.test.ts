@@ -203,9 +203,9 @@ const rawOk = (reply: RawProcessReply): unknown => {
 
 describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(26);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(27);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
-      .toBe('c53168cc9945a471eea8b6f966fb4252aaa6bd0dfb1b4867044ade62b544f8be');
+      .toBe('2ba024e294f221b1d53d46fcef3bb214d55aee5d1284afb5f48afaf57a0cc6d2');
     const staleAbi = new RawProcessSession(identity());
     try {
       expect(rawErrorCode(await staleAbi.request(RSCORE_OP.hello, [

@@ -1,6 +1,4 @@
 import type {
-  AccountAuthorityFrameBeginRequest,
-  AccountAuthorityFrameOutboundRequest,
   AccountAuthorityInputRequest,
   AccountAuthorityProposalRequest,
 } from '../../account/consensus/context';
@@ -11,6 +9,8 @@ import type {
 import type { AccountInput } from '../../types/account';
 import type { EntityInput } from '../../entity/types';
 import type {
+  AccountAuthorityFrameBeginRequest,
+  AccountAuthorityFrameOutboundRequest,
   AccountAuthorityEntityStageCapability,
   EntityRuntimeContext,
 } from '../../entity/runtime-context';
@@ -19,6 +19,7 @@ import { accountInputApplied } from '../../account/consensus/result';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
+import { accountHasProposableMempool } from '../../entity/consensus/account/mempool-eligibility';
 
 type AccountAuthorityExecutionMode = 'pre-ts-observe' | 'cutover';
 
@@ -99,10 +100,14 @@ type AccountAuthorityEntityParent = Readonly<{
 
 export type AccountAuthorityEntityBatchInbound = AccountAuthorityEntityParent & Readonly<{
   expectedAccountsRoot: string;
+  entityState: AccountAuthorityFrameBeginRequest['entityState'];
+  entityContext: AccountAuthorityFrameBeginRequest['entityContext'];
   requests: readonly AccountAuthorityInboundBatchRequest[];
 }>;
 
 export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent & Readonly<{
+  entityState: AccountAuthorityFrameOutboundRequest['entityState'];
+  entityHeight: AccountAuthorityFrameOutboundRequest['entityHeight'];
   accountForWrite(accountId: string): AccountAuthorityInputRequest['account'] | undefined;
   failedHtlcRoutes: AccountAuthorityFrameOutboundRequest['failedHtlcRoutes'];
   admissions: readonly AccountAuthorityInputRequest[];
@@ -364,6 +369,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const materializers = [...await run.call(this.options.provider, {
       ...this.parentOf(),
       expectedAccountsRoot: request.expectedAccountsRoot,
+      entityState: request.entityState,
+      entityContext: request.entityContext,
       requests: this.inboundRequests,
     })];
     if (materializers.length !== this.inboundRequests.length) {
@@ -390,6 +397,10 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.frameOutboundPrepared = true;
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
       .filter(accountId => request.accounts.has(accountId))
+      .filter(accountId => {
+        const account = request.accountForWrite(accountId);
+        return account !== undefined && accountHasProposableMempool(account, request.entityState);
+      })
       .toSorted();
     const proposals = proposalIds.map(accountId => {
       const account = request.accountForWrite(accountId);
@@ -409,6 +420,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       normalizeEntityId(request.account.proofHeader.toEntity)))].toSorted();
     const prepared = await run.call(this.options.provider, {
       ...this.parentOf(),
+      entityState: request.entityState,
+      entityHeight: request.entityHeight,
       accountForWrite: request.accountForWrite,
       failedHtlcRoutes: request.failedHtlcRoutes,
       admissions: this.admissionRequests,

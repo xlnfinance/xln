@@ -12,7 +12,10 @@ import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult } from '../../account/consensus/types';
-import type { AccountAuthorityInputRequest } from '../../account/consensus/context';
+import type {
+  AccountAuthorityInputRequest,
+  AccountAuthorityProposalRequest,
+} from '../../account/consensus/context';
 import { accountInputApplied } from '../../account/consensus/result';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { safeStringify } from '../../protocol/serialization';
@@ -22,7 +25,10 @@ import type {
   AccountAuthorityEntityStageProvider,
 } from '../authority/entity-stage';
 import {
+  authorityCutoverEntityRound,
   authorityDriverEnabled,
+  entityAuthorityDriverEnabled,
+  runAuthorityCutoverEntityBatch,
   runAuthorityCutoverInboundBatch,
   runAuthorityCutoverOutboundBatch,
 } from '../authority-driver';
@@ -35,6 +41,8 @@ import {
   type CutoverWaveResult,
 } from './execute';
 import { inboundSlice, indexInboundWave } from '../round/inbound';
+import { entityOwnedSectionDigests } from '../entity/snapshot-wire';
+import type { Wave } from '../wave-decode';
 
 const halt = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
@@ -89,7 +97,34 @@ const executeInboundBatch = async (
     entityTimestamp: env.state.timestamp,
     finalizedJHeight: 0,
   };
-  const wave = await runAuthorityCutoverInboundBatch(
+  const inputs = requests.map(({ request, accountId, input }) => ({
+    accountId,
+    input,
+    ...(request.genesisPolicy === undefined
+      ? {}
+      : { genesisPolicy: request.genesisPolicy }),
+  }));
+  const fused = entityAuthorityDriverEnabled(env);
+  if (fused) {
+    const unsupported = [...new Set((batch.canonicalEntityInput.entityTxs ?? [])
+      .map(tx => tx.type)
+      .filter(type => type !== 'accountInput'))].sort();
+    if (unsupported.length > 0) {
+      return halt('ENTITY_ROUND_TX_OUTSIDE_PROFILE', { unsupported });
+    }
+  }
+  const entityRound = fused
+    ? await runAuthorityCutoverEntityBatch(env, {
+        ownerEntityId: batch.ownerEntityId,
+        expectedAccountsRoot: batch.expectedAccountsRoot,
+        entityState: batch.entityState,
+        entityContext: batch.entityContext,
+        entityTimestamp: clock.entityTimestamp,
+        finalizedJHeight: clock.finalizedJHeight,
+        inputs,
+      })
+    : null;
+  const wave = entityRound?.inbound ?? await runAuthorityCutoverInboundBatch(
     env,
     batch.ownerEntityId,
     batch.expectedAccountsRoot,
@@ -97,13 +132,7 @@ const executeInboundBatch = async (
       entityTimestamp: clock.entityTimestamp,
       finalizedJHeight: clock.finalizedJHeight,
     },
-    requests.map(({ request, accountId, input }) => ({
-      accountId,
-      input,
-      ...(request.genesisPolicy === undefined
-        ? {}
-        : { genesisPolicy: request.genesisPolicy }),
-    })),
+    inputs,
   );
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const waveIndex = indexInboundWave(full.wave);
@@ -145,13 +174,20 @@ const executeInboundBatch = async (
   });
 };
 
-const executeOutboundBatch = async (
-  env: RuntimeReplica,
-  batch: AccountAuthorityEntityBatchOutbound,
-) => {
-  const binding = bindingFor(env, batch.ownerEntityId);
+type OutboundAdmission = Readonly<{ accountId: string; txs: readonly AccountTx[] }>;
+type OutboundProposal = Readonly<{
+  request: AccountAuthorityProposalRequest;
+  accountId: string;
+}>;
+type GeneratedResolution = NonNullable<
+  Wave['proposals'][number]['failedHtlcLocks'][number]['upstreamResolution']
+>;
+
+const collectOutboundAdmissions = (
+  requests: AccountAuthorityEntityBatchOutbound['admissions'],
+): readonly OutboundAdmission[] => {
   const grouped = new Map<string, AccountTx[]>();
-  for (const request of batch.admissions) {
+  for (const request of requests) {
     if (request.input.kind !== 'enqueue') {
       return halt('OUTBOUND_BATCH_INPUT_KIND', { kind: request.input.kind });
     }
@@ -160,9 +196,97 @@ const executeOutboundBatch = async (
     if (existing) existing.push(...request.input.txs);
     else grouped.set(accountId, [...request.input.txs]);
   }
-  const admits = [...grouped.entries()]
+  return [...grouped.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([accountId, txs]) => ({ accountId, txs }));
+};
+
+const assertOutboundProposalSet = (
+  wave: Wave,
+  proposals: readonly OutboundProposal[],
+  admits: readonly OutboundAdmission[],
+  batch: AccountAuthorityEntityBatchOutbound,
+): void => {
+  if (new Set(wave.proposals.map(row => row.accountId)).size !== wave.proposals.length) {
+    return halt('OUTBOUND_PROPOSAL_DUPLICATE');
+  }
+  const actualProposalIds = new Set(wave.proposals.map(row => row.accountId));
+  const missingProposalIds = proposals
+    .map(row => row.accountId)
+    .filter(accountId => !actualProposalIds.has(accountId));
+  if (missingProposalIds.length === 0) return;
+  halt('OUTBOUND_PROPOSAL_SET_MISMATCH', {
+    expected: proposals.map(row => row.accountId),
+    actual: [...actualProposalIds],
+    missing: missingProposalIds.map(accountId => {
+      const account = batch.accountForWrite(accountId);
+      return {
+        accountId,
+        status: account?.status ?? 'active',
+        pending: account?.pendingFrame !== undefined,
+        mempool: account?.mempool.map(tx => tx.type) ?? [],
+        admitted: admits.find(row => row.accountId === accountId)?.txs.map(tx => tx.type) ?? [],
+        htlcLocks: account?.state.locks.size ?? null,
+      };
+    }),
+  });
+};
+
+const generatedResolutions = (wave: Wave): readonly GeneratedResolution[] =>
+  wave.proposals.flatMap(proposal => proposal.failedHtlcLocks.flatMap(failed =>
+    failed.upstreamResolution === null ? [] : [failed.upstreamResolution]));
+
+const assertOutboundAdmissions = (
+  wave: Wave,
+  admits: readonly OutboundAdmission[],
+  resolutions: readonly GeneratedResolution[],
+): void => {
+  if (wave.admissions.length !== admits.length + resolutions.length) {
+    return halt('OUTBOUND_ADMISSION_ARITY', {
+      expected: admits.length + resolutions.length,
+      actual: wave.admissions.length,
+    });
+  }
+  for (const [index, admit] of admits.entries()) {
+    const result = wave.admissions[index];
+    if (
+      result !== undefined
+      && result.operationIndex === index
+      && result.accountId === admit.accountId
+      && result.verdict.kind === 'admitted'
+      && result.verdict.count === admit.txs.length
+    ) continue;
+    halt('OUTBOUND_ADMISSION_MISMATCH', {
+      index,
+      account: admit.accountId,
+      expected: admit.txs.length,
+      actual: result ?? null,
+    });
+  }
+  for (const [offset, resolution] of resolutions.entries()) {
+    const index = admits.length + offset;
+    const result = wave.admissions[index];
+    if (
+      result !== undefined
+      && result.operationIndex === index
+      && result.accountId === resolution.accountId
+      && result.verdict.kind === 'admitted'
+      && result.verdict.count === 1
+    ) continue;
+    halt('OUTBOUND_GENERATED_ADMISSION_MISMATCH', {
+      index,
+      resolution,
+      actual: result ?? null,
+    });
+  }
+};
+
+const executeOutboundBatch = async (
+  env: RuntimeReplica,
+  batch: AccountAuthorityEntityBatchOutbound,
+) => {
+  const binding = bindingFor(env, batch.ownerEntityId);
+  const admits = collectOutboundAdmissions(batch.admissions);
   const proposals = batch.proposals.map(request => ({
     request,
     accountId: accountIdOf(request.account),
@@ -173,67 +297,25 @@ const executeOutboundBatch = async (
   const jHeight = proposals[0]?.request.jHeight
     ?? batch.admissions[0]?.finalizedJHeight
     ?? 0;
-  const wave = await runAuthorityCutoverOutboundBatch(env, {
-    ownerEntityId: batch.ownerEntityId,
-    admits,
-    propose: proposals.map(row => row.accountId),
-    materialize: batch.materializeAccountIds,
-    failedHtlcRoutes: batch.failedHtlcRoutes,
-    timestamp,
-    jHeight,
-    checkpointDue: env.accountAuthorityCheckpointDue === true,
-  });
+  const entityRound = authorityCutoverEntityRound(env, batch.ownerEntityId);
+  const wave = entityRound?.outbound ?? await runAuthorityCutoverOutboundBatch(env, {
+      ownerEntityId: batch.ownerEntityId,
+      admits,
+      propose: proposals.map(row => row.accountId),
+      materialize: batch.materializeAccountIds,
+      failedHtlcRoutes: batch.failedHtlcRoutes,
+      timestamp,
+      jHeight,
+      checkpointDue: env.accountAuthorityCheckpointDue === true,
+    });
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const postAccountById = new Map(full.wave.postAccounts.map(row => [row.accountId, row]));
   if (postAccountById.size !== full.wave.postAccounts.length) {
     return halt('OUTBOUND_POST_ACCOUNT_DUPLICATE');
   }
-  if (new Set(full.wave.proposals.map(row => row.accountId)).size !== full.wave.proposals.length) {
-    return halt('OUTBOUND_PROPOSAL_DUPLICATE');
-  }
-  const resolutions = full.wave.proposals.flatMap(proposal =>
-    proposal.failedHtlcLocks.flatMap(failed =>
-      failed.upstreamResolution === null ? [] : [failed.upstreamResolution]));
-  if (full.wave.admissions.length !== admits.length + resolutions.length) {
-    return halt('OUTBOUND_ADMISSION_ARITY', {
-      expected: admits.length + resolutions.length,
-      actual: full.wave.admissions.length,
-    });
-  }
-  for (const [index, admit] of admits.entries()) {
-    const result = full.wave.admissions[index];
-    if (
-      result === undefined
-      || result.operationIndex !== index
-      || result.accountId !== admit.accountId
-      || result.verdict.kind !== 'admitted'
-      || result.verdict.count !== admit.txs.length
-    ) {
-      return halt('OUTBOUND_ADMISSION_MISMATCH', {
-        index,
-        account: admit.accountId,
-        expected: admit.txs.length,
-        actual: result ?? null,
-      });
-    }
-  }
-  for (const [offset, resolution] of resolutions.entries()) {
-    const index = admits.length + offset;
-    const result = full.wave.admissions[index];
-    if (
-      result === undefined
-      || result.operationIndex !== index
-      || result.accountId !== resolution.accountId
-      || result.verdict.kind !== 'admitted'
-      || result.verdict.count !== 1
-    ) {
-      return halt('OUTBOUND_GENERATED_ADMISSION_MISMATCH', {
-        index,
-        resolution,
-        actual: result ?? null,
-      });
-    }
-  }
+  assertOutboundProposalSet(full.wave, proposals, admits, batch);
+  const resolutions = generatedResolutions(full.wave);
+  assertOutboundAdmissions(full.wave, admits, resolutions);
   const accountById = (accountId: string): AccountReplica =>
     batch.accountForWrite(accountId)
     ?? batch.accountForWrite(accountId.toLowerCase())
@@ -246,6 +328,26 @@ const executeOutboundBatch = async (
       { binding, account, accountId },
       row,
     );
+  }
+  if (entityRound !== null) {
+    const expectedSections = entityOwnedSectionDigests({
+      ...batch.entityState,
+      height: batch.entityHeight,
+    });
+    if (safeStringify(entityRound.ownedSections) !== safeStringify(expectedSections)) {
+      return halt('ENTITY_ROUND_SECTION_MISMATCH', {
+        owner: batch.ownerEntityId,
+        expected: expectedSections,
+        actual: entityRound.ownedSections,
+        htlcRoutes: [...batch.entityState.htlcRoutes.entries()],
+        entityOutputs: entityRound.outputs,
+        proposalFailures: entityRound.outbound.proposals.flatMap(proposal =>
+          proposal.failedHtlcLocks.map(failed => ({
+            accountId: proposal.accountId,
+            ...failed,
+          }))),
+      });
+    }
   }
   const preparedProposals = full.wave.proposals.map((proposal, index) => {
     const accountId = proposal.accountId;

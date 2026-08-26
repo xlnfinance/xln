@@ -7,8 +7,10 @@ mod resolve;
 mod types;
 
 pub use commitment::compute_book_commitment_hash;
+pub use page::{BookPricePageEntrySnapshot, BookPricePageSnapshot};
 pub use types::{
-    BookOrder, BookState, OrderbookState, PairDimensions, PairPolicy, SameJOffer, Side,
+    BookOrder, BookState, BookStateSnapshot, OrderbookState, OrderbookStateSnapshot,
+    PairDimensions, PairPolicy, SameJOffer, Side,
 };
 
 pub(crate) use matcher::{SameJOutputDelta, apply_orderbook_outputs};

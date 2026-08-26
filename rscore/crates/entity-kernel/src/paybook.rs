@@ -437,7 +437,15 @@ pub(crate) fn revealed_secret_followup(
         return Ok(());
     }
     route.secret = Some(secret.clone());
-    if let Some(fee) = route.pending_fee.take() {
+    if route
+        .pending_fee
+        .as_ref()
+        .is_some_and(|fee| fee != &BigInt::from(0))
+    {
+        let fee = route
+            .pending_fee
+            .take()
+            .ok_or_else(|| EntityKernelError::htlc("HTLC_PENDING_FEE_MISSING"))?;
         state.htlc_fees_earned += fee;
     }
     if let Some(lock_id) = &route.outbound_lock_id {

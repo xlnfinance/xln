@@ -263,8 +263,6 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
         state,
         ResidentEntityRequest {
             inbound,
-            creates: Vec::new(),
-            failed_htlc_routes: Vec::new(),
             entity_height: 1,
             outbound_timestamp: TIMESTAMP,
             outbound_j_height: 100,
@@ -338,8 +336,6 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
                     rows: rows.clone(),
                     post_accounts: false,
                 },
-                creates: Vec::new(),
-                failed_htlc_routes: Vec::new(),
                 entity_height: 1,
                 outbound_timestamp: TIMESTAMP,
                 outbound_j_height: 100,

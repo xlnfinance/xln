@@ -125,6 +125,12 @@ pub enum OpTag {
     /// One Entity input's outbound half: the transactions the Entity's own
     /// logic produced, and the accounts that now propose.
     AccountOutbound = 26,
+    /// Install the exact resident Entity paybook/orderbook state after the
+    /// Account forest has been restored and its root is known.
+    BootstrapEntity = 27,
+    /// One fused Entity+Account transition: inbound Account rows, Entity
+    /// paybook/orderbook effects, and outbound Account proposals.
+    EntityRound = 28,
     /// Incremental canonical rows since the last durable checkpoint, taken at
     /// the Runtime frame boundary rather than from a staged candidate.
     Checkpoint = 30,
@@ -162,6 +168,8 @@ impl TryFrom<u64> for OpTag {
             24 => Ok(Self::SealAccountWave),
             25 => Ok(Self::AccountInbound),
             26 => Ok(Self::AccountOutbound),
+            27 => Ok(Self::BootstrapEntity),
+            28 => Ok(Self::EntityRound),
             30 => Ok(Self::Checkpoint),
             _ => Err(AbiError::UnknownOpTag(value)),
         }

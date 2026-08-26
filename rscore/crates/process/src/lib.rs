@@ -5,11 +5,16 @@
 mod candidate;
 mod canonical;
 mod checkpoint_wire;
+#[path = "wire/entity.rs"]
+mod entity_wire;
 mod error;
 mod session;
 mod transport;
+#[path = "wire/decode.rs"]
 mod wire_decode;
+#[path = "wire/encode.rs"]
 mod wire_encode;
+#[path = "wire/value.rs"]
 mod wire_value;
 
 pub use error::ProcessError;
@@ -73,13 +78,15 @@ pub use transport::{read_frame, serve, write_frame};
 // 25: AccountSettled J-claim bodies, witnesses and typed finality output.
 // 26: exact checkpoints persist the J-claim Patricia nodes needed to prove
 // non-empty accumulator roots after a process restart.
-pub const PROCESS_ABI_VERSION: u64 = 26;
+// 27: one resident Entity round owns Account inbound, paybook/orderbook work,
+// and Account outbound without returning Account replicas to TypeScript.
+pub const PROCESS_ABI_VERSION: u64 = 27;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=30")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=31")
         // wire=30: checkpoint deltas and exact restore rows carry the
         // content-verified J-claim Patricia node store.
         // wire=29: AccountSettled J-claim transactions, Patricia witnesses,
@@ -147,9 +154,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xc5, 0x31, 0x68, 0xcc, 0x99, 0x45, 0xa4, 0x71, 0xee, 0xa8, 0xb6, 0xf9, 0x66, 0xfb,
-            0x42, 0x52, 0xaa, 0xa6, 0xbd, 0x0d, 0xfb, 0x1b, 0x48, 0x67, 0x04, 0x4a, 0xde, 0x62,
-            0xb5, 0x44, 0xf8, 0xbe,
+            0x2b, 0xa0, 0x24, 0xe2, 0x94, 0xf2, 0x21, 0xb1, 0xd5, 0x3d, 0x46, 0xfc, 0xef, 0x3b,
+            0xb2, 0x14, 0xd5, 0x5a, 0xee, 0x5d, 0x12, 0x84, 0xaf, 0xb5, 0xf4, 0x8a, 0xfa, 0xf5,
+            0x7a, 0x0c, 0xc6, 0xd2,
         ],
     };
 
