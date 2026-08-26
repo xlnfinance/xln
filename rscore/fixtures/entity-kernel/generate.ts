@@ -24,6 +24,7 @@ import {
 } from '../../../core/entity/tx/handlers/account/committed-htlc-followups';
 import {
   createOrderbookExtState,
+  computeBookCommitmentHash,
   quoteAmountAtPrice,
   replaceOrderbookPair,
   type BookState,
@@ -60,7 +61,11 @@ import type { EntityRuntimeContext } from '../../../core/entity/runtime-context'
 import type { EntityInfraContext } from '../../../core/types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../../core/types/entity/htlc-infra-context';
 import { PersistentEntityAccountMap } from '../../../core/entity/state/persistent-account-map';
-import { computeEntityAccountValueHash } from '../../../core/entity/consensus/state-root';
+import {
+  computeCanonicalEntityConsensusStateHashCold,
+  computeEntityAccountValueHash,
+  computeEntityConsensusSectionDigestsCold,
+} from '../../../core/entity/consensus/state-root';
 import { createEntityFrameCandidateState } from '../../../core/entity/state-clone';
 
 const HUB = `0x${'11'.repeat(32)}`;
@@ -93,6 +98,11 @@ const profile: HubProfile = {
 
 const digest = (value: unknown): string =>
   `0x${createHash('sha256').update(encodeAccountStateValue(value)).digest('hex')}`;
+
+const canonicalEntityEvidence = (state: EntityState) => ({
+  root: computeCanonicalEntityConsensusStateHashCold(state),
+  sections: computeEntityConsensusSectionDigestsCold(state),
+});
 
 const txDigest = (tx: AccountTx): string => digest(canonicalAccountTxForFrameHash(tx));
 
@@ -327,6 +337,8 @@ if (match.crossJurisdictionFills.length !== 0 || match.debugProjectionRejects.le
 }
 const finalBook = match.bookUpdates.find((row) => row.pairId === '1/2')?.book;
 if (!finalBook || finalBook.tradeCount !== 1) throw new Error('ENTITY_KERNEL_FIXTURE_MATCH_MISSING');
+for (const update of match.bookUpdates) replaceOrderbookPair(ext, update.pairId, update.book);
+const sameJFullMatchCanonicalEntity = canonicalEntityEvidence(hubState);
 
 const grouped = new Map<string, AccountTx[]>();
 for (const row of match.accountTxs) {
@@ -664,6 +676,7 @@ const paybookOutputs = [{
   entityId: String(forwardEvent.data['entityId']),
   hashlock: String(forwardEvent.data['hashlock']),
 }];
+const paybookForwardCanonicalEntity = canonicalEntityEvidence(paybookWorkingState);
 
 const finalEnvelope = {
   version: HTLC_OPAQUE_CIPHERTEXT_VERSION,
@@ -798,6 +811,7 @@ const fixture = {
       outputs: paybookOutputs,
     }),
     txDigests: paybookProposal[0]!.txDigests,
+    canonicalEntity: paybookForwardCanonicalEntity,
   },
   paybookFinalResolve: {
     paybookRoot: digest(emptyPaybook([MAKER])),
@@ -817,6 +831,10 @@ const fixture = {
     tradeCount: finalBook.tradeCount,
     tradeQtyLots: finalBook.tradeQtySum.toString(),
     eventHash: finalBook.eventHash.toString(),
+    bidPagesRoot: finalBook.bidPages.rootHash(),
+    askPagesRoot: finalBook.askPages.rootHash(),
+    bookCommitmentHash: computeBookCommitmentHash(finalBook),
+    canonicalEntity: sameJFullMatchCanonicalEntity,
   },
   sameJPartialMatch: {
     orderbookRoot: digest(partialOrderbookProjection),
@@ -825,6 +843,9 @@ const fixture = {
     takerResolveDigest: partialProposalWork.find((row) => row.accountId === TAKER)?.txDigests[0],
     remainingMakerQtyLots: partialBook.orders
       .get(`${MAKER}:${partialMaker.offerId}`)?.qtyLots.toString(),
+    bidPagesRoot: partialBook.bidPages.rootHash(),
+    askPagesRoot: partialBook.askPages.rootHash(),
+    bookCommitmentHash: computeBookCommitmentHash(partialBook),
   },
   sameJSweepMatch: {
     orderbookRoot: digest(sweepOrderbookProjection),
@@ -835,6 +856,9 @@ const fixture = {
     tradeCount: sweepBook.tradeCount,
     tradeQtyLots: sweepBook.tradeQtySum.toString(),
     eventHash: sweepBook.eventHash.toString(),
+    bidPagesRoot: sweepBook.bidPages.rootHash(),
+    askPagesRoot: sweepBook.askPages.rootHash(),
+    bookCommitmentHash: computeBookCommitmentHash(sweepBook),
   },
   sameJCancel: {
     resolveDigest: txDigest(cancelTx),

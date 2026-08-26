@@ -2,6 +2,8 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
+
+use super::page::BookPricePageTree;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SameJOffer {
     pub offer_id: String,
@@ -50,10 +52,14 @@ pub struct BookOrder {
     pub price_ticks: BigInt,
     pub qty_lots: BigInt,
     pub seq: u64,
+    pub page_sequence: u16,
+    pub page_slot: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BookState {
+    pub bucket_width_ticks: BigInt,
+    pub stp_policy: u8,
     pub max_orders: usize,
     pub orders: BTreeMap<String, BookOrder>,
     pub next_seq: u64,
@@ -62,13 +68,17 @@ pub struct BookState {
     pub last_trade_price_ticks: BigInt,
     pub last_accepted_usd_ask_price_ticks: BigInt,
     pub event_hash: BigInt,
+    pub(crate) bid_pages: BookPricePageTree,
+    pub(crate) ask_pages: BookPricePageTree,
     pub(crate) bids: BTreeMap<(Reverse<BigInt>, u64), String>,
     pub(crate) asks: BTreeMap<(BigInt, u64), String>,
 }
 
 impl BookState {
-    pub fn empty(max_orders: usize) -> Self {
+    pub fn empty(max_orders: usize, bucket_width_ticks: u32) -> Self {
         Self {
+            bucket_width_ticks: BigInt::from(bucket_width_ticks.max(1)),
+            stp_policy: 1,
             max_orders,
             orders: BTreeMap::new(),
             next_seq: 1,
@@ -77,6 +87,8 @@ impl BookState {
             last_trade_price_ticks: BigInt::from(0),
             last_accepted_usd_ask_price_ticks: BigInt::from(0),
             event_hash: BigInt::from(0),
+            bid_pages: BookPricePageTree::empty(),
+            ask_pages: BookPricePageTree::empty(),
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
         }
@@ -90,6 +102,14 @@ impl BookState {
     pub fn best_ask(&self) -> Option<&BigInt> {
         let order_id = self.asks.first_key_value()?.1;
         self.orders.get(order_id).map(|order| &order.price_ticks)
+    }
+
+    pub fn bid_pages_root(&self) -> String {
+        self.bid_pages.root_hash()
+    }
+
+    pub fn ask_pages_root(&self) -> String {
+        self.ask_pages.root_hash()
     }
 }
 

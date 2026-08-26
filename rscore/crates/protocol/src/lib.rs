@@ -2,6 +2,7 @@
 
 //! Byte-exact protocol primitives shared by the Rust Account engine.
 
+mod consensus_msgpack;
 mod flat;
 mod persistent;
 mod persistent_node;
@@ -13,6 +14,7 @@ mod value;
 #[cfg(test)]
 mod persistent_tests;
 
+pub use consensus_msgpack::{ConsensusMessagePackError, encode_canonical_consensus_bytes};
 pub use flat::compute_flat_integrity_root;
 pub use persistent::{
     PERSISTENT_RADIX_SHARD_COUNT, PERSISTENT_RADIX_SHARD_DEPTH, PersistentChildRecord,

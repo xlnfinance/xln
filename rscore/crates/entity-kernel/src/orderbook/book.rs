@@ -3,6 +3,7 @@ use num_bigint::BigInt;
 use crate::EntityKernelError;
 
 use super::math::exact_quote_lot_multiple;
+use super::page::{BookPricePageEntry, BookPricePageLocation, page_tree_mut};
 use super::{BookOrder, BookState, PairDimensions, Side};
 
 const PRIME: u64 = 0x0100_0001;
@@ -105,6 +106,19 @@ pub(crate) fn add_resting(state: &mut BookState, input: AddOrder) -> Result<(), 
     if state.orders.len() >= state.max_orders {
         return Err(EntityKernelError::orderbook("ORDERBOOK_CAPACITY"));
     }
+    let next_seq = state
+        .next_seq
+        .checked_add(1)
+        .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_SEQUENCE_OVERFLOW"))?;
+    let location = page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, input.side).append(
+        &input.price_ticks,
+        BookPricePageEntry {
+            order_id: input.order_id.clone(),
+            owner_id: input.owner_id.clone(),
+            qty_lots: input.qty_lots.clone(),
+            seq: state.next_seq,
+        },
+    )?;
     let order = BookOrder {
         order_id: input.order_id,
         owner_id: input.owner_id,
@@ -112,29 +126,45 @@ pub(crate) fn add_resting(state: &mut BookState, input: AddOrder) -> Result<(), 
         price_ticks: input.price_ticks,
         qty_lots: input.qty_lots,
         seq: state.next_seq,
+        page_sequence: location.sequence,
+        page_slot: location.slot,
     };
-    state.next_seq = state
-        .next_seq
-        .checked_add(1)
-        .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_SEQUENCE_OVERFLOW"))?;
+    state.next_seq = next_seq;
     index_order(state, &order);
     bump_hash(state, 1, &order.price_ticks, &order.qty_lots);
     state.orders.insert(order.order_id.clone(), order);
     Ok(())
 }
 
-pub(crate) fn remove_order(state: &mut BookState, order_id: &str) -> Option<BookOrder> {
-    let order = state.orders.remove(order_id)?;
+pub(crate) fn remove_order(
+    state: &mut BookState,
+    order_id: &str,
+) -> Result<Option<BookOrder>, EntityKernelError> {
+    let Some(order) = state.orders.get(order_id).cloned() else {
+        return Ok(None);
+    };
+    page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, order.side).remove(
+        &order.price_ticks,
+        BookPricePageLocation {
+            sequence: order.page_sequence,
+            slot: order.page_slot,
+        },
+        order_id,
+    )?;
+    state.orders.remove(order_id);
     unindex_order(state, &order);
-    Some(order)
+    Ok(Some(order))
 }
 
-pub(crate) fn cancel_order(state: &mut BookState, order_id: &str) -> bool {
-    let Some(order) = remove_order(state, order_id) else {
-        return false;
+pub(crate) fn cancel_order(
+    state: &mut BookState,
+    order_id: &str,
+) -> Result<bool, EntityKernelError> {
+    let Some(order) = remove_order(state, order_id)? else {
+        return Ok(false);
     };
     bump_hash(state, 5, &order.price_ticks, &BigInt::from(0));
-    true
+    Ok(true)
 }
 
 fn ordered_ids(state: &BookState, side: Side) -> Vec<String> {
@@ -201,9 +231,18 @@ fn apply_fill(
         taker_qty_total: taker.qty_lots.clone(),
     });
     if fill == &maker.qty_lots {
-        remove_order(state, &maker.order_id);
+        remove_order(state, &maker.order_id)?;
     } else {
         let next = &maker.qty_lots - fill;
+        page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, maker.side).reduce(
+            &maker.price_ticks,
+            BookPricePageLocation {
+                sequence: maker.page_sequence,
+                slot: maker.page_slot,
+            },
+            &maker.order_id,
+            &next,
+        )?;
         if let Some(stored) = state.orders.get_mut(&maker.order_id) {
             stored.qty_lots = next;
         }
@@ -332,11 +371,20 @@ where
     let mut events = Vec::new();
     let matched = match_order(state, &taker, dimensions, &mut classify, &mut events)?;
     if matched.blocking_order_id.is_some() || matched.remaining == BigInt::from(0) {
-        remove_order(state, &taker.order_id);
-    } else if matched.remaining < taker.qty_lots
-        && let Some(stored) = state.orders.get_mut(&taker.order_id)
-    {
-        stored.qty_lots = matched.remaining;
+        remove_order(state, &taker.order_id)?;
+    } else if matched.remaining < taker.qty_lots {
+        page_tree_mut(&mut state.bid_pages, &mut state.ask_pages, taker_order.side).reduce(
+            &taker_order.price_ticks,
+            BookPricePageLocation {
+                sequence: taker_order.page_sequence,
+                slot: taker_order.page_slot,
+            },
+            &taker_order.order_id,
+            &matched.remaining,
+        )?;
+        if let Some(stored) = state.orders.get_mut(&taker.order_id) {
+            stored.qty_lots = matched.remaining;
+        }
     }
     Ok((!events.is_empty()).then_some((taker.order_id, events)))
 }

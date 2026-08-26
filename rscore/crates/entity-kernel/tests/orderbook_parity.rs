@@ -8,8 +8,27 @@ use support::{
 };
 use xln_rscore_engine::{AccountOutput, AccountReplica, AccountTx, Side};
 use xln_rscore_entity_kernel::{
-    DeterministicContext, EntityKernelOutput, EntityStateSlice, OrderbookState, apply_entity_kernel,
+    BookState, DeterministicContext, EntityKernelOutput, EntityStateSlice, OrderbookState,
+    apply_entity_kernel, compute_book_commitment_hash,
 };
+
+fn assert_book_commitment(book: &BookState, oracle: &serde_json::Value, case: &str) {
+    assert_eq!(
+        book.bid_pages_root(),
+        fixture_text(oracle, &[case, "bidPagesRoot"]),
+        "{case} bid pages"
+    );
+    assert_eq!(
+        book.ask_pages_root(),
+        fixture_text(oracle, &[case, "askPagesRoot"]),
+        "{case} ask pages"
+    );
+    assert_eq!(
+        compute_book_commitment_hash(book).expect("book commitment"),
+        fixture_text(oracle, &[case, "bookCommitmentHash"]),
+        "{case} book commitment"
+    );
+}
 
 fn offer_tx_at(offer_id: &str, ask: bool, units: u32, price_ticks: u64) -> AccountTx {
     let base = BigInt::from(units) * BigInt::from(10_u8).pow(18);
@@ -116,6 +135,7 @@ fn same_j_offer_match_and_committed_resolve_lifecycle() {
         fixture_text(&oracle, &["sameJFullMatch", "takerResolveDigest"])
     );
     let book = &first.state.orderbook.as_ref().expect("orderbook").books["1/2"];
+    assert_book_commitment(book, &oracle, "sameJFullMatch");
     assert_eq!(book.trade_count, 1);
     assert_eq!(
         book.trade_qty_sum.to_string(),
@@ -261,6 +281,7 @@ fn same_j_partial_fill_rests_exact_remainder_after_committed_resolve() {
     assert_eq!(*fee_token_id, Some(2));
     assert_eq!(fee_amount.as_ref(), Some(&BigInt::from(10_u8).pow(14)));
     let book = &matched.state.orderbook.as_ref().expect("orderbook").books["1/2"];
+    assert_book_commitment(book, &oracle, "sameJPartialMatch");
     let maker_order = &book.orders[&format!("{MAKER}:partial-maker")];
     assert_eq!(
         maker_order.qty_lots.to_string(),
@@ -380,6 +401,7 @@ fn same_j_hlt_sweep_matches_two_price_levels_with_weighted_taker_resolution() {
     assert_eq!(execution_want_amount.as_ref(), Some(&expected_want));
     assert!(*cancel_remainder);
     let book = &matched.state.orderbook.as_ref().expect("orderbook").books["1/2"];
+    assert_book_commitment(book, &oracle, "sameJSweepMatch");
     assert!(book.orders.is_empty());
     assert_eq!(book.trade_count, 2);
     assert_eq!(

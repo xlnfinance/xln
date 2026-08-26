@@ -179,17 +179,22 @@ fn require_book<'a>(
         .ok_or_else(|| EntityKernelError::orderbook("ORDERBOOK_INTERNAL_BOOK_MISSING"))
 }
 
-fn remove_committed(state: &mut OrderbookState, account_id: &str, offer_id: &str) {
+fn remove_committed(
+    state: &mut OrderbookState,
+    account_id: &str,
+    offer_id: &str,
+) -> Result<(), EntityKernelError> {
     let Ok(key) = order_id(account_id, offer_id) else {
-        return;
+        return Ok(());
     };
     let Some(pair_id) = state.pair_by_order.get(&key).cloned() else {
-        return;
+        return Ok(());
     };
     if let Some(book) = state.books.get_mut(&pair_id) {
-        cancel_order(book, &key);
+        cancel_order(book, &key)?;
     }
     sync_pair_index(state, &pair_id);
+    Ok(())
 }
 
 fn apply_final_offer_index(state: &mut OrderbookState, deltas: &[SameJOutputDelta]) {
@@ -213,23 +218,27 @@ fn apply_final_offer_index(state: &mut OrderbookState, deltas: &[SameJOutputDelt
     }
 }
 
-fn apply_removes(state: &mut OrderbookState, deltas: &[SameJOutputDelta]) {
+fn apply_removes(
+    state: &mut OrderbookState,
+    deltas: &[SameJOutputDelta],
+) -> Result<(), EntityKernelError> {
     for delta in deltas {
         if let SameJOutputDelta::Remove {
             account_id,
             offer_id,
         } = delta
         {
-            remove_committed(state, account_id, offer_id);
+            remove_committed(state, account_id, offer_id)?;
         }
     }
+    Ok(())
 }
 
 fn apply_cancel_requests(
     state: &mut OrderbookState,
     deltas: &[SameJOutputDelta],
     effects: &mut OrderbookEffects,
-) {
+) -> Result<(), EntityKernelError> {
     for delta in deltas {
         let SameJOutputDelta::CancelRequest {
             account_id,
@@ -244,7 +253,7 @@ fn apply_cancel_requests(
         {
             continue;
         }
-        remove_committed(state, account_id, offer_id);
+        remove_committed(state, account_id, offer_id)?;
         queue_cancel(
             state,
             effects,
@@ -253,6 +262,7 @@ fn apply_cancel_requests(
             "cancel_request".to_string(),
         );
     }
+    Ok(())
 }
 
 fn same_snapshot(state: &OrderbookState, account_id: &str, offer: &SameJOffer) -> bool {
@@ -349,7 +359,7 @@ fn sweep_pair(
         }
         let (account_id, offer_id) = split_order_id(&order.order_id)?;
         if let Some(book) = state.books.get_mut(pair_id) {
-            cancel_order(book, &order.order_id);
+            cancel_order(book, &order.order_id)?;
         }
         queue_cancel(
             state,
@@ -521,7 +531,9 @@ fn process_one_offer(
     state
         .books
         .entry(materialized.pair_id.clone())
-        .or_insert_with(|| BookState::empty(state.max_orders_per_pair));
+        .or_insert_with(|| {
+            BookState::empty(state.max_orders_per_pair, policy.book_bucket_width_ticks)
+        });
     if swept.insert(materialized.pair_id.clone()) {
         sweep_pair(state, &materialized.pair_id, policy, effects)?;
     }
@@ -595,8 +607,8 @@ pub(crate) fn apply_orderbook_outputs(
 ) -> Result<OrderbookEffects, EntityKernelError> {
     let mut effects = OrderbookEffects::default();
     apply_final_offer_index(state, deltas);
-    apply_removes(state, deltas);
-    apply_cancel_requests(state, deltas, &mut effects);
+    apply_removes(state, deltas)?;
+    apply_cancel_requests(state, deltas, &mut effects)?;
     let mut swept = BTreeSet::new();
     let mut batch = BTreeMap::new();
     for (account_id, offer) in sorted_upserts(deltas) {
