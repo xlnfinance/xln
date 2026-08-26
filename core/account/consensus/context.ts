@@ -82,6 +82,8 @@ export type AccountAuthorityFrameBeginRequest = Readonly<{
 
 export type AccountAuthorityFrameOutboundRequest = Readonly<{
   accounts: ReadonlyMap<string, AccountReplica>;
+  /** Claim a mutable Entity-frame shell after any intermediate root projection sealed it. */
+  accountForWrite(accountId: string): AccountReplica | undefined;
   proposalAccountIds: readonly string[];
   failedHtlcRoutes: readonly AccountAuthorityFailedHtlcRoute[];
   timestamp: number;

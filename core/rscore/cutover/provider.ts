@@ -150,19 +150,19 @@ const executeOutboundBatch = async (
   batch: AccountAuthorityEntityBatchOutbound,
 ) => {
   const binding = bindingFor(env, batch.ownerEntityId);
-  const grouped = new Map<string, { account: AccountReplica; txs: AccountTx[] }>();
+  const grouped = new Map<string, AccountTx[]>();
   for (const request of batch.admissions) {
     if (request.input.kind !== 'enqueue') {
       return halt('OUTBOUND_BATCH_INPUT_KIND', { kind: request.input.kind });
     }
     const accountId = accountIdOf(request.account);
     const existing = grouped.get(accountId);
-    if (existing) existing.txs.push(...request.input.txs);
-    else grouped.set(accountId, { account: request.account, txs: [...request.input.txs] });
+    if (existing) existing.push(...request.input.txs);
+    else grouped.set(accountId, [...request.input.txs]);
   }
   const admits = [...grouped.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([accountId, value]) => ({ accountId, txs: value.txs }));
+    .map(([accountId, txs]) => ({ accountId, txs }));
   const proposals = batch.proposals.map(request => ({
     request,
     accountId: accountIdOf(request.account),
@@ -177,7 +177,7 @@ const executeOutboundBatch = async (
     ownerEntityId: batch.ownerEntityId,
     admits,
     propose: proposals.map(row => row.accountId),
-    materialize: batch.materializeAccounts.map(row => row.accountId),
+    materialize: batch.materializeAccountIds,
     failedHtlcRoutes: batch.failedHtlcRoutes,
     timestamp,
     jHeight,
@@ -235,8 +235,8 @@ const executeOutboundBatch = async (
     }
   }
   const accountById = (accountId: string): AccountReplica =>
-    batch.accounts.get(accountId)
-    ?? batch.accounts.get(accountId.toLowerCase())
+    batch.accountForWrite(accountId)
+    ?? batch.accountForWrite(accountId.toLowerCase())
     ?? halt('OUTBOUND_ACCOUNT_MISSING', { account: accountId });
   const proposalPriors = full.wave.proposals.map(proposal =>
     forkAccountReplicaShell(accountById(proposal.accountId)));

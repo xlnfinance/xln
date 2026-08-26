@@ -204,6 +204,7 @@ describe('pre-TypeScript Account authority capability', () => {
     expect(admitted?.ok).toBe(true);
     await stage.prepareEntityAccountOutbound?.({
       accounts: new Map([[PEER, account]]),
+      accountForWrite: accountId => accountId === PEER ? account : undefined,
       proposalAccountIds: [],
       failedHtlcRoutes: [],
       timestamp: 100,
@@ -221,6 +222,84 @@ describe('pre-TypeScript Account authority capability', () => {
       applyAccountInput: 0,
       proposeAccountFrame: 0,
     });
+    await stage.discard();
+  });
+
+  test('collision diagnostics include same-frame admissions already seen by Entity order', async () => {
+    const account = makeAccount(OWNER, PEER);
+    const peerInput = {
+      kind: 'ack' as const,
+      fromEntityId: PEER,
+      toEntityId: OWNER,
+      domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
+      ack: {
+        height: account.currentHeight,
+        frameHash: account.currentFrame.stateHash,
+      },
+    };
+    const provider: AccountAuthorityEntityStageProvider = {
+      async beginEntityStage() {
+        throw new Error('TEST_PER_OPERATION_STAGE_MUST_NOT_OPEN');
+      },
+      async executeAccountInboundBatch(batch) {
+        expect(batch.requests).toHaveLength(1);
+        return [() => accountInputApplied({
+          events: [
+            "📤 LEFT-WINS: Ignored RIGHT's frame 1 (waiting for their ACK)",
+            "⚠️ LEFT has 1 pending txs while waiting for RIGHT's ACK",
+          ],
+        })];
+      },
+      async executeAccountOutboundBatch() {
+        throw new Error('TEST_OUTBOUND_UNREACHABLE');
+      },
+    };
+    const stage = createAccountAuthorityEntityStage(options(provider, 'cutover'));
+    stage.bindCanonicalInput({
+      ...canonicalInput(),
+      entityTxs: [{ type: 'accountInput', data: peerInput }],
+    });
+    await stage.beginEntityAccountFrame?.({
+      ownerEntityId: OWNER,
+      expectedAccountsRoot: `0x${'00'.repeat(32)}`,
+      entityTxs: [{ type: 'accountInput', data: peerInput }],
+      accounts: new Map([[PEER, account]]),
+      accountForWrite: accountId => accountId === PEER ? account : undefined,
+      createInboundAccount: () => { throw new Error('TEST_CREATE_UNREACHABLE'); },
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    await stage.executeAccountInput({
+      collectorFrameId: OWNER,
+      account,
+      input: {
+        kind: 'enqueue',
+        txs: [{
+          type: 'direct_payment',
+          data: {
+            tokenId: 1,
+            amount: 1n,
+            route: [PEER],
+            fromEntityId: OWNER,
+            toEntityId: PEER,
+            description: 'queued before collision',
+          },
+        }],
+      },
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    const collision = await stage.executeAccountInput({
+      collectorFrameId: OWNER,
+      account,
+      input: peerInput,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    expect(collision?.events).toContain(
+      "⚠️ LEFT has 2 pending txs while waiting for RIGHT's ACK",
+    );
     await stage.discard();
   });
 
@@ -280,6 +359,7 @@ describe('pre-TypeScript Account authority capability', () => {
     });
     await stage.prepareEntityAccountOutbound?.({
       accounts,
+      accountForWrite: accountId => accounts.get(accountId),
       proposalAccountIds: [PEER],
       failedHtlcRoutes: [],
       timestamp: 100,

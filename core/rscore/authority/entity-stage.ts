@@ -103,14 +103,11 @@ export type AccountAuthorityEntityBatchInbound = AccountAuthorityEntityParent & 
 }>;
 
 export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent & Readonly<{
-  accounts: ReadonlyMap<string, AccountAuthorityInputRequest['account']>;
+  accountForWrite(accountId: string): AccountAuthorityInputRequest['account'] | undefined;
   failedHtlcRoutes: AccountAuthorityFrameOutboundRequest['failedHtlcRoutes'];
   admissions: readonly AccountAuthorityInputRequest[];
   proposals: readonly AccountAuthorityProposalRequest[];
-  materializeAccounts: readonly Readonly<{
-    accountId: string;
-    account: AccountAuthorityInputRequest['account'];
-  }>[];
+  materializeAccountIds: readonly string[];
 }>;
 
 export interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
@@ -395,7 +392,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       .filter(accountId => request.accounts.has(accountId))
       .toSorted();
     const proposals = proposalIds.map(accountId => {
-      const account = request.accounts.get(accountId);
+      const account = request.accountForWrite(accountId);
       if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
       return {
         collectorFrameId: this.ownerEntityId,
@@ -408,19 +405,15 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       };
     });
     const run = this.requireBatchProvider('executeAccountOutboundBatch');
-    const materializeById = new Map(this.inboundRequests.map(request => {
-      const accountId = normalizeEntityId(request.account.proofHeader.toEntity);
-      return [accountId, { accountId, account: request.account }] as const;
-    }));
+    const materializeAccountIds = [...new Set(this.inboundRequests.map(request =>
+      normalizeEntityId(request.account.proofHeader.toEntity)))].toSorted();
     const prepared = await run.call(this.options.provider, {
       ...this.parentOf(),
-      accounts: request.accounts,
+      accountForWrite: request.accountForWrite,
       failedHtlcRoutes: request.failedHtlcRoutes,
       admissions: this.admissionRequests,
       proposals,
-      materializeAccounts: [...materializeById.values()].toSorted((left, right) =>
-        left.accountId.localeCompare(right.accountId),
-      ),
+      materializeAccountIds,
     });
     this.preparedProposalIds = prepared.proposals.map(row => normalizeEntityId(row.accountId));
     this.proposalResults = prepared.proposals.map(row => row.result);
@@ -587,14 +580,37 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const alreadyQueued = this.admissionRequests
       .filter(entry => normalizeEntityId(entry.account.proofHeader.toEntity) === accountId)
       .reduce((count, entry) => count + (entry.input.kind === 'enqueue' ? entry.input.txs.length : 0), 0);
-    if (alreadyQueued === 0 || result.events.some(event => event.startsWith('⚠️ LEFT has '))) {
-      return result;
+    if (alreadyQueued === 0) return result;
+    const warningPrefix = '⚠️ LEFT has ';
+    const warningSuffix = " pending txs while waiting for RIGHT's ACK";
+    const warningIndexes = result.events.flatMap((event, index) =>
+      event.startsWith(warningPrefix) ? [index] : []);
+    if (warningIndexes.length > 1) {
+      throw new Error(`ACCOUNT_AUTHORITY_COLLISION_QUEUE_WARNING_DUPLICATE:${accountId}`);
+    }
+    const warningIndex = warningIndexes[0];
+    if (warningIndex !== undefined) {
+      const warning = result.events[warningIndex] ?? '';
+      if (!warning.endsWith(warningSuffix)) {
+        throw new Error(`ACCOUNT_AUTHORITY_COLLISION_QUEUE_WARNING_INVALID:${accountId}`);
+      }
+      const engineQueued = Number(warning.slice(warningPrefix.length, -warningSuffix.length));
+      const total = engineQueued + alreadyQueued;
+      if (!Number.isSafeInteger(engineQueued) || engineQueued < 1 || !Number.isSafeInteger(total)) {
+        throw new Error(`ACCOUNT_AUTHORITY_COLLISION_QUEUE_COUNT_INVALID:${accountId}`);
+      }
+      return {
+        ...result,
+        events: result.events.map((event, index) => index === warningIndex
+          ? `${warningPrefix}${total}${warningSuffix}`
+          : event),
+      };
     }
     return {
       ...result,
       events: [
         ...result.events,
-        `⚠️ LEFT has ${alreadyQueued} pending txs while waiting for RIGHT's ACK`,
+        `${warningPrefix}${alreadyQueued}${warningSuffix}`,
       ],
     };
   }

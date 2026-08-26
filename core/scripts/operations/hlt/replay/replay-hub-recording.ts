@@ -397,9 +397,12 @@ const runTrial = async (offeredEntityInputsPerSecond: number): Promise<ReplayTri
   await startRuntimeSamplingProfiler('hlt-replay-tail');
   resetPerfPhases();
   const operationsBefore = snapshotOpCounters();
+  // Calibrate the event-loop probe before the measured replay window. The
+  // fixed 200 ms idle sample is harness setup, not Runtime or Account work;
+  // including it made short, dense replays report an arbitrarily low TPS.
+  const stopBusyProbe = await startMainThreadBusyProbe();
   const startedAt = performance.now();
   const cpuStarted = process.cpuUsage();
-  const stopBusyProbe = await startMainThreadBusyProbe();
   let cumulativeUnits = 0;
   const frameProfile: ReplayFrameProfile[] = [];
   try {

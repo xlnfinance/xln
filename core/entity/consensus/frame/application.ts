@@ -1642,6 +1642,7 @@ const applyPostEntityTxPhases = async (
   await context.accountConsensusContext.accountAuthorityExecutionScope
     ?.prepareEntityAccountOutbound?.({
       accounts: currentEntityState.accounts,
+      accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
       proposalAccountIds,
       failedHtlcRoutes: failedForwardHtlcRouteClosure(
         currentEntityState.htlcRoutes,
@@ -1773,6 +1774,10 @@ const applyEntityFrameWithIsolation = async (
     await working.context.accountConsensusContext.accountAuthorityExecutionScope
       ?.prepareEntityAccountOutbound?.({
         accounts: working.currentEntityState.accounts,
+        accountForWrite: accountId => getEntityAccountForWrite(
+          working.currentEntityState.accounts,
+          accountId,
+        ),
         proposalAccountIds: [],
         failedHtlcRoutes: [],
         timestamp: working.currentEntityState.timestamp,
