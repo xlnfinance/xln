@@ -636,6 +636,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xln-rscore-runtime"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "xln-rscore-protocol",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
