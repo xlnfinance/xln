@@ -28,7 +28,6 @@ import { createHash } from 'node:crypto';
 import { createStructuredLogger } from '../support/logger';
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { projectEntityAccountLeaf } from '../entity/consensus/state-root';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import {
   authorityPeerInputRow,
@@ -126,14 +125,8 @@ export const setAuthorityRuntimeSuppressed = (
 type Session = {
   client: RscoreProcessClient;
   ownerEntityId: string;
-  /** Membership committed by Create or proven by RestoreExact. */
-  seeded: Set<string>;
-  /**
-   * The leaf projection each account was seeded with. The engine carries the
-   * fields it does not own itself, so when a leaf disagrees the first question
-   * is which carried field this frame moved underneath it.
-   */
-  seededProjection: Map<string, Record<string, unknown>>;
+  /** Membership held by the resident engine at its accepted Account root. */
+  residentAccounts: Set<string>;
 };
 
 type OpenFrame = {
@@ -144,6 +137,8 @@ type OpenFrame = {
   latest: Readonly<{ revision: number; accountsRoot: string }> | null;
   /** Account forest selected by accepted Entity inputs in this Runtime frame. */
   acceptedAccountsRoot: string;
+  /** Membership at Rust's currently held base/candidate head. */
+  candidateAccounts: Set<string>;
   /** Repeatable exports keyed by the exact candidate root they describe. */
   checkpoints: Map<string, RscoreCheckpointChanges>;
 };
@@ -379,8 +374,7 @@ const openAuthoritySession = async (
   return {
     client,
     ownerEntityId,
-    seeded: new Set(),
-    seededProjection: new Map(),
+    residentAccounts: new Set(),
   };
 };
 
@@ -404,7 +398,6 @@ const importAccountsFromTypescript = async (
   const seeds: Array<Readonly<{
     counterpartyId: string;
     seed: RscoreWireValue;
-    projection: Record<string, unknown>;
   }>> = [];
   const refused: Record<string, string> = {};
   for (const [counterpartyId, account] of [...accounts].sort(([left], [right]) =>
@@ -424,7 +417,6 @@ const importAccountsFromTypescript = async (
           accountConsensusWire(account),
           requireAccountDeltaTransformerAddress(env.state, account.state),
         ),
-        projection: projectEntityAccountLeaf(account),
       });
     } catch (error) {
       refused[counterpartyId] = error instanceof Error ? error.message : String(error);
@@ -438,8 +430,7 @@ const importAccountsFromTypescript = async (
   }
   await session.client.bootstrapAccounts(0, seeds.map(row => row.seed), true);
   for (const row of seeds) {
-    session.seeded.add(row.counterpartyId);
-    session.seededProjection.set(row.counterpartyId, row.projection);
+    session.residentAccounts.add(row.counterpartyId);
   }
   authorityLog.error('authority.imported', {
     owner: session.ownerEntityId,
@@ -524,8 +515,12 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       continue;
     }
     const actual = new Set(replica.state.accounts.keys());
-    const missing = [...actual].filter(accountId => !existing.seeded.has(accountId)).sort();
-    const removed = [...existing.seeded].filter(accountId => !actual.has(accountId)).sort();
+    const missing = [...actual]
+      .filter(accountId => !existing.residentAccounts.has(accountId))
+      .sort();
+    const removed = [...existing.residentAccounts]
+      .filter(accountId => !actual.has(accountId))
+      .sort();
     if (missing.length > 0 || removed.length > 0) {
       halt('AUTHORITY_MEMBERSHIP_OUTSIDE_CANDIDATE', {
         owner: ownerEntityId,
@@ -549,6 +544,7 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       entityInput: null,
       latest: null,
       acceptedAccountsRoot,
+      candidateAccounts: new Set(session.residentAccounts),
       checkpoints: new Map(),
     } satisfies OpenFrame;
   });
@@ -673,13 +669,7 @@ export const restoreAuthorityExact = async (
         });
       }
       const restoredAccounts = accountsOf(env, ownerEntityId);
-      session.seeded = new Set(restoredAccounts.keys());
-      session.seededProjection = new Map(
-        [...restoredAccounts.entries()].map(([counterpartyId, account]) => [
-          counterpartyId,
-          projectEntityAccountLeaf(account),
-        ]),
-      );
+      session.residentAccounts = new Set(restoredAccounts.keys());
       report.restores += 1;
     }
   } catch (error) {
@@ -770,6 +760,9 @@ const handAccountInbound = async (
   report.engineMicros += wave.engineMicros;
   report.waveMicros += Math.round((performance.now() - startedMs) * 1_000);
   report.inputsApplied += wave.applied.length;
+  for (const created of wave.createdAccounts) {
+    frame.candidateAccounts.add(created.accountId);
+  }
   frame.latest = { revision: wave.revision, accountsRoot: wave.accountsRoot };
   return wave;
 };
@@ -888,6 +881,10 @@ export const acceptAuthorityEntityStage = async (
     });
   }
   frame.acceptedAccountsRoot = frame.latest.accountsRoot.toLowerCase();
+  // Membership changes become authoritative only with the parent Entity
+  // input that published them. Inbound may have created H=1 inside Rust
+  // earlier, but a rejected Entity input must not advance this accepted set.
+  frame.session.residentAccounts = new Set(frame.candidateAccounts);
   frame.entityInput = null;
 };
 
@@ -912,6 +909,7 @@ export const discardAuthorityEntityStage = async (
   if (handle === null) return;
   const frame = requireOpenEntityInput(env, handle);
   frame.acceptedAccountsRoot = handle.baseAccountsRoot;
+  frame.candidateAccounts = new Set(frame.session.residentAccounts);
   frame.entityInput = null;
   report.discardedEntityInputs += 1;
 };

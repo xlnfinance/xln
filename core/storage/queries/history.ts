@@ -269,7 +269,7 @@ const cursorAfter = (
     || (lifecycle.lastUpdatedHeight === cursor.height && lifecycle.offerId < cursor.offerId);
 };
 
-export const readAccountFrameHistoryRecords = async (
+const readAccountFrameHistoryRecords = async (
   deps: CertifiedHistoryReadDeps,
   env: RuntimeReplica,
   entityId: string,

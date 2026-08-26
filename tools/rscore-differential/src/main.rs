@@ -319,9 +319,13 @@ fn output_value(output: &AccountOutput) -> AbiValue {
             AbiValue::Text("swapCancelRequest".into()),
             AbiValue::Text(offer_id.clone()),
         ]),
-        AccountOutput::SwapOfferRemove { offer_id } => values_tuple(vec![
+        AccountOutput::SwapOfferRemove {
+            offer_id,
+            maker_is_left,
+        } => values_tuple(vec![
             AbiValue::Text("swapOfferRemove".into()),
             AbiValue::Text(offer_id.clone()),
+            AbiValue::Integer(i128::from(!maker_is_left)),
         ]),
         AccountOutput::HtlcError {
             lock_id,
@@ -336,6 +340,18 @@ fn output_value(output: &AccountOutput) -> AbiValue {
             AbiValue::Integer(i128::from(token_id.get())),
             AbiValue::Text(amount.to_string()),
             reason.clone().map_or(AbiValue::Nil, AbiValue::Text),
+        ]),
+        AccountOutput::AccountSettledFinalized {
+            token_id,
+            j_height,
+            collateral,
+            ondelta,
+        } => values_tuple(vec![
+            AbiValue::Text("accountSettledFinalized".into()),
+            AbiValue::Integer(i128::from(token_id.get())),
+            AbiValue::Integer(i128::from(*j_height)),
+            AbiValue::Text(collateral.to_string()),
+            AbiValue::Text(ondelta.to_string()),
         ]),
     }
 }

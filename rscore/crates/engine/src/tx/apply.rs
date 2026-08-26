@@ -161,6 +161,9 @@ fn apply_to_candidate(
     context: Option<&AccountExecutionContext>,
 ) -> Result<MutationDecision, TransitionError> {
     match tx {
+        AccountTx::JEventClaim(tx) => {
+            crate::tx::handlers::j_events::apply_j_event_claim(candidate, tx, proposer)
+        }
         AccountTx::AddDelta { token_id } => balance::add_delta(candidate, *token_id),
         AccountTx::SetCreditLimit { token_id, amount } => {
             balance::set_credit_limit(candidate, *token_id, amount, proposer)

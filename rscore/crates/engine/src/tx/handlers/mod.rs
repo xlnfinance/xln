@@ -2,5 +2,6 @@
 
 pub(crate) mod balance;
 pub(crate) mod htlc;
+pub(crate) mod j_events;
 pub(crate) mod lending;
 pub(crate) mod rebalance;

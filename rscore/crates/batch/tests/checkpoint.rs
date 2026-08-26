@@ -17,11 +17,14 @@ use num_bigint::BigInt;
 use xln_rscore_batch::{
     AccountCheckpointRows, AccountId, AccountInputKind, AccountInputVerdict, AccountRestore,
     AccountSeed, AccountsCheckpoint, BatchError, CheckpointExpectation, CheckpointToken,
+    EngineGeneration, StatefulConsensusEngine,
 };
 use xln_rscore_engine::{
-    AccountConsensus, AccountReplica, AccountState, AccountStateSeed, AccountTx,
-    BilateralRebalanceFeePolicy, ConsensusSnapshot, DeliveryMode, Delta, LendingIntentKind,
-    RebalanceFeePolicySnapshot, Side, SwapOffer, TokenId,
+    AccountConsensus, AccountReplica, AccountSettledEvent, AccountState, AccountStateSeed,
+    AccountTx, BilateralRebalanceFeePolicy, ConsensusSnapshot, DeliveryMode, Delta, JClaimNode,
+    JEventClaimTx, JEventMetadata, JurisdictionEvent, LendingIntentKind,
+    RebalanceFeePolicySnapshot, SequentialAccountEngine, Side, SwapOffer, TokenId,
+    prepare_claim_tx,
 };
 use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef};
 
@@ -115,6 +118,7 @@ struct AccountRow {
     lending: Section<xln_rscore_engine::LendingIntentKind>,
     offers: Section<xln_rscore_engine::SwapOffer>,
     policies: Section<xln_rscore_engine::BilateralRebalanceFeePolicy>,
+    j_claim_nodes: BTreeMap<[u8; 32], JClaimNode>,
 }
 
 /// The runtime's canonical store, reduced to what a checkpoint touches.
@@ -140,6 +144,12 @@ impl Database {
             row.lending.apply(&rows.lending_intents);
             row.offers.apply(&rows.swap_offers);
             row.policies.apply(&rows.rebalance_fee_policies);
+            for (hash, node) in &rows.j_claim_nodes.new_nodes {
+                row.j_claim_nodes.insert(*hash, node.clone());
+            }
+            for hash in &rows.j_claim_nodes.replaced_node_hashes {
+                row.j_claim_nodes.remove(hash);
+            }
         }
         for account_id in &checkpoint.removed {
             self.accounts.remove(account_id);
@@ -172,6 +182,14 @@ impl Database {
                 let mut replica =
                     AccountReplica::new(header.owner.clone(), state).expect("replica");
                 replica.set_envelope(header.envelope.clone());
+                replica
+                    .restore_j_claim_nodes(
+                        row.j_claim_nodes
+                            .iter()
+                            .map(|(hash, node)| (*hash, node.clone()))
+                            .collect(),
+                    )
+                    .expect("J-claim store");
                 if let Some(address) = header.delta_transformer {
                     replica.set_delta_transformer(address);
                 }
@@ -1111,6 +1129,130 @@ fn a_failed_restore_changes_nothing() {
         .expect("restore");
     assert_eq!(root, source.payer.accounts_root());
     assert_eq!(live.payer.revision(), database.expectation().revision);
+}
+
+/// A pending jurisdiction claim is not only two accumulator roots. Its
+/// Patricia witnesses must cross the same durable checkpoint boundary, or the
+/// first peer claim after a process crash cannot prove membership and the hub
+/// permanently loses the ability to finalize that settlement.
+#[test]
+fn a_j_claim_checkpoint_restores_witnesses_and_finalizes_after_crash() {
+    let (owner_bytes, owner) = entity_of("1");
+    let (peer_bytes, peer) = entity_of("j-claim-peer");
+    let (left, right) = if owner.to_string() < peer.to_string() {
+        (owner.clone(), peer.clone())
+    } else {
+        (peer.clone(), owner.clone())
+    };
+    let replica =
+        AccountReplica::new(owner.clone(), account_state(&left, &right)).expect("claim account");
+    let raw = JEventClaimTx {
+        j_height: 7,
+        j_block_hash: [0x33; 32],
+        events: vec![JurisdictionEvent::AccountSettled(AccountSettledEvent {
+            metadata: JEventMetadata::default(),
+            left_entity: left.clone(),
+            right_entity: right.clone(),
+            token_id: TokenId::new(1).expect("token"),
+            left_reserve: BigInt::from(0),
+            right_reserve: BigInt::from(0),
+            collateral: BigInt::from(125),
+            ondelta: BigInt::from(7),
+            nonce: 3,
+        })],
+        left_proof: None,
+        right_proof: None,
+    };
+    let prepared = prepare_claim_tx(
+        replica.state().identity(),
+        &replica.state().carried().left_pending_j_claims,
+        &replica.state().carried().right_pending_j_claims,
+        &raw,
+        &BTreeMap::new(),
+    )
+    .expect("prepare first claim");
+    let owner_side = if owner == left {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    let pending =
+        SequentialAccountEngine::apply(&replica, owner_side, &AccountTx::JEventClaim(prepared))
+            .expect("apply first claim")
+            .committed()
+            .expect("pending claim state");
+    assert_eq!(pending.state().j_claim_node_entries().len(), 1);
+
+    let account_id = AccountId::from_bytes(peer_bytes);
+    let source = StatefulConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x42; 8]),
+        2,
+        0,
+        signer_key("1"),
+        "1".to_string(),
+        std::sync::Arc::default(),
+        vec![AccountSeed {
+            account_id,
+            replica: pending.clone(),
+            consensus: None,
+        }],
+    )
+    .expect("source engine");
+    assert_eq!(source.account_count(), 1);
+    assert_eq!(
+        *source
+            .account(&account_id)
+            .expect("source account")
+            .replica()
+            .owner()
+            .as_bytes(),
+        owner_bytes
+    );
+
+    let mut database = Database::default();
+    database.write(&source.checkpoint_changes().expect("checkpoint"));
+    let mut restored = engine();
+    restored
+        .restore_accounts(database.restore_rows(), &database.expectation())
+        .expect("cold restore");
+    let restored_replica = restored
+        .account(&account_id)
+        .expect("restored account")
+        .replica()
+        .clone();
+    assert_eq!(
+        restored_replica.state().j_claim_node_entries(),
+        pending.state().j_claim_node_entries(),
+    );
+
+    let store = restored_replica
+        .state()
+        .j_claim_node_entries()
+        .into_iter()
+        .collect();
+    let peer_claim = prepare_claim_tx(
+        restored_replica.state().identity(),
+        &restored_replica.state().carried().left_pending_j_claims,
+        &restored_replica.state().carried().right_pending_j_claims,
+        &raw,
+        &store,
+    )
+    .expect("prepare peer claim after crash");
+    let peer_side = if owner_side == Side::Left {
+        Side::Right
+    } else {
+        Side::Left
+    };
+    let finalized = SequentialAccountEngine::apply(
+        &restored_replica,
+        peer_side,
+        &AccountTx::JEventClaim(peer_claim),
+    )
+    .expect("finalize after crash")
+    .committed()
+    .expect("finalized state");
+    assert_eq!(finalized.state().last_finalized_j_height(), 7);
+    assert!(finalized.state().j_claim_node_entries().is_empty());
 }
 
 /// An engine comes up at the revision it was restored to, not one past it:

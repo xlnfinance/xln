@@ -68,13 +68,24 @@ pub use transport::{read_frame, serve, write_frame};
 // worker-resident checkpoint rows separately from temporary read-model rows.
 // 23: that reply carries an optional exact incremental checkpoint manifest;
 // the next inbound root implicitly accepts or rejects its pending baseline.
-pub const PROCESS_ABI_VERSION: u64 = 23;
+// 24: swap-offer removal carries the maker side observed by the Account
+// transition, so the two-call parent never needs a stale Account read model.
+// 25: AccountSettled J-claim bodies, witnesses and typed finality output.
+// 26: exact checkpoints persist the J-claim Patricia nodes needed to prove
+// non-empty accumulator roots after a process restart.
+pub const PROCESS_ABI_VERSION: u64 = 26;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=27")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=30")
+        // wire=30: checkpoint deltas and exact restore rows carry the
+        // content-verified J-claim Patricia node store.
+        // wire=29: AccountSettled J-claim transactions, Patricia witnesses,
+        // and their typed finality output are part of the authority ABI.
+        // wire=28: swap-offer removal carries its exact maker side because
+        // the removed row is absent from the post-state.
         // wire=27: checkpoint rows are wrapped with exact incremental and
         // restore tokens; Nil means checkpointDue was false.
         // wire=26: checkpoint cadence is part of AccountOutbound and its
@@ -136,9 +147,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x05, 0xcc, 0x38, 0x20, 0xad, 0x39, 0xf9, 0x49, 0x5e, 0xde, 0xc0, 0x92, 0xdf, 0x80,
-            0x40, 0x58, 0x04, 0x13, 0x9a, 0x03, 0xe2, 0x3a, 0xc9, 0x68, 0xd3, 0xde, 0x5f, 0xc0,
-            0x58, 0xa0, 0x09, 0x43,
+            0xc5, 0x31, 0x68, 0xcc, 0x99, 0x45, 0xa4, 0x71, 0xee, 0xa8, 0xb6, 0xf9, 0x66, 0xfb,
+            0x42, 0x52, 0xaa, 0xa6, 0xbd, 0x0d, 0xfb, 0x1b, 0x48, 0x67, 0x04, 0x4a, 0xde, 0x62,
+            0xb5, 0x44, 0xf8, 0xbe,
         ],
     };
 

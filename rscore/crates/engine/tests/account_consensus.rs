@@ -1573,6 +1573,81 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
     );
 }
 
+/// Parent certification is not another Account IPC message. The outbound
+/// candidate records that its fresh recovery draft will be certified by the
+/// Entity manifest; only a candidate selected by the next accounts root can
+/// reach this second proposal. A proof-body-neutral policy update must then
+/// reuse the exact draft, matching TypeScript's `resolveDisputeHanko` branch.
+#[test]
+fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
+    let (mut left, mut right) = parties_with_transformer(Some([0x77_u8; 20]));
+    let policy = |version| AccountTx::RebalancePolicy {
+        token_id: 1,
+        policy_version: version,
+        base_fee: BigInt::from(version),
+        liquidity_fee_bps: BigInt::from(375),
+        gas_fee: BigInt::from(23),
+    };
+    left.account
+        .admit_txs(vec![policy(1)], "test")
+        .expect("admit first policy");
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("first proposal") else {
+        panic!("expected first proposal");
+    };
+    let first = *first;
+    let first_dispute = first.dispute.clone().expect("first recovery draft");
+    assert!(left.account.certify_local_dispute_after_outbound());
+
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_with_dispute(&first, &left.identity),
+        &market(),
+    )
+    .expect("peer commits first proposal") else {
+        panic!("expected first commit");
+    };
+    let ack_draft = right
+        .account
+        .consensus_snapshot()
+        .last_outbound_ack
+        .and_then(|ack| ack.dispute)
+        .expect("ack recovery draft");
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        first.frame.height,
+        &first.state_hash,
+        &ack_hanko,
+        Some(certify_dispute(&right.identity, &ack_draft)),
+    )
+    .expect("commit first proposal ack");
+
+    left.account
+        .admit_txs(vec![policy(2)], "test")
+        .expect("admit second policy");
+    let ProposalOutcome::Proposed(second) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_001,
+        8,
+        &market(),
+    )
+    .expect("second proposal") else {
+        panic!("expected second proposal");
+    };
+    assert_eq!(second.dispute.as_ref(), Some(&first_dispute));
+}
+
 /// A valid frame certificate does not bless its attached dispute witness. A
 /// foreign signer and a role bit changed underneath the original signature
 /// are both rejected before replay, leaving the account at H=0.

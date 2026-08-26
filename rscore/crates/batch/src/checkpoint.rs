@@ -11,7 +11,7 @@
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountEnvelope, AccountIdentity, AccountReplica,
     BilateralRebalanceFeePolicy, CarriedSections, ConsensusSnapshot, Delta, EntityId, HtlcLock,
-    LendingIntentKind, StateError, SwapOffer,
+    JClaimNodeChanges, LendingIntentKind, StateError, SwapOffer,
 };
 use xln_rscore_protocol::PersistentNodeChanges;
 
@@ -57,6 +57,11 @@ pub struct AccountCheckpointRows {
     pub lending_intents: PersistentNodeChanges<LendingIntentKind>,
     pub swap_offers: PersistentNodeChanges<SwapOffer>,
     pub rebalance_fee_policies: PersistentNodeChanges<BilateralRebalanceFeePolicy>,
+    /// Content-verified jurisdiction-claim Patricia nodes. Unlike the five
+    /// radix sections these nodes are keyed by their Keccak digest, so their
+    /// incremental representation is a sorted put/delete set rather than a
+    /// radix path diff.
+    pub j_claim_nodes: JClaimNodeChanges,
     pub consensus: ConsensusSnapshot,
 }
 
@@ -82,6 +87,7 @@ impl AccountCheckpointRows {
             + self.lending_intents.puts.len()
             + self.swap_offers.puts.len()
             + self.rebalance_fee_policies.puts.len()
+            + self.j_claim_nodes.new_nodes.len()
     }
 
     pub fn del_count(&self) -> usize {
@@ -90,6 +96,7 @@ impl AccountCheckpointRows {
             + self.lending_intents.dels.len()
             + self.swap_offers.dels.len()
             + self.rebalance_fee_policies.dels.len()
+            + self.j_claim_nodes.replaced_node_hashes.len()
     }
 }
 
@@ -247,25 +254,31 @@ pub(crate) fn account_rows(
     signer_id: &str,
 ) -> Result<AccountCheckpointRows, StateError> {
     let state = account.replica().state();
-    let (deltas, locks, lending_intents, swap_offers, rebalance_fee_policies) = match previous {
-        Some(previous) => {
-            let prior = previous.replica().state();
-            (
-                state.delta_node_changes_since(prior),
-                state.htlc_node_changes_since(prior),
-                state.lending_node_changes_since(prior),
-                state.swap_offer_node_changes_since(prior),
-                state.rebalance_policy_node_changes_since(prior),
-            )
-        }
-        None => (
-            full(state.delta_node_records()),
-            full(state.htlc_node_records()),
-            full(state.lending_node_records()),
-            full(state.swap_offer_node_records()),
-            full(state.rebalance_policy_node_records()),
-        ),
-    };
+    let (deltas, locks, lending_intents, swap_offers, rebalance_fee_policies, j_claim_nodes) =
+        match previous {
+            Some(previous) => {
+                let prior = previous.replica().state();
+                (
+                    state.delta_node_changes_since(prior),
+                    state.htlc_node_changes_since(prior),
+                    state.lending_node_changes_since(prior),
+                    state.swap_offer_node_changes_since(prior),
+                    state.rebalance_policy_node_changes_since(prior),
+                    state.j_claim_node_changes_since(prior),
+                )
+            }
+            None => (
+                full(state.delta_node_records()),
+                full(state.htlc_node_records()),
+                full(state.lending_node_records()),
+                full(state.swap_offer_node_records()),
+                full(state.rebalance_policy_node_records()),
+                JClaimNodeChanges {
+                    new_nodes: state.j_claim_node_entries(),
+                    replaced_node_hashes: Vec::new(),
+                },
+            ),
+        };
     Ok(AccountCheckpointRows {
         account_id,
         account_leaf,
@@ -307,6 +320,7 @@ pub(crate) fn account_rows(
         lending_intents,
         swap_offers,
         rebalance_fee_policies,
+        j_claim_nodes,
         consensus: account.consensus_snapshot(),
     })
 }

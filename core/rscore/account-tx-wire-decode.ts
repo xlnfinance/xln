@@ -7,6 +7,7 @@
  */
 import { HTLC_OPAQUE_CIPHERTEXT_VERSION } from '../protocol/htlc/multi-recipient';
 import type { AccountTx } from '../types/account';
+import { jEventClaimFromWire } from './process/j-claim-wire';
 
 export const rscoreWireDecodeFail = (code: string): never => {
   throw new Error(`RSCORE_WAVE_DECODE:${code}`);
@@ -217,6 +218,8 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
     }
     case 8:
       return decodeSwapResolve(row);
+    case 9:
+      return jEventClaimFromWire(row);
     default:
       return rscoreWireDecodeFail('tx.tag:unknown');
   }

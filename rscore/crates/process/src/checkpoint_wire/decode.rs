@@ -36,7 +36,7 @@ pub fn restore_request(
 }
 
 fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
-    let fields = exact(tuple(value)?, 9, "accountRestore")?;
+    let fields = exact(tuple(value)?, 10, "accountRestore")?;
     let account_id = AccountId::from_bytes(fixed_bytes(&fields[0], "accountId")?);
     let account_leaf = fixed_bytes(&fields[1], "accountLeaf")?;
     let header = header(&fields[2])?;
@@ -60,7 +60,17 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         .iter()
         .map(policy_entry)
         .collect::<Result<_, _>>()?;
-    let consensus = consensus(&fields[8])?;
+    let j_claim_nodes = tuple(&fields[8])?
+        .iter()
+        .map(|entry| {
+            let row = exact(tuple(entry)?, 2, "jClaimNodeEntry")?;
+            Ok((
+                fixed_bytes(&row[0], "jClaimNodeHash")?,
+                crate::wire_decode::decode_j_claim_node(&row[1])?,
+            ))
+        })
+        .collect::<Result<Vec<_>, ProcessError>>()?;
+    let consensus = consensus(&fields[9])?;
     let AccountCheckpointHeader {
         owner,
         signer_id,
@@ -98,6 +108,7 @@ fn account_restore(value: &AbiValue) -> Result<AccountRestore, ProcessError> {
         })?,
     )?;
     replica.set_envelope(envelope);
+    replica.restore_j_claim_nodes(j_claim_nodes)?;
     if let Some(address) = delta_transformer {
         replica.set_delta_transformer(address);
     }

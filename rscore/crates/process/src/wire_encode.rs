@@ -200,6 +200,18 @@ fn output(value: &IndexedOutput) -> AbiValue {
 
 fn account_output(value: &AccountOutput) -> AbiValue {
     match value {
+        AccountOutput::AccountSettledFinalized {
+            token_id,
+            j_height,
+            collateral,
+            ondelta,
+        } => tuple(vec![
+            AbiValue::Integer(6),
+            integer(token_id.get()),
+            integer(*j_height),
+            big(collateral),
+            big(ondelta),
+        ]),
         AccountOutput::DirectPaymentForward {
             token_id,
             amount,
@@ -253,9 +265,14 @@ fn account_output(value: &AccountOutput) -> AbiValue {
             AbiValue::Text(offer.quantized_give.to_string()),
             AbiValue::Text(offer.quantized_want.to_string()),
         ]),
-        AccountOutput::SwapOfferRemove { offer_id } => {
-            tuple(vec![AbiValue::Integer(4), AbiValue::Text(offer_id.clone())])
-        }
+        AccountOutput::SwapOfferRemove {
+            offer_id,
+            maker_is_left,
+        } => tuple(vec![
+            AbiValue::Integer(4),
+            AbiValue::Text(offer_id.clone()),
+            AbiValue::Integer(i128::from(!maker_is_left)),
+        ]),
         AccountOutput::SwapCancelRequest { offer_id } => {
             tuple(vec![AbiValue::Integer(5), AbiValue::Text(offer_id.clone())])
         }
@@ -925,6 +942,21 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
             optional_big(resting_quantized_give),
             optional_big(resting_quantized_want),
         ],
+        AccountTx::JEventClaim(claim) => vec![
+            integer(9),
+            integer(claim.j_height),
+            AbiValue::Bytes(claim.j_block_hash.to_vec()),
+            AbiValue::Bytes(xln_rscore_engine::canonical_events_hash(&claim.events)?.to_vec()),
+            tuple(
+                claim
+                    .events
+                    .iter()
+                    .map(jurisdiction_event)
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            j_claim_proof(claim.left_proof.as_ref())?,
+            j_claim_proof(claim.right_proof.as_ref())?,
+        ],
         // Every kind the frame hash cannot express is refused at admission, so
         // one cannot reach a proposal.
         other => {
@@ -937,6 +969,88 @@ pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate
         }
     };
     Ok(tuple(fields))
+}
+
+fn jurisdiction_event(
+    value: &xln_rscore_engine::JurisdictionEvent,
+) -> Result<AbiValue, crate::ProcessError> {
+    match value {
+        xln_rscore_engine::JurisdictionEvent::AccountSettled(event) => Ok(tuple(vec![
+            integer(0),
+            j_event_metadata(&event.metadata),
+            AbiValue::Bytes(event.left_entity.as_bytes().to_vec()),
+            AbiValue::Bytes(event.right_entity.as_bytes().to_vec()),
+            integer(event.token_id.get()),
+            big(&event.left_reserve),
+            big(&event.right_reserve),
+            big(&event.collateral),
+            big(&event.ondelta),
+            integer(event.nonce),
+        ])),
+    }
+}
+
+fn j_event_metadata(value: &xln_rscore_engine::JEventMetadata) -> AbiValue {
+    tuple(vec![
+        value.block_number.map_or(AbiValue::Nil, integer),
+        value
+            .block_hash
+            .map_or(AbiValue::Nil, |hash| AbiValue::Bytes(hash.to_vec())),
+        value
+            .transaction_hash
+            .map_or(AbiValue::Nil, |hash| AbiValue::Bytes(hash.to_vec())),
+        value.log_index.map_or(AbiValue::Nil, integer),
+        value.event_index.map_or(AbiValue::Nil, integer),
+    ])
+}
+
+fn j_claim_proof(
+    value: Option<&xln_rscore_engine::JClaimProof>,
+) -> Result<AbiValue, crate::ProcessError> {
+    let Some(proof) = value else {
+        return Ok(AbiValue::Nil);
+    };
+    Ok(tuple(vec![
+        integer(1),
+        tuple(
+            proof
+                .nodes
+                .iter()
+                .map(j_claim_node)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    ]))
+}
+
+pub(crate) fn j_claim_node(
+    value: &xln_rscore_engine::JClaimNode,
+) -> Result<AbiValue, crate::ProcessError> {
+    Ok(match value {
+        xln_rscore_engine::JClaimNode::Leaf { key, record } => tuple(vec![
+            integer(0),
+            AbiValue::Bytes(key.to_vec()),
+            j_claim_record(record),
+        ]),
+        xln_rscore_engine::JClaimNode::Branch { bit, left, right } => tuple(vec![
+            integer(1),
+            integer(*bit),
+            AbiValue::Bytes(left.to_vec()),
+            AbiValue::Bytes(right.to_vec()),
+        ]),
+    })
+}
+
+fn j_claim_record(value: &xln_rscore_engine::JClaimRecord) -> AbiValue {
+    tuple(vec![
+        AbiValue::Bytes(value.account_key.to_vec()),
+        integer(match value.side {
+            xln_rscore_engine::JClaimSide::Left => 0,
+            xln_rscore_engine::JClaimSide::Right => 1,
+        }),
+        integer(value.j_height),
+        AbiValue::Bytes(value.j_block_hash.to_vec()),
+        AbiValue::Bytes(value.events_hash.to_vec()),
+    ])
 }
 
 /// A `0x`-prefixed hex string as the bytes the decoder expects. The wire is

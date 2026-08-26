@@ -27,6 +27,10 @@ import {
   type AccountStateMapNamespace,
 } from '../../account/state/persistent-state-map';
 import { buffersEqual } from '../../protocol/serialization';
+import {
+  decodeRscoreJClaimNodeChanges,
+  type RscoreJClaimNodeChanges,
+} from './j-claim-checkpoint';
 
 type RscoreCheckpointTreeDescriptor = Readonly<{ root: string; leafCount: number }>;
 
@@ -77,6 +81,7 @@ export type RscoreAccountCheckpointRow = Readonly<{
     swapOffers: RscoreCheckpointNodeChanges;
     rebalanceFeePolicies: RscoreCheckpointNodeChanges;
   }>;
+  jClaimNodeChanges: RscoreJClaimNodeChanges;
   /**
    * The consensus half of the row: mempool, pending frame, acknowledgement
    * and dispute drafts. It does not depend on the state trees, so it decodes
@@ -320,7 +325,7 @@ const header = (
 };
 
 export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckpointRow => {
-  const row = rscoreCheckpointTuple(value, 10, 'WAVE_POST_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 11, 'WAVE_POST_ACCOUNT');
   const accountId = rscoreCheckpointBytes(row[0], 32, 'WAVE_POST_ACCOUNT_ID');
   const parsedHeader = header(row[2], accountId);
   const rawSections = rscoreCheckpointTuple(row[3], 5, 'WAVE_POST_ACCOUNT_SECTIONS');
@@ -347,6 +352,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     header: parsedHeader,
     sections,
     nodeChanges,
-    consensus: decodeRscoreConsensusSeed(row[9], RSCORE_CUTOVER_VERIFY),
+    jClaimNodeChanges: decodeRscoreJClaimNodeChanges(row[9], 'postAccount.jClaimNodes'),
+    consensus: decodeRscoreConsensusSeed(row[10], RSCORE_CUTOVER_VERIFY),
   };
 };

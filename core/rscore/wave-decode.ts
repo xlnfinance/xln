@@ -132,8 +132,16 @@ export type WaveOutput =
       reason: string | null;
     }
   | { kind: 'swapOfferUpsert'; offer: WaveSwapOffer }
-  | { kind: 'swapOfferRemove'; offerId: string }
-  | { kind: 'swapCancelRequest'; offerId: string };
+  | { kind: 'swapOfferRemove'; offerId: string; makerIsRight: 0 | 1 }
+  | { kind: 'swapCancelRequest'; offerId: string }
+  | {
+      /** Bilateral J-event claim reached finality inside the Account machine. */
+      kind: 'accountSettledFinalized';
+      tokenId: number;
+      jHeight: number;
+      collateral: string;
+      ondelta: string;
+    };
 
 type WaveSwapOffer = {
   offerId: string;
@@ -774,12 +782,30 @@ const decodeOutput = (value: unknown): WaveOutput => {
       };
     }
     case 4: {
-      const fields = rscoreWireTuple(row, 2, 'output.swapOfferRemove');
-      return { kind: 'swapOfferRemove', offerId: rscoreWireText(fields[1], 'output.offerId') };
+      const fields = rscoreWireTuple(row, 3, 'output.swapOfferRemove');
+      const makerIsRight = rscoreWireInt(fields[2], 'output.makerIsRight');
+      if (makerIsRight !== 0 && makerIsRight !== 1) {
+        return rscoreWireDecodeFail(`output.makerIsRight:${makerIsRight}`);
+      }
+      return {
+        kind: 'swapOfferRemove',
+        offerId: rscoreWireText(fields[1], 'output.offerId'),
+        makerIsRight,
+      };
     }
     case 5: {
       const fields = rscoreWireTuple(row, 2, 'output.swapCancelRequest');
       return { kind: 'swapCancelRequest', offerId: rscoreWireText(fields[1], 'output.offerId') };
+    }
+    case 6: {
+      const fields = rscoreWireTuple(row, 5, 'output.accountSettledFinalized');
+      return {
+        kind: 'accountSettledFinalized',
+        tokenId: rscoreWireInt(fields[1], 'output.tokenId'),
+        jHeight: rscoreWireInt(fields[2], 'output.jHeight'),
+        collateral: rscoreWireBig(fields[3], 'output.collateral').toString(),
+        ondelta: rscoreWireBig(fields[4], 'output.ondelta').toString(),
+      };
     }
     default:
       return rscoreWireDecodeFail(`output.tag:${String(row[0])}`);
@@ -842,6 +868,14 @@ export const waveOutputRow = (output: WaveOutput): ShadowOutputRow => {
       return ['offerRemove', output.offerId];
     case 'swapCancelRequest':
       return ['cancelRequest', output.offerId];
+    case 'accountSettledFinalized':
+      return [
+        'accountSettledFinalized',
+        output.tokenId,
+        output.jHeight,
+        output.collateral,
+        output.ondelta,
+      ];
   }
 };
 
@@ -940,9 +974,11 @@ const outputWire = (output: WaveOutput): RscoreWireValue => {
       ];
     }
     case 'swapOfferRemove':
-      return [4, output.offerId];
+      return [4, output.offerId, output.makerIsRight];
     case 'swapCancelRequest':
       return [5, output.offerId];
+    case 'accountSettledFinalized':
+      return [6, output.tokenId, output.jHeight, output.collateral, output.ondelta];
   }
 };
 

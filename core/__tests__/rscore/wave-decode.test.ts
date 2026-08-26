@@ -66,6 +66,7 @@ const emptyPostAccount = (
     changes,
     changes,
     changes,
+    changes,
     emptyConsensus(),
   ];
 };
@@ -382,7 +383,7 @@ describe('rscore staged wave decoder', () => {
         1,
         ackStateHash,
         [
-          [4, 'ack-remove'],
+          [4, 'ack-remove', 0],
           [1, 'ack-lock', 'ack-hashlock', 'ack-secret', 7, '12'],
         ],
         committedFrameEvidence(ackStateHash, false),
@@ -434,7 +435,7 @@ describe('rscore staged wave decoder', () => {
       throw new Error('RSCORE_TEST_EXPECTED_FRAME_ACK_FRAME_COMMIT');
     }
     expect(verdict.ackVerdict.outputs).toEqual([
-      { kind: 'swapOfferRemove', offerId: 'ack-remove' },
+      { kind: 'swapOfferRemove', offerId: 'ack-remove', makerIsRight: 0 },
       {
         kind: 'htlcSecret',
         lockId: 'ack-lock',
@@ -603,7 +604,7 @@ describe('rscore staged wave decoder', () => {
       changedConsensus[6] as RscoreWireValue[][],
       0,
       'CHANGED_CONSENSUS_POST',
-    )[9] as RscoreWireValue[];
+    )[10] as RscoreWireValue[];
     changedConsensusRow[3] = 1;
     expect(() => resolve(changedConsensus)).toThrow('ACCOUNT_LEAF_MISMATCH');
 

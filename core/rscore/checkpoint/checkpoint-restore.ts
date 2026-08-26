@@ -28,6 +28,10 @@ import {
   type RscoreAccountStateTrees,
 } from './checkpoint-restore-state';
 import { rscoreCheckpointTuple } from './checkpoint-wire';
+import {
+  decodeRscoreExactJClaimNodes,
+  type RscoreJClaimNodeEntry,
+} from './j-claim-checkpoint';
 
 const RSCORE_ROOT_ONLY_CARRIED_SECTIONS = Object.freeze([
   'pulls',
@@ -44,6 +48,7 @@ export type RscoreDecodedAccountRestore = Readonly<{
   entityAccountLeaf: string;
   stateSeed: RscoreAccountStateSeed;
   consensus: RscoreConsensusSeed;
+  jClaimNodes: readonly RscoreJClaimNodeEntry[];
   /** Bodies are not present in the exact checkpoint; only these roots are. */
   rootOnlyCarriedSections: typeof RSCORE_ROOT_ONLY_CARRIED_SECTIONS;
 }>;
@@ -275,14 +280,15 @@ const restoredMempoolRoot = (
 };
 
 export const decodeRscoreAccountRestoreRow = (value: unknown): RscoreDecodedAccountRestore => {
-  const row = rscoreCheckpointTuple(value, 9, 'RESTORE_ACCOUNT');
+  const row = rscoreCheckpointTuple(value, 10, 'RESTORE_ACCOUNT');
   return buildRscoreAccountRestore(
     checkpointHex(row[0], 32, 'ACCOUNT_ID'),
     checkpointHex(row[1], 32, 'ACCOUNT_LEAF'),
     row[2],
     decodeRscoreAccountStateTrees(row.slice(3, 8)),
-    decodeRscoreConsensusSeed(row[8]),
+    decodeRscoreConsensusSeed(row[9]),
     true,
+    decodeRscoreExactJClaimNodes(row[8], 'RESTORE_J_CLAIM_NODES'),
   );
 };
 
@@ -301,6 +307,7 @@ export const buildRscoreAccountRestore = (
   trees: RscoreAccountStateTrees,
   consensus: RscoreConsensusSeed,
   verify: boolean,
+  jClaimNodes: readonly RscoreJClaimNodeEntry[] = [],
 ): RscoreDecodedAccountRestore => {
   const stateSeed = decodeRscoreAccountStateSeed(accountId, headerValue, trees);
   if (stateSeed.domain.chainId === 0) checkpointRestoreFail('CHAIN_ID_ZERO');
@@ -330,6 +337,7 @@ export const buildRscoreAccountRestore = (
     entityAccountLeaf: storedEntityAccountLeaf,
     stateSeed,
     consensus,
+    jClaimNodes,
     rootOnlyCarriedSections: RSCORE_ROOT_ONLY_CARRIED_SECTIONS,
   };
 };

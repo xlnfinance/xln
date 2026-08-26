@@ -14,7 +14,7 @@ mod peer_wire;
 fn hello_requires_exact_build_owned_payment_profile_binding() {
     assert_eq!(
         hex::encode(crate::PAYMENT_PROFILE_BINDING.protocol_fingerprint),
-        "05cc3820ad39f9495edec092df80405804139a03e23ac968d3de5fc058a00943"
+        "c53168cc9945a471eea8b6f966fb4252aaa6bd0dfb1b4867044ade62b544f8be"
     );
 
     let mut session = ProcessSession::new();
@@ -874,7 +874,8 @@ fn tuple_fields(value: &AbiValue) -> Vec<AbiValue> {
 }
 
 pub(crate) fn materialize_restore_row(value: &AbiValue) -> AbiValue {
-    let fields = exact_tuple(value, 10, "checkpoint account");
+    let fields = exact_tuple(value, 11, "checkpoint account");
+    let j_claim_changes = exact_tuple(&fields[9], 2, "j claim node changes");
     tuple_of(vec![
         fields[0].clone(),
         fields[1].clone(),
@@ -884,7 +885,8 @@ pub(crate) fn materialize_restore_row(value: &AbiValue) -> AbiValue {
         tuple_of(lending_values(&fields[6])),
         tuple_of(leaf_values(&fields[7])),
         tuple_of(policy_values(&fields[8])),
-        fields[9].clone(),
+        j_claim_changes[0].clone(),
+        fields[10].clone(),
     ])
 }
 

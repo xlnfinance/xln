@@ -10,6 +10,15 @@ import {
   type PreparedRscoreCheckpointStorage,
 } from '../../../../storage/schema/rscore/checkpoint';
 import type { RuntimeDbLike } from '../../../../storage/types';
+import {
+  getAccountJClaimKey,
+  hashAccountJClaimNode,
+} from '../../../../account/j-claims/j-claim-codec';
+import { jClaimNodeWire } from '../../../../rscore/process/j-claim-wire';
+import type {
+  AccountJClaimNode,
+  AccountJClaimRecord,
+} from '../../../../types/finance/account-j-claims';
 
 const OWNER = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = `0x${'bb'.repeat(32)}`;
@@ -79,6 +88,8 @@ const checkpoint = (
     leafValue?: Uint8Array;
     branchValue?: Uint8Array;
     deleteNodes?: boolean;
+    jClaimPuts?: readonly RscoreWireValue[];
+    jClaimDels?: readonly Uint8Array[];
     removeAccount?: boolean;
   }> = {},
 ): RscoreCheckpointChanges => {
@@ -111,12 +122,53 @@ const checkpoint = (
     emptyTree,
     emptyTree,
     emptyTree,
+    [options.jClaimPuts ?? [], options.jClaimDels ?? []],
     [null, null, null, null, null, null, null, null, null, null, null],
   ];
   return { commitToken, restoreToken, accounts: [account], removed: [] };
 };
 
 describe('rscore physical checkpoint storage', () => {
+  test('persists and deletes content-verified J-claim nodes by their exact digest', async () => {
+    const { db } = makeMemoryDb();
+    const record: AccountJClaimRecord = {
+      version: 1,
+      accountKey: `0x${'11'.repeat(32)}`,
+      side: 'left',
+      jHeight: 7,
+      jBlockHash: `0x${'22'.repeat(32)}`,
+      eventsHash: `0x${'33'.repeat(32)}`,
+    };
+    const node: AccountJClaimNode = {
+      version: 1,
+      type: 'leaf',
+      key: getAccountJClaimKey(record),
+      record,
+    };
+    const hash = hashAccountJClaimNode(node);
+    const hashBytes = Buffer.from(hash.slice(2), 'hex');
+    const put: RscoreWireValue = [hashBytes, jClaimNodeWire(node)];
+    const input = (value: RscoreCheckpointChanges) => [{
+      ownerEntityId: OWNER,
+      protocolFingerprint: FINGERPRINT,
+      checkpoint: value,
+    }];
+
+    const inserted = await prepareRscoreCheckpointStorage(
+      db,
+      input(checkpoint(0, 1, { jClaimPuts: [put] })),
+    );
+    await apply(db, inserted);
+    expect((await loadRscoreCheckpoint(db, OWNER))?.accounts[0]?.[8]).toEqual([put]);
+
+    const deleted = await prepareRscoreCheckpointStorage(
+      db,
+      input(checkpoint(1, 2, { jClaimDels: [hashBytes] })),
+    );
+    await apply(db, deleted);
+    expect((await loadRscoreCheckpoint(db, OWNER))?.accounts[0]?.[8]).toEqual([]);
+  });
+
   test('rejects a semantic leaf stored under a different physical key', async () => {
     const { db, rows } = makeMemoryDb();
     const plan = await prepareRscoreCheckpointStorage(db, [{

@@ -39,6 +39,8 @@ pub enum StateError {
     CriticalProposalFailure { kind: &'static str, reason: String },
     #[error("ACCOUNT_STATE_LEAF_TOO_LARGE:{actual}:{maximum}")]
     AccountStateLeafTooLarge { actual: usize, maximum: usize },
+    #[error("{0}")]
+    JClaim(String),
     #[error("ACCOUNT_DISPUTE_{side}_RESPONSE_SECONDS_INVALID:{value}")]
     InvalidDisputeResponseSeconds { side: &'static str, value: u64 },
     #[error("ACCOUNT_DISPUTE_RESPONSE_TOTAL_EXCEEDED:{0}")]

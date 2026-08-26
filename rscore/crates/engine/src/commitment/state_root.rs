@@ -20,13 +20,12 @@ pub(crate) struct AccountJournal {
     pub last_finalized_j_height: u64,
 }
 
-/// Sections the engine does not interpret but must commit verbatim.
+/// Roots without native bodies plus the two native J-claim accumulators.
 ///
-/// No supported transaction (payments, HTLC lock/resolve) mutates any of
-/// them, so carrying their roots preserves the exact account state root of a
-/// live account whose swap/pull/lending/rebalance/J-claim state is non-empty.
-/// What the engine computes itself (deltas, locks, the accounts tree) is still
-/// verified independently; these are faithfully preserved, not re-derived.
+/// Pulls, subcontracts and requested-rebalance maps remain opaque commitments.
+/// J-claim roots/counts are updated only through verified Patricia witnesses;
+/// the corresponding node store lives beside `AccountState` and is restored
+/// independently from the checkpoint node table.
 #[derive(Clone, Default)]
 pub struct CarriedSections {
     pub pulls_root: [u8; 32],
@@ -37,7 +36,7 @@ pub struct CarriedSections {
     pub right_pending_j_claims: JClaimAccumulator,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JClaimAccumulator {
     pub root: [u8; 32],
     pub count: u64,

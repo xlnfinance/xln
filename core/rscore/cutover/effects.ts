@@ -81,6 +81,7 @@ const offerCreated = (row: AccountSwapOfferSnapshot): SwapOfferEvent => ({
  */
 export const cutoverAccountEffects = (
   prior: AccountReplica | null,
+  ownerEntityId: string,
   accountId: string,
   outputs: readonly WaveOutput[],
 ): CutoverAccountEffects => {
@@ -130,9 +131,15 @@ export const cutoverAccountEffects = (
       }
       case 'swapOfferRemove': {
         candidateEffects.push({ kind: 'swapOfferRemove', offerId: output.offerId });
-        const makerIsLeft = makers.get(output.offerId);
-        if (makerIsLeft === undefined) {
-          return fail('OFFER_MAKER_UNKNOWN', { account: accountId, offer: output.offerId });
+        const makerIsLeft = output.makerIsRight === 0;
+        const priorMaker = makers.get(output.offerId);
+        if (priorMaker !== undefined && priorMaker !== makerIsLeft) {
+          return fail('OFFER_MAKER_MISMATCH', {
+            account: accountId,
+            offer: output.offerId,
+            priorMakerIsLeft: priorMaker,
+            outputMakerIsLeft: makerIsLeft,
+          });
         }
         const maker = makerIsLeft ? sides.left : sides.right;
         if (maker.length === 0) {
@@ -146,6 +153,33 @@ export const cutoverAccountEffects = (
         candidateEffects.push({ kind: 'swapCancelRequest', offerId: output.offerId });
         swapCancelRequests.push({ offerId: output.offerId, accountId });
         break;
+      case 'accountSettledFinalized': {
+        const data = {
+          entityId: ownerEntityId,
+          accountId,
+          tokenId: output.tokenId,
+          jHeight: output.jHeight,
+          collateral: output.collateral,
+          ondelta: output.ondelta,
+        };
+        candidateEffects.push({
+          kind: 'runtimeEvent',
+          eventName: 'account_settled_finalized_bilateral',
+          data,
+        });
+        candidateEffects.push({
+          kind: 'debug',
+          payload: {
+            level: 'info',
+            code: 'REB_STEP',
+            step: 5,
+            status: 'ok',
+            event: 'account_settled_finalized_bilateral',
+            ...data,
+          },
+        });
+        break;
+      }
       default:
         return fail('KIND_UNSUPPORTED', { account: accountId, output });
     }

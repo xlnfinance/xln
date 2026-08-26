@@ -150,7 +150,8 @@ fn append_outputs(
 pub(crate) const fn supported(tx: &AccountTx) -> bool {
     matches!(
         tx,
-        AccountTx::AddDelta { .. }
+        AccountTx::JEventClaim(_)
+            | AccountTx::AddDelta { .. }
             | AccountTx::SetCreditLimit { .. }
             | AccountTx::DirectPayment { .. }
             | AccountTx::HtlcLock(_)
@@ -164,6 +165,7 @@ pub(crate) const fn supported(tx: &AccountTx) -> bool {
 
 pub(crate) const fn tx_tag(tx: &AccountTx) -> &'static str {
     match tx {
+        AccountTx::JEventClaim(_) => "j_event_claim",
         AccountTx::AddDelta { .. } => "add_delta",
         AccountTx::SetCreditLimit { .. } => "set_credit_limit",
         AccountTx::DirectPayment { .. } => "direct_payment",

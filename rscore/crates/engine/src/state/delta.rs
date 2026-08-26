@@ -192,6 +192,18 @@ impl Delta {
         Ok(())
     }
 
+    pub(crate) fn apply_j_settlement(
+        &mut self,
+        collateral: &BigInt,
+        ondelta: &BigInt,
+    ) -> Result<(), StateError> {
+        unsigned("collateral", collateral, &uint_max(256))?;
+        signed("ondelta", ondelta, 256)?;
+        self.collateral = collateral.clone();
+        self.ondelta = ondelta.clone();
+        Ok(())
+    }
+
     pub fn perspective(&self, side: Side) -> DeltaPerspective {
         let left = self.left_perspective();
         if side == Side::Left {

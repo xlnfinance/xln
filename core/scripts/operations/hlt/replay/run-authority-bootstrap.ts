@@ -6,7 +6,7 @@ import {
   authorityEvidenceBinary,
   freshAuthorityEvidenceDir,
   runAuthorityEvidenceGate,
-} from './authority-evidence-gate-support';
+} from './evidence/gate-support';
 
 const unknownArgs = process.argv.slice(2).filter(value => value !== '--restart');
 if (unknownArgs.length > 0) throw new Error(`RSCORE_BOOTSTRAP_ARGUMENT_UNKNOWN:${unknownArgs[0]}`);

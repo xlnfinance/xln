@@ -141,7 +141,7 @@ describe('orderbook admission', () => {
     expect(admitted?.offerId).toBe(offer.offerId);
   });
 
-  test('authoritative output still waits behind an already queued lifecycle tx', () => {
+  test('authoritative output does not consult the stale TS consensus envelope', () => {
     const offer = committedOffer();
     const state = createEntityFrameCandidateState(
       makeState(MAKER, addr('a1'), jurisdiction, TAKER),
@@ -152,11 +152,12 @@ describe('orderbook admission', () => {
       data: { offerId: offer.offerId },
     });
     state.accounts.set(TAKER, account);
-    expect(() => admitOrderbookOfferForMatching(
+    const admitted = admitOrderbookOfferForMatching(
       env,
       state,
       candidateFor(offer, { accountOutputVerified: true }),
-    )).toThrow('ORDERBOOK_ORDER_NOT_READY');
+    );
+    expect(admitted?.offerId).toBe(offer.offerId);
   });
 
   test.each([

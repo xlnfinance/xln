@@ -149,15 +149,14 @@ export const admitOrderbookOfferForMatching = (
       throw haltRuntimeFailure("ORDERBOOK_ACCOUNT_OUTPUT_ACCOUNT_MISSING", `ORDERBOOK_ACCOUNT_OUTPUT_ACCOUNT_MISSING: account=${offer.accountId} offer=${offer.offerId}`);
     }
     if ((account.status ?? 'active') !== 'active') return null;
-    if (outputVerified && hasQueuedOrderLifecycleTx(account, offer.offerId)) {
-      throw haltRuntimeFailure("ORDERBOOK_ORDER_NOT_READY", `ORDERBOOK_ORDER_NOT_READY: account=${offer.accountId} offer=${offer.offerId}`);
-    }
     // A Rust authority visit returns typed child-machine outputs before the
     // final Account materialization. The output is the commitment evidence:
     // the transition emits it only after placing the exact give hold and the
     // resting row in the candidate that the signed frame commits. Re-reading
-    // the intentionally stale TS Account mirror here would reject a valid
-    // child output and reintroduce a third Account synchronization visit.
+    // either financial state or envelope fields from the intentionally stale
+    // TS Account mirror here would reject a valid child output and reintroduce
+    // a third Account synchronization visit. Rust remains the sole judge of
+    // its resident pending frame and mempool when the outbound batch runs.
     if (!outputVerified) assertSameJurisdictionOrderHoldCommitted(account, offer);
   }
   return markWorkingOrderbookOffer(offer);

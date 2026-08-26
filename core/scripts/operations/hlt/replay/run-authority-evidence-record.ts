@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import {
   freshAuthorityEvidenceDir,
   runAuthorityEvidenceGate,
-} from './authority-evidence-gate-support';
+} from './evidence/gate-support';
 
 const workDir = freshAuthorityEvidenceDir('xln-rscore-authority-evidence-');
 const output = join(workDir, 'hlt-hub-recording.json');

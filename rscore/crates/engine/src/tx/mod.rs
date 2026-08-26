@@ -8,7 +8,7 @@ pub(crate) mod handlers;
 
 use num_bigint::BigInt;
 
-use crate::{HtlcLockTx, HtlcResolveTx, TokenId};
+use crate::{HtlcLockTx, HtlcResolveTx, JEventClaimTx, TokenId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliveryMode {
@@ -37,6 +37,7 @@ pub enum ReserveSide {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountTx {
+    JEventClaim(JEventClaimTx),
     AddDelta {
         token_id: TokenId,
     },

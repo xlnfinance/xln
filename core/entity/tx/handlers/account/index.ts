@@ -149,13 +149,18 @@ const logIncomingAccountInput = (
   });
 };
 
+type PreparedInboundResolution = ReturnType<typeof resolveInboundAccount> & Readonly<{
+  /** Rust already consumed the H=0 genesis and returned the authenticated H=1 replica. */
+  preparedByAuthority: boolean;
+}>;
+
 const resolvePreparedInboundAccount = (
   state: EntityState,
   input: AccountPeerInput,
   accountConsensusContext: AccountConsensusContext,
   hasAck: boolean,
   hasProposal: boolean,
-): ReturnType<typeof resolveInboundAccount> => {
+): PreparedInboundResolution => {
   try {
     const authorityScope = accountConsensusContext.accountAuthorityExecutionScope;
     const preparedGenesis = authorityScope?.preparedInboundGenesis?.(
@@ -167,15 +172,19 @@ const resolvePreparedInboundAccount = (
         account: preparedGenesis,
         counterpartyId: normalizeEntityRef(input.fromEntityId),
         createdAccount: true,
+        preparedByAuthority: true,
       };
     }
-    return resolveInboundAccount(
+    return {
+      ...resolveInboundAccount(
       state,
       input,
       hasAck,
       hasProposal,
       authorityScope?.hasPreparedAccountInput?.(input.fromEntityId, input) === true,
-    );
+      ),
+      preparedByAuthority: false,
+    };
   } catch (error) {
     if (!(error instanceof AccountPeerEvidenceError)) throw error;
     const dump = safeStringify({
@@ -220,8 +229,8 @@ const prepareAccountInputToEntity = (
     Boolean(incomingAck),
     Boolean(incomingProposal),
   );
-  const { account, counterpartyId, createdAccount } = resolution;
-  if (createdAccount && authorityRecordEnabled()) {
+  const { account, counterpartyId, createdAccount, preparedByAuthority } = resolution;
+  if (createdAccount && !preparedByAuthority && authorityRecordEnabled()) {
     // The inbound H=0 replica is complete here but has not consumed the peer's
     // H=1 input yet. Create must occupy the immediately preceding wave slot;
     // seeding the post-input replica would hide the very transition Rust owns.

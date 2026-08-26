@@ -3,11 +3,12 @@ use xln_rscore_abi::{AbiValue, Envelope, OpTag};
 use xln_rscore_batch::{AccountId, AccountInputAuthority, AccountSeed, BatchJob};
 use xln_rscore_engine::{
     AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountFrame, AccountIdentity,
-    AccountReplica, AccountState, AccountStateSeed, AccountTx, BilateralRebalanceFeePolicy,
-    CarriedSections, DeliveryMode, Delta, DepositoryAddress, HtlcDeliveryMode, HtlcHashlock,
-    HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx, JClaimAccumulator,
-    OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, Side, SwapMarketPolicy, SwapOffer, SwapToken,
-    TokenId, WatchSeed,
+    AccountReplica, AccountSettledEvent, AccountState, AccountStateSeed, AccountTx,
+    BilateralRebalanceFeePolicy, CarriedSections, DeliveryMode, Delta, DepositoryAddress,
+    HtlcDeliveryMode, HtlcHashlock, HtlcLock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx,
+    JClaimAccumulator, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, JEventClaimTx,
+    JEventMetadata, JurisdictionEvent, OpaqueHtlcCiphertext, RebalanceFeePolicySnapshot, Side,
+    SwapMarketPolicy, SwapOffer, SwapToken, TokenId, WatchSeed,
 };
 
 use crate::wire_value::{
@@ -992,8 +993,139 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         6 => decode_swap_offer(fields),
         7 => decode_swap_cancel_request(fields),
         8 => decode_swap_resolve(fields),
+        9 => decode_j_event_claim(fields),
         value => Err(ProcessError::Tag { field: "tx", value }),
     }
+}
+
+fn decode_j_event_claim(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {
+    let fields = exact(fields, 7, "jEventClaim")?;
+    let events = tuple(&fields[4])?
+        .iter()
+        .map(decode_jurisdiction_event)
+        .collect::<Result<Vec<_>, _>>()?;
+    let supplied_events_hash = fixed_bytes(&fields[3], "jClaimEventsHash")?;
+    let actual_events_hash = xln_rscore_engine::canonical_events_hash(&events)?;
+    if supplied_events_hash != actual_events_hash {
+        return Err(ProcessError::Expected("jClaimEventsHashMismatch"));
+    }
+    Ok(AccountTx::JEventClaim(JEventClaimTx {
+        j_height: js_number(&fields[1], "jClaimHeight")?,
+        j_block_hash: fixed_bytes(&fields[2], "jClaimBlockHash")?,
+        events,
+        left_proof: decode_j_claim_proof(&fields[5], "leftJClaimProof")?,
+        right_proof: decode_j_claim_proof(&fields[6], "rightJClaimProof")?,
+    }))
+}
+
+fn decode_jurisdiction_event(value: &AbiValue) -> Result<JurisdictionEvent, ProcessError> {
+    let fields = exact(tuple(value)?, 10, "jurisdictionEvent")?;
+    match integer(&fields[0])? {
+        0 => Ok(JurisdictionEvent::AccountSettled(AccountSettledEvent {
+            metadata: decode_j_event_metadata(&fields[1])?,
+            left_entity: entity(&fields[2], "settledLeftEntity")?,
+            right_entity: entity(&fields[3], "settledRightEntity")?,
+            token_id: token(&fields[4])?,
+            left_reserve: bigint(&fields[5], "settledLeftReserve")?,
+            right_reserve: bigint(&fields[6], "settledRightReserve")?,
+            collateral: bigint(&fields[7], "settledCollateral")?,
+            ondelta: bigint(&fields[8], "settledOndelta")?,
+            nonce: js_number(&fields[9], "settledNonce")?,
+        })),
+        value => Err(ProcessError::Tag {
+            field: "jurisdictionEvent",
+            value,
+        }),
+    }
+}
+
+fn decode_j_event_metadata(value: &AbiValue) -> Result<JEventMetadata, ProcessError> {
+    let fields = exact(tuple(value)?, 5, "jEventMetadata")?;
+    Ok(JEventMetadata {
+        block_number: optional_js_number(&fields[0], "jEventBlockNumber")?,
+        block_hash: optional_fixed_bytes(&fields[1], "jEventBlockHash")?,
+        transaction_hash: optional_fixed_bytes(&fields[2], "jEventTransactionHash")?,
+        log_index: optional_js_number(&fields[3], "jEventLogIndex")?,
+        event_index: optional_js_number(&fields[4], "jEventIndex")?,
+    })
+}
+
+fn optional_js_number(value: &AbiValue, field: &'static str) -> Result<Option<u64>, ProcessError> {
+    match value {
+        AbiValue::Nil => Ok(None),
+        value => Ok(Some(js_number(value, field)?)),
+    }
+}
+
+fn decode_j_claim_proof(
+    value: &AbiValue,
+    field: &'static str,
+) -> Result<Option<JClaimProof>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = exact(tuple(value)?, 2, field)?;
+    if integer(&fields[0])? != 1 {
+        return Err(ProcessError::Expected("jClaimProofVersion"));
+    }
+    Ok(Some(JClaimProof {
+        nodes: tuple(&fields[1])?
+            .iter()
+            .map(decode_j_claim_node)
+            .collect::<Result<_, _>>()?,
+    }))
+}
+
+pub(crate) fn decode_j_claim_node(value: &AbiValue) -> Result<JClaimNode, ProcessError> {
+    let fields = tuple(value)?;
+    match fields
+        .first()
+        .map(integer)
+        .transpose()?
+        .ok_or(ProcessError::Expected("jClaimNodeTag"))?
+    {
+        0 => {
+            let fields = exact(fields, 3, "jClaimLeaf")?;
+            Ok(JClaimNode::Leaf {
+                key: fixed_bytes(&fields[1], "jClaimLeafKey")?,
+                record: decode_j_claim_record(&fields[2])?,
+            })
+        }
+        1 => {
+            let fields = exact(fields, 4, "jClaimBranch")?;
+            let bit = bounded_u32(&fields[1], "jClaimBranchBit")?;
+            Ok(JClaimNode::Branch {
+                bit: u16::try_from(bit).map_err(|_| ProcessError::Expected("jClaimBranchBit"))?,
+                left: fixed_bytes(&fields[2], "jClaimBranchLeft")?,
+                right: fixed_bytes(&fields[3], "jClaimBranchRight")?,
+            })
+        }
+        value => Err(ProcessError::Tag {
+            field: "jClaimNode",
+            value,
+        }),
+    }
+}
+
+fn decode_j_claim_record(value: &AbiValue) -> Result<JClaimRecord, ProcessError> {
+    let fields = exact(tuple(value)?, 5, "jClaimRecord")?;
+    let side = match integer(&fields[1])? {
+        0 => JClaimSide::Left,
+        1 => JClaimSide::Right,
+        value => {
+            return Err(ProcessError::Tag {
+                field: "jClaimSide",
+                value,
+            });
+        }
+    };
+    Ok(JClaimRecord {
+        account_key: fixed_bytes(&fields[0], "jClaimAccountKey")?,
+        side,
+        j_height: js_number(&fields[2], "jClaimRecordHeight")?,
+        j_block_hash: fixed_bytes(&fields[3], "jClaimRecordBlockHash")?,
+        events_hash: fixed_bytes(&fields[4], "jClaimRecordEventsHash")?,
+    })
 }
 
 fn decode_add_delta(fields: &[AbiValue]) -> Result<AccountTx, ProcessError> {

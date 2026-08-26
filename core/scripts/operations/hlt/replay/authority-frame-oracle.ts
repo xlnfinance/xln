@@ -1,4 +1,4 @@
-import { decodeAccountFrame as validateAccountFrame } from '../../../../account/validation/frame-validation';
+import { decodeAccountFrame } from '../../../../account/validation/frame-validation';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -51,7 +51,7 @@ const decodeEntityFrame = (value: unknown, index: number): HltCertifiedEntityFra
   };
 };
 
-const decodeAccountFrame = (value: unknown, index: number): HltCertifiedAccountFrame => {
+const decodeCertifiedAccountFrame = (value: unknown, index: number): HltCertifiedAccountFrame => {
   const row = requireBoundaryRecord(value, `HLT_AUTHORITY_ACCOUNT_FRAME_INVALID:${index}`);
   requireExactBoundaryKeys(
     row,
@@ -67,7 +67,7 @@ const decodeAccountFrame = (value: unknown, index: number): HltCertifiedAccountF
     entityId: text(row['entityId'], `HLT_AUTHORITY_ACCOUNT_ENTITY_ID_INVALID:${index}`),
     counterpartyId: text(row['counterpartyId'], `HLT_AUTHORITY_ACCOUNT_COUNTERPARTY_INVALID:${index}`),
     source: row['source'],
-    frame: validateAccountFrame(row['frame'], `HLT_AUTHORITY_ACCOUNT_FRAME:${index}`),
+    frame: decodeAccountFrame(row['frame'], `HLT_AUTHORITY_ACCOUNT_FRAME:${index}`),
   };
 };
 
@@ -79,6 +79,6 @@ export const decodeHltAuthorityFrameOracle = (value: unknown): HltAuthorityFrame
   }
   return {
     entityFrames: root['entityFrames'].map(decodeEntityFrame),
-    accountFrames: root['accountFrames'].map(decodeAccountFrame),
+    accountFrames: root['accountFrames'].map(decodeCertifiedAccountFrame),
   };
 };

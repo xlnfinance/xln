@@ -15,6 +15,7 @@ mod crypto;
 mod dispute;
 mod error;
 mod input;
+mod j_claims;
 mod state;
 mod swap;
 mod tx;
@@ -47,6 +48,13 @@ pub use crypto::{
 };
 pub use dispute::{DisputeProof, build_dispute_proof, dispute_proof_hash, proof_body_hash};
 pub use input::mempool::ACCOUNT_MEMPOOL_SIZE;
+pub use j_claims::{
+    AccountSettledEvent, EMPTY_J_CLAIM_ROOT, JClaimMutation, JClaimNode, JClaimNodeChanges,
+    JClaimProof, JClaimRecord, JClaimSide, JClaimStatus, JClaimStore, JClaimTransition,
+    JEventClaimTx, JEventMetadata, JurisdictionEvent, account_key as j_claim_account_key,
+    apply_claim_transition, canonical_events_hash, claim_key as j_claim_key,
+    hash_node as hash_j_claim_node, prepare_claim_tx,
+};
 pub use state::account_replica_shell::{AccountEnvelope, EnvelopeError};
 pub use state::delta::{Delta, DeltaPerspective, TokenId};
 pub use tx::apply::{AccountTransition, AccountVerdict, SequentialAccountEngine};

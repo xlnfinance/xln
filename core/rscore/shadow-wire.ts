@@ -31,6 +31,7 @@ import type {
 import type { AccountStateCollection, AccountStateMapNamespace } from '../account/state/persistent-state-map';
 import type { ApplyAccountTxOk } from '../account/tx/apply-types';
 import type { RscoreWireValue } from './client';
+import { jEventClaimWire } from './process/j-claim-wire';
 
 export const hexToWireBytes = (value: string, expectedBytes: number, code: string): Uint8Array => {
   const clean = value.trim().toLowerCase().replace(/^0x/, '');
@@ -632,6 +633,13 @@ export type ShadowOutputRow =
   | readonly [kind: 'offerRemove', offerId: string]
   | readonly [kind: 'cancelRequest', offerId: string]
   | readonly [
+      kind: 'accountSettledFinalized',
+      tokenId: number,
+      jHeight: number,
+      collateral: string,
+      ondelta: string,
+    ]
+  | readonly [
       kind: 'error',
       lockId: string,
       hashlock: string,
@@ -648,9 +656,12 @@ export type ShadowOutputRow =
  */
 export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] => {
   const rows: ShadowOutputRow[] = [];
+  const effects = result.candidateEffects ?? [];
   // Every candidate effect, in order: skipping an unknown kind would compare a
   // shorter list against the engine's and call the frame a match.
-  for (const output of result.candidateEffects ?? []) {
+  for (let index = 0; index < effects.length; index += 1) {
+    const output = effects[index];
+    if (output === undefined) throw new Error(`SHADOW_OUTPUT_INDEX_MISSING:${index}`);
     switch (output.kind) {
       case 'directPaymentForward':
         rows.push([
@@ -693,8 +704,45 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
       case 'swapCancelRequest':
         rows.push(['cancelRequest', output.offerId]);
         break;
+      case 'runtimeEvent': {
+        if (output.eventName !== 'account_settled_finalized_bilateral') {
+          throw new Error(`SHADOW_OUTPUT_RUNTIME_EVENT_UNSUPPORTED:${output.eventName}`);
+        }
+        const { tokenId, jHeight, collateral, ondelta } = output.data;
+        if (
+          typeof tokenId !== 'number'
+          || !Number.isSafeInteger(tokenId)
+          || typeof jHeight !== 'number'
+          || !Number.isSafeInteger(jHeight)
+          || typeof collateral !== 'string'
+          || !/^-?\d+$/.test(collateral)
+          || typeof ondelta !== 'string'
+          || !/^-?\d+$/.test(ondelta)
+        ) {
+          throw new Error('SHADOW_OUTPUT_ACCOUNT_SETTLED_INVALID');
+        }
+        const debug = effects[index + 1];
+        if (
+          debug?.kind !== 'debug'
+          || debug.payload['code'] !== 'REB_STEP'
+          || debug.payload['step'] !== 5
+          || debug.payload['status'] !== 'ok'
+          || debug.payload['event'] !== output.eventName
+          || debug.payload['tokenId'] !== tokenId
+          || debug.payload['jHeight'] !== jHeight
+          || debug.payload['collateral'] !== collateral
+          || debug.payload['ondelta'] !== ondelta
+        ) {
+          throw new Error('SHADOW_OUTPUT_ACCOUNT_SETTLED_DEBUG_MISMATCH');
+        }
+        rows.push(['accountSettledFinalized', tokenId, jHeight, collateral, ondelta]);
+        index += 1;
+        break;
+      }
+      case 'debug':
+        throw new Error('SHADOW_OUTPUT_ORPHAN_DEBUG');
       default:
-        throw new Error(`SHADOW_OUTPUT_KIND_UNSUPPORTED:${output.kind}`);
+        throw new Error('SHADOW_OUTPUT_KIND_UNSUPPORTED');
     }
   }
   if (result.outcome === 'htlc_secret') {
@@ -813,6 +861,8 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] | null => {
       return tx.data.outcome === 'secret'
         ? [2, tx.data.lockId, 0, hexToWireBytes(tx.data.secret, 32, 'SHADOW_SECRET')]
         : [2, tx.data.lockId, 1, tx.data.reason ?? null];
+    case 'j_event_claim':
+      return jEventClaimWire(tx);
     default:
       return null;
   }

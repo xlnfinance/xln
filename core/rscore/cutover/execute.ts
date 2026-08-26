@@ -148,9 +148,10 @@ const committedFrame = (
  */
 const appliedFromCommit = (
   prior: AccountReplica | null,
+  ownerEntityId: string,
   accountId: string,
   outputs: readonly WaveOutput[],
-) => cutoverAccountEffects(prior, accountId, outputs);
+) => cutoverAccountEffects(prior, ownerEntityId, accountId, outputs);
 
 /**
  * The exact event strings TypeScript publishes for one peer input.
@@ -224,7 +225,12 @@ export const cutoverAccountInputResult = (
     // Our own frame came back acknowledged. TypeScript releases the frame's
     // candidate effects here, having already published its typed outcomes
     // when it proposed.
-    const effects = appliedFromCommit(priorSnapshot, accountId, ackPart.outputs);
+    const effects = appliedFromCommit(
+      priorSnapshot,
+      request.binding.sessionOwnerEntityId,
+      accountId,
+      ackPart.outputs,
+    );
     candidateEffects.push(...effects.candidateEffects);
     timedOutHashlocks.push(...effects.timedOutHashlocks);
     committedFrames.push(committedFrame(ackPart.committedFrame));
@@ -235,7 +241,12 @@ export const cutoverAccountInputResult = (
   }
 
   if (framePart.kind === 'frameCommitted') {
-    const effects = appliedFromCommit(priorSnapshot, accountId, framePart.outputs);
+    const effects = appliedFromCommit(
+      priorSnapshot,
+      request.binding.sessionOwnerEntityId,
+      accountId,
+      framePart.outputs,
+    );
     candidateEffects.push(...effects.candidateEffects);
     revealedSecrets.push(...effects.revealedSecrets);
     timedOutHashlocks.push(...effects.timedOutHashlocks);
@@ -336,7 +347,12 @@ export const cutoverAccountProposalResult = (
     });
   }
   const row = requireRow(result, accountId);
-  const effects = cutoverAccountEffects(priorSnapshot, accountId, proposal.outputs);
+  const effects = cutoverAccountEffects(
+    priorSnapshot,
+    request.binding.sessionOwnerEntityId,
+    accountId,
+    proposal.outputs,
+  );
   if (effects.candidateEffects.length > 0 && effects.timedOutHashlocks.length > 0) {
     // Both halves are released with the peer's acknowledgement, never here.
     return fail('PROPOSAL_EFFECT_TIMING', { account: accountId });

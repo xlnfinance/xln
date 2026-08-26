@@ -105,6 +105,50 @@ impl AccountFrame {
 /// error, never a silently different hash.
 pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> {
     let (kind, data) = match tx {
+        AccountTx::JEventClaim(tx) => {
+            let events_hash = crate::canonical_events_hash(&tx.events)?;
+            let mut fields = vec![
+                (
+                    "version".to_string(),
+                    text("xln:account-j-event-claim-frame:v1"),
+                ),
+                ("jHeight".to_string(), number(tx.j_height)?),
+                (
+                    "jBlockHash".to_string(),
+                    text(&crate::state::identity::render_hex(&tx.j_block_hash)),
+                ),
+                (
+                    "eventsHash".to_string(),
+                    text(&crate::state::identity::render_hex(&events_hash)),
+                ),
+                (
+                    "events".to_string(),
+                    CanonicalValue::Array(
+                        tx.events
+                            .iter()
+                            .map(crate::j_claims::canonical_event_value)
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                ),
+            ];
+            push_optional(
+                &mut fields,
+                "leftProof",
+                tx.left_proof
+                    .as_ref()
+                    .map(crate::j_claims::canonical_proof_value)
+                    .transpose()?,
+            );
+            push_optional(
+                &mut fields,
+                "rightProof",
+                tx.right_proof
+                    .as_ref()
+                    .map(crate::j_claims::canonical_proof_value)
+                    .transpose()?,
+            );
+            ("j_event_claim", fields)
+        }
         AccountTx::DirectPayment {
             token_id,
             amount,

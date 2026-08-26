@@ -42,9 +42,13 @@ import {
 } from '../frame/lineage';
 import {
   buildEntityFrameAuthority,
+  computeEntityAccountDigests,
+  computeEntityAccountFieldDigests,
   computeCanonicalEntityConsensusStateHash,
+  computeEntityConsensusSectionDigestsCold,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
+import { safeStringify } from '../../../protocol/serialization';
 import { fitEntityProposalToWireBudget } from './wire-budget';
 import { primeProposalHankos } from './hanko/prime-hankos';
 import {
@@ -456,11 +460,17 @@ const assertReplayOracleFrameHash = (
   );
   if (frameHash === expected.frameHash) return;
   const txPrefixHash = hashEntityProposalTxPrefix(state.entityId, height, txs);
+  const commitmentDiagnostics = {
+    sections: computeEntityConsensusSectionDigestsCold(state),
+    accounts: computeEntityAccountDigests(state),
+    accountFields: computeEntityAccountFieldDigests(state),
+  };
   throw new Error(
     `HLT_ENTITY_PROPOSAL_ORACLE_FRAME_HASH_MISMATCH:${height}:` +
     `expected=${expected.frameHash}:actual=${frameHash}:` +
     `txCount=${expected.txCount}:${txs.length}:` +
-    `txPrefix=${expected.txPrefixHash}:${txPrefixHash}:stateRoot=${stateRoot}`,
+    `txPrefix=${expected.txPrefixHash}:${txPrefixHash}:stateRoot=${stateRoot}:` +
+    `commitments=${safeStringify(commitmentDiagnostics)}`,
   );
 };
 

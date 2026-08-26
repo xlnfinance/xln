@@ -311,7 +311,7 @@ export const keyRscoreAccountNode = (
   kind: 0 | 1,
   payload: Uint8Array,
 ): Buffer => {
-  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 5) {
+  if (!Number.isSafeInteger(namespaceTag) || namespaceTag < 1 || namespaceTag > 6) {
     throw new Error(`STORAGE_RSCORE_NAMESPACE_INVALID:${String(namespaceTag)}`);
   }
   return Buffer.concat([

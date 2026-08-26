@@ -140,7 +140,11 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
     ];
   }
   if (tag === 4) {
-    wireTuple(output, 'SHADOW_ENGINE_OFFER_REMOVE', 2);
+    wireTuple(output, 'SHADOW_ENGINE_OFFER_REMOVE', 3);
+    const makerSide = wireInteger(output[2], 'SHADOW_ENGINE_OFFER_REMOVE_MAKER');
+    if (makerSide !== 0 && makerSide !== 1) {
+      throw new Error(`SHADOW_ENGINE_OFFER_REMOVE_MAKER:${makerSide}`);
+    }
     return ['offerRemove', wireText(output[1], 'SHADOW_ENGINE_OFFER_REMOVE_ID')];
   }
   if (tag === 5) {

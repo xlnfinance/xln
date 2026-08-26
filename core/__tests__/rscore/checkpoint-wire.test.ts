@@ -234,6 +234,7 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
       ],
     ],
     [[1, [[1, '2', '50', '3', 88], null]]],
+    [],
     [
       [],
       [frameWire, bytes(frame.stateHash)],
@@ -287,7 +288,7 @@ describe('rscore checkpoint wire', () => {
     const first = restoreFixture();
     const firstDecoded = decodeRscoreAccountRestoreRow(first.row);
     const second = restoreFixture();
-    const consensus = second.row[8] as unknown[];
+    const consensus = second.row[9] as unknown[];
     const ack = consensus[7] as unknown[];
     ack[2] = Buffer.from([0x09, 0x08, 0x07, 0x06]);
     const secondDecoded = decodeRscoreAccountRestoreRow(second.row);
@@ -297,7 +298,7 @@ describe('rscore checkpoint wire', () => {
     expect(secondDecoded.consensus.lastOutboundAck?.frameHanko).toBe('0x09080706');
 
     const oldShape = restoreFixture().row;
-    const oldConsensus = oldShape[8] as unknown[];
+    const oldConsensus = oldShape[9] as unknown[];
     const oldAck = oldConsensus[7] as unknown[];
     oldConsensus[7] = [oldAck[0], oldAck[1], oldAck[3]];
     expect(() => decodeRscoreAccountRestoreRow(oldShape)).toThrow(
@@ -307,7 +308,7 @@ describe('rscore checkpoint wire', () => {
 
   test('rejects corrupt frame, state-root and Entity-leaf commitments', () => {
     const badFrame = restoreFixture().row;
-    ((badFrame[8] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);
+    ((badFrame[9] as unknown[])[1] as unknown[])[1] = Buffer.alloc(32, 0xff);
     expect(() => decodeRscoreAccountRestoreRow(badFrame)).toThrow('CURRENT_FRAME_HASH_MISMATCH');
 
     const badRoot = restoreFixture().row;

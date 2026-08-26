@@ -32,8 +32,28 @@ pub(crate) fn account_rows(
         changes(&value.lending_intents, |kind| integer(lending_kind(*kind))),
         changes(&value.swap_offers, offer),
         changes(&value.rebalance_fee_policies, policy),
+        j_claim_changes(&value.j_claim_nodes)?,
         consensus(&value.consensus)?,
     ]))
+}
+
+fn j_claim_changes(value: &xln_rscore_engine::JClaimNodeChanges) -> Result<AbiValue, ProcessError> {
+    let puts = value
+        .new_nodes
+        .iter()
+        .map(|(hash, node)| {
+            Ok(tuple(vec![
+                AbiValue::Bytes(hash.to_vec()),
+                crate::wire_encode::j_claim_node(node)?,
+            ]))
+        })
+        .collect::<Result<Vec<_>, ProcessError>>()?;
+    let dels = value
+        .replaced_node_hashes
+        .iter()
+        .map(|hash| AbiValue::Bytes(hash.to_vec()))
+        .collect();
+    Ok(tuple(vec![tuple(puts), tuple(dels)]))
 }
 
 fn sections(value: &xln_rscore_batch::AccountCheckpointSections) -> AbiValue {

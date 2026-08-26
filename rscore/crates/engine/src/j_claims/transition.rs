@@ -1,0 +1,288 @@
+use crate::commitment::JClaimAccumulator;
+use crate::j_claims::accumulator::{JClaimStore, delete, insert, prune};
+use crate::j_claims::codec::{JClaimRecord, JClaimSide, account_key, j_error, same_record};
+use crate::j_claims::events::{MAX_SAFE_INTEGER, canonical_events, canonical_events_hash};
+use crate::j_claims::proof::{ProofResult, create, inspect};
+use crate::j_claims::store::apply_changes;
+use crate::j_claims::types::{JClaimStatus, JClaimTransition, JEventClaimTx, JurisdictionEvent};
+use crate::{AccountIdentity, JClaimProof, StateError};
+
+struct OwnedTransition<'a> {
+    own: &'a JClaimAccumulator,
+    peer: &'a JClaimAccumulator,
+    own_record: JClaimRecord,
+    peer_record: JClaimRecord,
+    own_result: ProofResult,
+    peer_result: ProofResult,
+}
+
+pub fn apply_claim_transition(
+    identity: &AccountIdentity,
+    left: &JClaimAccumulator,
+    right: &JClaimAccumulator,
+    last_finalized_j_height: u64,
+    tx: &JEventClaimTx,
+    by_left: bool,
+    store: &mut JClaimStore,
+) -> Result<JClaimTransition, StateError> {
+    let events = canonical_events(&tx.events)?;
+    let records = build_records(identity, tx, &events)?;
+    let left_proof = required_proof(tx.left_proof.as_ref(), "left")?;
+    let right_proof = required_proof(tx.right_proof.as_ref(), "right")?;
+    let left_result = inspect(left.root, &records.0, left_proof)?.result;
+    let right_result = inspect(right.root, &records.1, right_proof)?.result;
+    assert_exact_member(&left_result, &records.0, "ACCOUNT_J_CLAIM_LEFT_CONFLICT")?;
+    assert_exact_member(&right_result, &records.1, "ACCOUNT_J_CLAIM_RIGHT_CONFLICT")?;
+    if tx.j_height <= last_finalized_j_height {
+        return stale_transition(left, right, records, last_finalized_j_height, events, store);
+    }
+    let (state, swap) = owned_by_side(left, right, records, (left_result, right_result), by_left);
+    let transition = apply_owned_transition(state, tx, events, store)?;
+    Ok(if swap {
+        swap_sides(transition)
+    } else {
+        transition
+    })
+}
+
+pub fn prepare_claim_tx(
+    identity: &AccountIdentity,
+    left: &JClaimAccumulator,
+    right: &JClaimAccumulator,
+    tx: &JEventClaimTx,
+    store: &JClaimStore,
+) -> Result<JEventClaimTx, StateError> {
+    let events = canonical_events(&tx.events)?;
+    let records = build_records(identity, tx, &events)?;
+    Ok(JEventClaimTx {
+        j_height: tx.j_height,
+        j_block_hash: tx.j_block_hash,
+        events,
+        left_proof: Some(create(store, left.root, &records.0)?),
+        right_proof: Some(create(store, right.root, &records.1)?),
+    })
+}
+
+fn owned_by_side<'a>(
+    left: &'a JClaimAccumulator,
+    right: &'a JClaimAccumulator,
+    records: (JClaimRecord, JClaimRecord),
+    results: (ProofResult, ProofResult),
+    by_left: bool,
+) -> (OwnedTransition<'a>, bool) {
+    if by_left {
+        (
+            OwnedTransition {
+                own: left,
+                peer: right,
+                own_record: records.0,
+                peer_record: records.1,
+                own_result: results.0,
+                peer_result: results.1,
+            },
+            false,
+        )
+    } else {
+        (
+            OwnedTransition {
+                own: right,
+                peer: left,
+                own_record: records.1,
+                peer_record: records.0,
+                own_result: results.1,
+                peer_result: results.0,
+            },
+            true,
+        )
+    }
+}
+
+fn apply_owned_transition(
+    state: OwnedTransition<'_>,
+    tx: &JEventClaimTx,
+    events: Vec<JurisdictionEvent>,
+    store: &mut JClaimStore,
+) -> Result<JClaimTransition, StateError> {
+    if matches!(state.peer_result, ProofResult::Absent) {
+        return apply_without_peer(state, tx, events, store);
+    }
+    let (_, mut next_peer, peer_changes) = delete(
+        state.peer,
+        &state.peer_record,
+        proof_for(tx, state.peer_record.side)?,
+    )?;
+    apply_changes(store, &peer_changes);
+    let mut next_own = state.own.clone();
+    if matches!(state.own_result, ProofResult::Member(_)) {
+        let (_, next, changes) = delete(
+            state.own,
+            &state.own_record,
+            proof_for(tx, state.own_record.side)?,
+        )?;
+        apply_changes(store, &changes);
+        next_own = next;
+    }
+    let account_key = state.own_record.account_key;
+    next_own = prune(
+        next_own,
+        store,
+        account_key,
+        state.own_record.side,
+        tx.j_height,
+    )?;
+    next_peer = prune(
+        next_peer,
+        store,
+        account_key,
+        state.peer_record.side,
+        tx.j_height,
+    )?;
+    Ok(transition(
+        JClaimStatus::Finalized,
+        next_own,
+        next_peer,
+        events,
+    ))
+}
+
+fn apply_without_peer(
+    state: OwnedTransition<'_>,
+    tx: &JEventClaimTx,
+    events: Vec<JurisdictionEvent>,
+    store: &mut JClaimStore,
+) -> Result<JClaimTransition, StateError> {
+    if matches!(state.own_result, ProofResult::Member(_)) {
+        return Ok(transition(
+            JClaimStatus::Idempotent,
+            state.own.clone(),
+            state.peer.clone(),
+            events,
+        ));
+    }
+    let (_, next, changes) = insert(
+        state.own,
+        &state.own_record,
+        proof_for(tx, state.own_record.side)?,
+    )?;
+    apply_changes(store, &changes);
+    Ok(transition(
+        JClaimStatus::Pending,
+        next,
+        state.peer.clone(),
+        events,
+    ))
+}
+
+fn stale_transition(
+    left: &JClaimAccumulator,
+    right: &JClaimAccumulator,
+    records: (JClaimRecord, JClaimRecord),
+    height: u64,
+    events: Vec<JurisdictionEvent>,
+    store: &mut JClaimStore,
+) -> Result<JClaimTransition, StateError> {
+    let next_left = prune(
+        left.clone(),
+        store,
+        records.0.account_key,
+        JClaimSide::Left,
+        height,
+    )?;
+    let next_right = prune(
+        right.clone(),
+        store,
+        records.1.account_key,
+        JClaimSide::Right,
+        height,
+    )?;
+    Ok(transition(
+        JClaimStatus::Stale,
+        next_left,
+        next_right,
+        events,
+    ))
+}
+
+fn build_records(
+    identity: &AccountIdentity,
+    tx: &JEventClaimTx,
+    events: &[JurisdictionEvent],
+) -> Result<(JClaimRecord, JClaimRecord), StateError> {
+    if tx.j_height == 0 || tx.j_height > MAX_SAFE_INTEGER {
+        return Err(j_error(format!(
+            "ACCOUNT_J_CLAIM_HEIGHT_INVALID:{}",
+            tx.j_height
+        )));
+    }
+    let events_hash = canonical_events_hash(events)?;
+    let key = account_key(identity);
+    Ok((
+        claim_record(key, JClaimSide::Left, tx, events_hash),
+        claim_record(key, JClaimSide::Right, tx, events_hash),
+    ))
+}
+
+fn claim_record(
+    account_key: [u8; 32],
+    side: JClaimSide,
+    tx: &JEventClaimTx,
+    events_hash: [u8; 32],
+) -> JClaimRecord {
+    JClaimRecord {
+        account_key,
+        side,
+        j_height: tx.j_height,
+        j_block_hash: tx.j_block_hash,
+        events_hash,
+    }
+}
+
+fn assert_exact_member(
+    result: &ProofResult,
+    expected: &JClaimRecord,
+    code: &str,
+) -> Result<(), StateError> {
+    if let ProofResult::Member(actual) = result
+        && !same_record(actual, expected)
+    {
+        return Err(j_error(format!(
+            "{code}:{:?}:{}",
+            expected.side, expected.j_height
+        )));
+    }
+    Ok(())
+}
+
+fn required_proof<'a>(
+    proof: Option<&'a JClaimProof>,
+    side: &str,
+) -> Result<&'a JClaimProof, StateError> {
+    proof.ok_or_else(|| j_error(format!("ACCOUNT_J_CLAIM_PROOF_REQUIRED:{side}")))
+}
+
+fn proof_for(tx: &JEventClaimTx, side: JClaimSide) -> Result<&JClaimProof, StateError> {
+    match side {
+        JClaimSide::Left => tx.left_proof.as_ref(),
+        JClaimSide::Right => tx.right_proof.as_ref(),
+    }
+    .ok_or_else(|| j_error("ACCOUNT_J_CLAIM_PROOF_REQUIRED"))
+}
+
+fn transition(
+    status: JClaimStatus,
+    left: JClaimAccumulator,
+    right: JClaimAccumulator,
+    events: Vec<JurisdictionEvent>,
+) -> JClaimTransition {
+    JClaimTransition {
+        status,
+        left,
+        right,
+        events,
+    }
+}
+
+fn swap_sides(mut value: JClaimTransition) -> JClaimTransition {
+    std::mem::swap(&mut value.left, &mut value.right);
+    value
+}

@@ -141,7 +141,8 @@ pub(crate) fn execute_window(
     let mut outputs = Vec::new();
     let mut events = Vec::new();
     let mut dropped = Vec::new();
-    for (index, tx) in window.into_iter().enumerate() {
+    for (index, admitted_tx) in window.into_iter().enumerate() {
+        let tx = prepare_transaction(&candidate, admitted_tx)?;
         let transition =
             SequentialAccountEngine::apply_with_context(&candidate, proposer, &tx, context)
                 .map_err(|error| StateError::TransitionFailed(error.to_string()))?;
@@ -184,6 +185,20 @@ pub(crate) fn execute_window(
         events,
         dropped,
     })
+}
+
+fn prepare_transaction(candidate: &AccountReplica, tx: AccountTx) -> Result<AccountTx, StateError> {
+    let AccountTx::JEventClaim(claim) = tx else {
+        return Ok(tx);
+    };
+    let carried = candidate.state().carried();
+    Ok(AccountTx::JEventClaim(crate::prepare_claim_tx(
+        candidate.state().identity(),
+        &carried.left_pending_j_claims,
+        &carried.right_pending_j_claims,
+        &claim,
+        candidate.state().j_claim_store(),
+    )?))
 }
 
 /// Propose the next frame for this account.

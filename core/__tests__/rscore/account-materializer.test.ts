@@ -298,6 +298,7 @@ const restoreWire = (
       tokenId,
       [policySnapshotWire(policy.left), policySnapshotWire(policy.right)],
     ]),
+    [],
     consensus,
   ];
 };
@@ -324,7 +325,8 @@ const checkpointRow = (wire: RscoreWireValue[]): RscoreAccountCheckpointRow => {
       swapOffers: changes,
       rebalanceFeePolicies: changes,
     },
-    consensus: wire[8] as readonly RscoreWireValue[],
+    jClaimNodeChanges: { puts: [], dels: [] },
+    consensus: wire[9] as readonly RscoreWireValue[],
     decoded,
     wire: [],
   };

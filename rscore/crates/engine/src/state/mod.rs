@@ -7,6 +7,7 @@ pub(crate) mod delta;
 pub(crate) mod identity;
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 use xln_rscore_protocol::{
@@ -94,10 +95,13 @@ pub struct AccountState {
     swap_offers: PersistentRadixMap<SwapOffer>,
     j_nonce: u64,
     last_finalized_j_height: u64,
-    /// Sections no supported transaction mutates; committed verbatim so a
-    /// live account with swap/pull/rebalance/J-claim state still reproduces
-    /// its exact TypeScript state root.
+    /// Opaque section roots plus the J-claim accumulators now owned by the
+    /// native transition. See `CarriedSections` for the ownership split.
     carried: crate::commitment::CarriedSections,
+    /// Content-addressed J-claim proof nodes. `Arc` makes the overwhelmingly
+    /// common payment candidate clone O(1); only a J claim path-copies this
+    /// small per-Account store through `Arc::make_mut`.
+    j_claim_store: Arc<crate::JClaimStore>,
     /// Derived, never compared: the per-section memo for this account's state
     /// root. A payment moves one section; the other four are byte-identical to
     /// the previous commit and are reused instead of being rebuilt, encoded
@@ -245,6 +249,7 @@ impl AccountState {
             j_nonce,
             last_finalized_j_height,
             carried,
+            j_claim_store: Arc::new(crate::JClaimStore::new()),
             root_cache: crate::commitment::AccountRootCache::default(),
         })
     }
@@ -259,12 +264,10 @@ impl AccountState {
 
     /// Exact TypeScript AccountStateRoot for the isolated payment profile.
     ///
-    /// This state type cannot represent swaps, pulls, rebalance policy,
-    /// J-claim progress, or settlement workspaces — those sections are
-    /// committed at their canonical genesis values and callers must reject a
-    /// wider Account snapshot instead of projecting it. The J journal counters
-    /// (`jNonce`, `lastFinalizedJHeight`) ARE represented and committed
-    /// verbatim.
+    /// The engine owns payments, swaps, rebalance policy and J-claim progress.
+    /// Pulls, subcontracts, requested-rebalance bodies and settlement
+    /// workspaces remain explicit integration boundaries; a transition that
+    /// would need an opaque body fails loudly.
     /// Section roots this account currently commits.
     fn payment_roots(&self) -> crate::commitment::PaymentAccountRoots {
         crate::commitment::PaymentAccountRoots {
@@ -508,6 +511,82 @@ impl AccountState {
         &self.carried
     }
 
+    pub fn j_claim_node_entries(&self) -> Vec<([u8; 32], crate::JClaimNode)> {
+        self.j_claim_store
+            .iter()
+            .map(|(hash, node)| (*hash, node.clone()))
+            .collect()
+    }
+
+    pub fn j_claim_node_changes_since(&self, base: &Self) -> crate::JClaimNodeChanges {
+        let new_nodes = self
+            .j_claim_store
+            .iter()
+            .filter(|(hash, node)| base.j_claim_store.get(*hash) != Some(*node))
+            .map(|(hash, node)| (*hash, node.clone()))
+            .collect();
+        let replaced_node_hashes = base
+            .j_claim_store
+            .keys()
+            .filter(|hash| !self.j_claim_store.contains_key(*hash))
+            .copied()
+            .collect();
+        crate::JClaimNodeChanges {
+            new_nodes,
+            replaced_node_hashes,
+        }
+    }
+
+    /// Install the exact checkpoint store and prove that both committed roots
+    /// are completely reachable before changing live state.
+    pub fn restore_j_claim_nodes(
+        &mut self,
+        entries: Vec<([u8; 32], crate::JClaimNode)>,
+    ) -> Result<(), StateError> {
+        let mut store = crate::JClaimStore::new();
+        for (hash, node) in entries {
+            if crate::hash_j_claim_node(&node)? != hash || store.insert(hash, node).is_some() {
+                return Err(StateError::JClaim(
+                    "ACCOUNT_J_CLAIM_STORE_ENTRY_INVALID".into(),
+                ));
+            }
+        }
+        crate::j_claims::validate_store_for_roots(
+            &store,
+            &[
+                self.carried.left_pending_j_claims.clone(),
+                self.carried.right_pending_j_claims.clone(),
+            ],
+        )?;
+        self.j_claim_store = Arc::new(store);
+        Ok(())
+    }
+
+    pub(crate) fn j_claim_store(&self) -> &crate::JClaimStore {
+        &self.j_claim_store
+    }
+
+    pub(crate) fn j_claim_store_mut(&mut self) -> &mut crate::JClaimStore {
+        Arc::make_mut(&mut self.j_claim_store)
+    }
+
+    pub(crate) fn set_j_claim_accumulators(
+        &mut self,
+        left: crate::commitment::JClaimAccumulator,
+        right: crate::commitment::JClaimAccumulator,
+    ) {
+        self.carried.left_pending_j_claims = left;
+        self.carried.right_pending_j_claims = right;
+    }
+
+    pub(crate) fn set_j_nonce(&mut self, nonce: u64) {
+        self.j_nonce = nonce;
+    }
+
+    pub(crate) fn set_last_finalized_j_height(&mut self, height: u64) {
+        self.last_finalized_j_height = height;
+    }
+
     pub(crate) fn delta_or_zero(&self, token_id: TokenId) -> Result<Delta, StateError> {
         if let Some(delta) = self.delta(token_id) {
             return Ok(delta.clone());
@@ -605,6 +684,10 @@ pub struct AccountReplica {
     /// The jurisdiction's `DeltaTransformer`, when this session builds its own
     /// recovery proofs.
     delta_transformer: Option<[u8; 20]>,
+    /// This workspace is not interpreted by the native J-finality path yet.
+    /// The checkpoint decoder must mark its presence so finality rejects it
+    /// instead of silently skipping post-settlement proof activation.
+    settlement_workspace_present: bool,
 }
 
 impl AccountReplica {
@@ -619,6 +702,7 @@ impl AccountReplica {
             state,
             envelope: crate::AccountEnvelope::default(),
             delta_transformer: None,
+            settlement_workspace_present: false,
         })
     }
 
@@ -643,6 +727,21 @@ impl AccountReplica {
 
     pub const fn set_delta_transformer(&mut self, address: [u8; 20]) {
         self.delta_transformer = Some(address);
+    }
+
+    pub const fn set_settlement_workspace_present(&mut self, present: bool) {
+        self.settlement_workspace_present = present;
+    }
+
+    pub const fn settlement_workspace_present(&self) -> bool {
+        self.settlement_workspace_present
+    }
+
+    pub fn restore_j_claim_nodes(
+        &mut self,
+        entries: Vec<([u8; 32], crate::JClaimNode)>,
+    ) -> Result<(), StateError> {
+        self.state.restore_j_claim_nodes(entries)
     }
 
     pub const fn envelope(&self) -> &crate::AccountEnvelope {

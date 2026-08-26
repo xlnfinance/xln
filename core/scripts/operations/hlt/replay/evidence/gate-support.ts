@@ -3,6 +3,8 @@ import { accessSync, constants, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+/** Bounded subprocess boundary shared by the authoritative recording gates. */
+
 export const AUTHORITY_EVIDENCE_GATE_MAX_MS = 20_000;
 
 export const freshAuthorityEvidenceDir = (prefix: string): string => {

@@ -742,6 +742,11 @@ fn apply_outbound_work(
     } else {
         None
     };
+    // This runs after proposal construction. A draft created by inbound is
+    // therefore not reusable inside the same Entity candidate, while the
+    // candidate returned to the parent remembers that its manifest must
+    // certify the draft. Root-based rollback discards this bit with the value.
+    changed |= account.certify_local_dispute_after_outbound();
     let result = OutboundOutcome { proposal };
     if changed {
         let leaf = leaf_root(account_id, &account)?;

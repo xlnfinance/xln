@@ -87,13 +87,18 @@ const RSCORE_ABI_VERSION = 1;
 // worker-resident checkpoint rows separately from temporary read-model rows.
 // 23: that reply carries one optional exact incremental checkpoint manifest;
 // the next inbound root implicitly accepts or rejects its pending baseline.
-export const RSCORE_PROCESS_ABI_VERSION = 23;
+// 24: swap-offer removal carries the maker side observed by the Account
+// transition, so the two-call parent never needs a stale Account read model.
+// 25: AccountSettled J-claim bodies, witnesses and typed finality output.
+// 26: exact checkpoints persist the J-claim Patricia nodes needed to prove
+// non-empty accumulator roots after a process restart.
+export const RSCORE_PROCESS_ABI_VERSION = 26;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=27")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=30")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '05cc3820ad39f9495edec092df80405804139a03e23ac968d3de5fc058a00943',
+  'c53168cc9945a471eea8b6f966fb4252aaa6bd0dfb1b4867044ade62b544f8be',
   'hex',
 );
 

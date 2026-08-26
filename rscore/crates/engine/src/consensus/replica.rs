@@ -161,6 +161,14 @@ pub struct AccountConsensus {
     /// nonce it will spend. Both are committed in the account leaf, and a
     /// proposal that moves the state moves them with it.
     dispute: Option<DisputeDraft>,
+    /// Whether the parent Entity has had a chance to certify `dispute`.
+    ///
+    /// A draft created during inbound must not be reused by a proposal in the
+    /// same Entity candidate: its Hanko does not exist yet.  The resident
+    /// coordinator marks it certified only after finishing the outbound visit.
+    /// That bit lives inside the candidate selected by the next parent root,
+    /// so rolling the candidate back also rolls this authority fact back.
+    local_dispute_certified: bool,
     next_proof_nonce: u64,
     /// The counterparty's proof, and the digest of their signature over it —
     /// the leaf commits the digest, not the kilobyte of hex.
@@ -186,6 +194,7 @@ impl AccountConsensus {
             counterparty_frame_hanko_digest: None,
             last_outbound_ack: None,
             dispute: None,
+            local_dispute_certified: false,
             // TypeScript's canonical H=0 Account genesis starts at nonce 1.
             // Nonce 0 is not a usable proof nonce: proposal/ACK construction
             // already clamps against jNonce + 1, but the Entity account leaf
@@ -367,11 +376,10 @@ impl AccountConsensus {
         if !changed {
             // Nothing new to sign; a proof already certified for exactly this
             // body travels with the acknowledgement instead.
-            let certified = self
-                .replica
-                .envelope()
-                .has_field("currentDisputeProofHanko");
-            return Ok(self.dispute.clone().filter(|_| certified));
+            return Ok(self
+                .dispute
+                .clone()
+                .filter(|_| self.local_dispute_certified));
         }
         let identity = self.replica.state().identity();
         let draft = DisputeDraft {
@@ -394,6 +402,7 @@ impl AccountConsensus {
             proposer_is_left,
         };
         self.dispute = Some(draft.clone());
+        self.local_dispute_certified = false;
         self.replica
             .forget_envelope_field("currentDisputeProofHanko");
         self.next_proof_nonce = nonce + 1;
@@ -560,12 +569,8 @@ impl AccountConsensus {
             //
             // Parity target: the second branch of `resolveDisputeHanko`
             // (core/account/consensus/proposal/finalize.ts).
-            let certified = self
-                .replica
-                .envelope()
-                .has_field("currentDisputeProofHanko");
             return Ok(self.dispute.clone().filter(|draft| {
-                certified
+                self.local_dispute_certified
                     && draft.proof_body_hash == proof_body_hash
                     && draft.proposer_is_left == proposer_is_left
                     && draft.nonce > j_nonce
@@ -592,6 +597,7 @@ impl AccountConsensus {
             nonce,
             proposer_is_left,
         });
+        self.local_dispute_certified = false;
         // A Hanko certifies one exact hash, so the witness for the proof this
         // replaces does not carry over.
         //
@@ -601,6 +607,20 @@ impl AccountConsensus {
             .forget_envelope_field("currentDisputeProofHanko");
         self.next_proof_nonce = nonce + 1;
         Ok(self.dispute.clone())
+    }
+
+    /// Seal the local recovery draft at the parent Account boundary.
+    ///
+    /// The caller invokes this after every outbound visit, never before the
+    /// proposal logic in that visit.  An accepted Entity root keeps this bit;
+    /// an unselected Account candidate is discarded with it.  No Hanko bytes
+    /// are fabricated here—the Entity manifest remains their sole authority.
+    pub fn certify_local_dispute_after_outbound(&mut self) -> bool {
+        if self.dispute.is_none() || self.local_dispute_certified {
+            return false;
+        }
+        self.local_dispute_certified = true;
+        true
     }
 
     pub(crate) const fn last_rollback_frame_hash(&self) -> Option<&[u8; 32]> {
@@ -705,6 +725,11 @@ impl AccountConsensus {
             counterparty_dispute,
             local_committed_frame_hanko,
         } = snapshot;
+        // Exact checkpoints are installed only after the parent WAL made the
+        // corresponding Entity candidate durable. A stored local draft is
+        // therefore certified; an uncommitted candidate never reaches this
+        // restore boundary.
+        let local_dispute_certified = dispute.is_some();
         if let Some(ack) = last_outbound_ack.as_ref() {
             verify_restored_outbound_ack(&replica, ack)?;
         }
@@ -771,6 +796,7 @@ impl AccountConsensus {
             counterparty_frame_hanko,
             last_outbound_ack,
             dispute,
+            local_dispute_certified,
             next_proof_nonce,
             counterparty_dispute_hash: None,
             counterparty_dispute_hanko_digest: None,

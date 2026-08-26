@@ -61,8 +61,14 @@ const CASES: { name: string; wire: RscoreWireValue[]; row: unknown[] }[] = [
       1, 6, '1000000', 2, 6, '2000000', '0', '1900000', '20000', null, 0, 7, '5', '6',
     ],
   },
-  { name: 'swapOfferRemove', wire: [4, 'offer-1'], row: ['offerRemove', 'offer-1'] },
+  { name: 'swapOfferRemove/left maker', wire: [4, 'offer-1', 0], row: ['offerRemove', 'offer-1'] },
+  { name: 'swapOfferRemove/right maker', wire: [4, 'offer-2', 1], row: ['offerRemove', 'offer-2'] },
   { name: 'swapCancelRequest', wire: [5, 'offer-1'], row: ['cancelRequest', 'offer-1'] },
+  {
+    name: 'accountSettledFinalized',
+    wire: [6, 1, 43, '-12', '34'],
+    row: ['accountSettledFinalized', 1, 43, '-12', '34'],
+  },
 ];
 
 describe('wave outputs', () => {

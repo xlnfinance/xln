@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import {
   authorityEvidenceBinary,
   runAuthorityEvidenceGate,
-} from './authority-evidence-gate-support';
+} from './evidence/gate-support';
 import { writeAuthorityReplayPreflight } from './authority-replay-preflight';
 
 const recordingRaw = String(process.env['XLN_RSCORE_EVIDENCE_RECORDING'] ?? '').trim();

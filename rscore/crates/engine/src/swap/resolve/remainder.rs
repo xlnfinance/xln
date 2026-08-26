@@ -186,6 +186,7 @@ fn close_offer(
         events,
         outputs: vec![AccountOutput::SwapOfferRemove {
             offer_id: offer.offer_id().to_owned(),
+            maker_is_left: offer.maker_is_left(),
         }],
     })
 }
