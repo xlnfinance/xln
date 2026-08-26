@@ -1,6 +1,6 @@
 use xln_rscore_abi::{EngineIdentity, Envelope, MessageKind, ProtocolBinding};
 use xln_rscore_batch::{
-    CandidateId, EngineGeneration, PreparedBatch, StatefulBatchEngine, StatefulConsensusEngine,
+    CandidateId, EngineGeneration, PreparedBatch, ResidentConsensusEngine, StatefulBatchEngine,
 };
 
 use crate::candidate::{CandidateToken, ProcessIncarnation};
@@ -23,31 +23,10 @@ pub struct ProcessSession {
     /// session is one or the other for its whole life: mirroring and owning
     /// the accounts are different jobs, and a process that could switch would
     /// have two answers to "what is the account".
-    authority: Option<Box<StatefulConsensusEngine>>,
+    authority: Option<Box<ResidentConsensusEngine>>,
     authority_config: Option<AuthorityConfig>,
     pending: Option<PendingBatch>,
-    pending_wave: Option<PendingWave>,
-    /// A candidate checkpoint whose Runtime frame is durable and whose wave
-    /// was committed, but whose incremental debt has not yet been
-    /// acknowledged. While this exists, CommitCheckpoint is the only legal
-    /// next operation.
-    pending_checkpoint: Option<PendingCheckpoint>,
     stopped: bool,
-}
-
-/// The wave the engine is holding, and the request that produced it.
-struct PendingWave {
-    token: CandidateToken,
-    candidate_id: CandidateId,
-    revision: u64,
-    sealed: bool,
-    checkpoint: Option<PendingCheckpoint>,
-}
-
-#[derive(Clone, Copy)]
-struct PendingCheckpoint {
-    commit_token: xln_rscore_batch::CheckpointToken,
-    restore_token: xln_rscore_batch::CheckpointToken,
 }
 
 struct SessionBinding {
@@ -82,8 +61,6 @@ impl ProcessSession {
             authority: None,
             authority_config: None,
             pending: None,
-            pending_wave: None,
-            pending_checkpoint: None,
             stopped: false,
         }
     }
@@ -192,27 +169,6 @@ impl ProcessSession {
         request_id: [u8; 8],
         command: Command,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending_checkpoint.is_some()
-            && !matches!(&command, Command::CommitCheckpoint { .. })
-        {
-            return Err(ProcessError::CheckpointPending);
-        }
-        if self.pending_wave.is_some()
-            && !matches!(
-                &command,
-                Command::BeginEntity { .. }
-                    | Command::ApplyAccountWave { .. }
-                    | Command::ProposeAccountWave { .. }
-                    | Command::FinalizeEntity { .. }
-                    | Command::DiscardEntity { .. }
-                    | Command::SealAccountWave { .. }
-                    | Command::GetCheckpointChanges { .. }
-                    | Command::Commit { .. }
-                    | Command::Abort { .. }
-            )
-        {
-            return Err(ProcessError::PreparePending);
-        }
         match command {
             Command::Hello { .. } => Err(ProcessError::HelloDuplicate),
             Command::BootstrapAccounts {
@@ -220,70 +176,21 @@ impl ProcessSession {
                 accounts,
                 import_existing,
             } => self.load(revision, accounts, import_existing),
-            Command::GetCheckpointChanges { candidate_token } => {
-                self.get_checkpoint_changes(candidate_token)
-            }
-            Command::CommitCheckpoint { token } => self.commit_checkpoint(&token),
+            Command::AuthorityTwoCallOnly => Err(ProcessError::AuthorityTwoCallOnly),
             Command::RestoreExact { expected, accounts } => self.restore_exact(expected, accounts),
-            Command::PrepareAccountWave { request } => self.prepare_wave(request_id, *request),
-            Command::BeginEntity {
-                candidate_token,
-                stage_key,
-                expected_accepted_ordinal,
-                context,
-            } => self.begin_entity_stage(
-                candidate_token,
-                stage_key,
-                expected_accepted_ordinal,
-                context,
-            ),
-            Command::Checkpoint {
-                expected_accounts_root,
-            } => self.checkpoint(expected_accounts_root),
             Command::AccountInbound { request } => self.account_inbound(*request),
             Command::AccountOutbound { request } => self.account_outbound(*request),
-            Command::ApplyAccountWave {
-                candidate_token,
-                stage_key,
-                request,
-            } => self.apply_wave(candidate_token, stage_key, *request),
-            Command::ProposeAccountWave {
-                candidate_token,
-                stage_key,
-                request,
-            } => self.propose_wave(candidate_token, stage_key, *request),
-            Command::FinalizeEntity {
-                candidate_token,
-                stage_key,
-                expected_accepted_ordinal,
-            } => self.finish_entity_stage(
-                candidate_token,
-                stage_key,
-                expected_accepted_ordinal,
-                true,
-            ),
-            Command::DiscardEntity {
-                candidate_token,
-                stage_key,
-                expected_accepted_ordinal,
-            } => self.finish_entity_stage(
-                candidate_token,
-                stage_key,
-                expected_accepted_ordinal,
-                false,
-            ),
-            Command::SealAccountWave { candidate_token } => self.seal_wave(candidate_token),
             Command::Prepare { jobs } => self.prepare(request_id, &jobs),
             Command::Commit { candidate_token } => {
                 if self.authority.is_some() {
-                    self.commit_wave(candidate_token)
+                    Err(ProcessError::AuthorityTwoCallOnly)
                 } else {
                     self.commit(candidate_token)
                 }
             }
             Command::Abort { candidate_token } => {
                 if self.authority.is_some() {
-                    self.abort_wave(candidate_token)
+                    Err(ProcessError::AuthorityTwoCallOnly)
                 } else {
                     self.abort(candidate_token)
                 }
@@ -334,22 +241,9 @@ impl ProcessSession {
     /// whose leaf disagrees can name the field instead of the hash.
     fn account_envelope(
         &self,
-        account_id: xln_rscore_batch::AccountId,
+        _account_id: xln_rscore_batch::AccountId,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let engine = self
-            .authority
-            .as_ref()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let account = engine
-            .account(&account_id)
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let fields = account
-            .projected_leaf_fields()
-            .map_err(|error| ProcessError::Envelope(error.to_string()))?;
-        Ok((
-            wire_encode::account_envelope(engine.revision(), &fields),
-            false,
-        ))
+        Err(ProcessError::AuthorityTwoCallOnly)
     }
 
     /// One runtime frame, against a candidate this process keeps until the
@@ -371,68 +265,6 @@ impl ProcessSession {
         ))
     }
 
-    fn prepare_wave(
-        &mut self,
-        request_id: [u8; 8],
-        request: xln_rscore_batch::WaveRequest,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        // Prepare owns only the Runtime candidate capability. Accepting even
-        // one Entity here would apply its Account work before BeginEntity had
-        // established the stage key and rollback savepoint that authorize it.
-        if !request.entities.is_empty() {
-            return Err(ProcessError::PrepareWaveNonempty {
-                entities: request.entities.len(),
-            });
-        }
-        if self.pending_wave.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
-        let (result, engine_micros) = {
-            let engine = self
-                .authority
-                .as_mut()
-                .ok_or(ProcessError::EngineNotLoaded)?;
-            let started = std::time::Instant::now();
-            let result = engine.prepare_wave(request)?;
-            let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-            (result, engine_micros)
-        };
-        let token = self.issue_candidate_token(request_id, result.candidate_id)?;
-        let response = self.encode_wave_after_mutation(&result, engine_micros, Some(token))?;
-        self.pending_wave = Some(PendingWave {
-            token,
-            candidate_id: result.candidate_id,
-            revision: result.revision,
-            sealed: false,
-            checkpoint: None,
-        });
-        Ok((response, false))
-    }
-
-    /// The rows that moved since the last durable checkpoint.
-    ///
-    /// Taken at the Runtime frame boundary named by `checkpointDue`. The
-    /// engine advances its in-memory dirty baseline immediately: if the
-    /// caller cannot fsync these rows, continuing is forbidden and this whole
-    /// process is discarded. Recovery starts from the last durable Runtime
-    /// checkpoint and replays the authoritative WAL, so a second Account-side
-    /// CommitCheckpoint acknowledgement would only create another state
-    /// machine that could disagree with the WAL.
-    fn checkpoint(
-        &mut self,
-        expected_accounts_root: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        engine.reconcile_parent_accounts_root(expected_accounts_root)?;
-        let checkpoint = engine.checkpoint_changes()?;
-        let response = crate::checkpoint_wire::changes(&checkpoint)?;
-        engine.commit_checkpoint(&checkpoint.token)?;
-        Ok((response, false))
-    }
-
     /// One Entity input's inbound half. Nothing is staged: the accounts move
     /// when the Entity says they move, and the reply is what happened.
     fn account_inbound(
@@ -446,7 +278,8 @@ impl ProcessSession {
         let started = std::time::Instant::now();
         let result = engine.entity_inbound(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        Ok((crate::wire_encode::round(&result, engine_micros)?, false))
+        let response = self.encode_resident_round_after_mutation(&result, engine_micros)?;
+        Ok((response, false))
     }
 
     /// One Entity input's outbound half.
@@ -461,252 +294,28 @@ impl ProcessSession {
         let started = std::time::Instant::now();
         let result = engine.entity_outbound(request)?;
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        Ok((crate::wire_encode::round(&result, engine_micros)?, false))
-    }
-
-    fn apply_wave(
-        &mut self,
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        request: xln_rscore_batch::WaveOpsRequest,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        engine.require_entity_stage(stage_key)?;
-        let started = std::time::Instant::now();
-        let result = engine.apply_wave_ops(request)?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        if result.candidate_id != candidate_id {
-            self.stopped = true;
-            return Err(ProcessError::CandidateTokenMismatch);
-        }
-        let response = self.encode_wave_after_mutation(&result, engine_micros, None)?;
-        self.pending_wave
-            .as_mut()
-            .ok_or(ProcessError::PrepareNotPending)?
-            .revision = result.revision;
+        let response = self.encode_resident_round_after_mutation(&result, engine_micros)?;
         Ok((response, false))
     }
 
-    fn propose_wave(
+    /// Both resident visits mutate an internal base/candidate head before the
+    /// reply exists. If encoding fails, the parent never observed that head;
+    /// continuing would let a later root assertion reconcile state that was
+    /// never durably recorded. Checkpoint export is non-acknowledging, but its
+    /// pending root is likewise invisible unless this reply is encoded, so any
+    /// post-mutation encoding failure remains process-fatal.
+    fn encode_resident_round_after_mutation(
         &mut self,
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        request: xln_rscore_batch::WaveProposalRequest,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        engine.require_entity_stage(stage_key)?;
-        let started = std::time::Instant::now();
-        let result = engine.propose_wave(request)?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        if result.candidate_id != candidate_id {
-            self.stopped = true;
-            return Err(ProcessError::CandidateTokenMismatch);
-        }
-        let response = self.encode_wave_after_mutation(&result, engine_micros, None)?;
-        self.pending_wave
-            .as_mut()
-            .ok_or(ProcessError::PrepareNotPending)?
-            .revision = result.revision;
-        Ok((response, false))
-    }
-
-    fn begin_entity_stage(
-        &mut self,
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        expected_accepted_ordinal: u64,
-        context: xln_rscore_batch::EntityStageContext,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.pending_wave_for(candidate_token)?;
-        let (receipt, revision, accounts_root) = {
-            let engine = self
-                .authority
-                .as_mut()
-                .ok_or(ProcessError::EngineNotLoaded)?;
-            let receipt =
-                engine.begin_entity_stage(stage_key, expected_accepted_ordinal, context)?;
-            (receipt, engine.revision(), engine.accounts_root())
-        };
-        let response =
-            self.encode_entity_stage_after_mutation(&receipt, revision, accounts_root)?;
-        self.pending_wave
-            .as_mut()
-            .ok_or(ProcessError::PrepareNotPending)?
-            .revision = revision;
-        Ok((response, false))
-    }
-
-    fn finish_entity_stage(
-        &mut self,
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        expected_accepted_ordinal: u64,
-        accept: bool,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        self.pending_wave_for(candidate_token)?;
-        let (receipt, revision, accounts_root) = {
-            let engine = self
-                .authority
-                .as_mut()
-                .ok_or(ProcessError::EngineNotLoaded)?;
-            let receipt = if accept {
-                engine.accept_entity_stage(stage_key, expected_accepted_ordinal)?
-            } else {
-                engine.rollback_entity_stage(stage_key, expected_accepted_ordinal)?
-            };
-            (receipt, engine.revision(), engine.accounts_root())
-        };
-        let response =
-            self.encode_entity_stage_after_mutation(&receipt, revision, accounts_root)?;
-        self.pending_wave
-            .as_mut()
-            .ok_or(ProcessError::PrepareNotPending)?
-            .revision = revision;
-        Ok((response, false))
-    }
-
-    /// Entity-stage calls mutate the held candidate before their reply exists.
-    /// If reply construction ever becomes fallible, the process must not
-    /// continue with candidate state the runtime never observed.
-    fn encode_entity_stage_after_mutation(
-        &mut self,
-        receipt: &xln_rscore_batch::EntityStageReceipt,
-        revision: u64,
-        accounts_root: [u8; 32],
-    ) -> Result<xln_rscore_abi::BodyTuple, ProcessError> {
-        match wire_encode::entity_stage(receipt, revision, accounts_root) {
-            Ok(response) => Ok(response),
-            Err(error) => {
-                self.stopped = true;
-                Err(error)
-            }
-        }
-    }
-
-    fn seal_wave(
-        &mut self,
-        candidate_token: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let started = std::time::Instant::now();
-        let result = engine.seal_wave()?;
-        let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-        if result.candidate_id != candidate_id {
-            self.stopped = true;
-            return Err(ProcessError::CandidateTokenMismatch);
-        }
-        let response = self.encode_wave_after_mutation(&result, engine_micros, None)?;
-        let pending = self
-            .pending_wave
-            .as_mut()
-            .ok_or(ProcessError::PrepareNotPending)?;
-        pending.revision = result.revision;
-        pending.sealed = true;
-        Ok((response, false))
-    }
-
-    /// A successful staged call has already mutated the authority candidate.
-    /// Returning a recoverable encoding error would expose that mutation while
-    /// session metadata can still name the preceding revision. In particular,
-    /// a later Abort could miss the engine revision and leave the candidate
-    /// usable without any reply that described it. Make the error reply this
-    /// process's last reply; restart restores the last durable checkpoint.
-    fn encode_wave_after_mutation(
-        &mut self,
-        result: &xln_rscore_batch::WaveResult,
+        result: &xln_rscore_batch::EntityRoundResult,
         engine_micros: u64,
-        token: Option<CandidateToken>,
     ) -> Result<xln_rscore_abi::BodyTuple, ProcessError> {
-        let encoded = match token {
-            Some(token) => wire_encode::prepared_wave(result, engine_micros, token.as_bytes()),
-            None => wire_encode::wave(result, engine_micros),
-        };
-        match encoded {
+        match wire_encode::round(result, engine_micros) {
             Ok(response) => Ok(response),
             Err(error) => {
                 self.stopped = true;
                 Err(error)
             }
         }
-    }
-
-    fn commit_wave(
-        &mut self,
-        candidate_token: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let candidate_id = self.sealed_wave_for(candidate_token)?.candidate_id;
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        match engine.commit_wave(candidate_id) {
-            Ok(accounts_root) => {
-                let pending = self
-                    .pending_wave
-                    .take()
-                    .ok_or(ProcessError::PrepareNotPending)?;
-                self.pending_checkpoint = pending.checkpoint;
-                Ok((
-                    wire_encode::wave_committed(engine.revision(), accounts_root),
-                    false,
-                ))
-            }
-            Err(error) => {
-                // A commit that cannot be honoured leaves this process and the
-                // runtime disagreeing about what happened; there is nothing
-                // safe to serve after that.
-                self.stopped = true;
-                Err(error.into())
-            }
-        }
-    }
-
-    fn abort_wave(
-        &mut self,
-        candidate_token: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let candidate_id = self.pending_wave_for(candidate_token)?.candidate_id;
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let revision = engine.abort_wave(candidate_id)?;
-        self.pending_wave = None;
-        Ok((
-            wire_encode::wave_aborted(revision, engine.accounts_root()),
-            false,
-        ))
-    }
-
-    fn pending_wave_for(&self, actual: [u8; 32]) -> Result<&PendingWave, ProcessError> {
-        let pending = self
-            .pending_wave
-            .as_ref()
-            .ok_or(ProcessError::PrepareNotPending)?;
-        if pending.token != CandidateToken::from_bytes(actual) {
-            return Err(ProcessError::CandidateTokenMismatch);
-        }
-        Ok(pending)
-    }
-
-    fn sealed_wave_for(&self, actual: [u8; 32]) -> Result<&PendingWave, ProcessError> {
-        let pending = self.pending_wave_for(actual)?;
-        if !pending.sealed {
-            return Err(xln_rscore_batch::BatchError::WaveOpen.into());
-        }
-        Ok(pending)
     }
 
     fn load(
@@ -733,7 +342,7 @@ impl ProcessSession {
                     accounts: accounts.len(),
                 });
             }
-            let engine = StatefulConsensusEngine::restore(
+            let engine = ResidentConsensusEngine::restore(
                 EngineGeneration::from_bytes(binding.engine_generation),
                 self.worker_count,
                 revision,
@@ -757,67 +366,6 @@ impl ProcessSession {
         Ok((wire_encode::loaded(revision, accounts_root), false))
     }
 
-    fn get_checkpoint_changes(
-        &mut self,
-        candidate_token: [u8; 32],
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let candidate_id = self.sealed_wave_for(candidate_token)?.candidate_id;
-        let engine = self
-            .authority
-            .as_ref()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        let checkpoint = engine.checkpoint_changes_for_wave(candidate_id)?;
-        let response = crate::checkpoint_wire::changes(&checkpoint)?;
-        let ticket = PendingCheckpoint {
-            commit_token: checkpoint.token,
-            restore_token: checkpoint.restore_token(),
-        };
-        let pending = self
-            .pending_wave
-            .as_mut()
-            .ok_or(ProcessError::PrepareNotPending)?;
-        if pending.token != CandidateToken::from_bytes(candidate_token) {
-            return Err(ProcessError::CandidateTokenMismatch);
-        }
-        pending.checkpoint = Some(ticket);
-        Ok((response, false))
-    }
-
-    fn commit_checkpoint(
-        &mut self,
-        token: &xln_rscore_batch::CheckpointToken,
-    ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        let ticket = self
-            .pending_checkpoint
-            .ok_or(ProcessError::CheckpointNotPending)?;
-        if *token != ticket.commit_token {
-            return Err(xln_rscore_batch::BatchError::CheckpointToken {
-                actual: format!("{token:?}"),
-                expected: format!("{:?}", ticket.commit_token),
-            }
-            .into());
-        }
-        let engine = self
-            .authority
-            .as_mut()
-            .ok_or(ProcessError::EngineNotLoaded)?;
-        engine.commit_checkpoint(token)?;
-        let normalized = engine.checkpoint_token()?;
-        if normalized != ticket.restore_token {
-            self.stopped = true;
-            return Err(xln_rscore_batch::BatchError::CheckpointToken {
-                actual: format!("{normalized:?}"),
-                expected: format!("{:?}", ticket.restore_token),
-            }
-            .into());
-        }
-        self.pending_checkpoint = None;
-        Ok((
-            crate::checkpoint_wire::checkpoint_committed(&normalized),
-            false,
-        ))
-    }
-
     /// Replace an authority session from exact durable rows. The candidate
     /// engine is built beside the session and installed only after every leaf,
     /// the forest root and signer digest have been verified.
@@ -834,26 +382,17 @@ impl ProcessSession {
             .authority_config
             .as_ref()
             .ok_or(ProcessError::EngineNotLoaded)?;
-        let mut restored = StatefulConsensusEngine::restore(
+        let restored = ResidentConsensusEngine::restore_exact(
             EngineGeneration::from_bytes(binding.engine_generation),
             self.worker_count,
-            expected.revision,
             config.private_key,
             config.signer_id.clone(),
             std::sync::Arc::clone(&self.swap_market),
-            Vec::new(),
+            expected,
+            accounts,
         )?;
-        restored.restore_accounts(accounts, &expected)?;
-        let normalized = restored.checkpoint_token()?;
-        if normalized != expected {
-            return Err(xln_rscore_batch::BatchError::CheckpointToken {
-                actual: format!("{normalized:?}"),
-                expected: format!("{expected:?}"),
-            }
-            .into());
-        }
         self.authority = Some(Box::new(restored));
-        Ok((crate::checkpoint_wire::exact_restored(&normalized), false))
+        Ok((crate::checkpoint_wire::exact_restored(&expected), false))
     }
 
     fn upsert_accounts(
@@ -867,7 +406,7 @@ impl ProcessSession {
         if self.authority.is_some() {
             return Err(ProcessError::AuthorityUpsertForbidden);
         }
-        if self.pending.is_some() || self.pending_wave.is_some() {
+        if self.pending.is_some() {
             return Err(ProcessError::PreparePending);
         }
         let engine = self.engine.as_mut().ok_or(ProcessError::EngineNotLoaded)?;
@@ -991,12 +530,6 @@ impl ProcessSession {
     }
 
     fn shutdown(&mut self) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        if self.pending_checkpoint.is_some() {
-            return Err(ProcessError::CheckpointPending);
-        }
-        if self.pending_wave.is_some() {
-            return Err(ProcessError::PreparePending);
-        }
         if self.pending.is_some() {
             return Err(ProcessError::PreparePending);
         }

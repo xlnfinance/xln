@@ -16,6 +16,7 @@ import type {
 } from '../../entity/runtime-context';
 import { cloneIsolatedEntityInput } from '../../entity/state/input-clone';
 import { accountInputApplied } from '../../account/consensus/result';
+import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
 
@@ -74,6 +75,19 @@ type AccountAuthorityPreparedOutbound = Readonly<{
   }>[];
 }>;
 
+/** Entity-owned fields a peer is never allowed to choose at Account genesis. */
+type AccountAuthorityInboundGenesisPolicy = Readonly<{
+  expectedDomain: AccountAuthorityInputRequest['account']['state']['domain'];
+  shadowPolicyRoot: string;
+  deltaTransformer: string;
+  publicPinned: false;
+}>;
+
+type AccountAuthorityInboundBatchRequest = AccountAuthorityInputRequest & Readonly<{
+  accountId: string;
+  genesisPolicy?: AccountAuthorityInboundGenesisPolicy;
+}>;
+
 type AccountAuthorityEntityParent = Readonly<{
   ownerEntityId: string;
   canonicalEntityInput: EntityInput;
@@ -85,7 +99,7 @@ type AccountAuthorityEntityParent = Readonly<{
 
 export type AccountAuthorityEntityBatchInbound = AccountAuthorityEntityParent & Readonly<{
   expectedAccountsRoot: string;
-  requests: readonly AccountAuthorityInputRequest[];
+  requests: readonly AccountAuthorityInboundBatchRequest[];
 }>;
 
 export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent & Readonly<{
@@ -226,7 +240,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   private authoritativeExecutions = 0;
   private frameOpened = false;
   private frameOutboundPrepared = false;
-  private inboundRequests: AccountAuthorityInputRequest[] = [];
+  private inboundRequests: AccountAuthorityInboundBatchRequest[] = [];
   private inboundResults: HandleAccountInputResult[] = [];
   private inboundCursor = 0;
   private admissionRequests: AccountAuthorityInputRequest[] = [];
@@ -308,18 +322,45 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.proposalCursor = 0;
     this.generatedAdmissions = [];
     this.generatedAdmissionCursor = 0;
+    const newAccounts = new Map<string, AccountAuthorityInputRequest['account']>();
     this.inboundRequests = inboundArrivals(request.entityTxs).map(arrival => {
       const accountId = normalizeEntityId(arrival.accountId);
-      const account = request.accountForWrite(accountId);
-      if (account === undefined) {
-        throw new Error(`ACCOUNT_AUTHORITY_INBOUND_ACCOUNT_MISSING:${accountId}`);
+      const existing = request.accountForWrite(accountId) ?? newAccounts.get(accountId);
+      if (existing !== undefined) {
+        return {
+          collectorFrameId: String(request.ownerEntityId),
+          accountId,
+          account: existing,
+          input: arrival.input,
+          entityTimestamp: request.entityTimestamp,
+          finalizedJHeight: request.finalizedJHeight,
+        };
       }
+      const created = request.createInboundAccount(arrival.input);
+      const actualAccountId = normalizeEntityId(created.account.proofHeader.toEntity);
+      if (actualAccountId !== accountId) {
+        throw new Error(`ACCOUNT_AUTHORITY_INBOUND_CREATE_ACCOUNT_MISMATCH:${accountId}:${actualAccountId}`);
+      }
+      if (created.account.publicPinned === true) {
+        throw new Error(`ACCOUNT_AUTHORITY_INBOUND_CREATE_PUBLIC_PINNED:${accountId}`);
+      }
+      newAccounts.set(accountId, created.account);
       return {
         collectorFrameId: String(request.ownerEntityId),
-        account,
+        accountId,
+        account: created.account,
         input: arrival.input,
         entityTimestamp: request.entityTimestamp,
         finalizedJHeight: request.finalizedJHeight,
+        genesisPolicy: {
+          expectedDomain: created.account.state.domain,
+          shadowPolicyRoot: requirePersistentAccountStateMap(
+            created.account.shadow.rebalance.policy,
+            'rebalanceShadowPolicy',
+          ).rootHash(),
+          deltaTransformer: created.deltaTransformer,
+          publicPinned: false,
+        },
       };
     });
     const run = this.requireBatchProvider('executeAccountInboundBatch');
@@ -416,12 +457,25 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     for (let index = this.inboundCursor; index < this.inboundRequests.length; index += 1) {
       const request = this.inboundRequests[index];
       if (request === undefined) continue;
-      if (normalizeEntityId(request.account.proofHeader.toEntity) !== normalized) continue;
+      if (request.accountId !== normalized) continue;
       if (request.input === input) return true;
       serializedInput ??= safeStringify(input);
       if (safeStringify(request.input) === serializedInput) return true;
     }
     return false;
+  }
+
+  preparedInboundGenesis(accountId: string, input: AccountInput): AccountAuthorityInputRequest['account'] | null {
+    const normalized = normalizeEntityId(accountId);
+    let serializedInput: string | undefined;
+    for (let index = this.inboundCursor; index < this.inboundRequests.length; index += 1) {
+      const request = this.inboundRequests[index];
+      if (request?.genesisPolicy === undefined || request.accountId !== normalized) continue;
+      if (request.input === input) return request.account;
+      serializedInput ??= safeStringify(input);
+      if (safeStringify(request.input) === serializedInput) return request.account;
+    }
+    return null;
   }
 
   finishEntityAccountFrame(): void {
@@ -505,7 +559,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (expected === undefined || result === undefined) {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNPREPARED:${request.account.proofHeader.toEntity}`);
     }
-    const expectedAccount = normalizeEntityId(expected.account.proofHeader.toEntity);
+    const expectedAccount = expected.accountId;
     const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
     // Identity is the common case and is exactly as strong as comparing the
     // canonical bytes: both sides hold the same `entityTx.data`. A frame that

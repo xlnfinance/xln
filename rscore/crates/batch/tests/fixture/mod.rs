@@ -286,6 +286,7 @@ pub fn input_row(
     AccountInputRow {
         operation_index,
         account_id,
+        genesis_policy: None,
         input: peer_input(from_entity_id, to_entity_id, kind),
     }
 }

@@ -177,6 +177,7 @@ describe('pre-TypeScript Account authority capability', () => {
       entityTxs: [],
       accounts: new Map([[PEER, account]]),
       accountForWrite: accountId => accountId === PEER ? account : undefined,
+      createInboundAccount: () => { throw new Error('TEST_CREATE_UNREACHABLE'); },
       entityTimestamp: 100,
       finalizedJHeight: 7,
     });
@@ -273,6 +274,7 @@ describe('pre-TypeScript Account authority capability', () => {
       entityTxs: [],
       accounts,
       accountForWrite: accountId => accounts.get(accountId),
+      createInboundAccount: () => { throw new Error('TEST_CREATE_UNREACHABLE'); },
       entityTimestamp: 100,
       finalizedJHeight: 7,
     });

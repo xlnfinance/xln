@@ -10,8 +10,8 @@ use std::collections::BTreeSet;
 
 use sha2::{Digest, Sha256};
 use xln_rscore_protocol::{
-    CanonicalValue, PersistentNodeChanges, PersistentNodeRecord, PersistentRadixMap,
-    encode_account_state_value, encode_raw_text_key,
+    CanonicalNumber, CanonicalValue, PersistentNodeChanges, PersistentNodeRecord,
+    PersistentRadixMap, encode_account_state_value, encode_raw_text_key,
 };
 
 use crate::state::delta::MAX_ACCOUNT_TOKEN_ROWS;
@@ -21,6 +21,7 @@ use crate::{AccountIdentity, Delta, EntityId, HtlcLock, Side, StateError, TokenI
 
 const MAX_ACCOUNT_DISPUTE_SECONDS: u64 = 365 * 24 * 60 * 60;
 const MAX_ACCOUNT_HTLC_LOCKS: usize = 32;
+pub(crate) const MAX_ACCOUNT_STATE_LEAF_BYTES: usize = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccountDisputeConfig {
@@ -543,7 +544,10 @@ impl AccountState {
 
     pub(crate) fn remove_swap_offer(&mut self, offer_id: &str) -> Result<(), StateError> {
         let key = text_key(offer_id)?;
-        self.swap_offers = self.swap_offers.removed(&key);
+        self.swap_offers = self
+            .swap_offers
+            .removed(&key)
+            .map_err(|error| StateError::PersistentMap(error.to_string()))?;
         Ok(())
     }
 
@@ -554,7 +558,10 @@ impl AccountState {
 
     pub(crate) fn remove_htlc_lock(&mut self, lock_id: &str) -> Result<(), StateError> {
         let key = crate::htlc_lock_radix_key(lock_id)?;
-        self.locks = self.locks.removed(&key);
+        self.locks = self
+            .locks
+            .removed(&key)
+            .map_err(|error| StateError::PersistentMap(error.to_string()))?;
         Ok(())
     }
 
@@ -708,7 +715,7 @@ fn put_swap_offer_map(
     offer: SwapOffer,
 ) -> Result<PersistentRadixMap<SwapOffer>, StateError> {
     let key = text_key(offer.offer_id())?;
-    let digest = canonical_digest(offer.canonical())?;
+    let digest = canonical_digest(offer.canonical()?)?;
     map.updated(key, offer, digest)
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
@@ -718,7 +725,7 @@ fn put_policy_map(
     token_id: TokenId,
     policy: BilateralRebalanceFeePolicy,
 ) -> Result<PersistentRadixMap<BilateralRebalanceFeePolicy>, StateError> {
-    let digest = canonical_digest(policy.canonical())?;
+    let digest = canonical_digest(policy.canonical()?)?;
     map.updated(token_id.radix_key(), policy, digest)
         .map_err(|error| StateError::PersistentMap(error.to_string()))
 }
@@ -726,7 +733,7 @@ fn put_policy_map(
 fn delta_digest(delta: &Delta) -> Result<[u8; 32], StateError> {
     let mut fields = vec![(
         "tokenId".into(),
-        CanonicalValue::Number(f64::from(delta.token_id().get())),
+        CanonicalValue::Number(CanonicalNumber::from_u16(delta.token_id().get())),
     )];
     fields.extend(
         delta
@@ -737,9 +744,25 @@ fn delta_digest(delta: &Delta) -> Result<[u8; 32], StateError> {
 }
 
 fn canonical_digest(value: CanonicalValue) -> Result<[u8; 32], StateError> {
-    let bytes = encode_account_state_value(&value)
-        .map_err(|error| StateError::PersistentMap(error.to_string()))?;
+    let bytes = encode_account_state_leaf(&value)?;
     Ok(Sha256::digest(bytes).into())
+}
+
+pub(crate) fn encode_account_state_leaf(value: &CanonicalValue) -> Result<Vec<u8>, StateError> {
+    let bytes = encode_account_state_value(value)
+        .map_err(|error| StateError::PersistentMap(error.to_string()))?;
+    validate_account_state_leaf_size(bytes.len())?;
+    Ok(bytes)
+}
+
+fn validate_account_state_leaf_size(actual: usize) -> Result<(), StateError> {
+    if actual > MAX_ACCOUNT_STATE_LEAF_BYTES {
+        return Err(StateError::AccountStateLeafTooLarge {
+            actual,
+            maximum: MAX_ACCOUNT_STATE_LEAF_BYTES,
+        });
+    }
+    Ok(())
 }
 
 fn text_key(value: &str) -> Result<Vec<u8>, StateError> {
@@ -780,4 +803,39 @@ fn decode_token_radix_key(key: &[u8]) -> Result<TokenId, StateError> {
         )));
     }
     TokenId::new(u32::from(u16::from_be_bytes([key[30], key[31]])))
+}
+
+#[cfg(test)]
+mod leaf_limit_tests {
+    use super::{MAX_ACCOUNT_STATE_LEAF_BYTES, encode_account_state_leaf};
+    use crate::StateError;
+    use xln_rscore_protocol::{CanonicalValue, encode_account_state_value};
+
+    fn encoded_string_with_size(target: usize) -> CanonicalValue {
+        (target.saturating_sub(32)..target)
+            .map(|length| CanonicalValue::String("a".repeat(length)))
+            .find(|value| {
+                encode_account_state_value(value).is_ok_and(|encoded| encoded.len() == target)
+            })
+            .expect("canonical string with target encoded size")
+    }
+
+    #[test]
+    fn account_leaf_limit_matches_typescript_boundary_exactly() {
+        let accepted = encoded_string_with_size(MAX_ACCOUNT_STATE_LEAF_BYTES);
+        assert_eq!(
+            encode_account_state_leaf(&accepted)
+                .expect("10,000-byte canonical leaf")
+                .len(),
+            MAX_ACCOUNT_STATE_LEAF_BYTES
+        );
+        let rejected = encoded_string_with_size(MAX_ACCOUNT_STATE_LEAF_BYTES + 1);
+        assert_eq!(
+            encode_account_state_leaf(&rejected),
+            Err(StateError::AccountStateLeafTooLarge {
+                actual: 10_001,
+                maximum: 10_000,
+            })
+        );
+    }
 }

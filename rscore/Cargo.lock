@@ -574,7 +574,6 @@ dependencies = [
  "hex",
  "mimalloc",
  "num-bigint",
- "ryu-js",
  "sha2",
  "thiserror",
  "xln-rscore-abi",

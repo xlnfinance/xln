@@ -715,6 +715,11 @@ export interface RuntimeReplica {
   accountAuthorityEntityStageProvider?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStageProvider | undefined;
   /** Active for one EntityInput and always cleared before returning to Runtime. */
   accountAuthorityEntityStage?: import('../rscore/authority/entity-stage').AccountAuthorityEntityStage | undefined;
+  /**
+   * Ephemeral checkpoint cadence for the active Runtime frame. Rust consumes
+   * it on the outbound Account visit; it is never consensus state or WAL.
+   */
+  accountAuthorityCheckpointDue?: boolean | undefined;
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   /** Ephemeral wall-clock boundary for the active process(); never consensus or WAL state. */
   activeProcessProgressAt?: number;

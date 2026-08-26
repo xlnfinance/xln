@@ -58,6 +58,8 @@ type RscoreCheckpointNodeChanges = Readonly<{
 }>;
 
 export type RscoreAccountCheckpointRow = Readonly<{
+  /** Exact validated process row; storage persists these bytes without re-encoding. */
+  wire: readonly RscoreWireValue[];
   accountId: string;
   entityAccountLeaf: string;
   header: readonly RscoreWireValue[];
@@ -337,6 +339,7 @@ export const decodeRscoreWavePostAccount = (value: unknown): RscoreAccountCheckp
     rebalanceFeePolicies: changes(row[8], 'postAccount.rebalanceFeePolicies'),
   };
   return {
+    wire: row,
     accountId: `0x${Buffer.from(accountId).toString('hex')}`,
     entityAccountLeaf: `0x${Buffer.from(
       rscoreCheckpointBytes(row[1], 32, 'WAVE_POST_ACCOUNT_LEAF'),

@@ -34,6 +34,10 @@ import {
   rscoreWireUint,
 } from './account-tx-wire-decode';
 import { RSCORE_CUTOVER_VERIFY } from './cutover/verify';
+import {
+  decodeRscoreCheckpointChanges,
+  type RscoreCheckpointChanges,
+} from './checkpoint/checkpoint-wire';
 import { decodeRscoreWavePostAccount } from './checkpoint/wave-checkpoint-decode';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import { accountTxWire, type ShadowOutputRow } from './shadow-wire';
@@ -41,7 +45,7 @@ import type { AccountFrame, Delta } from '../types/account';
 
 export { decodeRscoreAccountTx };
 
-const WAVE_PARITY_DOMAIN = 'xln.rscore.wave-parity.v1';
+const WAVE_PARITY_DOMAIN = 'xln.rscore.wave-parity.v2';
 
 type WaveDroppedRow = {
   index: number;
@@ -256,6 +260,10 @@ export type Wave = {
    * 9-field materialized restore row.
    */
   postAccounts: RscoreAccountCheckpointRow[];
+  /** Exact H=1 read models for Accounts first authenticated by this inbound. */
+  createdAccounts: RscoreAccountCheckpointRow[];
+  /** Exact incremental checkpoint piggybacked on a due outbound visit. */
+  checkpoint: RscoreCheckpointChanges | null;
   parityDigest: string;
   /**
    * Wall microseconds inside the engine, so a caller can separate the cost of
@@ -268,7 +276,7 @@ export type Wave = {
 // --------------------------------------------------------------- the decoder
 
 const decodeWavePayload = (value: unknown): Wave => {
-  const fields = rscoreWireTuple(value, 9, 'wave');
+  const fields = rscoreWireTuple(value, 11, 'wave');
   const applied = rscoreWireList(fields[2], 'wave.applied').map(decodeInputResult);
   const admissions = rscoreWireList(fields[3], 'wave.admissions').map(decodeAdmissionResult);
   const proposals = rscoreWireList(fields[4], 'wave.proposals').map(decodeProposal);
@@ -280,6 +288,13 @@ const decodeWavePayload = (value: unknown): Wave => {
     };
   });
   const postAccounts = rscoreWireList(fields[6], 'wave.postAccounts').map(decodeRscoreWavePostAccount);
+  const createdAccounts = rscoreWireList(fields[7], 'wave.createdAccounts')
+    .map(decodeRscoreWavePostAccount);
+  const checkpoint = fields[8] === null ? null : decodeRscoreCheckpointChanges(fields[8]);
+  // The generic checkpoint decoder protects the durable token/row envelope.
+  // Run the full Account-row decoder here as well so malformed node changes
+  // cannot wait until storage to fail after Entity has consumed this reply.
+  const checkpointAccounts = (checkpoint?.accounts ?? []).map(decodeRscoreWavePostAccount);
   for (const [name, rows] of [['applied', applied], ['admissions', admissions]] as const) {
     for (let index = 1; index < rows.length; index += 1) {
       const previous = rows[index - 1];
@@ -298,22 +313,49 @@ const decodeWavePayload = (value: unknown): Wave => {
   }
   const touchedKeys = touched.map(row => row.accountId);
   const postKeys = postAccounts.map(row => row.accountId);
+  const createdKeys = createdAccounts.map(row => row.accountId);
+  const checkpointKeys = checkpointAccounts.map(row => row.accountId);
   if (new Set(touchedKeys).size !== touchedKeys.length) return rscoreWireDecodeFail('wave.touched:duplicate');
   if (new Set(postKeys).size !== postKeys.length) return rscoreWireDecodeFail('wave.postAccounts:duplicate');
-  // Bodies are optional: a candidate that did not ask for them gets none, and
-  // the leaves in `touched` are then the whole answer. Any body that does
-  // arrive must still bind to its leaf.
+  if (new Set(createdKeys).size !== createdKeys.length) {
+    return rscoreWireDecodeFail('wave.createdAccounts:duplicate');
+  }
+  if (new Set(checkpointKeys).size !== checkpointKeys.length) {
+    return rscoreWireDecodeFail('wave.checkpointAccounts:duplicate');
+  }
+  for (let index = 1; index < checkpointKeys.length; index += 1) {
+    const previous = checkpointKeys[index - 1];
+    const current = checkpointKeys[index];
+    if (previous === undefined || current === undefined || previous >= current) {
+      return rscoreWireDecodeFail('wave.checkpointAccounts:order');
+    }
+  }
+  // Final bodies are optional, but whenever present they describe this exact
+  // round head and therefore bind one-for-one to its touched leaves.
+  const touchedById = new Map(touched.map(row => [row.accountId, row]));
   if (postAccounts.length !== 0 && touched.length !== postAccounts.length) {
     return rscoreWireDecodeFail('wave.postAccounts:length');
   }
   for (const [index, post] of postAccounts.entries()) {
-    const touchedRow = touched[index];
+    const touchedRow = touchedById.get(post.accountId);
     if (
       touchedRow === undefined ||
       touchedRow.accountId !== post.accountId ||
       touchedRow.entityAccountLeaf !== post.entityAccountLeaf
     ) {
       return rscoreWireDecodeFail(`wave.postAccounts:binding:${index}`);
+    }
+  }
+  for (const [index, created] of createdAccounts.entries()) {
+    const committedH1 = applied.some(row => {
+      if (row.accountId !== created.accountId) return false;
+      const verdict = row.verdict.kind === 'frameAckApplied'
+        ? row.verdict.frameVerdict
+        : row.verdict;
+      return verdict.kind === 'frameCommitted' && verdict.height === 1;
+    });
+    if (!touchedById.has(created.accountId) || !committedH1) {
+      return rscoreWireDecodeFail(`wave.createdAccounts:binding:${index}`);
     }
   }
   return {
@@ -324,8 +366,10 @@ const decodeWavePayload = (value: unknown): Wave => {
     proposals,
     touched,
     postAccounts,
-    parityDigest: rscoreWireHex(fields[7], 'wave.parityDigest', 32),
-    engineMicros: rscoreWireUint(fields[8], 'wave.engineMicros'),
+    createdAccounts,
+    checkpoint,
+    parityDigest: rscoreWireHex(fields[9], 'wave.parityDigest', 32),
+    engineMicros: rscoreWireUint(fields[10], 'wave.engineMicros'),
   };
 };
 
@@ -1049,6 +1093,10 @@ export const waveParityDigest = (wave: Wave): string => {
               failed.upstreamResolution.reason,
             ],
       ]),
+    ]),
+    wave.createdAccounts.map(row => [
+      hexToBytes(row.accountId, 'transcript.createdAccountId'),
+      hexToBytes(row.entityAccountLeaf, 'transcript.createdAccountLeaf'),
     ]),
   ];
   const digest = createHash('sha256');

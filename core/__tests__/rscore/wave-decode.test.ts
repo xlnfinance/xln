@@ -134,6 +134,8 @@ const rawWave = (): RscoreWireValue[] => {
     [],
     [[accountId, leaf]],
     [emptyPostAccount(accountId, leaf)],
+    [],
+    null,
     bytes(32, 0),
     17,
   ];
@@ -155,7 +157,7 @@ const committedFrameEvidence = (
 ], committedViaNewFrame];
 
 const withParityDigest = (raw: RscoreWireValue[]): RscoreWireValue[] => {
-  raw[7] = Buffer.from(waveParityDigestFromWireForTests(raw).slice(2), 'hex');
+  raw[9] = Buffer.from(waveParityDigestFromWireForTests(raw).slice(2), 'hex');
   return raw;
 };
 
@@ -344,6 +346,31 @@ describe('rscore staged wave decoder', () => {
     });
   });
 
+  test('binds authenticated H=1 materialization separately from the final touched leaf', () => {
+    const raw = rawWave();
+    const accountId = bytes(32, 0x22);
+    const h1StateHash = bytes(32, 0x44);
+    requiredAt(raw[2] as RscoreWireValue[][], 0, 'GENESIS_COMMIT')[2] = [
+      0,
+      1,
+      h1StateHash,
+      bytes(65, 0x55),
+      [],
+      null,
+      committedFrameEvidence(h1StateHash, true),
+      [],
+      null,
+    ];
+    const created = emptyPostAccount(accountId, bytes(32, 0x77));
+    raw[6] = [];
+    raw[7] = [created];
+    const signed = withParityDigest(raw);
+    expect(decodeWave(signed).createdAccounts).toHaveLength(1);
+
+    (created as RscoreWireValue[])[1] = bytes(32, 0x78);
+    expect(() => decodeWave(signed)).toThrow('wave.parityDigest');
+  });
+
   test('decodes one atomic frame-ACK result with ordered outputs and both committed frames', () => {
     const raw = rawWave();
     const ackStateHash = bytes(32, 0x66);
@@ -512,7 +539,7 @@ describe('rscore staged wave decoder', () => {
   });
 
   test('rejects old replies, duplicate operation indices and malformed admission tags', () => {
-    expect(() => decodeWave(rawWave().slice(0, 7))).toThrow('wave:arity:7:9');
+    expect(() => decodeWave(rawWave().slice(0, 7))).toThrow('wave:arity:7:11');
 
     const duplicate = rawWave();
     requiredAt(duplicate[2] as RscoreWireValue[][], 0, 'APPLIED')[0] = 1;
@@ -528,7 +555,7 @@ describe('rscore staged wave decoder', () => {
     expect(() => decodeWave(badAdmission)).toThrow('admissionResult.verdict.tag:7');
 
     const corruptDigest = withParityDigest(rawWave());
-    corruptDigest[7] = bytes(32, 0xff);
+    corruptDigest[9] = bytes(32, 0xff);
     expect(() => decodeWave(corruptDigest)).toThrow('wave.parityDigest');
   });
 
@@ -592,5 +619,32 @@ describe('rscore staged wave decoder', () => {
     identity[2] = right;
     identity[3] = left;
     expect(() => decodeWave(reversedParties)).toThrow('postAccount.header.parties:order');
+  });
+
+  test('requires piggyback checkpoint rows to be unique and canonically ordered', () => {
+    const checkpointRow = (accountFill: number, leafFill: number): RscoreWireValue[] => {
+      const accountId = bytes(32, accountFill);
+      const row = emptyPostAccount(accountId, bytes(32, leafFill));
+      const header = row[2] as RscoreWireValue[];
+      const identity = header[2] as RscoreWireValue[];
+      identity[3] = accountId;
+      return row;
+    };
+    const first = checkpointRow(0x22, 0x31);
+    const second = checkpointRow(0x33, 0x32);
+    const checkpoint = (accounts: RscoreWireValue[]): RscoreWireValue[] => [
+      [0, 4, bytes(32, 0x66), bytes(32, 0x77), accounts.length],
+      [4, 4, bytes(32, 0x66), bytes(32, 0x77), accounts.length],
+      accounts,
+      [],
+    ];
+
+    const reversed = rawWave();
+    reversed[8] = checkpoint([second, first]);
+    expect(() => decodeWave(reversed)).toThrow('wave.checkpointAccounts:order');
+
+    const duplicate = rawWave();
+    duplicate[8] = checkpoint([first, first]);
+    expect(() => decodeWave(duplicate)).toThrow('wave.checkpointAccounts:duplicate');
   });
 });

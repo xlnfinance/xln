@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Signing, recovery and key derivation shared by the account engine and the
 //! Hanko codec.
 //!

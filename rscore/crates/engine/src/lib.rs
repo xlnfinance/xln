@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Deterministic, path-copy Account execution.
 //!
 //! This crate is deliberately not wired into production yet. Its public API is
@@ -67,4 +69,4 @@ pub use tx::handlers::htlc::{
 };
 pub use tx::handlers::rebalance::{BilateralRebalanceFeePolicy, RebalanceFeePolicySnapshot};
 pub use tx::{AccountTx, DeliveryMode, LendingAction, LendingTermId, ReserveSide};
-pub use xln_rscore_protocol::CanonicalValue;
+pub use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};

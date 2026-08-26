@@ -6,12 +6,13 @@
 //! `core/account/tx/handlers/rebalance/policy.ts`.
 
 use num_bigint::BigInt;
-use xln_rscore_protocol::CanonicalValue;
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use crate::state::delta::MAX_TOKEN_ID;
 use crate::tx::apply_types::MutationDecision;
 use crate::{
-    AccountRejection, AccountReplica, Side, TokenId, TransitionError, ValidationRejection,
+    AccountRejection, AccountReplica, Side, StateError, TokenId, TransitionError,
+    ValidationRejection,
 };
 
 const MAX_LIQUIDITY_FEE_BPS: i64 = 10_000;
@@ -71,12 +72,14 @@ impl RebalanceFeePolicySnapshot {
             && &self.gas_fee == gas_fee
     }
 
-    fn canonical(&self) -> CanonicalValue {
-        CanonicalValue::Object(vec![
-            (
-                "policyVersion".into(),
-                CanonicalValue::Number(self.policy_version as f64),
-            ),
+    fn canonical(&self) -> Result<CanonicalValue, StateError> {
+        let number = |value| {
+            CanonicalNumber::try_from_u64(value)
+                .map(CanonicalValue::Number)
+                .map_err(|error| StateError::AccountStateRoot(error.to_string()))
+        };
+        Ok(CanonicalValue::Object(vec![
+            ("policyVersion".into(), number(self.policy_version)?),
             (
                 "baseFee".into(),
                 CanonicalValue::BigInt(self.base_fee.clone()),
@@ -89,11 +92,8 @@ impl RebalanceFeePolicySnapshot {
                 "gasFee".into(),
                 CanonicalValue::BigInt(self.gas_fee.clone()),
             ),
-            (
-                "updatedAt".into(),
-                CanonicalValue::Number(self.updated_at as f64),
-            ),
-        ])
+            ("updatedAt".into(), number(self.updated_at)?),
+        ]))
     }
 }
 
@@ -130,15 +130,15 @@ impl BilateralRebalanceFeePolicy {
         next
     }
 
-    pub(crate) fn canonical(&self) -> CanonicalValue {
+    pub(crate) fn canonical(&self) -> Result<CanonicalValue, StateError> {
         let mut fields = Vec::with_capacity(2);
         if let Some(left) = &self.left {
-            fields.push(("left".into(), left.canonical()));
+            fields.push(("left".into(), left.canonical()?));
         }
         if let Some(right) = &self.right {
-            fields.push(("right".into(), right.canonical()));
+            fields.push(("right".into(), right.canonical()?));
         }
-        CanonicalValue::Object(fields)
+        Ok(CanonicalValue::Object(fields))
     }
 }
 

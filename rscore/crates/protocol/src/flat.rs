@@ -44,13 +44,14 @@ mod tests {
     use num_bigint::BigInt;
 
     use super::*;
+    use crate::CanonicalNumber;
 
     fn text(value: &str) -> CanonicalValue {
         CanonicalValue::String(value.into())
     }
 
-    fn number(value: f64) -> CanonicalValue {
-        CanonicalValue::Number(value)
+    fn number(value: u64) -> CanonicalValue {
+        CanonicalValue::Number(CanonicalNumber::try_from_u64(value).expect("safe integer"))
     }
 
     fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
@@ -69,7 +70,7 @@ mod tests {
             (
                 "identity".into(),
                 object(vec![
-                    ("chainId", number(31_337.0)),
+                    ("chainId", number(31_337)),
                     ("depositoryAddress", text(&format!("0x{}", "11".repeat(20)))),
                     ("leftEntity", text(&format!("0x{}", "22".repeat(32)))),
                     ("rightEntity", text(&format!("0x{}", "33".repeat(32)))),
@@ -80,12 +81,12 @@ mod tests {
                 "financial".into(),
                 object(vec![
                     ("deltasRoot", zero.clone()),
-                    ("jNonce", number(7.0)),
+                    ("jNonce", number(7)),
                     (
                         "disputeConfig",
                         object(vec![
-                            ("leftResponseSeconds", number(11.0)),
-                            ("rightResponseSeconds", number(13.0)),
+                            ("leftResponseSeconds", number(11)),
+                            ("rightResponseSeconds", number(13)),
                         ]),
                     ),
                 ]),
@@ -100,14 +101,14 @@ mod tests {
             (
                 "jurisdiction".into(),
                 object(vec![
-                    ("lastFinalizedJHeight", number(9.0)),
+                    ("lastFinalizedJHeight", number(9)),
                     (
                         "leftPendingJClaims",
-                        object(vec![("height", number(0.0)), ("root", zero.clone())]),
+                        object(vec![("height", number(0)), ("root", zero.clone())]),
                     ),
                     (
                         "rightPendingJClaims",
-                        object(vec![("height", number(0.0)), ("root", zero.clone())]),
+                        object(vec![("height", number(0)), ("root", zero.clone())]),
                     ),
                 ]),
             ),
@@ -126,8 +127,7 @@ mod tests {
     #[test]
     fn number_and_bigint_are_distinct_commitments() {
         let number_root =
-            compute_flat_integrity_root("test", &[("value".into(), CanonicalValue::Number(7.0))])
-                .expect("number");
+            compute_flat_integrity_root("test", &[("value".into(), number(7))]).expect("number");
         let bigint_root = compute_flat_integrity_root(
             "test",
             &[("value".into(), CanonicalValue::BigInt(BigInt::from(7)))],

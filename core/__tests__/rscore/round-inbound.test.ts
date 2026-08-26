@@ -14,6 +14,8 @@ const waveWithApplied = (...rows: Wave['applied']): Wave => ({
   proposals: [],
   touched: [],
   postAccounts: [],
+  createdAccounts: [],
+  checkpoint: null,
   parityDigest: `0x${'22'.repeat(32)}`,
   engineMicros: 0,
 });

@@ -25,5 +25,9 @@ thiserror = "2.0.16"
 codegen-units = 1
 lto = "thin"
 panic = "unwind"
+# Consensus arithmetic must fail identically in debug and production. This is
+# a backstop, not a substitute for checked_add/checked_sub at financial
+# boundaries: an overlooked overflow may halt, but it may never wrap a balance.
+overflow-checks = true
 # Symbols only; they cost nothing at runtime and make a profile readable.
 debug = "line-tables-only"

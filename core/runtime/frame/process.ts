@@ -407,8 +407,7 @@ const commitRuntimeFrame = async (
       frame.entityContexts,
       ...(authorityDriverEnabled(candidateEnv)
         ? [{
-            prepareCheckpoint: (checkpointRequested: boolean) =>
-              prepareAuthorityCheckpoint(candidateEnv, checkpointRequested),
+            prepareCheckpoint: () => prepareAuthorityCheckpoint(candidateEnv),
             validateCheckpointMaterialization: (
               checkpoints: readonly RscoreExactCheckpoint[],
             ) =>

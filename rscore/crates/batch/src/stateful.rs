@@ -156,7 +156,12 @@ impl StatefulBatchEngine {
         }
         let mut accounts = self.accounts.clone();
         for account_id in account_ids {
-            accounts = accounts.removed(account_id.as_bytes());
+            accounts = accounts.removed(account_id.as_bytes()).map_err(|error| {
+                BatchError::AccountsTree {
+                    account_id: *account_id,
+                    detail: error.to_string(),
+                }
+            })?;
         }
         self.accounts = accounts;
         self.revision += 1;

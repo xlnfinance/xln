@@ -6,7 +6,7 @@
  *
  * For what the runtime will actually delegate — the engine owning the
  * accounts, signing frames and verifying acks — use
- * `bench-rscore-authority.ts`. Numbers from this script are not payments per
+ * the integrated resident two-call replay. Numbers from this script are not payments per
  * second and must never be quoted as such.
  *
  * Usage: bun core/scripts/operations/benchmark/rscore/bench-rscore-waves.ts \

@@ -202,6 +202,7 @@ fn main() {
                 propose,
                 materialize: Vec::new(),
                 failed_htlc_routes: Vec::new(),
+                checkpoint_due: false,
                 post_accounts: false,
             })
             .expect("outbound");
@@ -227,6 +228,7 @@ fn main() {
                 AccountInputRow {
                     operation_index: operation_index as u64,
                     account_id: peer.account_id,
+                    genesis_policy: None,
                     input: peer_input(
                         hub_bytes,
                         peer.entity_bytes,
@@ -268,6 +270,7 @@ fn main() {
             propose: Vec::new(),
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: false,
         })
         .expect("drain outbound");

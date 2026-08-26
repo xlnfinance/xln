@@ -6,7 +6,9 @@
 //! to execute it.
 
 use num_bigint::BigInt;
-use xln_rscore_protocol::CanonicalValue;
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
+
+use crate::StateError;
 
 /// The Entity-visible view of one resting row.
 /// Parity target: `AccountSwapOfferSnapshot` (core/types/account.ts).
@@ -205,7 +207,10 @@ impl SwapOffer {
 
     /// Field-for-field the TypeScript SwapOffer object; absent optional keys
     /// are omitted exactly as TypeScript drops undefined before encoding.
-    pub fn canonical(&self) -> CanonicalValue {
+    pub fn canonical(&self) -> Result<CanonicalValue, StateError> {
+        let created_height = CanonicalNumber::try_from_u64(self.created_height)
+            .map(CanonicalValue::Number)
+            .map_err(|error| StateError::AccountStateRoot(error.to_string()))?;
         let mut fields = vec![
             (
                 "offerId".into(),
@@ -213,11 +218,11 @@ impl SwapOffer {
             ),
             (
                 "giveTokenId".into(),
-                CanonicalValue::Number(f64::from(self.give_token_id)),
+                CanonicalValue::Number(CanonicalNumber::from_u32(self.give_token_id)),
             ),
             (
                 "giveTokenDecimals".into(),
-                CanonicalValue::Number(f64::from(self.give_token_decimals)),
+                CanonicalValue::Number(CanonicalNumber::from_u32(self.give_token_decimals)),
             ),
             (
                 "giveAmount".into(),
@@ -225,11 +230,11 @@ impl SwapOffer {
             ),
             (
                 "wantTokenId".into(),
-                CanonicalValue::Number(f64::from(self.want_token_id)),
+                CanonicalValue::Number(CanonicalNumber::from_u32(self.want_token_id)),
             ),
             (
                 "wantTokenDecimals".into(),
-                CanonicalValue::Number(f64::from(self.want_token_decimals)),
+                CanonicalValue::Number(CanonicalNumber::from_u32(self.want_token_decimals)),
             ),
             (
                 "wantAmount".into(),
@@ -251,10 +256,7 @@ impl SwapOffer {
                 "makerIsLeft".into(),
                 CanonicalValue::Bool(self.maker_is_left),
             ),
-            (
-                "createdHeight".into(),
-                CanonicalValue::Number(self.created_height as f64),
-            ),
+            ("createdHeight".into(), created_height),
             (
                 "quantizedGive".into(),
                 CanonicalValue::BigInt(self.quantized_give.clone()),
@@ -267,10 +269,10 @@ impl SwapOffer {
         if let Some(time_in_force) = self.time_in_force {
             fields.push((
                 "timeInForce".into(),
-                CanonicalValue::Number(f64::from(time_in_force)),
+                CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(time_in_force))),
             ));
         }
-        CanonicalValue::Object(fields)
+        Ok(CanonicalValue::Object(fields))
     }
 }
 
@@ -302,8 +304,10 @@ mod tests {
             true,
             21,
         );
-        let encoded = xln_rscore_protocol::encode_account_state_value(&offer.canonical())
-            .expect("canonical offer");
+        let encoded = xln_rscore_protocol::encode_account_state_value(
+            &offer.canonical().expect("canonical value"),
+        )
+        .expect("canonical offer");
         assert_eq!(
             hex::encode(Sha256::digest(encoded)),
             "2bcadbbf04f98b128428cb9e48e45e156ff000977c4f306c211a0386ec05c534",

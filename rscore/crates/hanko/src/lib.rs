@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! The Hanko proof: how an entity signs, and how its counterparty checks.
 //!
 //! Mirrors `core/hanko` file for file — abi, codec, claims, batch — so the two

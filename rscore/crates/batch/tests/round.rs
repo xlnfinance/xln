@@ -53,6 +53,7 @@ fn two_visits_carry_a_whole_entity_frame() {
             propose: vec![payer_account],
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: true,
         })
         .expect("outbound");
@@ -108,6 +109,7 @@ fn two_visits_carry_a_whole_entity_frame() {
             propose: Vec::new(),
             materialize: vec![payee_account],
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: true,
         })
         .expect("outbound half");
@@ -138,6 +140,7 @@ fn the_next_parent_root_promotes_or_drops_the_path_copy_candidate() {
             propose: vec![account],
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: false,
         })
         .expect("candidate");
@@ -172,6 +175,7 @@ fn the_next_parent_root_promotes_or_drops_the_path_copy_candidate() {
             propose: vec![account],
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: false,
         })
         .expect("candidate");
@@ -205,6 +209,7 @@ fn the_two_visit_protocol_refuses_missing_or_overlapping_halves() {
             propose: Vec::new(),
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: false,
         })
         .err()
@@ -246,6 +251,7 @@ fn a_round_refuses_an_account_another_entity_owns() {
             propose: vec![payer_account],
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: false,
         })
         .err()
@@ -265,6 +271,7 @@ fn a_round_refuses_an_account_another_entity_owns() {
             propose: Vec::new(),
             materialize: Vec::new(),
             failed_htlc_routes: Vec::new(),
+            checkpoint_due: false,
             post_accounts: false,
         })
         .expect("a rejected outbound does not consume the inbound half");
@@ -333,6 +340,7 @@ fn a_failed_forward_reaches_the_upstream_account_in_one_outbound_visit() {
                 inbound_account_id: upstream_account,
                 inbound_lock_id: upstream_lock_id.clone(),
             }],
+            checkpoint_due: false,
             post_accounts: true,
         })
         .expect("one outbound visit reaches fixed point");

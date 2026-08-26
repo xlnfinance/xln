@@ -69,6 +69,8 @@ pub enum ProcessError {
     AuthorityBootstrapInvalid { revision: u64, accounts: usize },
     #[error("RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN")]
     AuthorityUpsertForbidden,
+    #[error("RSCORE_PROCESS_AUTHORITY_TWO_CALL_ONLY")]
+    AuthorityTwoCallOnly,
     #[error("RSCORE_PROCESS_PREPARE_PENDING")]
     PreparePending,
     #[error("RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY:entities={entities}")]
@@ -126,6 +128,7 @@ impl ProcessError {
             Self::EngineNotLoaded => "RSCORE_PROCESS_ENGINE_NOT_LOADED",
             Self::AuthorityBootstrapInvalid { .. } => "RSCORE_PROCESS_AUTHORITY_BOOTSTRAP_INVALID",
             Self::AuthorityUpsertForbidden => "RSCORE_PROCESS_AUTHORITY_UPSERT_FORBIDDEN",
+            Self::AuthorityTwoCallOnly => "RSCORE_PROCESS_AUTHORITY_TWO_CALL_ONLY",
             Self::PreparePending => "RSCORE_PROCESS_PREPARE_PENDING",
             Self::PrepareWaveNonempty { .. } => "RSCORE_PROCESS_PREPARE_WAVE_NONEMPTY",
             Self::PrepareNotPending => "RSCORE_PROCESS_PREPARE_NOT_PENDING",
@@ -146,6 +149,17 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
     match error {
         BatchError::InvalidWorkerCount(_) => "RSCORE_BATCH_WORKERS_INVALID",
         BatchError::ThreadPoolBuild(_) => "RSCORE_BATCH_THREAD_POOL",
+        BatchError::ResidentWorkerStart { .. } => "RSCORE_BATCH_RESIDENT_WORKER_START",
+        BatchError::ResidentWorkerStopped { .. } => "RSCORE_BATCH_RESIDENT_WORKER_STOPPED",
+        BatchError::ResidentWorkerReplyMissing => "RSCORE_BATCH_RESIDENT_WORKER_REPLY_MISSING",
+        BatchError::ResidentLaneCount { .. } => "RSCORE_BATCH_RESIDENT_LANE_COUNT",
+        BatchError::ResidentShardMissing { .. } => "RSCORE_BATCH_RESIDENT_SHARD_MISSING",
+        BatchError::ResidentRollbackMissing { .. } => "RSCORE_BATCH_RESIDENT_ROLLBACK_MISSING",
+        BatchError::ResidentRollbackPhase { .. } => "RSCORE_BATCH_RESIDENT_ROLLBACK_PHASE",
+        BatchError::ResidentWorkerResultCount { .. } => "RSCORE_BATCH_RESIDENT_WORKER_RESULT_COUNT",
+        BatchError::ResidentCheckpointAccountRemoved(_) => {
+            "RSCORE_BATCH_RESIDENT_CHECKPOINT_ACCOUNT_REMOVED"
+        }
         BatchError::DuplicateAccount(_) => "RSCORE_BATCH_ACCOUNT_DUPLICATE",
         BatchError::EmptyBatch => "RSCORE_BATCH_EMPTY",
         BatchError::BatchTooLarge { .. } => "RSCORE_BATCH_TOO_LARGE",
@@ -188,6 +202,8 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::EntityRoundOpen => "RSCORE_BATCH_ENTITY_ROUND_OPEN",
         BatchError::EntityRoundMissing => "RSCORE_BATCH_ENTITY_ROUND_MISSING",
         BatchError::EntityRoundOwner { .. } => "RSCORE_BATCH_ENTITY_ROUND_OWNER",
+        BatchError::EntityInboundPostAccounts => "RSCORE_BATCH_ENTITY_INBOUND_POST_ACCOUNTS",
+        BatchError::InboundGenesis { .. } => "RSCORE_BATCH_INBOUND_GENESIS",
         BatchError::EntityHeadRoot { .. } => "RSCORE_BATCH_ENTITY_HEAD_ROOT",
         BatchError::FailedHtlcRouteDuplicate { .. } => "RSCORE_BATCH_FAILED_HTLC_ROUTE_DUPLICATE",
         BatchError::FailedHtlcRouteMismatch { .. } => "RSCORE_BATCH_FAILED_HTLC_ROUTE_MISMATCH",

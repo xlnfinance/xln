@@ -31,7 +31,9 @@ import { compareStableText, safeStringify } from '../../../protocol/serializatio
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../../scheduler/wake/scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../../state-clone';
-import { getEntityAccountForWrite } from '../../state/persistent-account-map';
+import {
+  getEntityAccountForWrite,
+} from '../../state/persistent-account-map';
 import { getAccountPerspective } from '../../../account/state/perspective';
 import { emitScopedEvents } from '../../../support/scoped-events';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../../frame-events';
@@ -96,6 +98,8 @@ import {
   getQueuedAccountIds,
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
+import { requireAccountDeltaTransformerAddress } from '../../../account/consensus/helpers';
+import { resolveInboundAccount } from '../../tx/handlers/account/inbound-account';
 import {
   noteAuthorityAccountProposal,
   noteAuthorityAccountProposalResult,
@@ -1467,6 +1471,24 @@ const prepareEntityFrameWorkingSet = async (
     entityTxs,
     accounts: currentEntityState.accounts,
     accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
+    createInboundAccount: input => {
+      const resolution = resolveInboundAccount(
+        currentEntityState,
+        input,
+        Boolean(accountInputAck(input)),
+        Boolean(accountInputProposal(input)),
+      );
+      if (!resolution.createdAccount) {
+        throw new Error(`ACCOUNT_AUTHORITY_INBOUND_CREATE_EXPECTED:${resolution.counterpartyId}`);
+      }
+      return {
+        account: resolution.account,
+        deltaTransformer: requireAccountDeltaTransformerAddress(
+          context.accountConsensusContext,
+          resolution.account.state,
+        ),
+      };
+    },
     entityTimestamp: currentEntityState.timestamp,
     finalizedJHeight: currentEntityState.lastFinalizedJHeight ?? 0,
   });

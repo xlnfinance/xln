@@ -312,18 +312,6 @@ pub fn candidate_command(id: u64, op_tag: OpTag, candidate_token: [u8; 32]) -> E
     request(id, op_tag, vec![AbiValue::Bytes(candidate_token.to_vec())])
 }
 
-pub fn get_checkpoint_changes(id: u64, candidate_token: [u8; 32]) -> Envelope {
-    request(
-        id,
-        OpTag::GetCheckpointChanges,
-        vec![AbiValue::Bytes(candidate_token.to_vec())],
-    )
-}
-
-pub fn commit_checkpoint(id: u64, token: AbiValue) -> Envelope {
-    request(id, OpTag::CommitCheckpoint, vec![token])
-}
-
 pub fn restore_exact(id: u64, token: AbiValue, accounts: Vec<AbiValue>) -> Envelope {
     request(id, OpTag::RestoreExact, vec![token, tuple(accounts)])
 }
@@ -331,15 +319,6 @@ pub fn restore_exact(id: u64, token: AbiValue, accounts: Vec<AbiValue>) -> Envel
 /// Build the exact durable rows old authority tests need without reopening the
 /// production Bootstrap import path. Production authority Bootstrap is empty
 /// revision zero only; every nonempty/revisioned start is RestoreExact.
-pub fn restore_authority_accounts(
-    id: u64,
-    seed: &str,
-    signer_id: &str,
-    accounts: Vec<AbiValue>,
-) -> Envelope {
-    restore_authority_accounts_with_rows(id, seed, signer_id, accounts).0
-}
-
 pub fn restore_authority_accounts_with_rows(
     id: u64,
     seed: &str,
@@ -504,9 +483,10 @@ fn authority_account_with(
 }
 
 fn authority_genesis_envelope(owner: [u8; 32], counterparty: [u8; 32]) -> AbiValue {
-    use xln_rscore_engine::{AccountEnvelope, CanonicalValue};
+    use xln_rscore_engine::{AccountEnvelope, CanonicalNumber, CanonicalValue};
 
     let entity = |value: [u8; 32]| format!("0x{}", hex::encode(value));
+    let number = |value| CanonicalValue::Number(CanonicalNumber::from_u32(value));
     let zero_root = CanonicalValue::String(format!("0x{}", "00".repeat(32)));
     let envelope = AccountEnvelope::new(
         vec![
@@ -514,8 +494,8 @@ fn authority_genesis_envelope(owner: [u8; 32], counterparty: [u8; 32]) -> AbiVal
                 "status".to_string(),
                 CanonicalValue::String("active".to_string()),
             ),
-            ("currentHeight".to_string(), CanonicalValue::Number(0.0)),
-            ("rollbackCount".to_string(), CanonicalValue::Number(0.0)),
+            ("currentHeight".to_string(), number(0)),
+            ("rollbackCount".to_string(), number(0)),
             (
                 "proofHeader".to_string(),
                 CanonicalValue::Object(vec![
@@ -527,7 +507,7 @@ fn authority_genesis_envelope(owner: [u8; 32], counterparty: [u8; 32]) -> AbiVal
                         "toEntity".to_string(),
                         CanonicalValue::String(entity(counterparty)),
                     ),
-                    ("nextProofNonce".to_string(), CanonicalValue::Number(1.0)),
+                    ("nextProofNonce".to_string(), number(1)),
                 ]),
             ),
             (
@@ -569,300 +549,6 @@ pub fn load_accounts(id: u64, revision: u64, accounts: Vec<AbiValue>) -> Envelop
 /// One runtime frame for one owner Entity: what it queued, what arrived for
 /// it, and whether it proposes. The wire carries a group per Entity, each with
 /// its own clocks and its own ordered operations.
-pub fn prepare_wave(
-    id: u64,
-    owner_entity_id: [u8; 32],
-    timestamp: u64,
-    admissions: Vec<AbiValue>,
-    inputs: Vec<AbiValue>,
-    propose: bool,
-) -> Envelope {
-    let ops = staged_wave_ops(admissions, inputs);
-    prepare_wave_ops(id, owner_entity_id, timestamp, ops, propose)
-}
-
-pub fn staged_wave_ops(admissions: Vec<AbiValue>, inputs: Vec<AbiValue>) -> Vec<AbiValue> {
-    let mut ops = Vec::new();
-    for (operation_index, admission) in (0_u64..).zip(admissions) {
-        let AbiValue::Tuple(fields) = admission else {
-            panic!("an admission is [accountId, txs]")
-        };
-        let fields = fields.fields().to_vec();
-        ops.push(tuple(vec![
-            AbiValue::Integer(0),
-            AbiValue::Integer(i128::from(operation_index)),
-            fields[0].clone(),
-            fields[1].clone(),
-        ]));
-    }
-    let first_input_index = u64::try_from(ops.len()).expect("test wave operation count fits u64");
-    for (operation_index, input) in (first_input_index..).zip(inputs) {
-        let AbiValue::Tuple(fields) = input else {
-            panic!("an input is [operationIndex, accountId, peerEnvelope]")
-        };
-        let mut fields = fields.fields().to_vec();
-        fields[0] = AbiValue::Integer(i128::from(operation_index));
-        ops.push(tuple(vec![AbiValue::Integer(1), tuple(fields)]));
-    }
-    ops
-}
-
-pub fn prepare_empty_wave(id: u64) -> Envelope {
-    request(
-        id,
-        OpTag::PrepareAccountWave,
-        vec![tuple(Vec::new()), AbiValue::Bool(true)],
-    )
-}
-
-pub fn prepare_wave_ops(
-    id: u64,
-    owner_entity_id: [u8; 32],
-    timestamp: u64,
-    ops: Vec<AbiValue>,
-    propose: bool,
-) -> Envelope {
-    request(
-        id,
-        OpTag::PrepareAccountWave,
-        vec![
-            tuple(vec![tuple(vec![
-                AbiValue::Bytes(owner_entity_id.to_vec()),
-                AbiValue::Integer(i128::from(timestamp)),
-                AbiValue::Integer(100),
-                AbiValue::Integer(i128::from(timestamp)),
-                AbiValue::Integer(100),
-                AbiValue::Bool(propose),
-                tuple(ops),
-            ])]),
-            AbiValue::Bool(true),
-        ],
-    )
-}
-
-pub fn wave_create(operation_index: u64, seed: AbiValue) -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(2),
-        AbiValue::Integer(i128::from(operation_index)),
-        seed,
-    ])
-}
-
-pub fn wave_add_delta(operation_index: u64, account_id: [u8; 32], token_id: u32) -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(0),
-        AbiValue::Integer(i128::from(operation_index)),
-        AbiValue::Bytes(account_id.to_vec()),
-        tuple(vec![tuple(vec![
-            AbiValue::Integer(3),
-            AbiValue::Integer(i128::from(token_id)),
-        ])]),
-    ])
-}
-
-pub fn apply_wave(
-    id: u64,
-    candidate_token: [u8; 32],
-    stage_key: [u8; 32],
-    owner_entity_id: [u8; 32],
-    ops: Vec<AbiValue>,
-) -> Envelope {
-    request(
-        id,
-        OpTag::ApplyAccountWave,
-        vec![
-            AbiValue::Bytes(candidate_token.to_vec()),
-            AbiValue::Bytes(stage_key.to_vec()),
-            tuple(vec![tuple(vec![
-                AbiValue::Bytes(owner_entity_id.to_vec()),
-                tuple(ops),
-            ])]),
-        ],
-    )
-}
-
-pub fn propose_wave(
-    id: u64,
-    candidate_token: [u8; 32],
-    stage_key: [u8; 32],
-    owner_entity_id: [u8; 32],
-    account_ids: Vec<[u8; 32]>,
-) -> Envelope {
-    request(
-        id,
-        OpTag::ProposeAccountWave,
-        vec![
-            AbiValue::Bytes(candidate_token.to_vec()),
-            AbiValue::Bytes(stage_key.to_vec()),
-            tuple(vec![tuple(vec![
-                AbiValue::Bytes(owner_entity_id.to_vec()),
-                tuple(
-                    account_ids
-                        .into_iter()
-                        .map(|account_id| AbiValue::Bytes(account_id.to_vec()))
-                        .collect(),
-                ),
-            ])]),
-        ],
-    )
-}
-
-pub fn begin_entity(
-    id: u64,
-    candidate_token: [u8; 32],
-    stage_key: [u8; 32],
-    expected_accepted_ordinal: u64,
-    owner_entity_id: [u8; 32],
-    timestamp: u64,
-    propose: bool,
-) -> Envelope {
-    request(
-        id,
-        OpTag::BeginEntity,
-        vec![
-            AbiValue::Bytes(candidate_token.to_vec()),
-            AbiValue::Bytes(stage_key.to_vec()),
-            AbiValue::Integer(i128::from(expected_accepted_ordinal)),
-            tuple(vec![
-                AbiValue::Bytes(owner_entity_id.to_vec()),
-                AbiValue::Integer(i128::from(timestamp)),
-                AbiValue::Integer(100),
-                AbiValue::Integer(i128::from(timestamp)),
-                AbiValue::Integer(100),
-                AbiValue::Bool(propose),
-            ]),
-        ],
-    )
-}
-
-pub fn finalize_entity(
-    id: u64,
-    candidate_token: [u8; 32],
-    stage_key: [u8; 32],
-    expected_accepted_ordinal: u64,
-) -> Envelope {
-    entity_stage_terminal(
-        id,
-        OpTag::FinalizeEntity,
-        candidate_token,
-        stage_key,
-        expected_accepted_ordinal,
-    )
-}
-
-pub fn discard_entity(
-    id: u64,
-    candidate_token: [u8; 32],
-    stage_key: [u8; 32],
-    expected_accepted_ordinal: u64,
-) -> Envelope {
-    entity_stage_terminal(
-        id,
-        OpTag::DiscardEntity,
-        candidate_token,
-        stage_key,
-        expected_accepted_ordinal,
-    )
-}
-
-fn entity_stage_terminal(
-    id: u64,
-    op_tag: OpTag,
-    candidate_token: [u8; 32],
-    stage_key: [u8; 32],
-    expected_accepted_ordinal: u64,
-) -> Envelope {
-    request(
-        id,
-        op_tag,
-        vec![
-            AbiValue::Bytes(candidate_token.to_vec()),
-            AbiValue::Bytes(stage_key.to_vec()),
-            AbiValue::Integer(i128::from(expected_accepted_ordinal)),
-        ],
-    )
-}
-
-pub fn seal_wave(id: u64, candidate_token: [u8; 32]) -> Envelope {
-    request(
-        id,
-        OpTag::SealAccountWave,
-        vec![AbiValue::Bytes(candidate_token.to_vec())],
-    )
-}
-
-/// A direct payment queued for one account.
-pub fn wave_payment(account_id: [u8; 32], from: [u8; 32], to: [u8; 32], amount: i128) -> AbiValue {
-    tuple(vec![
-        AbiValue::Bytes(account_id.to_vec()),
-        tuple(vec![tuple(vec![
-            AbiValue::Integer(0),
-            AbiValue::Integer(1),
-            AbiValue::Text(amount.to_string()),
-            tuple(vec![AbiValue::Text(format!("0x{}", hex::encode(to)))]),
-            AbiValue::Nil,
-            AbiValue::Text(format!("0x{}", hex::encode(from))),
-            AbiValue::Text(format!("0x{}", hex::encode(to))),
-            AbiValue::Integer(0),
-            AbiValue::Nil,
-        ])]),
-    ])
-}
-
-pub fn wave_swap_offer(account_id: [u8; 32]) -> AbiValue {
-    tuple(vec![
-        AbiValue::Bytes(account_id.to_vec()),
-        tuple(vec![tuple(vec![
-            AbiValue::Integer(6),
-            AbiValue::Text("checkpoint-offer".to_string()),
-            AbiValue::Integer(1),
-            AbiValue::Integer(6),
-            AbiValue::Text("100000".to_string()),
-            AbiValue::Integer(2),
-            AbiValue::Integer(6),
-            AbiValue::Text("200000".to_string()),
-            AbiValue::Text("0".to_string()),
-            AbiValue::Text("190000".to_string()),
-            AbiValue::Nil,
-            AbiValue::Nil,
-        ])]),
-    ])
-}
-
-pub fn wave_ack(
-    operation_index: u64,
-    account_id: [u8; 32],
-    from: [u8; 32],
-    to: [u8; 32],
-    height: u64,
-    frame_hash: [u8; 32],
-    frame_hanko: Vec<u8>,
-) -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(i128::from(operation_index)),
-        AbiValue::Bytes(account_id.to_vec()),
-        tuple(vec![
-            AbiValue::Bytes(from.to_vec()),
-            AbiValue::Bytes(to.to_vec()),
-            tuple(vec![
-                AbiValue::Integer(31_337),
-                AbiValue::Bytes(vec![0x88; 20]),
-            ]),
-            tuple(vec![AbiValue::Integer(10), AbiValue::Integer(20)]),
-            AbiValue::Bytes(vec![0x99; 32]),
-            tuple(vec![
-                AbiValue::Integer(1),
-                tuple(vec![
-                    AbiValue::Integer(i128::from(height)),
-                    AbiValue::Bytes(frame_hash.to_vec()),
-                    AbiValue::Bytes(frame_hanko),
-                    AbiValue::Nil,
-                ]),
-            ]),
-        ]),
-    ])
-}
-
 fn entity_bytes(suffix: u8) -> [u8; 32] {
     let mut bytes = [0_u8; 32];
     bytes[31] = suffix;

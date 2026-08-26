@@ -701,7 +701,7 @@ export const describeAuthorityWaveOperation = (
     tag === 1
     && value.length === 2
     && Array.isArray(value[1])
-    && value[1].length === 3
+    && value[1].length === 4
   ) {
     const input = value[1];
     operationIndex = input[0];
@@ -1013,6 +1013,12 @@ export const authorityPeerInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
   payload: Extract<RecordedPayload, { kind: 'frame' | 'ack' | 'frame_ack' }>,
+  genesisPolicy?: Readonly<{
+    expectedDomain: Readonly<{ chainId: number; depositoryAddress: string }>;
+    shadowPolicyRoot: string;
+    deltaTransformer: string;
+    publicPinned: false;
+  }>,
 ): RscoreWireValue => {
   const accountId = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_ACCOUNT_ID');
   const decoded = decodeAccountPeerInput(payload.input, 'RSCORE_AUTHORITY_PEER_INPUT');
@@ -1023,7 +1029,26 @@ export const authorityPeerInputRow = (
     case 'frame':
     case 'ack':
     case 'frame_ack':
-      return [operationIndex, accountId, peerEnvelopeWire(decoded)];
+      return [
+        operationIndex,
+        accountId,
+        peerEnvelopeWire(decoded),
+        genesisPolicy === undefined
+          ? null
+          : [
+              [
+                genesisPolicy.expectedDomain.chainId,
+                hexToWireBytes(
+                  genesisPolicy.expectedDomain.depositoryAddress,
+                  20,
+                  'AUTHORITY_GENESIS_DEPOSITORY',
+                ),
+              ],
+              hexToWireBytes(genesisPolicy.shadowPolicyRoot, 32, 'AUTHORITY_GENESIS_POLICY_ROOT'),
+              hexToWireBytes(genesisPolicy.deltaTransformer, 20, 'AUTHORITY_GENESIS_TRANSFORMER'),
+              genesisPolicy.publicPinned,
+            ],
+      ];
   }
 };
 

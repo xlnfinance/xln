@@ -1,5 +1,5 @@
 use xln_rscore_abi::AbiValue;
-use xln_rscore_batch::{AccountCheckpointHeader, AccountCheckpointRows, AccountsCheckpoint};
+use xln_rscore_batch::{AccountCheckpointHeader, AccountCheckpointRows};
 use xln_rscore_engine::{
     AccountFrame, BilateralRebalanceFeePolicy, ConsensusSnapshot, CounterpartyDispute,
     DisputeDraft, HtlcLock, LendingIntentKind, OutboundAck, RebalanceFeePolicySnapshot, Side,
@@ -10,27 +10,6 @@ use xln_rscore_protocol::{PersistentNodeChanges, PersistentNodeRecord, Persisten
 use crate::ProcessError;
 use crate::canonical::encode_envelope;
 use crate::wire_encode::{big, delta, integer, tuple, tx};
-
-pub fn checkpoint(value: &AccountsCheckpoint) -> Result<AbiValue, ProcessError> {
-    Ok(tuple(vec![
-        super::token(&value.token),
-        super::token(&value.restore_token()),
-        tuple(
-            value
-                .accounts
-                .iter()
-                .map(|row| account_rows(row, true))
-                .collect::<Result<_, _>>()?,
-        ),
-        tuple(
-            value
-                .removed
-                .iter()
-                .map(|id| AbiValue::Bytes(id.as_bytes().to_vec()))
-                .collect(),
-        ),
-    ]))
-}
 
 /// `carry_envelope` is false on the round wire and true in a checkpoint.
 ///

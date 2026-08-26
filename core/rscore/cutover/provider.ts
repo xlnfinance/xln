@@ -12,6 +12,7 @@ import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult } from '../../account/consensus/types';
+import type { AccountAuthorityInputRequest } from '../../account/consensus/context';
 import { accountInputApplied } from '../../account/consensus/result';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { safeStringify } from '../../protocol/serialization';
@@ -67,10 +68,17 @@ const requireResult = (
 const executeInboundBatch = async (
   env: RuntimeReplica,
   batch: AccountAuthorityEntityBatchInbound,
-): Promise<readonly ((request: AccountAuthorityEntityBatchInbound['requests'][number]) => HandleAccountInputResult)[]> => {
+): Promise<readonly ((request: AccountAuthorityInputRequest) => HandleAccountInputResult)[]> => {
   const binding = bindingFor(env, batch.ownerEntityId);
   const requests = batch.requests.map((request, operationIndex) => {
-    const accountId = accountIdOf(request.account);
+    const accountId = request.accountId;
+    const materializedAccountId = accountIdOf(request.account);
+    if (materializedAccountId !== accountId) {
+      return halt('INBOUND_ACCOUNT_BINDING', {
+        expected: accountId,
+        actual: materializedAccountId,
+      });
+    }
     const input = request.input;
     if (input.kind !== 'frame' && input.kind !== 'ack' && input.kind !== 'frame_ack') {
       return halt('INBOUND_BATCH_KIND', { account: accountId, kind: input.kind });
@@ -89,16 +97,44 @@ const executeInboundBatch = async (
       entityTimestamp: clock.entityTimestamp,
       finalizedJHeight: clock.finalizedJHeight,
     },
-    requests.map(({ accountId, input }) => ({ accountId, input })),
+    requests.map(({ request, accountId, input }) => ({
+      accountId,
+      input,
+      ...(request.genesisPolicy === undefined
+        ? {}
+        : { genesisPolicy: request.genesisPolicy }),
+    })),
   );
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const waveIndex = indexInboundWave(full.wave);
+  const genesisIds = new Set(requests
+    .filter(({ request }) => request.genesisPolicy !== undefined)
+    .map(({ accountId }) => accountId));
+  const postIds = new Set(full.wave.createdAccounts.map(row => row.accountId));
+  if (
+    postIds.size !== full.wave.createdAccounts.length
+    || genesisIds.size !== postIds.size
+    || [...genesisIds].some(accountId => !postIds.has(accountId))
+  ) {
+    return halt('INBOUND_GENESIS_POST_ACCOUNT_SET', {
+      expected: [...genesisIds].toSorted(),
+      actual: [...postIds].toSorted(),
+    });
+  }
+  const effectPriors = new Map<number, AccountReplica>();
+  for (const { request, accountId, operationIndex } of requests) {
+    if (request.genesisPolicy === undefined) continue;
+    const row = full.wave.createdAccounts.find(created => created.accountId === accountId)
+      ?? halt('INBOUND_GENESIS_POST_ACCOUNT_MISSING', { account: accountId });
+    effectPriors.set(operationIndex, forkAccountReplicaShell(request.account));
+    materializeCutoverAccount({ binding, account: request.account, accountId }, row);
+  }
   return requests.map(({ accountId, input, operationIndex }) => actualRequest => {
     const slice = inboundSlice(full.wave, accountId, operationIndex, waveIndex);
     return cutoverAccountInputResult(
       {
         binding,
-        account: actualRequest.account,
+        account: effectPriors.get(operationIndex) ?? actualRequest.account,
         accountId,
         fromEntityId: peerOf(input, accountId),
         operationIndex,
@@ -145,6 +181,7 @@ const executeOutboundBatch = async (
     failedHtlcRoutes: batch.failedHtlcRoutes,
     timestamp,
     jHeight,
+    checkpointDue: env.accountAuthorityCheckpointDue === true,
   });
   const full = requireResult(wave === null ? null : { wave, row: null }, batch.ownerEntityId, 'batch');
   const postAccountById = new Map(full.wave.postAccounts.map(row => [row.accountId, row]));

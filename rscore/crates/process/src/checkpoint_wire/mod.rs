@@ -10,10 +10,6 @@ use crate::ProcessError;
 use crate::wire_encode::{body, integer, tuple};
 use crate::wire_value::{exact, fixed_bytes, js_number, tuple as decode_tuple};
 
-pub fn changes(value: &AccountsCheckpoint) -> Result<BodyTuple, ProcessError> {
-    Ok(body(vec![encode::checkpoint(value)?]))
-}
-
 pub(crate) fn account_rows(
     value: &AccountCheckpointRows,
     carry_envelope: bool,
@@ -21,8 +17,32 @@ pub(crate) fn account_rows(
     encode::account_rows(value, carry_envelope)
 }
 
-pub fn checkpoint_committed(value: &CheckpointToken) -> BodyTuple {
-    body(vec![token(value)])
+/// Optional exact checkpoint manifest piggybacked on AccountOutbound.
+///
+/// The first token names the incremental write (`base -> revision`); the
+/// second is what a later cold `RestoreExact` must reproduce after those rows
+/// are materialized. There is deliberately no checkpoint ACK operation: the
+/// next inbound root selects or rejects this pending export implicitly.
+pub(crate) fn changes(value: Option<&AccountsCheckpoint>) -> Result<AbiValue, ProcessError> {
+    let Some(value) = value else {
+        return Ok(AbiValue::Nil);
+    };
+    let accounts = value
+        .accounts
+        .iter()
+        .map(|row| account_rows(row, true))
+        .collect::<Result<Vec<_>, _>>()?;
+    let removed = value
+        .removed
+        .iter()
+        .map(|account_id| AbiValue::Bytes(account_id.as_bytes().to_vec()))
+        .collect();
+    Ok(tuple(vec![
+        token(&value.token),
+        token(&value.restore_token()),
+        tuple(accounts),
+        tuple(removed),
+    ]))
 }
 
 pub fn exact_restored(value: &CheckpointToken) -> BodyTuple {

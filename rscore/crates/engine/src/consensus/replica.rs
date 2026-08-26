@@ -7,7 +7,7 @@
 //! state stays in `AccountReplica` so executing a transaction never copies the
 //! queue.
 
-use xln_rscore_protocol::CanonicalValue;
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use crate::consensus::frame::hash::{
     AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value, is_frame_hashable, unsupported_kind,
@@ -19,6 +19,12 @@ use crate::input::mempool::{
 };
 use crate::state::account_replica_shell::AccountEnvelope;
 use crate::{AccountReplica, AccountTx};
+
+fn number(value: u64) -> Result<CanonicalValue, StateError> {
+    CanonicalNumber::try_from_u64(value)
+        .map(CanonicalValue::Number)
+        .map_err(|error| StateError::Envelope(error.to_string()))
+}
 
 /// An acknowledgement this side sent for the counterparty's frame, kept
 /// because the Entity commits it in the account leaf: a proposal built right
@@ -908,14 +914,8 @@ impl AccountConsensus {
             .filter(|(name, _)| !DERIVED_CONSENSUS_FIELDS.contains(&name.as_str()))
             .cloned()
             .collect();
-        fields.push((
-            "currentHeight".to_string(),
-            CanonicalValue::Number(self.current_height() as f64),
-        ));
-        fields.push((
-            "rollbackCount".to_string(),
-            CanonicalValue::Number(self.rollback_count as f64),
-        ));
+        fields.push(("currentHeight".to_string(), number(self.current_height())?));
+        fields.push(("rollbackCount".to_string(), number(self.rollback_count)?));
         // The TypeScript AccountReplica always has an H=0 currentFrame whose
         // stateHash is the empty string. Absence here would make a freshly
         // created Rust Account occupy a different Entity leaf before its first
@@ -943,7 +943,7 @@ impl AccountConsensus {
         if let Some(pending) = &self.pending {
             fields.push((
                 "pendingAccountInput".to_string(),
-                self.outbound_proposal_binding(pending),
+                self.outbound_proposal_binding(pending)?,
             ));
         }
         if let Some(draft) = &self.dispute {
@@ -955,10 +955,7 @@ impl AccountConsensus {
                 "currentDisputeProofBodyHash".to_string(),
                 CanonicalValue::String(hex_prefixed(&draft.proof_body_hash)),
             ));
-            fields.push((
-                "currentDisputeProofNonce".to_string(),
-                CanonicalValue::Number(draft.nonce as f64),
-            ));
+            fields.push(("currentDisputeProofNonce".to_string(), number(draft.nonce)?));
             fields.push((
                 "currentDisputeProofProposerIsLeft".to_string(),
                 CanonicalValue::Bool(draft.proposer_is_left),
@@ -975,25 +972,19 @@ impl AccountConsensus {
                     "toEntity".to_string(),
                     CanonicalValue::String(self.replica.counterparty().to_string()),
                 ),
-                (
-                    "nextProofNonce".to_string(),
-                    CanonicalValue::Number(self.next_proof_nonce as f64),
-                ),
+                ("nextProofNonce".to_string(), number(self.next_proof_nonce)?),
             ]),
         ));
         if let Some(ack) = &self.last_outbound_ack {
             fields.push((
                 "lastOutboundFrameAck".to_string(),
                 CanonicalValue::Object(vec![
-                    (
-                        "height".to_string(),
-                        CanonicalValue::Number(ack.height as f64),
-                    ),
+                    ("height".to_string(), number(ack.height)?),
                     (
                         "counterpartyEntityId".to_string(),
                         CanonicalValue::String(self.replica.counterparty().to_string()),
                     ),
-                    ("response".to_string(), self.ack_binding(ack)),
+                    ("response".to_string(), self.ack_binding(ack)?),
                 ]),
             ));
         }
@@ -1010,7 +1001,7 @@ impl AccountConsensus {
             ));
             fields.push((
                 "counterpartyDisputeProofNonce".to_string(),
-                CanonicalValue::Number(dispute.nonce as f64),
+                number(dispute.nonce)?,
             ));
             fields.push((
                 "counterpartyDisputeProofProposerIsLeft".to_string(),
@@ -1044,7 +1035,10 @@ impl AccountConsensus {
     ///
     /// Parity target: `compactAccountInputBinding`
     /// (core/entity/consensus/state-root.ts) over `pendingAccountInput`.
-    fn outbound_proposal_binding(&self, pending: &PendingFrame) -> CanonicalValue {
+    fn outbound_proposal_binding(
+        &self,
+        pending: &PendingFrame,
+    ) -> Result<CanonicalValue, StateError> {
         let mut fields = vec![
             (
                 "kind".to_string(),
@@ -1067,31 +1061,28 @@ impl AccountConsensus {
             ),
             ("proposal".to_string(), {
                 let mut proposal = vec![
-                    (
-                        "height".to_string(),
-                        CanonicalValue::Number(pending.frame.height as f64),
-                    ),
+                    ("height".to_string(), number(pending.frame.height)?),
                     (
                         "frameHash".to_string(),
                         CanonicalValue::String(hex_prefixed(&pending.state_hash)),
                     ),
                 ];
                 if let Some(draft) = &pending.proposal_dispute {
-                    proposal.push(("disputeHanko".to_string(), dispute_binding(draft)));
+                    proposal.push(("disputeHanko".to_string(), dispute_binding(draft)?));
                 }
                 CanonicalValue::Object(proposal)
             }),
         ];
         if let Some(ack) = &pending.bundled_ack {
-            fields.push(("ack".to_string(), ack_fields(ack)));
+            fields.push(("ack".to_string(), ack_fields(ack)?));
         }
-        CanonicalValue::Object(fields)
+        Ok(CanonicalValue::Object(fields))
     }
 
     /// The standalone acknowledgement message this side sent, as the Entity
     /// commits it inside `lastOutboundFrameAck`.
-    fn ack_binding(&self, ack: &OutboundAck) -> CanonicalValue {
-        CanonicalValue::Object(vec![
+    fn ack_binding(&self, ack: &OutboundAck) -> Result<CanonicalValue, StateError> {
+        Ok(CanonicalValue::Object(vec![
             (
                 "kind".to_string(),
                 CanonicalValue::String("ack".to_string()),
@@ -1104,8 +1095,8 @@ impl AccountConsensus {
                 "toEntityId".to_string(),
                 CanonicalValue::String(self.replica.counterparty().to_string()),
             ),
-            ("ack".to_string(), ack_fields(ack)),
-        ])
+            ("ack".to_string(), ack_fields(ack)?),
+        ]))
     }
 }
 
@@ -1113,8 +1104,8 @@ impl AccountConsensus {
 /// which proof, never the signature over it.
 ///
 /// Parity target: `compactDisputeHanko` (core/entity/consensus/state-root.ts).
-fn dispute_binding(draft: &DisputeDraft) -> CanonicalValue {
-    CanonicalValue::Object(vec![
+fn dispute_binding(draft: &DisputeDraft) -> Result<CanonicalValue, StateError> {
+    Ok(CanonicalValue::Object(vec![
         (
             "hash".to_string(),
             CanonicalValue::String(hex_prefixed(&draft.hash)),
@@ -1123,32 +1114,26 @@ fn dispute_binding(draft: &DisputeDraft) -> CanonicalValue {
             "proofBodyHash".to_string(),
             CanonicalValue::String(hex_prefixed(&draft.proof_body_hash)),
         ),
-        (
-            "proofNonce".to_string(),
-            CanonicalValue::Number(draft.nonce as f64),
-        ),
+        ("proofNonce".to_string(), number(draft.nonce)?),
         (
             "proposerIsLeft".to_string(),
             CanonicalValue::Bool(draft.proposer_is_left),
         ),
-    ])
+    ]))
 }
 
-fn ack_fields(ack: &OutboundAck) -> CanonicalValue {
+fn ack_fields(ack: &OutboundAck) -> Result<CanonicalValue, StateError> {
     let mut fields = vec![
-        (
-            "height".to_string(),
-            CanonicalValue::Number(ack.height as f64),
-        ),
+        ("height".to_string(), number(ack.height)?),
         (
             "frameHash".to_string(),
             CanonicalValue::String(hex_prefixed(&ack.frame_hash)),
         ),
     ];
     if let Some(draft) = &ack.dispute {
-        fields.push(("disputeHanko".to_string(), dispute_binding(draft)));
+        fields.push(("disputeHanko".to_string(), dispute_binding(draft)?));
     }
-    CanonicalValue::Object(fields)
+    Ok(CanonicalValue::Object(fields))
 }
 
 impl std::fmt::Debug for AccountConsensus {

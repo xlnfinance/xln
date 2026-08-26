@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Byte-exact protocol primitives shared by the Rust Account engine.
 
 mod flat;
@@ -13,8 +15,11 @@ mod persistent_tests;
 
 pub use flat::compute_flat_integrity_root;
 pub use persistent::{
-    PersistentChildRecord, PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef,
-    PersistentRadixMap, PersistentRadixMapError, SlotOutcome, SlotWork,
+    PERSISTENT_RADIX_SHARD_COUNT, PERSISTENT_RADIX_SHARD_DEPTH, PersistentChildRecord,
+    PersistentNodeChanges, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
+    PersistentRadixMapError, PersistentRadixOverlayWork, PersistentRadixShard,
+    PersistentRadixShardCoordinator, PersistentRadixShardDescriptor, PersistentRadixShardOverlay,
+    PersistentRadixSubtreeKind, PersistentRadixSubtreeRoot, SlotOutcome, SlotWork,
 };
 pub use radix::{
     EMPTY_RADIX_ROOT, RadixLeaf, RadixMerkleError, RadixMerkleResult, build_radix16_merkle,
@@ -22,5 +27,6 @@ pub use radix::{
 };
 pub use rlp::RlpWriter;
 pub use value::{
-    CanonicalValue, ValueEncodingError, encode_account_state_value, write_account_state_value,
+    CanonicalNumber, CanonicalNumberError, CanonicalValue, JS_MAX_SAFE_INTEGER, ValueEncodingError,
+    encode_account_state_value, write_account_state_value,
 };

@@ -119,6 +119,38 @@ fn exact_peer_variants_round_trip_without_losing_received_fields() {
 }
 
 #[test]
+fn inbound_genesis_policy_is_typed_exact_and_not_peer_derived() {
+    let policy = tuple(vec![
+        tuple(vec![
+            AbiValue::Integer(31_337),
+            AbiValue::Bytes(vec![0x33; 20]),
+        ]),
+        AbiValue::Bytes(vec![0x91; 32]),
+        AbiValue::Bytes(vec![0x92; 20]),
+        AbiValue::Bool(false),
+    ]);
+    let value = replace_at(&frame_ack_row(), &[3], policy);
+    let row = decode_input_row(&value).expect("decode typed genesis policy");
+    let genesis = row.genesis_policy.expect("genesis policy");
+    assert_eq!(genesis.expected_domain.chain_id(), 31_337);
+    assert_eq!(
+        genesis.expected_domain.depository_address().bytes(),
+        &[0x33; 20]
+    );
+    assert_eq!(genesis.shadow_policy_root, [0x91; 32]);
+    assert_eq!(genesis.delta_transformer, [0x92; 20]);
+    assert!(!genesis.public_pinned);
+
+    for mutation in [
+        width_at(&value, &[3, 1], 31),
+        width_at(&value, &[3, 2], 21),
+        replace_at(&value, &[3, 3], AbiValue::Integer(0)),
+    ] {
+        assert!(decode_input_row(&mutation).is_err());
+    }
+}
+
+#[test]
 fn exact_peer_decoder_rejects_mutated_shapes_widths_and_aliases() {
     let canonical = frame_ack_row();
     let cases = vec![

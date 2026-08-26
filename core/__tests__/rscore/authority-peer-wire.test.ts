@@ -197,6 +197,7 @@ describe('authority canonical peer wire', () => {
             ],
           ],
         ],
+        null,
       ],
     ]]);
   });

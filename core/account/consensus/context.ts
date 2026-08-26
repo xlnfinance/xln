@@ -1,4 +1,4 @@
-import type { AccountInput, AccountReplica } from '../../types/account';
+import type { AccountInput, AccountPeerInput, AccountReplica } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import type { HandleAccountInputResult, ProposeAccountFrameResult } from './types';
 import type { HankoString } from '../../types/hanko';
@@ -36,6 +36,15 @@ export type AccountAuthorityExecutionScope = Readonly<{
   prepareEntityAccountOutbound?(request: AccountAuthorityFrameOutboundRequest): Promise<void>;
   hasPreparedAccountProposal?(accountId: string): boolean;
   hasPreparedAccountInput?(accountId: string, input: AccountInput): boolean;
+  /**
+   * Return the authenticated H=1 Account materialized by the authority for an
+   * Account that did not exist at the start of this Entity frame.
+   *
+   * This is a read, not a transition. The normal Entity
+   * handler still publishes the Account only after it consumes the matching
+   * successful verdict and proves that H=1 committed.
+   */
+  preparedInboundGenesis?(accountId: string, input: AccountInput): AccountReplica | null;
   finishEntityAccountFrame?(): void;
   beforeTypeScriptAccountExecution(
     kind: 'applyAccountInput' | 'proposeAccountFrame',
@@ -62,6 +71,11 @@ export type AccountAuthorityFrameBeginRequest = Readonly<{
   entityTxs: readonly EntityTx[];
   accounts: ReadonlyMap<string, AccountReplica>;
   accountForWrite(accountId: string): AccountReplica | undefined;
+  /** Build the canonical local H=0 read model for a previously unknown peer. */
+  createInboundAccount(input: AccountPeerInput): Readonly<{
+    account: AccountReplica;
+    deltaTransformer: string;
+  }>;
   entityTimestamp: number;
   finalizedJHeight: number;
 }>;

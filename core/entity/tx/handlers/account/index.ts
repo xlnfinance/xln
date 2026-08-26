@@ -36,6 +36,7 @@ import {
   authorityRecordEnabled,
   noteAuthorityAccountCreate,
 } from '../../../../rscore/authority-wave';
+import { normalizeEntityRef } from '../../account-key';
 
 export {
   canProcessFrozenAccountInput,
@@ -131,16 +132,11 @@ type PreparedEntityAccountInputResult =
   | Readonly<{ kind: 'terminal'; result: AccountHandlerResult }>
   | Readonly<{ kind: 'ready'; prepared: PreparedEntityAccountInput }>;
 
-const prepareAccountInputToEntity = (
-  state: EntityState,
+const logIncomingAccountInput = (
   input: AccountPeerInput,
-  env: EntityRuntimeContext,
-  accountConsensusContext: AccountConsensusContext,
-  options: ApplyEntityTxOptions | undefined,
-  checkpointProfile: AccountInputCheckpoint,
-): PreparedEntityAccountInputResult => {
-  const incomingAck = accountInputAck(input);
-  const incomingProposal = accountInputProposal(input);
+  incomingAck: unknown,
+  incomingProposal: unknown,
+): void => {
   accountHandlerLog.debug('input.apply', {
     // 12 chars: at 1000+ concurrent accounts, the default 4-char shortId
     // collides often enough (birthday paradox over a 65536 namespace) to
@@ -151,19 +147,34 @@ const prepareAccountInputToEntity = (
     frame: Boolean(incomingProposal),
     prevHanko: Boolean(incomingAck),
   });
+};
 
-  // Entity-frame isolation already cloned state. Every phase mutates this
-  // candidate and records effects; none may publish transport or storage.
-  const effects = createCommittedAccountEffects();
-  let resolution: ReturnType<typeof resolveInboundAccount>;
+const resolvePreparedInboundAccount = (
+  state: EntityState,
+  input: AccountPeerInput,
+  accountConsensusContext: AccountConsensusContext,
+  hasAck: boolean,
+  hasProposal: boolean,
+): ReturnType<typeof resolveInboundAccount> => {
   try {
-    resolution = resolveInboundAccount(
+    const authorityScope = accountConsensusContext.accountAuthorityExecutionScope;
+    const preparedGenesis = authorityScope?.preparedInboundGenesis?.(
+      input.fromEntityId,
+      input,
+    ) ?? null;
+    if (preparedGenesis !== null) {
+      return {
+        account: preparedGenesis,
+        counterpartyId: normalizeEntityRef(input.fromEntityId),
+        createdAccount: true,
+      };
+    }
+    return resolveInboundAccount(
       state,
       input,
-      Boolean(incomingAck),
-      Boolean(incomingProposal),
-      accountConsensusContext.accountAuthorityExecutionScope
-        ?.hasPreparedAccountInput?.(input.fromEntityId, input) === true,
+      hasAck,
+      hasProposal,
+      authorityScope?.hasPreparedAccountInput?.(input.fromEntityId, input) === true,
     );
   } catch (error) {
     if (!(error instanceof AccountPeerEvidenceError)) throw error;
@@ -185,6 +196,30 @@ const prepareAccountInputToEntity = (
       `ACCOUNT_PEER_EVIDENCE_REJECTED:${error.code}:${error.message}:dump=${dump}`,
     );
   }
+};
+
+const prepareAccountInputToEntity = (
+  state: EntityState,
+  input: AccountPeerInput,
+  env: EntityRuntimeContext,
+  accountConsensusContext: AccountConsensusContext,
+  options: ApplyEntityTxOptions | undefined,
+  checkpointProfile: AccountInputCheckpoint,
+): PreparedEntityAccountInputResult => {
+  const incomingAck = accountInputAck(input);
+  const incomingProposal = accountInputProposal(input);
+  logIncomingAccountInput(input, incomingAck, incomingProposal);
+
+  // Entity-frame isolation already cloned state. Every phase mutates this
+  // candidate and records effects; none may publish transport or storage.
+  const effects = createCommittedAccountEffects();
+  const resolution = resolvePreparedInboundAccount(
+    state,
+    input,
+    accountConsensusContext,
+    Boolean(incomingAck),
+    Boolean(incomingProposal),
+  );
   const { account, counterpartyId, createdAccount } = resolution;
   if (createdAccount && authorityRecordEnabled()) {
     // The inbound H=0 replica is complete here but has not consumed the peer's

@@ -6,7 +6,7 @@
 //! transactions, the frame's deltas, and the account state root — combined by
 //! the same flat integrity root the account state itself uses.
 
-use xln_rscore_protocol::{CanonicalValue, compute_flat_integrity_root};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, compute_flat_integrity_root};
 
 use crate::{
     AccountTx, DeliveryMode, Delta, HTLC_OPAQUE_CIPHERTEXT_VERSION, HtlcDeliveryMode,
@@ -33,14 +33,20 @@ pub struct AccountFrame {
     pub deltas: Vec<Delta>,
 }
 
-fn number(value: u64) -> CanonicalValue {
-    CanonicalValue::Number(value as f64)
+fn number(value: u64) -> Result<CanonicalValue, StateError> {
+    CanonicalNumber::try_from_u64(value)
+        .map(CanonicalValue::Number)
+        .map_err(|error| StateError::AccountStateRoot(error.to_string()))
+}
+
+fn number_u32(value: u32) -> CanonicalValue {
+    CanonicalValue::Number(CanonicalNumber::from_u32(value))
 }
 
 fn delta_value(delta: &Delta) -> CanonicalValue {
     let mut fields = vec![(
         "tokenId".to_string(),
-        CanonicalValue::Number(f64::from(delta.token_id().get())),
+        CanonicalValue::Number(CanonicalNumber::from_u16(delta.token_id().get())),
     )];
     fields.extend(
         delta
@@ -54,9 +60,9 @@ impl AccountFrame {
     /// The frame's `stateHash`: what the proposer signs and the peer verifies.
     pub fn hash(&self) -> Result<[u8; 32], StateError> {
         let transition = CanonicalValue::Object(vec![
-            ("height".into(), number(self.height)),
-            ("timestamp".into(), number(self.timestamp)),
-            ("jHeight".into(), number(self.j_height)),
+            ("height".into(), number(self.height)?),
+            ("timestamp".into(), number(self.timestamp)?),
+            ("jHeight".into(), number(self.j_height)?),
             (
                 "prevFrameHash".into(),
                 CanonicalValue::String(self.prev_frame_hash.clone()),
@@ -141,7 +147,7 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
                 ("timelock".to_string(), big(&lock.timelock)),
                 (
                     "revealBeforeHeight".to_string(),
-                    number(lock.reveal_before_height),
+                    number(lock.reveal_before_height)?,
                 ),
                 ("amount".to_string(), big(&lock.amount)),
                 ("tokenId".to_string(), token(lock.token_id)),
@@ -201,8 +207,8 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
         } => (
             "rebalance_policy",
             vec![
-                ("tokenId".to_string(), number(u64::from(*token_id))),
-                ("policyVersion".to_string(), number(*policy_version)),
+                ("tokenId".to_string(), number_u32(*token_id)),
+                ("policyVersion".to_string(), number(*policy_version)?),
                 ("baseFee".to_string(), big(base_fee)),
                 ("liquidityFeeBps".to_string(), big(liquidity_fee_bps)),
                 ("gasFee".to_string(), big(gas_fee)),
@@ -223,16 +229,16 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
         } => {
             let mut fields = vec![
                 ("offerId".to_string(), text(offer_id)),
-                ("giveTokenId".to_string(), number(u64::from(*give_token_id))),
+                ("giveTokenId".to_string(), number_u32(*give_token_id)),
                 (
                     "giveTokenDecimals".to_string(),
-                    number(u64::from(*give_token_decimals)),
+                    number_u32(*give_token_decimals),
                 ),
                 ("giveAmount".to_string(), big(give_amount)),
-                ("wantTokenId".to_string(), number(u64::from(*want_token_id))),
+                ("wantTokenId".to_string(), number_u32(*want_token_id)),
                 (
                     "wantTokenDecimals".to_string(),
-                    number(u64::from(*want_token_decimals)),
+                    number_u32(*want_token_decimals),
                 ),
                 ("wantAmount".to_string(), big(want_amount)),
                 ("maxFee".to_string(), big(max_fee)),
@@ -241,7 +247,7 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             push_optional(
                 &mut fields,
                 "timeInForce",
-                time_in_force.map(|value| number(u64::from(value))),
+                time_in_force.map(|value| number_u32(u32::from(value))),
             );
             push_optional(&mut fields, "priceTicks", price_ticks.as_ref().map(big));
             ("swap_offer", fields)
@@ -267,7 +273,7 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
         } => {
             let mut fields = vec![
                 ("offerId".to_string(), text(offer_id)),
-                ("fillRatio".to_string(), number(u64::from(*fill_ratio))),
+                ("fillRatio".to_string(), number_u32(*fill_ratio)),
             ];
             push_optional(
                 &mut fields,
@@ -295,18 +301,14 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             push_optional(
                 &mut fields,
                 "restingGiveTokenId",
-                resting_give_token_id.map(|value| number(u64::from(value))),
+                resting_give_token_id.map(number_u32),
             );
             push_optional(
                 &mut fields,
                 "restingWantTokenId",
-                resting_want_token_id.map(|value| number(u64::from(value))),
+                resting_want_token_id.map(number_u32),
             );
-            push_optional(
-                &mut fields,
-                "feeTokenId",
-                fee_token_id.map(|value| number(u64::from(value))),
-            );
+            push_optional(&mut fields, "feeTokenId", fee_token_id.map(number_u32));
             push_optional(&mut fields, "feeAmount", fee_amount.as_ref().map(big));
             push_optional(
                 &mut fields,
@@ -368,7 +370,7 @@ fn big(value: &num_bigint::BigInt) -> CanonicalValue {
 }
 
 fn token(value: TokenId) -> CanonicalValue {
-    CanonicalValue::Number(f64::from(value.get()))
+    CanonicalValue::Number(CanonicalNumber::from_u16(value.get()))
 }
 
 fn push_optional(

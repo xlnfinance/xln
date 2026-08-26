@@ -17,12 +17,10 @@ import { RSCORE_CUTOVER_VERIFY } from './cutover/verify';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { buffersEqual, safeStringify } from '../protocol/serialization';
+import { safeStringify } from '../protocol/serialization';
 import {
-  decodeRscoreCheckpointChanges,
   decodeRscoreCheckpointToken,
   rscoreCheckpointBytes,
-  type RscoreCheckpointChanges,
   type RscoreCheckpointToken,
 } from './checkpoint/checkpoint-wire';
 import {
@@ -83,24 +81,27 @@ const RSCORE_ABI_VERSION = 1;
 // 14: peer inputs carry the exact Account envelope plus the closed
 // Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
 // returns one ordered composite result row.
-export const RSCORE_PROCESS_ABI_VERSION = 20;
+// 21: inbound-first Account genesis carries trusted Entity policy and returns
+// its exact H=1 materialization separately from the final touched rows.
+// 22: AccountOutbound carries checkpointDue and its reply carries exact
+// worker-resident checkpoint rows separately from temporary read-model rows.
+// 23: that reply carries one optional exact incremental checkpoint manifest;
+// the next inbound root implicitly accepts or rejects its pending baseline.
+export const RSCORE_PROCESS_ABI_VERSION = 23;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=24")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=27")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  'bac2673dd781fe5e63773c778f29ce94e82ba4bba229b6740c55e62a9d465dab',
+  '05cc3820ad39f9495edec092df80405804139a03e23ac968d3de5fc058a00943',
   'hex',
 );
 
 export const RSCORE_OP = {
   hello: 0,
   bootstrapAccounts: 1,
-  beginEntity: 3,
   readCapacityBatch: 4,
   executeWave: 5,
-  finalizeEntity: 7,
-  discardEntity: 8,
   commitRuntime: 10,
   abortRuntime: 11,
   readAccountSummaryPage: 12,
@@ -108,17 +109,10 @@ export const RSCORE_OP = {
   upsertAccounts: 14,
   updateAccountShells: 15,
   removeAccounts: 16,
-  prepareAccountWave: 17,
   readAccountEnvelope: 18,
-  getCheckpointChanges: 19,
-  commitCheckpoint: 20,
   restoreExact: 21,
-  applyAccountWave: 22,
-  proposeAccountWave: 23,
-  sealAccountWave: 24,
   accountInbound: 25,
   accountOutbound: 26,
-  checkpoint: 30,
 } as const;
 
 /**
@@ -161,52 +155,6 @@ export type RscoreSessionIdentity = Readonly<{
   engineGeneration: Buffer; // 8 bytes
   runtimeId: Buffer; // 20 bytes
   sessionId: Buffer; // 16 bytes
-}>;
-
-export type RscoreAuthorityWaveEntity = Readonly<{
-  ownerEntityId: Uint8Array;
-  timestamp: number;
-  jHeight: number;
-  entityTimestamp: number;
-  finalizedJHeight: number;
-  /** Authorizes later `proposeAccountWave` stages for this owner. */
-  propose: boolean;
-  /**
-   * `[0, operationIndex, accountId, txs]`, `[1, inputRow]`, or
-   * `[2, operationIndex, accountSeed15]` for atomic candidate creation.
-   */
-  ops: readonly RscoreWireValue[];
-}>;
-
-export type RscoreAuthorityWaveOpsEntity = Readonly<{
-  ownerEntityId: Uint8Array;
-  /** Operation indices are candidate-wide, unique and monotonically increasing. */
-  ops: readonly RscoreWireValue[];
-}>;
-
-export type RscoreAuthorityProposalSelection = Readonly<{
-  ownerEntityId: Uint8Array;
-  /** Strictly sorted Account ids selected by the Entity's canonical worklist. */
-  accountIds: readonly Uint8Array[];
-}>;
-
-export type RscoreEntityStageContext = Readonly<{
-  ownerEntityId: Uint8Array;
-  timestamp: number;
-  jHeight: number;
-  entityTimestamp: number;
-  finalizedJHeight: number;
-  propose: boolean;
-}>;
-
-export type RscoreEntityStageStatus = 'open' | 'accepted' | 'rolled_back';
-
-export type RscoreEntityStageReceipt = Readonly<{
-  stageKey: Buffer;
-  status: RscoreEntityStageStatus;
-  acceptedStageOrdinal: number;
-  revision: number;
-  accountsRoot: Buffer;
 }>;
 
 const encodeEnvelope = (
@@ -252,17 +200,6 @@ type ResponseWaiter = Readonly<{
   reject: (error: Error) => void;
 }>;
 
-type AuthorityCandidate = {
-  token: Buffer;
-  sealed: boolean;
-  activeStage: Readonly<{
-    key: Buffer;
-    expectedAcceptedOrdinal: number;
-    contextBytes: Buffer;
-  }> | null;
-  acceptedStageOrdinal: number;
-};
-
 /** Own caller-retained arrays and bytes before this request joins the queue. */
 const ownWireValue = (value: RscoreWireValue): RscoreWireValue => {
   if (
@@ -294,44 +231,6 @@ const exactUnsigned = (value: unknown, code: string): number => {
     return Number(value);
   }
   throw new Error(`${code}:${String(value)}`);
-};
-
-const entityStageKey = (value: unknown): Buffer => Buffer.from(
-  rscoreCheckpointBytes(value, 32, 'ENTITY_STAGE_KEY'),
-);
-
-const entityStageContextRow = (
-  context: RscoreEntityStageContext,
-): RscoreWireValue[] => {
-  if (typeof context.propose !== 'boolean') {
-    throw new Error(`RSCORE_CLIENT_ENTITY_STAGE_PROPOSE:${String(context.propose)}`);
-  }
-  return [
-    Buffer.from(rscoreCheckpointBytes(
-      context.ownerEntityId,
-      32,
-      'ENTITY_STAGE_OWNER',
-    )),
-    exactUnsigned(context.timestamp, 'RSCORE_CLIENT_ENTITY_STAGE_TIMESTAMP'),
-    exactUnsigned(context.jHeight, 'RSCORE_CLIENT_ENTITY_STAGE_J_HEIGHT'),
-    exactUnsigned(
-      context.entityTimestamp,
-      'RSCORE_CLIENT_ENTITY_STAGE_ENTITY_TIMESTAMP',
-    ),
-    exactUnsigned(
-      context.finalizedJHeight,
-      'RSCORE_CLIENT_ENTITY_STAGE_FINALIZED_J_HEIGHT',
-    ),
-    context.propose,
-  ];
-};
-
-const entityStageStatus = (value: unknown): RscoreEntityStageStatus => {
-  const tag = exactUnsigned(value, 'RSCORE_CLIENT_ENTITY_STAGE_STATUS');
-  if (tag === 0) return 'open';
-  if (tag === 1) return 'accepted';
-  if (tag === 2) return 'rolled_back';
-  throw new Error(`RSCORE_CLIENT_ENTITY_STAGE_STATUS:${tag}`);
 };
 
 /**
@@ -411,8 +310,6 @@ export class RscoreProcessClient {
   #requestTurn: Promise<void> = Promise.resolve();
   #dead: Error | null = null;
   #stderrTail = '';
-  #authorityCandidate: AuthorityCandidate | null = null;
-  #authoritySession: boolean | null = null;
 
   constructor(binaryPath: string, identity: RscoreSessionIdentity) {
     this.#identity = identity;
@@ -644,102 +541,6 @@ export class RscoreProcessClient {
     }
   }
 
-  #decodeEntityStageReceipt(
-    value: unknown,
-    expected: Readonly<{
-      key: Buffer;
-      status: RscoreEntityStageStatus;
-      acceptedStageOrdinal: number;
-    }>,
-  ): RscoreEntityStageReceipt {
-    try {
-      if (!Array.isArray(value) || value.length !== 5) {
-        throw new Error('RSCORE_CLIENT_ENTITY_STAGE_RECEIPT_ARITY');
-      }
-      const stageKey = entityStageKey(value[0]);
-      const status = entityStageStatus(value[1]);
-      const acceptedStageOrdinal = exactUnsigned(
-        value[2],
-        'RSCORE_CLIENT_ENTITY_STAGE_ACCEPTED_ORDINAL',
-      );
-      const revision = exactUnsigned(
-        value[3],
-        'RSCORE_CLIENT_ENTITY_STAGE_REVISION',
-      );
-      const accountsRoot = Buffer.from(rscoreCheckpointBytes(
-        value[4],
-        32,
-        'ENTITY_STAGE_ACCOUNTS_ROOT',
-      ));
-      if (!buffersEqual(stageKey, expected.key)) {
-        throw new Error('RSCORE_CLIENT_ENTITY_STAGE_RECEIPT_KEY');
-      }
-      if (status !== expected.status) {
-        throw new Error(
-          `RSCORE_CLIENT_ENTITY_STAGE_RECEIPT_STATUS:${status}:${expected.status}`,
-        );
-      }
-      if (acceptedStageOrdinal !== expected.acceptedStageOrdinal) {
-        throw new Error(
-          'RSCORE_CLIENT_ENTITY_STAGE_RECEIPT_ORDINAL:'
-          + `${acceptedStageOrdinal}:${expected.acceptedStageOrdinal}`,
-        );
-      }
-      return {
-        stageKey,
-        status,
-        acceptedStageOrdinal,
-        revision,
-        accountsRoot,
-      };
-    } catch (cause) {
-      throw this.#poisonAuthority(cause);
-    }
-  }
-
-  #requireAuthorityCandidate(
-    token: Uint8Array,
-    stage: string,
-    requireOpen: boolean,
-  ): AuthorityCandidate {
-    rscoreCheckpointBytes(token, 32, 'CANDIDATE_TOKEN');
-    const candidate = this.#authorityCandidate;
-    if (candidate === null) throw new Error(`RSCORE_CLIENT_AUTHORITY_CANDIDATE_MISSING:${stage}`);
-    if (!candidate.token.equals(Buffer.from(token))) {
-      throw new Error(`RSCORE_CLIENT_AUTHORITY_TOKEN_MISMATCH:${stage}`);
-    }
-    if (requireOpen && candidate.sealed) {
-      throw new Error(`RSCORE_CLIENT_AUTHORITY_ALREADY_SEALED:${stage}`);
-    }
-    return candidate;
-  }
-
-  #rejectActiveEntityStage(candidate: AuthorityCandidate, stage: string): void {
-    const active = candidate.activeStage;
-    if (active !== null) {
-      throw new Error(
-        `RSCORE_CLIENT_ENTITY_STAGE_ACTIVE:${stage}:${active.key.toString('hex')}`,
-      );
-    }
-  }
-
-  #requireActiveEntityStage(
-    token: Uint8Array,
-    key: Uint8Array,
-    stage: string,
-  ): Readonly<{ candidate: AuthorityCandidate; key: Buffer }> {
-    const candidate = this.#requireAuthorityCandidate(token, stage, true);
-    const exactKey = entityStageKey(key);
-    const active = candidate.activeStage;
-    if (active === null) {
-      throw new Error(`RSCORE_CLIENT_ENTITY_STAGE_MISSING:${stage}`);
-    }
-    if (!buffersEqual(active.key, exactKey)) {
-      throw new Error(`RSCORE_CLIENT_ENTITY_STAGE_KEY_MISMATCH:${stage}`);
-    }
-    return { candidate, key: exactKey };
-  }
-
   /**
    * `authority` turns this session into one that owns its accounts: it signs
    * with the key it is given and returns signed frames. Without it the session
@@ -769,139 +570,7 @@ export class RscoreProcessClient {
       const response = authority === undefined
         ? await this.#requestOwnedNow(RSCORE_OP.hello, payload)
         : await this.#authorityRequestOwnedNow(RSCORE_OP.hello, payload);
-      this.#authoritySession = authority !== undefined;
       return response.result;
-    });
-  }
-
-  /**
-   * Open one authoritative Runtime candidate and apply its first ordered ops.
-   * The returned token identifies the candidate for every later Apply,
-   * Propose, Seal, checkpoint, Commit and Abort request.
-   *
-   * Prepare does not propose or seal. `propose` records whether this owner may
-   * be selected by later proposal stages. The runtime can therefore consume
-   * applied results, perform its same-frame Entity continuation and send the
-   * derived Account operations back without changing protocol timing.
-   *
-   * Each group carries its own clocks because each Entity has its own: a
-   * runtime frame that stamped every Entity's proposal with one timestamp, or
-   * judged every arrival against one finalized J height, would settle one
-   * Entity's locks by its neighbour's clock. Operations stay in the order the
-   * authority performed them: admissions and peer inputs interleave, and the
-   * order decides what a rolled-back proposal puts back in the queue.
-   */
-  async prepareAccountWave(wave: Readonly<{
-    entities: readonly RscoreAuthorityWaveEntity[];
-    /**
-     * Ask every reply in this candidate to carry the full account body.
-     *
-     * That body is the mempool, the trees and their node changes, serialized
-     * and decoded once per operation. A caller that only needs the verdicts,
-     * the outputs and the leaf must not pay for it; durable checkpointing
-     * asks for the rows explicitly at the frame boundary.
-     */
-    postAccounts: boolean;
-  }>): Promise<{ result: Wave; token: Buffer }> {
-    const payload = ownWirePayload([
-      wave.entities.map(entity => [
-        entity.ownerEntityId,
-        entity.timestamp,
-        entity.jHeight,
-        entity.entityTimestamp,
-        entity.finalizedJHeight,
-        entity.propose,
-        [...entity.ops],
-      ]),
-      wave.postAccounts,
-    ]);
-    return this.#withRequestTurn(async () => {
-      if (this.#authorityCandidate !== null) {
-        throw new Error('RSCORE_CLIENT_AUTHORITY_CANDIDATE_PENDING');
-      }
-      const prepared = await this.#authorityRequestOwnedNow(
-        RSCORE_OP.prepareAccountWave,
-        payload,
-      );
-      if (!Array.isArray(prepared.result) || prepared.result.length !== 10) {
-        throw this.#poisonAuthority(new Error('RSCORE_CLIENT_PREPARED_WAVE_ARITY'));
-      }
-      const token = Buffer.from(rscoreCheckpointBytes(
-        prepared.result[9],
-        32,
-        'CANDIDATE_TOKEN',
-      ));
-      const result = this.#decodeAuthorityWave(prepared.result.slice(0, 9));
-      this.#authorityCandidate = {
-        token,
-        sealed: false,
-        activeStage: null,
-        acceptedStageOrdinal: 0,
-      };
-      return {
-        result,
-        token,
-      };
-    });
-  }
-
-  /** Open the exact abortable Account savepoint for one parent Entity input. */
-  async beginEntityStage(
-    candidateToken: Uint8Array,
-    stageKey: Uint8Array,
-    expectedAcceptedOrdinal: number,
-    context: RscoreEntityStageContext,
-  ): Promise<RscoreEntityStageReceipt> {
-    const key = entityStageKey(stageKey);
-    const ordinal = exactUnsigned(
-      expectedAcceptedOrdinal,
-      'RSCORE_CLIENT_ENTITY_STAGE_EXPECTED_ORDINAL',
-    );
-    const contextRow = entityStageContextRow(context);
-    const contextBytes = packWireValue(contextRow);
-    const payload = ownWirePayload([
-      Buffer.from(candidateToken),
-      key,
-      ordinal,
-      contextRow,
-    ]);
-    return this.#withRequestTurn(async () => {
-      const candidate = this.#requireAuthorityCandidate(
-        candidateToken,
-        'BEGIN_ENTITY',
-        true,
-      );
-      if (candidate.acceptedStageOrdinal !== ordinal) {
-        throw new Error(
-          'RSCORE_CLIENT_ENTITY_STAGE_ORDINAL_MISMATCH:BEGIN_ENTITY:'
-          + `${ordinal}:${candidate.acceptedStageOrdinal}`,
-        );
-      }
-      const active = candidate.activeStage;
-      if (active !== null && (
-        !buffersEqual(active.key, key)
-        || active.expectedAcceptedOrdinal !== ordinal
-        || !buffersEqual(active.contextBytes, contextBytes)
-      )) {
-        throw new Error(
-          `RSCORE_CLIENT_ENTITY_STAGE_ACTIVE:BEGIN_ENTITY:${active.key.toString('hex')}`,
-        );
-      }
-      const response = await this.#authorityRequestOwnedNow(
-        RSCORE_OP.beginEntity,
-        payload,
-      );
-      const receipt = this.#decodeEntityStageReceipt(response.result, {
-        key,
-        status: 'open',
-        acceptedStageOrdinal: ordinal,
-      });
-      candidate.activeStage = {
-        key,
-        expectedAcceptedOrdinal: ordinal,
-        contextBytes,
-      };
-      return receipt;
     });
   }
 
@@ -950,6 +619,7 @@ export class RscoreProcessClient {
     materialize: readonly RscoreWireValue[];
     failedHtlcRoutes: readonly RscoreWireValue[];
     postAccounts: boolean;
+    checkpointDue: boolean;
   }>): Promise<Wave> {
     const payload = ownWirePayload([
       Buffer.from(wave.ownerEntityId),
@@ -961,147 +631,11 @@ export class RscoreProcessClient {
       [...wave.materialize],
       [...wave.failedHtlcRoutes],
       wave.postAccounts,
+      wave.checkpointDue,
     ]);
     return this.#withRequestTurn(async () => {
       const response = await this.#authorityRequestOwnedNow(RSCORE_OP.accountOutbound, payload);
       return this.#decodeAuthorityWave(response.result);
-    });
-  }
-
-  /** Continue ordered Account operations on the candidate opened by Prepare. */
-  async applyAccountWave(
-    candidateToken: Uint8Array,
-    stageKey: Uint8Array,
-    wave: Readonly<{ entities: readonly RscoreAuthorityWaveOpsEntity[] }>,
-  ): Promise<Wave> {
-    const key = entityStageKey(stageKey);
-    const payload = ownWirePayload([
-      Buffer.from(candidateToken),
-      key,
-      wave.entities.map(entity => [entity.ownerEntityId, [...entity.ops]]),
-    ]);
-    return this.#withRequestTurn(async () => {
-      this.#requireActiveEntityStage(candidateToken, key, 'APPLY');
-      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.applyAccountWave, payload);
-      return this.#decodeAuthorityWave(response.result);
-    });
-  }
-
-  /** Propose exactly the sorted per-owner Account worklists for this round. */
-  async proposeAccountWave(
-    candidateToken: Uint8Array,
-    stageKey: Uint8Array,
-    wave: Readonly<{ entities: readonly RscoreAuthorityProposalSelection[] }>,
-  ): Promise<Wave> {
-    const key = entityStageKey(stageKey);
-    const payload = ownWirePayload([
-      Buffer.from(candidateToken),
-      key,
-      wave.entities.map(entity => [entity.ownerEntityId, [...entity.accountIds]]),
-    ]);
-    return this.#withRequestTurn(async () => {
-      this.#requireActiveEntityStage(candidateToken, key, 'PROPOSE');
-      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.proposeAccountWave, payload);
-      return this.#decodeAuthorityWave(response.result);
-    });
-  }
-
-  /** Accept one Entity input and advance the candidate's exact stage ordinal. */
-  async finalizeEntityStage(
-    candidateToken: Uint8Array,
-    stageKey: Uint8Array,
-    expectedAcceptedOrdinal: number,
-  ): Promise<RscoreEntityStageReceipt> {
-    const key = entityStageKey(stageKey);
-    const ordinal = exactUnsigned(
-      expectedAcceptedOrdinal,
-      'RSCORE_CLIENT_ENTITY_STAGE_EXPECTED_ORDINAL',
-    );
-    if (ordinal >= Number.MAX_SAFE_INTEGER) {
-      throw new Error('RSCORE_CLIENT_ENTITY_STAGE_ORDINAL_OVERFLOW');
-    }
-    const payload = ownWirePayload([Buffer.from(candidateToken), key, ordinal]);
-    return this.#withRequestTurn(async () => {
-      const { candidate } = this.#requireActiveEntityStage(
-        candidateToken,
-        key,
-        'FINALIZE_ENTITY',
-      );
-      if (
-        candidate.acceptedStageOrdinal !== ordinal
-        || candidate.activeStage?.expectedAcceptedOrdinal !== ordinal
-      ) {
-        throw new Error(
-          'RSCORE_CLIENT_ENTITY_STAGE_ORDINAL_MISMATCH:FINALIZE_ENTITY:'
-          + `${ordinal}:${candidate.acceptedStageOrdinal}`,
-        );
-      }
-      const response = await this.#authorityRequestOwnedNow(
-        RSCORE_OP.finalizeEntity,
-        payload,
-      );
-      const receipt = this.#decodeEntityStageReceipt(response.result, {
-        key,
-        status: 'accepted',
-        acceptedStageOrdinal: ordinal + 1,
-      });
-      candidate.activeStage = null;
-      candidate.acceptedStageOrdinal = receipt.acceptedStageOrdinal;
-      return receipt;
-    });
-  }
-
-  /** Reject one Entity input and restore its exact pre-input Account savepoint. */
-  async discardEntityStage(
-    candidateToken: Uint8Array,
-    stageKey: Uint8Array,
-    expectedAcceptedOrdinal: number,
-  ): Promise<RscoreEntityStageReceipt> {
-    const key = entityStageKey(stageKey);
-    const ordinal = exactUnsigned(
-      expectedAcceptedOrdinal,
-      'RSCORE_CLIENT_ENTITY_STAGE_EXPECTED_ORDINAL',
-    );
-    const payload = ownWirePayload([Buffer.from(candidateToken), key, ordinal]);
-    return this.#withRequestTurn(async () => {
-      const { candidate } = this.#requireActiveEntityStage(
-        candidateToken,
-        key,
-        'DISCARD_ENTITY',
-      );
-      if (
-        candidate.acceptedStageOrdinal !== ordinal
-        || candidate.activeStage?.expectedAcceptedOrdinal !== ordinal
-      ) {
-        throw new Error(
-          'RSCORE_CLIENT_ENTITY_STAGE_ORDINAL_MISMATCH:DISCARD_ENTITY:'
-          + `${ordinal}:${candidate.acceptedStageOrdinal}`,
-        );
-      }
-      const response = await this.#authorityRequestOwnedNow(
-        RSCORE_OP.discardEntity,
-        payload,
-      );
-      const receipt = this.#decodeEntityStageReceipt(response.result, {
-        key,
-        status: 'rolled_back',
-        acceptedStageOrdinal: ordinal,
-      });
-      candidate.activeStage = null;
-      return receipt;
-    });
-  }
-
-  /** Freeze the cumulative candidate transcript before checkpoint/WAL/Commit. */
-  async sealAccountWave(candidateToken: Uint8Array): Promise<Wave> {
-    const payload = ownWirePayload([Buffer.from(candidateToken)]);
-    return this.#withRequestTurn(async () => {
-      const candidate = this.#requireAuthorityCandidate(candidateToken, 'SEAL', true);
-      this.#rejectActiveEntityStage(candidate, 'SEAL');
-      const response = await this.#authorityRequestOwnedNow(RSCORE_OP.sealAccountWave, payload);
-      const result = this.#decodeAuthorityWave(response.result);
-      candidate.sealed = true;
-      return result;
     });
   }
 
@@ -1121,69 +655,6 @@ export class RscoreProcessClient {
       accounts,
       importExisting,
     ]);
-  }
-
-  /** Incremental exact rows since the last checkpoint Rust acknowledged. */
-  /** The rows that moved since the last durable checkpoint. */
-  async checkpointChanges(expectedAccountsRoot: Uint8Array): Promise<RscoreCheckpointChanges> {
-    const payload = ownWirePayload([Buffer.from(expectedAccountsRoot)]);
-    return this.#withRequestTurn(async () => {
-      const response = (await this.#authorityRequestOwnedNow(
-        RSCORE_OP.checkpoint,
-        payload,
-      )).result;
-      try {
-        if (!Array.isArray(response) || response.length !== 1) {
-          throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
-        }
-        return decodeRscoreCheckpointChanges(response[0]);
-      } catch (cause) {
-        throw this.#poisonAuthority(cause);
-      }
-    });
-  }
-
-  async getCheckpointChanges(candidateToken: Uint8Array): Promise<RscoreCheckpointChanges> {
-    const payload = ownWirePayload([Buffer.from(candidateToken)]);
-    return this.#withRequestTurn(async () => {
-      const candidate = this.#requireAuthorityCandidate(candidateToken, 'CHECKPOINT', false);
-      this.#rejectActiveEntityStage(candidate, 'CHECKPOINT');
-      if (!candidate.sealed) throw new Error('RSCORE_CLIENT_AUTHORITY_NOT_SEALED:CHECKPOINT');
-      const response = (await this.#authorityRequestOwnedNow(
-        RSCORE_OP.getCheckpointChanges,
-        payload,
-      )).result;
-      try {
-        if (!Array.isArray(response) || response.length !== 1) {
-          throw new Error('RSCORE_CLIENT_CHECKPOINT_RESPONSE_ARITY');
-        }
-        return decodeRscoreCheckpointChanges(response[0]);
-      } catch (cause) {
-        throw this.#poisonAuthority(cause);
-      }
-    });
-  }
-
-  /** Acknowledge only the exact token returned with the durable rows. */
-  async commitCheckpoint(token: RscoreCheckpointToken): Promise<RscoreCheckpointToken> {
-    const payload = ownWirePayload([token]);
-    return this.#withRequestTurn(async () => {
-      if (this.#authorityCandidate !== null) {
-        this.#rejectActiveEntityStage(this.#authorityCandidate, 'CHECKPOINT_COMMIT');
-      }
-      const response = (await this.#authorityRequestOwnedNow(
-        RSCORE_OP.commitCheckpoint,
-        payload,
-      )).result;
-      try {
-        if (!Array.isArray(response) || response.length !== 1) {
-          throw new Error('RSCORE_CLIENT_CHECKPOINT_COMMIT_RESPONSE_ARITY');
-        }
-        return decodeRscoreCheckpointToken(response[0], 'COMMITTED');
-      } catch (cause) {
-        throw this.#poisonAuthority(cause);
-      }
-    });
   }
 
   /** Replace an authority session from materialized canonical Account rows. */
@@ -1236,37 +707,11 @@ export class RscoreProcessClient {
   }
 
   async commit(candidateToken: Buffer): Promise<unknown> {
-    const payload = ownWirePayload([candidateToken]);
-    return this.#withRequestTurn(async () => {
-      if (this.#authoritySession !== true) {
-        return (await this.#requestOwnedNow(RSCORE_OP.commitRuntime, payload)).result;
-      }
-      const candidate = this.#requireAuthorityCandidate(candidateToken, 'COMMIT', false);
-      this.#rejectActiveEntityStage(candidate, 'COMMIT');
-      if (!candidate.sealed) throw new Error('RSCORE_CLIENT_AUTHORITY_NOT_SEALED:COMMIT');
-      const response = (await this.#authorityRequestOwnedNow(
-        RSCORE_OP.commitRuntime,
-        payload,
-      )).result;
-      this.#authorityCandidate = null;
-      return response;
-    });
+    return this.#request(RSCORE_OP.commitRuntime, [candidateToken]);
   }
 
   async abort(candidateToken: Buffer): Promise<unknown> {
-    const payload = ownWirePayload([candidateToken]);
-    return this.#withRequestTurn(async () => {
-      if (this.#authoritySession !== true) {
-        return (await this.#requestOwnedNow(RSCORE_OP.abortRuntime, payload)).result;
-      }
-      this.#requireAuthorityCandidate(candidateToken, 'ABORT', false);
-      const response = (await this.#authorityRequestOwnedNow(
-        RSCORE_OP.abortRuntime,
-        payload,
-      )).result;
-      this.#authorityCandidate = null;
-      return response;
-    });
+    return this.#request(RSCORE_OP.abortRuntime, [candidateToken]);
   }
 
   /** Create or replace accounts between waves; replies [revision, accountsRoot]. */

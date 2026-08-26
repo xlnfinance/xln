@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Deterministic parallel batching over independently owned Account replicas.
 //!
 //! Account-local order and collected bytes are stable across worker counts.
@@ -10,6 +12,7 @@ mod error;
 mod execution;
 mod parallel;
 mod query;
+mod resident_consensus;
 mod round;
 mod stateful;
 mod types;
@@ -28,7 +31,11 @@ pub use consensus::{
 };
 pub use error::BatchError;
 pub use parallel::{AccountShardMetric, LOGICAL_ACCOUNT_SHARDS};
-pub use round::{EntityInboundRequest, EntityOutboundRequest, EntityRoundResult, FailedHtlcRoute};
+pub use resident_consensus::ResidentConsensusEngine;
+pub use round::{
+    EntityAccountGenesisPolicy, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult,
+    FailedHtlcRoute,
+};
 // The receiver clock is part of this layer's boundary: a caller cannot apply
 // an input without saying what time it is on its own machine.
 pub use query::{AccountSummaryRow, CapacityRequest, EngineTotals, TokenTotals};

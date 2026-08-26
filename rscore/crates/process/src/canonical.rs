@@ -10,6 +10,7 @@
 use num_bigint::BigInt;
 use xln_rscore_abi::AbiValue;
 use xln_rscore_engine::CanonicalValue;
+use xln_rscore_protocol::CanonicalNumber;
 
 use crate::ProcessError;
 use crate::wire_value::{integer, text, tuple};
@@ -40,13 +41,10 @@ fn encode(value: &CanonicalValue) -> AbiValue {
             AbiValue::Integer(1),
             AbiValue::Integer(i128::from(*flag)),
         ]),
-        CanonicalValue::Number(number) => {
-            let mut buffer = ryu_js::Buffer::new();
-            tuple(vec![
-                AbiValue::Integer(2),
-                AbiValue::Text(buffer.format(*number).to_owned()),
-            ])
-        }
+        CanonicalValue::Number(number) => tuple(vec![
+            AbiValue::Integer(2),
+            AbiValue::Text(number.as_str().to_owned()),
+        ]),
         CanonicalValue::BigInt(number) => tuple(vec![
             AbiValue::Integer(3),
             AbiValue::Text(number.to_string()),
@@ -127,11 +125,9 @@ fn decode(value: &AbiValue, depth: usize) -> Result<CanonicalValue, ProcessError
     match tag {
         0 => Ok(CanonicalValue::Null),
         1 => Ok(CanonicalValue::Bool(integer(one()?)? != 0)),
-        // Numbers travel as the string JavaScript renders, and are parsed back
-        // to the same double: the shortest representation round-trips exactly,
-        // so re-rendering it on this side reproduces the authority's bytes.
-        2 => text(one()?)?
-            .parse::<f64>()
+        // Validate JavaScript's exact shortest rendering once, then retain only
+        // those bytes. No binary64 value reaches committed or hashed state.
+        2 => CanonicalNumber::parse_js_canonical(text(one()?)?)
             .map(CanonicalValue::Number)
             .map_err(|_| ProcessError::Expected("canonicalNumber")),
         3 => text(one()?)?
@@ -174,63 +170,29 @@ fn list(value: &AbiValue, depth: usize) -> Result<Vec<CanonicalValue>, ProcessEr
         .collect()
 }
 
-fn wire_tuple(fields: Vec<AbiValue>) -> AbiValue {
-    AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// The same nine-variant model back on the wire, so a runtime can read the
-/// projection the engine committed and name the field that disagrees instead
-/// of comparing two opaque leaves.
-pub fn canonical_wire(value: &CanonicalValue) -> AbiValue {
-    match value {
-        CanonicalValue::Null => wire_tuple(vec![AbiValue::Integer(0)]),
-        CanonicalValue::Bool(flag) => wire_tuple(vec![
-            AbiValue::Integer(1),
-            AbiValue::Integer(i128::from(*flag)),
-        ]),
-        CanonicalValue::Number(number) => wire_tuple(vec![
+    fn wire_number(value: &str) -> AbiValue {
+        AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(vec![
             AbiValue::Integer(2),
-            AbiValue::Text({
-                let mut buffer = ryu_js::Buffer::new();
-                buffer.format(*number).to_string()
-            }),
-        ]),
-        CanonicalValue::BigInt(value) => wire_tuple(vec![
-            AbiValue::Integer(3),
             AbiValue::Text(value.to_string()),
-        ]),
-        CanonicalValue::String(text) => {
-            wire_tuple(vec![AbiValue::Integer(4), AbiValue::Text(text.clone())])
+        ]))
+    }
+
+    #[test]
+    fn wire_number_retains_only_exact_javascript_text() {
+        for value in ["0", "42", "-3.5", "1e+21", "0.000001", "1e-7"] {
+            let decoded = canonical_value(&wire_number(value)).expect("canonical number");
+            let CanonicalValue::Number(number) = decoded else {
+                panic!("number variant");
+            };
+            assert_eq!(number.as_str(), value);
         }
-        CanonicalValue::Array(items) => wire_tuple(vec![
-            AbiValue::Integer(5),
-            wire_tuple(items.iter().map(canonical_wire).collect()),
-        ]),
-        CanonicalValue::Map(entries) => wire_tuple(vec![
-            AbiValue::Integer(6),
-            wire_tuple(
-                entries
-                    .iter()
-                    .map(|(key, value)| {
-                        wire_tuple(vec![canonical_wire(key), canonical_wire(value)])
-                    })
-                    .collect(),
-            ),
-        ]),
-        CanonicalValue::Set(items) => wire_tuple(vec![
-            AbiValue::Integer(7),
-            wire_tuple(items.iter().map(canonical_wire).collect()),
-        ]),
-        CanonicalValue::Object(entries) => wire_tuple(vec![
-            AbiValue::Integer(8),
-            wire_tuple(
-                entries
-                    .iter()
-                    .map(|(key, value)| {
-                        wire_tuple(vec![AbiValue::Text(key.clone()), canonical_wire(value)])
-                    })
-                    .collect(),
-            ),
-        ]),
+
+        for value in ["-0", "NaN", "Infinity", "01", "+1", "1.0"] {
+            assert!(canonical_value(&wire_number(value)).is_err(), "{value}");
+        }
     }
 }

@@ -5,11 +5,83 @@ use thiserror::Error;
 
 use crate::rlp::{RlpError, RlpWriter, encode_list, encode_payload};
 
-#[derive(Clone, Debug, PartialEq)]
+/// Largest integer JavaScript can represent without rounding.
+pub const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
+/// Exact text emitted by JavaScript's canonical Number rendering.
+///
+/// The text is validated once at the wire boundary and then committed as-is.
+/// Keeping it private prevents a binary64 value from entering hashed state.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CanonicalNumber(Box<str>);
+
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum CanonicalNumberError {
+    #[error("CANONICAL_NUMBER_INVALID")]
+    Invalid,
+    #[error("CANONICAL_NUMBER_NON_FINITE")]
+    NonFinite,
+    #[error("CANONICAL_NUMBER_NON_CANONICAL")]
+    NonCanonical,
+    #[error("CANONICAL_NUMBER_UNSAFE_INTEGER:{0}")]
+    UnsafeInteger(String),
+}
+
+impl CanonicalNumber {
+    /// Validate text received from JavaScript without retaining the parsed
+    /// binary64 value. `ryu_js` is used only to prove the input is the exact
+    /// canonical rendering the TypeScript encoder would hash.
+    pub fn parse_js_canonical(value: &str) -> Result<Self, CanonicalNumberError> {
+        let parsed = value
+            .parse::<f64>()
+            .map_err(|_| CanonicalNumberError::Invalid)?;
+        if !parsed.is_finite() {
+            return Err(CanonicalNumberError::NonFinite);
+        }
+        let mut buffer = ryu_js::Buffer::new();
+        if buffer.format(parsed) != value {
+            return Err(CanonicalNumberError::NonCanonical);
+        }
+        Ok(Self(value.into()))
+    }
+
+    /// Construct a Rust-produced unsigned protocol number without rounding.
+    pub fn try_from_u64(value: u64) -> Result<Self, CanonicalNumberError> {
+        if value > JS_MAX_SAFE_INTEGER {
+            return Err(CanonicalNumberError::UnsafeInteger(value.to_string()));
+        }
+        Ok(Self(value.to_string().into()))
+    }
+
+    /// Construct a Rust-produced signed protocol number without rounding.
+    pub fn try_from_i64(value: i64) -> Result<Self, CanonicalNumberError> {
+        let maximum = JS_MAX_SAFE_INTEGER as i64;
+        if !(-maximum..=maximum).contains(&value) {
+            return Err(CanonicalNumberError::UnsafeInteger(value.to_string()));
+        }
+        Ok(Self(value.to_string().into()))
+    }
+
+    /// Every `u32` is a JavaScript-safe integer; this explicit constructor
+    /// still prevents callers from entering through a floating-point cast.
+    pub fn from_u32(value: u32) -> Self {
+        Self(value.to_string().into())
+    }
+
+    pub fn from_u16(value: u16) -> Self {
+        Self(value.to_string().into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalValue {
     Null,
     Bool(bool),
-    Number(f64),
+    Number(CanonicalNumber),
     BigInt(BigInt),
     String(String),
     Array(Vec<CanonicalValue>),
@@ -20,8 +92,6 @@ pub enum CanonicalValue {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ValueEncodingError {
-    #[error("ACCOUNT_STATE_RLP_NON_FINITE_NUMBER")]
-    NonFiniteNumber,
     #[error("ACCOUNT_STATE_RLP_DUPLICATE_OBJECT_KEY:{0}")]
     DuplicateObjectKey(String),
     #[error("ACCOUNT_STATE_RLP_DUPLICATE_MAP_KEY")]
@@ -51,13 +121,8 @@ fn cmp_utf16(left: &str, right: &str) -> Ordering {
     left.encode_utf16().cmp(right.encode_utf16())
 }
 
-fn encode_number(value: f64) -> Result<Vec<u8>, ValueEncodingError> {
-    if !value.is_finite() {
-        return Err(ValueEncodingError::NonFiniteNumber);
-    }
-    let mut buffer = ryu_js::Buffer::new();
-    let rendered = buffer.format(value);
-    Ok(scalar("number", &[text(rendered)?])?)
+fn encode_number(value: &CanonicalNumber) -> Result<Vec<u8>, ValueEncodingError> {
+    Ok(scalar("number", &[text(value.as_str())?])?)
 }
 
 fn magnitude_bytes(value: &BigInt) -> (u8, Vec<u8>) {
@@ -136,16 +201,9 @@ pub fn write_account_state_value(
         CanonicalValue::Bool(flag) => write_scalar(writer, "bool", |writer| {
             Ok(writer.push_payload(&[u8::from(*flag)])?)
         }),
-        CanonicalValue::Number(number) => {
-            if !number.is_finite() {
-                return Err(ValueEncodingError::NonFiniteNumber);
-            }
-            let mut buffer = ryu_js::Buffer::new();
-            let rendered = buffer.format(*number).to_owned();
-            write_scalar(writer, "number", |writer| {
-                Ok(writer.push_payload(rendered.as_bytes())?)
-            })
-        }
+        CanonicalValue::Number(number) => write_scalar(writer, "number", |writer| {
+            Ok(writer.push_payload(number.as_str().as_bytes())?)
+        }),
         CanonicalValue::BigInt(value) => {
             let (sign, magnitude) = magnitude_bytes(value);
             write_scalar(writer, "bigint", |writer| {
@@ -209,7 +267,7 @@ pub fn encode_account_state_value(value: &CanonicalValue) -> Result<Vec<u8>, Val
     match value {
         CanonicalValue::Null => Ok(scalar("null", &[])?),
         CanonicalValue::Bool(value) => Ok(scalar("bool", &[byte(u8::from(*value))?])?),
-        CanonicalValue::Number(value) => encode_number(*value),
+        CanonicalValue::Number(value) => encode_number(value),
         CanonicalValue::BigInt(value) => {
             let (sign, magnitude) = magnitude_bytes(value);
             Ok(scalar(
@@ -239,6 +297,10 @@ pub fn encode_account_state_value(value: &CanonicalValue) -> Result<Vec<u8>, Val
 mod tests {
     use super::*;
 
+    fn number(value: &str) -> CanonicalValue {
+        CanonicalValue::Number(CanonicalNumber::parse_js_canonical(value).expect("number"))
+    }
+
     fn encoded_hex(value: CanonicalValue) -> String {
         hex::encode(encode_account_state_value(&value).expect("encode"))
     }
@@ -249,9 +311,9 @@ mod tests {
             (CanonicalValue::Null, "c5846e756c6c"),
             (CanonicalValue::Bool(false), "c684626f6f6c00"),
             (CanonicalValue::Bool(true), "c684626f6f6c01"),
-            (CanonicalValue::Number(0.0), "c8866e756d62657230"),
-            (CanonicalValue::Number(42.0), "ca866e756d626572823432"),
-            (CanonicalValue::Number(-3.5), "cc866e756d626572842d332e35"),
+            (number("0"), "c8866e756d62657230"),
+            (number("42"), "ca866e756d626572823432"),
+            (number("-3.5"), "cc866e756d626572842d332e35"),
             (CanonicalValue::BigInt(0.into()), "c986626967696e740000"),
             (
                 CanonicalValue::BigInt((-255).into()),
@@ -267,7 +329,7 @@ mod tests {
     #[test]
     fn matches_typescript_composite_vectors() {
         let array = CanonicalValue::Array(vec![
-            CanonicalValue::Number(1.0),
+            number("1"),
             CanonicalValue::String("a".into()),
             CanonicalValue::BigInt(2.into()),
         ]);
@@ -305,5 +367,70 @@ mod tests {
             encoded_hex(set),
             "d683736574c886737472696e6761c886737472696e677a",
         );
+    }
+
+    #[test]
+    fn canonical_number_accepts_javascript_rendering_thresholds() {
+        for value in [
+            "0",
+            "42",
+            "-3.5",
+            "100000000000000000000",
+            "1e+21",
+            "0.000001",
+            "1e-7",
+        ] {
+            assert_eq!(
+                CanonicalNumber::parse_js_canonical(value)
+                    .expect("canonical")
+                    .as_str(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_number_rejects_negative_zero_non_finite_and_alternate_text() {
+        assert_eq!(
+            CanonicalNumber::parse_js_canonical("-0"),
+            Err(CanonicalNumberError::NonCanonical)
+        );
+        for value in ["NaN", "inf", "-inf", "Infinity", "-Infinity"] {
+            assert!(matches!(
+                CanonicalNumber::parse_js_canonical(value),
+                Err(CanonicalNumberError::Invalid | CanonicalNumberError::NonFinite)
+            ));
+        }
+        for value in ["01", "+1", "1.0", "1e20", "1e21", "0.0000001"] {
+            assert_eq!(
+                CanonicalNumber::parse_js_canonical(value),
+                Err(CanonicalNumberError::NonCanonical)
+            );
+        }
+    }
+
+    #[test]
+    fn safe_integer_constructors_enforce_javascript_bounds() {
+        let maximum = JS_MAX_SAFE_INTEGER;
+        assert_eq!(
+            CanonicalNumber::try_from_u64(maximum)
+                .expect("maximum")
+                .as_str(),
+            "9007199254740991"
+        );
+        assert_eq!(
+            CanonicalNumber::try_from_i64(-(maximum as i64))
+                .expect("minimum")
+                .as_str(),
+            "-9007199254740991"
+        );
+        assert!(matches!(
+            CanonicalNumber::try_from_u64(maximum + 1),
+            Err(CanonicalNumberError::UnsafeInteger(_))
+        ));
+        assert!(matches!(
+            CanonicalNumber::try_from_i64(-((maximum as i64) + 1)),
+            Err(CanonicalNumberError::UnsafeInteger(_))
+        ));
     }
 }

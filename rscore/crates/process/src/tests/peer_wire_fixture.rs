@@ -71,6 +71,7 @@ pub(super) fn peer_row(kind: AbiValue) -> AbiValue {
             AbiValue::Bytes(vec![0x44; 32]),
             kind,
         ]),
+        AbiValue::Nil,
     ])
 }
 

@@ -13,7 +13,11 @@ use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountEnvelope, AccountIdentity,
     AccountReplica, AccountState, AccountTx, DepositoryAddress, ReserveSide, TokenId, WatchSeed,
 };
-use xln_rscore_protocol::CanonicalValue;
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
+
+fn number(value: u32) -> CanonicalValue {
+    CanonicalValue::Number(CanonicalNumber::from_u32(value))
+}
 
 fn fresh_engine(signer_id: &str) -> StatefulConsensusEngine {
     StatefulConsensusEngine::restore(
@@ -89,8 +93,8 @@ fn canonical_genesis_envelope_with_policy(
         fields.push(("publicPinned".to_string(), CanonicalValue::Bool(true)));
     }
     fields.extend([
-        ("currentHeight".to_string(), CanonicalValue::Number(0.0)),
-        ("rollbackCount".to_string(), CanonicalValue::Number(0.0)),
+        ("currentHeight".to_string(), number(0)),
+        ("rollbackCount".to_string(), number(0)),
         (
             "proofHeader".to_string(),
             CanonicalValue::Object(vec![
@@ -102,7 +106,7 @@ fn canonical_genesis_envelope_with_policy(
                     "toEntity".to_string(),
                     CanonicalValue::String(replica.counterparty().to_string()),
                 ),
-                ("nextProofNonce".to_string(), CanonicalValue::Number(1.0)),
+                ("nextProofNonce".to_string(), number(1)),
             ]),
         ),
         (
@@ -1462,11 +1466,7 @@ fn create_requires_the_exact_canonical_h0_entity_envelope() {
     variants.push(("inactive status", inactive));
 
     let mut wrong_height = seed.clone();
-    replace_genesis_envelope_field(
-        &mut wrong_height,
-        "currentHeight",
-        CanonicalValue::Number(1.0),
-    );
+    replace_genesis_envelope_field(&mut wrong_height, "currentHeight", number(1));
     variants.push(("nonzero height", wrong_height));
 
     let mut wrong_proof = seed.clone();
@@ -1479,7 +1479,7 @@ fn create_requires_the_exact_canonical_h0_entity_envelope() {
             "toEntity".to_string(),
             CanonicalValue::String(wrong_proof.replica.counterparty().to_string()),
         ),
-        ("nextProofNonce".to_string(), CanonicalValue::Number(0.0)),
+        ("nextProofNonce".to_string(), number(0)),
     ]);
     replace_genesis_envelope_field(&mut wrong_proof, "proofHeader", proof);
     variants.push(("nonce zero", wrong_proof));

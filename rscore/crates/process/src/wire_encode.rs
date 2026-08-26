@@ -108,28 +108,6 @@ pub fn capacity_rows(
     ])
 }
 
-/// One account's committed leaf projection: the field names and their
-/// canonical values, in the order the engine holds them.
-pub fn account_envelope(
-    revision: u64,
-    fields: &[(String, xln_rscore_engine::CanonicalValue)],
-) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        tuple(
-            fields
-                .iter()
-                .map(|(name, value)| {
-                    tuple(vec![
-                        AbiValue::Text(name.clone()),
-                        crate::canonical::canonical_wire(value),
-                    ])
-                })
-                .collect(),
-        ),
-    ])
-}
-
 pub fn summary_page(
     revision: u64,
     rows: &[xln_rscore_batch::AccountSummaryRow],
@@ -316,26 +294,6 @@ pub(crate) fn integer(value: impl TryInto<i128>) -> AbiValue {
 
 // ---------------------------------------------------------- authority wave
 
-/// What one wave produced, against a candidate the runtime has not committed.
-pub fn wave(
-    result: &xln_rscore_batch::WaveResult,
-    engine_micros: u64,
-) -> Result<BodyTuple, crate::ProcessError> {
-    Ok(body(wave_fields(result, engine_micros)?))
-}
-
-/// The first staged reply also carries the opaque capability that names this
-/// candidate. Later replies remain the canonical nine-field Wave value.
-pub fn prepared_wave(
-    result: &xln_rscore_batch::WaveResult,
-    engine_micros: u64,
-    candidate_token: &[u8; 32],
-) -> Result<BodyTuple, crate::ProcessError> {
-    let mut fields = wave_fields(result, engine_micros)?;
-    fields.push(AbiValue::Bytes(candidate_token.to_vec()));
-    Ok(body(fields))
-}
-
 /// One Entity round in the same canonical shape a wave reply has, so the
 /// caller decodes both with one decoder.
 pub fn round(
@@ -350,24 +308,10 @@ pub fn round(
         proposals: &result.proposals,
         touched: &result.touched,
         post_accounts: &result.post_accounts,
+        created_accounts: &result.created_accounts,
+        checkpoint: result.checkpoint.as_ref(),
         engine_micros,
     })?))
-}
-
-fn wave_fields(
-    result: &xln_rscore_batch::WaveResult,
-    engine_micros: u64,
-) -> Result<Vec<AbiValue>, crate::ProcessError> {
-    round_fields(RoundFields {
-        revision: result.revision,
-        accounts_root: result.accounts_root,
-        applied: &result.applied,
-        admissions: &result.admissions,
-        proposals: &result.proposals,
-        touched: &result.touched,
-        post_accounts: &result.post_accounts,
-        engine_micros,
-    })
 }
 
 /// Whether a reply echoes the Account envelope back to its owner.
@@ -390,6 +334,8 @@ struct RoundFields<'a> {
     proposals: &'a [xln_rscore_batch::ProposalRow],
     touched: &'a [(xln_rscore_batch::AccountId, [u8; 32])],
     post_accounts: &'a [xln_rscore_batch::AccountCheckpointRows],
+    created_accounts: &'a [xln_rscore_batch::AccountCheckpointRows],
+    checkpoint: Option<&'a xln_rscore_batch::AccountsCheckpoint>,
     engine_micros: u64,
 }
 
@@ -426,12 +372,36 @@ fn round_fields(fields: RoundFields<'_>) -> Result<Vec<AbiValue>, crate::Process
             .map(|row| crate::checkpoint_wire::account_rows(row, carry_envelope()))
             .collect::<Result<_, _>>()?,
     );
+    let created_accounts = tuple(
+        fields
+            .created_accounts
+            .iter()
+            // A newly authenticated Account has no prior Entity read model.
+            // Its H=1 row must therefore carry the envelope even when normal
+            // cutover verification is disabled.
+            .map(|row| crate::checkpoint_wire::account_rows(row, true))
+            .collect::<Result<_, _>>()?,
+    );
+    let checkpoint = crate::checkpoint_wire::changes(fields.checkpoint)?;
+    let created_leaves = tuple(
+        fields
+            .created_accounts
+            .iter()
+            .map(|row| {
+                tuple(vec![
+                    AbiValue::Bytes(row.account_id.as_bytes().to_vec()),
+                    AbiValue::Bytes(row.account_leaf.to_vec()),
+                ])
+            })
+            .collect(),
+    );
     let digest = parity_digest(
         fields.accounts_root,
         &touched,
         &applied,
         &admissions,
         &proposals,
+        &created_leaves,
     )?;
     Ok(vec![
         integer(fields.revision),
@@ -441,6 +411,8 @@ fn round_fields(fields: RoundFields<'_>) -> Result<Vec<AbiValue>, crate::Process
         proposals,
         touched,
         post_accounts,
+        created_accounts,
+        checkpoint,
         AbiValue::Bytes(digest.to_vec()),
         // Wall time inside the engine, so a caller can tell the cost of the
         // work from the cost of reaching it. Excluded from the parity digest:
@@ -471,9 +443,10 @@ fn parity_digest(
     applied: &AbiValue,
     admissions: &AbiValue,
     proposals: &AbiValue,
+    created_leaves: &AbiValue,
 ) -> Result<[u8; 32], crate::ProcessError> {
     use sha2::{Digest, Sha256};
-    // The transcript is the four values themselves, not a body: a reply wraps
+    // The transcript is the six values themselves, not a body: a reply wraps
     // its fields in one more tuple, and hashing that wrapper would make the
     // digest describe the envelope rather than the wave.
     let transcript = xln_rscore_abi::BodyTuple::from_array([
@@ -482,6 +455,7 @@ fn parity_digest(
         applied.clone(),
         admissions.clone(),
         proposals.clone(),
+        created_leaves.clone(),
     ]);
     let encoded = xln_rscore_abi::encode_tuple(&transcript)?;
     let mut digest = Sha256::new();
@@ -490,48 +464,7 @@ fn parity_digest(
     Ok(digest.finalize().into())
 }
 
-const WAVE_PARITY_DOMAIN: &str = "xln.rscore.wave-parity.v1";
-
-pub fn wave_committed(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        AbiValue::Bytes(accounts_root.to_vec()),
-    ])
-}
-
-pub fn wave_aborted(revision: u64, accounts_root: [u8; 32]) -> BodyTuple {
-    body(vec![
-        integer(revision),
-        AbiValue::Bytes(accounts_root.to_vec()),
-    ])
-}
-
-/// Exact acknowledgement of one parent Entity-input savepoint operation.
-///
-/// This intentionally carries the candidate revision and forest root beside
-/// the idempotency receipt. The runtime can therefore prove that an accepted
-/// stage retained its Account mutations and a discarded stage restored the
-/// exact pre-input candidate before it decides what enters the Runtime WAL.
-pub fn entity_stage(
-    receipt: &xln_rscore_batch::EntityStageReceipt,
-    revision: u64,
-    accounts_root: [u8; 32],
-) -> Result<BodyTuple, crate::ProcessError> {
-    use xln_rscore_batch::EntityStageStatus;
-
-    let status = match receipt.status {
-        EntityStageStatus::Open => 0,
-        EntityStageStatus::Accepted => 1,
-        EntityStageStatus::RolledBack => 2,
-    };
-    Ok(body(vec![
-        AbiValue::Bytes(receipt.key.as_bytes().to_vec()),
-        integer(status),
-        integer(receipt.accepted_stage_ordinal),
-        integer(revision),
-        AbiValue::Bytes(accounts_root.to_vec()),
-    ]))
-}
+const WAVE_PARITY_DOMAIN: &str = "xln.rscore.wave-parity.v2";
 
 /// One attempt to propose: the account, the frame it produced if any, and the
 /// transactions it could not include. An attempt that produced no frame is

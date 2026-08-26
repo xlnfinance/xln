@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Transport-neutral, canonical binary ABI for the native Account engine.
 
 mod codec;

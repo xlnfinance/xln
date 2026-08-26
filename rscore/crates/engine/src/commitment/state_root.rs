@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
-use xln_rscore_protocol::{CanonicalValue, compute_flat_integrity_root};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, compute_flat_integrity_root};
 
 use crate::{AccountDisputeConfig, AccountIdentity, StateError};
 
@@ -61,7 +61,7 @@ pub(crate) fn payment_account_state_root(
 ) -> Result<[u8; 32], StateError> {
     compute_flat_integrity_root(
         ACCOUNT_STATE_NAMESPACE,
-        &account_state_entries(identity, dispute_config, roots, journal, carried),
+        &account_state_entries(identity, dispute_config, roots, journal, carried)?,
     )
     .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
@@ -217,7 +217,7 @@ pub(crate) fn refresh_payment_account_state_root(
     journal: &AccountJournal,
     carried: &CarriedSections,
 ) -> Result<[u8; 32], StateError> {
-    let entries = account_state_entries_ref(identity, dispute_config, roots, journal, carried);
+    let entries = account_state_entries_ref(identity, dispute_config, roots, journal, carried)?;
     let identity_hash = match cache.identity {
         Some(hash) => hash,
         None => {
@@ -277,7 +277,7 @@ fn account_state_entries_ref(
     roots: &PaymentAccountRoots,
     journal: &AccountJournal,
     carried: &CarriedSections,
-) -> [CanonicalValue; 5] {
+) -> Result<[CanonicalValue; 5], StateError> {
     let entries = account_state_entries(
         identity,
         dispute_config,
@@ -293,15 +293,15 @@ fn account_state_entries_ref(
             last_finalized_j_height: journal.last_finalized_j_height,
         },
         carried,
-    );
+    )?;
     let mut values = entries.into_iter().map(|(_, value)| value);
-    [
+    Ok([
         values.next().expect("identity"),
         values.next().expect("financial"),
         values.next().expect("commitments"),
         values.next().expect("jurisdiction"),
         values.next().expect("rebalance"),
-    ]
+    ])
 }
 
 fn account_state_entries(
@@ -310,15 +310,15 @@ fn account_state_entries(
     roots: PaymentAccountRoots,
     journal: AccountJournal,
     carried: &CarriedSections,
-) -> Vec<(String, CanonicalValue)> {
-    vec![
-        ("identity".into(), identity_value(identity)),
+) -> Result<Vec<(String, CanonicalValue)>, StateError> {
+    Ok(vec![
+        ("identity".into(), identity_value(identity)?),
         (
             "financial".into(),
             object(vec![
                 ("deltasRoot", root_value(&roots.deltas)),
-                ("jNonce", number(journal.j_nonce)),
-                ("disputeConfig", dispute_config_value(dispute_config)),
+                ("jNonce", number(journal.j_nonce)?),
+                ("disputeConfig", dispute_config_value(dispute_config)?),
             ]),
         ),
         (
@@ -336,7 +336,7 @@ fn account_state_entries(
             object(vec![
                 (
                     "lastFinalizedJHeight",
-                    number(journal.last_finalized_j_height),
+                    number(journal.last_finalized_j_height)?,
                 ),
                 (
                     "leftPendingJClaims",
@@ -365,12 +365,12 @@ fn account_state_entries(
                 ),
             ]),
         ),
-    ]
+    ])
 }
 
-fn identity_value(identity: &AccountIdentity) -> CanonicalValue {
-    object(vec![
-        ("chainId", number(identity.domain().chain_id())),
+fn identity_value(identity: &AccountIdentity) -> Result<CanonicalValue, StateError> {
+    Ok(object(vec![
+        ("chainId", number(identity.domain().chain_id())?),
         (
             "depositoryAddress",
             text(identity.domain().depository_address().as_hex()),
@@ -378,25 +378,28 @@ fn identity_value(identity: &AccountIdentity) -> CanonicalValue {
         ("leftEntity", text(identity.left().as_hex())),
         ("rightEntity", text(identity.right().as_hex())),
         ("watchSeed", text(identity.watch_seed().as_hex())),
-    ])
+    ]))
 }
 
-fn dispute_config_value(config: AccountDisputeConfig) -> CanonicalValue {
-    object(vec![
+fn dispute_config_value(config: AccountDisputeConfig) -> Result<CanonicalValue, StateError> {
+    Ok(object(vec![
         (
             "leftResponseSeconds",
-            number(u64::from(config.left_response_seconds())),
+            number(u64::from(config.left_response_seconds()))?,
         ),
         (
             "rightResponseSeconds",
-            number(u64::from(config.right_response_seconds())),
+            number(u64::from(config.right_response_seconds()))?,
         ),
-    ])
+    ]))
 }
 
 fn claim_value(accumulator: &JClaimAccumulator) -> CanonicalValue {
     object(vec![
-        ("version", number(1)),
+        (
+            "version",
+            CanonicalValue::Number(CanonicalNumber::from_u32(1)),
+        ),
         ("root", root_value(&accumulator.root)),
         (
             "count",
@@ -414,8 +417,10 @@ fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
     )
 }
 
-fn number(value: u64) -> CanonicalValue {
-    CanonicalValue::Number(value as f64)
+fn number(value: u64) -> Result<CanonicalValue, StateError> {
+    CanonicalNumber::try_from_u64(value)
+        .map(CanonicalValue::Number)
+        .map_err(|error| StateError::AccountStateRoot(error.to_string()))
 }
 
 fn text(value: String) -> CanonicalValue {

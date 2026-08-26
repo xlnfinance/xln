@@ -15,8 +15,15 @@ import {
   unpackWireValue,
   type RscoreWireValue,
 } from '../../../rscore/client';
-import { hexToWireBytes, swapMarketPolicyWire, waveInputOp } from '../../../rscore/shadow-wire';
+import {
+  accountConsensusWire,
+  accountEnvelopeWire,
+  accountSeedWire,
+  hexToWireBytes,
+  swapMarketPolicyWire,
+} from '../../../rscore/shadow-wire';
 import { decodeWave } from '../../../rscore/wave-decode';
+import { addr, makeAccount } from '../../helpers/cross-j';
 const BINARY = join(import.meta.dir, '../../../../rscore/target/release/xln-rscore');
 
 if (!existsSync(BINARY) && process.env['XLN_RSCORE_REQUIRE_BINARY'] === '1') {
@@ -194,15 +201,15 @@ const rawOk = (reply: RawProcessReply): unknown => {
   return reply.result;
 };
 
-describe.skipIf(!existsSync(BINARY))('rscore ABI20 process binding', () => {
+describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(20);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(23);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
-      .toBe('bac2673dd781fe5e63773c778f29ce94e82ba4bba229b6740c55e62a9d465dab');
+      .toBe('05cc3820ad39f9495edec092df80405804139a03e23ac968d3de5fc058a00943');
     const staleAbi = new RawProcessSession(identity());
     try {
       expect(rawErrorCode(await staleAbi.request(RSCORE_OP.hello, [
-        16,
+        22,
         2,
         swapMarketPolicyWire(),
         null,
@@ -223,81 +230,6 @@ describe.skipIf(!existsSync(BINARY))('rscore ABI20 process binding', () => {
     }
   });
 
-  test('a trailing peer row fails before candidate root or revision mutation', async () => {
-    const raw = new RawProcessSession(identity());
-    try {
-      const seed = `0x${'7a'.repeat(32)}`;
-      const owner = generateLazyEntityId([deriveSignerAddressSync(seed, '1')], 1n);
-      rawOk(await raw.request(RSCORE_OP.hello, [
-        RSCORE_PROCESS_ABI_VERSION,
-        2,
-        swapMarketPolicyWire(),
-        [deriveSignerKeySync(seed, '1'), '1'],
-      ]));
-      const loaded = exactTuple(rawOk(await raw.request(
-        RSCORE_OP.bootstrapAccounts,
-        [RSCORE_PROCESS_PROFILE, 0, [], false],
-      )), 2, 'raw bootstrap');
-      const prepared = exactTuple(rawOk(await raw.request(
-        RSCORE_OP.prepareAccountWave,
-        [[], true],
-      )), 10, 'raw prepared');
-      const baseline = decodeWave(prepared.slice(0, 9));
-      expect(baseline.revision).toBe(loaded[0]);
-      expect(baseline.accountsRoot)
-        .toBe(`0x${exactBytes(loaded[1], 32, 'raw loaded root').toString('hex')}`);
-      const token = exactBytes(prepared[9], 32, 'raw candidate token');
-      const stageKey = Buffer.alloc(32, 0x93);
-      const ownerBytes = hexToWireBytes(owner, 32, 'TEST_RAW_OWNER');
-      rawOk(await raw.request(RSCORE_OP.beginEntity, [
-        token,
-        stageKey,
-        0,
-        [ownerBytes, 1_700_000_000_000, 100, 1_700_000_000_000, 100, false],
-      ]));
-
-      const trailingPeerRow: RscoreWireValue = waveInputOp([
-        0,
-        Buffer.alloc(32, 0x44),
-        null,
-        null,
-      ]);
-      expect(rawErrorCode(await raw.request(RSCORE_OP.applyAccountWave, [
-        token,
-        stageKey,
-        [[ownerBytes, [trailingPeerRow]]],
-      ]))).toBe('RSCORE_PROCESS_ARITY');
-
-      const afterFailure = decodeWave(rawOk(await raw.request(
-        RSCORE_OP.applyAccountWave,
-        [token, stageKey, []],
-      )));
-      expect(afterFailure.revision).toBe(baseline.revision);
-      expect(afterFailure.accountsRoot).toBe(baseline.accountsRoot);
-      expect(afterFailure.applied).toEqual([]);
-      expect(afterFailure.admissions).toEqual([]);
-      const discarded = exactTuple(
-        rawOk(await raw.request(RSCORE_OP.discardEntity, [token, stageKey, 0])),
-        5,
-        'raw discard',
-      );
-      expect(discarded[3]).toBe(baseline.revision);
-      expect(`0x${exactBytes(discarded[4], 32, 'raw discarded root').toString('hex')}`)
-        .toBe(baseline.accountsRoot);
-      const aborted = exactTuple(
-        rawOk(await raw.request(RSCORE_OP.abortRuntime, [token])),
-        2,
-        'raw abort',
-      );
-      expect(aborted[0]).toBe(baseline.revision);
-      expect(`0x${exactBytes(aborted[1], 32, 'raw aborted root').toString('hex')}`)
-        .toBe(baseline.accountsRoot);
-      rawOk(await raw.request(RSCORE_OP.shutdown, []));
-    } finally {
-      raw.kill();
-    }
-  });
-
   test('Account inbound reconciles from the parent forest root without a commit command', async () => {
     const raw = new RawProcessSession(identity());
     try {
@@ -309,9 +241,18 @@ describe.skipIf(!existsSync(BINARY))('rscore ABI20 process binding', () => {
         swapMarketPolicyWire(),
         [deriveSignerKeySync(seed, '1'), '1'],
       ]));
+      const counterparty = `0x${'cd'.repeat(32)}`;
+      const account = makeAccount(owner, counterparty);
       const loaded = exactTuple(rawOk(await raw.request(
         RSCORE_OP.bootstrapAccounts,
-        [RSCORE_PROCESS_PROFILE, 0, [], false],
+        [RSCORE_PROCESS_PROFILE, 0, [accountSeedWire(
+          owner,
+          counterparty,
+          account.state,
+          accountEnvelopeWire(account),
+          accountConsensusWire(account),
+          addr('77'),
+        )], true],
       )), 2, 'root bootstrap');
       const expectedRoot = exactBytes(loaded[1], 32, 'root bootstrap root');
       const ownerBytes = hexToWireBytes(owner, 32, 'TEST_ROOT_OWNER');
@@ -340,13 +281,33 @@ describe.skipIf(!existsSync(BINARY))('rscore ABI20 process binding', () => {
         [],
         [],
         false,
+        false,
       ])));
       expect(outbound.accountsRoot).toBe(inbound.accountsRoot);
-      const checkpoint = exactTuple(rawOk(await raw.request(
-        RSCORE_OP.checkpoint,
-        [expectedRoot],
-      )), 1, 'root checkpoint');
-      expect(checkpoint).toHaveLength(1);
+      expect(outbound.checkpoint).toBeNull();
+      const due = decodeWave(rawOk(await raw.request(RSCORE_OP.accountOutbound, [
+        ownerBytes,
+        1_700_000_000_000,
+        100,
+        [],
+        [],
+        [],
+        [],
+        [],
+        false,
+        true,
+      ])));
+      expect(due.checkpoint).not.toBeNull();
+      expect(due.checkpoint?.accounts).toEqual([]);
+      expect(due.checkpoint?.removed).toEqual([]);
+      const reconciled = decodeWave(rawOk(await raw.request(RSCORE_OP.accountInbound, [
+        ownerBytes,
+        expectedRoot,
+        [1_700_000_000_001, 101],
+        [],
+        false,
+      ])));
+      expect(reconciled.accountsRoot).toBe(inbound.accountsRoot);
       rawOk(await raw.request(RSCORE_OP.shutdown, []));
     } finally {
       raw.kill();

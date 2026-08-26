@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 getrandom.workspace = true
 mimalloc.workspace = true
-ryu-js.workspace = true
 num-bigint.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

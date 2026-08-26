@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Long-lived, framed binary host for the deterministic Account batch engine.
 
 mod candidate;
@@ -60,13 +62,25 @@ pub use transport::{read_frame, serve, write_frame};
 // Entity inputs roll back their Account mutations and operation indices.
 // 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
 // shapes. FrameAck is one atomic operation with one ordered composite result.
-pub const PROCESS_ABI_VERSION: u64 = 20;
+// 21: an inbound row may carry trusted Entity genesis policy; the round reply
+// has a separate exact H=1 materialization list for authenticated new Accounts.
+// 22: AccountOutbound carries checkpointDue and the same reply carries the
+// worker-resident checkpoint rows separately from temporary read-model rows.
+// 23: that reply carries an optional exact incremental checkpoint manifest;
+// the next inbound root implicitly accepts or rejects its pending baseline.
+pub const PROCESS_ABI_VERSION: u64 = 23;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=24")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=27")
+        // wire=27: checkpoint rows are wrapped with exact incremental and
+        // restore tokens; Nil means checkpointDue was false.
+        // wire=26: checkpoint cadence is part of AccountOutbound and its
+        // exact worker-resident delta is a separate round-reply field.
+        // wire=25: peer rows carry optional Entity-owned genesis policy and
+        // replies separate H=1 create materialization from final Account rows.
         // wire=24: outbound carries the reachable forwarded-HTLC route
         // closure; failed-lock rows bind the lock and exact generated upstream
         // resolution, so the second visit reaches fixed point without a third
@@ -122,9 +136,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0xba, 0xc2, 0x67, 0x3d, 0xd7, 0x81, 0xfe, 0x5e, 0x63, 0x77, 0x3c, 0x77, 0x8f, 0x29,
-            0xce, 0x94, 0xe8, 0x2b, 0xa4, 0xbb, 0xa2, 0x29, 0xb6, 0x74, 0x0c, 0x55, 0xe6, 0x2a,
-            0x9d, 0x46, 0x5d, 0xab,
+            0x05, 0xcc, 0x38, 0x20, 0xad, 0x39, 0xf9, 0x49, 0x5e, 0xde, 0xc0, 0x92, 0xdf, 0x80,
+            0x40, 0x58, 0x04, 0x13, 0x9a, 0x03, 0xe2, 0x3a, 0xc9, 0x68, 0xd3, 0xde, 0x5f, 0xc0,
+            0x58, 0xa0, 0x09, 0x43,
         ],
     };
 

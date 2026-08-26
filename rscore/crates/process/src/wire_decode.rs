@@ -45,12 +45,6 @@ pub enum Command {
         /// having the engine guess.
         import_existing: bool,
     },
-    GetCheckpointChanges {
-        candidate_token: [u8; 32],
-    },
-    CommitCheckpoint {
-        token: xln_rscore_batch::CheckpointToken,
-    },
     RestoreExact {
         expected: xln_rscore_batch::CheckpointToken,
         accounts: Vec<xln_rscore_batch::AccountRestore>,
@@ -85,47 +79,15 @@ pub enum Command {
     RemoveAccounts {
         account_ids: Vec<AccountId>,
     },
-    /// One runtime frame for the authoritative engine.
-    PrepareAccountWave {
-        request: Box<xln_rscore_batch::WaveRequest>,
-    },
-    BeginEntity {
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        expected_accepted_ordinal: u64,
-        context: xln_rscore_batch::EntityStageContext,
-    },
-    ApplyAccountWave {
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        request: Box<xln_rscore_batch::WaveOpsRequest>,
-    },
-    Checkpoint {
-        expected_accounts_root: [u8; 32],
-    },
+    /// Every retired authority candidate/checkpoint command collapses to one
+    /// loud rejection. Keeping decoded payloads here would retain a second,
+    /// unused authority protocol beside the resident two-call path.
+    AuthorityTwoCallOnly,
     AccountInbound {
         request: Box<xln_rscore_batch::EntityInboundRequest>,
     },
     AccountOutbound {
         request: Box<xln_rscore_batch::EntityOutboundRequest>,
-    },
-    ProposeAccountWave {
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        request: Box<xln_rscore_batch::WaveProposalRequest>,
-    },
-    FinalizeEntity {
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        expected_accepted_ordinal: u64,
-    },
-    DiscardEntity {
-        candidate_token: [u8; 32],
-        stage_key: xln_rscore_batch::StageKey,
-        expected_accepted_ordinal: u64,
-    },
-    SealAccountWave {
-        candidate_token: [u8; 32],
     },
 }
 
@@ -144,24 +106,19 @@ pub fn decode_command(envelope: &Envelope) -> Result<Command, ProcessError> {
         OpTag::ReadCapacityBatch => decode_capacity_batch(payload),
         OpTag::ReadAccountSummaryPage => decode_summary_page(payload),
         OpTag::UpsertAccounts => decode_upsert_accounts(payload),
-        OpTag::PrepareAccountWave => decode_prepare_wave(payload),
-        OpTag::BeginEntity => decode_begin_entity(payload),
-        OpTag::ApplyAccountWave => decode_apply_wave(payload),
-        OpTag::ProposeAccountWave => decode_propose_wave(payload),
+        OpTag::PrepareAccountWave
+        | OpTag::BeginEntity
+        | OpTag::ApplyAccountWave
+        | OpTag::ProposeAccountWave
+        | OpTag::Checkpoint
+        | OpTag::FinalizeEntity
+        | OpTag::DiscardEntity
+        | OpTag::SealAccountWave
+        | OpTag::GetCheckpointChanges
+        | OpTag::CommitCheckpoint => Ok(Command::AuthorityTwoCallOnly),
         OpTag::AccountInbound => decode_account_inbound(payload),
-        OpTag::Checkpoint => {
-            let fields = exact(payload, 1, "checkpoint")?;
-            Ok(Command::Checkpoint {
-                expected_accounts_root: fixed_bytes(&fields[0], "expectedAccountsRoot")?,
-            })
-        }
         OpTag::AccountOutbound => decode_account_outbound(payload),
-        OpTag::FinalizeEntity => decode_finalize_entity(payload),
-        OpTag::DiscardEntity => decode_discard_entity(payload),
-        OpTag::SealAccountWave => decode_seal_wave(payload),
         OpTag::ReadAccountEnvelope => decode_read_envelope(payload),
-        OpTag::GetCheckpointChanges => decode_get_checkpoint_changes(payload),
-        OpTag::CommitCheckpoint => decode_commit_checkpoint(payload),
         OpTag::RestoreExact => decode_restore_exact(payload),
         other => Err(ProcessError::UnsupportedOp(other as u8)),
     }
@@ -259,20 +216,6 @@ fn decode_read_envelope(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-fn decode_get_checkpoint_changes(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "getCheckpointChanges")?;
-    Ok(Command::GetCheckpointChanges {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
-    })
-}
-
-fn decode_commit_checkpoint(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "commitCheckpoint")?;
-    Ok(Command::CommitCheckpoint {
-        token: crate::checkpoint_wire::decode_token(&fields[0])?,
-    })
-}
-
 fn decode_restore_exact(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     let (expected, accounts) = crate::checkpoint_wire::restore_request(fields)?;
     Ok(Command::RestoreExact { expected, accounts })
@@ -323,95 +266,37 @@ fn decode_prepare(fields: &[AbiValue]) -> Result<Command, ProcessError> {
     })
 }
 
-const MAX_WAVE_ENTITY_ROWS: usize = 4_096;
 const MAX_WAVE_OP_ROWS: usize = 1_000_000;
-
-/// One runtime frame, grouped by the Entity that owns the work.
-///
-/// Each group carries its own clocks because each Entity has its own: the
-/// timestamp it stamps proposals with, and the entity timestamp and finalized
-/// J height it judges arrivals with. Its operations stay in the order the
-/// authority performed them — admissions and peer inputs interleave.
-fn decode_prepare_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 2, "prepareWave")?;
-    let entities = tuple(&fields[0])?;
-    if entities.len() > MAX_WAVE_ENTITY_ROWS {
-        return Err(ProcessError::Expected("waveEntityRows"));
-    }
-    Ok(Command::PrepareAccountWave {
-        request: Box::new(xln_rscore_batch::WaveRequest {
-            entities: entities
-                .iter()
-                .map(decode_entity_wave)
-                .collect::<Result<_, _>>()?,
-            post_accounts: boolean(&fields[1], "prepareWave.postAccounts")?,
-        }),
-    })
-}
-
-fn decode_entity_wave(value: &AbiValue) -> Result<xln_rscore_batch::EntityWave, ProcessError> {
-    let fields = exact(tuple(value)?, 7, "entityWave")?;
-    let ops = tuple(&fields[6])?;
-    if ops.len() > MAX_WAVE_OP_ROWS {
-        return Err(ProcessError::Expected("waveOpRows"));
-    }
-    Ok(xln_rscore_batch::EntityWave {
-        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
-        timestamp: js_number(&fields[1], "timestamp")?,
-        j_height: js_number(&fields[2], "jHeight")?,
-        clock: xln_rscore_batch::ReceiverClock {
-            entity_timestamp: js_number(&fields[3], "entityTimestamp")?,
-            finalized_j_height: js_number(&fields[4], "finalizedJHeight")?,
-        },
-        propose: boolean(&fields[5], "propose")?,
-        ops: ops.iter().map(decode_wave_op).collect::<Result<_, _>>()?,
-    })
-}
-
-fn decode_wave_op(value: &AbiValue) -> Result<xln_rscore_batch::WaveOp, ProcessError> {
-    let fields = tuple(value)?;
-    let tag = fields.first().ok_or(ProcessError::Expected("waveOpTag"))?;
-    match integer(tag)? {
-        0 => {
-            let fields = exact(fields, 4, "waveAdmit")?;
-            Ok(xln_rscore_batch::WaveOp::Admit {
-                operation_index: js_number(&fields[1], "operationIndex")?,
-                account_id: AccountId::from_bytes(fixed_bytes(&fields[2], "accountId")?),
-                txs: tuple(&fields[3])?
-                    .iter()
-                    .map(decode_tx)
-                    .collect::<Result<_, _>>()?,
-            })
-        }
-        1 => {
-            let fields = exact(fields, 2, "waveInput")?;
-            Ok(xln_rscore_batch::WaveOp::Input(Box::new(decode_input_row(
-                &fields[1],
-            )?)))
-        }
-        2 => {
-            let fields = exact(fields, 3, "waveCreate")?;
-            Ok(xln_rscore_batch::WaveOp::Create {
-                operation_index: js_number(&fields[1], "operationIndex")?,
-                seed: Box::new(decode_seed_account(&fields[2])?),
-            })
-        }
-        value => Err(ProcessError::Tag {
-            field: "waveOp",
-            value,
-        }),
-    }
-}
 
 pub(crate) fn decode_input_row(
     value: &AbiValue,
 ) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
-    let fields = exact(tuple(value)?, 3, "accountInput")?;
+    let fields = exact(tuple(value)?, 4, "accountInput")?;
     Ok(xln_rscore_batch::AccountInputRow {
         operation_index: js_number(&fields[0], "operationIndex")?,
         account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
+        genesis_policy: decode_entity_account_genesis_policy(&fields[3])?,
         input: decode_peer_input(&fields[2])?,
     })
+}
+
+fn decode_entity_account_genesis_policy(
+    value: &AbiValue,
+) -> Result<Option<xln_rscore_batch::EntityAccountGenesisPolicy>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let fields = exact(tuple(value)?, 4, "accountGenesisPolicy")?;
+    let domain = exact(tuple(&fields[0])?, 2, "accountGenesisDomain")?;
+    Ok(Some(xln_rscore_batch::EntityAccountGenesisPolicy {
+        expected_domain: AccountDomain::new(
+            js_number(&domain[0], "accountGenesisChainId")?,
+            DepositoryAddress::parse(&hex_fixed(&domain[1], "accountGenesisDepository", 20)?)?,
+        )?,
+        shadow_policy_root: fixed_bytes(&fields[1], "accountGenesisPolicyRoot")?,
+        delta_transformer: fixed_bytes(&fields[2], "accountGenesisDeltaTransformer")?,
+        public_pinned: strict_boolean(&fields[3], "accountGenesisPublicPinned")?,
+    }))
 }
 
 fn decode_peer_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountPeerInput, ProcessError> {
@@ -437,64 +322,6 @@ fn decode_peer_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountPeerIn
             watch_seed,
         },
         kind: decode_input_kind(&fields[5])?,
-    })
-}
-
-fn decode_begin_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 4, "beginEntity")?;
-    Ok(Command::BeginEntity {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
-        stage_key: xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
-        expected_accepted_ordinal: unsigned(&fields[2], "expectedAcceptedOrdinal")?,
-        context: decode_entity_stage_context(&fields[3])?,
-    })
-}
-
-fn decode_entity_stage_context(
-    value: &AbiValue,
-) -> Result<xln_rscore_batch::EntityStageContext, ProcessError> {
-    let fields = exact(tuple(value)?, 6, "entityStageContext")?;
-    Ok(xln_rscore_batch::EntityStageContext {
-        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
-        timestamp: js_number(&fields[1], "timestamp")?,
-        j_height: js_number(&fields[2], "jHeight")?,
-        clock: xln_rscore_batch::ReceiverClock {
-            entity_timestamp: js_number(&fields[3], "entityTimestamp")?,
-            finalized_j_height: js_number(&fields[4], "finalizedJHeight")?,
-        },
-        propose: strict_boolean(&fields[5], "propose")?,
-    })
-}
-
-fn decode_apply_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 3, "applyWave")?;
-    let entities = tuple(&fields[2])?;
-    if entities.len() > MAX_WAVE_ENTITY_ROWS {
-        return Err(ProcessError::Expected("waveEntityRows"));
-    }
-    Ok(Command::ApplyAccountWave {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
-        stage_key: xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
-        request: Box::new(xln_rscore_batch::WaveOpsRequest {
-            entities: entities
-                .iter()
-                .map(decode_entity_wave_ops)
-                .collect::<Result<_, _>>()?,
-        }),
-    })
-}
-
-fn decode_entity_wave_ops(
-    value: &AbiValue,
-) -> Result<xln_rscore_batch::EntityWaveOps, ProcessError> {
-    let fields = exact(tuple(value)?, 2, "entityWaveOps")?;
-    let ops = tuple(&fields[1])?;
-    if ops.len() > MAX_WAVE_OP_ROWS {
-        return Err(ProcessError::Expected("waveOpRows"));
-    }
-    Ok(xln_rscore_batch::EntityWaveOps {
-        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
-        ops: ops.iter().map(decode_wave_op).collect::<Result<_, _>>()?,
     })
 }
 
@@ -525,7 +352,7 @@ fn decode_account_inbound(fields: &[AbiValue]) -> Result<Command, ProcessError> 
 
 /// One Entity input's outbound half: creates, admissions, proposal worklist.
 fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 9, "accountOutbound")?;
+    let fields = exact(fields, 10, "accountOutbound")?;
     let creates = tuple(&fields[3])?;
     let admits = tuple(&fields[4])?;
     let propose = tuple(&fields[5])?;
@@ -586,75 +413,8 @@ fn decode_account_outbound(fields: &[AbiValue]) -> Result<Command, ProcessError>
                 })
                 .collect::<Result<_, ProcessError>>()?,
             post_accounts: strict_boolean(&fields[8], "postAccounts")?,
+            checkpoint_due: strict_boolean(&fields[9], "checkpointDue")?,
         }),
-    })
-}
-
-fn decode_propose_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 3, "proposeWave")?;
-    let entities = tuple(&fields[2])?;
-    if entities.len() > MAX_WAVE_ENTITY_ROWS {
-        return Err(ProcessError::Expected("waveEntityRows"));
-    }
-    Ok(Command::ProposeAccountWave {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
-        stage_key: xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
-        request: Box::new(xln_rscore_batch::WaveProposalRequest {
-            entities: entities
-                .iter()
-                .map(|value| {
-                    let fields = exact(tuple(value)?, 2, "entityProposalSelection")?;
-                    Ok(xln_rscore_batch::EntityProposalSelection {
-                        owner_entity_id: fixed_bytes(&fields[0], "ownerEntityId")?,
-                        account_ids: tuple(&fields[1])?
-                            .iter()
-                            .map(|value| {
-                                Ok(AccountId::from_bytes(fixed_bytes(value, "accountId")?))
-                            })
-                            .collect::<Result<_, ProcessError>>()?,
-                    })
-                })
-                .collect::<Result<_, ProcessError>>()?,
-        }),
-    })
-}
-
-fn decode_finalize_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let (candidate_token, stage_key, expected_accepted_ordinal) =
-        decode_entity_stage_terminal(fields, "finalizeEntity")?;
-    Ok(Command::FinalizeEntity {
-        candidate_token,
-        stage_key,
-        expected_accepted_ordinal,
-    })
-}
-
-fn decode_discard_entity(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let (candidate_token, stage_key, expected_accepted_ordinal) =
-        decode_entity_stage_terminal(fields, "discardEntity")?;
-    Ok(Command::DiscardEntity {
-        candidate_token,
-        stage_key,
-        expected_accepted_ordinal,
-    })
-}
-
-fn decode_entity_stage_terminal(
-    fields: &[AbiValue],
-    context: &'static str,
-) -> Result<([u8; 32], xln_rscore_batch::StageKey, u64), ProcessError> {
-    let fields = exact(fields, 3, context)?;
-    Ok((
-        fixed_bytes(&fields[0], "candidateToken")?,
-        xln_rscore_batch::StageKey::from_bytes(fixed_bytes(&fields[1], "stageKey")?),
-        unsigned(&fields[2], "expectedAcceptedOrdinal")?,
-    ))
-}
-
-fn decode_seal_wave(fields: &[AbiValue]) -> Result<Command, ProcessError> {
-    let fields = exact(fields, 1, "sealWave")?;
-    Ok(Command::SealAccountWave {
-        candidate_token: fixed_bytes(&fields[0], "candidateToken")?,
     })
 }
 

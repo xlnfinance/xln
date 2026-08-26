@@ -15,11 +15,12 @@
  *   parity             — verify commitments and typed effects at the boundary
  *   Runtime WAL fsync  — TypeScript's own record becomes durable
  *
- * Rust executes against an internal path-copy candidate. The next useful
- * inbound/checkpoint call carries the Entity's canonical Account-forest root:
- * naming the candidate promotes it, naming the base drops it. A failed WAL/DB
- * write remains fail-stop. There is deliberately no second Commit/Abort
- * protocol whose acknowledgement could disagree with the WAL.
+ * Rust executes against an internal path-copy candidate. The next inbound
+ * carries the Entity's canonical Account-forest root: naming the candidate
+ * promotes it, naming the base drops it, and naming a piggybacked checkpoint
+ * implicitly acknowledges that durable baseline. A failed WAL/DB write is
+ * fail-stop. There is no second Commit/Abort/checkpoint-ACK protocol whose
+ * answer could disagree with the WAL.
  */
 
 import { createHash } from 'node:crypto';
@@ -57,9 +58,12 @@ import {
   type RscoreWireValue,
 } from './client';
 import { assertRscoreCheckpointCandidate } from './checkpoint/checkpoint-wire';
+import { decodeRscoreAccountRestoreRow } from './checkpoint/checkpoint-restore';
+import { PersistentRadixValueMap } from '../protocol/state/persistent-radix-value-map';
 import type { AccountPeerInput, AccountReplica, AccountTx } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
+import { DEFAULT_MATERIALIZE_PERIOD_FRAMES } from '../storage/keys';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -140,8 +144,8 @@ type OpenFrame = {
   latest: Readonly<{ revision: number; accountsRoot: string }> | null;
   /** Account forest selected by accepted Entity inputs in this Runtime frame. */
   acceptedAccountsRoot: string;
-  /** Rows exported for this frame's durable checkpoint, once taken. */
-  checkpoint?: RscoreCheckpointChanges;
+  /** Repeatable exports keyed by the exact candidate root they describe. */
+  checkpoints: Map<string, RscoreCheckpointChanges>;
 };
 
 /** Names the Entity input and the parent root from which it started. */
@@ -486,6 +490,14 @@ const disable = (ownerEntityId: string, reason: string): 'disabled' => {
  */
 export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
   if (!authorityDriverEnabled(env)) return;
+  const materializePeriod = env.runtimeConfig?.storage?.materializePeriodFrames
+    ?? DEFAULT_MATERIALIZE_PERIOD_FRAMES;
+  if (!Number.isSafeInteger(materializePeriod) || materializePeriod < 1) {
+    return halt('CHECKPOINT_PERIOD_INVALID', { materializePeriod });
+  }
+  const nextHeight = env.state.height + 1;
+  env.accountAuthorityCheckpointDue = nextHeight === 1
+    || (nextHeight - 1) % materializePeriod === 0;
   const runtimeSessions = sessionMap(env, true);
   // A zero-account Entity must already own an empty session before the frame
   // that opens its first Account, otherwise Create would have nowhere to run.
@@ -537,6 +549,7 @@ export const armAuthorityWave = async (env: RuntimeReplica): Promise<void> => {
       entityInput: null,
       latest: null,
       acceptedAccountsRoot,
+      checkpoints: new Map(),
     } satisfies OpenFrame;
   });
   pending.set(env, candidates);
@@ -770,12 +783,19 @@ export const runAuthorityCutoverInboundBatch = async (
   inputs: readonly Readonly<{
     accountId: string;
     input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+    genesisPolicy?: Readonly<{
+      expectedDomain: AccountReplica['state']['domain'];
+      shadowPolicyRoot: string;
+      deltaTransformer: string;
+      publicPinned: false;
+    }>;
   }>[],
 ): Promise<Wave | null> => {
   const rows = inputs.map((entry, index) => authorityPeerInputRow(
     index,
     entry.accountId,
     { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
+    entry.genesisPolicy,
   ));
   return handAccountInbound(env, ownerEntityId, expectedAccountsRoot, clock, rows);
 };
@@ -797,6 +817,7 @@ export const runAuthorityCutoverOutboundBatch = async (
     }>[];
     timestamp: number;
     jHeight: number;
+    checkpointDue: boolean;
   }>,
 ): Promise<Wave | null> => {
   if (!authorityDriverEnabled(env)) return null;
@@ -826,7 +847,25 @@ export const runAuthorityCutoverOutboundBatch = async (
       route.inboundLockId,
     ]),
     postAccounts: true,
+    checkpointDue: request.checkpointDue,
   });
+  if (request.checkpointDue !== (wave.checkpoint !== null)) {
+    return halt('OUTBOUND_CHECKPOINT_PRESENCE', {
+      owner,
+      requested: request.checkpointDue,
+      received: wave.checkpoint !== null,
+    });
+  }
+  if (wave.checkpoint !== null) {
+    const checkpointRoot = `0x${Buffer.from(wave.checkpoint.restoreToken[2]).toString('hex')}`
+      .toLowerCase();
+    assertRscoreCheckpointCandidate(wave.checkpoint, {
+      revision: wave.revision,
+      accountsRoot: wave.accountsRoot,
+      accountCount: accountsOf(env, owner).size,
+    });
+    frame.checkpoints.set(checkpointRoot, wave.checkpoint);
+  }
   report.waves += 1;
   report.outboundRounds += 1;
   report.engineMicros += wave.engineMicros;
@@ -862,6 +901,7 @@ const killAuthorityRuntime = (env: RuntimeReplica): void => {
   captured.delete(env);
   pending.delete(env);
   arrivalCursors.delete(env);
+  delete env.accountAuthorityCheckpointDue;
 };
 
 /** Leave the held candidate for root reconciliation on the next useful call. */
@@ -958,47 +998,39 @@ const assertCheckpointMatchesCandidate = (
   }
 };
 
-/**
- * Export candidate-bound checkpoint changes before the authoritative WAL
- * append. A materialization frame covers every armed owner, including owners
- * whose Account machine was idle in this Runtime frame; those receive one
- * explicit empty candidate so the exported rows and token name this exact
- * Runtime boundary.
- */
-export const prepareAuthorityCheckpoint = async (
+/** Select the already-piggybacked export for the final accepted Entity root. */
+export const prepareAuthorityCheckpoint = (
   env: RuntimeReplica,
-  checkpointRequested: boolean,
 ): Promise<readonly AuthorityCheckpointStorageInput[]> => {
-  if (!authorityDriverEnabled(env) || !checkpointRequested) return [];
+  if (!authorityDriverEnabled(env) || env.accountAuthorityCheckpointDue !== true) {
+    return Promise.resolve([]);
+  }
   const candidates = pending.get(env);
   if (candidates === undefined) return halt('CHECKPOINT_CANDIDATE_MISSING', {});
   const inputs: AuthorityCheckpointStorageInput[] = [];
   for (const candidate of [...candidates]
     .sort((left, right) => left.session.ownerEntityId.localeCompare(right.session.ownerEntityId))) {
-    if (candidate.checkpoint) {
-      halt('CHECKPOINT_ALREADY_EXPORTED', { owner: candidate.session.ownerEntityId });
-    }
     if (candidate.entityInput !== null) {
       return halt('CHECKPOINT_ENTITY_INPUT_OPEN', { owner: candidate.session.ownerEntityId });
     }
-    const expectedAccountsRoot = accountMapRoot(
-      accountsOf(env, candidate.session.ownerEntityId),
-      candidate.session.ownerEntityId,
-    );
-    const checkpoint = await candidate.session.client.checkpointChanges(
-      hexToWireBytes(expectedAccountsRoot, 32, 'AUTHORITY_CHECKPOINT_ACCOUNTS_ROOT'),
-    );
-    // Checkpoint is itself a useful call: Rust first reconciles its held
-    // path-copy candidate to expectedAccountsRoot, then exports that exact
-    // position. Never compare against a rejected candidate left in `latest`.
+    const checkpoint = candidate.checkpoints.get(candidate.acceptedAccountsRoot);
+    if (checkpoint === undefined) {
+      // An idle owner has no outbound visit and therefore no changes to
+      // checkpoint. An active owner must have exported every candidate root;
+      // absence here would leave its Runtime WAL without a restorable Account
+      // position and is fatal before the write starts.
+      if (candidate.latest === null) continue;
+      return halt('CHECKPOINT_ACCEPTED_ROOT_NOT_EXPORTED', {
+        owner: candidate.session.ownerEntityId,
+        acceptedRoot: candidate.acceptedAccountsRoot,
+        exportedRoots: [...candidate.checkpoints.keys()].sort(),
+      });
+    }
     const position = {
       revision: Number(checkpoint.restoreToken[1]),
       accountsRoot: `0x${Buffer.from(checkpoint.restoreToken[2]).toString('hex')}`,
     };
     assertCheckpointMatchesCandidate(env, candidate, position, checkpoint);
-    candidate.latest = position;
-    candidate.acceptedAccountsRoot = position.accountsRoot.toLowerCase();
-    candidate.checkpoint = checkpoint;
     report.checkpointsPrepared += 1;
     inputs.push({
       ownerEntityId: candidate.session.ownerEntityId,
@@ -1006,7 +1038,7 @@ export const prepareAuthorityCheckpoint = async (
       checkpoint,
     });
   }
-  return inputs;
+  return Promise.resolve(inputs);
 };
 
 const checkpointTokensEqual = (
@@ -1019,20 +1051,86 @@ const checkpointTokensEqual = (
   buffersEqual(Buffer.from(left[3]), Buffer.from(right[3])) &&
   left[4] === right[4];
 
-/**
- * Re-read the exact physical projection through the storage overlay and make
- * a disposable Rust authority restore it before WAL fsync. This binds the
- * incremental node changes—not just their token—to the candidate root.
- */
-export const validateAuthorityCheckpointMaterialization = async (
+type DecodedCheckpointAccount = ReturnType<typeof decodeRscoreAccountRestoreRow>;
+
+const checkpointForestRoot = (accounts: readonly DecodedCheckpointAccount[]): string =>
+  PersistentRadixValueMap.fromMap(
+    accounts.map(account => [account.accountId, account.entityAccountLeaf] as const),
+    {
+      radix: 16,
+      ownKey: accountId => accountId.toLowerCase(),
+      keyBytes: accountId => Buffer.from(accountId.slice(2), 'hex'),
+      valueHash: leaf => leaf,
+      ownValue: leaf => leaf,
+    },
+  ).rootHash();
+
+const checkpointSignerDigest = (accounts: readonly DecodedCheckpointAccount[]): Buffer => {
+  const digest = createHash('sha256').update('xln.rscore.signer-config.v1');
+  for (const account of [...accounts].sort((left, right) => left.accountId.localeCompare(right.accountId))) {
+    const signerId = account.stateSeed.signerId;
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(Buffer.byteLength(signerId));
+    digest
+      .update(Buffer.from(account.accountId.slice(2), 'hex'))
+      .update(Buffer.from(account.stateSeed.ownerEntityId.slice(2), 'hex'))
+      .update(length)
+      .update(signerId);
+  }
+  return digest.digest();
+};
+
+const validateMaterializedCheckpointRows = (
+  owner: string,
+  checkpoint: RscoreExactCheckpoint,
+): void => {
+  const accounts = checkpoint.accounts.map(decodeRscoreAccountRestoreRow);
+  if (accounts.some(account => account.stateSeed.ownerEntityId !== owner)) {
+    halt('CHECKPOINT_MATERIALIZATION_ACCOUNT_OWNER', { owner });
+  }
+  const ids = accounts.map(account => account.accountId);
+  const outOfOrder = ids.some((id, index) => {
+    const previous = ids[index - 1];
+    return previous !== undefined && previous >= id;
+  });
+  if (new Set(ids).size !== ids.length || outOfOrder) {
+    halt('CHECKPOINT_MATERIALIZATION_ACCOUNT_ORDER', { owner, ids });
+  }
+  const root = checkpointForestRoot(accounts);
+  const expectedRoot = exactCheckpointRoot(checkpoint);
+  const signerDigest = checkpointSignerDigest(accounts);
+  if (
+    root !== expectedRoot ||
+    accounts.length !== checkpoint.restoreToken[4] ||
+    !buffersEqual(signerDigest, Buffer.from(checkpoint.restoreToken[3]))
+  ) {
+    halt('CHECKPOINT_MATERIALIZATION_CONTENT_MISMATCH', {
+      owner,
+      root,
+      expectedRoot,
+      count: accounts.length,
+      expectedCount: checkpoint.restoreToken[4],
+      signerDigest: `0x${signerDigest.toString('hex')}`,
+      expectedSignerDigest: `0x${Buffer.from(checkpoint.restoreToken[3]).toString('hex')}`,
+    });
+  }
+};
+
+/** Re-read and independently hash the planned physical overlay before WAL. */
+export const validateAuthorityCheckpointMaterialization = (
   env: RuntimeReplica,
   checkpoints: readonly RscoreExactCheckpoint[],
 ): Promise<void> => {
-  if (!authorityDriverEnabled(env)) return;
+  if (!authorityDriverEnabled(env)) return Promise.resolve();
   const expected = new Map(
     (pending.get(env) ?? [])
-      .filter(candidate => candidate.checkpoint !== undefined)
-      .map(candidate => [candidate.session.ownerEntityId, candidate]),
+      .map(candidate => {
+        const checkpoint = candidate.checkpoints.get(candidate.acceptedAccountsRoot);
+        return checkpoint === undefined
+          ? null
+          : [candidate.session.ownerEntityId, { candidate, checkpoint }] as const;
+      })
+      .filter((entry): entry is Exclude<typeof entry, null> => entry !== null),
   );
   const ordered = [...checkpoints]
     .sort((left, right) => left.ownerEntityId.localeCompare(right.ownerEntityId));
@@ -1045,48 +1143,31 @@ export const validateAuthorityCheckpointMaterialization = async (
   const seen = new Set<string>();
   for (const checkpoint of ordered) {
     const owner = checkpoint.ownerEntityId.trim().toLowerCase();
-    const candidate = expected.get(owner);
+    const expectedEntry = expected.get(owner);
     if (
       seen.has(owner) ||
-      candidate?.checkpoint === undefined ||
+      expectedEntry === undefined ||
       checkpoint.protocolFingerprint.toLowerCase() !== protocolFingerprint ||
       !checkpointTokensEqual(
         checkpoint.restoreToken,
-        candidate.checkpoint.restoreToken,
+        expectedEntry.checkpoint.restoreToken,
       )
     ) {
       halt('CHECKPOINT_MATERIALIZATION_IDENTITY_MISMATCH', {
         owner,
         duplicate: seen.has(owner),
-        expectedOwner: candidate?.session.ownerEntityId ?? null,
-        expectedRevision: candidate?.checkpoint === undefined
+        expectedOwner: expectedEntry?.candidate.session.ownerEntityId ?? null,
+        expectedRevision: expectedEntry === undefined
           ? null
-          : String(candidate.checkpoint.restoreToken[1]),
+          : String(expectedEntry.checkpoint.restoreToken[1]),
         actualRevision: String(checkpoint.restoreToken[1]),
       });
     }
     seen.add(owner);
-    const validator = await openAuthoritySession(env, owner);
-    if (validator === 'disabled') {
-      return halt('CHECKPOINT_MATERIALIZATION_VALIDATOR_DISABLED', { owner });
-    }
-    try {
-      const restored = await validator.client.restoreExact(
-        checkpoint.restoreToken,
-        checkpoint.accounts,
-      );
-      if (!checkpointTokensEqual(restored, checkpoint.restoreToken)) {
-        halt('CHECKPOINT_MATERIALIZATION_RESTORE_MISMATCH', {
-          owner,
-          expectedRevision: String(checkpoint.restoreToken[1]),
-          actualRevision: String(restored[1]),
-        });
-      }
-      report.checkpointValidations += 1;
-    } finally {
-      validator.client.kill();
-    }
+    validateMaterializedCheckpointRows(owner, checkpoint);
+    report.checkpointValidations += 1;
   }
+  return Promise.resolve();
 };
 
 /** The Runtime's own record is durable: release only TS-side frame bookkeeping. */
@@ -1117,6 +1198,7 @@ export const finalizeAuthorityFrameAfterWal = async (env: RuntimeReplica): Promi
   }
   pending.delete(env);
   arrivalCursors.delete(env);
+  delete env.accountAuthorityCheckpointDue;
 };
 
 /** A failed durable write after Account mutation is a mandatory restart. */
@@ -1133,6 +1215,7 @@ export const failStopAuthorityFrame = async (env: RuntimeReplica): Promise<void>
   }
   pending.delete(env);
   arrivalCursors.delete(env);
+  delete env.accountAuthorityCheckpointDue;
 };
 
 export const printAuthorityDriverReport = (): void => {

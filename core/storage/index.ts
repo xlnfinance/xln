@@ -893,10 +893,8 @@ export type StorageFrameSaveOptions = {
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
   onPersistenceProgress?: StoragePersistenceProgressHook;
   accountAuthority?: Readonly<{
-    /** Called after stale-writer detection, while the Rust wave is abortable. */
-    prepareCheckpoint: (
-      checkpointRequested: boolean,
-    ) => Promise<readonly RscoreCheckpointStorageInput[]>;
+    /** Selects checkpoint rows already piggybacked by the final Account outbound. */
+    prepareCheckpoint: () => Promise<readonly RscoreCheckpointStorageInput[]>;
     /** Proves the planned physical projection is accepted by exact Rust restore. */
     validateCheckpointMaterialization: (
       checkpoints: readonly RscoreExactCheckpoint[],
@@ -2371,7 +2369,7 @@ export const saveRuntimeFrameToStorage = async (
   checkpointPrepare('pendingNodes');
 
   const authorityCheckpointInputs = options.accountAuthority
-    ? await options.accountAuthority.prepareCheckpoint(prepared.shouldMaterialize)
+    ? await options.accountAuthority.prepareCheckpoint()
     : [];
   const accountAuthorityCheckpoint = await prepareRscoreCheckpointStorage(
     walDb,

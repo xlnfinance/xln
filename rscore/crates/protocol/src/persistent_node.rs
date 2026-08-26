@@ -59,29 +59,62 @@ pub(super) fn make_leaf<V>(key: Vec<u8>, value: V, value_digest: [u8; 32]) -> No
     })
 }
 
-pub(super) fn make_branch<V>(path: Vec<u8>, nodes: &[NodeRef<V>]) -> NodeRef<V> {
+pub(super) fn make_branch<V>(
+    path: Vec<u8>,
+    nodes: &[NodeRef<V>],
+) -> Result<NodeRef<V>, PersistentRadixMapError> {
+    for node in nodes {
+        validate_child_edge(&path, node)?;
+    }
     let mut children = std::array::from_fn(|_| None);
     for node in nodes {
         let slot = node_path(node)[path.len()] as usize;
-        assert!(
-            children[slot].is_none(),
-            "PERSISTENT_RADIX_BRANCH_SLOT_COLLISION"
-        );
+        if children[slot].is_some() {
+            return Err(PersistentRadixMapError::BranchSlotCollision { slot });
+        }
         children[slot] = Some(Arc::clone(node));
     }
-    Arc::new(Node::Branch {
+    Ok(Arc::new(Node::Branch {
         path,
         children,
         hash: OnceLock::new(),
-    })
+    }))
 }
 
-pub(super) fn ensure_root_branch<V>(node: Option<NodeRef<V>>) -> Option<NodeRef<V>> {
+pub(super) fn ensure_root_branch<V>(
+    node: Option<NodeRef<V>>,
+) -> Result<Option<NodeRef<V>>, PersistentRadixMapError> {
     match node {
-        Some(node) if matches!(&*node, Node::Branch { path, .. } if path.is_empty()) => Some(node),
-        Some(node) => Some(make_branch(Vec::new(), &[node])),
-        None => None,
+        Some(node) if matches!(&*node, Node::Branch { path, .. } if path.is_empty()) => {
+            Ok(Some(node))
+        }
+        Some(node) => Ok(Some(make_branch(Vec::new(), &[node])?)),
+        None => Ok(None),
     }
+}
+
+pub(super) fn validate_child_edge<V>(
+    parent_path: &[u8],
+    child: &NodeRef<V>,
+) -> Result<(), PersistentRadixMapError> {
+    let child_path = node_path(child);
+    let segment_start = parent_path
+        .len()
+        .checked_add(1)
+        .ok_or(PersistentRadixMapError::KeyPrefixCollision)?;
+    if child_path.len() < segment_start {
+        return Err(PersistentRadixMapError::KeyPrefixCollision);
+    }
+    if matches!(&**child, Node::Branch { .. }) {
+        let actual = child_path.len() - segment_start;
+        if actual > u16::MAX as usize {
+            return Err(PersistentRadixMapError::ExtensionPathTooLong {
+                actual,
+                maximum: u16::MAX as usize,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn node_hash<V>(node: &NodeRef<V>) -> [u8; 32] {
@@ -145,7 +178,7 @@ pub(super) fn put_node<V>(
             let shared = common_prefix(path, leaf_path);
             if shared < path.len() {
                 return Ok((
-                    make_branch(path[..shared].to_vec(), &[Arc::clone(node), leaf]),
+                    make_branch(path[..shared].to_vec(), &[Arc::clone(node), leaf])?,
                     true,
                 ));
             }
@@ -166,7 +199,7 @@ pub(super) fn put_node<V>(
                 make_branch(
                     path.clone(),
                     &next.iter().flatten().cloned().collect::<Vec<_>>(),
-                ),
+                )?,
                 inserted,
             ))
         }
@@ -203,7 +236,7 @@ fn put_against_leaf<V>(
         return Err(PersistentRadixMapError::KeyPrefixCollision);
     }
     Ok((
-        make_branch(path[..shared].to_vec(), &[Arc::clone(node), leaf]),
+        make_branch(path[..shared].to_vec(), &[Arc::clone(node), leaf])?,
         true,
     ))
 }
@@ -212,16 +245,16 @@ pub(super) fn delete_node<V>(
     node: &NodeRef<V>,
     path: &[u8],
     key: &[u8],
-) -> (Option<NodeRef<V>>, bool) {
+) -> Result<(Option<NodeRef<V>>, bool), PersistentRadixMapError> {
     if !path.starts_with(node_path(node)) {
-        return (Some(Arc::clone(node)), false);
+        return Ok((Some(Arc::clone(node)), false));
     }
     match &**node {
         Node::Leaf { key: stored, .. } => {
             if stored == key {
-                (None, true)
+                Ok((None, true))
             } else {
-                (Some(Arc::clone(node)), false)
+                Ok((Some(Arc::clone(node)), false))
             }
         }
         Node::Branch {
@@ -238,23 +271,23 @@ fn delete_from_branch<V>(
     key: &[u8],
     branch_path: &[u8],
     children: &[Option<NodeRef<V>>; 16],
-) -> (Option<NodeRef<V>>, bool) {
+) -> Result<(Option<NodeRef<V>>, bool), PersistentRadixMapError> {
     let Some(slot) = path.get(branch_path.len()).map(|slot| *slot as usize) else {
-        return (Some(Arc::clone(node)), false);
+        return Ok((Some(Arc::clone(node)), false));
     };
     let Some(child) = &children[slot] else {
-        return (Some(Arc::clone(node)), false);
+        return Ok((Some(Arc::clone(node)), false));
     };
-    let (updated, deleted) = delete_node(child, path, key);
+    let (updated, deleted) = delete_node(child, path, key)?;
     if !deleted {
-        return (Some(Arc::clone(node)), false);
+        return Ok((Some(Arc::clone(node)), false));
     }
     let mut next = children.clone();
     next[slot] = updated;
     let remaining = next.iter().flatten().cloned().collect::<Vec<_>>();
-    match remaining.len() {
+    Ok(match remaining.len() {
         0 => (None, true),
         1 => (remaining.into_iter().next(), true),
-        _ => (Some(make_branch(branch_path.to_vec(), &remaining)), true),
-    }
+        _ => (Some(make_branch(branch_path.to_vec(), &remaining)?), true),
+    })
 }

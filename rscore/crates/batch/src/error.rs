@@ -9,6 +9,24 @@ pub enum BatchError {
     InvalidWorkerCount(usize),
     #[error("RSCORE_BATCH_THREAD_POOL:{0}")]
     ThreadPoolBuild(String),
+    #[error("RSCORE_BATCH_RESIDENT_WORKER_START:{worker}:{detail}")]
+    ResidentWorkerStart { worker: usize, detail: String },
+    #[error("RSCORE_BATCH_RESIDENT_WORKER_STOPPED:{worker}")]
+    ResidentWorkerStopped { worker: usize },
+    #[error("RSCORE_BATCH_RESIDENT_WORKER_REPLY_MISSING")]
+    ResidentWorkerReplyMissing,
+    #[error("RSCORE_BATCH_RESIDENT_LANE_COUNT:{actual}:expected={expected}")]
+    ResidentLaneCount { actual: usize, expected: usize },
+    #[error("RSCORE_BATCH_RESIDENT_SHARD_MISSING:{shard}")]
+    ResidentShardMissing { shard: usize },
+    #[error("RSCORE_BATCH_RESIDENT_ROLLBACK_MISSING:{phase}")]
+    ResidentRollbackMissing { phase: u64 },
+    #[error("RSCORE_BATCH_RESIDENT_ROLLBACK_PHASE:{actual}:expected={expected}")]
+    ResidentRollbackPhase { actual: u64, expected: u64 },
+    #[error("RSCORE_BATCH_RESIDENT_WORKER_RESULT_COUNT:{actual}:expected={expected}")]
+    ResidentWorkerResultCount { actual: usize, expected: usize },
+    #[error("RSCORE_BATCH_RESIDENT_CHECKPOINT_ACCOUNT_REMOVED:{0}")]
+    ResidentCheckpointAccountRemoved(AccountId),
     #[error("RSCORE_BATCH_ACCOUNT_DUPLICATE:{0}")]
     DuplicateAccount(AccountId),
     #[error("RSCORE_BATCH_EMPTY")]
@@ -133,6 +151,13 @@ pub enum BatchError {
     EntityRoundMissing,
     #[error("RSCORE_BATCH_ENTITY_ROUND_OWNER:{actual}:{expected}")]
     EntityRoundOwner { actual: String, expected: String },
+    #[error("RSCORE_BATCH_ENTITY_INBOUND_POST_ACCOUNTS")]
+    EntityInboundPostAccounts,
+    #[error("RSCORE_BATCH_INBOUND_GENESIS:{account_id}:{detail}")]
+    InboundGenesis {
+        account_id: AccountId,
+        detail: String,
+    },
     #[error("RSCORE_BATCH_ENTITY_HEAD_ROOT:{actual}:base={base}:candidate={candidate}")]
     EntityHeadRoot {
         actual: String,

@@ -11,15 +11,15 @@ use std::fmt;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
-    AccountConsensus, AccountEnvelope, AccountFrame, AccountOutput, AccountPeerEnvelope,
-    AccountReplica, AccountState, AccountTx, AckOutcome, BoardDelays, CommittedFrameEvidence,
-    Disposition, FrameAckOutcome, FrameAckPhase, HtlcResolveOutcome, HtlcResolveTx, IncomingAck,
-    IncomingFrame, IncomingOutcome, ProposalOutcome, ReceiverClock, SigningIdentity, StateError,
-    apply_incoming_ack, apply_incoming_frame, apply_incoming_frame_ack, canonical_tx_digest,
-    propose_account_frame,
+    AccountConsensus, AccountEnvelope, AccountFrame, AccountIdentity, AccountOutput,
+    AccountPeerEnvelope, AccountReplica, AccountState, AccountTx, AckOutcome, BoardDelays,
+    CommittedFrameEvidence, Disposition, FrameAckOutcome, FrameAckPhase, HtlcResolveOutcome,
+    HtlcResolveTx, IncomingAck, IncomingFrame, IncomingOutcome, ProposalOutcome, ReceiverClock,
+    SigningIdentity, StateError, apply_incoming_ack, apply_incoming_frame,
+    apply_incoming_frame_ack, canonical_tx_digest, propose_account_frame,
 };
 use xln_rscore_protocol::{
-    CanonicalValue, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
+    CanonicalNumber, CanonicalValue, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
 };
 
 use crate::checkpoint::{
@@ -52,6 +52,9 @@ pub struct AccountPeerInput {
 pub struct AccountInputRow {
     pub operation_index: u64,
     pub account_id: AccountId,
+    /// Trusted owner policy used only when this exact row is an authenticated
+    /// H=1 proposal for an Account absent from the resident forest.
+    pub genesis_policy: Option<crate::EntityAccountGenesisPolicy>,
     pub input: AccountPeerInput,
 }
 
@@ -547,7 +550,7 @@ fn dropped_rows(
         .collect()
 }
 
-fn proposal_row(
+pub(crate) fn proposal_row(
     account_id: AccountId,
     outcome: ProposalOutcome,
 ) -> Result<ProposalRow, BatchError> {
@@ -783,20 +786,8 @@ impl StatefulConsensusEngine {
                 return Err(BatchError::DuplicateAccount(seed.account_id));
             }
             self.ensure_identity(seed.replica.owner().as_bytes())?;
-            let account = match seed.consensus {
-                None => AccountConsensus::new(seed.replica),
-                Some(snapshot) => AccountConsensus::restore_from_checkpoint(
-                    seed.replica,
-                    snapshot,
-                    &self.swap_market,
-                )
-                .map_err(|error| BatchError::SeedRestore {
-                    account_id: seed.account_id,
-                    detail: error.to_string(),
-                })?,
-            };
-            let leaf = leaf_root(seed.account_id, &account)?;
-            entries.push((seed.account_id.as_bytes().to_vec(), account, leaf));
+            let (account_id, account, leaf) = restore_seed_account(seed, &self.swap_market)?;
+            entries.push((account_id.as_bytes().to_vec(), account, leaf));
         }
         if entries.is_empty() {
             return Ok(self.accounts.root_hash());
@@ -2451,28 +2442,6 @@ impl StatefulConsensusEngine {
                 }
                 None => self.build_identity(owner, self.private_key, &row.signer_id)?,
             };
-            if let Some(pending) = row.consensus.pending.as_ref() {
-                xln_rscore_engine::verify_frame_hanko(&pending.hanko, &pending.state_hash, &owner)
-                    .map_err(|error| state_error(row.account_id, &error))?;
-            }
-            if let (Some(current), Some(counterparty_hanko)) = (
-                row.consensus.current.as_ref(),
-                row.consensus.counterparty_frame_hanko.as_ref(),
-            ) {
-                xln_rscore_engine::verify_frame_hanko(
-                    counterparty_hanko,
-                    &current.state_hash,
-                    row.replica.counterparty().as_bytes(),
-                )
-                .map_err(|error| state_error(row.account_id, &error))?;
-            }
-            if let (Some(current), Some(local_hanko)) = (
-                row.consensus.current.as_ref(),
-                row.consensus.local_committed_frame_hanko.as_ref(),
-            ) {
-                xln_rscore_engine::verify_frame_hanko(local_hanko, &current.state_hash, &owner)
-                    .map_err(|error| state_error(row.account_id, &error))?;
-            }
             if let Some(existing) = identities.get(&owner) {
                 if existing.signer_id() != row.signer_id {
                     return Err(BatchError::SignerRebind {
@@ -2484,22 +2453,13 @@ impl StatefulConsensusEngine {
             } else {
                 identities.insert(owner, identity);
             }
-            let account = AccountConsensus::restore_from_checkpoint(
-                row.replica,
-                row.consensus,
-                &self.swap_market,
-            )
-            .map_err(|error| state_error(row.account_id, &error))?;
-            let leaf = leaf_root(row.account_id, &account)?;
-            if leaf != row.account_leaf {
-                return Err(BatchError::CheckpointAccountLeaf {
-                    account_id: row.account_id,
-                    actual: hex_of(&leaf),
-                    expected: hex_of(&row.account_leaf),
-                });
-            }
-            signer_rows.push((row.account_id, owner, row.signer_id));
-            entries.push((row.account_id.as_bytes().to_vec(), account, leaf));
+            let restored = restore_checkpoint_account(row, &self.swap_market)?;
+            signer_rows.push((restored.account_id, restored.owner, restored.signer_id));
+            entries.push((
+                restored.account_id.as_bytes().to_vec(),
+                restored.account,
+                restored.leaf,
+            ));
         }
         let restored = self.put_into(&PersistentRadixMap::empty(), entries)?;
         if restored.len() != expected.account_count {
@@ -2559,20 +2519,7 @@ impl StatefulConsensusEngine {
         private_key: [u8; 32],
         signer_id: &str,
     ) -> Result<SigningIdentity, BatchError> {
-        let identity = SigningIdentity::from_key(
-            private_key,
-            signer_id,
-            entity_id,
-            1,
-            1,
-            BoardDelays::default(),
-        );
-        if !identity.binds_lazy_entity() {
-            return Err(BatchError::SignerUnknownEntity {
-                entity_id: hex_of(&entity_id),
-            });
-        }
-        Ok(identity)
+        build_signing_identity(entity_id, private_key, signer_id)
     }
 
     /// The signer id bound to an entity, so a checkpoint can carry it and a
@@ -2620,7 +2567,7 @@ impl StatefulConsensusEngine {
     }
 }
 
-fn apply_one(
+pub(crate) fn apply_one(
     account_id: AccountId,
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
@@ -2766,7 +2713,7 @@ fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
     }
 }
 
-fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
+pub(crate) fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
     match verdict {
         AccountInputVerdict::FrameCommitted { height: 1, .. } => true,
         AccountInputVerdict::FrameAckApplied { frame, .. } => verdict_commits_genesis(frame),
@@ -2783,7 +2730,7 @@ fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
     }
 }
 
-fn admit_local_txs(
+pub(crate) fn admit_local_txs(
     account: &mut AccountConsensus,
     txs: Vec<AccountTx>,
 ) -> Result<usize, StateError> {
@@ -2819,7 +2766,7 @@ fn admit_local_txs(
 /// than a hand-maintained list of "must be empty" sections. When AccountState
 /// gains another committed financial section, its root changes and Create is
 /// fail-closed until that section is canonically empty too.
-fn validate_genesis_seed(
+pub(crate) fn validate_genesis_seed(
     owner_entity_id: [u8; 32],
     seed: &AccountSeed,
 ) -> Result<AccountConsensus, BatchError> {
@@ -2974,8 +2921,14 @@ fn genesis_envelope_fields(
         fields.push(("publicPinned".to_string(), CanonicalValue::Bool(true)));
     }
     fields.extend([
-        ("currentHeight".to_string(), CanonicalValue::Number(0.0)),
-        ("rollbackCount".to_string(), CanonicalValue::Number(0.0)),
+        (
+            "currentHeight".to_string(),
+            CanonicalValue::Number(CanonicalNumber::from_u32(0)),
+        ),
+        (
+            "rollbackCount".to_string(),
+            CanonicalValue::Number(CanonicalNumber::from_u32(0)),
+        ),
         (
             "proofHeader".to_string(),
             CanonicalValue::Object(vec![
@@ -2987,7 +2940,10 @@ fn genesis_envelope_fields(
                     "toEntity".to_string(),
                     CanonicalValue::String(replica.counterparty().to_string()),
                 ),
-                ("nextProofNonce".to_string(), CanonicalValue::Number(1.0)),
+                (
+                    "nextProofNonce".to_string(),
+                    CanonicalValue::Number(CanonicalNumber::from_u32(1)),
+                ),
             ]),
         ),
         (
@@ -3081,9 +3037,7 @@ fn canonical_exact_eq(actual: &CanonicalValue, expected: &CanonicalValue) -> boo
     match (actual, expected) {
         (CanonicalValue::Null, CanonicalValue::Null) => true,
         (CanonicalValue::Bool(left), CanonicalValue::Bool(right)) => left == right,
-        (CanonicalValue::Number(left), CanonicalValue::Number(right)) => {
-            left.to_bits() == right.to_bits()
-        }
+        (CanonicalValue::Number(left), CanonicalValue::Number(right)) => left == right,
         (CanonicalValue::BigInt(left), CanonicalValue::BigInt(right)) => left == right,
         (CanonicalValue::String(left), CanonicalValue::String(right)) => left == right,
         (CanonicalValue::Array(left), CanonicalValue::Array(right))
@@ -3160,7 +3114,7 @@ fn validate_terminal_replay(
     Ok(())
 }
 
-fn proposable(account: &AccountConsensus) -> bool {
+pub(crate) fn proposable(account: &AccountConsensus) -> bool {
     if account.pending().is_some() {
         return false;
     }
@@ -3184,6 +3138,209 @@ fn proposable(account: &AccountConsensus) -> bool {
         .mempool()
         .iter()
         .any(|tx| !locks_full || !matches!(tx, AccountTx::HtlcLock(_)))
+}
+
+/// Rebuild one restored account using the same canonical path as the legacy
+/// forest. Resident workers call this before taking ownership of the value;
+/// keeping the constructor here prevents the two stores from drifting on
+/// pending-frame replay or swap-market validation.
+pub(crate) fn restore_seed_account(
+    seed: AccountSeed,
+    swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
+) -> Result<(AccountId, AccountConsensus, [u8; 32]), BatchError> {
+    let account_id = seed.account_id;
+    let account = match seed.consensus {
+        None => AccountConsensus::new(seed.replica),
+        Some(snapshot) => {
+            AccountConsensus::restore_from_checkpoint(seed.replica, snapshot, swap_market).map_err(
+                |error| BatchError::SeedRestore {
+                    account_id,
+                    detail: error.to_string(),
+                },
+            )?
+        }
+    };
+    let leaf = leaf_root(account_id, &account)?;
+    Ok((account_id, account, leaf))
+}
+
+pub(crate) struct RestoredCheckpointAccount {
+    pub account_id: AccountId,
+    pub account: AccountConsensus,
+    pub leaf: [u8; 32],
+    pub owner: [u8; 32],
+    pub signer_id: String,
+}
+
+/// Reconstruct and authenticate one exact checkpoint row. Both resident and
+/// legacy forests use this one path, so pending-frame replay, retained Hanko
+/// validation, and the claimed leaf cannot drift between restore backends.
+pub(crate) fn restore_checkpoint_account(
+    row: AccountRestore,
+    swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
+) -> Result<RestoredCheckpointAccount, BatchError> {
+    let account_id = row.account_id;
+    let owner = *row.replica.owner().as_bytes();
+    if let Some(pending) = row.consensus.pending.as_ref() {
+        xln_rscore_engine::verify_frame_hanko(&pending.hanko, &pending.state_hash, &owner)
+            .map_err(|error| state_error(account_id, &error))?;
+    }
+    if let (Some(current), Some(counterparty_hanko)) = (
+        row.consensus.current.as_ref(),
+        row.consensus.counterparty_frame_hanko.as_ref(),
+    ) {
+        xln_rscore_engine::verify_frame_hanko(
+            counterparty_hanko,
+            &current.state_hash,
+            row.replica.counterparty().as_bytes(),
+        )
+        .map_err(|error| state_error(account_id, &error))?;
+    }
+    if let (Some(current), Some(local_hanko)) = (
+        row.consensus.current.as_ref(),
+        row.consensus.local_committed_frame_hanko.as_ref(),
+    ) {
+        xln_rscore_engine::verify_frame_hanko(local_hanko, &current.state_hash, &owner)
+            .map_err(|error| state_error(account_id, &error))?;
+    }
+    let claimed_leaf = row.account_leaf;
+    let account =
+        AccountConsensus::restore_from_checkpoint(row.replica, row.consensus, swap_market)
+            .map_err(|error| state_error(account_id, &error))?;
+    let leaf = leaf_root(account_id, &account)?;
+    if leaf != claimed_leaf {
+        return Err(BatchError::CheckpointAccountLeaf {
+            account_id,
+            actual: hex_of(&leaf),
+            expected: hex_of(&claimed_leaf),
+        });
+    }
+    Ok(RestoredCheckpointAccount {
+        account_id,
+        account,
+        leaf,
+        owner,
+        signer_id: row.signer_id,
+    })
+}
+
+/// Construct the exact local H=0 shell for a previously unknown peer, using
+/// owner policy for every field the peer is not allowed to choose. This value
+/// is only a replay candidate: the caller must authenticate and commit the H=1
+/// frame before inserting it into the resident forest.
+pub(crate) fn inbound_genesis_account(
+    account_id: AccountId,
+    owner_entity_id: [u8; 32],
+    input: &AccountPeerInput,
+    policy: &crate::EntityAccountGenesisPolicy,
+) -> Result<AccountConsensus, BatchError> {
+    if policy.public_pinned {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: "PUBLIC_PINNED_FORBIDDEN".to_string(),
+        });
+    }
+    let envelope = &input.envelope;
+    if envelope.from_entity_id != *account_id.as_bytes()
+        || envelope.to_entity_id != owner_entity_id
+        || envelope.from_entity_id == envelope.to_entity_id
+    {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: "PARTIES".to_string(),
+        });
+    }
+    if envelope.domain != policy.expected_domain {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: "DOMAIN_POLICY".to_string(),
+        });
+    }
+    let Some(watch_seed) = envelope.watch_seed.clone() else {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: "WATCH_SEED_REQUIRED".to_string(),
+        });
+    };
+    let frame_height = match &input.kind {
+        AccountInputKind::Frame(frame) | AccountInputKind::FrameAck { frame, .. } => {
+            frame.frame.height
+        }
+        AccountInputKind::Ack(_) => {
+            return Err(BatchError::InboundGenesis {
+                account_id,
+                detail: "FRAME_REQUIRED".to_string(),
+            });
+        }
+    };
+    if frame_height != 1 {
+        return Err(BatchError::InboundGenesis {
+            account_id,
+            detail: "HEIGHT_NOT_ONE".to_string(),
+        });
+    }
+    let owner = parse_entity_id(owner_entity_id).map_err(|_| BatchError::InboundGenesis {
+        account_id,
+        detail: "OWNER_ID".to_string(),
+    })?;
+    let peer =
+        parse_entity_id(envelope.from_entity_id).map_err(|_| BatchError::InboundGenesis {
+            account_id,
+            detail: "PEER_ID".to_string(),
+        })?;
+    let (left, right) = if owner < peer {
+        (owner.clone(), peer)
+    } else {
+        (peer, owner.clone())
+    };
+    let identity = AccountIdentity::new(policy.expected_domain.clone(), left, right, watch_seed)
+        .map_err(|error| state_error(account_id, &error))?;
+    let state = AccountState::new(identity, envelope.dispute_config, Vec::new())
+        .map_err(|error| state_error(account_id, &error))?;
+    let mut replica =
+        AccountReplica::new(owner, state).map_err(|error| state_error(account_id, &error))?;
+    replica.set_delta_transformer(policy.delta_transformer);
+    let policy_root = format!("0x{}", hex_of(&policy.shadow_policy_root));
+    let fields = genesis_envelope_fields(&replica, false, &policy_root);
+    let full_envelope = AccountEnvelope::new(fields, Vec::new())
+        .map_err(|error| create_envelope_error(account_id, error.to_string()))?;
+    replica.set_envelope(full_envelope);
+    validate_genesis_seed(
+        owner_entity_id,
+        &AccountSeed {
+            account_id,
+            replica,
+            consensus: None,
+        },
+    )
+}
+
+fn parse_entity_id(bytes: [u8; 32]) -> Result<xln_rscore_engine::EntityId, StateError> {
+    xln_rscore_engine::EntityId::parse(&format!("0x{}", hex_of(&bytes)))
+}
+
+/// Derive and verify the sole signer identity accepted by both Account stores.
+/// The key is usable only when it actually defines this lazy Entity; accepting
+/// an arbitrary owner here would produce valid signatures for the wrong board.
+pub(crate) fn build_signing_identity(
+    entity_id: [u8; 32],
+    private_key: [u8; 32],
+    signer_id: &str,
+) -> Result<SigningIdentity, BatchError> {
+    let identity = SigningIdentity::from_key(
+        private_key,
+        signer_id,
+        entity_id,
+        1,
+        1,
+        BoardDelays::default(),
+    );
+    if !identity.binds_lazy_entity() {
+        return Err(BatchError::SignerUnknownEntity {
+            entity_id: hex_of(&entity_id),
+        });
+    }
+    Ok(identity)
 }
 
 /// The leaf commits the consensus state too, so a queued transaction or a new
