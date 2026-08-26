@@ -44,6 +44,7 @@ const HUB_PASSTHROUGH_ENV_KEYS = [
   'XLN_HEAVY_LOGS',
   'XLN_LOG_FORMAT',
   'XLN_ENTITY_STATE_ROOT_PROFILE',
+  'XLN_STORAGE_CERTIFIED_HISTORY',
 ] as const;
 
 export const buildHubEngineArgs = (
@@ -93,6 +94,12 @@ export const buildHubChildProcessEnv = (
     }
     if (source['XLN_RSCORE_AUTHORITY_WORKERS']) {
       child['XLN_RSCORE_AUTHORITY_WORKERS'] = source['XLN_RSCORE_AUTHORITY_WORKERS'];
+    }
+    if (source['XLN_RSCORE_AUTHORITY_CUTOVER']) {
+      child['XLN_RSCORE_AUTHORITY_CUTOVER'] = source['XLN_RSCORE_AUTHORITY_CUTOVER'];
+    }
+    if (source['XLN_RSCORE_AUTHORITY_RECORD']) {
+      child['XLN_RSCORE_AUTHORITY_RECORD'] = source['XLN_RSCORE_AUTHORITY_RECORD'];
     }
   }
   for (const key of HUB_PASSTHROUGH_ENV_KEYS) {

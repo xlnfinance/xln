@@ -88,6 +88,9 @@ describe('production startup wiring', () => {
       XLN_HUB_STEADY_FRAME_PERIOD_MS: '-1',
     })).toThrow('HUB_STEADY_FRAME_PERIOD_MS_INVALID:-1');
     expect(orchestrator).toContain('env: sanitizeChildProcessEnv(buildHubChildProcessEnv({');
+    expect(orchestrator).toContain(
+      "XLN_STORAGE_CERTIFIED_HISTORY: process.env['XLN_STORAGE_CERTIFIED_HISTORY'] ?? '1'",
+    );
     expect(buildHubEngineArgs('h1', {
       XLN_HUB_ENGINE_ARGS_H1: ' --cpu-prof   --smol ',
     })).toEqual(['--cpu-prof', '--smol']);
@@ -104,6 +107,9 @@ describe('production startup wiring', () => {
       sourceEnv: {
         XLN_HUB_RSCORE_AUTHORITY_H1: '1',
         XLN_RSCORE_BINARY: '/bin/rscore',
+        XLN_RSCORE_AUTHORITY_CUTOVER: '1',
+        XLN_RSCORE_AUTHORITY_RECORD: '1',
+        XLN_STORAGE_CERTIFIED_HISTORY: '1',
         XLN_RUNTIME_APPLY_PROFILE: '1',
       },
     })).toMatchObject({
@@ -111,6 +117,9 @@ describe('production startup wiring', () => {
       ANVIL_RPC: 'http://rpc',
       XLN_RSCORE_AUTHORITY: '1',
       XLN_RSCORE_BINARY: '/bin/rscore',
+      XLN_RSCORE_AUTHORITY_CUTOVER: '1',
+      XLN_RSCORE_AUTHORITY_RECORD: '1',
+      XLN_STORAGE_CERTIFIED_HISTORY: '1',
       XLN_RUNTIME_APPLY_PROFILE: '1',
       XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',
       XLN_HUB_STEADY_FRAME_PERIOD_MS: '25',
@@ -190,6 +199,14 @@ describe('production startup wiring', () => {
     expect(primaryReady).toBeGreaterThan(primaryStart);
     expect(secondaryStart).toBeGreaterThan(primaryReady);
     expect(secondaryReady).toBeGreaterThan(secondaryStart);
+  });
+
+  test('Rust authority restart proves the exact persisted H1 checkpoint root', () => {
+    const smoke = readFileSync(join(repoRoot, 'core/scripts/operations/production/local-prod-smoke.ts'), 'utf8');
+    expect(smoke).toContain("readH1AuthorityFrame(before.height)");
+    expect(smoke).toContain('restored.canonicalStateHash !== before.canonicalStateHash');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_AUTHORITY_CHECKPOINT_DIVERGED');
+    expect(smoke).toContain('HLT_RSCORE_RESTART_CHECKPOINT_OK');
   });
 
   test('isolated e2e outer timeout exceeds every declared Playwright test timeout', () => {

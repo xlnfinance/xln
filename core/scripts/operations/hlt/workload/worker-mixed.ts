@@ -64,6 +64,10 @@ import {
   waitForRoutableReceivers,
 } from './worker-payments';
 import type { LaneRuntime } from '../lanes/lane-runtimes';
+import {
+  hltAuthorityEvidenceEnabled,
+  materializeH1CollateralEvidence,
+} from './worker-authority-evidence';
 
 export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> => {
   const plan = args.plan;
@@ -74,6 +78,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
   const marketMakerLabel = plan.economy.marketMakerLabels[0] ?? 'MM';
   const hub = await connectRuntime(entryByLabel(entries, hubLabel));
   const marketMaker = await connectRuntime(entryByLabel(entries, marketMakerLabel));
+  const authorityEvidence = hltAuthorityEvidenceEnabled();
   let prepared: PreparedParallelSameLoad | null = null;
   try {
     const hubIdentity = selectLocalHubIdentity(
@@ -85,6 +90,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const minimumTradeSize = decodeHubMinTradeSize(
       await hub.adapter.read<unknown>(`entity/${hubIdentity.entityId}`),
     );
+    if (authorityEvidence) await exportReplayBaseSnapshotIfConfigured(hub);
     prepared = await prepareParallelSameLoad({
       workDir: args.workDir,
       portBase: args.portBase,
@@ -111,6 +117,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
         (_, round) => users[paymentReceiverIndexSamePopulation(senderIndex, round, users.length)]!.identity.entityId,
       )),
     );
+    if (authorityEvidence) {
+      const firstUser = users[0];
+      if (!firstUser) throw new Error('HLT_AUTHORITY_EVIDENCE_USER_MISSING');
+      await materializeH1CollateralEvidence({ hub, hubIdentity, lane: firstUser });
+    }
 
     const initialBook = await readLoadBook(hub, hubIdentity.entityId);
     if (initialBook.tradeCount !== prepared.setupTradeCount) {
@@ -123,7 +134,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       resetLaneHostOpCounters(users),
       resetHltProcessOpCounters(args, [hub]),
     ]);
-    await exportReplayBaseSnapshotIfConfigured(hub);
+    if (!authorityEvidence) await exportReplayBaseSnapshotIfConfigured(hub);
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const hubDurableBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
@@ -187,7 +198,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       expectedMatchedTrades: args.lanes * args.rounds,
       startedAt,
       allowAdditionalTrades: true,
-      acceptDrainedBelowTarget: true,
+      acceptDrainedBelowTarget: !authorityEvidence,
     });
     const expectedMatchedTrades = matchedDrain.matchedTrades;
     const matchedElapsedMs = matchedDrain.matchedElapsedMs;
@@ -259,6 +270,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       walBytesAfter: directoryBytes(walPath),
       hubDurableBefore,
       hubDurableAfter,
+      environment: collectHltEnvironmentManifest(),
     });
     persistReport(join(args.workDir, 'hlt-payment-load-report.json'), paymentReport, decodeLoadPaymentReport);
     publishHltDashboardReport('payment', paymentReport);

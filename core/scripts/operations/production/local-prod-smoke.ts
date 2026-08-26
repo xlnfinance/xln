@@ -35,6 +35,11 @@ import {
 import { parseSameLoadSchedule } from '../hlt/workload/load-schedule';
 import { HUB_COUNT } from '../../../config/constants';
 import { readBooleanEnv } from '../../../config/environment';
+import {
+  decodeLoadFrame,
+  decodeRuntimeManifestEntries,
+  type LoadFrame,
+} from '../hlt/boundary/worker-boundary';
 
 type ManagedProcess = {
   name: string;
@@ -172,6 +177,7 @@ const PROFILING_ENV_KEYS = [
   // process-wide switch: an Entity the engine cannot sign for must not be
   // handed to it by inheritance.
   'XLN_RSCORE_AUTHORITY_WORKERS', 'XLN_RSCORE_AUTHORITY_RECORD',
+  'XLN_RSCORE_AUTHORITY_CUTOVER',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -497,6 +503,55 @@ const restartManaged = async (name: string): Promise<RestartProcessIds> => {
   const after = restarted.proc.pid;
   if (!after || after === before) throw new Error(`LOCAL_PROD_SMOKE_PROCESS_NOT_REPLACED:${name}:${before}`);
   return { before, after };
+};
+
+const readH1AuthorityFrame = async (height: number | 'latest'): Promise<LoadFrame> => {
+  const manifestPath = join(workDir, 'prod-mesh', 'runtime-import-manifest.json');
+  const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown);
+  const matches = entries.filter(entry => entry.label === 'H1');
+  const entry = matches[0];
+  if (matches.length !== 1 || !entry) throw new Error('LOCAL_PROD_SMOKE_AUTHORITY_H1_ENTRY_NOT_UNIQUE');
+  const adapter = new RemoteRuntimeAdapter();
+  try {
+    await adapter.connect({
+      mode: 'remote',
+      wsUrl: entry.wsUrl,
+      authKey: entry.token,
+      requestTimeoutMs: 10_000,
+    });
+    return decodeLoadFrame(await adapter.read<unknown>(`frame/${String(height)}`));
+  } finally {
+    adapter.disconnect();
+  }
+};
+
+const runAuthorityCheckpointRestart = async (): Promise<void> => {
+  const configured = String(process.env['XLN_LOCAL_PROD_SMOKE_AUTHORITY_RESTART'] ?? '').trim();
+  if (!configured) return;
+  if (configured !== '1') throw new Error(`LOCAL_PROD_SMOKE_AUTHORITY_RESTART_INVALID:${configured}`);
+  const before = await readH1AuthorityFrame('latest');
+  recordStage('rscore-authority-restart:start', before);
+  const processIds = await restartManaged('server');
+  await waitForHealth();
+  const [restored, latest] = await Promise.all([
+    readH1AuthorityFrame(before.height),
+    readH1AuthorityFrame('latest'),
+  ]);
+  if (restored.height !== before.height || restored.canonicalStateHash !== before.canonicalStateHash) {
+    throw new Error(
+      `LOCAL_PROD_SMOKE_AUTHORITY_CHECKPOINT_DIVERGED:` +
+      `${before.height}:${before.canonicalStateHash}:` +
+      `${restored.height}:${restored.canonicalStateHash}`,
+    );
+  }
+  if (latest.height < before.height) {
+    throw new Error(`LOCAL_PROD_SMOKE_AUTHORITY_HEIGHT_REGRESSED:${before.height}:${latest.height}`);
+  }
+  recordStage('rscore-authority-restart:complete', { processIds, before, restored, latest });
+  console.log(
+    `HLT_RSCORE_RESTART_CHECKPOINT_OK beforePid=${processIds.before} afterPid=${processIds.after} ` +
+    `height=${before.height} root=${before.canonicalStateHash} latestHeight=${latest.height}`,
+  );
 };
 
 const readClosedStorageHead = async (path: string): Promise<StorageHead> => {
@@ -1316,6 +1371,7 @@ const main = async (): Promise<void> => {
     recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
   }
 
+  await runAuthorityCheckpointRestart();
   await runProductionSwapLoadSmoke();
 
   // Optional adversary branch AFTER same+cross books are green. Profiles only

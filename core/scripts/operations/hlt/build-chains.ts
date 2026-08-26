@@ -15,6 +15,13 @@ const workload = String(process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || ''
 if (!['payments', 'same', 'mixed', 'cross'].includes(workload)) {
   throw new Error(`HLT_BUILD_WORKLOAD_INVALID:${workload}`);
 }
+const authorityEvidence = process.env['XLN_HLT_AUTHORITY_EVIDENCE'] === '1';
+if (authorityEvidence && workload !== 'mixed') {
+  throw new Error(`HLT_AUTHORITY_EVIDENCE_REQUIRES_MIXED:${workload}`);
+}
+if (authorityEvidence && process.env['XLN_MM_CROSS_J'] !== '0') {
+  throw new Error('HLT_AUTHORITY_EVIDENCE_REQUIRES_MM_CROSS_J_DISABLED');
+}
 
 const snapshotPath = join(workDir, 'hlt-h1-base-snapshot.json');
 const buildEnv = {
@@ -47,6 +54,7 @@ const builder = spawnSync(process.execPath, [
   '--snapshot', snapshotPath,
   '--users', String(users),
   '--workload', workload,
+  ...(authorityEvidence ? ['--require-complete-authority-evidence'] : []),
 ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit' });
 if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
 console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
