@@ -3,10 +3,12 @@
 
 use num_bigint::BigInt;
 use sha2::{Digest as _, Sha256};
+use std::sync::OnceLock;
+use std::time::Instant;
 use xln_rscore_engine::canonical_tx_digest;
 use xln_rscore_protocol::{
-    CanonicalNumber, CanonicalValue, PersistentRadixMap, encode_account_state_value,
-    encode_canonical_consensus_bytes,
+    CanonicalNumber, CanonicalValue, PersistentRadixMap, RlpWriter,
+    encode_canonical_consensus_bytes, write_account_state_value,
 };
 
 use crate::orderbook::{
@@ -83,12 +85,13 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn digest(value: CanonicalValue) -> Result<String, EntityKernelError> {
-    let encoded = encode_account_state_value(&value).map_err(|error| {
+    let mut encoded = RlpWriter::with_capacity(4_096);
+    write_account_state_value(&mut encoded, &value).map_err(|error| {
         EntityKernelError::CommitmentEncoding {
             detail: error.to_string(),
         }
     })?;
-    Ok(hex(&Sha256::digest(encoded)))
+    Ok(hex(&Sha256::digest(encoded.as_slice())))
 }
 
 fn consensus_digest_bytes(value: &CanonicalValue) -> Result<[u8; 32], EntityKernelError> {
@@ -756,9 +759,60 @@ pub(crate) fn compute_commitments(
     proposal_work: &[AccountProposalWork],
     outputs: &[EntityKernelOutput],
 ) -> Result<EntityKernelCommitments, EntityKernelError> {
+    let started = Instant::now();
+    let paybook_value = paybook_value(state)?;
+    let paybook_project_micros = started.elapsed().as_micros();
+    let started = Instant::now();
+    let paybook_root = digest(paybook_value)?;
+    let paybook_digest_micros = started.elapsed().as_micros();
+    let started = Instant::now();
+    let orderbook_value = orderbook_value(state.orderbook.as_ref())?;
+    let orderbook_project_micros = started.elapsed().as_micros();
+    let started = Instant::now();
+    let orderbook_root = digest(orderbook_value)?;
+    let orderbook_digest_micros = started.elapsed().as_micros();
+    let started = Instant::now();
+    let outbox_value = outbox_value(proposal_work, outputs)?;
+    let outbox_project_micros = started.elapsed().as_micros();
+    let started = Instant::now();
+    let ordered_outbox_digest = digest(outbox_value)?;
+    let outbox_digest_micros = started.elapsed().as_micros();
+    report_commitment_profile(
+        [
+            paybook_project_micros,
+            paybook_digest_micros,
+            orderbook_project_micros,
+            orderbook_digest_micros,
+            outbox_project_micros,
+            outbox_digest_micros,
+        ],
+        [
+            state.known_accounts.len(),
+            state.htlc_routes.len(),
+            state.lock_book.len(),
+        ],
+    );
     Ok(EntityKernelCommitments {
-        paybook_root: digest(paybook_value(state)?)?,
-        orderbook_root: digest(orderbook_value(state.orderbook.as_ref())?)?,
-        ordered_outbox_digest: digest(outbox_value(proposal_work, outputs)?)?,
+        paybook_root,
+        orderbook_root,
+        ordered_outbox_digest,
     })
+}
+
+fn report_commitment_profile(phases: [u128; 6], rows: [usize; 3]) {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    if *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1")) {
+        eprintln!(
+            "RSCORE_COMMITMENT_PHASE paybookProject={} paybookDigest={} orderbookProject={} orderbookDigest={} outboxProject={} outboxDigest={} knownAccounts={} routes={} locks={}",
+            phases[0],
+            phases[1],
+            phases[2],
+            phases[3],
+            phases[4],
+            phases[5],
+            rows[0],
+            rows[1],
+            rows[2],
+        );
+    }
 }

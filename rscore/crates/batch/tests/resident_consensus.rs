@@ -554,6 +554,9 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
     let root = engine.accounts_root();
     let revision = engine.revision();
     let count = engine.account_count();
+    let proposable = engine
+        .proposable_account_ids()
+        .expect("pre-error proposer index");
     let (created, owner, _) = genesis_seed("payer-0", "new-peer");
     assert_eq!(owner, pair.payer_entity);
     let error = match engine.entity_outbound(EntityOutboundRequest {
@@ -561,7 +564,7 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
         timestamp: TIMESTAMP,
         j_height: 100,
         creates: vec![created],
-        admits: Vec::new(),
+        admits: vec![(pair.payer_account, fixture::payment(&pair, 25).1)],
         propose: Vec::new(),
         materialize: vec![AccountId::from_bytes([0xfe; 32])],
         failed_htlc_routes: Vec::new(),
@@ -579,6 +582,12 @@ fn failed_outbound_restores_the_exact_post_inbound_head() {
     assert_eq!(engine.accounts_root(), root);
     assert_eq!(engine.revision(), revision);
     assert_eq!(engine.account_count(), count);
+    assert_eq!(
+        engine
+            .proposable_account_ids()
+            .expect("post-error proposer index"),
+        proposable,
+    );
 }
 
 #[test]

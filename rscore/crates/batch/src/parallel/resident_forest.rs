@@ -171,7 +171,18 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         revision: u64,
         entries: Vec<(AccountId, V, [u8; 32])>,
     ) -> Result<Self, BatchError> {
-        let plan = AccountShardPlan::balanced(worker_count)?;
+        let mut shard_weights = vec![0_u64; PERSISTENT_RADIX_SHARD_COUNT];
+        for (account_id, _, _) in &entries {
+            let shard = logical_account_shard(*account_id);
+            shard_weights[shard] =
+                shard_weights[shard]
+                    .checked_add(1)
+                    .ok_or_else(|| BatchError::AccountsTree {
+                        account_id: *account_id,
+                        detail: "ACCOUNT_SHARD_WEIGHT_OVERFLOW".to_string(),
+                    })?;
+        }
+        let plan = AccountShardPlan::weighted(worker_count, &shard_weights)?;
         let mut states = (0..worker_count)
             .map(|_| ResidentWorkerState {
                 shards: BTreeMap::new(),
@@ -277,6 +288,16 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
 
     pub(crate) fn metrics(&self) -> Vec<super::AccountShardMetric> {
         self.plan.metrics()
+    }
+
+    pub(crate) fn expected_uses_candidate(
+        &self,
+        expected_root: [u8; 32],
+    ) -> Result<bool, BatchError> {
+        Ok(matches!(
+            self.reconcile_head(expected_root)?.0,
+            ReconcileHead::Candidate
+        ))
     }
 
     /// Reconcile the prior parent head, then apply all inbound Account inputs

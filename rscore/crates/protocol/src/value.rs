@@ -241,15 +241,49 @@ pub fn write_account_state_value(
                 Ok(())
             })
         }
-        // Map and Set order by ENCODED bytes, which the streaming writer cannot
-        // know before it writes them. They are rare in committed account state,
-        // so they fall back to the allocating encoder.
-        CanonicalValue::Map(_) | CanonicalValue::Set(_) => {
-            let encoded = encode_account_state_value(value)?;
-            writer.push_encoded(&encoded);
-            Ok(())
-        }
+        CanonicalValue::Map(entries) => write_map(writer, entries),
+        CanonicalValue::Set(entries) => write_set(writer, entries),
     }
+}
+
+fn write_map(
+    writer: &mut RlpWriter,
+    entries: &[(CanonicalValue, CanonicalValue)],
+) -> Result<(), ValueEncodingError> {
+    let mut ordered = entries
+        .iter()
+        .map(|(key, value)| Ok((encode_account_state_value(key)?, value)))
+        .collect::<Result<Vec<_>, ValueEncodingError>>()?;
+    ordered.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    if ordered.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err(ValueEncodingError::DuplicateMapKey);
+    }
+    write_scalar(writer, "map", |writer| {
+        for (key, value) in ordered {
+            let mark = writer.open_list();
+            writer.push_encoded(&key);
+            write_account_state_value(writer, value)?;
+            writer.close_list(mark)?;
+        }
+        Ok(())
+    })
+}
+
+fn write_set(writer: &mut RlpWriter, entries: &[CanonicalValue]) -> Result<(), ValueEncodingError> {
+    let mut ordered = entries
+        .iter()
+        .map(encode_account_state_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    ordered.sort_unstable();
+    if ordered.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(ValueEncodingError::DuplicateSetValue);
+    }
+    write_scalar(writer, "set", |writer| {
+        for value in ordered {
+            writer.push_encoded(&value);
+        }
+        Ok(())
+    })
 }
 
 fn write_scalar(
@@ -367,6 +401,33 @@ mod tests {
             encoded_hex(set),
             "d683736574c886737472696e6761c886737472696e677a",
         );
+    }
+
+    #[test]
+    fn streaming_writer_matches_allocating_encoder_for_nested_maps_and_sets() {
+        let value = CanonicalValue::Object(vec![
+            (
+                "map".into(),
+                CanonicalValue::Map(vec![
+                    (
+                        CanonicalValue::String("z".into()),
+                        CanonicalValue::Set(vec![number("2"), number("1")]),
+                    ),
+                    (
+                        CanonicalValue::String("a".into()),
+                        CanonicalValue::Array(vec![
+                            CanonicalValue::Null,
+                            CanonicalValue::BigInt((-9).into()),
+                        ]),
+                    ),
+                ]),
+            ),
+            ("enabled".into(), CanonicalValue::Bool(false)),
+        ]);
+        let expected = encode_account_state_value(&value).expect("allocating encoder");
+        let mut writer = RlpWriter::with_capacity(expected.len());
+        write_account_state_value(&mut writer, &value).expect("streaming writer");
+        assert_eq!(writer.as_slice(), expected);
     }
 
     #[test]

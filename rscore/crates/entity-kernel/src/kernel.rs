@@ -339,11 +339,17 @@ fn group_proposal_work(account_txs: Vec<TargetedAccountTx>) -> Vec<AccountPropos
         .collect()
 }
 
-pub fn apply_entity_kernel(
+pub(crate) struct EntityTransitionResult {
+    pub(crate) state: EntityStateSlice,
+    pub(crate) proposal_work: Vec<AccountProposalWork>,
+    pub(crate) outputs: Vec<EntityKernelOutput>,
+}
+
+pub(crate) fn apply_entity_transitions(
     mut state: EntityStateSlice,
     commits: &[OrderedAccountCommit],
     context: &DeterministicContext,
-) -> Result<EntityKernelResult, EntityKernelError> {
+) -> Result<EntityTransitionResult, EntityKernelError> {
     let mut deltas = Vec::new();
     let mut account_txs = Vec::new();
     let mut outputs = Vec::new();
@@ -381,11 +387,24 @@ pub fn apply_entity_kernel(
         }
     }
     let proposal_work = group_proposal_work(account_txs);
-    let commitments = compute_commitments(&state, &proposal_work, &outputs)?;
-    Ok(EntityKernelResult {
+    Ok(EntityTransitionResult {
         state,
         proposal_work,
         outputs,
+    })
+}
+
+pub fn apply_entity_kernel(
+    state: EntityStateSlice,
+    commits: &[OrderedAccountCommit],
+    context: &DeterministicContext,
+) -> Result<EntityKernelResult, EntityKernelError> {
+    let result = apply_entity_transitions(state, commits, context)?;
+    let commitments = compute_commitments(&result.state, &result.proposal_work, &result.outputs)?;
+    Ok(EntityKernelResult {
+        state: result.state,
+        proposal_work: result.proposal_work,
+        outputs: result.outputs,
         commitments,
     })
 }

@@ -147,8 +147,14 @@ impl ProcessSession {
             return self.start(request, decode_command(request)?);
         }
         self.validate_bound_request(request)?;
+        // A malformed outer command has not entered the deterministic request
+        // stream. Decode it before spending the sequence number so a client
+        // can correct framing and retry the same id. Once decoding succeeds,
+        // dispatch errors do consume the id: the engine may already have
+        // inspected or mutated request-scoped state.
+        let command = decode_command(request)?;
         self.last_request_id = Some(request_id(&request.identity));
-        self.dispatch(request.identity.request_id, decode_command(request)?)
+        self.dispatch(request.identity.request_id, command)
     }
 
     fn start(
@@ -414,6 +420,7 @@ impl ProcessSession {
                 return Err(error.into());
             }
         };
+        report_account_shard_profile(engine);
         let engine_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         let sections = match xln_rscore_entity_kernel::compute_entity_owned_sections(
             &result.state,
@@ -759,4 +766,25 @@ fn authority_identity(config: &AuthorityConfig) -> Result<([u8; 20], [u8; 32]), 
         ProcessError::Batch(xln_rscore_batch::BatchError::Signing(error.to_string()))
     })?;
     Ok((address, *identity.entity_id()))
+}
+
+fn report_account_shard_profile(engine: &ResidentConsensusEngine) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_SHARDS").as_deref() == Ok("1")) {
+        return;
+    }
+    let mut worker_items = vec![0_u64; engine.worker_count()];
+    let mut worker_nanos = vec![0_u64; engine.worker_count()];
+    let mut active_shards = 0_usize;
+    for metric in engine.account_shard_metrics() {
+        let worker = usize::from(metric.worker);
+        worker_items[worker] = worker_items[worker].saturating_add(metric.work_items);
+        worker_nanos[worker] = worker_nanos[worker]
+            .saturating_add(metric.work_nanos)
+            .saturating_add(metric.fold_nanos);
+        active_shards += usize::from(metric.work_items > 0 || metric.fold_leaves > 0);
+    }
+    eprintln!(
+        "RSCORE_SHARD_PROFILE activeShards={active_shards} workerItems={worker_items:?} workerNanos={worker_nanos:?}"
+    );
 }

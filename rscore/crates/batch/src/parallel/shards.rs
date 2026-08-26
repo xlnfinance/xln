@@ -58,6 +58,56 @@ impl AccountShardPlan {
         })
     }
 
+    pub(crate) fn weighted(worker_count: usize, shard_weights: &[u64]) -> Result<Self, BatchError> {
+        if worker_count == 0 || worker_count > u16::MAX as usize {
+            return Err(BatchError::InvalidWorkerCount(worker_count));
+        }
+        if shard_weights.len() != LOGICAL_ACCOUNT_SHARDS {
+            return Err(BatchError::AccountsTree {
+                account_id: AccountId::from_bytes([0; 32]),
+                detail: format!(
+                    "ACCOUNT_SHARD_WEIGHT_COUNT:{}:{}",
+                    shard_weights.len(),
+                    LOGICAL_ACCOUNT_SHARDS
+                ),
+            });
+        }
+        let mut worker_by_shard = vec![0_u16; LOGICAL_ACCOUNT_SHARDS];
+        let mut worker_load = vec![0_u64; worker_count];
+        let mut weighted = shard_weights
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, weight)| *weight > 0)
+            .collect::<Vec<_>>();
+        weighted.sort_unstable_by(|left, right| {
+            right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
+        });
+        for (shard, weight) in weighted {
+            let worker = least_loaded_worker(&worker_load);
+            worker_by_shard[shard] = worker as u16;
+            worker_load[worker] = worker_load[worker].checked_add(weight).ok_or_else(|| {
+                BatchError::AccountsTree {
+                    account_id: AccountId::from_bytes([0; 32]),
+                    detail: "ACCOUNT_SHARD_WEIGHT_OVERFLOW".to_string(),
+                }
+            })?;
+        }
+        for (shard, weight) in shard_weights.iter().enumerate() {
+            if *weight == 0 {
+                worker_by_shard[shard] = (shard % worker_count) as u16;
+            }
+        }
+        let counters = (0..LOGICAL_ACCOUNT_SHARDS)
+            .map(|_| ShardCounters::default())
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Ok(Self {
+            worker_by_shard: worker_by_shard.into_boxed_slice(),
+            counters,
+        })
+    }
+
     pub(crate) fn worker(&self, shard: usize) -> usize {
         usize::from(self.worker_by_shard[shard])
     }
@@ -110,6 +160,14 @@ impl AccountShardPlan {
     }
 }
 
+fn least_loaded_worker(loads: &[u64]) -> usize {
+    loads
+        .iter()
+        .enumerate()
+        .min_by_key(|(worker, load)| (**load, *worker))
+        .map_or(0, |(worker, _)| worker)
+}
+
 pub(crate) fn logical_account_shard(account_id: AccountId) -> usize {
     let bytes = account_id.as_bytes();
     (usize::from(bytes[0]) << 4) | usize::from(bytes[1] >> 4)
@@ -143,5 +201,20 @@ mod tests {
         for shard in 0..LOGICAL_ACCOUNT_SHARDS {
             assert_eq!(plan.worker(shard), shard % 20);
         }
+    }
+
+    #[test]
+    fn weighted_assignment_balances_hot_shards_without_changing_logical_ids() {
+        let mut weights = vec![0_u64; LOGICAL_ACCOUNT_SHARDS];
+        weights[7] = 9;
+        weights[18] = 8;
+        weights[29] = 7;
+        weights[40] = 6;
+        let plan = AccountShardPlan::weighted(2, &weights).expect("weighted plan");
+        assert_eq!(plan.worker(7), 0);
+        assert_eq!(plan.worker(18), 1);
+        assert_eq!(plan.worker(29), 1);
+        assert_eq!(plan.worker(40), 0);
+        assert_eq!(plan.worker(5), 1);
     }
 }

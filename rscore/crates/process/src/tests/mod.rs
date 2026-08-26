@@ -43,6 +43,22 @@ fn hello_requires_exact_build_owned_payment_profile_binding() {
 }
 
 #[test]
+fn malformed_outer_command_does_not_spend_its_request_id() {
+    let mut session = ProcessSession::new();
+    assert_ok(session.handle(hello(0)).envelope);
+
+    let malformed = request(1, OpTag::Shutdown, vec![AbiValue::Integer(1)]);
+    assert_error(
+        session.handle(malformed).envelope,
+        "RSCORE_PROCESS_ARITY:shutdown:1:0",
+    );
+
+    let retried = session.handle(shutdown(1));
+    assert_ok(retried.envelope);
+    assert!(retried.shutdown);
+}
+
+#[test]
 fn account_outbound_decodes_the_exact_failed_htlc_route_closure() {
     let tuple = |fields| AbiValue::Tuple(xln_rscore_abi::BodyTuple::from_vec(fields));
     let hashlock = [0x5a; 32];
@@ -475,10 +491,10 @@ fn restore_profile_is_explicit_and_begin_runtime_is_not_repurposed() {
             .envelope,
         "RSCORE_PROCESS_PROFILE:full-h1",
     );
-    assert_ok(session.handle(load(2, 0, Vec::new())).envelope);
+    assert_ok(session.handle(load(1, 0, Vec::new())).envelope);
     assert_error(
         session
-            .handle(request(3, OpTag::BeginRuntime, Vec::new()))
+            .handle(request(2, OpTag::BeginRuntime, Vec::new()))
             .envelope,
         "RSCORE_PROCESS_OP_UNSUPPORTED:2",
     );

@@ -39,6 +39,7 @@ struct InboundOutcome {
     applied: Vec<AccountInputResult>,
     leaf: [u8; 32],
     created_checkpoint: Option<AccountCheckpointRows>,
+    proposable: bool,
 }
 
 #[derive(Clone)]
@@ -50,6 +51,7 @@ struct OutboundWork {
 
 struct OutboundOutcome {
     proposal: Option<ProposalRow>,
+    proposable: bool,
 }
 
 struct MaterializedAccount {
@@ -67,6 +69,9 @@ pub struct ResidentConsensusEngine {
     identities: BTreeMap<[u8; 32], Arc<SigningIdentity>>,
     swap_market: Arc<SwapMarketPolicy>,
     round_owner: Option<[u8; 32]>,
+    base_proposable: BTreeSet<AccountId>,
+    inbound_proposable: Option<BTreeSet<AccountId>>,
+    candidate_proposable: Option<BTreeSet<AccountId>>,
 }
 
 impl ResidentConsensusEngine {
@@ -103,6 +108,7 @@ impl ResidentConsensusEngine {
             .into_iter()
             .map(|seed| restore_seed_account(seed, &swap_market))
             .collect::<Result<Vec<_>, _>>()?;
+        let base_proposable = proposable_from_entries(&entries);
         let forest = ResidentAccountForest::restore(worker_count, revision, entries)?;
         Ok(Self {
             engine_generation,
@@ -112,6 +118,9 @@ impl ResidentConsensusEngine {
             identities,
             swap_market,
             round_owner: None,
+            base_proposable,
+            inbound_proposable: None,
+            candidate_proposable: None,
         })
     }
 
@@ -168,6 +177,7 @@ impl ResidentConsensusEngine {
             entries.push((restored.account_id, restored.account, restored.leaf));
         }
 
+        let base_proposable = proposable_from_entries(&entries);
         let forest = ResidentAccountForest::restore(worker_count, expected.revision, entries)?;
         if forest.len() != expected.account_count {
             return Err(BatchError::CheckpointIncomplete {
@@ -207,6 +217,9 @@ impl ResidentConsensusEngine {
             identities,
             swap_market,
             round_owner: None,
+            base_proposable,
+            inbound_proposable: None,
+            candidate_proposable: None,
         })
     }
 
@@ -237,13 +250,16 @@ impl ResidentConsensusEngine {
     /// Exact resident worklist before Entity adds same-round transactions.
     /// Values stay inside their owner workers; only matching Account ids cross
     /// back to the coordinator.
-    pub fn proposable_account_ids(&mut self) -> Result<Vec<AccountId>, BatchError> {
+    pub fn proposable_account_ids(&self) -> Result<Vec<AccountId>, BatchError> {
+        Ok(self.active_proposable()?.iter().copied().collect())
+    }
+
+    fn active_proposable(&self) -> Result<&BTreeSet<AccountId>, BatchError> {
         Ok(self
-            .forest
-            .read_all(|_, account| Ok(proposable(account)))?
-            .into_iter()
-            .filter_map(|(account_id, ready)| ready.then_some(account_id))
-            .collect())
+            .candidate_proposable
+            .as_ref()
+            .or(self.inbound_proposable.as_ref())
+            .unwrap_or(&self.base_proposable))
     }
 
     /// First and only inward visit for one Entity input.
@@ -254,6 +270,16 @@ impl ResidentConsensusEngine {
         if request.post_accounts {
             return Err(BatchError::EntityInboundPostAccounts);
         }
+        let uses_candidate = self
+            .forest
+            .expected_uses_candidate(request.expected_accounts_root)?;
+        let selected_proposable = if uses_candidate {
+            self.candidate_proposable
+                .clone()
+                .ok_or(BatchError::EntityRoundMissing)?
+        } else {
+            self.base_proposable.clone()
+        };
         validate_operation_indices(&request.rows)?;
         let mut grouped = BTreeMap::<AccountId, Vec<AccountInputRow>>::new();
         for row in request.rows {
@@ -348,6 +374,7 @@ impl ResidentConsensusEngine {
                     applied,
                     leaf,
                     created_checkpoint,
+                    proposable: proposable(&account),
                 };
                 if changed {
                     Ok(ResidentAccountAction::Put {
@@ -360,6 +387,7 @@ impl ResidentConsensusEngine {
                 }
             },
         )?;
+        let mut inbound_proposable = selected_proposable.clone();
         let mut result = EntityRoundResult {
             revision: batch.revision,
             accounts_root: batch.accounts_root,
@@ -367,6 +395,7 @@ impl ResidentConsensusEngine {
         };
         let mut created_any = false;
         for (account_id, outcome) in batch.rows {
+            set_proposable(&mut inbound_proposable, account_id, outcome.proposable);
             result.applied.extend(outcome.applied);
             result.touched.push((account_id, outcome.leaf));
             if let Some(created) = outcome.created_checkpoint {
@@ -378,6 +407,11 @@ impl ResidentConsensusEngine {
         if identity_is_new && created_any {
             self.identities.insert(owner, identity);
         }
+        if uses_candidate {
+            self.base_proposable = selected_proposable;
+        }
+        self.inbound_proposable = Some(inbound_proposable);
+        self.candidate_proposable = None;
         self.round_owner = Some(owner);
         Ok(result)
     }
@@ -504,6 +538,7 @@ impl ResidentConsensusEngine {
                     account_id,
                 })
             })?;
+        self.candidate_proposable = None;
         Ok(())
     }
 
@@ -526,11 +561,26 @@ impl ResidentConsensusEngine {
         let apply = move |account_id, current, work: OutboundWork| {
             apply_outbound_work(account_id, current, work, &context)
         };
-        if continue_candidate {
-            self.forest.apply_outbound_continue(entries, apply)
+        let mut next_proposable = if continue_candidate {
+            self.candidate_proposable
+                .clone()
+                .or_else(|| self.inbound_proposable.clone())
+                .ok_or(BatchError::EntityRoundMissing)?
         } else {
-            self.forest.apply_outbound(entries, apply)
+            self.inbound_proposable
+                .clone()
+                .ok_or(BatchError::EntityRoundMissing)?
+        };
+        let batch = if continue_candidate {
+            self.forest.apply_outbound_continue(entries, apply)?
+        } else {
+            self.forest.apply_outbound(entries, apply)?
+        };
+        for (account_id, outcome) in &batch.rows {
+            set_proposable(&mut next_proposable, *account_id, outcome.proposable);
         }
+        self.candidate_proposable = Some(next_proposable);
+        Ok(batch)
     }
 
     fn run_htlc_fixed_point(
@@ -759,7 +809,10 @@ fn apply_outbound_work(
     // candidate returned to the parent remembers that its manifest must
     // certify the draft. Root-based rollback discards this bit with the value.
     changed |= account.certify_local_dispute_after_outbound();
-    let result = OutboundOutcome { proposal };
+    let result = OutboundOutcome {
+        proposal,
+        proposable: proposable(&account),
+    };
     if changed {
         let leaf = leaf_root(account_id, &account)?;
         Ok(ResidentAccountAction::Put {
@@ -782,6 +835,23 @@ fn admission_results(admits: &[(AccountId, Vec<AccountTx>)]) -> Vec<AccountAdmis
             verdict: AccountAdmissionVerdict::Admitted { count: txs.len() },
         })
         .collect()
+}
+
+fn proposable_from_entries(
+    entries: &[(AccountId, AccountConsensus, [u8; 32])],
+) -> BTreeSet<AccountId> {
+    entries
+        .iter()
+        .filter_map(|(account_id, account, _)| proposable(account).then_some(*account_id))
+        .collect()
+}
+
+fn set_proposable(accounts: &mut BTreeSet<AccountId>, account_id: AccountId, ready: bool) {
+    if ready {
+        accounts.insert(account_id);
+    } else {
+        accounts.remove(&account_id);
+    }
 }
 
 fn create_work(creates: &[AccountSeed]) -> Result<Vec<(AccountId, OutboundWork)>, BatchError> {

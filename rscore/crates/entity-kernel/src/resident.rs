@@ -8,6 +8,8 @@
 //! candidate, so this API has no commit/abort messages.
 
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use thiserror::Error;
 use xln_rscore_batch::{
@@ -17,11 +19,35 @@ use xln_rscore_batch::{
 use xln_rscore_engine::{AccountOutput, CommittedFrameEvidence, EntityId};
 
 use crate::commitment::compute_commitments;
+use crate::kernel::apply_entity_transitions;
 use crate::{
     CommittedAccountTransition, DeterministicContext, EntityKernelCommitments, EntityKernelError,
     EntityKernelOutput, EntityStateSlice, JurisdictionScope, OrderedAccountCommit,
-    apply_entity_kernel,
 };
+
+fn profile_resident_round() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_ENTITY").as_deref() == Ok("1"))
+}
+
+fn report_resident_round_profile(phases: [u128; 9], total: u128) {
+    if !profile_resident_round() {
+        return;
+    }
+    eprintln!(
+        "RSCORE_ENTITY_PHASE inbound={} commits={} entity={} worklist={} proposable={} prepareOutbound={} failedRoutes={} outbound={} finalize={} total={}",
+        phases[0],
+        phases[1],
+        phases[2],
+        phases[3],
+        phases[4],
+        phases[5],
+        phases[6],
+        phases[7],
+        phases[8],
+        total,
+    );
+}
 
 #[derive(Debug, Error)]
 pub enum ResidentEntityError {
@@ -122,41 +148,48 @@ fn failed_route_closure(
     state: &EntityStateSlice,
     proposal_accounts: &[AccountId],
 ) -> Result<Vec<FailedHtlcRoute>, ResidentEntityError> {
+    let mut routes_by_outbound =
+        std::collections::BTreeMap::<AccountId, Vec<(&String, &String, &String, &String)>>::new();
+    for (hashlock, route) in &state.htlc_routes {
+        let (
+            Some(outbound_entity),
+            Some(outbound_lock_id),
+            Some(inbound_entity),
+            Some(inbound_lock_id),
+        ) = (
+            route.outbound_entity.as_ref(),
+            route.outbound_lock_id.as_ref(),
+            route.inbound_entity.as_ref(),
+            route.inbound_lock_id.as_ref(),
+        )
+        else {
+            continue;
+        };
+        routes_by_outbound
+            .entry(account_id(outbound_entity)?)
+            .or_default()
+            .push((hashlock, outbound_lock_id, inbound_entity, inbound_lock_id));
+    }
     let mut active = proposal_accounts.iter().copied().collect::<BTreeSet<_>>();
+    let mut frontier = active.clone();
     let mut selected = std::collections::BTreeMap::<[u8; 32], FailedHtlcRoute>::new();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (hashlock, route) in &state.htlc_routes {
-            let (
-                Some(outbound_entity),
-                Some(outbound_lock_id),
-                Some(inbound_entity),
-                Some(inbound_lock_id),
-            ) = (
-                route.outbound_entity.as_ref(),
-                route.outbound_lock_id.as_ref(),
-                route.inbound_entity.as_ref(),
-                route.inbound_lock_id.as_ref(),
-            )
-            else {
-                continue;
-            };
-            let outbound_account_id = account_id(outbound_entity)?;
-            if !active.contains(&outbound_account_id) {
-                continue;
-            }
+    while let Some(outbound_account_id) = frontier.pop_first() {
+        for (hashlock, outbound_lock_id, inbound_entity, inbound_lock_id) in routes_by_outbound
+            .get(&outbound_account_id)
+            .into_iter()
+            .flatten()
+        {
             let inbound_account_id = account_id(inbound_entity)?;
             let hashlock = digest32(hashlock)?;
             selected.entry(hashlock).or_insert_with(|| FailedHtlcRoute {
                 hashlock,
                 outbound_account_id,
-                outbound_lock_id: outbound_lock_id.clone(),
+                outbound_lock_id: (*outbound_lock_id).clone(),
                 inbound_account_id,
-                inbound_lock_id: inbound_lock_id.clone(),
+                inbound_lock_id: (*inbound_lock_id).clone(),
             });
             if active.insert(inbound_account_id) {
-                changed = true;
+                frontier.insert(inbound_account_id);
             }
         }
     }
@@ -316,6 +349,7 @@ pub fn apply_resident_entity_round(
     request: ResidentEntityRequest,
     context: &DeterministicContext,
 ) -> Result<ResidentEntityResult, ResidentEntityError> {
+    let total_started = Instant::now();
     let owner_entity_id = request.inbound.owner_entity_id;
     let request_owner = hex_prefixed(&owner_entity_id);
     if state.entity_id != request_owner {
@@ -327,20 +361,30 @@ pub fn apply_resident_entity_round(
     state.height = request.entity_height;
     state.timestamp = request.outbound_timestamp;
     state.last_finalized_j_height = request.outbound_j_height;
+    let phase_started = Instant::now();
     let inbound = accounts.entity_inbound(request.inbound)?;
+    let inbound_micros = phase_started.elapsed().as_micros();
     for created in &inbound.created_accounts {
         state
             .known_accounts
             .insert(account_text(created.account_id));
     }
+    let phase_started = Instant::now();
     let commits = ordered_commits(&inbound)?;
-    let mut kernel = apply_entity_kernel(state, &commits, context)?;
+    let commits_micros = phase_started.elapsed().as_micros();
+    let phase_started = Instant::now();
+    let mut kernel = apply_entity_transitions(state, &commits, context)?;
+    let entity_micros = phase_started.elapsed().as_micros();
 
+    let phase_started = Instant::now();
     let mut admits = Vec::with_capacity(kernel.proposal_work.len());
+    let proposable_started = Instant::now();
     let mut propose = accounts
         .proposable_account_ids()?
         .into_iter()
         .collect::<BTreeSet<_>>();
+    let proposable_micros = proposable_started.elapsed().as_micros();
+    let prepare_outbound_started = Instant::now();
     for work in &kernel.proposal_work {
         let target = account_id(&work.account_id)?;
         admits.push((target, work.txs.clone()));
@@ -353,7 +397,12 @@ pub fn apply_resident_entity_round(
         .map(|(account_id, _)| *account_id)
         .collect::<BTreeSet<_>>();
     materialize.extend(propose.iter().copied());
+    let prepare_outbound_micros = prepare_outbound_started.elapsed().as_micros();
+    let failed_routes_started = Instant::now();
     let failed_htlc_routes = failed_route_closure(&kernel.state, &propose)?;
+    let failed_routes_micros = failed_routes_started.elapsed().as_micros();
+    let worklist_micros = phase_started.elapsed().as_micros();
+    let phase_started = Instant::now();
     let outbound = accounts.entity_outbound(EntityOutboundRequest {
         owner_entity_id,
         timestamp: request.outbound_timestamp,
@@ -366,13 +415,29 @@ pub fn apply_resident_entity_round(
         checkpoint_due: request.checkpoint_due,
         post_accounts: request.post_accounts,
     })?;
+    let outbound_micros = phase_started.elapsed().as_micros();
+    let phase_started = Instant::now();
     apply_failed_proposal_routes(&mut kernel.state, &outbound, &mut kernel.outputs);
-    kernel.commitments =
-        compute_commitments(&kernel.state, &kernel.proposal_work, &kernel.outputs)?;
+    let commitments = compute_commitments(&kernel.state, &kernel.proposal_work, &kernel.outputs)?;
+    let finalize_micros = phase_started.elapsed().as_micros();
+    report_resident_round_profile(
+        [
+            inbound_micros,
+            commits_micros,
+            entity_micros,
+            worklist_micros,
+            proposable_micros,
+            prepare_outbound_micros,
+            failed_routes_micros,
+            outbound_micros,
+            finalize_micros,
+        ],
+        total_started.elapsed().as_micros(),
+    );
     Ok(ResidentEntityResult {
         state: kernel.state,
         outputs: kernel.outputs,
-        commitments: kernel.commitments,
+        commitments,
         inbound,
         outbound,
     })
