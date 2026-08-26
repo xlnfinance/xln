@@ -1,0 +1,50 @@
+{
+  "canonicalSource": "TypeScript Entity paybook follow-ups + processOrderbookSwaps/processOrderbookCancels",
+  "paybookFinalResolve": {
+    "orderedOutboxDigest": "0x927c3bad6560779a4296162ac75c71bf3b1b7e47836d7625a16d86644e981677",
+    "paybookRoot": "0x61b67dab71810cb8f0f4d3ccf3e7d783fe9b8c6ef54bee8a9cc782f73b0d2fec",
+    "resolveDigest": "0x3eacd7c1c1909ea83ddc6f852c0332b3c55bf799176b55ee33a9cb8f8b401fdc"
+  },
+  "paybookForward": {
+    "forwardLockId": "0xf7536a8312f1c1fcc3b02f44e575b1c9a50b594b6f2d74dc5f4ddd747240d691",
+    "orderbookRoot": "0x0ee44d1670f4f967accda605ad0e3e6dc665640d9c8085c0ff1e5ecfc4b9b2aa",
+    "orderedOutboxDigest": "0xecd2958795056f325b4f1bf7862930415274c8466e623a4c8e4047d110a9c31b",
+    "outerEnvelopeHash": "0x0c593247b03c65eec39dc891901cc1eaeb766e9f94b816e7a60523742c362aaf",
+    "paybookRoot": "0xcde35febd5aa3744a9c111257af9f4fa9f0bfcb80a9ab19bcd057fa2dac376ca",
+    "txDigests": [
+      "0xc2bc918c68a7f7a9a9240c3a5bd30314e023d69abb19c22c87ca36f7ff3c263a",
+      "0xe90299c2ddd6cae0c4de4ad30d5ca6166e974bbfe9e58c54d91bb3c7d81f555a"
+    ]
+  },
+  "sameJCancel": {
+    "resolveDigest": "0x8cc03d0823773ede609e61d7001c1b07787c6d58d1d35c21bdf98b92fd5f1b2c"
+  },
+  "sameJFullMatch": {
+    "eventHash": "7013928125421380",
+    "makerResolveDigest": "0xf1407646344f6f7fbb0d3b800a0f13ae0a39064ee19bc6e89092f3ecbebad5a3",
+    "orderbookRoot": "0x756aa6d35a9ddf7d8b8ca95c118ade2aef817f58e5d933fc36d34b3bd775073b",
+    "orderedOutboxDigest": "0x0838a228bed0505969c120a766ff63e6f04ca3b9b05fb2628e387825abc278d6",
+    "paybookRoot": "0x490f5fad7d0d7ba6f8589fcde382f63719730cdb8530423c3adbce7185862801",
+    "takerResolveDigest": "0x2de4da2c8cb0cdb18f8cda91e71bb6be3bd4a16f7ab2681f6eb5d0806c7ea8f1",
+    "tradeCount": 1,
+    "tradeQtyLots": "1000000"
+  },
+  "sameJPartialMatch": {
+    "makerResolveDigest": "0x0f024d8087602d6decb1da841e41f1728b93bb6973bcfa3c2aa0071f29df2b55",
+    "orderbookRoot": "0x89f29f5a34c13c821ed69697772bd00a63894753d5aa82538e10774d30bf4cab",
+    "orderedOutboxDigest": "0xa0cc0d548d583f460c77f73bd360c6b4e765a8e725d10a805377bc50338e46ce",
+    "remainingMakerQtyLots": "1000000",
+    "takerResolveDigest": "0x56144d286d940caf28bc74000bd5f1ee9f41fdacf9c9ad118454f4744f46100d"
+  },
+  "sameJSweepMatch": {
+    "eventHash": "3679022324825608",
+    "highMakerResolveDigest": "0xde11ab77e6e6b538af2e7fdce73d8d2cf04e90888f5f3accb96dd3d24e8e981c",
+    "lowMakerResolveDigest": "0xbc902060075a8a6c26b25954d942f31c13255546d454e6e911e3a7c361f4431e",
+    "orderbookRoot": "0x92ca1a0816655d19a3c30b3d90bd8f1626191790f34b419e7d95183274e25e89",
+    "orderedOutboxDigest": "0x3c2b02a318e41d00c5a75e5664f1057aa2185bbe6b9211f11f4f3762b6b2ef3d",
+    "takerResolveDigest": "0x307ab58eda9b77788ef91d746f023962c075e3d763f80d293f6d00983e035568",
+    "tradeCount": 2,
+    "tradeQtyLots": "2000000"
+  },
+  "version": 1
+}
