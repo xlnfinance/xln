@@ -739,6 +739,17 @@ absent until their dedicated vertical increments. Focused model, route,
 metadata, storage-boundary, and listener-cleanup coverage accompanies the
 wallet typecheck, production build, and browser evidence.
 
+The React `/app` shell now owns the identity-entry stage for both canonical
+Brain Vault and mnemonic modes. It preserves session-randomized testnet demo
+prefill, exact-name/passphrase/factor validation, 12/24-word seed validation
+plus canonical checksum/address derivation before review,
+keyboard-native tab selection, sensitive-field clearing on mode changes, and
+a secret-free recovery-requirements review. Invalid input is announced
+in-place and the review states explicitly that no wallet has been created;
+derivation and persistence are not simulated. Focused success, invalid, demo,
+unknown-demo, routing, keyboard-policy, and secret-boundary coverage accompanies
+responsive browser evidence for entry, errors, and review.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte

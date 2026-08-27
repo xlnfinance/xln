@@ -10,10 +10,11 @@ import { walletPageMetadata } from '../../../frontend/apps/wallet/src/wallet-mod
 describe('React wallet app shell', () => {
   test('exposes only working navigation destinations', () => {
     expect(WALLET_APP_LINKS).toEqual([
-      { href: '/app', label: 'Overview', current: true },
-      { href: '/testnet', label: 'Testnet', current: false },
-      { href: '/health', label: 'Network', current: false },
-      { href: '/docs', label: 'Docs', current: false },
+      { href: '/app', label: 'Overview', view: 'overview' },
+      { href: '/app?setup=1', label: 'Identity', view: 'identity' },
+      { href: '/testnet', label: 'Testnet', view: null },
+      { href: '/health', label: 'Network', view: null },
+      { href: '/docs', label: 'Docs', view: null },
     ]);
   });
 

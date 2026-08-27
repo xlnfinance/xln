@@ -1,10 +1,11 @@
 import type { RuntimeAdapterStorageSnapshot } from '../../../packages/browser/src/runtime-adapter-session';
 
 export const WALLET_APP_LINKS = [
-  { href: '/app', label: 'Overview', current: true },
-  { href: '/testnet', label: 'Testnet', current: false },
-  { href: '/health', label: 'Network', current: false },
-  { href: '/docs', label: 'Docs', current: false },
+  { href: '/app', label: 'Overview', view: 'overview' },
+  { href: '/app?setup=1', label: 'Identity', view: 'identity' },
+  { href: '/testnet', label: 'Testnet', view: null },
+  { href: '/health', label: 'Network', view: null },
+  { href: '/docs', label: 'Docs', view: null },
 ] as const;
 
 export type WalletRuntimeSummary = Readonly<{

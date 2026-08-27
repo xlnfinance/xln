@@ -138,6 +138,8 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/ws-url.ts',
       'frontend/apps/wallet/src/app-shell.tsx',
       'frontend/apps/wallet/src/app-shell-model.ts',
+      'frontend/apps/wallet/src/identity-onboarding.tsx',
+      'frontend/apps/wallet/src/identity-onboarding-model.ts',
       'frontend/src/lib/utils/runtime/runtimeConnection.ts',
     ],
     behavior: [
@@ -160,6 +162,7 @@ export const CAPABILITIES = [
       'explicit remote attachment consent',
       'reconnect and failure states',
       'React-owned Runtime and authority overview shell',
+      'React-owned Brain Vault and mnemonic identity entry with secret-free review',
     ],
     status: 'in_progress',
   },
