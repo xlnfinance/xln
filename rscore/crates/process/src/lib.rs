@@ -8,6 +8,8 @@ mod checkpoint_wire;
 #[path = "wire/entity.rs"]
 mod entity_wire;
 mod error;
+#[path = "runtime_replay/native_restart.rs"]
+pub mod native_runtime;
 #[cfg(feature = "bench")]
 pub mod replay_support;
 #[cfg(feature = "bench")]

@@ -9,10 +9,12 @@ use xln_rscore_entity_kernel::{
     current_entity_command_board_hash, normalize_entity_command_nonce_board,
 };
 
+use crate::{EntityInfraMaterializeRequest, EntityInfraMaterializer};
+
 use super::types::EntityExecutionStep;
 use super::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
-    RuntimeApplyResult, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
+    RuntimeApplyResult, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput, RuntimeLiveInput,
     RuntimeMachineError, RuntimeOutputs, RuntimeReplica, RuntimeWake, enqueue_runtime_input,
     scheduled_input::scheduled_wake_entity_input, select_runtime_frame,
 };
@@ -269,8 +271,27 @@ fn internal_wake(
 /// no value that a caller can continue using; production must reload the last
 /// durable checkpoint+WAL instead of guessing an inverse transition.
 pub fn apply_runtime(
+    replica: RuntimeReplica,
+    input: RuntimeInput,
+) -> Result<RuntimeApplyResult, RuntimeMachineError> {
+    apply_runtime_inner(replica, input, None)
+}
+
+/// Apply one live input after selecting its exact FIFO prefix and then
+/// materializing the Entity context for that prefix. The caller never sees a
+/// candidate or a commit/abort handle.
+pub fn apply_runtime_live(
+    replica: RuntimeReplica,
+    input: RuntimeLiveInput,
+    materializer: &mut dyn EntityInfraMaterializer,
+) -> Result<RuntimeApplyResult, RuntimeMachineError> {
+    apply_runtime_inner(replica, input.into_selection_input(), Some(materializer))
+}
+
+fn apply_runtime_inner(
     mut replica: RuntimeReplica,
     mut input: RuntimeInput,
+    materializer: Option<&mut dyn EntityInfraMaterializer>,
 ) -> Result<RuntimeApplyResult, RuntimeMachineError> {
     validate_frame_context(&replica, &input)?;
     for entity_input in &input.entity_inputs {
@@ -445,6 +466,22 @@ pub fn apply_runtime(
         row.operation_index =
             u64::try_from(expected).map_err(|_| RuntimeMachineError::InputCountOverflow)?;
         row.resolve_certified_boards(&replica.certified_board_registry)?;
+    }
+
+    if let Some(materializer) = materializer {
+        let materialized = materializer
+            .materialize(EntityInfraMaterializeRequest {
+                replica: &replica,
+                account_inputs: &rows,
+                local_financial_txs: &local_financial_txs,
+                timestamp: frame.frame.timestamp,
+                finalized_j_height: frame.frame.finalized_j_height,
+            })
+            .map_err(|error| {
+                RuntimeMachineError::EntityContextMaterialization(error.to_string())
+            })?;
+        frame.frame.entity_context = materialized.execution;
+        frame.frame.canonical_entity_context = materialized.canonical;
     }
 
     let checkpoint_due = super::materialization_due(

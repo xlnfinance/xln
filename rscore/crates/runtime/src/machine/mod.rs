@@ -14,13 +14,13 @@ mod types;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use apply::apply_runtime;
+pub use apply::{apply_runtime, apply_runtime_live};
 pub use mempool::{SelectedRuntimeFrame, enqueue_runtime_input, select_runtime_frame};
 pub use scheduled_wake::ScheduledWakeIndex;
 pub(crate) use types::materialization_due;
 pub use types::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
     RuntimeApplyResult, RuntimeEntityInput, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
-    RuntimeLimits, RuntimeMachineError, RuntimeMempool, RuntimeOutputs, RuntimeReplica,
-    RuntimeState, RuntimeTx, RuntimeWake,
+    RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeOutputs,
+    RuntimeReplica, RuntimeState, RuntimeTx, RuntimeWake,
 };

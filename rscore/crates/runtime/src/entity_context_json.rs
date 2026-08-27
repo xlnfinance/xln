@@ -9,8 +9,14 @@ use xln_rscore_entity_kernel::{
     PairPolicy, PreparedHtlcEntry, PreparedOriginatedHtlcPayment,
 };
 
+#[path = "entity_context_json/fresh.rs"]
+mod fresh;
 mod policy;
 
+pub use fresh::{
+    CanonicalEntityInfraMaterializer, EntityInfraMaterializeRequest, EntityInfraMaterializer,
+    FreshEntityContextError, MaterializedEntityInfraContext, materialize_fresh_entity_context,
+};
 pub(crate) use policy::entity_context_policy_from_core;
 pub use policy::{canonical_swap_market_policy, entity_context_policy_from_checkpoint};
 
@@ -153,11 +159,15 @@ fn validate_context_identity(context: &Map<String, Value>) -> Result<(), EntityC
         32,
         "context.entityId",
     )?;
-    let signer = fixed_hex(
+    let signer = nonempty_text(
         required(context, "proposerSignerId", "context")?,
-        20,
         "context.proposerSignerId",
     )?;
+    if signer != signer.trim().to_lowercase() {
+        return Err(EntityContextJsonError::InvalidValue(
+            "context.proposerSignerId".into(),
+        ));
+    }
     let replica = nonempty_text(
         required(context, "proposerReplicaId", "context")?,
         "context.proposerReplicaId",
@@ -167,11 +177,10 @@ fn validate_context_identity(context: &Map<String, Value>) -> Result<(), EntityC
             "context.proposerReplicaId".into(),
         ));
     }
-    fixed_hex(
-        required(context, "parentFrameHash", "context")?,
-        32,
-        "context.parentFrameHash",
-    )?;
+    let parent = required(context, "parentFrameHash", "context")?;
+    if parent.as_str() != Some("genesis") {
+        fixed_hex(parent, 32, "context.parentFrameHash")?;
+    }
     safe_u64(required(context, "height", "context")?, "context.height")?;
     Ok(())
 }
@@ -979,6 +988,31 @@ mod tests {
             "peerAssertions":[{"entityId":PEER,"online":true}],
             "htlc":{"version":1,"entries":entries,"originated":[]}
         })
+    }
+
+    #[test]
+    fn accepts_genesis_parent_and_canonical_named_signer() {
+        let mut value = context(vec![]);
+        value["proposerSignerId"] = json!("h1-hub");
+        value["proposerReplicaId"] = json!(format!("{ENTITY}:h1-hub"));
+        value["parentFrameHash"] = json!("genesis");
+        decode_entity_deterministic_context(&policy(), &value)
+            .expect("TS permits canonical named signer ids at genesis");
+    }
+
+    #[test]
+    fn rejects_noncanonical_named_signer() {
+        for signer in ["H1-HUB", " h1-hub", "h1-hub "] {
+            let mut value = context(vec![]);
+            value["proposerSignerId"] = json!(signer);
+            value["proposerReplicaId"] = json!(format!("{ENTITY}:{signer}"));
+            assert_eq!(
+                decode_entity_deterministic_context(&policy(), &value),
+                Err(EntityContextJsonError::InvalidValue(
+                    "context.proposerSignerId".into()
+                ))
+            );
+        }
     }
 
     #[test]

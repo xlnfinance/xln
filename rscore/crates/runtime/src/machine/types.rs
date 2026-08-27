@@ -330,6 +330,37 @@ pub struct RuntimeInput {
     pub frame: RuntimeFrameContext,
 }
 
+/// Uncommitted live ingress. Unlike `RuntimeInput`, it cannot carry an Entity
+/// context because the exact FIFO/EntityTx prefix is not known until after
+/// selection. `apply_runtime_live` materializes that context exactly once at
+/// the canonical post-selection boundary.
+#[derive(Clone, Debug)]
+pub struct RuntimeLiveInput {
+    pub runtime_txs: Vec<RuntimeTx>,
+    pub entity_inputs: Vec<RuntimeEntityInput>,
+    pub timestamp: u64,
+    pub finalized_j_height: u64,
+    pub hub_rebalance_has_pending_work: bool,
+}
+
+impl RuntimeLiveInput {
+    pub(crate) fn into_selection_input(self) -> RuntimeInput {
+        RuntimeInput {
+            runtime_txs: self.runtime_txs,
+            entity_inputs: self.entity_inputs,
+            // This value exists only so the FIFO selector owns one clock
+            // shape. It is overwritten before Account/Entity execution.
+            frame: RuntimeFrameContext {
+                timestamp: self.timestamp,
+                finalized_j_height: self.finalized_j_height,
+                hub_rebalance_has_pending_work: self.hub_rebalance_has_pending_work,
+                entity_context: DeterministicContext::hlt_default(),
+                canonical_entity_context: CanonicalValue::Object(Vec::new()),
+            },
+        }
+    }
+}
+
 impl RuntimeInput {
     pub fn empty_frame(
         timestamp: u64,
@@ -763,6 +794,8 @@ pub enum RuntimeMachineError {
     EntityCommandContext(String),
     #[error("RUNTIME_ENTITY_TX_INTERLEAVING_UNSUPPORTED")]
     EntityTxInterleavingUnsupported,
+    #[error("RUNTIME_ENTITY_CONTEXT_MATERIALIZATION:{0}")]
+    EntityContextMaterialization(String),
     #[error("RUNTIME_ENTITY_INPUT_ENCODING:{0}")]
     EntityInputEncoding(String),
     #[error("RUNTIME_ENTITY_HEAD_WIRE_UNFITTABLE:actual={actual}:limit={limit}")]

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -15,18 +16,27 @@ use xln_rscore_entity_kernel::{
     EntityFrameAuthority, EntityHtlcNoteIndex, EntityLeaderState, EntitySingleSigner,
     EntityStateSlice, ResidentEntityConsensusReplica,
 };
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use super::{
     DurableRuntimeProcessor, DurableRuntimeProcessorError, EntityRoute, EntityRouteTable,
-    RuntimeDurableEnvelope, RuntimeSignerLabel,
+    ResidentRuntimeService, RuntimeDurableEnvelope, RuntimeSignerLabel,
 };
 use crate::machine::{
-    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeReplica,
-    RuntimeState,
+    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeLiveInput,
+    RuntimeReplica, RuntimeState,
 };
-use crate::storage::native::{NativeRuntimeStore, NativeStorageConfig};
-use crate::transport::InboundEntityInputs;
-use crate::{canonical_value_from_tagged_json, transport::derive_local_runtime_id};
+use crate::storage::native::{
+    CanonicalRuntimeFrameDraft, NativeRuntimeStore, NativeStorageConfig, build_runtime_frame_commit,
+};
+use crate::transport::{
+    DirectOutboxPublisher, DirectOutboxPublisherConfig, DirectRoute, DirectRouteTable,
+    DirectRuntimeIngress, DirectRuntimeIngressConfig, InboundEntityInputs,
+};
+use crate::{
+    CanonicalEntityInfraMaterializer, canonical_value_from_tagged_json,
+    transport::derive_local_runtime_id,
+};
 
 #[path = "test_ws.rs"]
 mod test_ws;
@@ -245,6 +255,40 @@ fn path() -> std::path::PathBuf {
     ))
 }
 
+fn canonical_number(value: u64) -> CanonicalValue {
+    CanonicalValue::Number(CanonicalNumber::try_from_u64(value).expect("safe fixture number"))
+}
+
+fn live_socket_output(
+    target_runtime_id: &str,
+    target_entity_id: &str,
+    target_signer_id: &str,
+) -> Vec<u8> {
+    crate::encode_storage_payload(&CanonicalValue::Object(vec![
+        (
+            "runtimeId".into(),
+            CanonicalValue::String(target_runtime_id.into()),
+        ),
+        (
+            "entityId".into(),
+            CanonicalValue::String(target_entity_id.into()),
+        ),
+        (
+            "signerId".into(),
+            CanonicalValue::String(target_signer_id.into()),
+        ),
+        ("entityTxs".into(), CanonicalValue::Array(Vec::new())),
+        (
+            "sourceRuntimeFrame".into(),
+            CanonicalValue::Object(vec![
+                ("height".into(), canonical_number(1)),
+                ("timestamp".into(), canonical_number(150)),
+            ]),
+        ),
+    ]))
+    .expect("canonical transport output")
+}
+
 #[test]
 fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
     let path = path();
@@ -324,8 +368,7 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         "sourceRuntimeFrame": {"height": 7, "timestamp": 150},
     }))
     .expect("authenticated transport projection");
-    let frame = frame_context(&replica, 1, 200);
-    let input = InboundEntityInputs {
+    let inbound = InboundEntityInputs {
         peer_runtime_id: remote_runtime_id,
         message_id: "rrs_7_1".into(),
         source_runtime_height: 7,
@@ -333,8 +376,14 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         ingress_timestamp: Some(151),
         entity_tx_count: 0,
         entity_inputs: vec![entity_input],
-    }
-    .into_runtime_input(frame);
+    };
+    let input = RuntimeLiveInput {
+        runtime_txs: Vec::new(),
+        entity_inputs: inbound.entity_inputs,
+        timestamp: 200,
+        finalized_j_height: 0,
+        hub_rebalance_has_pending_work: false,
+    };
     let store = NativeRuntimeStore::open(
         &path,
         NativeStorageConfig {
@@ -350,7 +399,15 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("durable processor");
-    let report = processor.process(input).expect("fsynced Runtime frame");
+    let mut materializer = CanonicalEntityInfraMaterializer::new(json!({
+        "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+        "swapTakerFeeBps": 0,
+        "jurisdictionId": null,
+        "pairPolicies": []
+    }));
+    let report = processor
+        .process_live(input, &mut materializer)
+        .expect("selected context then fsynced Runtime frame");
     assert_eq!(report.durable_height, Some(1));
     assert_eq!(report.outputs_published, 0);
     let recovered = processor
@@ -359,6 +416,121 @@ fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
     assert_eq!(recovered.height, 1);
     drop(processor);
     std::fs::remove_dir_all(path).expect("remove fixture");
+}
+
+#[test]
+fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
+    let target_path = path();
+    let source_path = target_path.with_extension("source");
+    let _ = std::fs::remove_dir_all(&target_path);
+    let _ = std::fs::remove_dir_all(&source_path);
+
+    let replica = processor_replica();
+    let target_runtime_id = replica.durable.runtime_id().to_owned();
+    let target_entity_id = replica.state.entity.entity_id.clone();
+    let target_signer_id = replica.signer_id.clone();
+    let target_store = NativeRuntimeStore::open(&target_path, NativeStorageConfig::default())
+        .expect("target store");
+    let target_processor = DurableRuntimeProcessor::new(
+        replica,
+        target_store,
+        EntityRouteTable::new([]).expect("empty target routes"),
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("target signer"),
+    )
+    .expect("target processor");
+    let ingress = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        SOURCE_SEED,
+        SOURCE_SIGNER,
+    ))
+    .expect("target ingress");
+    let mut service = ResidentRuntimeService::new(
+        target_processor,
+        ingress,
+        Box::new(CanonicalEntityInfraMaterializer::new(json!({
+            "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+            "swapTakerFeeBps": 0,
+            "jurisdictionId": null,
+            "pairPolicies": []
+        }))),
+    )
+    .expect("single live service");
+    assert_eq!(service.runtime_id(), target_runtime_id);
+
+    let source_seed = "rrs-live-source";
+    let source_signer = "source";
+    let mut source_store = NativeRuntimeStore::open(&source_path, NativeStorageConfig::default())
+        .expect("source store");
+    let commit = build_runtime_frame_commit(
+        CanonicalRuntimeFrameDraft {
+            height: 1,
+            timestamp: 150,
+            prev_frame_hash: [0; 32],
+            replica_meta_digest: [0x11; 32],
+            runtime_component_digests: Vec::new(),
+            materialized_state: false,
+            canonical_state: None,
+            runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+            pending_runtime_input: None,
+            runtime_machine_root: None,
+            account_authority_checkpoints: Vec::new(),
+            touched_entities: Vec::new(),
+            touched_accounts: Vec::new(),
+            touched_book_entities: Vec::new(),
+        },
+        crate::storage::native::EntityContextPayloadRows::empty(),
+        vec![live_socket_output(
+            &target_runtime_id,
+            &target_entity_id,
+            &target_signer_id,
+        )],
+        None,
+    )
+    .expect("source frame")
+    .commit;
+    let durable = source_store.append_frame(commit).expect("source fsync");
+    let routes = DirectRouteTable::new([DirectRoute {
+        target_runtime_id: target_runtime_id.clone(),
+        url: format!("ws://{}/ws", service.local_address()),
+    }])
+    .expect("source route");
+    let mut publisher = DirectOutboxPublisher::new(DirectOutboxPublisherConfig::production(
+        source_seed,
+        source_signer,
+        routes,
+    ))
+    .expect("source publisher");
+    publisher
+        .publish_durable(&mut source_store, &durable)
+        .expect("authenticated socket publish");
+
+    let report = service
+        .process_next(std::time::Duration::from_secs(3))
+        .expect("socket to durable reducer")
+        .expect("one durable Runtime frame");
+    assert_eq!(report.durable_height, Some(1));
+    assert_eq!(
+        service
+            .processor()
+            .replica()
+            .expect("live replica")
+            .state
+            .height,
+        1
+    );
+    publisher.close();
+    service.shutdown().expect("target shutdown");
+    drop(service);
+    drop(source_store);
+
+    let mut reopened = NativeRuntimeStore::open(&target_path, NativeStorageConfig::default())
+        .expect("restart target store");
+    let recovery = reopened.recover().expect("recover target frame");
+    assert_eq!(recovery.checkpoint.as_ref().map(|row| row.height), Some(1));
+    drop(reopened);
+    std::fs::remove_dir_all(target_path).expect("remove target fixture");
+    std::fs::remove_dir_all(source_path).expect("remove source fixture");
 }
 
 #[test]

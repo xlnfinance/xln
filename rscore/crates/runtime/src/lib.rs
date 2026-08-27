@@ -52,8 +52,10 @@ pub use entity_checkpoint::{
     EntityCheckpointError, carried_entity_checkpoint_sections, entity_checkpoint_crontab,
 };
 pub use entity_context_json::{
-    EntityContextJsonError, canonical_swap_market_policy, decode_entity_deterministic_context,
-    entity_context_policy_from_checkpoint,
+    CanonicalEntityInfraMaterializer, EntityContextJsonError, EntityInfraMaterializeRequest,
+    EntityInfraMaterializer, FreshEntityContextError, MaterializedEntityInfraContext,
+    canonical_swap_market_policy, decode_entity_deterministic_context,
+    entity_context_policy_from_checkpoint, materialize_fresh_entity_context,
 };
 pub use entity_frame::{EntityFrameError, fit_entity_account_input_prefix};
 pub use j_watcher::{
@@ -64,16 +66,16 @@ pub use leveldb::{RuntimeLevelDbError, RuntimeWalReader, StoredRscoreCheckpoint}
 pub use machine::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
     RuntimeApplyResult, RuntimeEntityInput, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,
-    RuntimeLimits, RuntimeMachineError, RuntimeMempool, RuntimeOutputs, RuntimeReplica,
-    RuntimeState, RuntimeTx, RuntimeWake, ScheduledWakeIndex, SelectedRuntimeFrame, apply_runtime,
-    enqueue_runtime_input, select_runtime_frame,
+    RuntimeLimits, RuntimeLiveInput, RuntimeMachineError, RuntimeMempool, RuntimeOutputs,
+    RuntimeReplica, RuntimeState, RuntimeTx, RuntimeWake, ScheduledWakeIndex, SelectedRuntimeFrame,
+    apply_runtime, apply_runtime_live, enqueue_runtime_input, select_runtime_frame,
 };
 pub use machine_graph::{RuntimeMachineGraphError, rebuild_runtime_machine_graph};
 pub use mesh_seed::{MeshSeedError, derive_mesh_child_seed};
 pub use processor::{
-    DurableRuntimeProcessor, DurableRuntimeProcessorError, RuntimeDurableCommitments,
-    RuntimeDurableEnvelope, RuntimeDurableEnvelopeError, RuntimeOperatorConfig,
-    RuntimeProcessReport, RuntimeSignerLabel,
+    DurableRuntimeProcessor, DurableRuntimeProcessorError, ResidentRuntimeService,
+    ResidentRuntimeServiceError, RuntimeDurableCommitments, RuntimeDurableEnvelope,
+    RuntimeDurableEnvelopeError, RuntimeOperatorConfig, RuntimeProcessReport, RuntimeSignerLabel,
 };
 pub use recording::{
     RecordingPostStateCheck, RuntimeRecordingError, verify_recording_post_state_hashes,

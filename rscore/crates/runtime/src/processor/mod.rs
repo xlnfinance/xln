@@ -7,6 +7,7 @@ mod durable;
 #[path = "projection/entity_checkpoint.rs"]
 mod entity_checkpoint_projection;
 mod envelope;
+mod live;
 mod machine_snapshot;
 mod output;
 mod projection;
@@ -24,5 +25,6 @@ pub use durable::{
     RuntimeProcessReport, RuntimeSignerLabel,
 };
 pub use envelope::{RuntimeDurableEnvelope, RuntimeDurableEnvelopeError, RuntimeOperatorConfig};
+pub use live::{ResidentRuntimeService, ResidentRuntimeServiceError};
 pub use output::{EntityOutputEncodingError, encode_local_entity_outputs};
 pub use routing::{EntityRoute, EntityRouteError, EntityRouteTable};

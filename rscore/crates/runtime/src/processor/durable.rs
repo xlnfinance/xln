@@ -11,7 +11,10 @@ use crate::transport::{
     DirectOutboxPublisher, DirectOutboxPublisherConfig, PublicationReport, RuntimeTransportError,
     derive_local_runtime_id,
 };
-use crate::{RuntimeInput, RuntimeMachineError, RuntimeReplica, apply_runtime};
+use crate::{
+    EntityInfraMaterializer, RuntimeApplyResult, RuntimeInput, RuntimeLiveInput,
+    RuntimeMachineError, RuntimeReplica, apply_runtime, apply_runtime_live,
+};
 
 use super::projection::{DurableProjection, project_durable_frame};
 use super::{EntityRouteTable, RuntimeDurableEnvelopeError};
@@ -215,6 +218,24 @@ impl DurableRuntimeProcessor {
         &mut self,
         input: RuntimeInput,
     ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
+        self.process_with(|replica| apply_runtime(replica, input))
+    }
+
+    /// Canonical production entry point: select the exact FIFO prefix, build
+    /// its Entity infrastructure context, execute R/E/A, fsync and only then
+    /// publish the flat outbox. No candidate/commit/abort API escapes.
+    pub fn process_live(
+        &mut self,
+        input: RuntimeLiveInput,
+        materializer: &mut dyn EntityInfraMaterializer,
+    ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
+        self.process_with(|replica| apply_runtime_live(replica, input, materializer))
+    }
+
+    fn process_with(
+        &mut self,
+        apply: impl FnOnce(RuntimeReplica) -> Result<RuntimeApplyResult, RuntimeMachineError>,
+    ) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {
         self.ensure_healthy()?;
         if let Some(pending) = self.pending_publications.front() {
             return Err(DurableRuntimeProcessorError::PublicationPending(
@@ -226,7 +247,7 @@ impl DurableRuntimeProcessor {
             .take()
             .ok_or(DurableRuntimeProcessorError::Poisoned)?;
         let apply_started = Instant::now();
-        let applied = match apply_runtime(replica, input) {
+        let applied = match apply(replica) {
             Ok(applied) => applied,
             Err(error) => return self.fail_stop(DurableRuntimeProcessorError::Machine(error)),
         };

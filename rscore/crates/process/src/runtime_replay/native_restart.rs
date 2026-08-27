@@ -30,6 +30,7 @@ pub struct NativeRuntimeReady {
 #[derive(Clone, Copy)]
 enum RestartPublication {
     WebSocket,
+    #[cfg(feature = "bench")]
     ValidateOnly,
 }
 
@@ -56,6 +57,7 @@ pub fn restore_native_runtime_processor(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "bench")]
 pub(crate) fn restore_native_replay_processor(
     native_database: impl AsRef<Path>,
     runtime_seed: &str,
@@ -146,6 +148,7 @@ fn restore_native_runtime(
         RestartPublication::WebSocket => {
             DurableRuntimeProcessor::new(restored.replica, store, routes, runtime_seed, signer)
         }
+        #[cfg(feature = "bench")]
         RestartPublication::ValidateOnly => DurableRuntimeProcessor::new_replay_validate_only(
             restored.replica,
             store,

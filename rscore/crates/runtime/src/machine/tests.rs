@@ -14,6 +14,8 @@ use xln_rscore_entity_kernel::{
 };
 use xln_rscore_protocol::CanonicalValue;
 
+use crate::{EntityInfraMaterializeRequest, materialize_fresh_entity_context};
+
 use super::{
     RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeMachineError,
     RuntimeMempool, RuntimeReplica, RuntimeState, RuntimeTx, ScheduledWakeIndex, apply_runtime,
@@ -183,6 +185,31 @@ fn frame_at(
             canonical_entity_context: CanonicalValue::Object(Vec::new()),
         },
     }
+}
+
+#[test]
+fn fresh_context_matches_genesis_lineage_and_named_signer() -> Result<(), RuntimeMachineError> {
+    let runtime = replica(RuntimeLimits::hlt())?;
+    let policy = serde_json::json!({
+        "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+        "swapTakerFeeBps": 0,
+        "jurisdictionId": null,
+        "pairPolicies": []
+    });
+    let context = materialize_fresh_entity_context(
+        &policy,
+        EntityInfraMaterializeRequest {
+            replica: &runtime,
+            account_inputs: &[],
+            local_financial_txs: &[],
+            timestamp: 101,
+            finalized_j_height: 7,
+        },
+    )
+    .expect("canonical non-HTLC context");
+    assert!(context.execution.prepared_htlcs.is_empty());
+    assert!(context.execution.originated_htlcs.is_empty());
+    Ok(())
 }
 
 fn account_ack_entity_input() -> serde_json::Value {

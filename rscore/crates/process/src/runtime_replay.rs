@@ -8,9 +8,7 @@
 mod diff;
 mod evidence;
 mod expectations;
-mod native_restart;
-
-pub use native_restart::{NativeRuntimeReady, restore_native_runtime_processor};
+pub use crate::native_runtime::{NativeRuntimeReady, restore_native_runtime_processor};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -563,7 +561,7 @@ pub fn replay_runtime_wal(
         .durable
         .prev_frame_hash();
     drop(processor);
-    let restarted = native_restart::restore_native_replay_processor(
+    let restarted = crate::native_runtime::restore_native_replay_processor(
         native_database,
         runtime_seed,
         runtime_signer_label,
