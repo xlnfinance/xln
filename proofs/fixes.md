@@ -81,10 +81,11 @@ Touch points:
   от параллельного WIP — не мой долг).
 - Коммит: отдельные атомарные коммиты FX-1/FX-2/FX-3; `wip:` префикс если L1/L2 не зелёные.
 
-## FX-4 — каноническая семантика rollback-duplicate (D7-кандидат, ТРЕБУЕТ РЕШЕНИЯ ВЛАДЕЛЬЦА)
+## FX-4 — условный кандидат rollback-duplicate (D7-кандидат; НЕ ИСПОЛНЯТЬ без reachability proof и решения владельца)
 
-Основание: TLA+ вердикт (proofs/tla/report.md, C3) — оба варианта имеют модельно
-подтверждённый дефект, safety (Agreement/AckDurability) не нарушен ни одним:
+Основание: TLA+ вердикт (`proofs/tla/report.md`, C3) — оба варианта имеют
+дефект в абстрактной модели при действии `DeliverPartial`; safety
+(Agreement/AckDurability) не нарушен ни одним:
 
 - **reject (Rust)**: CollisionTermination НАРУШЕН — после crash-window
   (post-rollback/pre-commit, `DeliverPartial`) каждый ретрансмит победителя
@@ -96,15 +97,42 @@ Touch points:
   его восстановленные tx навсегда вне committed ∪ mempool ∪ removed
   (терминальное нарушение NoLostTx).
 
-Предлагаемая каноническая семантика (чинит оба, сводит движки к одному):
+**Обязательный предварительный гейт:** показать production cutpoint, на котором
+`lastRollbackFrameHash` становится durable, а победный state/frame — нет. Текущие
+TS и Rust пути публикуют весь переход через одну атомарную WAL/LevelDB batch-границу,
+поэтому без такого witness BUG-05 остаётся CONDITIONAL и менять консенсус нельзя.
+
+Если cutpoint доказан, предлагаемая модельная семантика сводит движки к одному:
 1. Ретрансмит победителя с `lastRollbackFrameHash == stateHash`:
    если текущий state уже коммитит этот хеш → re-ack (существующий Duplicate-путь);
 2. если коммит не случился (crash-window) → довести коммит победителя И явно
    инвалидировать устаревший same-height pending с восстановлением его tx в
    mempool — никогда не бросать tx и никогда не молчать без re-ack.
 
-Обязательные артефакты: обновлённая TLA-модель с фикс-семантикой (оба свойства
-зелёные), TS↔Rust векторы: (a) crash-window ретрансмит; (b) зависший pending;
-(c) нормальный duplicate после полного коммита. Storage-аудит вопроса
-достижимости окна: может ли `lastRollbackFrameHash` пережить WAL-границу без
-победного коммита (NEXT B из tla/report.md).
+Обязательные артефакты в таком порядке: (1) C10/storage witness достижимости;
+(2) решение владельца; (3) обновлённая TLA-модель с зелёными свойствами;
+(4) TS↔Rust векторы: crash-window retransmit, orphan pending и normal duplicate
+после полного commit. Если пункт (1) доказывает атомарную недостижимость, FX-4
+закрывается как модельный контрпример вне production, без изменения движков.
+
+## Манифест FX-1/FX-2 внутри смешанного коммита `64b41da54`
+
+`64b41da54` («feat(rscore): add resident runtime parity…», 499 файлов) несёт
+параллельный replay-WIP; FX-1/FX-2-релевантное подмножество (для аудита/выделения):
+
+- `core/account/tx/admission-policy.ts` — `MAX_POLICY_VERSION = 9_007_199_254_740_991`,
+  `OUT_OF_PROFILE_TX_KINDS`, typed `ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE` /
+  `ACCOUNT_TX_KIND_OUT_OF_PROFILE` (новый файл).
+- `core/account/input/peer-rejection.ts` — peer-frame typed rejects
+  `ACCOUNT_PEER_FRAME_TX_POLICY_VERSION_OUT_OF_RANGE` / `..._TX_OUT_OF_PROFILE`.
+- `rscore/crates/engine/src/consensus/frame/hash.rs` — Rust `MAX_POLICY_VERSION`
+  admission-проверка.
+- `rscore/crates/engine/src/consensus/replica.rs`, `error.rs`, `lib.rs` — проводка
+  typed-ошибок.
+- Тесты: `core/__tests__/proofs/fx-admission.test.ts`,
+  `rscore/crates/engine/tests/fx_admission.rs`.
+
+Нарушение собственного гейта fixes.md («отдельные атомарные коммиты FX-1/FX-2/FX-3»);
+FX-3 сел атомарно (`190b778e9`), FX-1/FX-2 — нет. Замечено аудитом 2026-08-28;
+историю не переписывать, выделить это подмножество при необходимости cherry-pick'ом
+на чистом дереве.

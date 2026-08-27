@@ -163,13 +163,14 @@ tx-stranding:
   height RIGHT has already committed — a same-height pending then requires losing
   that commit while the envelope survived, i.e. the WAL-boundary fault.
 
-**Priority call (within the model):** the Rust `reject` behavior is a liveness bug
-candidate with a plausible reachability window (rollback envelope persisted before
-the frame-commit projection, plus a retry). The TS `continue` behavior preserves
-liveness but strands the restored txs in an orphaned pending. Neither is an
-Agreement/AckDurability break; both deserve an owner decision on the canonical
-post-rollback-duplicate semantics (re-ack + explicit pending invalidation would fix
-both).
+**Priority call (within the model):** the Rust `reject` behavior is a conditional
+liveness counterexample and the TS `continue` behavior conditionally strands the
+restored txs. Neither is an Agreement/AckDurability break. A post-run source review
+found rollback+commit inside one pure Account transition and one atomic durable
+Runtime batch in both current engines; no production cutpoint matching
+`DeliverPartial` has been demonstrated. Therefore this is not yet evidence of two
+production bugs: first prove reachability with C10, then request an owner decision
+only if that witness exists.
 
 ## Coverage caveats
 

@@ -1,8 +1,9 @@
 # proofs/ — формальные доказательства и доказательный фаззинг
 
-Pinned SHA: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78` (рабочее дерево содержит незакоммиченные
-изменения параллельных задач; каждый report обязан записать фактический `git rev-parse HEAD`
-и `git status --porcelain | wc -l` на момент запуска).
+Матрица повторно сверена на `b043199fee93e0e50fb12dcc4cc2b00c7e193fc2`.
+Каждый evidence-report обязан указывать собственный immutable SHA, версии инструментов,
+точные команды и bounded-скоуп. Результат из dirty worktree не считается доказательством:
+повторный прогон выполняется из `git archive` заявленного SHA или другого чистого checkout.
 
 ## Правила для всех задач
 
@@ -24,16 +25,32 @@ Pinned SHA: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78` (рабочее дере�
 
 | # | Claim (что утверждаем) | Evidence (артефакт) | Статус |
 |---|---|---|---|
-| C1 | Канонические энкодеры TS↔Rust побайтово эквивалентны на случайных и острых входах | `proofs/fuzz/enc-diff/report.md`: 80,656 кейсов, 0 расхождений. **Аудиты**: c1-repro **92/100** — полное точное воспроизведение на пине dfd45cc7 (таллие байт-в-байт, детерминизм, провенанс-гигиена); обе boundary-находки подтверждены обеими сторонами и закрыты FX-1/FX-2 (policyVersion: TS молча искажал — 2^53 и 2^53+1 в одинаковые байты). c1-adversary **74/100** — метод валиден на общем домене, но: асимметрийное семейство протестировано в одной точке (F2), both-reject для дубликатов — фабрикация тест-драйвера, продакшн-TS-энкодер так не проверяет (F3), шринкер сломан для контентных расхождений (F4), 3/14 TS-only видов (F6), живой корпус 199/200 после FX-1 — метка класса устарела (переименовать). → gap-лист в audits/c1-adversary/report.md | ✅ доказано и воспроизведено; скоуп-гэпы — в волне закрытия |
-| C2 | Горячие (мемоизированные) корни ≡ холодному пересчёту после любой последовательности операций | `core/__tests__/proofs/hot-vs-cold.test.ts` + `proofs/ts/report.md`: 1,200 последовательностей, 229,999 expects, hot==cold везде; F1 — конфликтный j_event_claim валит propose throw'ом вместо typed rejection (admission не валидирует) — на решении владельца | ✅ готово |
-| C3 | Bilateral account consensus: agreement / ACK-durability / no-lost-tx / collision termination / restore=no-op | `proofs/tla/report.md`: 8 TLC-прогонов (337–372k состояний), TLC 1.8.0. **Вердикт**: Agreement/AckDurability НЕ нарушены ни одним вариантом rollback-duplicate; **reject (Rust) — CollisionTermination НАРУШЕН** (перманентный same-height standoff после crash-window ретрансмита при полной fairness); **continue (TS) — OrphanPending НАРУШЕН** (зависший pending вне committed∪mempool∪removed, терминальный NoLostTx); окно недостижимо без crash-действия, достижимо с ним (witness depth-9). Фикс-семантика → `proofs/fixes.md` FX-4, требует решения владельца | ✅ доказательство завершено; найдены 2 бага (по одному на движок) |
-| C4 | Контракты: conservation стоимости, transformer allowances, nonce-монотонность, Hanko-порог | `proofs/solidity/report.md` + `jurisdictions/test/foundry/*` (35 тестов) + Halmos 5/5; багов в целях 1–5 не найдено; 2 пре-существующих падения замороженных тестов на триаже (DebtChunking = тест-vs-O(1)-дизайн, книги сходятся — проверено; BatchBounds gas ≥15M). **Аудиты**: c4-repro 92/100 (воспроизведение полное, провенанс закрыт git-archive пина); c4-adversary **78/100 по скоупу** — HIGH: долговой жизненный цикл недостижим в conservation-модели (споры не генерируются, forgive всегда пуст — верифицировано независимо), transformer только single-index/single-clause без adversarial fault-модей, hash-ladder симметричные окна. → C4-hardening wave-2: **посажено** (`aecfed195`) — долговой цикл генерируется (disputes/enforce/непустое прощение), debt-гост-инварианты, 6 fault-модей fail-closed, асимметричные окна 50/70, repay-действие; 99 pass + halmos 5/5, frozen-core UNCHANGED | ✅ воспроизводимо + скоуп закрыт |
-| C5 | Дельта-математика: flip-инволюция, capacity ≥ 0, transfer-консервация, hold∘release=id, диапазоны полей | `proofs/kani/report.md` (коммит 6ee90c875): **16/16 Kani-харнессов VERIFIED** + мост эквивалентности (2M случайных, 500k walks, 15,987 граничных, **200k кросс-чек против реального движка на ширине 256/128**, 3-мутантная калибровка, корпус закоммичен). Уточнение: conservation in/out безусловен только под production-precondition covered-transfer (клэмп-дефицит снаружи) | ✅ доказано |
-| C6 | Radix: path-independence корня, delete∘insert=id, структурная инъективность (2-байтовые ключи, ≤4 листа) | `proofs/kani/report.md`: **полный перебор вселенной 4-key/2-byte** (24/24 перестановок — один корень; 60/60 канонических порядков; 16×15 пар — различные реальные SHA-256 корни; round-trips; delete∘insert=id уточнён — для отсутствующего ключа). Символьный Kani не сходится на aarch64 (задокументировано: Arc drop-glue × 16-ary × SHA unwind ≥75) — харнессы остались под мощнее раннер. `hash_branch16([])`-недостижимость — 12-сайтовый census | ✅ доказано (bounded exhaustive) |
-| C7 | Все парсеры: no panic/OOM, budget срабатывает раньше аллокации, каноничность принимается только байт-в-байт | `proofs/fuzz/parser/report.md`: 57.6M исполнений, **7 таргетов в 5 крейтах (abi/hanko/process/entity-kernel/protocol)**, 0 паник/OOM в покрытом; F1/F2/O1 на триаже. **Скоуп-уточнение аудита c7-adversary (61/100 как «все», 84/100 в покрытом)**: крейт `runtime` НЕ покрыт (storage_msgpack, account_input_json, restore-декодеры, j_watcher/abi, wal_input); A2 — OOM-амплификация `with_capacity` в storage_msgpack подтверждена и закрыта гардом `require_fits_input` (файл — WIP параллельной задачи, коммит за ней); wave-2: фаззинг runtime-декодеров + усиление ассертов checkpoint_wire/orderbook | ✅ в покрытом скоупе; расширение — wave-2 |
-| C8 | Эквивалентность движков TS↔Rust (машинная) | Существующие parity-дайджесты + тест-векторы в репо | уже есть; задокументировано здесь |
+| C1 | Канонические энкодеры TS↔Rust дают одинаковые байты либо одинаково отвергают вход в сгенерированном домене | `proofs/fuzz/enc-diff/report.md`: 80,656 кейсов, 0 неожиданных расхождений. Committed adversary: 74/100; заявленный c1-repro 92/100 отсутствует в audited SHA. После FX-1 основной корпус требует новую immutable фиксацию: `tx-policy-unsafe-version` теперь `both-reject`; остаются F2–F7 adversary-gap'ы | ⚠️ bounded evidence; missing repro + re-audit после фикса генератора |
+| C2 | Hot-root равен cold-recompute после покрытых последовательностей мутаций | `core/__tests__/proofs/hot-vs-cold.test.ts` + `proofs/ts/report.md`: после hardening 900 последовательностей, 325,793 deep-проверки. Остатки: пустые `lendingIntents`/`subcontracts`/`pendingWithdrawals`/shadow maps, нет delete для pulls, settlement/dispute/external-finality, double rollback и boundary tokenIds. **c2-repro**: исходный отчёт 2026-08-27 утерян до коммита; заменён независимым re-audit `b043199fe` (**91/100**): clean-extraction `78e07d9a9` — 113,872 default / 325,793 deep, точно; гэпы — `proofs/gaps.md` | ⚠️ сильное bounded evidence, не закрыто |
+| C3 | В TLA-модели Agreement/AckDurability сохраняются; rollback-duplicate варианты нарушают разные liveness-свойства при `DeliverPartial` | `proofs/tla/report.md`: 8 TLC-прогонов; один прогон независимо повторён: 337,955 distinct states, без ошибки. Производственная достижимость `DeliverPartial` не доказана: TS и Rust публикуют переход через атомарную WAL-границу | ⚠️ модель завершена; 0/2 аудита и нужен crash-cutpoint |
+| C4 | Контрактные свойства в пределах Foundry/Halmos моделей | `proofs/solidity/report.md`: 99 pass + 2 известные fail; Halmos 5/5 независимо повторён. `jurisdictions/contracts/**`, artifacts/typechain и `frozen-core.json` не менялись относительно frozen baseline. Hardening закрыл A1–A3/A5–A7; A4 закрыт частично, A8–A12 остаются | ⚠️ воспроизводимо, scope не закрыт |
+| C5 | Bounded delta-mirror: арифметика и инварианты 16/8; sampled bridge к production 256/128 | `proofs/kani/report.md`: 16/16 Kani VERIFIED, 2M random + 500k walks + 15,987 boundary + 200k engine cross-check. W256 rejection-ветка фактически не достигается; калибровка — 2 мутанта + 1 coverage sensor, не 3 мутанта | ⚠️ bounded evidence; repro-аудит отсутствует |
+| C6 | Radix path-independence/round-trip/injectivity в конечной 4-key вселенной | `proofs/kani/report.md`: 24 перестановки, 73 канонических subset-порядка, 16×15 ordered root pairs; `hash_branch16([])` — ручной census 11 production call sites, не machine proof | ✅ bounded exhaustive; Kani-repro всё ещё нужен |
+| C7 | Семь parser targets в пяти крейтах не паникуют/OOM в выполненной wave-1 | `proofs/fuzz/parser/report.md`: 57.6M исполнений, 0 panic/OOM в покрытом. Оценка adversary: 61/100 для исходного «все», 84/100 для узкого scope. Runtime-декодеры, checkpoint/orderbook assertions и wave-2 long run не завершены | ⚠️ только wave-1 scope |
+| C8 | Machine-checked TS↔Rust transition equivalence | В репозитории есть parity-дайджесты и тест-векторы, но нет отдельного report с SHA, командами, cardinality, exact transition claim и двумя аудитами | ❌ не доказано как C8 |
 | C9 | Trace refinement: одна последовательность inputs → равные roots/events/effects/outbox после каждого перехода, с авто-shrink | фаза 2 (строится на генераторах задачи 1) | ожидает |
 | C10 | Crash-cutpoint: восстановление после искуственного краха на каждой границе WAL→fsync→projection→outbox ≡ побитово uninterrupted run | фаза 2; расширяет `core/__tests__/storage/recovery/recovery-outbox-equivalence.test.ts` | ожидает |
+
+## Completion gate
+
+- Под `proofs/audits/` закоммичено **8**, а не 9 пакетов (7 исходных + c2-repro re-audit
+  `b043199fe`, заменяющий утерянный до коммита оригинал); заявленный C1-repro отсутствует.
+  Аудиты садились в git позже
+  пинов своих evidence (`9aa5affbe`/`3cbf807da`) — при цитировании сверять SHA отчёта,
+  не только SHA evidence. Отсутствуют: TLA×2 и Kani-repro.
+- Единый реестр требований аудитов (до 100/100) — `proofs/gaps.md`; статус «программа
+  завершена» требует его обнуления или явного owner-решения по каждому OPEN.
+- До статуса «программа завершена» обязательны: полноценный C8, C9/C10, production
+  crash-cutpoint для C3/BUG-05, C7 wave-2 и Kani W256 rejection/repro.
+- Итоговые числа должны быть исправлены в первичных секциях отчётов, а не только в поздних
+  примечаниях, и повторены двумя независимыми аудитами на одном immutable SHA.
+- Релизный пакет требует clean SHA, English-источников, folder-width gate, `bun run check`
+  и итоговой таблицы claim → proof → adversary → repro → residual risk.
 
 ## Точные формулировки кодек-свойств (для задач 1, 6, 7)
 
@@ -60,7 +77,11 @@ Pinned SHA: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78` (рабочее дере�
   idempotent; конфликт с committed/ранним mempool claim — typed reject; proposal удаляет только
   конфликтную строку с typed disposition и продолжает аккаунт, никогда голый `Error`.
   Обязательные векторы TS↔Rust: committed conflict, два конфликта в одном batch, exact
-  duplicate, stale admitted claim после incoming frame. → `proofs/fixes.md` FX-3. **Hardening посажен** (`b8004d939`): все A-гэпы закрыты — 7 коллекций непустые, delete-пути, конфликты генерируются + D4-векторы закреплены, entity-overlay слой, 325,793 expects deep; новые находки BUG-13/BUG-14 (см. bugs.md). Ревизионная переоценка аудита — опционально.
+  duplicate, stale admitted claim после incoming frame. → `proofs/fixes.md` FX-3. **Hardening посажен**
+  (`b8004d939`): 7 коллекций непустые, delete-пути, конфликты и D4-векторы закреплены,
+  entity-overlay слой, 325,793 deep-проверки. Остаточный скоуп перечислен в
+  `proofs/ts/report.md`; replacement C2-repro — `b043199fe`, 91/100.
+  Найдены BUG-13/BUG-14 (см. bugs.md).
 - **D5** Удаление legacy wave/shadow/worker — атомарно после exact RRS replay + crash restore
   TS↔Rust + pay/same-J HLT. Не трогать до гейтов.
 - **D6** Re-ACK — переиспользование сохранённого Hanko без новой ECDSA; current/previous-board
@@ -91,8 +112,9 @@ fixed-width арифметика, overflow, routing и малые reducers.
 ## Известное расхождение для TLA-вариантов (проверено по коду)
 
 `rollback-duplicate` (ретрансмит победившего фрейма после роллбэка):
-TS `core/account/consensus/incoming/collision.ts:196` → `return undefined` (продолжить),
-Rust `engine/src/consensus/incoming/apply.rs` → `rejected("ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE")`.
+TS `core/account/consensus/incoming/collision.ts:198` → `return undefined` (продолжить),
+Rust `engine/src/consensus/incoming/apply.rs:707` → `rejected("ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE")`
+(строки — HEAD `b043199fe`; на TLA-пине `13f51950a` — `:196`/`:652`, см. `proofs/tla/report.md`).
 Модель обязана закодировать оба варианта (`TS_ROLLBACK_DUP == continue | reject`) и проверить,
 ломает ли расхождение Agreement. Окно достижимости узкое (post-rollback/pre-commit + retry);
 если достижимо — Rust-путь может подавлять нужный re-ack → liveness. Это не «расхождение

@@ -11,7 +11,7 @@ Pinned source: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78`.
 Toolchain: Forge 1.7.1, solc 0.8.36 (`via_ir`, optimizer runs 1, Cancun),
 Halmos 0.3.3 with Yices 2.6.4.
 
-## Hardening wave 2 (2026-08-26, closes c4-adversary A1-A7)
+## Hardening wave 2 (2026-08-26, addresses c4-adversary A1-A7; A4 partial)
 
 Scope: test/handler files only; `jurisdictions/contracts/**` untouched
 (`bun run frozen-core:check` → FROZEN CORE UNCHANGED, root hash
@@ -53,7 +53,7 @@ Per-gap closure:
   `Depository.sol:833-858`) and `invariant_debtLifecycleFlowsBalance`
   (created == live + repaid + forgiven). Sensitivity metas fire both ways
   (corrupted chain slot; corrupted ghost).
-- **A4 (MEDIUM, transformer fault modes unused):** all six
+- **A4 (MEDIUM, transformer shapes/fault modes; partially closed):** all six
   TransformerLivenessHarness fault modes now have foundry coverage through
   the real `Account.prepareSettlementDeltas` bytecode — with and without
   allowance, each failing CLOSED with a real revert (never the tolerated
@@ -93,6 +93,16 @@ Per-gap closure:
   tolerance is single-clause/empty-arguments-only (≥2 clauses or a decoder
   site would legitimately emit the selector).
 
+Residual adversary scope after wave 2:
+
+- **A4:** multi-index partial allowances are covered, but multi-clause chaining
+  and invalid allowance arrays (duplicate/out-of-range/oversized) are not.
+- **A8:** no full-int256/sentinel/non-representable-input or allowance-validity
+  Halmos lemma; the five lemmas remain intentionally narrow.
+- **A9–A12:** deep/registered-board Hanko and previous-board dispute grace,
+  historical replay/deep profile, fee-on-transfer measurement, and the
+  `watchtowerCounterDispute` conservation path remain outside this report.
+
 Gates (2026-08-26):
 
 - `forge test --match-path 'test/foundry/*'`: **99 passed, 2 failed** — the
@@ -101,6 +111,12 @@ Gates (2026-08-26):
 - Halmos `--loop 20 --solver-timeout-assertion 120s`: **5/5 lemmas PASS**
   (paths 97 / 1016 / 4 / 17 / 2; drift consistent with prior runs);
   `check_gateZeroConcrete`: expected halmos FAIL (artifact) / EVM PASS.
+
+Independent audit rerun at
+`78e07d9a92b5a022cb55a9a32519f10341148d0e`: **5/5 PASS**, paths
+97 / 948 / 4 / 17 / 2, 10.75s solver time after compilation. Contract source,
+artifacts/typechain, and `frozen-core.json` are unchanged from the frozen
+baseline; the path-count drift does not change the five verdicts.
 
 ## Reproduction
 

@@ -66,12 +66,12 @@ width-parameterized transcription of the production code above:
 
 | Run | Inputs | Result |
 |---|---|---|
-| `equivalence_w16_random` | 2,000,000 random in-range deltas; per delta: validate identity, both perspectives (all 21 fields), transfer/add/release/j-settlement with in-domain and oversized amounts (rejection field names compared), flip involution | PASS, 23.4s |
+| `equivalence_w16_random` | 2,000,000 random in-range deltas; per delta: validation identity over all 21 fields, both perspectives over their 4 projected fields, transfer/add/release/j-settlement with in-domain and oversized amounts (rejection field names compared), flip involution | PASS, 23.4s |
 | `equivalence_w16_random_walks` | 500,000 random walks × 6 chained handlers, state compared after every step | PASS, 3.9s |
 | `equivalence_w16_boundary_battery` | 15,987 structured cases: every ordered field pair × boundary-proximate values × 3 backgrounds | PASS |
 | `transcription_self_consistency_w12/w20` | 200,000 each at widths 12/6 and 20/10 (flip, closed forms, hold round-trip, exact boundary rejections) | PASS |
-| `engine_cross_check_w256_random` | 200,000 deltas at PRODUCTION width 256/128 vs the real `xln-rscore-engine` `Delta::new` (acceptance + rejection field names) and `Delta::perspective` (both sides, 4 fields) | PASS, 2.1s |
-| `mutant_detection_calibrates_harness` | 100,000 iterations; 3 seeded mutants must be detected | PASS (transfer-sign mutant diverged 37,628×, hold-subtraction mutant 82,377×, credit-bound edge reached) |
+| `engine_cross_check_w256_random` | 200,000 accepted deltas at production width 256/128 vs real `xln-rscore-engine` `Delta::new`, plus `Delta::perspective` (both sides, 4 fields); this sample does not reach production-width rejection boundaries | PASS, 2.1s |
+| `mutant_detection_calibrates_harness` | 100,000 iterations; 2 seeded semantic mutants must be detected and 1 credit-bound sensor must be reached | PASS (transfer-sign mutant diverged 37,628×, hold-subtraction mutant 82,377×, credit-bound sensor reached) |
 | `corpus_artifact_replays` | first 4,096 generated inputs committed as `corpus/delta-w16.jsonl` (807 KB), re-verified every run; byte-identical PRNG regeneration | PASS |
 
 Bridge logic: Kani proves the mirror (§2.3); the transcription equals the
@@ -128,8 +128,9 @@ symbolic inputs whose nine fields satisfy the scaled declared ranges**:
 3. **TS `addHold` (`core/account/tx/hold-utils.ts`) checks only `amount ≥ 0`
    — no unsigned upper bound**, while Rust `add_hold` enforces
    `≤ uint_max(256)` after the update. Mirror/proofs follow the Rust
-   (stricter) semantics. Divergence is theoretical at 256-bit scale but is a
-   real parity difference; flagged for the TLA/parity tasks.
+   semantics for the upper bound. Rust additionally accepts some negative
+   operands when the resulting hold remains in range, so the divergence is
+   bidirectional; flagged as BUG-06 for an owner protocol decision.
 4. Cross-width handler comparison at W12/W20 vs the fixed 16-bit mirror is
    meaningless by construction (different declared ranges ⇒ different
    rejection boundaries); neighboring widths therefore check transcription
@@ -150,7 +151,7 @@ complete enumeration of the bounded universe** (not sampling):
 | Test | Coverage | Result |
 |---|---|---|
 | `all_permutations_of_full_set_share_one_root` | all 4! = 24 insertion orders of the 4-leaf set → one root | PASS |
-| `subset_any_order_matches_canonical_root` | all 60 ordered sequences over {4 keys + skip} (every subset ≤ 3 leaves, every order) → canonical subset root | PASS |
+| `subset_any_order_matches_canonical_root` | all 73 generated canonical subset orders over the 4-key universe (including the full set) → canonical subset root | PASS |
 | `insert_delete_round_trip_is_identity` | all 16 subsets × 4 keys: absent key → exact identity; present key → insert is a no-op and delete∘insert equals base-without-key | PASS |
 | `different_leaf_sets_have_different_roots` | all 16×15 ordered subset pairs → pairwise distinct roots; empty mask root == `EMPTY_RADIX_ROOT` | PASS |
 | `universe_leaf_hashes_are_pairwise_distinct` | 6 pairs of real `hash_leaf` outputs distinct | PASS |
@@ -192,7 +193,7 @@ solver headroom.
 
 Census over the pinned tree (review, not a proof):
 
-- All 12 `make_branch` call sites pass ≥ 1 node:
+- All 11 production `make_branch` call sites pass ≥ 1 node:
   `persistent/node.rs:91` (ensure_root_branch, exactly 1), `:181`, `:199`,
   `:239` (put paths, 2 or ≥2), `:291` (delete collapse, ≥2 by match);
   `persistent.rs:862, 963, 1058, 1551` (batch roots, ≥1 — an existing root
@@ -217,8 +218,9 @@ reviewed pinned sources; not a machine-checked claim.
 - B1–B8 known-bug list: **not provided by the owner yet**; this harness set
   is therefore uncalibrated against B1–B8 and must be re-run against them
   when the list arrives.
-- Demonstrated self-calibration: (i) three seeded mutants detected within
-  100k iterations (§2.2); (ii) the concrete suite caught a wrong property
+- Demonstrated self-calibration: (i) two seeded semantic mutants detected and
+  one credit-bound coverage sensor reached within 100k iterations (§2.2);
+  (ii) the concrete suite caught a wrong property
   formulation during development — "delete∘insert == identity" is FALSE for
   an already-present key (digest-equal insert is a no-op, delete then
   removes it); the property was split into absent-key identity and

@@ -9,6 +9,16 @@ not a claim about values or decoders outside the corpus model.
 Pinned run: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78`, Bun 1.3.14,
 Rust/Cargo 1.94.1, `ryu-js` 1.0.3.
 
+Post-FX-1 audit (2026-08-28): the committed corpus vector had been changed to
+`both-reject`, but `generate.ts` still regenerated `tx-policy-unsafe-version`
+as `rust-rejects`. A clean run at
+`78e07d9a92b5a022cb55a9a32519f10341148d0e` therefore failed 1/10,114. The
+generator classification is now corrected; the full 80,656-case suite passes
+on clean `e69630fca77d62f6d495143fd21d18fd95fac72f` plus this proof-only change
+(fresh Rust release build: 11.16s; all five corpus runs: 0 failures). This
+result must be pinned to the next immutable commit before it is release
+evidence.
+
 ## Harness
 
 - `generate.ts` is the deterministic corpus source. It generates tagged
@@ -34,14 +44,16 @@ Two additional 10,000-case runs used seeds `777` and `31337`.
 
 ## Results
 
-The combined runs covered **80,656 cases with zero unexpected differences**.
-The primary 10,114-case run contained:
+The original pinned runs covered **80,656 cases with zero unexpected
+differences**. After FX-1 and the generator correction, a clean independent
+rerun again covered **80,656 cases with zero failures**. Its primary
+10,114-case run contained:
 
 | Class | Cases | Result |
 |---|---:|---|
 | both encode | 9,353 | exact bytes and radix counters match |
-| both reject | 751 | both implementations reject |
-| documented Rust rejection | 7 | known domain boundary |
+| both reject | 752 | both implementations reject |
+| documented Rust rejection | 6 | known domain boundary |
 | documented TS-only kind | 3 | intentionally outside the Rust frame domain |
 
 The separate number run checked 50,093 finite binary64 values and found
@@ -73,8 +85,8 @@ Rust streaming writer against the allocating encoder on every value case.
 ## Documented boundaries
 
 - Rust rejects noncanonical numeric text; TypeScript never emits it.
-- `rebalance_policy.policyVersion > 2^53-1` remains outside the shared domain.
-  The TS admission policy must reject it before Rust-authoritative cutover.
+- `rebalance_policy.policyVersion > 2^53-1` is now a symmetric protocol-boundary
+  rejection in both implementations (FX-1/D2), not a Rust-only corpus class.
 - Lending and `reserve_to_collateral` frame forms are not native Rust frame
   kinds in this corpus.
 - Rust radix leaf values are typed as 32-byte digests, while the lower-level TS

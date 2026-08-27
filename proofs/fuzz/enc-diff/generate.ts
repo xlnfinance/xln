@@ -518,7 +518,10 @@ const seeds = (): Case[] => {
     push(`tx-${kind}-maximal`, 'tx', 'both-encode', { txKind: kind, data: maximal });
   }
   // known asymmetric tx domains
-  push('tx-policy-unsafe-version', 'tx', 'rust-rejects', {
+  // FX-1/D2 made the protocol bound symmetric: both production engines now
+  // reject policyVersion > Number.MAX_SAFE_INTEGER before frame hashing.
+  // Keep the generated corpus authoritative; never hand-edit only the seed.
+  push('tx-policy-unsafe-version', 'tx', 'both-reject', {
     txKind: 'rebalance_policy',
     data: { tokenId: 7, policyVersion: '9007199254740992', baseFee: '1', liquidityFeeBps: '2', gasFee: '3' },
   });

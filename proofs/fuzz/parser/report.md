@@ -1,7 +1,15 @@
 # C7 — structure-aware parser fuzz (cargo-fuzz): report
 
-Claim C7 (`proofs/readme.md`): all Rust decoders — no panic, no OOM, limits fire
-before allocation, canonical acceptance only (byte-in / byte-out).
+Scoped C7 claim (`proofs/readme.md`): the seven targets below, spanning five
+crates (`abi`, `hanko`, `process`, `entity-kernel`, `protocol`), showed no
+panic/OOM in the executed model. This report does **not** cover every Rust
+decoder or the `runtime` crate.
+
+Post-audit scope correction: wave-2 target scaffolding for runtime storage
+msgpack, WAL input, and J-watcher ABI is present in the tree, but its long runs,
+result report, and independent audits were interrupted and are not evidence of
+completion. The checkpoint/orderbook assertion upgrades requested by the
+adversary audit also remain open.
 
 ## Environment / evidence identity
 
@@ -135,7 +143,8 @@ fix decisions belong to the owner.
 
 ### Non-findings (explicitly checked)
 
-- No panic, abort, or OOM in any production decoder across all executions.
+- No panic, abort, or OOM in any of the seven covered decoder targets across
+  the recorded executions.
 - Hanko ABI reader: all offsets/lengths bounded by the buffer before any
   reservation (`size()` rejects values > buffer length); no OOB found.
 - Orderbook page keys: `page_price`'s `key[1] == 0` non-canonical guard is not
