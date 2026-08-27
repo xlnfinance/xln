@@ -1,6 +1,7 @@
 //! Fail-stop Runtime reducer → WAL fsync → WebSocket publication.
 
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
@@ -28,6 +29,17 @@ pub struct RuntimeProcessReport {
     /// It is exposed only after WAL fsync for replay diagnostics and is not a
     /// stored or consensus-authoritative history surface.
     pub account_commits: Vec<crate::AccountCommitEvidence>,
+    /// Non-consensus diagnostics for locating production Runtime cost. These
+    /// durations never enter a frame, checkpoint or replay decision.
+    pub timings: RuntimeProcessTimings,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeProcessTimings {
+    pub apply: Duration,
+    pub projection: Duration,
+    pub storage: Duration,
+    pub publication: Duration,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,10 +225,13 @@ impl DurableRuntimeProcessor {
             .replica
             .take()
             .ok_or(DurableRuntimeProcessorError::Poisoned)?;
+        let apply_started = Instant::now();
         let applied = match apply_runtime(replica, input) {
             Ok(applied) => applied,
             Err(error) => return self.fail_stop(DurableRuntimeProcessorError::Machine(error)),
         };
+        let apply_elapsed = apply_started.elapsed();
+        let projection_started = Instant::now();
         let prior_checkpoint_rows = if applied.outputs.checkpoint.is_some() {
             match self.store.current_checkpoint_path_nodes() {
                 Ok(rows) => Some(rows),
@@ -236,28 +251,47 @@ impl DurableRuntimeProcessor {
         let projected = match projected {
             DurableProjection::Idle(replica) => {
                 self.replica = Some(*replica);
-                return Ok(RuntimeProcessReport::default());
+                return Ok(RuntimeProcessReport {
+                    timings: RuntimeProcessTimings {
+                        apply: apply_elapsed,
+                        projection: projection_started.elapsed(),
+                        ..RuntimeProcessTimings::default()
+                    },
+                    ..RuntimeProcessReport::default()
+                });
             }
             DurableProjection::Frame(projected) => *projected,
         };
-        let durable = match self.store.append_frame(projected.encoded.commit) {
+        let projection_elapsed = projection_started.elapsed();
+        let storage_started = Instant::now();
+        let projected_frame_hash = projected.encoded.frame_hash;
+        let durable = match self.store.append_encoded_frame(projected.encoded) {
             Ok(durable) => durable,
             Err(error) => return self.fail_stop(DurableRuntimeProcessorError::Storage(error)),
         };
+        let storage_elapsed = storage_started.elapsed();
         let mut replica = projected.replica;
-        if let Err(error) = replica.durable.advance_frame_hash(
-            projected.expected_previous_hash,
-            projected.encoded.frame_hash,
-        ) {
+        if let Err(error) = replica
+            .durable
+            .advance_frame_hash(projected.expected_previous_hash, projected_frame_hash)
+        {
             // WAL is already durable. The only safe recovery is reopening it;
             // never expose a replica whose lineage failed to advance.
             return self.fail_stop(DurableRuntimeProcessorError::Envelope(error));
         }
         self.replica = Some(replica);
         self.pending_publications.push_back(durable);
+        let publication_started = Instant::now();
         let mut report = self.publish_pending()?;
+        let publication_elapsed = publication_started.elapsed();
         report.commitments = Some(projected.commitments);
         report.account_commits = projected.account_commits;
+        report.timings = RuntimeProcessTimings {
+            apply: apply_elapsed,
+            projection: projection_elapsed,
+            storage: storage_elapsed,
+            publication: publication_elapsed,
+        };
         Ok(report)
     }
 
@@ -335,6 +369,7 @@ fn process_report(report: PublicationReport) -> RuntimeProcessReport {
         durable_bytes_published: report.durable_bytes,
         commitments: None,
         account_commits: Vec::new(),
+        timings: RuntimeProcessTimings::default(),
     }
 }
 

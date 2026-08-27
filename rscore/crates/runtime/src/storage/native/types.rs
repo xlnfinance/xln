@@ -78,6 +78,10 @@ pub struct DurableRuntimeFrame {
     pub(super) height: u64,
     pub(super) output_count: usize,
     pub(super) output_digest: [u8; 32],
+    /// Exact rows that were just included in the synced write batch. They are
+    /// retained only until immediate publication; recovered resend tokens use
+    /// `None` and read the same rows from LevelDB.
+    pub(super) resident_outputs: Option<Vec<Vec<u8>>>,
 }
 
 impl DurableRuntimeFrame {
@@ -87,6 +91,10 @@ impl DurableRuntimeFrame {
 
     pub fn output_count(&self) -> usize {
         self.output_count
+    }
+
+    pub(crate) fn resident_outputs(&self) -> Option<&[Vec<u8>]> {
+        self.resident_outputs.as_deref()
     }
 }
 

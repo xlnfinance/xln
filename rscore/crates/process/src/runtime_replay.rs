@@ -45,6 +45,10 @@ pub struct RuntimeReplayMetrics {
     pub elapsed: Duration,
     pub setup_elapsed: Duration,
     pub engine_elapsed: Duration,
+    pub apply_elapsed: Duration,
+    pub projection_elapsed: Duration,
+    pub storage_elapsed: Duration,
+    pub publication_elapsed: Duration,
     pub account_roots_compared: u64,
     pub accounts_forest_roots_compared: u64,
     pub entity_roots_compared: u64,
@@ -347,6 +351,10 @@ pub fn replay_runtime_wal(
         elapsed: Duration::ZERO,
         setup_elapsed: setup_started.elapsed(),
         engine_elapsed: Duration::ZERO,
+        apply_elapsed: Duration::ZERO,
+        projection_elapsed: Duration::ZERO,
+        storage_elapsed: Duration::ZERO,
+        publication_elapsed: Duration::ZERO,
         account_roots_compared: 0,
         accounts_forest_roots_compared: 0,
         entity_roots_compared: 0,
@@ -427,6 +435,10 @@ pub fn replay_runtime_wal(
             .process(input)
             .map_err(|error| format!("RUNTIME_REPLAY_PROCESS:{height}:{error}"))?;
         metrics.engine_elapsed += started.elapsed();
+        metrics.apply_elapsed += report.timings.apply;
+        metrics.projection_elapsed += report.timings.projection;
+        metrics.storage_elapsed += report.timings.storage;
+        metrics.publication_elapsed += report.timings.publication;
         if report.durable_height != Some(height) {
             return Err(format!(
                 "RUNTIME_REPLAY_DURABLE_HEIGHT:{height}:{:?}",

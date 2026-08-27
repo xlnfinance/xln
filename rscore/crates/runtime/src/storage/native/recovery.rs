@@ -61,6 +61,7 @@ impl NativeRuntimeStore {
                     height: frame.height,
                     output_count: frame.outputs.len(),
                     output_digest: output_digest(&frame.outputs)?,
+                    resident_outputs: None,
                 })
             })
             .collect()

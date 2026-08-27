@@ -65,10 +65,11 @@ pub struct CanonicalRuntimeFrameDraft {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodedRuntimeFrame {
-    pub frame_hash: Digest,
-    pub post_state_hash: Digest,
-    pub output_digest: Digest,
-    pub commit: RuntimeFrameCommit,
+    pub(crate) frame_hash: Digest,
+    pub(crate) post_state_hash: Digest,
+    pub(crate) output_digest: Digest,
+    pub(crate) validated: ValidatedRuntimeFrame,
+    pub(crate) commit: RuntimeFrameCommit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

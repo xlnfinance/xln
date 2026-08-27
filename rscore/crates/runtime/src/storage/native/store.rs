@@ -1,5 +1,6 @@
 //! Single-writer native Runtime WAL and durable flat outbox.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -11,7 +12,7 @@ use super::codec::{
     decode_head, encode_checkpoint, encode_head, output_digest, validate_storage_row,
 };
 use super::entity_context::frame_entity_context_refs;
-use super::frame::{ValidatedRuntimeFrame, validate_runtime_frame};
+use super::frame::{EncodedRuntimeFrame, ValidatedRuntimeFrame, validate_runtime_frame};
 use super::fsync::{DurableEnv, sync_database_directory};
 use super::keys::{KEY_HEAD, KEY_NATIVE_CHECKPOINT, frame_key, output_key};
 use super::keys::{runtime_machine_leaf_key, runtime_watcher_cursor_key};
@@ -92,6 +93,19 @@ impl NativeRuntimeStore {
         self.persist_frame(prepared)
     }
 
+    /// Hot production seam for the sealed output of the canonical Runtime
+    /// frame builder. It checks durable rows and checkpoint binding without
+    /// decoding and re-encoding bytes that this process just constructed.
+    pub(crate) fn append_encoded_frame(
+        &mut self,
+        encoded: EncodedRuntimeFrame,
+    ) -> Result<DurableRuntimeFrame, NativeStorageError> {
+        self.ensure_healthy()?;
+        validate_encoded_frame(&encoded)?;
+        let prepared = self.prepare_validated_frame(encoded.commit, encoded.validated)?;
+        self.persist_frame(prepared)
+    }
+
     /// Atomically install one already-verified materialized Runtime checkpoint
     /// as the first native durable head. The import is a real WAL boundary:
     /// exact frame, outbox, Entity contexts, path-key state, Runtime-machine
@@ -141,6 +155,19 @@ impl NativeRuntimeStore {
         Ok(outputs)
     }
 
+    /// Use the exact in-memory rows that have just crossed the synced batch.
+    /// A restart has no resident copy and therefore falls back to the durable
+    /// LevelDB rows. Either path is bound to the opaque count+digest token.
+    pub(crate) fn publication_outputs<'a>(
+        &mut self,
+        durable: &'a DurableRuntimeFrame,
+    ) -> Result<Cow<'a, [Vec<u8>]>, NativeStorageError> {
+        if let Some(outputs) = durable.resident_outputs() {
+            return Ok(Cow::Borrowed(outputs));
+        }
+        self.read_durable_outputs(durable).map(Cow::Owned)
+    }
+
     /// Read the exact native Runtime-envelope watcher cursor before enabling
     /// polling. Absence means this `(Entity, chain, depository)` has never
     /// consumed a finalized range in the native store.
@@ -168,6 +195,15 @@ impl NativeRuntimeStore {
         &self,
         frame: RuntimeFrameCommit,
     ) -> Result<PreparedRuntimeFrame, NativeStorageError> {
+        let envelope = validate_frame(&frame)?;
+        self.prepare_validated_frame(frame, envelope)
+    }
+
+    fn prepare_validated_frame(
+        &self,
+        frame: RuntimeFrameCommit,
+        envelope: ValidatedRuntimeFrame,
+    ) -> Result<PreparedRuntimeFrame, NativeStorageError> {
         let expected = self
             .head
             .latest_height
@@ -179,7 +215,6 @@ impl NativeRuntimeStore {
                 actual: frame.height,
             });
         }
-        let envelope = validate_frame(&frame)?;
         self.validate_checkpoint(frame.height, &envelope, frame.checkpoint.as_ref())?;
         let bytes = committed_bytes(&frame)?;
         let mut next_head = self.head.clone();
@@ -311,10 +346,13 @@ impl NativeRuntimeStore {
             return Err(error);
         }
         self.head = prepared.next_head;
+        let height = prepared.frame.height;
+        let output_count = prepared.frame.outputs.len();
         Ok(DurableRuntimeFrame {
-            height: prepared.frame.height,
-            output_count: prepared.frame.outputs.len(),
+            height,
+            output_count,
             output_digest: prepared.digest,
+            resident_outputs: Some(prepared.frame.outputs),
         })
     }
 
@@ -399,6 +437,52 @@ fn validate_frame(frame: &RuntimeFrameCommit) -> Result<ValidatedRuntimeFrame, N
         }
     }
     Ok(validated)
+}
+
+fn validate_encoded_frame(encoded: &EncodedRuntimeFrame) -> Result<(), NativeStorageError> {
+    let frame = &encoded.commit;
+    let validated = &encoded.validated;
+    if frame.frame_bytes.len() > MAX_FRAME_BYTES {
+        return Err(NativeStorageError::FrameBytes(frame.frame_bytes.len()));
+    }
+    if frame.height != validated.height {
+        return Err(NativeStorageError::FrameHeight {
+            key: frame.height,
+            frame: validated.height,
+        });
+    }
+    if encoded.frame_hash != validated.frame_hash
+        || encoded.output_digest != validated.output_digest
+        || frame.outputs.len() != validated.output_count
+    {
+        return Err(NativeStorageError::DurableToken(frame.height));
+    }
+    if frame.outputs.len() > MAX_OUTPUT_ROWS {
+        return Err(NativeStorageError::OutputCount(frame.outputs.len()));
+    }
+    for output in &frame.outputs {
+        if output.len() > MAX_OUTPUT_BYTES {
+            return Err(NativeStorageError::OutputBytes(output.len()));
+        }
+        validate_storage_row(output)?;
+    }
+    if frame.watcher_cursor_changes.len() > 256 {
+        return Err(NativeStorageError::WatcherCursorCount(
+            frame.watcher_cursor_changes.len(),
+        ));
+    }
+    let mut watcher_keys = BTreeSet::new();
+    for row in &frame.watcher_cursor_changes {
+        validate_watcher_cursor_row(row.clone())?;
+        if !watcher_keys.insert(runtime_watcher_cursor_key(
+            &row.entity_id,
+            row.chain_id,
+            &row.depository_address,
+        )) {
+            return Err(NativeStorageError::WatcherCursorDuplicate);
+        }
+    }
+    Ok(())
 }
 
 fn committed_bytes(frame: &RuntimeFrameCommit) -> Result<u64, NativeStorageError> {

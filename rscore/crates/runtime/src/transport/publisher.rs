@@ -178,10 +178,10 @@ impl DirectOutboxPublisher {
         store: &mut NativeRuntimeStore,
         durable: &DurableRuntimeFrame,
     ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
-        let rows = store.read_durable_outputs(durable)?;
+        let rows = store.publication_outputs(durable)?;
         let prepared = prepare_envelopes(
             &self.source_runtime_id,
-            &rows,
+            rows.as_ref(),
             &self.config.local_entity_signers,
             self.config.max_envelope_rows,
             self.config.max_plaintext_bytes,

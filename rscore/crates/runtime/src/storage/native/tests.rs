@@ -481,6 +481,7 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
                 }),
             ))
             .expect("durable checkpoint frame");
+        assert_eq!(first.resident_outputs(), Some(first_outputs.as_slice()));
         assert_eq!(
             store.read_durable_outputs(&first).expect("published"),
             first_outputs,
@@ -530,6 +531,11 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
             .map(DurableRuntimeFrame::height)
             .collect::<Vec<_>>(),
         vec![1, 2]
+    );
+    assert!(
+        resend
+            .iter()
+            .all(|durable| durable.resident_outputs().is_none())
     );
     drop(reopened);
     cleanup(&path);

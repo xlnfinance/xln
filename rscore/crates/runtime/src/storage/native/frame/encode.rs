@@ -10,6 +10,7 @@ use super::rows::{
 };
 use super::types::{
     CanonicalRuntimeFrameDraft, Digest, EncodedRuntimeFrame, RuntimeFrameCodecError,
+    ValidatedRuntimeFrame,
 };
 use super::value::{encode, encode_frame_record, format_hash, number, object, parse_hash, text};
 use super::{FRAME_DOMAIN, MAX_SAFE_INTEGER};
@@ -206,10 +207,25 @@ pub fn build_runtime_frame_commit(
     let frame_hash = compute_frame_hash(&fields)?;
     fields.insert("frameHash".into(), text(format_hash(&frame_hash)));
     let frame_bytes = encode_frame_record(&Value::Object(fields))?;
+    let validated = ValidatedRuntimeFrame {
+        height: draft.height,
+        timestamp: draft.timestamp,
+        prev_frame_hash: draft.prev_frame_hash,
+        frame_hash,
+        materialized_state: draft.materialized_state,
+        output_count: outputs.len(),
+        output_digest: digest,
+        canonical_state_hash: draft
+            .canonical_state
+            .as_ref()
+            .map(|canonical| canonical.state_hash),
+        runtime_machine_root: draft.runtime_machine_root.clone(),
+    };
     Ok(EncodedRuntimeFrame {
         frame_hash,
         post_state_hash,
         output_digest: digest,
+        validated,
         commit: RuntimeFrameCommit {
             height: draft.height,
             frame_bytes,
