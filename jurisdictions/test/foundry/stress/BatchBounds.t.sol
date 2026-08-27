@@ -2,9 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {console} from "forge-std/Test.sol";
-import {XlnFixture} from "./helpers/XlnFixture.sol";
-import {XlnHanko} from "./helpers/XlnHanko.sol";
-import "../../contracts/Types.sol";
+import {XlnFixture} from "../helpers/XlnFixture.sol";
+import {XlnHanko} from "../helpers/XlnHanko.sol";
+import "../../../contracts/Types.sol";
 
 /// @notice Task item 5: does every MAX_BATCH_* cap actually bound *gas*, or only
 ///         array length? These are deliberately not `invariant_*`: gas is a

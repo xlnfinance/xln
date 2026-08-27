@@ -173,7 +173,7 @@ pub(crate) fn logical_account_shard(account_id: AccountId) -> usize {
     (usize::from(bytes[0]) << 4) | usize::from(bytes[1] >> 4)
 }
 
-fn duration_nanos(elapsed: Duration) -> u64 {
+pub(crate) fn duration_nanos(elapsed: Duration) -> u64 {
     elapsed.as_nanos().min(u128::from(u64::MAX)) as u64
 }
 

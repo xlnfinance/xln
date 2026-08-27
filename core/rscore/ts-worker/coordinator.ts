@@ -32,9 +32,10 @@ type PhaseDispatch = Readonly<{
 }>;
 
 /**
- * Prototype coordinator. Its only stateful Account-machine calls are the two
- * public frame phases below; Account replicas cross IPC once at initialization
- * and leave workers only as dirty checkpoint documents when explicitly due.
+ * Resident Account coordinator. Its worker pool lives for the Runtime process:
+ * Account replicas cross IPC once at initialization and leave workers only as
+ * dirty checkpoint documents when explicitly due. Fatal poison terminates the
+ * pool; normal process exit owns shutdown so Bun never races Worker teardown.
  */
 export class TsAccountWorkerCoordinator {
   readonly #clients: TsAccountWorkerClient[];
@@ -43,7 +44,6 @@ export class TsAccountWorkerCoordinator {
   readonly #rootTree: TsAccountShardRootTree;
   readonly #dirtyWorkerIndexes = new Set<number>();
   #fatal: Error | null = null;
-  #closed = false;
   #inFlight = false;
   #openFrameId: string | null = null;
   readonly initialization: TsAccountWorkerInitialization;
@@ -157,7 +157,6 @@ export class TsAccountWorkerCoordinator {
 
   #assertUsable(): void {
     if (this.#fatal) throw this.#fatal;
-    if (this.#closed) throw new Error('TS_ACCOUNT_WORKER_COORDINATOR_CLOSED');
     if (this.#inFlight) throw new Error('TS_ACCOUNT_WORKER_COORDINATOR_CONCURRENT_PHASE');
   }
 
@@ -323,9 +322,4 @@ export class TsAccountWorkerCoordinator {
     return result;
   }
 
-  close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    for (const client of this.#clients) client.terminate();
-  }
 }

@@ -1,4 +1,5 @@
 import { parseWorkerPhaseResult, type WorkerRequestResult } from './coordinator-client';
+import { getPerfMs } from '../../support/time';
 import { TsAccountShardRootTree, tsAccountWorkerForShard } from './sharding';
 import type {
   TsAccountWorkerBatchResult,
@@ -49,6 +50,8 @@ export const aggregateWorkerPhaseResults = (
         checkpointAccounts.set(change.accountId, change.account);
       }
     }
+    const workMs = result.elapsedUs / 1_000;
+    const roundTripMs = response.roundTripMs;
     metrics.push({
       workerIndex,
       operations: result.operations,
@@ -56,11 +59,17 @@ export const aggregateWorkerPhaseResults = (
       heapUsedBytes: result.heapUsedBytes,
       requestBytes: response.requestBytes,
       responseBytes: response.responseBytes,
+      encodeMs: response.encodeMs,
+      decodeMs: response.decodeMs,
+      roundTripMs,
+      workMs,
+      waitMs: Math.max(0, roundTripMs - workMs),
     });
   }
   if (effects.length !== options.expectedEffects) {
     throw new Error(`TS_ACCOUNT_WORKER_EFFECT_COUNT:${effects.length}:${options.expectedEffects}`);
   }
+  const foldStart = getPerfMs();
   const changedSubroots: TsAccountWorkerSubroot[] = [...subroots]
     .sort(([left], [right]) => left - right)
     .map(([shardId, root]) => ({ shardId, root }));
@@ -81,6 +90,12 @@ export const aggregateWorkerPhaseResults = (
     ipc: {
       requestBytes: metrics.reduce((sum, metric) => sum + metric.requestBytes, 0),
       responseBytes: metrics.reduce((sum, metric) => sum + metric.responseBytes, 0),
+    },
+    timings: {
+      encodeMs: metrics.reduce((sum, metric) => sum + metric.encodeMs, 0),
+      decodeMs: metrics.reduce((sum, metric) => sum + metric.decodeMs, 0),
+      foldMs: getPerfMs() - foldStart,
+      dispatchMs: metrics.reduce((max, metric) => Math.max(max, metric.roundTripMs), 0),
     },
   };
 };

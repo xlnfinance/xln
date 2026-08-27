@@ -336,6 +336,12 @@ impl ResidentConsensusEngine {
         self.forest.metrics()
     }
 
+    /// Accumulated wall-clock observability per resident phase kind.
+    /// Timing-only: never influences committed roots or replay parity.
+    pub fn account_phase_metrics(&self) -> Vec<crate::AccountPhaseMetric> {
+        self.forest.phase_metrics()
+    }
+
     /// Exact resident worklist before Entity adds same-round transactions.
     /// Values stay inside their owner workers; only matching Account ids cross
     /// back to the coordinator.

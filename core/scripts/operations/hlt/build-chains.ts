@@ -3,8 +3,19 @@
 /** HLT phase 1: run real sovereign nodes once, then seal H1 checkpoint + WAL tail. */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
+import { deriveMeshChildSeed } from '../../../orchestrator/mesh/mesh-seeds';
+import { deriveManagedEntityIdentity } from '../../../orchestrator/daemon-control';
+import { safeStringify } from '../../../protocol/serialization';
+import { laneRuntimePort } from './lanes/lane-runtimes';
+import { deriveLoadLaneSeeds } from './lanes/worker-lanes';
+import {
+  parseHltEngineSelection,
+  spawnRustH1,
+  deriveUserNodeRoute,
+} from './rust/rust-h1';
 
 const workDirRaw = String(process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || '').trim();
 if (!workDirRaw) throw new Error('HLT_BUILD_WORK_DIR_MISSING');
@@ -60,4 +71,70 @@ const builder = spawnSync(process.execPath, [
   ...(authorityEvidence ? ['--require-complete-authority-evidence'] : []),
 ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit' });
 if (builder.status !== 0) throw new Error(`HLT_BUILD_RECORDING_FAILED:${String(builder.status)}`);
-console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
+
+const selection = parseHltEngineSelection(process.env);
+if (selection.engine === 'rust') {
+  // One-time offline TS DB import: seal the signed snapshot into the frozen
+  // path-keyed native base, then boot the real rscore-runtime as H1 from it.
+  const base = spawnSync(process.execPath, [
+    'core/scripts/operations/hlt/replay/commands/prepare-native-base.ts',
+    '--work-dir', workDir,
+    '--snapshot', snapshotPath,
+  ], { cwd: process.cwd(), env: buildEnv, stdio: 'inherit' });
+  if (base.status !== 0) throw new Error(`HLT_RUST_H1_NATIVE_BASE_FAILED:${String(base.status)}`);
+  const bindHost = String(process.env['XLN_HLT_RUST_H1_BIND_HOST'] || '127.0.0.1');
+  const bindPort = Number(process.env['XLN_HLT_RUST_H1_BIND_PORT'] || '0');
+  const meshRootSeed = readFileSync(join(workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
+  const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
+  // Canonical identity: identical derivation to prepare-native-base, so the
+  // transport encryption key and signer ids match the sealed native state.
+  const identity = deriveManagedEntityIdentity({
+    name: 'H1',
+    seed: runtimeSeed,
+    signerLabel: 'h1-hub',
+  });
+  // H1 outbound route table over the real HLT user topology: canonical load
+  // lane seeds/identities (`production-swap-load:lane:N`) and the lane port
+  // formula. User Runtimes dial H1 inbound; H1 pushes Account outputs/ACKs
+  // back to them over exactly these routes. No scaffolding: every row is
+  // derived from the mesh root seed and validated before H1 starts.
+  const lanePortBase = Number(process.env['XLN_HLT_RUST_H1_LANE_PORT_BASE'] || '20020');
+  const laneCount = Math.max(1, users);
+  const laneSeeds = deriveLoadLaneSeeds(meshRootSeed, laneCount, 'taker', 0);
+  const h1Routes = laneSeeds.map((seed, index) => deriveUserNodeRoute({
+    name: `Load Taker ${String(index + 1).padStart(4, '0')}`,
+    runtimeSeed: seed,
+    signerLabel: 'owner',
+    listenHost: bindHost,
+    listenPort: laneRuntimePort(lanePortBase, index),
+  }));
+  const handle = await spawnRustH1({
+    workDir,
+    runtimeSeed,
+    routes: h1Routes,
+    bindHost,
+    bindPort,
+    runtimeSignerLabel: 'h1-hub',
+    entitySignerLabel: 'h1-hub',
+    offlineTsImport: true,
+  });
+  const result = {
+    engine: selection.engine,
+    profile: selection.profile,
+    runtimeId: handle.ready.runtimeId,
+    listen: handle.ready.listen,
+    workers: handle.ready.workers,
+    pid: handle.pid,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    routes: h1Routes,
+    // TS user nodes dial H1 with this URL through the same encrypted direct
+    // socket protocol they use for a TS H1.
+    dialUrl: `ws://${handle.ready.listen}`,
+  };
+  await handle.stop();
+  writeFileSync(join(workDir, 'hlt-rust-h1.json'), `${safeStringify(result)}\n`);
+  console.log(`HLT_BUILD_CHAINS_OK_RUST_H1 recording=${output} listen=${handle.ready.listen} runtimeId=${handle.ready.runtimeId}`);
+} else {
+  console.log(`HLT_BUILD_CHAINS_OK recording=${output}`);
+}

@@ -1,4 +1,5 @@
 import { decodeTsAccountWorkerTransfer, encodeTsAccountWorkerTransfer } from './codec';
+import { getPerfMs } from '../../support/time';
 import type {
   TsAccountWorkerInitResult,
   TsAccountWorkerPhaseResult,
@@ -10,12 +11,17 @@ export type WorkerRequestResult = Readonly<{
   value: unknown;
   requestBytes: number;
   responseBytes: number;
+  encodeMs: number;
+  decodeMs: number;
+  roundTripMs: number;
 }>;
 
 type PendingRequest = Readonly<{
   resolve(value: WorkerRequestResult): void;
   reject(error: Error): void;
   requestBytes: number;
+  encodeMs: number;
+  sentAt: number;
 }>;
 
 export const asWorkerError = (error: unknown): Error =>
@@ -61,10 +67,16 @@ export class TsAccountWorkerClient {
       return;
     }
     try {
+      const decodeStart = getPerfMs();
+      const value = decodeTsAccountWorkerTransfer(response.payload);
+      const decodeMs = getPerfMs() - decodeStart;
       pending.resolve({
-        value: decodeTsAccountWorkerTransfer(response.payload),
+        value,
         requestBytes: pending.requestBytes,
         responseBytes: response.payload.byteLength,
+        encodeMs: pending.encodeMs,
+        decodeMs,
+        roundTripMs: getPerfMs() - pending.sentAt,
       });
     } catch (error) {
       pending.reject(new Error(
@@ -87,10 +99,13 @@ export class TsAccountWorkerClient {
     }
     const requestId = this.#nextRequestId;
     this.#nextRequestId += 1;
+    const encodeStart = getPerfMs();
     const payload = encodeTsAccountWorkerTransfer(value);
+    const encodeMs = getPerfMs() - encodeStart;
     const request: TsAccountWorkerRequestEnvelope = { requestId, kind, payload };
+    const sentAt = getPerfMs();
     return new Promise((resolve, reject) => {
-      this.#pending.set(requestId, { resolve, reject, requestBytes: payload.byteLength });
+      this.#pending.set(requestId, { resolve, reject, requestBytes: payload.byteLength, encodeMs, sentAt });
       try {
         this.#worker.postMessage(request, [payload]);
       } catch (error) {

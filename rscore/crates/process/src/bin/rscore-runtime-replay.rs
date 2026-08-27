@@ -184,6 +184,41 @@ fn main() -> Result<(), String> {
         &diff_path,
     )?;
     let seconds = metrics.elapsed.as_secs_f64().max(0.000_001);
+    // Serialized once after replay; timing-only observability that never
+    // touches committed state. Mean worker times are derived from sums.
+    let phase_metrics = metrics
+        .account_phase_metrics
+        .iter()
+        .map(|metric| {
+            let kind = match metric.kind {
+                xln_rscore_batch::AccountPhaseKind::Inbound => "inbound",
+                xln_rscore_batch::AccountPhaseKind::OutboundReset => "outboundReset",
+                xln_rscore_batch::AccountPhaseKind::OutboundContinue => "outboundContinue",
+            };
+            let samples = metric.worker_samples.max(1);
+            serde_json::json!({
+                "kind": kind,
+                "invocations": metric.invocations,
+                "coordinatorWallMs": metric.coordinator_wall_nanos as f64 / 1e6,
+                "workerSamples": metric.worker_samples,
+                "workerWorkMeanMs": metric.worker_work_sum_nanos as f64 / samples as f64 / 1e6,
+                "workerWorkMaxMs": metric.worker_work_max_nanos as f64 / 1e6,
+                "workerBarrierWaitMeanMs":
+                    metric.worker_barrier_wait_sum_nanos as f64 / samples as f64 / 1e6,
+                "workerBarrierWaitMaxMs": metric.worker_barrier_wait_max_nanos as f64 / 1e6,
+                "coordinatorFoldMs": metric.coordinator_fold_nanos as f64 / 1e6,
+                "touchedRows": metric.touched_rows,
+                "touchedShards": metric.touched_shards,
+                "workersWithWork": metric.workers_with_work,
+                "valueClones": metric.value_clones,
+                "candidateBaseReads": metric.candidate_base_reads,
+                "continuationRounds": metric.continuation_rounds,
+                "fallbackRounds": metric.fallback_rounds,
+            })
+        })
+        .collect::<Vec<_>>();
+    let phase_metrics = serde_json::to_string(&phase_metrics)
+        .map_err(|error| format!("RUNTIME_REPLAY_PHASE_METRICS_JSON:{error}"))?;
     println!(
         concat!(
             "{{\"benchmark\":\"rscore-runtime-replay\",\"mode\":\"native-exact\",",
@@ -197,7 +232,8 @@ fn main() -> Result<(), String> {
             "\"entityRootsCompared\":{},\"eventDigestsCompared\":{},",
             "\"effectDigestsCompared\":{},",
             "\"outboxDigestsCompared\":{},\"postStateHashesCompared\":{},",
-            "\"runtimeRootsCompared\":{},\"accountsRoot\":\"{}\"}}"
+            "\"runtimeRootsCompared\":{},\"accountsRoot\":\"{}\",",
+            "\"accountPhaseMetrics\":{}}}"
         ),
         workers,
         metrics.frames,
@@ -223,6 +259,7 @@ fn main() -> Result<(), String> {
         metrics.post_state_hashes_compared,
         metrics.runtime_roots_compared,
         metrics.accounts_root,
+        phase_metrics,
     );
     Ok(())
 }

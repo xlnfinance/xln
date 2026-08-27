@@ -58,6 +58,9 @@ pub struct RuntimeReplayMetrics {
     pub post_state_hashes_compared: u64,
     pub runtime_roots_compared: u64,
     pub accounts_root: String,
+    /// Resident Account sharding observability per phase kind. Timing-only:
+    /// serialized once after replay and never part of committed state.
+    pub account_phase_metrics: Vec<xln_rscore_batch::AccountPhaseMetric>,
 }
 
 fn object<'a>(value: &'a Value, path: &str) -> Result<&'a Map<String, Value>, String> {
@@ -377,6 +380,7 @@ pub fn replay_runtime_wal(
         // explicit canonical Runtime root in this below-cadence replay range.
         runtime_roots_compared: 1,
         accounts_root: hex(&initial_accounts_root),
+        account_phase_metrics: Vec::new(),
     };
 
     let replay_started = Instant::now();
@@ -558,6 +562,11 @@ pub fn replay_runtime_wal(
         metrics.accounts_root = hex(&commitments.accounts_root);
     }
     metrics.elapsed = replay_started.elapsed();
+    metrics.account_phase_metrics = processor
+        .replica()
+        .map_err(|error| format!("RUNTIME_REPLAY_PHASE_METRICS:{error}"))?
+        .accounts
+        .account_phase_metrics();
 
     let expected_frames = to - from + 1;
     if metrics.frames != expected_frames

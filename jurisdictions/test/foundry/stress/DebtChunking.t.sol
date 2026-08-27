@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import {XlnFixture} from "./helpers/XlnFixture.sol";
-import {XlnHanko} from "./helpers/XlnHanko.sol";
-import "../../contracts/Types.sol";
+import {XlnFixture} from "../helpers/XlnFixture.sol";
+import {XlnHanko} from "../helpers/XlnHanko.sol";
+import "../../../contracts/Types.sol";
 
 /// @notice Task item 3, chunking half. A stateful fuzzer will not stack 33+
 ///         debts on one (entity, token) by chance, so the FIFO cursor across

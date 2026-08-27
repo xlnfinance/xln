@@ -86,6 +86,13 @@ export type TsAccountWorkerPhaseMetrics = Readonly<{
   heapUsedBytes: number;
   requestBytes: number;
   responseBytes: number;
+  /** Coordinator-side IPC telemetry for this worker's round trip. */
+  encodeMs: number;
+  decodeMs: number;
+  roundTripMs: number;
+  /** Worker busy time; wait is queue/IPC idle inside the round trip. */
+  workMs: number;
+  waitMs: number;
 }>;
 
 export type TsAccountWorkerBatchResult = Readonly<{
@@ -97,6 +104,17 @@ export type TsAccountWorkerBatchResult = Readonly<{
   ipc: Readonly<{
     requestBytes: number;
     responseBytes: number;
+  }>;
+  /** Coordinator-side phase cost split, measured — never extrapolated. */
+  timings: Readonly<{
+    /** Msgpack encode of outbound request payloads. */
+    encodeMs: number;
+    /** Msgpack decode of inbound worker responses. */
+    decodeMs: number;
+    /** Radix fold + ordinal restore + aggregate of worker results. */
+    foldMs: number;
+    /** Wall clock from first dispatch to last worker response. */
+    dispatchMs: number;
   }>;
 }>;
 

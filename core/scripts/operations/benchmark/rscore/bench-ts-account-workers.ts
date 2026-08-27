@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { availableParallelism } from 'node:os';
 import { computeAccountStateRoot } from '../../../../account/commitment/state-root';
 import { TsAccountWorkerCoordinator } from '../../../../rscore/ts-worker';
 import type { AccountReplica, AccountTx } from '../../../../types/account';
@@ -41,10 +42,24 @@ type BenchResult = Readonly<{
   rssBytes: number;
   maxRssBytes: number;
   workerHeapBytes: number;
+  cpuUserMs: number;
+  cpuSystemMs: number;
+  cpuCores: number;
+  cpuBusyRatio: number;
   initRequestBytes: number;
   normalRequestBytes: number;
   normalResponseBytes: number;
   checkpointResponseBytes: number;
+  coordinatorTimings: Readonly<{ encodeMs: number; decodeMs: number; foldMs: number; dispatchMs: number }>;
+  perWorker: readonly Readonly<{
+    workerIndex: number;
+    operations: number;
+    workMs: number;
+    waitMs: number;
+    roundTripMs: number;
+    requestBytes: number;
+    responseBytes: number;
+  }>[];
 }>;
 
 const argument = (name: string): string | undefined => {
@@ -170,8 +185,7 @@ const runChild = async (): Promise<void> => {
     accounts,
     jReplicas: new Map([[BENCH_JURISDICTION.name, BENCH_JURISDICTION]]),
   });
-  try {
-    const emptyInbound = await coordinator.applyAccountInputs({
+  const emptyInbound = await coordinator.applyAccountInputs({
       frameId: 'bench-frame-1',
       entityTimestamp: 1_000,
       finalizedJHeight: 0,
@@ -180,6 +194,7 @@ const runChild = async (): Promise<void> => {
     if (emptyInbound.workers.length !== 0 || emptyInbound.ipc.requestBytes !== 0) {
       throw new Error(`TS_ACCOUNT_WORKER_BENCH_EMPTY_INBOUND_DISPATCH:${safeStringify(emptyInbound.workers)}`);
     }
+    const cpuStart = process.cpuUsage();
     const startedAt = performance.now();
     const outbound = await coordinator.proposeAccountFrames({
       frameId: 'bench-frame-1',
@@ -190,6 +205,7 @@ const runChild = async (): Promise<void> => {
       checkpointDue: false,
     });
     const elapsedMs = performance.now() - startedAt;
+    const cpu = process.cpuUsage(cpuStart);
     assertCanonicalResults(outbound.effects, accountCount);
     const effectsDigest = computeIntegrityDigest(encodeCanonicalConsensusBytes(outbound.effects));
 
@@ -240,15 +256,31 @@ const runChild = async (): Promise<void> => {
       rssBytes: usage.rss,
       maxRssBytes: process.platform === 'darwin' ? maxRss : maxRss * 1_024,
       workerHeapBytes: Math.max(...outbound.workers.map(worker => worker.heapUsedBytes)),
+      cpuUserMs: Math.round(cpu.user / 1000),
+      cpuSystemMs: Math.round(cpu.system / 1000),
+      cpuCores: availableParallelism(),
+      cpuBusyRatio: Math.round(((cpu.user + cpu.system) / 1000 / elapsedMs) * 100) / 100,
       initRequestBytes: coordinator.initialization.requestBytes,
       normalRequestBytes: outbound.ipc.requestBytes,
       normalResponseBytes: outbound.ipc.responseBytes,
       checkpointResponseBytes: checkpoint.ipc.responseBytes,
+      coordinatorTimings: {
+        encodeMs: Math.round(outbound.timings.encodeMs * 100) / 100,
+        decodeMs: Math.round(outbound.timings.decodeMs * 100) / 100,
+        foldMs: Math.round(outbound.timings.foldMs * 100) / 100,
+        dispatchMs: Math.round(outbound.timings.dispatchMs * 100) / 100,
+      },
+      perWorker: outbound.workers.map(worker => ({
+        workerIndex: worker.workerIndex,
+        operations: worker.operations,
+        workMs: Math.round(worker.workMs * 100) / 100,
+        waitMs: Math.round(worker.waitMs * 100) / 100,
+        roundTripMs: Math.round(worker.roundTripMs * 100) / 100,
+        requestBytes: worker.requestBytes,
+        responseBytes: worker.responseBytes,
+      })),
     };
-    console.log(`${RESULT_PREFIX}${safeStringify(result)}`);
-  } finally {
-    coordinator.close();
-  }
+  console.log(`${RESULT_PREFIX}${safeStringify(result)}`);
 };
 
 const parseChildResult = (stdout: string): BenchResult => {
@@ -307,8 +339,11 @@ const runCoordinator = async (): Promise<void> => {
     'TS_ACCOUNT_WORKER_BENCH_ACCOUNTS',
   );
   const startedAt = performance.now();
+  const workersList = (process.env['XLN_TS_WORKER_BENCH_WORKERS'] ?? '1,2,4')
+    .split(',')
+    .map(value => positiveInteger(value, 1, 'TS_ACCOUNT_WORKER_BENCH_WORKERS'));
   const results: BenchResult[] = [];
-  for (const workers of [1, 2, 4]) results.push(await runIsolated(workers, accounts));
+  for (const workers of workersList) results.push(await runIsolated(workers, accounts));
   const baseline = results[0];
   if (baseline === undefined) throw new Error('TS_ACCOUNT_WORKER_BENCH_BASELINE_MISSING');
   if (results.some(result => (
@@ -316,7 +351,7 @@ const runCoordinator = async (): Promise<void> => {
   ))) {
     throw new Error(`TS_ACCOUNT_WORKER_BENCH_PARITY_DIVERGENCE:${safeStringify(results)}`);
   }
-  console.log('workers  payment proposals/s  speedup  worker  coord  RSS MiB  normal IPC MB  checkpoint MB');
+  console.log('workers  payment proposals/s  speedup  worker  coord  RSS MiB  normal IPC MB  checkpoint MB  cpu_busy  encode  decode   fold  dispatch');
   for (const result of results) {
     const speedup = result.paymentProposalsPerSecond / baseline.paymentProposalsPerSecond;
     const normalIpc = result.normalRequestBytes + result.normalResponseBytes;
@@ -328,14 +363,27 @@ const runCoordinator = async (): Promise<void> => {
       + `${result.coordinatorOverheadMs.toFixed(2).padStart(5)}ms  `
       + `${mib(result.rssBytes).padStart(7)}  `
       + `${mib(normalIpc).padStart(13)}  `
-      + `${mib(result.checkpointResponseBytes).padStart(13)}`,
+      + `${mib(result.checkpointResponseBytes).padStart(13)}  `
+      + `${String(result.cpuBusyRatio).padStart(8)}  `
+      + `${result.coordinatorTimings.encodeMs.toFixed(2).padStart(6)}ms  `
+      + `${result.coordinatorTimings.decodeMs.toFixed(2).padStart(6)}ms  `
+      + `${result.coordinatorTimings.foldMs.toFixed(2).padStart(6)}ms  `
+      + `${result.coordinatorTimings.dispatchMs.toFixed(2).padStart(7)}ms`,
     );
+    for (const worker of result.perWorker) {
+      console.log(
+        `  w${String(worker.workerIndex).padStart(2)}  ops=${String(worker.operations).padStart(4)}  `
+        + `work=${worker.workMs.toFixed(2).padStart(7)}ms  wait=${worker.waitMs.toFixed(2).padStart(7)}ms  `
+        + `rt=${worker.roundTripMs.toFixed(2).padStart(7)}ms  `
+        + `tx=${mib(worker.requestBytes + worker.responseBytes).padStart(6)}MB`,
+      );
+    }
   }
   const totalMs = performance.now() - startedAt;
   if (totalMs > 20_000) throw new Error(`TS_ACCOUNT_WORKER_BENCH_TOTAL_TIMEOUT:${Math.round(totalMs)}`);
   console.log(
     `shadowRoot=${baseline.shadowRoot} effects=${baseline.effectsDigest} `
-    + `accounts=${accounts} totalMs=${totalMs.toFixed(2)}`,
+    + `accounts=${accounts} totalMs=${totalMs.toFixed(2)} cpuCores=${String(baseline.cpuCores)}`,
   );
   console.log(`${RESULT_PREFIX}${safeStringify(results)}`);
 };

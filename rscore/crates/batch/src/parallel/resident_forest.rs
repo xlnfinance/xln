@@ -19,7 +19,7 @@ use xln_rscore_protocol::{
     PersistentRadixShardCoordinator, PersistentRadixShardDescriptor, PersistentRadixShardOverlay,
 };
 
-use super::{AccountShardPlan, ResidentWorkerPool, logical_account_shard};
+use super::{AccountShardPlan, ResidentWorkerPool, duration_nanos, logical_account_shard};
 use crate::{AccountId, BatchError};
 
 #[derive(Clone)]
@@ -75,6 +75,79 @@ struct WorkerMutationReply<R> {
     changed: Vec<AccountId>,
     descriptors: Vec<PersistentRadixShardDescriptor>,
     metrics: Vec<ShardPhaseMetric>,
+    /// Wall time the worker spent on this phase before the shared barrier.
+    work_wall: Duration,
+    /// Wall time the worker spent blocked at the phase barrier behind the
+    /// slowest worker. Zero for the straggler itself.
+    barrier_wait: Duration,
+    /// Resident shard value clones performed during head reconciliation.
+    value_clones: u64,
+}
+
+/// Stable observability label for one resident phase. Never participates in
+/// committed state or deterministic output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountPhaseKind {
+    Inbound,
+    OutboundReset,
+    OutboundContinue,
+}
+
+impl AccountPhaseKind {
+    fn index(self) -> usize {
+        match self {
+            AccountPhaseKind::Inbound => 0,
+            AccountPhaseKind::OutboundReset => 1,
+            AccountPhaseKind::OutboundContinue => 2,
+        }
+    }
+}
+
+/// Wall-clock observability for one resident phase kind, accumulated over the
+/// whole replay and serialized once after it. Duration sums are observability
+/// only: worker replies keep their deterministic positional order, so these
+/// counters can never change committed roots or replay parity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountPhaseMetric {
+    pub kind: AccountPhaseKind,
+    pub invocations: u64,
+    pub coordinator_wall_nanos: u64,
+    pub worker_samples: u64,
+    pub worker_work_sum_nanos: u64,
+    pub worker_work_max_nanos: u64,
+    pub worker_barrier_wait_sum_nanos: u64,
+    pub worker_barrier_wait_max_nanos: u64,
+    pub coordinator_fold_nanos: u64,
+    pub touched_rows: u64,
+    pub touched_shards: u64,
+    pub workers_with_work: u64,
+    pub value_clones: u64,
+    pub candidate_base_reads: u64,
+    pub continuation_rounds: u64,
+    pub fallback_rounds: u64,
+}
+
+impl AccountPhaseMetric {
+    fn new(kind: AccountPhaseKind) -> Self {
+        Self {
+            kind,
+            invocations: 0,
+            coordinator_wall_nanos: 0,
+            worker_samples: 0,
+            worker_work_sum_nanos: 0,
+            worker_work_max_nanos: 0,
+            worker_barrier_wait_sum_nanos: 0,
+            worker_barrier_wait_max_nanos: 0,
+            coordinator_fold_nanos: 0,
+            touched_rows: 0,
+            touched_shards: 0,
+            workers_with_work: 0,
+            value_clones: 0,
+            candidate_base_reads: 0,
+            continuation_rounds: 0,
+            fallback_rounds: 0,
+        }
+    }
 }
 
 struct ShardPhaseMetric {
@@ -96,6 +169,14 @@ impl PhaseControl {
             barrier: Barrier::new(active_workers.max(1)),
             failed: AtomicBool::new(false),
         }
+    }
+}
+
+fn phase_kind(mode: WorkerPhase) -> AccountPhaseKind {
+    match mode {
+        WorkerPhase::Inbound { .. } => AccountPhaseKind::Inbound,
+        WorkerPhase::OutboundReset => AccountPhaseKind::OutboundReset,
+        WorkerPhase::OutboundContinue => AccountPhaseKind::OutboundContinue,
     }
 }
 
@@ -163,6 +244,8 @@ pub(crate) struct ResidentAccountForest<V> {
     checkpoint_revision: u64,
     pending_checkpoint: Option<PendingCheckpoint>,
     phase: u64,
+    phase_totals: [AccountPhaseMetric; 3],
+    last_outbound_kind: Option<AccountPhaseKind>,
 }
 
 impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
@@ -288,6 +371,12 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             checkpoint_revision: revision,
             pending_checkpoint: None,
             phase: 0,
+            phase_totals: [
+                AccountPhaseMetric::new(AccountPhaseKind::Inbound),
+                AccountPhaseMetric::new(AccountPhaseKind::OutboundReset),
+                AccountPhaseMetric::new(AccountPhaseKind::OutboundContinue),
+            ],
+            last_outbound_kind: None,
         })
     }
 
@@ -318,6 +407,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
 
     pub(crate) fn metrics(&self) -> Vec<super::AccountShardMetric> {
         self.plan.metrics()
+    }
+
+    /// Accumulated wall-clock observability per resident phase kind.
+    pub(crate) fn phase_metrics(&self) -> Vec<AccountPhaseMetric> {
+        self.phase_totals.to_vec()
     }
 
     pub(crate) fn expected_uses_candidate(
@@ -368,6 +462,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             base_revision,
             checkpoint_ack,
         )?;
+        let fold_started = Instant::now();
         if matches!(head, ReconcileHead::Candidate) {
             let candidate = self
                 .candidate_top
@@ -381,6 +476,10 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             .base_top
             .sparse_overlay(None, reply.descriptors)
             .map_err(|error| forest_error(zero_account(), error))?;
+        self.phase_totals[AccountPhaseKind::Inbound.index()].coordinator_fold_nanos = self
+            .phase_totals[AccountPhaseKind::Inbound.index()]
+        .coordinator_fold_nanos
+        .saturating_add(duration_nanos(fold_started.elapsed()));
         let batch = ResidentAccountBatch {
             revision: inbound_revision,
             accounts_root: inbound_top.root_hash(),
@@ -478,7 +577,15 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         if let Some(error) = first_error {
             return Err(error);
         }
-        restore_positioned_rows(rows)
+        let rows = restore_positioned_rows(rows)?;
+        // Every materialized row performs one candidate read plus one base
+        // read on the owning worker. Attribute it to the round's outbound
+        // phase kind; pre-outbound capacity probes fall back to Inbound.
+        let kind = self.last_outbound_kind.unwrap_or(AccountPhaseKind::Inbound);
+        self.phase_totals[kind.index()].candidate_base_reads = self.phase_totals[kind.index()]
+            .candidate_base_reads
+            .saturating_add(rows.len() as u64);
+        Ok(rows)
     }
 
     /// Read one compact projection for every Account at the active head.
@@ -614,6 +721,9 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         } else {
             WorkerPhase::OutboundReset
         };
+        // Restarting a fresh outbound candidate after this round already built
+        // one is the explicit retry/fallback path back to the inbound head.
+        let fallback_round = !continue_candidate && self.candidate_revision.is_some();
         let (reply, candidate_revision) = self.run_phase(
             mode,
             worker_batches,
@@ -622,6 +732,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             start_revision,
             false,
         )?;
+        let fold_started = Instant::now();
         let candidate_top = if continue_candidate {
             let parent = self
                 .candidate_top
@@ -638,6 +749,14 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                 .sparse_overlay(Some(parent), reply.descriptors)
         }
         .map_err(|error| forest_error(zero_account(), error))?;
+        let kind = phase_kind(mode);
+        self.phase_totals[kind.index()].coordinator_fold_nanos = self.phase_totals[kind.index()]
+            .coordinator_fold_nanos
+            .saturating_add(duration_nanos(fold_started.elapsed()));
+        if fallback_round {
+            self.phase_totals[AccountPhaseKind::OutboundReset.index()].fallback_rounds += 1;
+        }
+        self.last_outbound_kind = Some(kind);
         let batch = ResidentAccountBatch {
             revision: candidate_revision,
             accounts_root: candidate_top.root_hash(),
@@ -674,6 +793,12 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             + Sync
             + 'static,
     {
+        let phase_started = Instant::now();
+        let kind = phase_kind(mode);
+        let workers_with_batches = worker_batches
+            .iter()
+            .filter(|lane| !lane.is_empty())
+            .count();
         let phase = self.next_phase()?;
         let mut reconcile_by_worker = empty_lanes(self.workers.worker_count());
         for shard in reconcile {
@@ -716,6 +841,24 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         let replies = self.workers.run_lanes(lanes, move |state, batch| {
             run_worker_phase(state, batch, &apply)
         })?;
+        let mut worker_samples = 0_u64;
+        let mut worker_work_sum = 0_u64;
+        let mut worker_work_max = 0_u64;
+        let mut barrier_wait_sum = 0_u64;
+        let mut barrier_wait_max = 0_u64;
+        let mut value_clones = 0_u64;
+        for lane in &replies {
+            for reply in lane.iter().flatten() {
+                worker_samples += 1;
+                let work = duration_nanos(reply.work_wall);
+                worker_work_sum = worker_work_sum.saturating_add(work);
+                worker_work_max = worker_work_max.max(work);
+                let wait = duration_nanos(reply.barrier_wait);
+                barrier_wait_sum = barrier_wait_sum.saturating_add(wait);
+                barrier_wait_max = barrier_wait_max.max(wait);
+                value_clones = value_clones.saturating_add(reply.value_clones);
+            }
+        }
         let reply = collect_worker_replies(replies)?;
         if checkpoint_ack {
             self.checkpoint_workers.clear();
@@ -731,6 +874,34 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                 self.plan
                     .record_fold(metric.shard, metric.fold_leaves, metric.fold_elapsed);
             }
+        }
+        let touched_shards = reply
+            .metrics
+            .iter()
+            .map(|metric| metric.shard)
+            .collect::<BTreeSet<usize>>()
+            .len();
+        let totals = &mut self.phase_totals[kind.index()];
+        totals.invocations += 1;
+        totals.coordinator_wall_nanos = totals
+            .coordinator_wall_nanos
+            .saturating_add(duration_nanos(phase_started.elapsed()));
+        totals.worker_samples = totals.worker_samples.saturating_add(worker_samples);
+        totals.worker_work_sum_nanos = totals.worker_work_sum_nanos.saturating_add(worker_work_sum);
+        totals.worker_work_max_nanos = totals.worker_work_max_nanos.max(worker_work_max);
+        totals.worker_barrier_wait_sum_nanos = totals
+            .worker_barrier_wait_sum_nanos
+            .saturating_add(barrier_wait_sum);
+        totals.worker_barrier_wait_max_nanos =
+            totals.worker_barrier_wait_max_nanos.max(barrier_wait_max);
+        totals.touched_rows = totals.touched_rows.saturating_add(reply.rows.len() as u64);
+        totals.touched_shards = totals.touched_shards.saturating_add(touched_shards as u64);
+        totals.workers_with_work = totals
+            .workers_with_work
+            .saturating_add(workers_with_batches as u64);
+        totals.value_clones = totals.value_clones.saturating_add(value_clones);
+        if matches!(kind, AccountPhaseKind::OutboundContinue) {
+            totals.continuation_rounds += 1;
         }
         let revision = next_revision(start_revision, !reply.descriptors.is_empty())?;
         Ok((reply, revision))
@@ -901,6 +1072,7 @@ where
         .chain(mutation_shards.iter().copied())
         .chain(checkpoint_shards)
         .collect::<BTreeSet<_>>();
+    let work_started = Instant::now();
     let snapshot = snapshot_worker_shards(state, phase, &touched);
     let result = match snapshot {
         Ok(()) => apply_worker_phase(
@@ -914,16 +1086,23 @@ where
         ),
         Err(error) => Err(error),
     };
+    let work_wall = work_started.elapsed();
     if result.is_err() {
         control.failed.store(true, Ordering::Release);
     }
+    let barrier_started = Instant::now();
     control.barrier.wait();
+    let barrier_wait = barrier_started.elapsed();
     let failed = control.failed.load(Ordering::Acquire);
     finish_worker_phase(state, phase, failed)?;
     if !failed && let Ok(reply) = &result {
         state.checkpoint_dirty.extend(reply.changed.iter().copied());
     }
-    result
+    result.map(|mut reply| {
+        reply.work_wall = work_wall;
+        reply.barrier_wait = barrier_wait;
+        reply
+    })
 }
 
 fn apply_worker_phase<V, T, R, F>(
@@ -939,11 +1118,19 @@ where
     V: Clone,
     F: Fn(AccountId, Option<V>, T) -> Result<ResidentAccountAction<V, R>, BatchError>,
 {
+    let mut value_clones = 0_u64;
     match mode {
         WorkerPhase::Inbound {
             head,
             checkpoint_ack,
-        } => reconcile_worker_head(state, head, reconcile, mutation_shards, checkpoint_ack)?,
+        } => reconcile_worker_head(
+            state,
+            head,
+            reconcile,
+            mutation_shards,
+            checkpoint_ack,
+            &mut value_clones,
+        )?,
         WorkerPhase::OutboundReset => prepare_worker_outbound(state, reconcile, mutation_shards)?,
         WorkerPhase::OutboundContinue => {}
     }
@@ -952,6 +1139,9 @@ where
         changed: Vec::new(),
         descriptors: Vec::new(),
         metrics: Vec::new(),
+        work_wall: Duration::ZERO,
+        barrier_wait: Duration::ZERO,
+        value_clones,
     };
     for batch in batches {
         mutate_shard(state, mode, batch, allow_change, apply, &mut reply)?;
@@ -965,6 +1155,7 @@ fn reconcile_worker_head<V: Clone>(
     reconcile: &[usize],
     mutation_shards: &BTreeSet<usize>,
     checkpoint_ack: bool,
+    value_clones: &mut u64,
 ) -> Result<(), BatchError> {
     let checkpoint_shards = if checkpoint_ack {
         state
@@ -985,13 +1176,20 @@ fn reconcile_worker_head<V: Clone>(
     {
         let resident = resident_shard_mut(state, shard)?;
         let base = match head {
-            ReconcileHead::Base => resident.base.clone(),
+            ReconcileHead::Base => {
+                *value_clones += 1;
+                resident.base.clone()
+            }
             ReconcileHead::Candidate => resident
                 .candidate
                 .take()
                 .or_else(|| resident.inbound.take())
-                .unwrap_or_else(|| resident.base.clone()),
+                .unwrap_or_else(|| {
+                    *value_clones += 1;
+                    resident.base.clone()
+                }),
         };
+        *value_clones += 1;
         resident.base = base.clone();
         resident.inbound = mutation_shards.contains(&shard).then_some(base);
         resident.candidate = None;
@@ -999,6 +1197,7 @@ fn reconcile_worker_head<V: Clone>(
     if checkpoint_ack {
         for shard in checkpoint_shards {
             let resident = resident_shard_mut(state, shard)?;
+            *value_clones += 1;
             resident.checkpoint = resident.base.clone();
         }
         state.checkpoint_dirty.clear();
@@ -1273,6 +1472,9 @@ fn collect_worker_replies<R>(
         changed: Vec::new(),
         descriptors: Vec::new(),
         metrics: Vec::new(),
+        work_wall: Duration::ZERO,
+        barrier_wait: Duration::ZERO,
+        value_clones: 0,
     };
     let mut first_error = None;
     for mut lane in replies {
@@ -1635,6 +1837,50 @@ mod tests {
         assert_eq!(metrics[0x123].work_items, 1);
         assert_eq!(metrics[0x123].fold_batches, 1);
         assert_eq!(metrics[0x456].work_batches, 0);
+    }
+
+    #[test]
+    fn phase_metrics_count_invocations_rows_shards_clones_and_reads() {
+        let seeds = seeds(&[0x123, 0x456]);
+        let mut forest = ResidentAccountForest::restore(2, 1, seeds).expect("restore");
+        let root = forest.accounts_root();
+        forest
+            .apply_inbound(root, vec![(account(0x123, 0), 99)], put)
+            .expect("inbound");
+        forest
+            .apply_outbound(vec![(account(0x123, 0), 30)], put)
+            .expect("outbound");
+        forest
+            .apply_outbound_continue(vec![(account(0x456, 0), 55)], put)
+            .expect("outbound continue");
+        forest
+            .read_outbound(
+                vec![(account(0x123, 0), ())],
+                |_account_id, value, _base, ()| Ok::<_, BatchError>(*value),
+            )
+            .expect("read outbound");
+        forest
+            .apply_outbound(vec![(account(0x123, 0), 31)], put)
+            .expect("outbound fallback");
+        let metrics = forest.phase_metrics();
+        let inbound = &metrics[0];
+        let outbound_reset = &metrics[1];
+        let outbound_continue = &metrics[2];
+        assert_eq!(inbound.invocations, 1);
+        assert_eq!(inbound.touched_rows, 1);
+        assert_eq!(inbound.touched_shards, 1);
+        assert_eq!(inbound.workers_with_work, 1);
+        assert_eq!(inbound.worker_samples, 1);
+        // Head reconciliation clones the touched shard base twice:
+        // once for the match arm and once into the new base slot.
+        assert_eq!(inbound.value_clones, 2);
+        assert_eq!(outbound_reset.invocations, 2);
+        assert_eq!(outbound_reset.fallback_rounds, 1);
+        assert_eq!(outbound_reset.touched_rows, 2);
+        assert_eq!(outbound_continue.invocations, 1);
+        assert_eq!(outbound_continue.continuation_rounds, 1);
+        assert_eq!(outbound_continue.candidate_base_reads, 1);
+        assert_eq!(outbound_continue.worker_samples, 1);
     }
 
     #[test]

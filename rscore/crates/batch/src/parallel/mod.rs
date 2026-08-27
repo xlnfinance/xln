@@ -10,8 +10,9 @@ pub(crate) use fanout::{
     map_owned, map_slots,
 };
 pub(crate) use resident::ResidentWorkerPool;
+pub use resident_forest::{AccountPhaseKind, AccountPhaseMetric};
 pub(crate) use resident_forest::{
     ResidentAccountAction, ResidentAccountBatch, ResidentAccountForest,
 };
 pub use shards::AccountShardMetric;
-pub(crate) use shards::{AccountShardPlan, logical_account_shard};
+pub(crate) use shards::{AccountShardPlan, duration_nanos, logical_account_shard};
