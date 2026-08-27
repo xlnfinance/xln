@@ -151,6 +151,13 @@ impl EntityRouteTable {
                 if !is_trigger_only(&object) {
                     return Err(EntityRouteError::LocalPayload(index));
                 }
+                // TypeScript output routing merges identical trigger-only
+                // self-wakes by Entity+signer before they enter the Runtime
+                // FIFO. Ten local financial txs therefore schedule one next
+                // Entity visit, not ten empty Runtime inputs.
+                if !local_continuations.is_empty() {
+                    continue;
+                }
                 object.insert(
                     "signerId".into(),
                     Value::String(local_signer_id.to_ascii_lowercase()),
@@ -355,6 +362,24 @@ mod tests {
             encoded.local_continuations[0].canonical()["signerId"],
             "local-signer",
         );
+    }
+
+    #[test]
+    fn duplicate_local_triggers_coalesce_into_one_runtime_continuation() {
+        let local_entity = entity("44");
+        let trigger = json!({"entityId":local_entity,"entityTxs":[]});
+        let encoded = EntityRouteTable::new([])
+            .expect("routes")
+            .bind_and_encode(
+                vec![trigger.clone(), trigger],
+                3,
+                77,
+                &entity("44"),
+                "local-signer",
+            )
+            .expect("local triggers");
+        assert_eq!(encoded.local_continuations.len(), 1);
+        assert!(encoded.rows.is_empty());
     }
 
     #[test]

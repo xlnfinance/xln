@@ -59,6 +59,13 @@ fn recording_range(root: &Value) -> Result<(u64, u64), String> {
     Ok((from, target))
 }
 
+fn recorded_direct_payments(root: &Value) -> Result<u64, String> {
+    unsigned(
+        root.pointer("/authorityEvidence/economicOperations/coverage/directPayments"),
+        "authorityEvidence.economicOperations.coverage.directPayments",
+    )
+}
+
 fn main() -> Result<(), String> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let wal_path = argument(&args, "--wal")?;
@@ -91,6 +98,7 @@ fn main() -> Result<(), String> {
     let recording = serde_json::from_slice::<Value>(&recording_bytes)
         .map_err(|error| format!("RUNTIME_REPLAY_RECORDING_JSON:{error}"))?;
     let (from, to) = recording_range(&recording)?;
+    let direct_payments = recorded_direct_payments(&recording)?;
     let runtime_seed = std::fs::read_to_string(runtime_seed_path)
         .map_err(|error| format!("RUNTIME_REPLAY_SEED_READ:{error}"))?;
     let runtime_seed = runtime_seed.trim();
@@ -122,6 +130,7 @@ fn main() -> Result<(), String> {
             "{{\"benchmark\":\"rscore-runtime-replay\",\"mode\":\"native-exact\",",
             "\"workers\":{},\"frames\":{},\"ingress\":{},\"egress\":{},",
             "\"setupMs\":{:.3},\"elapsedMs\":{:.3},\"engineMs\":{:.3},",
+            "\"directPayments\":{},\"paymentReplayPerSecond\":{:.2},",
             "\"ingressPerSecond\":{:.2},\"egressPerSecond\":{:.2},",
             "\"accountRootsCompared\":{},\"accountsForestRootsCompared\":{},",
             "\"entityRootsCompared\":{},\"eventDigestsCompared\":{},",
@@ -136,6 +145,8 @@ fn main() -> Result<(), String> {
         metrics.setup_elapsed.as_secs_f64() * 1_000.0,
         seconds * 1_000.0,
         metrics.engine_elapsed.as_secs_f64() * 1_000.0,
+        direct_payments,
+        direct_payments as f64 / seconds,
         metrics.ingress as f64 / seconds,
         metrics.egress as f64 / seconds,
         metrics.account_roots_compared,

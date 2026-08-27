@@ -21,6 +21,7 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { computeEntityConsensusSectionDigestsCold } from '../../../../entity/consensus/state-root';
 
 const FIXED_CREATED_AT = 1_775_000_000_000;
+const FIXTURE_SNAPSHOT_PERIOD = 1_000_000;
 const MAIN_SEED = 'xln-native-replay-main-v1';
 const PEER_SEED = 'xln-native-replay-peer-v1';
 const FIXTURE_JURISDICTION: JurisdictionConfig = {
@@ -40,6 +41,12 @@ export type SingleEntityNativeFixturePaths = Readonly<{
   manifest: string;
 }>;
 
+export type SingleEntityNativeFixtureOptions = Readonly<{
+  paymentCount?: number;
+  paymentBatchSize?: number;
+  includeSwap?: boolean;
+}>;
+
 type RuntimeApi = typeof import('../../../../runtime');
 
 type FixtureIdentities = Readonly<{
@@ -52,7 +59,7 @@ const configureProcess = (workDir: string): void => {
   process.env['XLN_RDB_ROOT'] = join(workDir, 'db');
   process.env['XLN_STORAGE_WAL_SYNC'] = '1';
   process.env['XLN_STORAGE_CERTIFIED_HISTORY'] = '1';
-  process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = '100';
+  process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = String(FIXTURE_SNAPSHOT_PERIOD);
   process.env['XLN_RSCORE_AUTHORITY'] = '0';
 };
 
@@ -68,7 +75,7 @@ const createFixtureRuntime = (runtime: RuntimeApi, seed: string): RuntimeReplica
       ...env.runtimeConfig?.storage,
       enabled: true,
       materializePeriodFrames: 1,
-      snapshotPeriodFrames: 100,
+      snapshotPeriodFrames: FIXTURE_SNAPSHOT_PERIOD,
       canonicalHashPeriodFrames: 1,
     },
   };
@@ -292,7 +299,7 @@ const setupInputs = async (
 };
 
 const tailInputs = async (identities: FixtureIdentities): Promise<Readonly<{
-  payment: EntityInput;
+  payment: (start: number, count: number) => EntityInput;
   maker: EntityInput;
   taker: EntityInput;
 }>> => {
@@ -309,14 +316,21 @@ const tailInputs = async (identities: FixtureIdentities): Promise<Readonly<{
     entityTxs: [tx],
   });
   return {
-    payment: input(identities.main, { type: 'directPayment', data: {
-      targetEntityId: identities.peer.entityId,
-      tokenId: 1,
-      amount: eth / 10n,
-      route: [identities.main.entityId, identities.peer.entityId],
-      deliveryMode: 'direct',
-      description: 'native replay direct payment',
-    } }),
+    payment: (start, count) => ({
+      entityId: identities.main.entityId,
+      signerId: identities.main.signerId,
+      entityTxs: Array.from({ length: count }, (_, offset): EntityTx => ({
+        type: 'directPayment',
+        data: {
+          targetEntityId: identities.peer.entityId,
+          tokenId: 1,
+          amount: eth / 10n,
+          route: [identities.main.entityId, identities.peer.entityId],
+          deliveryMode: 'direct',
+          description: `native replay direct payment ${start + offset}`,
+        },
+      })),
+    }),
     maker: input(identities.main, { type: 'placeSwapOffer', data: {
       counterpartyEntityId: identities.peer.entityId,
       offerId: 'native-replay-maker',
@@ -358,7 +372,17 @@ const assertTail = (
 
 export const buildSingleEntityNativeRecording = async (
   outputDirectory: string,
+  options: SingleEntityNativeFixtureOptions = {},
 ): Promise<SingleEntityNativeFixturePaths> => {
+  const paymentCount = options.paymentCount ?? 1;
+  const paymentBatchSize = options.paymentBatchSize ?? 1;
+  const includeSwap = options.includeSwap ?? true;
+  if (!Number.isSafeInteger(paymentCount) || paymentCount < 1) {
+    throw new Error(`NATIVE_FIXTURE_PAYMENT_COUNT:${paymentCount}`);
+  }
+  if (!Number.isSafeInteger(paymentBatchSize) || paymentBatchSize < 1) {
+    throw new Error(`NATIVE_FIXTURE_PAYMENT_BATCH_SIZE:${paymentBatchSize}`);
+  }
   const workDir = resolve(outputDirectory);
   rmSync(workDir, { recursive: true, force: true });
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
@@ -451,12 +475,17 @@ export const buildSingleEntityNativeRecording = async (
       entitySections.set(height, computeEntityConsensusSectionDigestsCold(state));
     });
     const tail = await tailInputs(identities);
-    enqueue(runtime, main, ++timestamp, [tail.payment]);
-    await pump(runtime, mainRef, peerRef);
-    enqueue(runtime, main, ++timestamp, [tail.maker]);
-    await pump(runtime, mainRef, peerRef);
-    enqueue(runtime, peer, ++timestamp, [tail.taker]);
-    await pump(runtime, mainRef, peerRef);
+    for (let start = 0; start < paymentCount; start += paymentBatchSize) {
+      const count = Math.min(paymentBatchSize, paymentCount - start);
+      enqueue(runtime, main, ++timestamp, [tail.payment(start, count)]);
+      await pump(runtime, mainRef, peerRef);
+    }
+    if (includeSwap) {
+      enqueue(runtime, main, ++timestamp, [tail.maker]);
+      await pump(runtime, mainRef, peerRef);
+      enqueue(runtime, peer, ++timestamp, [tail.taker]);
+      await pump(runtime, mainRef, peerRef);
+    }
     unregister();
 
     const targetHeight = main.state.height;
@@ -507,9 +536,9 @@ export const buildSingleEntityNativeRecording = async (
     const authorityEvidence = (await import('./authority-evidence')).buildHltAuthorityEvidence(
       frames, authorityFrameOracle,
     );
-    if (authorityEvidence.economicOperations.coverage.directPayments < 1 ||
-        authorityEvidence.economicOperations.coverage.swapOffers < 2 ||
-        authorityEvidence.economicOperations.coverage.swapResolves < 1) {
+    if (authorityEvidence.economicOperations.coverage.directPayments < paymentCount ||
+        (includeSwap && authorityEvidence.economicOperations.coverage.swapOffers < 2) ||
+        (includeSwap && authorityEvidence.economicOperations.coverage.swapResolves < 1)) {
       throw new Error('NATIVE_FIXTURE_FINANCIAL_COVERAGE_INCOMPLETE');
     }
     const evidenceCoverage = {
@@ -519,7 +548,10 @@ export const buildSingleEntityNativeRecording = async (
       ackCommit: accountFrames.filter(row => row.source === 'ackCommit').length,
       peerCommit: accountFrames.filter(row => row.source === 'peerCommit').length,
     };
-    if (Object.values(evidenceCoverage).some(count => count === 0)) {
+    const requiredEvidence = includeSwap
+      ? Object.values(evidenceCoverage)
+      : [evidenceCoverage.outbox, evidenceCoverage.events, evidenceCoverage.ackCommit];
+    if (requiredEvidence.some(count => count === 0)) {
       const messages = [...new Set(frames.flatMap(frame => frame.logs.map(entry => entry.message)))];
       const entityEventTypes = [...new Set(entityRecords.flatMap(record =>
         record.runtimeHeight > baseHeight ? record.link.frame.events.map(event => event.type) : []))];
@@ -531,7 +563,11 @@ export const buildSingleEntityNativeRecording = async (
     const artifact = {
       schema: recordingApi.HLT_HUB_RECORDING_SCHEMA,
       createdAt: FIXED_CREATED_AT,
-      source: { workDir, users: 1, workload: 'single-entity-pay-same-j-swap' },
+      source: {
+        workDir,
+        users: 1,
+        workload: `single-entity-pay-${paymentCount}${includeSwap ? '-same-j-swap' : ''}`,
+      },
       recording,
       totals: recordingApi.summarizeHltHubFrames(frames),
       featurePolicy: {
@@ -568,9 +604,21 @@ const cliOutputDirectory = (): string => {
   return resolve(value || join(process.cwd(), '.logs', 'rscore-native-fixture'));
 };
 
+const cliPositiveInteger = (flag: string, defaultValue: number): number => {
+  const index = process.argv.indexOf(flag);
+  if (index < 0) return defaultValue;
+  const value = Number(process.argv[index + 1]);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`NATIVE_FIXTURE_CLI:${flag}`);
+  return value;
+};
+
 if (import.meta.main) {
   const startedAt = performance.now();
-  const paths = await buildSingleEntityNativeRecording(cliOutputDirectory());
+  const paths = await buildSingleEntityNativeRecording(cliOutputDirectory(), {
+    paymentCount: cliPositiveInteger('--payments', 1),
+    paymentBatchSize: cliPositiveInteger('--payment-batch-size', 1),
+    includeSwap: !process.argv.includes('--no-swap'),
+  });
   mkdirSync(dirname(paths.manifest), { recursive: true });
   console.log(safeStringify({ ...paths, elapsedMs: Math.round(performance.now() - startedAt) }));
 }
