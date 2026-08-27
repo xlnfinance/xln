@@ -9,7 +9,6 @@ import {
   hashEntityLeaderVoteBody,
 } from '../../../../entity/consensus/leader';
 import { getAccountJClaimNodeStore } from '../../../../entity/account/account-j-claim-node-store';
-import { getConsumptionNodeStore } from '../../../../entity/consumption/consumption-store';
 import {
   handleInboundP2PEntityInputs,
   processRuntime,
@@ -69,7 +68,6 @@ describe('Entity proposal Runtime isolation', () => {
     const { inboundResults, remoteRuntimeId, remoteEnv } = await deliverEncryptedProposal(env, frame);
     expect(inboundResults).toEqual([expect.objectContaining({ kind: 'queued' })]);
 
-    const consumptionBefore = getConsumptionNodeStore(env).size;
     const claimsBefore = getAccountJClaimNodeStore(env).size;
     await processRuntime(env, []);
     const replica = env.state.eReplicas.get(`${durableProposalFixture.entityId}:${signerId}`)!;
@@ -78,9 +76,7 @@ describe('Entity proposal Runtime isolation', () => {
     expect(replica.state.height).toBe(0);
     expect(replica.proposal).toBeUndefined();
     expect(replica.candidate).toBeUndefined();
-    expect(getConsumptionNodeStore(env).size).toBe(consumptionBefore);
     expect(getAccountJClaimNodeStore(env).size).toBe(claimsBefore);
-    expect(env.infrastructure?.pendingConsumptionNodes?.size ?? 0).toBe(0);
     expect(env.infrastructure?.pendingAccountJClaimNodes?.size ?? 0).toBe(0);
     expect(await readPersistedFrameJournal(env, 2)).toBeNull();
 
@@ -117,7 +113,6 @@ describe('Entity proposal Runtime isolation', () => {
     expect(restoredReplica.proposal).toBeUndefined();
     expect(restoredReplica.candidate).toBeUndefined();
     expect(restoredReplica.leaderVotes?.has(voterId)).toBe(true);
-    expect(getConsumptionNodeStore(restored).size).toBe(consumptionBefore);
     expect(getAccountJClaimNodeStore(restored).size).toBe(claimsBefore);
   }, 30_000);
 

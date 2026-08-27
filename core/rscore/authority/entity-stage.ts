@@ -634,6 +634,13 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (this.mode !== 'cutover') return null;
     if (!this.frameOpened) throw new Error(`ACCOUNT_AUTHORITY_FRAME_NOT_OPEN:${this.ownerEntityId}`);
     if (!this.frameOutboundPrepared) throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_BEFORE_OUTBOUND');
+    // Rust consumes the whole resident mempool and returns its rejected rows.
+    // A caller-selected subset would make Rust sign different bytes from the
+    // canonical TypeScript proposal window, so this is a protocol violation,
+    // not an eligibility miss that may fall back to TypeScript.
+    if (!request.selectionIsWholeMempool) {
+      throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_SUBSET_UNSUPPORTED');
+    }
     const expectedId = this.preparedProposalIds[this.proposalCursor];
     const actualId = normalizeEntityId(request.account.proofHeader.toEntity);
     const result = this.proposalResults[this.proposalCursor];

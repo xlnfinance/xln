@@ -771,6 +771,7 @@ export async function processCommittedSettlementTransitionFollowup(
   account: AccountReplica,
   accountTx: AccountTx,
   committedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   counterpartyEntityId: string,
   entityState: EntityState,
   _env: EntityRuntimeContext,
@@ -790,7 +791,6 @@ export async function processCommittedSettlementTransitionFollowup(
   // post-state and may trigger a signature. Signing an earlier upsert against
   // final post-state would either fail the Entity frame or authorize stale ops.
   if (hasLaterTransition) return empty();
-  if (typeof committedFrame.byLeft !== 'boolean') throw new Error('SETTLEMENT_COMMITTED_FRAME_SIDE_MISSING');
   const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_COMMITTED_WORKSPACE_MISSING');
   const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
@@ -798,7 +798,7 @@ export async function processCommittedSettlementTransitionFollowup(
     throw new Error(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${workspace.revision}:${accountTx.data.revision}`);
   }
   const { iAmLeft } = getAccountPerspective(account.state, entityState.entityId);
-  if (committedFrame.byLeft === iAmLeft) return empty();
+  if (proposerIsLeft === iAmLeft) return empty();
   const localPostHanko = iAmLeft
     ? workspace.postSettlementDisputeProof?.leftHanko
     : workspace.postSettlementDisputeProof?.rightHanko;

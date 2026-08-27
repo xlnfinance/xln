@@ -38,7 +38,7 @@ describe('FinTS EntityInput phase views', () => {
 
   test('catalog covers every current wire field deliberately', () => {
     expect(Object.keys(ENTITY_INPUT_FIELD_PHASE).sort()).toEqual([
-      'certifiedOutputIdentity', 'entityId', 'entityTxs', 'from',
+      'entityId', 'entityTxs', 'from',
       'hashPrecommitFrame', 'hashPrecommits', 'jPrefixAttestations',
       'leaderTimeoutVote', 'localRuntimeProtocol', 'proposedFrame',
       'runtimeId', 'signerId',

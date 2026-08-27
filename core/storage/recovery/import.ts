@@ -1,11 +1,6 @@
 import { Level } from 'level';
 import { collectReachableAccountJClaimNodes } from '../../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore, getLiveAccountJClaimAccumulatorStates } from '../../entity/account/account-j-claim-node-store';
-import {
-  collectReachableConsumptionNodes,
-  getConsumptionNodeStore,
-  getLiveConsumptionAccumulatorStates,
-} from '../../entity/consumption/consumption-store';
 import { collectReachableCertifiedBoardNodes, getCertifiedBoardNodeStore } from '../../jurisdiction/machine/board-registry';
 import {
   assertCertifiedJHistoryIntegrity,
@@ -22,10 +17,9 @@ import {
   reconcileHistoryViews,
 } from '../history/history-view';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildCertifiedEntityLineagePlan,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
-} from '../replica/entity-lineage';
+  applyCertifiedEntityHeadPlan,
+  buildCertifiedEntityHeadPlan,
+} from '../replica/entity-head';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -54,12 +48,12 @@ export interface PersistRestoredRuntimeOptions {
 }
 
 const collectCertifiedStorageDocs = (
-  lineagePlan: ReturnType<typeof buildCertifiedEntityLineagePlan>,
+  headPlan: ReturnType<typeof buildCertifiedEntityHeadPlan>,
 ): { docs: StorageDoc[]; canonicalEntityHashes: ReturnType<typeof computeCanonicalEntityHash>[] } => {
   const docs: StorageDoc[] = [];
   const canonicalEntityHashes: ReturnType<typeof computeCanonicalEntityHash>[] = [];
 
-  for (const [entityId, selected] of lineagePlan.lookup.entries()) {
+  for (const [entityId, selected] of headPlan.lookup.entries()) {
     const core = projectEntityCoreDoc(selected.state);
     // This is a cold recovery projection, not a machine clone: each decoded
     // value is projected once into the exact storage boundary representation.
@@ -115,20 +109,13 @@ const persistRestoredRuntimeStateUnlocked = async (
     assertCertifiedJHistoryIntegrity(replica.state);
     assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
   }
-  const lineagePlan = rebaseCertifiedEntityLineageAtRuntimeCheckpoint(
-    env,
-    buildCertifiedEntityLineagePlan(env),
-  );
-  const materialized = collectCertifiedStorageDocs(lineagePlan);
+  const headPlan = buildCertifiedEntityHeadPlan(env);
+  const materialized = collectCertifiedStorageDocs(headPlan);
   const boardNodes = collectReachableCertifiedBoardNodes(
     getCertifiedBoardNodeStore(env),
     Array.from(env.state.eReplicas.values(), ({ state }) => state.certifiedBoardState?.boardRegistryRoot).filter(
       (root): root is string => Boolean(root),
     ),
-  );
-  const consumptionNodes = collectReachableConsumptionNodes(
-    getConsumptionNodeStore(env),
-    getLiveConsumptionAccumulatorStates(env),
   );
   const accountJClaimNodes = collectReachableAccountJClaimNodes(
     getAccountJClaimNodeStore(env),
@@ -154,7 +141,7 @@ const persistRestoredRuntimeStateUnlocked = async (
     walDb: deps.getRuntimeWalDb(env),
     ...coordinates,
     docs: materialized.docs,
-    replicaMetas: buildStorageReplicaMetaCommitment(env, lineagePlan).entries,
+    replicaMetas: buildStorageReplicaMetaCommitment(env, headPlan).entries,
     headConfig: {
       schemaVersion: STORAGE_SCHEMA_VERSION,
       snapshotPeriodFrames: Math.max(
@@ -170,7 +157,6 @@ const persistRestoredRuntimeStateUnlocked = async (
     runtimeMachine,
     runtimeOutputs,
     certifiedBoardNodes: Array.from(boardNodes, ([hash, node]) => ({ hash, node })),
-    consumptionNodes: Array.from(consumptionNodes, ([hash, node]) => ({ hash, node })),
     accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),
     ...(options.onPersistenceBoundary ? { onPersistenceBoundary: options.onPersistenceBoundary } : {}),
   });
@@ -193,10 +179,9 @@ const persistRestoredRuntimeStateUnlocked = async (
     readWalActivity: height => readHistoryViewRuntimeActivity(walDb, height),
     config: resolveStorageRuntimeConfig(env),
   });
-  // The durable checkpoint is now the new lineage anchor. Publish the same
-  // anchor in RAM only after the atomic storage swap succeeds; otherwise a
-  // second checkpoint would require a pruned intermediate frame we no longer keep.
-  applyCertifiedEntityLineagePlan(env, lineagePlan);
+  // Publish the same full current heads in RAM only after the atomic storage
+  // swap succeeds. Older certified frames remain in history, never the live replica.
+  applyCertifiedEntityHeadPlan(env, headPlan);
   if (await deps.tryOpenStorageDb(env, 'previous')) {
     await clearDatabase(deps.getStorageDb(env, 'previous'));
   }

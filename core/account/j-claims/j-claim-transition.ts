@@ -76,16 +76,46 @@ export const prepareAccountJClaimTx = (
   };
 };
 
-const assertExactMember = (
+const exactMemberConflict = (
   result: AccountJClaimProofResult,
   expected: AccountJClaimRecord,
   label: string,
-): void => {
-  if (result.status !== 'member') return;
+): string | undefined => {
+  if (result.status !== 'member') return undefined;
   const record = result.record;
   if (record.jBlockHash !== expected.jBlockHash || record.eventsHash !== expected.eventsHash) {
-    throw new Error(`${label}:${expected.side}:${expected.jHeight}`);
+    return `${label}:${expected.side}:${expected.jHeight}`;
   }
+  return undefined;
+};
+
+export type AccountJEventClaimAdmission = Readonly<{
+  events: readonly JurisdictionEvent[];
+  leftRecord: AccountJClaimRecord;
+  rightRecord: AccountJClaimRecord;
+  leftResult: AccountJClaimProofResult;
+  rightResult: AccountJClaimProofResult;
+}>;
+
+export type AccountJEventClaimAdmissionResult =
+  | Readonly<{ ok: true; admission: AccountJEventClaimAdmission }>
+  | Readonly<{ ok: false; message: string }>;
+
+export const validateAccountJEventClaimAdmission = (
+  account: AccountState,
+  tx: ClaimTx,
+  domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,
+): AccountJEventClaimAdmissionResult => {
+  const events = canonicalEvents(tx.data.events);
+  const leftRecord = buildRecord(account, domain, 'left', tx.data, events);
+  const rightRecord = buildRecord(account, domain, 'right', tx.data, events);
+  const leftResult = verifyAccountJClaimProof(account.leftPendingJClaims.root, leftRecord, tx.data.leftProof);
+  const rightResult = verifyAccountJClaimProof(account.rightPendingJClaims.root, rightRecord, tx.data.rightProof);
+  const message = exactMemberConflict(leftResult, leftRecord, 'ACCOUNT_J_CLAIM_LEFT_CONFLICT')
+    ?? exactMemberConflict(rightResult, rightRecord, 'ACCOUNT_J_CLAIM_RIGHT_CONFLICT');
+  return message
+    ? { ok: false, message }
+    : { ok: true, admission: { events, leftRecord, rightRecord, leftResult, rightResult } };
 };
 
 const pruneSide = (
@@ -110,16 +140,10 @@ export const applyAccountJClaimTransition = (
   account: AccountState,
   tx: ClaimTx,
   byLeft: boolean,
-  domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,
   session: AccountJClaimSession,
+  admission: AccountJEventClaimAdmission,
 ): AccountJClaimTransition => {
-  const events = canonicalEvents(tx.data.events);
-  const leftRecord = buildRecord(account, domain, 'left', tx.data, events);
-  const rightRecord = buildRecord(account, domain, 'right', tx.data, events);
-  const leftResult = verifyAccountJClaimProof(account.leftPendingJClaims.root, leftRecord, tx.data.leftProof);
-  const rightResult = verifyAccountJClaimProof(account.rightPendingJClaims.root, rightRecord, tx.data.rightProof);
-  assertExactMember(leftResult, leftRecord, 'ACCOUNT_J_CLAIM_LEFT_CONFLICT');
-  assertExactMember(rightResult, rightRecord, 'ACCOUNT_J_CLAIM_RIGHT_CONFLICT');
+  const { events, leftRecord, rightRecord, leftResult, rightResult } = admission;
 
   if (tx.data.jHeight <= account.lastFinalizedJHeight) {
     return {

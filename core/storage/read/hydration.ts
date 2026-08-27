@@ -5,7 +5,6 @@ import type { EntityState } from '../../entity/types';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
 import { assertAccountMempoolWithinLimit } from '../../account/input/mempool';
 import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-claim-accumulator';
-import { assertConsumptionAccumulatorState } from '../../entity/consumption/consumption-accumulator';
 import { assertJBatchWithinContractLimits } from '../../jurisdiction/machine/batch';
 import { createStructuredLogger } from '../../support/logger';
 
@@ -101,12 +100,6 @@ export const hydrateEntityStateFromStorage = (options: {
     rebuildOrderbookPairIndex(orderbookExt);
   }
 
-  if (core.consumptionAccumulator) assertConsumptionAccumulatorState(core.consumptionAccumulator);
-  if (core.certifiedOutputSequences) {
-    if (!(core.certifiedOutputSequences instanceof Map)) {
-      throw new Error('STORAGE_CERTIFIED_OUTPUT_SEQUENCES_INVALID');
-    }
-  }
   if (core.jBatchState) {
     assertJBatchWithinContractLimits(core.jBatchState.batch, 'storage.entity.jBatchState.batch');
     if (core.jBatchState.sentBatch) {
@@ -161,8 +154,6 @@ export const hydrateEntityStateFromStorage = (options: {
     ),
     ...withDefinedProperty('jBatchState', core.jBatchState),
     ...withDefinedProperty('entityProviderActionState', core.entityProviderActionState),
-    ...withDefinedProperty('consumptionAccumulator', core.consumptionAccumulator),
-    ...withDefinedProperty('certifiedOutputSequences', core.certifiedOutputSequences),
     ...withDefinedProperty('outDebtsByToken', core.outDebtsByToken),
     ...withDefinedProperty('inDebtsByToken', core.inDebtsByToken),
     ...withDefinedProperty('orderbookExt', orderbookExt),

@@ -229,6 +229,8 @@ fn main() {
                     operation_index: operation_index as u64,
                     account_id: peer.account_id,
                     genesis_policy: None,
+                    certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+                    local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
                     input: peer_input(
                         hub_bytes,
                         peer.entity_bytes,

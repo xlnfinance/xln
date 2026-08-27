@@ -334,11 +334,12 @@ const applyCommittedFrameTransactions = async (
     .flatMap(({ frame }) => frame.accountTxs ?? []);
   const sameJurisdictionCancels = classifyCommittedSwapCancels(account, committedAccountTxs);
   let committedAccountTxIndex = 0;
-  for (const { frame, committedViaNewFrame } of result.committedFrames ?? []) {
+  for (const { frame, proposerIsLeft, committedViaNewFrame } of result.committedFrames ?? []) {
     applyCommittedAccountFrameFollowups(
       state,
       counterpartyId,
       frame,
+      proposerIsLeft,
       effects.accountTxs,
       env,
       effects.candidateEffects,
@@ -348,6 +349,7 @@ const applyCommittedFrameTransactions = async (
         account,
         accountTx,
         frame,
+        proposerIsLeft,
         counterpartyId,
         state,
         env,
@@ -385,6 +387,7 @@ const applyCommittedFrameTransactions = async (
           },
           accountTx,
           frame,
+          proposerIsLeft,
           committedViaNewFrame,
         );
       }

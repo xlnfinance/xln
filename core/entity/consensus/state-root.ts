@@ -85,8 +85,6 @@ export const ENTITY_STATE_ROOT_FIELDS = [
   'profile',
   'htlcRoutes',
   'htlcFeesEarned',
-  'consumptionAccumulator',
-  'certifiedOutputSequences',
   'outDebtsByToken',
   'inDebtsByToken',
   'orderbookExt',

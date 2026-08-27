@@ -20,11 +20,6 @@ import {
   getCertifiedBoardNodeStore,
 } from '../../jurisdiction/machine/board-registry';
 import {
-  collectReachableConsumptionNodes,
-  getConsumptionNodeStore,
-  getLiveConsumptionAccumulatorStates,
-} from '../../entity/consumption/consumption-store';
-import {
   collectReachableAccountJClaimNodes,
 } from '../../account/j-claims/j-claim-accumulator';
 import {
@@ -132,7 +127,6 @@ export const buildCanonicalEntityReplicaSnapshot = (
     ...(!compactTransient && replica.lockedFrame ? { lockedFrame: replica.lockedFrame } : {}),
     ...(!compactTransient && replica.candidate ? { candidate: replica.candidate } : {}),
     ...(replica.certifiedFrameHead ? { certifiedFrameHead: replica.certifiedFrameHead } : {}),
-    ...(replica.certifiedFrameAnchor ? { certifiedFrameAnchor: replica.certifiedFrameAnchor } : {}),
     isProposer: replica.isProposer,
     ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),
     ...(replica.pendingLeaderCertificate ? { pendingLeaderCertificate: replica.pendingLeaderCertificate } : {}),
@@ -323,10 +317,6 @@ const buildDurableRuntimeStateSnapshot = (
               .map((replica) => replica.state.certifiedBoardState?.boardRegistryRoot)
               .filter((root): root is string => Boolean(root)),
           ),
-          consumptionNodes: collectReachableConsumptionNodes(
-            getConsumptionNodeStore(env),
-            getLiveConsumptionAccumulatorStates(env),
-          ),
           accountJClaimNodes: collectReachableAccountJClaimNodes(
             getAccountJClaimNodeStore(env),
             getLiveAccountJClaimAccumulatorStates(env),
@@ -372,7 +362,7 @@ export const buildDurableRuntimeMachineSnapshot = (
 
 /**
  * WAL Runtime-machine projection. Transport bodies have their own bounded
- * `runtimeOutputRefs` commitment, so duplicating them in this Patricia graph
+ * flat outbox-byte commitment, so duplicating them in this Patricia graph
  * would make a valid output envelope capable of violating the graph row bound.
  */
 export const buildStorageRuntimeMachineSnapshot = (

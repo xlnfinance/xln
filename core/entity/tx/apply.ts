@@ -48,7 +48,6 @@ import {
   handleProfileUpdateEntityTx,
   handleProposeEntityTx,
   handleVoteEntityTx,
-  handleReissueCertifiedOutputEntityTx,
 } from './handlers/system/basic';
 import { handleOpenAccountEntityTx } from './handlers/account/lifecycle/open-account';
 import {
@@ -162,7 +161,7 @@ type EntityTxDispatcher = (
 
 type ReducibleEntityTx = Exclude<
   EntityTx,
-  { type: 'entityCommand' | 'consensusOutput' | 'runtimeOutput' }
+  { type: 'entityCommand' | 'runtimeOutput' }
 >;
 
 const handleJEventEntityTx: EntityTxDispatcher = async (
@@ -340,11 +339,6 @@ const entityTxDispatchers = {
     state,
     tx as Extract<EntityTx, { type: 'vote' }>,
     options?.mutableFrameState,
-  ),
-  reissueCertifiedOutput: (env, state, tx) => handleReissueCertifiedOutputEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'reissueCertifiedOutput' }>,
   ),
   'profile-update': (env, state, tx, options) => handleProfileUpdateEntityTx(
     env,
@@ -561,7 +555,6 @@ export const applyEntityTx = async (
   }
   if (
     entityTx.type === 'entityCommand' ||
-    entityTx.type === 'consensusOutput' ||
     entityTx.type === 'runtimeOutput'
   ) {
     throw new TypeError(`ENTITY_TX_WRAPPER_REACHED_REDUCER:${entityTx.type}`);

@@ -6,12 +6,16 @@ use num_bigint::BigInt;
 use xln_rscore_abi::{AbiValue, BodyTuple};
 use xln_rscore_engine::{AccountDomain, DepositoryAddress, OpaqueHtlcCiphertext};
 use xln_rscore_entity_kernel::{
-    BookPricePageEntrySnapshot, BookPricePageSnapshot, BookStateSnapshot, DeterministicContext,
-    EntityConsensusSection, EntityKernelCommitments, EntityKernelOutput, EntityReferral,
-    EntityStateSnapshot, HtlcPreparedBinding, HtlcPreparedOutcome, HtlcRoute, HubProfile,
-    LockBookEntry, OrderbookConsensusMetadata, OrderbookStateSnapshot, PairDimensions, PairPolicy,
-    PreparedHtlcEntry, ResidentEntityResult, SameJOffer, SpreadDistribution,
+    BookPricePageEntrySnapshot, BookPricePageSnapshot, BookStateSnapshot, CrontabState,
+    CrontabTaskMethod, CrontabTaskParam, CrontabTaskState, DeterministicContext,
+    EntityCommandNonceRecord, EntityCommandNonceState, EntityConsensusSection,
+    EntityKernelCommitments, EntityKernelOutput, EntityReferral, EntityStateSnapshot,
+    HtlcPreparedBinding, HtlcPreparedOutcome, HtlcRoute, HubProfile, LockBookEntry,
+    OrderbookConsensusMetadata, OrderbookStateSnapshot, PairDimensions, PairPolicy,
+    PreparedHtlcEntry, ResidentEntityResult, SameJOffer, ScheduledHook, ScheduledHookKind,
+    SpreadDistribution,
 };
+use xln_rscore_protocol::CanonicalNumber;
 
 use crate::ProcessError;
 use crate::wire_value::{
@@ -311,25 +315,182 @@ fn decode_metadata(value: &AbiValue) -> Result<Option<OrderbookConsensusMetadata
     }))
 }
 
-pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, ProcessError> {
-    let row = exact(tuple(value)?, 11, "entityStateSnapshot")?;
-    let mut known_accounts = BTreeSet::new();
+fn decode_task_param(value: &AbiValue) -> Result<(String, CrontabTaskParam), ProcessError> {
+    let row = exact(tuple(value)?, 3, "crontabTaskParam")?;
+    let name = text(&row[0])?.to_string();
+    if name.is_empty() {
+        return Err(ProcessError::Expected("crontabTaskParamName"));
+    }
+    let tag = unsigned(&row[1], "crontabTaskParamTag")?;
+    let value = match tag {
+        0 => CrontabTaskParam::String(text(&row[2])?.to_string()),
+        1 => CrontabTaskParam::Number(
+            CanonicalNumber::parse_js_canonical(text(&row[2])?)
+                .map_err(|_| ProcessError::Expected("crontabTaskParamNumber"))?,
+        ),
+        2 => CrontabTaskParam::Bool(boolean(&row[2], "crontabTaskParamBool")?),
+        value => {
+            return Err(ProcessError::Tag {
+                field: "crontabTaskParam",
+                value: i128::from(value),
+            });
+        }
+    };
+    Ok((name, value))
+}
+
+fn decode_crontab_task(value: &AbiValue) -> Result<CrontabTaskState, ProcessError> {
+    let row = exact(tuple(value)?, 5, "crontabTask")?;
+    if text(&row[0])? != "hubRebalance" {
+        return Err(ProcessError::Expected("crontabTaskMethod"));
+    }
+    let mut params = BTreeMap::new();
     for value in tuple(&row[4])? {
+        let (name, value) = decode_task_param(value)?;
+        map_insert(&mut params, name, value, "crontabTaskParamDuplicate")?;
+    }
+    Ok(CrontabTaskState {
+        method: CrontabTaskMethod::HubRebalance,
+        interval_ms: js_number(&row[1], "crontabIntervalMs")?,
+        last_run: js_number(&row[2], "crontabLastRun")?,
+        enabled: boolean(&row[3], "crontabEnabled")?,
+        params,
+    })
+}
+
+fn decode_hook_kind(
+    value: &AbiValue,
+    field: &'static str,
+) -> Result<ScheduledHookKind, ProcessError> {
+    let row = tuple(value)?;
+    let tag = row
+        .first()
+        .ok_or(ProcessError::Expected(field))
+        .and_then(crate::wire_value::integer)?;
+    let text_at = |index: usize, name: &'static str| {
+        row.get(index)
+            .ok_or(ProcessError::Expected(field))
+            .and_then(text)
+            .map(str::to_string)
+            .map_err(|_| ProcessError::Expected(name))
+    };
+    let number_at = |index: usize, name: &'static str| {
+        row.get(index)
+            .ok_or(ProcessError::Expected(field))
+            .and_then(|value| js_number(value, name))
+    };
+    match tag {
+        0 if row.len() == 3 => Ok(ScheduledHookKind::HtlcTimeout {
+            account_id: text_at(1, "crontabHookAccountId")?,
+            lock_id: text_at(2, "crontabHookLockId")?,
+        }),
+        1 if row.len() == 2 => Ok(ScheduledHookKind::DisputeDeadline {
+            account_id: text_at(1, "crontabHookAccountId")?,
+        }),
+        2 if row.len() == 4 => Ok(ScheduledHookKind::HtlcSecretAckTimeout {
+            hashlock: text_at(1, "crontabHookHashlock")?,
+            counterparty_entity_id: text_at(2, "crontabHookCounterparty")?,
+            inbound_lock_id: text_at(3, "crontabHookInboundLock")?,
+        }),
+        3 if row.len() == 1 => Ok(ScheduledHookKind::SettlementWindow),
+        4 if row.len() == 1 => Ok(ScheduledHookKind::Watchdog),
+        5 if row.len() == 3 => Ok(ScheduledHookKind::HubRebalanceKick {
+            reason: text_at(1, "crontabHookReason")?,
+            counterparty_id: text_at(2, "crontabHookCounterparty")?,
+        }),
+        6 if row.len() == 4 => Ok(ScheduledHookKind::BoardHankoRefresh {
+            activation_j_height: number_at(1, "crontabHookActivationJHeight")?,
+            activation_log_index: number_at(2, "crontabHookActivationLogIndex")?,
+            after_counterparty_id: text_at(3, "crontabHookAfterCounterparty")?,
+        }),
+        7 if row.len() == 4 => Ok(ScheduledHookKind::CounterpartyBoardHankoRefreshDeadline {
+            account_id: text_at(1, "crontabHookAccountId")?,
+            activation_j_height: number_at(2, "crontabHookActivationJHeight")?,
+            activation_log_index: number_at(3, "crontabHookActivationLogIndex")?,
+        }),
+        8 if row.len() == 2 => Ok(ScheduledHookKind::CrossJOrderbookSweep {
+            reason: text_at(1, "crontabHookReason")?,
+        }),
+        _ => Err(ProcessError::Tag { field, value: tag }),
+    }
+}
+
+fn decode_crontab(value: &AbiValue) -> Result<Option<CrontabState>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let row = exact(tuple(value)?, 2, "entityCrontab")?;
+    let mut tasks = BTreeMap::new();
+    for value in tuple(&row[0])? {
+        let task = decode_crontab_task(value)?;
+        map_insert(
+            &mut tasks,
+            CrontabTaskMethod::HubRebalance,
+            task,
+            "crontabTaskDuplicate",
+        )?;
+    }
+    let mut hooks = BTreeMap::new();
+    for value in tuple(&row[1])? {
+        let hook = exact(tuple(value)?, 4, "crontabHook")?;
+        let id = text(&hook[0])?.to_string();
+        let scheduled = ScheduledHook {
+            id: id.clone(),
+            trigger_at: js_number(&hook[1], "crontabHookTriggerAt")?,
+            kind: decode_hook_kind(&hook[3], "crontabHookKind")?,
+        };
+        if text(&hook[2])?
+            != match &scheduled.kind {
+                ScheduledHookKind::HtlcTimeout { .. } => "htlc_timeout",
+                ScheduledHookKind::DisputeDeadline { .. } => "dispute_deadline",
+                ScheduledHookKind::HtlcSecretAckTimeout { .. } => "htlc_secret_ack_timeout",
+                ScheduledHookKind::SettlementWindow => "settlement_window",
+                ScheduledHookKind::Watchdog => "watchdog",
+                ScheduledHookKind::HubRebalanceKick { .. } => "hub_rebalance_kick",
+                ScheduledHookKind::BoardHankoRefresh { .. } => "board_hanko_refresh",
+                ScheduledHookKind::CounterpartyBoardHankoRefreshDeadline { .. } => {
+                    "counterparty_board_hanko_refresh_deadline"
+                }
+                ScheduledHookKind::CrossJOrderbookSweep { .. } => "cross_j_orderbook_sweep",
+            }
+        {
+            return Err(ProcessError::Expected("crontabHookType"));
+        }
+        map_insert(&mut hooks, id, scheduled, "crontabHookDuplicate")?;
+    }
+    Ok(Some(CrontabState { tasks, hooks }))
+}
+
+pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, ProcessError> {
+    let row = exact(tuple(value)?, 14, "entityStateSnapshot")?;
+    let mut reserves = BTreeMap::new();
+    for value in tuple(&row[4])? {
+        let entry = exact(tuple(value)?, 2, "entityReserve")?;
+        let token_id = u16::try_from(bounded_u32(&entry[0], "reserveTokenId")?)
+            .map_err(|_| ProcessError::Expected("reserveTokenId"))?;
+        let amount = bigint(&entry[1], "reserveAmount")?;
+        if token_id == 0 || amount < BigInt::from(0) {
+            return Err(ProcessError::Expected("entityReserveValue"));
+        }
+        map_insert(&mut reserves, token_id, amount, "entityReserveDuplicate")?;
+    }
+    let mut known_accounts = BTreeSet::new();
+    for value in tuple(&row[5])? {
         if !known_accounts.insert(hex_fixed(value, "knownAccount", 32)?) {
             return Err(ProcessError::Expected("knownAccountDuplicate"));
         }
     }
     let mut htlc_routes = BTreeMap::new();
-    for value in tuple(&row[5])? {
+    for value in tuple(&row[6])? {
         let (key, route) = decode_route(value)?;
         map_insert(&mut htlc_routes, key, route, "htlcRouteDuplicate")?;
     }
     let mut lock_book = BTreeMap::new();
-    for value in tuple(&row[7])? {
+    for value in tuple(&row[8])? {
         let (key, lock) = decode_lock(value)?;
         map_insert(&mut lock_book, key, lock, "lockBookDuplicate")?;
     }
-    let expected_owned_sections = tuple(&row[10])?
+    let expected_owned_sections = tuple(&row[11])?
         .iter()
         .map(|value| {
             let entry = exact(tuple(value)?, 2, "entityOwnedSection")?;
@@ -343,15 +504,61 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
         entity_id: hex_fixed(&row[0], "entityId", 32)?,
         height: js_number(&row[1], "entityHeight")?,
         timestamp: js_number(&row[2], "entityTimestamp")?,
+        entity_command_nonces: decode_entity_command_nonces(&row[13])?,
         last_finalized_j_height: js_number(&row[3], "lastFinalizedJHeight")?,
+        reserves,
         known_accounts,
         htlc_routes,
-        htlc_fees_earned: bigint(&row[6], "htlcFeesEarned")?,
+        htlc_fees_earned: bigint(&row[7], "htlcFeesEarned")?,
         lock_book,
-        orderbook: decode_orderbook(&row[8])?,
-        orderbook_metadata: decode_metadata(&row[9])?,
+        orderbook: decode_orderbook(&row[9])?,
+        orderbook_metadata: decode_metadata(&row[10])?,
         expected_owned_sections,
+        crontab: decode_crontab(&row[12])?,
     })
+}
+
+fn decode_entity_command_nonces(
+    value: &AbiValue,
+) -> Result<Option<EntityCommandNonceState>, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(None);
+    }
+    let row = exact(tuple(value)?, 4, "entityCommandNonces")?;
+    if bounded_u32(&row[0], "entityCommandNonceVersion")? != 1 {
+        return Err(ProcessError::Expected("entityCommandNonceVersion"));
+    }
+    let entries = tuple(&row[3])?;
+    if entries.len() > 100 {
+        return Err(ProcessError::Expected("entityCommandNonceSignerLimit"));
+    }
+    let mut by_signer = BTreeMap::new();
+    for value in entries {
+        let entry = exact(tuple(value)?, 3, "entityCommandNonceRecord")?;
+        let signer = text(&entry[0])?;
+        if signer.is_empty() || signer.trim().to_lowercase() != signer {
+            return Err(ProcessError::Expected("entityCommandNonceSigner"));
+        }
+        let nonce = bigint(&entry[1], "entityCommandNonce")?;
+        if nonce < BigInt::from(1_u8) {
+            return Err(ProcessError::Expected("entityCommandNonce"));
+        }
+        map_insert(
+            &mut by_signer,
+            signer.to_string(),
+            EntityCommandNonceRecord {
+                nonce,
+                command_hash: hex_fixed(&entry[2], "entityCommandHash", 32)?,
+            },
+            "entityCommandNonceSignerDuplicate",
+        )?;
+    }
+    Ok(Some(EntityCommandNonceState {
+        version: 1,
+        board_hash: hex_fixed(&row[1], "entityCommandBoardHash", 32)?,
+        board_epoch: js_number(&row[2], "entityCommandBoardEpoch")?,
+        by_signer,
+    }))
 }
 
 fn decode_prepared_htlc(
@@ -392,10 +599,11 @@ fn decode_prepared_htlc(
             }
         }
         1 => {
-            let outcome = exact(outcome, 3, "preparedHtlcFinal")?;
+            let outcome = exact(outcome, 4, "preparedHtlcFinal")?;
             HtlcPreparedOutcome::Final {
                 secret: hex_fixed(&outcome[1], "secret", 32)?,
-                started_at_ms: optional_u64(&outcome[2], "startedAtMs")?,
+                description: optional_text(&outcome[2])?,
+                started_at_ms: optional_u64(&outcome[3], "startedAtMs")?,
             }
         }
         2 => {
@@ -450,7 +658,95 @@ pub fn decode_context(value: &AbiValue) -> Result<DeterministicContext, ProcessE
         jurisdiction_id: optional_text(&row[2])?,
         pair_policies,
         prepared_htlcs,
+        originated_htlcs: BTreeMap::new(),
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)] // Wire tests stay beside their private decoder fixtures.
+mod prepared_context_wire_tests {
+    use super::*;
+
+    fn tuple(fields: Vec<AbiValue>) -> AbiValue {
+        AbiValue::Tuple(BodyTuple::from_vec(fields))
+    }
+
+    #[test]
+    fn prepared_final_wire_preserves_description() {
+        let binding = tuple(vec![
+            AbiValue::Bytes(vec![0x11; 32]),
+            AbiValue::Bytes(vec![0x22; 32]),
+            tuple(vec![
+                AbiValue::Integer(31_337),
+                AbiValue::Bytes(vec![0x33; 20]),
+            ]),
+            AbiValue::Bytes(vec![0x44; 32]),
+            AbiValue::Integer(1),
+            AbiValue::Bytes(vec![0x55; 32]),
+            AbiValue::Bytes(vec![0x66; 32]),
+            AbiValue::Bytes(vec![0x77; 32]),
+            AbiValue::Integer(7),
+            AbiValue::Text("1000".to_string()),
+            AbiValue::Text("100000".to_string()),
+            AbiValue::Integer(100),
+        ]);
+        let outcome = tuple(vec![
+            AbiValue::Integer(1),
+            AbiValue::Bytes(vec![0x88; 32]),
+            AbiValue::Text("canonical payment note".to_string()),
+            AbiValue::Integer(1_500),
+        ]);
+        let context = tuple(vec![
+            AbiValue::Text("0".to_string()),
+            AbiValue::Integer(0),
+            AbiValue::Nil,
+            tuple(Vec::new()),
+            tuple(vec![tuple(vec![binding, outcome])]),
+        ]);
+        let decoded = decode_context(&context).expect("context");
+        let outcome = &decoded
+            .prepared_htlcs
+            .values()
+            .next()
+            .expect("prepared row")
+            .outcome;
+        assert!(matches!(
+            outcome,
+            HtlcPreparedOutcome::Final {
+                description: Some(value),
+                started_at_ms: Some(1_500),
+                ..
+            } if value == "canonical payment note"
+        ));
+    }
+
+    #[test]
+    fn entity_command_nonce_wire_is_exact_and_preserves_latest_slot() {
+        let wire = tuple(vec![
+            AbiValue::Integer(1),
+            AbiValue::Bytes(vec![0xaa; 32]),
+            AbiValue::Integer(7),
+            tuple(vec![tuple(vec![
+                AbiValue::Text("signer-1".to_string()),
+                AbiValue::Text("9".to_string()),
+                AbiValue::Bytes(vec![0xbb; 32]),
+            ])]),
+        ]);
+        let decoded = decode_entity_command_nonces(&wire)
+            .expect("nonce wire")
+            .expect("nonce state");
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.board_hash, format!("0x{}", "aa".repeat(32)));
+        assert_eq!(decoded.board_epoch, 7);
+        assert_eq!(decoded.by_signer["signer-1"].nonce, BigInt::from(9_u8));
+        assert_eq!(
+            decoded.by_signer["signer-1"].command_hash,
+            format!("0x{}", "bb".repeat(32))
+        );
+
+        let malformed = tuple(vec![AbiValue::Integer(1), AbiValue::Bytes(vec![0xaa; 32])]);
+        assert!(decode_entity_command_nonces(&malformed).is_err());
+    }
 }
 
 fn fixed_hex_bytes(
@@ -495,6 +791,57 @@ fn optional_bigint_value(value: Option<&BigInt>) -> AbiValue {
 
 fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
     let fields = match value {
+        EntityKernelOutput::AccountSettledFinalizedBilateral {
+            entity_id,
+            account_id,
+            token_id,
+            j_height,
+            collateral,
+            ondelta,
+        } => vec![
+            AbiValue::Integer(6),
+            AbiValue::Bytes(fixed_hex_bytes(entity_id, 32, "entityId")?),
+            AbiValue::Bytes(fixed_hex_bytes(account_id, 32, "accountId")?),
+            AbiValue::Integer(i128::from(*token_id)),
+            AbiValue::Integer(i128::from(*j_height)),
+            AbiValue::Text(collateral.to_string()),
+            AbiValue::Text(ondelta.to_string()),
+        ],
+        EntityKernelOutput::HtlcInitiated {
+            entity_id,
+            from_entity,
+            to_entity,
+            token_id,
+            amount,
+            sender_amount,
+            fee,
+            hashlock,
+            lock_id,
+            route,
+            description,
+            started_at_ms,
+        } => vec![
+            AbiValue::Integer(5),
+            AbiValue::Bytes(fixed_hex_bytes(entity_id, 32, "entityId")?),
+            AbiValue::Bytes(fixed_hex_bytes(from_entity, 32, "fromEntity")?),
+            AbiValue::Bytes(fixed_hex_bytes(to_entity, 32, "toEntity")?),
+            AbiValue::Integer(i128::from(*token_id)),
+            AbiValue::Text(amount.to_string()),
+            AbiValue::Text(sender_amount.to_string()),
+            AbiValue::Text(fee.to_string()),
+            AbiValue::Bytes(fixed_hex_bytes(hashlock, 32, "hashlock")?),
+            AbiValue::Bytes(fixed_hex_bytes(lock_id, 32, "lockId")?),
+            AbiValue::Tuple(BodyTuple::from_vec(
+                route
+                    .iter()
+                    .map(|entity_id| {
+                        fixed_hex_bytes(entity_id, 32, "routeEntityId").map(AbiValue::Bytes)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            description.clone().map_or(AbiValue::Nil, AbiValue::Text),
+            AbiValue::Integer(i128::from(*started_at_ms)),
+        ],
         EntityKernelOutput::HtlcForwardAccepted {
             entity_id,
             hashlock,

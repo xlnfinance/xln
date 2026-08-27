@@ -290,9 +290,8 @@ export const fitEntityProposalToWireBudget = async (
     );
   }
   // Reuse the WAL context so replay does not rematerialize gossip/HTLC, but
-  // still defer the mempool tail. Taking every current mempool tx here packed
-  // the deferred consensusOutput into the same Entity frame, so live-head
-  // replica meta (mempoolCount + certified head) diverged on restore.
+  // still defer the mempool tail. Taking every current mempool tx here can
+  // make live-head replica metadata diverge from the certified replay head.
   if (usePersistedReplayContext && hasReplayEntityContext(env, replica)) {
     const entityContext = await materializeEntityInfraContext(env, replica, params.proposalTxs, {
       usePersistedReplayContext: true,

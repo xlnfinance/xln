@@ -37,6 +37,8 @@ pub enum BatchError {
     InputIndex { actual: u32, expected: u32 },
     #[error("RSCORE_BATCH_OPERATION_INDEX:{actual}:after={after:?}")]
     OperationIndex { actual: u64, after: Option<u64> },
+    #[error("RSCORE_BATCH_BOARD_AUTHORITY_UNRESOLVED")]
+    BoardAuthorityUnresolved,
     #[error("RSCORE_BATCH_ACCOUNT_NOT_FOUND:{input_index}:{account_id}")]
     AccountNotFound {
         input_index: u32,
@@ -44,6 +46,14 @@ pub enum BatchError {
     },
     #[error("RSCORE_BATCH_TX_UNSUPPORTED:{input_index}:{tag}")]
     UnsupportedTx { input_index: u32, tag: &'static str },
+    /// Settlement proposal eligibility depends on the signed workspace body
+    /// and post-commit Hanko drafts. The current payment/swap Account profile
+    /// deliberately represents neither; treating a mere presence bit as the
+    /// canonical rule would silently propose a frozen transaction.
+    #[error("PROPOSABILITY_SETTLEMENT_UNREPRESENTED")]
+    ProposabilitySettlementUnrepresented,
+    #[error("RSCORE_ACCOUNT_OUTBOUND_DISPUTE_UNSUPPORTED:{0}")]
+    OutboundDisputeUnsupported(AccountId),
     #[error("RSCORE_BATCH_TRANSITION:{input_index}:{source}")]
     Transition {
         input_index: u32,

@@ -100,6 +100,7 @@ fn hostile_peer_certificates_are_rejected_without_root_or_revision_change() {
         .account(&pair.payee_account)
         .expect("receiver account");
     let identity = receiver.replica().state().identity();
+    let proposer_is_left = receiver.replica().owner_side().opposite() == Side::Left;
     let proof_body_hash = [0x73; 32];
     let dispute_hash = dispute_proof_hash(
         identity.domain().chain_id(),
@@ -107,7 +108,7 @@ fn hostile_peer_certificates_are_rejected_without_root_or_revision_change() {
         identity.entity(Side::Left).as_bytes(),
         identity.entity(Side::Right).as_bytes(),
         1,
-        incoming.frame.by_left,
+        proposer_is_left,
         &proof_body_hash,
         identity.watch_seed().bytes(),
     );
@@ -120,7 +121,7 @@ fn hostile_peer_certificates_are_rejected_without_root_or_revision_change() {
         hash: [0; 32],
         proof_body_hash,
         nonce: 1,
-        proposer_is_left: incoming.frame.by_left,
+        proposer_is_left,
     });
     let mut bad_dispute_hanko = incoming.clone();
     bad_dispute_hanko.dispute = Some(CounterpartyDispute {
@@ -128,7 +129,7 @@ fn hostile_peer_certificates_are_rejected_without_root_or_revision_change() {
         hash: dispute_hash,
         proof_body_hash,
         nonce: 1,
-        proposer_is_left: incoming.frame.by_left,
+        proposer_is_left,
     });
     let receiver_root = stand.payee.accounts_root();
     let receiver_revision = stand.payee.revision();

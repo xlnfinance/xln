@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { handleJEventClaim } from '../../../account/tx/handlers/j-events/claim';
+import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { createAccountJClaimSession } from '../../../account/j-claims/j-claim-session';
 import {
@@ -111,7 +112,7 @@ describe('account J-event validate/commit parity', () => {
     const initial = machine();
     const firstSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
     const leftClaim = prepareAccountJClaimTx(initial.state, rawClaim(), DOMAIN, firstSession);
-    expect(handleJEventClaim(initial, leftClaim, true, 99, false, LEFT, [], runtime.state, firstSession).ok)
+    expect(handleJEventClaim(initial, leftClaim, true, 99, LEFT, [], runtime.state, firstSession).ok)
       .toBe(true);
     cacheCommittedAccountJClaimNodeChanges(runtime, firstSession.changes());
     expect(initial.state.leftPendingJClaims.count).toBe(1n);
@@ -123,10 +124,10 @@ describe('account J-event validate/commit parity', () => {
     const validationSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
     const commitSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
     const validationResult = handleJEventClaim(
-      validation, rightClaim, false, 100, true, LEFT, [], runtime.state, validationSession,
+      validation, rightClaim, false, 100, LEFT, [], runtime.state, validationSession,
     );
     const commitResult = handleJEventClaim(
-      commit, rightClaim, false, 100, false, LEFT, [], runtime.state, commitSession,
+      commit, rightClaim, false, 100, LEFT, [], runtime.state, commitSession,
     );
 
     expect(validationResult.ok).toBe(true);
@@ -137,6 +138,57 @@ describe('account J-event validate/commit parity', () => {
     expect(validation.state.leftPendingJClaims.count).toBe(0n);
     expect(validation.state.rightPendingJClaims.count).toBe(0n);
     expect('jEventChain' in validation).toBe(false);
+  });
+
+  test('keeps exact retries idempotent and rejects a conflicting claim without mutation', () => {
+    const runtime = env();
+    const account = machine();
+    const firstSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
+    const first = prepareAccountJClaimTx(account.state, rawClaim(), DOMAIN, firstSession);
+    expect(handleJEventClaim(account, first, true, 99, LEFT, [], runtime.state, firstSession).ok)
+      .toBe(true);
+    cacheCommittedAccountJClaimNodeChanges(runtime, firstSession.changes());
+    const pendingLeft = account.state.leftPendingJClaims;
+    const pendingRight = account.state.rightPendingJClaims;
+
+    const retrySession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
+    const retry = prepareAccountJClaimTx(account.state, rawClaim(), DOMAIN, retrySession);
+    expect(handleJEventClaim(account, retry, true, 100, LEFT, [], runtime.state, retrySession))
+      .toMatchObject({ ok: true, outcome: 'applied', events: ['ℹ️ j_event_claim idempotent'] });
+    expect(account.state.leftPendingJClaims).toEqual(pendingLeft);
+    expect(account.state.rightPendingJClaims).toEqual(pendingRight);
+
+    const conflict: Extract<AccountTx, { type: 'j_event_claim' }> = {
+      ...rawClaim(),
+      data: {
+        ...rawClaim().data,
+        events: [{ ...settledEvent, data: { ...settledEvent.data, collateral: '126' } }],
+      },
+    };
+    const conflictSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
+    const preparedConflict = prepareAccountJClaimTx(account.state, conflict, DOMAIN, conflictSession);
+    const result = handleJEventClaim(
+      account,
+      preparedConflict,
+      true,
+      101,
+      LEFT,
+      [],
+      runtime.state,
+      conflictSession,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      events: [],
+      rejection: {
+        kind: 'validation',
+        code: ACCOUNT_TX_REJECTION_CODES.validation,
+        message: 'ACCOUNT_J_CLAIM_LEFT_CONFLICT:left:7',
+      },
+    });
+    expect(account.state.leftPendingJClaims).toEqual(pendingLeft);
+    expect(account.state.rightPendingJClaims).toEqual(pendingRight);
   });
 
   test('orders claims by account and height without moving unrelated account operations', () => {

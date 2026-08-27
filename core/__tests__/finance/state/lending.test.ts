@@ -100,16 +100,14 @@ const makeAccount = (counterparty: string): AccountReplica => {
   };
 };
 
-const frame = (tx: AccountTx | AccountTx[], byLeft: boolean, timestamp: number): AccountFrame => ({
+const frame = (tx: AccountTx | AccountTx[], timestamp: number): AccountFrame => ({
   height: 2,
   timestamp,
   jHeight: 0,
   accountTxs: Array.isArray(tx) ? tx : [tx],
   prevFrameHash: FRAME_HASH,
-  deltas: [],
   stateHash: FRAME_HASH,
   accountStateRoot: `0x${'66'.repeat(32)}`,
-  byLeft,
 });
 
 const commit = async (
@@ -132,7 +130,15 @@ const commit = async (
   expect(result.ok, result.ok ? undefined : result.rejection.message).toBe(true);
   state.accounts = state.accounts.updated(counterparty, commitAccountTransition(transition).account);
   const followups: AccountTxTarget[] = [];
-  applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups, undefined, []);
+  applyCommittedAccountFrameFollowups(
+    state,
+    counterparty,
+    frame(tx, timestamp),
+    byLeft,
+    followups,
+    undefined,
+    [],
+  );
   return followups;
 };
 
@@ -187,7 +193,15 @@ describe('payer-authenticated hub lending', () => {
     }));
     for (const tx of borrows) expect((await applyOnly(state, BORROWER, tx, false, 2_000)).ok).toBe(true);
     const grants: AccountTxTarget[] = [];
-    applyCommittedAccountFrameFollowups(state, BORROWER, frame(borrows, false, 2_000), grants, undefined, []);
+    applyCommittedAccountFrameFollowups(
+      state,
+      BORROWER,
+      frame(borrows, 2_000),
+      false,
+      grants,
+      undefined,
+      [],
+    );
     expect(grants.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
       .toEqual([20_100n, 20_300n]);
 
@@ -197,7 +211,8 @@ describe('payer-authenticated hub lending', () => {
     applyCommittedAccountFrameFollowups(
       state,
       BORROWER,
-      frame(grants.map(output => output.tx), true, 2_001),
+      frame(grants.map(output => output.tx), 2_001),
+      true,
       [],
       undefined,
       [],
@@ -215,7 +230,15 @@ describe('payer-authenticated hub lending', () => {
     }));
     for (const tx of repayments) expect((await applyOnly(state, BORROWER, tx, false, 3_000)).ok).toBe(true);
     const revokes: AccountTxTarget[] = [];
-    applyCommittedAccountFrameFollowups(state, BORROWER, frame(repayments, false, 3_000), revokes, undefined, []);
+    applyCommittedAccountFrameFollowups(
+      state,
+      BORROWER,
+      frame(repayments, 3_000),
+      false,
+      revokes,
+      undefined,
+      [],
+    );
     expect(revokes.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
       .toEqual([20_200n, 20_000n]);
   });

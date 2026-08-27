@@ -50,6 +50,7 @@ import type {
 } from '../account/consensus/types';
 import { safeStringify } from '../protocol/serialization';
 import { decodeAccountPeerInput } from '../account/validation/input-validation';
+import type { CertifiedBoardRecord } from '../types/entity-board-registry';
 
 const authorityLog = createStructuredLogger('rscore.authority');
 
@@ -701,7 +702,7 @@ export const describeAuthorityWaveOperation = (
     tag === 1
     && value.length === 2
     && Array.isArray(value[1])
-    && value[1].length === 4
+    && value[1].length === 5
   ) {
     const input = value[1];
     operationIndex = input[0];
@@ -1009,6 +1010,38 @@ const soleClock = (
  * One arrival as the engine reads it: its index, the account it moves, and
  * the exact envelope the peer sent.
  */
+export type AuthorityCertifiedBoard = Readonly<Pick<
+  CertifiedBoardRecord,
+  | 'boardHash'
+  | 'previousBoardHash'
+  | 'previousBoardValidUntil'
+  | 'activatedAtJHeight'
+  | 'logIndex'
+>>;
+
+const authorityBoardWire = (
+  authority: AuthorityCertifiedBoard | undefined,
+  role: 'PEER' | 'LOCAL',
+): RscoreWireValue => {
+  if (authority === undefined) return null;
+  for (const [field, value] of [
+    ['previousBoardValidUntil', authority.previousBoardValidUntil],
+    ['activatedAtJHeight', authority.activatedAtJHeight],
+    ['logIndex', authority.logIndex],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`AUTHORITY_${role}_${field.toUpperCase()}_INVALID:${String(value)}`);
+    }
+  }
+  return [
+    hexToWireBytes(authority.boardHash, 32, `AUTHORITY_${role}_BOARD_HASH`),
+    hexToWireBytes(authority.previousBoardHash, 32, `AUTHORITY_${role}_PREVIOUS_BOARD_HASH`),
+    authority.previousBoardValidUntil,
+    authority.activatedAtJHeight,
+    authority.logIndex,
+  ];
+};
+
 export const authorityPeerInputRow = (
   operationIndex: number,
   counterpartyEntityId: string,
@@ -1019,6 +1052,8 @@ export const authorityPeerInputRow = (
     deltaTransformer: string;
     publicPinned: false;
   }>,
+  peerBoardAuthority?: AuthorityCertifiedBoard,
+  localBoardAuthority?: AuthorityCertifiedBoard,
 ): RscoreWireValue => {
   const accountId = hexToWireBytes(counterpartyEntityId, 32, 'AUTHORITY_ACCOUNT_ID');
   const decoded = decodeAccountPeerInput(payload.input, 'RSCORE_AUTHORITY_PEER_INPUT');
@@ -1048,6 +1083,10 @@ export const authorityPeerInputRow = (
               hexToWireBytes(genesisPolicy.deltaTransformer, 20, 'AUTHORITY_GENESIS_TRANSFORMER'),
               genesisPolicy.publicPinned,
             ],
+        [
+          authorityBoardWire(peerBoardAuthority, 'PEER'),
+          authorityBoardWire(localBoardAuthority, 'LOCAL'),
+        ],
       ];
   }
 };

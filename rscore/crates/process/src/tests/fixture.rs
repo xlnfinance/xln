@@ -529,7 +529,7 @@ fn authority_genesis_envelope(owner: [u8; 32], counterparty: [u8; 32]) -> AbiVal
         Vec::new(),
     )
     .expect("canonical authority genesis envelope");
-    crate::canonical::encode_envelope(&envelope)
+    xln_rscore_batch::encode_account_envelope(&envelope)
 }
 
 /// `BootstrapAccounts` carrying accounts an authoritative session owns.

@@ -5,6 +5,7 @@ mod commitment;
 mod matcher;
 mod math;
 mod page;
+mod policy;
 mod resolve;
 mod types;
 
@@ -12,6 +13,10 @@ mod types;
 pub use benchmark::{OrderbookBenchmarkResult, run_orderbook_benchmark};
 pub use commitment::compute_book_commitment_hash;
 pub use page::{BookPricePageEntrySnapshot, BookPricePageSnapshot};
+pub use policy::{
+    canonical_pair_orientation, canonical_pair_policy, canonical_token_decimals,
+    is_canonical_liquid_token,
+};
 pub use types::{
     BookOrder, BookState, BookStateSnapshot, OrderbookState, OrderbookStateSnapshot,
     PairDimensions, PairPolicy, SameJOffer, Side,

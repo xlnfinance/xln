@@ -15,9 +15,7 @@ const nestedEntityTxs = (
   switch (tx.type) {
     case 'entityCommand':
       return tx.data.txs;
-    case 'consensusOutput':
     case 'runtimeOutput':
-    case 'reissueCertifiedOutput':
       return tx.data.entityTxs;
     case 'propose':
       return tx.data.action.type === 'entity_transaction'

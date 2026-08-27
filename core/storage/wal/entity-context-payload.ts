@@ -1,13 +1,14 @@
 /**
  * Proposer infrastructure observations are replay inputs, not Runtime state.
- * Each exact context is stored once and WAL frames commit replica-id → hash
- * references. Recovery verifies the bytes before allowing deterministic replay.
+ * WAL frames commit replica-id → manifest digest. Physical rows live at
+ * permanent `(Runtime height, replica, row kind, row index)` paths; digests
+ * authenticate bytes but never select a database key.
  *
  * One physical LevelDB value is capped at 10 KB. A 4-hop HTLC context carries
  * four gossip Profiles (~2.5–3.1 KB each) plus the prepared HTLC envelope, so
  * the canonical RAM object does not fit in one record. Store a tiny manifest
- * plus content-addressed Profile and HTLC leaves; never byte-chunk an opaque
- * blob, which would create a second storage layout beside the typed records.
+ * plus path-addressed Profile and HTLC leaves; never byte-chunk an opaque blob,
+ * which would create a second storage layout beside the typed records.
  */
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type {
@@ -23,7 +24,10 @@ import {
   type EntityContextPayloadHash,
 } from '../../protocol/hashes';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
-import { keyEntityContextPayload } from '../keys';
+import {
+  keyEntityContextPayload,
+  type EntityContextPayloadPathKind,
+} from '../keys';
 import type {
   RuntimeDbLike,
 } from '../types';
@@ -32,44 +36,44 @@ export const MAX_ENTITY_CONTEXT_PAYLOAD_BYTES = 10_000;
 
 type StoredEntityContextManifest = Readonly<{
   kind: 'entityContext';
-  version: 1;
+  version: 2;
   header: Omit<EntityInfraContext, 'gossipProfiles' | 'htlc' | 'peerAssertions'> &
     Partial<Pick<EntityInfraContext, 'peerAssertions'>>;
-  profilePageRefs: EntityContextPayloadHash[];
+  profilePageDigests: EntityContextPayloadHash[];
   /**
    * A Hub frame asserts liveness for every next hop it routes to in that frame;
    * at ~350 payments per frame the inline assertion list alone crossed the
    * record cap and halted the Runtime. Assertions are therefore paged like the
    * other lists (rows written before this field kept them inline in the header).
    */
-  peerAssertionPageRefs?: EntityContextPayloadHash[];
+  peerAssertionPageDigests: EntityContextPayloadHash[];
   /**
    * One leaf per prepared HTLC rather than one leaf for the whole frame. A Hub
    * that batches carries as many prepared HTLCs as the batch is wide, and a
    * single combined leaf crossed the 10 KB record cap at 49 entries and halted
-   * the Runtime. Per-entry leaves also dedupe: an entry repeated across
-   * replicas or retried frames is stored once by content address.
+   * the Runtime. Each leaf has a stable replica-local index and is overwritten
+   * when that Runtime height is rewritten during an offline rebuild.
    */
-  htlcEntryPageRefs: EntityContextPayloadHash[];
-  htlcOriginatedPageRefs: EntityContextPayloadHash[];
+  htlcEntryPageDigests: EntityContextPayloadHash[];
+  htlcOriginatedPageDigests: EntityContextPayloadHash[];
 }>;
 
 /**
  * Splitting the leaves only moved the ceiling onto the manifest: a batch of 99
  * payments listed 198 hashes and the manifest itself passed 20 KB. Reference
- * lists are therefore paged into their own content-addressed leaves, so the
- * manifest holds a handful of page hashes no matter how wide the batch is.
+ * lists are therefore paged into fixed path-derived rows, so the manifest
+ * holds a handful of page digests no matter how wide the batch is.
  */
-type StoredReferencePage = Readonly<{
-  kind: 'referencePage';
-  version: 1;
+type StoredDigestPage = Readonly<{
+  kind: 'digestPage';
+  version: 2;
   childKind: 'gossipProfile' | 'htlcEntry' | 'htlcOriginated' | 'peerAssertions';
-  refs: EntityContextPayloadHash[];
+  digests: EntityContextPayloadHash[];
 }>;
 
 type StoredPeerAssertionsPage = Readonly<{
   kind: 'peerAssertions';
-  version: 1;
+  version: 2;
   assertions: EntityInfraContext['peerAssertions'];
 }>;
 
@@ -78,19 +82,19 @@ const PEER_ASSERTION_PAGE_SIZE = 64;
 
 type StoredGossipProfile = Readonly<{
   kind: 'gossipProfile';
-  version: 1;
+  version: 2;
   profile: Profile;
 }>;
 
 type StoredHtlcEntry = Readonly<{
   kind: 'htlcEntry';
-  version: 1;
+  version: 2;
   entry: PreparedHtlcEntry;
 }>;
 
 type StoredHtlcOriginated = Readonly<{
   kind: 'htlcOriginated';
-  version: 1;
+  version: 2;
   originated: PreparedOriginatedHtlcPayment;
 }>;
 
@@ -100,7 +104,7 @@ type StoredEntityContextRow =
   | StoredHtlcEntry
   | StoredHtlcOriginated
   | StoredPeerAssertionsPage
-  | StoredReferencePage;
+  | StoredDigestPage;
 
 type PayloadRow = Readonly<{
   key: Buffer;
@@ -145,33 +149,20 @@ const payloadBudgetLabel = (payload: StoredEntityContextRow): string => {
   if (payload.kind === 'htlcEntry') return `htlcEntry:${payload.entry.binding.lockId}`;
   if (payload.kind === 'htlcOriginated') return `htlcOriginated:${payload.originated.lockId}`;
   if (payload.kind === 'peerAssertions') return `peerAssertions:${payload.assertions.length}`;
-  if (payload.kind === 'referencePage') {
-    return `referencePage:${payload.childKind}:refs=${payload.refs.length}`;
+  if (payload.kind === 'digestPage') {
+    return `digestPage:${payload.childKind}:digests=${payload.digests.length}`;
   }
-  return `entityContext:profilePages=${payload.profilePageRefs.length}:` +
-    `htlcPages=${payload.htlcEntryPageRefs.length}`;
-};
-
-const prepareReferencePages = (
-  refs: readonly EntityContextPayloadHash[],
-  childKind: StoredReferencePage['childKind'],
-  rowsByHash: Map<EntityContextPayloadHash, PayloadRow>,
-): EntityContextPayloadHash[] => {
-  const pageRefs: EntityContextPayloadHash[] = [];
-  for (let offset = 0; offset < refs.length; offset += REFERENCE_PAGE_SIZE) {
-    pageRefs.push(prepareRow({
-      kind: 'referencePage',
-      version: 1,
-      childKind,
-      refs: refs.slice(offset, offset + REFERENCE_PAGE_SIZE),
-    }, rowsByHash));
-  }
-  return pageRefs;
+  return `entityContext:profilePages=${payload.profilePageDigests.length}:` +
+    `htlcPages=${payload.htlcEntryPageDigests.length}`;
 };
 
 const prepareRow = (
+  runtimeHeight: number,
+  replicaId: string,
+  pathKind: EntityContextPayloadPathKind,
+  index: number,
   payload: StoredEntityContextRow,
-  rowsByHash: Map<EntityContextPayloadHash, PayloadRow>,
+  rows: PayloadRow[],
 ): EntityContextPayloadHash => {
   const value = encodeBuffer(payload, { omitSymbolKeys: true });
   if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
@@ -180,18 +171,58 @@ const prepareRow = (
       `max=${MAX_ENTITY_CONTEXT_PAYLOAD_BYTES}:${payloadBudgetLabel(payload)}`,
     );
   }
-  const hash = hashContext(value);
-  rowsByHash.set(hash, { key: keyEntityContextPayload(hash), value });
-  return hash;
+  const digest = hashContext(value);
+  rows.push({
+    key: keyEntityContextPayload(runtimeHeight, replicaId, pathKind, index),
+    value,
+  });
+  return digest;
+};
+
+const digestPagePathKind = (
+  childKind: StoredDigestPage['childKind'],
+): EntityContextPayloadPathKind => {
+  if (childKind === 'gossipProfile') return 'gossipProfileDigests';
+  if (childKind === 'htlcEntry') return 'htlcEntryDigests';
+  if (childKind === 'htlcOriginated') return 'htlcOriginatedDigests';
+  return 'peerAssertionDigests';
+};
+
+const prepareDigestPages = (
+  runtimeHeight: number,
+  replicaId: string,
+  digests: readonly EntityContextPayloadHash[],
+  childKind: StoredDigestPage['childKind'],
+  rows: PayloadRow[],
+): EntityContextPayloadHash[] => {
+  const pageDigests: EntityContextPayloadHash[] = [];
+  for (let offset = 0; offset < digests.length; offset += REFERENCE_PAGE_SIZE) {
+    pageDigests.push(prepareRow(
+      runtimeHeight,
+      replicaId,
+      digestPagePathKind(childKind),
+      offset / REFERENCE_PAGE_SIZE,
+      {
+        kind: 'digestPage',
+        version: 2,
+        childKind,
+        digests: digests.slice(offset, offset + REFERENCE_PAGE_SIZE),
+      },
+      rows,
+    ));
+  }
+  return pageDigests;
 };
 
 export const prepareEntityContextPayloadRows = (
+  runtimeHeight: number,
   contexts: ReadonlyMap<string, EntityInfraContext>,
   inProcessInfraValidated = false,
 ) => {
   const refs = new Map<string, EntityContextPayloadHash>();
-  const rowsByHash = new Map<EntityContextPayloadHash, PayloadRow>();
-  for (const [replicaId, context] of contexts) {
+  const rows: PayloadRow[] = [];
+  for (const [replicaId, context] of [...contexts.entries()].sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0)) {
     assertReplicaId(replicaId, 'STORAGE_ENTITY_CONTEXT_REPLICA_ID_INVALID');
     // Live saveEnvToDB never runs during WAL replay. Each collected context
     // already passed materialize or apply this tick; re-parse is a second
@@ -204,47 +235,66 @@ export const prepareEntityContextPayloadRows = (
     // replica. The map key binds the recipient Entity; the payload's validated
     // proposerReplicaId independently binds the proposer identity.
     assertAppliedReplicaEntity(replicaId, decoded);
-    const profileRefs = decoded.gossipProfiles.map(profile => prepareRow({
-      kind: 'gossipProfile',
-      version: 1,
-      profile,
-    }, rowsByHash));
-    const htlcEntryRefs = decoded.htlc.entries.map(entry => prepareRow({
-      kind: 'htlcEntry',
-      version: 1,
-      entry,
-    }, rowsByHash));
-    const htlcOriginatedRefs = decoded.htlc.originated.map(originated => prepareRow({
-      kind: 'htlcOriginated',
-      version: 1,
-      originated,
-    }, rowsByHash));
-    const peerAssertionRefs: EntityContextPayloadHash[] = [];
+    const profileDigests = decoded.gossipProfiles.map((profile, index) => prepareRow(
+      runtimeHeight, replicaId, 'gossipProfile', index,
+      { kind: 'gossipProfile', version: 2, profile }, rows,
+    ));
+    const htlcEntryDigests = decoded.htlc.entries.map((entry, index) => prepareRow(
+      runtimeHeight, replicaId, 'htlcEntry', index,
+      { kind: 'htlcEntry', version: 2, entry }, rows,
+    ));
+    const htlcOriginatedDigests = decoded.htlc.originated.map((originated, index) => prepareRow(
+      runtimeHeight, replicaId, 'htlcOriginated', index,
+      { kind: 'htlcOriginated', version: 2, originated }, rows,
+    ));
+    const peerAssertionDigests: EntityContextPayloadHash[] = [];
     for (let offset = 0; offset < decoded.peerAssertions.length; offset += PEER_ASSERTION_PAGE_SIZE) {
-      peerAssertionRefs.push(prepareRow({
-        kind: 'peerAssertions',
-        version: 1,
-        assertions: decoded.peerAssertions.slice(offset, offset + PEER_ASSERTION_PAGE_SIZE),
-      }, rowsByHash));
+      peerAssertionDigests.push(prepareRow(
+        runtimeHeight,
+        replicaId,
+        'peerAssertions',
+        offset / PEER_ASSERTION_PAGE_SIZE,
+        {
+          kind: 'peerAssertions',
+          version: 2,
+          assertions: decoded.peerAssertions.slice(offset, offset + PEER_ASSERTION_PAGE_SIZE),
+        },
+        rows,
+      ));
     }
-    refs.set(replicaId, prepareRow({
-      kind: 'entityContext',
-      version: 1,
-      header: {
-        version: decoded.version,
-        proposerReplicaId: decoded.proposerReplicaId,
-        entityId: decoded.entityId,
-        proposerSignerId: decoded.proposerSignerId,
-        parentFrameHash: decoded.parentFrameHash,
-        height: decoded.height,
+    refs.set(replicaId, prepareRow(
+      runtimeHeight,
+      replicaId,
+      'manifest',
+      0,
+      {
+        kind: 'entityContext',
+        version: 2,
+        header: {
+          version: decoded.version,
+          proposerReplicaId: decoded.proposerReplicaId,
+          entityId: decoded.entityId,
+          proposerSignerId: decoded.proposerSignerId,
+          parentFrameHash: decoded.parentFrameHash,
+          height: decoded.height,
+        },
+        profilePageDigests: prepareDigestPages(
+          runtimeHeight, replicaId, profileDigests, 'gossipProfile', rows,
+        ),
+        peerAssertionPageDigests: prepareDigestPages(
+          runtimeHeight, replicaId, peerAssertionDigests, 'peerAssertions', rows,
+        ),
+        htlcEntryPageDigests: prepareDigestPages(
+          runtimeHeight, replicaId, htlcEntryDigests, 'htlcEntry', rows,
+        ),
+        htlcOriginatedPageDigests: prepareDigestPages(
+          runtimeHeight, replicaId, htlcOriginatedDigests, 'htlcOriginated', rows,
+        ),
       },
-      profilePageRefs: prepareReferencePages(profileRefs, 'gossipProfile', rowsByHash),
-      peerAssertionPageRefs: prepareReferencePages(peerAssertionRefs, 'peerAssertions', rowsByHash),
-      htlcEntryPageRefs: prepareReferencePages(htlcEntryRefs, 'htlcEntry', rowsByHash),
-      htlcOriginatedPageRefs: prepareReferencePages(htlcOriginatedRefs, 'htlcOriginated', rowsByHash),
-    }, rowsByHash));
+      rows,
+    ));
   }
-  return { refs, rows: [...rowsByHash.values()] };
+  return { refs, rows };
 };
 
 export const decodeEntityContextPayloadRefs = (
@@ -265,31 +315,37 @@ export const decodeEntityContextPayloadRefs = (
 
 const readVerifiedPayload = async (
   db: Pick<RuntimeDbLike, 'get'>,
+  runtimeHeight: number,
   replicaId: string,
-  ref: EntityContextPayloadHash,
+  pathKind: EntityContextPayloadPathKind,
+  index: number,
+  expectedDigest: EntityContextPayloadHash,
 ): Promise<unknown> => {
   let value: Buffer;
   try {
-    value = await db.get(keyEntityContextPayload(ref));
+    value = await db.get(keyEntityContextPayload(runtimeHeight, replicaId, pathKind, index));
   } catch (error) {
-    throw new Error(`STORAGE_ENTITY_CONTEXT_PAYLOAD_MISSING:${replicaId}:${ref}`, {
+    throw new Error(
+      `STORAGE_ENTITY_CONTEXT_PAYLOAD_MISSING:${runtimeHeight}:${replicaId}:${pathKind}:${index}`,
+      {
       cause: error,
-    });
+      },
+    );
   }
   if (value.byteLength >= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_PAYLOAD_TOO_LARGE:${replicaId}`);
   }
   const actual = hashContext(value);
-  if (actual !== ref) {
+  if (actual !== expectedDigest) {
     throw new Error(
       `STORAGE_ENTITY_CONTEXT_PAYLOAD_HASH_MISMATCH:${replicaId}:` +
-      `expected=${ref}:actual=${actual}`,
+      `expected=${expectedDigest}:actual=${actual}`,
     );
   }
   return decodeBuffer(value);
 };
 
-const decodeHashList = (value: unknown, code: string): EntityContextPayloadHash[] => {
+const decodeDigestList = (value: unknown, code: string): EntityContextPayloadHash[] => {
   if (!Array.isArray(value)) throw new Error(code);
   return value.map(entry => {
     if (typeof entry !== 'string') throw new Error(`${code}:ENTRY`);
@@ -300,7 +356,7 @@ const decodeHashList = (value: unknown, code: string): EntityContextPayloadHash[
 const decodeGossipProfileLeaf = (value: unknown, replicaId: string): Profile => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_PROFILE_INVALID:${replicaId}`);
   exactKeys(raw, ['kind', 'version', 'profile'], `STORAGE_ENTITY_CONTEXT_PROFILE_INVALID:${replicaId}`);
-  if (raw['kind'] !== 'gossipProfile' || raw['version'] !== 1) {
+  if (raw['kind'] !== 'gossipProfile' || raw['version'] !== 2) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_PROFILE_KIND:${replicaId}`);
   }
   return raw['profile'] as Profile;
@@ -309,7 +365,7 @@ const decodeGossipProfileLeaf = (value: unknown, replicaId: string): Profile => 
 const decodeHtlcEntryLeaf = (value: unknown, replicaId: string): PreparedHtlcEntry => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
   exactKeys(raw, ['kind', 'version', 'entry'], `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
-  if (raw['kind'] !== 'htlcEntry' || raw['version'] !== 1) {
+  if (raw['kind'] !== 'htlcEntry' || raw['version'] !== 2) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_HTLC_KIND:${replicaId}`);
   }
   return raw['entry'] as PreparedHtlcEntry;
@@ -318,7 +374,7 @@ const decodeHtlcEntryLeaf = (value: unknown, replicaId: string): PreparedHtlcEnt
 const decodeHtlcOriginatedLeaf = (value: unknown, replicaId: string): PreparedOriginatedHtlcPayment => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
   exactKeys(raw, ['kind', 'version', 'originated'], `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
-  if (raw['kind'] !== 'htlcOriginated' || raw['version'] !== 1) {
+  if (raw['kind'] !== 'htlcOriginated' || raw['version'] !== 2) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_HTLC_KIND:${replicaId}`);
   }
   return raw['originated'] as PreparedOriginatedHtlcPayment;
@@ -330,7 +386,7 @@ const decodePeerAssertionsLeaf = (
 ): EntityInfraContext['peerAssertions'] => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_INVALID:${replicaId}`);
   exactKeys(raw, ['kind', 'version', 'assertions'], `STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_INVALID:${replicaId}`);
-  if (raw['kind'] !== 'peerAssertions' || raw['version'] !== 1 || !Array.isArray(raw['assertions'])) {
+  if (raw['kind'] !== 'peerAssertions' || raw['version'] !== 2 || !Array.isArray(raw['assertions'])) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_KIND:${replicaId}`);
   }
   if (raw['assertions'].length === 0 || raw['assertions'].length > PEER_ASSERTION_PAGE_SIZE) {
@@ -341,121 +397,144 @@ const decodePeerAssertionsLeaf = (
 
 const decodeManifest = (value: unknown, replicaId: string): StoredEntityContextManifest => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_MANIFEST_INVALID:${replicaId}`);
-  const paged = 'peerAssertionPageRefs' in raw;
   exactKeys(
     raw,
     [
-      'kind', 'version', 'header', 'profilePageRefs', 'htlcEntryPageRefs', 'htlcOriginatedPageRefs',
-      ...(paged ? ['peerAssertionPageRefs'] : []),
+      'kind', 'version', 'header', 'profilePageDigests', 'peerAssertionPageDigests',
+      'htlcEntryPageDigests', 'htlcOriginatedPageDigests',
     ],
     `STORAGE_ENTITY_CONTEXT_MANIFEST_INVALID:${replicaId}`,
   );
-  if (raw['kind'] !== 'entityContext' || raw['version'] !== 1) {
+  if (raw['kind'] !== 'entityContext' || raw['version'] !== 2) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_MANIFEST_KIND:${replicaId}`);
   }
   const header = record(raw['header'], `STORAGE_ENTITY_CONTEXT_HEADER_INVALID:${replicaId}`);
   exactKeys(header, [
     'version', 'proposerReplicaId', 'entityId', 'proposerSignerId',
-    'parentFrameHash', 'height', ...(paged ? [] : ['peerAssertions']),
+    'parentFrameHash', 'height',
   ], `STORAGE_ENTITY_CONTEXT_HEADER_INVALID:${replicaId}`);
   return {
     kind: 'entityContext',
-    version: 1,
+    version: 2,
     header: header as StoredEntityContextManifest['header'],
-    profilePageRefs: decodeHashList(
-      raw['profilePageRefs'],
-      `STORAGE_ENTITY_CONTEXT_PROFILE_REFS:${replicaId}`,
+    profilePageDigests: decodeDigestList(
+      raw['profilePageDigests'],
+      `STORAGE_ENTITY_CONTEXT_PROFILE_DIGESTS:${replicaId}`,
     ),
-    ...(paged ? {
-      peerAssertionPageRefs: decodeHashList(
-        raw['peerAssertionPageRefs'],
-        `STORAGE_ENTITY_CONTEXT_PEER_ASSERTION_REFS:${replicaId}`,
-      ),
-    } : {}),
-    htlcEntryPageRefs: decodeHashList(
-      raw['htlcEntryPageRefs'],
-      `STORAGE_ENTITY_CONTEXT_HTLC_REFS:${replicaId}`,
+    peerAssertionPageDigests: decodeDigestList(
+      raw['peerAssertionPageDigests'],
+      `STORAGE_ENTITY_CONTEXT_PEER_ASSERTION_DIGESTS:${replicaId}`,
     ),
-    htlcOriginatedPageRefs: decodeHashList(
-      raw['htlcOriginatedPageRefs'],
-      `STORAGE_ENTITY_CONTEXT_HTLC_ORIGINATED_REFS:${replicaId}`,
+    htlcEntryPageDigests: decodeDigestList(
+      raw['htlcEntryPageDigests'],
+      `STORAGE_ENTITY_CONTEXT_HTLC_DIGESTS:${replicaId}`,
+    ),
+    htlcOriginatedPageDigests: decodeDigestList(
+      raw['htlcOriginatedPageDigests'],
+      `STORAGE_ENTITY_CONTEXT_HTLC_ORIGINATED_DIGESTS:${replicaId}`,
     ),
   };
 };
 
-const decodeReferencePageLeaf = (
+const decodeDigestPageLeaf = (
   value: unknown,
   replicaId: string,
-  childKind: StoredReferencePage['childKind'],
+  childKind: StoredDigestPage['childKind'],
 ): EntityContextPayloadHash[] => {
-  const raw = record(value, `STORAGE_ENTITY_CONTEXT_REFERENCE_PAGE_INVALID:${replicaId}`);
+  const raw = record(value, `STORAGE_ENTITY_CONTEXT_DIGEST_PAGE_INVALID:${replicaId}`);
   exactKeys(
     raw,
-    ['kind', 'version', 'childKind', 'refs'],
-    `STORAGE_ENTITY_CONTEXT_REFERENCE_PAGE_INVALID:${replicaId}`,
+    ['kind', 'version', 'childKind', 'digests'],
+    `STORAGE_ENTITY_CONTEXT_DIGEST_PAGE_INVALID:${replicaId}`,
   );
-  if (raw['kind'] !== 'referencePage' || raw['version'] !== 1 || raw['childKind'] !== childKind) {
-    throw new Error(`STORAGE_ENTITY_CONTEXT_REFERENCE_PAGE_KIND:${replicaId}`);
+  if (raw['kind'] !== 'digestPage' || raw['version'] !== 2 || raw['childKind'] !== childKind) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_DIGEST_PAGE_KIND:${replicaId}`);
   }
-  const refs = decodeHashList(raw['refs'], `STORAGE_ENTITY_CONTEXT_REFERENCE_PAGE_REFS:${replicaId}`);
-  if (refs.length === 0 || refs.length > REFERENCE_PAGE_SIZE) {
-    throw new Error(`STORAGE_ENTITY_CONTEXT_REFERENCE_PAGE_SIZE:${replicaId}:${refs.length}`);
+  const digests = decodeDigestList(
+    raw['digests'],
+    `STORAGE_ENTITY_CONTEXT_DIGEST_PAGE_DIGESTS:${replicaId}`,
+  );
+  if (digests.length === 0 || digests.length > REFERENCE_PAGE_SIZE) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_DIGEST_PAGE_SIZE:${replicaId}:${digests.length}`);
   }
-  return refs;
+  return digests;
 };
 
-const readPagedRefs = async (
+const readPagedDigests = async (
   db: Pick<RuntimeDbLike, 'get'>,
+  runtimeHeight: number,
   replicaId: string,
-  pageRefs: readonly EntityContextPayloadHash[],
-  childKind: StoredReferencePage['childKind'],
+  pageDigests: readonly EntityContextPayloadHash[],
+  childKind: StoredDigestPage['childKind'],
 ): Promise<EntityContextPayloadHash[]> => {
-  const refs: EntityContextPayloadHash[] = [];
-  for (const pageRef of pageRefs) {
-    refs.push(...decodeReferencePageLeaf(
-      await readVerifiedPayload(db, replicaId, pageRef),
+  const digests: EntityContextPayloadHash[] = [];
+  for (const [pageIndex, pageDigest] of pageDigests.entries()) {
+    digests.push(...decodeDigestPageLeaf(
+      await readVerifiedPayload(
+        db,
+        runtimeHeight,
+        replicaId,
+        digestPagePathKind(childKind),
+        pageIndex,
+        pageDigest,
+      ),
       replicaId,
       childKind,
     ));
   }
-  return refs;
+  return digests;
 };
 
 export const readEntityContextPayloads = async (
   db: Pick<RuntimeDbLike, 'get'>,
+  runtimeHeight: number,
   refs: ReadonlyMap<string, EntityContextPayloadHash>,
 ): Promise<Map<string, EntityInfraContext>> => {
   const contexts = new Map<string, EntityInfraContext>();
   for (const [replicaId, ref] of refs) {
-    const manifest = decodeManifest(await readVerifiedPayload(db, replicaId, ref), replicaId);
+    const manifest = decodeManifest(await readVerifiedPayload(
+      db, runtimeHeight, replicaId, 'manifest', 0, ref,
+    ), replicaId);
     const gossipProfiles: Profile[] = [];
-    for (const profileRef of await readPagedRefs(db, replicaId, manifest.profilePageRefs, 'gossipProfile')) {
+    const profileDigests = await readPagedDigests(
+      db, runtimeHeight, replicaId, manifest.profilePageDigests, 'gossipProfile',
+    );
+    for (const [index, digest] of profileDigests.entries()) {
       gossipProfiles.push(
-        decodeGossipProfileLeaf(await readVerifiedPayload(db, replicaId, profileRef), replicaId),
+        decodeGossipProfileLeaf(await readVerifiedPayload(
+          db, runtimeHeight, replicaId, 'gossipProfile', index, digest,
+        ), replicaId),
       );
     }
     const entries: PreparedHtlcEntry[] = [];
-    for (const entryRef of await readPagedRefs(db, replicaId, manifest.htlcEntryPageRefs, 'htlcEntry')) {
-      entries.push(decodeHtlcEntryLeaf(await readVerifiedPayload(db, replicaId, entryRef), replicaId));
+    const entryDigests = await readPagedDigests(
+      db, runtimeHeight, replicaId, manifest.htlcEntryPageDigests, 'htlcEntry',
+    );
+    for (const [index, digest] of entryDigests.entries()) {
+      entries.push(decodeHtlcEntryLeaf(await readVerifiedPayload(
+        db, runtimeHeight, replicaId, 'htlcEntry', index, digest,
+      ), replicaId));
     }
     const originated: PreparedOriginatedHtlcPayment[] = [];
-    for (const originatedRef of await readPagedRefs(
-      db, replicaId, manifest.htlcOriginatedPageRefs, 'htlcOriginated',
-    )) {
+    const originatedDigests = await readPagedDigests(
+      db, runtimeHeight, replicaId, manifest.htlcOriginatedPageDigests, 'htlcOriginated',
+    );
+    for (const [index, digest] of originatedDigests.entries()) {
       originated.push(
-        decodeHtlcOriginatedLeaf(await readVerifiedPayload(db, replicaId, originatedRef), replicaId),
+        decodeHtlcOriginatedLeaf(await readVerifiedPayload(
+          db, runtimeHeight, replicaId, 'htlcOriginated', index, digest,
+        ), replicaId),
       );
     }
     const htlc: HtlcPreparedInfraContext = { version: 1, entries, originated };
-    let peerAssertions = manifest.header.peerAssertions ?? [];
-    if (manifest.peerAssertionPageRefs) {
-      const paged: EntityInfraContext['peerAssertions'][number][] = [];
-      for (const pageRef of await readPagedRefs(
-        db, replicaId, manifest.peerAssertionPageRefs, 'peerAssertions',
-      )) {
-        paged.push(...decodePeerAssertionsLeaf(await readVerifiedPayload(db, replicaId, pageRef), replicaId));
-      }
-      peerAssertions = paged;
+    const peerAssertions: EntityInfraContext['peerAssertions'][number][] = [];
+    const assertionDigests = await readPagedDigests(
+      db, runtimeHeight, replicaId, manifest.peerAssertionPageDigests, 'peerAssertions',
+    );
+    for (const [index, digest] of assertionDigests.entries()) {
+      peerAssertions.push(...decodePeerAssertionsLeaf(await readVerifiedPayload(
+        db, runtimeHeight, replicaId, 'peerAssertions', index, digest,
+      ), replicaId));
     }
     const context = validateEntityInfraContext({
       ...manifest.header,

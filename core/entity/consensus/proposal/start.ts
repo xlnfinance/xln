@@ -25,7 +25,6 @@ import {
 } from '../input/hanko-witness';
 import type { ApplyEntityInputContext, ApplyEntityInputResult } from '../input/types';
 import { getReplicaProposalLeader } from '../leader';
-import { buildCertifiedEntityOutputHashes } from '../output/certification';
 import {
   shouldKeepPreparedEntityFrame,
   type EntityProposalSelection,
@@ -138,18 +137,11 @@ const replayPreparedFrameForRelay = async (
       `ENTITY_PREPARED_FRAME_HASH_MISMATCH:expected=${replayedHash}:received=${frame.hash}`,
     );
   }
-  const outputHashes = buildCertifiedEntityOutputHashes(
-    state,
-    env,
-    frame.height,
-    replayedHash,
-    applied.outputs,
-  );
   const hashesToSign = buildEntityHashesToSign(
     replica.entityId,
     frame.height,
     replayedHash,
-    [...(applied.collectedHashes ?? []), ...outputHashes],
+    applied.collectedHashes ?? [],
   );
   const mismatch = getEntityHashManifestMismatch(hashesToSign, frame.hashesToSign);
   if (mismatch) throw new Error(`ENTITY_PREPARED_MANIFEST_MISMATCH:${mismatch}`);
@@ -163,9 +155,6 @@ const replayPreparedFrameForRelay = async (
     candidateEffects: applied.candidateEffects,
     storageChanges: applied.storageChanges,
     proposableAccounts: copyProposableAccounts(applied.proposableAccounts),
-    ...(applied.consumptionNodeChanges
-      ? { consumptionNodeChanges: applied.consumptionNodeChanges }
-      : {}),
     ...(applied.accountJClaimNodeChanges
       ? { accountJClaimNodeChanges: applied.accountJClaimNodeChanges }
       : {}),
@@ -370,7 +359,6 @@ const storeCandidate = (
     storageChanges: applied.storageChanges,
     proposableAccounts: copyProposableAccounts(applied.proposableAccounts),
     authority,
-    ...(applied.consumptionNodeChanges ? { consumptionNodeChanges: applied.consumptionNodeChanges } : {}),
     ...(applied.accountJClaimNodeChanges ? { accountJClaimNodeChanges: applied.accountJClaimNodeChanges } : {}),
   };
   return replica.candidate;
@@ -499,13 +487,11 @@ const certifyEntityProposal = async (
   );
   assertReplayOracleFrameHash(context, state, height, txs, stateRoot, frameHash);
   profile.checkpoint('frameHash');
-  const outputHashes = buildCertifiedEntityOutputHashes(state, env, height, frameHash, applied.outputs);
-  profile.checkpoint('outputHashes');
   const hashesToSign = buildEntityHashesToSign(
     workingReplica.state.entityId,
     height,
     frameHash,
-    [...(applied.collectedHashes ?? []), ...outputHashes],
+    applied.collectedHashes ?? [],
   );
   profile.checkpoint('hashManifest');
   const leaderBody = {

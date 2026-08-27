@@ -12,7 +12,6 @@ describe('isolated Entity input clone', () => {
       from: `0x${'44'.repeat(20)}`,
       sourceRuntimeFrame: { height: 7, timestamp: 8 },
       atomicCrossJurisdictionPair: { phase: 'proposal', pairKey: 'pair' },
-      certifiedOutputIdentity: { lane: 'generic', sequence: 9n, semanticHash: `0x${'55'.repeat(32)}` },
       entityTxs: [],
     };
 
@@ -22,7 +21,6 @@ describe('isolated Entity input clone', () => {
     expect(cloned).not.toBe(input);
     expect(cloned.sourceRuntimeFrame).not.toBe(input.sourceRuntimeFrame);
     expect(cloned.atomicCrossJurisdictionPair).not.toBe(input.atomicCrossJurisdictionPair);
-    expect(cloned.certifiedOutputIdentity).not.toBe(input.certifiedOutputIdentity);
     expect(cloned.entityTxs).not.toBe(input.entityTxs);
   });
 });

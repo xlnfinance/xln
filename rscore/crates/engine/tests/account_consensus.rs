@@ -5,11 +5,17 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountPeerEnvelope,
-    AccountReplica, AccountState, AccountTx, BoardDelays, CounterpartyDispute, DeliveryMode, Delta,
-    DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame, IncomingOutcome,
-    ProposalOutcome, ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity, TokenId,
-    WatchSeed, apply_incoming_ack as apply_exact_incoming_ack,
-    apply_incoming_frame as apply_exact_incoming_frame, dispute_proof_hash, propose_account_frame,
+    AccountReplica, AccountState, AccountTx, BoardDelays, BoardHankoRefreshInput,
+    CertifiedBoardAuthority, CounterpartyDispute, DeliveryMode, Delta, DepositoryAddress,
+    DisputeDraft, EntityId, FrameAckOutcome, IncomingAck, IncomingFrame, IncomingOutcome,
+    ProposalOutcome, ProposedFrame, ReceiverClock, RolledBackProposal, SigningIdentity,
+    StandaloneInputOutcome, TokenId, WatchSeed, apply_board_hanko_refresh,
+    apply_incoming_ack as apply_exact_incoming_ack,
+    apply_incoming_frame as apply_exact_incoming_frame, apply_standalone_dispute,
+    dispute_proof_hash, propose_account_frame,
+};
+use xln_rscore_hanko::{
+    BoardMember, SemanticClaim, build_single_signer_hanko, hash_hanko_board_claim,
 };
 
 /// The receiver's own clock, at the same moment the frames below are proposed.
@@ -312,6 +318,57 @@ fn a_signed_frame_commits_on_both_sides() {
             .offdelta(),
         &BigInt::from(-25),
     );
+}
+
+/// Match `core/account/consensus/proposal/admission.ts`: an Entity whose
+/// clock trails the bilateral Account head must stamp the next frame at the
+/// committed Account timestamp, never move the chain watermark backwards.
+#[test]
+fn a_proposal_clamps_its_timestamp_to_the_committed_account_watermark() {
+    let (mut left, mut right) = parties();
+    let committed_timestamp = 1_700_000_000_005;
+    right
+        .account
+        .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 10)], "test")
+        .expect("admit peer payment");
+    let ProposalOutcome::Proposed(peer) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        committed_timestamp,
+        7,
+        &market(),
+    )
+    .expect("peer proposal") else {
+        panic!("expected peer proposal");
+    };
+    let peer = *peer;
+    assert!(matches!(
+        apply_incoming_frame(
+            &mut left.account,
+            &left.identity,
+            right.identity.entity_id(),
+            CLOCK,
+            incoming_of(&peer.frame, peer.state_hash, peer.hanko),
+            &market(),
+        )
+        .expect("commit peer frame"),
+        IncomingOutcome::Committed { .. }
+    ));
+
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 5)], "test")
+        .expect("admit local payment");
+    let ProposalOutcome::Proposed(next) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        committed_timestamp - 1_000,
+        7,
+        &market(),
+    )
+    .expect("lagging-clock proposal") else {
+        panic!("expected lagging-clock proposal");
+    };
+    assert_eq!(next.frame.timestamp, committed_timestamp);
 }
 
 /// The Entity layer must receive the complete committed frame in canonical
@@ -713,7 +770,7 @@ fn enforcement_is_judged_on_the_receiver_clock() {
 
     let (mut left, mut right) = parties();
     // The lock is alive at the frame's own clock and dead at ours.
-    let timelock = 1_700_000_005_000_u64;
+    let timelock = 1_700_000_060_000_u64;
     let lock = AccountTx::HtlcLock(HtlcLockTx {
         lock_id: "lock-1".to_string(),
         hashlock: HtlcHashlock::parse(&format!("0x{}", "11".repeat(32))).expect("hashlock"),
@@ -758,7 +815,7 @@ fn enforcement_is_judged_on_the_receiver_clock() {
         panic!("expected a rejection, got {outcome:?}");
     };
     assert!(
-        reason.starts_with("ACCOUNT_PEER_FRAME_TX_REJECTED"),
+        reason.starts_with("HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT"),
         "{reason}"
     );
 
@@ -779,6 +836,99 @@ fn enforcement_is_judged_on_the_receiver_clock() {
         outcome,
         IncomingOutcome::Committed { height: 1, .. }
     ));
+}
+
+/// TypeScript commits the ACK phase before it examines the bundled proposal.
+/// A bad proposal must therefore not resurrect the pending frame the valid ACK
+/// just certified.
+#[test]
+fn frame_ack_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit left payment");
+    let ProposalOutcome::Proposed(left_frame) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("left proposal") else {
+        panic!("expected left proposal");
+    };
+    let left_frame = *left_frame;
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&left_frame.frame, left_frame.state_hash, left_frame.hanko),
+        &market(),
+    )
+    .expect("right commits left frame") else {
+        panic!("expected right commit");
+    };
+
+    right
+        .account
+        .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 10)], "test")
+        .expect("admit right payment");
+    let ProposalOutcome::Proposed(right_frame) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("right proposal") else {
+        panic!("expected right proposal");
+    };
+    let mut invalid = incoming_of(
+        &right_frame.frame,
+        right_frame.state_hash,
+        right_frame.hanko,
+    );
+    invalid.frame.prev_frame_hash = format!("0x{}", "ff".repeat(32));
+    invalid.state_hash = invalid.frame.hash().expect("bad-chain frame hash");
+    invalid.frame_hanko = Some(
+        right
+            .identity
+            .sign_frame(&invalid.state_hash)
+            .expect("sign bad-chain frame"),
+    );
+
+    let right_to_left = envelope(&left.account, right.identity.entity_id());
+    let outcome = xln_rscore_engine::apply_incoming_frame_ack(
+        &mut left.account,
+        &left.identity,
+        &right_to_left,
+        CLOCK,
+        IncomingAck {
+            height: left_frame.frame.height,
+            frame_hash: left_frame.state_hash,
+            frame_hanko: Some(ack_hanko),
+            dispute: None,
+        },
+        invalid,
+        &market(),
+    )
+    .expect("sequential frame_ack");
+
+    let FrameAckOutcome::Applied { ack, frame } = outcome else {
+        panic!("ACK phase must commit, got {outcome:?}");
+    };
+    assert!(matches!(
+        *ack,
+        xln_rscore_engine::AckOutcome::Committed { height: 1, .. }
+    ));
+    assert!(matches!(
+        *frame,
+        IncomingOutcome::Rejected { ref reason }
+            if reason.starts_with("ACCOUNT_PEER_FRAME_PREV_MISMATCH")
+    ));
+    assert_eq!(left.account.current_height(), 1);
+    assert!(left.account.pending().is_none());
 }
 
 /// A frame from the future could satisfy payer-side deadlines early, so it is
@@ -894,7 +1044,7 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
     let leaf_after_first = right.account.entity_account_leaf().expect("leaf");
     let mut duplicate = incoming_of(&first.frame, first.state_hash, first.hanko.clone());
     duplicate.frame_hanko = None;
-    duplicate.frame.deltas[0] = Delta::zero(TokenId::new(1).expect("token"));
+    duplicate.frame.account_state_root[0] ^= 0x01;
     let duplicate = apply_incoming_frame(
         &mut right.account,
         &right.identity,
@@ -904,14 +1054,17 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
         &market(),
     )
     .expect("exact-current retry skips obsolete certificate and body");
-    assert!(matches!(
-        duplicate,
-        IncomingOutcome::Duplicate {
-            height: 1,
-            state_hash,
-            ..
-        } if state_hash == first.state_hash
-    ));
+    let IncomingOutcome::Duplicate {
+        height: 1,
+        state_hash,
+        ack_hanko: duplicate_ack_hanko,
+        ..
+    } = duplicate
+    else {
+        panic!("expected exact-current duplicate");
+    };
+    assert_eq!(state_hash, first.state_hash);
+    assert_eq!(duplicate_ack_hanko, ack_hanko);
     assert_eq!(
         right.account.entity_account_leaf().expect("leaf"),
         leaf_after_first
@@ -991,6 +1144,79 @@ fn a_redelivered_ancestor_frame_is_a_no_op() {
             if reason == "ACCOUNT_PEER_FRAME_HASH_MISMATCH"
     ));
     assert_eq!(right.account.current_height(), 2);
+}
+
+/// A successor proposal owns a different Hanko. Retrying the committed head
+/// must still return the exact local ACK certificate retained for that head.
+#[test]
+fn duplicate_current_frame_reuses_committed_hanko_while_successor_is_pending() {
+    let (mut left, mut right) = parties();
+    left.account
+        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
+        .expect("admit first");
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose first") else {
+        panic!("expected first proposal");
+    };
+    let first = *first;
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&first.frame, first.state_hash, first.hanko.clone()),
+        &market(),
+    )
+    .expect("commit first") else {
+        panic!("expected first commit");
+    };
+
+    right
+        .account
+        .admit_txs(vec![payment(&right.entity_id, &left.entity_id, 5)], "test")
+        .expect("admit successor");
+    let ProposalOutcome::Proposed(successor) = propose_account_frame(
+        &mut right.account,
+        &right.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose successor") else {
+        panic!("expected successor proposal");
+    };
+    assert_eq!(successor.frame.height, 2);
+
+    let mut retry = incoming_of(&first.frame, first.state_hash, first.hanko);
+    retry.frame_hanko = None;
+    let IncomingOutcome::Duplicate {
+        ack_hanko: retried_ack_hanko,
+        ..
+    } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        retry,
+        &market(),
+    )
+    .expect("duplicate current frame")
+    else {
+        panic!("expected duplicate outcome");
+    };
+
+    assert_eq!(retried_ack_hanko, ack_hanko);
+    assert_eq!(right.account.current_height(), 1);
+    assert_eq!(
+        right.account.pending().map(|pending| pending.frame.height),
+        Some(2)
+    );
 }
 
 /// A frame that fails validation must not cost us our own proposal, even at
@@ -1572,6 +1798,124 @@ fn outputs_are_held_until_the_peer_acks() {
     );
 }
 
+/// A valid signed secret inside the 30-second enforcement reserve is dispute
+/// evidence, not a normal rejection and never an off-chain commit.
+#[test]
+fn a_secret_inside_the_enforcement_reserve_requires_dispute() {
+    use num_bigint::BigInt as Big;
+    use sha3::{Digest as _, Keccak256};
+    use xln_rscore_engine::{HtlcHashlock, HtlcLockTx, HtlcResolveOutcome, HtlcResolveTx};
+
+    let (mut left, mut right) = parties();
+    let secret_bytes = [0x7c_u8; 32];
+    let secret = format!("0x{}", hex::encode(secret_bytes));
+    let hashlock_bytes: [u8; 32] = Keccak256::digest(secret_bytes).into();
+    let hashlock_text = format!("0x{}", hex::encode(hashlock_bytes));
+    let timelock = 1_700_000_100_000_u64;
+    left.account
+        .admit_txs(
+            vec![AccountTx::HtlcLock(HtlcLockTx {
+                lock_id: format!("0x{}", "ab".repeat(32)),
+                hashlock: HtlcHashlock::parse(&hashlock_text).expect("hashlock"),
+                timelock: Big::from(timelock),
+                reveal_before_height: 100,
+                amount: Big::from(50),
+                token_id: TokenId::new(1).expect("token"),
+                delivery_mode: None,
+                envelope: None,
+            })],
+            "test",
+        )
+        .expect("admit lock");
+    let ProposalOutcome::Proposed(lock_frame) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose lock") else {
+        panic!("expected lock proposal");
+    };
+    let lock_frame = *lock_frame;
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&lock_frame.frame, lock_frame.state_hash, lock_frame.hanko),
+        &market(),
+    )
+    .expect("commit lock") else {
+        panic!("expected lock commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        1,
+        &lock_frame.state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("ack lock");
+
+    left.account
+        .admit_txs(
+            vec![AccountTx::HtlcResolve(HtlcResolveTx {
+                lock_id: format!("0x{}", "ab".repeat(32)),
+                outcome: HtlcResolveOutcome::Secret {
+                    secret: secret.clone(),
+                },
+            })],
+            "test",
+        )
+        .expect("admit secret");
+    let ProposalOutcome::Proposed(resolve_frame) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        timelock - 20_000,
+        7,
+        &market(),
+    )
+    .expect("propose secret") else {
+        panic!("expected secret proposal");
+    };
+    let resolve_frame = *resolve_frame;
+    let outcome = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        ReceiverClock {
+            entity_timestamp: timelock - 10_000,
+            finalized_j_height: 7,
+        },
+        incoming_of(
+            &resolve_frame.frame,
+            resolve_frame.state_hash,
+            resolve_frame.hanko,
+        ),
+        &market(),
+    )
+    .expect("deadline disposition");
+    let IncomingOutcome::DisputeRequired {
+        reason,
+        evidence_secrets,
+        signed_frame,
+    } = outcome
+    else {
+        panic!("expected dispute-required outcome, got {outcome:?}");
+    };
+    assert!(
+        reason.starts_with("HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT"),
+        "{reason}"
+    );
+    assert_eq!(evidence_secrets.len(), 1);
+    assert_eq!(evidence_secrets[0].hashlock, hashlock_text);
+    assert_eq!(evidence_secrets[0].secret, secret);
+    assert_eq!(signed_frame.state_hash, resolve_frame.state_hash);
+    assert_eq!(right.account.current_height(), 1);
+}
+
 /// A recovery witness is a second, independent certificate: the receiver
 /// rebuilds its Solidity digest, recovers the account counterparty, and only
 /// then retains it. The ACK path performs the same check in the other
@@ -1614,6 +1958,80 @@ fn counterparty_dispute_hankos_are_verified_on_frame_and_ack() {
         .expect("stored peer dispute");
     assert_eq!(stored.proof_body_hash, proposal_dispute.proof_body_hash);
     assert_eq!(stored.nonce, proposal_dispute.nonce);
+
+    let left_to_right = envelope(&right.account, left.identity.entity_id());
+    let standalone = apply_standalone_dispute(
+        &mut right.account,
+        &left_to_right,
+        CLOCK,
+        certify_dispute(&left.identity, &proposal_dispute),
+        None,
+    )
+    .expect("standalone dispute reducer");
+    assert_eq!(
+        standalone,
+        StandaloneInputOutcome::Applied { events: Vec::new() }
+    );
+
+    let rotated_key = [0x35_u8; 32];
+    let rotated_hanko = build_single_signer_hanko(
+        left.identity.entity_id(),
+        &proposed.state_hash,
+        &rotated_key,
+        2,
+        2,
+        BoardDelays::default(),
+    )
+    .expect("rotated frame hanko");
+    let rotated_address =
+        xln_rscore_engine::address_of_private_key(&rotated_key).expect("rotated signer address");
+    let mut rotated_member = [0_u8; 32];
+    rotated_member[12..].copy_from_slice(&rotated_address);
+    let rotated_board_hash = hash_hanko_board_claim(&SemanticClaim {
+        entity_id: *left.identity.entity_id(),
+        members: vec![BoardMember {
+            entity_id: rotated_member,
+            weight: 2,
+        }],
+        threshold: 2,
+        delays: BoardDelays::default(),
+    });
+    let authority = CertifiedBoardAuthority {
+        entity_id: *left.identity.entity_id(),
+        registered_board_hash: rotated_board_hash,
+        previous_board_hash: [0_u8; 32],
+        previous_board_valid_until: 0,
+        activated_at_j_height: 88,
+        activation_log_index: 3,
+    };
+    let leaf_before_refresh = right
+        .account
+        .entity_account_leaf()
+        .expect("leaf before refresh");
+    let refresh = apply_board_hanko_refresh(
+        &mut right.account,
+        &left_to_right,
+        CLOCK,
+        BoardHankoRefreshInput {
+            height: 1,
+            frame_hash: proposed.state_hash,
+            frame_hanko: Some(rotated_hanko),
+            dispute: None,
+            board_activation_j_height: 88,
+            board_activation_log_index: 3,
+        },
+        Some(&authority),
+    )
+    .expect("board refresh reducer");
+    assert!(matches!(
+        refresh,
+        StandaloneInputOutcome::Applied { ref events }
+            if events == &["🔐 Refreshed Account frame 1 Hankos under the current board"]
+    ));
+    assert_ne!(
+        leaf_before_refresh,
+        right.account.entity_account_leaf().expect("refreshed leaf")
+    );
 
     let ack_draft = right
         .account
@@ -1672,6 +2090,7 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
         panic!("expected first proposal");
     };
     let first = *first;
+    assert!(!first.dispute_requires_existing_hanko);
     let first_dispute = first.dispute.clone().expect("first recovery draft");
     assert!(left.account.certify_local_dispute_after_outbound());
 
@@ -1716,6 +2135,7 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
         panic!("expected second proposal");
     };
     assert_eq!(second.dispute.as_ref(), Some(&first_dispute));
+    assert!(second.dispute_requires_existing_hanko);
 }
 
 /// A valid frame certificate does not bless its attached dispute witness. A
@@ -2011,54 +2431,6 @@ fn stale_frame_and_ack_skip_obsolete_dispute_witnesses() {
     assert_eq!(
         left.account.entity_account_leaf().expect("left leaf after"),
         left_leaf,
-    );
-}
-
-#[test]
-fn exact_received_deltas_are_replayed_before_commit() {
-    let (mut left, mut right) = parties();
-    left.account
-        .admit_txs(vec![payment(&left.entity_id, &right.entity_id, 25)], "test")
-        .expect("admit");
-    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
-        &mut left.account,
-        &left.identity,
-        1_700_000_000_000,
-        7,
-        &market(),
-    )
-    .expect("propose") else {
-        panic!("expected proposal");
-    };
-    let mut incoming = incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone());
-    incoming.frame.deltas[0] = Delta::zero(TokenId::new(1).expect("token"));
-    incoming.state_hash = incoming.frame.hash().expect("received frame hash");
-    incoming.frame_hanko = Some(
-        left.identity
-            .sign_frame(&incoming.state_hash)
-            .expect("received frame signature"),
-    );
-    let leaf = right.account.entity_account_leaf().expect("leaf before");
-    let exact_envelope = envelope(&right.account, left.identity.entity_id());
-
-    let outcome = apply_exact_incoming_frame(
-        &mut right.account,
-        &right.identity,
-        &exact_envelope,
-        CLOCK,
-        incoming,
-        &market(),
-    )
-    .expect("mismatch is a typed rejection");
-    assert!(matches!(
-        outcome,
-        IncomingOutcome::Rejected { reason }
-            if reason == "ACCOUNT_PEER_FRAME_DELTAS_MISMATCH"
-    ));
-    assert_eq!(right.account.current_height(), 0);
-    assert_eq!(
-        right.account.entity_account_leaf().expect("leaf after"),
-        leaf
     );
 }
 

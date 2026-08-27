@@ -13,7 +13,7 @@ import type { Covered } from '../types/hash-coverage/coverage';
 import type {
   EntityContextPayloadHash,
   RuntimeMachineRootHash,
-  RuntimeOutputPayloadHash,
+  RuntimeOutputsDigest,
 } from '../protocol/hashes';
 
 export type RuntimeDbLike = {
@@ -113,8 +113,6 @@ export type StorageEntityCoreDoc = {
   profile: EntityState['profile'];
   htlcRoutes: Map<string, HtlcRoute>;
   htlcFeesEarned: bigint;
-  consumptionAccumulator?: EntityState['consumptionAccumulator'];
-  certifiedOutputSequences?: EntityState['certifiedOutputSequences'];
   outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
   inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
   lockBook: Map<string, LockBookEntry>;
@@ -165,7 +163,7 @@ export type RuntimeFrame = {
   /** Sparse canonical Entity + durable R-machine replay oracle. */
   runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
-  /** Replica-id to immutable infrastructure-context payload hash. */
+  /** Replica-id to manifest digest; physical rows are keyed by this frame height + replica path. */
   entityContextRefs?: Map<string, EntityContextPayloadHash>;
   /** Exact bounded input queue retained after this frame (for deferred H+1 work). */
   pendingRuntimeInput?: RuntimeInput;
@@ -173,8 +171,9 @@ export type RuntimeFrame = {
   runtimeMachineRoot?: RuntimeMachineGraphRoot;
   /** Exact Rust Account-authority restore tokens made durable by this frame. */
   accountAuthorityCheckpoints?: StorageRscoreCheckpointRef[];
-  /** Ordered immutable payload references; bodies live once in the outbox keyspace. */
-  runtimeOutputRefs?: RuntimeOutputPayloadHash[];
+  /** Exact flat outbox rows at `(height,index)`, committed in byte order. */
+  runtimeOutputCount: number;
+  runtimeOutputsDigest: RuntimeOutputsDigest;
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
@@ -211,7 +210,8 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'replicaMetaStateMode'
   | 'runtimeInput'
   | 'pendingRuntimeInput'
-  | 'runtimeOutputRefs'
+  | 'runtimeOutputCount'
+  | 'runtimeOutputsDigest'
   | 'runtimeStateHash'
 > & RuntimeFramePayloads & { logs: FrameLogEntry[] };
 
@@ -233,7 +233,6 @@ export type StorageReplicaMeta = {
   lockedFrame?: EntityReplica['lockedFrame'];
   candidate?: EntityReplica['candidate'];
   certifiedFrameHead?: EntityReplica['certifiedFrameHead'];
-  certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
   hankoWitness?: EntityReplica['hankoWitness'];
   leaderVotes?: EntityReplica['leaderVotes'];
   pendingLeaderCertificate?: EntityReplica['pendingLeaderCertificate'];
@@ -285,10 +284,8 @@ export type StorageDebugStats = {
   entityGraphBranchCount?: number;
   entityGraphLeafCount?: number;
   certifiedBoardNodeCount?: number;
-  consumptionNodeCount?: number;
   accountJClaimNodeCount?: number;
   certifiedBoardNodeBytes?: number;
-  consumptionNodeBytes?: number;
   accountJClaimNodeBytes?: number;
   frameBytes: number;
   boundedValueCount?: number;

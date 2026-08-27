@@ -274,7 +274,7 @@ where
         let Some(maker) = next_maker(state, taker, classify)? else {
             break;
         };
-        if maker.owner_id == taker.owner_id {
+        if maker.owner_id == taker.owner_id && state.stp_policy == 1 {
             events.push(BookEvent::Reject {
                 reason: "STP cancel taker",
                 blocking_order_id: Some(maker.order_id.clone()),
@@ -394,4 +394,83 @@ where
         }
     }
     Ok((!events.is_empty()).then_some((taker.order_id, events)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn order(order_id: &str, owner_id: &str, side: Side) -> AddOrder {
+        AddOrder {
+            order_id: order_id.to_string(),
+            owner_id: owner_id.to_string(),
+            side,
+            price_ticks: BigInt::from(25_000_000),
+            qty_lots: BigInt::from(1),
+        }
+    }
+
+    fn dimensions() -> PairDimensions {
+        PairDimensions {
+            base_token_decimals: 6,
+            quote_token_decimals: 18,
+        }
+    }
+
+    #[test]
+    fn stp_policy_zero_matches_typescript_and_allows_self_trade() {
+        let mut state = BookState::empty(16, 1);
+        state.stp_policy = 0;
+        apply_gtc(
+            &mut state,
+            order("maker", "same-owner", Side::Ask),
+            dimensions(),
+            |_| Ok(MakerDisposition::Eligible),
+        )
+        .expect("maker accepted");
+
+        let events = apply_gtc(
+            &mut state,
+            order("taker", "same-owner", Side::Bid),
+            dimensions(),
+            |_| Ok(MakerDisposition::Eligible),
+        )
+        .expect("self trade allowed");
+
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, BookEvent::Trade { .. }))
+        );
+        assert_eq!(state.trade_count, 1);
+    }
+
+    #[test]
+    fn stp_policy_one_cancels_self_crossing_taker() {
+        let mut state = BookState::empty(16, 1);
+        apply_gtc(
+            &mut state,
+            order("maker", "same-owner", Side::Ask),
+            dimensions(),
+            |_| Ok(MakerDisposition::Eligible),
+        )
+        .expect("maker accepted");
+
+        let events = apply_gtc(
+            &mut state,
+            order("taker", "same-owner", Side::Bid),
+            dimensions(),
+            |_| Ok(MakerDisposition::Eligible),
+        )
+        .expect("self trade rejected");
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            BookEvent::Reject {
+                reason: "STP cancel taker",
+                ..
+            }
+        )));
+        assert_eq!(state.trade_count, 0);
+    }
 }

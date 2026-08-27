@@ -10,11 +10,6 @@ import {
   type EntityFrameWirePrefixMeter,
 } from '../frame';
 import {
-  normalizeConsensusOutputOrigin,
-  resolveConsensusOutputBoardAuthority,
-} from '../output/certification';
-import { attachTargetConsumptionProofs } from '../output/consumption';
-import {
   verifyEntityLeaderCertificate,
   verifyEntityRelayCertificate,
 } from '../leader/certificates';
@@ -134,27 +129,12 @@ export const selectProposableEntityTxs = async (
     return { txs: [], currentAuthorityReady: false, reason: 'SELF_BOARD_CERTIFICATION_REQUIRED' };
   }
 
-  const blockedOutput = mempool.some(tx => {
-    if (tx.type !== 'consensusOutput') return false;
-    const origin = normalizeConsensusOutputOrigin(tx.data.origin);
-    return resolveConsensusOutputBoardAuthority(origin, state, env).kind === 'defer';
+  const phaseSelection = selectCrossJCommitPhaseTxs(mempool);
+  return applyJRangeBudgetToSelection({
+    txs: phaseSelection.txs,
+    currentAuthorityReady: true,
+    ...(phaseSelection.deferredCrossJSetup ? { reason: 'CROSS_J_ACCOUNT_COMMIT_PRIORITY' } : {}),
   });
-  if (!blockedOutput) {
-    const phaseSelection = selectCrossJCommitPhaseTxs(mempool);
-    return applyJRangeBudgetToSelection({
-      txs: attachTargetConsumptionProofs(env, state, phaseSelection.txs),
-      currentAuthorityReady: true,
-      ...(phaseSelection.deferredCrossJSetup ? { reason: 'CROSS_J_ACCOUNT_COMMIT_PRIORITY' } : {}),
-    });
-  }
-  if (jRanges.length > 0) {
-    return applyJRangeBudgetToSelection({
-      txs: [jRanges[0]!],
-      currentAuthorityReady: true,
-      reason: 'OUTPUT_BOARD_CATCH_UP_PRIORITY',
-    });
-  }
-  return { txs: [], currentAuthorityReady: true, reason: 'OUTPUT_BOARD_CATCH_UP_REQUIRED' };
 };
 
 export const isSelfBoardAuthorityTransitionFrame = async (

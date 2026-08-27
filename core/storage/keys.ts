@@ -15,7 +15,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/bytes/integrity-checks
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 1;
+export const STORAGE_SCHEMA_VERSION = 2;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -72,9 +72,9 @@ export const KEY_FRAME = 0x10;
 /** Static continuation rows for any oversized WAL/history value. */
 export const KEY_BOUNDED_VALUE_CHUNK = 0x11;
 export const KEY_SNAPSHOT_MANIFEST = 0x12;
-/** Immutable routed-output bytes addressed by their full SHA-256 digest. */
-export const KEY_RUNTIME_OUTPUT_PAYLOAD = 0x13;
-/** Immutable Entity infrastructure context addressed by full SHA-256 digest. */
+/** Flat Runtime outbox row keyed by permanent `(height, outputIndex)`. */
+export const KEY_RUNTIME_OUTPUT_ROW = 0x13;
+/** Entity replay-context row at a permanent `(height, replica, kind, index)` path. */
 export const KEY_ENTITY_CONTEXT_PAYLOAD = 0x14;
 /** Runtime checkpoint Patricia branch, scoped by the materialized frame height. */
 export const KEY_RUNTIME_MACHINE_BRANCH = 0x15;
@@ -92,8 +92,9 @@ export const KEY_LIVE_BOOK = 0x23;
 /** One bounded Account envelope field at its permanent owner + field-tag key. */
 export const KEY_LIVE_ACCOUNT_FIELD = 0x24;
 export const KEY_LIVE_REPLICA_META = 0x26;
+/** Board Patricia rows keyed by `(owning Entity, logical binary path)`. */
 export const KEY_CERTIFIED_BOARD_NODE = 0x2a;
-export const KEY_CONSUMPTION_NODE = 0x2b;
+/** Account J-claim rows keyed by `(owner, counterparty, side, logical binary path)`. */
 export const KEY_ACCOUNT_J_CLAIM_NODE = 0x2c;
 export const KEY_LIVE_BOOK_BRANCH = 0x2d;
 export const KEY_LIVE_BOOK_LEAF = 0x2e;
@@ -111,7 +112,6 @@ export const KEY_LIVE_ENTITY_FIELD = 0x36;
 export const KEY_LIVE_ENTITY_BRANCH = 0x37;
 /** Exact leaf nodes of Entity-owned persistent collections. */
 export const KEY_LIVE_ENTITY_LEAF = 0x38;
-
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 
 export const KEY_HISTORY_VIEW_HEAD = Buffer.from([0x00]);
@@ -143,11 +143,6 @@ const signerKeyBytes = (value: string): Buffer =>
 export const decodeEntityId = (bytes: Uint8Array): EntityId => {
   if (bytes.byteLength !== 32) throw new Error(`STORAGE_ENTITY_ID_BYTES_INVALID:${bytes.byteLength}`);
   return toEntityId(`0x${Buffer.from(bytes).toString('hex')}`);
-};
-
-export const decodeTaggedStorageHash = (key: Buffer, tag: number, code: string): string => {
-  if (key.length !== 33 || key[0] !== tag) throw new Error(`${code}:${key.toString('hex')}`);
-  return decodeEntityId(key.subarray(1));
 };
 
 export const encodeHeight = (height: number): Buffer => {
@@ -225,17 +220,88 @@ export const parseBoundedValueChunkKey = (
 
 export const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
 
-export const keyRuntimeOutputPayload = (hash: string): Buffer =>
-  Buffer.concat([
-    Buffer.from([KEY_RUNTIME_OUTPUT_PAYLOAD]),
-    exactHexBytes(hash, 32, 'STORAGE_RUNTIME_OUTPUT_HASH_INVALID'),
-  ]);
+export const keyRuntimeOutputRowPrefix = (height?: number): Buffer =>
+  height === undefined
+    ? Buffer.from([KEY_RUNTIME_OUTPUT_ROW])
+    : Buffer.concat([Buffer.from([KEY_RUNTIME_OUTPUT_ROW]), encodeHeight(height)]);
 
-export const keyEntityContextPayload = (hash: string): Buffer =>
-  Buffer.concat([
+export const keyRuntimeOutputRow = (height: number, outputIndex: number): Buffer => {
+  if (!Number.isSafeInteger(outputIndex) || outputIndex < 0 || outputIndex > 0xffff_ffff) {
+    throw new Error(`STORAGE_RUNTIME_OUTPUT_INDEX_INVALID:${String(outputIndex)}`);
+  }
+  const index = Buffer.allocUnsafe(4);
+  index.writeUInt32BE(outputIndex);
+  return Buffer.concat([keyRuntimeOutputRowPrefix(height), index]);
+};
+
+export const parseRuntimeOutputRowKey = (
+  key: Buffer,
+): Readonly<{ height: number; outputIndex: number }> => {
+  if (key.byteLength !== 13 || key[0] !== KEY_RUNTIME_OUTPUT_ROW) {
+    throw new Error(`STORAGE_RUNTIME_OUTPUT_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return { height: decodeHeight(key), outputIndex: key.readUInt32BE(9) };
+};
+
+export type EntityContextPayloadPathKind =
+  | 'manifest'
+  | 'gossipProfile'
+  | 'htlcEntry'
+  | 'htlcOriginated'
+  | 'peerAssertions'
+  | 'gossipProfileDigests'
+  | 'htlcEntryDigests'
+  | 'htlcOriginatedDigests'
+  | 'peerAssertionDigests';
+
+const ENTITY_CONTEXT_PAYLOAD_PATH_TAG = Object.freeze({
+  manifest: 0,
+  gossipProfile: 1,
+  htlcEntry: 2,
+  htlcOriginated: 3,
+  peerAssertions: 4,
+  gossipProfileDigests: 5,
+  htlcEntryDigests: 6,
+  htlcOriginatedDigests: 7,
+  peerAssertionDigests: 8,
+} satisfies Record<EntityContextPayloadPathKind, number>);
+
+const normalizedReplicaIdBytes = (replicaId: string): Buffer => {
+  if (
+    replicaId !== replicaId.toLowerCase() ||
+    !/^0x[0-9a-f]{64}:0x[0-9a-f]{40}(:[1-9][0-9]*)?$/.test(replicaId)
+  ) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_REPLICA_ID_INVALID:${replicaId}`);
+  }
+  return textBytes(replicaId);
+};
+
+/**
+ * Physical Entity-context rows are path-keyed. The digest committed by the
+ * Runtime frame or parent page verifies the bytes but never chooses this key.
+ */
+export const keyEntityContextPayload = (
+  runtimeHeight: number,
+  replicaId: string,
+  kind: EntityContextPayloadPathKind,
+  index: number,
+): Buffer => {
+  if (!Number.isSafeInteger(runtimeHeight) || runtimeHeight < 1) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_HEIGHT_INVALID:${String(runtimeHeight)}`);
+  }
+  if (!Number.isSafeInteger(index) || index < 0 || index > 0xffff_ffff) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_INDEX_INVALID:${String(index)}`);
+  }
+  const indexBytes = Buffer.allocUnsafe(4);
+  indexBytes.writeUInt32BE(index);
+  return Buffer.concat([
     Buffer.from([KEY_ENTITY_CONTEXT_PAYLOAD]),
-    exactHexBytes(hash, 32, 'STORAGE_ENTITY_CONTEXT_HASH_INVALID'),
+    encodeHeight(runtimeHeight),
+    normalizedReplicaIdBytes(replicaId),
+    Buffer.from([ENTITY_CONTEXT_PAYLOAD_PATH_TAG[kind]]),
+    indexBytes,
   ]);
+};
 
 const runtimeMachineTreeOwnerKey = (
   tag: typeof KEY_RUNTIME_MACHINE_BRANCH | typeof KEY_RUNTIME_MACHINE_LEAF,
@@ -304,7 +370,7 @@ export const keyRscoreAccount = (ownerEntityId: string, accountId: string): Buff
 export const keyRscoreAccountPrefix = (ownerEntityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_RSCORE_ACCOUNT]), hexBytes(ownerEntityId)]);
 
-export const keyRscoreAccountNode = (
+const keyRscoreAccountNode = (
   ownerEntityId: string,
   accountId: string,
   namespaceTag: number,
@@ -323,6 +389,34 @@ export const keyRscoreAccountNode = (
   ]);
 };
 
+/** Canonical radix-16 branch key: nibble length plus two nibbles per byte. */
+export const keyRscoreAccountRadixBranchNode = (
+  ownerEntityId: string,
+  accountId: string,
+  namespaceTag: number,
+  path: readonly number[],
+): Buffer => keyRscoreAccountNode(
+  ownerEntityId,
+  accountId,
+  namespaceTag,
+  0,
+  Buffer.from(packRadixMerklePath(16, [...path])),
+);
+
+/** Canonical radix-16 leaf key: the full namespace protocol key. */
+export const keyRscoreAccountRadixLeafNode = (
+  ownerEntityId: string,
+  accountId: string,
+  namespaceTag: number,
+  protocolKey: Uint8Array,
+): Buffer => keyRscoreAccountNode(
+  ownerEntityId,
+  accountId,
+  namespaceTag,
+  1,
+  protocolKey,
+);
+
 export const keyRscoreAccountNodePrefix = (
   ownerEntityId: string,
   accountId: string,
@@ -339,6 +433,29 @@ export const keyRscoreAccountNodePrefix = (
     ...(namespaceTag === undefined ? [] : [Buffer.from([namespaceTag])]),
     ...(kind === undefined ? [] : [Buffer.from([kind])]),
   ]);
+};
+
+/**
+ * Rust Account J-claim nodes share the Account checkpoint namespace, but the
+ * two Patricia roots are independent. The side is therefore part of the
+ * permanent logical section, followed by the branch path or full leaf key.
+ */
+export const keyRscoreAccountJClaimPathNode = (
+  ownerEntityId: string,
+  accountId: string,
+  side: 0 | 1,
+  path: BinaryPatriciaStoragePath,
+): Buffer => {
+  const encodedPath = keyBinaryPatriciaStoragePath(path);
+  const kind = encodedPath[0];
+  if (kind !== 0 && kind !== 1) throw new Error('STORAGE_RSCORE_J_CLAIM_PATH_KIND');
+  return keyRscoreAccountNode(
+    ownerEntityId,
+    accountId,
+    6,
+    kind,
+    Buffer.concat([Buffer.from([side]), encodedPath.subarray(1)]),
+  );
 };
 
 export const keySnapshotGraph = (height: number, liveKey: Buffer): Buffer =>
@@ -490,9 +607,8 @@ export const keyLiveAccountField = (
 /**
  * Static continuation row for a large Account envelope field.
  *
- * The key is owner + permanent field tag + deterministic chunk index. Content
- * hashes are verification data in the Account manifest, never addresses. This
- * keeps overwrites bounded without creating a second content-addressed graph.
+ * The key is owner + permanent field tag + deterministic chunk index. Hashes
+ * remain verification data in the Account manifest, never row addresses.
  */
 export const keyLiveAccountFieldChunk = (
   entityId: string,
@@ -680,17 +796,146 @@ export const keyLiveReplicaMetaPrefix = (entityId?: string): Buffer =>
 export const keyLiveReplicaMeta = (entityId: string, signerId: string): Buffer =>
   Buffer.concat([keyLiveReplicaMetaPrefix(entityId), signerKeyBytes(signerId)]);
 
-export const keyCertifiedBoardNode = (hash: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_CERTIFIED_BOARD_NODE]), hexBytes(hash)]);
-export const keyCertifiedBoardNodePrefix = (): Buffer => Buffer.from([KEY_CERTIFIED_BOARD_NODE]);
+/**
+ * Binary Patricia nodes use their permanent logical position, never their
+ * digest, as the physical database key. A branch is identified by the common
+ * key prefix before its discriminating bit; a leaf is identified by its full
+ * protocol key. Updating a node therefore overwrites one bounded row.
+ */
+export type BinaryPatriciaStoragePath =
+  | Readonly<{ kind: 'branch'; bit: number; representativeKey: string }>
+  | Readonly<{ kind: 'leaf'; key: string }>;
 
-export const keyConsumptionNode = (hash: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_CONSUMPTION_NODE]), hexBytes(hash)]);
-export const keyConsumptionNodePrefix = (): Buffer => Buffer.from([KEY_CONSUMPTION_NODE]);
+const keyBinaryPatriciaStoragePath = (path: BinaryPatriciaStoragePath): Buffer => {
+  if (path.kind === 'leaf') {
+    return Buffer.concat([Buffer.from([1]), hexBytes(path.key)]);
+  }
+  if (!Number.isSafeInteger(path.bit) || path.bit < 0 || path.bit > 255) {
+    throw new Error(`STORAGE_BINARY_PATRICIA_BIT_INVALID:${String(path.bit)}`);
+  }
+  const prefix = Buffer.from(hexBytes(path.representativeKey));
+  const wholeBytes = Math.floor(path.bit / 8);
+  const remainder = path.bit % 8;
+  if (remainder === 0) {
+    prefix.fill(0, wholeBytes);
+  } else {
+    prefix[wholeBytes] = prefix[wholeBytes]! & (0xff << (8 - remainder));
+    prefix.fill(0, wholeBytes + 1);
+  }
+  const bit = Buffer.allocUnsafe(2);
+  bit.writeUInt16BE(path.bit);
+  return Buffer.concat([Buffer.from([0]), bit, prefix]);
+};
 
-export const keyAccountJClaimNode = (hash: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]), hexBytes(hash)]);
-export const keyAccountJClaimNodePrefix = (): Buffer => Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]);
+const parseBinaryPatriciaStoragePath = (
+  payload: Buffer,
+  code: string,
+): BinaryPatriciaStoragePath => {
+  const kind = payload[0];
+  if (kind === 1 && payload.byteLength === 33) {
+    return { kind: 'leaf', key: `0x${payload.subarray(1).toString('hex')}` };
+  }
+  if (kind !== 0 || payload.byteLength !== 35) throw new Error(`${code}_PATH_INVALID`);
+  const path: BinaryPatriciaStoragePath = {
+    kind: 'branch',
+    bit: payload.readUInt16BE(1),
+    representativeKey: `0x${payload.subarray(3).toString('hex')}`,
+  };
+  if (!keyBinaryPatriciaStoragePath(path).equals(payload)) {
+    throw new Error(`${code}_PATH_NON_CANONICAL`);
+  }
+  return path;
+};
+
+export const parseRscoreAccountJClaimPathNodeKey = (key: Buffer) => {
+  if (
+    key.byteLength <= 68 ||
+    key[0] !== KEY_RSCORE_ACCOUNT_NODE ||
+    key[65] !== 6
+  ) {
+    throw new Error('STORAGE_RSCORE_J_CLAIM_PATH_KEY_INVALID');
+  }
+  const kind = key[66];
+  const side = key[67];
+  if ((kind !== 0 && kind !== 1) || (side !== 0 && side !== 1)) {
+    throw new Error('STORAGE_RSCORE_J_CLAIM_PATH_HEADER_INVALID');
+  }
+  return {
+    ownerEntityId: decodeEntityId(key.subarray(1, 33)),
+    accountId: decodeEntityId(key.subarray(33, 65)),
+    side,
+    path: parseBinaryPatriciaStoragePath(
+      Buffer.concat([Buffer.from([kind]), key.subarray(68)]),
+      'STORAGE_RSCORE_J_CLAIM',
+    ),
+  };
+};
+
+export const keyCertifiedBoardNodePrefix = (ownerEntityId?: string): Buffer =>
+  ownerEntityId
+    ? Buffer.concat([Buffer.from([KEY_CERTIFIED_BOARD_NODE]), hexBytes(ownerEntityId)])
+    : Buffer.from([KEY_CERTIFIED_BOARD_NODE]);
+
+export const keyCertifiedBoardPathNode = (
+  ownerEntityId: string,
+  path: BinaryPatriciaStoragePath,
+): Buffer => Buffer.concat([
+  keyCertifiedBoardNodePrefix(ownerEntityId),
+  keyBinaryPatriciaStoragePath(path),
+]);
+
+export const parseCertifiedBoardPathNodeKey = (key: Buffer) => {
+  if (key.byteLength <= 33 || key[0] !== KEY_CERTIFIED_BOARD_NODE) {
+    throw new Error('STORAGE_CERTIFIED_BOARD_PATH_KEY_INVALID');
+  }
+  return {
+    ownerEntityId: decodeEntityId(key.subarray(1, 33)),
+    path: parseBinaryPatriciaStoragePath(key.subarray(33), 'STORAGE_CERTIFIED_BOARD'),
+  };
+};
+
+export const keyAccountJClaimNodePrefix = (
+  ownerEntityId?: string,
+  counterpartyId?: string,
+  side?: 0 | 1,
+): Buffer => {
+  if (counterpartyId !== undefined && ownerEntityId === undefined) {
+    throw new Error('STORAGE_ACCOUNT_J_CLAIM_COUNTERPARTY_WITHOUT_OWNER');
+  }
+  if (side !== undefined && counterpartyId === undefined) {
+    throw new Error('STORAGE_ACCOUNT_J_CLAIM_SIDE_WITHOUT_ACCOUNT');
+  }
+  return Buffer.concat([
+    Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]),
+    ...(ownerEntityId === undefined ? [] : [hexBytes(ownerEntityId)]),
+    ...(counterpartyId === undefined ? [] : [hexBytes(counterpartyId)]),
+    ...(side === undefined ? [] : [Buffer.from([side])]),
+  ]);
+};
+
+export const keyAccountJClaimPathNode = (
+  ownerEntityId: string,
+  counterpartyId: string,
+  side: 0 | 1,
+  path: BinaryPatriciaStoragePath,
+): Buffer => Buffer.concat([
+  keyAccountJClaimNodePrefix(ownerEntityId, counterpartyId, side),
+  keyBinaryPatriciaStoragePath(path),
+]);
+
+export const parseAccountJClaimPathNodeKey = (key: Buffer) => {
+  if (key.byteLength <= 66 || key[0] !== KEY_ACCOUNT_J_CLAIM_NODE) {
+    throw new Error('STORAGE_ACCOUNT_J_CLAIM_PATH_KEY_INVALID');
+  }
+  const side = key[65];
+  if (side !== 0 && side !== 1) throw new Error('STORAGE_ACCOUNT_J_CLAIM_PATH_SIDE_INVALID');
+  return {
+    ownerEntityId: decodeEntityId(key.subarray(1, 33)),
+    counterpartyId: decodeEntityId(key.subarray(33, 65)),
+    side,
+    path: parseBinaryPatriciaStoragePath(key.subarray(66), 'STORAGE_ACCOUNT_J_CLAIM'),
+  };
+};
 
 export const keyHistoryViewAccountFrame = (
   entityId: string,

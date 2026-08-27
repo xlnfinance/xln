@@ -132,6 +132,21 @@ fn outbound_request(
     }
 }
 
+fn empty_checkpoint_request(owner: [u8; 32]) -> EntityOutboundRequest {
+    EntityOutboundRequest {
+        owner_entity_id: owner,
+        timestamp: TIMESTAMP,
+        j_height: 100,
+        creates: Vec::new(),
+        admits: Vec::new(),
+        propose: Vec::new(),
+        materialize: Vec::new(),
+        failed_htlc_routes: Vec::new(),
+        checkpoint_due: true,
+        post_accounts: false,
+    }
+}
+
 fn exact_restore_row(
     engine: &StatefulConsensusEngine,
     account_id: AccountId,
@@ -229,6 +244,9 @@ fn exact_restore_refuses_every_corrupt_binding_before_returning_an_engine() {
 #[test]
 fn resident_pay_htlc_swap_result_matches_the_legacy_oracle() {
     let (seed, pair) = funded_seed();
+    let expected_domain = seed.replica.state().identity().domain().clone();
+    let expected_dispute_config = seed.replica.state().dispute_config();
+    let expected_watch_seed = seed.replica.state().identity().watch_seed().clone();
     let market = fixture::market();
     let mut legacy = legacy(
         4,
@@ -276,6 +294,40 @@ fn resident_pay_htlc_swap_result_matches_the_legacy_oracle() {
     assert_eq!(actual_proposal.hanko, expected_proposal.hanko);
     assert_eq!(actual_proposal.events, expected_proposal.events);
     assert_eq!(actual_proposal.outputs, expected_proposal.outputs);
+    let outbound = actual.proposals[0]
+        .outbound_input
+        .as_ref()
+        .expect("Account consensus authored its exact outbound input");
+    assert_eq!(outbound.envelope.from_entity_id, pair.payer_entity);
+    assert_eq!(outbound.envelope.to_entity_id, pair.payee_entity);
+    assert_eq!(outbound.envelope.domain, expected_domain);
+    assert_eq!(outbound.envelope.dispute_config, expected_dispute_config);
+    assert_eq!(
+        outbound.envelope.watch_seed.as_ref(),
+        Some(&expected_watch_seed)
+    );
+    let AccountInputKind::Frame(frame) = &outbound.kind else {
+        panic!("first proposal must be a frame");
+    };
+    assert_eq!(frame.frame, actual_proposal.frame);
+    assert_eq!(frame.state_hash, actual_proposal.state_hash);
+    assert_eq!(frame.frame_hanko.as_ref(), Some(&actual_proposal.hanko));
+    assert_eq!(
+        frame.dispute.as_ref().map(|draft| (
+            draft.hanko.as_ref(),
+            draft.hash,
+            draft.proof_body_hash,
+            draft.nonce,
+            draft.proposer_is_left,
+        )),
+        actual_proposal.dispute.as_ref().map(|draft| (
+            None,
+            draft.hash,
+            draft.proof_body_hash,
+            draft.nonce,
+            draft.proposer_is_left,
+        )),
+    );
     assert_eq!(
         actual.post_accounts[0].account_leaf,
         expected.post_accounts[0].account_leaf
@@ -390,6 +442,66 @@ fn checkpoint_due_exports_exact_dirty_rows_once() {
         empty_checkpoint.revision()
     );
     assert_eq!(empty.accounts_root, checkpointed.accounts_root);
+}
+
+#[test]
+fn explicit_existing_import_exports_every_seed_until_acked_but_normal_restore_is_clean() {
+    let (seed, pair) = funded_seed();
+    let mut imported = ResidentConsensusEngine::import_existing(
+        EngineGeneration::from_bytes([0x42; 8]),
+        4,
+        fixture::signer_key("payer-0"),
+        "payer-0".to_string(),
+        fixture::market(),
+        vec![seed.clone()],
+    )
+    .expect("explicit existing import");
+    let imported_root = imported.accounts_root();
+    enter_resident(&mut imported, pair.payer_entity);
+    let first = imported
+        .entity_outbound(empty_checkpoint_request(pair.payer_entity))
+        .expect("first imported checkpoint")
+        .checkpoint
+        .expect("first imported manifest");
+    assert_eq!(first.base_revision(), 0);
+    assert_eq!(first.revision(), 0);
+    assert_eq!(first.accounts_root(), imported_root);
+    assert_eq!(first.token.account_count, 1);
+    assert_eq!(first.accounts.len(), 1);
+    assert_eq!(first.accounts[0].account_id, pair.payer_account);
+
+    let retried = imported
+        .entity_outbound(empty_checkpoint_request(pair.payer_entity))
+        .expect("retry imported checkpoint before ack")
+        .checkpoint
+        .expect("retry imported manifest");
+    assert_eq!(retried.token, first.token);
+    assert_eq!(retried.accounts.len(), 1);
+    assert_eq!(retried.accounts[0].account_id, first.accounts[0].account_id);
+    assert_eq!(
+        retried.accounts[0].account_leaf,
+        first.accounts[0].account_leaf
+    );
+    assert_eq!(retried.accounts[0].sections, first.accounts[0].sections);
+    assert_eq!(
+        retried.accounts[0].put_count(),
+        first.accounts[0].put_count()
+    );
+    assert_eq!(
+        retried.accounts[0].del_count(),
+        first.accounts[0].del_count()
+    );
+
+    let mut restored = resident(4, "payer-0", 0, fixture::market(), vec![seed]);
+    enter_resident(&mut restored, pair.payer_entity);
+    let clean = restored
+        .entity_outbound(empty_checkpoint_request(pair.payer_entity))
+        .expect("normal restore checkpoint")
+        .checkpoint
+        .expect("normal restore manifest");
+    assert_eq!(clean.accounts_root(), imported_root);
+    assert_eq!(clean.token.account_count, 1);
+    assert!(clean.accounts.is_empty());
 }
 
 #[test]
@@ -544,6 +656,25 @@ fn resident_result_is_root_identical_with_1_2_4_8_16_workers() {
             expected = Some(signature);
         }
     }
+}
+
+#[test]
+fn resident_refuses_to_guess_proposability_for_an_unrepresented_settlement_workspace() {
+    let (mut seed, _) = funded_seed();
+    seed.replica.set_settlement_workspace_present(true);
+    let error = match ResidentConsensusEngine::restore(
+        EngineGeneration::from_bytes([0x42; 8]),
+        1,
+        REVISION,
+        fixture::signer_key("payer-0"),
+        "payer-0".to_string(),
+        fixture::market(),
+        vec![seed],
+    ) {
+        Ok(_) => panic!("settlement eligibility cannot be inferred from a presence bit"),
+        Err(error) => error,
+    };
+    assert_eq!(error, BatchError::ProposabilitySettlementUnrepresented,);
 }
 
 #[test]

@@ -37,11 +37,12 @@ if (process.env['XLN_MM_CROSS_J'] !== '0') {
 process.env['XLN_DB_PATH'] = join(workDir, 'prod-mesh', 'h1');
 process.env['XLN_RDB_ROOT'] = join(workDir, 'prod-mesh', 'h1');
 process.env['XLN_JURISDICTIONS_PATH'] = join(workDir, 'prod-mesh', 'jurisdictions.json');
-const [meshSeeds, runtime, { deriveRuntimeIdFromSeed }, recordingApi] = await Promise.all([
+const [meshSeeds, runtime, { deriveRuntimeIdFromSeed }, recordingApi, entityCommitments] = await Promise.all([
   import('../../../../orchestrator/mesh/mesh-seeds'),
   import('../../../../runtime'),
   import('../../../../storage/runtime-dbs'),
   import('./recording'),
+  import('../../../../entity/consensus/state-root'),
 ]);
 const { deriveMeshChildSeed } = meshSeeds;
 const {
@@ -56,6 +57,7 @@ const {
   readPersistedAccountFrameHistoryRecords,
   readPersistedEntityFrameHistory,
   readPersistedEntityFrameHistoryRecords,
+  openDetachedRuntimeRecording,
   validateRuntimeRecoveryBundle,
 } = runtime;
 const { hashEntityProposalTxPrefix } = await import('../../../../entity/consensus/proposal/replay-oracle');
@@ -139,15 +141,42 @@ try {
       touchedAccounts.set(`${entityId}:${counterpartyId}`, { entityId, counterpartyId });
     }
   }
-  const entityFrames = (await Promise.all([...touchedEntities].sort().map(async entityId =>
+  const entityFrameRecords = (await Promise.all([...touchedEntities].sort().map(async entityId =>
     readPersistedEntityFrameHistoryRecords(env, entityId, 1_000, { maxRuntimeHeight: targetHeight })
-  ))).flat().filter(record => record.runtimeHeight > baseHeight).map(record => ({
+  ))).flat().filter(record => record.runtimeHeight > baseHeight);
+  const detached = openDetachedRuntimeRecording(recording, runtimeSeed);
+  const accountsRoots = new Map<string, string>();
+  const entitySections = new Map<string, ReturnType<typeof entityCommitments.computeEntityConsensusSectionDigestsCold>>();
+  try {
+    for (const record of entityFrameRecords) {
+      const key = `${record.runtimeHeight}:${record.entityId}`;
+      if (accountsRoots.has(key)) continue;
+      const projection = await detached.readAtHeight(record.runtimeHeight);
+      const replicas = [...projection.state.eReplicas.values()].filter(replica =>
+        replica.entityId.toLowerCase() === record.entityId.toLowerCase());
+      if (replicas.length === 0) {
+        throw new Error(`HLT_AUTHORITY_ACCOUNTS_ROOT_ENTITY_MISSING:${key}`);
+      }
+      const roots = new Set(replicas.map(replica => replica.state.accounts.rootHash()));
+      if (roots.size !== 1) throw new Error(`HLT_AUTHORITY_ACCOUNTS_ROOT_REPLICA_DIVERGENCE:${key}`);
+      accountsRoots.set(key, [...roots][0]!);
+      entitySections.set(
+        key,
+        entityCommitments.computeEntityConsensusSectionDigestsCold(replicas[0]!.state),
+      );
+    }
+  } finally {
+    await detached.close();
+  }
+  const entityFrames = entityFrameRecords.map(record => ({
     runtimeHeight: record.runtimeHeight,
     entityId: record.entityId,
     entityHeight: record.entityHeight,
     frameHash: record.link.frame.hash,
     stateRoot: record.link.frame.stateRoot,
     authorityRoot: record.link.frame.authorityRoot,
+    accountsRoot: accountsRoots.get(`${record.runtimeHeight}:${record.entityId}`)!,
+    sections: entitySections.get(`${record.runtimeHeight}:${record.entityId}`)!,
   })).sort((left, right) => left.runtimeHeight - right.runtimeHeight ||
     left.entityId.localeCompare(right.entityId) || left.entityHeight - right.entityHeight);
   const accountFrames = (await Promise.all([...touchedAccounts.values()].map(async account =>
@@ -205,7 +234,8 @@ try {
     recording,
     totals: summarizeHltHubFrames(frames),
     featurePolicy: {
-      mmCrossJurisdiction: false,
+      hubRebalance: 'disabled',
+      crossJ: 'disabled',
       disputes: 'disabled',
       lending: 'disabled',
     },

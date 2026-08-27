@@ -2,14 +2,9 @@ import type { AccountFrame, AccountReplica } from '../../types/account';
 import type { RuntimeReplica } from '../types';
 import { validateEntityState } from '../../entity/state/state-validation';
 import { computeFrameHash } from '../../account/consensus/index';
-import { assertAccountFrameDeltaIntegrity } from '../../account/state/frame';
 
 const formatAccountLabel = (replicaKey: string, counterpartyId: string): string =>
   `${replicaKey.slice(-4)}↔${counterpartyId.slice(-4)}`;
-
-const assertFrameShape = (frame: AccountFrame, label: string): void => {
-  assertAccountFrameDeltaIntegrity(frame, `[STRICT] ${label}`);
-};
 
 const assertFrameHash = async (frame: AccountFrame, label: string): Promise<void> => {
   if (!frame.stateHash) {
@@ -37,7 +32,6 @@ const assertAccountFrames = async (
   // NOTE: proofHeader.nextProofNonce is the unified on-chain nonce (not tied to frame height).
   // Frame height tracking is via account.currentHeight only.
 
-  assertFrameShape(currentFrame, `${label} currentFrame`);
   if (account.currentHeight > 0) {
     await assertFrameHash(currentFrame, `${label} currentFrame`);
   }
@@ -52,7 +46,6 @@ const assertAccountFrames = async (
     if (pending.prevFrameHash !== expectedPrev) {
       throw new Error(`[STRICT] ${label}: pendingFrame.prevFrameHash mismatch`);
     }
-    assertFrameShape(pending, `${label} pendingFrame`);
     await assertFrameHash(pending, `${label} pendingFrame`);
   }
 };

@@ -203,9 +203,9 @@ const rawOk = (reply: RawProcessReply): unknown => {
 
 describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
   test('Hello rejects the stale process ABI and protocol fingerprint', async () => {
-    expect(RSCORE_PROCESS_ABI_VERSION).toBe(27);
+    expect(RSCORE_PROCESS_ABI_VERSION).toBe(36);
     expect(RSCORE_PROTOCOL_FINGERPRINT.toString('hex'))
-      .toBe('2ba024e294f221b1d53d46fcef3bb214d55aee5d1284afb5f48afaf57a0cc6d2');
+      .toBe('0d0e71b61e8319a6a3514059b0167b56f0b03a22422937731184b4b3a9cfaceb');
     const staleAbi = new RawProcessSession(identity());
     try {
       expect(rawErrorCode(await staleAbi.request(RSCORE_OP.hello, [
@@ -298,7 +298,10 @@ describe.skipIf(!existsSync(BINARY))('rscore resident two-call process', () => {
         true,
       ])));
       expect(due.checkpoint).not.toBeNull();
-      expect(due.checkpoint?.accounts).toEqual([]);
+      // Offline import is dirty against the empty Rust durability baseline.
+      // The first due Runtime checkpoint must persist the imported Account;
+      // otherwise a crash before the first mutation loses authority state.
+      expect(due.checkpoint?.accounts).toHaveLength(1);
       expect(due.checkpoint?.removed).toEqual([]);
       const reconciled = decodeWave(rawOk(await raw.request(RSCORE_OP.accountInbound, [
         ownerBytes,

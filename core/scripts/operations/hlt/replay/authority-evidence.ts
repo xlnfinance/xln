@@ -9,6 +9,10 @@ import type {
   HltCertifiedAccountFrame,
   HltCertifiedEntityFrame,
 } from './authority-frame-oracle';
+import {
+  buildHltEntityEffectEvidence,
+  type HltEntityEffectEvidence,
+} from './entity-effect-evidence';
 
 type HltOperationKind =
   | 'direct_payment'
@@ -65,8 +69,11 @@ export type HltAuthorityExpectations = Readonly<{
   }>[];
   effects: readonly Readonly<{
     runtimeHeight: number;
-    orderedOutputRefs: readonly string[];
+    outputCount: number;
+    orderedOutputDigest: string;
   }>[];
+  /** Ordered Entity economic effects, distinct from signed events and Runtime outbox. */
+  entityEffects: readonly HltEntityEffectEvidence[];
 }>;
 
 export type HltAuthorityEvidence = Readonly<{
@@ -76,7 +83,7 @@ export type HltAuthorityEvidence = Readonly<{
 
 const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => {
   if (tx.type === 'entityCommand') return tx.data.txs;
-  if (tx.type === 'consensusOutput' || tx.type === 'runtimeOutput' || tx.type === 'reissueCertifiedOutput') {
+  if (tx.type === 'runtimeOutput') {
     return tx.data.entityTxs;
   }
   return [];
@@ -209,8 +216,10 @@ export const buildHltAuthorityEvidence = (
       accountFrames,
       effects: frames.map(frame => ({
         runtimeHeight: frame.height,
-        orderedOutputRefs: [...(frame.runtimeOutputRefs ?? [])],
+        outputCount: frame.runtimeOutputCount,
+        orderedOutputDigest: frame.runtimeOutputsDigest,
       })),
+      entityEffects: frames.map(frame => buildHltEntityEffectEvidence(frame.height, frame.logs)),
     },
     economicOperations: {
       operations: [...grouped.values()].map(row => ({

@@ -205,16 +205,74 @@ describe('typed Account peer rejection', () => {
       createAccountConsensusContext(env),
       async (_hanko, _hash, expectedEntityId, authority) => {
         observedAuthorities.push(authority);
-        return { valid: true, entityId: expectedEntityId };
+        return authority?.allowPreviousBoard === true
+          ? { valid: true, entityId: expectedEntityId }
+          : { valid: false, entityId: null };
       },
     );
     const accepted = await applyAccountInput(honestContext, account, input);
     expect(accepted.ok).toBe(true);
     expect('rejection' in accepted).toBe(false);
     expect('disposition' in accepted).toBe(false);
-    expect(observedAuthorities).toEqual([{ allowPreviousBoard: false }]);
+    // An ACK certifies a frame the peer already committed. Lost delivery may
+    // cross a board rotation, so this historical-evidence lane accepts the
+    // exact previous board within its registry grace window.
+    expect(observedAuthorities).toEqual([{ allowPreviousBoard: true }]);
     expect(account.currentHeight).toBe(1);
     expect(account.pendingFrame).toBeUndefined();
+  });
+
+  test('historical ACK authority expires at the exclusive previous-board boundary', async () => {
+    const previousBoardValidUntil = 1_700_604_800;
+    const currentBoardHash = `0x${'77'.repeat(32)}`;
+    const applyAt = async (entityTimestamp: number) => {
+      const env = createEmptyEnv(`account-ack-previous-board-${entityTimestamp}`);
+      env.quietRuntimeLogs = true;
+      const account = createAccount();
+      installPendingFrame(account);
+      const observedAuthorities: unknown[] = [];
+      const context = withVerifier(
+        createAccountConsensusContext(env),
+        async (_hanko, _hash, expectedEntityId, authority) => {
+          observedAuthorities.push(authority);
+          const insidePreviousBoardGrace =
+            Math.floor(entityTimestamp / 1_000) < previousBoardValidUntil;
+          return authority?.allowPreviousBoard === true && insidePreviousBoardGrace
+            ? { valid: true, entityId: expectedEntityId }
+            : { valid: false, entityId: null };
+        },
+      );
+      const result = await applyAccountInput(context, account, ackInput(account), {
+        entityTimestamp,
+        finalizedJHeight: 0,
+        owningEntityIsHub: false,
+        counterpartyCertifiedBoard: {
+          boardHash: currentBoardHash,
+          activatedAtJHeight: 2,
+          logIndex: 1,
+        },
+        verifyHanko: context.verifyHanko,
+      });
+      return { account, observedAuthorities, result };
+    };
+
+    const inside = await applyAt(previousBoardValidUntil * 1_000 - 1);
+    expect(inside.result.ok).toBe(true);
+    expect(inside.account.currentHeight).toBe(1);
+    expect(inside.observedAuthorities).toEqual([{
+      registeredBoardHash: currentBoardHash,
+      allowPreviousBoard: true,
+    }]);
+
+    for (const timestamp of [
+      previousBoardValidUntil * 1_000,
+      (previousBoardValidUntil + 1) * 1_000,
+    ]) {
+      const expired = await applyAt(timestamp);
+      expect(accountInputPeerRejectionCode(expired.result)).toBe('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID');
+      expect(expired.account.currentHeight).toBe(0);
+      expect(expired.account.pendingFrame?.height).toBe(1);
+    }
   });
 
   test('bad frame certificate is a typed no-mutation rejection', async () => {

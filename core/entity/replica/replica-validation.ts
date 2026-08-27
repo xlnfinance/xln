@@ -22,7 +22,6 @@ import {
   validateJSubmitState,
 } from './replica-submit-validation';
 import {
-  validateCertifiedFrameAnchor,
   validateReplicaJHistory,
   validateReplicaLineageAndWitnesses,
 } from './replica-evidence-validation';
@@ -112,7 +111,6 @@ const validateEntityCandidate = (
     });
   }
   for (const field of [
-    'consumptionNodeChanges',
     'accountJClaimNodeChanges',
   ] as const) {
     if (candidate[field] === undefined) continue;
@@ -249,7 +247,6 @@ function assertEntityReplicaMetadata(
   }
   validateEntityCandidate(replica['candidate'], entityId, context);
   validateReplicaLineageAndWitnesses(replica, context);
-  validateCertifiedFrameAnchor(replica['certifiedFrameAnchor'], context);
   validatePosition(replica['position'], context);
   validateLeaderConsensus(replica, context);
   validateHtlcNotes(replica['htlcNotes'], context);

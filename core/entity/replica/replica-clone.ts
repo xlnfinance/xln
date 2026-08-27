@@ -5,7 +5,6 @@ import {
   cloneIsolatedProposedEntityFrame,
 } from '../state/input-clone';
 import {
-  copyCertifiedEntityLineageAnchor,
   copyEntityProviderActionSubmitState,
   copyJPrefixRound,
   copyJSubmitState,
@@ -60,9 +59,6 @@ export const forkEntityReplicaForInput = (
     ...(replica.candidate && { candidate: replica.candidate }),
     ...(replica.certifiedFrameHead && {
       certifiedFrameHead: replica.certifiedFrameHead,
-    }),
-    ...(replica.certifiedFrameAnchor && {
-      certifiedFrameAnchor: copyCertifiedEntityLineageAnchor(replica.certifiedFrameAnchor),
     }),
     ...(replica.hankoWitness && {
       hankoWitness: new Map(

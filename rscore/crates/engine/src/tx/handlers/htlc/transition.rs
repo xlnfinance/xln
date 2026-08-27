@@ -223,7 +223,7 @@ fn deadline_expired(lock: &HtlcLock, context: &AccountExecutionContext) -> bool 
         || BigInt::from(context.enforcement_timestamp) >= lock.timelock().clone()
 }
 
-fn hash_secret(secret: &str) -> Result<HtlcHashlock, String> {
+pub(crate) fn hash_secret(secret: &str) -> Result<HtlcHashlock, String> {
     let Some(hex) = secret.strip_prefix("0x") else {
         return Err(secret_shape_error(secret));
     };

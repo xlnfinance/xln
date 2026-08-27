@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { RoutedEntityInput } from '../../../runtime/types';
 import {
-  MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES,
-  prepareRuntimeOutputPayloadRows,
-  readRuntimeOutputPayloads,
+  prepareRuntimeOutputRows,
+  readRuntimeOutputRows,
 } from '../../../storage/wal/outbox-payload';
+import { MAX_PHYSICAL_STORAGE_VALUE_BYTES } from '../../../storage/codec/bounded-value';
 import {
   MAX_ENTITY_CONTEXT_PAYLOAD_BYTES,
   prepareEntityContextPayloadRows,
@@ -20,9 +20,11 @@ import {
 } from '../../../storage/wal/snapshot';
 import { createEmptyEnv } from '../../../runtime';
 import { encodeBuffer } from '../../../storage/codec/codec';
+import { keyEntityContextPayload } from '../../../storage/keys';
 
 const ENTITY_ID = `0x${'11'.repeat(32)}`;
 const SIGNER_ID = `0x${'22'.repeat(20)}`;
+const RUNTIME_HEIGHT = 17;
 
 const output = (tag: string): RoutedEntityInput => ({
   entityId: ENTITY_ID,
@@ -36,7 +38,11 @@ const memoryReader = (rows: ReadonlyArray<Readonly<{ key: Buffer; value: Buffer 
   return {
     get: async (key: Buffer): Promise<Buffer> => {
       const value = values.get(key.toString('hex'));
-      if (!value) throw new Error('LEVEL_NOT_FOUND');
+      if (!value) {
+        const error = new Error('LEVEL_NOT_FOUND') as Error & { code: string };
+        error.code = 'LEVEL_NOT_FOUND';
+        throw error;
+      }
       return value;
     },
     keys: async function* (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) {
@@ -50,34 +56,40 @@ const memoryReader = (rows: ReadonlyArray<Readonly<{ key: Buffer; value: Buffer 
   };
 };
 
-describe('content-addressed Runtime outbox payloads', () => {
-  test('deduplicates disk rows while preserving ordered references', async () => {
+describe('path-keyed Runtime outbox rows', () => {
+  test('stores duplicate values at permanent ordered paths', async () => {
     const left = output('left');
     const right = output('right');
-    const prepared = prepareRuntimeOutputPayloadRows([left, right, left]);
+    const prepared = prepareRuntimeOutputRows(7, [left, right, left]);
 
-    expect(prepared.refs).toHaveLength(3);
-    expect(prepared.rows).toHaveLength(2);
-    expect(prepared.refs[0]).toBe(prepared.refs[2]);
-    const restored = await readRuntimeOutputPayloads(
+    expect(prepared.commitment.count).toBe(3);
+    expect(prepared.rows).toHaveLength(3);
+    expect(prepared.rows.map(row => row.key.toString('hex'))).toEqual([
+      '13000000000000000700000000',
+      '13000000000000000700000001',
+      '13000000000000000700000002',
+    ]);
+    const restored = await readRuntimeOutputRows(
       memoryReader(prepared.rows),
-      prepared.refs,
+      7,
+      prepared.commitment,
     );
     expect(restored.map(item => item.debugTag)).toEqual(['left', 'right', 'left']);
   });
 
-  test('fails closed on missing or corrupted payload bytes', async () => {
-    const prepared = prepareRuntimeOutputPayloadRows([output('safe')]);
-    await expect(readRuntimeOutputPayloads(memoryReader([]), prepared.refs))
-      .rejects.toThrow('STORAGE_RUNTIME_OUTPUT_PAYLOAD_MISSING');
+  test('fails closed on missing or corrupted ordered bytes', async () => {
+    const prepared = prepareRuntimeOutputRows(9, [output('safe')]);
+    await expect(readRuntimeOutputRows(memoryReader([]), 9, prepared.commitment))
+      .rejects.toThrow('STORAGE_RUNTIME_OUTPUT_ROW_MISSING');
 
     const row = prepared.rows[0]!;
-    const corrupted = [{ ...row, value: Buffer.from([...row.value, 0]) }];
-    await expect(readRuntimeOutputPayloads(memoryReader(corrupted), prepared.refs))
-      .rejects.toThrow('STORAGE_RUNTIME_OUTPUT_PAYLOAD_HASH_MISMATCH');
+    const corrupted = [{ ...row, value: Buffer.from(row.value.map((byte, index) =>
+      index === row.value.length - 1 ? byte ^ 1 : byte)) }];
+    await expect(readRuntimeOutputRows(memoryReader(corrupted), 9, prepared.commitment))
+      .rejects.toThrow('STORAGE_RUNTIME_OUTPUT_DIGEST_MISMATCH');
   });
 
-  test('stores a large routed batch as one manifest plus bounded EntityTx leaves', async () => {
+  test('chunks one large flat MessagePack row under static owner keys', async () => {
     const large: RoutedEntityInput = {
       ...output('large-batch'),
       entityTxs: [{
@@ -93,12 +105,12 @@ describe('content-addressed Runtime outbox payloads', () => {
         },
       }],
     };
-    const prepared = prepareRuntimeOutputPayloadRows([large]);
+    const prepared = prepareRuntimeOutputRows(11, [large]);
 
-    expect(prepared.refs).toHaveLength(1);
-    expect(prepared.rows).toHaveLength(36);
-    expect(prepared.rows.every(row => row.value.byteLength < MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES)).toBe(true);
-    const [restored] = await readRuntimeOutputPayloads(memoryReader(prepared.rows), prepared.refs);
+    expect(prepared.commitment.count).toBe(1);
+    expect(prepared.rows.length).toBeGreaterThan(1);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_PHYSICAL_STORAGE_VALUE_BYTES)).toBe(true);
+    const [restored] = await readRuntimeOutputRows(memoryReader(prepared.rows), 11, prepared.commitment);
     expect(restored).toEqual(large);
   });
 
@@ -141,22 +153,25 @@ describe('content-addressed Runtime outbox payloads', () => {
         },
       }],
     };
-    const prepared = prepareRuntimeOutputPayloadRows([large]);
+    const prepared = prepareRuntimeOutputRows(12, [large]);
 
-    expect(prepared.rows).toHaveLength(207);
-    expect(prepared.rows.every(row => row.value.byteLength < MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES)).toBe(true);
-    const [restored] = await readRuntimeOutputPayloads(memoryReader(prepared.rows), prepared.refs);
+    expect(prepared.rows.length).toBeGreaterThan(1);
+    expect(prepared.rows.every(row => row.value.byteLength < MAX_PHYSICAL_STORAGE_VALUE_BYTES)).toBe(true);
+    const [restored] = await readRuntimeOutputRows(memoryReader(prepared.rows), 12, prepared.commitment);
     expect(restored).toEqual(large);
   });
 
-  test('rejects a payload row larger than the LevelDB record budget', () => {
-    const oversized = output('x'.repeat(MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES));
-    expect(() => prepareRuntimeOutputPayloadRows([oversized]))
-      .toThrow('STORAGE_RUNTIME_OUTPUT_PAYLOAD_TOO_LARGE');
+  test('empty outbox still has an explicit stable commitment', async () => {
+    const prepared = prepareRuntimeOutputRows(13, []);
+    expect(prepared.rows).toEqual([]);
+    expect(prepared.commitment.count).toBe(0);
+    expect(prepared.commitment.digest).toMatch(/^0x[0-9a-f]{64}$/);
+    await expect(readRuntimeOutputRows(memoryReader([]), 13, prepared.commitment))
+      .resolves.toEqual([]);
   });
 });
 
-describe('content-addressed Entity replay contexts', () => {
+describe('path-addressed Entity replay contexts', () => {
   test('round-trips exact replica-bound context without a frame blob', async () => {
     const replicaId = `${ENTITY_ID}:${SIGNER_ID}`;
     const context = {
@@ -171,6 +186,7 @@ describe('content-addressed Entity replay contexts', () => {
       htlc: { version: 1 as const, entries: [], originated: [] },
     };
     const prepared = prepareEntityContextPayloadRows(
+      RUNTIME_HEIGHT,
       new Map([[replicaId, context]]),
     );
     expect(prepared.refs.size).toBe(1);
@@ -180,6 +196,7 @@ describe('content-addressed Entity replay contexts', () => {
     expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows),
+      RUNTIME_HEIGHT,
       prepared.refs,
     );
     expect(restored.get(replicaId)).toEqual(context);
@@ -215,11 +232,13 @@ describe('content-addressed Entity replay contexts', () => {
       peerAssertions: [],
       htlc: { version: 1 as const, entries, originated: [] },
     };
-    const prepared = prepareEntityContextPayloadRows(new Map([[replicaId, context]]));
-    // One leaf per entry, two reference pages holding their hashes, one manifest.
+    const prepared = prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[replicaId, context]]));
+    // One leaf per entry, two digest pages, one manifest.
     expect(prepared.rows).toHaveLength(entries.length + 3);
     expect(prepared.rows.every(row => row.value.byteLength < MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
-    const restored = await readEntityContextPayloads(memoryReader(prepared.rows), prepared.refs);
+    const restored = await readEntityContextPayloads(
+      memoryReader(prepared.rows), RUNTIME_HEIGHT, prepared.refs,
+    );
     expect(restored.get(replicaId)).toEqual(context);
   });
 
@@ -238,10 +257,12 @@ describe('content-addressed Entity replay contexts', () => {
       htlc: { version: 1 as const, entries: [], originated: [] },
     };
     const prepared = prepareEntityContextPayloadRows(
+      RUNTIME_HEIGHT,
       new Map([[recipientReplicaId, context]]),
     );
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows),
+      RUNTIME_HEIGHT,
       prepared.refs,
     );
     expect(restored.get(recipientReplicaId)?.proposerReplicaId)
@@ -261,8 +282,8 @@ describe('content-addressed Entity replay contexts', () => {
       peerAssertions: [],
       htlc: { version: 1 as const, entries: [], originated: [] },
     };
-    const parsed = prepareEntityContextPayloadRows(new Map([[replicaId, context]]));
-    const skipped = prepareEntityContextPayloadRows(new Map([[replicaId, context]]), true);
+    const parsed = prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[replicaId, context]]));
+    const skipped = prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[replicaId, context]]), true);
     expect([...skipped.refs.entries()]).toEqual([...parsed.refs.entries()]);
     expect(skipped.rows.map(row => row.value.toString('hex')))
       .toEqual(parsed.rows.map(row => row.value.toString('hex')));
@@ -270,7 +291,7 @@ describe('content-addressed Entity replay contexts', () => {
 
   test('in-process skip still binds the replica identity', () => {
     const wrongReplicaId = `${`0x${'44'.repeat(32)}`}:${SIGNER_ID}`;
-    expect(() => prepareEntityContextPayloadRows(new Map([[wrongReplicaId, {
+    expect(() => prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[wrongReplicaId, {
       version: 1,
       proposerReplicaId: `${ENTITY_ID}:${SIGNER_ID}`,
       entityId: ENTITY_ID,
@@ -285,7 +306,7 @@ describe('content-addressed Entity replay contexts', () => {
 
   test('rejects a context stored under another replica identity', () => {
     const wrongReplicaId = `${`0x${'44'.repeat(32)}`}:${SIGNER_ID}`;
-    expect(() => prepareEntityContextPayloadRows(new Map([[wrongReplicaId, {
+    expect(() => prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[wrongReplicaId, {
       version: 1,
       proposerReplicaId: `${ENTITY_ID}:${SIGNER_ID}`,
       entityId: ENTITY_ID,
@@ -296,6 +317,39 @@ describe('content-addressed Entity replay contexts', () => {
       peerAssertions: [],
       htlc: { version: 1, entries: [], originated: [] },
     }]]))).toThrow('STORAGE_ENTITY_CONTEXT_REPLICA_BINDING');
+  });
+
+  test('uses a permanent logical key while the committed digest verifies changing bytes', async () => {
+    const replicaId = `${ENTITY_ID}:${SIGNER_ID}`;
+    const base = {
+      version: 1 as const,
+      proposerReplicaId: replicaId,
+      entityId: ENTITY_ID,
+      proposerSignerId: SIGNER_ID,
+      parentFrameHash: `0x${'33'.repeat(32)}`,
+      height: 2,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries: [], originated: [] },
+    };
+    const first = prepareEntityContextPayloadRows(RUNTIME_HEIGHT, new Map([[replicaId, base]]));
+    const second = prepareEntityContextPayloadRows(
+      RUNTIME_HEIGHT,
+      new Map([[replicaId, { ...base, height: 3 }]]),
+    );
+    const expectedKey = keyEntityContextPayload(RUNTIME_HEIGHT, replicaId, 'manifest', 0);
+    expect(first.rows[0]?.key).toEqual(expectedKey);
+    expect(second.rows[0]?.key).toEqual(expectedKey);
+    expect(first.refs.get(replicaId)).not.toBe(second.refs.get(replicaId));
+    const manifest = first.rows[0]!;
+    const corrupted = [{
+      ...manifest,
+      value: Buffer.from(manifest.value.map((byte, index) =>
+        index === manifest.value.length - 1 ? byte ^ 1 : byte)),
+    }];
+    await expect(readEntityContextPayloads(
+      memoryReader(corrupted), RUNTIME_HEIGHT, first.refs,
+    )).rejects.toThrow('STORAGE_ENTITY_CONTEXT_PAYLOAD_HASH_MISMATCH');
   });
 });
 

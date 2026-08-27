@@ -16,6 +16,10 @@ import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authoriz
 import { getStaticSwapTokenDimensions } from '../../orderbook';
 import { safeStringify } from '../../protocol/serialization';
 import { buildCurrentDisputeArgumentPlan } from '../../protocol/dispute/arguments';
+import {
+  peekPreparedProposalCommit,
+  preparedCommitKey,
+} from '../../account/consensus/proposal/prepared-commit';
 import { bootScenario, fundEntities, registerEntities } from '../harness/boot';
 import {
   assert,
@@ -91,7 +95,7 @@ const accountEvidenceSummary = (account: AccountReplica | undefined) => ({
 
 const findAccountAck = (txs: readonly EntityTx[] | undefined): AccountAckInput | undefined => {
   // AccountInput is a raw top-level Runtime outbox item. Never restore readers
-  // for the retired consensusOutput/runtimeOutput nesting shape.
+  // for the Runtime output nesting shape.
   for (const tx of txs ?? []) {
     if (tx.type === 'accountInput' && tx.data.kind === 'ack') return structuredClone(tx.data);
   }
@@ -279,9 +283,10 @@ const decodeArguments = (encoded: string, context: string): DecodedArguments => 
   };
 };
 
-const deltaByToken = (frame: AccountFrame, tokenId: number) => {
-  const delta = frame.deltas.find((entry) => entry.tokenId === tokenId);
-  if (!delta) throw new Error(`DISPUTE_TRANSFORMER_FRAME_DELTA_MISSING:${tokenId}`);
+const pendingDeltaByToken = (account: AccountReplica, frame: AccountFrame, tokenId: number) => {
+  const prepared = peekPreparedProposalCommit(preparedCommitKey(account, frame.stateHash), account.state);
+  const delta = prepared?.state.deltas.get(tokenId);
+  if (!delta) throw new Error(`DISPUTE_TRANSFORMER_PENDING_DELTA_MISSING:${tokenId}`);
   return delta;
 };
 
@@ -293,12 +298,14 @@ const currentDelta = (account: AccountReplica, tokenId: number) => {
 
 const combinedPendingOffdelta = (
   base: AccountReplica,
-  aliceFrame: AccountFrame,
-  hubFrame: AccountFrame,
+  aliceAccount: AccountReplica,
+  hubAccount: AccountReplica,
   tokenId: number,
 ): bigint => {
   const initial = currentDelta(base, tokenId).offdelta;
-  return deltaByToken(aliceFrame, tokenId).offdelta + deltaByToken(hubFrame, tokenId).offdelta - initial;
+  return pendingDeltaByToken(aliceAccount, aliceAccount.pendingFrame!, tokenId).offdelta
+    + pendingDeltaByToken(hubAccount, hubAccount.pendingFrame!, tokenId).offdelta
+    - initial;
 };
 
 const readDebtOutstanding = async (jadapter: JAdapter, entityId: string, tokenId: number): Promise<bigint> =>
@@ -610,8 +617,11 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       dropPartitionedOutputs(env, alice.id, hub.id);
     }
 
-    const alicePending = requirePendingResolution(findReplica(env, alice.id)[1].state.accounts.get(hub.id), 'alice');
-    const hubPending = requirePendingResolution(findReplica(env, hub.id)[1].state.accounts.get(alice.id), 'hub');
+    const alicePendingAccount = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+    const hubPendingAccount = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
+    const alicePending = requirePendingResolution(alicePendingAccount, 'alice');
+    const hubPending = requirePendingResolution(hubPendingAccount, 'hub');
+    if (!alicePendingAccount || !hubPendingAccount) throw new Error('DISPUTE_TRANSFORMER_PENDING_ACCOUNT_MISSING');
     requirePendingSwapResolution(alicePending, 'hub-maker-right', 65_535);
     requirePendingSwapResolution(hubPending, 'alice-maker-left', 16_384);
     console.log(`[DISPUTE_DEBUG:pending-evidence] ${safeStringify({
@@ -627,7 +637,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         rightReserve: await jadapter.getReserves(hub.id, tokenId),
         collateral: await jadapter.getCollateral(alice.id, hub.id, tokenId),
         ondelta: currentDelta(baseAccount, tokenId).ondelta,
-        offdelta: combinedPendingOffdelta(baseAccount, alicePending, hubPending, tokenId),
+        offdelta: combinedPendingOffdelta(baseAccount, alicePendingAccount, hubPendingAccount, tokenId),
       });
     }
 

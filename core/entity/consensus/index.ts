@@ -5,16 +5,9 @@
  * shared validation/certification, input consensus, and committed-frame apply.
  */
 export {
-  expectedCommittedLeaderState,
-  selectPreparedFrameFromCertificate,
-  verifyEntityLeaderCertificate,
-  verifyEntityRelayCertificate,
-} from './leader/certificates';
-export {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
 } from './account/cross-j-fill-ack';
-export { attachTargetConsumptionProofs } from './output/consumption';
 export {
   selectProposableEntityTxs,
 } from './proposal/policy';

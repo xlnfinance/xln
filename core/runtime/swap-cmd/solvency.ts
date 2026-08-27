@@ -26,7 +26,6 @@ type AssetSolvency = {
   tokenId: number;
   reserves: bigint;
   confirmedCollateral: bigint;
-  pendingCollateral: bigint;
   internalValue: bigint;
   expectedInternalValue: bigint | null;
   delta: bigint | null;
@@ -114,7 +113,6 @@ const ensureAsset = (byAsset: Map<string, AssetSolvency>, state: EntityState, ra
     tokenId,
     reserves: 0n,
     confirmedCollateral: 0n,
-    pendingCollateral: 0n,
     internalValue: 0n,
     expectedInternalValue: null,
     delta: null,
@@ -143,12 +141,6 @@ export const calculateSolvency = (
         ensureAsset(byAsset, state, tokenId).confirmedCollateral += canonicalAmount(
           delta.collateral,
           `collateral.${tokenId}`,
-        );
-      }
-      for (const delta of account.pendingFrame?.deltas ?? []) {
-        ensureAsset(byAsset, state, delta.tokenId).pendingCollateral += canonicalAmount(
-          delta.collateral,
-          `pendingCollateral.${delta.tokenId}`,
         );
       }
     }

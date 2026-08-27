@@ -245,6 +245,57 @@ const redactSecrets = <T>(value: T): T => {
   return walk(value) as T;
 };
 
+type ShadowFirstDifference = Readonly<{
+  path: string;
+  reason: 'value-mismatch' | 'missing-typescript' | 'missing-rust';
+}>;
+
+type ShadowMismatch = Readonly<{
+  detail: string;
+  firstDifference: ShadowFirstDifference;
+  actualOutputs?: readonly IndexedShadowOutputRow[];
+  actualRoot?: string;
+}>;
+
+/** Deterministic first differing path; values stay in the 0600 dump below. */
+export const findFirstShadowDifference = (
+  typescript: unknown,
+  rust: unknown,
+  path = '$',
+): ShadowFirstDifference | null => {
+  if (safeStringify(typescript) === safeStringify(rust)) return null;
+  if (Array.isArray(typescript) && Array.isArray(rust)) {
+    const length = Math.max(typescript.length, rust.length);
+    for (let index = 0; index < length; index += 1) {
+      if (index >= typescript.length) {
+        return { path: `${path}[${index}]`, reason: 'missing-typescript' };
+      }
+      if (index >= rust.length) return { path: `${path}[${index}]`, reason: 'missing-rust' };
+      const difference = findFirstShadowDifference(typescript[index], rust[index], `${path}[${index}]`);
+      if (difference !== null) return difference;
+    }
+  }
+  if (typescript !== null && rust !== null
+    && typeof typescript === 'object' && typeof rust === 'object'
+    && !(typescript instanceof Uint8Array) && !(rust instanceof Uint8Array)) {
+    const left = typescript as Record<string, unknown>;
+    const right = rust as Record<string, unknown>;
+    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+    for (const key of keys) {
+      if (!(key in left)) return { path: `${path}.${key}`, reason: 'missing-typescript' };
+      if (!(key in right)) return { path: `${path}.${key}`, reason: 'missing-rust' };
+      const difference = findFirstShadowDifference(left[key], right[key], `${path}.${key}`);
+      if (difference !== null) return difference;
+    }
+  }
+  return { path, reason: 'value-mismatch' };
+};
+
+const shadowFailure = (detail: string, path: string): ShadowMismatch => ({
+  detail,
+  firstDifference: { path, reason: 'value-mismatch' },
+});
+
 /**
  * The engine's own tree, computed on the TypeScript side — and the Entity's
  * accounts tree at the same time: key = the raw 32-byte counterparty id, leaf
@@ -662,6 +713,7 @@ export type ShadowGap = Readonly<{
   txTypes: readonly string[];
   /** Per-section roots, filled in for divergences so the dump names the section. */
   sections?: Readonly<Record<string, Readonly<{ typescript: string; rust: string }>>>;
+  firstDifference?: ShadowFirstDifference;
 }>;
 
 export type ShadowStats = {
@@ -1504,13 +1556,18 @@ export class RscoreShadowMirror {
       // matches + mismatches; incrementing first let a stats snapshot taken
       // mid-frame report a comparison with no outcome.
       this.#stats.framesCompared += 1;
-      const failure = revisionGap ?? rejectionByAccount.get(accountKey) ?? this.#verifyAccount(
-        accountKey,
-        frame,
-        frame.expectedOutputs,
-        engineOutputs,
-        roots,
-      );
+      const rejection = rejectionByAccount.get(accountKey);
+      const failure = revisionGap !== null
+        ? shadowFailure(revisionGap, '$.wave.revision')
+        : rejection !== undefined
+          ? shadowFailure(rejection, '$.verdict')
+          : this.#verifyAccount(
+            accountKey,
+            frame,
+            frame.expectedOutputs,
+            engineOutputs,
+            roots,
+          );
       if (failure === null) {
         this.#stats.matches += 1;
         continue;
@@ -1583,32 +1640,47 @@ export class RscoreShadowMirror {
     expectedOutputs: readonly IndexedShadowOutputRow[],
     engineOutputs: readonly unknown[],
     roots: readonly unknown[],
-  ): string | null {
+  ): ShadowMismatch | null {
     const actualOutputs = engineOutputProjection(engineOutputs, accountKey);
     this.#stats.outputRowsCompared += expectedOutputs.length;
     // Compare the raw values — two different preimages of the same length must
     // not compare equal — but build the message, which ends up in a durable
     // dump file, from redacted copies.
     if (safeStringify(actualOutputs) !== safeStringify(expectedOutputs)) {
-      return `outputs:ts=${safeStringify(redactSecrets(expectedOutputs))}` +
-        `:rust=${safeStringify(redactSecrets(actualOutputs))}`;
+      const firstDifference = findFirstShadowDifference(expectedOutputs, actualOutputs, '$.outputs')
+        ?? { path: '$.outputs', reason: 'value-mismatch' as const };
+      return {
+        detail: `outputs:${firstDifference.path}:${firstDifference.reason}`,
+        firstDifference,
+        actualOutputs,
+      };
     }
     const row = roots.find(candidate =>
       Buffer.from((candidate as unknown[])[0] as Uint8Array).toString('hex') === accountKey);
     const actual = row ? Buffer.from((row as unknown[])[1] as Uint8Array).toString('hex') : 'missing';
-    return actual === frame.expectedRootHex ? null : `root:${actual}`;
+    return actual === frame.expectedRootHex ? null : {
+      detail: `root:ts=${frame.expectedRootHex}:rust=${actual}`,
+      firstDifference: { path: '$.accountStateRoot', reason: 'value-mismatch' },
+      actualRoot: actual,
+    };
   }
 
   async #recordMismatch(
     entry: Extract<QueueEntry, { kind: 'wave' }>,
     accountKey: string,
     frame: WaveFrame,
-    detail: string,
+    failure: ShadowMismatch,
   ): Promise<void> {
     this.#stats.mismatches += 1;
     this.#needsReseed.add(`${entry.ownerKey}/${accountKey}`);
     const sections = await this.#diverginSections(entry.ownerKey, accountKey, frame);
-    this.#writeDiff(entry, accountKey, frame, detail, sections);
+    const section = Object.entries(sections ?? {}).find(([, roots]) =>
+      roots.typescript !== roots.rust);
+    const firstDifference = section === undefined
+      ? failure.firstDifference
+      : { path: `$.accountState.${section[0]}Root`, reason: 'value-mismatch' as const };
+    const diagnostic = { ...failure, firstDifference };
+    this.#writeDiff(entry, accountKey, frame, diagnostic, sections);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
     try {
@@ -1617,7 +1689,8 @@ export class RscoreShadowMirror {
         account: accountKey,
         frameHeight: frame.frameHeight,
         expected: frame.expectedRootHex,
-        detail,
+        detail: diagnostic.detail,
+        firstDifference,
         sections,
       });
     } catch { /* observer-only */ }
@@ -1626,8 +1699,9 @@ export class RscoreShadowMirror {
       owner: entry.ownerKey,
       account: accountKey,
       frameHeight: frame.frameHeight,
-      detail,
+      detail: diagnostic.detail,
       txTypes: frame.txTypes,
+      firstDifference,
       ...(sections ? { sections } : {}),
     });
   }
@@ -1678,7 +1752,7 @@ export class RscoreShadowMirror {
     entry: Extract<QueueEntry, { kind: 'wave' }>,
     accountKey: string,
     frame: WaveFrame,
-    detail: string,
+    failure: ShadowMismatch,
     sections: Record<string, { typescript: string; rust: string }> | undefined,
   ): void {
     if (DIFF_DIR === null) return;
@@ -1692,10 +1766,13 @@ export class RscoreShadowMirror {
         account: accountKey,
         frameHeight: frame.frameHeight,
         txTypes: frame.txTypes,
-        detail: redactSecrets(detail),
+        detail: failure.detail,
+        firstDifference: failure.firstDifference,
         expectedRoot: frame.expectedRootHex,
+        actualRoot: failure.actualRoot ?? null,
         sections: sections ?? null,
         expectedOutputs: redactSecrets(frame.expectedOutputs),
+        actualOutputs: redactSecrets(failure.actualOutputs ?? []),
         jobs: redactSecrets(ownJobs),
       }, 2), { mode: 0o600 });
     } catch { /* observer-only */ }

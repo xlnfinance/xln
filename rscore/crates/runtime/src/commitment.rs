@@ -1,4 +1,6 @@
+use serde_json::Value as JsonValue;
 use sha2::{Digest as _, Sha256};
+use sha3::Keccak256;
 use thiserror::Error;
 use xln_rscore_protocol::{
     CanonicalNumber, CanonicalValue, ConsensusMessagePackError, encode_canonical_consensus_bytes,
@@ -20,7 +22,8 @@ pub struct RuntimePostStateCommitment {
     pub timestamp: u64,
     pub replica_meta_digest: String,
     pub runtime_component_digests: Vec<RuntimeComponentDigest>,
-    pub runtime_output_refs: Vec<String>,
+    pub runtime_output_count: u64,
+    pub runtime_outputs_digest: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,12 +32,23 @@ pub struct StorageReplicaMetaEntry {
     pub value: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CanonicalRuntimeEntityHash {
+    pub entity_id: String,
+    pub hash: String,
+    pub cell_count: u64,
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeCommitmentError {
     #[error(transparent)]
     Encoding(#[from] ConsensusMessagePackError),
     #[error("RUNTIME_STORAGE_NUMBER_UNSAFE:field={field}:value={value}")]
     UnsafeNumber { field: &'static str, value: u64 },
+    #[error("RUNTIME_CANONICAL_JSON_NUMBER_INVALID:path={path}:value={value}")]
+    InvalidJsonNumber { path: String, value: String },
+    #[error("RUNTIME_CANONICAL_JSON_ENCODE_FAILED:{0}")]
+    JsonEncode(#[from] serde_json::Error),
 }
 
 fn text(value: impl Into<String>) -> CanonicalValue {
@@ -69,6 +83,125 @@ fn hex(bytes: &[u8]) -> String {
 
 fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
+}
+
+fn compare_utf16(left: &str, right: &str) -> std::cmp::Ordering {
+    left.encode_utf16().cmp(right.encode_utf16())
+}
+
+fn js_array_index(key: &str) -> Option<u32> {
+    if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
+        return None;
+    }
+    let value = key.parse::<u32>().ok()?;
+    (value < u32::MAX && value.to_string() == key).then_some(value)
+}
+
+fn compare_js_object_keys(left: &str, right: &str) -> std::cmp::Ordering {
+    match (js_array_index(left), js_array_index(right)) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => compare_utf16(left, right),
+    }
+}
+
+fn append_canonical_json(
+    output: &mut String,
+    value: &JsonValue,
+    path: &str,
+) -> Result<(), RuntimeCommitmentError> {
+    match value {
+        JsonValue::Null => output.push_str("null"),
+        JsonValue::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        JsonValue::String(value) => output.push_str(&serde_json::to_string(value)?),
+        JsonValue::Number(number) => {
+            let parsed =
+                number
+                    .as_f64()
+                    .ok_or_else(|| RuntimeCommitmentError::InvalidJsonNumber {
+                        path: path.to_string(),
+                        value: number.to_string(),
+                    })?;
+            let mut buffer = ryu_js::Buffer::new();
+            output.push_str(buffer.format(parsed));
+        }
+        JsonValue::Array(values) => {
+            output.push('[');
+            for (index, child) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                append_canonical_json(output, child, &format!("{path}[{index}]"))?;
+            }
+            output.push(']');
+        }
+        JsonValue::Object(object) => {
+            output.push('{');
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort_by(|left, right| compare_js_object_keys(left, right));
+            for (index, key) in keys.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(&serde_json::to_string(key)?);
+                output.push(':');
+                append_canonical_json(output, &object[key], &format!("{path}.{key}"))?;
+            }
+            output.push('}');
+        }
+    }
+    Ok(())
+}
+
+/// Exact Rust implementation of `computeCanonicalRuntimeStateHash`.
+///
+/// `runtime_machine` is the tagged, key-sorted value produced by the canonical
+/// storage projection. Passing the previous root would add no authority, so the
+/// resident Runtime computes this directly from its owned post-state.
+pub fn compute_canonical_runtime_state_hash(
+    height: u64,
+    timestamp: u64,
+    entity_hashes: &[CanonicalRuntimeEntityHash],
+    runtime_machine: Option<&JsonValue>,
+) -> Result<String, RuntimeCommitmentError> {
+    number("height", height)?;
+    number("timestamp", timestamp)?;
+
+    let mut entities = entity_hashes
+        .iter()
+        .map(|entry| {
+            number("cellCount", entry.cell_count)?;
+            Ok((entry.entity_id.to_lowercase(), entry))
+        })
+        .collect::<Result<Vec<_>, RuntimeCommitmentError>>()?;
+    entities.sort_by(|left, right| compare_utf16(&left.0, &right.0));
+
+    let mut preimage =
+        String::from("{\"kind\":\"xln.storage.canonicalRuntimeHash.v1\",\"height\":");
+    preimage.push_str(&height.to_string());
+    preimage.push_str(",\"timestamp\":");
+    preimage.push_str(&timestamp.to_string());
+    preimage.push_str(",\"entities\":[");
+    for (index, (entity_id, entry)) in entities.into_iter().enumerate() {
+        if index > 0 {
+            preimage.push(',');
+        }
+        preimage.push_str("{\"entityId\":");
+        preimage.push_str(&serde_json::to_string(&entity_id)?);
+        preimage.push_str(",\"hash\":");
+        preimage.push_str(&serde_json::to_string(&entry.hash)?);
+        preimage.push_str(",\"cellCount\":");
+        preimage.push_str(&entry.cell_count.to_string());
+        preimage.push('}');
+    }
+    preimage.push(']');
+    if let Some(machine) = runtime_machine {
+        preimage.push_str(",\"runtimeMachine\":");
+        append_canonical_json(&mut preimage, machine, "$.runtimeMachine")?;
+    }
+    preimage.push('}');
+    Ok(hex(&Keccak256::digest(preimage.as_bytes())))
 }
 
 /// Storage hashes include the canonical codec discriminator byte. Consensus
@@ -110,9 +243,10 @@ pub fn compute_storage_post_state_hash(
             CanonicalValue::Array(component_rows),
         ),
         (
-            "runtimeOutputRefs",
-            CanonicalValue::Array(input.runtime_output_refs.iter().map(text).collect()),
+            "runtimeOutputCount",
+            number("runtimeOutputCount", input.runtime_output_count)?,
         ),
+        ("runtimeOutputsDigest", text(&input.runtime_outputs_digest)),
     ]);
     Ok(sha256_hex(&encode_storage_payload(&value)?))
 }
@@ -145,6 +279,60 @@ mod tests {
     }
 
     #[test]
+    fn canonical_runtime_state_hash_matches_typescript() {
+        let runtime_machine: JsonValue = serde_json::from_str(
+            r#"{"a":{"__xlnType":"Map","value":[["a",{"__xlnType":"BigInt","value":"1"}],["b",{"__xlnType":"BigInt","value":"2"}]]},"bytes":{"__xlnType":"TypedArray","kind":"Uint8Array","value":"0001ff"},"nested":{"x":"ok","y":true},"z":3}"#,
+        )
+        .expect("canonical runtime fixture");
+        let entities = vec![
+            CanonicalRuntimeEntityHash {
+                entity_id: "0xBB".into(),
+                hash: repeated("22"),
+                cell_count: 3,
+            },
+            CanonicalRuntimeEntityHash {
+                entity_id: "0xAa".into(),
+                hash: repeated("11"),
+                cell_count: 1,
+            },
+        ];
+        assert_eq!(
+            compute_canonical_runtime_state_hash(
+                55,
+                1_787_579_799_935,
+                &entities,
+                Some(&runtime_machine),
+            )
+            .expect("runtime state hash"),
+            "0x4a2c670c5ffd39fa8dc865ccffee2277d2dffb681f2025e1fec35c2eadfc0ebd",
+        );
+    }
+
+    #[test]
+    fn canonical_runtime_state_hash_matches_javascript_key_and_number_order() {
+        let runtime_machine: JsonValue = serde_json::from_str(
+            r#"{"2":"two","10":"ten","":"bmp","😀":"astral","small":1e-7,"wide":100000000000000000000,"exp":1e+21}"#,
+        )
+        .expect("javascript ordering fixture");
+        assert_eq!(
+            compute_canonical_runtime_state_hash(1, 2, &[], Some(&runtime_machine))
+                .expect("runtime state hash"),
+            "0x432eec0ee1220efa8d301b00c20d4c13f35baf6aef749fb17f4c9642c539d642",
+        );
+    }
+
+    #[test]
+    fn canonical_runtime_state_hash_normalizes_negative_zero_like_json_stringify() {
+        let runtime_machine: JsonValue =
+            serde_json::from_str(r#"{"negzero":-0.0}"#).expect("negative zero fixture");
+        assert_eq!(
+            compute_canonical_runtime_state_hash(1, 2, &[], Some(&runtime_machine))
+                .expect("runtime state hash"),
+            "0x8a3d0ebab608f949e4c607d5635ad06f588984f652e00a3dbdc29735f41a4431",
+        );
+    }
+
+    #[test]
     fn storage_post_state_bytes_match_typescript_msgpackr() {
         let input = RuntimePostStateCommitment {
             height: 55,
@@ -164,16 +352,17 @@ mod tests {
                     value_hash: repeated("44"),
                 },
             ],
-            runtime_output_refs: vec![repeated("55"), repeated("66")],
+            runtime_output_count: 2,
+            runtime_outputs_digest: repeated("55"),
         };
         assert_eq!(
             compute_storage_post_state_hash(&input).expect("post-state hash"),
-            "0x2c3cf33e5a7d98a39272ea8a688404073398764ec188f374505371749662dea5",
+            "0x8ca3f46f31430a9a3483a2a4ec92d42ca943051fbdf69e25a64ebedcb1065273",
         );
     }
 
     #[test]
-    fn h1_frame_55_post_state_hash_matches_recorded_typescript_root() {
+    fn flat_outbox_post_state_bytes_match_typescript() {
         let input = RuntimePostStateCommitment {
             height: 55,
             timestamp: 1_787_579_799_935,
@@ -201,14 +390,13 @@ mod tests {
                         "0x7c79fed396265cc14e27c9475e5e5fc02e2b0733ce8d3d1db34a2af117632e22".into(),
                 },
             ],
-            runtime_output_refs: vec![
+            runtime_output_count: 2,
+            runtime_outputs_digest:
                 "0xde140f60b20b533061956e2c7dec80877d3c9920ca3e9ee6b791712c00be4f13".into(),
-                "0x254f630f6ebc42a33a004c7b1e278f346fcd24accfbb60aaa7b0eb655ef0fc84".into(),
-            ],
         };
         assert_eq!(
             compute_storage_post_state_hash(&input).expect("frame 55 post-state hash"),
-            "0xb7e0d40bef5e2a0d1c608ebd1cc343c48ddad6c879c387132798660d2f36e7f9",
+            "0xabf44991ae6430f31c4fba1cac6a216243120e4cd39b7c37581f2e6b0bb3e55e",
         );
     }
 }

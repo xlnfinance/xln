@@ -14,8 +14,10 @@ import { rememberEngineAccountLeaf } from './leaf-registry';
 import { publishAccountOverlay } from '../../account/state/candidate-overlay';
 import {
   accountInputApplied,
+  accountInputDisputeRequired,
   proposeAccountFrameIdle,
   proposeAccountFrameProposed,
+  rejectAccountPeerInput,
 } from '../../account/consensus/result';
 import type {
   AccountCommittedFrame,
@@ -25,6 +27,7 @@ import type {
   ProposalDroppedTransaction,
 } from '../../account/consensus/types';
 import type { AccountFrame, AccountReplica } from '../../types/account';
+import { isLeftEntity } from '../../account/utils';
 import { safeStringify } from '../../protocol/serialization';
 import {
   materializeRscoreAccountReplica,
@@ -39,7 +42,7 @@ import type { Wave, WaveDisputeDraft, WaveOutput } from '../wave-decode';
 
 /** One applied operation's verdict, as the wave reports it. */
 type CutoverVerdict = Wave['applied'][number]['verdict'];
-import { cutoverAccountEffects } from './effects';
+import { cutoverAccountEffects, type CutoverAccountEffects } from './effects';
 import {
   cutoverAck,
   cutoverAckHashes,
@@ -136,8 +139,10 @@ const verdictOf = (result: CutoverWaveResult, accountId: string, operationIndex:
 
 const committedFrame = (
   evidence: Readonly<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
+  proposerIsLeft: boolean,
 ): AccountCommittedFrame => ({
   frame: evidence.frame,
+  proposerIsLeft,
   committedViaNewFrame: evidence.committedViaNewFrame,
 });
 
@@ -195,118 +200,187 @@ const cutoverAccountInputEvents = (
   return events;
 };
 
+type CutoverOutboundAck = Readonly<{
+  height: number;
+  frameHash: string;
+  dispute: WaveDisputeDraft | null;
+}>;
+
+type CutoverInputAccumulator = {
+  events: string[];
+  effects: {
+    [K in keyof CutoverAccountEffects]: CutoverAccountEffects[K];
+  };
+  committedFrames: AccountCommittedFrame[];
+  outbound: CutoverOutboundAck | null;
+};
+
+const createCutoverInputAccumulator = (): CutoverInputAccumulator => ({
+  events: [],
+  effects: {
+    candidateEffects: [],
+    revealedSecrets: [],
+    timedOutHashlocks: [],
+    swapOffersCreated: [],
+    swapCancelRequests: [],
+    swapOffersCancelled: [],
+  },
+  committedFrames: [],
+  outbound: null,
+});
+
+const standaloneInputResult = (
+  request: CutoverInputRequest,
+  result: CutoverWaveResult,
+  verdict: CutoverVerdict,
+  publishPostState: boolean,
+): HandleAccountInputResult | null => {
+  if (verdict.kind === 'disputeRejected') {
+    return rejectAccountPeerInput('ACCOUNT_PEER_DISPUTE_HANKO_INVALID', verdict.reason, []);
+  }
+  if (verdict.kind === 'boardHankoRefreshRejected') {
+    return rejectAccountPeerInput('ACCOUNT_PEER_BOARD_HANKO_REFRESH_INVALID', verdict.reason, []);
+  }
+  if (verdict.kind !== 'disputeApplied' && verdict.kind !== 'boardHankoRefreshApplied') return null;
+  if (publishPostState) materializeCutoverAccount(request, requireRow(result, request.accountId));
+  return accountInputApplied({
+    events: verdict.kind === 'boardHankoRefreshApplied' ? verdict.events : [],
+    revealedSecrets: [],
+    swapOffersCreated: [],
+    swapCancelRequests: [],
+    swapOffersCancelled: [],
+    timedOutHashlocks: [],
+  });
+};
+
+const collectAckCommit = (
+  request: CutoverInputRequest,
+  verdict: CutoverVerdict,
+  accumulator: CutoverInputAccumulator,
+): void => {
+  const ack = verdict.kind === 'frameAckApplied' ? verdict.ackVerdict : verdict;
+  if (ack.kind === 'ackCommitted') {
+    const effects = appliedFromCommit(
+      request.account,
+      request.binding.sessionOwnerEntityId,
+      request.accountId,
+      ack.outputs,
+    );
+    accumulator.effects.candidateEffects.push(...effects.candidateEffects);
+    accumulator.effects.timedOutHashlocks.push(...effects.timedOutHashlocks);
+    accumulator.committedFrames.push(committedFrame(
+      ack.committedFrame,
+      isLeftEntity(request.binding.sessionOwnerEntityId, request.accountId),
+    ));
+  } else if (ack.kind === 'ackRejected') {
+    fail('ACK_REJECTED', { account: request.accountId, reason: ack.reason });
+  }
+};
+
+const collectFrameCommit = (
+  request: CutoverInputRequest,
+  result: CutoverWaveResult,
+  verdict: CutoverVerdict,
+  publishPostState: boolean,
+  accumulator: CutoverInputAccumulator,
+): HandleAccountInputResult | null => {
+  const frame = verdict.kind === 'frameAckApplied' ? verdict.frameVerdict : verdict;
+  if (frame.kind === 'frameCommitted') {
+    const effects = appliedFromCommit(
+      request.account,
+      request.binding.sessionOwnerEntityId,
+      request.accountId,
+      frame.outputs,
+    );
+    accumulator.effects.candidateEffects.push(...effects.candidateEffects);
+    accumulator.effects.revealedSecrets.push(...effects.revealedSecrets);
+    accumulator.effects.timedOutHashlocks.push(...effects.timedOutHashlocks);
+    accumulator.effects.swapOffersCreated.push(...effects.swapOffersCreated);
+    accumulator.effects.swapCancelRequests.push(...effects.swapCancelRequests);
+    accumulator.effects.swapOffersCancelled.push(...effects.swapOffersCancelled);
+    accumulator.committedFrames.push(committedFrame(
+      frame.committedFrame,
+      isLeftEntity(request.fromEntityId, request.binding.sessionOwnerEntityId),
+    ));
+    accumulator.outbound = {
+      height: frame.height,
+      frameHash: frame.stateHash,
+      dispute: frame.ackDispute,
+    };
+  } else if (frame.kind === 'frameDuplicate') {
+    accumulator.outbound = {
+      height: frame.height,
+      frameHash: frame.stateHash,
+      dispute: frame.ackDispute,
+    };
+  } else if (frame.kind === 'frameStale') {
+    fail('FRAME_STALE', {
+      account: request.accountId,
+      height: frame.height,
+      current: frame.currentHeight,
+    });
+  } else if (frame.kind === 'frameDisputeRequired') {
+    accumulator.events.push(...cutoverAccountInputEvents(verdict, request.fromEntityId));
+    if (publishPostState) materializeCutoverAccount(request, requireRow(result, request.accountId));
+    const { hanko, ...signedFrame } = frame.signedFrame;
+    return accountInputDisputeRequired({
+      reason: frame.reason,
+      evidenceSecrets: frame.evidenceSecrets,
+      signedFrame: { frame: signedFrame, frameHanko: hanko },
+    }, accumulator.events);
+  } else if (frame.kind === 'frameRejected') {
+    fail('FRAME_REJECTED', { account: request.accountId, reason: frame.reason });
+  } else if (frame.kind === 'frameAckRejected') {
+    fail('FRAME_ACK_REJECTED', {
+      account: request.accountId,
+      phase: frame.phase,
+      reason: frame.reason,
+    });
+  } else if (frame.kind === 'failed') {
+    fail('OPERATION_FAILED', { account: request.accountId, message: frame.message });
+  }
+  return null;
+};
+
+const finishAppliedInput = (
+  request: CutoverInputRequest,
+  result: CutoverWaveResult,
+  publishPostState: boolean,
+  accumulator: CutoverInputAccumulator,
+): HandleAccountInputResult => {
+  const { effects, committedFrames, outbound } = accumulator;
+  const { candidateEffects, ...typedEffects } = effects;
+  const hashesToSign = outbound === null
+    ? []
+    : cutoverAckHashes(request.accountId, outbound.height, outbound.frameHash, outbound.dispute);
+  if (publishPostState) materializeCutoverAccount(request, requireRow(result, request.accountId));
+  const response = outbound === null
+    ? undefined
+    : cutoverAck(cutoverEnvelope(request.account), outbound.height, outbound.frameHash, outbound.dispute);
+  return accountInputApplied({
+    events: accumulator.events,
+    ...(response === undefined ? {} : { response }),
+    ...typedEffects,
+    ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
+    ...(committedFrames.length > 0 ? { committedFrames } : {}),
+    ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
+  });
+};
+
 export const cutoverAccountInputResult = (
   request: CutoverInputRequest,
   result: CutoverWaveResult,
   publishPostState = true,
 ): HandleAccountInputResult => {
-  const accountId = request.accountId;
-  const verdict = verdictOf(result, accountId, request.operationIndex);
-  const priorSnapshot = request.account;
-  const events: string[] = [];
-  const committedFrames: AccountCommittedFrame[] = [];
-  const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
-  const timedOutHashlocks: string[] = [];
-  const candidateEffects = [];
-  const swapOffersCreated = [];
-  const swapCancelRequests = [];
-  const swapOffersCancelled = [];
-  const envelope = cutoverEnvelope(request.account);
-  let outbound: Readonly<{
-    height: number;
-    frameHash: string;
-    dispute: WaveDisputeDraft | null;
-  }> | null = null;
-
-  const ackPart = verdict.kind === 'frameAckApplied' ? verdict.ackVerdict : verdict;
-  const framePart = verdict.kind === 'frameAckApplied' ? verdict.frameVerdict : verdict;
-
-  if (ackPart.kind === 'ackCommitted') {
-    // Our own frame came back acknowledged. TypeScript releases the frame's
-    // candidate effects here, having already published its typed outcomes
-    // when it proposed.
-    const effects = appliedFromCommit(
-      priorSnapshot,
-      request.binding.sessionOwnerEntityId,
-      accountId,
-      ackPart.outputs,
-    );
-    candidateEffects.push(...effects.candidateEffects);
-    timedOutHashlocks.push(...effects.timedOutHashlocks);
-    committedFrames.push(committedFrame(ackPart.committedFrame));
-  } else if (ackPart.kind === 'ackStale') {
-    // Nothing to publish: the peer acknowledged a height we already passed.
-  } else if (ackPart.kind === 'ackRejected') {
-    return fail('ACK_REJECTED', { account: accountId, reason: ackPart.reason });
-  }
-
-  if (framePart.kind === 'frameCommitted') {
-    const effects = appliedFromCommit(
-      priorSnapshot,
-      request.binding.sessionOwnerEntityId,
-      accountId,
-      framePart.outputs,
-    );
-    candidateEffects.push(...effects.candidateEffects);
-    revealedSecrets.push(...effects.revealedSecrets);
-    timedOutHashlocks.push(...effects.timedOutHashlocks);
-    swapOffersCreated.push(...effects.swapOffersCreated);
-    swapCancelRequests.push(...effects.swapCancelRequests);
-    swapOffersCancelled.push(...effects.swapOffersCancelled);
-    committedFrames.push(committedFrame(framePart.committedFrame));
-    outbound = {
-      height: framePart.height,
-      frameHash: framePart.stateHash,
-      dispute: framePart.ackDispute,
-    };
-  } else if (framePart.kind === 'frameDuplicate') {
-    outbound = {
-      height: framePart.height,
-      frameHash: framePart.stateHash,
-      dispute: framePart.ackDispute,
-    };
-  } else if (framePart.kind === 'frameCollisionIgnored') {
-    // Nothing was committed; the event list still records the decision.
-  } else if (framePart.kind === 'frameStale') {
-    return fail('FRAME_STALE', {
-      account: accountId,
-      height: framePart.height,
-      current: framePart.currentHeight,
-    });
-  } else if (framePart.kind === 'frameRejected') {
-    return fail('FRAME_REJECTED', { account: accountId, reason: framePart.reason });
-  } else if (framePart.kind === 'frameAckRejected') {
-    return fail('FRAME_ACK_REJECTED', {
-      account: accountId,
-      phase: framePart.phase,
-      reason: framePart.reason,
-    });
-  } else if (framePart.kind === 'failed') {
-    return fail('OPERATION_FAILED', { account: accountId, message: framePart.message });
-  }
-
-  events.push(...cutoverAccountInputEvents(verdict, request.fromEntityId));
-  const hashesToSign = outbound === null
-    ? []
-    : cutoverAckHashes(accountId, outbound.height, outbound.frameHash, outbound.dispute);
-  if (publishPostState) {
-    materializeCutoverAccount(request, requireRow(result, accountId));
-  }
-  const response = outbound === null
-    ? undefined
-    : cutoverAck(envelope, outbound.height, outbound.frameHash, outbound.dispute);
-  return accountInputApplied({
-    events,
-    ...(response === undefined ? {} : { response }),
-    revealedSecrets,
-    swapOffersCreated,
-    swapCancelRequests,
-    swapOffersCancelled,
-    timedOutHashlocks,
-    ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
-    ...(committedFrames.length > 0 ? { committedFrames } : {}),
-    ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
-  });
+  const verdict = verdictOf(result, request.accountId, request.operationIndex);
+  const standalone = standaloneInputResult(request, result, verdict, publishPostState);
+  if (standalone !== null) return standalone;
+  const accumulator = createCutoverInputAccumulator();
+  collectAckCommit(request, verdict, accumulator);
+  const terminal = collectFrameCommit(request, result, verdict, publishPostState, accumulator);
+  if (terminal !== null) return terminal;
+  accumulator.events.push(...cutoverAccountInputEvents(verdict, request.fromEntityId));
+  return finishAppliedInput(request, result, publishPostState, accumulator);
 };
 
 export const cutoverAccountProposalResult = (

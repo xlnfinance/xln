@@ -1,4 +1,11 @@
-import type { AccountDisputeHanko, AccountFrame, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type {
+  AccountDisputeHanko,
+  AccountFrame,
+  AccountFrameAck,
+  AccountPeerInput,
+  AccountReplica,
+} from '../../../types/account';
+import type { HankoString } from '../../../types/hanko';
 import { createStructuredLogger, shortId } from '../../../support/logger';
 import {
   copyAccountDisputeConfig,
@@ -11,8 +18,9 @@ import {
   accountInputReferenceHeight,
 } from '../flush';
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
-import type { AccountConsensusHashToSign, HandleAccountInputResult } from '../types';
-import { accountInputApplied, accountInputValidationRejected } from '../result';
+import type { HandleAccountInputResult } from '../types';
+import { accountInputApplied } from '../result';
+import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 
 const replayLog = createStructuredLogger('account.replay');
 
@@ -109,37 +117,78 @@ export const classifyAccountInputReplay = (
   };
 };
 
-const sameAccountStateHash = (left: string | undefined, right: string | undefined): boolean =>
+const sameAccountFrameHash = (left: string | undefined, right: string | undefined): boolean =>
   typeof left === 'string'
   && typeof right === 'string'
   && left.toLowerCase() === right.toLowerCase();
 
-const duplicateAckHashesToSign = (
-  input: AccountPeerInput,
-  receivedFrame: AccountFrame,
-  response: AccountPeerInput,
-): AccountConsensusHashToSign[] | undefined => {
-  if (accountInputAck(response)?.frameHanko) return undefined;
-  return [{
-    hash: receivedFrame.stateHash,
-    type: 'accountFrame',
-    context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}`,
-  }];
-};
-
 const applyDuplicateAck = (
-  input: AccountPeerInput,
-  receivedFrame: AccountFrame,
   response: AccountPeerInput,
   events: string[],
-): HandleAccountInputResult => {
-  const hashesToSign = duplicateAckHashesToSign(input, receivedFrame, response);
-  return accountInputApplied({
-    response: structuredClone(response),
-    events,
-    ...(hashesToSign ? { hashesToSign } : {}),
-  });
+): HandleAccountInputResult => accountInputApplied({
+  response: structuredClone(response),
+  events,
+});
+
+const requireVerifiedDuplicateAckHanko = async (
+  account: AccountReplica,
+  ack: AccountFrameAck,
+  frameHash: string,
+  receivedHeight: number,
+  securityContext: AccountInputSecurityContext,
+  source: 'CACHED' | 'CURRENT_FRAME',
+): Promise<HankoString> => {
+  if (!sameAccountFrameHash(ack.frameHash, frameHash)) {
+    throw new Error(
+      `DUPLICATE_ACK_${source}_FRAME_HASH_MISMATCH:`
+      + `height=${receivedHeight}:cached=${String(ack.frameHash)}:current=${frameHash}`,
+    );
+  }
+  const hanko = ack.frameHanko;
+  if (!hanko) {
+    throw new Error(`DUPLICATE_ACK_${source}_HANKO_MISSING:height=${receivedHeight}`);
+  }
+  const ownEntityId = account.proofHeader.fromEntity;
+  if (!ownEntityId) {
+    throw new Error(`DUPLICATE_ACK_LOCAL_ENTITY_MISSING:height=${receivedHeight}`);
+  }
+  // Both sources are persisted evidence for an already-committed frame. They
+  // may legitimately have been signed by the immediately previous board when
+  // the original ACK crossed a board rotation. The verifier still binds the
+  // bytes to this exact frame hash and enforces the exclusive grace deadline;
+  // this mode is never used for a fresh proposal.
+  const verified = await securityContext.verifyHanko(
+    hanko,
+    frameHash,
+    ownEntityId,
+    { allowPreviousBoard: true },
+  );
+  if (
+    !verified.valid
+    || verified.entityId?.toLowerCase() !== ownEntityId.toLowerCase()
+  ) {
+    throw new Error(`DUPLICATE_ACK_${source}_HANKO_INVALID:height=${receivedHeight}`);
+  }
+  return hanko;
 };
+
+const requireCurrentFrameHanko = async (
+  account: AccountReplica,
+  frameHash: string,
+  receivedHeight: number,
+  securityContext: AccountInputSecurityContext,
+): Promise<HankoString> => requireVerifiedDuplicateAckHanko(
+  account,
+  {
+    height: receivedHeight,
+    frameHash,
+    ...(account.currentFrameHanko ? { frameHanko: account.currentFrameHanko } : {}),
+  },
+  frameHash,
+  receivedHeight,
+  securityContext,
+  'CURRENT_FRAME',
+);
 
 const cacheAckOnlyResponse = (
   account: AccountReplica,
@@ -180,13 +229,20 @@ const reusableCertifiedAckHanko = (account: AccountReplica): AccountDisputeHanko
   };
 };
 
-const rebuildDuplicateCommittedFrameAck = (
+const rebuildDuplicateCommittedFrameAck = async (
   account: AccountReplica,
   input: AccountPeerInput,
-  receivedFrame: AccountFrame,
+  frameHash: string,
   receivedHeight: number,
   events: string[],
-): HandleAccountInputResult => {
+  securityContext: AccountInputSecurityContext,
+): Promise<HandleAccountInputResult> => {
+  const frameHanko = await requireCurrentFrameHanko(
+    account,
+    frameHash,
+    receivedHeight,
+    securityContext,
+  );
   const disputeHanko = reusableCertifiedAckHanko(account);
   const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
     kind: 'ack',
@@ -197,7 +253,8 @@ const rebuildDuplicateCommittedFrameAck = (
     ...(account.state.watchSeed !== undefined ? { watchSeed: account.state.watchSeed } : {}),
     ack: {
       height: receivedHeight,
-      frameHash: account.currentFrame.stateHash,
+      frameHash,
+      frameHanko,
       ...(disputeHanko ? { disputeHanko } : {}),
     },
   };
@@ -212,22 +269,66 @@ const rebuildDuplicateCommittedFrameAck = (
     from: shortId(input.fromEntityId),
     currentHeight: account.currentHeight,
   });
-  return applyDuplicateAck(input, receivedFrame, response, events);
+  return applyDuplicateAck(response, events);
 };
 
-export const buildDuplicateCommittedFrameAck = (
+const isDuplicateAckTarget = (
+  candidateHeight: number,
+  candidateEntityId: string,
+  receivedHeight: number,
+  fromEntityId: string,
+): boolean => Number(candidateHeight) === receivedHeight
+  && candidateEntityId.toLowerCase() === fromEntityId.toLowerCase();
+
+const reuseLastOutboundDuplicateAck = async (
+  account: AccountReplica,
+  input: AccountPeerInput,
+  receivedHeight: number,
+  events: string[],
+  securityContext: AccountInputSecurityContext,
+): Promise<HandleAccountInputResult | null> => {
+  const cached = account.lastOutboundFrameAck;
+  if (!cached || !isDuplicateAckTarget(
+    cached.height,
+    cached.counterpartyEntityId,
+    receivedHeight,
+    input.fromEntityId,
+  )) return null;
+  const ack = accountInputAck(cached.response);
+  if (!ack) throw new Error(`DUPLICATE_ACK_CACHED_RESPONSE_MISSING_ACK:${receivedHeight}`);
+  await requireVerifiedDuplicateAckHanko(
+    account,
+    ack,
+    account.currentFrame.stateHash,
+    receivedHeight,
+    securityContext,
+    'CACHED',
+  );
+  events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
+  replayLog.debug('input.duplicate_ack_cached', {
+    height: receivedHeight,
+    from: shortId(input.fromEntityId),
+    currentHeight: account.currentHeight,
+    hasHanko: Boolean(ack.frameHanko),
+  });
+  return applyDuplicateAck(cached.response, events);
+};
+
+export const buildDuplicateCommittedFrameAck = async (
   account: AccountReplica,
   input: AccountPeerInput,
   events: string[],
   replayCurrentHeight: number,
   receivedFrame: AccountFrame,
-): HandleAccountInputResult | null => {
+  securityContext: AccountInputSecurityContext,
+): Promise<HandleAccountInputResult | null> => {
   const receivedHeight = Number(receivedFrame.height ?? 0);
   if (receivedHeight !== replayCurrentHeight) return null;
-  if (!sameAccountStateHash(receivedFrame.stateHash, account.currentFrame?.stateHash)) {
+  const receivedFrameHash = receivedFrame.stateHash;
+  if (!sameAccountFrameHash(receivedFrameHash, account.currentFrame?.stateHash)) {
     replayLog.warn('input.duplicate_height_hash_mismatch', {
       height: receivedHeight,
-      receivedHash: receivedFrame.stateHash ?? null,
+      receivedHash: receivedFrameHash ?? null,
       currentHash: account.currentFrame?.stateHash ?? null,
       from: shortId(input.fromEntityId),
     });
@@ -240,9 +341,32 @@ export const buildDuplicateCommittedFrameAck = (
   if (
     pendingResponse
     && pendingAck
-    && Number(pendingAck.height) === receivedHeight
-    && pendingResponse.toEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
+    && isDuplicateAckTarget(pendingAck.height, pendingResponse.toEntityId, receivedHeight, input.fromEntityId)
   ) {
+    await requireVerifiedDuplicateAckHanko(
+      account,
+      pendingAck,
+      account.currentFrame.stateHash,
+      receivedHeight,
+      securityContext,
+      'CACHED',
+    );
+    const retainedAck = account.lastOutboundFrameAck
+      && Number(account.lastOutboundFrameAck.height) === receivedHeight
+      && account.lastOutboundFrameAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
+      ? accountInputAck(account.lastOutboundFrameAck.response)
+      : undefined;
+    if (retainedAck) {
+      if (!retainedAck.frameHanko) {
+        throw new Error(`DUPLICATE_ACK_CACHED_HANKO_MISSING:height=${receivedHeight}`);
+      }
+      if (
+        !sameAccountFrameHash(retainedAck.frameHash, pendingAck.frameHash)
+        || retainedAck.frameHanko.toLowerCase() !== pendingAck.frameHanko?.toLowerCase()
+      ) {
+        throw new Error(`DUPLICATE_ACK_CACHED_HANKO_CONFLICT:height=${receivedHeight}`);
+      }
+    }
     const response = cacheAckOnlyResponse(
       account,
       pendingResponse,
@@ -255,48 +379,47 @@ export const buildDuplicateCommittedFrameAck = (
       from: shortId(input.fromEntityId),
       currentHeight: account.currentHeight,
     });
-    return applyDuplicateAck(input, receivedFrame, response, events);
+    return applyDuplicateAck(response, events);
   }
-  const cachedAck = account.lastOutboundFrameAck;
-  if (
-    cachedAck
-    && Number(cachedAck.height) === receivedHeight
-    && cachedAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
-  ) {
-    events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
-    replayLog.debug('input.duplicate_ack_cached', {
-      height: receivedHeight,
-      from: shortId(input.fromEntityId),
-      currentHeight: account.currentHeight,
-      hasHanko: Boolean(accountInputAck(cachedAck.response)?.frameHanko),
-    });
-    return applyDuplicateAck(input, receivedFrame, cachedAck.response, events);
-  }
+  const cachedAck = await reuseLastOutboundDuplicateAck(
+    account,
+    input,
+    receivedHeight,
+    events,
+    securityContext,
+  );
+  if (cachedAck) return cachedAck;
   if (!account.currentFrame?.stateHash || !account.proofHeader.fromEntity) {
-    return accountInputValidationRejected(
-      `DUPLICATE_ACK_CACHE_MISSING: height=${receivedHeight}`,
-      events,
-    );
+    throw new Error(`DUPLICATE_ACK_CURRENT_FRAME_BINDING_MISSING:height=${receivedHeight}`);
   }
-  return rebuildDuplicateCommittedFrameAck(account, input, receivedFrame, receivedHeight, events);
+  return rebuildDuplicateCommittedFrameAck(
+    account,
+    input,
+    account.currentFrame.stateHash,
+    receivedHeight,
+    events,
+    securityContext,
+  );
 };
 
-export const handleReplayOrObsoleteAccountInput = (
+export const handleReplayOrObsoleteAccountInput = async (
   account: AccountReplica,
   input: AccountPeerInput,
   replay: AccountInputReplayClassification,
   events: string[],
-): HandleAccountInputResult | undefined => {
+  securityContext: AccountInputSecurityContext,
+): Promise<HandleAccountInputResult | undefined> => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
   if (proposal) {
     // At-least-once delivery may retry an exact committed frame after ACK loss.
-    const duplicateAck = buildDuplicateCommittedFrameAck(
+    const duplicateAck = await buildDuplicateCommittedFrameAck(
       account,
       input,
       events,
       replay.currentHeight,
       proposal.frame,
+      securityContext,
     );
     if (duplicateAck) return duplicateAck;
   }

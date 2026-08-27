@@ -3,7 +3,6 @@ import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../support/perfo
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../support/performance/runtime-flags';
 import { createStructuredLogger } from '../../support/logger';
 import type { EntityInput } from '../../entity/types';
-import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica } from '../types';
 import { getPerfMs } from '../../support/time';
 import { nodeProcess } from '../../support/process/runtime-process';
@@ -31,7 +30,7 @@ type RuntimeProcessProfileMetrics = {
   runtimeTxs: number;
   entityInputs: number;
   entityTxs: number;
-  /** Top-level EntityTx kinds in this Runtime frame (accountInput:ack, consensusOutput:…). */
+  /** Top-level EntityTx kinds in this Runtime frame (for example accountInput:ack). */
   txKinds?: Record<string, number>;
   /** Distinct `from` Runtime ids on the EntityInputs applied this frame. */
   senders?: number;
@@ -92,13 +91,7 @@ const bumpKind = (counts: Record<string, number>, key: string): void => {
   counts[key] = (counts[key] ?? 0) + 1;
 };
 
-const nestedConsensusOutputKind = (tx: Extract<EntityTx, { type: 'consensusOutput' }>): string => {
-  const inner = tx.data.entityTxs[0];
-  if (!inner) return 'consensusOutput:empty';
-  return `consensusOutput:${inner.type}`;
-};
-
-/** Cheap ingress histogram. Counts top-level EntityTxs only; nested certified payloads stay in the key. */
+/** Cheap ingress histogram. Counts top-level EntityTxs only. */
 export const countEntityInputTxKinds = (
   entityInputs: readonly EntityInput[],
 ): { txKinds: Record<string, number>; senders: number } => {
@@ -110,10 +103,6 @@ export const countEntityInputTxKinds = (
     for (const tx of input.entityTxs ?? []) {
       if (tx.type === 'accountInput') {
         bumpKind(txKinds, `accountInput:${tx.data.kind}`);
-        continue;
-      }
-      if (tx.type === 'consensusOutput') {
-        bumpKind(txKinds, nestedConsensusOutputKind(tx));
         continue;
       }
       bumpKind(txKinds, tx.type);

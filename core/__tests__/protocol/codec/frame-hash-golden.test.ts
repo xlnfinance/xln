@@ -12,9 +12,9 @@ import { makeAccount } from '../../helpers/cross-j';
 
 // Intentional testnet reset: Account frame/state integrity commitments use the
 // native-SHA integrity helper; Ethereum-facing proof hashes remain Keccak.
-const ACCOUNT_FRAME_GOLDEN_HASH = '0xdadd355aca7a74a990d3f4a8a3cd1653b3050e6cc012a6939c598a30f5473a35';
-// Independently calculated with a standalone tagged-tuple reference encoder.
-// Keep these literal so changing the production codec cannot bless itself.
+const ACCOUNT_FRAME_GOLDEN_HASH = '0x48209002630a2dae349c0ec270c3668afd11e7bad2970121e24d7af157fdc75b';
+// Protocol-34 reset after removing duplicate AccountFrame financial/role fields.
+// Keep these literal so later codec changes remain explicit protocol changes.
 // Intentional testnet reset: Entity Accounts are committed through the
 // persistent radix-Merkle section. Every projected AccountReplica leaf remains
 // bound, while unchanged accounts no longer require O(total accounts) hashing.
@@ -22,7 +22,7 @@ const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x9b55ab751f698879e3215f49008d58305333e69
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
 // Intentional testnet reset: the canonical Entity frame commits the exact infra context,
 // while Entity state commits its shared encryption public key.
-const ENTITY_FRAME_GOLDEN_HASH = '0xe9d6a480053defcdfaa9c330991ddd521de99f11db1ea599f3b7694fc3413e5d';
+const ENTITY_FRAME_GOLDEN_HASH = '0x6c145c7ba53b115383a46279c19d65feb067497bde1ccc7c4d131090ee942cbe';
 
 const makeEntityContextFixture = (): EntityInfraContext => ({
   version: 1,
@@ -40,25 +40,12 @@ const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,
   timestamp: 1_700_000_000_123,
   jHeight: 42,
-  byLeft: true,
   prevFrameHash: `0x${'11'.repeat(32)}`,
   accountStateRoot: `0x${'33'.repeat(32)}`,
   accountTxs: [
     { type: 'set_credit_limit', data: { tokenId: 1, amount: 1234n } } as any,
     { type: 'direct_payment', data: { tokenId: 1, amount: 55n, nonce: 'payment-1' } } as any,
   ],
-  deltas: [{
-    tokenId: 1,
-    collateral: 1000n,
-    ondelta: 10n,
-    offdelta: -55n,
-    leftCreditLimit: 5000n,
-    rightCreditLimit: 3000n,
-    leftAllowance: 100n,
-    rightAllowance: 200n,
-    leftHold: 7n,
-    rightHold: 9n,
-  }],
   stateHash: '',
 });
 

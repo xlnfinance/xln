@@ -1,9 +1,11 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountIdentity, AccountOutput, AccountReplica,
-    AccountSettledEvent, AccountState, AccountTx, DepositoryAddress, EntityId, JEventClaimTx,
-    JEventMetadata, JurisdictionEvent, SequentialAccountEngine, Side, TokenId, WatchSeed,
-    canonical_events_hash, canonical_tx_digest, prepare_claim_tx,
+    AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountOutput,
+    AccountRejection, AccountReplica, AccountSettledEvent, AccountState, AccountTx, AccountVerdict,
+    BoardDelays, DepositoryAddress, Disposition, EntityId, JEventClaimTx, JEventMetadata,
+    JurisdictionEvent, ProposalOutcome, SequentialAccountEngine, Side, SigningIdentity, TokenId,
+    ValidationRejection, WatchSeed, canonical_events_hash, canonical_tx_digest, prepare_claim_tx,
+    propose_account_frame,
 };
 
 const EMPTY_PROOF_DIGEST: &str = "d877be0b440ed7bfda96495cefa57ed81331c1ac03b19b09eb27c4083cf01512";
@@ -172,15 +174,63 @@ fn exact_retry_is_idempotent_and_conflict_is_atomic() {
     let JurisdictionEvent::AccountSettled(value) = &mut changed;
     value.collateral = 126.into();
     let conflict = raw_claim(7, changed);
-    let error = SequentialAccountEngine::apply(
+    let rejected = SequentialAccountEngine::apply(
         &pending,
         Side::Left,
         &AccountTx::JEventClaim(prepare(&pending, &conflict)),
     )
-    .err()
-    .expect("same key with another event body must fail");
-    assert!(error.to_string().contains("ACCOUNT_J_CLAIM_LEFT_CONFLICT"));
+    .expect("same key with another event body is a typed rejection");
+    assert_eq!(
+        rejected.verdict(),
+        &AccountVerdict::Rejected(AccountRejection::Validation(
+            ValidationRejection::JEventClaimConflict {
+                side: Side::Left,
+                j_height: 7,
+            },
+        ))
+    );
+    assert!(rejected.committed().is_none());
     assert_eq!(pending.state().carried().left_pending_j_claims.root, root);
+    assert!(
+        SequentialAccountEngine::apply(
+            &pending,
+            Side::Left,
+            &AccountTx::AddDelta {
+                token_id: TokenId::new(1).expect("token"),
+            },
+        )
+        .expect("the Account remains usable after rejecting only the conflict")
+        .committed()
+        .is_some()
+    );
+
+    let mut account = AccountConsensus::new(pending);
+    account
+        .admit_txs(vec![AccountTx::JEventClaim(conflict)], "jClaimConflict")
+        .expect("admit conflicting observation");
+    let signer = SigningIdentity::lazy_from_seed(
+        &format!("0x{}", "77".repeat(32)),
+        "1",
+        1,
+        1,
+        BoardDelays::default(),
+    )
+    .expect("signer");
+    let outcome = propose_account_frame(&mut account, &signer, 100, 7, &std::sync::Arc::default())
+        .expect("conflict does not abort proposal processing");
+    let ProposalOutcome::Idle { dropped } = outcome else {
+        panic!("only conflicting work should leave the proposal idle")
+    };
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].disposition, Disposition::Removed);
+    assert!(matches!(
+        dropped[0].rejection,
+        AccountRejection::Validation(ValidationRejection::JEventClaimConflict {
+            side: Side::Left,
+            j_height: 7,
+        })
+    ));
+    assert!(account.mempool().is_empty());
 }
 
 #[test]

@@ -78,8 +78,8 @@ export const appendCrossJurisdictionTargetProgressAfterAdmission = (
   outputs.push(buildCrossJurisdictionTargetFillNoticeOutput(currentEntityState, tx));
 };
 
-/** Generic certified E→E output. Cross-j sibling code must never call this. */
-export const buildCertifiedEntityOutput = (
+/** Generic E→E output. Publication rejects this unsupported production path loudly. */
+export const buildGenericEntityOutput = (
   entityId: string,
   signerId: string,
   entityTxs: EntityTx[],

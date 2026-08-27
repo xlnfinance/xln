@@ -10,7 +10,6 @@ import {
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
 } from '../input/types';
-import { buildCertifiedEntityOutputHashes } from '../output/certification';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
@@ -170,7 +169,6 @@ const replayCommitFrame = async (
     events,
     storageChanges,
     proposableAccounts,
-    consumptionNodeChanges,
     accountJClaimNodeChanges,
   } = applied;
   if (!entityFrameEventsEqual(events, frame.events)) {
@@ -191,18 +189,11 @@ const replayCommitFrame = async (
   const commitments = validateReplayedCommitments(context, frame, state);
   if (commitments.kind === 'result') return commitments;
   const { replayedHash } = commitments;
-  const outputHashes = buildCertifiedEntityOutputHashes(
-    state,
-    env,
-    frame.height,
-    replayedHash,
-    outputs,
-  );
   const hashesToSign = buildEntityHashesToSign(
     workingReplica.state.entityId,
     frame.height,
     replayedHash,
-    [...collectedHashes, ...outputHashes],
+    collectedHashes,
   );
   entityLog.warn('commit.catch_up_state_replayed', {
     height: frame.height,
@@ -220,7 +211,6 @@ const replayCommitFrame = async (
       candidateEffects,
       storageChanges,
       proposableAccounts: copyProposableAccounts(proposableAccounts),
-      ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
     },
   };

@@ -145,7 +145,7 @@ export const loadPersistedRuntime = async (
     if (!source) return null;
     if (source.payloads.runtimeMachine) {
       // Install the durable Runtime-machine envelope once, before rebuilding
-      // the Entity graph that references its content-addressed witness stores.
+      // the Entity graph that references its path-keyed witness stores.
       // Reapplying it afterward is redundant and risks erasing state produced
       // by graph restoration if the two phases ever gain overlapping fields.
       restoreDurableRuntimeSnapshot(env, source.payloads.runtimeMachine);

@@ -1,13 +1,13 @@
 import { ethers } from 'ethers';
 
 import type { AccountFrame, AccountTx } from '../../../types/account';
-import { assertAccountFrameDeltaIntegrity } from '../../state/frame';
 import { computeCanonicalMerkleRoot } from '../../commitment/state-root';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
 import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machine/events/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 import { LIMITS } from '../../../config/constants';
 import { accountTxWithoutPostCommitHankos } from '../../settlement/witness-projection';
+import { policyVersionOutOfRangeError } from '../../tx/admission-policy';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could
@@ -91,6 +91,14 @@ const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknow
 };
 
 export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, unknown> => {
+  // FX-1 tripwire: an out-of-range policyVersion here means admission let a
+  // value through that TypeScript would hash distorted (silent 2^53 rounding)
+  // while Rust refuses it as an unsafe integer. Hashing it anyway would sign a
+  // frame the other engine can never reproduce, so this is an admission bug:
+  // throw, never hash. Scoped to policyVersion only — out-of-profile kinds
+  // stay hashable here so committed historical frames remain verifiable.
+  const rangeError = policyVersionOutOfRangeError(tx);
+  if (rangeError) throw rangeError;
   if (tx.type === 'j_event_claim') {
     return { type: tx.type, data: canonicalJEventClaimForFrameHash(tx.data) };
   }
@@ -102,17 +110,14 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
 };
 
 const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
-  assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   return computeCanonicalMerkleRoot('account.frame', [
     ['transition', {
       height: frame.height,
       timestamp: frame.timestamp,
       jHeight: frame.jHeight,
       prevFrameHash: frame.prevFrameHash,
-      byLeft: frame.byLeft,
     }],
     ['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],
-    ['deltas', frame.deltas],
     ['accountStateRoot', frame.accountStateRoot],
   ], 'integrity');
 };

@@ -1,4 +1,4 @@
-import { FailureDispositionError, haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 /**
  * Entity consensus: validator replicas agree on entity frames, then route
@@ -14,7 +14,7 @@ import {
   hasPendingSettlementTransition,
 } from '../../../account/tx/handlers/settlement/transition';
 import { markCrossJurisdictionBookAdmissionResolving } from '../../../extensions/cross-j/orderbook';
-import { logError, shortHash, shortId, shortOrder } from '../../../support/logger';
+import { shortHash, shortId, shortOrder } from '../../../support/logger';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
 import { assertEntityFrameJRangeBudget } from '../../../jurisdiction/machine/range-budget';
@@ -57,11 +57,6 @@ import {
   normalizeEntityCommandNonceBoard,
 } from '../../command';
 import { isEntityCommandForbiddenTx } from '../../command/command-codec';
-import {
-  applyConsumptionOutput,
-  createEmptyConsumptionAccumulator,
-} from '../../consumption/consumption-accumulator';
-import { type ConsumptionNodeChanges } from '../../consumption/consumption-store';
 import {
   entityTxContainsAccountTransition,
   entityTxContainsCrossJSetup,
@@ -106,7 +101,6 @@ import {
 } from '../../../rscore/authority-wave';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { assertEntityFrameTxByteBudget } from '../frame';
-import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from '../output/certification';
 import { invalidateEntityAccountCommitment } from '../state-root';
 import type { ApplyEntityTxsInOrderContext } from './application-types';
 import { validateEntityInfraContext } from './infra-context-validation';
@@ -123,7 +117,6 @@ import {
   entityFrameSlowMs,
 } from './profile';
 import { entityLog } from '../entity-log';
-import { buildConsumptionOutputIdentity } from '../output/consumption';
 import { admitOrderbookOfferForMatching } from '../account/orderbook-admission';
 import {
   buildCrossJurisdictionFillNoticeOutput,
@@ -184,69 +177,6 @@ const applyRuntimeOutput = async (
   });
 };
 
-const applyCertifiedConsensusOutput = async (
-  context: ApplyEntityTxsInOrderContext,
-  currentEntityState: EntityState,
-  tx: Extract<EntityTx, { type: 'consensusOutput' }>,
-): Promise<EntityState> => {
-  const verified = context.verifiedCertifiedOutputs.get(tx) ??
-    await verifyCertifiedEntityOutput(context.env, currentEntityState, tx);
-  const { origin, targetEntityId, entityTxs, outputHash } = verified;
-
-  const identity = buildConsumptionOutputIdentity(origin, targetEntityId, outputHash, tx.data.outputHanko);
-  const consumption = applyConsumptionOutput(
-    currentEntityState.consumptionAccumulator ?? createEmptyConsumptionAccumulator(),
-    identity,
-    tx.data.consumptionProof,
-  );
-  if (consumption.status === 'idempotent') {
-    return currentEntityState;
-  }
-  if (consumption.status === 'stale') {
-    return currentEntityState;
-  }
-  if (consumption.status === 'gap') {
-    throw new Error(
-      `CONSENSUS_OUTPUT_SEQUENCE_GAP:source=${origin.sourceEntityId}:lane=${origin.lane}:` +
-        `received=${origin.sequence}`,
-    );
-  }
-  for (const { hash, node } of consumption.newNodes) {
-    context.consumptionNewNodes.set(hash, node);
-    context.consumptionReplacedNodeHashes.delete(hash);
-  }
-  for (const hash of consumption.replacedNodeHashes) {
-    if (!context.consumptionNewNodes.delete(hash)) {
-      context.consumptionReplacedNodeHashes.add(hash);
-    }
-  }
-  if (consumption.status === 'quarantined') {
-    if (consumption.newNodes.length > 0) {
-      logError('FRAME_CONSENSUS', 'Certified output relationship quarantined after current-sequence equivocation', {
-        sourceEntityId: origin.sourceEntityId,
-        targetEntityId,
-        lane: origin.lane,
-        sequence: origin.sequence.toString(),
-        acceptedRoot: currentEntityState.consumptionAccumulator?.root ?? 'empty',
-        quarantineRoot: consumption.state.root,
-      });
-      return { ...currentEntityState, consumptionAccumulator: consumption.state };
-    }
-    throw new Error(
-      `CONSENSUS_OUTPUT_RELATIONSHIP_QUARANTINED:${origin.sourceEntityId}:${targetEntityId}:${origin.lane}`,
-    );
-  }
-
-  const applied = await applyEntityTxsInOrder({
-    ...context,
-    entityTxs,
-    currentEntityState,
-    // The outer source certificate authorizes generic cross-Entity effects.
-    authorizedCertifiedOutput: true,
-  });
-  return { ...applied, consumptionAccumulator: consumption.state };
-};
-
 const applyNestedEntityTx = async (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
@@ -254,9 +184,6 @@ const applyNestedEntityTx = async (
 ): Promise<{ handled: boolean; state: EntityState }> => {
   if (tx.type === 'runtimeOutput') {
     return { handled: true, state: await applyRuntimeOutput(context, state, tx) };
-  }
-  if (tx.type === 'consensusOutput') {
-    return { handled: true, state: await applyCertifiedConsensusOutput(context, state, tx) };
   }
   if (tx.type !== 'entityCommand') return { handled: false, state };
 
@@ -300,7 +227,6 @@ const assertEntityTxAuthorization = (
   if (
     !context.authorizedCommand &&
     !context.authorizedCollective &&
-    !context.authorizedCertifiedOutput &&
     !context.authorizedRuntimeOutput
   ) {
     throw new Error(`ENTITY_COMMAND_REQUIRED:${tx.type}`);
@@ -416,7 +342,6 @@ const applyRegularEntityTx = async (
       currentEntityState: nextState,
       authorizedCommand: undefined,
       authorizedCollective: true,
-      authorizedCertifiedOutput: undefined,
       authorizedRuntimeOutput: undefined,
     });
   }
@@ -495,7 +420,6 @@ const materializeSettlementContinuation = async (
     currentEntityState: state,
     authorizedCommand: undefined,
     authorizedCollective: true,
-    authorizedCertifiedOutput: undefined,
     authorizedRuntimeOutput: undefined,
   });
   // Delete only after every derived transaction succeeded. Multi-signer
@@ -1245,7 +1169,6 @@ type EntityFrameResult = {
   accountsToProposeFramesCount: number;
   events: EntityFrameEvent[];
   collectedHashes?: Array<{ hash: string; type: HashType; context: string }>;
-  consumptionNodeChanges?: ConsumptionNodeChanges;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
 };
 
@@ -1257,26 +1180,6 @@ type EntityFrameWorkingSet = {
   frameProfileStartMs: number;
   frameProfileMarks: Record<string, number>;
   markFrameProfile: (label: string) => void;
-};
-
-const verifyCertifiedFrameInputs = async (
-  env: EntityRuntimeContext,
-  state: EntityState,
-  txs: readonly EntityTx[],
-): Promise<ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs']> => {
-  const verified: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'] =
-    new Map();
-  for (const tx of txs) {
-    if (tx.type !== 'consensusOutput') continue;
-    try {
-      verified.set(tx, await verifyCertifiedEntityOutput(env, state, tx));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!(error instanceof FailureDispositionError) || error.disposition !== 'reject') throw error;
-      throw new MalformedEntityFrameInputError(tx.type, message);
-    }
-  }
-  return verified;
 };
 
 const initializeEntityFrameState = (
@@ -1309,7 +1212,6 @@ const createEntityFrameApplyContext = (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   currentEntityState: EntityState,
-  verifiedCertifiedOutputs: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'],
   authorizedBoardHandoverConfig: EntityState['config'] | undefined,
 ): ApplyEntityTxsInOrderContext => {
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
@@ -1340,14 +1242,11 @@ const createEntityFrameApplyContext = (
     allSwapCancelRequests: [],
     allSwapOffersCancelled: [],
     frameProfileTxTotals: new Map(),
-    consumptionNewNodes: new Map(),
-    consumptionReplacedNodeHashes: new Set(),
     accountJClaimNewNodes,
     accountJClaimReplacedNodeHashes: new Set(),
     accountJClaimNodeStore,
     candidateEffects: [],
     storageChanges: [],
-    verifiedCertifiedOutputs,
     ...(authorizedBoardHandoverConfig ? { authorizedBoardHandoverConfig } : {}),
   };
 };
@@ -1428,15 +1327,6 @@ const prepareEntityFrameWorkingSet = async (
     env,
     normalizeEntityCommandNonceBoard(env, entityState),
   );
-  // Certified output bytes are adversarial transport input. Verify them before
-  // touching the Runtime-owned single-signer State, then reuse the proof during
-  // execution. Invalid Hanko therefore drops only this input in production;
-  // reducer/storage faults still halt and reload durable WAL truth.
-  const verifiedCertifiedOutputs = await verifyCertifiedFrameInputs(
-    env,
-    normalized,
-    entityTxs,
-  );
   const authorizedBoardHandoverConfig = getBoardHandoverFrameConfig(
     env,
     normalized,
@@ -1462,7 +1352,6 @@ const prepareEntityFrameWorkingSet = async (
     entityContext,
     entityTxs,
     currentEntityState,
-    verifiedCertifiedOutputs,
     authorizedBoardHandoverConfig ?? undefined,
   );
   await env.accountAuthorityEntityStage?.beginEntityAccountFrame({
@@ -1522,15 +1411,6 @@ const buildEntityFrameResult = (
   accountsToProposeFramesCount,
   events: readEntityFrameEvents(currentEntityState),
   collectedHashes: context.collectedHashes,
-  ...(context.consumptionNewNodes.size > 0 ||
-  context.consumptionReplacedNodeHashes.size > 0
-    ? {
-        consumptionNodeChanges: {
-          newNodes: Array.from(context.consumptionNewNodes, ([hash, node]) => ({ hash, node })),
-          replacedNodeHashes: Array.from(context.consumptionReplacedNodeHashes).sort(),
-        },
-      }
-    : {}),
   ...(context.accountJClaimNewNodes.size > 0 ||
   context.accountJClaimReplacedNodeHashes.size > 0
     ? {
@@ -1679,10 +1559,6 @@ const applyPostEntityTxPhases = async (
     currentEntityState,
     context,
   );
-  currentEntityState = assignCertifiedOutputIdentities(
-    currentEntityState,
-    context.allOutputs,
-  );
   assertOriginatedHtlcRoutesHaveLiveLocks(currentEntityState);
   return {
     currentEntityState,
@@ -1796,10 +1672,6 @@ const applyEntityFrameWithIsolation = async (
         jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
       });
     working.context.env.accountAuthorityEntityStage?.finishEntityAccountFrame();
-    working.currentEntityState = assignCertifiedOutputIdentities(
-      working.currentEntityState,
-      working.context.allOutputs,
-    );
     entityLog.info('frame.board_authority_transition_only', {
       entity: shortId(working.currentEntityState.entityId),
       txs: entityTxs.length,

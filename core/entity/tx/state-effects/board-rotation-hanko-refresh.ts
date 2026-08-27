@@ -4,7 +4,7 @@ import type { CertifiedBoardNodeStore } from '../../../types/entity-board-regist
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/account-counterparty-route';
 import { HankoValidationError } from '../../../hanko/codec';
-import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
+import { buildGenericEntityOutput } from '../j-events-htlc/cross-j-outputs';
 import { createStructuredLogger } from '../../../support/logger';
 import { EntityAccountCandidateMap, getEntityAccountForWrite } from '../../state/persistent-account-map';
 import {
@@ -274,7 +274,7 @@ const buildHankoRefreshOutput = (
       });
       return undefined;
     }
-    return buildCertifiedEntityOutput(counterpartyId, signerId, input);
+    return buildGenericEntityOutput(counterpartyId, signerId, input);
   } catch (error) {
     // An absent/non-authoritative bilateral witness is retryable. Corrupt
     // Account identity, frame hashes, or certified Patricia nodes remain loud.

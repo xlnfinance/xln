@@ -369,10 +369,8 @@ impl BookPricePageTree {
     ) -> Result<Option<(u16, BookPricePage)>, EntityKernelError> {
         let prefix = price_prefix(price_ticks)?;
         self.map
-            .iter()
-            .filter(|(key, _)| key.starts_with(&prefix))
+            .last_with_prefix(&prefix)
             .map(|(key, page)| Ok((page_sequence(key)?, page.clone())))
-            .last()
             .transpose()
     }
 

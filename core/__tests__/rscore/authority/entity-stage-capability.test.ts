@@ -368,6 +368,15 @@ describe('pre-TypeScript Account authority capability', () => {
 
     expect(stage.hasPreparedAccountProposal?.(PEER)).toBe(true);
     expect(stage.hasPreparedAccountProposal?.(UPSTREAM)).toBe(true);
+    await expect(stage.executeAccountProposal({
+      collectorFrameId: OWNER,
+      account: downstream,
+      timestamp: 100,
+      jHeight: 7,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+      selectionIsWholeMempool: false,
+    })).rejects.toThrow('ACCOUNT_AUTHORITY_PROPOSAL_SUBSET_UNSUPPORTED');
     expect((await stage.executeAccountProposal({
       collectorFrameId: OWNER,
       account: downstream,

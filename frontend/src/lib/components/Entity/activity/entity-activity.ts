@@ -328,6 +328,8 @@ export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions)
       };
 
       if (account.pendingFrame) {
+        const pendingProposerIsLeft = account.proofHeader.fromEntity.toLowerCase()
+          === account.state.leftEntity.toLowerCase();
         pushFrameRow(
           'pending',
           'Pending frame',
@@ -335,7 +337,7 @@ export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions)
           Number(account.pendingFrame.height || 0),
           Number(account.pendingFrame.timestamp || 0),
           Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
-          account.pendingFrame.byLeft,
+          pendingProposerIsLeft,
         );
       }
 
@@ -361,7 +363,7 @@ export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions)
           Number(frame.height || 0),
           Number(frame.timestamp || 0),
           Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
-          frame.byLeft,
+          undefined,
         );
       }
     }

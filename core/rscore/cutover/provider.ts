@@ -33,6 +33,7 @@ import {
   runAuthorityCutoverOutboundBatch,
 } from '../authority-driver';
 import type { RscoreAccountMaterializerBinding } from '../checkpoint/account-materializer';
+import type { AuthorityCertifiedBoard } from '../authority-wave';
 import { authorityCutoverEnabled } from './enabled';
 import {
   cutoverAccountInputResult,
@@ -43,6 +44,10 @@ import {
 import { inboundSlice, indexInboundWave } from '../round/inbound';
 import { entityOwnedSectionDigests } from '../entity/snapshot-wire';
 import type { Wave } from '../wave-decode';
+import {
+  getCertifiedBoardNodeStore,
+  resolveObserverCertifiedBoardRecord,
+} from '../../jurisdiction/machine/board-registry';
 
 const halt = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
   throw new Error(`RSCORE_CUTOVER_${code}:${safeStringify(detail)}`);
@@ -65,6 +70,16 @@ const peerOf = (input: AccountInput, accountId: string): string =>
   input.kind === 'enqueue' || input.kind === 'external_finality'
     ? accountId
     : String(input.fromEntityId ?? accountId).trim().toLowerCase();
+
+const certifiedBoardAuthorityFor = (
+  env: RuntimeReplica,
+  state: AccountAuthorityEntityBatchInbound['entityState'],
+  entityId: string,
+): AuthorityCertifiedBoard | undefined => resolveObserverCertifiedBoardRecord(
+    state,
+    getCertifiedBoardNodeStore(env),
+    entityId,
+  ) ?? undefined;
 
 const requireResult = (
   value: CutoverWaveResult | null,
@@ -97,13 +112,23 @@ const executeInboundBatch = async (
     entityTimestamp: env.state.timestamp,
     finalizedJHeight: 0,
   };
-  const inputs = requests.map(({ request, accountId, input }) => ({
-    accountId,
-    input,
-    ...(request.genesisPolicy === undefined
-      ? {}
-      : { genesisPolicy: request.genesisPolicy }),
-  }));
+  const localBoardAuthority = certifiedBoardAuthorityFor(
+    env,
+    batch.entityState,
+    batch.ownerEntityId,
+  );
+  const inputs = requests.map(({ request, accountId, input }) => {
+    const peerBoardAuthority = certifiedBoardAuthorityFor(env, batch.entityState, input.fromEntityId);
+    return {
+      accountId,
+      input,
+      ...(peerBoardAuthority === undefined ? {} : { peerBoardAuthority }),
+      ...(localBoardAuthority === undefined ? {} : { localBoardAuthority }),
+      ...(request.genesisPolicy === undefined
+        ? {}
+        : { genesisPolicy: request.genesisPolicy }),
+    };
+  });
   const fused = entityAuthorityDriverEnabled(env);
   if (fused) {
     const unsupported = [...new Set((batch.canonicalEntityInput.entityTxs ?? [])

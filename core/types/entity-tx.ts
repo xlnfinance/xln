@@ -4,8 +4,6 @@ import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './
 import type { LendingTermId } from './finance/lending';
 import type { ProposalAction } from '../entity/types';
 import type { PaymentDeliveryMode } from './finance/payment';
-import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
-import type { ConsumptionProof } from '../entity/consumption/consumption-accumulator-types';
 import type { ProfileEntityKind, ProfileEntitySector } from '../entity/profile';
 
 type ProfileUpdateTx = {
@@ -85,37 +83,11 @@ export type PendingSettlementContinuation = SettlementContinuationPlan & {
   workspaceHash: string;
 };
 
-export type ConsensusOutputOrigin = {
-  sourceEntityId: string;
-  lane: 'generic';
-  /** Lifetime-monotonic for this exact source→target relationship. */
-  sequence: bigint;
-  /** Stable payload commitment preserved across a current-board reissue. */
-  semanticHash: string;
-  height: number;
-  frameHash: string;
-  outputIndex: number;
-  /** Required for a source whose id is certified in a jurisdiction registry. */
-  boardAuthority?: CertifiedBoardAuthorityBinding;
-};
-
 type EntityTxPayload =
   | {
       /** Independently authored board-member command; validators replay and verify it. */
       type: 'entityCommand';
       data: SignedEntityCommandV1;
-    }
-  | {
-      /** Quorum-certified source-frame output, deduplicated in target consensus state. */
-      type: 'consensusOutput';
-      data: {
-        origin: ConsensusOutputOrigin;
-        outputHanko: string;
-        targetEntityId: string;
-        entityTxs: EntityTx[];
-        /** Target-proposer witness against the target's pre-frame accumulator root. */
-        consumptionProof?: ConsumptionProof;
-      };
     }
   | {
       /**
@@ -128,18 +100,6 @@ type EntityTxPayload =
         protocol: 'cross-j';
         sourceEntityId: string;
         targetEntityId: string;
-        entityTxs: EntityTx[];
-      };
-    }
-  | {
-      /** Collective reissue of the exact bounded last generic source output. */
-      type: 'reissueCertifiedOutput';
-      data: {
-        targetEntityId: string;
-        /** Committed recipient lane; transport must never derive it from local topology during replay. */
-        targetSignerId: string;
-        sequence: bigint;
-        semanticHash: string;
         entityTxs: EntityTx[];
       };
     }

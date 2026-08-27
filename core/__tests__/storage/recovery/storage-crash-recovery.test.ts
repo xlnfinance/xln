@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-  recoverStorageDbFromHistory,
-  hydrateConsumptionRootNodesFromStorage,
-} from '../../../storage';
+import { recoverStorageDbFromHistory } from '../../../storage';
 import {
   buildHistoryViewPuts,
   prepareHistoryViewCommit,
@@ -16,9 +13,9 @@ import { liveKeyForDoc } from '../../../storage/schema/doc-refs';
 import {
   KEY_HEAD,
   STORAGE_SCHEMA_VERSION,
-  keyCertifiedBoardNode,
-  keyConsumptionNode,
 } from '../../../storage/keys';
+import { preparePathKeyedAuxiliaryRows } from '../../../storage/schema/nodes/path-keyed-auxiliary-nodes';
+import { validatePersistedCertifiedBoardPathNode } from '../../../storage/schema/authoritative-schema';
 import type {
   RuntimeDbLike,
   StorageHead,
@@ -29,15 +26,6 @@ import {
   getCertifiedBoardStackKey,
   putCertifiedBoardRecord,
 } from '../../../jurisdiction/machine/board-registry';
-import {
-  applyConsumptionOutput,
-  createConsumptionProof,
-  createEmptyConsumptionAccumulator,
-  getConsumptionKey,
-  verifyConsumptionProof,
-} from '../../../entity/consumption/consumption-accumulator';
-import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
-import { createEmptyEnv } from '../../../runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;
 
@@ -103,7 +91,7 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
 });
 
 describe('storage crash recovery', () => {
-  test('copies immutable certified-board nodes before publishing recovered current head', async () => {
+  test('copies path-keyed certified-board nodes before publishing recovered current head', async () => {
     const stackKey = getCertifiedBoardStackKey({
       chainId: 31_337,
       depositoryAddress: `0x${'11'.repeat(20)}`,
@@ -122,68 +110,23 @@ describe('storage crash recovery', () => {
       transactionHash: `0x${'55'.repeat(32)}`,
       source: 'EntityRegistered',
     });
-    const [nodeHash, node] = [...update.newNodes][0]!;
+    const boardStore = new Map(update.newNodes);
+    const [row] = preparePathKeyedAuxiliaryRows({
+      owners: [{ entityId, certifiedBoardRoot: update.root, accounts: [] }],
+      certifiedBoardStore: boardStore,
+      accountJClaimStore: new Map(),
+    }).certifiedBoardNodes;
+    if (!row) throw new Error('expected board path row');
     const currentDb = makeMemoryDb();
     const historyDb = makeMemoryDb([
       [KEY_HEAD, encodeBuffer(head(1, 0))],
-      [keyCertifiedBoardNode(nodeHash), encodeBuffer(node)],
+      [row.key, row.value],
     ]);
     await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
-    expect(decodeBuffer(await currentDb.get(keyCertifiedBoardNode(nodeHash)))).toEqual(node);
+    expect(validatePersistedCertifiedBoardPathNode(
+      decodeBuffer(await currentDb.get(row.key)),
+    ).node).toEqual([...boardStore.values()][0]);
     expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
-  });
-
-  test('hydrates the complete reachable consumption DAG and rejects an incomplete restore', async () => {
-    const firstIdentity = {
-      targetEntityId: entityId,
-      sourceEntityId: `0x${'22'.repeat(32)}`,
-      lane: 'generic' as const,
-      sequence: 1,
-      semanticHash: `0x${'33'.repeat(32)}`,
-      outputHash: `0x${'44'.repeat(32)}`,
-      outputHanko: '0x01',
-    };
-    const first = applyConsumptionOutput(
-      createEmptyConsumptionAccumulator(),
-      firstIdentity,
-      { version: 1, nodes: [] },
-    );
-    const firstStore = new Map(first.newNodes.map(({ hash, node }) => [hash, node]));
-    const secondIdentity = {
-      ...firstIdentity,
-      sourceEntityId: `0x${'55'.repeat(32)}`,
-      semanticHash: `0x${'66'.repeat(32)}`,
-      outputHash: `0x${'77'.repeat(32)}`,
-      outputHanko: '0x02',
-    };
-    const second = applyConsumptionOutput(
-      first.state,
-      secondIdentity,
-      createConsumptionProof(firstStore, first.state.root, getConsumptionKey(secondIdentity)),
-    );
-    const nodes = [...first.newNodes, ...second.newNodes];
-    const db = makeMemoryDb(nodes.map(({ hash, node }) => [keyConsumptionNode(hash), encodeBuffer(node)]));
-    const env = createEmptyEnv('consumption storage hydrate');
-
-    await hydrateConsumptionRootNodesFromStorage(env, db, second.state);
-    expect(getConsumptionNodeStore(env).size).toBe(3);
-    const membership = createConsumptionProof(
-      getConsumptionNodeStore(env),
-      second.state.root,
-      getConsumptionKey(firstIdentity),
-    );
-    expect(verifyConsumptionProof(second.state.root, getConsumptionKey(firstIdentity), membership).status)
-      .toBe('member');
-
-    const incompleteDb = makeMemoryDb(nodes.slice(1).map(({ hash, node }) => [
-      keyConsumptionNode(hash),
-      encodeBuffer(node),
-    ]));
-    await expect(hydrateConsumptionRootNodesFromStorage(
-      createEmptyEnv('consumption storage missing'),
-      incompleteDb,
-      second.state,
-    )).rejects.toThrow('CONSUMPTION_NODE_MISSING');
   });
 
   test('rejects current DB state that is ahead of authoritative history DB', async () => {

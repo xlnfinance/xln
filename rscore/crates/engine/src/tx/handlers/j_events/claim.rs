@@ -1,6 +1,9 @@
-use crate::j_claims::JClaimStatus;
+use crate::j_claims::{
+    AccountJEventClaimAdmissionResult, JClaimStatus, apply_admitted_claim_transition,
+    validate_j_event_claim_admission,
+};
 use crate::tx::apply_types::MutationDecision;
-use crate::{AccountReplica, JEventClaimTx, Side, TransitionError};
+use crate::{AccountRejection, AccountReplica, JEventClaimTx, Side, TransitionError};
 
 use super::finality::apply_finalized_events;
 
@@ -13,14 +16,22 @@ pub(crate) fn apply_j_event_claim(
     let left = replica.state().carried().left_pending_j_claims.clone();
     let right = replica.state().carried().right_pending_j_claims.clone();
     let finalized_height = replica.state().last_finalized_j_height();
-    let transition = crate::apply_claim_transition(
-        &identity,
+    let admission = match validate_j_event_claim_admission(&identity, &left, &right, tx)? {
+        AccountJEventClaimAdmissionResult::Accepted(admission) => admission,
+        AccountJEventClaimAdmissionResult::Rejected(rejection) => {
+            return Ok(MutationDecision::rejected(AccountRejection::Validation(
+                rejection,
+            )));
+        }
+    };
+    let transition = apply_admitted_claim_transition(
         &left,
         &right,
         finalized_height,
         tx,
         proposer == Side::Left,
         replica.state_mut().j_claim_store_mut(),
+        *admission,
     )?;
     replica
         .state_mut()

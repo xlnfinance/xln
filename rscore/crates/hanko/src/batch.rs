@@ -24,8 +24,24 @@ pub fn build_single_signer_hanko(
     delays: BoardDelays,
 ) -> HankoResult<Vec<u8>> {
     let signed = sign_digest(private_key, digest).ok_or(HankoError::SigningFailed)?;
-    let mut signature = signed;
-    signature[64] = 27 + signed[64];
+    encode_single_signer_hanko_from_signature(entity_id, signed, weight, threshold, delays)
+}
+
+/// Wrap an already-produced raw ECDSA signature as the same single-signer
+/// Hanko. Entity consensus retains the raw 0/1-recovery signature in
+/// `collectedSigs` and the ABI Hanko needs 27/28; signing the digest again is
+/// both waste and an avoidable second crypto path.
+pub fn encode_single_signer_hanko_from_signature(
+    entity_id: &Word,
+    mut signature: [u8; 65],
+    weight: u128,
+    threshold: u128,
+    delays: BoardDelays,
+) -> HankoResult<Vec<u8>> {
+    if signature[64] > 1 {
+        return Err(HankoError::Invalid("HANKO_RAW_SIGNATURE_RECOVERY_INVALID"));
+    }
+    signature[64] += 27;
     let packed = pack_hanko_signatures(&[signature])?;
     encode_hanko_envelope(&HankoEnvelope {
         placeholders: Vec::new(),
@@ -79,10 +95,37 @@ mod tests {
         .expect("hanko");
         assert_eq!(hex::encode(&hanko), TYPESCRIPT_HANKO);
 
+        let signed = sign_digest(&private_key, &digest).expect("raw signature");
+        let reused = encode_single_signer_hanko_from_signature(
+            &entity_id,
+            signed,
+            1,
+            1,
+            BoardDelays::default(),
+        )
+        .expect("reused signature hanko");
+        assert_eq!(reused, hanko);
+
         let verified =
             verify_canonical_hanko(&hanko, &digest, Some(&entity_id), None).expect("verified");
         assert_eq!(verified.target_entity_id, entity_id);
         assert_eq!(verified.claims[0].board_hash, entity_id);
+    }
+
+    #[test]
+    fn rejects_a_non_raw_recovery_byte() {
+        let mut signature = [1_u8; 65];
+        signature[64] = 27;
+        assert!(matches!(
+            encode_single_signer_hanko_from_signature(
+                &[2_u8; 32],
+                signature,
+                1,
+                1,
+                BoardDelays::default(),
+            ),
+            Err(HankoError::Invalid("HANKO_RAW_SIGNATURE_RECOVERY_INVALID"))
+        ));
     }
 
     /// The same bytes verified against the wrong digest must fail, and so must

@@ -61,11 +61,9 @@ import {
 
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildCertifiedEntityLineagePlan,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
-  refreshRuntimeCheckpointLineageForEntity,
-} from '../../../storage/replica/entity-lineage';
+  applyCertifiedEntityHeadPlan,
+  buildCertifiedEntityHeadPlan,
+} from '../../../storage/replica/entity-head';
 import { resolveEntityProposerId } from '../../../runtime/delivery/entity-output-signer';
 import { forkEntityReplicaForInput } from '../../../entity/replica/replica-clone';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
@@ -153,7 +151,6 @@ import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../..
 
 import { signEntityHashes } from '../../../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../../../entity/consensus/output/certification';
 
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../../../entity/tx/j-events-htlc';
 
@@ -209,7 +206,6 @@ import { LIMITS } from '../../../config/constants';
 import { getEffectiveEntityInputTxs } from '../../../entity/consensus/output/envelope';
 
 import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authorization';
-import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import { getAccountJClaimNodeStore } from '../../../entity/account/account-j-claim-node-store';
 
 import { cloneIsolatedEntityInput } from '../../../entity/state/input-clone';
@@ -241,11 +237,11 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
 });
 
 const publishTestRuntimeCheckpoint = (env: RuntimeReplica): void => {
-  applyCertifiedEntityLineagePlan(env, rebaseCertifiedEntityLineageAtRuntimeCheckpoint(env));
+  applyCertifiedEntityHeadPlan(env, buildCertifiedEntityHeadPlan(env));
 };
 
 const installTestGenesisLineage = (env: RuntimeReplica): void => {
-  applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
+  applyCertifiedEntityHeadPlan(env, buildCertifiedEntityHeadPlan(env));
 };
 
 const registerVerifiedOwnerRoute = (
@@ -492,7 +488,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       {
         isReplay: false,
         routingDeps: makeLocalCrossJRoutingDeps(),
-        beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
       },
     );
     const hubWakePass = hubProposalPass;
@@ -566,7 +561,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       {
         isReplay: false,
         routingDeps: makeLocalCrossJRoutingDeps(),
-        beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
       },
     );
     const proposalsB = hubWakePassB.entityOutbox.map(output => ({
@@ -758,7 +752,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         isReplay: false,
         routingDeps: makeLocalCrossJRoutingDeps(),
         beforeEntityApply: entityId => {
-          refreshRuntimeCheckpointLineageForEntity(concurrentUserEnv, entityId);
           concurrentApplyCounts.set(entityId, (concurrentApplyCounts.get(entityId) ?? 0) + 1);
         },
       });
@@ -914,9 +907,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     ];
     const snapshotRuntimeCas = () => ({
-      consumption: [...getConsumptionNodeStore(userEnv).keys()].sort(),
-      pendingConsumption: [...(userEnv.infrastructure?.pendingConsumptionNodes?.keys() ?? [])].sort(),
-      pendingConsumptionDeletes: [...(userEnv.infrastructure?.pendingConsumptionNodeDeletes ?? [])].sort(),
       claims: [...getAccountJClaimNodeStore(userEnv).keys()].sort(),
       pendingClaims: [...(userEnv.infrastructure?.pendingAccountJClaimNodes?.keys() ?? [])].sort(),
       pendingClaimDeletes: [...(userEnv.infrastructure?.pendingAccountJClaimNodeDeletes ?? [])].sort(),
@@ -1026,7 +1016,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
       beforeEntityApply: entityId => {
-        refreshRuntimeCheckpointLineageForEntity(userEnv, entityId);
         proposalApplyCounts.set(entityId, (proposalApplyCounts.get(entityId) ?? 0) + 1);
       },
     });
@@ -1068,7 +1057,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const exactRetryPass = await applyMergedEntityInputs(userEnv, exactRetry.inputs, [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(userEnv, entityId),
     });
     expect(exactRetryPass.rejectedAtomicPairs).toEqual([]);
     expect([...userEnv.state.eReplicas.entries()].map(
@@ -1255,7 +1243,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const hubAckPass = await applyMergedEntityInputs(hubEnv, mergeEntityInputs(preparedHubInputs.inputs), [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
     });
     expect(hubAckPass.rejectedAtomicPairs).toEqual([]);
     expect(
@@ -1315,7 +1302,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       {
         isReplay: false,
         routingDeps: makeLocalCrossJRoutingDeps(),
-        beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
       },
     );
     expect(fillPass.entityOutbox.map(output => output.entityId).sort())
@@ -1355,7 +1341,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const userFillPass = await applyMergedEntityInputs(userEnv, admittedFill.inputs, [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(userEnv, entityId),
     });
     expect(userFillPass.entityOutbox.map(output => output.entityId).sort())
       .toEqual([sourceHub, targetHub].sort());
@@ -1376,7 +1361,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     await applyMergedEntityInputs(hubEnv, admittedFillAcks.inputs, [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
     });
     expect(hubEnv.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)
       ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('partially_filled');
@@ -1399,7 +1383,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       {
         isReplay: false,
         routingDeps: makeLocalCrossJRoutingDeps(),
-        beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
       },
     );
     const cancelFrame = { height: 46, timestamp: hubEnv.state.timestamp };
@@ -1438,7 +1421,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const userCancelPass = await applyMergedEntityInputs(userEnv, admittedCancel.inputs, [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(userEnv, entityId),
     });
     expect(userEnv.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)
       ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
@@ -1457,7 +1439,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const hubCancelAckPass = await applyMergedEntityInputs(hubEnv, admittedCancelAcks.inputs, [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(hubEnv, entityId),
     });
     expect(hubCancelAckPass.localCrossJurisdictionEventTrace.filter(input =>
       getEffectiveEntityInputTxs(input).some(tx => tx.type === 'crossJurisdictionFillNotice'))).toEqual([]);

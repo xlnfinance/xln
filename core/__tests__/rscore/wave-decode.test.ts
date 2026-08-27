@@ -152,8 +152,6 @@ const committedFrameEvidence = (
   [],
   'genesis',
   bytes(32, 0x33),
-  true,
-  [],
   stateHash,
 ], committedViaNewFrame];
 
@@ -372,7 +370,7 @@ describe('rscore staged wave decoder', () => {
     expect(() => decodeWave(signed)).toThrow('wave.parityDigest');
   });
 
-  test('decodes one atomic frame-ACK result with ordered outputs and both committed frames', () => {
+  test('decodes one ACK-first frame-ACK result with ordered outputs and both committed frames', () => {
     const raw = rawWave();
     const ackStateHash = bytes(32, 0x66);
     const frameStateHash = bytes(32, 0x77);
@@ -459,7 +457,7 @@ describe('rscore staged wave decoder', () => {
     expect(waveParityDigest(wave)).toBe(wave.parityDigest);
   });
 
-  test('decodes atomic frame-ACK rejection phases by name', () => {
+  test('decodes frame-ACK rejection phases by name', () => {
     for (const [phaseTag, phase] of [[0, 'ack'], [1, 'frame']] as const) {
       const raw = rawWave();
       requiredAt(raw[2] as RscoreWireValue[][], 0, `FRAME_ACK_REJECTED_${phase}`)[2] = [
@@ -473,6 +471,66 @@ describe('rscore staged wave decoder', () => {
         reason: `${phase} rejected`,
       });
     }
+  });
+
+  test('decodes standalone dispute and board-Hanko-refresh verdicts exactly', () => {
+    const cases: ReadonlyArray<Readonly<{
+      wire: RscoreWireValue[];
+      verdict: Readonly<Record<string, unknown>>;
+    }>> = [
+      { wire: [12], verdict: { kind: 'disputeApplied' } },
+      { wire: [13, 'bad dispute'], verdict: { kind: 'disputeRejected', reason: 'bad dispute' } },
+      {
+        wire: [14, ['refreshed']],
+        verdict: { kind: 'boardHankoRefreshApplied', events: ['refreshed'] },
+      },
+      {
+        wire: [15, 'bad refresh'],
+        verdict: { kind: 'boardHankoRefreshRejected', reason: 'bad refresh' },
+      },
+    ];
+    for (const row of cases) {
+      const raw = rawWave();
+      requiredAt(raw[2] as RscoreWireValue[][], 0, 'STANDALONE_VERDICT')[2] = row.wire;
+      const wave = decodeWave(withParityDigest(raw));
+      expect(wave.applied[0]?.verdict).toEqual(row.verdict);
+      expect(waveParityDigest(wave)).toBe(wave.parityDigest);
+    }
+  });
+
+  test('decodes dispute-required evidence and the exact signed frame', () => {
+    const raw = rawWave();
+    const stateHash = bytes(32, 0x77);
+    requiredAt(raw[2] as RscoreWireValue[][], 0, 'DISPUTE_REQUIRED')[2] = [
+      11,
+      'HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT',
+      [[hex(32, 0x22), hex(32, 0x33)]],
+      [
+        2,
+        1_700_000_000_000,
+        100,
+        [],
+        hex(32, 0x44),
+        bytes(32, 0x55),
+        stateHash,
+        bytes(65, 0x66),
+      ],
+    ];
+    expect(decodeWave(withParityDigest(raw)).applied[0]?.verdict).toEqual({
+      kind: 'frameDisputeRequired',
+      reason: 'HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT',
+      evidenceSecrets: [{ hashlock: hex(32, 0x22), secret: hex(32, 0x33) }],
+      signedFrame: {
+        height: 2,
+        timestamp: 1_700_000_000_000,
+        jHeight: 100,
+        accountTxs: [],
+        prevFrameHash: hex(32, 0x44),
+        accountStateRoot: hex(32, 0x55),
+        stateHash: hex(32, 0x77),
+        hanko: hex(65, 0x66),
+      },
+    });
   });
 
   test('rejects malformed or out-of-domain frame-ACK child verdicts', () => {

@@ -6,6 +6,7 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../../../protocol/htlc/events';
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { applyCommittedAccountFrameFollowups } from '../../../entity/tx/handlers/account/index';
 import { applyHtlcSecretFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { handleResolveHtlcLockEntityTx } from '../../../entity/tx/handlers/htlc/direct';
@@ -20,10 +21,14 @@ import type { EntityCandidateEffect, EntityReplica } from '../../../entity/types
 import {
   getEntityAccountForWrite,
   PersistentEntityAccountMap,
- EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
+  EntityAccountCandidateMap,
+} from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
-import { PersistentAccountStateMap , requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import {
+  PersistentAccountStateMap,
+  requirePersistentAccountStateMap,
+} from '../../../account/state/persistent-state-map';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
   const account: AccountReplica = {
@@ -119,7 +124,7 @@ describe('htlc event contract and dispute tail', () => {
     const counterpartyId = `0x${'11'.repeat(32)}`;
     const lockId = `0x${'33'.repeat(32)}`;
     const secret = `0x${'44'.repeat(32)}`;
-    const hashlock = `0x4033fb2e6fa5cf816f87a9a40e8ce681fb6d8aa53c5302e72b80f654141a0e65`;
+    const hashlock = hashHtlcSecret(secret);
     const replica = makeReplica(entityId, counterpartyId);
     const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
     account.state.leftEntity = counterpartyId;
@@ -242,8 +247,8 @@ describe('htlc event contract and dispute tail', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const counterpartyId = `0x${'22'.repeat(32)}`;
     const lockId = 'received-lock';
-    const hashlock = `0x${'33'.repeat(32)}`;
     const secret = `0x${'44'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
     const env = createEmptyEnv('htlc-received-description-seed');
     env.quietRuntimeLogs = true;
     const replica = makeReplica(entityId, counterpartyId);
@@ -273,10 +278,9 @@ describe('htlc event contract and dispute tail', () => {
         },
       }],
       prevFrameHash: '',
-      deltas: [],
+      accountStateRoot: '',
       stateHash: `0x${'66'.repeat(32)}`,
-      byLeft: true,
-    }, [], env, candidateEffects);
+    }, true, [], env, candidateEffects);
 
   expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(0);
     publishEntityCandidateEffects(env, replica, candidateEffects);
@@ -384,7 +388,8 @@ describe('htlc event contract and dispute tail', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const counterpartyId = `0x${'22'.repeat(32)}`;
     const inboundLockId = 'lock-inbound';
-    const hashlock = `0x${'66'.repeat(32)}`;
+    const secret = `0x${'55'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
     const replica = makeReplica(entityId, counterpartyId);
     const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
     account.state.locks = requirePersistentAccountStateMap(account.state.locks, 'locks').updated(inboundLockId, {
@@ -402,7 +407,7 @@ describe('htlc event contract and dispute tail', () => {
       inboundEntity: counterpartyId,
       inboundLockId,
       createdTimestamp: replica.state.timestamp - 1000,
-      secret: `0x${'55'.repeat(32)}`,
+      secret,
       secretAckPending: true,
       secretAckStartedAt: replica.state.timestamp - 500,
       secretAckDeadlineAt: replica.state.timestamp + 30_000,
@@ -427,14 +432,13 @@ describe('htlc event contract and dispute tail', () => {
         data: {
           lockId: inboundLockId,
           outcome: 'secret',
-          secret: `0x${'55'.repeat(32)}`,
+          secret,
         },
       }],
       prevFrameHash: '',
-      deltas: [],
+      accountStateRoot: '',
       stateHash: '',
-      byLeft: true,
-    }, [], undefined, []);
+    }, true, [], undefined, []);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(false);
@@ -446,8 +450,8 @@ describe('htlc event contract and dispute tail', () => {
     const outboundEntityId = `0x${'33'.repeat(32)}`;
     const inboundLockId = 'lock-inbound-forwarded';
     const outboundLockId = 'lock-outbound-forwarded';
-    const hashlock = `0x${'68'.repeat(32)}`;
     const secret = `0x${'55'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
     const replica = makeReplica(entityId, outboundEntityId);
     replica.state.htlcRoutes.set(hashlock, {
       hashlock,
@@ -469,10 +473,9 @@ describe('htlc event contract and dispute tail', () => {
         data: { lockId: outboundLockId, outcome: 'secret', secret },
       }],
       prevFrameHash: '',
-      deltas: [],
+      accountStateRoot: '',
       stateHash: '',
-      byLeft: true,
-    }, [], undefined, []);
+    }, true, [], undefined, []);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
 
@@ -507,8 +510,8 @@ describe('htlc event contract and dispute tail', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const inboundEntityId = `0x${'22'.repeat(32)}`;
     const outboundEntityId = `0x${'33'.repeat(32)}`;
-    const hashlock = `0x${'69'.repeat(32)}`;
     const secret = `0x${'55'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
     const replica = makeReplica(entityId, outboundEntityId);
     replica.state.htlcRoutes.set(hashlock, {
       hashlock,
@@ -542,14 +545,14 @@ describe('htlc event contract and dispute tail', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const counterpartyId = `0x${'22'.repeat(32)}`;
     const outboundLockId = 'lock-outbound';
-    const hashlock = `0x${'77'.repeat(32)}`;
     const secret = `0x${'55'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
     const env = createEmptyEnv('htlc-finalized-commit-seed');
     env.quietRuntimeLogs = true;
     env.activeJurisdiction = 'Testnet';
     const replica = makeReplica(entityId, counterpartyId);
     env.state.eReplicas.set(`${entityId}:${replica.signerId}`, replica);
-    const account = replica.state.accounts.get(counterpartyId)!;
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
     account.mempool.push({
       type: 'htlc_lock',
       data: {
@@ -586,10 +589,9 @@ describe('htlc event contract and dispute tail', () => {
         },
       }],
       prevFrameHash: '',
-      deltas: [],
+      accountStateRoot: '',
       stateHash: '',
-      byLeft: true,
-    }, [], env, candidateEffects);
+    }, true, [], env, candidateEffects);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(account.mempool).toEqual([]);
@@ -618,8 +620,8 @@ describe('htlc event contract and dispute tail', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const outboundEntity = `0x${'22'.repeat(32)}`;
     const inboundEntity = `0x${'33'.repeat(32)}`;
-    const hashlock = `0x${'77'.repeat(32)}`;
     const secret = `0x${'55'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
     const outboundLockId = 'self-outbound';
     const inboundLockId = 'self-inbound';
 
@@ -656,10 +658,9 @@ describe('htlc event contract and dispute tail', () => {
               data: { lockId, outcome: 'secret', secret },
           }],
           prevFrameHash: '',
-          deltas: [],
+          accountStateRoot: '',
           stateHash: `0x${'44'.repeat(32)}`,
-          byLeft: true,
-        }, [], env, candidateEffects);
+        }, true, [], env, candidateEffects);
       const commits = order === 'inbound-first'
         ? [
             () => commit(inboundEntity, inboundLockId, secret),
@@ -685,7 +686,7 @@ describe('htlc event contract and dispute tail', () => {
     const outboundLockId = 'lock-pending';
     const hashlock = `0x${'88'.repeat(32)}`;
     const replica = makeReplica(entityId, counterpartyId);
-    const account = replica.state.accounts.get(counterpartyId)!;
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
     account.mempool.push({
       type: 'htlc_lock',
       data: {
@@ -722,7 +723,7 @@ describe('htlc event contract and dispute tail', () => {
     const outboundLockId = 'lock-stale-current-frame';
     const hashlock = `0x${'89'.repeat(32)}`;
     const replica = makeReplica(entityId, counterpartyId);
-    const account = replica.state.accounts.get(counterpartyId)!;
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
     account.currentFrame = {
       ...account.currentFrame,
       accountTxs: [{

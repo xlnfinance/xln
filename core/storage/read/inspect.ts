@@ -2,7 +2,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import {
   KEY_FRAME,
   KEY_BOUNDED_VALUE_CHUNK,
-  KEY_RUNTIME_OUTPUT_PAYLOAD,
+  KEY_RUNTIME_OUTPUT_ROW,
   KEY_ENTITY_CONTEXT_PAYLOAD,
   KEY_RUNTIME_MACHINE_BRANCH,
   KEY_RUNTIME_MACHINE_LEAF,
@@ -19,7 +19,6 @@ import {
   KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
   KEY_CERTIFIED_BOARD_NODE,
-  KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
@@ -75,7 +74,7 @@ const measureStorageNamespaces = (db: RuntimeDbLike) => Promise.all([
   measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ENTITY_FRAME])),
   measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_EVENT])),
   measurePrefixBytes(db, Buffer.from([HISTORY_VIEW_ACCOUNT_SWAP_RECENCY])),
-  measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_OUTPUT_PAYLOAD])),
+  measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_OUTPUT_ROW])),
   measurePrefixBytes(db, Buffer.from([KEY_ENTITY_CONTEXT_PAYLOAD])),
   measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_MACHINE_BRANCH])),
   measurePrefixBytes(db, Buffer.from([KEY_RUNTIME_MACHINE_LEAF])),
@@ -99,7 +98,6 @@ const measureStorageNamespaces = (db: RuntimeDbLike) => Promise.all([
   measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY_BRANCH])),
   measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY_LEAF])),
   measurePrefixBytes(db, Buffer.from([KEY_CERTIFIED_BOARD_NODE])),
-  measurePrefixBytes(db, Buffer.from([KEY_CONSUMPTION_NODE])),
   measurePrefixBytes(db, Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE])),
 ] as const);
 
@@ -147,7 +145,6 @@ export const inspectStorage = async (options: {
     entityGraphBranchStats,
     entityGraphLeafStats,
     certifiedBoardNodeStats,
-    consumptionNodeStats,
     accountJClaimNodeStats,
   ] = await measureStorageNamespaces(db);
 
@@ -177,7 +174,6 @@ export const inspectStorage = async (options: {
     runtimeMachineBranchStats.bytes +
     runtimeMachineLeafStats.bytes +
     certifiedBoardNodeStats.bytes +
-    consumptionNodeStats.bytes +
     accountJClaimNodeStats.bytes;
   const historyViewBytes =
     accountFrameHistoryStats.bytes +
@@ -208,10 +204,8 @@ export const inspectStorage = async (options: {
     entityGraphBranchCount: entityGraphBranchStats.count,
     entityGraphLeafCount: entityGraphLeafStats.count,
     certifiedBoardNodeCount: certifiedBoardNodeStats.count,
-    consumptionNodeCount: consumptionNodeStats.count,
     accountJClaimNodeCount: accountJClaimNodeStats.count,
     certifiedBoardNodeBytes: certifiedBoardNodeStats.bytes,
-    consumptionNodeBytes: consumptionNodeStats.bytes,
     accountJClaimNodeBytes: accountJClaimNodeStats.bytes,
     frameBytes: frameStats.bytes,
     boundedValueCount: boundedValueChunks.total.count,
@@ -231,7 +225,7 @@ export const inspectStorage = async (options: {
       liveBookStats, liveReplicaMetaStats, accountGraphBranchStats, accountGraphLeafStats,
       bookGraphBranchStats, bookGraphLeafStats, entityGraphBranchStats, entityGraphLeafStats,
       runtimeOutputPayloadStats, entityContextPayloadStats, runtimeMachineBranchStats,
-      runtimeMachineLeafStats, certifiedBoardNodeStats, consumptionNodeStats, accountJClaimNodeStats,
+      runtimeMachineLeafStats, certifiedBoardNodeStats, accountJClaimNodeStats,
     ),
     maxSnapshotBytes: Math.max(
       snapshotManifestStats.maxValueBytes,

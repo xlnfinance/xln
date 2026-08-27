@@ -2,11 +2,14 @@
 import { LIMITS } from '../../config/constants';
 import { computeEntityConsensusSectionDigestsCold } from '../../entity/consensus/state-root';
 import type { EntityState } from '../../entity/types';
+import type { CrontabTaskState, ScheduledHook } from '../../entity/scheduler/types';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import type { BookPricePage, BookPricePageTree } from '../../orderbook/pages/page';
 import type { AccountReplica, SwapOffer } from '../../types/account';
 import type { RscoreWireValue } from '../client';
 import { hexToWireBytes } from '../shadow-wire';
+import { compareStableText } from '../../protocol/serialization';
+import { entityCommandNoncesWire } from './command-nonce-wire';
 
 const OWNED_FIELDS = new Set([
   'accounts',
@@ -14,10 +17,13 @@ const OWNED_FIELDS = new Set([
   'height',
   'timestamp',
   'lastFinalizedJHeight',
+  'reserves',
   'htlcRoutes',
   'htlcFeesEarned',
   'lockBook',
   'orderbookExt',
+  'crontabState',
+  'entityCommandNonces',
 ]);
 
 const bytes32 = (value: string, code: string): Uint8Array =>
@@ -230,6 +236,64 @@ const locksWire = (state: EntityState): RscoreWireValue[] =>
       ];
     });
 
+const crontabParamWire = (
+  name: string,
+  value: CrontabTaskState['params'][string],
+): RscoreWireValue[] => {
+  if (typeof value === 'string') return [name, 0, value];
+  if (typeof value === 'boolean') return [name, 2, value];
+  if (!Number.isFinite(value) || Object.is(value, -0)) {
+    throw new Error(`RSCORE_ENTITY_CRONTAB_PARAM_NUMBER:${name}:${String(value)}`);
+  }
+  return [name, 1, String(value)];
+};
+
+const crontabTaskWire = (task: CrontabTaskState): RscoreWireValue[] => [
+  task.method,
+  task.intervalMs,
+  task.lastRun,
+  task.enabled,
+  Object.entries(task.params)
+    .sort(([left], [right]) => compareStableText(left, right))
+    .map(([name, value]) => crontabParamWire(name, value)),
+];
+
+const hookKindWire = (hook: ScheduledHook): RscoreWireValue[] => {
+  switch (hook.type) {
+    case 'htlc_timeout': return [0, hook.data.accountId, hook.data.lockId];
+    case 'dispute_deadline': return [1, hook.data.accountId];
+    case 'htlc_secret_ack_timeout': return [
+      2, hook.data.hashlock, hook.data.counterpartyEntityId, hook.data.inboundLockId,
+    ];
+    case 'settlement_window': return [3];
+    case 'watchdog': return [4];
+    case 'hub_rebalance_kick': return [5, hook.data.reason, hook.data.counterpartyId];
+    case 'board_hanko_refresh': return [
+      6, hook.data.activationJHeight, hook.data.activationLogIndex, hook.data.afterCounterpartyId,
+    ];
+    case 'counterparty_board_hanko_refresh_deadline': return [
+      7, hook.data.accountId, hook.data.activationJHeight, hook.data.activationLogIndex,
+    ];
+    case 'cross_j_orderbook_sweep': return [8, hook.data.reason];
+  }
+};
+
+const crontabWire = (state: EntityState): RscoreWireValue[] | null => {
+  const crontab = state.crontabState;
+  if (crontab === undefined) return null;
+  return [
+    [...crontab.tasks.entries()]
+      .sort(([left], [right]) => compareStableText(left, right))
+      .map(([, task]) => crontabTaskWire(task)),
+    [...crontab.hooks.entries()]
+      .sort(([left], [right]) => compareStableText(left, right))
+      .map(([id, hook]) => {
+        if (id !== hook.id) throw new Error(`RSCORE_ENTITY_CRONTAB_HOOK_KEY:${id}:${hook.id}`);
+        return [hook.id, hook.triggerAt, hook.type, hookKindWire(hook)];
+      }),
+  ];
+};
+
 export const entityOwnedSectionDigests = (
   state: EntityState,
 ): readonly Readonly<{ field: string; digest: string }>[] =>
@@ -248,6 +312,9 @@ export const entitySnapshotWire = (state: EntityState): RscoreWireValue[] => {
     state.height,
     state.timestamp,
     state.lastFinalizedJHeight,
+    [...state.reserves.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([tokenId, amount]) => [tokenId, amount.toString()]),
     [...state.accounts.keys()].sort().map(accountId =>
       bytes32(accountId, 'RSCORE_ENTITY_KNOWN_ACCOUNT')),
     routesWire(state),
@@ -256,5 +323,7 @@ export const entitySnapshotWire = (state: EntityState): RscoreWireValue[] => {
     orderbookWire(state),
     metadataWire(state),
     sections,
+    crontabWire(state),
+    entityCommandNoncesWire(state.entityCommandNonces),
   ];
 };

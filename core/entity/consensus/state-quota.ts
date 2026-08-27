@@ -1,8 +1,4 @@
 import type { EntityState } from '../types';
-import {
-  getConsumptionTreeByteLength,
-  type ConsumptionAccumulatorState,
-} from '../consumption/consumption-accumulator';
 import { encodeCanonicalEntityConsensusState } from './state-root';
 import { shortId } from '../../support/logger';
 import type { EntityRuntimeContext } from '../runtime-context';
@@ -15,15 +11,8 @@ export type EntityConsensusStateQuotaConfig = Readonly<{
   warningBytes: number;
 }>;
 
-export type EntityConsensusStateConsumptionAdapter = Readonly<{
-  getAccumulatorState: (
-    state: EntityState,
-  ) => Pick<ConsumptionAccumulatorState, 'count'> | undefined;
-}>;
-
 export type EntityConsensusStateByteMeasurement = Readonly<{
   canonicalBytes: bigint;
-  consumptionTreeBytes: bigint;
   totalBytes: bigint;
 }>;
 
@@ -81,18 +70,12 @@ export const validateEntityConsensusStateQuotaConfig = (
 
 export const measureEntityConsensusStateBytes = (
   state: EntityState,
-  consumptionAdapter?: EntityConsensusStateConsumptionAdapter,
 ): EntityConsensusStateByteMeasurement => {
   const canonicalState = encodeCanonicalEntityConsensusState(state);
   const canonicalBytes = BigInt(UTF8_ENCODER.encode(canonicalState).byteLength);
-  const accumulatorState = consumptionAdapter?.getAccumulatorState(state);
-  const consumptionTreeBytes = accumulatorState === undefined
-    ? 0n
-    : getConsumptionTreeByteLength(accumulatorState.count);
   return Object.freeze({
     canonicalBytes,
-    consumptionTreeBytes,
-    totalBytes: canonicalBytes + consumptionTreeBytes,
+    totalBytes: canonicalBytes,
   });
 };
 
@@ -130,11 +113,6 @@ type ConsumptionSizeLog = Readonly<{
   details: Record<string, string>;
 }>;
 
-const measureConsumptionState = (state: EntityState) =>
-  measureEntityConsensusStateBytes(state, {
-    getAccumulatorState: candidate => candidate.consumptionAccumulator,
-  });
-
 export const prepareCommittedEntitySizeLog = (
   env: EntityRuntimeContext,
   preState: EntityState,
@@ -147,8 +125,8 @@ export const prepareCommittedEntitySizeLog = (
   // warning threshold; normal operation relies on incremental graph/storage
   // byte accounting instead of rebuilding a debug blob.
   if (configuredWarningBytes === undefined) return null;
-  const before = measureConsumptionState(preState);
-  const after = measureConsumptionState(postState);
+  const before = measureEntityConsensusStateBytes(preState);
+  const after = measureEntityConsensusStateBytes(postState);
   const assessment = classifyEntityConsensusStateQuotaTransition(
     before.totalBytes,
     after.totalBytes,
@@ -158,8 +136,6 @@ export const prepareCommittedEntitySizeLog = (
     warning: assessment.classification !== 'within',
     details: {
       entity: shortId(postState.entityId),
-      outputCount: postState.consumptionAccumulator?.count.toString() ?? '0',
-      consumptionTreeBytes: after.consumptionTreeBytes.toString(),
       totalBytes: after.totalBytes.toString(),
       warningBytes: assessment.warningBytes.toString(),
       overageBytes: assessment.overageBytes.toString(),

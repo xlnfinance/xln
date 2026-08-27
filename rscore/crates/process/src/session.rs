@@ -527,15 +527,26 @@ impl ProcessSession {
                     accounts: accounts.len(),
                 });
             }
-            let engine = ResidentConsensusEngine::restore(
-                EngineGeneration::from_bytes(binding.engine_generation),
-                self.worker_count,
-                revision,
-                config.private_key,
-                config.signer_id.clone(),
-                std::sync::Arc::clone(&self.swap_market),
-                accounts,
-            )?;
+            let engine = if import_existing {
+                ResidentConsensusEngine::import_existing(
+                    EngineGeneration::from_bytes(binding.engine_generation),
+                    self.worker_count,
+                    config.private_key,
+                    config.signer_id.clone(),
+                    std::sync::Arc::clone(&self.swap_market),
+                    accounts,
+                )?
+            } else {
+                ResidentConsensusEngine::restore(
+                    EngineGeneration::from_bytes(binding.engine_generation),
+                    self.worker_count,
+                    revision,
+                    config.private_key,
+                    config.signer_id.clone(),
+                    std::sync::Arc::clone(&self.swap_market),
+                    accounts,
+                )?
+            };
             let accounts_root = engine.accounts_root();
             self.authority = Some(Box::new(engine));
             return Ok((wire_encode::loaded(revision, accounts_root), false));

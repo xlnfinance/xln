@@ -32,7 +32,7 @@ test('offline target and ingress rejection are loud transport failures', () => {
 
   reportRelayClientError(env, 'ws://relay', new Error(
     'P2P_INBOUND_ENTITY_INPUT_REJECTED:INBOUND_ENTITY_RUNTIME_QUIESCING: ' +
-      'entity=0x11 signer=0x22 txTypes=consensusOutput',
+      'entity=0x11 signer=0x22 txTypes=accountInput',
   ));
   expect(errors).toEqual([
     'WS_RELAY_FATAL',
@@ -64,7 +64,7 @@ test('direct runtime rejection is a visible transport error, never a retry hint'
     env,
     'ws://peer/ws',
     `0x${'22'.repeat(20)}`,
-    new Error('INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput'),
+    new Error('INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=accountInput'),
   )).toBe('transport-error');
   expect(info).toEqual([]);
   expect(errors).toEqual(['WS_DIRECT_FATAL']);

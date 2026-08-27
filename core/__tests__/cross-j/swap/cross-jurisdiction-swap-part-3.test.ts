@@ -137,7 +137,6 @@ import {
 
 import { signEntityHashes } from '../../../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../../../entity/consensus/output/certification';
 
 import {
   countDeferredHashLadderReveals,
@@ -801,7 +800,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.outcome.kind).toBe('committed');
     expect(
       result.outputs.some(
-        output => output.entityId === sourceHub && output.entityTxs?.some(tx => tx.type === 'consensusOutput'),
+        output => output.entityId === sourceHub && output.entityTxs?.some(tx => tx.type === 'accountInput'),
       ),
     ).toBe(true);
     const workingAccount = result.workingReplica.state.accounts.get(sourceHub)!;

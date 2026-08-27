@@ -400,6 +400,15 @@ ABI field set, ordering, signedness, left/right convention, and inclusive or
 exclusive deadline semantics. TypeScript field coverage alone cannot prove
 contract parity.
 
+Hashed safe-integer fields are protocol-ranged, not `number`-ranged. Every
+version or counter field committed by an Account frame hash — canonically
+`RebalancePolicy.policyVersion` — MUST lie in `0..=9_007_199_254_740_991`
+(`Number.MAX_SAFE_INTEGER`). Above that bound a TypeScript `number` rounds
+silently while the Rust engine rejects the same `u64` as unsafe, so the two
+engines would diverge on one frame hash. Admission MUST reject an
+out-of-range value before the mempool in both engines; the frame-hash layer
+MUST treat meeting one as an admission bug and throw rather than hash.
+
 ## 9. Errors and failure containment
 
 ### 9.1 Error classes
@@ -523,35 +532,54 @@ retry results and never reach this boundary.
 - Tests MUST cover both modes and prove identical committed bytes/effects for
   equivalent certified inputs.
 
-### 10.6 Persistent candidates, never machine clones
+### 10.6 Persistent candidates, never machine clones or content-addressed storage
 
-Runtime and Entity state are unbounded financial indexes. Their candidate and
-durability paths MUST use persistent overlays and dirty Merkle branches; a
-frame may never copy or traverse the whole machine merely to isolate a
-candidate, compute a root, or append the WAL.
+Runtime and Entity state are unbounded financial indexes. Their candidate paths
+MUST use in-memory overlays over dirty Merkle paths; a frame may never copy or
+traverse the whole machine merely to isolate a candidate, compute a root, or
+append the WAL.
+
+- xln storage MUST NOT address any row by a content hash and MUST NOT persist a
+  content-addressed DAG. A hash is verification data, never a physical key.
+- Merkle branches and leaves use permanent owner + namespace + packed-path
+  keys. Updating a value overwrites its path and deletes obsolete descendants
+  in the same atomic batch, so storage is bounded by retained live/history
+  state instead of every value ever observed.
+- Non-Merkle sequences use permanent semantic keys such as
+  `(runtimeHeight, outputIndex)`. Runtime outbox values are exact flat
+  MessagePack rows; the Runtime frame commits their ordered byte digest and
+  count, not references to another graph.
+- Runtime transport has no delivery ACK, receipt, or durable delivery cursor.
+  Only Account bilateral consensus acknowledges financial progress. External
+  publication starts after Runtime WAL fsync; after restart every still-durable
+  outbox row may be resent best-effort and Account consensus must deduplicate it.
+- Account, Entity, Runtime, Book, evidence and history stores follow the same
+  rule. Signed hashes remain protocol identities, but never become LevelDB
+  addresses.
 
 - `RuntimeReplica` and `RuntimeState` are never cloned.
 - `EntityReplica`, `EntityState`, their Account map, and their orderbook maps
   are never cloned as a unit. Reads do not claim or copy values for mutation.
-- Candidate writes path-copy only the touched branch and replace its hashes up
-  to the committed root. Certification publishes that overlay atomically;
-  rejection drops it without mutating committed state.
+- Candidate writes touch only dirty paths in an ephemeral overlay and replace
+  their hashes up to the candidate root. Certification overwrites those static
+  paths atomically; rejection drops the overlay without storage writes.
 - `AccountReplica` and `AccountState` are not cloned. Account, Entity, Book and
   Runtime overlays are separate ephemeral transition caches outside every
   committed `*State` and live `*Replica`; an Entity candidate receives only the
   resulting touched Account roots/nodes, never ownership of Account overlays.
 - An overlay cache key binds machine identity, committed base root, and the
   ordered input-prefix/proposed-frame hash. It may be evicted at any time and
-  MUST deterministically rebuild from the committed root plus authoritative WAL
-  inputs. Certification publishes only immutable nodes and the new root;
-  rejection drops the cache without cleanup writes.
+  MUST deterministically rebuild from the committed checkpoint plus
+  authoritative WAL inputs. Certification publishes only the dirty static-path
+  replacements and the new root; rejection drops the cache without cleanup
+  writes.
 - Live replicas contain no historical frame/order/event collections. Runtime,
   Entity and Account certified frame histories are separate LevelDB/WAL logs
   read on demand. Live state retains only the current committed head/root and
   bounded in-flight coordination required to finish that head.
-- WAL frames retain the applied input and compact commitments. Full Runtime or
-  Entity snapshots are not constructed on the frame path; checkpoint writers
-  stream immutable CAS nodes already reachable from committed roots.
+- WAL frames retain the applied input, flat ordered outputs and compact
+  commitments. Full Runtime or Entity snapshots are not constructed on the
+  frame path; checkpoint writers persist only dirty path-keyed rows.
 - Any new clone of a Runtime/Entity/Book object, including through a helper or
   clone-on-read collection, is a product-gate failure.
 

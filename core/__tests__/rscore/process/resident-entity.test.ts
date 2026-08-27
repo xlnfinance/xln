@@ -18,6 +18,7 @@ import { RscoreProcessClient } from '../../../rscore/client';
 import { entityDeterministicContextWire } from '../../../rscore/entity/round-wire';
 import { entitySnapshotWire } from '../../../rscore/entity/snapshot-wire';
 import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
+import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import {
   accountConsensusWire,
   accountEnvelopeWire,
@@ -40,6 +41,7 @@ const identity = () => ({
 const owned = new Set([
   'accounts', 'entityId', 'height', 'timestamp', 'lastFinalizedJHeight',
   'htlcRoutes', 'htlcFeesEarned', 'lockBook', 'orderbookExt',
+  'crontabState', 'reserves',
 ]);
 
 describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
@@ -123,6 +125,13 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
       quoteTokenDecimals: dimensions.wantTokenDecimals,
     });
     state.orderbookExt = ext;
+    state.crontabState = initCrontab();
+    scheduleHook(state.crontabState, {
+      id: 'resident-htlc-timeout',
+      triggerAt: state.timestamp + 30_000,
+      type: 'htlc_timeout',
+      data: { accountId: counterparty, lockId: `0x${'bc'.repeat(32)}` },
+    });
     const routeHashlock = `0x${'ab'.repeat(32)}`;
     state.htlcRoutes = PersistentEntityCollectionMap.empty().updated(routeHashlock, {
       hashlock: routeHashlock,

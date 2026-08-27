@@ -13,7 +13,6 @@ import type {
   JTx,
 } from '../types/jurisdiction-runtime';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
-import type { ConsumptionNodeStore } from '../entity/consumption/consumption-accumulator-types';
 import type { AccountJClaimNodeStore } from '../types/finance/account-j-claims';
 import type {
   RecordEntityProviderActionSubmitResultData,
@@ -577,12 +576,6 @@ interface RuntimeInfrastructure {
   certifiedBoardNodes?: CertifiedBoardNodeStore;
   /** Newly created immutable nodes awaiting the same atomic batch as a root. */
   pendingCertifiedBoardNodes?: CertifiedBoardNodeStore;
-  /** Content-addressed consumed-output witnesses. EntityState root is authority. */
-  consumptionNodes?: ConsumptionNodeStore;
-  /** Committed nodes awaiting the same atomic storage batch as EntityState. */
-  pendingConsumptionNodes?: ConsumptionNodeStore;
-  /** Obsolete committed path nodes awaiting safe cross-replica reachability GC. */
-  pendingConsumptionNodeDeletes?: Set<string>;
   /** Content-addressed bilateral Account J-claim witnesses. Account roots are authority. */
   accountJClaimNodes?: AccountJClaimNodeStore;
   /** Committed nodes awaiting the same atomic batch as Account root documents. */

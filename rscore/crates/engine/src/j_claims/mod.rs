@@ -14,7 +14,11 @@ pub use codec::{
     EMPTY_J_CLAIM_ROOT, JClaimNode, JClaimProof, JClaimRecord, JClaimSide, account_key, claim_key,
     hash_node,
 };
-pub use events::canonical_events_hash;
+pub use events::{canonical_events, canonical_events_hash};
+pub(crate) use transition::{
+    AccountJEventClaimAdmissionResult, apply_admitted_claim_transition,
+    validate_j_event_claim_admission,
+};
 pub use transition::{apply_claim_transition, prepare_claim_tx};
 pub use types::{
     AccountSettledEvent, JClaimStatus, JClaimTransition, JEventClaimTx, JEventMetadata,

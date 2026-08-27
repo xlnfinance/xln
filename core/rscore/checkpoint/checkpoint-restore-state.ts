@@ -99,7 +99,7 @@ const decodeEnvelope = (value: unknown): RscoreAccountEnvelope => {
   };
 };
 
-export const decodeRscoreCheckpointDelta = (value: unknown, index: number): Delta => {
+const decodeRscoreCheckpointDelta = (value: unknown, index: number): Delta => {
   const row = rscoreCheckpointTuple(value, 10, `RESTORE_DELTA_${index}`);
   return validateDelta(
     {

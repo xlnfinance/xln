@@ -91,8 +91,8 @@
   $: activityRows = (() => {
     const rows: ActivityRow[] = [];
     if (account.pendingFrame) {
-      const pendingByLeft = account.pendingFrame.byLeft;
-      const pendingIsYou = pendingByLeft !== undefined ? (pendingByLeft === iAmLeft) : undefined;
+      const pendingByLeft = iAmLeft;
+      const pendingIsYou = true;
       rows.push({
         id: `pending-${account.pendingFrame.height}`,
         kind: 'pending',
@@ -118,17 +118,12 @@
     const frameHistory = (account as { frameHistory?: typeof account.currentFrame[] }).frameHistory;
     const historicalFrames = Array.isArray(frameHistory) ? frameHistory.slice(-12).reverse() : [];
     for (const frame of historicalFrames) {
-      const fByLeft = frame.byLeft;
-      const isYou = fByLeft !== undefined ? (fByLeft === iAmLeft) : undefined;
       rows.push({
         id: `confirmed-${frame.height}`,
         kind: 'confirmed',
         frameLabel: `A#${frame.height}`,
         timestamp: Number(frame.timestamp || 0),
-        statusLabel: isYou !== undefined
-          ? (isYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Counterparty (${iAmLeft ? 'R' : 'L'})`)
-          : 'Confirmed',
-        ...(fByLeft !== undefined ? { byLeft: fByLeft } : {}),
+        statusLabel: 'Confirmed',
         txs: Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
       });
     }

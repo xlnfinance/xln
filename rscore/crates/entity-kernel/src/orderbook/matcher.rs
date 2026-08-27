@@ -9,7 +9,10 @@ use crate::{DeterministicContext, EntityKernelError};
 use super::book::{AddOrder, BookEvent, MakerDisposition, apply_gtc, cancel_order, resume_crossed};
 use super::math::{canonical_pair, exact_quote_lot_multiple, lot_scale, pair_dimensions, side_for};
 use super::resolve::{ResolvePlan, build_resolve_plans};
-use super::{BookOrder, BookState, OrderbookState, PairDimensions, PairPolicy, SameJOffer, Side};
+use super::{
+    BookOrder, BookState, OrderbookState, PairDimensions, PairPolicy, SameJOffer, Side,
+    canonical_pair_policy,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SameJOutputDelta {
@@ -157,15 +160,46 @@ fn queue_cancel(
     ));
 }
 
-fn sync_pair_index(state: &mut OrderbookState, pair_id: &str) {
-    state.pair_by_order.retain(|_, pair| pair != pair_id);
-    let Some(book) = state.books.get(pair_id) else {
-        return;
-    };
-    for order_id in book.orders.keys() {
-        state
-            .pair_by_order
-            .insert(order_id.clone(), pair_id.to_string());
+fn index_order_pair(state: &mut OrderbookState, pair_id: &str, order_id: &str) {
+    state
+        .pair_by_order
+        .insert(order_id.to_string(), pair_id.to_string());
+}
+
+fn unindex_order_pair(state: &mut OrderbookState, pair_id: &str, order_id: &str) {
+    if state.pair_by_order.get(order_id).map(String::as_str) == Some(pair_id) {
+        state.pair_by_order.remove(order_id);
+    }
+}
+
+fn apply_pair_index_events(
+    state: &mut OrderbookState,
+    pair_id: &str,
+    taker_order_id: &str,
+    events: &[BookEvent],
+) {
+    for event in events {
+        let BookEvent::Trade {
+            qty,
+            maker_order_id,
+            maker_qty_before,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        if qty == maker_qty_before {
+            unindex_order_pair(state, pair_id, maker_order_id);
+        }
+    }
+    let taker_is_resting = state
+        .books
+        .get(pair_id)
+        .is_some_and(|book| book.orders.contains_key(taker_order_id));
+    if taker_is_resting {
+        index_order_pair(state, pair_id, taker_order_id);
+    } else {
+        unindex_order_pair(state, pair_id, taker_order_id);
     }
 }
 
@@ -190,17 +224,34 @@ fn remove_committed(
     let Some(pair_id) = state.pair_by_order.get(&key).cloned() else {
         return Ok(());
     };
-    if let Some(book) = state.books.get_mut(&pair_id) {
-        cancel_order(book, &key)?;
+    if let Some(book) = state.books.get_mut(&pair_id)
+        && cancel_order(book, &key)?
+    {
+        unindex_order_pair(state, &pair_id, &key);
     }
-    sync_pair_index(state, &pair_id);
     Ok(())
 }
 
-fn apply_final_offer_index(state: &mut OrderbookState, deltas: &[SameJOutputDelta]) {
+fn is_local_maker(offer: &SameJOffer, entity_id: &str) -> bool {
+    let maker = if offer.maker_is_left {
+        &offer.left_entity
+    } else {
+        &offer.right_entity
+    };
+    maker == entity_id
+}
+
+fn apply_final_offer_index(
+    state: &mut OrderbookState,
+    deltas: &[SameJOutputDelta],
+    entity_id: &str,
+) {
     for delta in deltas {
         match delta {
             SameJOutputDelta::Upsert { account_id, offer } => {
+                if is_local_maker(offer, entity_id) {
+                    continue;
+                }
                 let key = (account_id.clone(), offer.offer_id.clone());
                 state.offers.insert(key.clone(), offer.as_ref().clone());
                 state.resolving_offers.remove(&key);
@@ -272,13 +323,12 @@ fn same_snapshot(state: &OrderbookState, account_id: &str, offer: &SameJOffer) -
         == Some(offer)
 }
 
-fn sorted_upserts(deltas: &[SameJOutputDelta]) -> Vec<(String, SameJOffer)> {
+fn sorted_upserts(deltas: &[SameJOutputDelta], entity_id: &str) -> Vec<(String, SameJOffer)> {
     let mut offers: Vec<_> = deltas
         .iter()
         .filter_map(|delta| match delta {
-            SameJOutputDelta::Upsert { account_id, offer } => {
-                Some((account_id.clone(), offer.as_ref().clone()))
-            }
+            SameJOutputDelta::Upsert { account_id, offer } => (!is_local_maker(offer, entity_id))
+                .then(|| (account_id.clone(), offer.as_ref().clone())),
             _ => None,
         })
         .collect();
@@ -351,12 +401,12 @@ fn band_bounds(anchor: &BigInt) -> (BigInt, BigInt) {
     (anchor - &offset, anchor + offset)
 }
 
-fn band_anchor(book: &BookState, policy: &PairPolicy) -> BigInt {
+fn band_anchor(book: &BookState, policy: &PairPolicy, has_explicit_policy: bool) -> Option<BigInt> {
     match (book.best_bid(), book.best_ask()) {
-        (Some(bid), Some(ask)) => (bid + ask) / BigInt::from(2),
-        (Some(bid), None) => bid.clone(),
-        (None, Some(ask)) => ask.clone(),
-        (None, None) => policy.mid_price_ticks.clone(),
+        (Some(bid), Some(ask)) => Some((bid + ask) / BigInt::from(2)),
+        (Some(bid), None) => Some(bid.clone()),
+        (None, Some(ask)) => Some(ask.clone()),
+        (None, None) => has_explicit_policy.then(|| policy.mid_price_ticks.clone()),
     }
 }
 
@@ -364,12 +414,16 @@ fn sweep_pair(
     state: &mut OrderbookState,
     pair_id: &str,
     policy: &PairPolicy,
+    has_explicit_policy: bool,
     effects: &mut OrderbookEffects,
 ) -> Result<(), EntityKernelError> {
     let Some(book) = state.books.get(pair_id) else {
         return Ok(());
     };
-    let (min, max) = band_bounds(&band_anchor(book, policy));
+    let Some(anchor) = band_anchor(book, policy, has_explicit_policy) else {
+        return Ok(());
+    };
+    let (min, max) = band_bounds(&anchor);
     let candidates: Vec<_> = book
         .orders
         .values()
@@ -382,8 +436,10 @@ fn sweep_pair(
             continue;
         }
         let (account_id, offer_id) = split_order_id(&order.order_id)?;
-        if let Some(book) = state.books.get_mut(pair_id) {
-            cancel_order(book, &order.order_id)?;
+        if let Some(book) = state.books.get_mut(pair_id)
+            && cancel_order(book, &order.order_id)?
+        {
+            unindex_order_pair(state, pair_id, &order.order_id);
         }
         queue_cancel(
             state,
@@ -393,7 +449,6 @@ fn sweep_pair(
             format!("outside-anchor-band:{}", order.price_ticks),
         );
     }
-    sync_pair_index(state, pair_id);
     Ok(())
 }
 
@@ -528,15 +583,16 @@ fn process_one_offer(
         }
         Err(error) => return Err(error),
     };
-    let policy = context
-        .pair_policies
-        .get(&materialized.pair_id)
-        .ok_or_else(|| {
-            EntityKernelError::orderbook(format!(
-                "ORDERBOOK_PAIR_POLICY_MISSING:{}",
-                materialized.pair_id
-            ))
-        })?;
+    let (base, quote, _) = canonical_pair(offer.give_token_id, offer.want_token_id);
+    let (policy, has_explicit_policy) = canonical_pair_policy(base, quote, materialized.dimensions);
+    if let Some(supplied) = context.pair_policies.get(&materialized.pair_id)
+        && supplied != &policy
+    {
+        return Err(EntityKernelError::orderbook(format!(
+            "ORDERBOOK_PAIR_POLICY_DRIFT:{}",
+            materialized.pair_id
+        )));
+    }
     if let Some(existing) = state.pair_dimensions.get(&materialized.pair_id)
         && existing != &materialized.dimensions
     {
@@ -549,29 +605,45 @@ fn process_one_offer(
         );
         return Ok(());
     }
-    state
-        .pair_dimensions
-        .insert(materialized.pair_id.clone(), materialized.dimensions);
-    state
-        .books
-        .entry(materialized.pair_id.clone())
-        .or_insert_with(|| {
-            BookState::empty(state.max_orders_per_pair, policy.book_bucket_width_ticks)
-        });
+    let pair_already_exists = state.books.contains_key(&materialized.pair_id);
     if swept.insert(materialized.pair_id.clone()) {
-        sweep_pair(state, &materialized.pair_id, policy, effects)?;
-    }
-    let anchor = band_anchor(require_book(state, &materialized.pair_id)?, policy);
-    let (min, max) = band_bounds(&anchor);
-    if offer.price_ticks < min || offer.price_ticks > max {
-        queue_cancel(
+        sweep_pair(
             state,
+            &materialized.pair_id,
+            &policy,
+            has_explicit_policy,
             effects,
-            &account_id,
-            &offer.offer_id,
-            format!("outside-anchor-band:{}", offer.price_ticks),
+        )?;
+    }
+    let anchor = match state.books.get(&materialized.pair_id) {
+        Some(book) => band_anchor(book, &policy, has_explicit_policy),
+        None => has_explicit_policy.then(|| policy.mid_price_ticks.clone()),
+    };
+    if let Some(anchor) = anchor {
+        let (min, max) = band_bounds(&anchor);
+        if offer.price_ticks < min || offer.price_ticks > max {
+            queue_cancel(
+                state,
+                effects,
+                &account_id,
+                &offer.offer_id,
+                format!("outside-anchor-band:{}", offer.price_ticks),
+            );
+            return Ok(());
+        }
+    }
+    // TS creates the empty candidate book before price-band validation but
+    // publishes it only after the command is accepted. Persisting it earlier
+    // makes a rejected first offer mutate pairDimensions/books and forks the
+    // Entity root even though both engines emit the same cancel transaction.
+    if !pair_already_exists {
+        state
+            .pair_dimensions
+            .insert(materialized.pair_id.clone(), materialized.dimensions);
+        state.books.insert(
+            materialized.pair_id.clone(),
+            BookState::empty(state.max_orders_per_pair, policy.book_bucket_width_ticks),
         );
-        return Ok(());
     }
     batch.insert(materialized.order_id.clone(), offer.clone());
     let is_identical = identical_order(require_book(state, &materialized.pair_id)?, &materialized)?;
@@ -600,8 +672,8 @@ fn process_one_offer(
         )?;
         Some((materialized.order_id.clone(), events))
     };
-    sync_pair_index(state, &materialized.pair_id);
     if let Some((taker_order_id, events)) = events_and_taker {
+        apply_pair_index_events(state, &materialized.pair_id, &taker_order_id, &events);
         let (taker_account, taker_offer_id) = split_order_id(&taker_order_id)?;
         let taker_offer = state
             .offers
@@ -628,14 +700,15 @@ pub(crate) fn apply_orderbook_outputs(
     state: &mut OrderbookState,
     deltas: &[SameJOutputDelta],
     context: &DeterministicContext,
+    entity_id: &str,
 ) -> Result<OrderbookEffects, EntityKernelError> {
     let mut effects = OrderbookEffects::default();
-    apply_final_offer_index(state, deltas);
+    apply_final_offer_index(state, deltas, entity_id);
     apply_removes(state, deltas)?;
     apply_cancel_requests(state, deltas, &mut effects)?;
     let mut swept = BTreeSet::new();
     let mut batch = BTreeMap::new();
-    for (account_id, offer) in sorted_upserts(deltas) {
+    for (account_id, offer) in sorted_upserts(deltas, entity_id) {
         if !same_snapshot(state, &account_id, &offer) {
             continue;
         }
@@ -650,4 +723,125 @@ pub(crate) fn apply_orderbook_outputs(
         )?;
     }
     Ok(effects)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn book_order(order_id: &str) -> BookOrder {
+        BookOrder {
+            order_id: order_id.to_string(),
+            owner_id: "owner".to_string(),
+            side: Side::Bid,
+            price_ticks: BigInt::from(1),
+            qty_lots: BigInt::from(1),
+            seq: 1,
+            page_sequence: 0,
+            page_slot: 0,
+        }
+    }
+
+    #[test]
+    fn pair_index_updates_only_orders_changed_by_match_events() {
+        let pair_id = "1/2";
+        let mut state = OrderbookState::empty(20_000);
+        let mut book = BookState::empty(20_000, 100);
+        book.orders.insert("taker".to_string(), book_order("taker"));
+        state.books.insert(pair_id.to_string(), book);
+        for index in 0..4_096 {
+            state
+                .pair_by_order
+                .insert(format!("unrelated-{index}"), "9/10".to_string());
+        }
+        state
+            .pair_by_order
+            .insert("full-maker".to_string(), pair_id.to_string());
+        state
+            .pair_by_order
+            .insert("partial-maker".to_string(), pair_id.to_string());
+
+        apply_pair_index_events(
+            &mut state,
+            pair_id,
+            "taker",
+            &[
+                BookEvent::Trade {
+                    price: BigInt::from(1),
+                    qty: BigInt::from(5),
+                    maker_order_id: "full-maker".to_string(),
+                    taker_order_id: "taker".to_string(),
+                    maker_qty_before: BigInt::from(5),
+                    taker_qty_total: BigInt::from(8),
+                },
+                BookEvent::Trade {
+                    price: BigInt::from(1),
+                    qty: BigInt::from(3),
+                    maker_order_id: "partial-maker".to_string(),
+                    taker_order_id: "taker".to_string(),
+                    maker_qty_before: BigInt::from(7),
+                    taker_qty_total: BigInt::from(8),
+                },
+            ],
+        );
+
+        assert!(!state.pair_by_order.contains_key("full-maker"));
+        assert_eq!(state.pair_by_order["partial-maker"], pair_id);
+        assert_eq!(state.pair_by_order["taker"], pair_id);
+        assert_eq!(state.pair_by_order["unrelated-4095"], "9/10");
+        assert_eq!(state.pair_by_order.len(), 4_098);
+
+        state.books.get_mut(pair_id).unwrap().orders.remove("taker");
+        apply_pair_index_events(&mut state, pair_id, "taker", &[]);
+        assert!(!state.pair_by_order.contains_key("taker"));
+        assert_eq!(state.pair_by_order.len(), 4_097);
+    }
+
+    #[test]
+    fn rejected_first_offer_does_not_publish_an_empty_pair() {
+        let account_id = "0x0000000000000000000000000000000000000001";
+        let hub_id = "0x0000000000000000000000000000000000000002";
+        let give = BigInt::from(10_u8).pow(18);
+        let want = BigInt::from(400_u32);
+        let offer = SameJOffer {
+            offer_id: "outside-band".to_string(),
+            left_entity: account_id.to_string(),
+            right_entity: hub_id.to_string(),
+            give_token_id: 2,
+            give_token_decimals: 18,
+            give_amount: give.clone(),
+            want_token_id: 1,
+            want_token_decimals: 6,
+            want_amount: want.clone(),
+            max_fee: BigInt::from(0),
+            min_net_receive: want.clone(),
+            price_ticks: BigInt::from(4),
+            time_in_force: Some(0),
+            maker_is_left: true,
+            created_height: 1,
+            quantized_give: give,
+            quantized_want: want,
+        };
+        let mut state = OrderbookState::empty(20_000);
+
+        let effects = apply_orderbook_outputs(
+            &mut state,
+            &[SameJOutputDelta::Upsert {
+                account_id: account_id.to_string(),
+                offer: Box::new(offer),
+            }],
+            &DeterministicContext::hlt_default(),
+            hub_id,
+        )
+        .expect("outside-band offer is a typed cancellation");
+
+        assert!(state.books.is_empty());
+        assert!(state.pair_dimensions.is_empty());
+        assert_eq!(effects.account_txs.len(), 1);
+        assert!(matches!(
+            &effects.account_txs[0].1,
+            AccountTx::SwapResolve { comment: Some(comment), .. }
+                if comment == "outside-anchor-band:4"
+        ));
+    }
 }

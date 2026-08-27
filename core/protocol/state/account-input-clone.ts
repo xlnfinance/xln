@@ -33,8 +33,6 @@ export const cloneIsolatedAccountFrame = (frame: AccountFrame): AccountFrame => 
   prevFrameHash: frame.prevFrameHash,
   accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
-  byLeft: frame.byLeft,
-  deltas: frame.deltas.map(delta => ({ ...delta })),
 });
 
 const cloneDisputeHanko = (disputeHanko: AccountDisputeHanko): AccountDisputeHanko => ({ ...disputeHanko });

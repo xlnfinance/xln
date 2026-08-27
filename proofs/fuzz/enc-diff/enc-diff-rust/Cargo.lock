@@ -512,6 +512,7 @@ version = "0.1.0"
 dependencies = [
  "num-bigint",
  "ryu-js",
+ "serde_json",
  "sha2",
  "thiserror",
 ]

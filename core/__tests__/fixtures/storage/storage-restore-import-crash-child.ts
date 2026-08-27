@@ -19,16 +19,6 @@ import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/fr
 import { getEntityLeaderState } from '../../../entity/consensus/leader';
 import { generateLazyEntityId } from '../../../entity/factory';
 import {
-  applyConsumptionOutput,
-  createConsumptionProof,
-  createEmptyConsumptionAccumulator,
-  getConsumptionKey,
-} from '../../../entity/consumption/consumption-accumulator';
-import {
-  cacheCommittedConsumptionNodeChanges,
-  getConsumptionNodeStore,
-} from '../../../entity/consumption/consumption-store';
-import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
@@ -163,32 +153,14 @@ if (!(replica.state.accounts instanceof PersistentEntityAccountMap)) {
   throw new Error('restore import fixture requires committed Account graph');
 }
 replica.state.accounts = replica.state.accounts.updated(counterpartyId, restoredAccount);
-const consumptionIdentity = (height: number) => ({
-  targetEntityId: entityId,
-  sourceEntityId: `0x${'22'.repeat(32)}`,
-  lane: 'generic' as const,
-  sequence: height,
-  semanticHash: `0x${height.toString(16).padStart(2, '0').repeat(32)}`,
-  outputHash: `0x${(height + 16).toString(16).padStart(2, '0').repeat(32)}`,
-  outputHanko: `0x${height.toString(16).padStart(2, '0')}`,
-});
-const commitConsumption = async (height: number): Promise<void> => {
+const commitEntityFrame = async (): Promise<void> => {
   const preState = replica.state;
-  const before = replica.state.consumptionAccumulator ?? createEmptyConsumptionAccumulator();
-  const identity = consumptionIdentity(height);
-  const proof = createConsumptionProof(
-    getConsumptionNodeStore(env),
-    before.root,
-    getConsumptionKey(identity),
-  );
-  const applied = applyConsumptionOutput(before, identity, proof);
   const entityHeight = preState.height + 1;
   const timestamp = preState.timestamp + 1;
   const postStateWithoutHead = {
     ...preState,
     height: entityHeight,
     timestamp,
-    consumptionAccumulator: applied.state,
   };
   const stateRoot = computeCanonicalEntityConsensusStateHash(postStateWithoutHead);
   const postAuthority = buildEntityFrameAuthority(postStateWithoutHead);
@@ -237,12 +209,8 @@ const commitConsumption = async (height: number): Promise<void> => {
   };
   replica.state = { ...postStateWithoutHead, prevFrameHash: hash };
   replica.certifiedFrameHead = link;
-  cacheCommittedConsumptionNodeChanges(env, {
-    newNodes: applied.newNodes,
-    replacedNodeHashes: applied.replacedNodeHashes,
-  });
 };
-await commitConsumption(1);
+await commitEntityFrame();
 replica.lastConsensusProgressAt = 1_000;
 env.state.timestamp = 1_000;
 await persistRestoredEnvToDB(env);
@@ -251,7 +219,7 @@ await persistRestoredEnvToDB(env);
 // authoritative: recovery must discard it and rebuild solely from history.
 await getRuntimeStorageDb(env).put(Buffer.from([0x7f]), Buffer.from('stale-cache'), { sync: true });
 env.state.height += 1;
-await commitConsumption(2);
+await commitEntityFrame();
 replica.lastConsensusProgressAt = 2_000;
 env.state.timestamp = 2_000;
 await persistRestoredEnvToDB(env, {

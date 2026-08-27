@@ -1,11 +1,7 @@
 import { encodeBuffer, writeBatch } from '../codec/codec';
-import { hashCertifiedBoardNode } from '../../jurisdiction/machine/board-registry';
 import type { CertifiedBoardPatriciaNode } from '../../types/entity-board-registry';
 import type { RoutedEntityInput } from '../../runtime/types';
-import { hashConsumptionNode, type ConsumptionNode } from '../../entity/consumption/consumption-accumulator';
 import {
-  collectReachableAccountJClaimNodes,
-  hashAccountJClaimNode,
   type AccountJClaimNode,
 } from '../../account/j-claims/j-claim-accumulator';
 import {
@@ -39,9 +35,6 @@ import {
   encodeHeight,
   keyFrame,
   keyLiveReplicaMetaPrefix,
-  keyCertifiedBoardNode,
-  keyConsumptionNode,
-  keyAccountJClaimNode,
   keySnapshotManifest,
   keySnapshotGraph,
 } from '../keys';
@@ -49,9 +42,13 @@ import { readStorageFrameRecord, readStorageHead } from '../read/read';
 import { verifyStorageSnapshotIntegrity , verifyStorageTailIntegrity } from '../read/verify';
 import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
-import { prepareRuntimeOutputPayloadRows } from '../wal/outbox-payload';
+import { prepareRuntimeOutputRows } from '../wal/outbox-payload';
 import { buildHistoryViewPuts } from '../history/history-view';
 import { prepareBoundedStorageValueRows } from '../codec/bounded-value';
+import {
+  preparePathKeyedAuxiliaryRows,
+  type AuxiliaryTreeOwner,
+} from '../schema/nodes/path-keyed-auxiliary-nodes';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -84,7 +81,6 @@ export type RestoredStorageBaseOptions = {
   runtimeMachine: Record<string, unknown>;
   runtimeOutputs: readonly RoutedEntityInput[];
   certifiedBoardNodes: Array<{ hash: string; node: CertifiedBoardPatriciaNode }>;
-  consumptionNodes: Array<{ hash: string; node: ConsumptionNode }>;
   accountJClaimNodes: Array<{ hash: string; node: AccountJClaimNode }>;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
 };
@@ -152,12 +148,10 @@ const queueCurrentBody = (
   batch: ReturnType<RuntimeDbLike['batch']>,
   rows: readonly PhysicalRow[],
   certifiedBoardNodes: readonly { key: Buffer; value: Buffer }[],
-  consumptionNodes: readonly { key: Buffer; value: Buffer }[],
   accountJClaimNodes: readonly { key: Buffer; value: Buffer }[],
 ): void => {
   for (const item of rows) batch.put(item.key, item.value);
   for (const item of certifiedBoardNodes) batch.put(item.key, item.value);
-  for (const item of consumptionNodes) batch.put(item.key, item.value);
   for (const item of accountJClaimNodes) batch.put(item.key, item.value);
 };
 
@@ -255,36 +249,42 @@ const prepareCertifiedNodes = (
   options: RestoredStorageBaseOptions,
 ): {
   certifiedBoardNodes: EncodedNode[];
-  consumptionNodes: EncodedNode[];
   accountJClaimNodes: EncodedNode[];
 } => {
-  const certifiedBoardNodes = options.certifiedBoardNodes.map(({ hash, node }) => {
-    const actualHash = hashCertifiedBoardNode(node);
-    if (actualHash !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}:${actualHash}`);
-    return { key: keyCertifiedBoardNode(hash), value: encodeBuffer(node) };
+  const accountsByEntity = new Map<string, AuxiliaryTreeOwner['accounts'][number][]>();
+  for (const doc of options.docs) {
+    if (doc.family !== 'account') continue;
+    const accounts = accountsByEntity.get(doc.entityId) ?? [];
+    accounts.push({
+      counterpartyId: doc.counterpartyId,
+      leftPendingJClaims: doc.value.state.leftPendingJClaims,
+      rightPendingJClaims: doc.value.state.rightPendingJClaims,
+    });
+    accountsByEntity.set(doc.entityId, accounts);
+  }
+  const owners: AuxiliaryTreeOwner[] = options.docs
+    .filter((doc): doc is Extract<StorageDoc, { family: 'entity' }> => doc.family === 'entity')
+    .map(doc => ({
+      entityId: doc.entityId,
+      ...(doc.value.certifiedBoardState?.boardRegistryRoot
+        ? { certifiedBoardRoot: doc.value.certifiedBoardState.boardRegistryRoot }
+        : {}),
+      accounts: accountsByEntity.get(doc.entityId) ?? [],
+    }));
+  const rows = preparePathKeyedAuxiliaryRows({
+    owners,
+    certifiedBoardStore: new Map(options.certifiedBoardNodes.map(({ hash, node }) => [hash, node])),
+    accountJClaimStore: new Map(options.accountJClaimNodes.map(({ hash, node }) => [hash, node])),
+    rejectUnreachable: true,
   });
-  const consumptionNodes = options.consumptionNodes.map(({ hash, node }) => {
-    const actualHash = hashConsumptionNode(node);
-    if (actualHash !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}:${actualHash}`);
-    return { key: keyConsumptionNode(hash), value: encodeBuffer(node) };
-  });
-  const accountJClaimNodes = options.accountJClaimNodes.map(({ hash, node }) => {
-    const actualHash = hashAccountJClaimNode(node);
-    if (actualHash !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actualHash}`);
-    return { key: keyAccountJClaimNode(hash), value: encodeBuffer(node) };
-  });
-  const accountJClaimStates = options.docs.flatMap(doc =>
-    doc.family === 'account' ? [doc.value.state.leftPendingJClaims, doc.value.state.rightPendingJClaims] : [],
-  );
-  collectReachableAccountJClaimNodes(
-    new Map(options.accountJClaimNodes.map(({ hash, node }) => [hash, node])),
-    accountJClaimStates,
-  );
-  return { certifiedBoardNodes, consumptionNodes, accountJClaimNodes };
+  return {
+    certifiedBoardNodes: [...rows.certifiedBoardNodes],
+    accountJClaimNodes: [...rows.accountJClaimNodes],
+  };
 };
 
 type RestoreNodeRows = ReturnType<typeof prepareCertifiedNodes>;
-type RestoreOutputPayloads = ReturnType<typeof prepareRuntimeOutputPayloadRows>;
+type RestoreOutputPayloads = ReturnType<typeof prepareRuntimeOutputRows>;
 
 const publishNewHistoryBase = async (
   options: RestoredStorageBaseOptions,
@@ -296,6 +296,14 @@ const publishNewHistoryBase = async (
 ): Promise<void> => {
   const snapshotEntries = buildSnapshotEntries(options.height, liveRows);
   const snapshotReplicaMetaEntries = buildSnapshotReplicaMetaEntries(options.height, options.replicaMetas);
+  const liveAuxiliaryRows = [
+    ...nodes.certifiedBoardNodes,
+    ...nodes.accountJClaimNodes,
+  ];
+  const snapshotAuxiliaryRows = liveAuxiliaryRows.map(row => ({
+    key: keySnapshotGraph(options.height, row.key),
+    value: row.value,
+  }));
   const runtimeMachineGraph = prepareRuntimeMachineGraphRows(options.height, options.runtimeMachine);
   if (!runtimeMachineGraph.root) throw new Error('RECOVERY_IMPORT_RUNTIME_MACHINE_ROOT_MISSING');
   const manifestEntry = {
@@ -303,7 +311,10 @@ const publishNewHistoryBase = async (
     value: encodeBuffer({
       height: options.height,
       createdAt: options.timestamp,
-      docCount: snapshotEntries.length + snapshotReplicaMetaEntries.length,
+      docCount:
+        snapshotEntries.length +
+        snapshotReplicaMetaEntries.length +
+        snapshotAuxiliaryRows.length,
     } satisfies StorageSnapshotManifest),
   };
   const touchedAccounts = options.docs
@@ -325,9 +336,8 @@ const publishNewHistoryBase = async (
     canonicalEntityHashes: options.canonicalEntityHashes,
     runtimeStateHash: options.canonicalStateHash,
     runtimeMachineRoot: runtimeMachineGraph.root,
-    ...(outputPayloads.refs.length > 0
-      ? { runtimeOutputRefs: [...outputPayloads.refs] }
-      : {}),
+    runtimeOutputCount: outputPayloads.commitment.count,
+    runtimeOutputsDigest: outputPayloads.commitment.digest,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts,
@@ -348,13 +358,12 @@ const publishNewHistoryBase = async (
   const durableRows = [
     ...snapshotEntries,
     ...snapshotReplicaMetaEntries,
+    ...snapshotAuxiliaryRows,
     manifestEntry,
     ...frameRows,
     ...activityRows,
     ...options.replicaMetas,
-    ...nodes.certifiedBoardNodes,
-    ...nodes.consumptionNodes,
-    ...nodes.accountJClaimNodes,
+    ...liveAuxiliaryRows,
     ...outputPayloads.rows,
     ...runtimeMachineGraph.rows,
     ...liveRows,
@@ -420,7 +429,7 @@ export const replaceRestoredStorageBase = async (
   }
   const liveRows = [...liveStateGraph.puts, ...bookRows];
   const replicaMetaDigest = computeStorageReplicaMetaDigest(options.replicaMetas);
-  const outputPayloads = prepareRuntimeOutputPayloadRows(options.runtimeOutputs);
+  const outputPayloads = prepareRuntimeOutputRows(options.height, options.runtimeOutputs);
   const postStateHash = computeStoragePostStateHash({
     height: options.height,
     timestamp: options.timestamp,
@@ -428,7 +437,8 @@ export const replaceRestoredStorageBase = async (
     runtimeComponentDigests: computeRuntimePostStateComponentDigests(
       projectReplayVerifiableRuntimePostStateView(options.runtimeMachine),
     ),
-    runtimeOutputRefs: outputPayloads.refs,
+    runtimeOutputCount: outputPayloads.commitment.count,
+    runtimeOutputsDigest: outputPayloads.commitment.digest,
   });
 
   const currentBody = options.currentDb.batch();
@@ -436,7 +446,6 @@ export const replaceRestoredStorageBase = async (
     currentBody,
     liveRows,
     nodes.certifiedBoardNodes,
-    nodes.consumptionNodes,
     nodes.accountJClaimNodes,
   );
   await writeBatch(currentBody);

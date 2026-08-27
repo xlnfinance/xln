@@ -259,7 +259,11 @@ assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityCon
 assertIncludes(entityConsensus, 'const hankos: HankoString[] = [];', entityConsensusPath);
 assertIncludes(entityConsensus, 'await buildQuorumHanko(', entityConsensusPath);
 assertIncludes(entityConsensus, 'attachHankoWitnessToOutputs(', entityConsensusPath);
-assertIncludes(entityConsensus, '...wrapCertifiedEntityOutputs(', entityConsensusPath);
+assertIncludes(
+  readText('core/entity/consensus/output/publication.ts'),
+  'GENERIC_ENTITY_OUTPUT_UNSUPPORTED',
+  'core/entity/consensus/output/publication.ts',
+);
 assertIncludes(entityConsensus, 'if (isEmitter) jOutbox.push(...execution.jOutputs);', entityConsensusPath);
 
 assertIncludes(accountFrame, 'canonicalJurisdictionEventsHash(events)', accountFramePath);
@@ -267,7 +271,6 @@ assertOrder(accountFrame, accountFramePath, [
   "return computeCanonicalMerkleRoot('account.frame', [",
   "['transition', {",
   "['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],",
-  "['deltas', frame.deltas],",
   "['accountStateRoot', frame.accountStateRoot],",
 ]);
 assertOrder(entityFrame, entityFramePath, [

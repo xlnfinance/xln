@@ -1,6 +1,6 @@
 use xln_rscore_abi::AbiValue;
 use xln_rscore_batch::{AccountId, AccountInputKind, AccountInputResult, AccountInputVerdict};
-use xln_rscore_engine::{FrameAckPhase, Side};
+use xln_rscore_engine::{AccountFrame, FrameAckPhase, HtlcEvidenceSecret, SignedIncomingFrame};
 
 use crate::wire_decode::decode_input_row;
 use crate::wire_encode::input_result;
@@ -67,16 +67,7 @@ fn exact_peer_variants_round_trip_without_losing_received_fields() {
     assert_eq!(frame.frame.prev_frame_hash, "prev-41");
     assert_eq!(frame.frame.account_state_root, [0x55; 32]);
     assert_eq!(frame.state_hash, [0x66; 32]);
-    assert!(frame.frame.by_left);
     assert_eq!(frame.frame_hanko, Some(vec![0x77, 0x78]));
-    assert_eq!(frame.frame.deltas.len(), 1);
-    let received_delta = &frame.frame.deltas[0];
-    assert_eq!(received_delta.token_id().get(), 7);
-    assert_eq!(received_delta.collateral().to_string(), "1000");
-    assert_eq!(received_delta.ondelta().to_string(), "11");
-    assert_eq!(received_delta.offdelta().to_string(), "-12");
-    assert_eq!(received_delta.allowance(Side::Right).to_string(), "16");
-    assert_eq!(received_delta.hold(Side::Left).to_string(), "17");
     let frame_dispute = frame.dispute.expect("proposal dispute");
     assert_eq!(frame_dispute.hanko, Some(vec![0x88]));
     assert_eq!(frame_dispute.hash, [0x89; 32]);
@@ -151,6 +142,42 @@ fn inbound_genesis_policy_is_typed_exact_and_not_peer_derived() {
 }
 
 #[test]
+fn certified_board_authority_is_typed_local_context() {
+    let authority = |current: u8, previous: u8| {
+        tuple(vec![
+            AbiValue::Bytes(vec![current; 32]),
+            AbiValue::Bytes(vec![previous; 32]),
+            AbiValue::Integer(1_700_604_800),
+            AbiValue::Integer(19),
+            AbiValue::Integer(2),
+        ])
+    };
+    let value = replace_at(
+        &frame_ack_row(),
+        &[4],
+        tuple(vec![authority(0xa3, 0xa2), authority(0xb3, 0xb2)]),
+    );
+    let row = decode_input_row(&value).expect("decode certified board authority");
+    let xln_rscore_batch::PeerBoardAuthority::Certified(authority) = row.certified_board_authority
+    else {
+        panic!("certified board authority")
+    };
+    assert_eq!(authority.registered_board_hash, [0xa3; 32]);
+    assert_eq!(authority.previous_board_hash, [0xa2; 32]);
+    let xln_rscore_batch::PeerBoardAuthority::Certified(local) =
+        row.local_certified_board_authority
+    else {
+        panic!("local certified board authority")
+    };
+    assert_eq!(local.entity_id, [0x22; 32]);
+    assert_eq!(local.registered_board_hash, [0xb3; 32]);
+    assert_eq!(local.previous_board_hash, [0xb2; 32]);
+    assert_eq!(local.previous_board_valid_until, 1_700_604_800);
+    assert!(decode_input_row(&width_at(&value, &[4, 0, 0], 31)).is_err());
+    assert!(decode_input_row(&width_at(&value, &[4, 1, 1], 31)).is_err());
+}
+
+#[test]
 fn exact_peer_decoder_rejects_mutated_shapes_widths_and_aliases() {
     let canonical = frame_ack_row();
     let cases = vec![
@@ -196,10 +223,6 @@ fn exact_peer_decoder_rejects_mutated_shapes_widths_and_aliases() {
         (
             "proof hash width",
             width_at(&canonical, &[2, 5, 2, 2, 2], 33),
-        ),
-        (
-            "byLeft integer alias",
-            replace_at(&canonical, &[2, 5, 2, 0, 7], AbiValue::Integer(1)),
         ),
         (
             "role integer alias",
@@ -292,4 +315,48 @@ fn frame_ack_result_is_one_row_with_ack_before_frame_and_closed_child_domains() 
         },
     };
     assert!(input_result(&wrong_domains).is_err());
+}
+
+#[test]
+fn dispute_required_verdict_carries_exact_secret_and_signed_frame() {
+    let result = AccountInputResult {
+        operation_index: 20,
+        account_id: AccountId::from_bytes([0x11; 32]),
+        verdict: AccountInputVerdict::FrameDisputeRequired {
+            reason: "HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT".into(),
+            evidence_secrets: vec![HtlcEvidenceSecret {
+                hashlock: format!("0x{}", "22".repeat(32)),
+                secret: format!("0x{}", "33".repeat(32)),
+            }],
+            signed_frame: SignedIncomingFrame {
+                frame: AccountFrame {
+                    height: 3,
+                    timestamp: 1_700_000_000_000,
+                    j_height: 9,
+                    txs: Vec::new(),
+                    prev_frame_hash: format!("0x{}", "44".repeat(32)),
+                    account_state_root: [0x55; 32],
+                },
+                state_hash: [0x66; 32],
+                frame_hanko: vec![0x77, 0x78],
+            },
+        },
+    };
+    let encoded = input_result(&result).expect("encode dispute required");
+    let verdict = at(&encoded, &[2]);
+    assert_eq!(at(verdict, &[0]), &AbiValue::Integer(11));
+    assert_eq!(
+        at(verdict, &[1]),
+        &AbiValue::Text("HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT".into()),
+    );
+    assert_eq!(
+        at(verdict, &[2, 0]),
+        &tuple(vec![
+            AbiValue::Text(format!("0x{}", "22".repeat(32))),
+            AbiValue::Text(format!("0x{}", "33".repeat(32))),
+        ]),
+    );
+    assert_eq!(at(verdict, &[3, 0]), &AbiValue::Integer(3));
+    assert_eq!(at(verdict, &[3, 6]), &AbiValue::Bytes(vec![0x66; 32]));
+    assert_eq!(at(verdict, &[3, 7]), &AbiValue::Bytes(vec![0x77, 0x78]));
 }

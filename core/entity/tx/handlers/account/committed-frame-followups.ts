@@ -49,10 +49,73 @@ function emitOriginatedHtlcFinalized(
   });
 }
 
+const applyCommittedHtlcResolveFollowup = (
+  newState: EntityState,
+  counterpartyId: string,
+  accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
+  env: EntityRuntimeContext | undefined,
+  candidateEffects: EntityCandidateEffect[],
+): void => {
+  const visible = newState.accounts.get(counterpartyId);
+  if (visible?.mempool?.length) {
+    const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
+    if (!account) throw new Error(`HTLC_FOLLOWUP_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
+    account.mempool = account.mempool.filter((mempoolTx) =>
+      !(mempoolTx.type === 'htlc_lock' && mempoolTx.data.lockId === accountTx.data.lockId)
+    );
+  }
+  newState.lockBook.delete(accountTx.data.lockId);
+  if (newState.crontabState) cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
+  if (accountTx.data.outcome !== 'secret') return;
+
+  // Account already verified hashHtlcSecret(secret) against the lock. Routes
+  // are keyed by that hash, so this is one direct lookup, never a route scan.
+  const hashlock = hashHtlcSecret(accountTx.data.secret);
+  const route = newState.htlcRoutes.get(hashlock);
+  if (!route) return;
+  const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
+  const resolvesOriginatedOutbound = route.outboundLockId === accountTx.data.lockId
+    && (route.originated || !hasInboundHtlcRoute(route));
+  const resolvesForwardedOutbound = route.outboundLockId === accountTx.data.lockId
+    && isForwardingHtlcRoute(route) && !route.originated;
+  if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) return;
+  if (resolvesInbound) {
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'HtlcReceived',
+      data: buildHtlcReceivedEventPayload({
+        entityId: newState.entityId,
+        fromEntity: counterpartyId,
+        toEntity: newState.entityId,
+        hashlock,
+        lockId: accountTx.data.lockId,
+        ...(route.amount !== undefined ? { amount: route.amount } : {}),
+        ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
+        ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+        ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
+        receivedAtMs: newState.timestamp,
+      }),
+    });
+  }
+  // Propagation still needs the inbound lock reference; the secret followup
+  // terminates this route after it queues the upstream resolve.
+  if (resolvesForwardedOutbound) return;
+  emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
+  if (route.originated && route.inboundEntity) {
+    const writableRoute = getEntityCollectionValueForWrite(newState.htlcRoutes, hashlock);
+    if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${hashlock}`);
+    if (resolvesInbound) writableRoute.inboundSettled = true;
+    if (resolvesOriginatedOutbound) writableRoute.outboundSettled = true;
+    if (!writableRoute.inboundSettled || !writableRoute.outboundSettled) return;
+  }
+  terminateHtlcRoute(newState, hashlock, newState.timestamp);
+};
+
 export function applyCommittedAccountFrameFollowups(
   newState: EntityState,
   counterpartyId: string,
   committedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   accountTxs: AccountTxTarget[],
   env: EntityRuntimeContext | undefined,
   candidateEffects: EntityCandidateEffect[],
@@ -66,80 +129,19 @@ export function applyCommittedAccountFrameFollowups(
 
   for (const accountTx of committedFrame.accountTxs) {
     if (HEAVY_LOGS) accountFollowupLog.debug('frame.tx', { type: accountTx.type });
-    applyCommittedLendingFollowup(newState, counterpartyId, accountTx, committedFrame, accountTxs);
+    applyCommittedLendingFollowup(
+      newState,
+      counterpartyId,
+      accountTx,
+      committedFrame,
+      proposerIsLeft,
+      accountTxs,
+    );
 
-    // Account frames are canonical once committed; keep entity-local indexes in
-    // sync here instead of mutating them while the account proposal is still tentative.
+    // Account frames are canonical once committed; update Entity-local
+    // indexes only after commit, never while the proposal is tentative.
     if (accountTx.type === 'htlc_resolve') {
-      const visible = newState.accounts.get(counterpartyId);
-      if (visible?.mempool?.length) {
-        const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
-        if (!account) throw new Error(`HTLC_FOLLOWUP_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
-        account.mempool = account.mempool.filter((mempoolTx) =>
-          !(mempoolTx.type === 'htlc_lock' && mempoolTx.data.lockId === accountTx.data.lockId)
-        );
-      }
-      newState.lockBook.delete(accountTx.data.lockId);
-      if (newState.crontabState) {
-        cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
-      }
-      if (accountTx.data.outcome === 'secret') {
-        // The account resolve handler already enforced
-        // hashHtlcSecret(secret) === lock.hashlock, and routes are keyed by
-        // hashlock, so the route this lock belongs to is a direct lookup.
-        // Scanning every route per resolve was O(routes) per payment and
-        // ~30% of Hub CPU at 500 users.
-        const secretHashlock = hashHtlcSecret(accountTx.data.secret);
-        const directRoute = newState.htlcRoutes.get(secretHashlock);
-        const matchedRoutes: Iterable<[string, HtlcRoute]> = directRoute
-          ? [[secretHashlock, directRoute]]
-          : [];
-        for (const [hashlock, route] of matchedRoutes) {
-          const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
-          const resolvesOriginatedOutbound =
-            route.outboundLockId === accountTx.data.lockId && (route.originated || !hasInboundHtlcRoute(route));
-          const resolvesForwardedOutbound =
-            route.outboundLockId === accountTx.data.lockId && isForwardingHtlcRoute(route) && !route.originated;
-          if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) continue;
-          if (resolvesInbound) {
-            candidateEffects.push({
-              kind: 'runtimeEvent',
-              eventName: 'HtlcReceived',
-              data: buildHtlcReceivedEventPayload({
-                entityId: newState.entityId,
-                fromEntity: counterpartyId,
-                toEntity: newState.entityId,
-                hashlock,
-                lockId: accountTx.data.lockId,
-                ...(route.amount !== undefined ? { amount: route.amount } : {}),
-                ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
-                ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
-                ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
-                receivedAtMs: newState.timestamp,
-              }),
-            });
-          }
-          if (resolvesForwardedOutbound) {
-            // This commit reveals the downstream preimage, but the forwarded
-            // route is not terminal until applyHtlcSecretFollowups queues the
-            // exact upstream resolve in this same Entity-frame replay. Deleting
-            // it here loses the inbound lock reference needed for propagation.
-            continue;
-          }
-          emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
-          if (route.originated && route.inboundEntity) {
-            const writableRoute = getEntityCollectionValueForWrite(newState.htlcRoutes, hashlock);
-            if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${hashlock}`);
-            if (resolvesInbound) writableRoute.inboundSettled = true;
-            if (resolvesOriginatedOutbound) writableRoute.outboundSettled = true;
-            if (!writableRoute.inboundSettled || !writableRoute.outboundSettled) continue;
-          }
-          terminateHtlcRoute(newState, hashlock, newState.timestamp);
-        }
-      }
+      applyCommittedHtlcResolveFollowup(newState, counterpartyId, accountTx, env, candidateEffects);
     }
-
-    if (accountTx.type === 'j_event_claim') continue;
-
   }
 }

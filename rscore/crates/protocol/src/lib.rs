@@ -2,18 +2,23 @@
 
 //! Byte-exact protocol primitives shared by the Rust Account engine.
 
+mod canonical_text;
 mod consensus_msgpack;
 mod flat;
 mod persistent;
+#[path = "persistent/node.rs"]
 mod persistent_node;
+#[path = "persistent/records.rs"]
 mod persistent_records;
 mod radix;
 mod rlp;
 mod value;
 
 #[cfg(test)]
+#[path = "persistent/tests.rs"]
 mod persistent_tests;
 
+pub use canonical_text::{CanonicalTextError, encode_canonical_consensus_text};
 pub use consensus_msgpack::{ConsensusMessagePackError, encode_canonical_consensus_bytes};
 pub use flat::compute_flat_integrity_root;
 pub use persistent::{

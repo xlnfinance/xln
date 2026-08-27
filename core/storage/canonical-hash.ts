@@ -9,7 +9,7 @@ import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
-import { buildCertifiedEntityLineagePlan } from './replica/entity-lineage';
+import { buildCertifiedEntityHeadPlan } from './replica/entity-head';
 
 export type CanonicalFrameEntityHash = {
   entityId: string;
@@ -123,8 +123,8 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
 };
 
 export const computeCanonicalEntityHashesFromEnv = (env: RuntimeReplica): CanonicalFrameEntityHash[] => {
-  const lineagePlan = buildCertifiedEntityLineagePlan(env);
-  return Array.from(lineagePlan.lookup.values(), ({ replica }) => computeCanonicalEntityHash(replica))
+  const headPlan = buildCertifiedEntityHeadPlan(env);
+  return Array.from(headPlan.lookup.values(), ({ replica }) => computeCanonicalEntityHash(replica))
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
 };
 

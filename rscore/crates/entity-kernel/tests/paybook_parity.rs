@@ -1,6 +1,6 @@
 mod support;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use sha3::{Digest as _, Keccak256};
@@ -13,7 +13,7 @@ use xln_rscore_engine::{
     HtlcResolveTx, OpaqueHtlcCiphertext, Side,
 };
 use xln_rscore_entity_kernel::{
-    DeterministicContext, EntityKernelOutput, EntityStateSlice, HtlcPreparedBinding,
+    CrontabState, DeterministicContext, EntityKernelOutput, EntityStateSlice, HtlcPreparedBinding,
     HtlcPreparedOutcome, HtlcRoute, PreparedHtlcEntry, apply_entity_kernel,
     compute_entity_owned_sections,
 };
@@ -217,6 +217,7 @@ fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
             },
             outcome: HtlcPreparedOutcome::Final {
                 secret: secret.clone(),
+                description: Some("prepared final".to_string()),
                 started_at_ms: Some(1_500),
             },
         },
@@ -294,6 +295,10 @@ fn zero_forwarding_fee_remains_present_after_secret_reveal() {
     let outbound_lock_id = format!("0x{}", "66".repeat(32));
     let mut state = EntityStateSlice::empty(HUB, 2_000);
     state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]);
+    state.crontab = Some(CrontabState {
+        tasks: BTreeMap::new(),
+        hooks: BTreeMap::new(),
+    });
     state.htlc_routes.insert(
         hashlock.clone(),
         HtlcRoute {

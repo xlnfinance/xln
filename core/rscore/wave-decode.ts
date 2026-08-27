@@ -41,7 +41,7 @@ import {
 import { decodeRscoreWavePostAccount } from './checkpoint/wave-checkpoint-decode';
 import type { RscoreAccountCheckpointRow } from './checkpoint/wave-checkpoint-decode';
 import { accountTxWire, type ShadowOutputRow } from './shadow-wire';
-import type { AccountFrame, Delta } from '../types/account';
+import type { AccountFrame } from '../types/account';
 
 export { decodeRscoreAccountTx };
 
@@ -210,6 +210,12 @@ type WaveFrameVerdict =
       ackDispute: WaveDisputeDraft | null;
     }
   | { kind: 'frameStale'; height: number; currentHeight: number }
+  | {
+      kind: 'frameDisputeRequired';
+      reason: string;
+      evidenceSecrets: Array<{ hashlock: string; secret: string }>;
+      signedFrame: AccountFrame & { hanko: string };
+    }
   | { kind: 'frameRejected'; reason: string };
 
 type WaveAckVerdict =
@@ -236,6 +242,10 @@ type WaveVerdict =
    */
   | { kind: 'frameAckApplied'; ackVerdict: WaveAckVerdict; frameVerdict: WaveFrameVerdict }
   | { kind: 'frameAckRejected'; phase: 'ack' | 'frame'; reason: string }
+  | { kind: 'disputeApplied' }
+  | { kind: 'disputeRejected'; reason: string }
+  | { kind: 'boardHankoRefreshApplied'; events: string[] }
+  | { kind: 'boardHankoRefreshRejected'; reason: string }
   | { kind: 'failed'; message: string };
 
 type WaveCommittedFrame = Readonly<{
@@ -469,23 +479,21 @@ const decodeFrameFields = (row: readonly unknown[], field: string): AccountFrame
   accountTxs: rscoreWireList(row[3], `${field}.txs`).map(decodeRscoreAccountTx),
   prevFrameHash: rscoreWireText(row[4], `${field}.prevFrameHash`),
   accountStateRoot: rscoreWireHex(row[5], `${field}.accountStateRoot`, 32),
-  byLeft: rscoreWireBool(row[6], `${field}.byLeft`),
-  deltas: rscoreWireList(row[7], `${field}.deltas`).map(decodeDelta),
-  stateHash: rscoreWireHex(row[8], `${field}.stateHash`, 32),
+  stateHash: rscoreWireHex(row[6], `${field}.stateHash`, 32),
 });
 
 const decodeFrame = (value: unknown): AccountFrame & { hanko: string } => {
-  const row = rscoreWireTuple(value, 10, 'frame');
+  const row = rscoreWireTuple(value, 8, 'frame');
   return {
     ...decodeFrameFields(row, 'frame'),
-    hanko: `0x${Buffer.from(rscoreWireBytes(row[9], 'frame.hanko')).toString('hex')}`,
+    hanko: `0x${Buffer.from(rscoreWireBytes(row[7], 'frame.hanko')).toString('hex')}`,
   };
 };
 
 const decodeCommittedFrame = (value: unknown): WaveCommittedFrame => {
   const row = rscoreWireTuple(value, 2, 'committedFrame');
   return {
-    frame: decodeFrameFields(rscoreWireTuple(row[0], 9, 'committedFrame.frame'), 'committedFrame.frame'),
+    frame: decodeFrameFields(rscoreWireTuple(row[0], 7, 'committedFrame.frame'), 'committedFrame.frame'),
     committedViaNewFrame: rscoreWireBool(row[1], 'committedFrame.committedViaNewFrame'),
   };
 };
@@ -506,22 +514,6 @@ const assertCommittedFrameBinding = (
     );
   }
   return evidence;
-};
-
-const decodeDelta = (value: unknown): Delta => {
-  const row = rscoreWireTuple(value, 10, 'delta');
-  return {
-    tokenId: rscoreWireInt(row[0], 'delta.tokenId'),
-    collateral: rscoreWireBig(row[1], 'delta.collateral'),
-    ondelta: rscoreWireBig(row[2], 'delta.ondelta'),
-    offdelta: rscoreWireBig(row[3], 'delta.offdelta'),
-    leftCreditLimit: rscoreWireBig(row[4], 'delta.leftCreditLimit'),
-    rightCreditLimit: rscoreWireBig(row[5], 'delta.rightCreditLimit'),
-    leftAllowance: rscoreWireBig(row[6], 'delta.leftAllowance'),
-    rightAllowance: rscoreWireBig(row[7], 'delta.rightAllowance'),
-    leftHold: rscoreWireBig(row[8], 'delta.leftHold'),
-    rightHold: rscoreWireBig(row[9], 'delta.rightHold'),
-  };
 };
 
 const DISPOSITIONS = ['deferred', 'removed'] as const;
@@ -631,6 +623,22 @@ const decodeFrameVerdict = (value: unknown, field: string): WaveFrameVerdict => 
       const fields = rscoreWireTuple(row, 2, `${field}.rejected`);
       return { kind: 'frameRejected', reason: rscoreWireText(fields[1], `${field}.reason`) };
     }
+    case 11: {
+      const fields = rscoreWireTuple(row, 4, `${field}.disputeRequired`);
+      return {
+        kind: 'frameDisputeRequired',
+        reason: rscoreWireText(fields[1], `${field}.reason`),
+        evidenceSecrets: rscoreWireList(fields[2], `${field}.evidenceSecrets`)
+          .map((entry, index) => {
+            const evidence = rscoreWireTuple(entry, 2, `${field}.evidenceSecrets.${index}`);
+            return {
+              hashlock: rscoreWireText(evidence[0], `${field}.evidenceSecrets.${index}.hashlock`),
+              secret: rscoreWireText(evidence[1], `${field}.evidenceSecrets.${index}.secret`),
+            };
+          }),
+        signedFrame: decodeFrame(fields[3]),
+      };
+    }
     default:
       return rscoreWireDecodeFail(`${field}.tag:${tag}:frameDomain`);
   }
@@ -677,7 +685,7 @@ const FRAME_ACK_PHASES = ['ack', 'frame'] as const;
 const decodeVerdict = (value: unknown): WaveVerdict => {
   const row = rscoreWireList(value, 'verdict');
   const tag = rscoreWireInt(row[0], 'verdict.tag');
-  if (tag >= 0 && tag <= 4) return decodeFrameVerdict(row, 'verdict');
+  if ((tag >= 0 && tag <= 4) || tag === 11) return decodeFrameVerdict(row, 'verdict');
   if (tag >= 5 && tag <= 7) return decodeAckVerdict(row, 'verdict');
   switch (tag) {
     case 8: {
@@ -703,6 +711,34 @@ const decodeVerdict = (value: unknown): WaveVerdict => {
         kind: 'frameAckRejected',
         phase,
         reason: rscoreWireText(fields[2], 'verdict.frameAckRejected.reason'),
+      };
+    }
+    case 12:
+      rscoreWireTuple(row, 1, 'verdict.disputeApplied');
+      return { kind: 'disputeApplied' };
+    case 13: {
+      const fields = rscoreWireTuple(row, 2, 'verdict.disputeRejected');
+      return {
+        kind: 'disputeRejected',
+        reason: rscoreWireText(fields[1], 'verdict.disputeRejected.reason'),
+      };
+    }
+    case 14: {
+      const fields = rscoreWireTuple(row, 2, 'verdict.boardHankoRefreshApplied');
+      return {
+        kind: 'boardHankoRefreshApplied',
+        events: rscoreWireList(fields[1], 'verdict.boardHankoRefreshApplied.events')
+          .map((entry, index) => rscoreWireText(
+            entry,
+            `verdict.boardHankoRefreshApplied.events.${index}`,
+          )),
+      };
+    }
+    case 15: {
+      const fields = rscoreWireTuple(row, 2, 'verdict.boardHankoRefreshRejected');
+      return {
+        kind: 'boardHankoRefreshRejected',
+        reason: rscoreWireText(fields[1], 'verdict.boardHankoRefreshRejected.reason'),
       };
     }
     default:
@@ -887,19 +923,6 @@ const hexToBytes = (value: string, code: string): Uint8Array => {
   return Uint8Array.from(Buffer.from(raw, 'hex'));
 };
 
-const deltaWire = (delta: Delta): RscoreWireValue[] => [
-  delta.tokenId,
-  delta.collateral.toString(),
-  delta.ondelta.toString(),
-  delta.offdelta.toString(),
-  delta.leftCreditLimit.toString(),
-  delta.rightCreditLimit.toString(),
-  delta.leftAllowance.toString(),
-  delta.rightAllowance.toString(),
-  delta.leftHold.toString(),
-  delta.rightHold.toString(),
-];
-
 const frameBodyWire = (frame: AccountFrame): RscoreWireValue[] => [
   frame.height,
   frame.timestamp,
@@ -911,8 +934,6 @@ const frameBodyWire = (frame: AccountFrame): RscoreWireValue[] => [
   }),
   frame.prevFrameHash,
   hexToBytes(frame.accountStateRoot, 'transcript.accountStateRoot'),
-  frame.byLeft,
-  frame.deltas.map(deltaWire),
   hexToBytes(frame.stateHash, 'transcript.stateHash'),
 ];
 
@@ -1020,6 +1041,13 @@ const frameVerdictWire = (verdict: WaveFrameVerdict): RscoreWireValue => {
       ];
     case 'frameStale':
       return [3, verdict.height, verdict.currentHeight];
+    case 'frameDisputeRequired':
+      return [
+        11,
+        verdict.reason,
+        verdict.evidenceSecrets.map((evidence) => [evidence.hashlock, evidence.secret]),
+        frameWire(verdict.signedFrame),
+      ];
     case 'frameRejected':
       return [4, verdict.reason];
   }
@@ -1049,6 +1077,7 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
     case 'frameCollisionIgnored':
     case 'frameDuplicate':
     case 'frameStale':
+    case 'frameDisputeRequired':
     case 'frameRejected':
       return frameVerdictWire(verdict);
     case 'ackCommitted':
@@ -1063,6 +1092,14 @@ const verdictWire = (verdict: WaveVerdict): RscoreWireValue => {
       ];
     case 'frameAckRejected':
       return [10, verdict.phase === 'ack' ? 0 : 1, verdict.reason];
+    case 'disputeApplied':
+      return [12];
+    case 'disputeRejected':
+      return [13, verdict.reason];
+    case 'boardHankoRefreshApplied':
+      return [14, [...verdict.events]];
+    case 'boardHankoRefreshRejected':
+      return [15, verdict.reason];
     case 'failed':
       return [8, verdict.message];
   }

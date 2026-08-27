@@ -9,7 +9,7 @@ import { FINANCIAL, LIMITS, TOKENS } from '../../config/constants';
 import { normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/boundary/integer-ranges';
 import { HASHABLE_DELTA_FIELDS } from '../../types/hash-coverage/account-nested';
-import type { AccountFrame, AccountState, Delta } from '../../types/account';
+import type { AccountFrame, AccountState } from '../../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
 import { normalizeEntityId } from '../keys';
 import { validateSettlementContinuationValue } from '../../entity/account/account-metadata-validation';
@@ -35,7 +35,6 @@ const ENTITY_OPTIONAL = [
   'entityCommandNonces', 'prevFrameHash', 'leaderState', 'externalWallet',
   'deferredAccountProposals', 'settlementContinuations', 'jHistoryFinality', 'certifiedBoardState',
   'crontabState', 'jBatchState', 'entityProviderActionState',
-  'consumptionAccumulator', 'certifiedOutputSequences',
   'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs',
   'crossJurisdictionSwaps', 'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionAuthorizations',
@@ -279,9 +278,6 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   const currentHeight = requireBoundaryInteger(doc['currentHeight'], `${code}_CURRENT_HEIGHT`);
   const frames = [doc['currentFrame'], doc['pendingFrame']].filter((frame): frame is AccountFrame => frame !== undefined);
   for (const frame of frames) {
-    const deltas = requireStorageArray<Delta>(requireBoundaryRecord(frame, `${code}_FRAME`)['deltas'], `${code}_FRAME_DELTAS`);
-    if (deltas.length > LIMITS.MAX_ACCOUNT_TOKEN_ROWS) throw new Error(`${code}_FRAME_DELTAS_LIMIT`);
-    for (const delta of deltas) validateStorageDelta(delta, `${code}_FRAME_DELTA`);
     if (frame.height > 0) assertAccountFrameHash(frame, `${code}_FRAME_HASH`);
   }
   const current = frames[0]!;

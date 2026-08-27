@@ -13,10 +13,6 @@ import {
 } from '../../../rscore/authority-driver';
 import { installAuthorityCutover } from '../../../rscore/cutover/provider';
 import { createStructuredLogger } from '../../../support/logger';
-import {
-  beginRuntimeCheckpointLineageRefresh,
-  refreshRuntimeCheckpointLineageForEntity,
-} from '../../../storage/replica/entity-lineage';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import { DEBUG } from '../../../support/debug-flags';
@@ -103,55 +99,14 @@ const createApplyProfiler = (): ApplyProfiler => {
   };
 };
 
-type LineageRefresh = {
-  beforeEntityApply(entityId: string, force?: boolean): void;
-  finalize(): void;
-};
-
-const createLineageRefresh = (env: RuntimeReplica): LineageRefresh => {
-  const guards = new Map<
-    string,
-    ReturnType<typeof beginRuntimeCheckpointLineageRefresh>
-  >();
-  return {
-    beforeEntityApply: (rawEntityId, force = false) => {
-      const entityId = rawEntityId.trim().toLowerCase();
-      if (force) {
-        guards.get(entityId)?.finalize();
-        guards.delete(entityId);
-        refreshRuntimeCheckpointLineageForEntity(env, entityId);
-      } else {
-        // A causal local cross-j output may certify H+1 after H in the same
-        // atomic Runtime frame. Seal H into a fresh checkpoint anchor before
-        // applying H+1; otherwise the short certified head still contains H
-        // and appendCertifiedEntityFrameLink correctly rejects a second
-        // height as unrebased. Replacing (rather than force-refreshing) the
-        // guard preserves rollback when the later input commits no frame.
-        guards.get(entityId)?.finalize();
-        guards.delete(entityId);
-        guards.set(entityId, beginRuntimeCheckpointLineageRefresh(env, entityId));
-      }
-    },
-    finalize: () => {
-      for (const guard of guards.values()) guard.finalize();
-    },
-  };
-};
-
 const applyRuntimeTransactions = async (
   env: RuntimeReplica,
   runtimeTxs: RuntimeTx[],
   isReplay: boolean,
-  lineage: LineageRefresh,
 ): Promise<JInput[]> => {
   const jOutbox: JInput[] = [];
   for (const runtimeTx of runtimeTxs) {
     jOutbox.push(...await applyRuntimeTx(env, runtimeTx, { isReplay }));
-    if (runtimeTx.type === 'importReplica') {
-      // A repeated import can add a validator-local replica for the same
-      // Entity, so rebuild that Entity's lineage after every import.
-      lineage.beforeEntityApply(runtimeTx.entityId, true);
-    }
   }
   return jOutbox;
 };
@@ -191,15 +146,12 @@ const applyRuntimeEntityBatch = async (
   deps: RuntimeInputReducerDeps,
   profile: ApplyProfiler,
 ): Promise<{ prepared: PreparedAtomicCrossJ; batch: AppliedEntityBatch }> => {
-  const lineage = createLineageRefresh(env);
   const runtimeJOutbox = await applyRuntimeTransactions(
     env,
     ingress.runtimeTxs,
     isReplay,
-    lineage,
   );
   profile.mark('runtimeTxs');
-  profile.mark('lineage');
 
   const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
   const routingDeps = deps.getRoutingDeps();
@@ -212,7 +164,6 @@ const applyRuntimeEntityBatch = async (
   const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
     isReplay,
     routingDeps,
-    beforeEntityApply: lineage.beforeEntityApply,
   });
   const rejectedIndexes = new Set(
     batch.rejectedAtomicPairs.flatMap(rejection => rejection.inputIndexes),
@@ -249,7 +200,6 @@ const applyRuntimeEntityBatch = async (
       !rejectedIndexes.has(pair.sourceInputIndex) &&
       !rejectedIndexes.has(pair.targetInputIndex)),
   };
-  lineage.finalize();
   logAtomicCrossJCommit(accepted, batch);
   profile.mark('entityApply');
   return { prepared: accepted, batch };

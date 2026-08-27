@@ -6,9 +6,9 @@ import { computeStoragePostStateHash } from '../..';
 import { computeRuntimePostStateComponentDigests } from '../../hashes';
 import { computeCanonicalStateHashFromEnv } from '../../canonical-hash';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildRuntimeCheckpointLineagePlan,
-} from '../../replica/entity-lineage';
+  applyCertifiedEntityHeadPlan,
+  buildRuntimeCheckpointHeadPlan,
+} from '../../replica/entity-head';
 import {
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
@@ -28,28 +28,32 @@ import {
 } from '../machine';
 import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
 import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
-import { prepareRuntimeOutputPayloadRows } from '../../wal/outbox-payload';
+import {
+  prepareRuntimeOutputRows,
+  type RuntimeOutputCommitment,
+} from '../../wal/outbox-payload';
 import { timePerfPhase } from '../../../support/performance/profile';
 
 export const assertRecoveryOutboxMatches = (
   expectedOutputs: readonly RoutedEntityInput[],
   actualOutputs: readonly RoutedEntityInput[],
-  expectedRefs: readonly string[],
+  expectedCommitment: RuntimeOutputCommitment,
   height: number,
 ): void => {
-  const canonicalExpectedRefs = expectedRefs.length > 0
-    ? [...expectedRefs]
-    : prepareRuntimeOutputPayloadRows(expectedOutputs).refs;
-  const actualRefs = prepareRuntimeOutputPayloadRows(actualOutputs).refs;
+  const persisted = prepareRuntimeOutputRows(height, expectedOutputs).commitment;
+  const actual = prepareRuntimeOutputRows(height, actualOutputs).commitment;
   if (
-    canonicalExpectedRefs.length === actualRefs.length &&
-    canonicalExpectedRefs.every((hash, index) => hash === actualRefs[index])
+    persisted.count === expectedCommitment.count &&
+    persisted.digest === expectedCommitment.digest &&
+    actual.count === expectedCommitment.count &&
+    actual.digest === expectedCommitment.digest
   ) return;
   throw new Error(
     `RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=${height}:` +
     safeStringify({
-      expectedRefs: canonicalExpectedRefs,
-      actualRefs,
+      expectedCommitment,
+      persisted,
+      actual,
       expectedOutputs,
       actualOutputs,
     }),
@@ -86,7 +90,7 @@ export const verifyRecoveryJournalFrame = (
       assertRecoveryRuntimeMachineMatches(env, expectedRuntimeMachine, height));
   }
   const lineage = timePerfPhase('recovery.verify.lineage', () => frame.replicaMetaCheckpoint
-    ? buildRuntimeCheckpointLineagePlan(env)
+    ? buildRuntimeCheckpointHeadPlan(env)
     : null);
   const commitment = timePerfPhase('recovery.verify.replicaMeta', () => lineage
     ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage)
@@ -126,7 +130,8 @@ export const verifyRecoveryJournalFrame = (
           excludePersistedHistoryRecords: true,
         }),
       ),
-      runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
+      runtimeOutputCount: frame.runtimeOutputCount,
+      runtimeOutputsDigest: frame.runtimeOutputsDigest,
     }));
   if (postStateHash !== frame.postStateHash) {
     throw new Error(
@@ -152,5 +157,5 @@ export const verifyRecoveryJournalFrame = (
       );
     }
   }
-  if (lineage) applyCertifiedEntityLineagePlan(env, lineage);
+  if (lineage) applyCertifiedEntityHeadPlan(env, lineage);
 };

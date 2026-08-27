@@ -176,7 +176,7 @@ export const accountEnvelopeWire = (account: AccountReplica): RscoreWireValue =>
  */
 export const shadowIneligibilityReason = (state: AccountState): string | null => {
   if ((state.lendingIntents?.size ?? 0) > 0) return 'LENDING_INTENTS';
-  if (state.settlementWorkspace !== undefined) return 'SETTLEMENT_WORKSPACE';
+  if (state.settlementWorkspace !== undefined) return 'PROPOSABILITY_SETTLEMENT_UNREPRESENTED';
   // The engine owns the offer rows now, so it can only import offers it can
   // represent: same-j offers whose committed price and quantized amounts are
   // present and equal to the resting amounts. Anything else would be re-encoded
@@ -510,8 +510,6 @@ const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
   }),
   frame.prevFrameHash,
   hexToWireBytes(frame.accountStateRoot, 32, 'SHADOW_FRAME_STATE_ROOT'),
-  frame.byLeft,
-  frame.deltas.map(deltaWire),
 ];
 
 /**
@@ -519,8 +517,8 @@ const accountFrameWire = (frame: AccountFrame): RscoreWireValue => [
  *
  * Consensus snapshots bind `stateHash` beside their frame because the engine
  * independently restores that binding. A peer input is different: its frame
- * itself carries both the signed deltas and `stateHash`, and dropping either
- * would make Rust judge reconstructed data instead of the canonical input.
+ * itself carries `stateHash`; dropping it would make Rust judge reconstructed
+ * data instead of the canonical input.
  */
 export const accountPeerFrameWire = (frame: AccountFrame): RscoreWireValue => [
   frame.height,
@@ -534,8 +532,6 @@ export const accountPeerFrameWire = (frame: AccountFrame): RscoreWireValue => [
   frame.prevFrameHash,
   hexToWireBytes(frame.accountStateRoot, 32, 'AUTHORITY_FRAME_STATE_ROOT'),
   hexToWireBytes(frame.stateHash, 32, 'AUTHORITY_FRAME_STATE_HASH'),
-  frame.byLeft,
-  frame.deltas.map(deltaWire),
 ];
 
 const hankoWireBytes = (value: string): Uint8Array => {

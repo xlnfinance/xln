@@ -21,8 +21,6 @@ import {
 import { applyAccountTx } from '../../tx/apply';
 import type { ApplyAccountTxOk } from '../../tx/apply-types';
 import { noteAccountFrameForShadow, shadowClockUs, shadowPreFrameState } from '../../../rscore/shadow-hook';
-import {
-} from '../helpers';
 import type { AccountConsensusContext } from '../context';
 import type { HtlcEnforcementClock } from '../../htlc-deadline';
 import { assertLiveCommitMatchesFrame } from '../incoming/commit-root';
@@ -38,6 +36,7 @@ type CommitAccountFrameTransitionOptions = Readonly<{
   context: AccountConsensusContext;
   account: AccountReplica;
   frame: AccountFrame;
+  proposerIsLeft: boolean;
   jClaimSession: AccountJClaimSession;
   role: 'proposer/commit' | 'receiver/collision-commit';
   counterpartyCertifiedBoardHash?: string;
@@ -74,7 +73,7 @@ export const commitAccountFrameTransition = async (
         const result = await applyAccountTx(
           draft,
           tx,
-          frame.byLeft,
+          options.proposerIsLeft,
           frame.timestamp,
           jHeight,
           false,
@@ -120,7 +119,7 @@ export const commitAccountFrameTransition = async (
       ownerEntityId: account.proofHeader.fromEntity,
       counterpartyEntityId: account.proofHeader.toEntity,
       frameHeight: frame.height,
-      byLeft: frame.byLeft,
+      byLeft: options.proposerIsLeft,
       timestamp: frame.timestamp,
       jHeight,
       enforcementTimestamp: options.htlcEnforcementClock?.timestamp ?? frame.timestamp,

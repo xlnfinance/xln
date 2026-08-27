@@ -13,8 +13,8 @@ use crate::wire_decode::{
     decode_outbound_ack, decode_swap_offer_state, decode_tx,
 };
 use crate::wire_value::{
-    bigint, boolean, bounded_u32, bytes, entity, exact, fixed_bytes, hex_fixed, integer, js_number,
-    text, tuple, unsigned,
+    bigint, bounded_u32, bytes, entity, exact, fixed_bytes, hex_fixed, integer, js_number, text,
+    tuple, unsigned,
 };
 
 const MAX_CHECKPOINT_ACCOUNTS: usize = 65_536;
@@ -227,7 +227,7 @@ fn optional_pending(value: &AbiValue) -> Result<Option<PendingFrameSnapshot>, Pr
 }
 
 fn frame(value: &AbiValue) -> Result<AccountFrame, ProcessError> {
-    let fields = exact(tuple(value)?, 8, "checkpointFrame")?;
+    let fields = exact(tuple(value)?, 6, "checkpointFrame")?;
     Ok(AccountFrame {
         height: js_number(&fields[0], "height")?,
         timestamp: js_number(&fields[1], "timestamp")?,
@@ -238,11 +238,6 @@ fn frame(value: &AbiValue) -> Result<AccountFrame, ProcessError> {
             .collect::<Result<_, _>>()?,
         prev_frame_hash: text(&fields[4])?.to_owned(),
         account_state_root: fixed_bytes(&fields[5], "accountStateRoot")?,
-        by_left: boolean(&fields[6], "byLeft")?,
-        deltas: tuple(&fields[7])?
-            .iter()
-            .map(decode_delta)
-            .collect::<Result<_, _>>()?,
     })
 }
 

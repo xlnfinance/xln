@@ -4,7 +4,6 @@ import type { EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import type {
-  CertifiedBoardAuthorityBinding,
   CertifiedBoardNodeStore,
   CertifiedBoardPatriciaNode,
   CertifiedBoardProof,
@@ -27,8 +26,6 @@ const SOURCE_CODE: Record<CertifiedBoardSource, number> = {
   EntityRegistered: 2,
   BoardActivated: 3,
 };
-const normalizedText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
-
 const normalizeChainId = (value: unknown): number => {
   const chainId = Number(value);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
@@ -621,46 +618,6 @@ export const createCertifiedBoardProof = (
     stackKey: state.stackKey,
     entityId: normalizeBytes32(entityId, 'ENTITY_ID'),
     nodes: [...walked.path.map((entry) => ({ ...entry.node })), { ...walked.leaf, record: { ...walked.leaf.record } }],
-  };
-};
-
-/**
- * Bind a registered source output to the exact Entity-certified jurisdiction
- * prefix used by its validators. Lazy entities have no registry membership and
- * therefore return null; their board remains self-authenticating via entityId.
- */
-export const createCertifiedBoardAuthorityBinding = (
-  state: EntityState,
-  store: ReadonlyMap<string, CertifiedBoardPatriciaNode>,
-): CertifiedBoardAuthorityBinding | null => {
-  const registry = state.certifiedBoardState;
-  const jurisdiction = state.config.jurisdiction;
-  if (!registry || !jurisdiction) return null;
-  const stackKey = getCertifiedBoardStackKey(jurisdiction);
-  if (registry.stackKey !== stackKey) {
-    throw new Error(`CERTIFIED_BOARD_STACK_MISMATCH:${registry.stackKey}:${stackKey}`);
-  }
-  const record = lookupCertifiedBoardRecord(
-    store,
-    registry.boardRegistryRoot,
-    stackKey,
-    state.entityId,
-  );
-  if (!record) return null;
-  const finality = state.jHistoryFinality;
-  if (
-    registry.finalizedJHeight !== state.lastFinalizedJHeight ||
-    !finality ||
-    finality.finalizedThroughHeight !== registry.finalizedJHeight ||
-    normalizedText(finality.eventHistoryRoot) !== registry.eventHistoryRoot ||
-    normalizedText(finality.tipBlockHash) !== registry.finalizedJBlockHash
-  ) {
-    throw new Error(`CERTIFIED_BOARD_OUTPUT_FINALITY_DIVERGENCE:${state.entityId}`);
-  }
-  return {
-    version: 1,
-    stackKey,
-    record,
   };
 };
 

@@ -278,8 +278,6 @@ const buildNodeBootstrapCausalCheckpoint = (
         return {
           entityId: context.entityId,
           jurisdiction: context.jurisdictionName,
-          consumptionRoot: replica?.state.consumptionAccumulator?.root ?? null,
-          consumptionRelationships: replica?.state.consumptionAccumulator?.count ?? 0n,
           accounts: [...(replica?.state.accounts.entries() ?? [])]
             .map(([counterpartyEntityId, account]) => ({
               counterpartyEntityId,

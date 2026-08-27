@@ -1,13 +1,9 @@
 import type { AccountFrame } from '../../types/account';
 import {
   FinancialDataCorruptionError,
-  validateArray,
   validateObject,
   validateString,
 } from '../../protocol/boundary/validation-primitives';
-import { assertAccountFrameDeltaIntegrity } from '../state/frame';
-import { assertAccountDeltaCapacity } from '../state/delta';
-import { validateDelta } from './delta-validation';
 import { decodeAccountTxs } from '../tx-validation';
 import {
   requireBoundaryInteger,
@@ -27,19 +23,13 @@ const isBytes32 = (value: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(value);
 
 function decodeFrameHash(
   value: unknown,
-  field: 'stateHash',
-  height: number,
-  context: string,
-): FrameHash | '';
-function decodeFrameHash(
-  value: unknown,
   field: 'prevFrameHash',
   height: number,
   context: string,
 ): FrameHash | 'genesis' | '';
 function decodeFrameHash(
   value: unknown,
-  field: 'prevFrameHash' | 'stateHash',
+  field: 'prevFrameHash',
   height: number,
   context: string,
 ): FrameHash | 'genesis' | '' {
@@ -47,15 +37,11 @@ function decodeFrameHash(
     throw new FinancialDataCorruptionError(`${context}.${field} must be a string`);
   }
   const hash = value;
-  const valid = field === 'stateHash'
-    ? (height === 0 ? hash === '' : isBytes32(hash))
-    : (
-        height === 0
-          ? hash === ''
-          : height === 1
-            ? hash === 'genesis'
-            : isBytes32(hash)
-      );
+  const valid = height === 0
+    ? hash === ''
+    : height === 1
+      ? hash === 'genesis'
+      : isBytes32(hash);
   if (!valid) {
     throw new FinancialDataCorruptionError(
       `${context}.${field} is invalid for height ${height}:value=${hash}`,
@@ -69,7 +55,6 @@ export type DecodedAccountFrame = AccountFrame & Readonly<{
   timestamp: UnixMs;
   jHeight: JHeight;
   accountStateRoot: StateHash;
-  stateHash: FrameHash | '';
   prevFrameHash: FrameHash | 'genesis' | '';
 }>;
 
@@ -86,7 +71,7 @@ export const decodeAccountFrame = (
     frame,
     [
       'height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash',
-      'accountStateRoot', 'stateHash', 'deltas', 'byLeft',
+      'accountStateRoot', 'stateHash',
     ],
     [],
     `${context}.fields`,
@@ -101,13 +86,16 @@ export const decodeAccountFrame = (
       `${context}.accountStateRoot must be bytes32 hex`,
     );
   }
-  const byLeft = frame['byLeft'];
-  if (typeof byLeft !== 'boolean') {
-    throw new FinancialDataCorruptionError(`${context}.byLeft must be boolean`);
+  const stateHashValue = frame['stateHash'];
+  if (typeof stateHashValue !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.stateHash must be a string`);
   }
-
-  const deltas = validateArray(frame['deltas'], `${context}.deltas`);
-  assertAccountDeltaCapacity(deltas.length, `${context}.deltas`);
+  const stateHash = stateHashValue;
+  if (height === 0 ? stateHash !== '' : !isBytes32(stateHash)) {
+    throw new FinancialDataCorruptionError(
+      `${context}.stateHash is invalid for height ${height}:value=${stateHash}`,
+    );
+  }
   const decoded: DecodedAccountFrame = {
     height,
     timestamp: toUnixMs(requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`)),
@@ -120,28 +108,12 @@ export const decodeAccountFrame = (
       context,
     ),
     accountStateRoot: toStateHash(accountStateRoot),
-    stateHash: decodeFrameHash(
-      frame['stateHash'],
-      'stateHash',
-      height,
-      context,
-    ),
-    deltas: deltas.map(
-      (delta, index) => validateDelta(delta, `${context}.deltas[${index}]`),
-    ),
-    byLeft,
+    stateHash,
   };
   if (decoded.height > 0 && decoded.timestamp <= 0) {
     throw new FinancialDataCorruptionError(
       'AccountFrame.timestamp must be positive',
       { timestamp: decoded.timestamp },
-    );
-  }
-  try {
-    assertAccountFrameDeltaIntegrity(decoded, context);
-  } catch (error) {
-    throw new FinancialDataCorruptionError(
-      error instanceof Error ? error.message : String(error),
     );
   }
   return decoded;

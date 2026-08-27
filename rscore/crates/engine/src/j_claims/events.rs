@@ -27,7 +27,12 @@ pub fn canonical_events_hash(events: &[JurisdictionEvent]) -> Result<[u8; 32], S
     Ok(Keccak256::digest(json.as_bytes()).into())
 }
 
-pub(crate) fn canonical_events(
+/// Canonical TS-equivalent jurisdiction-event ordering and duplicate guard.
+///
+/// Entity owns the ordering of watcher-derived claims while Account owns their
+/// financial application.  Both layers must call this one implementation so a
+/// claim cannot acquire a different digest merely by crossing that boundary.
+pub fn canonical_events(
     events: &[JurisdictionEvent],
 ) -> Result<Vec<JurisdictionEvent>, StateError> {
     if events.is_empty() {

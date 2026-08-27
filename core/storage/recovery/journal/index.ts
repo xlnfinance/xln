@@ -1,6 +1,5 @@
 import { nodeProcess } from '../../../support/process/runtime-process';
 import { requireBoundaryInteger } from '../../../protocol/boundary-validation';
-import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import {
   deleteRuntimeMetadata,
   readRuntimeMetadata,
@@ -104,7 +103,7 @@ const collectOutputSignerHints = (
   const hints = new Map<string, string>();
   for (const output of frame.runtimeOutputs ?? []) {
     // Account delivery has one persisted shape: a raw atomic AccountInput.
-    // A nested consensusOutput is invalid protocol data, never a recovery alias.
+    // Account delivery has no generic wrapper or recovery alias.
     const carriesAccountInput = (output.entityTxs ?? []).some(tx => tx.type === 'accountInput');
     if (!carriesAccountInput) continue;
     const entityId = String(output.entityId || '').trim().toLowerCase();
@@ -162,7 +161,6 @@ const replayOneFrame = async (
     if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
       runtimeLog.info('recovery.replica_meta.pre', {
         height,
-        consumptionNodes: getConsumptionNodeStore(env).size,
       });
     }
     const result = await timePerfPhase('recovery.frame.applyRuntimeInput', () =>
@@ -190,7 +188,10 @@ const replayOneFrame = async (
       timePerfPhase('recovery.frame.verifyOutbox', () => assertRecoveryOutboxMatches(
         frame.runtimeOutputs ?? [],
         env.pendingNetworkOutputs ?? [],
-        frame.runtimeOutputRefs ?? [],
+        {
+          count: frame.runtimeOutputCount,
+          digest: frame.runtimeOutputsDigest,
+        },
         height,
       ));
     }

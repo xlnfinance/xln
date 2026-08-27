@@ -12,7 +12,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 export const ENTITY_TX_TYPES = [
   'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
   'boardHandover', 'chat', 'chatMessage',
-  'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
+  'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
   'crossJurisdictionForceSiblingDispute',
   'crossJurisdictionSalvage',
   'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
@@ -25,7 +25,7 @@ export const ENTITY_TX_TYPES = [
   'orderbookSweepCrossJurisdiction', 'placeSwapOffer',
   'prepareCrossJurisdictionSwap', 'prepareDispute', 'processHtlcTimeouts', 'profile-update',
   'propose', 'proposeCancelSwap', 'r2c', 'r2e', 'r2r',
-  'registerCrossJurisdictionSwap', 'reissueCertifiedOutput', 'removeCrossJurisdictionBookOrder',
+  'registerCrossJurisdictionSwap', 'removeCrossJurisdictionBookOrder',
   'requestCollateral', 'requestCrossJurisdictionClear',
   'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
   'resolveHtlcLock',

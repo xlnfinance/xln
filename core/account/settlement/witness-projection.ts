@@ -64,5 +64,4 @@ export const accountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
 export const accountFrameWithoutPostCommitHankos = (frame: AccountFrame): AccountFrame => ({
   ...frame,
   accountTxs: frame.accountTxs.map(tx => accountTxWithoutPostCommitHankos(cloneIsolatedAccountTx(tx))),
-  deltas: frame.deltas.map(delta => ({ ...delta })),
 });

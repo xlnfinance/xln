@@ -19,7 +19,6 @@ import {
   applyEntityInputToReplica,
   type AppliedEntityReplicaInput,
 } from './entity-input-replica.ts';
-import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption/consumption-store';
 import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/account-j-claim-node-store';
 import {
   applyStorageChanges,
@@ -382,7 +381,6 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       context,
       command.kind === 'account-work',
     );
-    cacheCommittedConsumptionNodeChanges(env, result.consumptionNodeChanges);
     cacheCommittedAccountJClaimNodeChanges(env, result.accountJClaimNodeChanges);
   }
 };

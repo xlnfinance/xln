@@ -74,7 +74,6 @@ import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorizat
 import { generateProposalId } from '../../../entity/tx/processing/proposals';
 
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
-import { buildCertifiedEntityOutputHashes } from '../../../entity/consensus/output/certification';
 
 import {
   buildEntityFrameAuthority,
@@ -757,7 +756,7 @@ describe('audit fail-fast regressions', () => {
     baseState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     baseState.config = config;
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, baseState, collectiveTxs);
-    const { newState: replayedState, collectedHashes = [], outputs, events, entityContext } = await applyEntityFrameWithMaterializedTestInfraContext(
+    const { newState: replayedState, collectedHashes = [], events, entityContext } = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       baseState,
       frameTxs,
@@ -783,10 +782,7 @@ describe('audit fail-fast regressions', () => {
       entityId,
       1,
       frameHash,
-      [
-        ...collectedHashes,
-        ...buildCertifiedEntityOutputHashes(committedState, env, 1, frameHash, outputs),
-      ],
+      collectedHashes,
     );
     const stateRoot = computeCanonicalEntityConsensusStateHash(committedState);
     const authorityRoot = computeEntityFrameAuthorityRoot(
@@ -1513,6 +1509,13 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
+    const [ackHanko] = await signEntityHashes(
+      env,
+      left.entityId,
+      left.signerId,
+      [accountMachine.currentFrame.stateHash],
+    );
+    accountMachine.currentFrameHanko = ackHanko;
     accountMachine.lastOutboundFrameAck = {
       height: 10,
       counterpartyEntityId: right.entityId,
@@ -1523,7 +1526,7 @@ describe('audit fail-fast regressions', () => {
         ack: {
           height: 10,
           frameHash: accountMachine.currentFrame.stateHash,
-          frameHanko: `0x${'12'.repeat(65)}`,
+          frameHanko: ackHanko,
           disputeHanko: {
             hanko: `0x${'13'.repeat(65)}`,
             hash: `0x${'14'.repeat(32)}`,
@@ -1676,6 +1679,12 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
+    const [ackHanko] = await signEntityHashes(
+      env,
+      left.entityId,
+      left.signerId,
+      [accountMachine.currentFrame.stateHash],
+    );
     const pendingFrame = {
       ...accountMachine.currentFrame,
       height: 11,
@@ -1692,7 +1701,7 @@ describe('audit fail-fast regressions', () => {
       ack: {
         height: 10,
         frameHash: accountMachine.currentFrame.stateHash,
-        frameHanko: `0x${'12'.repeat(65)}`,
+        frameHanko: ackHanko,
       },
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
@@ -1738,6 +1747,13 @@ describe('audit fail-fast regressions', () => {
       height: 10,
       stateHash: `0x${'ef'.repeat(32)}`,
     };
+    const [ackHanko] = await signEntityHashes(
+      env,
+      left.entityId,
+      left.signerId,
+      [accountMachine.currentFrame.stateHash],
+    );
+    accountMachine.currentFrameHanko = ackHanko;
     delete accountMachine.lastOutboundFrameAck;
 
     const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
@@ -1762,7 +1778,8 @@ describe('audit fail-fast regressions', () => {
     expect(result.response?.kind === 'ack' ? result.response.ack.height : undefined).toBe(10);
     expect(result.response?.kind === 'ack' ? result.response.ack.frameHash : undefined)
       .toBe(accountMachine.currentFrame.stateHash);
-    expect(result.hashesToSign?.some(entry => entry.type === 'accountFrame')).toBe(true);
+    expect(result.response?.kind === 'ack' ? result.response.ack.frameHanko : undefined).toBe(ackHanko);
+    expect(result.hashesToSign).toBeUndefined();
     expect(accountMachine.lastOutboundFrameAck?.height).toBe(10);
     expect(accountMachine.currentHeight).toBe(10);
   });

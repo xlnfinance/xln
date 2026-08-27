@@ -46,10 +46,6 @@ const assertTxBatch = (value: unknown, stack: Set<unknown>): void => {
         assertTxBatch(tx.data.txs, stack);
         continue;
       }
-      if (tx.type === 'consensusOutput' || tx.type === 'reissueCertifiedOutput') {
-        assertTxBatch(tx.data.entityTxs, stack);
-        continue;
-      }
       if (tx.type === 'propose' && tx.data.action?.type === 'entity_transaction') {
         assertTxBatch(tx.data.action.data.txs, stack);
       }

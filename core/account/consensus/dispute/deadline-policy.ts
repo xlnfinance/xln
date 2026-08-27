@@ -167,14 +167,12 @@ const inspectHtlcDeadline = (
 export function getIncomingAccountDeadlineViolation(
   account: AccountState,
   frame: AccountFrame,
+  proposerIsLeft: boolean,
   context: AccountInputSecurityContext,
 ): IncomingDeadlineViolation | undefined {
-  if (typeof frame.byLeft !== 'boolean') {
-    return rejectedDeadline('ACCOUNT_FRAME_PROPOSER_SIDE_MISSING');
-  }
   const scan: DeadlineScan = {
     locks: cloneLocks(account),
-    proposerIsLeft: frame.byLeft,
+    proposerIsLeft,
     frame,
     context,
   };

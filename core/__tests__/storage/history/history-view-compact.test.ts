@@ -61,8 +61,6 @@ describe('history-view compact values', () => {
         prevFrameHash: accountHeight === 1 ? 'genesis' : zeroHash,
         accountStateRoot: zeroHash,
         stateHash: zeroHash,
-        byLeft: true,
-        deltas: [],
       };
       const accountPut = buildCertifiedFramePuts({
         height: accountHeight,
@@ -108,8 +106,6 @@ describe('history-view compact values', () => {
       prevFrameHash: zeroHash,
       accountStateRoot: zeroHash,
       stateHash: zeroHash,
-      byLeft: true,
-      deltas: [],
     };
 
     const puts = buildCertifiedFramePuts({
@@ -156,8 +152,6 @@ describe('history-view compact values', () => {
       prevFrameHash: zeroHash,
       accountStateRoot: zeroHash,
       stateHash: zeroHash,
-      byLeft: true,
-      deltas: [],
     };
     const puts = buildCertifiedFramePuts({
       height: 8,

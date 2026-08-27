@@ -252,7 +252,7 @@ const assertDecodedRegistrationLog = (evidence: CertifiedRegistrationEvidence): 
   }
 };
 
-export const assertRegistrationEvidenceEnvelope = (
+const assertRegistrationEvidenceEnvelope = (
   env: RuntimeReplica,
   evidence: CertifiedRegistrationEvidence,
 ): void => {

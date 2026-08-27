@@ -49,7 +49,8 @@ export type HltHubRecording = Readonly<{
   recording: RuntimeRecording;
   totals: HltHubRecordingTotals;
   featurePolicy: Readonly<{
-    mmCrossJurisdiction: false;
+    hubRebalance: 'disabled';
+    crossJ: 'disabled';
     disputes: 'disabled';
     lending: 'disabled';
   }>;
@@ -64,7 +65,7 @@ export const summarizeHltHubFrames = (
 ): HltHubRecordingTotals => frames.reduce((total, frame) => ({
     runtimeFrames: total.runtimeFrames + 1,
     runtimeEntityInputs: total.runtimeEntityInputs + frame.runtimeInput.entityInputs.length,
-    outboxEnvelopes: total.outboxEnvelopes + (frame.runtimeOutputRefs?.length ?? 0),
+    outboxEnvelopes: total.outboxEnvelopes + frame.runtimeOutputCount,
   }), {
   runtimeFrames: 0,
   runtimeEntityInputs: 0,
@@ -123,12 +124,13 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
   const featurePolicy = requireBoundaryRecord(root['featurePolicy'], 'HLT_AUTHORITY_FEATURE_POLICY_INVALID');
   requireExactBoundaryKeys(
     featurePolicy,
-    ['mmCrossJurisdiction', 'disputes', 'lending'],
+    ['hubRebalance', 'crossJ', 'disputes', 'lending'],
     [],
     'HLT_AUTHORITY_FEATURE_POLICY_FIELDS_INVALID',
   );
   if (
-    featurePolicy['mmCrossJurisdiction'] !== false ||
+    featurePolicy['hubRebalance'] !== 'disabled' ||
+    featurePolicy['crossJ'] !== 'disabled' ||
     featurePolicy['disputes'] !== 'disabled' ||
     featurePolicy['lending'] !== 'disabled'
   ) throw new Error('HLT_AUTHORITY_FEATURE_POLICY_INVALID');
@@ -152,7 +154,8 @@ export const validateHltHubRecording = (value: unknown): HltHubRecording => {
       outboxEnvelopes: Number(totals['outboxEnvelopes']),
     },
     featurePolicy: {
-      mmCrossJurisdiction: false,
+      hubRebalance: 'disabled',
+      crossJ: 'disabled',
       disputes: 'disabled',
       lending: 'disabled',
     },

@@ -4,7 +4,7 @@ declare const StateHashBrand: unique symbol;
 declare const EvidenceHashBrand: unique symbol;
 declare const BoardHashBrand: unique symbol;
 declare const BoardProposalHashBrand: unique symbol;
-declare const RuntimeOutputPayloadHashBrand: unique symbol;
+declare const RuntimeOutputsDigestBrand: unique symbol;
 declare const EntityContextPayloadHashBrand: unique symbol;
 declare const RuntimeMachineRootHashBrand: unique symbol;
 
@@ -13,8 +13,8 @@ export type StateHash = string & { readonly [StateHashBrand]: typeof StateHashBr
 export type EvidenceHash = string & { readonly [EvidenceHashBrand]: typeof EvidenceHashBrand };
 export type BoardHash = string & { readonly [BoardHashBrand]: typeof BoardHashBrand };
 export type BoardProposalHash = string & { readonly [BoardProposalHashBrand]: typeof BoardProposalHashBrand };
-export type RuntimeOutputPayloadHash = string & {
-  readonly [RuntimeOutputPayloadHashBrand]: typeof RuntimeOutputPayloadHashBrand;
+export type RuntimeOutputsDigest = string & {
+  readonly [RuntimeOutputsDigestBrand]: typeof RuntimeOutputsDigestBrand;
 };
 export type EntityContextPayloadHash = string & {
   readonly [EntityContextPayloadHashBrand]: typeof EntityContextPayloadHashBrand;
@@ -43,8 +43,8 @@ export const toBoardHash = (value: string): BoardHash =>
 export const toBoardProposalHash = (value: string): BoardProposalHash =>
   requireBytes32(value, 'PROTOCOL_BOARD_PROPOSAL_HASH_INVALID').toLowerCase() as BoardProposalHash;
 
-export const toRuntimeOutputPayloadHash = (value: string): RuntimeOutputPayloadHash =>
-  requireBytes32(value, 'PROTOCOL_RUNTIME_OUTPUT_PAYLOAD_HASH_INVALID').toLowerCase() as RuntimeOutputPayloadHash;
+export const toRuntimeOutputsDigest = (value: string): RuntimeOutputsDigest =>
+  requireBytes32(value, 'PROTOCOL_RUNTIME_OUTPUTS_DIGEST_INVALID').toLowerCase() as RuntimeOutputsDigest;
 
 export const toEntityContextPayloadHash = (value: string): EntityContextPayloadHash =>
   requireBytes32(value, 'PROTOCOL_ENTITY_CONTEXT_PAYLOAD_HASH_INVALID').toLowerCase() as EntityContextPayloadHash;

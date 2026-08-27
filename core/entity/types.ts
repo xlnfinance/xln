@@ -7,7 +7,6 @@ import type { AccountFrame, AccountOutput, AccountTx, AccountHistoryRecord, Htlc
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { LendingState } from '../types/finance/lending';
 import type {
-  ConsensusOutputOrigin,
   EntityCommandNonceState,
   EntityTx,
   PendingSettlementContinuation,
@@ -15,7 +14,6 @@ import type {
 import type { JAdapterFailure } from '../types/jurisdiction-runtime';
 import type { RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
 import type { CertifiedBoardRegistryState } from '../types/entity-board-registry';
-import type { ConsumptionAccumulatorState, ConsumptionNodeEntry } from './consumption/consumption-accumulator-types';
 import type { AccountJClaimNodeChanges } from '../types/finance/account-j-claims';
 import type { EntityProviderActionState, EntityProviderActionSubmitState } from '../types/entity-provider-actions';
 import type { JBatchState } from '../jurisdiction/machine/batch';
@@ -87,12 +85,6 @@ export interface EntityInput {
   signerId: string;
   runtimeId?: string;
   from?: string;
-  /** Validator-derived source identity, removed from the routed envelope. */
-  certifiedOutputIdentity?: {
-    lane: ConsensusOutputOrigin['lane'];
-    sequence: bigint;
-    semanticHash: string;
-  };
   /** Transient pre-commit marker; removed when wrapped as siblingOutput. */
   localRuntimeProtocol?: 'cross-j';
   entityTxs?: EntityTx[];
@@ -315,16 +307,6 @@ export interface EntityState {
   // rate, and maturity here.
   lending?: LendingState;
 
-  /**
-   * Exact-once certified-output commitment. The root is consensus authority;
-   * content-addressed nodes are validator-local witnesses and never authority.
-   */
-  consumptionAccumulator?: ConsumptionAccumulatorState;
-  /** Generic source-output lifetime frontier. Account-frame outputs use Account height instead. */
-  certifiedOutputSequences?: Map<string, {
-    lastSequence: bigint;
-    lastSemanticHash: string;
-  }>;
 }
 
 
@@ -457,25 +439,6 @@ export interface CertifiedEntityFrameLink {
 
 
 /** Locally trusted genesis/checkpoint root published by the authoritative R-frame WAL. */
-export interface CertifiedEntityLineageAnchor {
-  entityId: string;
-  height: number;
-  frameHash: string;
-  stateRoot: string;
-  authority: EntityFrameAuthority;
-  /** Required for non-self-certifying (numbered/named) H0 authorities. */
-  authorityEvidenceHash?: string;
-  /**
-   * Validator-local trust boundary created only by an atomic Runtime WAL commit.
-   * This is recovery metadata, never an Entity/peer certificate.
-   */
-  runtimeCheckpoint?: {
-    runtimeHeight: number;
-    replicaSetRoot: string;
-  };
-}
-
-
 export type EntityCandidateEffect =
   | Extract<AccountOutput, { kind: 'runtimeEvent' | 'debug' }>
   | {
@@ -526,11 +489,6 @@ export interface EntityCandidate {
   proposableAccounts?: readonly string[];
   /** Authority already computed by the proposer; lets the certified link skip a recompute. */
   authority?: EntityFrameAuthority;
-  /** Validator-computed CAS delta, published only when this exact frame commits. */
-  consumptionNodeChanges?: {
-    newNodes: readonly ConsumptionNodeEntry[];
-    replacedNodeHashes: readonly string[];
-  };
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
 }
 
@@ -546,7 +504,6 @@ export interface EntityReplica {
   candidate?: EntityCandidate;
   /** Current finalized certificate only; historical certificates live in the Entity-frame history store. */
   certifiedFrameHead?: CertifiedEntityFrameLink;
-  certifiedFrameAnchor?: CertifiedEntityLineageAnchor;
   isProposer: boolean;
   leaderVotes?: Map<string, EntityLeaderTimeoutVote>;
   pendingLeaderCertificate?: EntityLeaderCertificate;

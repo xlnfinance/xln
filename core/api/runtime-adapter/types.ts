@@ -140,7 +140,6 @@ export type RuntimeAdapterSolvencySummary = {
     tokenId: number;
     reserves: bigint;
     confirmedCollateral: bigint;
-    pendingCollateral: bigint;
     /** reserves + collateral: the side of the conservation law a Runtime owns. */
     internalValue: bigint;
     /** Authoritative Depository total, when the caller supplied one. */

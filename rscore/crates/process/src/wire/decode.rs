@@ -153,6 +153,11 @@ fn decode_entity_round(fields: &[AbiValue]) -> Result<Command, ProcessError> {
             outbound_j_height: js_number(&fields[3], "outboundJHeight")?,
             checkpoint_due: strict_boolean(&fields[4], "checkpointDue")?,
             post_accounts: strict_boolean(&fields[5], "postAccounts")?,
+            scheduled_wake: None,
+            expected_proposer_signer_id: String::new(),
+            hub_rebalance_has_pending_work: false,
+            finalized_j_events: None,
+            local_financial_txs: Vec::new(),
         }),
         context: Box::new(crate::entity_wire::decode_context(&fields[6])?),
     })
@@ -305,13 +310,48 @@ const MAX_WAVE_OP_ROWS: usize = 1_000_000;
 pub(crate) fn decode_input_row(
     value: &AbiValue,
 ) -> Result<xln_rscore_batch::AccountInputRow, ProcessError> {
-    let fields = exact(tuple(value)?, 4, "accountInput")?;
+    let fields = exact(tuple(value)?, 5, "accountInput")?;
+    let input = decode_peer_input(&fields[2])?;
+    let peer_entity_id = input.envelope.from_entity_id;
+    let local_entity_id = input.envelope.to_entity_id;
+    let authorities = exact(tuple(&fields[4])?, 2, "accountBoardAuthorities")?;
     Ok(xln_rscore_batch::AccountInputRow {
         operation_index: js_number(&fields[0], "operationIndex")?,
         account_id: AccountId::from_bytes(fixed_bytes(&fields[1], "accountId")?),
         genesis_policy: decode_entity_account_genesis_policy(&fields[3])?,
-        input: decode_peer_input(&fields[2])?,
+        certified_board_authority: decode_board_authority(
+            &authorities[0],
+            peer_entity_id,
+            "peerBoardAuthority",
+        )?,
+        local_certified_board_authority: decode_board_authority(
+            &authorities[1],
+            local_entity_id,
+            "localBoardAuthority",
+        )?,
+        input,
     })
+}
+
+fn decode_board_authority(
+    value: &AbiValue,
+    entity_id: [u8; 32],
+    label: &'static str,
+) -> Result<xln_rscore_batch::PeerBoardAuthority, ProcessError> {
+    if matches!(value, AbiValue::Nil) {
+        return Ok(xln_rscore_batch::PeerBoardAuthority::Lazy);
+    }
+    let fields = exact(tuple(value)?, 5, label)?;
+    Ok(xln_rscore_batch::PeerBoardAuthority::Certified(
+        xln_rscore_engine::CertifiedBoardAuthority {
+            entity_id,
+            registered_board_hash: fixed_bytes(&fields[0], "registeredBoardHash")?,
+            previous_board_hash: fixed_bytes(&fields[1], "previousBoardHash")?,
+            previous_board_valid_until: js_number(&fields[2], "previousBoardValidUntil")?,
+            activated_at_j_height: js_number(&fields[3], "activatedAtJHeight")?,
+            activation_log_index: js_number(&fields[4], "activationLogIndex")?,
+        },
+    ))
 }
 
 fn decode_entity_account_genesis_policy(
@@ -492,7 +532,7 @@ fn decode_incoming_frame(
     value: &AbiValue,
 ) -> Result<xln_rscore_engine::IncomingFrame, ProcessError> {
     let proposal = exact(tuple(value)?, 3, "incomingProposal")?;
-    let frame = exact(tuple(&proposal[0])?, 9, "incomingFrame")?;
+    let frame = exact(tuple(&proposal[0])?, 7, "incomingFrame")?;
     Ok(xln_rscore_engine::IncomingFrame {
         frame: AccountFrame {
             height: js_number(&frame[0], "height")?,
@@ -504,11 +544,6 @@ fn decode_incoming_frame(
                 .collect::<Result<_, _>>()?,
             prev_frame_hash: text(&frame[4])?.into(),
             account_state_root: fixed_bytes(&frame[5], "accountStateRoot")?,
-            by_left: strict_boolean(&frame[7], "byLeft")?,
-            deltas: tuple(&frame[8])?
-                .iter()
-                .map(decode_delta)
-                .collect::<Result<_, _>>()?,
         },
         state_hash: fixed_bytes(&frame[6], "stateHash")?,
         frame_hanko: optional_bytes(&proposal[1], "frameHanko")?,

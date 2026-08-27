@@ -24,16 +24,25 @@ import {
 import { iterateKeys, readRawOrNull } from '../../database/level';
 import {
   keyRscoreAccount,
-  keyRscoreAccountNode,
+  keyRscoreAccountJClaimPathNode,
+  keyRscoreAccountRadixBranchNode,
+  keyRscoreAccountRadixLeafNode,
   keyRscoreAccountNodePrefix,
   keyRscoreAccountPrefix,
   keyRscoreCheckpoint,
+  parseRscoreAccountJClaimPathNodeKey,
 } from '../../keys';
 import type { RuntimeDbLike, StorageRscoreCheckpointRef } from '../../types';
 import {
   decodeRscoreExactJClaimNodes,
   decodeRscoreJClaimNodeChanges,
 } from '../../../rscore/checkpoint/j-claim-checkpoint';
+import {
+  EMPTY_ACCOUNT_J_CLAIM_ROOT,
+  hashAccountJClaimNode,
+} from '../../../account/j-claims/j-claim-accumulator';
+import { accountJClaimKeyBit } from '../../../account/j-claims/j-claim-codec';
+import type { AccountJClaimNode } from '../../../types/finance/account-j-claims';
 
 const TREE_TAGS = [1, 2, 3, 4, 5] as const;
 const J_CLAIM_NODE_NAMESPACE = 6;
@@ -141,7 +150,120 @@ const nodeStorageKey = (
   if (record[0] !== 0 && record[0] !== 1) throw new Error('STORAGE_RSCORE_NODE_TAG');
   const kind = record[0] as 0 | 1;
   const payload = variableBytes(record[kind === 0 ? 1 : 2], 'NODE_KEY');
-  return keyRscoreAccountNode(owner, account, namespace, kind, payload);
+  return kind === 0
+    ? keyRscoreAccountRadixBranchNode(owner, account, namespace, [...payload])
+    : keyRscoreAccountRadixLeafNode(owner, account, namespace, payload);
+};
+
+type StoredJClaimEntry = Readonly<{
+  hash: string;
+  node: AccountJClaimNode;
+  wire: readonly RscoreWireValue[];
+}>;
+
+const jClaimRoots = (headerValue: unknown): readonly [string, string] => {
+  const header = rscoreCheckpointTuple(headerValue, 9, 'J_CLAIM_HEADER');
+  const carried = rscoreCheckpointTuple(header[6], 6, 'J_CLAIM_CARRIED');
+  const root = (index: 4 | 5): string => {
+    const accumulator = rscoreCheckpointTuple(carried[index], 2, `J_CLAIM_ACCUMULATOR_${index}`);
+    return hex32(rscoreCheckpointBytes(accumulator[0], 32, `J_CLAIM_ROOT_${index}`));
+  };
+  return [root(4), root(5)];
+};
+
+const readStoredJClaimEntries = async (
+  db: RuntimeDbLike,
+  owner: string,
+  account: string,
+): Promise<Readonly<{ entries: Map<string, StoredJClaimEntry>; keys: Buffer[] }>> => {
+  const entries = new Map<string, StoredJClaimEntry>();
+  const keys: Buffer[] = [];
+  const prefix = keyRscoreAccountNodePrefix(owner, account, J_CLAIM_NODE_NAMESPACE);
+  for await (const key of iterateKeys(db, { prefix })) {
+    parseRscoreAccountJClaimPathNodeKey(key);
+    const raw = await readBoundedEncodedValue(db, key);
+    if (!raw) throw new Error(`STORAGE_RSCORE_J_CLAIM_NODE_MISSING:${key.toString('hex')}`);
+    const entry = decodeRscoreExactJClaimNodes([decodeBuffer(raw)], 'STORED_J_CLAIM_NODE')[0];
+    if (!entry) throw new Error('STORAGE_RSCORE_J_CLAIM_NODE_EMPTY');
+    const previous = entries.get(entry.hash);
+    if (previous && !buffersEqual(encodeBuffer(previous.wire), encodeBuffer(entry.wire))) {
+      throw new Error(`STORAGE_RSCORE_J_CLAIM_HASH_CONFLICT:${entry.hash}`);
+    }
+    entries.set(entry.hash, entry);
+    keys.push(key);
+  }
+  return { entries, keys };
+};
+
+const putJClaimPathRow = (
+  rows: Map<string, Readonly<{ key: Buffer; value: Buffer }>>,
+  path: Buffer,
+  value: Buffer,
+): void => {
+  const id = path.toString('hex');
+  const previous = rows.get(id);
+  if (previous && !buffersEqual(previous.value, value)) {
+    throw new Error(`STORAGE_RSCORE_J_CLAIM_PATH_COLLISION:${id}`);
+  }
+  rows.set(id, { key: path, value });
+};
+
+const projectJClaimPathRows = (
+  owner: string,
+  account: string,
+  roots: readonly [string, string],
+  entries: ReadonlyMap<string, StoredJClaimEntry>,
+): readonly Readonly<{ key: Buffer; value: Buffer }>[] => {
+  const rows = new Map<string, Readonly<{ key: Buffer; value: Buffer }>>();
+  const reached = new Set<string>();
+  const stack = new Set<string>();
+  const visit = (hash: string, side: 0 | 1, previousBit: number): string => {
+    if (stack.has(hash)) throw new Error(`STORAGE_RSCORE_J_CLAIM_CYCLE:${hash}`);
+    const entry = entries.get(hash);
+    if (!entry) throw new Error(`STORAGE_RSCORE_J_CLAIM_NODE_MISSING:${hash}`);
+    if (hashAccountJClaimNode(entry.node) !== hash) {
+      throw new Error(`STORAGE_RSCORE_J_CLAIM_NODE_CORRUPT:${hash}`);
+    }
+    stack.add(hash);
+    reached.add(hash);
+    try {
+      if (entry.node.type === 'leaf') {
+        const key = keyRscoreAccountJClaimPathNode(owner, account, side, {
+          kind: 'leaf',
+          key: entry.node.key,
+        });
+        putJClaimPathRow(rows, key, encodeBuffer(entry.wire));
+        return entry.node.key;
+      }
+      if (entry.node.bit <= previousBit) {
+        throw new Error(`STORAGE_RSCORE_J_CLAIM_BRANCH_ORDER:${previousBit}:${entry.node.bit}`);
+      }
+      const leftKey = visit(entry.node.left, side, entry.node.bit);
+      const rightKey = visit(entry.node.right, side, entry.node.bit);
+      if (
+        accountJClaimKeyBit(leftKey, entry.node.bit) !== 0 ||
+        accountJClaimKeyBit(rightKey, entry.node.bit) !== 1
+      ) {
+        throw new Error(`STORAGE_RSCORE_J_CLAIM_BRANCH_DIRECTION:${entry.node.bit}`);
+      }
+      const key = keyRscoreAccountJClaimPathNode(owner, account, side, {
+        kind: 'branch',
+        bit: entry.node.bit,
+        representativeKey: leftKey,
+      });
+      putJClaimPathRow(rows, key, encodeBuffer(entry.wire));
+      return leftKey;
+    } finally {
+      stack.delete(hash);
+    }
+  };
+  for (const [side, root] of roots.entries()) {
+    if (root !== EMPTY_ACCOUNT_J_CLAIM_ROOT) visit(root, side as 0 | 1, -1);
+  }
+  if (reached.size !== entries.size) {
+    throw new Error(`STORAGE_RSCORE_J_CLAIM_UNREACHABLE:${entries.size - reached.size}`);
+  }
+  return [...rows.values()].sort((left, right) => Buffer.compare(left.key, right.key));
 };
 
 const addEncodedPut = (
@@ -355,21 +477,29 @@ export const prepareRscoreCheckpointStorage = async (
         }
       }
       const jClaimChanges = decodeRscoreJClaimNodeChanges(row[9], 'STORAGE_J_CLAIM_NODES');
+      const storedJClaims = await readStoredJClaimEntries(db, owner, account);
       for (const hash of jClaimChanges.dels) {
+        storedJClaims.entries.delete(hex32(hash));
+      }
+      for (const entry of jClaimChanges.puts) {
+        storedJClaims.entries.set(entry.hash, entry);
+      }
+      const jClaimRows = projectJClaimPathRows(
+        owner,
+        account,
+        jClaimRoots(row[2]),
+        storedJClaims.entries,
+      );
+      for (const key of storedJClaims.keys) {
         const nodeMutation = await prepareBoundedStorageValueMutation(
           db,
-          keyRscoreAccountNode(owner, account, J_CLAIM_NODE_NAMESPACE, 1, hash),
+          key,
           null,
         );
         for (const key of nodeMutation.dels) addDel(puts, dels, key);
       }
-      for (const entry of jClaimChanges.puts) {
-        const hash = Buffer.from(entry.hash.slice(2), 'hex');
-        const nodeMutation = await prepareBoundedStorageValueMutation(
-          db,
-          keyRscoreAccountNode(owner, account, J_CLAIM_NODE_NAMESPACE, 1, hash),
-          encodeBuffer(entry.wire),
-        );
+      for (const entry of jClaimRows) {
+        const nodeMutation = await prepareBoundedStorageValueMutation(db, entry.key, entry.value);
         for (const key of nodeMutation.dels) addDel(puts, dels, key);
         for (const put of nodeMutation.puts) addEncodedPut(puts, dels, put.key, put.value);
       }
@@ -418,22 +548,21 @@ const jClaimNodeValues = async (
   db: RuntimeDbLike,
   owner: string,
   account: string,
+  header: unknown,
 ): Promise<RscoreWireValue[]> => {
-  const values: RscoreWireValue[] = [];
-  const prefix = keyRscoreAccountNodePrefix(owner, account, J_CLAIM_NODE_NAMESPACE, 1);
-  for await (const key of iterateKeys(db, { prefix })) {
-    const raw = await readBoundedEncodedValue(db, key);
-    if (!raw) throw new Error(`STORAGE_RSCORE_J_CLAIM_NODE_MISSING:${key.toString('hex')}`);
-    const wire = rscoreCheckpointTuple(decodeBuffer(raw), 2, 'STORED_J_CLAIM_NODE');
-    const storedHash = key.subarray(prefix.byteLength);
-    const wireHash = rscoreCheckpointBytes(wire[0], 32, 'STORED_J_CLAIM_NODE_HASH');
-    if (!buffersEqual(storedHash, Buffer.from(wireHash))) {
-      throw new Error(`STORAGE_RSCORE_J_CLAIM_NODE_KEY_MISMATCH:${key.toString('hex')}`);
-    }
-    values.push(wire);
+  const stored = await readStoredJClaimEntries(db, owner, account);
+  const expected = projectJClaimPathRows(owner, account, jClaimRoots(header), stored.entries);
+  const actualKeys = stored.keys.map(key => key.toString('hex')).sort();
+  const expectedKeys = expected.map(row => row.key.toString('hex')).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    throw new Error(`STORAGE_RSCORE_J_CLAIM_PATH_SET_MISMATCH:${account}`);
   }
-  decodeRscoreExactJClaimNodes(values, 'STORED_J_CLAIM_NODES');
-  return values;
+  return [...stored.entries.values()]
+    .sort((left, right) => left.hash.localeCompare(right.hash))
+    .map(entry => entry.wire as RscoreWireValue[]);
 };
 
 const leafValues = async (
@@ -494,7 +623,7 @@ export const loadRscoreCheckpoint = async (
       await leafValues(db, owner, account, 3),
       await leafValues(db, owner, account, 4),
       await leafValues(db, owner, account, 5),
-      await jClaimNodeValues(db, owner, account),
+      await jClaimNodeValues(db, owner, account, accountMeta[1]),
       accountMeta[2],
     ] as RscoreWireValue[]);
   }

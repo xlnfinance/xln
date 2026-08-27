@@ -9,9 +9,12 @@ import {
   KEY_LIVE_ENTITY,
   decodeEntityId,
   hexBytes,
-  keyCertifiedBoardNode,
-  keyConsumptionNode,
-  keyAccountJClaimNode,
+  keyCertifiedBoardNodePrefix,
+  keyCertifiedBoardPathNode,
+  keyAccountJClaimNodePrefix,
+  keyAccountJClaimPathNode,
+  keySnapshotGraphPrefix,
+  parseSnapshotGraphKey,
   keyFrame,
   keyLiveAccount,
   keyLiveAccountPrefix,
@@ -39,7 +42,7 @@ import {
   createSnapshotAccountGraphView,
   createSnapshotEntityGraphView,
 } from '../database/snapshot-graph-view';
-import { iterateKeys, readRawOrNull, readValidatedOrNull } from '../database/level';
+import { iterateKeys, readValidatedOrNull } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
 import { compareAscii } from '../../support/collections/sorted-map-index';
 import { hydrateEntityStateFromStorage } from './projections';
@@ -50,33 +53,25 @@ import {
   hashCertifiedBoardNode,
 } from '../../jurisdiction/machine/board-registry';
 import {
-  EMPTY_CONSUMPTION_ROOT,
-  hashConsumptionNode,
-} from '../../entity/consumption/consumption-accumulator';
-import {
-  collectReachableConsumptionNodes,
-  getConsumptionNodeStore,
-} from '../../entity/consumption/consumption-store';
-import {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
   type AccountJClaimAccumulatorState,
+  type AccountJClaimNode,
 } from '../../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../../entity/account/account-j-claim-node-store';
 import { validateEntityReplicaMetadata } from '../../entity/replica/replica-validation';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
-  validateAccountJClaimNodeValue,
-  validateCertifiedBoardNodeValue,
-  validateConsumptionNodeValue,
+  validatePersistedAccountJClaimPathNode,
+  validatePersistedCertifiedBoardPathNode,
   validateStorageAccountDocValue,
   validateStorageFrameRecordValue,
   validateStorageHeadValue,
 } from '../schema/authoritative-schema';
 import { readSnapshotBookGraph, readStorageBookGraph } from './book-graph';
-import { readRuntimeOutputPayloads } from '../wal/outbox-payload';
+import { readRuntimeOutputRows } from '../wal/outbox-payload';
 import { readEntityContextPayloads } from '../wal/entity-context-payload';
 import { readRuntimeMachineGraph } from '../wal/runtime-machine-graph';
 import type {
@@ -114,82 +109,178 @@ const assertEntityDocKeyBinding = (
   return doc ? assertStorageEntityDocBinding(doc, expectedEntityId, scope) : null;
 };
 
+type StoredBinaryPatriciaNode =
+  | Readonly<{ type: 'leaf'; key: string }>
+  | Readonly<{ type: 'branch'; bit: number; left: string; right: string }>;
+
+type PathNodeGroup<TNode extends StoredBinaryPatriciaNode> = Readonly<{
+  scope: Buffer;
+  nodes: Map<string, TNode>;
+  keys: Map<string, Buffer>;
+}>;
+
+const readPathNodeGroups = async <TNode extends StoredBinaryPatriciaNode>(options: {
+  db: RuntimeDbLike;
+  livePrefix: Buffer;
+  scopeBytes: number;
+  snapshotHeight?: number;
+  validate: (value: unknown) => Readonly<{ hash: string; node: TNode }>;
+  hashNode: (node: TNode) => string;
+  code: string;
+}): Promise<PathNodeGroup<TNode>[]> => {
+  const physicalPrefix = options.snapshotHeight === undefined
+    ? options.livePrefix
+    : keySnapshotGraphPrefix(options.snapshotHeight, options.livePrefix);
+  const groups = new Map<string, { scope: Buffer; nodes: Map<string, TNode>; keys: Map<string, Buffer> }>();
+  for await (const physicalKey of iterateKeys(options.db, { prefix: physicalPrefix })) {
+    const liveKey = options.snapshotHeight === undefined
+      ? physicalKey
+      : parseSnapshotGraphKey(physicalKey).liveKey;
+    if (liveKey.byteLength <= options.scopeBytes || liveKey[0] !== options.livePrefix[0]) {
+      throw new Error(`${options.code}_KEY_INVALID:${liveKey.toString('hex')}`);
+    }
+    const scope = liveKey.subarray(0, options.scopeBytes);
+    const scopeHex = scope.toString('hex');
+    const group = groups.get(scopeHex) ?? {
+      scope,
+      nodes: new Map<string, TNode>(),
+      keys: new Map<string, Buffer>(),
+    };
+    const row = decodeValidatedBuffer(await options.db.get(physicalKey), options.validate);
+    const actual = options.hashNode(row.node);
+    if (actual !== row.hash) throw new Error(`${options.code}_CORRUPT:${row.hash}:${actual}`);
+    const previous = group.nodes.get(row.hash);
+    if (previous) throw new Error(`${options.code}_DUPLICATE_HASH:${row.hash}`);
+    group.nodes.set(row.hash, row.node);
+    group.keys.set(row.hash, liveKey);
+    groups.set(scopeHex, group);
+  }
+  return [...groups.values()].sort((left, right) => Buffer.compare(left.scope, right.scope));
+};
+
+const hydratePathNodeRoot = <TNode extends StoredBinaryPatriciaNode>(options: {
+  groups: readonly PathNodeGroup<TNode>[];
+  root: string;
+  target: Map<string, TNode>;
+  keyForPath: (scope: Buffer, path: Readonly<
+    { kind: 'leaf'; key: string } | { kind: 'branch'; bit: number; representativeKey: string }
+  >) => Buffer;
+  hashNode: (node: TNode) => string;
+  code: string;
+}): void => {
+  const group = options.groups.find(candidate => candidate.nodes.has(options.root));
+  if (!group) throw new Error(`${options.code}_MISSING:${options.root}`);
+  const stack = new Set<string>();
+  const reached = new Set<string>();
+  const visit = (hash: string, previousBit: number): string => {
+    if (stack.has(hash)) throw new Error(`${options.code}_CYCLE:${hash}`);
+    const node = group.nodes.get(hash);
+    if (!node) throw new Error(`${options.code}_MISSING:${hash}`);
+    const actual = options.hashNode(node);
+    if (actual !== hash) throw new Error(`${options.code}_CORRUPT:${hash}:${actual}`);
+    reached.add(hash);
+    stack.add(hash);
+    try {
+      let representativeKey: string;
+      const path = node.type === 'leaf'
+        ? { kind: 'leaf' as const, key: node.key }
+        : (() => {
+            if (!Number.isSafeInteger(node.bit) || node.bit <= previousBit || node.bit > 255) {
+              throw new Error(`${options.code}_BRANCH_ORDER_INVALID:${previousBit}:${String(node.bit)}`);
+            }
+            representativeKey = visit(node.left, node.bit);
+            const rightKey = visit(node.right, node.bit);
+            const bitAt = (key: string): number => {
+              const offset = 2 + Math.floor(node.bit / 8) * 2;
+              const byte = Number.parseInt(key.slice(offset, offset + 2), 16);
+              return (byte >> (7 - (node.bit % 8))) & 1;
+            };
+            if (bitAt(representativeKey) !== 0 || bitAt(rightKey) !== 1) {
+              throw new Error(`${options.code}_BRANCH_DIRECTION_INVALID:${node.bit}`);
+            }
+            return { kind: 'branch' as const, bit: node.bit, representativeKey };
+          })();
+      const storedKey = group.keys.get(hash);
+      const expectedKey = options.keyForPath(group.scope, path);
+      if (!storedKey?.equals(expectedKey)) {
+        throw new Error(
+          `${options.code}_PATH_MISMATCH:${hash}:` +
+          `stored=${storedKey?.toString('hex') ?? 'missing'}:expected=${expectedKey.toString('hex')}`,
+        );
+      }
+      options.target.set(hash, node);
+      return node.type === 'leaf' ? node.key : representativeKey!;
+    } finally {
+      stack.delete(hash);
+    }
+  };
+  visit(options.root, -1);
+  if (reached.size !== group.nodes.size) {
+    throw new Error(`${options.code}_UNREACHABLE:${group.nodes.size - reached.size}`);
+  }
+};
+
 export const hydrateCertifiedBoardRootNodesFromStorage = async (
   env: RuntimeReplica,
   db: RuntimeDbLike,
   root: string | undefined,
+  snapshotHeight?: number,
 ): Promise<void> => {
   if (!root || root === EMPTY_CERTIFIED_BOARD_ROOT) return;
-  const store = getCertifiedBoardNodeStore(env);
-  const pending = [root];
-  const visited = new Set<string>();
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    if (visited.has(hash)) continue;
-    if (visited.size > 1_000_000) throw new Error('CERTIFIED_BOARD_DAG_OVERSIZED');
-    visited.add(hash);
-    let node = store.get(hash);
-    if (!node) {
-      const raw = await readRawOrNull(db, keyCertifiedBoardNode(hash));
-      if (!raw) throw new Error(`CERTIFIED_BOARD_NODE_MISSING:${hash}`);
-      node = decodeValidatedBuffer(raw, validateCertifiedBoardNodeValue);
-      store.set(hash, node);
-    }
-    const actual = hashCertifiedBoardNode(node);
-    if (actual !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}:${actual}`);
-    if (node.type === 'branch') pending.push(node.left, node.right);
-  }
-};
-
-export const hydrateConsumptionRootNodesFromStorage = async (
-  env: RuntimeReplica,
-  db: RuntimeDbLike,
-  state: NonNullable<EntityState['consumptionAccumulator']> | undefined,
-): Promise<void> => {
-  if (!state || state.root === EMPTY_CONSUMPTION_ROOT) return;
-  const store = getConsumptionNodeStore(env);
-  const pending = [state.root];
-  const visited = new Set<string>();
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    if (visited.has(hash)) continue;
-    visited.add(hash);
-    let node = store.get(hash);
-    if (!node) {
-      const raw = await readRawOrNull(db, keyConsumptionNode(hash));
-      if (!raw) throw new Error(`CONSUMPTION_NODE_MISSING:${hash}`);
-      node = decodeValidatedBuffer(raw, validateConsumptionNodeValue);
-      store.set(hash, node);
-    }
-    const actual = hashConsumptionNode(node);
-    if (actual !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}:${actual}`);
-    if (node.type === 'branch') pending.push(node.left, node.right);
-  }
-  collectReachableConsumptionNodes(store, [state]);
+  const groups = await readPathNodeGroups({
+    db,
+    livePrefix: keyCertifiedBoardNodePrefix(),
+    scopeBytes: 33,
+    ...(snapshotHeight === undefined ? {} : { snapshotHeight }),
+    validate: validatePersistedCertifiedBoardPathNode,
+    hashNode: hashCertifiedBoardNode,
+    code: 'CERTIFIED_BOARD_PATH_NODE',
+  });
+  hydratePathNodeRoot({
+    groups,
+    root,
+    target: getCertifiedBoardNodeStore(env),
+    keyForPath: (scope, path) => keyCertifiedBoardPathNode(decodeEntityId(scope.subarray(1)), path),
+    hashNode: hashCertifiedBoardNode,
+    code: 'CERTIFIED_BOARD_PATH_NODE',
+  });
 };
 
 export const hydrateAccountJClaimRootNodesFromStorage = async (
   env: RuntimeReplica,
   db: RuntimeDbLike,
   states: readonly AccountJClaimAccumulatorState[],
+  snapshotHeight?: number,
 ): Promise<void> => {
-  const store = getAccountJClaimNodeStore(env);
-  const pending = states.filter((state) => state.root !== EMPTY_ACCOUNT_J_CLAIM_ROOT).map((state) => state.root);
-  const visited = new Set<string>();
-  while (pending.length > 0) {
-    const hash = pending.pop()!;
-    if (visited.has(hash)) continue;
-    visited.add(hash);
-    let node = store.get(hash);
-    if (!node) {
-      const raw = await readRawOrNull(db, keyAccountJClaimNode(hash));
-      if (!raw) throw new Error(`ACCOUNT_J_CLAIM_NODE_MISSING:${hash}`);
-      node = decodeValidatedBuffer(raw, validateAccountJClaimNodeValue);
-      store.set(hash, node);
-    }
-    const actual = hashAccountJClaimNode(node);
-    if (actual !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actual}`);
-    if (node.type === 'branch') pending.push(node.left, node.right);
+  const groups = await readPathNodeGroups({
+    db,
+    livePrefix: keyAccountJClaimNodePrefix(),
+    scopeBytes: 66,
+    ...(snapshotHeight === undefined ? {} : { snapshotHeight }),
+    validate: validatePersistedAccountJClaimPathNode,
+    hashNode: hashAccountJClaimNode,
+    code: 'ACCOUNT_J_CLAIM_PATH_NODE',
+  });
+  const store = getAccountJClaimNodeStore(env) as Map<string, AccountJClaimNode>;
+  for (const state of states) {
+    if (state.root === EMPTY_ACCOUNT_J_CLAIM_ROOT) continue;
+    hydratePathNodeRoot({
+      groups,
+      root: state.root,
+      target: store,
+      keyForPath: (scope, path) => {
+        const side = scope[65];
+        if (side !== 0 && side !== 1) throw new Error('ACCOUNT_J_CLAIM_PATH_NODE_SIDE_INVALID');
+        return keyAccountJClaimPathNode(
+          decodeEntityId(scope.subarray(1, 33)),
+          decodeEntityId(scope.subarray(33, 65)),
+          side,
+          path,
+        );
+      },
+      hashNode: hashAccountJClaimNode,
+      code: 'ACCOUNT_J_CLAIM_PATH_NODE',
+    });
   }
   collectReachableAccountJClaimNodes(store, states);
 };
@@ -200,11 +291,11 @@ const hydrateEntityWithCertifiedBoardNodes = async (
   core: StorageEntityCoreDoc,
   accounts: Map<string, StorageAccountDoc>,
   books: Map<string, BookState>,
+  snapshotHeight?: number,
 ): Promise<EntityState> => {
   const state = hydrateEntityStateFromStorage({ core, accounts, books });
   const root = state.certifiedBoardState?.boardRegistryRoot;
-  await hydrateCertifiedBoardRootNodesFromStorage(env, db, root);
-  await hydrateConsumptionRootNodesFromStorage(env, db, state.consumptionAccumulator);
+  await hydrateCertifiedBoardRootNodesFromStorage(env, db, root, snapshotHeight);
   await hydrateAccountJClaimRootNodesFromStorage(
     env,
     db,
@@ -212,6 +303,7 @@ const hydrateEntityWithCertifiedBoardNodes = async (
       account.state.leftPendingJClaims,
       account.state.rightPendingJClaims,
     ]),
+    snapshotHeight,
   );
   return state;
 };
@@ -251,15 +343,14 @@ export const readStorageFramePayloads = async (
   options?: { includeRuntimeMachine?: boolean },
 ): Promise<RuntimeFramePayloads> => {
   const targetHeight = frame.height;
-  const runtimeOutputs = frame.runtimeOutputRefs?.length
-    ? await readRuntimeOutputPayloads(
-      db,
-      frame.runtimeOutputRefs,
-    )
-    : [];
+  const runtimeOutputs = await readRuntimeOutputRows(db, targetHeight, {
+    count: frame.runtimeOutputCount,
+    digest: frame.runtimeOutputsDigest,
+  });
   const entityContexts = frame.entityContextRefs?.size
     ? await readEntityContextPayloads(
       db,
+      targetHeight,
       frame.entityContextRefs,
     )
     : new Map();
@@ -680,6 +771,7 @@ const hydrateEntityStatesFromDocs = async (
   env: RuntimeReplica,
   db: RuntimeDbLike,
   docs: Map<string, StorageDoc>,
+  snapshotHeight?: number,
 ): Promise<Map<string, EntityState>> => {
   const cores = new Map<string, StorageEntityCoreDoc>();
   const accounts = new Map<string, Map<string, StorageAccountDoc>>();
@@ -707,6 +799,7 @@ const hydrateEntityStatesFromDocs = async (
       core,
       accounts.get(entityId) ?? new Map(),
       books.get(entityId) ?? new Map(),
+      snapshotHeight,
     ));
   }
   return states;
@@ -1150,7 +1243,7 @@ export const loadEntityStateFromStorage = async (options: {
     }
   }
 
-  return hydrateEntityWithCertifiedBoardNodes(options.env, db, core.value, accounts, books);
+  return hydrateEntityWithCertifiedBoardNodes(options.env, db, core.value, accounts, books, targetHeight);
 };
 
 export const loadEntityStatesAtHeightFromStorage = async (options: {
@@ -1198,6 +1291,6 @@ export const loadEntityStatesAtHeightFromStorage = async (options: {
     'entity-states',
   );
   const docs = await loadSnapshotDocsAtHeight(db, targetHeight);
-  return hydrateEntityStatesFromDocs(options.env, db, docs);
+  return hydrateEntityStatesFromDocs(options.env, db, docs, targetHeight);
 };
 import { Buffer } from '../../support/platform-crypto';

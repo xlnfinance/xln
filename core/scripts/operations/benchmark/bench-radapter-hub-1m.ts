@@ -267,8 +267,6 @@ const makeAccount = async (
       prevFrameHash: height === 0 ? 'genesis' : `0x${'00'.repeat(32)}`,
       accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: `0x${'00'.repeat(32)}`,
-      byLeft: firstEntity === leftEntity,
-      deltas: [],
     },
     currentHeight: height,
     rollbackCount: 0,

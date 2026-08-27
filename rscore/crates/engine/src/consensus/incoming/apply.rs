@@ -6,21 +6,27 @@
 //! reproduces the exact account state root and frame hash the peer signed.
 
 use crate::consensus::frame::hash::AccountFrame;
-use crate::consensus::proposal::propose::{WindowExecution, collect_frame_deltas, execute_window};
+use crate::consensus::proposal::propose::{WindowExecution, execute_window};
 use crate::consensus::replica::AccountConsensus;
-use crate::consensus::signing::{SigningIdentity, verify_frame_hanko};
+use crate::consensus::signing::{
+    CertifiedBoardAuthority, SigningIdentity, verify_ack_hanko_with_authority,
+    verify_frame_hanko_with_authority,
+};
 use crate::dispute::{
     counterparty_dispute_requirement_error, proof_body_hash, validate_counterparty_dispute_hash,
-    validate_counterparty_dispute_shape, verify_counterparty_dispute,
+    validate_counterparty_dispute_shape, verify_counterparty_dispute_with_authority,
 };
 use crate::error::StateError;
 use crate::input::mempool::ACCOUNT_MEMPOOL_SIZE;
 use crate::{AccountExecutionContext, AccountOutput, Side};
 
 use super::types::{
-    AccountPeerEnvelope, FrameAckOutcome, FrameAckPhase, IncomingAck, IncomingFrame,
-    validate_peer_envelope,
+    AccountPeerEnvelope, BoardHankoRefreshInput, FrameAckOutcome, FrameAckPhase, IncomingAck,
+    IncomingFrame, StandaloneInputOutcome, validate_peer_envelope,
 };
+
+use super::deadline::incoming_deadline_violation;
+pub use super::deadline::{HtlcEvidenceSecret, IncomingDeadlineViolation};
 
 /// `ACCOUNT_NETWORK_ALLOWANCE_MS` (core/account/consensus/constants.ts). A peer
 /// chooses its own frame timestamp, so a frame from the future could satisfy
@@ -31,6 +37,7 @@ const MAX_FRAME_FUTURE_SKEW_MS: u64 = 30_000;
 /// `MAX_ACCOUNT_FRAME_TXS` (core/account/consensus/frame/hash.ts), which is
 /// the mempool bound.
 const MAX_ACCOUNT_FRAME_TXS: usize = ACCOUNT_MEMPOOL_SIZE;
+const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// The receiver's own clock, which is what decides whether a lock has expired.
 ///
@@ -42,6 +49,26 @@ const MAX_ACCOUNT_FRAME_TXS: usize = ACCOUNT_MEMPOOL_SIZE;
 pub struct ReceiverClock {
     pub entity_timestamp: u64,
     pub finalized_j_height: u64,
+}
+
+/// Parent-owned verification context shared by both phases of `frame_ack`.
+#[derive(Clone, Copy, Debug)]
+pub struct IncomingFrameSecurityContext<'a> {
+    pub clock: ReceiverClock,
+    pub peer_certified_board_authority: Option<&'a CertifiedBoardAuthority>,
+    /// Parent-certified authority for the Account owner. Kept separate from
+    /// the untrusted sender's record because duplicate ACKs authenticate our
+    /// persisted historical Hanko, not the peer's proposal Hanko.
+    pub local_certified_board_authority: Option<&'a CertifiedBoardAuthority>,
+}
+
+/// Authenticated frame evidence retained when the deadline policy requires a
+/// dispute instead of accepting or rejecting the peer frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignedIncomingFrame {
+    pub frame: AccountFrame,
+    pub state_hash: [u8; 32],
+    pub frame_hanko: Vec<u8>,
 }
 
 /// The exact canonical frame whose bilateral commit an input completed.
@@ -111,6 +138,15 @@ pub enum IncomingOutcome {
         height: u64,
         current_height: u64,
     },
+    /// The peer supplied a valid signed secret, but too little enforcement
+    /// window remains to commit it off-chain safely. Runtime must open the
+    /// canonical dispute with this exact evidence; treating it as an ordinary
+    /// rejection can strand a valid preimage until expiry.
+    DisputeRequired {
+        reason: String,
+        evidence_secrets: Vec<HtlcEvidenceSecret>,
+        signed_frame: Box<SignedIncomingFrame>,
+    },
     Rejected {
         reason: String,
     },
@@ -124,7 +160,8 @@ pub enum AckOutcome {
         height: u64,
         state_hash: [u8; 32],
         outputs: Vec<AccountOutput>,
-        /// The pending frame's own events, released with its outputs.
+        /// Canonical acknowledgement event. Transaction handler events were
+        /// speculative and are not replayed into the ACK's Entity frame.
         events: Vec<String>,
         /// Boxed: an ACK outcome is mostly the tiny stale/rejected cases, and
         /// the committed frame is the only large thing in the enum.
@@ -151,6 +188,318 @@ fn ack_rejected(reason: impl Into<String>) -> AckOutcome {
     }
 }
 
+fn reusable_duplicate_ack_hanko(
+    local_hanko: Option<&[u8]>,
+    account_owner: &[u8; 32],
+    identity: &SigningIdentity,
+    state_hash: &[u8; 32],
+    height: u64,
+    clock: ReceiverClock,
+    local_authority: Option<&CertifiedBoardAuthority>,
+) -> Result<Vec<u8>, StateError> {
+    if identity.entity_id() != account_owner {
+        return Err(StateError::Signing(format!(
+            "DUPLICATE_ACK_LOCAL_IDENTITY_MISMATCH:height={height}"
+        )));
+    }
+    let hanko = local_hanko.ok_or_else(|| {
+        StateError::Signing(format!(
+            "DUPLICATE_ACK_LOCAL_COMMITTED_FRAME_HANKO_MISSING:height={height}"
+        ))
+    })?;
+    if let Some(authority) = local_authority {
+        authority.assert_entity(account_owner)?;
+    }
+    verify_ack_hanko_with_authority(
+        hanko,
+        state_hash,
+        account_owner,
+        local_authority,
+        clock.entity_timestamp,
+    )
+    .map_err(|error| {
+        StateError::Signing(format!(
+            "DUPLICATE_ACK_LOCAL_COMMITTED_FRAME_HANKO_INVALID:height={height}:{error}"
+        ))
+    })?;
+    Ok(hanko.to_vec())
+}
+
+fn standalone_rejected(reason: impl Into<String>) -> StandaloneInputOutcome {
+    StandaloneInputOutcome::Rejected {
+        reason: reason.into(),
+    }
+}
+
+/// Apply a heightless recovery witness. Its proof nonce sequences it; no fake
+/// frame height is introduced solely to fit the frame/ACK reducer.
+pub fn apply_standalone_dispute(
+    account: &mut AccountConsensus,
+    envelope: &AccountPeerEnvelope,
+    clock: ReceiverClock,
+    dispute: crate::CounterpartyDispute,
+    authority: Option<&CertifiedBoardAuthority>,
+) -> Result<StandaloneInputOutcome, StateError> {
+    if let Err(error) = validate_peer_envelope(account, envelope) {
+        return Ok(standalone_rejected(error.to_string()));
+    }
+    if let Some(authority) = authority {
+        authority.assert_entity(&envelope.from_entity_id)?;
+    }
+    if let Err(error) = validate_counterparty_dispute_shape(&dispute) {
+        return Ok(standalone_rejected(error.to_string()));
+    }
+    if let Err(error) = verify_counterparty_dispute_with_authority(
+        account.replica(),
+        &envelope.from_entity_id,
+        &dispute,
+        authority,
+        clock.entity_timestamp,
+        true,
+    ) {
+        return Ok(standalone_rejected(error.to_string()));
+    }
+    if let Some(reason) = counterparty_dispute_requirement_error(
+        account.dispute().map(|draft| &draft.proof_body_hash),
+        account.counterparty_dispute(),
+        account.replica().state().j_nonce(),
+        Some(&dispute),
+    ) {
+        return Ok(standalone_rejected(reason));
+    }
+    account.store_counterparty_dispute(dispute);
+    Ok(StandaloneInputOutcome::Applied { events: Vec::new() })
+}
+
+#[derive(Clone, Copy)]
+struct StoredBoardHankoRefresh {
+    activation_j_height: u64,
+    activation_log_index: u64,
+    frame_height: u64,
+    frame_hash: [u8; 32],
+}
+
+fn canonical_u64(
+    fields: &[(String, xln_rscore_protocol::CanonicalValue)],
+    name: &str,
+) -> Result<u64, StateError> {
+    let Some((_, xln_rscore_protocol::CanonicalValue::Number(value))) =
+        fields.iter().find(|(field, _)| field == name)
+    else {
+        return Err(StateError::Envelope(format!(
+            "COUNTERPARTY_BOARD_HANKO_REFRESH_FIELD:{name}"
+        )));
+    };
+    value
+        .as_str()
+        .parse::<u64>()
+        .map_err(|_| StateError::Envelope(format!("COUNTERPARTY_BOARD_HANKO_REFRESH_U64:{name}")))
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
+}
+
+fn stored_board_hanko_refresh(
+    account: &AccountConsensus,
+) -> Result<Option<StoredBoardHankoRefresh>, StateError> {
+    let Some(value) = account
+        .replica()
+        .envelope()
+        .field("counterpartyBoardHankoRefresh")
+    else {
+        return Ok(None);
+    };
+    let xln_rscore_protocol::CanonicalValue::Object(fields) = value else {
+        return Err(StateError::Envelope(
+            "COUNTERPARTY_BOARD_HANKO_REFRESH_OBJECT".to_string(),
+        ));
+    };
+    let Some((_, xln_rscore_protocol::CanonicalValue::String(frame_hash))) =
+        fields.iter().find(|(field, _)| field == "frameHash")
+    else {
+        return Err(StateError::Envelope(
+            "COUNTERPARTY_BOARD_HANKO_REFRESH_FIELD:frameHash".to_string(),
+        ));
+    };
+    Ok(Some(StoredBoardHankoRefresh {
+        activation_j_height: canonical_u64(fields, "activationJHeight")?,
+        activation_log_index: canonical_u64(fields, "activationLogIndex")?,
+        frame_height: canonical_u64(fields, "frameHeight")?,
+        frame_hash: crate::parse_root_hex(frame_hash).ok_or_else(|| {
+            StateError::Envelope("COUNTERPARTY_BOARD_HANKO_REFRESH_FRAME_HASH".to_string())
+        })?,
+    }))
+}
+
+fn refresh_metadata(
+    input: &BoardHankoRefreshInput,
+) -> Result<xln_rscore_protocol::CanonicalValue, StateError> {
+    let number = |value| {
+        xln_rscore_protocol::CanonicalNumber::try_from_u64(value)
+            .map(xln_rscore_protocol::CanonicalValue::Number)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    };
+    Ok(xln_rscore_protocol::CanonicalValue::Object(vec![
+        (
+            "activationJHeight".to_string(),
+            number(input.board_activation_j_height)?,
+        ),
+        (
+            "activationLogIndex".to_string(),
+            number(input.board_activation_log_index)?,
+        ),
+        ("frameHeight".to_string(), number(input.height)?),
+        (
+            "frameHash".to_string(),
+            xln_rscore_protocol::CanonicalValue::String(format!("0x{}", hex_of(&input.frame_hash))),
+        ),
+    ]))
+}
+
+/// Replace historical witnesses under the current certified board without
+/// manufacturing a new Account frame or changing bilateral money.
+pub fn apply_board_hanko_refresh(
+    account: &mut AccountConsensus,
+    envelope: &AccountPeerEnvelope,
+    clock: ReceiverClock,
+    input: BoardHankoRefreshInput,
+    authority: Option<&CertifiedBoardAuthority>,
+) -> Result<StandaloneInputOutcome, StateError> {
+    if let Err(error) = validate_peer_envelope(account, envelope) {
+        return Ok(standalone_rejected(error.to_string()));
+    }
+    let Some(authority) = authority else {
+        return Ok(standalone_rejected(
+            "ACCOUNT_BOARD_HANKO_REFRESH_CERTIFIED_BOARD_MISSING",
+        ));
+    };
+    authority.assert_entity(&envelope.from_entity_id)?;
+    if input.board_activation_j_height == 0 || input.board_activation_j_height > JS_MAX_SAFE_INTEGER
+    {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_HEIGHT_INVALID:{}",
+            input.board_activation_j_height
+        )));
+    }
+    if input.board_activation_log_index > JS_MAX_SAFE_INTEGER {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:{}",
+            input.board_activation_log_index
+        )));
+    }
+    if input.board_activation_j_height != authority.activated_at_j_height
+        || input.board_activation_log_index != authority.activation_log_index
+    {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_MISMATCH:{}:{}:{}:{}",
+            input.board_activation_j_height,
+            input.board_activation_log_index,
+            authority.activated_at_j_height,
+            authority.activation_log_index
+        )));
+    }
+    if let Some(previous) = stored_board_hanko_refresh(account)? {
+        let not_newer = input.board_activation_j_height < previous.activation_j_height
+            || (input.board_activation_j_height == previous.activation_j_height
+                && input.board_activation_log_index <= previous.activation_log_index);
+        let exact_retry = input.board_activation_j_height == previous.activation_j_height
+            && input.board_activation_log_index == previous.activation_log_index
+            && input.height == previous.frame_height
+            && input.frame_hash == previous.frame_hash;
+        if not_newer && !exact_retry {
+            return Ok(standalone_rejected(format!(
+                "ACCOUNT_BOARD_HANKO_REFRESH_ACTIVATION_ORDER_INVALID:{}:{}:{}:{}",
+                input.board_activation_j_height,
+                input.board_activation_log_index,
+                previous.activation_j_height,
+                previous.activation_log_index
+            )));
+        }
+    }
+    let Some(current) = account.current() else {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_HEIGHT_MISMATCH:{}:{}",
+            input.height,
+            account.current_height()
+        )));
+    };
+    if input.height == 0
+        || input.height > JS_MAX_SAFE_INTEGER
+        || input.height != account.current_height()
+        || input.height != current.frame.height
+    {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_HEIGHT_MISMATCH:{}:{}",
+            input.height,
+            account.current_height()
+        )));
+    }
+    if input.frame_hash != current.state_hash {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_FRAME_HASH_MISMATCH:0x{}:0x{}",
+            hex_of(&input.frame_hash),
+            hex_of(&current.state_hash)
+        )));
+    }
+    let Some(frame_hanko) = input.frame_hanko.as_ref() else {
+        return Ok(standalone_rejected(
+            "ACCOUNT_BOARD_HANKO_REFRESH_FRAME_HANKO_MISSING",
+        ));
+    };
+    if let Err(error) = verify_frame_hanko_with_authority(
+        frame_hanko,
+        &input.frame_hash,
+        &envelope.from_entity_id,
+        Some(authority),
+    ) {
+        return Ok(standalone_rejected(format!(
+            "ACCOUNT_BOARD_HANKO_REFRESH_FRAME_HANKO_INVALID:{error}"
+        )));
+    }
+    if let Some(dispute) = input.dispute.as_ref() {
+        let matches_stored = account.counterparty_dispute().is_some_and(|stored| {
+            dispute.hash == stored.hash
+                && dispute.proof_body_hash == stored.proof_body_hash
+                && dispute.nonce == stored.nonce
+                && dispute.proposer_is_left == stored.proposer_is_left
+        });
+        if !matches_stored {
+            return Ok(standalone_rejected(
+                "ACCOUNT_BOARD_HANKO_REFRESH_DISPUTE_MISMATCH",
+            ));
+        }
+        if let Err(error) = verify_counterparty_dispute_with_authority(
+            account.replica(),
+            &envelope.from_entity_id,
+            dispute,
+            Some(authority),
+            clock.entity_timestamp,
+            false,
+        ) {
+            return Ok(standalone_rejected(format!(
+                "ACCOUNT_BOARD_HANKO_REFRESH_DISPUTE_INVALID:{error}"
+            )));
+        }
+    }
+    let metadata = refresh_metadata(&input)?;
+    account.install_counterparty_board_hanko_refresh(
+        frame_hanko.clone(),
+        input.dispute,
+        metadata,
+    )?;
+    Ok(StandaloneInputOutcome::Applied {
+        events: vec![format!(
+            "🔐 Refreshed Account frame {} Hankos under the current board",
+            input.height
+        )],
+    })
+}
+
 /// Apply a peer's proposal.
 pub fn apply_incoming_frame(
     account: &mut AccountConsensus,
@@ -160,8 +509,38 @@ pub fn apply_incoming_frame(
     incoming: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<IncomingOutcome, StateError> {
+    apply_incoming_frame_with_authority(
+        account,
+        identity,
+        envelope,
+        incoming,
+        swap_market,
+        IncomingFrameSecurityContext {
+            clock,
+            peer_certified_board_authority: None,
+            local_certified_board_authority: None,
+        },
+    )
+}
+
+/// Apply a peer proposal against the exact current certified board supplied
+/// by Entity consensus. This is the production registered-Entity entrypoint.
+pub fn apply_incoming_frame_with_authority(
+    account: &mut AccountConsensus,
+    identity: &SigningIdentity,
+    envelope: &AccountPeerEnvelope,
+    incoming: IncomingFrame,
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+    security: IncomingFrameSecurityContext<'_>,
+) -> Result<IncomingOutcome, StateError> {
+    let clock = security.clock;
+    let peer_authority = security.peer_certified_board_authority;
+    let local_authority = security.local_certified_board_authority;
     if let Err(error) = validate_peer_envelope(account, envelope) {
         return Ok(rejected(error.to_string()));
+    }
+    if let Some(authority) = peer_authority {
+        authority.assert_entity(&envelope.from_entity_id)?;
     }
     let IncomingFrame {
         frame,
@@ -186,10 +565,19 @@ pub fn apply_incoming_frame(
             .current()
             .is_some_and(|committed| committed.state_hash == state_hash)
     {
+        let ack_hanko = reusable_duplicate_ack_hanko(
+            account.local_committed_frame_hanko(),
+            account.replica().owner().as_bytes(),
+            identity,
+            &state_hash,
+            frame.height,
+            clock,
+            local_authority,
+        )?;
         return Ok(IncomingOutcome::Duplicate {
             height: frame.height,
             state_hash,
-            ack_hanko: identity.sign_frame(&state_hash)?,
+            ack_hanko,
             // A re-sent acknowledgement carries the proof the original one
             // did, which the account still holds.
             ack_dispute: account
@@ -216,7 +604,12 @@ pub fn apply_incoming_frame(
     }
     // SECURITY: authenticate before touching any state, exactly as preflight
     // does. An unsigned frame is not evidence of anything.
-    if let Err(error) = verify_frame_hanko(&frame_hanko, &state_hash, &envelope.from_entity_id) {
+    if let Err(error) = verify_frame_hanko_with_authority(
+        &frame_hanko,
+        &state_hash,
+        &envelope.from_entity_id,
+        peer_authority,
+    ) {
         return Ok(rejected(error.to_string()));
     }
     let received_hash = match frame.hash() {
@@ -246,16 +639,56 @@ pub fn apply_incoming_frame(
     // Every input that can still move consensus authenticates the witness
     // here, before replay or collision handling mutates anything.
     if let Some(dispute) = dispute.as_ref()
-        && let Err(error) =
-            verify_counterparty_dispute(account.replica(), &envelope.from_entity_id, dispute)
+        && let Err(error) = verify_counterparty_dispute_with_authority(
+            account.replica(),
+            &envelope.from_entity_id,
+            dispute,
+            peer_authority,
+            clock.entity_timestamp,
+            true,
+        )
     {
         return Ok(rejected(error.to_string()));
     }
 
+    if frame.height != current_height + 1 {
+        return Ok(rejected(format!(
+            "ACCOUNT_PEER_FRAME_HEIGHT_GAP:{}:{current_height}",
+            frame.height
+        )));
+    }
+    if frame.prev_frame_hash != account.prev_frame_hash() {
+        return Ok(rejected(format!(
+            "ACCOUNT_PEER_FRAME_PREV_MISMATCH:{}",
+            frame.prev_frame_hash
+        )));
+    }
+    let proposer = account.replica().owner_side().opposite();
+    if let Some(violation) =
+        incoming_deadline_violation(account.replica().state(), &frame, proposer, clock)
+    {
+        return Ok(match violation {
+            IncomingDeadlineViolation::Reject { reason } => rejected(reason),
+            IncomingDeadlineViolation::Dispute {
+                reason,
+                evidence_secrets,
+            } => IncomingOutcome::DisputeRequired {
+                reason,
+                evidence_secrets,
+                signed_frame: Box::new(SignedIncomingFrame {
+                    frame,
+                    state_hash,
+                    frame_hanko,
+                }),
+            },
+        });
+    }
+
     // Each side may propose once at a height. If both race, the LEFT entity's
     // frame wins: the loser's proposal never acquired the counterparty Hanko
-    // it would need to be enforceable. Nothing is rolled back yet — a frame
-    // that fails validation below must leave our own proposal standing.
+    // it would need to be enforceable. The full chain, certificate and
+    // deadline preflight above runs first, matching TypeScript: malformed
+    // same-height traffic is a rejection, not a collision decision.
     let collides = account
         .pending()
         .is_some_and(|pending| pending.frame.height == frame.height);
@@ -274,28 +707,6 @@ pub fn apply_incoming_frame(
         }
     }
 
-    if frame.height != current_height + 1 {
-        return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_HEIGHT_GAP:{}:{current_height}",
-            frame.height
-        )));
-    }
-    if frame.prev_frame_hash != account.prev_frame_hash() {
-        return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_PREV_MISMATCH:{}",
-            frame.prev_frame_hash
-        )));
-    }
-    if frame.by_left != (account.replica().owner_side() == Side::Right) {
-        // `byLeft` is the proposer's side, and the proposer is our
-        // counterparty. A frame claiming our own side would let one entity
-        // author both directions of the account.
-        return Ok(rejected(format!(
-            "ACCOUNT_PEER_FRAME_BY_LEFT_MISMATCH:{}",
-            frame.by_left
-        )));
-    }
-
     // The committed clock is the peer's — it is what they signed — but
     // enforcement is judged on our own clock, so a backdated frame cannot
     // decide our timeouts for us.
@@ -307,7 +718,6 @@ pub fn apply_incoming_frame(
         frame.j_height,
         std::sync::Arc::clone(swap_market),
     );
-    let proposer = account.replica().owner_side().opposite();
     let execution = execute_window(
         account.replica(),
         proposer,
@@ -339,11 +749,6 @@ pub fn apply_incoming_frame(
     if account_state_root != frame.account_state_root {
         return Ok(rejected("ACCOUNT_PEER_FRAME_STATE_ROOT_MISMATCH"));
     }
-    let derived_deltas = collect_frame_deltas(&candidate);
-    if derived_deltas != frame.deltas {
-        return Ok(rejected("ACCOUNT_PEER_FRAME_DELTAS_MISMATCH"));
-    }
-
     let expected_proof_body_hash = candidate
         .delta_transformer()
         .map(|transformer| proof_body_hash(&candidate, transformer))
@@ -381,7 +786,7 @@ pub fn apply_incoming_frame(
     let ack_dispute = match candidate.delta_transformer().copied() {
         None => None,
         Some(transformer) => {
-            account.refresh_ack_dispute_draft(&candidate, &transformer, frame.by_left)?
+            account.refresh_ack_dispute_draft(&candidate, &transformer, proposer == Side::Left)?
         }
     };
     let domain = candidate.state().identity().domain().clone();
@@ -425,10 +830,36 @@ pub fn apply_incoming_ack(
     envelope: &AccountPeerEnvelope,
     incoming: IncomingAck,
 ) -> Result<AckOutcome, StateError> {
+    apply_incoming_ack_with_authority(
+        account,
+        envelope,
+        ReceiverClock {
+            entity_timestamp: 0,
+            finalized_j_height: 0,
+        },
+        incoming,
+        None,
+    )
+}
+
+/// Apply an ACK as historical evidence for an already-authored pending frame.
+/// The current board always verifies; the exact previous board verifies only
+/// inside its certified grace window. Fresh incoming frames use the separate
+/// current-board-only verifier above.
+pub fn apply_incoming_ack_with_authority(
+    account: &mut AccountConsensus,
+    envelope: &AccountPeerEnvelope,
+    clock: ReceiverClock,
+    incoming: IncomingAck,
+    authority: Option<&CertifiedBoardAuthority>,
+) -> Result<AckOutcome, StateError> {
     if let Err(error) = validate_peer_envelope(account, envelope) {
         return Ok(AckOutcome::Rejected {
             reason: error.to_string(),
         });
+    }
+    if let Some(authority) = authority {
+        authority.assert_entity(&envelope.from_entity_id)?;
     }
     let IncomingAck {
         height,
@@ -464,9 +895,14 @@ pub fn apply_incoming_ack(
         {
             return Ok(ack_rejected(error.to_string()));
         }
-        if let Err(error) =
-            verify_counterparty_dispute(account.replica(), &envelope.from_entity_id, dispute)
-        {
+        if let Err(error) = verify_counterparty_dispute_with_authority(
+            account.replica(),
+            &envelope.from_entity_id,
+            dispute,
+            authority,
+            clock.entity_timestamp,
+            true,
+        ) {
             return Ok(ack_rejected(error.to_string()));
         }
     }
@@ -512,7 +948,13 @@ pub fn apply_incoming_ack(
             reason: "ACCOUNT_PEER_ACK_HASH_MISMATCH".to_string(),
         });
     }
-    if let Err(error) = verify_frame_hanko(&frame_hanko, &frame_hash, &envelope.from_entity_id) {
+    if let Err(error) = verify_ack_hanko_with_authority(
+        &frame_hanko,
+        &frame_hash,
+        &envelope.from_entity_id,
+        authority,
+        clock.entity_timestamp,
+    ) {
         return Ok(ack_rejected(error.to_string()));
     }
     // Their proof of the state this ack commits, kept as it arrived.
@@ -525,7 +967,7 @@ pub fn apply_incoming_ack(
     let domain = pending.candidate.state().identity().domain().clone();
     let outputs = pending.outputs;
     let outputs_by_tx = pending.outputs_by_tx;
-    let events = pending.events;
+    let events = vec![format!("✅ Frame {height} confirmed and committed")];
     account.commit_from_ack(
         pending.candidate,
         &pending.frame,
@@ -550,9 +992,10 @@ pub fn apply_incoming_ack(
 
 /// Apply one canonical `frame_ack` input in ACK-before-proposal order.
 ///
-/// Both phases run against a private Account candidate. A rejection or fault
-/// publishes nothing, including an ACK commit that succeeded before a bad
-/// proposal was examined.
+/// The phases mutate sequentially, exactly like TypeScript. A valid ACK is a
+/// completed bilateral certificate and remains committed even when the bundled
+/// proposal is invalid. Rolling it back would fork the two implementations at
+/// the next height.
 pub fn apply_incoming_frame_ack(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
@@ -562,31 +1005,377 @@ pub fn apply_incoming_frame_ack(
     frame: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
 ) -> Result<FrameAckOutcome, StateError> {
-    let mut candidate = account.clone();
-    let ack = apply_incoming_ack(&mut candidate, envelope, ack)?;
+    apply_incoming_frame_ack_with_authority(
+        account,
+        identity,
+        envelope,
+        ack,
+        frame,
+        swap_market,
+        IncomingFrameSecurityContext {
+            clock,
+            peer_certified_board_authority: None,
+            local_certified_board_authority: None,
+        },
+    )
+}
+
+pub fn apply_incoming_frame_ack_with_authority(
+    account: &mut AccountConsensus,
+    identity: &SigningIdentity,
+    envelope: &AccountPeerEnvelope,
+    ack: IncomingAck,
+    frame: IncomingFrame,
+    swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+    security: IncomingFrameSecurityContext<'_>,
+) -> Result<FrameAckOutcome, StateError> {
+    let ack = apply_incoming_ack_with_authority(
+        account,
+        envelope,
+        security.clock,
+        ack,
+        security.peer_certified_board_authority,
+    )?;
     if let AckOutcome::Rejected { reason } = &ack {
         return Ok(FrameAckOutcome::Rejected {
             phase: FrameAckPhase::Ack,
             reason: reason.clone(),
         });
     }
-    let frame = apply_incoming_frame(
-        &mut candidate,
+    let frame = apply_incoming_frame_with_authority(
+        account,
         identity,
         envelope,
-        clock,
         frame,
         swap_market,
+        security,
     )?;
-    if let IncomingOutcome::Rejected { reason } = &frame {
-        return Ok(FrameAckOutcome::Rejected {
-            phase: FrameAckPhase::Frame,
-            reason: reason.clone(),
-        });
-    }
-    *account = candidate;
     Ok(FrameAckOutcome::Applied {
         ack: Box::new(ack),
         frame: Box::new(frame),
     })
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use super::*;
+    use crate::consensus::signing::{reset_test_sign_frame_calls, test_sign_frame_calls};
+    use crate::verify_dispute_hanko_with_authority;
+    use xln_rscore_hanko::{
+        BoardDelays, BoardMember, SemanticClaim, build_single_signer_hanko, hash_hanko_board_claim,
+    };
+
+    fn board_hash(entity_id: [u8; 32], private_key: &[u8; 32]) -> [u8; 32] {
+        let address = crate::address_of_private_key(private_key).expect("signer address");
+        let mut member_entity = [0_u8; 32];
+        member_entity[12..].copy_from_slice(&address);
+        hash_hanko_board_claim(&SemanticClaim {
+            entity_id,
+            members: vec![BoardMember {
+                entity_id: member_entity,
+                weight: 2,
+            }],
+            threshold: 2,
+            delays: BoardDelays::default(),
+        })
+    }
+
+    #[test]
+    fn duplicate_ack_reuses_verified_bytes_without_invoking_the_signer() {
+        let private_key = [0x31_u8; 32];
+        let digest = [0x47_u8; 32];
+        let identity = SigningIdentity::lazy_from_key(
+            private_key,
+            "duplicate-ack",
+            1,
+            1,
+            BoardDelays::default(),
+        )
+        .expect("identity");
+        let persisted = identity.sign_frame(&digest).expect("initial ACK Hanko");
+        reset_test_sign_frame_calls();
+        let clock = ReceiverClock {
+            entity_timestamp: 1_700_000_000_000,
+            finalized_j_height: 0,
+        };
+
+        let reused = reusable_duplicate_ack_hanko(
+            Some(&persisted),
+            identity.entity_id(),
+            &identity,
+            &digest,
+            7,
+            clock,
+            None,
+        )
+        .expect("verified cached Hanko");
+
+        assert_eq!(reused, persisted);
+        assert_eq!(test_sign_frame_calls(), 0);
+
+        let missing = reusable_duplicate_ack_hanko(
+            None,
+            identity.entity_id(),
+            &identity,
+            &digest,
+            7,
+            clock,
+            None,
+        )
+        .expect_err("missing cached Hanko must fail loud");
+        assert_eq!(
+            missing.to_string(),
+            "ACCOUNT_SIGNING:DUPLICATE_ACK_LOCAL_COMMITTED_FRAME_HANKO_MISSING:height=7"
+        );
+        assert_eq!(test_sign_frame_calls(), 0);
+
+        let corrupt = reusable_duplicate_ack_hanko(
+            Some(&[0_u8]),
+            identity.entity_id(),
+            &identity,
+            &digest,
+            7,
+            clock,
+            None,
+        )
+        .expect_err("corrupt cached Hanko must fail loud");
+        assert!(corrupt.to_string().starts_with(
+            "ACCOUNT_SIGNING:DUPLICATE_ACK_LOCAL_COMMITTED_FRAME_HANKO_INVALID:height=7:"
+        ));
+        assert_eq!(test_sign_frame_calls(), 0);
+    }
+
+    #[test]
+    fn duplicate_ack_accepts_local_previous_board_only_inside_grace_without_signing() {
+        let current_key = [0x31_u8; 32];
+        let previous_key = [0x32_u8; 32];
+        let digest = [0x49_u8; 32];
+        let registered_entity = [0x9c_u8; 32];
+        let identity = SigningIdentity::from_key(
+            current_key,
+            "rotated-local",
+            registered_entity,
+            2,
+            2,
+            BoardDelays::default(),
+        );
+        let persisted = build_single_signer_hanko(
+            &registered_entity,
+            &digest,
+            &previous_key,
+            2,
+            2,
+            BoardDelays::default(),
+        )
+        .expect("previous local ACK Hanko");
+        let valid_until = 1_700_604_800_u64;
+        let local_authority = CertifiedBoardAuthority {
+            entity_id: registered_entity,
+            registered_board_hash: board_hash(registered_entity, &current_key),
+            previous_board_hash: board_hash(registered_entity, &previous_key),
+            previous_board_valid_until: valid_until,
+            activated_at_j_height: 19,
+            activation_log_index: 2,
+        };
+        let clock = |entity_timestamp| ReceiverClock {
+            entity_timestamp,
+            finalized_j_height: 0,
+        };
+        reset_test_sign_frame_calls();
+
+        let reused = reusable_duplicate_ack_hanko(
+            Some(&persisted),
+            &registered_entity,
+            &identity,
+            &digest,
+            7,
+            clock(valid_until * 1_000 - 1),
+            Some(&local_authority),
+        )
+        .expect("previous local board inside grace");
+        assert_eq!(reused, persisted);
+        assert_eq!(test_sign_frame_calls(), 0);
+
+        for entity_timestamp in [valid_until * 1_000, (valid_until + 1) * 1_000] {
+            let expired = reusable_duplicate_ack_hanko(
+                Some(&persisted),
+                &registered_entity,
+                &identity,
+                &digest,
+                7,
+                clock(entity_timestamp),
+                Some(&local_authority),
+            )
+            .expect_err("expired previous local board must fail loud");
+            assert!(expired.to_string().starts_with(
+                "ACCOUNT_SIGNING:DUPLICATE_ACK_LOCAL_COMMITTED_FRAME_HANKO_INVALID:height=7:"
+            ));
+            assert_eq!(test_sign_frame_calls(), 0);
+        }
+    }
+
+    #[test]
+    fn a_registered_threshold_board_verifies_only_against_its_certified_hash() {
+        let private_key = [0x31_u8; 32];
+        let digest = [0x47_u8; 32];
+        let registered_entity = [0x9a_u8; 32];
+        let hanko = build_single_signer_hanko(
+            &registered_entity,
+            &digest,
+            &private_key,
+            2,
+            2,
+            BoardDelays::default(),
+        )
+        .expect("registered hanko");
+        let registered_board_hash = board_hash(registered_entity, &private_key);
+
+        assert!(matches!(
+            verify_frame_hanko_with_authority(&hanko, &digest, &registered_entity, None),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+        verify_frame_hanko_with_authority(
+            &hanko,
+            &digest,
+            &registered_entity,
+            Some(&CertifiedBoardAuthority {
+                entity_id: registered_entity,
+                registered_board_hash,
+                previous_board_hash: [0_u8; 32],
+                previous_board_valid_until: 0,
+                activated_at_j_height: 1,
+                activation_log_index: 0,
+            }),
+        )
+        .expect("certified current board");
+        assert!(matches!(
+            verify_frame_hanko_with_authority(
+                &hanko,
+                &digest,
+                &registered_entity,
+                Some(&CertifiedBoardAuthority {
+                    entity_id: registered_entity,
+                    registered_board_hash: [0x55_u8; 32],
+                    previous_board_hash: [0_u8; 32],
+                    previous_board_valid_until: 0,
+                    activated_at_j_height: 1,
+                    activation_log_index: 0,
+                }),
+            ),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+        let wrong_peer = CertifiedBoardAuthority {
+            entity_id: [0x54_u8; 32],
+            registered_board_hash,
+            previous_board_hash: [0_u8; 32],
+            previous_board_valid_until: 0,
+            activated_at_j_height: 1,
+            activation_log_index: 0,
+        };
+        assert!(matches!(
+            verify_frame_hanko_with_authority(
+                &hanko,
+                &digest,
+                &registered_entity,
+                Some(&wrong_peer),
+            ),
+            Err(StateError::BoardAuthorityPeerMismatch { .. }),
+        ));
+    }
+
+    #[test]
+    fn historical_ack_and_dispute_accept_the_exact_previous_board_before_exclusive_expiry() {
+        let current_key = [0x31_u8; 32];
+        let previous_key = [0x32_u8; 32];
+        let digest = [0x48_u8; 32];
+        let registered_entity = [0x9b_u8; 32];
+        let previous_hanko = build_single_signer_hanko(
+            &registered_entity,
+            &digest,
+            &previous_key,
+            2,
+            2,
+            BoardDelays::default(),
+        )
+        .expect("previous-board hanko");
+        let activated_at_seconds = 1_700_000_000_u64;
+        let valid_until = activated_at_seconds + 7 * 24 * 60 * 60;
+        let authority = CertifiedBoardAuthority {
+            entity_id: registered_entity,
+            registered_board_hash: board_hash(registered_entity, &current_key),
+            previous_board_hash: board_hash(registered_entity, &previous_key),
+            previous_board_valid_until: valid_until,
+            activated_at_j_height: 77,
+            activation_log_index: 4,
+        };
+
+        assert!(matches!(
+            verify_frame_hanko_with_authority(
+                &previous_hanko,
+                &digest,
+                &registered_entity,
+                Some(&authority),
+            ),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+        verify_ack_hanko_with_authority(
+            &previous_hanko,
+            &digest,
+            &registered_entity,
+            Some(&authority),
+            valid_until * 1_000 - 1,
+        )
+        .expect("historical ACK inside grace");
+        assert!(matches!(
+            verify_ack_hanko_with_authority(
+                &previous_hanko,
+                &digest,
+                &registered_entity,
+                Some(&authority),
+                valid_until * 1_000,
+            ),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+        assert!(matches!(
+            verify_ack_hanko_with_authority(
+                &previous_hanko,
+                &digest,
+                &registered_entity,
+                Some(&authority),
+                (valid_until + 1) * 1_000,
+            ),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+        verify_dispute_hanko_with_authority(
+            &previous_hanko,
+            &digest,
+            &registered_entity,
+            Some(&authority),
+            valid_until * 1_000 - 1,
+            true,
+        )
+        .expect("historical proof inside grace");
+        assert!(matches!(
+            verify_dispute_hanko_with_authority(
+                &previous_hanko,
+                &digest,
+                &registered_entity,
+                Some(&authority),
+                valid_until * 1_000,
+                true,
+            ),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+        assert!(matches!(
+            verify_dispute_hanko_with_authority(
+                &previous_hanko,
+                &digest,
+                &registered_entity,
+                Some(&authority),
+                valid_until * 1_000 - 1,
+                false,
+            ),
+            Err(StateError::BoardAuthorityUnavailable),
+        ));
+    }
 }

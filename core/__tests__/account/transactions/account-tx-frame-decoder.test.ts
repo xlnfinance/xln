@@ -16,18 +16,9 @@ const genesisFrame = (accountTxs: unknown[]) => ({
   prevFrameHash: '',
   accountStateRoot: hash,
   stateHash: '',
-  byLeft: true,
-  deltas: [],
 });
 
 describe('signed Account frame transaction decoder', () => {
-  test('requires the signed bilateral proposer side', () => {
-    const { byLeft: _byLeft, ...missingSide } = genesisFrame([]);
-    expect(() => decodeAccountFrame(missingSide)).toThrow(
-      'AccountFrame.fields:missing=byLeft',
-    );
-  });
-
   test('rejects malformed money payloads and unknown or extra fields', () => {
     expect(() => decodeTx({
       type: 'direct_payment',
@@ -158,11 +149,11 @@ describe('signed Account frame transaction decoder', () => {
     expect(() => decodeAccountFrame({
       ...genesisFrame([]),
       deltas: false,
-    })).toThrow('AccountFrame.deltas');
+    })).toThrow('AccountFrame.fields');
     expect(() => decodeAccountFrame({
       ...genesisFrame([]),
       byLeft: 'left',
-    })).toThrow('AccountFrame.byLeft');
+    })).toThrow('AccountFrame.fields');
   });
 
   test('requires canonical frame hashes at every committed height', () => {

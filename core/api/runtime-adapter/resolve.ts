@@ -226,7 +226,7 @@ type RuntimeAdapterGraphAccountActivity = {
 
 type RuntimeAdapterGraphAccountFrame = Pick<
   StorageAccountDoc['currentFrame'],
-  'height' | 'timestamp' | 'jHeight' | 'prevFrameHash' | 'accountStateRoot' | 'stateHash' | 'byLeft'
+  'height' | 'timestamp' | 'jHeight' | 'prevFrameHash' | 'accountStateRoot' | 'stateHash'
 > & {
   accountTxs: RuntimeAdapterGraphAccountActivity[];
   accountTxCount: number;
@@ -928,7 +928,6 @@ const compactMapTail = <K, V>(value: ReadonlyMap<K, V> | undefined, limit = 20):
 const compactAccountFrameForView = (
   frame: StorageAccountDoc['currentFrame'],
   txLimit = 20,
-  deltaLimit = 100,
 ): StorageAccountDoc['currentFrame'] => ({
   height: frame.height,
   timestamp: frame.timestamp,
@@ -937,8 +936,6 @@ const compactAccountFrameForView = (
   prevFrameHash: frame.prevFrameHash,
   accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
-  byLeft: frame.byLeft,
-  deltas: Array.isArray(frame.deltas) ? frame.deltas.slice(0, deltaLimit) : [],
 });
 
 const compactAccountDocForView = (
@@ -1501,7 +1498,6 @@ const projectGraphAccountFrame = (
   prevFrameHash: frame.prevFrameHash,
   accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
-  byLeft: frame.byLeft,
   accountTxs: projectGraphAccountActivities(frame.accountTxs),
   accountTxCount: frame.accountTxs.length,
 });

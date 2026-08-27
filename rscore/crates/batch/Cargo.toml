@@ -13,6 +13,7 @@ secp256k1 = { version = "0.31.1", features = ["recovery"] }
 sha3.workspace = true
 thiserror.workspace = true
 xln-rscore-engine = { path = "../engine" }
+xln-rscore-abi = { path = "../abi" }
 xln-rscore-protocol = { path = "../protocol" }
 
 [dev-dependencies]

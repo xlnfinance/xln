@@ -13,10 +13,13 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use xln_rscore_engine::{
     AccountConsensus, AccountEnvelope, AccountFrame, AccountIdentity, AccountOutput,
     AccountPeerEnvelope, AccountReplica, AccountState, AccountTx, AckOutcome, BoardDelays,
-    CommittedFrameEvidence, Disposition, FrameAckOutcome, FrameAckPhase, HtlcResolveOutcome,
-    HtlcResolveTx, IncomingAck, IncomingFrame, IncomingOutcome, ProposalOutcome, ReceiverClock,
-    SigningIdentity, StateError, apply_incoming_ack, apply_incoming_frame,
-    apply_incoming_frame_ack, canonical_tx_digest, propose_account_frame,
+    BoardHankoRefreshInput, CertifiedBoardAuthority, CommittedFrameEvidence, CounterpartyDispute,
+    Disposition, FrameAckOutcome, FrameAckPhase, HtlcResolveOutcome, HtlcResolveTx, IncomingAck,
+    IncomingFrame, IncomingFrameSecurityContext, IncomingOutcome, ProposalOutcome, ReceiverClock,
+    SignedIncomingFrame, SigningIdentity, StandaloneInputOutcome, StateError,
+    apply_board_hanko_refresh, apply_incoming_ack_with_authority,
+    apply_incoming_frame_ack_with_authority, apply_incoming_frame_with_authority,
+    apply_standalone_dispute, canonical_tx_digest, propose_account_frame,
 };
 use xln_rscore_protocol::{
     CanonicalNumber, CanonicalValue, PersistentNodeRecord, PersistentNodeRef, PersistentRadixMap,
@@ -30,8 +33,9 @@ use crate::parallel::map_accounts;
 use crate::stateful::MAX_BATCH_WORKERS;
 use crate::{AccountId, AccountSeed, BatchError, CandidateId, EngineGeneration};
 
-/// What arrives for one account. `FrameAck` is one canonical input and cannot
-/// be split into independently committable operations.
+/// What arrives for one account. `FrameAck` is one canonical wire input whose
+/// phases execute ACK-first: a valid ACK commits even if the bundled frame is
+/// rejected, matching the TypeScript bilateral machine.
 #[derive(Clone, Debug)]
 pub enum AccountInputKind {
     Frame(Box<IncomingFrame>),
@@ -40,6 +44,8 @@ pub enum AccountInputKind {
         ack: IncomingAck,
         frame: Box<IncomingFrame>,
     },
+    Dispute(CounterpartyDispute),
+    BoardHankoRefresh(BoardHankoRefreshInput),
 }
 
 #[derive(Clone, Debug)]
@@ -55,7 +61,62 @@ pub struct AccountInputRow {
     /// Trusted owner policy used only when this exact row is an authenticated
     /// H=1 proposal for an Account absent from the resident forest.
     pub genesis_policy: Option<crate::EntityAccountGenesisPolicy>,
+    /// Exact current board hash certified by the parent Entity for the peer.
+    /// It is local verification context, never copied from the peer envelope.
+    pub certified_board_authority: PeerBoardAuthority,
+    /// Exact current/previous board record certified by the parent Entity for
+    /// the Account owner. Duplicate-frame ACK reuse authenticates this local
+    /// historical Hanko independently of the peer authority above.
+    pub local_certified_board_authority: PeerBoardAuthority,
     pub input: AccountPeerInput,
+}
+
+/// Parent-resolved board authority for one untrusted peer input.
+///
+/// `Unresolved` is deliberately distinct from `Lazy`: absence in peer bytes
+/// proves nothing about registration. Only the parent Entity registry may
+/// turn it into `Lazy` or `Certified`, and Account execution fails loudly if
+/// that resolution step was skipped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeerBoardAuthority {
+    Unresolved,
+    Lazy,
+    Certified(CertifiedBoardAuthority),
+}
+
+impl PeerBoardAuthority {
+    pub(crate) fn certified(&self) -> Result<Option<&CertifiedBoardAuthority>, BatchError> {
+        match self {
+            Self::Unresolved => Err(BatchError::BoardAuthorityUnresolved),
+            Self::Lazy => Ok(None),
+            Self::Certified(authority) => Ok(Some(authority)),
+        }
+    }
+}
+
+/// Parent Entity authority lookup. Implementations resolve only from the
+/// Entity-certified registry keyed by the peer; peer AccountInput bytes never
+/// participate in this decision.
+pub trait CertifiedBoardAuthorityResolver {
+    type Error;
+
+    fn resolve_certified_board(
+        &self,
+        peer_entity_id: &[u8; 32],
+    ) -> Result<PeerBoardAuthority, Self::Error>;
+}
+
+impl AccountInputRow {
+    pub fn resolve_certified_boards<R>(&mut self, resolver: &R) -> Result<(), R::Error>
+    where
+        R: CertifiedBoardAuthorityResolver,
+    {
+        self.certified_board_authority =
+            resolver.resolve_certified_board(&self.input.envelope.from_entity_id)?;
+        self.local_certified_board_authority =
+            resolver.resolve_certified_board(&self.input.envelope.to_entity_id)?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +152,11 @@ pub enum AccountInputVerdict {
         height: u64,
         current_height: u64,
     },
+    FrameDisputeRequired {
+        reason: String,
+        evidence_secrets: Vec<xln_rscore_engine::HtlcEvidenceSecret>,
+        signed_frame: SignedIncomingFrame,
+    },
     FrameRejected {
         reason: String,
     },
@@ -115,6 +181,16 @@ pub enum AccountInputVerdict {
     },
     FrameAckRejected {
         phase: FrameAckPhase,
+        reason: String,
+    },
+    DisputeApplied,
+    DisputeRejected {
+        reason: String,
+    },
+    BoardHankoRefreshApplied {
+        events: Vec<String>,
+    },
+    BoardHankoRefreshRejected {
         reason: String,
     },
     /// The account is not in this engine, or its transition faulted. The
@@ -427,6 +503,10 @@ struct TerminalEntityStage {
 #[derive(Clone)]
 pub struct ProposalRow {
     pub account_id: AccountId,
+    /// Exact Entity-local AccountInput authored by Account consensus. Runtime
+    /// may add only the destination signer/runtime route; it must never
+    /// reconstruct domain, dispute config, watch seed, ACK or proposal bytes.
+    pub outbound_input: Option<AccountPeerInput>,
     /// The signed frame, absent when nothing survived the window.
     ///
     /// It carries no outputs: what the frame produced is released with the
@@ -554,32 +634,91 @@ fn dropped_rows(
         .collect()
 }
 
+fn outgoing_account_input(account: &AccountConsensus, proposed: &ProposedRow) -> AccountPeerInput {
+    let replica = account.replica();
+    let envelope = AccountPeerEnvelope {
+        from_entity_id: *replica.owner().as_bytes(),
+        to_entity_id: *replica.counterparty().as_bytes(),
+        domain: replica.state().identity().domain().clone(),
+        dispute_config: replica.state().dispute_config(),
+        watch_seed: Some(replica.state().identity().watch_seed().clone()),
+    };
+    let frame = IncomingFrame {
+        frame: proposed.frame.clone(),
+        state_hash: proposed.state_hash,
+        frame_hanko: Some(proposed.hanko.clone()),
+        dispute: proposed
+            .dispute
+            .as_ref()
+            .map(|draft| xln_rscore_engine::CounterpartyDispute {
+                hanko: None,
+                hash: draft.hash,
+                proof_body_hash: draft.proof_body_hash,
+                nonce: draft.nonce,
+                proposer_is_left: draft.proposer_is_left,
+            }),
+    };
+    let kind = match &proposed.bundled_ack {
+        Some(ack) => AccountInputKind::FrameAck {
+            ack: IncomingAck {
+                height: ack.height,
+                frame_hash: ack.frame_hash,
+                frame_hanko: Some(ack.frame_hanko.clone()),
+                dispute: ack
+                    .dispute
+                    .as_ref()
+                    .map(|draft| xln_rscore_engine::CounterpartyDispute {
+                        hanko: None,
+                        hash: draft.hash,
+                        proof_body_hash: draft.proof_body_hash,
+                        nonce: draft.nonce,
+                        proposer_is_left: draft.proposer_is_left,
+                    }),
+            },
+            frame: Box::new(frame),
+        },
+        None => AccountInputKind::Frame(Box::new(frame)),
+    };
+    AccountPeerInput { envelope, kind }
+}
+
 pub(crate) fn proposal_row(
     account_id: AccountId,
     outcome: ProposalOutcome,
+    account: &AccountConsensus,
 ) -> Result<ProposalRow, BatchError> {
     Ok(match outcome {
         ProposalOutcome::Idle { dropped } => ProposalRow {
             account_id,
+            outbound_input: None,
             proposed: None,
             failed_htlc_locks: failed_htlc_locks(&dropped),
             dropped: dropped_rows(account_id, &dropped)?,
         },
         ProposalOutcome::Proposed(proposed) => {
+            if proposed.dispute_requires_existing_hanko
+                || proposed.bundled_ack_dispute_requires_existing_hanko
+            {
+                return Err(BatchError::OutboundDisputeUnsupported(account_id));
+            }
             let failed_htlc_locks = failed_htlc_locks(&proposed.dropped);
+            let dropped = dropped_rows(account_id, &proposed.dropped)?;
+            let proposed = ProposedRow {
+                frame: proposed.frame,
+                state_hash: proposed.state_hash,
+                hanko: proposed.hanko,
+                dispute: proposed.dispute,
+                events: proposed.events,
+                outputs: proposed.outputs,
+                outputs_by_tx: proposed.outputs_by_tx,
+                bundled_ack: proposed.bundled_ack,
+            };
+            let outbound_input = Some(outgoing_account_input(account, &proposed));
             ProposalRow {
                 account_id,
-                proposed: Some(ProposedRow {
-                    frame: proposed.frame,
-                    state_hash: proposed.state_hash,
-                    hanko: proposed.hanko,
-                    dispute: proposed.dispute,
-                    events: proposed.events,
-                    outputs: proposed.outputs,
-                    outputs_by_tx: proposed.outputs_by_tx,
-                    bundled_ack: proposed.bundled_ack,
-                }),
-                dropped: dropped_rows(account_id, &proposed.dropped)?,
+                outbound_input,
+                proposed: Some(proposed),
+                dropped,
                 failed_htlc_locks,
             }
         }
@@ -928,7 +1067,7 @@ impl StatefulConsensusEngine {
                     changed = true;
                 }
                 let proposal = if selected {
-                    if proposable(&account) {
+                    if proposable(&account)? {
                         let identity = identities
                             .get(account.replica().owner().as_bytes())
                             .ok_or(BatchError::SignerRequired)?;
@@ -941,10 +1080,11 @@ impl StatefulConsensusEngine {
                         )
                         .map_err(|error| state_error(account_id, &error))?;
                         changed = true;
-                        Some(proposal_row(account_id, outcome)?)
+                        Some(proposal_row(account_id, outcome, &account)?)
                     } else {
                         Some(ProposalRow {
                             account_id,
+                            outbound_input: None,
                             proposed: None,
                             dropped: Vec::new(),
                             failed_htlc_locks: Vec::new(),
@@ -1122,7 +1262,7 @@ impl StatefulConsensusEngine {
                             account_id: *account_id,
                         },
                     )?;
-                    if proposable(account) {
+                    if proposable(account)? {
                         candidates.push((*account_id, account.clone()));
                     } else {
                         // A selected worklist is a request/response contract:
@@ -1131,6 +1271,7 @@ impl StatefulConsensusEngine {
                         // whether Rust's post-inbound Account is proposable.
                         idle.push(ProposalRow {
                             account_id: *account_id,
+                            outbound_input: None,
                             proposed: None,
                             dropped: Vec::new(),
                             failed_htlc_locks: Vec::new(),
@@ -1139,12 +1280,15 @@ impl StatefulConsensusEngine {
                 }
                 candidates
             }
-            None => self
-                .accounts
-                .iter()
-                .filter(|(_, account)| proposable(account))
-                .map(|(key, account)| (AccountId::from_key(key), account.clone()))
-                .collect(),
+            None => {
+                let mut candidates = Vec::new();
+                for (key, account) in self.accounts.iter() {
+                    if proposable(account)? {
+                        candidates.push((AccountId::from_key(key), account.clone()));
+                    }
+                }
+                candidates
+            }
         };
         let mut rows = self.propose_candidates(candidates, timestamp, j_height)?;
         rows.append(&mut idle);
@@ -1178,7 +1322,7 @@ impl StatefulConsensusEngine {
                 let outcome =
                     propose_account_frame(&mut account, identity, timestamp, j_height, swap_market)
                         .map_err(|error| state_error(account_id, &error))?;
-                let row = proposal_row(account_id, outcome)?;
+                let row = proposal_row(account_id, outcome, &account)?;
                 let leaf = leaf_root(account_id, &account)?;
                 Ok((account_id, account, leaf, row))
             },
@@ -1257,12 +1401,18 @@ impl StatefulConsensusEngine {
                 let mut results = Vec::with_capacity(rows.len());
                 let mut changed = false;
                 for row in rows {
+                    let authority = row.certified_board_authority.certified()?;
+                    let local_authority = row.local_certified_board_authority.certified()?;
                     let (verdict, row_changed) = apply_one(
                         account_id,
                         &mut account,
                         identity,
-                        clock,
                         row.input,
+                        IncomingFrameSecurityContext {
+                            clock,
+                            peer_certified_board_authority: authority,
+                            local_certified_board_authority: local_authority,
+                        },
                         swap_market,
                     );
                     changed |= row_changed;
@@ -1482,12 +1632,19 @@ impl StatefulConsensusEngine {
                             });
                         }
                         WaveOp::Input(row) => {
+                            let authority = row.certified_board_authority.certified()?;
+                            let local_authority =
+                                row.local_certified_board_authority.certified()?;
                             let (verdict, row_changed) = apply_one(
                                 account_id,
                                 &mut account,
                                 identity,
-                                clock,
                                 row.input,
+                                IncomingFrameSecurityContext {
+                                    clock,
+                                    peer_certified_board_authority: authority,
+                                    local_certified_board_authority: local_authority,
+                                },
                                 swap_market,
                             );
                             changed |= row_changed;
@@ -1591,7 +1748,7 @@ impl StatefulConsensusEngine {
                         entity_id: hex_of(&selection.owner_entity_id),
                     });
                 }
-                if proposable(account) {
+                if proposable(account)? {
                     candidates.push((*account_id, account.clone()));
                 }
             }
@@ -2576,49 +2733,112 @@ pub(crate) fn apply_one(
     account_id: AccountId,
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    clock: ReceiverClock,
     input: AccountPeerInput,
+    security: IncomingFrameSecurityContext<'_>,
     swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
 ) -> (AccountInputVerdict, bool) {
+    let clock = security.clock;
+    let peer_authority = security.peer_certified_board_authority;
+    let local_authority = security.local_certified_board_authority;
     if account_id.as_bytes() != &input.envelope.from_entity_id {
         return (
             AccountInputVerdict::Failed("ACCOUNT_INPUT_ACCOUNT_ID_MISMATCH".to_string()),
             false,
         );
     }
+    if let Some(authority) = peer_authority
+        && let Err(error) = authority.assert_entity(&input.envelope.from_entity_id)
+    {
+        return (AccountInputVerdict::Failed(error.to_string()), false);
+    }
     let verdict = match input.kind {
         AccountInputKind::Frame(frame) => {
-            match apply_incoming_frame(
+            match apply_incoming_frame_with_authority(
                 account,
                 identity,
                 &input.envelope,
-                clock,
                 *frame,
                 swap_market,
+                IncomingFrameSecurityContext {
+                    clock,
+                    peer_certified_board_authority: peer_authority,
+                    local_certified_board_authority: local_authority,
+                },
             ) {
                 Ok(outcome) => incoming_verdict(outcome),
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
             }
         }
-        AccountInputKind::Ack(ack) => match apply_incoming_ack(account, &input.envelope, ack) {
-            Ok(outcome) => ack_verdict(outcome),
-            Err(error) => AccountInputVerdict::Failed(error.to_string()),
-        },
-        AccountInputKind::FrameAck { ack, frame } => match apply_incoming_frame_ack(
+        AccountInputKind::Ack(ack) => {
+            match apply_incoming_ack_with_authority(
+                account,
+                &input.envelope,
+                clock,
+                ack,
+                peer_authority,
+            ) {
+                Ok(outcome) => ack_verdict(outcome),
+                Err(error) => AccountInputVerdict::Failed(error.to_string()),
+            }
+        }
+        AccountInputKind::FrameAck { ack, frame } => match apply_incoming_frame_ack_with_authority(
             account,
             identity,
             &input.envelope,
-            clock,
             ack,
             *frame,
             swap_market,
+            IncomingFrameSecurityContext {
+                clock,
+                peer_certified_board_authority: peer_authority,
+                local_certified_board_authority: local_authority,
+            },
         ) {
             Ok(outcome) => frame_ack_verdict(outcome),
             Err(error) => AccountInputVerdict::Failed(error.to_string()),
         },
+        AccountInputKind::Dispute(dispute) => {
+            match apply_standalone_dispute(account, &input.envelope, clock, dispute, peer_authority)
+            {
+                Ok(outcome) => standalone_dispute_verdict(outcome),
+                Err(error) => AccountInputVerdict::Failed(error.to_string()),
+            }
+        }
+        AccountInputKind::BoardHankoRefresh(refresh) => {
+            match apply_board_hanko_refresh(
+                account,
+                &input.envelope,
+                clock,
+                refresh,
+                peer_authority,
+            ) {
+                Ok(outcome) => board_hanko_refresh_verdict(outcome),
+                Err(error) => AccountInputVerdict::Failed(error.to_string()),
+            }
+        }
     };
     let changed = verdict_changes_account(&verdict);
     (verdict, changed)
+}
+
+fn standalone_dispute_verdict(outcome: StandaloneInputOutcome) -> AccountInputVerdict {
+    match outcome {
+        StandaloneInputOutcome::Applied { .. } => AccountInputVerdict::DisputeApplied,
+        StandaloneInputOutcome::Rejected { reason } => {
+            AccountInputVerdict::DisputeRejected { reason }
+        }
+    }
+}
+
+fn board_hanko_refresh_verdict(outcome: StandaloneInputOutcome) -> AccountInputVerdict {
+    match outcome {
+        StandaloneInputOutcome::Applied { events } => {
+            AccountInputVerdict::BoardHankoRefreshApplied { events }
+        }
+        StandaloneInputOutcome::Rejected { reason } => {
+            AccountInputVerdict::BoardHankoRefreshRejected { reason }
+        }
+    }
 }
 
 fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
@@ -2663,6 +2883,15 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
             height,
             current_height,
         },
+        IncomingOutcome::DisputeRequired {
+            reason,
+            evidence_secrets,
+            signed_frame,
+        } => AccountInputVerdict::FrameDisputeRequired {
+            reason,
+            evidence_secrets,
+            signed_frame: *signed_frame,
+        },
         IncomingOutcome::Rejected { reason } => AccountInputVerdict::FrameRejected { reason },
     }
 }
@@ -2701,19 +2930,23 @@ fn frame_ack_verdict(outcome: FrameAckOutcome) -> AccountInputVerdict {
 
 fn verdict_changes_account(verdict: &AccountInputVerdict) -> bool {
     match verdict {
-        AccountInputVerdict::FrameCommitted { .. } | AccountInputVerdict::AckCommitted { .. } => {
-            true
-        }
+        AccountInputVerdict::FrameCommitted { .. }
+        | AccountInputVerdict::AckCommitted { .. }
+        | AccountInputVerdict::DisputeApplied
+        | AccountInputVerdict::BoardHankoRefreshApplied { .. } => true,
         AccountInputVerdict::FrameAckApplied { ack, frame } => {
             verdict_changes_account(ack) || verdict_changes_account(frame)
         }
         AccountInputVerdict::FrameCollisionIgnored { .. }
         | AccountInputVerdict::FrameDuplicate { .. }
         | AccountInputVerdict::FrameStale { .. }
+        | AccountInputVerdict::FrameDisputeRequired { .. }
         | AccountInputVerdict::FrameRejected { .. }
         | AccountInputVerdict::AckStale { .. }
         | AccountInputVerdict::AckRejected { .. }
         | AccountInputVerdict::FrameAckRejected { .. }
+        | AccountInputVerdict::DisputeRejected { .. }
+        | AccountInputVerdict::BoardHankoRefreshRejected { .. }
         | AccountInputVerdict::Failed(_) => false,
     }
 }
@@ -2726,11 +2959,16 @@ pub(crate) fn verdict_commits_genesis(verdict: &AccountInputVerdict) -> bool {
         | AccountInputVerdict::FrameCollisionIgnored { .. }
         | AccountInputVerdict::FrameDuplicate { .. }
         | AccountInputVerdict::FrameStale { .. }
+        | AccountInputVerdict::FrameDisputeRequired { .. }
         | AccountInputVerdict::FrameRejected { .. }
         | AccountInputVerdict::AckCommitted { .. }
         | AccountInputVerdict::AckStale { .. }
         | AccountInputVerdict::AckRejected { .. }
         | AccountInputVerdict::FrameAckRejected { .. }
+        | AccountInputVerdict::DisputeApplied
+        | AccountInputVerdict::DisputeRejected { .. }
+        | AccountInputVerdict::BoardHankoRefreshApplied { .. }
+        | AccountInputVerdict::BoardHankoRefreshRejected { .. }
         | AccountInputVerdict::Failed(_) => false,
     }
 }
@@ -3119,9 +3357,12 @@ fn validate_terminal_replay(
     Ok(())
 }
 
-pub(crate) fn proposable(account: &AccountConsensus) -> bool {
+pub(crate) fn proposable(account: &AccountConsensus) -> Result<bool, BatchError> {
+    if account.replica().settlement_workspace_present() {
+        return Err(BatchError::ProposabilitySettlementUnrepresented);
+    }
     if account.pending().is_some() {
-        return false;
+        return Ok(false);
     }
     let active = match account
         .replica()
@@ -3136,13 +3377,13 @@ pub(crate) fn proposable(account: &AccountConsensus) -> bool {
         Some(_) => false,
     };
     if !active {
-        return false;
+        return Ok(false);
     }
     let locks_full = account.replica().state().htlc_slots_full();
-    account
+    Ok(account
         .mempool()
         .iter()
-        .any(|tx| !locks_full || !matches!(tx, AccountTx::HtlcLock(_)))
+        .any(|tx| !locks_full || !matches!(tx, AccountTx::HtlcLock(_))))
 }
 
 /// Rebuild one restored account using the same canonical path as the legacy
@@ -3271,7 +3512,9 @@ pub(crate) fn inbound_genesis_account(
         AccountInputKind::Frame(frame) | AccountInputKind::FrameAck { frame, .. } => {
             frame.frame.height
         }
-        AccountInputKind::Ack(_) => {
+        AccountInputKind::Ack(_)
+        | AccountInputKind::Dispute(_)
+        | AccountInputKind::BoardHankoRefresh(_) => {
             return Err(BatchError::InboundGenesis {
                 account_id,
                 detail: "FRAME_REQUIRED".to_string(),

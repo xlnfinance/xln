@@ -38,24 +38,32 @@ import {
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
-  keyCertifiedBoardNode,
+  keyCertifiedBoardNodePrefix,
+  keySnapshotGraphPrefix,
 } from '../../../storage/keys';
 import { measurePrefixBytes } from '../../../storage/database/level';
 import { hydrateCertifiedBoardRootNodesFromStorage, readStorageHead } from '../../../storage/read/read';
+import { decodeBuffer } from '../../../storage/codec/codec';
+import { validatePersistedCertifiedBoardPathNode } from '../../../storage/schema/authoritative-schema';
 import type { RuntimeDbLike } from '../../../storage/types';
 import type { CertifiedBoardRecord } from '../../../types/entity-board-registry';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { getPerfMs } from '../../../support/time';
 
-const isMissing = async (db: RuntimeDbLike, key: Buffer): Promise<boolean> => {
-  try {
-    await db.get(key);
-    return false;
-  } catch (error) {
-    if ((error as { code?: string }).code === 'LEVEL_NOT_FOUND') return true;
-    throw error;
+const snapshotHasBoardHash = async (
+  db: RuntimeDbLike,
+  height: number,
+  hash: string,
+): Promise<boolean> => {
+  const prefix = keySnapshotGraphPrefix(height, keyCertifiedBoardNodePrefix());
+  for await (const rawKey of db.keys?.({ prefix }) ?? []) {
+    const key = Buffer.from(rawKey);
+    if (!key.subarray(0, prefix.byteLength).equals(prefix)) continue;
+    const row = validatePersistedCertifiedBoardPathNode(decodeBuffer(await db.get(key)));
+    if (row.hash === hash) return true;
   }
+  return false;
 };
 
 const refreshGenesisAnchor = (replica: EntityReplica): void => {
@@ -167,6 +175,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
       KEY_LIVE_BOOK_BRANCH,
       KEY_LIVE_BOOK_LEAF,
       KEY_LIVE_REPLICA_META,
+      KEY_CERTIFIED_BOARD_NODE,
     ]);
     const measureRetainedBytes = async (): Promise<number> => {
       let total = 0;
@@ -225,15 +234,15 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
         );
       }
       if (epoch === 2) {
-        expect(await isMissing(historyDb, keyCertifiedBoardNode(roots[0]!))).toBe(false);
+        expect(await snapshotHasBoardHash(historyDb, 1, roots[0]!)).toBe(true);
       }
     }
 
-    expect(await isMissing(historyDb, keyCertifiedBoardNode(roots[0]!))).toBe(true);
+    expect(await snapshotHasBoardHash(historyDb, 1, roots[0]!)).toBe(false);
     expect((await readStorageHead(historyDb))?.retainedHistoryBytes).toBe(await measureRetainedBytes());
     for (const index of [1, 2]) {
       const restored = createEmptyEnv(`certified board gc restore ${index} alpha beta gamma`);
-      await hydrateCertifiedBoardRootNodesFromStorage(restored, historyDb, roots[index]);
+      await hydrateCertifiedBoardRootNodesFromStorage(restored, historyDb, roots[index], index + 1);
       expect(lookupCertifiedBoardRecord(
         getCertifiedBoardNodeStore(restored), roots[index]!, stackKey, entityId,
       )).toEqual(records[index]);

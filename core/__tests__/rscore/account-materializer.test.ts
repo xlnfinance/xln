@@ -108,8 +108,6 @@ const frameWire = (frame: AccountFrame): RscoreWireValue[] => [
   frame.accountTxs.map(tx => accountTxWire(tx) ?? failTest(`tx:${tx.type}`)),
   frame.prevFrameHash,
   bytes(frame.accountStateRoot),
-  frame.byLeft,
-  frame.deltas.map(deltaWire),
 ];
 
 const failTest = (field: string): never => {
@@ -158,8 +156,6 @@ const replica = (state: AccountState = emptyState()): AccountReplica => {
       prevFrameHash: '',
       accountStateRoot,
       stateHash: '',
-      byLeft: true,
-      deltas: [],
     },
     currentHeight: 0,
     rollbackCount: 0,
@@ -400,8 +396,6 @@ const pendingDisputeReplica = (
     prevFrameHash: 'genesis',
     accountStateRoot: computeAccountStateRoot(account.state),
     stateHash: '',
-    byLeft: true,
-    deltas: [],
   };
   frame.stateHash = computeFrameHash(frame);
   const proofBodyHash = `0x${'77'.repeat(32)}`;
@@ -465,8 +459,6 @@ describe('rscore Account materializer', () => {
       prevFrameHash: 'genesis',
       accountStateRoot: computeAccountStateRoot(state),
       stateHash: '',
-      byLeft: true,
-      deltas: [...state.deltas.values()],
     };
     current.stateHash = computeFrameHash(current);
     const pending: AccountFrame = {
@@ -658,21 +650,6 @@ describe('rscore Account materializer', () => {
         context: `account:${PEER.slice(-8)}:ack:1`,
       }],
     })).toThrow('RSCORE_MATERIALIZE_LOCAL_WITNESS_PLAN_CONTEXT_MISMATCH');
-    const pending = row.decoded.consensus.pending ?? failTest('decoded pending');
-    expect(() => materializeRscoreAccountReplica(binding, PEER, {
-      ...row,
-      decoded: {
-        ...row.decoded,
-        consensus: {
-          ...row.decoded.consensus,
-          pending: {
-            ...pending,
-            frame: { ...pending.frame, byLeft: false },
-          },
-        },
-      },
-    }, null, noFreshWitnesses)).toThrow('RSCORE_MATERIALIZE_PENDING_AUTHOR_MISMATCH');
-
     const plan: RscoreAccountLocalWitnessPlan = { freshHashesToSign: [
       { hash: frame.stateHash, type: 'accountFrame', context: `account:${PEER.slice(-8)}:frame:1` },
       { hash: dispute.hash, type: 'dispute', context: `account:${PEER.slice(-8)}:dispute` },

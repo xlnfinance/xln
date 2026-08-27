@@ -1,5 +1,4 @@
 import { getLiveAccountJClaimAccumulatorStates } from '../../entity/account/account-j-claim-node-store';
-import { getLiveConsumptionAccumulatorStates } from '../../entity/consumption/consumption-store';
 import { createReplicaKey, formatReplicaKey } from '../../protocol/identity';
 import {
   assertCertifiedJHistoryIntegrity,
@@ -11,13 +10,12 @@ import { restoreJPrefixRound } from '../../jurisdiction/machine/history/j-prefix
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildCertifiedEntityLineagePlan,
-} from '../replica/entity-lineage';
+  applyCertifiedEntityHeadPlan,
+  buildCertifiedEntityHeadPlan,
+} from '../replica/entity-head';
 import {
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
-  hydrateConsumptionRootNodesFromStorage,
 } from '..';
 import { computeCanonicalEntityHash } from '../canonical-hash';
 import type { PersistedStorageReadApi } from '../read/persisted-read';
@@ -124,9 +122,6 @@ const installPersistedEntityReplicas = async (
         ...(meta?.certifiedFrameHead
           ? { certifiedFrameHead: meta.certifiedFrameHead }
           : {}),
-        ...(meta?.certifiedFrameAnchor
-          ? { certifiedFrameAnchor: meta.certifiedFrameAnchor }
-          : {}),
         ...(meta?.position ? { position: meta.position } : {}),
         ...(validatorJHistory ? { jHistory: validatorJHistory } : {}),
         ...(meta?.jSubmitState ? { jSubmitState: meta.jSubmitState } : {}),
@@ -165,9 +160,10 @@ const installPersistedEntityReplicas = async (
   }
 };
 
-const hydrateRestoredEntityDags = async (
+const hydrateRestoredEntityTrees = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeReplica,
+  snapshotHeight?: number,
 ): Promise<void> => {
   const walDb = deps.getRuntimeWalDb(env);
   const boardRoots = new Set(
@@ -177,15 +173,13 @@ const hydrateRestoredEntityDags = async (
     ).filter((value): value is string => Boolean(value)),
   );
   for (const root of boardRoots) {
-    await hydrateCertifiedBoardRootNodesFromStorage(env, walDb, root);
-  }
-  for (const state of getLiveConsumptionAccumulatorStates(env)) {
-    await hydrateConsumptionRootNodesFromStorage(env, walDb, state);
+    await hydrateCertifiedBoardRootNodesFromStorage(env, walDb, root, snapshotHeight);
   }
   await hydrateAccountJClaimRootNodesFromStorage(
     env,
     walDb,
     getLiveAccountJClaimAccumulatorStates(env),
+    snapshotHeight,
   );
 };
 
@@ -233,9 +227,9 @@ const verifyRestoredEntityLineage = (
   env: RuntimeReplica,
   restoredStates: Map<string, EntityState>,
 ): void => {
-  const lineagePlan = buildCertifiedEntityLineagePlan(env);
+  const headPlan = buildCertifiedEntityHeadPlan(env);
   for (const [entityId, sharedState] of restoredStates) {
-    const selected = lineagePlan.lookup.get(entityId.toLowerCase());
+    const selected = headPlan.lookup.get(entityId.toLowerCase());
     if (!selected) {
       throw new Error(`STORAGE_RESTORE_LINEAGE_ENTITY_MISSING:${entityId}`);
     }
@@ -251,7 +245,7 @@ const verifyRestoredEntityLineage = (
       );
     }
   }
-  applyCertifiedEntityLineagePlan(env, lineagePlan);
+  applyCertifiedEntityHeadPlan(env, headPlan);
 };
 
 export const restorePersistedEntityGraph = async (
@@ -274,7 +268,13 @@ export const restorePersistedEntityGraph = async (
     usesLiveMaterializedCheckpoint,
   );
   assertCrossJLocalCohorts(env);
-  await hydrateRestoredEntityDags(deps, env);
+  await hydrateRestoredEntityTrees(
+    deps,
+    env,
+    !usesLiveMaterializedCheckpoint && targetHeight === selectedSnapshotHeight
+      ? selectedSnapshotHeight
+      : undefined,
+  );
   // Keep the exact hydrated roots as the next materialization baseline.
   // Identity-sharing is what lets nodeChangesSince emit only dirty Patricia
   // paths after restart; reading the same bytes into a second tree would make

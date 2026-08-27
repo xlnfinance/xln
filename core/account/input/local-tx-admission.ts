@@ -3,6 +3,7 @@ import { txFingerprint } from '../../protocol/state/tx-multiset';
 import type { AccountEnqueueInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult } from '../consensus/types';
 import { accountInputApplied } from '../consensus/result';
+import { assertAccountTxsAdmissible } from '../tx/admission-policy';
 
 type AccountMempoolQueue = Pick<AccountReplica, 'mempool' | 'pendingFrame'>;
 
@@ -19,6 +20,7 @@ export const admitLocalAccountTx = (
   account: AccountMempoolQueue,
   tx: AccountTx,
 ): boolean => {
+  assertAccountTxsAdmissible([tx]);
   const admitted = planLocalAccountTxAdmission(account, [tx]);
   appendAccountMempoolTxs(account, admitted, 'account:localAdmission');
   return admitted.length === 1;
@@ -51,6 +53,11 @@ export const applyAccountEnqueue = (
   account: AccountMempoolQueue,
   input: AccountEnqueueInput,
 ): HandleAccountInputResult => {
+  // FX-1/FX-2 admission gate: an out-of-range policyVersion or an
+  // out-of-profile kind is a loud typed error before any mempool write, so a
+  // rejected batch admits nothing — the same whole-batch verdict as Rust
+  // `AccountConsensus::admit_txs`.
+  assertAccountTxsAdmissible(input.txs);
   const admitted = planLocalAccountTxAdmission(account, input.txs);
   appendAccountMempoolTxs(account, admitted, 'account:localInput');
   return accountInputApplied({

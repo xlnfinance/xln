@@ -24,12 +24,7 @@ export const encodeBuffer = (
   return buffer;
 };
 
-/**
- * Row bytes that are only ever decoded back into objects (the frame record,
- * activity rows) skip the canonical walk. Content-addressed payload rows must
- * NOT use this: their ref is the hash of the stored bytes and replay rebuilds
- * the same ref from WAL-decoded (canonically ordered) objects.
- */
+/** Row bytes that are only ever decoded back into objects may skip the canonical walk. */
 export const encodeBufferAsIs = (value: unknown): Buffer => {
   const buffer = Buffer.from(packPreorderedBinaryPayload(value));
   countOpWithSite('storage.encode', buffer.byteLength, 1);

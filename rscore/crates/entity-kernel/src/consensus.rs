@@ -168,3 +168,21 @@ mod tests {
         ));
     }
 }
+
+#[path = "consensus/production.rs"]
+mod production;
+
+pub use production::{
+    CanonicalEntityTx, CertifiedEntityFrameLink, CertifiedEntityProposal,
+    CertifiedEntityTransition, ConsensusMode, ENTITY_OWNED_CONSENSUS_FIELDS, EntityAuthorityError,
+    EntityCertificationError, EntityConsensusConfig, EntityConsensusState, EntityEncodingError,
+    EntityFrame, EntityFrameAuthority, EntityFrameBody, EntityFrameError, EntityFrameEvent,
+    EntityFrameLeader, EntityHankoWitness, EntityHankoWitnessMap, EntityHtlcNoteIndex,
+    EntityLeaderState, EntityLineageError, EntityOutputError, EntitySingleSigner,
+    EntityTransitionCertificationRequest, EntityTransitionError, EntityTxCatalogError,
+    EntityTxKind, EntityTxSupport, HashToSign, HashType, LocalEntityOutput, LocalEntityOutputTx,
+    PendingNonMutatingWake, ResidentEntityConsensusReplica, build_certified_entity_frame_link,
+    build_entity_hash_manifest, certify_entity_transition, certify_single_signer_entity_frame,
+    compute_entity_events_parity_digest, compute_entity_frame_hash,
+    is_entity_owned_consensus_field, project_entity_consensus_sections,
+};

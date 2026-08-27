@@ -33,7 +33,6 @@ import {
   collectCommittedEntityResult,
   recordEntityInputProfile,
 } from './entity-input-output.ts';
-import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption/consumption-store';
 import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/account-j-claim-node-store';
 import {
   collectRuntimeEntityContext,
@@ -107,12 +106,11 @@ export const publishStagedEntityNodeChanges = (
 ): void => {
   for (const { result } of stagedInputs) {
     if (!isCommittedEntityInput(result.outcome)) {
-      if (result.consumptionNodeChanges || result.accountJClaimNodeChanges) {
+      if (result.accountJClaimNodeChanges) {
         throw new Error('ENTITY_REJECTED_INPUT_NODE_CHANGES_FORBIDDEN');
       }
       continue;
     }
-    cacheCommittedConsumptionNodeChanges(env, result.consumptionNodeChanges);
     cacheCommittedAccountJClaimNodeChanges(env, result.accountJClaimNodeChanges);
   }
 };

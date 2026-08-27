@@ -3,7 +3,13 @@ import { describe, expect, test } from 'bun:test';
 import type { RscoreCheckpointChanges } from '../../../../rscore/checkpoint/checkpoint-wire';
 import type { RscoreWireValue } from '../../../../rscore/client';
 import { MAX_PHYSICAL_STORAGE_VALUE_BYTES } from '../../../../storage/codec/bounded-value';
-import { keyRscoreAccountNodePrefix } from '../../../../storage/keys';
+import {
+  keyRscoreAccountJClaimPathNode,
+  keyRscoreAccountNodePrefix,
+  keyRscoreAccountRadixBranchNode,
+  keyRscoreAccountRadixLeafNode,
+  parseRscoreAccountJClaimPathNodeKey,
+} from '../../../../storage/keys';
 import {
   loadRscoreCheckpoint,
   prepareRscoreCheckpointStorage,
@@ -11,6 +17,7 @@ import {
 } from '../../../../storage/schema/rscore/checkpoint';
 import type { RuntimeDbLike } from '../../../../storage/types';
 import {
+  EMPTY_ACCOUNT_J_CLAIM_ROOT,
   getAccountJClaimKey,
   hashAccountJClaimNode,
 } from '../../../../account/j-claims/j-claim-codec';
@@ -112,10 +119,29 @@ const checkpoint = (
     dels.push([1, NODE_PATH, NODE_KEY]);
   }
   const emptyTree: RscoreWireValue = [[], []];
+  const firstJClaim = options.jClaimPuts?.[0];
+  const leftJClaimRoot = Array.isArray(firstJClaim) && firstJClaim[0] instanceof Uint8Array
+    ? firstJClaim[0]
+    : Buffer.from(EMPTY_ACCOUNT_J_CLAIM_ROOT.slice(2), 'hex');
+  const emptyJClaimRoot = Buffer.from(EMPTY_ACCOUNT_J_CLAIM_ROOT.slice(2), 'hex');
   const account: RscoreWireValue[] = [
     Buffer.from(ACCOUNT.slice(2), 'hex'),
     Buffer.alloc(32, revision),
-    [Buffer.from(OWNER.slice(2), 'hex'), null, null, null, null, null, null, null, null],
+    [
+      Buffer.from(OWNER.slice(2), 'hex'),
+      null,
+      null,
+      null,
+      null,
+      null,
+      [
+        Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32), Buffer.alloc(32),
+        [leftJClaimRoot, firstJClaim ? 1 : 0],
+        [emptyJClaimRoot, 0],
+      ],
+      null,
+      null,
+    ],
     [null, null, null, null, null],
     [puts, dels],
     emptyTree,
@@ -129,8 +155,34 @@ const checkpoint = (
 };
 
 describe('rscore physical checkpoint storage', () => {
-  test('persists and deletes content-verified J-claim nodes by their exact digest', async () => {
-    const { db } = makeMemoryDb();
+  test('packs radix branch nibbles while leaf rows keep the full protocol key', () => {
+    const branchPrefix = keyRscoreAccountNodePrefix(OWNER, ACCOUNT, 1, 0);
+    const branch = keyRscoreAccountRadixBranchNode(OWNER, ACCOUNT, 1, [1, 2, 3]);
+    expect(branch.subarray(branchPrefix.byteLength)).toEqual(Buffer.from([0, 3, 0x12, 0x30]));
+
+    const leafPrefix = keyRscoreAccountNodePrefix(OWNER, ACCOUNT, 1, 1);
+    const leaf = keyRscoreAccountRadixLeafNode(OWNER, ACCOUNT, 1, NODE_KEY);
+    expect(leaf.subarray(leafPrefix.byteLength)).toEqual(NODE_KEY);
+  });
+
+  test('binds J-claim branches to side and masks the logical prefix after the bit', () => {
+    const representativeKey = `0x${'abff'.padEnd(64, 'f')}`;
+    const key = keyRscoreAccountJClaimPathNode(OWNER, ACCOUNT, 1, {
+      kind: 'branch',
+      bit: 9,
+      representativeKey,
+    });
+    const parsed = parseRscoreAccountJClaimPathNodeKey(key);
+    expect(parsed.side).toBe(1);
+    expect(parsed.path).toEqual({
+      kind: 'branch',
+      bit: 9,
+      representativeKey: `0xab80${'00'.repeat(30)}`,
+    });
+  });
+
+  test('overwrites J-claim nodes at their permanent side and Patricia path', async () => {
+    const { db, rows } = makeMemoryDb();
     const record: AccountJClaimRecord = {
       version: 1,
       accountKey: `0x${'11'.repeat(32)}`,
@@ -160,6 +212,12 @@ describe('rscore physical checkpoint storage', () => {
     );
     await apply(db, inserted);
     expect((await loadRscoreCheckpoint(db, OWNER))?.accounts[0]?.[8]).toEqual([put]);
+    const pathKey = keyRscoreAccountJClaimPathNode(OWNER, ACCOUNT, 0, {
+      kind: 'leaf',
+      key: node.key,
+    });
+    expect(rows.has(pathKey.toString('hex'))).toBe(true);
+    expect(pathKey.subarray(pathKey.byteLength - 32).equals(hashBytes)).toBe(false);
 
     const deleted = await prepareRscoreCheckpointStorage(
       db,

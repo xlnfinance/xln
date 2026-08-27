@@ -12,7 +12,7 @@ pub mod batch;
 pub mod claims;
 pub mod codec;
 
-pub use batch::build_single_signer_hanko;
+pub use batch::{build_single_signer_hanko, encode_single_signer_hanko_from_signature};
 pub use claims::{
     BoardDelays, BoardMember, SemanticClaim, VerifiedHanko, hash_hanko_board_claim, lazy_entity_id,
     verify_canonical_hanko,

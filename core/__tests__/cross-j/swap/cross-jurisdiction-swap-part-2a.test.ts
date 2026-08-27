@@ -141,7 +141,6 @@ import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../..
 
 import { signEntityHashes } from '../../../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../../../entity/consensus/output/certification';
 
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../../../entity/tx/j-events-htlc';
 

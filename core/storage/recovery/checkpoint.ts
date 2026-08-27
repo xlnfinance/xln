@@ -3,7 +3,6 @@ import { validateEntityReplica } from '../../entity/replica/replica-validation';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account/account-j-claim-node-store';
-import { assertConsumptionRootsAvailable } from '../../entity/consumption/consumption-store';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/machine/board-registry';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
 import {
@@ -166,7 +165,6 @@ const assertCheckpointCommitments = async (env: RuntimeReplica): Promise<void> =
     assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
   }
   assertCertifiedBoardRootsAvailable(env);
-  assertConsumptionRootsAvailable(env);
   assertAccountJClaimRootsAvailable(env);
   await assertCertifiedRegistrationEvidenceStore(env);
 };

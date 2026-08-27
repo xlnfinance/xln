@@ -42,8 +42,9 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
       if (!record) return false;
       // Transport follows current corporate authority immediately after the
       // certified BoardActivated event. The previous board remains valid only
-      // for historical dispute evidence; it must never receive fresh Account
-      // protocol traffic during its seven-day court grace period.
+      // to verify historical bilateral evidence (already-issued ACKs and
+      // dispute proofs); it must never receive fresh Account protocol traffic
+      // during its seven-day court grace period.
       return record.boardHash === reconstructedBoardHash;
     },
   });

@@ -3,9 +3,8 @@ import { rmSync } from 'fs';
 import { Level } from 'level';
 
 import {
-  validateAccountJClaimNodeValue,
-  validateCertifiedBoardNodeValue,
-  validateConsumptionNodeValue,
+  validatePersistedAccountJClaimPathNode,
+  validatePersistedCertifiedBoardPathNode,
   validateStorageAccountDocValue,
   validateStorageEntityCoreDocValue,
   validateStorageFrameRecordValue,
@@ -24,9 +23,8 @@ import { buildEntityTransactionProposalAction } from '../../../entity/auth/autho
 import { hashEntityCommandTxs } from '../../../entity/command/command-codec';
 import {
   KEY_HEAD,
-  keyAccountJClaimNode,
-  keyCertifiedBoardNode,
-  keyConsumptionNode,
+  keyAccountJClaimPathNode,
+  keyCertifiedBoardPathNode,
   keyFrame,
   keyLiveAccount,
   keyLiveBook,
@@ -95,9 +93,16 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     ['entity', keyLiveEntity(entityId), validateStorageEntityCoreDocValue],
     ['account', keyLiveAccount(entityId, counterpartyId), validateStorageAccountDocValue],
     ['book-header', keyLiveBook(entityId, '1:2'), decodeStorageBookHeader],
-    ['certified-board-cas', keyCertifiedBoardNode(hash), validateCertifiedBoardNodeValue],
-    ['consumption-cas', keyConsumptionNode(hash), validateConsumptionNodeValue],
-    ['account-j-cas', keyAccountJClaimNode(hash), validateAccountJClaimNodeValue],
+    [
+      'certified-board-path',
+      keyCertifiedBoardPathNode(entityId, { kind: 'leaf', key: hash }),
+      validatePersistedCertifiedBoardPathNode,
+    ],
+    [
+      'account-j-path',
+      keyAccountJClaimPathNode(entityId, counterpartyId, 0, { kind: 'leaf', key: hash }),
+      validatePersistedAccountJClaimPathNode,
+    ],
   ] as const;
 
   for (const [family, key, validator] of families) {
@@ -303,35 +308,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
         action: buildEntityTransactionProposalAction([corruptCollective]),
       },
     };
-    const consensusOutput = {
-      type: 'consensusOutput',
-      data: {
-        origin: {
-          sourceEntityId: entityId,
-          lane: 'generic',
-          sequence: 1n,
-          semanticHash: hash,
-          height: 1,
-          frameHash: hash,
-          outputIndex: 0,
-        },
-        outputHanko: '0x01',
-        targetEntityId: counterpartyId,
-        entityTxs: [corruptIndividual],
-      },
-    };
-    const reissue = {
-      type: 'reissueCertifiedOutput',
-      data: {
-        targetEntityId: counterpartyId,
-        targetSignerId: `0x${'44'.repeat(20)}`,
-        sequence: 1n,
-        semanticHash: hash,
-        entityTxs: [corruptIndividual],
-      },
-    };
-
-    for (const [index, tx] of [entityCommand, propose, consensusOutput, reissue].entries()) {
+    for (const [index, tx] of [entityCommand, propose].entries()) {
       expect(() => validateEntityTx(tx, `NESTED_${index}`)).toThrow('DATA');
     }
   });

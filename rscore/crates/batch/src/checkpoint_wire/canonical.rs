@@ -1,0 +1,59 @@
+use xln_rscore_abi::AbiValue;
+use xln_rscore_engine::{AccountEnvelope, CanonicalValue};
+
+use super::tuple;
+
+pub fn encode_account_envelope(value: &AccountEnvelope) -> AbiValue {
+    let fields = CanonicalValue::Object(value.fields().to_vec());
+    tuple(vec![
+        encode(&fields),
+        tuple(value.mempool().iter().map(encode).collect()),
+    ])
+}
+
+fn encode(value: &CanonicalValue) -> AbiValue {
+    match value {
+        CanonicalValue::Null => tuple(vec![AbiValue::Integer(0)]),
+        CanonicalValue::Bool(flag) => tuple(vec![
+            AbiValue::Integer(1),
+            AbiValue::Integer(i128::from(*flag)),
+        ]),
+        CanonicalValue::Number(number) => tuple(vec![
+            AbiValue::Integer(2),
+            AbiValue::Text(number.as_str().to_owned()),
+        ]),
+        CanonicalValue::BigInt(number) => tuple(vec![
+            AbiValue::Integer(3),
+            AbiValue::Text(number.to_string()),
+        ]),
+        CanonicalValue::String(text) => {
+            tuple(vec![AbiValue::Integer(4), AbiValue::Text(text.clone())])
+        }
+        CanonicalValue::Array(values) => tuple(vec![
+            AbiValue::Integer(5),
+            tuple(values.iter().map(encode).collect()),
+        ]),
+        CanonicalValue::Map(entries) => tuple(vec![
+            AbiValue::Integer(6),
+            tuple(
+                entries
+                    .iter()
+                    .map(|(key, value)| tuple(vec![encode(key), encode(value)]))
+                    .collect(),
+            ),
+        ]),
+        CanonicalValue::Set(values) => tuple(vec![
+            AbiValue::Integer(7),
+            tuple(values.iter().map(encode).collect()),
+        ]),
+        CanonicalValue::Object(entries) => tuple(vec![
+            AbiValue::Integer(8),
+            tuple(
+                entries
+                    .iter()
+                    .map(|(key, value)| tuple(vec![AbiValue::Text(key.clone()), encode(value)]))
+                    .collect(),
+            ),
+        ]),
+    }
+}

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { assertRecoveryOutboxMatches } from '../../../storage/recovery/journal/verification';
-import { prepareRuntimeOutputPayloadRows } from '../../../storage/wal/outbox-payload';
+import { prepareRuntimeOutputRows } from '../../../storage/wal/outbox-payload';
 import type { RoutedEntityInput } from '../../../runtime/types';
 
 const output = (targetByte: string): RoutedEntityInput => ({
@@ -12,12 +12,12 @@ const output = (targetByte: string): RoutedEntityInput => ({
   entityTxs: [],
 });
 
-test('recovery replay requires the exact ordered committed outbox hashes', () => {
+test('recovery replay requires the exact ordered committed outbox bytes', () => {
   const expected = [output('1a'), output('1b')];
-  const refs = prepareRuntimeOutputPayloadRows(expected).refs;
-  expect(() => assertRecoveryOutboxMatches(expected, expected, refs, 7)).not.toThrow();
-  expect(() => assertRecoveryOutboxMatches(expected, [...expected].reverse(), refs, 7))
+  const commitment = prepareRuntimeOutputRows(7, expected).commitment;
+  expect(() => assertRecoveryOutboxMatches(expected, expected, commitment, 7)).not.toThrow();
+  expect(() => assertRecoveryOutboxMatches(expected, [...expected].reverse(), commitment, 7))
     .toThrow('RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=7');
-  expect(() => assertRecoveryOutboxMatches(expected, [output('1c'), expected[1]!], refs, 7))
+  expect(() => assertRecoveryOutboxMatches(expected, [output('1c'), expected[1]!], commitment, 7))
     .toThrow('RECOVERY_JOURNAL_OUTBOX_HASH_MISMATCH:height=7');
 });

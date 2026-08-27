@@ -8,13 +8,11 @@ import type {
   AccountJClaimNode,
   AccountJClaimNodeStore,
 } from '../../../types/finance/account-j-claims';
-import type { ConsumptionNode } from '../../consumption/consumption-accumulator';
 import type {
   SwapCancelEvent,
   SwapCancelRequestEvent,
   SwapOfferEvent,
 } from '../../tx/handlers/account';
-import type { VerifiedCertifiedEntityOutput } from '../output/certification';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../../types/entity/htlc-infra-context';
 import type { ProposableAccountMap } from '../account/canonical-worklist';
@@ -38,20 +36,13 @@ export type ApplyEntityTxsInOrderContext = {
   allSwapCancelRequests: SwapCancelRequestEvent[];
   allSwapOffersCancelled: SwapCancelEvent[];
   frameProfileTxTotals: Map<string, { count: number; elapsedMs: number }>;
-  consumptionNewNodes: Map<string, ConsumptionNode>;
-  consumptionReplacedNodeHashes: Set<string>;
   accountJClaimNewNodes: Map<string, AccountJClaimNode>;
   accountJClaimReplacedNodeHashes: Set<string>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
-  verifiedCertifiedOutputs: Map<
-    Extract<EntityTx, { type: 'consensusOutput' }>,
-    VerifiedCertifiedEntityOutput
-  >;
   authorizedCommand?: true | undefined;
   authorizedCollective?: true | undefined;
-  authorizedCertifiedOutput?: true | undefined;
   authorizedRuntimeOutput?: true | undefined;
   /** Exact authority proven from this frame's contiguous BoardActivated chain. */
   authorizedBoardHandoverConfig?: EntityState['config'];

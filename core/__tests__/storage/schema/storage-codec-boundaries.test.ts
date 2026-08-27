@@ -17,7 +17,7 @@ import {
   STORAGE_SCHEMA_VERSION,
   decodeEntityId,
   hexBytes,
-  keyCertifiedBoardNode,
+  keyCertifiedBoardNodePrefix,
   keyHistoryViewAccountFrame,
   keyHistoryViewEntityFrame,
   keyHistoryViewRuntimeActivity,
@@ -126,7 +126,7 @@ describe('canonical binary codec', () => {
     const valid32 = `0x${'ab'.repeat(32)}`;
     const validSigner = `0x${'cd'.repeat(20)}`;
     expect(keyLiveEntity(valid32)).toHaveLength(33);
-    expect(keyCertifiedBoardNode(valid32)).toHaveLength(33);
+    expect(keyCertifiedBoardNodePrefix(valid32)).toHaveLength(33);
     expect(keyLiveReplicaMeta(valid32, validSigner)).toHaveLength(65);
     expect(decodeEntityId(Uint8Array.from({ length: 32 }, () => 0xab))).toBe(valid32);
 
@@ -138,7 +138,7 @@ describe('canonical binary codec', () => {
       'ab'.repeat(32),
     ]) {
       expect(() => keyLiveEntity(invalid), invalid).toThrow('STORAGE_HEX_32_INVALID');
-      expect(() => keyCertifiedBoardNode(invalid), invalid).toThrow('STORAGE_HEX_32_INVALID');
+      expect(() => keyCertifiedBoardNodePrefix(invalid), invalid).toThrow('STORAGE_HEX_32_INVALID');
     }
     for (const invalidSigner of [
       `0x${'a'.repeat(39)}`,

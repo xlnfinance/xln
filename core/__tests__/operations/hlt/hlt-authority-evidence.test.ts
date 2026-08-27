@@ -33,8 +33,9 @@ const journal = (): PersistedFrameJournal => ({
   replicaMetaCheckpoint: false,
   replicaMetaStateMode: 'live-head',
   runtimeInput: { runtimeTxs: [], entityInputs: [] },
+  runtimeOutputCount: 2,
+  runtimeOutputsDigest: `0x${'07'.repeat(32)}`,
   entityContexts: new Map(),
-  runtimeOutputRefs: [`0x${'07'.repeat(32)}`, `0x${'08'.repeat(32)}`],
   logs: [],
 });
 
@@ -137,10 +138,11 @@ describe('HLT Rust Account-authority evidence', () => {
     expect(evidence.expectations.runtimeFrames[0]?.runtimeStateHash).toBe(`0x${'06'.repeat(32)}`);
     expect(evidence.expectations.entityFrames[0]?.authorityRoot).toBe(`0x${'0e'.repeat(32)}`);
     expect(evidence.expectations.accountFrames[0]?.accountStateRoot).toBe(`0x${'02'.repeat(32)}`);
-    expect(evidence.expectations.effects[0]?.orderedOutputRefs).toEqual([
-      `0x${'07'.repeat(32)}`,
-      `0x${'08'.repeat(32)}`,
-    ]);
+    expect(evidence.expectations.effects[0]).toEqual({
+      runtimeHeight: 41,
+      outputCount: 2,
+      orderedOutputDigest: `0x${'07'.repeat(32)}`,
+    });
   });
 
   test('rejects disabled lending at artifact construction', () => {

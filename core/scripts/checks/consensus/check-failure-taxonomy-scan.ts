@@ -933,11 +933,11 @@ for (const [path, markers] of [
     ['account committed followups use structured logging only', 'account.followup'],
   ],
   [
-    'core/__tests__/account/consensus/account-consensus-logging.test.ts',
+    'core/__tests__/account/consensus/logging/account-consensus-logging.test.ts',
     ['account consensus core uses structured logging only', 'frame.state_root_mismatch'],
   ],
   [
-    'core/__tests__/account/consensus/account-propose-logging.test.ts',
+    'core/__tests__/account/consensus/logging/account-propose-logging.test.ts',
     ['account frame proposal path uses structured logging only', 'proposal.profile'],
   ],
   [

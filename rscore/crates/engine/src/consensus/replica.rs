@@ -10,7 +10,8 @@
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use crate::consensus::frame::hash::{
-    AccountFrame, GENESIS_PREV_FRAME_HASH, canonical_tx_value, is_frame_hashable, unsupported_kind,
+    AccountFrame, GENESIS_PREV_FRAME_HASH, MAX_POLICY_VERSION, canonical_tx_value,
+    is_frame_hashable, unsupported_kind,
 };
 use crate::consensus::proposal::propose::{WindowExecution, execute_window};
 use crate::error::StateError;
@@ -124,10 +125,6 @@ pub struct PendingFrame {
     /// Exact output rows in `frame.txs` order. This is rebuilt by replay on
     /// restore, so the checkpoint stores no duplicate effect payload.
     pub(crate) outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
-    /// What this frame's transactions said they did, held with the outputs
-    /// and released on the same ACK: the Entity frame that publishes the
-    /// effects is the one that records the events.
-    pub(crate) events: Vec<String>,
     /// The acknowledgement carried by the message that sent this proposal, if
     /// it carried one. Present means the message was a `frame_ack` rather than
     /// a `frame`, which the account leaf commits.
@@ -226,6 +223,13 @@ impl AccountConsensus {
         self.current.as_ref()
     }
 
+    /// Exact local certificate retained for the committed head. A pending
+    /// proposal has its own Hanko and must never replace this historical ACK
+    /// source.
+    pub(crate) fn local_committed_frame_hanko(&self) -> Option<&[u8]> {
+        self.local_committed_frame_hanko.as_deref()
+    }
+
     pub fn current_height(&self) -> u64 {
         self.current.as_ref().map_or(0, |frame| frame.frame.height)
     }
@@ -262,6 +266,21 @@ impl AccountConsensus {
         for tx in &txs {
             if !is_frame_hashable(tx) {
                 return Err(StateError::UnsupportedFrameTx(unsupported_kind(tx)));
+            }
+        }
+        // FX-1 (proofs/fixes.md D2): a policyVersion beyond the protocol range
+        // `0..=MAX_POLICY_VERSION` is a distinct admission violation — the tx
+        // kind is modelled, but TypeScript would silently round the field
+        // while hashing it. Reject the whole batch before the mempool, with
+        // the account unchanged, exactly like an unhashable kind.
+        for tx in &txs {
+            if let AccountTx::RebalancePolicy { policy_version, .. } = tx
+                && *policy_version > MAX_POLICY_VERSION
+            {
+                return Err(StateError::PolicyVersionOutOfRange {
+                    version: *policy_version,
+                    maximum: MAX_POLICY_VERSION,
+                });
             }
         }
         self.mempool.extend(txs);
@@ -343,6 +362,19 @@ impl AccountConsensus {
         self.last_outbound_ack.as_ref()
     }
 
+    /// The local recovery draft whose Entity certificate already exists.
+    ///
+    /// The payment/swap RRS profile may publish a fresh unsigned draft for
+    /// the parent Entity to certify in this candidate. It cannot resend an
+    /// older certified draft until the raw Hanko bytes are resident too;
+    /// exposing this exact predicate lets the Account output boundary refuse
+    /// only that unsupported reuse instead of disabling every first frame.
+    pub(crate) fn certified_local_dispute(&self) -> Option<&DisputeDraft> {
+        self.dispute
+            .as_ref()
+            .filter(|_| self.local_dispute_certified)
+    }
+
     /// Keep the counterparty's proof after the verifier proved that its exact
     /// supplied hash equals the independently rebuilt Account-bound digest.
     ///
@@ -353,6 +385,24 @@ impl AccountConsensus {
         self.counterparty_dispute_hash = Some(dispute.hash);
         self.counterparty_dispute_hanko_digest = dispute.hanko.as_deref().map(hanko_leaf_digest);
         self.counterparty_dispute = Some(dispute);
+    }
+
+    /// Atomically install the witnesses and activation metadata accepted by a
+    /// `board_hanko_refresh` control input. The metadata write is fallible, so
+    /// it happens before either witness is replaced.
+    pub(crate) fn install_counterparty_board_hanko_refresh(
+        &mut self,
+        frame_hanko: Vec<u8>,
+        dispute: Option<CounterpartyDispute>,
+        metadata: CanonicalValue,
+    ) -> Result<(), StateError> {
+        self.replica
+            .set_envelope_field("counterpartyBoardHankoRefresh", metadata)?;
+        self.store_counterparty_hanko(frame_hanko);
+        if let Some(dispute) = dispute {
+            self.store_counterparty_dispute(dispute);
+        }
+        Ok(())
     }
 
     /// The proof this side sends with the acknowledgement of a frame it just
@@ -831,7 +881,6 @@ impl AccountConsensus {
             candidate,
             outputs,
             outputs_by_tx,
-            events,
         } = replay_pending(&account.replica, &pending, swap_market)?;
         account.pending = Some(PendingFrame {
             frame: pending.frame,
@@ -840,7 +889,6 @@ impl AccountConsensus {
             candidate,
             outputs,
             outputs_by_tx,
-            events,
             bundled_ack: pending.bundled_ack,
             proposal_dispute: pending.proposal_dispute,
         });
@@ -868,7 +916,6 @@ struct PendingReplay {
     candidate: AccountReplica,
     outputs: Vec<crate::AccountOutput>,
     outputs_by_tx: Vec<Vec<crate::AccountOutput>>,
-    events: Vec<String>,
 }
 
 fn replay_pending(
@@ -890,7 +937,6 @@ fn replay_pending(
         applied,
         outputs,
         outputs_by_tx,
-        events,
         ..
     } = execute_window(replica, proposer, pending.frame.txs.clone(), &context, true)?;
     if applied.len() != pending.frame.txs.len() {
@@ -915,7 +961,6 @@ fn replay_pending(
         candidate,
         outputs,
         outputs_by_tx,
-        events,
     })
 }
 

@@ -672,6 +672,7 @@ await applyCommittedHtlcLockFollowup(
   paybookFollowupContext,
   inboundHtlc,
   committedHtlcFrame,
+  false,
   true,
 );
 applyDirectPaymentForwardFollowups(paybookFollowupContext, [directForward]);
@@ -813,6 +814,7 @@ await applyCommittedHtlcLockFollowup(
   },
   finalInboundHtlc,
   finalFrame,
+  false,
   true,
 );
 const finalResolve = finalPreparedAccountTxs[0]?.tx;
@@ -832,6 +834,7 @@ applyCommittedAccountFrameFollowups(
   finalWorkingState,
   MAKER,
   committedResolveFrame,
+  false,
   finalPostAccountTxs,
   fixtureEnv,
   finalCandidateEffects,

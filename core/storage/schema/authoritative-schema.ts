@@ -18,12 +18,13 @@ import {
   requireStorageString,
   requireStringArray,
 } from './schema-primitives';
-import { decodeRuntimeOutputPayloadRefs } from '../wal/outbox-payload';
+import { toRuntimeOutputsDigest } from '../../protocol/hashes';
+import { MAX_RUNTIME_OUTPUT_ROWS } from '../wal/outbox-payload';
 import { decodeEntityContextPayloadRefs } from '../wal/entity-context-payload';
 import { decodeRuntimeMachineGraphRoot } from '../wal/runtime-machine-graph';
 
 export * from './schema-state-docs';
-export * from './schema-merkle-cas';
+export * from './nodes/schema-merkle-nodes';
 
 export const validateStorageHeadValue = (value: unknown): StorageHead => {
   const code = 'STORAGE_HEAD_INVALID';
@@ -104,9 +105,10 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
     'replicaMetaStateMode', 'postStateHash', 'materializedState', 'runtimeInput',
+    'runtimeOutputCount', 'runtimeOutputsDigest',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs'], `${code}_FIELDS`);
+  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'pendingRuntimeInput', 'entityContextRefs'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -124,6 +126,14 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     throw new Error(`${code}_REPLICA_META_STATE_MODE_CHECKPOINT`);
   }
   requireStorageHash(frame['postStateHash'], `${code}_POST_STATE_HASH`);
+  const outputCount = requireBoundaryInteger(
+    frame['runtimeOutputCount'],
+    `${code}_OUTPUT_COUNT`,
+  );
+  if (outputCount > MAX_RUNTIME_OUTPUT_ROWS) throw new Error(`${code}_OUTPUT_COUNT_MAX`);
+  frame['runtimeOutputsDigest'] = toRuntimeOutputsDigest(
+    requireStorageHash(frame['runtimeOutputsDigest'], `${code}_OUTPUTS_DIGEST`),
+  );
   requireStorageBoolean(frame['materializedState'], `${code}_MATERIALIZED`);
   if (frame['materializedState'] === true) {
     if (frame['canonicalStateHash'] === undefined || frame['canonicalEntityHashes'] === undefined) {
@@ -188,12 +198,6 @@ const validateOptionalFrameFields = (frame: Record<string, unknown>, code: strin
   ];
   if (canonicalFields.some(value => value !== undefined) && canonicalFields.some(value => value === undefined)) {
     throw new Error(`${code}_CANONICAL_CHECKPOINT_INCOMPLETE`);
-  }
-  if (frame['runtimeOutputRefs'] !== undefined) {
-    frame['runtimeOutputRefs'] = decodeRuntimeOutputPayloadRefs(
-      frame['runtimeOutputRefs'],
-      `${code}_OUTPUT_REFS`,
-    );
   }
 };
 

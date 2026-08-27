@@ -49,7 +49,7 @@ export const prepareStorageCanonicalStateHashes = (
   };
 };
 
-/** Hash the compact WAL frame; payload bodies remain content-addressed rows.
+/** Hash the compact WAL frame; flat payload rows remain outside the frame.
  * Stored row bytes are `{ ...frameBase, frameHash }` and are NOT this digest
  * domain. Hashing the packed row would change WAL identity. Nested applied /
  * pending inputs are canonicalized once before this spread so the second pack
@@ -77,14 +77,16 @@ export const computeStoragePostStateHash = (input: {
   timestamp: number;
   replicaMetaDigest: string;
   runtimeComponentDigests: readonly Readonly<{ key: string; valueHash: string }>[];
-  runtimeOutputRefs: readonly string[];
+  runtimeOutputCount: number;
+  runtimeOutputsDigest: string;
 }): string => hashStable({
   kind: STORAGE_FRAME_FORMAT.postStateDomain,
   height: input.height,
   timestamp: input.timestamp,
   replicaMetaDigest: input.replicaMetaDigest,
   runtimeComponentDigests: input.runtimeComponentDigests,
-  runtimeOutputRefs: input.runtimeOutputRefs,
+  runtimeOutputCount: input.runtimeOutputCount,
+  runtimeOutputsDigest: input.runtimeOutputsDigest,
 });
 
 /** One hash per Runtime component keeps the parent commitment O(dirty). */

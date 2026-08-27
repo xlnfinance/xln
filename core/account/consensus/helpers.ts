@@ -1,4 +1,4 @@
-import type { AccountReplica, AccountTx, Delta , AccountOutput } from '../../types/account';
+import type { AccountReplica, AccountTx, Delta, AccountOutput } from '../../types/account';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { txFingerprint } from '../../protocol/state/tx-multiset';
 import {
@@ -18,18 +18,6 @@ const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export const isEntityId32 = (value: unknown): value is string =>
   typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
-
-export const summarizeDeltasForLog = (deltas: Map<number, Delta>) =>
-  Array.from(deltas.entries()).map(([tokenId, delta]) => ({
-    tokenId,
-    collateral: delta.collateral?.toString(),
-    ondelta: delta.ondelta?.toString(),
-    offdelta: delta.offdelta?.toString(),
-    leftCreditLimit: delta.leftCreditLimit?.toString(),
-    rightCreditLimit: delta.rightCreditLimit?.toString(),
-    leftHold: delta.leftHold.toString(),
-    rightHold: delta.rightHold.toString(),
-  }));
 
 type AccountDomainSubject = Readonly<{
   domain: AccountStateDomain;
@@ -81,12 +69,6 @@ export const buildAccountProofBodyFromJurisdictions = (
     requireAccountDeltaTransformerAddress(jurisdictions, account.state),
     deltaOverrides,
   );
-
-export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
-  const hasHolds = delta.leftHold !== 0n || delta.rightHold !== 0n;
-
-  return !(totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n && !hasHolds);
-}
 
 type SettlementVector = Map<number, { collateral: bigint; ondelta: bigint }>;
 

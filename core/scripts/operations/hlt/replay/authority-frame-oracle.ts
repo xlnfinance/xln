@@ -13,6 +13,10 @@ export type HltCertifiedEntityFrame = Readonly<{
   frameHash: string;
   stateRoot: string;
   authorityRoot: string;
+  /** Explicit Account-forest root at this exact Runtime height. */
+  accountsRoot: string;
+  /** Cold canonical section commitments for immediate first-divergence output. */
+  sections: readonly Readonly<{ field: string; digest: string }>[];
 }>;
 
 export type HltCertifiedAccountFrame = Readonly<{
@@ -37,10 +41,13 @@ const decodeEntityFrame = (value: unknown, index: number): HltCertifiedEntityFra
   const row = requireBoundaryRecord(value, `HLT_AUTHORITY_ENTITY_FRAME_INVALID:${index}`);
   requireExactBoundaryKeys(
     row,
-    ['runtimeHeight', 'entityId', 'entityHeight', 'frameHash', 'stateRoot', 'authorityRoot'],
+    ['runtimeHeight', 'entityId', 'entityHeight', 'frameHash', 'stateRoot', 'authorityRoot', 'accountsRoot', 'sections'],
     [],
     `HLT_AUTHORITY_ENTITY_FRAME_FIELDS_INVALID:${index}`,
   );
+  if (!Array.isArray(row['sections'])) {
+    throw new Error(`HLT_AUTHORITY_ENTITY_SECTIONS_INVALID:${index}`);
+  }
   return {
     runtimeHeight: requireBoundaryInteger(row['runtimeHeight'], `HLT_AUTHORITY_ENTITY_RUNTIME_HEIGHT_INVALID:${index}`),
     entityId: text(row['entityId'], `HLT_AUTHORITY_ENTITY_ID_INVALID:${index}`),
@@ -48,6 +55,27 @@ const decodeEntityFrame = (value: unknown, index: number): HltCertifiedEntityFra
     frameHash: text(row['frameHash'], `HLT_AUTHORITY_ENTITY_HASH_INVALID:${index}`),
     stateRoot: text(row['stateRoot'], `HLT_AUTHORITY_ENTITY_STATE_ROOT_INVALID:${index}`),
     authorityRoot: text(row['authorityRoot'], `HLT_AUTHORITY_ENTITY_AUTHORITY_ROOT_INVALID:${index}`),
+    accountsRoot: text(row['accountsRoot'], `HLT_AUTHORITY_ENTITY_ACCOUNTS_ROOT_INVALID:${index}`),
+    sections: row['sections'].map((value, sectionIndex) => {
+      const section = requireBoundaryRecord(
+        value,
+        `HLT_AUTHORITY_ENTITY_SECTION_INVALID:${index}:${sectionIndex}`,
+      );
+      requireExactBoundaryKeys(
+        section,
+        ['field', 'digest'],
+        [],
+        `HLT_AUTHORITY_ENTITY_SECTION_FIELDS_INVALID:${index}:${sectionIndex}`,
+      );
+      const field = String(section['field'] ?? '').trim();
+      if (!field) {
+        throw new Error(`HLT_AUTHORITY_ENTITY_SECTION_FIELD_INVALID:${index}:${sectionIndex}`);
+      }
+      return {
+        field,
+        digest: text(section['digest'], `HLT_AUTHORITY_ENTITY_SECTION_DIGEST_INVALID:${index}:${sectionIndex}`),
+      };
+    }),
   };
 };
 

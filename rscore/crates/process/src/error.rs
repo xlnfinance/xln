@@ -107,6 +107,18 @@ pub enum ProcessError {
     EofBeforeShutdown,
 }
 
+impl From<xln_rscore_batch::AccountWireEncodeError> for ProcessError {
+    fn from(error: xln_rscore_batch::AccountWireEncodeError) -> Self {
+        match error {
+            xln_rscore_batch::AccountWireEncodeError::Expected(field) => Self::Expected(field),
+            xln_rscore_batch::AccountWireEncodeError::Unsupported(detail) => {
+                Self::Unsupported(detail)
+            }
+            xln_rscore_batch::AccountWireEncodeError::State(error) => Self::State(error),
+        }
+    }
+}
+
 impl ProcessError {
     pub fn code(&self) -> &'static str {
         match self {
@@ -183,8 +195,13 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::BatchTooLarge { .. } => "RSCORE_BATCH_TOO_LARGE",
         BatchError::InputIndex { .. } => "RSCORE_BATCH_INPUT_INDEX",
         BatchError::OperationIndex { .. } => "RSCORE_BATCH_OPERATION_INDEX",
+        BatchError::BoardAuthorityUnresolved => "RSCORE_BATCH_BOARD_AUTHORITY_UNRESOLVED",
         BatchError::AccountNotFound { .. } => "RSCORE_BATCH_ACCOUNT_NOT_FOUND",
         BatchError::UnsupportedTx { .. } => "RSCORE_BATCH_TX_UNSUPPORTED",
+        BatchError::ProposabilitySettlementUnrepresented => {
+            "PROPOSABILITY_SETTLEMENT_UNREPRESENTED"
+        }
+        BatchError::OutboundDisputeUnsupported(_) => "RSCORE_ACCOUNT_OUTBOUND_DISPUTE_UNSUPPORTED",
         BatchError::Transition { .. } => "RSCORE_BATCH_TRANSITION",
         BatchError::EnginePanic { .. } => "RSCORE_BATCH_ENGINE_PANIC",
         BatchError::OutputIndexOverflow { .. } => "RSCORE_BATCH_OUTPUT_INDEX_OVERFLOW",

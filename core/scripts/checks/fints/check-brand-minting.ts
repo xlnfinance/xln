@@ -30,7 +30,7 @@ const BRAND_NAMES = new Set([
   'RuntimeHeight',
   'RuntimeId',
   'RuntimeMachineRootHash',
-  'RuntimeOutputPayloadHash',
+  'RuntimeOutputsDigest',
   'SignerId',
   'StateHash',
   'TokenAmount',

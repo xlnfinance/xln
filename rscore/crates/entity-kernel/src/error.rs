@@ -6,6 +6,12 @@ pub enum EntityKernelError {
     CrossJurisdictionUnsupported { account_id: String },
     #[error("ENTITY_KERNEL_TX_UNSUPPORTED:{kind}")]
     UnsupportedAccountTx { kind: &'static str },
+    #[error("ENTITY_J_EVENT_INGRESS_TX_UNSUPPORTED:{kind}")]
+    UnsupportedJEventIngress { kind: &'static str },
+    #[error("ENTITY_J_EVENT_INVALID:{detail}")]
+    JEventInvalid { detail: String },
+    #[error("ENTITY_LOCAL_TX_INVALID:{kind}:{detail}")]
+    InvalidLocalEntityTx { kind: &'static str, detail: String },
     #[error("ENTITY_KERNEL_OUTPUT_MISMATCH:{detail}")]
     AccountOutputMismatch { detail: String },
     #[error("ENTITY_KERNEL_ACCOUNT_MISSING:{account_id}")]
@@ -28,9 +34,18 @@ pub enum EntityKernelError {
     CommitmentEncoding { detail: String },
     #[error("ENTITY_KERNEL_SNAPSHOT_INVALID:{detail}")]
     SnapshotInvalid { detail: String },
+    #[error("CRONTAB_HUB_REBALANCE_HANDLER_MISSING")]
+    HubRebalanceHandlerMissing,
 }
 
 impl EntityKernelError {
+    pub(crate) fn local(kind: &'static str, detail: impl Into<String>) -> Self {
+        Self::InvalidLocalEntityTx {
+            kind,
+            detail: detail.into(),
+        }
+    }
+
     pub(crate) fn output(detail: impl Into<String>) -> Self {
         Self::AccountOutputMismatch {
             detail: detail.into(),

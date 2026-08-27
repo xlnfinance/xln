@@ -84,7 +84,7 @@ const assertPhysicalBudget = (value: Buffer, label: string): void => {
 /**
  * Values below 10 KB stay as their canonical MessagePack bytes. Larger values
  * become one small manifest plus static owner+index continuation rows. This is
- * one size-based layout, not a compatibility reader or a content-addressed DAG.
+ * one canonical size-based layout.
  */
 export const prepareBoundedStorageValueRows = (
   ownerKey: Buffer,

@@ -4,8 +4,8 @@ mod fixture;
 
 use fixture::stand;
 use xln_rscore_batch::{
-    AccountInputVerdict, EntityInboundRequest, EntityOutboundRequest, FailedHtlcRoute,
-    ReceiverClock,
+    AccountInputKind, AccountInputVerdict, EntityInboundRequest, EntityOutboundRequest,
+    FailedHtlcRoute, ReceiverClock,
 };
 
 const TIMESTAMP: u64 = 1_700_000_000_000;
@@ -63,6 +63,14 @@ fn two_visits_carry_a_whole_entity_frame() {
         outbound.proposals[0].proposed.is_some(),
         "the proposal carries a signed frame"
     );
+    let emitted = outbound.proposals[0]
+        .outbound_input
+        .as_ref()
+        .expect("Account consensus emits the complete local AccountInput");
+    assert_eq!(emitted.envelope.from_entity_id, payer_entity);
+    assert_eq!(emitted.envelope.to_entity_id, payee_entity);
+    assert!(emitted.envelope.watch_seed.is_some());
+    assert!(matches!(emitted.kind, AccountInputKind::Frame(_)));
     assert_eq!(
         outbound.touched,
         vec![(payer_account, {

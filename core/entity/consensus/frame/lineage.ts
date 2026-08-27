@@ -136,21 +136,19 @@ export const appendCertifiedEntityFrameLink = (
   }
   const fingerprint = certifiedEntityFrameLinkFingerprint(link);
   if (current && certifiedEntityFrameLinkFingerprint(current) === fingerprint) return;
-  if (current && current.frame.height !== link.frame.height) {
+  if (
+    current &&
+    current.frame.height !== link.frame.height &&
+    (current.frame.height + 1 !== link.frame.height || current.frame.hash !== link.frame.parentFrameHash)
+  ) {
     throw new Error(
-      `ENTITY_CERTIFIED_HEAD_NOT_REBASED:existing=${current.frame.height}:incoming=${link.frame.height}`,
-    );
-  }
-  const anchor = replica.certifiedFrameAnchor;
-  if (anchor && (anchor.height + 1 !== link.frame.height || anchor.frameHash !== link.frame.parentFrameHash)) {
-    throw new Error(
-      `ENTITY_CERTIFIED_HEAD_ANCHOR_MISMATCH:anchor=${anchor.height}@${anchor.frameHash}:` +
+      `ENTITY_CERTIFIED_HEAD_PARENT_MISMATCH:existing=${current.frame.height}@${current.frame.hash}:` +
         `incoming=${link.frame.height}@${link.frame.parentFrameHash}`,
     );
   }
-  if (!anchor && (link.frame.height !== 1 || link.frame.parentFrameHash !== 'genesis')) {
+  if (!current && (link.frame.height !== 1 || link.frame.parentFrameHash !== 'genesis')) {
     throw new Error(
-      `ENTITY_CERTIFIED_HEAD_ANCHOR_MISSING:incoming=${link.frame.height}@${link.frame.parentFrameHash}`,
+      `ENTITY_CERTIFIED_HEAD_MISSING:incoming=${link.frame.height}@${link.frame.parentFrameHash}`,
     );
   }
   candidateEffects.push({

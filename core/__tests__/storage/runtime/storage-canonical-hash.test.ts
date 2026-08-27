@@ -208,7 +208,8 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
     runtimeComponentDigests: computeRuntimePostStateComponentDigests({
       infrastructure: { pendingCommittedJOutbox: new Map([['a', 1]]) },
     }),
-    runtimeOutputRefs: [],
+    runtimeOutputCount: 0,
+    runtimeOutputsDigest: `0x${'00'.repeat(32)}`,
   };
   const hash = computeStoragePostStateHash(base);
 
@@ -220,7 +221,8 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
   })).not.toBe(hash);
   expect(computeStoragePostStateHash({
     ...base,
-    runtimeOutputRefs: [`0x${'24'.repeat(32)}`],
+    runtimeOutputCount: 1,
+    runtimeOutputsDigest: `0x${'24'.repeat(32)}`,
   })).not.toBe(hash);
   expect(computeStoragePostStateHash({
     ...base,
@@ -428,12 +430,6 @@ test('storage projection round-trip preserves canonical account optional-field s
     }]]),
     loans: new Map(),
   };
-  state.consumptionAccumulator = {
-    version: 1,
-    root: `0x${'44'.repeat(32)}`,
-    count: 1n,
-  };
-
   expect(account.state.pulls).toBeUndefined();
   expect(account.swapOrderHistory).toBeUndefined();
   expect(account.swapClosedOrders).toBeUndefined();
@@ -458,7 +454,6 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(hydratedState.accounts.get(counterpartyId)?.state.subcontracts).toEqual(account.state.subcontracts);
   expect(hydratedState.accounts.get(counterpartyId)?.disputePrepare).toEqual(account.disputePrepare);
   expect(hydratedState.lending).toEqual(state.lending);
-  expect(hydratedState.consumptionAccumulator).toEqual(state.consumptionAccumulator);
   expect(after.hash).toBe(before.hash);
 });
 

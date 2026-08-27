@@ -102,6 +102,27 @@ impl AccountEnvelope {
         Ok(Self { fields, mempool })
     }
 
+    /// Replace one parent-shell field by name. Control inputs use this for
+    /// consensus-visible metadata they own without rebuilding or copying the
+    /// rest of the Entity projection.
+    pub fn set_field(&mut self, name: String, value: CanonicalValue) -> Result<(), EnvelopeError> {
+        if DERIVED_FIELDS.contains(&name.as_str()) {
+            return Err(EnvelopeError::DerivedField(name));
+        }
+        if !ENTITY_ACCOUNT_LEAF_FIELDS.contains(&name.as_str()) {
+            return Err(EnvelopeError::UnclassifiedField(name));
+        }
+        self.fields.retain(|(field, _)| field != &name);
+        self.fields.push((name, value));
+        Ok(())
+    }
+
+    pub fn field(&self, name: &str) -> Option<&CanonicalValue> {
+        self.fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value))
+    }
+
     /// The carried projection fields, so a caller that owns part of the
     /// projection can replace exactly those.
     /// Drop one carried field. Used when the engine takes ownership of a

@@ -11,8 +11,7 @@ use crate::consensus::signing::SigningIdentity;
 use crate::error::StateError;
 use crate::tx::apply::{AccountVerdict, SequentialAccountEngine};
 use crate::{
-    AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, Delta,
-    Side,
+    AccountExecutionContext, AccountOutput, AccountRejection, AccountReplica, AccountTx, Side,
 };
 
 /// One transaction the proposer could not include, with the reason its own
@@ -75,6 +74,10 @@ pub struct ProposedFrame {
     pub dropped: Vec<DroppedTx>,
     /// The recovery proof this proposal travels with, when it carries one.
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
+    /// This draft was already certified by the parent Entity. The exact raw
+    /// Hanko must accompany a resend; the payment/swap-only RRS profile does
+    /// not retain those bytes yet and therefore refuses this output loudly.
+    pub dispute_requires_existing_hanko: bool,
     pub events: Vec<String>,
     pub outputs: Vec<AccountOutput>,
     /// Exact outputs of each applied transaction in `frame.txs` order.
@@ -86,6 +89,8 @@ pub struct ProposedFrame {
     /// publisher sends `frame_ack` rather than `frame` in that case, and must
     /// be told so by the verdict.
     pub bundled_ack: Option<crate::consensus::replica::OutboundAck>,
+    /// Same unsupported reuse condition for the ACK half of a frame_ack.
+    pub bundled_ack_dispute_requires_existing_hanko: bool,
 }
 
 #[derive(Debug)]
@@ -96,30 +101,6 @@ pub enum ProposalOutcome {
         dropped: Vec<DroppedTx>,
     },
     Proposed(Box<ProposedFrame>),
-}
-
-/// Only off-chain bilateral state belongs in frame comparison: `ondelta`
-/// follows independently observed J events and may reach the two peers at
-/// different Runtime frames.
-///
-/// Parity target: `collectFrameDeltas` + `shouldIncludeToken`
-/// (core/account/consensus/proposal/frame.ts, core/account/consensus/helpers.ts).
-pub(crate) fn collect_frame_deltas(replica: &AccountReplica) -> Vec<Delta> {
-    replica
-        .state()
-        .deltas()
-        .filter(|delta| should_include_token(delta))
-        .cloned()
-        .collect()
-}
-
-fn should_include_token(delta: &Delta) -> bool {
-    let zero = num_bigint::BigInt::from(0);
-    let has_holds = *delta.hold(Side::Left) != zero || *delta.hold(Side::Right) != zero;
-    !(*delta.offdelta() == zero
-        && *delta.left_credit_limit() == zero
-        && *delta.right_credit_limit() == zero
-        && !has_holds)
 }
 
 /// Execute a window against a candidate, keeping the transactions that apply.
@@ -222,7 +203,7 @@ fn prepare_transaction(candidate: &AccountReplica, tx: AccountTx) -> Result<Acco
 pub fn propose_account_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
-    timestamp: u64,
+    entity_timestamp: u64,
     j_height: u64,
     // Registry tables, not account state: the caller installs the same market
     // the runtime would, or a swap would price itself differently here than
@@ -242,6 +223,15 @@ pub fn propose_account_frame(
             dropped: Vec::new(),
         });
     }
+    // Dual Runtime peers may observe the same bilateral Account at different
+    // Entity clocks. The canonical TypeScript proposer never lets a new frame
+    // move behind the already committed Account watermark: doing so would
+    // produce a frame the receiver rejects even though both sides agree on
+    // the previous state. Keep this clamp here, inside the Account machine,
+    // so every caller (resident, batch and replay) uses the same rule.
+    let timestamp = account.current().map_or(entity_timestamp, |current| {
+        entity_timestamp.max(current.frame.timestamp)
+    });
     let height = account.current_height() + 1;
     let context = AccountExecutionContext::with_market(
         timestamp,
@@ -258,7 +248,7 @@ pub fn propose_account_frame(
         applied,
         outputs,
         outputs_by_tx,
-        events,
+        events: _,
         dropped,
     } = execution;
     // A rejection the machine itself caused is not a dropped transaction.
@@ -293,10 +283,15 @@ pub fn propose_account_frame(
     //
     // A mirror session carries no transformer address and builds no proof: it
     // is handed each frame and told what it was.
+    let certified_dispute_before = account.certified_local_dispute().cloned();
     let proposal_dispute = match candidate.delta_transformer().copied() {
         None => None,
         Some(transformer) => account.refresh_dispute_draft(&candidate, &transformer)?,
     };
+    let dispute_requires_existing_hanko = proposal_dispute
+        .as_ref()
+        .is_some_and(|draft| certified_dispute_before.as_ref() == Some(draft));
+    let transaction_count = applied.len();
     let frame = AccountFrame {
         height,
         timestamp,
@@ -304,16 +299,18 @@ pub fn propose_account_frame(
         txs: applied,
         prev_frame_hash: account.prev_frame_hash(),
         account_state_root,
-        by_left: proposer == Side::Left,
-        deltas: collect_frame_deltas(&candidate),
     };
     let state_hash = frame.hash()?;
     let hanko = identity.sign_frame(&state_hash)?;
-    let published_events = events.clone();
+    // TypeScript publishes only this proposal status line. Transaction
+    // handler events are speculative and never enter a later ACK frame.
+    let published_events = vec![format!(
+        "🚀 Proposed frame {height} with {} transactions",
+        transaction_count,
+    )];
     let published_outputs = outputs.clone();
     let published_outputs_by_tx = outputs_by_tx.clone();
     account.set_pending(PendingFrame {
-        events,
         // `set_pending` decides whether this proposal carries the ack we owe.
         bundled_ack: None,
         proposal_dispute: proposal_dispute.clone(),
@@ -327,16 +324,22 @@ pub fn propose_account_frame(
     let bundled_ack = account
         .pending()
         .and_then(|pending| pending.bundled_ack.clone());
+    let bundled_ack_dispute_requires_existing_hanko = bundled_ack
+        .as_ref()
+        .and_then(|ack| ack.dispute.as_ref())
+        .is_some_and(|draft| certified_dispute_before.as_ref() == Some(draft));
     Ok(ProposalOutcome::Proposed(Box::new(ProposedFrame {
         frame,
         state_hash,
         hanko,
         dropped,
         dispute: proposal_dispute,
+        dispute_requires_existing_hanko,
         events: published_events,
         outputs: published_outputs,
         outputs_by_tx: published_outputs_by_tx,
         bundled_ack,
+        bundled_ack_dispute_requires_existing_hanko,
     })))
 }
 

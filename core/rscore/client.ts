@@ -80,8 +80,8 @@ const RSCORE_ABI_VERSION = 1;
 // Propose are bound to its content-derived key; Seal cannot cross an open
 // stage, and accept/rollback advance the explicit accepted-stage ordinal.
 // 14: peer inputs carry the exact Account envelope plus the closed
-// Frame/Ack/FrameAck shapes. FrameAck is one atomic ACK-first operation and
-// returns one ordered composite result row.
+// Frame/Ack/FrameAck shapes. FrameAck is one ACK-first operation and returns
+// one ordered composite row; its valid ACK survives a rejected proposal.
 // 21: inbound-first Account genesis carries trusted Entity policy and returns
 // its exact H=1 materialization separately from the final touched rows.
 // 22: AccountOutbound carries checkpointDue and its reply carries exact
@@ -95,13 +95,23 @@ const RSCORE_ABI_VERSION = 1;
 // non-empty accumulator roots after a process restart.
 // 27: one resident Entity round owns Account inbound, paybook/orderbook work,
 // and Account outbound without returning Account replicas to TypeScript.
-export const RSCORE_PROCESS_ABI_VERSION = 27;
+// 28: swap removal retains the exact maker side after the row leaves state.
+// 29: AccountSettled carries J-claim bodies, witnesses and finality output.
+// 30: exact checkpoints retain the J-claim Patricia node store.
+// 31: Entity snapshots carry crontab state and PreparedFinal descriptions.
+// 32: incoming verdicts carry an explicit signed DisputeRequired outcome.
+// 33: Entity snapshots carry reserves, and peer verdicts carry standalone
+// dispute / board-Hanko-refresh results without aliasing frame verdict tags.
+// 34: Account frames no longer duplicate deltas or proposer side.
+// 35: Account input rows carry full peer/local certified-board authority.
+// 36: Entity snapshots carry the bounded Entity-command nonce fence.
+export const RSCORE_PROCESS_ABI_VERSION = 36;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
-// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=31")
+// sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=36")
 export const RSCORE_PROTOCOL_FINGERPRINT = Buffer.from(
-  '2ba024e294f221b1d53d46fcef3bb214d55aee5d1284afb5f48afaf57a0cc6d2',
+  '0d0e71b61e8319a6a3514059b0167b56f0b03a22422937731184b4b3a9cfaceb',
   'hex',
 );
 

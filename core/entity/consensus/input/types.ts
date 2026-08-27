@@ -43,7 +43,6 @@ export type ApplyEntityInputResult = {
   workingReplica: EntityReplica;
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
-  consumptionNodeChanges?: EntityCandidate['consumptionNodeChanges'];
   accountJClaimNodeChanges?: EntityCandidate['accountJClaimNodeChanges'];
   canonicalAppliedInput?: EntityInput;
   /** Exact Entity frame context produced or accepted by this input. */
@@ -58,7 +57,6 @@ export type ApplyEntityInputContext = {
   jOutbox: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
-  consumptionNodeChanges?: EntityCandidate['consumptionNodeChanges'];
   accountJClaimNodeChanges?: EntityCandidate['accountJClaimNodeChanges'];
   frameHash: string;
   /** False while Runtime stages one touched-only Entity candidate. */
@@ -86,9 +84,6 @@ export const commitEntityConsensusInput = (
   workingReplica: context.workingReplica,
   candidateEffects: context.candidateEffects,
   storageChanges: context.storageChanges,
-  ...(context.consumptionNodeChanges
-    ? { consumptionNodeChanges: context.consumptionNodeChanges }
-    : {}),
   ...(context.accountJClaimNodeChanges
     ? { accountJClaimNodeChanges: context.accountJClaimNodeChanges }
     : {}),

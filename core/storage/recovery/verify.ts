@@ -4,7 +4,7 @@ import {
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
 } from '../replica/replicas';
 import { computeCanonicalStateHashFromEnv } from '../canonical-hash';
-import { buildRuntimeCheckpointLineagePlan } from '../replica/entity-lineage';
+import { buildRuntimeCheckpointHeadPlan } from '../replica/entity-head';
 import { buildReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { computeRuntimePostStateComponentDigests } from '../hashes';
 import {
@@ -37,7 +37,7 @@ export const verifyPersistedFrameState = (
 ): PersistedFrameVerification => {
   const expectedStateHash = frame.postStateHash;
   const lineage = frame.replicaMetaCheckpoint
-    ? buildRuntimeCheckpointLineagePlan(env)
+    ? buildRuntimeCheckpointHeadPlan(env)
     : null;
   const replicaMetaDigest = lineage
     ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage).digest
@@ -52,7 +52,8 @@ export const verifyPersistedFrameState = (
         excludePersistedHistoryRecords: true,
       }),
     ),
-    runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
+    runtimeOutputCount: frame.runtimeOutputCount,
+    runtimeOutputsDigest: frame.runtimeOutputsDigest,
   });
   const expectedCanonicalStateHash = String(frame.canonicalStateHash || '');
   const actualCanonicalStateHash = expectedCanonicalStateHash

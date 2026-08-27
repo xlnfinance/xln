@@ -1,21 +1,35 @@
 //! The signed account frame: what a proposer commits and what its peer acks.
 //!
 //! Parity target: `computeCanonicalAccountFrameHash`
-//! (core/account/consensus/frame/hash.ts). Four entries under the
+//! (core/account/consensus/frame/hash.ts). Three entries under the
 //! `account.frame` namespace — the transition header, the canonical
-//! transactions, the frame's deltas, and the account state root — combined by
-//! the same flat integrity root the account state itself uses.
+//! transactions, and the account state root — combined by the same flat
+//! integrity root the account state itself uses. Financial deltas live only in
+//! `AccountState`; the state root commits them without duplicating them in
+//! every frame.
 
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, compute_flat_integrity_root};
+use xln_rscore_protocol::{
+    CanonicalNumber, CanonicalValue, JS_MAX_SAFE_INTEGER, compute_flat_integrity_root,
+};
 
 use crate::{
-    AccountTx, DeliveryMode, Delta, HTLC_OPAQUE_CIPHERTEXT_VERSION, HtlcDeliveryMode,
-    HtlcResolveOutcome, StateError, TokenId,
+    AccountTx, DeliveryMode, HTLC_OPAQUE_CIPHERTEXT_VERSION, HtlcDeliveryMode, HtlcResolveOutcome,
+    StateError, TokenId,
 };
 
 const ACCOUNT_FRAME_NAMESPACE: &str = "account.frame";
 /// The first frame of an account chains to this literal, not to a hash.
 pub const GENESIS_PREV_FRAME_HASH: &str = "genesis";
+
+/// FX-1 (proofs/fixes.md D2): the `RebalancePolicy.policyVersion` protocol
+/// range is `0..=MAX_POLICY_VERSION` — JavaScript's largest exact integer,
+/// `Number.MAX_SAFE_INTEGER`. The bound is normative in `docs/fints.md` and
+/// shared with TypeScript (`MAX_POLICY_VERSION` in
+/// core/account/tx/admission-policy.ts): above it a TS `number` silently
+/// rounds while hashing, and the engines diverge on one frame hash. Admission
+/// refuses such a version before the mempool; the hash layer refuses it again
+/// as an admission-bug tripwire.
+pub const MAX_POLICY_VERSION: u64 = JS_MAX_SAFE_INTEGER;
 
 /// A frame as it is hashed and signed. `state_hash` is the result of hashing
 /// the other fields, so it is never part of its own preimage.
@@ -29,8 +43,6 @@ pub struct AccountFrame {
     pub txs: Vec<crate::AccountTx>,
     pub prev_frame_hash: String,
     pub account_state_root: [u8; 32],
-    pub by_left: bool,
-    pub deltas: Vec<Delta>,
 }
 
 fn number(value: u64) -> Result<CanonicalValue, StateError> {
@@ -41,19 +53,6 @@ fn number(value: u64) -> Result<CanonicalValue, StateError> {
 
 fn number_u32(value: u32) -> CanonicalValue {
     CanonicalValue::Number(CanonicalNumber::from_u32(value))
-}
-
-fn delta_value(delta: &Delta) -> CanonicalValue {
-    let mut fields = vec![(
-        "tokenId".to_string(),
-        CanonicalValue::Number(CanonicalNumber::from_u16(delta.token_id().get())),
-    )];
-    fields.extend(
-        delta
-            .commitment_fields()
-            .map(|(name, value)| (name.to_string(), CanonicalValue::BigInt(value))),
-    );
-    CanonicalValue::Object(fields)
 }
 
 impl AccountFrame {
@@ -67,7 +66,6 @@ impl AccountFrame {
                 "prevFrameHash".into(),
                 CanonicalValue::String(self.prev_frame_hash.clone()),
             ),
-            ("byLeft".into(), CanonicalValue::Bool(self.by_left)),
         ]);
         let mut transactions = Vec::with_capacity(self.txs.len());
         for tx in &self.txs {
@@ -78,10 +76,6 @@ impl AccountFrame {
             (
                 "transactions".to_string(),
                 CanonicalValue::Array(transactions),
-            ),
-            (
-                "deltas".to_string(),
-                CanonicalValue::Array(self.deltas.iter().map(delta_value).collect()),
             ),
             (
                 "accountStateRoot".to_string(),
@@ -248,16 +242,28 @@ pub fn canonical_tx_value(tx: &AccountTx) -> Result<CanonicalValue, StateError> 
             base_fee,
             liquidity_fee_bps,
             gas_fee,
-        } => (
-            "rebalance_policy",
-            vec![
-                ("tokenId".to_string(), number_u32(*token_id)),
-                ("policyVersion".to_string(), number(*policy_version)?),
-                ("baseFee".to_string(), big(base_fee)),
-                ("liquidityFeeBps".to_string(), big(liquidity_fee_bps)),
-                ("gasFee".to_string(), big(gas_fee)),
-            ],
-        ),
+        } => {
+            // FX-1: admission already refuses an out-of-range version, so
+            // reaching here with one is an admission bug. Refuse to hash it
+            // with the same typed error instead of the generic unsafe-integer
+            // wrapping, so both directions name the exact violation.
+            if *policy_version > MAX_POLICY_VERSION {
+                return Err(StateError::PolicyVersionOutOfRange {
+                    version: *policy_version,
+                    maximum: MAX_POLICY_VERSION,
+                });
+            }
+            (
+                "rebalance_policy",
+                vec![
+                    ("tokenId".to_string(), number_u32(*token_id)),
+                    ("policyVersion".to_string(), number(*policy_version)?),
+                    ("baseFee".to_string(), big(base_fee)),
+                    ("liquidityFeeBps".to_string(), big(liquidity_fee_bps)),
+                    ("gasFee".to_string(), big(gas_fee)),
+                ],
+            )
+        }
         AccountTx::SwapOffer {
             offer_id,
             give_token_id,
@@ -498,19 +504,6 @@ mod tests {
     #[test]
     fn matches_typescript_frame_hash_vector() {
         let token = TokenId::new(1).expect("token");
-        let delta = Delta::new(
-            token,
-            BigInt::from(1_000_000),
-            BigInt::from(0),
-            BigInt::from(-5),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-        )
-        .expect("delta");
         let tx = AccountTx::DirectPayment {
             token_id: token,
             amount: BigInt::from(5),
@@ -529,29 +522,14 @@ mod tests {
             prev_frame_hash: GENESIS_PREV_FRAME_HASH.into(),
             account_state_root: parse_root_hex(&format!("0x{}", "cd".repeat(32)))
                 .expect("state root"),
-            by_left: false,
-            deltas: vec![delta],
         };
         assert_eq!(
             hex::encode(frame.hash().expect("frame hash")),
-            "924ebfa860055183b8a45e1555308cf206bf8fa9962d9cbd431c796ec8791210",
+            "6c9289826dc97a35ad952eed931b31a30c37d4f8267cf8e3bc498a42889f9d1c",
         );
     }
 
     fn frame_for(tx: AccountTx) -> AccountFrame {
-        let delta = Delta::new(
-            TokenId::new(1).expect("token"),
-            BigInt::from(1_000_000),
-            BigInt::from(0),
-            BigInt::from(-5),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-            BigInt::from(0),
-        )
-        .expect("delta");
         AccountFrame {
             height: 3,
             timestamp: 1_700_000_000_000,
@@ -559,8 +537,6 @@ mod tests {
             txs: vec![tx],
             prev_frame_hash: format!("0x{}", "11".repeat(32)),
             account_state_root: parse_root_hex(&format!("0x{}", "cd".repeat(32))).expect("root"),
-            by_left: true,
-            deltas: vec![delta],
         }
     }
 
@@ -704,7 +680,7 @@ mod tests {
         );
         assert_eq!(
             hex::encode(frame_for(tx).hash().expect("frame hash")),
-            "29631559c85f7707a65a878ae7379ff156ddb4a56f1c55aa5f4c546a9156bb21",
+            "d64ffd2886e9cc43322db974d00140d8f13462f713ada377eefdf2540be16e34",
         );
     }
 
@@ -718,15 +694,15 @@ mod tests {
                 .expect("envelope");
         let cases: Vec<(&str, AccountTx)> = vec![
             (
-                "41f2657fd0e24a2e9e21e286ff85c037e7b9e4ae6cf7d120d5b48864bb8923f1",
+                "3864234d2613ea949680ec0e8c3ed5adc8b3bea48ef63f18dd655114c00e77f3",
                 htlc_lock(Some(HtlcDeliveryMode::Instant), Some(ciphertext)),
             ),
             (
-                "690c2191643aa566f05778d8d29ffaa3e887d309bf63a79b5923cf3adf6b9799",
+                "d230b30b9607bf377c0c5da20552091f7e43d9c3f921153eca0c5b5071e2ce42",
                 htlc_lock(None, None),
             ),
             (
-                "1c845b653a9ce37629338938203eb3a15af742d237351682efc711c1f10ba1c9",
+                "3ac865fcd515331ed15af6d39b2134ae5090b525c72614f65e0dd95db4da3910",
                 AccountTx::HtlcResolve(crate::HtlcResolveTx {
                     lock_id: lock_id(),
                     outcome: HtlcResolveOutcome::Secret {
@@ -735,7 +711,7 @@ mod tests {
                 }),
             ),
             (
-                "93acff2dfa08d75f875075d8f3c8d4a86a536e4e80ec0a3a88116a353c9fbae5",
+                "cbac6ffd9433f5f75e56e3b05ccfe7dca2ac4c233fa950214267e2deb68abaed",
                 AccountTx::HtlcResolve(crate::HtlcResolveTx {
                     lock_id: lock_id(),
                     outcome: HtlcResolveOutcome::Error {
@@ -744,54 +720,54 @@ mod tests {
                 }),
             ),
             (
-                "009925438c5a4bcfeaded24d41459047f3dd1ac3b1697daf3823133bc37eefa7",
+                "d4f553b16093772ef3ff16869daf16943ad1b3612266ac6f946f0172430c223c",
                 AccountTx::HtlcResolve(crate::HtlcResolveTx {
                     lock_id: lock_id(),
                     outcome: HtlcResolveOutcome::Error { reason: None },
                 }),
             ),
             (
-                "29c4068e18f6d1600bf9afdf9981fa497eb8972f0a470b61c60e315c5d567a55",
+                "aec5e87ddeb82be486d2418a76815880df0124e2be7c5583248f9f14f86613e6",
                 AccountTx::SetCreditLimit {
                     token_id: TokenId::new(2).expect("token"),
                     amount: BigInt::from(500),
                 },
             ),
             (
-                "eda7d70244321a2a3e636c5c306c93fac401dc7bd5575d68dc3f571c4914c134",
+                "d6f58ecfd2e757ef758e0c03791c273edbdd307c020ff7708e3f046c1eca82fd",
                 AccountTx::AddDelta {
                     token_id: TokenId::new(3).expect("token"),
                 },
             ),
             (
-                "29631559c85f7707a65a878ae7379ff156ddb4a56f1c55aa5f4c546a9156bb21",
+                "d64ffd2886e9cc43322db974d00140d8f13462f713ada377eefdf2540be16e34",
                 rebalance_policy(),
             ),
             (
-                "c11728fa5bd309b6a5a884ac408425c29c556f7e5a9d5807921493f6dcc00163",
+                "ba6c16150799e34d7f4020a789ffbd483631896c94ca2474e65d445d1bc55e24",
                 swap_offer(true),
             ),
             (
-                "bc8b304df7f4f0f8109db6141a4a6bc05e978157ac4668d59675f21fccf9f7ba",
+                "03c31aaae209964d4139201202a5657e81876943857a8ec82b8cd98fc1d5cee7",
                 swap_offer(false),
             ),
             (
-                "6ed9380b7bd252764f1533628ec1e463ad9b0e99ea90562f0fa0bfdcc28409f0",
+                "fd1ec22d1ff0b7e459d49a1fde41005b6c5d0016451b55adc479202fa2ecdcd4",
                 swap_resolve(true),
             ),
             (
                 // `cancelRemainder: false` is hashed, not omitted. The old
                 // vector here reproduced a TypeScript object that simply did
                 // not carry the field, which real traffic always does.
-                "0a022fdbbf7673b1bd9a24a0c521dd709a9367a76e2f558534580ad3f47aa4c3",
+                "5bdf0a99946a59fef974e27b322622c888f355c89cc832613449eed01bb8f08f",
                 swap_resolve(false),
             ),
             (
-                "a81bad89a2cad7872453f69d1981384029db4ef9b3b996a4257f515f41f7d481",
+                "efc691408f6df868fe04a1a9e324a6e28568effa1ef5ab8b4666f035301b7b52",
                 swap_resolve_partial_fill(),
             ),
             (
-                "b2b171664b26860284c22bb46ab47744f29833521d46e131909d46f461706258",
+                "52db07f275bb2354c5e679eab2ba610a0906b5c932a6f53f22a267c7c56a65e6",
                 AccountTx::SwapCancelRequest {
                     offer_id: offer_id(),
                 },

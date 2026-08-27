@@ -36,7 +36,6 @@ import {
   listSnapshotHeights,
   maybeRotateSnapshots,
   pruneHistoryBeforeHeight,
-  readSnapshotDocs,
 } from './database/lifecycle';
 import {
   buildBookDeletionsFromOverlay,
@@ -47,9 +46,9 @@ import {
 } from './schema/overlay-docs';
 import { storageOverlayRecordKey } from '../protocol/state/overlay';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildRuntimeCheckpointLineagePlan,
-} from './replica/entity-lineage';
+  applyCertifiedEntityHeadPlan,
+  buildRuntimeCheckpointHeadPlan,
+} from './replica/entity-head';
 import {
   readStorageFrameRecord,
   readStorageHead,
@@ -68,32 +67,22 @@ import {
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
   KEY_CERTIFIED_BOARD_NODE,
-  KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
   STORAGE_SCHEMA_VERSION,
   ZERO_FRAME_HASH,
-  decodeTaggedStorageHash,
   keyFrame,
   keyLiveReplicaMetaPrefix,
-  keyCertifiedBoardNode,
   keyCertifiedBoardNodePrefix,
-  keyConsumptionNode,
-  keyConsumptionNodePrefix,
-  keyAccountJClaimNode,
   keyAccountJClaimNodePrefix,
-  parseLiveAccountKey,
   parseHistoryViewAccountFrameKey,
   parseHistoryViewAccountSwapRecencyKey,
   parseHistoryViewEntityFrameKey,
   HISTORY_VIEW_ACCOUNT_SWAP_EVENT,
   HISTORY_VIEW_ACCOUNT_SWAP_RECENCY,
   decodeHeight,
-  decodeEntityId,
 } from './keys';
-import { readAccountStorageLayout } from './schema/account-layout';
-import { readEntityStorageLayout } from './schema/entity/layout';
 import {
   areStorageCheckpointReplicasQuiescent,
   buildLiveReplicaMetaPlan,
@@ -103,38 +92,17 @@ import {
 } from './replica/replicas';
 import { createStructuredLogger } from '../support/logger';
 import { cumulativeMarksToDurations } from '../support/performance/profile';
-import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import type { FrameLogEntry } from '../types/logging';
-import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
-import type { EntityContextPayloadHash, RuntimeOutputPayloadHash } from '../protocol/hashes';
+import type { EntityContextPayloadHash } from '../protocol/hashes';
 import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
+import { getCertifiedBoardNodeStore, hashCertifiedBoardNode } from '../jurisdiction/machine/board-registry';
 import {
-  collectReachableCertifiedBoardNodes,
-  getCertifiedBoardNodeStore,
-  hashCertifiedBoardNode,
-} from '../jurisdiction/machine/board-registry';
-import {
-  hashConsumptionNode,
-  type ConsumptionAccumulatorState,
-  type ConsumptionNode,
-} from '../entity/consumption/consumption-accumulator';
-import {
-  collectReachableConsumptionNodes,
-  finalizePersistedConsumptionNodes,
-  getConsumptionNodeStore,
-  getLiveConsumptionAccumulatorStates,
-  getSafePendingConsumptionDeletes,
-} from '../entity/consumption/consumption-store';
-import {
-  collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
-  type AccountJClaimAccumulatorState,
-  type AccountJClaimNode,
 } from '../account/j-claims/j-claim-accumulator';
 import {
   finalizePersistedAccountJClaimNodes,
-  getLiveAccountJClaimAccumulatorStates,
+  getAccountJClaimNodeStore,
   getSafePendingAccountJClaimDeletes,
 } from '../entity/account/account-j-claim-node-store';
 import {
@@ -148,10 +116,8 @@ import {
 } from './read/verify';
 import { verifyLiveStorageIntegrity } from './read/integrity/live';
 import {
-  validateAccountJClaimNodeValue,
-  validateCertifiedBoardNodeValue,
-  validateConsumptionNodeValue,
-  validateStorageAccountDocValue,
+  validatePersistedAccountJClaimPathNode,
+  validatePersistedCertifiedBoardPathNode,
 } from './schema/authoritative-schema';
 import {
   validateStoredAccountFrameValue,
@@ -182,11 +148,16 @@ import {
   type RscoreCheckpointStorageInput,
 } from './schema/rscore/checkpoint';
 import {
-  prepareRuntimeOutputPayloadRows,
+  prepareRuntimeOutputRows,
+  type RuntimeOutputCommitment,
 } from './wal/outbox-payload';
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
 import { countOp, OP_COUNTERS_ENABLED } from '../support/performance/op-counters';
 import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
+import {
+  preparePathKeyedAuxiliaryRows,
+  type AuxiliaryTreeOwner,
+} from './schema/nodes/path-keyed-auxiliary-nodes';
 import type { RscoreExactCheckpoint } from '../rscore/checkpoint/checkpoint-wire';
 export { resolveStorageRuntimeConfig } from './database/config';
 export {
@@ -215,7 +186,6 @@ export {
   findStorageLatestSnapshotAtOrBelow,
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
-  hydrateConsumptionRootNodesFromStorage,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
   listStorageSnapshotReplicaMetas,
@@ -291,7 +261,6 @@ const CURRENT_RECOVERY_PREFIXES = [
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
   KEY_CERTIFIED_BOARD_NODE,
-  KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
@@ -355,30 +324,56 @@ const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
   left.epochReplayBytes === right.epochReplayBytes &&
   left.retainedHistoryBytes === right.retainedHistoryBytes;
 
-const synchronizeCertifiedBoardNodes = async (
+type AuxiliaryPathFamily = Readonly<{
+  prefix: Buffer;
+  validate: (value: unknown) => Readonly<{ hash: string; node: unknown }>;
+  hashNode: (node: never) => string;
+  code: string;
+}>;
+
+const AUXILIARY_PATH_FAMILIES: readonly AuxiliaryPathFamily[] = [
+  {
+    prefix: keyCertifiedBoardNodePrefix(),
+    validate: validatePersistedCertifiedBoardPathNode,
+    hashNode: hashCertifiedBoardNode as (node: never) => string,
+    code: 'CERTIFIED_BOARD_PATH_NODE',
+  },
+  {
+    prefix: keyAccountJClaimNodePrefix(),
+    validate: validatePersistedAccountJClaimPathNode,
+    hashNode: hashAccountJClaimNode as (node: never) => string,
+    code: 'ACCOUNT_J_CLAIM_PATH_NODE',
+  },
+] as const;
+
+const validateAuxiliaryPathValue = (
+  value: Buffer,
+  family: AuxiliaryPathFamily,
+): void => {
+  const decoded = decodeValidatedBuffer(value, family.validate);
+  const actual = family.hashNode(decoded.node as never);
+  if (actual !== decoded.hash) {
+    throw new Error(`${family.code}_CORRUPT:${decoded.hash}:${actual}`);
+  }
+};
+
+const synchronizeAuxiliaryPathFamily = async (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
+  family: AuxiliaryPathFamily,
   batch?: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
   const authoritativeKeys = new Set<string>();
   let changed = false;
-  for await (const key of iterateKeys(walDb, { prefix: keyCertifiedBoardNodePrefix() })) {
-    authoritativeKeys.add(key.toString('hex'));
+  for await (const key of iterateKeys(walDb, { prefix: family.prefix })) {
     const authoritative = await walDb.get(key);
-    const hash = decodeTaggedStorageHash(
-      key,
-      KEY_CERTIFIED_BOARD_NODE,
-      'STORAGE_CERTIFIED_BOARD_NODE_KEY_INVALID',
-    );
-    const node = decodeValidatedBuffer(authoritative, validateCertifiedBoardNodeValue);
-    const actual = hashCertifiedBoardNode(node);
-    if (actual !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}:${actual}`);
-    const current = await readRawOrNull(currentDb, key);
-    if (current?.equals(authoritative)) continue;
+    validateAuxiliaryPathValue(authoritative, family);
+    authoritativeKeys.add(key.toString('hex'));
+    if ((await readRawOrNull(currentDb, key))?.equals(authoritative)) continue;
     batch?.put(key, authoritative);
     changed = true;
   }
-  for await (const key of iterateKeys(currentDb, { prefix: keyCertifiedBoardNodePrefix() })) {
+  for await (const key of iterateKeys(currentDb, { prefix: family.prefix })) {
     if (authoritativeKeys.has(key.toString('hex'))) continue;
     batch?.del(key);
     changed = true;
@@ -386,201 +381,28 @@ const synchronizeCertifiedBoardNodes = async (
   return changed;
 };
 
-const synchronizeConsumptionNodes = async (
+const synchronizeCertifiedBoardNodes = (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch?: ReturnType<RuntimeDbLike['batch']>,
-  stateDb: RuntimeDbLike = currentDb,
-): Promise<boolean> => {
-  const states: ConsumptionAccumulatorState[] = [];
-  for await (const key of iterateKeys(stateDb, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
-    const entityId = decodeEntityId(key.subarray(1));
-    const stored = await readEntityStorageLayout(stateDb, entityId, key);
-    if (!stored) throw new Error(`STORAGE_ENTITY_GRAPH_MISSING:${entityId}`);
-    const doc = stored.doc;
-    if (doc.consumptionAccumulator) states.push(doc.consumptionAccumulator);
-  }
-  const authoritative = new Map<string, ConsumptionNode>();
-  const authoritativeValues = new Map<string, Buffer>();
-  for await (const key of iterateKeys(walDb, { prefix: keyConsumptionNodePrefix() })) {
-    const hash = decodeTaggedStorageHash(key, KEY_CONSUMPTION_NODE, 'STORAGE_CONSUMPTION_NODE_KEY_INVALID');
-    const value = await walDb.get(key);
-    const node = decodeValidatedBuffer(value, validateConsumptionNodeValue);
-    const actual = hashConsumptionNode(node);
-    if (actual !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}:${actual}`);
-    authoritative.set(hash, node);
-    authoritativeValues.set(hash, value);
-  }
-  const reachable = collectReachableConsumptionNodes(authoritative, states);
-  const reachableKeys = new Set<string>();
-  let changed = false;
-  for (const hash of reachable.keys()) {
-    const key = keyConsumptionNode(hash);
-    reachableKeys.add(key.toString('hex'));
-    const value = authoritativeValues.get(hash);
-    if (!value) throw new Error(`CONSUMPTION_NODE_MISSING:${hash}`);
-    const current = await readRawOrNull(currentDb, key);
-    if (current?.equals(value)) continue;
-    batch?.put(key, value);
-    changed = true;
-  }
-  for await (const key of iterateKeys(currentDb, { prefix: keyConsumptionNodePrefix() })) {
-    if (reachableKeys.has(key.toString('hex'))) continue;
-    batch?.del(key);
-    changed = true;
-  }
-  return changed;
-};
+): Promise<boolean> => synchronizeAuxiliaryPathFamily(
+  walDb,
+  currentDb,
+  AUXILIARY_PATH_FAMILIES[0]!,
+  batch,
+);
 
-const certifiedBoardRoot = (
-  state: { certifiedBoardState?: EntityState['certifiedBoardState'] },
-): string | undefined =>
-  state.certifiedBoardState?.boardRegistryRoot;
-
-const collectCertifiedBoardHistoryRoots = async (
-  env: RuntimeReplica,
-  walDb: RuntimeDbLike,
-): Promise<Set<string>> => {
-  const roots = new Set<string>();
-  const remember = (root: string | undefined): void => {
-    if (root) roots.add(root);
-  };
-  for (const { state } of env.state.eReplicas.values()) remember(certifiedBoardRoot(state));
-  for (const height of await listSnapshotHeights(walDb)) {
-    const docs = await readSnapshotDocs(walDb, height);
-    for (const doc of docs) if (doc.family === 'entity') remember(certifiedBoardRoot(doc.value));
-  }
-  return roots;
-};
-
-const readCertifiedBoardNodes = async (
-  db: RuntimeDbLike,
-): Promise<{ nodes: Map<string, CertifiedBoardPatriciaNode>; bytes: Map<string, number> }> => {
-  const nodes = new Map<string, CertifiedBoardPatriciaNode>();
-  const bytes = new Map<string, number>();
-  for await (const key of iterateKeys(db, { prefix: keyCertifiedBoardNodePrefix() })) {
-    const hash = decodeTaggedStorageHash(key, KEY_CERTIFIED_BOARD_NODE, 'STORAGE_CERTIFIED_BOARD_NODE_KEY_INVALID');
-    const raw = await db.get(key);
-    const node = decodeValidatedBuffer(raw, validateCertifiedBoardNodeValue);
-    const actual = hashCertifiedBoardNode(node);
-    if (actual !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}:${actual}`);
-    nodes.set(hash, node);
-    bytes.set(hash, key.byteLength + raw.byteLength);
-  }
-  return { nodes, bytes };
-};
-
-const deleteCertifiedBoardNodes = async (
-  db: RuntimeDbLike,
-  hashes: readonly string[],
-): Promise<void> => {
-  if (hashes.length === 0) return;
-  const batch = db.batch();
-  for (const hash of hashes) batch.del(keyCertifiedBoardNode(hash));
-  await writeBatch(batch);
-};
-
-const pruneUnreachableCertifiedBoardHistoryNodes = async (
-  env: RuntimeReplica,
-  walDb: RuntimeDbLike,
-  currentDb: RuntimeDbLike,
-): Promise<number> => {
-  const stored = await readCertifiedBoardNodes(walDb);
-  const roots = await collectCertifiedBoardHistoryRoots(env, walDb);
-  const reachable = collectReachableCertifiedBoardNodes(stored.nodes, roots);
-  const stale = [...stored.nodes.keys()].filter((hash) => !reachable.has(hash)).sort();
-  await deleteCertifiedBoardNodes(walDb, stale);
-  await deleteCertifiedBoardNodes(currentDb, stale);
-  const memoryStore = getCertifiedBoardNodeStore(env);
-  for (const hash of stale) memoryStore.delete(hash);
-  return stale.reduce((total, hash) => total + (stored.bytes.get(hash) ?? 0), 0);
-};
-
-const pruneUnreachableConsumptionHistoryNodes = async (
-  env: RuntimeReplica,
-  walDb: RuntimeDbLike,
-): Promise<number> => {
-  const byRoot = new Map<string, ConsumptionAccumulatorState>();
-  const remember = (state: ConsumptionAccumulatorState | undefined): void => {
-    if (state) byRoot.set(`${state.root}:${state.count.toString()}`, state);
-  };
-  for (const state of getLiveConsumptionAccumulatorStates(env)) remember(state);
-  for (const height of await listSnapshotHeights(walDb)) {
-    const docs = await readSnapshotDocs(walDb, height);
-    for (const doc of docs) {
-      if (doc.family === 'entity') remember(doc.value.consumptionAccumulator);
-    }
-  }
-
-  const stored = new Map<string, ConsumptionNode>();
-  const encodedBytes = new Map<string, number>();
-  for await (const key of iterateKeys(walDb, { prefix: keyConsumptionNodePrefix() })) {
-    const hash = decodeTaggedStorageHash(key, KEY_CONSUMPTION_NODE, 'STORAGE_CONSUMPTION_NODE_KEY_INVALID');
-    const raw = await walDb.get(key);
-    const node = decodeValidatedBuffer(raw, validateConsumptionNodeValue);
-    const actual = hashConsumptionNode(node);
-    if (actual !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}:${actual}`);
-    stored.set(hash, node);
-    encodedBytes.set(hash, key.byteLength + raw.byteLength);
-  }
-  if (stored.size === 0) return 0;
-  const reachable = collectReachableConsumptionNodes(stored, Array.from(byRoot.values()));
-  const stale = Array.from(stored.keys()).filter((hash) => !reachable.has(hash)).sort();
-  if (stale.length === 0) return 0;
-  const batch = walDb.batch();
-  let prunedBytes = 0;
-  for (const hash of stale) {
-    batch.del(keyConsumptionNode(hash));
-    prunedBytes += encodedBytes.get(hash) ?? 0;
-  }
-  await writeBatch(batch);
-  return prunedBytes;
-};
-
-const synchronizeAccountJClaimNodes = async (
+const synchronizeAccountJClaimNodes = (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch?: ReturnType<RuntimeDbLike['batch']>,
-  stateDb: RuntimeDbLike = currentDb,
-): Promise<boolean> => {
-  const states: AccountJClaimAccumulatorState[] = [];
-  for await (const key of iterateKeys(stateDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
-    const parsed = parseLiveAccountKey(key);
-    const stored = await readAccountStorageLayout(stateDb, parsed.entityId, parsed.counterpartyId, key);
-    if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_MISSING:${key.toString('hex')}`);
-    const doc = validateStorageAccountDocValue(stored.doc);
-    states.push(doc.state.leftPendingJClaims, doc.state.rightPendingJClaims);
-  }
-  const authoritative = new Map<string, AccountJClaimNode>();
-  const values = new Map<string, Buffer>();
-  for await (const key of iterateKeys(walDb, { prefix: keyAccountJClaimNodePrefix() })) {
-    const hash = decodeTaggedStorageHash(key, KEY_ACCOUNT_J_CLAIM_NODE, 'STORAGE_ACCOUNT_J_CLAIM_NODE_KEY_INVALID');
-    const value = await walDb.get(key);
-    const node = decodeValidatedBuffer(value, validateAccountJClaimNodeValue);
-    const actual = hashAccountJClaimNode(node);
-    if (actual !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actual}`);
-    authoritative.set(hash, node);
-    values.set(hash, value);
-  }
-  const reachable = collectReachableAccountJClaimNodes(authoritative, states);
-  const reachableKeys = new Set<string>();
-  let changed = false;
-  for (const hash of reachable.keys()) {
-    const key = keyAccountJClaimNode(hash);
-    reachableKeys.add(key.toString('hex'));
-    const value = values.get(hash);
-    if (!value) throw new Error(`ACCOUNT_J_CLAIM_NODE_MISSING:${hash}`);
-    if ((await readRawOrNull(currentDb, key))?.equals(value)) continue;
-    batch?.put(key, value);
-    changed = true;
-  }
-  for await (const key of iterateKeys(currentDb, { prefix: keyAccountJClaimNodePrefix() })) {
-    if (reachableKeys.has(key.toString('hex'))) continue;
-    batch?.del(key);
-    changed = true;
-  }
-  return changed;
-};
+  _stateDb: RuntimeDbLike = currentDb,
+): Promise<boolean> => synchronizeAuxiliaryPathFamily(
+  walDb,
+  currentDb,
+  AUXILIARY_PATH_FAMILIES[1]!,
+  batch,
+);
 
 const assertCurrentProjectionIntegrity = async (
   currentDb: RuntimeDbLike,
@@ -599,56 +421,13 @@ const assertCurrentProjectionIntegrity = async (
   }
 
   const boardChanged = await synchronizeCertifiedBoardNodes(walDb, currentDb);
-  const consumptionChanged = await synchronizeConsumptionNodes(walDb, currentDb);
   const accountJClaimChanged = await synchronizeAccountJClaimNodes(walDb, currentDb);
-  if (boardChanged || consumptionChanged || accountJClaimChanged) {
+  if (boardChanged || accountJClaimChanged) {
     throw new Error(
       `STORAGE_CURRENT_NODE_PROJECTION_MISMATCH:` +
-        `board=${boardChanged}:consumption=${consumptionChanged}:accountJ=${accountJClaimChanged}`,
+        `board=${boardChanged}:accountJ=${accountJClaimChanged}`,
     );
   }
-};
-
-const pruneUnreachableAccountJClaimHistoryNodes = async (
-  env: RuntimeReplica,
-  walDb: RuntimeDbLike,
-): Promise<number> => {
-  const states = new Map<string, AccountJClaimAccumulatorState>();
-  const remember = (state: AccountJClaimAccumulatorState): void => {
-    states.set(`${state.root}:${state.count.toString()}`, state);
-  };
-  for (const state of getLiveAccountJClaimAccumulatorStates(env)) remember(state);
-  for (const height of await listSnapshotHeights(walDb)) {
-    const docs = await readSnapshotDocs(walDb, height);
-    for (const doc of docs) {
-      if (doc.family !== 'account') continue;
-      remember(doc.value.state.leftPendingJClaims);
-      remember(doc.value.state.rightPendingJClaims);
-    }
-  }
-  const stored = new Map<string, AccountJClaimNode>();
-  const bytes = new Map<string, number>();
-  for await (const key of iterateKeys(walDb, { prefix: keyAccountJClaimNodePrefix() })) {
-    const hash = decodeTaggedStorageHash(key, KEY_ACCOUNT_J_CLAIM_NODE, 'STORAGE_ACCOUNT_J_CLAIM_NODE_KEY_INVALID');
-    const raw = await walDb.get(key);
-    const node = decodeValidatedBuffer(raw, validateAccountJClaimNodeValue);
-    const actual = hashAccountJClaimNode(node);
-    if (actual !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actual}`);
-    stored.set(hash, node);
-    bytes.set(hash, key.byteLength + raw.byteLength);
-  }
-  if (stored.size === 0) return 0;
-  const reachable = collectReachableAccountJClaimNodes(stored, [...states.values()]);
-  const stale = [...stored.keys()].filter((hash) => !reachable.has(hash)).sort();
-  if (stale.length === 0) return 0;
-  const batch = walDb.batch();
-  let prunedBytes = 0;
-  for (const hash of stale) {
-    batch.del(keyAccountJClaimNode(hash));
-    prunedBytes += bytes.get(hash) ?? 0;
-  }
-  await writeBatch(batch);
-  return prunedBytes;
 };
 
 export type StorageRecoveryDiagnostics = {
@@ -764,19 +543,14 @@ export const recoverStorageDbFromHistory = async (options: {
     : false;
   options.onPersistenceProgress?.('recovery-live-state-synchronized');
   if (headChanged) markRecoveryStage('syncLiveState');
-  // History commits before the rebuildable current projection cache.
-  // The normal append path writes both DBs and never scans the content-addressed
-  // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
+  // History commits before the rebuildable current projection cache. The
+  // normal append path writes both DBs; only lagging-cache recovery scans and
+  // reconciles the live owner/path rows.
   const boardNodesChanged = headChanged
     ? await synchronizeCertifiedBoardNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-board-nodes-synchronized');
   if (headChanged) markRecoveryStage('syncBoardNodes');
-  const consumptionNodesChanged = headChanged
-    ? await synchronizeConsumptionNodes(options.walDb, options.db, batch, options.walDb)
-    : false;
-  options.onPersistenceProgress?.('recovery-consumption-nodes-synchronized');
-  if (headChanged) markRecoveryStage('syncConsumptionNodes');
   const accountJClaimNodesChanged = headChanged
     ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch, options.walDb)
     : false;
@@ -785,7 +559,6 @@ export const recoverStorageDbFromHistory = async (options: {
   if (
     liveStateChanged ||
     boardNodesChanged ||
-    consumptionNodesChanged ||
     accountJClaimNodesChanged
   ) {
     await writeBatch(batch);
@@ -1018,22 +791,6 @@ const runStorageSnapshotLifecycle = async (
       oldestRetained,
       options.onPersistenceBoundary,
     );
-    prunedBytes += await pruneUnreachableCertifiedBoardHistoryNodes(
-      options.env,
-      walDb,
-      db,
-    );
-    options.onPersistenceProgress?.('snapshot-board-gc-done');
-    prunedBytes += await pruneUnreachableConsumptionHistoryNodes(
-      options.env,
-      walDb,
-    );
-    options.onPersistenceProgress?.('snapshot-consumption-gc-done');
-    prunedBytes += await pruneUnreachableAccountJClaimHistoryNodes(
-      options.env,
-      walDb,
-    );
-    options.onPersistenceProgress?.('snapshot-account-j-gc-done');
   }
 
   retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
@@ -1215,7 +972,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
   checkpoint('overlay');
   const checkpointedLineagePlan = shouldMaterialize
-    ? buildRuntimeCheckpointLineagePlan(options.env)
+    ? buildRuntimeCheckpointHeadPlan(options.env)
     : null;
   if (shouldMaterialize) {
     for (const replica of options.env.state.eReplicas.values()) {
@@ -1321,54 +1078,74 @@ const resolveStorageAppendPosition = async (
   };
 };
 
-const collectPendingStorageNodes = (env: RuntimeReplica) => {
-  const state = env.infrastructure ?? {};
-  const boardNodes =
-    state.pendingCertifiedBoardNodes instanceof Map
-      ? state.pendingCertifiedBoardNodes
-      : new Map<string, CertifiedBoardPatriciaNode>();
-  const boardEntries: Array<{ key: Buffer; value: Buffer }> = [];
-  let boardHistoryBytes = 0;
-  for (const [hash, node] of boardNodes) {
-    if (hashCertifiedBoardNode(node) !== hash) {
-      throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}`);
+const collectAuxiliaryTreeOwners = (env: RuntimeReplica): AuxiliaryTreeOwner[] => {
+  const owners = new Map<string, AuxiliaryTreeOwner>();
+  for (const replica of env.state.eReplicas.values()) {
+    const entityId = replica.entityId.toLowerCase();
+    const candidate: AuxiliaryTreeOwner = {
+      entityId,
+      ...(replica.state.certifiedBoardState?.boardRegistryRoot
+        ? { certifiedBoardRoot: replica.state.certifiedBoardState.boardRegistryRoot }
+        : {}),
+      accounts: [...replica.state.accounts]
+        .map(([counterpartyId, account]) => ({
+          counterpartyId: counterpartyId.toLowerCase(),
+          leftPendingJClaims: account.state.leftPendingJClaims,
+          rightPendingJClaims: account.state.rightPendingJClaims,
+        }))
+        .sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId)),
+    };
+    const previous = owners.get(entityId);
+    if (previous) {
+      const left = encodeBuffer(previous);
+      const right = encodeBuffer(candidate);
+      if (!left.equals(right)) throw new Error(`AUXILIARY_PATH_OWNER_STATE_CONFLICT:${entityId}`);
+      continue;
     }
-    const key = keyCertifiedBoardNode(hash);
-    const value = encodeBuffer(node);
-    boardEntries.push({ key, value });
-    boardHistoryBytes += key.byteLength + value.byteLength;
+    owners.set(entityId, candidate);
   }
+  return [...owners.values()].sort((left, right) => left.entityId.localeCompare(right.entityId));
+};
 
-  const consumptionNodes = state.pendingConsumptionNodes ?? new Map();
-  let consumptionHistoryBytes = 0;
-  for (const [hash, node] of consumptionNodes) {
-    if (hashConsumptionNode(node) !== hash) {
-      throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}`);
-    }
-    consumptionHistoryBytes +=
-      keyConsumptionNode(hash).byteLength + encodeBuffer(node).byteLength;
-  }
+const auxiliaryRowsChanged = (env: RuntimeReplica): boolean => {
+  const state = env.infrastructure;
+  return Boolean(
+    state?.pendingCertifiedBoardNodes instanceof Map && state.pendingCertifiedBoardNodes.size > 0 ||
+    state?.pendingAccountJClaimNodes instanceof Map && state.pendingAccountJClaimNodes.size > 0 ||
+    state?.pendingAccountJClaimNodeDeletes instanceof Set && state.pendingAccountJClaimNodeDeletes.size > 0
+  );
+};
 
-  const accountJClaimNodes =
-    state.pendingAccountJClaimNodes instanceof Map
-      ? state.pendingAccountJClaimNodes
-      : new Map<string, AccountJClaimNode>();
-  let accountJClaimHistoryBytes = 0;
-  for (const [hash, node] of accountJClaimNodes) {
-    if (hashAccountJClaimNode(node) !== hash) {
-      throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}`);
-    }
-    accountJClaimHistoryBytes +=
-      keyAccountJClaimNode(hash).byteLength + encodeBuffer(node).byteLength;
+const preparePathKeyedAuxiliaryPlan = async (
+  env: RuntimeReplica,
+  walDb: RuntimeDbLike,
+  force: boolean,
+) => {
+  const safeAccountJClaimDeletes = getSafePendingAccountJClaimDeletes(env);
+  if (!force && !auxiliaryRowsChanged(env)) {
+    return {
+      puts: [] as ReadonlyArray<Readonly<{ key: Buffer; value: Buffer }>>,
+      dels: [] as readonly Buffer[],
+      safeAccountJClaimDeletes,
+    };
   }
-  return {
-    boardEntries,
-    boardHistoryBytes,
-    consumptionNodes,
-    consumptionHistoryBytes,
-    accountJClaimNodes,
-    accountJClaimHistoryBytes,
-  };
+  const projected = preparePathKeyedAuxiliaryRows({
+    owners: collectAuxiliaryTreeOwners(env),
+    certifiedBoardStore: getCertifiedBoardNodeStore(env),
+    accountJClaimStore: getAccountJClaimNodeStore(env),
+  });
+  const puts = [
+    ...projected.certifiedBoardNodes,
+    ...projected.accountJClaimNodes,
+  ];
+  const desired = new Set(puts.map(row => row.key.toString('hex')));
+  const dels: Buffer[] = [];
+  for (const family of AUXILIARY_PATH_FAMILIES) {
+    for await (const key of iterateKeys(walDb, { prefix: family.prefix })) {
+      if (!desired.has(key.toString('hex'))) dels.push(key);
+    }
+  }
+  return { puts, dels, safeAccountJClaimDeletes };
 };
 
 const logReplicaMetaDebug = (
@@ -1381,17 +1158,9 @@ const logReplicaMetaDebug = (
     height: env.state.height,
     digest: commitment.digest,
     checkpoint: checkpointed,
-    consumptionNodes: getConsumptionNodeStore(env).size,
-    consumptionRoots: [...env.state.eReplicas.values()].map(replica => ({
+    mempools: [...env.state.eReplicas.values()].map(replica => ({
       entityId: replica.entityId,
-      root: replica.state.consumptionAccumulator?.root ?? null,
-      count: replica.state.consumptionAccumulator?.count?.toString() ?? null,
-      mempool: replica.mempool.map(tx =>
-        tx.type === 'consensusOutput'
-          ? `consensusOutput:${tx.data.origin.sourceEntityId}:` +
-            tx.data.origin.sequence.toString()
-          : tx.type,
-      ),
+      txTypes: replica.mempool.map(tx => tx.type),
     })),
     heads: summarizeStorageReplicaMetaHeads(commitment.entries),
   });
@@ -1638,7 +1407,7 @@ const buildStorageRuntimeFrame = (
   commitments: PreparedStorageCommitments,
   prevFrameHash: string,
   touches: StorageFrameTouchSummary,
-  runtimeOutputRefs: readonly RuntimeOutputPayloadHash[],
+  runtimeOutputs: RuntimeOutputCommitment,
   entityContextRefs: ReadonlyMap<string, EntityContextPayloadHash>,
   runtimeMachineRoot: import('./types').RuntimeMachineGraphRoot | undefined,
   accountAuthorityCheckpoints: PreparedRscoreCheckpointStorage['refs'],
@@ -1665,7 +1434,8 @@ const buildStorageRuntimeFrame = (
       timestamp: options.env.state.timestamp,
       replicaMetaDigest: commitments.replicaMetaCommitment.digest,
       runtimeComponentDigests: commitments.runtimeComponentDigests,
-      runtimeOutputRefs,
+      runtimeOutputCount: runtimeOutputs.count,
+      runtimeOutputsDigest: runtimeOutputs.digest,
     }),
     materializedState: shouldMaterialize,
     ...(commitments.runtimeStateHashes
@@ -1689,9 +1459,8 @@ const buildStorageRuntimeFrame = (
     ...(accountAuthorityCheckpoints.length > 0
       ? { accountAuthorityCheckpoints: [...accountAuthorityCheckpoints] }
       : {}),
-    ...(runtimeOutputRefs.length > 0
-      ? { runtimeOutputRefs: [...runtimeOutputRefs] }
-      : {}),
+    runtimeOutputCount: runtimeOutputs.count,
+    runtimeOutputsDigest: runtimeOutputs.digest,
     touchedEntities: touches.touchedEntities,
     touchedAccounts: touches.touchedAccounts,
     touchedBookEntities: touches.touchedBookEntities,
@@ -1734,18 +1503,19 @@ const buildStorageFrameRecordPlan = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
-  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
   prevFrameHash: string,
   accountAuthorityCheckpoint: PreparedRscoreCheckpointStorage,
   mark: (label: string) => void = () => {},
 ) => {
   const touches = summarizeStorageFrameTouches(options, prepared);
   mark('frameEncode.touches');
-  const outputPayloads = prepareRuntimeOutputPayloadRows(
+  const outputPayloads = prepareRuntimeOutputRows(
+    options.env.state.height,
     options.currentFrameOutputs ?? [],
   );
   mark('frameEncode.outputPayloads');
   const entityContextPayloads = prepareEntityContextPayloadRows(
+    options.env.state.height,
     options.entityContexts,
     options.inProcessInfraValidated === true,
   );
@@ -1763,7 +1533,7 @@ const buildStorageFrameRecordPlan = (
     commitments,
     prevFrameHash,
     touches,
-    outputPayloads.refs,
+    outputPayloads.commitment,
     entityContextPayloads.refs,
     runtimeMachineGraph.root,
     accountAuthorityCheckpoint.refs,
@@ -1780,13 +1550,8 @@ const buildStorageFrameRecordPlan = (
   const frameBuffer = encodeBufferAsIs(frameRecord);
   const frameRows = prepareBoundedStorageValueRows(frameKey, frameBuffer);
   mark('frameEncode.frameBuffer');
-  const nodeBytes =
-    pendingNodes.boardHistoryBytes +
-    pendingNodes.consumptionHistoryBytes +
-    pendingNodes.accountJClaimHistoryBytes;
   const authoritativeBaseBytes =
     boundedStorageRowsBytes(frameRows) +
-    nodeBytes +
     outputPayloads.rows.reduce(
       (total, row) => total + row.key.byteLength + row.value.byteLength,
       0,
@@ -1933,7 +1698,7 @@ const buildStorageCommitBatches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
-  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
+  pendingNodes: Awaited<ReturnType<typeof preparePathKeyedAuxiliaryPlan>>,
   frame: RuntimeFramePlan,
   certifiedHistoryPuts: HistoryViewPut[],
   accountAuthorityCheckpoint: PreparedRscoreCheckpointStorage,
@@ -1944,15 +1709,8 @@ const buildStorageCommitBatches = (
   const activityHistoryRows = frame.historyViewPuts.flatMap(put =>
     prepareBoundedStorageValueRows(put.key, put.value));
   for (const key of commitments.staleReplicaMetaKeys) walBatch.del(key);
-  for (const entry of pendingNodes.boardEntries) {
-    walBatch.put(entry.key, entry.value);
-  }
-  for (const [hash, node] of pendingNodes.consumptionNodes) {
-    walBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
-  }
-  for (const [hash, node] of pendingNodes.accountJClaimNodes) {
-    walBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
-  }
+  for (const key of pendingNodes.dels) walBatch.del(key);
+  for (const entry of pendingNodes.puts) walBatch.put(entry.key, entry.value);
   for (const row of frame.frameRows) walBatch.put(row.key, row.value);
   for (const row of frame.outputPayloadRows) {
     walBatch.put(row.key, row.value);
@@ -1987,25 +1745,8 @@ const buildStorageCommitBatches = (
   }
 
   const currentBatch = prepared.db.batch();
-  for (const entry of pendingNodes.boardEntries) {
-    currentBatch.put(entry.key, entry.value);
-  }
-  const safeConsumptionDeletes =
-    getSafePendingConsumptionDeletes(options.env);
-  const safeAccountJClaimDeletes =
-    getSafePendingAccountJClaimDeletes(options.env);
-  for (const [hash, node] of pendingNodes.consumptionNodes) {
-    currentBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
-  }
-  for (const hash of safeConsumptionDeletes) {
-    currentBatch.del(keyConsumptionNode(hash));
-  }
-  for (const [hash, node] of pendingNodes.accountJClaimNodes) {
-    currentBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
-  }
-  for (const hash of safeAccountJClaimDeletes) {
-    currentBatch.del(keyAccountJClaimNode(hash));
-  }
+  for (const key of pendingNodes.dels) currentBatch.del(key);
+  for (const entry of pendingNodes.puts) currentBatch.put(entry.key, entry.value);
   const graph = commitments.liveStateGraph;
   if (graph) {
     for (const key of graph.dels) currentBatch.del(key);
@@ -2045,8 +1786,7 @@ const buildStorageCommitBatches = (
     walBatch,
     currentBatch,
     nextHead,
-    safeConsumptionDeletes,
-    safeAccountJClaimDeletes,
+    safeAccountJClaimDeletes: pendingNodes.safeAccountJClaimDeletes,
   };
 };
 
@@ -2160,7 +1900,7 @@ const commitStorageFrame = async (
   options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');
   if (prepared.checkpointedLineagePlan) {
-    applyCertifiedEntityLineagePlan(
+    applyCertifiedEntityHeadPlan(
       options.env,
       prepared.checkpointedLineagePlan,
     );
@@ -2171,10 +1911,6 @@ const commitStorageFrame = async (
   if (prepared.checkpointedLineagePlan) {
     state.storageReplicaMetaKeys = new Set(commitments.liveReplicaMetaKeys);
   }
-  finalizePersistedConsumptionNodes(
-    options.env,
-    batches.safeConsumptionDeletes,
-  );
   finalizePersistedAccountJClaimNodes(
     options.env,
     batches.safeAccountJClaimDeletes,
@@ -2365,7 +2101,11 @@ export const saveRuntimeFrameToStorage = async (
   const { previousFrame, prevFrameHash } = appendPosition;
   options.onPersistenceProgress?.('history-read');
   checkpointPrepare('historyRead');
-  const pendingNodes = collectPendingStorageNodes(options.env);
+  const pendingNodes = await preparePathKeyedAuxiliaryPlan(
+    options.env,
+    walDb,
+    prepared.shouldMaterialize,
+  );
   checkpointPrepare('pendingNodes');
 
   const authorityCheckpointInputs = options.accountAuthority
@@ -2400,7 +2140,6 @@ export const saveRuntimeFrameToStorage = async (
     options,
     prepared,
     commitments,
-    pendingNodes,
     prevFrameHash,
     accountAuthorityCheckpoint,
     // Sub-stage marks split `frameEncode`; keep the default stage shape stable.

@@ -287,6 +287,8 @@ pub fn input_row(
         operation_index,
         account_id,
         genesis_policy: None,
+        certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
+        local_certified_board_authority: xln_rscore_batch::PeerBoardAuthority::Lazy,
         input: peer_input(from_entity_id, to_entity_id, kind),
     }
 }

@@ -174,13 +174,6 @@ export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T =>
       cloned[key] = { ...(value as Record<string, unknown>) };
       continue;
     }
-    if (key === 'certifiedOutputIdentity') {
-      if (!value || typeof value !== 'object') {
-        throw new Error('RUNTIME_INPUT_CERTIFIED_OUTPUT_IDENTITY_INVALID');
-      }
-      cloned[key] = { ...(value as Record<string, unknown>) };
-      continue;
-    }
     if (key === 'hashPrecommits') {
       if (!(value instanceof Map)) throw new Error('RUNTIME_INPUT_HASH_PRECOMMITS_INVALID');
       cloned[key] = new Map(Array.from(value, ([signerId, signatures]) => [

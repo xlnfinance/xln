@@ -15,7 +15,7 @@ use num_bigint::{BigInt, Sign};
 use sha3::{Digest, Keccak256};
 
 use crate::consensus::replica::CounterpartyDispute;
-use crate::consensus::signing::verify_dispute_hanko;
+use crate::consensus::signing::{CertifiedBoardAuthority, verify_dispute_hanko_with_authority};
 use crate::error::StateError;
 use crate::state::AccountReplica;
 use crate::state::identity::Side;
@@ -120,21 +120,30 @@ pub(crate) fn validate_counterparty_dispute_shape(
     Ok(())
 }
 
-/// Rebuild and authenticate a peer's recovery proof from the Account's own
-/// identity. The exact supplied hash must equal the independent rebuild: a
-/// valid Hanko over another Account/domain/watch-seed must never be retained
-/// as enforceable evidence for this one.
-pub(crate) fn verify_counterparty_dispute(
+/// Authority-aware dispute verification. Historical evidence may use exactly
+/// the previous Entity-certified board until its exclusive expiry; callers on
+/// fresh-money or refresh lanes pass `allow_previous_board = false`.
+pub(crate) fn verify_counterparty_dispute_with_authority(
     replica: &AccountReplica,
     expected_counterparty: &[u8; 32],
     dispute: &CounterpartyDispute,
+    authority: Option<&CertifiedBoardAuthority>,
+    entity_timestamp_ms: u64,
+    allow_previous_board: bool,
 ) -> Result<[u8; 32], StateError> {
     let digest = validate_counterparty_dispute_hash(replica, expected_counterparty, dispute)?;
     let hanko = dispute
         .hanko
         .as_deref()
         .ok_or_else(|| StateError::DisputeHankoInvalid("SHAPE_INVALID:HANKO_MISSING".into()))?;
-    verify_dispute_hanko(hanko, &digest, expected_counterparty)?;
+    verify_dispute_hanko_with_authority(
+        hanko,
+        &digest,
+        expected_counterparty,
+        authority,
+        entity_timestamp_ms,
+        allow_previous_board,
+    )?;
     Ok(digest)
 }
 

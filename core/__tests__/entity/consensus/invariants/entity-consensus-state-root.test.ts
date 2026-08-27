@@ -180,18 +180,6 @@ const mutators = {
   htlcFeesEarned: state => {
     state.htlcFeesEarned = 1n;
   },
-  consumptionAccumulator: state => {
-    state.consumptionAccumulator = {
-      version: 1,
-      root: `0x${'ab'.repeat(32)}`,
-      count: 1n,
-    };
-  },
-  certifiedOutputSequences: state => {
-    state.certifiedOutputSequences = new Map([
-      [counterpartyId, { lastSequence: 1n, lastSemanticHash: `0x${'bc'.repeat(32)}` }],
-    ]);
-  },
   outDebtsByToken: state => {
     state.outDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'out-debt' } as never]])]]);
   },

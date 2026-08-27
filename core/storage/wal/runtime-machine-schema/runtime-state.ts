@@ -47,7 +47,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
     'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
     'entityEncryptionSeeds',
-    'certifiedBoardNodes', 'consumptionNodes', 'accountJClaimNodes',
+    'certifiedBoardNodes', 'accountJClaimNodes',
   ], `${code}_FIELDS`);
   for (const field of ['maxEntityInputsPerFrame', 'maxEntityTxsPerFrame']) {
     if (state[field] !== undefined) requireBoundaryInteger(state[field], `${code}_${field.toUpperCase()}`, 1);
@@ -84,7 +84,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   if (state['pendingJurisdictionImports'] !== undefined) validateStringMap(state['pendingJurisdictionImports'], `${code}_PENDING_IMPORTS`, validatePendingImport);
   if (state['numberedRegistrationIntents'] !== undefined) validateStringMap(state['numberedRegistrationIntents'], `${code}_NUMBERED_INTENTS`, validateNumberedRecord);
   if (state['certifiedRegistrationEvidence'] !== undefined) validateStringMap(state['certifiedRegistrationEvidence'], `${code}_REGISTRATION_EVIDENCE`, validateRegistrationEvidence);
-  for (const field of ['certifiedBoardNodes', 'consumptionNodes', 'accountJClaimNodes']) {
+  for (const field of ['certifiedBoardNodes', 'accountJClaimNodes']) {
     if (state[field] === undefined) continue;
     validateStringMap(state[field], `${code}_${field.toUpperCase()}`, (node, nodeCode) => {
       requireBoundaryRecord(node, nodeCode);

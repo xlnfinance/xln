@@ -9,6 +9,12 @@ import { hexToWireBytes } from '../shadow-wire';
 import { decodeWave, type Wave } from '../wave-decode';
 
 type RscoreEntityOutput =
+  | Readonly<{
+      kind: 'htlcInitiated'; entityId: string; fromEntity: string; toEntity: string;
+      tokenId: number; amount: bigint; senderAmount: bigint; fee: bigint;
+      hashlock: string; lockId: string; route: readonly string[];
+      description: string | null; startedAtMs: number;
+    }>
   | Readonly<{ kind: 'htlcForwardAccepted'; entityId: string; hashlock: string }>
   | Readonly<{ kind: 'htlcFailed'; entityId: string; hashlock: string; lockId: string | null; reason: string }>
   | Readonly<{
@@ -65,6 +71,7 @@ const preparedWire = (entry: PreparedHtlcEntry): RscoreWireValue[] => {
       ? [
           1,
           bytes(entry.outcome.secret, 32, 'RSCORE_ENTITY_PREPARED_SECRET'),
+          entry.outcome.description ?? null,
           entry.outcome.startedAtMs ?? null,
         ]
       : [
@@ -218,6 +225,25 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
         kind: 'swapMatched',
         entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
         count: integer(row[2], 'RSCORE_ENTITY_OUTPUT_SWAP_COUNT'),
+      };
+    }
+    case 5: {
+      const row = tuple(value, 13, 'RSCORE_ENTITY_HTLC_INITIATED');
+      if (!Array.isArray(row[10])) throw new Error('RSCORE_ENTITY_OUTPUT_ROUTE');
+      return {
+        kind: 'htlcInitiated',
+        entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
+        fromEntity: digest(row[2], 32, 'RSCORE_ENTITY_OUTPUT_FROM'),
+        toEntity: digest(row[3], 32, 'RSCORE_ENTITY_OUTPUT_TO'),
+        tokenId: integer(row[4], 'RSCORE_ENTITY_OUTPUT_TOKEN'),
+        amount: BigInt(text(row[5], 'RSCORE_ENTITY_OUTPUT_AMOUNT')),
+        senderAmount: BigInt(text(row[6], 'RSCORE_ENTITY_OUTPUT_SENDER_AMOUNT')),
+        fee: BigInt(text(row[7], 'RSCORE_ENTITY_OUTPUT_FEE')),
+        hashlock: digest(row[8], 32, 'RSCORE_ENTITY_OUTPUT_HASHLOCK'),
+        lockId: digest(row[9], 32, 'RSCORE_ENTITY_OUTPUT_LOCK'),
+        route: row[10].map(value => digest(value, 32, 'RSCORE_ENTITY_OUTPUT_ROUTE_ENTITY')),
+        description: optionalText(row[11], 'RSCORE_ENTITY_OUTPUT_DESCRIPTION'),
+        startedAtMs: integer(row[12], 'RSCORE_ENTITY_OUTPUT_STARTED'),
       };
     }
     default: throw new Error(`RSCORE_ENTITY_OUTPUT_TAG:${String(value[0])}`);

@@ -159,6 +159,7 @@ export async function applyCommittedHtlcLockFollowup(
   ctx: HtlcFollowupContext,
   accountTx: AccountTx,
   committedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   committedViaNewFrame: boolean,
 ): Promise<void> {
   if (accountTx.type !== 'htlc_lock') return;
@@ -193,7 +194,7 @@ export async function applyCommittedHtlcLockFollowup(
     revealBeforeHeight: accountTx.data.revealBeforeHeight,
     amount: accountTx.data.amount,
     tokenId: accountTx.data.tokenId,
-    senderIsLeft: committedFrame.byLeft,
+    senderIsLeft: proposerIsLeft,
     // The Account handler stamps the pre-proposal height. The containing
     // frame is exactly the next height (proposal/frame.ts); using the frame
     // height here would synthesize a different lock than either engine did.

@@ -171,6 +171,22 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         revision: u64,
         entries: Vec<(AccountId, V, [u8; 32])>,
     ) -> Result<Self, BatchError> {
+        Self::restore_with_checkpoint(worker_count, revision, entries, false)
+    }
+
+    pub(crate) fn import_existing(
+        worker_count: usize,
+        entries: Vec<(AccountId, V, [u8; 32])>,
+    ) -> Result<Self, BatchError> {
+        Self::restore_with_checkpoint(worker_count, 0, entries, true)
+    }
+
+    fn restore_with_checkpoint(
+        worker_count: usize,
+        revision: u64,
+        entries: Vec<(AccountId, V, [u8; 32])>,
+        import_existing: bool,
+    ) -> Result<Self, BatchError> {
         let mut shard_weights = vec![0_u64; PERSISTENT_RADIX_SHARD_COUNT];
         for (account_id, _, _) in &entries {
             let shard = logical_account_shard(*account_id);
@@ -222,7 +238,12 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         for (shard, entries) in buckets {
             lanes[plan.worker(shard)].push(ShardSeedBatch { shard, entries });
         }
-        let seeded = workers.run_lanes(lanes, |state, batch| {
+        let seeded = workers.run_lanes(lanes, move |state, batch| {
+            if import_existing {
+                state
+                    .checkpoint_dirty
+                    .extend(batch.entries.iter().map(|(account_id, _, _)| *account_id));
+            }
             let resident = resident_shard_mut(state, batch.shard)?;
             let entries = batch
                 .entries
@@ -233,7 +254,9 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
                 .base
                 .updated_batch(entries)
                 .map_err(|error| forest_error(zero_account(), error))?;
-            resident.checkpoint = resident.base.clone();
+            if !import_existing {
+                resident.checkpoint = resident.base.clone();
+            }
             Ok::<_, BatchError>(resident.base.descriptor())
         })?;
         for descriptor in seeded.into_iter().flatten() {
@@ -243,6 +266,13 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         }
         let top = PersistentRadixShardCoordinator::from_descriptors(descriptors)
             .map_err(|error| forest_error(AccountId::from_bytes([0; 32]), error))?;
+        let checkpoint_workers = if import_existing {
+            seen.iter()
+                .map(|account_id| plan.worker(logical_account_shard(*account_id)))
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         Ok(Self {
             workers,
             plan,
@@ -254,7 +284,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             candidate_revision: None,
             inbound_shards: BTreeSet::new(),
             candidate_shards: BTreeSet::new(),
-            checkpoint_workers: BTreeSet::new(),
+            checkpoint_workers,
             checkpoint_revision: revision,
             pending_checkpoint: None,
             phase: 0,
@@ -640,29 +670,26 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             reconcile_by_worker[self.plan.worker(shard)].push(shard);
         }
         let checkpoint_workers = checkpoint_ack.then(|| self.checkpoint_workers.clone());
-        let active = worker_batches
+        let active_workers = worker_batches
             .iter()
             .zip(&reconcile_by_worker)
             .enumerate()
-            .filter(|(worker, (shards, reconcile))| {
+            .map(|(worker, (shards, reconcile))| {
                 !shards.is_empty()
                     || !reconcile.is_empty()
                     || checkpoint_workers
                         .as_ref()
-                        .is_some_and(|workers| workers.contains(worker))
+                        .is_some_and(|workers| workers.contains(&worker))
             })
-            .count();
+            .collect::<Vec<_>>();
+        let active = active_workers.iter().filter(|active| **active).count();
         let control = Arc::new(PhaseControl::new(active));
         let lanes = worker_batches
             .into_iter()
             .zip(reconcile_by_worker)
-            .enumerate()
-            .map(|(worker, (shards, reconcile))| {
-                let worker_checkpoint_ack = checkpoint_ack
-                    && checkpoint_workers
-                        .as_ref()
-                        .is_some_and(|workers| workers.contains(&worker));
-                if shards.is_empty() && reconcile.is_empty() && !worker_checkpoint_ack {
+            .zip(active_workers)
+            .map(|((shards, reconcile), active)| {
+                if !active {
                     Vec::new()
                 } else {
                     vec![WorkerMutationBatch {

@@ -23,8 +23,8 @@ export function handleAddDelta(
 
   const existed = account.deltas.has(tokenId);
   try {
-    // A zero-valued row is omitted from AccountFrame.deltas, so frame-shape
-    // validation alone cannot stop a signed peer from exhausting this map.
+    // A zero-valued row is still part of AccountState, so the state-root-only
+    // frame body cannot stop a signed peer from exhausting this map.
     // Keep the bounded insertion at the mutation sink and reject it as data.
     commitDeltaDraft(account, createDeltaDraft(account, tokenId));
   } catch (error) {

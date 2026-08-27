@@ -1104,7 +1104,7 @@ const stripRejectedAccountTxs = (
       if (!rejected.has(tx.data)) entityTxs.push(tx);
       continue;
     }
-    if (tx.type !== 'consensusOutput' && tx.type !== 'runtimeOutput') {
+    if (tx.type !== 'runtimeOutput') {
       entityTxs.push(tx);
       continue;
     }
@@ -1115,12 +1115,6 @@ const stripRejectedAccountTxs = (
       continue;
     }
     if (retained.length === 0) continue;
-    if (tx.type === 'consensusOutput') {
-      // A certified reliable Account output is required to contain exactly one
-      // nested transaction. Rewriting a signed mixed payload would invalidate
-      // its Hanko, so malformed producers fail loudly instead.
-      throw new Error('CROSS_J_CERTIFIED_OUTPUT_PARTIAL_REWRITE_FORBIDDEN');
-    }
     entityTxs.push({
       ...tx,
       data: {
@@ -1453,7 +1447,6 @@ const validateInboundEntityCommands = (
         `INBOUND_ACCOUNT_TARGET_MISMATCH:route=${input.entityId}:claimed=${tx.data.toEntityId}`,
       );
     }
-    if (tx.type === 'consensusOutput') continue;
     if (tx.type === 'runtimeOutput') {
       throw new Error(`INBOUND_RUNTIME_OUTPUT_FORBIDDEN:entity=${input.entityId}:from=${from}`);
     }

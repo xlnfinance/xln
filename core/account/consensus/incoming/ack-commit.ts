@@ -4,7 +4,6 @@ import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
 import { cloneIsolatedAccountFrame } from '../../../protocol/state/account-input-clone';
 import { getAccountPerspective } from '../../state/perspective';
-import { deriveAccountFrameTokenIds } from '../../state/frame';
 import { appendAccountMempoolTxs } from '../../input/mempool';
 import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
@@ -15,7 +14,7 @@ import {
   storeCounterpartyDisputeHanko,
   type ValidatedCounterpartyDisputeHanko,
 } from '../dispute/hanko';
-import type { HandleAccountInputResult } from '../types';
+import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
 import { preparedCommitKey, takePreparedProposalCommit } from '../proposal/prepared-commit';
@@ -94,6 +93,11 @@ const verifyPendingAckCertificate = async (
 
   const expectedEntity = account.proofHeader.toEntity;
   ackLog.debug('hanko.verify', { height: ackHeight, frame: shortHash(frameHash) });
+  // An ACK is the second half of the certificate for an already-authored
+  // pending frame, not authority to propose fresh financial movement. A lost
+  // ACK may cross a board rotation; rejecting its exact previous-board Hanko
+  // would strand the proposer even though the peer committed these bytes.
+  // Fresh frame proposals remain current-board-only in preflight.ts.
   const verified = await timePerfPhase(
     'account.verify.ackHanko',
     () => securityContext.verifyHanko(
@@ -103,9 +107,9 @@ const verifyPendingAckCertificate = async (
       securityContext.counterpartyCertifiedBoard
         ? {
             registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
-            allowPreviousBoard: false,
+            allowPreviousBoard: true,
           }
-        : { allowPreviousBoard: false },
+        : { allowPreviousBoard: true },
     ),
   );
   if (!verified.valid) {
@@ -146,8 +150,9 @@ const applyPendingFrameTransactions = async (
   committedJClaims: AccountJClaimSession,
   timedOutHashlocks: string[],
   candidateEffects: AccountOutput[],
+  frameHash: string,
 ): Promise<void> => {
-  const prepared = takePreparedProposalCommit(preparedCommitKey(account, pendingFrame.stateHash), account.state);
+  const prepared = takePreparedProposalCommit(preparedCommitKey(account, frameHash), account.state);
   // Same derivation commitAccountFrameTransition uses, so both commit paths
   // hand the mirror the identical execution clock.
   const preparedJHeight = pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
@@ -180,7 +185,7 @@ const applyPendingFrameTransactions = async (
       ownerEntityId: account.proofHeader.fromEntity,
       counterpartyEntityId: account.proofHeader.toEntity,
       frameHeight: pendingFrame.height,
-      byLeft: pendingFrame.byLeft,
+      byLeft: account.proofHeader.fromEntity.toLowerCase() === account.state.leftEntity.toLowerCase(),
       timestamp: pendingFrame.timestamp,
       jHeight: preparedJHeight,
       enforcementTimestamp: pendingFrame.timestamp,
@@ -198,6 +203,7 @@ const applyPendingFrameTransactions = async (
     context,
     account,
     frame: pendingFrame,
+    proposerIsLeft: account.proofHeader.fromEntity.toLowerCase() === account.state.leftEntity.toLowerCase(),
     jClaimSession: committedJClaims,
     role: 'proposer/commit',
   });
@@ -212,7 +218,7 @@ const installPendingFrameCommit = (
   ack: AccountFrameAck,
   ackHanko: string,
   validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
-  committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
+  committedFrames: AccountCommittedFrame[],
 ): number => {
   account.currentFrame = cloneIsolatedAccountFrame(pendingFrame);
   account.currentHeight = pendingFrame.height;
@@ -228,6 +234,7 @@ const installPendingFrameCommit = (
   }
   committedFrames.push({
     frame: account.currentFrame,
+    proposerIsLeft: account.proofHeader.fromEntity.toLowerCase() === account.state.leftEntity.toLowerCase(),
     committedViaNewFrame: false,
   });
 
@@ -274,7 +281,7 @@ export const handlePendingFrameAck = async (
   validatedDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
   events: string[],
   timedOutHashlocks: string[],
-  committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
+  committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
   candidateEffects: AccountOutput[],
@@ -301,11 +308,9 @@ export const handlePendingFrameAck = async (
   );
   if (certificate.kind === 'return') return certificate;
 
-  const tokenIds = deriveAccountFrameTokenIds(pendingFrame);
   ackLog.debug('frame.commit', {
     height: pendingFrame.height,
     txs: pendingFrame.accountTxs.map(tx => tx.type),
-    tokens: tokenIds,
     state: shortHash(certificate.frameHash),
   });
   const { counterparty } = getAccountPerspective(
@@ -319,6 +324,7 @@ export const handlePendingFrameAck = async (
     committedJClaims,
     timedOutHashlocks,
     candidateEffects,
+    certificate.frameHash,
   );
   ackLog.debug('frame.commit.complete', {
     side: 'proposer',

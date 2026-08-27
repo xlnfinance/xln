@@ -13,7 +13,7 @@ import {
   validatePreparedCrossJurisdictionRoute,
 } from '../../../../extensions/cross-j/prepared-route';
 import {
-  buildCertifiedEntityOutput,
+  buildGenericEntityOutput,
   pushCrossJurisdictionEntityOutput,
 } from '../../j-events-htlc/cross-j-outputs';
 import {
@@ -128,7 +128,7 @@ const authorizeCrossJurisdictionIntent = (
     );
   }
   if (role === 'source') {
-    outputs.push(buildCertifiedEntityOutput(
+    outputs.push(buildGenericEntityOutput(
       route.source.counterpartyEntityId,
       sourceHubSignerId,
       [{ type: 'prepareCrossJurisdictionSwap', data: { route: cloneCrossJurisdictionRoute(route) } }],

@@ -15,7 +15,7 @@ import {
 } from '../../../jurisdiction/machine/registration-evidence';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import { createEmptyEnv } from '../../../runtime';
-import { buildCertifiedEntityLineagePlan } from '../../../storage/replica/entity-lineage';
+import { buildCertifiedEntityHeadPlan } from '../../../storage/replica/entity-head';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -95,7 +95,7 @@ const resign = <T extends { witnessSignature: string }>(env: RuntimeReplica, evi
 describe('validator-local registered H0 authority evidence', () => {
   test('rejects candidate H0 authority without local authenticated receipt evidence', () => {
     const { env } = makeRegisteredRuntime('registration-authority-missing');
-    expect(() => buildCertifiedEntityLineagePlan(env))
+    expect(() => buildCertifiedEntityHeadPlan(env))
       .toThrow('STORAGE_ENTITY_LINEAGE_GENESIS_AUTHORITY_EVIDENCE_MISSING');
   });
 
@@ -107,7 +107,7 @@ describe('validator-local registered H0 authority evidence', () => {
       entityId,
       boardHash,
     );
-    const plan = buildCertifiedEntityLineagePlan(env);
+    const plan = buildCertifiedEntityHeadPlan(env);
     const anchor = plan.anchorByReplicaKey.get(`${entityId}:${replica.signerId}`);
     expect(anchor?.authorityEvidenceHash).toBe(computeRegistrationEvidenceHash(evidence));
     await expect(assertCertifiedRegistrationEvidenceStore(env)).resolves.toBeUndefined();
@@ -185,7 +185,7 @@ describe('validator-local registered H0 authority evidence', () => {
     restored.state.eReplicas = new Map([[`${entityId}:${replica.signerId}`, structuredClone(replica)]]);
     restoreDurableRuntimeSnapshot(restored, snapshot);
     await expect(assertCertifiedRegistrationEvidenceStore(restored)).resolves.toBeUndefined();
-    expect(buildCertifiedEntityLineagePlan(restored).anchorByReplicaKey
+    expect(buildCertifiedEntityHeadPlan(restored).anchorByReplicaKey
       .get(`${entityId}:${replica.signerId}`)?.authorityEvidenceHash)
       .toBe(computeRegistrationEvidenceHash(evidence));
 

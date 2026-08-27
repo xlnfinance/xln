@@ -135,8 +135,6 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
     prevFrameHash: `0x${'aa'.repeat(32)}`,
     accountStateRoot: stateRoot,
     stateHash: '',
-    byLeft: true,
-    deltas: [delta],
   };
   frame.stateHash = computeFrameHash(frame);
   const peerHanko = '0x010203';
@@ -172,8 +170,6 @@ const restoreFixture = (): { row: unknown[]; stateRoot: string; leaf: string; fr
     [],
     frame.prevFrameHash,
     bytes(frame.accountStateRoot),
-    frame.byLeft,
-    frame.deltas.map(deltaWire),
   ];
   const emptyRoot = bytes(empty('pulls').rootHash());
   const header = [

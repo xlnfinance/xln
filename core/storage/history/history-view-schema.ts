@@ -103,8 +103,8 @@ export const validateStoredAccountFrameValue = (
   const frameRecord = requireBoundaryRecord(record['frame'], `HISTORY_VIEW_ACCOUNT_FRAME_INVALID:height=${accountHeight}`);
   requireExactBoundaryKeys(
     frameRecord,
-    ['height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash', 'accountStateRoot', 'stateHash', 'deltas'],
-    ['byLeft'],
+    ['height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash', 'accountStateRoot', 'stateHash'],
+    [],
     `HISTORY_VIEW_ACCOUNT_FRAME_FIELDS_INVALID:height=${accountHeight}:frame`,
   );
   return {

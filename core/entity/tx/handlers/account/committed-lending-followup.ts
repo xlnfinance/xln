@@ -44,7 +44,9 @@ const projectedHubCreditLimit = (
     for (const tx of txs) projected = creditTarget(tx, tokenId) ?? projected;
   };
   const hubIsLeft = normalizeEntityRef(account.state.leftEntity) === hubEntityId;
-  if (account.pendingFrame?.byLeft === hubIsLeft) apply(account.pendingFrame.accountTxs);
+  const pendingProposerIsLeft = normalizeEntityRef(account.proofHeader.fromEntity)
+    === normalizeEntityRef(account.state.leftEntity);
+  if (account.pendingFrame && pendingProposerIsLeft === hubIsLeft) apply(account.pendingFrame.accountTxs);
   apply(account.mempool);
   apply(accountTxs
     .filter(output => normalizeEntityRef(output.accountId) === counterpartyId)
@@ -235,6 +237,7 @@ export function applyCommittedLendingFollowup(
   counterpartyIdRaw: string,
   tx: AccountTx,
   frame: AccountFrame,
+  proposerIsLeft: boolean,
   accountTxs: AccountTxTarget[],
 ): void {
   const hubEntityId = normalizeEntityRef(state.entityId);
@@ -250,7 +253,7 @@ export function applyCommittedLendingFollowup(
     lending: ensureLendingState(state),
     hubEntityId,
     counterpartyId,
-    proposer: normalizeEntityRef(frame.byLeft ? account.state.leftEntity : account.state.rightEntity),
+    proposer: normalizeEntityRef(proposerIsLeft ? account.state.leftEntity : account.state.rightEntity),
     now: Math.max(
       Math.floor(Number(frame.timestamp || 0)),
       Math.floor(Number(state.timestamp || 0)),

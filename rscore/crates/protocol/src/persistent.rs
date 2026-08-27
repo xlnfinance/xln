@@ -1122,6 +1122,63 @@ impl<V: Clone> PersistentRadixMap<V> {
             stack: self.root.iter().map(Arc::as_ref).collect(),
         }
     }
+
+    /// Return the lexicographically last entry whose key starts with `prefix`.
+    ///
+    /// A Patricia seek follows the one edge selected by each prefix nibble and
+    /// then the right-most edge below that subtree. It therefore does not scan
+    /// unrelated leaves, which matters for append-only page families sharing
+    /// one map. An empty prefix intentionally selects the map's final entry.
+    pub fn last_with_prefix(&self, prefix: &[u8]) -> Option<(&[u8], &V)> {
+        let mut visited = 0;
+        self.last_with_prefix_internal(prefix, &mut visited)
+    }
+
+    fn last_with_prefix_internal<'a>(
+        &'a self,
+        prefix: &[u8],
+        visited: &mut usize,
+    ) -> Option<(&'a [u8], &'a V)> {
+        let prefix_path = path_slots(prefix);
+        let mut node = self.root.as_deref()?;
+        loop {
+            *visited += 1;
+            match node {
+                Node::Leaf { key, value, .. } => {
+                    return key.starts_with(prefix).then_some((key.as_slice(), value));
+                }
+                Node::Branch { path, children, .. } => {
+                    if path.starts_with(&prefix_path) {
+                        return rightmost_leaf(node, visited);
+                    }
+                    if !prefix_path.starts_with(path) {
+                        return None;
+                    }
+                    let slot = usize::from(*prefix_path.get(path.len())?);
+                    node = children[slot].as_deref()?;
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_with_prefix_node_visits(&self, prefix: &[u8]) -> usize {
+        let mut visited = 0;
+        let _ = self.last_with_prefix_internal(prefix, &mut visited);
+        visited
+    }
+}
+
+fn rightmost_leaf<'a, V>(mut node: &'a Node<V>, visited: &mut usize) -> Option<(&'a [u8], &'a V)> {
+    loop {
+        match node {
+            Node::Leaf { key, value, .. } => return Some((key.as_slice(), value)),
+            Node::Branch { children, .. } => {
+                node = children.iter().rev().flatten().next()?.as_ref();
+                *visited += 1;
+            }
+        }
+    }
 }
 
 fn validate_key_path(key: &[u8]) -> Result<usize, PersistentRadixMapError> {

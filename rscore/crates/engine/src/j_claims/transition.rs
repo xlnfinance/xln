@@ -5,7 +5,18 @@ use crate::j_claims::events::{MAX_SAFE_INTEGER, canonical_events, canonical_even
 use crate::j_claims::proof::{ProofResult, create, inspect};
 use crate::j_claims::store::apply_changes;
 use crate::j_claims::types::{JClaimStatus, JClaimTransition, JEventClaimTx, JurisdictionEvent};
-use crate::{AccountIdentity, JClaimProof, StateError};
+use crate::{AccountIdentity, JClaimProof, Side, StateError, ValidationRejection};
+
+pub(crate) struct AccountJEventClaimAdmission {
+    events: Vec<JurisdictionEvent>,
+    records: (JClaimRecord, JClaimRecord),
+    results: (ProofResult, ProofResult),
+}
+
+pub(crate) enum AccountJEventClaimAdmissionResult {
+    Accepted(Box<AccountJEventClaimAdmission>),
+    Rejected(ValidationRejection),
+}
 
 struct OwnedTransition<'a> {
     own: &'a JClaimAccumulator,
@@ -25,14 +36,68 @@ pub fn apply_claim_transition(
     by_left: bool,
     store: &mut JClaimStore,
 ) -> Result<JClaimTransition, StateError> {
+    match validate_j_event_claim_admission(identity, left, right, tx)? {
+        AccountJEventClaimAdmissionResult::Accepted(admission) => apply_admitted_claim_transition(
+            left,
+            right,
+            last_finalized_j_height,
+            tx,
+            by_left,
+            store,
+            *admission,
+        ),
+        AccountJEventClaimAdmissionResult::Rejected(rejection) => Err(j_error(rejection.message())),
+    }
+}
+
+pub(crate) fn validate_j_event_claim_admission(
+    identity: &AccountIdentity,
+    left: &JClaimAccumulator,
+    right: &JClaimAccumulator,
+    tx: &JEventClaimTx,
+) -> Result<AccountJEventClaimAdmissionResult, StateError> {
     let events = canonical_events(&tx.events)?;
     let records = build_records(identity, tx, &events)?;
     let left_proof = required_proof(tx.left_proof.as_ref(), "left")?;
     let right_proof = required_proof(tx.right_proof.as_ref(), "right")?;
     let left_result = inspect(left.root, &records.0, left_proof)?.result;
     let right_result = inspect(right.root, &records.1, right_proof)?.result;
-    assert_exact_member(&left_result, &records.0, "ACCOUNT_J_CLAIM_LEFT_CONFLICT")?;
-    assert_exact_member(&right_result, &records.1, "ACCOUNT_J_CLAIM_RIGHT_CONFLICT")?;
+    for (result, expected, side) in [
+        (&left_result, &records.0, Side::Left),
+        (&right_result, &records.1, Side::Right),
+    ] {
+        if exact_member_conflicts(result, expected) {
+            return Ok(AccountJEventClaimAdmissionResult::Rejected(
+                ValidationRejection::JEventClaimConflict {
+                    side,
+                    j_height: expected.j_height,
+                },
+            ));
+        }
+    }
+    Ok(AccountJEventClaimAdmissionResult::Accepted(Box::new(
+        AccountJEventClaimAdmission {
+            events,
+            records,
+            results: (left_result, right_result),
+        },
+    )))
+}
+
+pub(crate) fn apply_admitted_claim_transition(
+    left: &JClaimAccumulator,
+    right: &JClaimAccumulator,
+    last_finalized_j_height: u64,
+    tx: &JEventClaimTx,
+    by_left: bool,
+    store: &mut JClaimStore,
+    admission: AccountJEventClaimAdmission,
+) -> Result<JClaimTransition, StateError> {
+    let AccountJEventClaimAdmission {
+        events,
+        records,
+        results: (left_result, right_result),
+    } = admission;
     if tx.j_height <= last_finalized_j_height {
         return stale_transition(left, right, records, last_finalized_j_height, events, store);
     }
@@ -237,20 +302,8 @@ fn claim_record(
     }
 }
 
-fn assert_exact_member(
-    result: &ProofResult,
-    expected: &JClaimRecord,
-    code: &str,
-) -> Result<(), StateError> {
-    if let ProofResult::Member(actual) = result
-        && !same_record(actual, expected)
-    {
-        return Err(j_error(format!(
-            "{code}:{:?}:{}",
-            expected.side, expected.j_height
-        )));
-    }
-    Ok(())
+fn exact_member_conflicts(result: &ProofResult, expected: &JClaimRecord) -> bool {
+    matches!(result, ProofResult::Member(actual) if !same_record(actual, expected))
 }
 
 fn required_proof<'a>(

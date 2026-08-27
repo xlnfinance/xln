@@ -16,7 +16,7 @@ import {
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,
 } from '../j-prefix/prefix-round';
-import { wrapCertifiedEntityOutputs } from '../output/consumption';
+import { materializeCommittedEntityOutputs } from '../output/publication';
 import {
   appendCertifiedEntityFrameLink,
   buildCertifiedEntityFrameLink,
@@ -180,13 +180,10 @@ const attachCommitProofsAndOutputs = (
   const isEmitter =
     emitterId.toLowerCase() === workingReplica.signerId.toLowerCase();
   entityOutbox.push(
-    ...wrapCertifiedEntityOutputs(
+    ...materializeCommittedEntityOutputs(
       execution.outputs,
-      frame,
-      execution.state,
+      execution.state.entityId,
       env,
-      execution.hashesToSign,
-      hankos,
       isEmitter,
     ),
   );
@@ -214,7 +211,6 @@ const installCommittedState = (
     previousState,
     committedState,
   );
-  context.consumptionNodeChanges = execution.consumptionNodeChanges;
   context.accountJClaimNodeChanges = execution.accountJClaimNodeChanges;
   workingReplica.state = committedState;
   storageChanges.push(

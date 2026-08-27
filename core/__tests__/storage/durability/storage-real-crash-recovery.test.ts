@@ -28,7 +28,7 @@ import {
 import type { CertifiedBoardPatriciaNode } from '../../../types/entity-board-registry';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
-import { buildCertifiedEntityLineagePlan } from '../../../storage/replica/entity-lineage';
+import { buildCertifiedEntityHeadPlan } from '../../../storage/replica/entity-head';
 import {
   readStorageHead,
   readHistoryViewHead,
@@ -43,15 +43,17 @@ import { createSnapshot } from '../../../storage/database/lifecycle';
 import { createSnapshotEntityGraphView } from '../../../storage/database/snapshot-graph-view';
 import { iterateKeys, readRawOrNull } from '../../../storage/database/level';
 import { readEntityStorageLayout } from '../../../storage/schema/entity/layout';
+import { validatePersistedCertifiedBoardPathNode } from '../../../storage/schema/authoritative-schema';
 import {
   KEY_HEAD,
-  keyCertifiedBoardNode,
+  keyCertifiedBoardNodePrefix,
   keyLiveEntity,
   keyLiveReplicaMeta,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntityPrefix,
   keySnapshotManifest,
+  keySnapshotGraphPrefix,
   keySnapshotReplicaMetaPrefix,
 } from '../../../storage/keys';
 import type {
@@ -475,7 +477,7 @@ describe('real process storage crash recovery', () => {
       });
       // Shared storage materializes the certified Entity lineage, not an
       // arbitrary validator-local replica selected by Map insertion order.
-      const restoredState = buildCertifiedEntityLineagePlan(restored).lookup.get(entityId)?.state;
+      const restoredState = buildCertifiedEntityHeadPlan(restored).lookup.get(entityId)?.state;
       const expectedSharedState = restoredState ? { ...restoredState } : restoredState;
       if (expectedSharedState) {
         delete (expectedSharedState as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
@@ -575,18 +577,35 @@ describe('real process storage crash recovery', () => {
       const core = stored.doc;
       const root = core.certifiedBoardState?.boardRegistryRoot;
       if (!root) throw new Error('certified-board corruption fixture root missing');
-      const rootKey = keyCertifiedBoardNode(root);
+      const boardPrefixes = [
+        keyCertifiedBoardNodePrefix(entityId),
+        keySnapshotGraphPrefix(2, keyCertifiedBoardNodePrefix(entityId)),
+      ];
+      const rootKeys: Buffer[] = [];
+      let rootRow: ReturnType<typeof validatePersistedCertifiedBoardPathNode> | undefined;
+      for (const prefix of boardPrefixes) {
+        for await (const key of iterateKeys(historyDb, { prefix })) {
+          const row = validatePersistedCertifiedBoardPathNode(decodeBuffer(await historyDb.get(key)));
+          if (row.hash === root) {
+            rootKeys.push(key);
+            rootRow ??= row;
+          }
+        }
+      }
+      if (rootKeys.length === 0 || !rootRow) throw new Error('certified-board corruption root row missing');
       if (corruption === 'missing') {
-        await historyDb.del(rootKey, { sync: true });
+        for (const key of rootKeys) await historyDb.del(key, { sync: true });
       } else {
-        const node = decodeBuffer<CertifiedBoardPatriciaNode>(await historyDb.get(rootKey));
+        const node: CertifiedBoardPatriciaNode = rootRow.node;
         const tampered: CertifiedBoardPatriciaNode = node.type === 'branch'
           ? { ...node, left: node.right, right: node.left }
           : {
               ...node,
               record: { ...node.record, transactionHash: `0x${'99'.repeat(32)}` },
             };
-        await historyDb.put(rootKey, encodeBuffer(tampered), { sync: true });
+        for (const key of rootKeys) {
+          await historyDb.put(key, encodeBuffer({ ...rootRow, node: tampered }), { sync: true });
+        }
       }
       await closeRuntimeDb(probe);
       await closeInfraDb(probe);
@@ -596,8 +615,8 @@ describe('real process storage crash recovery', () => {
       rmSync(`${join(dbRoot, runtimeId)}-storage-current`, { recursive: true, force: true });
       await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
         corruption === 'missing'
-          ? 'CERTIFIED_BOARD_NODE_MISSING'
-          : 'CERTIFIED_BOARD_NODE_CORRUPT',
+          ? /(?:CERTIFIED_BOARD_PATH_NODE_MISSING|STORAGE_VERIFY_SNAPSHOT_DOC_COUNT_MISMATCH)/
+          : 'CERTIFIED_BOARD_PATH_NODE_CORRUPT',
       );
     }, 30_000);
   }

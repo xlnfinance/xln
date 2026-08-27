@@ -65,64 +65,6 @@ export const validateReplicaJHistory = (
   }
 };
 
-export const validateCertifiedFrameAnchor = (
-  value: unknown,
-  context: string,
-): void => {
-  if (value === undefined) return;
-  const anchor = validateObject(value, `${context}.certifiedFrameAnchor`);
-  validateString(anchor['entityId'], `${context}.certifiedFrameAnchor.entityId`);
-  validateNumber(anchor['height'], `${context}.certifiedFrameAnchor.height`);
-  validateString(anchor['frameHash'], `${context}.certifiedFrameAnchor.frameHash`);
-  validateString(anchor['stateRoot'], `${context}.certifiedFrameAnchor.stateRoot`);
-  if (anchor['authorityEvidenceHash'] !== undefined) {
-    const hash = validateString(
-      anchor['authorityEvidenceHash'],
-      `${context}.certifiedFrameAnchor.authorityEvidenceHash`,
-    );
-    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-      throw new FinancialDataCorruptionError(
-        `${context}.certifiedFrameAnchor.authorityEvidenceHash must be bytes32`,
-      );
-    }
-  }
-  if (anchor['runtimeCheckpoint'] !== undefined) {
-    const checkpoint = validateObject(
-      anchor['runtimeCheckpoint'],
-      `${context}.certifiedFrameAnchor.runtimeCheckpoint`,
-    );
-    const height = validateNumber(
-      checkpoint['runtimeHeight'],
-      `${context}.certifiedFrameAnchor.runtimeCheckpoint.runtimeHeight`,
-    );
-    const root = validateString(
-      checkpoint['replicaSetRoot'],
-      `${context}.certifiedFrameAnchor.runtimeCheckpoint.replicaSetRoot`,
-    );
-    if (
-      !Number.isSafeInteger(height) ||
-      height < 0 ||
-      !/^0x[0-9a-fA-F]{64}$/.test(root)
-    ) {
-      throw new FinancialDataCorruptionError(
-        `${context}.certifiedFrameAnchor.runtimeCheckpoint invalid`,
-      );
-    }
-  }
-  const authority = validateObject(
-    anchor['authority'],
-    `${context}.certifiedFrameAnchor.authority`,
-  );
-  validateObject(
-    authority['config'],
-    `${context}.certifiedFrameAnchor.authority.config`,
-  );
-  validateObject(
-    authority['leaderState'],
-    `${context}.certifiedFrameAnchor.authority.leaderState`,
-  );
-};
-
 export const validateReplicaLineageAndWitnesses = (
   replica: Record<string, unknown>,
   context: string,

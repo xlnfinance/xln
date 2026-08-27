@@ -1,8 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use xln_rscore_engine::{AccountOutput, AccountTx, HtlcResolveOutcome};
+use xln_rscore_engine::{AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx};
 
 use crate::commitment::compute_commitments;
+use crate::j_events::{account_tx_kind, apply_committed_j_event_claim};
+use crate::local_financial::{
+    LocalAccountFinancialView, LocalEntityFinancialTx, apply_local_entity_financial_txs,
+};
 use crate::orderbook::{SameJOffer, SameJOutputDelta, apply_orderbook_outputs};
 use crate::paybook::{
     PaybookEffects, committed_htlc_lock, committed_htlc_resolve, direct_payment_forward,
@@ -11,30 +15,8 @@ use crate::paybook::{
 use crate::types::{AccountProposalWork, TargetedAccountTx};
 use crate::{
     DeterministicContext, EntityKernelError, EntityKernelOutput, EntityKernelResult,
-    EntityStateSlice, JurisdictionScope, OrderedAccountCommit,
+    EntityStateSlice, JurisdictionScope, OrderedAccountCommit, SchedulerCommand,
 };
-
-fn unsupported_kind(tx: &AccountTx) -> &'static str {
-    match tx {
-        AccountTx::AddDelta { .. } => "add_delta",
-        AccountTx::SetCreditLimit { .. } => "set_credit_limit",
-        AccountTx::RebalancePolicy { .. } => "rebalance_policy",
-        AccountTx::LendingFund { .. } => "lending_fund",
-        AccountTx::LendingBorrowRequest { .. } => "lending_borrow_request",
-        AccountTx::LendingRepay { .. } => "lending_repay",
-        AccountTx::LendingCredit { .. } => "lending_credit",
-        AccountTx::LendingCloseRequest { .. } => "lending_close_request",
-        AccountTx::LendingClosePayout { .. } => "lending_close_payout",
-        AccountTx::ReserveToCollateral { .. } => "reserve_to_collateral",
-        AccountTx::SwapOffer { .. } => "swap_offer",
-        AccountTx::SwapResolve { .. } => "swap_resolve",
-        AccountTx::SwapCancelRequest { .. } => "swap_cancel_request",
-        AccountTx::DirectPayment { .. } => "direct_payment",
-        AccountTx::HtlcLock(_) => "htlc_lock",
-        AccountTx::HtlcResolve(_) => "htlc_resolve",
-        AccountTx::JEventClaim(_) => "j_event_claim",
-    }
-}
 
 fn ensure_supported(tx: &AccountTx) -> Result<(), EntityKernelError> {
     match tx {
@@ -43,9 +25,10 @@ fn ensure_supported(tx: &AccountTx) -> Result<(), EntityKernelError> {
         | AccountTx::SwapCancelRequest { .. }
         | AccountTx::DirectPayment { .. }
         | AccountTx::HtlcLock(_)
-        | AccountTx::HtlcResolve(_) => Ok(()),
+        | AccountTx::HtlcResolve(_)
+        | AccountTx::JEventClaim(_) => Ok(()),
         _ => Err(EntityKernelError::UnsupportedAccountTx {
-            kind: unsupported_kind(tx),
+            kind: account_tx_kind(tx),
         }),
     }
 }
@@ -280,9 +263,18 @@ fn apply_commit_transitions(
                     &transition.outputs,
                 )?);
             }
+            AccountTx::JEventClaim(claim) => {
+                apply_committed_j_event_claim(
+                    &state.entity_id,
+                    &commit.account_id,
+                    claim,
+                    &transition.outputs,
+                    outputs,
+                )?;
+            }
             _ => {
                 return Err(EntityKernelError::UnsupportedAccountTx {
-                    kind: unsupported_kind(&transition.tx),
+                    kind: account_tx_kind(&transition.tx),
                 });
             }
         }
@@ -339,16 +331,48 @@ fn group_proposal_work(account_txs: Vec<TargetedAccountTx>) -> Vec<AccountPropos
         .collect()
 }
 
+fn append_scheduled_account_txs(
+    commands: &[SchedulerCommand],
+    account_txs: &mut Vec<TargetedAccountTx>,
+) -> Result<(), EntityKernelError> {
+    for command in commands {
+        match command {
+            SchedulerCommand::ProcessHtlcTimeouts { expired_locks } => {
+                account_txs.extend(expired_locks.iter().map(|(account_id, lock_id)| {
+                    (
+                        account_id.clone(),
+                        AccountTx::HtlcResolve(HtlcResolveTx {
+                            lock_id: lock_id.clone(),
+                            outcome: HtlcResolveOutcome::Error {
+                                reason: Some("timeout".to_string()),
+                            },
+                        }),
+                    )
+                }));
+            }
+            SchedulerCommand::HubRebalance => {
+                return Err(EntityKernelError::HubRebalanceHandlerMissing);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct EntityTransitionResult {
     pub(crate) state: EntityStateSlice,
     pub(crate) proposal_work: Vec<AccountProposalWork>,
     pub(crate) outputs: Vec<EntityKernelOutput>,
+    pub(crate) local_events: Vec<crate::EntityFrameEvent>,
+    pub(crate) non_mutating_wake_targets: Vec<String>,
 }
 
 pub(crate) fn apply_entity_transitions(
     mut state: EntityStateSlice,
     commits: &[OrderedAccountCommit],
+    local_txs: Vec<LocalEntityFinancialTx>,
+    local_account_views: &BTreeMap<String, LocalAccountFinancialView>,
     context: &DeterministicContext,
+    scheduled_commands: &[SchedulerCommand],
 ) -> Result<EntityTransitionResult, EntityKernelError> {
     let mut deltas = Vec::new();
     let mut account_txs = Vec::new();
@@ -377,7 +401,8 @@ pub(crate) fn apply_entity_transitions(
         return Err(EntityKernelError::orderbook("ORDERBOOK_EXTENSION_REQUIRED"));
     }
     if let Some(orderbook) = &mut state.orderbook {
-        let orderbook_effects = apply_orderbook_outputs(orderbook, &deltas, context)?;
+        let orderbook_effects =
+            apply_orderbook_outputs(orderbook, &deltas, context, &state.entity_id)?;
         account_txs.extend(orderbook_effects.account_txs);
         if orderbook_effects.matched_swaps > 0 {
             outputs.push(EntityKernelOutput::SwapMatched {
@@ -386,11 +411,18 @@ pub(crate) fn apply_entity_transitions(
             });
         }
     }
+    let local =
+        apply_local_entity_financial_txs(&mut state, local_txs, context, local_account_views)?;
+    account_txs.extend(local.account_txs);
+    outputs.extend(local.outputs);
+    append_scheduled_account_txs(scheduled_commands, &mut account_txs)?;
     let proposal_work = group_proposal_work(account_txs);
     Ok(EntityTransitionResult {
         state,
         proposal_work,
         outputs,
+        local_events: local.events,
+        non_mutating_wake_targets: local.wake_targets,
     })
 }
 
@@ -399,7 +431,8 @@ pub fn apply_entity_kernel(
     commits: &[OrderedAccountCommit],
     context: &DeterministicContext,
 ) -> Result<EntityKernelResult, EntityKernelError> {
-    let result = apply_entity_transitions(state, commits, context)?;
+    let result =
+        apply_entity_transitions(state, commits, Vec::new(), &BTreeMap::new(), context, &[])?;
     let commitments = compute_commitments(&result.state, &result.proposal_work, &result.outputs)?;
     Ok(EntityKernelResult {
         state: result.state,

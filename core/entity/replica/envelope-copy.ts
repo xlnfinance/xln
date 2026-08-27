@@ -1,83 +1,12 @@
-import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import type { RuntimeFailureSignal } from '../../protocol/errors/failure-taxonomy';
 import type { EntityProviderActionSubmitState } from '../../types/entity-provider-actions';
 import type { JAdapterFailure } from '../../types/jurisdiction-runtime';
-import type {
-  CertifiedEntityLineageAnchor,
-  ConsensusConfig,
-  EntityFrameAuthority,
-  EntityLeaderState,
-  EntityReplica,
-} from '../types';
+import type { EntityReplica } from '../types';
 import { copyJPrefixRound } from '../state/input-clone';
 
 const copyStringRecord = (
   record: Record<string, string>,
 ): Record<string, string> => Object.fromEntries(Object.entries(record));
-
-const copyJurisdictionConfig = (config: JurisdictionConfig): JurisdictionConfig => ({
-  address: config.address,
-  name: config.name,
-  entityProviderAddress: config.entityProviderAddress,
-  depositoryAddress: config.depositoryAddress,
-  ...(config.chainId !== undefined ? { chainId: config.chainId } : {}),
-  ...(config.blockTimeMs !== undefined ? { blockTimeMs: config.blockTimeMs } : {}),
-  ...(config.registrationBlock !== undefined ? { registrationBlock: config.registrationBlock } : {}),
-  ...(config.entityProviderDeploymentBlock !== undefined
-    ? { entityProviderDeploymentBlock: config.entityProviderDeploymentBlock }
-    : {}),
-  ...(config.rebalancePolicyUsd
-    ? {
-        rebalancePolicyUsd: {
-          r2cRequestSoftLimit: config.rebalancePolicyUsd.r2cRequestSoftLimit,
-          hardLimit: config.rebalancePolicyUsd.hardLimit,
-          maxFee: config.rebalancePolicyUsd.maxFee,
-        },
-      }
-    : {}),
-});
-
-const copyConsensusConfig = (config: ConsensusConfig): ConsensusConfig => ({
-  mode: config.mode,
-  threshold: config.threshold,
-  validators: [...config.validators],
-  shares: Object.fromEntries(
-    Object.entries(config.shares).map(([signerId, share]) => [signerId, share]),
-  ),
-  ...(config.jurisdiction ? { jurisdiction: copyJurisdictionConfig(config.jurisdiction) } : {}),
-});
-
-const copyEntityLeaderState = (leader: EntityLeaderState): EntityLeaderState => ({
-  activeValidatorId: leader.activeValidatorId,
-  view: leader.view,
-  changedAtHeight: leader.changedAtHeight,
-});
-
-const copyEntityFrameAuthority = (authority: EntityFrameAuthority): EntityFrameAuthority => ({
-  config: copyConsensusConfig(authority.config),
-  leaderState: copyEntityLeaderState(authority.leaderState),
-});
-
-export const copyCertifiedEntityLineageAnchor = (
-  anchor: CertifiedEntityLineageAnchor,
-): CertifiedEntityLineageAnchor => ({
-  entityId: anchor.entityId,
-  height: anchor.height,
-  frameHash: anchor.frameHash,
-  stateRoot: anchor.stateRoot,
-  authority: copyEntityFrameAuthority(anchor.authority),
-  ...(anchor.authorityEvidenceHash !== undefined
-    ? { authorityEvidenceHash: anchor.authorityEvidenceHash }
-    : {}),
-  ...(anchor.runtimeCheckpoint
-    ? {
-        runtimeCheckpoint: {
-          runtimeHeight: anchor.runtimeCheckpoint.runtimeHeight,
-          replicaSetRoot: anchor.runtimeCheckpoint.replicaSetRoot,
-        },
-      }
-    : {}),
-});
 
 const copyRuntimeFailureSignal = (failure: RuntimeFailureSignal): RuntimeFailureSignal => ({
   category: failure.category,

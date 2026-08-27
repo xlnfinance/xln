@@ -1,0 +1,157 @@
+import { decodeTsAccountWorkerTransfer, encodeTsAccountWorkerTransfer } from './codec';
+import type {
+  TsAccountWorkerInitResult,
+  TsAccountWorkerPhaseResult,
+  TsAccountWorkerRequestEnvelope,
+  TsAccountWorkerResponseEnvelope,
+} from './protocol';
+
+export type WorkerRequestResult = Readonly<{
+  value: unknown;
+  requestBytes: number;
+  responseBytes: number;
+}>;
+
+type PendingRequest = Readonly<{
+  resolve(value: WorkerRequestResult): void;
+  reject(error: Error): void;
+  requestBytes: number;
+}>;
+
+export const asWorkerError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+export class TsAccountWorkerClient {
+  readonly #worker: Worker;
+  readonly #workerIndex: number;
+  readonly #pending = new Map<number, PendingRequest>();
+  #nextRequestId = 1;
+  #closed = false;
+
+  constructor(workerIndex: number) {
+    this.#workerIndex = workerIndex;
+    this.#worker = new Worker(new URL('./worker.ts', import.meta.url), {
+      env: {
+        ...process.env,
+        XLN_CRYPTO_POOL_WORKERS: '0',
+        XLN_CRYPTO_SIGN_WORKERS: '0',
+      },
+    } as WorkerOptions);
+    this.#worker.onmessage = event => this.#handleResponse(event.data as TsAccountWorkerResponseEnvelope);
+    this.#worker.onerror = event => this.#retire(new Error(
+      `TS_ACCOUNT_WORKER_ERROR:${workerIndex}:${event.message}:${event.filename}:${event.lineno}:${event.colno}`,
+    ));
+    this.#worker.addEventListener('close', () => {
+      if (!this.#closed) this.#retire(new Error(`TS_ACCOUNT_WORKER_CLOSED:${workerIndex}`));
+    });
+  }
+
+  #handleResponse(response: TsAccountWorkerResponseEnvelope): void {
+    const pending = this.#pending.get(response.requestId);
+    if (!pending) {
+      this.#retire(new Error(`TS_ACCOUNT_WORKER_UNMATCHED_RESPONSE:${this.#workerIndex}:${response.requestId}`));
+      return;
+    }
+    this.#pending.delete(response.requestId);
+    if (response.kind === 'fatal') {
+      pending.reject(new Error(
+        `TS_ACCOUNT_WORKER_FATAL:${this.#workerIndex}:${response.error}`
+        + (response.stack ? `\n${response.stack}` : ''),
+      ));
+      return;
+    }
+    try {
+      pending.resolve({
+        value: decodeTsAccountWorkerTransfer(response.payload),
+        requestBytes: pending.requestBytes,
+        responseBytes: response.payload.byteLength,
+      });
+    } catch (error) {
+      pending.reject(new Error(
+        `TS_ACCOUNT_WORKER_RESPONSE_DECODE:${this.#workerIndex}:${asWorkerError(error).message}`,
+      ));
+    }
+  }
+
+  #retire(error: Error): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    const pending = [...this.#pending.values()];
+    this.#pending.clear();
+    for (const request of pending) request.reject(error);
+  }
+
+  request(kind: TsAccountWorkerRequestEnvelope['kind'], value: unknown): Promise<WorkerRequestResult> {
+    if (this.#closed) {
+      return Promise.reject(new Error(`TS_ACCOUNT_WORKER_CLIENT_CLOSED:${this.#workerIndex}`));
+    }
+    const requestId = this.#nextRequestId;
+    this.#nextRequestId += 1;
+    const payload = encodeTsAccountWorkerTransfer(value);
+    const request: TsAccountWorkerRequestEnvelope = { requestId, kind, payload };
+    return new Promise((resolve, reject) => {
+      this.#pending.set(requestId, { resolve, reject, requestBytes: payload.byteLength });
+      try {
+        this.#worker.postMessage(request, [payload]);
+      } catch (error) {
+        this.#pending.delete(requestId);
+        reject(asWorkerError(error));
+      }
+    });
+  }
+
+  terminate(): void {
+    if (!this.#closed) {
+      this.#closed = true;
+      const error = new Error(`TS_ACCOUNT_WORKER_TERMINATED:${this.#workerIndex}`);
+      const pending = [...this.#pending.values()];
+      this.#pending.clear();
+      for (const request of pending) request.reject(error);
+    }
+    this.#worker.terminate();
+  }
+}
+
+export const requireWorkerInteger = (value: number, code: string): number => {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(code);
+  return value;
+};
+
+export const requireWorkerFrameId = (frameId: string): string => {
+  if (typeof frameId !== 'string' || frameId.length === 0) {
+    throw new Error('TS_ACCOUNT_WORKER_FRAME_ID_INVALID');
+  }
+  return frameId;
+};
+
+export const parseWorkerInitResult = (
+  value: unknown,
+  expectedWorkerIndex: number,
+): TsAccountWorkerInitResult => {
+  if (value === null || typeof value !== 'object') throw new Error('TS_ACCOUNT_WORKER_INIT_RESULT_INVALID');
+  const result = value as TsAccountWorkerInitResult;
+  if (result.workerIndex !== expectedWorkerIndex) {
+    throw new Error(`TS_ACCOUNT_WORKER_INIT_RESULT_SLOT:${expectedWorkerIndex}:${result.workerIndex}`);
+  }
+  if (!Number.isSafeInteger(result.accountCount) || result.accountCount < 0 || !Array.isArray(result.subroots)) {
+    throw new Error(`TS_ACCOUNT_WORKER_INIT_RESULT_SHAPE:${expectedWorkerIndex}`);
+  }
+  return result;
+};
+
+export const parseWorkerPhaseResult = (
+  value: unknown,
+  expectedWorkerIndex: number,
+): TsAccountWorkerPhaseResult => {
+  if (value === null || typeof value !== 'object') throw new Error('TS_ACCOUNT_WORKER_PHASE_RESULT_INVALID');
+  const result = value as TsAccountWorkerPhaseResult;
+  if (
+    result.workerIndex !== expectedWorkerIndex
+    || !Array.isArray(result.effects)
+    || !Array.isArray(result.subroots)
+    || !Number.isSafeInteger(result.operations)
+    || !Number.isSafeInteger(result.elapsedUs)
+    || !Number.isFinite(result.heapUsedBytes)
+  ) throw new Error(`TS_ACCOUNT_WORKER_PHASE_RESULT_SHAPE:${expectedWorkerIndex}`);
+  return result;
+};

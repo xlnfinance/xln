@@ -17,7 +17,6 @@ import type { EntityLeaderTimeoutVote } from '../../../entity/types';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
 import type { Profile } from '../../../entity/profile';
 import { computeProfileRouteHash } from '../../../entity/profile/profile-signing';
-import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 
 const withRuntimeOwner = (env: RuntimeReplica): RuntimeReplica => {
   const seed = `runtime-output-routing:${String(env.runtimeId || 'anonymous')}`;
@@ -189,7 +188,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): DeliverableEnt
 };
 
 describe('runtime output routing', () => {
-  test('fails loud when a certified output has no target runtime route', () => {
+  test('fails loud when a raw Account output has no target runtime route', () => {
     const sourceEntityId = entityId('a4');
     const targetEntityId = entityId('a5');
     const targetSignerId = runtimeId('a6');
@@ -197,20 +196,12 @@ describe('runtime output routing', () => {
       entityId: targetEntityId,
       signerId: targetSignerId,
       entityTxs: [{
-        type: 'consensusOutput',
+        type: 'accountInput',
         data: {
-          origin: {
-            sourceEntityId,
-            lane: 'generic',
-            sequence: 1n,
-            semanticHash: `0x${'a7'.repeat(32)}`,
-            height: 1,
-            frameHash: `0x${'a8'.repeat(32)}`,
-            outputIndex: 0,
-          },
-          outputHanko: '0x01',
-          targetEntityId,
-          entityTxs: [{ type: 'chat', data: { text: 'route after profile' } } as never],
+          kind: 'ack',
+          fromEntityId: sourceEntityId,
+          toEntityId: targetEntityId,
+          ack: { height: 1, frameHash: `0x${'a8'.repeat(32)}`, frameHanko: '0x01' },
         },
       }],
     };
@@ -236,43 +227,6 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForEntity: () => null,
       resolveRuntimeIdForCrossJurisdictionEntity: () => null,
     })).toThrow('ROUTE_TARGET_RUNTIME_UNKNOWN');
-  });
-
-  test('normalizes batched certified generic outputs into contiguous source sequence', () => {
-    const sourceEntityId = entityId('41');
-    const targetEntityId = entityId('42');
-    const targetRuntimeId = runtimeId('43');
-    const targetSignerId = runtimeId('44');
-    const txFor = (sequence: bigint) => ({
-      type: 'consensusOutput' as const,
-      data: {
-        origin: {
-          sourceEntityId,
-          lane: 'generic' as const,
-          sequence,
-          semanticHash: `0x${sequence.toString(16).padStart(64, '0')}`,
-          height: Number(sequence),
-          frameHash: `0x${'45'.repeat(32)}`,
-          outputIndex: 0,
-        },
-        outputHanko: '0x01',
-        targetEntityId,
-        entityTxs: [{ type: 'chat', data: { text: `seq-${sequence}` } } as never],
-      },
-    });
-    const output = (sequence: bigint): DeliverableEntityInput => ({
-      runtimeId: targetRuntimeId,
-      entityId: targetEntityId,
-      signerId: targetSignerId,
-      entityTxs: [txFor(sequence)],
-    });
-
-    const sequences = [10n, 3n, 8n, 1n, 6n, 4n, 9n, 2n, 7n, 5n];
-    const pending = buildPendingNetworkOutputs(sequences.map(output));
-
-    expect(pending.flatMap(candidate => candidate.entityTxs ?? [])
-      .map(tx => tx.type === 'consensusOutput' && tx.data.origin.sequence))
-      .toEqual([1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n]);
   });
 
   test('uses existing proposal identity to distinguish transport envelopes', () => {
@@ -1499,86 +1453,6 @@ describe('runtime output routing', () => {
       getP2P: () => null,
     })).toEqual({ kind: 'queued' });
     expect(enqueued).toEqual([{ ...input, from: sourceRuntimeId }]);
-  });
-
-  test('rejects a certified cross-j intent whose user siblings resolve to different Runtimes', () => {
-    const localRuntimeId = runtimeId('11');
-    const authenticatedUserRuntimeId = runtimeId('12');
-    const otherUserRuntimeId = runtimeId('13');
-    const sourceUserId = entityId('70');
-    const targetUserId = entityId('71');
-    const sourceHubId = entityId('72');
-    const targetHubId = entityId('73');
-    const sourceUserSignerId = runtimeId('74');
-    const targetUserSignerId = runtimeId('75');
-    const sourceHubSignerId = runtimeId('76');
-    const targetHubSignerId = runtimeId('77');
-    const route = {
-      orderId: 'cross-j-invalid-runtime-topology',
-      makerEntityId: sourceUserId,
-      hubEntityId: sourceHubId,
-      sourceSignerId: sourceUserSignerId,
-      targetSignerId: targetUserSignerId,
-      sourceHubSignerId,
-      targetHubSignerId,
-      source: {
-        jurisdiction: 'stack:1:source', entityId: sourceUserId,
-        counterpartyEntityId: sourceHubId, tokenId: 1, amount: 1n,
-      },
-      target: {
-        jurisdiction: 'stack:2:target', entityId: targetHubId,
-        counterpartyEntityId: targetUserId, tokenId: 2, amount: 1n,
-      },
-      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      status: 'intent', createdAt: 1, updatedAt: 1, expiresAt: 10,
-    } satisfies CrossJurisdictionSwapRoute;
-    const enqueued: RoutedEntityInput[] = [];
-    const env = {
-      runtimeId: localRuntimeId,
-      state: {
-        eReplicas: new Map([
-          [`${sourceHubId}:${sourceHubSignerId}`, { entityId: sourceHubId, signerId: sourceHubSignerId }],
-          [`${targetHubId}:${targetHubSignerId}`, { entityId: targetHubId, signerId: targetHubSignerId }],
-        ]),
-      },
-      infrastructure: {
-        verifiedProfileRoutes: new Map([
-          [sourceUserId, { runtimeId: authenticatedUserRuntimeId, runtimeSignerId: sourceUserSignerId }],
-          [targetUserId, { runtimeId: otherUserRuntimeId, runtimeSignerId: targetUserSignerId }],
-        ]),
-      },
-      warn: () => {}, info: () => {}, error: () => {},
-    } as unknown as RuntimeReplica;
-
-    expect(() => routeInboundP2PEntityInput(env, authenticatedUserRuntimeId, {
-      entityId: sourceHubId,
-      signerId: sourceHubSignerId,
-      entityTxs: [{
-        type: 'consensusOutput',
-        data: {
-          origin: {
-            sourceEntityId: sourceUserId, lane: 'generic', sequence: 1n,
-            semanticHash: `0x${'78'.repeat(32)}`, height: 1,
-            frameHash: `0x${'79'.repeat(32)}`, outputIndex: 0,
-          },
-          outputHanko: '0x01',
-          targetEntityId: sourceHubId,
-          entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
-        },
-      }],
-    }, {
-      ensureRuntimeInfrastructure: target => target.infrastructure!,
-      enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
-      extractEntityId: key => String(key).split(':')[0] || '',
-      hasLocalSignerForEntity: () => true,
-      hasLocalSignerForEntitySigner: (_target, entity, signer) =>
-        (entity === sourceHubId && signer === sourceHubSignerId) ||
-        (entity === targetHubId && signer === targetHubSignerId),
-      resolveSoleLocalSignerForEntity: () => sourceHubSignerId,
-      getP2P: () => null,
-    })).toThrow('CROSS_J_RUNTIME_TOPOLOGY_INVALID:cross-j-invalid-runtime-topology:OWNER_RUNTIME_MISMATCH');
-    expect(enqueued).toEqual([]);
   });
 
   test('fails fast on inbound tx-bearing P2P input for an unknown local entity', () => {

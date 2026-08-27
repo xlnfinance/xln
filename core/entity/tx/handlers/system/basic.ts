@@ -25,8 +25,6 @@ import {
 } from '../../../auth/authorization';
 import { resolveEntityCommandBoard } from '../../../command';
 import { createStructuredLogger, shortHash, shortId } from '../../../../support/logger';
-import { buildCertifiedEntityOutput } from '../../j-events-htlc/cross-j-outputs';
-import { hashCertifiedEntityOutputSemantic } from '../../../consensus/output/certification';
 import { normalizeEntityRef } from '../../account-key';
 
 const basicLog = createStructuredLogger('entity.basic');
@@ -233,58 +231,6 @@ export const handleVoteEntityTx = (
 
   newEntityState.proposals.set(proposalId, updatedProposal);
   return { newState: newEntityState, outputs: [] };
-};
-
-export const handleReissueCertifiedOutputEntityTx = (
-  _env: EntityRuntimeContext,
-  entityState: EntityState,
-  entityTx: EntityTxOf<'reissueCertifiedOutput'>,
-): BasicEntityTxResult => {
-  const targetEntityId = String(entityTx.data.targetEntityId ?? '').trim().toLowerCase();
-  const targetSignerId = String(entityTx.data.targetSignerId ?? '').trim().toLowerCase();
-  const semanticHash = String(entityTx.data.semanticHash ?? '').trim().toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(targetEntityId)) {
-    throw new Error(`CONSENSUS_OUTPUT_REISSUE_TARGET_INVALID:${targetEntityId || 'missing'}`);
-  }
-  if (!/^0x[0-9a-f]{40}$/.test(targetSignerId)) {
-    throw new Error(`CONSENSUS_OUTPUT_REISSUE_TARGET_SIGNER_INVALID:${targetSignerId || 'missing'}`);
-  }
-  if (typeof entityTx.data.sequence !== 'bigint' || entityTx.data.sequence < 1n) {
-    throw new Error(`CONSENSUS_OUTPUT_REISSUE_SEQUENCE_INVALID:${String(entityTx.data.sequence)}`);
-  }
-  if (!/^0x[0-9a-f]{64}$/.test(semanticHash)) {
-    throw new Error(`CONSENSUS_OUTPUT_REISSUE_HASH_INVALID:${semanticHash || 'missing'}`);
-  }
-  if (!Array.isArray(entityTx.data.entityTxs) || entityTx.data.entityTxs.length === 0) {
-    throw new Error('CONSENSUS_OUTPUT_REISSUE_PAYLOAD_REQUIRED');
-  }
-  const frontier = entityState.certifiedOutputSequences?.get(targetEntityId);
-  if (!frontier) throw new Error(`CONSENSUS_OUTPUT_REISSUE_FRONTIER_MISSING:${targetEntityId}`);
-  const computed = hashCertifiedEntityOutputSemantic(
-    entityState.entityId,
-    targetEntityId,
-    'generic',
-    entityTx.data.sequence,
-    entityTx.data.entityTxs,
-  );
-  if (
-    frontier.lastSequence !== entityTx.data.sequence ||
-    frontier.lastSemanticHash.toLowerCase() !== semanticHash ||
-    computed !== semanticHash
-  ) {
-    throw new Error(`CONSENSUS_OUTPUT_REISSUE_IDENTITY_MISMATCH:${targetEntityId}`);
-  }
-  const output = buildCertifiedEntityOutput(
-    targetEntityId,
-    targetSignerId,
-    structuredClone(entityTx.data.entityTxs),
-  );
-  output.certifiedOutputIdentity = {
-    lane: 'generic',
-    sequence: entityTx.data.sequence,
-    semanticHash,
-  };
-  return { newState: entityState, outputs: [output] };
 };
 
 export const handleProfileUpdateEntityTx = (

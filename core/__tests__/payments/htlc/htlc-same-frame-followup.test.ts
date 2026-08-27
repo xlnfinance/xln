@@ -78,7 +78,18 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides =
     infraContext: { htlc: { entries: [preparedEntry] } },
     preparedHtlcEntriesByBinding: new Map([[`${frameHash}:${lockId}`, preparedEntry]]),
   };
-  return { context, tx, frame, accountTxs, state, from, next, lockId, hashlock };
+  return {
+    context,
+    tx,
+    frame,
+    accountTxs,
+    state,
+    from,
+    next,
+    lockId,
+    hashlock,
+    proposerIsLeft: from.toLowerCase() < to.toLowerCase(),
+  };
 };
 
 describe('same-frame incoming HTLC followup', () => {
@@ -125,7 +136,13 @@ describe('same-frame incoming HTLC followup', () => {
 
   test('queues the outbound Account proposal without an onion-advance frame', async () => {
     const fixture = setup('forward');
-    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true);
+    await applyCommittedHtlcLockFollowup(
+      fixture.context as never,
+      fixture.tx,
+      fixture.frame as never,
+      fixture.proposerIsLeft,
+      true,
+    );
     expect(fixture.accountTxs).toEqual([{
       accountId: fixture.next,
       tx: { type: 'htlc_lock', data: expect.objectContaining({ amount: 9n, envelope: opaque }) },
@@ -137,14 +154,26 @@ describe('same-frame incoming HTLC followup', () => {
   test('ACK replay commits the sender frame without consuming recipient onion context', async () => {
     const fixture = setup('forward');
     fixture.context.infraContext = undefined;
-    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, false);
+    await applyCommittedHtlcLockFollowup(
+      fixture.context as never,
+      fixture.tx,
+      fixture.frame as never,
+      fixture.proposerIsLeft,
+      false,
+    );
     expect(fixture.accountTxs).toEqual([]);
     expect(fixture.state.htlcRoutes.size).toBe(0);
   });
 
   test('same Entity frame rejects a second peer lock with an active hashlock without replacing its route', async () => {
     const first = setup('forward');
-    await applyCommittedHtlcLockFollowup(first.context as never, first.tx, first.frame as never, true);
+    await applyCommittedHtlcLockFollowup(
+      first.context as never,
+      first.tx,
+      first.frame as never,
+      first.proposerIsLeft,
+      true,
+    );
     const originalRoute = first.state.htlcRoutes.get(first.hashlock);
 
     const collision = setup('forward', {
@@ -159,6 +188,7 @@ describe('same-frame incoming HTLC followup', () => {
       collision.context as never,
       collision.tx,
       collision.frame as never,
+      collision.proposerIsLeft,
       true,
     );
 
@@ -211,7 +241,13 @@ describe('same-frame incoming HTLC followup', () => {
     };
     const fixture = setup('final', { hashlock, state });
 
-    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true);
+    await applyCommittedHtlcLockFollowup(
+      fixture.context as never,
+      fixture.tx,
+      fixture.frame as never,
+      fixture.proposerIsLeft,
+      true,
+    );
 
     expect(fixture.accountTxs).toEqual([{
       accountId: fixture.from,
@@ -229,15 +265,33 @@ describe('same-frame incoming HTLC followup', () => {
 
   test('queues reject and refuses consuming one prepared binding twice', async () => {
     const fixture = setup('reject');
-    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true);
+    await applyCommittedHtlcLockFollowup(
+      fixture.context as never,
+      fixture.tx,
+      fixture.frame as never,
+      fixture.proposerIsLeft,
+      true,
+    );
     expect(fixture.accountTxs[0]).toEqual(expect.objectContaining({ accountId: id('1') }));
-    await expect(applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true))
+    await expect(applyCommittedHtlcLockFollowup(
+      fixture.context as never,
+      fixture.tx,
+      fixture.frame as never,
+      fixture.proposerIsLeft,
+      true,
+    ))
       .rejects.toThrow('HTLC_PREPARED_CONTEXT_REUSED');
   });
 
   test('target queues the raw preimage in the same frame without an offer phase', async () => {
     const fixture = setup('final');
-    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true);
+    await applyCommittedHtlcLockFollowup(
+      fixture.context as never,
+      fixture.tx,
+      fixture.frame as never,
+      fixture.proposerIsLeft,
+      true,
+    );
     expect(fixture.accountTxs).toEqual([{
       accountId: id('1'),
       tx: { type: 'htlc_resolve', data: { lockId: id('4'), outcome: 'secret', secret: id('7') } },

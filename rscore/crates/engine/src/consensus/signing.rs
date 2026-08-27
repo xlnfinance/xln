@@ -6,9 +6,49 @@
 //! frame never leaves without a signature and an incoming one is never trusted
 //! before recovery.
 
-use xln_rscore_hanko::{BoardDelays, build_single_signer_hanko, verify_canonical_hanko};
+use xln_rscore_hanko::{
+    BoardDelays, build_single_signer_hanko, encode_single_signer_hanko_from_signature,
+    verify_canonical_hanko,
+};
 
 use crate::error::StateError;
+
+/// Exact board-registry record resolved by the parent Entity for one Entity.
+///
+/// Account never accepts this from an `AccountInput`. The parent resolves it
+/// from its certified registry, binds it to `entity_id`, and hands this typed
+/// value to the reducer beside the untrusted peer bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CertifiedBoardAuthority {
+    pub entity_id: [u8; 32],
+    pub registered_board_hash: [u8; 32],
+    pub previous_board_hash: [u8; 32],
+    /// Exclusive Unix-second boundary, exactly like
+    /// `CertifiedBoardRecord.previousBoardValidUntil` in TypeScript.
+    pub previous_board_valid_until: u64,
+    pub activated_at_j_height: u64,
+    pub activation_log_index: u64,
+}
+
+impl CertifiedBoardAuthority {
+    pub fn assert_entity(&self, expected_entity_id: &[u8; 32]) -> Result<(), StateError> {
+        if &self.entity_id != expected_entity_id {
+            return Err(StateError::BoardAuthorityPeerMismatch {
+                expected: render_word(expected_entity_id),
+                resolved: render_word(&self.entity_id),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn render_word(value: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    value.iter().fold(String::from("0x"), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
+}
 
 /// The board this runtime signs for. Single-validator only: a quorum needs the
 /// certified registry TypeScript owns, and the engine says so rather than
@@ -21,6 +61,21 @@ pub struct SigningIdentity {
     threshold: u128,
     delays: BoardDelays,
     signer_id: String,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static TEST_SIGN_FRAME_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_sign_frame_calls() {
+    TEST_SIGN_FRAME_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_sign_frame_calls() -> usize {
+    TEST_SIGN_FRAME_CALLS.with(std::cell::Cell::get)
 }
 
 impl std::fmt::Debug for SigningIdentity {
@@ -178,6 +233,8 @@ impl SigningIdentity {
 
     /// Sign one account frame digest and wrap it as this entity's Hanko.
     pub fn sign_frame(&self, digest: &[u8; 32]) -> Result<Vec<u8>, StateError> {
+        #[cfg(test)]
+        TEST_SIGN_FRAME_CALLS.with(|calls| calls.set(calls.get() + 1));
         build_single_signer_hanko(
             &self.entity_id,
             digest,
@@ -188,11 +245,36 @@ impl SigningIdentity {
         )
         .map_err(|error| StateError::Signing(error.to_string()))
     }
+
+    /// Encode a raw signature already retained in an Entity manifest as this
+    /// identity's Hanko. Recovery is checked against the identity before the
+    /// signature is wrapped, so a caller cannot pair a foreign `collectedSigs`
+    /// entry with our authority claim.
+    pub fn encode_frame_hanko(
+        &self,
+        digest: &[u8; 32],
+        signature: &[u8; 65],
+    ) -> Result<Vec<u8>, StateError> {
+        let expected = self.signer_address()?;
+        if crate::recover_signer_address(digest, signature) != Some(expected) {
+            return Err(StateError::Signing(
+                "ENTITY_RAW_SIGNATURE_SIGNER_MISMATCH".to_string(),
+            ));
+        }
+        encode_single_signer_hanko_from_signature(
+            &self.entity_id,
+            *signature,
+            self.weight,
+            self.threshold,
+            self.delays,
+        )
+        .map_err(|error| StateError::Signing(error.to_string()))
+    }
 }
 
 /// Check a peer's Hanko over a frame digest. Only self-authorising claims are
-/// decided here; anything that needs the certified board registry is reported
-/// so the caller can route the input to TypeScript instead of guessing.
+/// decided here; a registered-board claim is rejected unless the parent calls
+/// the authority-aware incoming entrypoint with its exact certified hash.
 pub fn verify_frame_hanko(
     hanko: &[u8],
     digest: &[u8; 32],
@@ -206,21 +288,106 @@ pub fn verify_frame_hanko(
     )
 }
 
-/// Check the counterparty's Hanko over the exact dispute digest rebuilt from
-/// the committed Account identity. A frame Hanko cannot certify this message:
-/// the two digests have different Solidity domains and both signatures must
-/// be verified independently before either witness is retained.
-pub fn verify_dispute_hanko(
+/// Verify fresh bilateral money evidence against the Entity-certified current
+/// board. Previous-board grace is deliberately impossible on this entrypoint.
+pub fn verify_frame_hanko_with_authority(
     hanko: &[u8],
     digest: &[u8; 32],
     expected_entity_id: &[u8; 32],
+    authority: Option<&CertifiedBoardAuthority>,
 ) -> Result<(), StateError> {
-    verify_peer_hanko(
+    verify_peer_hanko_with_authority(
         hanko,
         digest,
         expected_entity_id,
+        authority,
+        None,
+        StateError::FrameHankoInvalid,
+    )
+}
+
+/// Verify the second half of an already-authored bilateral frame certificate.
+///
+/// Unlike a fresh proposal, an ACK may have been issued before a certified
+/// board rotation and delivered afterwards. The exact previous board remains
+/// valid only until the registry's exclusive grace boundary; the digest and
+/// peer Entity binding are unchanged.
+pub fn verify_ack_hanko_with_authority(
+    hanko: &[u8],
+    digest: &[u8; 32],
+    expected_entity_id: &[u8; 32],
+    authority: Option<&CertifiedBoardAuthority>,
+    entity_timestamp_ms: u64,
+) -> Result<(), StateError> {
+    verify_peer_hanko_with_authority(
+        hanko,
+        digest,
+        expected_entity_id,
+        authority,
+        Some(entity_timestamp_ms / 1_000),
+        StateError::FrameHankoInvalid,
+    )
+}
+
+/// Verify historical dispute evidence. Like the ACK-certificate lane above,
+/// it may use the exact previous certified board only before the exclusive
+/// seven-day expiry; fresh frames and board refreshes stay current-board-only.
+pub fn verify_dispute_hanko_with_authority(
+    hanko: &[u8],
+    digest: &[u8; 32],
+    expected_entity_id: &[u8; 32],
+    authority: Option<&CertifiedBoardAuthority>,
+    entity_timestamp_ms: u64,
+    allow_previous_board: bool,
+) -> Result<(), StateError> {
+    verify_peer_hanko_with_authority(
+        hanko,
+        digest,
+        expected_entity_id,
+        authority,
+        allow_previous_board.then_some(entity_timestamp_ms / 1_000),
         StateError::DisputeHankoInvalid,
     )
+}
+
+fn verify_peer_hanko_with_authority(
+    hanko: &[u8],
+    digest: &[u8; 32],
+    expected_entity_id: &[u8; 32],
+    authority: Option<&CertifiedBoardAuthority>,
+    previous_board_at_seconds: Option<u64>,
+    invalid: fn(String) -> StateError,
+) -> Result<(), StateError> {
+    let Some(authority) = authority else {
+        return verify_peer_hanko(hanko, digest, expected_entity_id, invalid);
+    };
+    authority.assert_entity(expected_entity_id)?;
+    let validates_certified_board =
+        |entity_id: &[u8; 32], board_hash: &[u8; 32], _claim_index: usize| {
+            if entity_id != expected_entity_id {
+                return false;
+            }
+            if board_hash == &authority.registered_board_hash {
+                return true;
+            }
+            previous_board_at_seconds.is_some_and(|timestamp| {
+                authority.previous_board_hash != [0_u8; 32]
+                    && board_hash == &authority.previous_board_hash
+                    && timestamp < authority.previous_board_valid_until
+            })
+        };
+    match verify_canonical_hanko(
+        hanko,
+        digest,
+        Some(expected_entity_id),
+        Some(&validates_certified_board),
+    ) {
+        Ok(_) => Ok(()),
+        Err(xln_rscore_hanko::HankoError::BoardAuthorityUnavailable) => {
+            Err(StateError::BoardAuthorityUnavailable)
+        }
+        Err(error) => Err(invalid(error.to_string())),
+    }
 }
 
 fn verify_peer_hanko(

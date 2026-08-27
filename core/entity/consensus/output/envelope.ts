@@ -1,31 +1,14 @@
 import type { EntityInput } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
-import { compareStableText } from '../../../protocol/serialization';
 
 const NESTED_PROTOCOL_TXS = new Set<EntityTx['type']>([
   // AccountInput is routed raw after source Entity + Runtime WAL commit. It
-  // must never regain an outer consensusOutput/runtimeOutput envelope.
+  // must never regain an outer Runtime output envelope.
   'accountInput',
   'entityCommand',
-  'consensusOutput',
   'runtimeOutput',
-  'reissueCertifiedOutput',
   'scheduledWake',
 ]);
-
-const getCertifiedOutputNestedTxs = (
-  tx: EntityTx,
-): readonly EntityTx[] | null => {
-  if (tx.type !== 'consensusOutput') return null;
-  const nested = tx.data.entityTxs;
-  if (!Array.isArray(nested) || nested.length === 0) {
-    throw new Error('CONSENSUS_OUTPUT_ENTITY_TXS_MISSING');
-  }
-  if (nested.some((candidate) => NESTED_PROTOCOL_TXS.has(candidate.type))) {
-    throw new Error('CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
-  }
-  return nested;
-};
 
 const getRuntimeOutputNestedTxs = (
   tx: EntityTx,
@@ -42,7 +25,7 @@ const getRuntimeOutputNestedTxs = (
 export const getEffectiveEntityInputTxs = (
   input: Pick<EntityInput, 'entityTxs'>,
 ): EntityTx[] => (input.entityTxs ?? []).flatMap((tx) =>
-  getCertifiedOutputNestedTxs(tx) ?? getRuntimeOutputNestedTxs(tx) ?? [tx]);
+  getRuntimeOutputNestedTxs(tx) ?? [tx]);
 
 export const getAccountOnlyEntityTx = (
   txs: readonly EntityTx[] | undefined,
@@ -55,47 +38,4 @@ export const getAccountOnlyEntityTx = (
     throw new Error('ACCOUNT_OUTPUT_MUST_BE_ONE_RAW_ACCOUNT_INPUT');
   }
   return accountTxs[0]!;
-};
-
-/**
- * A target consumption frontier is contiguous per source/target/lane. Network
- * batching may combine independently certified outputs in any arrival order,
- * so reorder only the slots from the same frontier before applying them.
- */
-export const orderCertifiedOutputsBySequence = (txs: readonly EntityTx[]): EntityTx[] => {
-  const result = [...txs];
-  const positionsByLane = new Map<string, number[]>();
-  result.forEach((tx, index) => {
-    if (tx.type !== 'consensusOutput') return;
-    const origin = tx.data.origin;
-    const key = `${origin.sourceEntityId.toLowerCase()}:` +
-      `${tx.data.targetEntityId.toLowerCase()}:${origin.lane}`;
-    const positions = positionsByLane.get(key) ?? [];
-    positions.push(index);
-    positionsByLane.set(key, positions);
-  });
-  for (const positions of positionsByLane.values()) {
-    if (positions.length < 2) continue;
-    const ordered = positions.map(position => result[position]!).sort((left, right) => {
-      if (left.type !== 'consensusOutput' || right.type !== 'consensusOutput') return 0;
-      const leftOrigin = left.data.origin;
-      const rightOrigin = right.data.origin;
-      return (leftOrigin.sequence < rightOrigin.sequence ? -1 : leftOrigin.sequence > rightOrigin.sequence ? 1 : 0) ||
-        leftOrigin.height - rightOrigin.height ||
-        leftOrigin.outputIndex - rightOrigin.outputIndex ||
-        compareStableText(leftOrigin.semanticHash, rightOrigin.semanticHash);
-    });
-    positions.forEach((position, index) => { result[position] = ordered[index]!; });
-  }
-  return result;
-};
-
-const isAtomicCertifiedPayloadTx = (tx: EntityTx): boolean => tx.type === 'j_event';
-
-export const assertCertifiedJEventIsAtomic = (
-  txs: readonly EntityTx[],
-): void => {
-  if (txs.some(isAtomicCertifiedPayloadTx) && txs.length !== 1) {
-    throw new Error('CONSENSUS_OUTPUT_RELIABLE_PAYLOAD_MUST_BE_ATOMIC');
-  }
 };

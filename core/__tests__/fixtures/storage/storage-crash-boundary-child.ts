@@ -65,7 +65,6 @@ import {
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
 } from '../../../storage';
-import { refreshRuntimeCheckpointLineageForEntity } from '../../../storage/replica/entity-lineage';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { KEY_HEAD } from '../../../storage/keys';
 import { getPerfMs } from '../../../support/time';
@@ -348,7 +347,6 @@ const registrationEvidence = await installCanonicalRegisteredBoardAuthority(
 // Rebind every local validator's H0 checkpoint to that exact shared state before
 // constructing H1; otherwise the old bootstrap anchor correctly rejects the
 // test-only mutation as a certified-state mismatch.
-refreshRuntimeCheckpointLineageForEntity(env, entityId);
 const boardEvents = makeBoardEvents(registeredBoardHash, registrationEvidence);
 const collectiveTxs: EntityTx[] = [{
   type: 'r2r',

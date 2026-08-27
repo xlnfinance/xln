@@ -61,11 +61,9 @@ import {
 
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildCertifiedEntityLineagePlan,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
-  refreshRuntimeCheckpointLineageForEntity,
-} from '../../../storage/replica/entity-lineage';
+  applyCertifiedEntityHeadPlan,
+  buildCertifiedEntityHeadPlan,
+} from '../../../storage/replica/entity-head';
 import { resolveEntityProposerId } from '../../../runtime/delivery/entity-output-signer';
 import { forkEntityReplicaForInput } from '../../../entity/replica/replica-clone';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
@@ -153,7 +151,6 @@ import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../..
 
 import { signEntityHashes } from '../../../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../../../entity/consensus/output/certification';
 
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../../../entity/tx/j-events-htlc';
 
@@ -209,7 +206,6 @@ import { LIMITS } from '../../../config/constants';
 import { getEffectiveEntityInputTxs } from '../../../entity/consensus/output/envelope';
 
 import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authorization';
-import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import { getAccountJClaimNodeStore } from '../../../entity/account/account-j-claim-node-store';
 
 import { cloneIsolatedEntityInput } from '../../../entity/state/input-clone';
@@ -241,11 +237,11 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
 });
 
 const publishTestRuntimeCheckpoint = (env: RuntimeReplica): void => {
-  applyCertifiedEntityLineagePlan(env, rebaseCertifiedEntityLineageAtRuntimeCheckpoint(env));
+  applyCertifiedEntityHeadPlan(env, buildCertifiedEntityHeadPlan(env));
 };
 
 const installTestGenesisLineage = (env: RuntimeReplica): void => {
-  applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
+  applyCertifiedEntityHeadPlan(env, buildCertifiedEntityHeadPlan(env));
 };
 
 const registerVerifiedOwnerRoute = (
@@ -858,7 +854,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceCommit.outputs).toHaveLength(2);
     const localOutput = sourceCommit.outputs.find(output => output.entityId === targetHub)!;
     expect(localOutput.entityId).toBe(targetHub);
-    expect(localOutput.certifiedOutputIdentity).toBeUndefined();
     expect(localOutput.entityTxs?.map(tx => tx.type)).toEqual(['runtimeOutput']);
     const runtimeOutput = localOutput.entityTxs?.[0];
     if (runtimeOutput?.type !== 'runtimeOutput') throw new Error('TEST_RUNTIME_OUTPUT_REQUIRED');
@@ -876,9 +871,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetCommit.newState.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash).toBe(intent.routeHash);
     expect(targetCommit.newState.accounts.get(targetUser)?.mempool.map(tx => tx.type)).toEqual(['cross_pull_lock']);
     expect(targetCommit.newState.accounts.get(targetUser)?.pendingFrame).toBeUndefined();
-    expect(
-      targetCommit.outputs.flatMap(output => output.entityTxs ?? []).some(tx => tx.type === 'consensusOutput'),
-    ).toBe(false);
     expect(
       selectCrossJOpeningAccountProposalTxs(
         env,
@@ -1111,7 +1103,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const saturated = await applyMergedEntityInputs(saturatedEnv, [sourceInput], [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(saturatedEnv, entityId),
     });
     expect(saturated.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub]);
     const committedSaturatedTarget = saturatedEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state;
@@ -1128,7 +1119,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const pass = await applyMergedEntityInputs(env, [sourceInput, reverseInput], [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
-      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(env, entityId),
     });
 
     expect(env.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 4);

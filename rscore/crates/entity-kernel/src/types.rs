@@ -4,6 +4,7 @@ use num_bigint::BigInt;
 use xln_rscore_engine::{AccountDomain, AccountOutput, AccountTx, OpaqueHtlcCiphertext};
 
 use crate::orderbook::{OrderbookState, PairPolicy};
+use crate::scheduler::CrontabState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JurisdictionScope {
@@ -52,6 +53,7 @@ pub enum HtlcPreparedOutcome {
     },
     Final {
         secret: String,
+        description: Option<String>,
         started_at_ms: Option<u64>,
     },
     Forward {
@@ -67,6 +69,36 @@ pub struct PreparedHtlcEntry {
     pub outcome: HtlcPreparedOutcome,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OriginatedHtlcDeliveryMode {
+    Instant,
+    Async,
+}
+
+/// Exact proposer materialization for one local `htlcPayment` EntityTx.
+/// The onion envelope contains proposer entropy; all remaining fields are
+/// deterministic evidence validators check against the EntityTx and profiles.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedOriginatedHtlcPayment {
+    pub tx_hash: String,
+    pub target_entity_id: String,
+    pub token_id: u16,
+    pub recipient_amount: BigInt,
+    pub route: Vec<String>,
+    pub description: String,
+    pub delivery_mode: OriginatedHtlcDeliveryMode,
+    pub started_at_ms: u64,
+    pub hashlock: String,
+    pub sender_lock_amount: BigInt,
+    pub max_sender_debit: BigInt,
+    pub total_fee: BigInt,
+    pub lock_id: String,
+    pub timelock: BigInt,
+    pub reveal_before_height: u64,
+    pub next_hop_entity_id: String,
+    pub envelope: OpaqueHtlcCiphertext,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeterministicContext {
     pub minimum_trade_size: BigInt,
@@ -74,6 +106,7 @@ pub struct DeterministicContext {
     pub jurisdiction_id: Option<String>,
     pub pair_policies: BTreeMap<String, PairPolicy>,
     pub prepared_htlcs: BTreeMap<(String, String), PreparedHtlcEntry>,
+    pub originated_htlcs: BTreeMap<String, PreparedOriginatedHtlcPayment>,
 }
 
 impl DeterministicContext {
@@ -91,6 +124,7 @@ impl DeterministicContext {
                 },
             )]),
             prepared_htlcs: BTreeMap::new(),
+            originated_htlcs: BTreeMap::new(),
         }
     }
 }
@@ -133,11 +167,19 @@ pub struct EntityStateSlice {
     pub entity_id: String,
     pub height: u64,
     pub timestamp: u64,
+    /// Bounded latest signed-command slot per current board member. This is
+    /// Entity State, not replica admission metadata: retry/cancel semantics
+    /// must survive checkpoint restore and remain in the certified root.
+    pub entity_command_nonces: Option<crate::EntityCommandNonceState>,
     pub last_finalized_j_height: u64,
+    /// Canonical Entity-owned jurisdiction reserves, keyed by token id.
+    /// Account collateral is deliberately not duplicated here.
+    pub reserves: BTreeMap<u16, BigInt>,
     pub known_accounts: BTreeSet<String>,
     pub htlc_routes: BTreeMap<String, HtlcRoute>,
     pub htlc_fees_earned: BigInt,
     pub lock_book: BTreeMap<String, LockBookEntry>,
+    pub crontab: Option<CrontabState>,
     pub orderbook: Option<OrderbookState>,
     /// Exact Entity-consensus fields that surround the mutable books. They are
     /// installed once with the resident state; matching never rewrites them.
@@ -150,11 +192,14 @@ impl EntityStateSlice {
             entity_id: entity_id.into(),
             height: 0,
             timestamp,
+            entity_command_nonces: None,
             last_finalized_j_height: 0,
+            reserves: BTreeMap::new(),
             known_accounts: BTreeSet::new(),
             htlc_routes: BTreeMap::new(),
             htlc_fees_earned: BigInt::from(0),
             lock_book: BTreeMap::new(),
+            crontab: None,
             orderbook: None,
             orderbook_metadata: None,
         }
@@ -202,6 +247,30 @@ pub struct AccountProposalWork {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntityKernelOutput {
+    /// Exact semantic projection of the TS runtimeEvent + paired REB_STEP
+    /// diagnostic emitted when a bilateral J-event claim finalizes.
+    AccountSettledFinalizedBilateral {
+        entity_id: String,
+        account_id: String,
+        token_id: u16,
+        j_height: u64,
+        collateral: BigInt,
+        ondelta: BigInt,
+    },
+    HtlcInitiated {
+        entity_id: String,
+        from_entity: String,
+        to_entity: String,
+        token_id: u16,
+        amount: BigInt,
+        sender_amount: BigInt,
+        fee: BigInt,
+        hashlock: String,
+        lock_id: String,
+        route: Vec<String>,
+        description: Option<String>,
+        started_at_ms: u64,
+    },
     HtlcForwardAccepted {
         entity_id: String,
         hashlock: String,

@@ -21,7 +21,6 @@ import {
   signedEntityCommandTx,
 } from '../../../entity/command/command-codec';
 import {
-  assertCertifiedEntityOutputAuthorization,
   assertRuntimeOutputAuthorization,
   buildCollectiveEntityProposalTx,
   buildEntityTransactionProposalAction,
@@ -30,11 +29,6 @@ import {
 import { applyEntityInput } from '../../../entity/consensus';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
-import {
-  buildCertifiedEntityOutputHashes,
-  hashCertifiedEntityOutputSemantic,
-} from '../../../entity/consensus/output/certification';
-import { handleReissueCertifiedOutputEntityTx } from '../../../entity/tx/handlers/system/basic';
 import {
   assertEntityFrameEventByteBudget,
   assertEntityFrameTxByteBudget,
@@ -52,7 +46,6 @@ import {
   getCertifiedBoardNodeStore,
 } from '../../../jurisdiction/machine/board-registry';
 import { applyRuntimeInput, createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../runtime';
-import { buildQuorumHanko, verifyHankoForHash } from '../../../hanko/signing';
 import { hydrateEntityStateFromStorage } from '../../../storage/read/hydration';
 import { projectEntityCoreDoc } from '../../../storage/read/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, Proposal } from '../../../entity/types';
@@ -531,140 +524,6 @@ describe('signed Entity command admission', () => {
     expect(applied.newState.proposals.size).toBe(0);
     expect(applied.newState.hubRebalanceConfig?.routingFeePPM).toBe(777);
     expect(applied.newState.entityCommandNonces?.bySigner.get(proposer)?.nonce).toBe(2n);
-  });
-
-  test('reissues only the stored semantic frontier through proposal quorum and exact output Hanko', async () => {
-    const { env, state: initialState, signers } = setupNoJurisdictionMultisig();
-    const [proposer, voter] = signers as [string, string];
-    const targetEntityId = initialState.entityId;
-    const payload = [hubCommand()];
-    const semanticHash = hashCertifiedEntityOutputSemantic(
-      initialState.entityId,
-      targetEntityId,
-      'generic',
-      1n,
-      payload,
-    );
-    const state: EntityState = {
-      ...initialState,
-      certifiedOutputSequences: new Map([[
-        targetEntityId,
-        { lastSequence: 1n, lastSemanticHash: semanticHash },
-      ]]),
-    };
-    env.state.eReplicas.set(`${targetEntityId}:${proposer}`, {
-      entityId: targetEntityId,
-      signerId: proposer,
-      entityEncPubKey: '',
-      isProposer: true,
-      mempool: [],
-      state,
-    } as EntityReplica);
-    const reissue: EntityTx = {
-      type: 'reissueCertifiedOutput',
-      data: { targetEntityId, targetSignerId: proposer, sequence: 1n, semanticHash, entityTxs: payload },
-    };
-    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(
-      buildSignedEntityCommand(env, state, proposer, [buildCollectiveEntityProposalTx(proposer, [reissue])]),
-    )], 2_001);
-    expect(proposed.outputs).toHaveLength(0);
-    const proposal = Array.from(proposed.newState.proposals.values())[0];
-    expect(proposal?.proposer).toBe(proposer);
-
-    const vote: EntityTx = {
-      type: 'vote',
-      data: { proposalId: proposal!.id, voter, choice: 'yes' },
-    };
-    const committed = await applyEntityFrameWithMaterializedTestInfraContext(env, proposed.newState, [signedEntityCommandTx(
-      buildSignedEntityCommand(env, proposed.newState, voter, [vote]),
-    )], 2_002);
-    expect(committed.newState.proposals.has(proposal!.id)).toBe(false);
-    expect(committed.outputs).toHaveLength(1);
-    expect(committed.outputs[0]?.certifiedOutputIdentity).toEqual({
-      lane: 'generic',
-      sequence: 1n,
-      semanticHash,
-    });
-    expect(committed.newState.certifiedOutputSequences).toEqual(state.certifiedOutputSequences);
-
-    const hashes = buildCertifiedEntityOutputHashes(
-      committed.newState,
-      env,
-      2,
-      entityId('ab'),
-      committed.outputs,
-    );
-    expect(hashes).toHaveLength(1);
-    const outputHash = hashes[0]!.hash;
-    const signatures = signers.map(signerId => ({
-      signerId,
-      signature: signAccountFrame(env, signerId, outputHash),
-    }));
-    const hanko = await buildQuorumHanko(
-      env,
-      state.entityId,
-      outputHash,
-      signatures,
-      state.config,
-    );
-    expect((await verifyHankoForHash(hanko, outputHash, state.entityId, env)).valid).toBe(true);
-  });
-
-  test('reissue routing is identical with or without local target topology', () => {
-    const { state } = setup('reissue-routing-purity');
-    const targetEntityId = entityId('bc');
-    const targetSignerId = address('cd');
-    const staleTopologySigner = address('ef');
-    const payload = [hubCommand()];
-    const semanticHash = hashCertifiedEntityOutputSemantic(
-      state.entityId,
-      targetEntityId,
-      'generic',
-      1n,
-      payload,
-    );
-    const sourceState: EntityState = {
-      ...state,
-      certifiedOutputSequences: new Map([[
-        targetEntityId,
-        { lastSequence: 1n, lastSemanticHash: semanticHash },
-      ]]),
-    };
-    const reissue = {
-      type: 'reissueCertifiedOutput',
-      data: {
-        targetEntityId,
-        targetSignerId,
-        sequence: 1n,
-        semanticHash,
-        entityTxs: payload,
-      },
-    } as EntityTx;
-    const empty = createEmptyEnv('reissue-routing-empty');
-    const populated = createEmptyEnv('reissue-routing-populated');
-    populated.state.eReplicas.set(`${targetEntityId}:${staleTopologySigner}`, {
-      entityId: targetEntityId,
-      signerId: staleTopologySigner,
-      entityEncPubKey: '',
-      mempool: [],
-      isProposer: true,
-      state: {
-        ...cloneTestEntityState(state),
-        entityId: targetEntityId,
-        config: {
-          ...state.config,
-          threshold: 1n,
-          validators: [staleTopologySigner],
-          shares: { [staleTopologySigner]: 1n },
-        },
-      },
-    });
-
-    const withoutTopology = handleReissueCertifiedOutputEntityTx(empty, sourceState, reissue).outputs;
-    const withStaleTopology = handleReissueCertifiedOutputEntityTx(populated, sourceState, reissue).outputs;
-    expect(withoutTopology).toEqual(withStaleTopology);
-    expect(withoutTopology[0]?.signerId).toBe(targetSignerId);
-    expect(withoutTopology[0]?.certifiedOutputIdentity?.semanticHash).toBe(semanticHash);
   });
 
   test('rejects direct collective signatures, duplicate votes, and unknown authors', async () => {
@@ -1355,24 +1214,6 @@ describe('signed Entity command admission', () => {
         },
       },
     };
-    expect(() => assertCertifiedEntityOutputAuthorization(
-      sourceUser,
-      sourceHub,
-      [accountInput],
-      stateFor(sourceHub),
-    )).not.toThrow();
-    expect(() => assertCertifiedEntityOutputAuthorization(
-      sourceHub,
-      targetHub,
-      [targetRegistration],
-      stateFor(targetHub),
-    )).toThrow('CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:registerCrossJurisdictionSwap');
-    expect(() => assertCertifiedEntityOutputAuthorization(
-      targetUser,
-      sourceUser,
-      [forcedSourceDispute],
-      stateFor(sourceUser),
-    )).toThrow('CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:disputeStart');
     expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
       sourceHub,
@@ -1384,7 +1225,7 @@ describe('signed Entity command admission', () => {
       targetUser,
       [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
       stateFor(targetUser),
-    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:prepareCrossJurisdictionSwap');
+    )).toThrow('RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:prepareCrossJurisdictionSwap');
     expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
       targetUser,

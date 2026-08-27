@@ -3,7 +3,6 @@ import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../auth/authorization';
 import { validateConsensusConfig } from '../consensus/config-validation';
 import { normalizeSignedEntityCommand } from '../command/command-codec';
-import { normalizeConsensusOutputBoardAuthority } from '../consensus/output/certification';
 import type { ProposalAction } from '../types';
 import { requireKnownEntityTxType } from '../tx/processing/catalog';
 import {
@@ -26,38 +25,6 @@ import {
 
 const ENTITY_TX_NESTING_LIMIT = 16;
 
-const validateOrigin = (value: unknown, code: string): void => {
-  const origin = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(origin, [
-    'sourceEntityId', 'lane', 'sequence', 'semanticHash', 'height', 'frameHash', 'outputIndex',
-  ], ['boardAuthority'], `${code}_FIELDS`);
-  for (const field of ['sourceEntityId', 'semanticHash', 'frameHash']) {
-    requireString(origin[field], `${code}_${field.toUpperCase()}`);
-  }
-  if (origin['lane'] !== 'generic') {
-    throw new Error(`${code}_LANE`);
-  }
-  requireBigInt(origin['sequence'], `${code}_SEQUENCE`, 0n);
-  requireBoundaryInteger(origin['height'], `${code}_HEIGHT`);
-  requireBoundaryInteger(origin['outputIndex'], `${code}_OUTPUT_INDEX`);
-  if (origin['boardAuthority'] !== undefined) {
-    const authority = requireBoundaryRecord(origin['boardAuthority'], `${code}_BOARD_AUTHORITY`);
-    requireExactBoundaryKeys(
-      authority,
-      ['version', 'stackKey', 'record'],
-      [],
-      `${code}_BOARD_AUTHORITY_FIELDS`,
-    );
-    const record = requireBoundaryRecord(authority['record'], `${code}_BOARD_AUTHORITY_RECORD`);
-    requireExactBoundaryKeys(record, [
-      'stackKey', 'entityId', 'boardHash', 'boardEpoch', 'previousBoardHash',
-      'previousBoardValidUntil', 'activatedAtJHeight', 'logIndex', 'blockHash',
-      'transactionHash', 'source',
-    ], [], `${code}_BOARD_AUTHORITY_RECORD_FIELDS`);
-    normalizeConsensusOutputBoardAuthority(authority, String(origin['sourceEntityId']));
-  }
-};
-
 const validateNestedTxs = (value: unknown, code: string, depth: number): void => {
   if (depth > ENTITY_TX_NESTING_LIMIT) throw new Error(`${code}_NESTING_LIMIT`);
   requireArray(value, code).forEach((tx, index) =>
@@ -79,23 +46,6 @@ const validateProposal = (value: unknown, code: string, depth: number): void => 
   }
 };
 
-const validateConsensusOutput = (value: unknown, code: string, depth: number): void => {
-  const data = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(
-    data,
-    ['origin', 'outputHanko', 'targetEntityId', 'entityTxs'],
-    ['consumptionProof'],
-    `${code}_FIELDS`,
-  );
-  validateOrigin(data['origin'], `${code}_ORIGIN`);
-  requireString(data['outputHanko'], `${code}_HANKO`);
-  requireString(data['targetEntityId'], `${code}_TARGET`);
-  if (data['consumptionProof'] !== undefined) {
-    requireBoundaryRecord(data['consumptionProof'], `${code}_CONSUMPTION_PROOF`);
-  }
-  validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
-};
-
 const validateRuntimeOutput = (value: unknown, code: string, depth: number): void => {
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
@@ -107,21 +57,6 @@ const validateRuntimeOutput = (value: unknown, code: string, depth: number): voi
   if (data['protocol'] !== 'cross-j') throw new Error(`${code}_PROTOCOL`);
   requireString(data['sourceEntityId'], `${code}_SOURCE`);
   requireString(data['targetEntityId'], `${code}_TARGET`);
-  validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
-};
-
-const validateReissue = (value: unknown, code: string, depth: number): void => {
-  const data = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(
-    data,
-    ['targetEntityId', 'targetSignerId', 'sequence', 'semanticHash', 'entityTxs'],
-    [],
-    `${code}_FIELDS`,
-  );
-  requireString(data['targetEntityId'], `${code}_TARGET`);
-  requireString(data['targetSignerId'], `${code}_TARGET_SIGNER`);
-  requireBigInt(data['sequence'], `${code}_SEQUENCE`, 0n);
-  requireString(data['semanticHash'], `${code}_SEMANTIC_HASH`);
   validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
 };
 
@@ -238,9 +173,7 @@ function assertEntityTxRecord(
   if (type === 'entityCommand') validateEntityCommand(tx['data'], `${code}_DATA`, depth);
   else if (type === 'boardHandover') validateBoardHandover(tx['data'], `${code}_DATA`);
   else if (type === 'propose') validateProposal(tx['data'], `${code}_DATA`, depth);
-  else if (type === 'consensusOutput') validateConsensusOutput(tx['data'], `${code}_DATA`, depth);
   else if (type === 'runtimeOutput') validateRuntimeOutput(tx['data'], `${code}_DATA`, depth);
-  else if (type === 'reissueCertifiedOutput') validateReissue(tx['data'], `${code}_DATA`, depth);
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
   else if (type === 'htlcPayment') validatePreparedHtlcPayment(tx['data'], `${code}_DATA`);
   else if (type === 'accountInput') decodeAccountPeerInput(tx['data'], `${code}_DATA`);

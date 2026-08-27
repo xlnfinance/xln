@@ -14,21 +14,6 @@ fn dispute(hanko: AbiValue, hash: u8, proof_body_hash: u8, nonce: u64, left: boo
     ])
 }
 
-fn delta() -> AbiValue {
-    tuple(vec![
-        AbiValue::Integer(7),
-        AbiValue::Text("1000".into()),
-        AbiValue::Text("11".into()),
-        AbiValue::Text("-12".into()),
-        AbiValue::Text("13".into()),
-        AbiValue::Text("14".into()),
-        AbiValue::Text("15".into()),
-        AbiValue::Text("16".into()),
-        AbiValue::Text("17".into()),
-        AbiValue::Text("18".into()),
-    ])
-}
-
 pub(super) fn proposal() -> AbiValue {
     tuple(vec![
         tuple(vec![
@@ -39,8 +24,6 @@ pub(super) fn proposal() -> AbiValue {
             AbiValue::Text("prev-41".into()),
             AbiValue::Bytes(vec![0x55; 32]),
             AbiValue::Bytes(vec![0x66; 32]),
-            AbiValue::Bool(true),
-            tuple(vec![delta()]),
         ]),
         AbiValue::Bytes(vec![0x77, 0x78]),
         dispute(AbiValue::Bytes(vec![0x88]), 0x89, 0x8a, 61, false),
@@ -72,6 +55,7 @@ pub(super) fn peer_row(kind: AbiValue) -> AbiValue {
             kind,
         ]),
         AbiValue::Nil,
+        tuple(vec![AbiValue::Nil, AbiValue::Nil]),
     ])
 }
 

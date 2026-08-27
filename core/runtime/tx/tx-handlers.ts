@@ -40,7 +40,7 @@ import { createStructuredLogger } from '../../support/logger';
 import { encodeBoard, hashBoard } from '../../entity/factory';
 import { isNumberedEntity, toEntityId } from '../../protocol/identity';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/machine/board-registry';
-import { buildRuntimeCheckpointLineagePlan } from '../../storage/replica/entity-lineage';
+import { buildRuntimeCheckpointHeadPlan } from '../../storage/replica/entity-head';
 import {
   assertCertifiedRegistrationEvidence,
   computeRegistrationEvidenceClaimHash,
@@ -258,7 +258,7 @@ const resolveImportCheckpointState = (
   // Runtime WAL; requiring it here would turn every late validator import into an
   // accidental in-memory archive dependency. Bind the import to the exact
   // already-certified local endpoint that the next Runtime checkpoint uses.
-  const selected = buildRuntimeCheckpointLineagePlan(env).lookup.get(entityId);
+  const selected = buildRuntimeCheckpointHeadPlan(env).lookup.get(entityId);
   if (!selected) throw new Error(`IMPORT_REPLICA_CERTIFIED_CHECKPOINT_MISSING:${entityId}`);
   if (!selected.state.config.validators.some(validator => (
     String(validator).toLowerCase() === signerId
@@ -306,7 +306,6 @@ const entityHasCertifiedCheckpoint = (
 ): boolean =>
   siblings.some(replica =>
     replica.state.height > 0 ||
-    Boolean(replica.certifiedFrameAnchor) ||
     Boolean(replica.certifiedFrameHead));
 
 const deriveImportedEntityEncryptionKeys = (

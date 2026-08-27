@@ -382,11 +382,8 @@ export interface AccountFrame {
   accountTxs: AccountTx[]; // Renamed from transitions
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   accountStateRoot: string; // Canonical RLP/radix-Merkle root of bilateral Account state
+  /** Derived digest cache certified by the adjacent Hanko; never Account DB authority. */
   stateHash: string;
-  byLeft: boolean; // Signed proposer side; every frame must bind it explicitly.
-  // One source of truth for account-frame token state. Compact offdelta arrays
-  // and token id arrays are derived by helpers when logs/proofs need them.
-  deltas: Delta[];
 }
 
 export type AccountHistoryRecord =

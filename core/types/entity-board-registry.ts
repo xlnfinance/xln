@@ -59,14 +59,3 @@ export type CertifiedBoardProof = {
   entityId: string;
   nodes: CertifiedBoardPatriciaNode[];
 };
-
-/**
- * Source authority bound into an output. The receiver compares this complete
- * record with its own current Entity-certified registry record. Global J-head
- * movement cannot stale an unchanged board, while any rotation does.
- */
-export type CertifiedBoardAuthorityBinding = {
-  version: 1;
-  stackKey: string;
-  record: CertifiedBoardRecord;
-};

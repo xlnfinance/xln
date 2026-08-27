@@ -9,7 +9,10 @@ use xln_rscore_engine::{
 use crate::types::{
     EntityKernelOutput, EntityStateSlice, HtlcPreparedOutcome, HtlcRoute, TargetedAccountTx,
 };
-use crate::{DeterministicContext, EntityKernelError, OrderedAccountCommit};
+use crate::{
+    DeterministicContext, EntityKernelError, OrderedAccountCommit, ScheduledHook, cancel_hook,
+    schedule_hook,
+};
 
 const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
 const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
@@ -308,6 +311,7 @@ pub(crate) fn committed_htlc_lock(
         HtlcPreparedOutcome::Final {
             secret,
             started_at_ms,
+            ..
         } => {
             apply_final_prepared(state, commit, tx, secret, *started_at_ms, effects);
             Ok(())
@@ -333,6 +337,13 @@ fn matching_route<'a>(
     hashlock: &str,
 ) -> Option<&'a mut HtlcRoute> {
     state.htlc_routes.get_mut(hashlock)
+}
+
+pub(crate) fn terminate_route(state: &mut EntityStateSlice, hashlock: &str) -> Option<HtlcRoute> {
+    if let Some(crontab) = state.crontab.as_mut() {
+        cancel_hook(crontab, &format!("htlc-secret-ack:{hashlock}"));
+    }
+    state.htlc_routes.remove(hashlock)
 }
 
 pub(crate) fn committed_htlc_resolve(
@@ -411,7 +422,7 @@ pub(crate) fn committed_htlc_resolve(
                 return Ok(());
             }
         }
-        state.htlc_routes.remove(hashlock);
+        terminate_route(state, hashlock);
     }
     Ok(())
 }
@@ -458,11 +469,21 @@ pub(crate) fn revealed_secret_followup(
         queue_secret(effects, account, lock_id, secret);
         route.secret_ack_pending = true;
         route.secret_ack_started_at = Some(timestamp);
-        route.secret_ack_deadline_at = Some(
-            timestamp
-                .checked_add(SECRET_ACK_TIMEOUT_MS)
-                .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?,
+        let deadline = timestamp
+            .checked_add(SECRET_ACK_TIMEOUT_MS)
+            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?;
+        route.secret_ack_deadline_at = Some(deadline);
+        let hook = ScheduledHook::htlc_secret_ack_timeout(
+            hashlock.clone(),
+            account.clone(),
+            lock_id.clone(),
+            deadline,
         );
+        let crontab = state
+            .crontab
+            .as_mut()
+            .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_CRONTAB_MISSING"))?;
+        schedule_hook(crontab, hook);
         return Ok(());
     }
     effects.outputs.push(EntityKernelOutput::HtlcFinalized {
@@ -478,7 +499,7 @@ pub(crate) fn revealed_secret_followup(
         jurisdiction_id: jurisdiction_id.map(str::to_string),
         finalized_at_ms: timestamp,
     });
-    state.htlc_routes.remove(hashlock);
+    terminate_route(state, hashlock);
     Ok(())
 }
 
@@ -490,7 +511,7 @@ pub(crate) fn timed_out_followup(
     let AccountOutput::HtlcError { hashlock, .. } = output else {
         return Err(EntityKernelError::output("HTLC_ERROR_OUTPUT_KIND"));
     };
-    let Some(route) = state.htlc_routes.remove(hashlock) else {
+    let Some(route) = terminate_route(state, hashlock) else {
         return Ok(());
     };
     if let (Some(account), Some(lock_id)) = (&route.inbound_entity, &route.inbound_lock_id) {

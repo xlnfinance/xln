@@ -569,8 +569,6 @@ fn frame_fields(
         tuple(txs),
         AbiValue::Text(frame.prev_frame_hash.clone()),
         AbiValue::Bytes(frame.account_state_root.to_vec()),
-        AbiValue::Bool(frame.by_left),
-        tuple(frame.deltas.iter().map(delta).collect()),
         AbiValue::Bytes(state_hash.to_vec()),
     ])
 }
@@ -583,24 +581,6 @@ fn committed_frame(
         tuple(frame_fields(&evidence.frame, state_hash)?),
         AbiValue::Bool(evidence.committed_via_new_frame),
     ]))
-}
-
-/// One delta as the frame commits it. Same field order as `decode_delta`
-/// (wire_decode.rs), which is the order the frame hash reads them in.
-pub(crate) fn delta(value: &xln_rscore_engine::Delta) -> AbiValue {
-    use xln_rscore_engine::Side;
-    tuple(vec![
-        integer(value.token_id().get()),
-        big(value.collateral()),
-        big(value.ondelta()),
-        big(value.offdelta()),
-        big(value.left_credit_limit()),
-        big(value.right_credit_limit()),
-        big(value.allowance(Side::Left)),
-        big(value.allowance(Side::Right)),
-        big(value.hold(Side::Left)),
-        big(value.hold(Side::Right)),
-    ])
 }
 
 /// A transaction the proposer did not put in the frame, and why. A count
@@ -726,6 +706,30 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             height,
             current_height,
         } => tuple(vec![integer(3), integer(*height), integer(*current_height)]),
+        AccountInputVerdict::FrameDisputeRequired {
+            reason,
+            evidence_secrets,
+            signed_frame,
+        } => {
+            let mut signed = frame_fields(&signed_frame.frame, signed_frame.state_hash)?;
+            signed.push(AbiValue::Bytes(signed_frame.frame_hanko.clone()));
+            tuple(vec![
+                integer(11),
+                AbiValue::Text(reason.clone()),
+                tuple(
+                    evidence_secrets
+                        .iter()
+                        .map(|evidence| {
+                            tuple(vec![
+                                AbiValue::Text(evidence.hashlock.clone()),
+                                AbiValue::Text(evidence.secret.clone()),
+                            ])
+                        })
+                        .collect(),
+                ),
+                tuple(signed),
+            ])
+        }
         AccountInputVerdict::FrameRejected { reason } => {
             tuple(vec![integer(4), AbiValue::Text(reason.clone())])
         }
@@ -767,6 +771,16 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
             }),
             AbiValue::Text(reason.clone()),
         ]),
+        AccountInputVerdict::DisputeApplied => tuple(vec![integer(12)]),
+        AccountInputVerdict::DisputeRejected { reason } => {
+            tuple(vec![integer(13), AbiValue::Text(reason.clone())])
+        }
+        AccountInputVerdict::BoardHankoRefreshApplied { events } => {
+            tuple(vec![integer(14), frame_events(events)])
+        }
+        AccountInputVerdict::BoardHankoRefreshRejected { reason } => {
+            tuple(vec![integer(15), AbiValue::Text(reason.clone())])
+        }
     })
 }
 
@@ -786,6 +800,7 @@ fn is_frame_verdict(value: &xln_rscore_batch::AccountInputVerdict) -> bool {
             | xln_rscore_batch::AccountInputVerdict::FrameCollisionIgnored { .. }
             | xln_rscore_batch::AccountInputVerdict::FrameDuplicate { .. }
             | xln_rscore_batch::AccountInputVerdict::FrameStale { .. }
+            | xln_rscore_batch::AccountInputVerdict::FrameDisputeRequired { .. }
             | xln_rscore_batch::AccountInputVerdict::FrameRejected { .. }
     )
 }
@@ -794,294 +809,9 @@ fn is_frame_verdict(value: &xln_rscore_batch::AccountInputVerdict) -> bool {
 /// order, so a frame this engine proposes decodes back into the same
 /// transactions on the other side.
 pub(crate) fn tx(value: &xln_rscore_engine::AccountTx) -> Result<AbiValue, crate::ProcessError> {
-    use xln_rscore_engine::{AccountTx, HtlcDeliveryMode, HtlcResolveOutcome};
-    let fields = match value {
-        AccountTx::DirectPayment {
-            token_id,
-            amount,
-            route,
-            description,
-            from_entity_id,
-            to_entity_id,
-            delivery_mode,
-            trusted_gateway_entity_id,
-        } => vec![
-            integer(0),
-            integer(token_id.get()),
-            big(amount),
-            tuple(
-                route
-                    .iter()
-                    .map(|hop| AbiValue::Text(hop.clone()))
-                    .collect(),
-            ),
-            optional_text(description),
-            AbiValue::Text(from_entity_id.clone()),
-            AbiValue::Text(to_entity_id.clone()),
-            integer(match delivery_mode {
-                DeliveryMode::Direct => 0,
-                DeliveryMode::Trusted => 1,
-            }),
-            optional_text(trusted_gateway_entity_id),
-        ],
-        AccountTx::HtlcLock(lock) => vec![
-            integer(1),
-            AbiValue::Text(lock.lock_id.clone()),
-            hex_bytes(lock.hashlock.as_str(), 32)?,
-            big(&lock.timelock),
-            integer(lock.reveal_before_height),
-            big(&lock.amount),
-            integer(lock.token_id.get()),
-            match lock.delivery_mode {
-                None => AbiValue::Nil,
-                Some(HtlcDeliveryMode::Instant) => integer(0),
-                Some(HtlcDeliveryMode::Async) => integer(1),
-            },
-            match &lock.envelope {
-                None => AbiValue::Nil,
-                Some(envelope) => AbiValue::Bytes(envelope.packed().to_vec()),
-            },
-        ],
-        AccountTx::HtlcResolve(resolve) => {
-            let (outcome, payload) = match &resolve.outcome {
-                HtlcResolveOutcome::Secret { secret } => (integer(0), hex_bytes(secret, 32)?),
-                HtlcResolveOutcome::Error { reason } => (integer(1), optional_text(reason)),
-            };
-            vec![
-                integer(2),
-                AbiValue::Text(resolve.lock_id.clone()),
-                outcome,
-                payload,
-            ]
-        }
-        AccountTx::AddDelta { token_id } => vec![integer(3), integer(token_id.get())],
-        AccountTx::SetCreditLimit { token_id, amount } => {
-            vec![integer(4), integer(token_id.get()), big(amount)]
-        }
-        AccountTx::RebalancePolicy {
-            token_id,
-            policy_version,
-            base_fee,
-            liquidity_fee_bps,
-            gas_fee,
-        } => vec![
-            integer(5),
-            integer(*token_id),
-            integer(*policy_version),
-            big(base_fee),
-            big(liquidity_fee_bps),
-            big(gas_fee),
-        ],
-        AccountTx::SwapOffer {
-            offer_id,
-            give_token_id,
-            give_token_decimals,
-            give_amount,
-            want_token_id,
-            want_token_decimals,
-            want_amount,
-            max_fee,
-            min_net_receive,
-            time_in_force,
-            price_ticks,
-        } => vec![
-            integer(6),
-            AbiValue::Text(offer_id.clone()),
-            integer(*give_token_id),
-            integer(*give_token_decimals),
-            big(give_amount),
-            integer(*want_token_id),
-            integer(*want_token_decimals),
-            big(want_amount),
-            big(max_fee),
-            big(min_net_receive),
-            time_in_force.map_or(AbiValue::Nil, integer),
-            optional_big(price_ticks),
-        ],
-        AccountTx::SwapCancelRequest { offer_id } => {
-            vec![integer(7), AbiValue::Text(offer_id.clone())]
-        }
-        AccountTx::SwapResolve {
-            offer_id,
-            fill_ratio,
-            fill_numerator,
-            fill_denominator,
-            cancel_remainder,
-            comment,
-            fee_token_id,
-            fee_amount,
-            execution_give_amount,
-            execution_want_amount,
-            resting_give_token_id,
-            resting_want_token_id,
-            resting_price_ticks,
-            resting_give_amount,
-            resting_want_amount,
-            resting_quantized_give,
-            resting_quantized_want,
-        } => vec![
-            integer(8),
-            AbiValue::Text(offer_id.clone()),
-            integer(*fill_ratio),
-            optional_big(fill_numerator),
-            optional_big(fill_denominator),
-            // 0/1, not a boolean: the decoder reads an integer here and so
-            // does TypeScript's encoder. A boolean produced a swap_resolve
-            // this ABI could not read back.
-            integer(u8::from(*cancel_remainder)),
-            comment
-                .as_ref()
-                .map_or(AbiValue::Nil, |value| AbiValue::Text(value.clone())),
-            resting_give_token_id.map_or(AbiValue::Nil, integer),
-            resting_want_token_id.map_or(AbiValue::Nil, integer),
-            fee_token_id.map_or(AbiValue::Nil, integer),
-            optional_big(fee_amount),
-            optional_big(execution_give_amount),
-            optional_big(execution_want_amount),
-            optional_big(resting_price_ticks),
-            optional_big(resting_give_amount),
-            optional_big(resting_want_amount),
-            optional_big(resting_quantized_give),
-            optional_big(resting_quantized_want),
-        ],
-        AccountTx::JEventClaim(claim) => vec![
-            integer(9),
-            integer(claim.j_height),
-            AbiValue::Bytes(claim.j_block_hash.to_vec()),
-            AbiValue::Bytes(xln_rscore_engine::canonical_events_hash(&claim.events)?.to_vec()),
-            tuple(
-                claim
-                    .events
-                    .iter()
-                    .map(jurisdiction_event)
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            j_claim_proof(claim.left_proof.as_ref())?,
-            j_claim_proof(claim.right_proof.as_ref())?,
-        ],
-        // Every kind the frame hash cannot express is refused at admission, so
-        // one cannot reach a proposal.
-        other => {
-            return Err(crate::ProcessError::Unsupported(
-                xln_rscore_engine::StateError::UnsupportedFrameTx(
-                    xln_rscore_engine::unsupported_frame_tx_kind(other),
-                )
-                .to_string(),
-            ));
-        }
-    };
-    Ok(tuple(fields))
-}
-
-fn jurisdiction_event(
-    value: &xln_rscore_engine::JurisdictionEvent,
-) -> Result<AbiValue, crate::ProcessError> {
-    match value {
-        xln_rscore_engine::JurisdictionEvent::AccountSettled(event) => Ok(tuple(vec![
-            integer(0),
-            j_event_metadata(&event.metadata),
-            AbiValue::Bytes(event.left_entity.as_bytes().to_vec()),
-            AbiValue::Bytes(event.right_entity.as_bytes().to_vec()),
-            integer(event.token_id.get()),
-            big(&event.left_reserve),
-            big(&event.right_reserve),
-            big(&event.collateral),
-            big(&event.ondelta),
-            integer(event.nonce),
-        ])),
-    }
-}
-
-fn j_event_metadata(value: &xln_rscore_engine::JEventMetadata) -> AbiValue {
-    tuple(vec![
-        value.block_number.map_or(AbiValue::Nil, integer),
-        value
-            .block_hash
-            .map_or(AbiValue::Nil, |hash| AbiValue::Bytes(hash.to_vec())),
-        value
-            .transaction_hash
-            .map_or(AbiValue::Nil, |hash| AbiValue::Bytes(hash.to_vec())),
-        value.log_index.map_or(AbiValue::Nil, integer),
-        value.event_index.map_or(AbiValue::Nil, integer),
-    ])
-}
-
-fn j_claim_proof(
-    value: Option<&xln_rscore_engine::JClaimProof>,
-) -> Result<AbiValue, crate::ProcessError> {
-    let Some(proof) = value else {
-        return Ok(AbiValue::Nil);
-    };
-    Ok(tuple(vec![
-        integer(1),
-        tuple(
-            proof
-                .nodes
-                .iter()
-                .map(j_claim_node)
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-    ]))
-}
-
-pub(crate) fn j_claim_node(
-    value: &xln_rscore_engine::JClaimNode,
-) -> Result<AbiValue, crate::ProcessError> {
-    Ok(match value {
-        xln_rscore_engine::JClaimNode::Leaf { key, record } => tuple(vec![
-            integer(0),
-            AbiValue::Bytes(key.to_vec()),
-            j_claim_record(record),
-        ]),
-        xln_rscore_engine::JClaimNode::Branch { bit, left, right } => tuple(vec![
-            integer(1),
-            integer(*bit),
-            AbiValue::Bytes(left.to_vec()),
-            AbiValue::Bytes(right.to_vec()),
-        ]),
-    })
-}
-
-fn j_claim_record(value: &xln_rscore_engine::JClaimRecord) -> AbiValue {
-    tuple(vec![
-        AbiValue::Bytes(value.account_key.to_vec()),
-        integer(match value.side {
-            xln_rscore_engine::JClaimSide::Left => 0,
-            xln_rscore_engine::JClaimSide::Right => 1,
-        }),
-        integer(value.j_height),
-        AbiValue::Bytes(value.j_block_hash.to_vec()),
-        AbiValue::Bytes(value.events_hash.to_vec()),
-    ])
-}
-
-/// A `0x`-prefixed hex string as the bytes the decoder expects. The wire is
-/// binary for fixed-width identifiers: encoding one as text here would produce
-/// a frame this ABI cannot read back.
-fn hex_bytes(value: &str, length: usize) -> Result<AbiValue, crate::ProcessError> {
-    let hex = value.strip_prefix("0x").unwrap_or(value);
-    if hex.len() != length * 2 {
-        return Err(crate::ProcessError::Expected("wireHexLength"));
-    }
-    let mut bytes = Vec::with_capacity(length);
-    for pair in hex.as_bytes().chunks_exact(2) {
-        let nibble = |value: u8| match value {
-            b'0'..=b'9' => Some(value - b'0'),
-            b'a'..=b'f' => Some(value - b'a' + 10),
-            b'A'..=b'F' => Some(value - b'A' + 10),
-            _ => None,
-        };
-        let high = nibble(pair[0]).ok_or(crate::ProcessError::Expected("wireHexDigit"))?;
-        let low = nibble(pair[1]).ok_or(crate::ProcessError::Expected("wireHexDigit"))?;
-        bytes.push((high << 4) | low);
-    }
-    Ok(AbiValue::Bytes(bytes))
+    xln_rscore_batch::encode_account_tx(value).map_err(Into::into)
 }
 
 pub(crate) fn big(value: &num_bigint::BigInt) -> AbiValue {
-    AbiValue::Text(value.to_string())
-}
-
-fn optional_big(value: &Option<num_bigint::BigInt>) -> AbiValue {
-    value.as_ref().map_or(AbiValue::Nil, big)
+    xln_rscore_batch::encode_bigint(value)
 }

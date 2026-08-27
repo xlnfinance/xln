@@ -7,6 +7,7 @@ import { prependUniqueMempoolTxs } from '../helpers';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { countOp } from '../../../support/performance/op-counters';
+import { computeFrameHash } from '../frame/hash';
 
 const collisionLog = createStructuredLogger('account.collision');
 
@@ -139,6 +140,7 @@ export const handleUnmatchedAck = (
 export const resolveSameHeightIncomingFrame = (
   account: AccountReplica,
   receivedFrame: AccountFrame,
+  receivedFrameHash: string,
   events: string[],
   committedFrames: AccountCommittedFrame[],
 ): HandleAccountInputResult | true | undefined => {
@@ -182,7 +184,7 @@ export const resolveSameHeightIncomingFrame = (
     const pendingProposal = account.pendingAccountInput
       ? accountInputProposal(account.pendingAccountInput)
       : undefined;
-    if (!pendingProposal || pendingProposal.frame.stateHash !== account.pendingFrame.stateHash) {
+    if (!pendingProposal || computeFrameHash(account.pendingFrame) !== pendingProposal.frame.stateHash) {
       throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
     }
     // The original proposal already left in its committed Runtime outbox.
@@ -193,9 +195,9 @@ export const resolveSameHeightIncomingFrame = (
       ...(committedFrames.length > 0 && { committedFrames }),
     });
   }
-  if (account.lastRollbackFrameHash === receivedFrame.stateHash) {
+  if (account.lastRollbackFrameHash === receivedFrameHash) {
     collisionLog.debug('rollback.duplicate', {
-      frame: shortHash(receivedFrame.stateHash),
+      frame: shortHash(receivedFrameHash),
     });
     return undefined;
   }
@@ -205,6 +207,7 @@ export const resolveSameHeightIncomingFrame = (
 export const applySameHeightIncomingFrameRollback = (
   account: AccountReplica,
   receivedFrame: AccountFrame,
+  receivedFrameHash: string,
   events: string[],
 ): void => {
   /*
@@ -227,11 +230,11 @@ export const applySameHeightIncomingFrameRollback = (
   delete account.pendingFrame;
   delete account.pendingAccountInput;
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
-  account.lastRollbackFrameHash = receivedFrame.stateHash;
+  account.lastRollbackFrameHash = receivedFrameHash;
   if (account.rollbackCount > 1) {
     collisionLog.warn('rollback.retry', {
       count: account.rollbackCount,
-      frame: shortHash(receivedFrame.stateHash),
+      frame: shortHash(receivedFrameHash),
     });
   }
   events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} ` + `(we are RIGHT, deterministic tiebreaker)`);

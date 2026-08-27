@@ -20,9 +20,10 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
-import { keyAccountJClaimNode, keyLiveAccount } from '../../../storage/keys';
+import { keyAccountJClaimPathNode, keyLiveAccount } from '../../../storage/keys';
 import { hydrateAccountJClaimRootNodesFromStorage } from '../../../storage/read/read';
 import { readAccountStorageLayout } from '../../../storage/schema/account-layout';
+import { validatePersistedAccountJClaimPathNode } from '../../../storage/schema/authoritative-schema';
 import type { AccountJClaimNode, AccountJClaimRecord } from '../../../types/finance/account-j-claims';
 
 const fixture = join(import.meta.dir, '../../fixtures/storage/account-j-claim-storage-crash-child.ts');
@@ -51,10 +52,10 @@ describe('Account J-claim real storage crash recovery', () => {
     'after-authoritative-history-commit',
     'after-current-cache-commit',
   ] as const) {
-    test(`publishes Account root and immutable CAS nodes atomically across SIGKILL ${boundary}`, async () => {
+    test(`publishes Account root and path-keyed nodes atomically across SIGKILL ${boundary}`, async () => {
       const dbRoot = dbRootPath;
       mkdirSync(dbRoot, { recursive: true });
-      const seed = `account J CAS crash ${process.pid} ${boundary} deterministic seed`;
+      const seed = `account J path crash ${process.pid} ${boundary} deterministic seed`;
       const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
       const entityId = generateLazyEntityId([runtimeId], 1n).toLowerCase();
       const counterpartySigner = deriveSignerAddressSync(seed, '2').toLowerCase();
@@ -115,7 +116,16 @@ describe('Account J-claim real storage crash recovery', () => {
         expect(verifyAccountJClaimProof(state.root, record, proof)).toEqual({ status: 'member', record });
 
         const historyDb = getRuntimeWalDb(restored);
-        const persistedNode = decodeBuffer<AccountJClaimNode>(await historyDb.get(keyAccountJClaimNode(state.root)));
+        const pathKey = keyAccountJClaimPathNode(
+          entityId,
+          counterpartyId,
+          side === 'left' ? 0 : 1,
+          { kind: 'leaf', key: restoredNode.key },
+        );
+        const persistedRow = validatePersistedAccountJClaimPathNode(
+          decodeBuffer(await historyDb.get(pathKey)),
+        );
+        const persistedNode = persistedRow.node;
         const accountDoc = await readAccountStorageLayout(
           historyDb,
           entityId,
@@ -132,15 +142,14 @@ describe('Account J-claim real storage crash recovery', () => {
 
         if (boundary === 'after-current-cache-commit') {
           const currentDb = getRuntimeStorageDb(restored);
-          const key = keyAccountJClaimNode(state.root);
-          const original = await currentDb.get(key);
+          const original = await currentDb.get(pathKey);
           const missingBatch = currentDb.batch();
           if (typeof missingBatch.del !== 'function') throw new Error('ACCOUNT_J_CRASH_DB_DELETE_UNSUPPORTED');
-          missingBatch.del(key);
+          missingBatch.del(pathKey);
           await missingBatch.write();
           await expect(hydrateAccountJClaimRootNodesFromStorage(
             createEmptyEnv(`${seed}:missing`), currentDb, [state],
-          )).rejects.toThrow(`ACCOUNT_J_CLAIM_NODE_MISSING:${state.root}`);
+          )).rejects.toThrow(`ACCOUNT_J_CLAIM_PATH_NODE_MISSING:${state.root}`);
 
           const corruptNode: AccountJClaimNode = persistedNode.type === 'leaf'
             ? {
@@ -149,14 +158,14 @@ describe('Account J-claim real storage crash recovery', () => {
               }
             : { ...persistedNode, bit: (persistedNode.bit + 1) % 256 };
           const corruptBatch = currentDb.batch();
-          corruptBatch.put(key, encodeBuffer(corruptNode));
+          corruptBatch.put(pathKey, encodeBuffer({ ...persistedRow, node: corruptNode }));
           await corruptBatch.write();
           await expect(hydrateAccountJClaimRootNodesFromStorage(
             createEmptyEnv(`${seed}:corrupt`), currentDb, [state],
-          )).rejects.toThrow('ACCOUNT_J_CLAIM_NODE_CORRUPT');
+          )).rejects.toThrow('ACCOUNT_J_CLAIM_PATH_NODE_CORRUPT');
 
           const restoreBatch = currentDb.batch();
-          restoreBatch.put(key, original);
+          restoreBatch.put(pathKey, original);
           await restoreBatch.write();
         }
       } finally {

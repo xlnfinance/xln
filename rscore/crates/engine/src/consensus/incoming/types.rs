@@ -16,10 +16,8 @@ pub struct AccountPeerEnvelope {
     pub watch_seed: Option<WatchSeed>,
 }
 
-/// One exact frame proposal as received from the peer.
-///
-/// The frame retains its received deltas. Replay derives a second delta vector
-/// and compares the two before the received frame may become the chain head.
+/// One exact frame proposal as received from the peer. Replay must reproduce
+/// its `account_state_root` before the frame may become the chain head.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IncomingFrame {
     pub frame: AccountFrame,
@@ -35,6 +33,25 @@ pub struct IncomingAck {
     pub frame_hash: [u8; 32],
     pub frame_hanko: Option<Vec<u8>>,
     pub dispute: Option<crate::consensus::replica::CounterpartyDispute>,
+}
+
+/// Witness rotation for an already committed Account frame. It never creates
+/// a frame or spends a dispute nonce; it only replaces certificates after the
+/// parent Entity has certified the named board activation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoardHankoRefreshInput {
+    pub height: u64,
+    pub frame_hash: [u8; 32],
+    pub frame_hanko: Option<Vec<u8>>,
+    pub dispute: Option<crate::consensus::replica::CounterpartyDispute>,
+    pub board_activation_j_height: u64,
+    pub board_activation_log_index: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StandaloneInputOutcome {
+    Applied { events: Vec<String> },
+    Rejected { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,8 +71,10 @@ impl fmt::Display for FrameAckPhase {
 
 /// The single result of applying a canonical `frame_ack` input.
 ///
-/// `Applied` means both phases were non-rejecting and the candidate was
-/// published. `Rejected` means neither phase changed the caller's account.
+/// `Applied` means the ACK phase was non-rejecting and the proposal phase was
+/// attempted. Its nested frame may itself be rejected; a committed ACK is not
+/// rolled back. `Rejected` is reserved for an ACK-phase rejection, before any
+/// phase could mutate the caller's account.
 #[derive(Clone, Debug)]
 pub enum FrameAckOutcome {
     Applied {

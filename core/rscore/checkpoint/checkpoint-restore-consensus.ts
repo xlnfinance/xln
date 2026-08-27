@@ -14,7 +14,6 @@ import {
   checkpointSafeInt,
   checkpointText,
 } from './checkpoint-restore-read';
-import { decodeRscoreCheckpointDelta } from './checkpoint-restore-state';
 
 export type RscoreDisputeDraft = Readonly<{
   hash: string;
@@ -75,7 +74,7 @@ const decodeFrame = (
   field: string,
   verifyFrameHash: boolean,
 ): AccountFrame => {
-  const row = rscoreCheckpointTuple(value, 8, `RESTORE_${field}`);
+  const row = rscoreCheckpointTuple(value, 6, `RESTORE_${field}`);
   const stateHash = checkpointHex(stateHashValue, 32, `${field}_STATE_HASH`);
   const frame: AccountFrame = {
     height: checkpointSafeInt(row[0], `${field}_HEIGHT`),
@@ -84,10 +83,6 @@ const decodeFrame = (
     accountTxs: rscoreCheckpointList(row[3], `RESTORE_${field}_TXS`).map(decodeRscoreAccountTx),
     prevFrameHash: checkpointText(row[4], `${field}_PREV_HASH`),
     accountStateRoot: checkpointHex(row[5], 32, `${field}_ACCOUNT_ROOT`),
-    byLeft: checkpointBool(row[6], `${field}_BY_LEFT`),
-    deltas: rscoreCheckpointList(row[7], `RESTORE_${field}_DELTAS`).map((delta, index) =>
-      decodeRscoreCheckpointDelta(delta, index),
-    ),
     stateHash,
   };
   const structuralError = getAccountFrameStructuralError(frame);

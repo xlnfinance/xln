@@ -22,6 +22,7 @@ import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
 } from '../../../account/commitment/state-root';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   getAccountJClaimNodeStore,
 } from '../../../entity/account/account-j-claim-node-store';
@@ -270,7 +271,7 @@ if (!committedAccount) throw new Error('ACCOUNT_J_CRASH_COMMITTED_ACCOUNT_MISSIN
 const side = committedAccount.state.leftEntity === entityId ? 'left' as const : 'right' as const;
 const state = side === 'left' ? committedAccount.state.leftPendingJClaims : committedAccount.state.rightPendingJClaims;
 if (state.count !== 1n) {
-  throw new Error(`ACCOUNT_J_CRASH_CLAIM_NOT_APPLIED:${state.count}:` + JSON.stringify({
+  throw new Error(`ACCOUNT_J_CRASH_CLAIM_NOT_APPLIED:${state.count}:` + safeStringify({
     appliedInputs: appliedRuntime.appliedRuntimeInput.entityInputs.map(input => ({
       txs: input.entityTxs?.map(tx => tx.type),
       proposal: input.proposedFrame?.height ?? null,

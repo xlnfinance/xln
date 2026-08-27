@@ -81,6 +81,15 @@ export const rememberPreparedProposalCommit = (key: string, entry: PreparedPropo
   preparedCommits.set(key, entry);
 };
 
+/** Read the canonical prepared candidate without consuming the later ACK fast path. */
+export const peekPreparedProposalCommit = (
+  key: string,
+  liveState: AccountState,
+): PreparedProposalCommit | undefined => {
+  const entry = preparedCommits.get(key);
+  return entry && peekAccountStateRoot(liveState) === entry.baseRoot ? entry : undefined;
+};
+
 /**
  * Shells are re-forked every Entity frame, so object identity cannot prove
  * the base is unchanged; the (memoized, structurally invalidated) state root

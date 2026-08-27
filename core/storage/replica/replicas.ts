@@ -2,10 +2,9 @@ import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { compareStableText } from '../../protocol/serialization';
 import {
-  buildCertifiedEntityLineagePlan,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
-  type CertifiedEntityLineagePlan,
-} from './entity-lineage';
+  buildCertifiedEntityHeadPlan,
+  type CertifiedEntityHeadPlan,
+} from './entity-head';
 import { computeStorageReplicaMetaDigest } from './replica-meta-digest';
 import { keyLiveReplicaMeta, normalizeEntityId } from '../keys';
 import { encodeReplicaMeta } from '../read/projections';
@@ -69,12 +68,12 @@ export const findReplicaForEntity = (
 };
 
 export const buildReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
-  return buildCertifiedEntityLineagePlan(env).lookup;
+  return buildCertifiedEntityHeadPlan(env).lookup;
 };
 
 /**
  * Selects the live replica used to project dirty docs without re-validating
- * every certified lineage. The authoritative checkpoint path performs the
+ * every certified head. The authoritative checkpoint path performs the
  * full validation; ordinary WAL frames bind only already-certified heads and
  * are replayed from that checkpoint after a crash.
  */
@@ -94,43 +93,33 @@ const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
   return lookup;
 };
 
-export const buildLiveReplicaMetaPlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
-  const lineageByReplicaKey = new Map();
-  const anchorByReplicaKey = new Map();
+export const buildLiveReplicaMetaPlan = (env: RuntimeReplica): CertifiedEntityHeadPlan => {
+  const headByReplicaKey = new Map();
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-    if (replica.certifiedFrameHead) {
-      lineageByReplicaKey.set(String(replicaKey), [replica.certifiedFrameHead]);
-    }
-    if (replica.certifiedFrameAnchor) {
-      anchorByReplicaKey.set(String(replicaKey), replica.certifiedFrameAnchor);
-    }
+    headByReplicaKey.set(String(replicaKey), replica.certifiedFrameHead);
   }
   return {
     lookup: buildLiveReplicaLookup(env),
-    lineageByReplicaKey,
-    anchorByReplicaKey,
+    headByReplicaKey,
   };
 };
 
 export const buildStorageReplicaMetaCommitment = (
   env: RuntimeReplica,
-  lineagePlan = buildCertifiedEntityLineagePlan(env),
+  headPlan = buildCertifiedEntityHeadPlan(env),
 ): {
   entries: Array<{ key: Buffer; value: Buffer }>;
   digest: string;
-} => buildStorageReplicaMetaCommitmentFromCheckpointPlan(
-  env,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint(env, lineagePlan),
-);
+} => buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, headPlan);
 
 /**
- * Build metadata from a lineage plan already rebased for this exact Runtime
- * height. The storage commit path validates and rebases once, then reuses the
- * same immutable plan for lookup, metadata, and post-commit publication.
+ * Build metadata from the exact full-head plan validated for this Runtime
+ * height. The storage commit path serializes that immutable plan once for
+ * lookup, commitment, and post-commit publication.
  */
 export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
   env: RuntimeReplica,
-  checkpointPlan: ReturnType<typeof rebaseCertifiedEntityLineageAtRuntimeCheckpoint>,
+  checkpointPlan: CertifiedEntityHeadPlan,
 ): {
   entries: Array<{ key: Buffer; value: Buffer }>;
   digest: string;
@@ -146,8 +135,7 @@ export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),
       value: encodeReplicaMeta(replica, {
-        certifiedFrameHead: checkpointPlan.lineageByReplicaKey.get(String(replicaKey))?.at(-1),
-        certifiedFrameAnchor: checkpointPlan.anchorByReplicaKey.get(String(replicaKey)),
+        certifiedFrameHead: checkpointPlan.headByReplicaKey.get(String(replicaKey)),
       }),
     });
   }
@@ -164,22 +152,14 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     const signerId = normalizeEntityId(replica.signerId || '');
     if (!entityId || !signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
-    // Live (non-checkpoint) frames only commit to this head's digest. The
-    // certified frame body is already persisted by hash in certified history;
-    // embedding the full tx list here re-encoded every multi-megabyte hub frame
-    // once per replica per R-frame purely to hash it.
+    // EntityState cannot include its own certified frame because the frame
+    // contains stateRoot. The parent Runtime replica-meta commitment therefore
+    // binds the exact full head bytes. Checkpoints persist those bytes; ordinary
+    // frames persist their digest so one mutated signature/manifest byte still
+    // changes Runtime postStateHash without copying the full Entity graph.
     const head = replica.certifiedFrameHead;
-    const latestLineage = head
-      ? {
-          frame: {
-            hash: head.frame.hash,
-            height: head.frame.height,
-            stateRoot: head.frame.stateRoot,
-            parentFrameHash: head.frame.parentFrameHash,
-            authorityRoot: head.frame.authorityRoot,
-          },
-          postAuthority: head.postAuthority,
-        }
+    const certifiedFrameHeadDigest = head
+      ? computeIntegrityDigest(encodeBuffer(head, { omitSymbolKeys: true }))
       : undefined;
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),
@@ -206,8 +186,7 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
               candidateHeight: replica.candidate.height,
             }
           : {}),
-        ...(latestLineage ? { latestLineage } : {}),
-        ...(replica.certifiedFrameAnchor ? { certifiedFrameAnchor: replica.certifiedFrameAnchor } : {}),
+        ...(certifiedFrameHeadDigest ? { certifiedFrameHeadDigest } : {}),
         ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),
         ...(replica.pendingLeaderCertificate
           ? { pendingLeaderCertificate: replica.pendingLeaderCertificate }
@@ -259,35 +238,11 @@ export const summarizeStorageReplicaMetaFields = (
 
 export const summarizeStorageReplicaMetaHeads = (
   entries: readonly { key: Buffer; value: Buffer }[],
-): Array<{ key: string; entityHead: unknown; latestLineageHead: unknown }> => entries.map(entry => {
+): Array<{ key: string; entityHead: unknown; certifiedFrameHeadDigest: unknown }> => entries.map(entry => {
   const value = requireDecodedRecord(decodeBuffer(entry.value), entry.key);
-  const latestLineage = value['latestLineage'] as {
-    frame?: {
-      height?: unknown;
-      hash?: unknown;
-      stateRoot?: unknown;
-      accountRoots?: unknown;
-      parentFrameHash?: unknown;
-      authorityRoot?: unknown;
-      jPrefixCertificate?: unknown;
-      txs?: Array<{ type?: unknown }>;
-    };
-  } | undefined;
   return {
     key: entry.key.toString('hex'),
     entityHead: value['entityHead'],
-    latestLineageHead: latestLineage?.frame
-      ? {
-          height: latestLineage.frame.height,
-          hash: latestLineage.frame.hash,
-          stateRoot: latestLineage.frame.stateRoot,
-          accountRootsHash: computeIntegrityDigest(encodeBuffer(latestLineage.frame.accountRoots ?? null)),
-          parentFrameHash: latestLineage.frame.parentFrameHash,
-          authorityRoot: latestLineage.frame.authorityRoot,
-          jPrefixHash: computeIntegrityDigest(encodeBuffer(latestLineage.frame.jPrefixCertificate ?? null)),
-          txTypes: latestLineage.frame.txs?.map(tx => tx.type) ?? [],
-          txsHash: computeIntegrityDigest(encodeBuffer(latestLineage.frame.txs ?? [])),
-        }
-      : null,
+    certifiedFrameHeadDigest: value['certifiedFrameHeadDigest'] ?? null,
   };
 }).sort((left, right) => compareStableText(left.key, right.key));

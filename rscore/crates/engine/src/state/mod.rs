@@ -718,6 +718,16 @@ impl AccountReplica {
         self.envelope.forget_field(name);
     }
 
+    pub(crate) fn set_envelope_field(
+        &mut self,
+        name: &str,
+        value: xln_rscore_protocol::CanonicalValue,
+    ) -> Result<(), StateError> {
+        self.envelope
+            .set_field(name.to_string(), value)
+            .map_err(|error| StateError::Envelope(error.to_string()))
+    }
+
     /// The `DeltaTransformer` this account's jurisdiction runs, which the
     /// recovery proof names. Absent for a mirror session, which is told what
     /// each frame was and never builds a proof of its own.

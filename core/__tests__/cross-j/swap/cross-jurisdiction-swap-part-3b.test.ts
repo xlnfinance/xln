@@ -127,7 +127,6 @@ import { PersistentAccountStateMap } from '../../../account/state/persistent-sta
 
 import { signEntityHashes } from '../../../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../../../entity/consensus/output/certification';
 
 import {
   countDeferredHashLadderReveals,

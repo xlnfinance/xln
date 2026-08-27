@@ -1,7 +1,10 @@
 import type { AccountTx , AccountOutput } from '../../../../types/account';
 import type { AccountJClaimSession } from '../../../j-claims/j-claim-session';
 import { getAccountPerspective } from '../../../state/perspective';
-import { applyAccountJClaimTransition } from '../../../j-claims/j-claim-transition';
+import {
+  applyAccountJClaimTransition,
+  validateAccountJEventClaimAdmission,
+} from '../../../j-claims/j-claim-transition';
 import { applyFinalizedAccountJEventsOnView } from './finality';
 import {
   getAccountStateDomain,
@@ -10,7 +13,7 @@ import {
 } from '../../../consensus/helpers';
 import { createStructuredLogger, shortHash } from '../../../../support/logger';
 import type { ApplyAccountTxResult } from '../../apply-types';
-import { accountTxApplied } from '../../apply-result';
+import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 import type { AccountDraftReplica } from '../../../state/account-state-draft';
 
 const jEventClaimLog = createStructuredLogger('account.j_event');
@@ -28,12 +31,18 @@ export function handleJEventClaim(
   const { jHeight, jBlockHash } = accountTx.data;
   jEventClaimLog.debug('claim.received', { jHeight, hash: shortHash(jBlockHash), byLeft });
   const { counterparty } = getAccountPerspective(account.state, myEntityId);
+  const admission = validateAccountJEventClaimAdmission(
+    account.state,
+    accountTx,
+    getAccountStateDomain(account.state),
+  );
+  if (!admission.ok) return accountTxValidationRejected(admission.message, []);
   const transition = applyAccountJClaimTransition(
     account.state,
     accountTx,
     byLeft,
-    getAccountStateDomain(account.state),
     session,
+    admission.admission,
   );
   if (transition.status === 'pending' || transition.status === 'idempotent' || transition.status === 'stale') {
     account.state.leftPendingJClaims = transition.left;

@@ -34,7 +34,6 @@ const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'cu
   const authorityReplica = getJPrefixAuthorityReplica(workingReplica);
   const authorityConfigs = [
     authorityReplica.state.config,
-    ...(workingReplica.certifiedFrameAnchor ? [workingReplica.certifiedFrameAnchor.authority.config] : []),
     ...(workingReplica.certifiedFrameHead ? [workingReplica.certifiedFrameHead.postAuthority.config] : []),
   ];
   const dispositions = new Set(

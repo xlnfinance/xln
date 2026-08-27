@@ -63,8 +63,15 @@ pub enum StateError {
     DisputeHankoInvalid(String),
     #[error("ACCOUNT_BOARD_AUTHORITY_UNAVAILABLE")]
     BoardAuthorityUnavailable,
+    #[error("ACCOUNT_BOARD_AUTHORITY_PEER_MISMATCH:expected={expected}:resolved={resolved}")]
+    BoardAuthorityPeerMismatch { expected: String, resolved: String },
     #[error("ACCOUNT_FRAME_TX_UNSUPPORTED:{0}")]
     UnsupportedFrameTx(&'static str),
+    /// FX-1 (proofs/fixes.md D2): `RebalancePolicy.policyVersion` outside the
+    /// protocol range `0..=MAX_POLICY_VERSION`. Distinct from
+    /// `UnsupportedFrameTx`, which names an unmodelled kind, not a field range.
+    #[error("ACCOUNT_TX_POLICY_VERSION_OUT_OF_RANGE:{version}:{maximum}")]
+    PolicyVersionOutOfRange { version: u64, maximum: u64 },
     #[error("ACCOUNT_MEMPOOL_LIMIT_EXCEEDED:{context}:{outstanding}:{maximum}")]
     MempoolLimitExceeded {
         context: &'static str,
@@ -157,6 +164,10 @@ pub enum ValidationRejection {
     SwapNetAuthorization {
         code: &'static str,
     },
+    JEventClaimConflict {
+        side: Side,
+        j_height: u64,
+    },
     Htlc(HtlcRejection),
 }
 
@@ -228,6 +239,13 @@ impl ValidationRejection {
             Self::SwapCancelNotMaker => "Only maker can cancel swap offer".into(),
             Self::SwapResolve { code } => (*code).to_owned(),
             Self::SwapNetAuthorization { code } => (*code).to_owned(),
+            Self::JEventClaimConflict { side, j_height } => {
+                let side = if *side == Side::Left { "left" } else { "right" };
+                format!(
+                    "ACCOUNT_J_CLAIM_{}_CONFLICT:{side}:{j_height}",
+                    side.to_ascii_uppercase()
+                )
+            }
             Self::Htlc(reason) => reason.message(),
         }
     }

@@ -11,7 +11,6 @@ import type { ConsensusConfig, EntityState } from '../types';
 import { validateEntityAccountMetadata } from '../account/account-metadata-validation';
 import { validateEntityCommandState } from '../command/command-state-validation';
 import { validateConsensusConfig } from '../consensus/config-validation';
-import { assertConsumptionAccumulatorState } from '../consumption/consumption-accumulator';
 import { validateExternalWalletState } from '../auth/external-wallet-validation';
 import { validateEntityProposals } from './proposal-validation';
 import { validateCrontabState } from '../scheduler/validation';
@@ -51,57 +50,6 @@ const validateLeaderState = (
     throw new FinancialDataCorruptionError(
       `${context}.leaderState.activeValidatorId must be a board validator`,
     );
-  }
-};
-
-const validateConsumption = (
-  value: unknown,
-  context: string,
-): void => {
-  if (value === undefined) return;
-  try {
-    assertConsumptionAccumulatorState(
-      value as NonNullable<EntityState['consumptionAccumulator']>,
-    );
-  } catch (error) {
-    throw new FinancialDataCorruptionError(
-      `${context}.consumptionAccumulator invalid: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-};
-
-const validateCertifiedOutputSequences = (
-  value: unknown,
-  context: string,
-): void => {
-  if (value === undefined) return;
-  const sequences = validateMapInstance(
-    value,
-    `${context}.certifiedOutputSequences`,
-  );
-  for (const [rawTarget, rawFrontier] of sequences) {
-    const target = String(rawTarget ?? '').toLowerCase();
-    if (!/^0x[0-9a-f]{64}$/.test(target) || target !== rawTarget) {
-      throw new FinancialDataCorruptionError(
-        `${context}.certifiedOutputSequences target invalid`,
-      );
-    }
-    const item = `${context}.certifiedOutputSequences.${target}`;
-    const frontier = validateObject(rawFrontier, item);
-    if (Object.keys(frontier).sort().join(',') !== 'lastSemanticHash,lastSequence') {
-      throw new FinancialDataCorruptionError(`${item} fields invalid`);
-    }
-    if (
-      typeof frontier['lastSequence'] !== 'bigint' ||
-      frontier['lastSequence'] < 1n
-    ) {
-      throw new FinancialDataCorruptionError(`${item} sequence invalid`);
-    }
-    if (!/^0x[0-9a-f]{64}$/.test(String(frontier['lastSemanticHash'] ?? ''))) {
-      throw new FinancialDataCorruptionError(`${item} hash invalid`);
-    }
   }
 };
 
@@ -232,8 +180,6 @@ function assertEntityState(
   validateReserves(entity['reserves'], context);
   validateAccounts(entity['accounts'], entityId, context);
   validateEntityAccountMetadata(entity, context);
-  validateConsumption(entity['consumptionAccumulator'], context);
-  validateCertifiedOutputSequences(entity['certifiedOutputSequences'], context);
   validateCertifiedBoardState(entity['certifiedBoardState'], context);
   validateExternalWalletState(entity['externalWallet'], context);
   if (entity['crontabState'] !== undefined) {

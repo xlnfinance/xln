@@ -11,7 +11,7 @@ import { computeProfileRouteHash } from '../../entity/profile/profile-signing';
 import { recoverDigestSignerAddress } from '../../account/crypto';
 import { LIMITS } from '../../config/constants';
 
-import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import {
   deliveryAccepted,
@@ -414,44 +414,12 @@ const compareEntityFrameDelivery = (left: RoutedEntityInput, right: RoutedEntity
   );
 };
 
-const certifiedOutputDeliveryOrder = (
-  output: RoutedEntityInput,
-): {
-  sourceEntityId: string;
-  targetEntityId: string;
-  lane: string;
-  sequence: bigint;
-} | null => {
-  const tx = output.entityTxs?.find(candidate => candidate.type === 'consensusOutput');
-  if (!tx || tx.type !== 'consensusOutput') return null;
-  return {
-    sourceEntityId: tx.data.origin.sourceEntityId.toLowerCase(),
-    targetEntityId: tx.data.targetEntityId.toLowerCase(),
-    lane: tx.data.origin.lane,
-    sequence: tx.data.origin.sequence,
-  };
-};
-
-const compareCertifiedOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number => {
-  const leftOrder = certifiedOutputDeliveryOrder(left);
-  const rightOrder = certifiedOutputDeliveryOrder(right);
-  if (!leftOrder || !rightOrder) return 0;
-  return (
-    compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
-    compareStableText(leftOrder.sourceEntityId, rightOrder.sourceEntityId) ||
-    compareStableText(leftOrder.targetEntityId, rightOrder.targetEntityId) ||
-    compareStableText(leftOrder.lane, rightOrder.lane) ||
-    (leftOrder.sequence < rightOrder.sequence ? -1 : leftOrder.sequence > rightOrder.sequence ? 1 : 0)
-  );
-};
-
 const compareOutputDeliveryWithKeys = (
   left: RoutedEntityInput,
   right: RoutedEntityInput,
   leftRouteKey: string,
   rightRouteKey: string,
 ): number =>
-  compareCertifiedOutputDelivery(left, right) ||
   outputDeliveryPriority(left) - outputDeliveryPriority(right) ||
   compareEntityFrameDelivery(left, right) ||
   compareStableText(leftRouteKey, rightRouteKey);
@@ -489,13 +457,6 @@ export const buildPendingNetworkOutputs = (
     }
   }
   const pending = [...deduped.values()]
-    .map(output => {
-      if (!output.entityTxs || output.entityTxs.length < 2) return output;
-      const ordered = orderCertifiedOutputsBySequence(output.entityTxs);
-      return ordered.every((tx, index) => tx === output.entityTxs![index])
-        ? output
-        : { ...output, entityTxs: ordered };
-    })
     .sort((left, right) => compareOutputDeliveryWithKeys(
       left,
       right,

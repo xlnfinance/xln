@@ -8,6 +8,10 @@ mod checkpoint_wire;
 #[path = "wire/entity.rs"]
 mod entity_wire;
 mod error;
+#[cfg(feature = "bench")]
+pub mod replay_support;
+#[cfg(feature = "bench")]
+pub mod runtime_replay;
 mod session;
 #[cfg(feature = "bench")]
 pub mod transcript;
@@ -99,7 +103,8 @@ pub fn encode_resident_entity_round(
 // Runtime candidate. Apply/Propose are bound to that exact stage key; rejected
 // Entity inputs roll back their Account mutations and operation indices.
 // 14: peer inputs carry the exact canonical envelope and Frame/Ack/FrameAck
-// shapes. FrameAck is one atomic operation with one ordered composite result.
+// shapes. FrameAck is one ACK-first operation with one ordered composite
+// result: a valid ACK remains committed if its bundled frame is rejected.
 // 21: an inbound row may carry trusted Entity genesis policy; the round reply
 // has a separate exact H=1 materialization list for authenticated new Accounts.
 // 22: AccountOutbound carries checkpointDue and the same reply carries the
@@ -113,13 +118,37 @@ pub fn encode_resident_entity_round(
 // non-empty accumulator roots after a process restart.
 // 27: one resident Entity round owns Account inbound, paybook/orderbook work,
 // and Account outbound without returning Account replicas to TypeScript.
-pub const PROCESS_ABI_VERSION: u64 = 27;
+// 28: swap removal retains the exact maker side after the row leaves state.
+// 29: AccountSettled carries J-claim bodies, witnesses and finality output.
+// 30: exact checkpoints retain the J-claim Patricia node store.
+// 31: Entity snapshots carry crontab state and PreparedFinal descriptions.
+// 32: incoming verdicts carry an explicit signed DisputeRequired outcome.
+// 33: Entity snapshots carry reserves, and peer verdicts carry standalone
+// dispute / board-Hanko-refresh results without aliasing frame verdict tags.
+// 34: Account frames commit the canonical Account state root instead of
+// duplicating financial deltas or proposer side in every frame body.
+// 35: Account input rows carry separate full certified-board records for the
+// peer and local owner, including previous-board expiry for historical ACKs.
+// 36: Entity snapshots carry the bounded Entity-command nonce fence.
+pub const PROCESS_ABI_VERSION: u64 = 36;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {
         protocol_version: 1,
         storage_schema_version: 1,
-        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=31")
+        // sha256("xln.rscore.account:v1:protocol=1:storage=1:hanko:payment-v1:wire=36")
+        // wire=36: Entity snapshots carry the exact bounded command nonce
+        // fence, so process restart preserves retry/equivocation semantics.
+        // wire=35: Account input rows carry full peer/local board authority;
+        // cached ACK reuse can verify the exact previous board and expiry.
+        // wire=34: Account frames carry neither duplicate financial deltas nor
+        // redundant proposer side; replay verifies the committed state root.
+        // wire=33: Entity snapshots carry reserves and Account peer verdicts
+        // carry standalone dispute / board-Hanko-refresh results.
+        // wire=32: a signed incoming Account frame that needs an HTLC dispute
+        // is a typed verdict carrying its exact secret evidence and frame.
+        // wire=31: Entity snapshots carry canonical crontab state and the
+        // PreparedFinal description committed by the Entity machine.
         // wire=30: checkpoint deltas and exact restore rows carry the
         // content-verified J-claim Patricia node store.
         // wire=29: AccountSettled J-claim transactions, Patricia witnesses,
@@ -143,7 +172,7 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // wire=21: AccountOutbound names inbound-touched accounts whose final
         // bodies are returned only after all Entity-derived work has run.
         // wire=20: Account peer inputs carry from/to/domain/dispute/watch-seed
-        // exactly, received frames retain deltas and optional Hankos, disputes
+        // exactly, received frames retain optional Hankos, disputes
         // retain their claimed hash, and FrameAck is one ACK-first result row.
         // wire=19: BeginEntity/FinalizeEntity/DiscardEntity delimit one
         // abortable parent Entity input, and Apply/Propose carry its stage key.
@@ -187,9 +216,9 @@ pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
         // reject a binary built for the older shapes at Hello, so it moves
         // with every request/reply shape change.
         protocol_fingerprint: [
-            0x2b, 0xa0, 0x24, 0xe2, 0x94, 0xf2, 0x21, 0xb1, 0xd5, 0x3d, 0x46, 0xfc, 0xef, 0x3b,
-            0xb2, 0x14, 0xd5, 0x5a, 0xee, 0x5d, 0x12, 0x84, 0xaf, 0xb5, 0xf4, 0x8a, 0xfa, 0xf5,
-            0x7a, 0x0c, 0xc6, 0xd2,
+            0x0d, 0x0e, 0x71, 0xb6, 0x1e, 0x83, 0x19, 0xa6, 0xa3, 0x51, 0x40, 0x59, 0xb0, 0x16,
+            0x7b, 0x56, 0xf0, 0xb0, 0x3a, 0x22, 0x42, 0x29, 0x37, 0x73, 0x11, 0x84, 0xb4, 0xb3,
+            0xa9, 0xcf, 0xac, 0xeb,
         ],
     };
 

@@ -2,8 +2,7 @@
  * Canonical Account storage node. The root commits permanent field rows plus
  * the roots of the real in-memory Patricia maps. Never recursively graphify
  * the envelope: that creates a second tree and makes checkpoints O(Account).
- * Static field keys are intentional: a checkpoint overwrites exactly the
- * changed values instead of accumulating content-addressed live-state nodes.
+ * Static field keys let a checkpoint overwrite exactly the changed values.
  */
 import { computeIntegrityDigest } from '../../support/bytes/integrity-checksum';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';

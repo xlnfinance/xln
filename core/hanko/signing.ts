@@ -638,8 +638,8 @@ export async function verifyHankoForHash(
       // with verifyCurrentHankoSignature (cooperative settlement at
       // Account.sol:894, C2R at Account.sol:790). Accepting a retired board
       // here would commit a bilateral state the chain then rejects, leaving the
-      // channel ahead of settled truth. Historical evidence - dispute proofs -
-      // keeps the grace.
+      // channel ahead of settled truth. Historical evidence — dispute proofs
+      // and already-issued Account ACK certificates — keeps the grace.
       return Boolean(
         authority?.allowPreviousBoard !== false &&
         record.previousBoardHash !== ethers.ZeroHash &&

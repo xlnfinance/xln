@@ -12,7 +12,6 @@ import {
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
 } from '../input/types';
-import { buildCertifiedEntityOutputHashes } from '../output/certification';
 import {
   buildEntityFrameAuthority,
   computeEntityAccountDigests,
@@ -98,22 +97,13 @@ const verifyProposalFrameHash = (
 const buildVerifiedProposalHashes = (
   context: ApplyEntityInputContext,
   frame: EntityFrame,
-  state: EntityState,
-  outputs: EntityCandidate['outputs'],
   collectedHashes: NonNullable<EntityCandidate['hashesToSign']>,
 ): NonNullable<EntityCandidate['hashesToSign']> | ProposalReplayResult => {
-  const outputHashes = buildCertifiedEntityOutputHashes(
-    state,
-    context.env,
-    frame.height,
-    frame.hash,
-    outputs,
-  );
   const hashesToSign = buildEntityHashesToSign(
     context.workingReplica.state.entityId,
     frame.height,
     frame.hash,
-    [...collectedHashes, ...outputHashes],
+    collectedHashes,
   );
   const mismatch = getEntityHashManifestMismatch(hashesToSign, frame.hashesToSign);
   if (!mismatch) return hashesToSign;
@@ -180,7 +170,6 @@ export const replayProposedEntityFrame = async (
     events,
     storageChanges,
     proposableAccounts,
-    consumptionNodeChanges,
     accountJClaimNodeChanges,
   } = applied;
   if (!entityFrameEventsEqual(events, frame.events)) {
@@ -205,8 +194,6 @@ export const replayProposedEntityFrame = async (
   const hashesToSign = buildVerifiedProposalHashes(
     context,
     frame,
-    state,
-    outputs,
     collectedHashes,
   );
   if (!Array.isArray(hashesToSign)) return hashesToSign;
@@ -224,7 +211,6 @@ export const replayProposedEntityFrame = async (
       candidateEffects,
       storageChanges,
       proposableAccounts: copyProposableAccounts(proposableAccounts),
-      ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
     },
   };

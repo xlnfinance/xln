@@ -32,6 +32,7 @@ import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import {
   authorityPeerInputRow,
   buildAuthorityWave,
+  type AuthorityCertifiedBoard,
   type AuthorityWave,
 } from './authority-wave';
 import {
@@ -841,6 +842,8 @@ export const runAuthorityCutoverEntityBatch = async (
     inputs: readonly Readonly<{
       accountId: string;
       input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+      peerBoardAuthority?: AuthorityCertifiedBoard;
+      localBoardAuthority?: AuthorityCertifiedBoard;
       genesisPolicy?: Readonly<{
         expectedDomain: AccountReplica['state']['domain'];
         shadowPolicyRoot: string;
@@ -884,6 +887,8 @@ export const runAuthorityCutoverEntityBatch = async (
     entry.accountId,
     { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
     entry.genesisPolicy,
+    entry.peerBoardAuthority,
+    entry.localBoardAuthority,
   ));
   const startedMs = performance.now();
   const round = await frame.session.client.entityRound({
@@ -961,6 +966,8 @@ export const runAuthorityCutoverInboundBatch = async (
   inputs: readonly Readonly<{
     accountId: string;
     input: Extract<AccountPeerInput, { kind: 'frame' | 'ack' | 'frame_ack' }>;
+    peerBoardAuthority?: AuthorityCertifiedBoard;
+    localBoardAuthority?: AuthorityCertifiedBoard;
     genesisPolicy?: Readonly<{
       expectedDomain: AccountReplica['state']['domain'];
       shadowPolicyRoot: string;
@@ -974,6 +981,8 @@ export const runAuthorityCutoverInboundBatch = async (
     entry.accountId,
     { kind: entry.input.kind, input: entry.input } as Parameters<typeof authorityPeerInputRow>[2],
     entry.genesisPolicy,
+    entry.peerBoardAuthority,
+    entry.localBoardAuthority,
   ));
   return handAccountInbound(env, ownerEntityId, expectedAccountsRoot, clock, rows);
 };
@@ -1116,8 +1125,12 @@ const requireOpenEntityInput = (
 };
 
 /** One queued transaction as the engine reads it. */
-const accountTxRow = (tx: AccountTx): RscoreWireValue =>
-  accountTxWire(tx) ?? halt('ACCOUNT_TX_OUTSIDE_PROFILE', { kind: tx.type });
+const accountTxRow = (tx: AccountTx): RscoreWireValue => {
+  if (tx.type === 'settle_transition') {
+    return halt('PROPOSABILITY_SETTLEMENT_UNREPRESENTED', { kind: tx.type });
+  }
+  return accountTxWire(tx) ?? halt('ACCOUNT_TX_OUTSIDE_PROFILE', { kind: tx.type });
+};
 
 /** Nothing to seal: the accounts already moved in their owning subsystem. */
 export const assertAuthorityFrameSettled = async (env: RuntimeReplica): Promise<void> => {

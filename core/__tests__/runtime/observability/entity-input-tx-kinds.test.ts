@@ -17,7 +17,7 @@ const input = (from: string, entityTxs: EntityTx[]): EntityInput => ({
   entityTxs,
 });
 
-test('FRAME_LOG histogram splits raw AccountInput kinds and generic certified payloads', () => {
+test('FRAME_LOG histogram splits raw AccountInput kinds from Entity transactions', () => {
   const ack = {
     type: 'accountInput',
     data: { kind: 'ack', fromEntityId: entityId, toEntityId: entityId, ack: { height: 1, frameHash } },
@@ -26,25 +26,14 @@ test('FRAME_LOG histogram splits raw AccountInput kinds and generic certified pa
     type: 'accountInput',
     data: { kind: 'frame', fromEntityId: entityId, toEntityId: entityId, proposal: { frame: { height: 2 } } },
   } as EntityTx;
-  const certifiedChat = {
-    type: 'consensusOutput',
-    data: {
-      targetEntityId: entityId,
-      entityTxs: [{ type: 'chat', data: { from: signerId, message: 'certified' } }],
-      origin: {},
-      outputHanko: '0x',
-    },
-  } as EntityTx;
   const counted = countEntityInputTxKinds([
     input(fromA, [ack, proposal]),
-    input(fromA.toUpperCase(), [certifiedChat]),
     input(fromB, [{ type: 'chat', data: { from: signerId, message: 'hi' } }]),
   ]);
   expect(counted.senders).toBe(2);
   expect(counted.txKinds).toEqual({
     'accountInput:ack': 1,
     'accountInput:frame': 1,
-    'consensusOutput:chat': 1,
     chat: 1,
   });
 });

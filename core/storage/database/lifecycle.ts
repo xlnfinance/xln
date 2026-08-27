@@ -20,7 +20,6 @@ import {
   KEY_LIVE_ENTITY_LEAF,
   KEY_LIVE_REPLICA_META,
   KEY_CERTIFIED_BOARD_NODE,
-  KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
@@ -38,6 +37,8 @@ import {
   keySnapshotGraph,
   keySnapshotGraphPrefix,
   keySnapshotReplicaMetaPrefix,
+  keyRuntimeOutputRowPrefix,
+  parseRuntimeOutputRowKey,
   parseLiveBookKey,
   parseSnapshotAccountKey,
   parseSnapshotEntityKey,
@@ -153,7 +154,6 @@ export const seedFreshStorageEpoch = async (options: {
     Buffer.from([KEY_LIVE_BOOK_BRANCH]),
     Buffer.from([KEY_LIVE_BOOK_LEAF]),
     Buffer.from([KEY_CERTIFIED_BOARD_NODE]),
-    Buffer.from([KEY_CONSUMPTION_NODE]),
     Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]),
   ];
   let liveBytes = 0;
@@ -332,6 +332,8 @@ export const createSnapshot = async (
     KEY_LIVE_ACCOUNT_FIELD,
     KEY_LIVE_ACCOUNT_BRANCH,
     KEY_LIVE_ACCOUNT_LEAF,
+    KEY_CERTIFIED_BOARD_NODE,
+    KEY_ACCOUNT_J_CLAIM_NODE,
   ] as const) {
     const copied = await copyKeyRange(
       sourceDb,
@@ -429,6 +431,16 @@ export const pruneHistoryBeforeHeight = async (
     lt: Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(cutoff + 1)]),
   })) {
     if (retainedSnapshots.has(decodeHeight(key))) continue;
+    ownerKeys.push(key);
+    if (ownerKeys.length >= BOUNDED_STORAGE_DELETE_BATCH_SIZE) await flush();
+  }
+  await flush();
+  for await (const key of iterateKeys(db, {
+    gte: keyRuntimeOutputRowPrefix(),
+    lt: Buffer.concat([keyRuntimeOutputRowPrefix(), encodeHeight(cutoff + 1)]),
+  })) {
+    const { height } = parseRuntimeOutputRowKey(key);
+    if (retainedSnapshots.has(height)) continue;
     ownerKeys.push(key);
     if (ownerKeys.length >= BOUNDED_STORAGE_DELETE_BATCH_SIZE) await flush();
   }

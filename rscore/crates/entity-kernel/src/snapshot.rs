@@ -4,8 +4,8 @@ use num_bigint::BigInt;
 use xln_rscore_engine::EntityId;
 
 use crate::{
-    EntityConsensusSection, EntityKernelError, EntityReferral, EntityStateSlice, HtlcRoute,
-    LockBookEntry, OrderbookConsensusMetadata, OrderbookState, OrderbookStateSnapshot,
+    CrontabState, EntityConsensusSection, EntityKernelError, EntityReferral, EntityStateSlice,
+    HtlcRoute, LockBookEntry, OrderbookConsensusMetadata, OrderbookState, OrderbookStateSnapshot,
     compute_entity_owned_sections,
 };
 
@@ -16,11 +16,14 @@ pub struct EntityStateSnapshot {
     pub entity_id: String,
     pub height: u64,
     pub timestamp: u64,
+    pub entity_command_nonces: Option<crate::EntityCommandNonceState>,
     pub last_finalized_j_height: u64,
+    pub reserves: BTreeMap<u16, BigInt>,
     pub known_accounts: BTreeSet<String>,
     pub htlc_routes: BTreeMap<String, HtlcRoute>,
     pub htlc_fees_earned: BigInt,
     pub lock_book: BTreeMap<String, LockBookEntry>,
+    pub crontab: Option<CrontabState>,
     pub orderbook: Option<OrderbookStateSnapshot>,
     pub orderbook_metadata: Option<OrderbookConsensusMetadata>,
     pub expected_owned_sections: Vec<EntityConsensusSection>,
@@ -122,6 +125,16 @@ fn validate_locks(
     Ok(())
 }
 
+fn validate_reserves(reserves: &BTreeMap<u16, BigInt>) -> Result<(), EntityKernelError> {
+    if reserves
+        .iter()
+        .any(|(token_id, amount)| *token_id == 0 || amount < &BigInt::from(0))
+    {
+        return Err(invalid("ENTITY_RESERVES"));
+    }
+    Ok(())
+}
+
 fn validate_metadata(
     entity_id: &str,
     metadata: &OrderbookConsensusMetadata,
@@ -189,6 +202,7 @@ pub fn restore_entity_state(
     for account_id in &snapshot.known_accounts {
         require_entity(account_id, "KNOWN_ACCOUNT")?;
     }
+    validate_reserves(&snapshot.reserves)?;
     validate_routes(&snapshot.htlc_routes, &snapshot.known_accounts)?;
     validate_locks(&snapshot.lock_book, &snapshot.known_accounts)?;
     match (&snapshot.orderbook, &snapshot.orderbook_metadata) {
@@ -200,11 +214,14 @@ pub fn restore_entity_state(
         entity_id: snapshot.entity_id,
         height: snapshot.height,
         timestamp: snapshot.timestamp,
+        entity_command_nonces: snapshot.entity_command_nonces,
         last_finalized_j_height: snapshot.last_finalized_j_height,
+        reserves: snapshot.reserves,
         known_accounts: snapshot.known_accounts,
         htlc_routes: snapshot.htlc_routes,
         htlc_fees_earned: snapshot.htlc_fees_earned,
         lock_book: snapshot.lock_book,
+        crontab: snapshot.crontab,
         orderbook: snapshot
             .orderbook
             .map(OrderbookState::restore)
@@ -227,11 +244,14 @@ pub fn capture_entity_state(
         entity_id: state.entity_id.clone(),
         height: state.height,
         timestamp: state.timestamp,
+        entity_command_nonces: state.entity_command_nonces.clone(),
         last_finalized_j_height: state.last_finalized_j_height,
+        reserves: state.reserves.clone(),
         known_accounts: state.known_accounts.clone(),
         htlc_routes: state.htlc_routes.clone(),
         htlc_fees_earned: state.htlc_fees_earned.clone(),
         lock_book: state.lock_book.clone(),
+        crontab: state.crontab.clone(),
         orderbook: state
             .orderbook
             .as_ref()

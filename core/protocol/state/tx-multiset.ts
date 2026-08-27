@@ -33,7 +33,7 @@ type CompactAccountInput = {
   proposal?: {
     frame: {
       height: number; stateHash: string; prevFrameHash: string; accountStateRoot: string;
-      timestamp: number; jHeight: number; byLeft: boolean; accountTxs: readonly unknown[]; deltas: readonly unknown[];
+      timestamp: number; jHeight: number; byLeft: boolean; accountTxs: readonly unknown[];
     };
     frameHanko?: string;
     disputeHanko?: { hash: string; hanko?: string };
@@ -78,7 +78,7 @@ const compactAccountInputFingerprint = (data: unknown): string | undefined => {
     `|${proposal
       ? `${proposal.frame.height}:${proposal.frame.stateHash}:${proposal.frameHanko ?? ''}:${hankoKey(proposal.disputeHanko)}`
         + `:${proposal.frame.prevFrameHash}:${proposal.frame.accountStateRoot}:${proposal.frame.timestamp}:${proposal.frame.jHeight}`
-        + `:${proposal.frame.byLeft}:${proposal.frame.accountTxs.length}:${proposal.frame.deltas.length}`
+        + `:${proposal.frame.accountTxs.length}`
       : ''}` +
     `|${ack ? `${ack.height}:${ack.frameHash}:${ack.frameHanko ?? ''}:${hankoKey(ack.disputeHanko)}` : ''}` +
     `|${accountInputBodyDigest(input)}`;
@@ -92,21 +92,7 @@ const txFingerprintUncached = (tx: FingerprintableTx): string => {
   if (!tx.data || typeof tx.data !== 'object' || Array.isArray(tx.data)) {
     return `${tx.type}:${safeStringify(tx.data)}`;
   }
-  if (tx.type !== 'consensusOutput') {
-    return `${tx.type}:${accountInputBodyDigest(tx.data)}`;
-  }
-
-  /*
-   * consumptionProof is a target-proposer witness over the target pre-state.
-   * It is absent from the transported mempool item and attached only to the
-   * proposed frame. Including it would make a committed output impossible to
-   * match and remove, causing an endless idempotent replay loop.
-   */
-  const {
-    consumptionProof: _targetWitness,
-    ...certifiedOutput
-  } = tx.data as Record<string, unknown>;
-  return `${tx.type}:${keccakBytesHash(encodeBinaryPayload(certifiedOutput, 'msgpack', { omitSymbolKeys: true }))}`;
+  return `${tx.type}:${accountInputBodyDigest(tx.data)}`;
 };
 
 /**

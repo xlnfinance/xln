@@ -17,7 +17,6 @@ import type {
   AccountOutput,
   AccountPeerInput,
   AccountState,
-  Delta,
 } from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import {
@@ -46,8 +45,6 @@ import {
   captureSettlementVector,
   getAccountStateDomain,
   runPostFrameAutoRebalanceCheck,
-  shouldIncludeToken,
-  summarizeDeltasForLog,
 } from './helpers';
 import { appendAccountMempoolTxs } from '../input/mempool';
 import {
@@ -170,53 +167,6 @@ const isRefreshableStaleIncomingSettlementHanko = (
   return matchingHankos.length === 1;
 };
 
-function collectReceiverValidationDeltas(clonedMachine: AccountReplica): {
-  tokenIds: number[];
-  deltas: Delta[];
-} {
-  const tokenIds: number[] = [];
-  const deltas: Delta[] = [];
-  const sortedOurTokens = Array.from(clonedMachine.state.deltas.entries()).sort((a, b) => a[0] - b[0]);
-
-  for (const [tokenId, delta] of sortedOurTokens) {
-    // CRITICAL: Use offdelta ONLY for frame comparison (same as proposer).
-    const totalDelta = delta.offdelta;
-
-    if (!shouldIncludeToken(delta, totalDelta)) {
-      if (HEAVY_LOGS) accountLog.debug('receiver.token.skip_unused', { tokenId });
-      continue;
-    }
-
-    tokenIds.push(tokenId);
-    deltas.push({ ...delta });
-  }
-
-  if (HEAVY_LOGS) {
-    accountLog.debug('receiver.tokens.computed', { tokenIds });
-  }
-  return { tokenIds, deltas };
-}
-
-const accountFrameDeltasEqual = (left: readonly Delta[], right: readonly Delta[]): boolean => {
-  if (left.length !== right.length) return false;
-  return left.every((delta, index) => {
-    const peer = right[index];
-    return (
-      peer !== undefined &&
-      delta.tokenId === peer.tokenId &&
-      delta.collateral === peer.collateral &&
-      delta.ondelta === peer.ondelta &&
-      delta.offdelta === peer.offdelta &&
-      delta.leftCreditLimit === peer.leftCreditLimit &&
-      delta.rightCreditLimit === peer.rightCreditLimit &&
-      delta.leftAllowance === peer.leftAllowance &&
-      delta.rightAllowance === peer.rightAllowance &&
-      delta.leftHold === peer.leftHold &&
-      delta.rightHold === peer.rightHold
-    );
-  });
-};
-
 async function verifySenderFrameHash(
   receivedFrame: AccountFrame,
   events: string[],
@@ -280,6 +230,7 @@ const replayIncomingFrameOnClone = async (
   clonedMachine: AccountDraftReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   frameJHeight: number,
   events: string[],
   jClaimSession: AccountJClaimSession,
@@ -302,7 +253,7 @@ const replayIncomingFrameOnClone = async (
     const result = await applyAccountTx(
       clonedMachine,
       accountTx,
-      receivedFrame.byLeft,
+      proposerIsLeft,
       receivedFrame.timestamp,
       frameJHeight,
       true,
@@ -343,18 +294,12 @@ const validateIncomingCommittedState = (
   receivedFrame: AccountFrame,
   events: string[],
 ): HandleAccountInputResult | undefined => {
-  const { deltas } = collectReceiverValidationDeltas(account);
-  if (
-    accountStateRoot === receivedFrame.accountStateRoot &&
-    accountFrameDeltasEqual(deltas, receivedFrame.deltas)
-  ) return undefined;
+  if (accountStateRoot === receivedFrame.accountStateRoot) return undefined;
   accountLog.warn('frame.state_root_mismatch', {
     height: receivedFrame.height,
     txs: receivedFrame.accountTxs.map(tx => tx.type),
     localAccountStateRoot: accountStateRoot,
     receivedAccountStateRoot: receivedFrame.accountStateRoot,
-    localDeltas: summarizeDeltasForLog(new Map(deltas.map(delta => [delta.tokenId, delta]))),
-    receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
     localAccountStateSectionHashes: computeAccountStateSectionHashes(account.state),
     lastFinalizedJHeight: account.state.lastFinalizedJHeight,
     leftPendingJClaims: account.state.leftPendingJClaims,
@@ -371,11 +316,24 @@ const logAcceptedIncomingFrame = (input: AccountPeerInput, frame: AccountFrame):
   });
 };
 
+const getIncomingFrameDisputeHankoError = (
+  account: AccountReplica,
+  localProofBodyHash: string,
+  validated: ValidatedCounterpartyDisputeHanko | undefined,
+): string | undefined => getDisputeHankoRequirementError(
+  localProofBodyHash,
+  account.counterpartyDisputeProofBodyHash,
+  account.counterpartyDisputeProofNonce,
+  Number(account.state.jNonce ?? 0),
+  validated,
+);
+
 async function validateIncomingFrameOnDraft(
   context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   frameJHeight: number,
   events: string[],
   validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
@@ -410,6 +368,7 @@ async function validateIncomingFrameOnDraft(
         clonedMachine,
         input,
         receivedFrame,
+        proposerIsLeft,
         frameJHeight,
         events,
         jClaimSession,
@@ -442,11 +401,9 @@ async function validateIncomingFrameOnDraft(
       () => buildAccountProofBodyFromJurisdictions(context, validatedMachine),
     );
     const localProofBodyHash = proofResult.proofBodyHash;
-    const frameHankoError = getDisputeHankoRequirementError(
+    const frameHankoError = getIncomingFrameDisputeHankoError(
+      validatedMachine,
       localProofBodyHash,
-      account.counterpartyDisputeProofBodyHash,
-      account.counterpartyDisputeProofNonce,
-      Number(validatedMachine.state.jNonce ?? account.state.jNonce ?? 0),
       validatedCounterpartyDisputeHanko,
     );
     if (frameHankoError) {
@@ -477,6 +434,7 @@ async function commitIncomingFrameOnRealState(
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   validation: IncomingFrameValidation,
   ourEntityId: string,
   validatedCounterpartyDisputeHanko: ValidatedCounterpartyDisputeHanko | undefined,
@@ -513,6 +471,7 @@ async function commitIncomingFrameOnRealState(
     accountAuthorityFrameId,
     account,
     receivedFrame,
+    proposerIsLeft,
     validation,
     ownerEntityId: ourEntityId,
     counterpartyEntityId: cpForCommitLog,
@@ -544,7 +503,11 @@ async function commitIncomingFrameOnRealState(
   // The committed Account graph is frozen at Entity commit, so history may
   // share the live head's frame object; only genesis handlers write
   // accountStateRoot in place, and never on this path.
-  committedFrames.push({ frame: account.currentFrame, committedViaNewFrame: true });
+  committedFrames.push({
+    frame: account.currentFrame,
+    proposerIsLeft,
+    committedViaNewFrame: true,
+  });
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
   events.push(...validation.processEvents);
@@ -569,6 +532,7 @@ const noteCommittedIncomingFrameForShadow = (value: Readonly<{
   accountAuthorityFrameId: string | null | undefined;
   account: AccountReplica;
   receivedFrame: AccountFrame;
+  proposerIsLeft: boolean;
   validation: IncomingFrameValidation;
   ownerEntityId: string;
   counterpartyEntityId: string;
@@ -585,7 +549,7 @@ const noteCommittedIncomingFrameForShadow = (value: Readonly<{
     ownerEntityId: value.ownerEntityId,
     counterpartyEntityId: value.counterpartyEntityId,
     frameHeight: receivedFrame.height,
-    byLeft: receivedFrame.byLeft,
+    byLeft: value.proposerIsLeft,
     timestamp: receivedFrame.timestamp,
     jHeight: shadowJHeight,
     // Enforcement uses the receiving Entity's clock, never the signed frame's.
@@ -653,6 +617,7 @@ async function buildIncomingFrameAckMaterial(
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
   events: string[],
 ): Promise<IncomingFrameAckMaterialResult> {
@@ -665,7 +630,7 @@ async function buildIncomingFrameAckMaterial(
   const ackHankoDomain = getAccountStateDomain(account.state);
   const proofChanged =
     ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
-    account.currentDisputeProofProposerIsLeft !== receivedFrame.byLeft ||
+    account.currentDisputeProofProposerIsLeft !== proposerIsLeft ||
     Number(account.currentDisputeProofNonce ?? 0) <= Number(account.state.jNonce ?? 0);
   const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.state.jNonce ?? 0) + 1);
   const ackDisputeHash = proofChanged
@@ -674,7 +639,7 @@ async function buildIncomingFrameAckMaterial(
         ackProofResult.proofBodyHash,
         ackHankoDomain,
         ackSignedNonce,
-        receivedFrame.byLeft,
+        proposerIsLeft,
       )
     : undefined;
   if (proofChanged) {
@@ -689,7 +654,7 @@ async function buildIncomingFrameAckMaterial(
     ackSignedNonce,
     proofChanged,
     ackDisputeHash,
-    receivedFrame.byLeft,
+    proposerIsLeft,
   );
 
   const response: Extract<AccountPeerInput, { kind: 'ack' }> = {
@@ -718,7 +683,7 @@ async function buildIncomingFrameAckMaterial(
       ...(ackDisputeHash ? { ackDisputeHash } : {}),
       ackProofBodyHash: ackProofResult.proofBodyHash,
       ackSignedNonce,
-      ackProposerIsLeft: receivedFrame.byLeft,
+      ackProposerIsLeft: proposerIsLeft,
       proofChanged,
     },
   };
@@ -804,6 +769,7 @@ async function buildAckResponseForIncomingFrame(
   account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
+  proposerIsLeft: boolean,
   validation: IncomingFrameValidation,
   events: string[],
   timedOutHashlocks: string[],
@@ -813,6 +779,7 @@ async function buildAckResponseForIncomingFrame(
     account,
     input,
     receivedFrame,
+    proposerIsLeft,
     validation.proofResult,
     events,
   );
@@ -925,6 +892,7 @@ async function handleIncomingAccountFrame(
     account,
     input,
     preflight.receivedFrame,
+    preflight.proposerIsLeft,
     preflight.frameJHeight,
     events,
     validatedCounterpartyDisputeHanko,
@@ -936,7 +904,12 @@ async function handleIncomingAccountFrame(
   }
 
   if (preflight.rollbackPendingFrame) {
-    applySameHeightIncomingFrameRollback(account, preflight.receivedFrame, events);
+    applySameHeightIncomingFrameRollback(
+      account,
+      preflight.receivedFrame,
+      preflight.receivedFrame.stateHash,
+      events,
+    );
     countOp('account.collision.validatedOverlayReused');
   }
 
@@ -946,6 +919,7 @@ async function handleIncomingAccountFrame(
     account,
     input,
     preflight.receivedFrame,
+    preflight.proposerIsLeft,
     validationResult.validation,
     preflight.ourEntityId,
     validatedCounterpartyDisputeHanko,
@@ -963,6 +937,7 @@ async function handleIncomingAccountFrame(
       account,
       input,
       preflight.receivedFrame,
+      preflight.proposerIsLeft,
       validationResult.validation,
       events,
       timedOutHashlocks,
@@ -980,10 +955,7 @@ type AccountInputSession = {
   replay: ReturnType<typeof classifyAccountInputReplay>;
   events: string[];
   timedOutHashlocks: string[];
-  committedFrames: Array<{
-    frame: AccountFrame;
-    committedViaNewFrame: boolean;
-  }>;
+  committedFrames: AccountCommittedFrame[];
   committedJClaims: ReturnType<typeof createAccountJClaimSession>;
   candidateEffects: AccountOutput[];
 };
@@ -1253,6 +1225,16 @@ export async function applyAccountInput(
   return result;
 }
 
+const rejectMalformedPeerHanko = (
+  input: AccountPeerInput,
+  events: string[],
+): HandleAccountInputResult | undefined => {
+  const shapeError = getDisputeHankoShapeError(input);
+  return shapeError
+    ? rejectAccountPeerInput('ACCOUNT_PEER_HANKO_SHAPE_INVALID', shapeError, events)
+    : undefined;
+};
+
 const applyPeerAccountInput = async (
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -1271,14 +1253,8 @@ const applyPeerAccountInput = async (
   );
   if (input.kind === 'dispute') {
     const events: string[] = [];
-    const disputeHankoShapeError = getDisputeHankoShapeError(input);
-    if (disputeHankoShapeError) {
-      return rejectAccountPeerInput(
-        'ACCOUNT_PEER_HANKO_SHAPE_INVALID',
-        disputeHankoShapeError,
-        events,
-      );
-    }
+    const shapeRejection = rejectMalformedPeerHanko(input, events);
+    if (shapeRejection) return shapeRejection;
     // A standalone dispute witness is sequenced by its signed proof nonce, not
     // by an Account frame height. Route it before frame-height normalization so
     // adversarial peer evidence can only be accepted or rejected, never turn a
@@ -1298,14 +1274,8 @@ const applyPeerAccountInput = async (
     throw new Error('ACCOUNT_INPUT_HEIGHT_NORMALIZATION_INVARIANT');
   }
   const events: string[] = [];
-  const disputeHankoShapeError = getDisputeHankoShapeError(input);
-  if (disputeHankoShapeError) {
-    return rejectAccountPeerInput(
-      'ACCOUNT_PEER_HANKO_SHAPE_INVALID',
-      disputeHankoShapeError,
-      events,
-    );
-  }
+  const shapeRejection = rejectMalformedPeerHanko(input, events);
+  if (shapeRejection) return shapeRejection;
   const boardHankoRefresh = await handleBoardHankoRefresh(account, input, securityContext);
   if (boardHankoRefresh) {
     const session = createPeerAccountInputSession(
@@ -1320,7 +1290,13 @@ const applyPeerAccountInput = async (
     return finishAccountInput(session, boardHankoRefresh);
   }
   const replay = classifyAccountInputReplay(account, input);
-  const replayGateResult = await handleReplayOrObsoleteAccountInput(account, input, replay, events);
+  const replayGateResult = await handleReplayOrObsoleteAccountInput(
+    account,
+    input,
+    replay,
+    events,
+    securityContext,
+  );
   if (replayGateResult) return replayGateResult;
   const session = createPeerAccountInputSession(
     context,

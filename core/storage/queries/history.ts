@@ -40,15 +40,14 @@ export const buildRecoveryJournalFromStorageFrame = (
   replicaMetaCheckpoint: frame.replicaMetaCheckpoint,
   replicaMetaStateMode: frame.replicaMetaStateMode,
   runtimeInput: frame.runtimeInput,
+  runtimeOutputCount: frame.runtimeOutputCount,
+  runtimeOutputsDigest: frame.runtimeOutputsDigest,
   entityContexts: structuredClone(payloads.entityContexts),
   ...(frame.pendingRuntimeInput
     ? { pendingRuntimeInput: frame.pendingRuntimeInput }
     : {}),
   ...(payloads.runtimeOutputs?.length
     ? { runtimeOutputs: payloads.runtimeOutputs }
-    : {}),
-  ...(frame.runtimeOutputRefs?.length
-    ? { runtimeOutputRefs: [...frame.runtimeOutputRefs] }
     : {}),
   ...(payloads.runtimeMachine
     ? { runtimeMachine: payloads.runtimeMachine }

@@ -2,9 +2,6 @@ import type { AccountJClaimNodeStore } from '../types/finance/account-j-claims';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { LogCategory } from '../types/logging';
-import type {
-  ConsumptionNodeStore,
-} from './consumption/consumption-accumulator-types';
 import type { EntityInput, EntityReplica, EntityState } from './types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { EntityProposalReplayOracleEntry } from './consensus/proposal/replay-oracle';
@@ -96,9 +93,6 @@ export interface EntityRuntimeContext {
     replayEntityContexts?: Map<string, EntityInfraContext>;
     /** HLT-only exact certified proposal boundaries; absent for production and old recordings. */
     replayEntityProposalOracle?: Map<string, EntityProposalReplayOracleEntry>;
-    consumptionNodes?: ConsumptionNodeStore;
-    pendingConsumptionNodes?: ConsumptionNodeStore;
-    pendingConsumptionNodeDeletes?: Set<string>;
     accountJClaimNodes?: AccountJClaimNodeStore;
     pendingAccountJClaimNodes?: AccountJClaimNodeStore;
     pendingAccountJClaimNodeDeletes?: Set<string>;

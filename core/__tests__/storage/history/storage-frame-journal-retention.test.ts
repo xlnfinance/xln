@@ -43,7 +43,7 @@ import { readRawOrNull } from '../../../storage/database/level';
 import {
   KEY_HEAD,
   keyFrame,
-  keyRuntimeOutputPayload,
+  keyRuntimeOutputRow,
   keyEntityContextPayload,
   keyLiveEntity,
   keyLiveEntityField,
@@ -1083,15 +1083,16 @@ describe('storage frame journal retention', () => {
     const rawFrame = validateStorageFrameRecordValue(decodeBuffer(rawFrameBytes));
     expect(rawFrame.runtimeOutputs).toBeUndefined();
     expect(rawFrame.entityContexts).toBeUndefined();
-    expect(rawFrame.runtimeOutputRefs).toHaveLength(1);
+    expect(rawFrame.runtimeOutputCount).toBe(1);
+    expect(rawFrame.runtimeOutputsDigest).toMatch(/^0x[0-9a-f]{64}$/);
     expect(await readRawOrNull(
       getRuntimeWalDb(env),
-      keyRuntimeOutputPayload(rawFrame.runtimeOutputRefs![0]!),
+      keyRuntimeOutputRow(rawFrame.height, 0),
     )).toBeTruthy();
-    for (const contextHash of rawFrame.entityContextRefs?.values() ?? []) {
+    for (const replicaId of rawFrame.entityContextRefs?.keys() ?? []) {
       expect(await readRawOrNull(
         getRuntimeWalDb(env),
-        keyEntityContextPayload(contextHash),
+        keyEntityContextPayload(rawFrame.height, replicaId, 'manifest', 0),
       )).toBeTruthy();
     }
     expect(journal?.runtimeMachine).toBeUndefined();

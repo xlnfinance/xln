@@ -9,9 +9,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountConsensus, AccountTx, HtlcResolveOutcome, HtlcResolveTx, SigningIdentity,
-    SwapMarketPolicy, propose_account_frame,
+    AccountConsensus, AccountTx, CanonicalValue, HtlcResolveOutcome, HtlcResolveTx,
+    SigningIdentity, SwapMarketPolicy, TokenId, propose_account_frame,
 };
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
@@ -59,6 +60,15 @@ struct MaterializedAccount {
     checkpoint: Option<AccountCheckpointRows>,
 }
 
+/// The only Account-state projection local Entity financial admission needs.
+/// Account replicas and radix nodes remain resident on their owner workers;
+/// the coordinator receives one status bit and requested owner capacities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentAccountFinancialView {
+    pub active: bool,
+    pub owner_out_capacity: BTreeMap<TokenId, BigInt>,
+}
+
 /// The production Account authority: one value-owning forest, not an adapter
 /// around the legacy shared map.
 pub struct ResidentConsensusEngine {
@@ -74,6 +84,12 @@ pub struct ResidentConsensusEngine {
     candidate_proposable: Option<BTreeSet<AccountId>>,
 }
 
+#[derive(Clone, Copy)]
+enum SeedRestoreMode {
+    Durable { revision: u64 },
+    OfflineImport,
+}
+
 impl ResidentConsensusEngine {
     /// Restore every Account exactly once and move it into its permanent
     /// worker-owned shard. The reconstructed forest root is the same leaf/root
@@ -86,6 +102,49 @@ impl ResidentConsensusEngine {
         signer_id: String,
         swap_market: Arc<SwapMarketPolicy>,
         seeds: Vec<AccountSeed>,
+    ) -> Result<Self, BatchError> {
+        Self::restore_seeded(
+            engine_generation,
+            worker_count,
+            private_key,
+            signer_id,
+            swap_market,
+            seeds,
+            SeedRestoreMode::Durable { revision },
+        )
+    }
+
+    /// Import a pre-authority Account forest exactly once. Unlike an exact
+    /// durable restore, every seeded Account is dirty against an empty
+    /// checkpoint baseline so the first Runtime checkpoint persists the full
+    /// authority before a signed Runtime frame may reference it.
+    pub fn import_existing(
+        engine_generation: EngineGeneration,
+        worker_count: usize,
+        private_key: [u8; 32],
+        signer_id: String,
+        swap_market: Arc<SwapMarketPolicy>,
+        seeds: Vec<AccountSeed>,
+    ) -> Result<Self, BatchError> {
+        Self::restore_seeded(
+            engine_generation,
+            worker_count,
+            private_key,
+            signer_id,
+            swap_market,
+            seeds,
+            SeedRestoreMode::OfflineImport,
+        )
+    }
+
+    fn restore_seeded(
+        engine_generation: EngineGeneration,
+        worker_count: usize,
+        private_key: [u8; 32],
+        signer_id: String,
+        swap_market: Arc<SwapMarketPolicy>,
+        seeds: Vec<AccountSeed>,
+        mode: SeedRestoreMode,
     ) -> Result<Self, BatchError> {
         if worker_count == 0 || worker_count > MAX_BATCH_WORKERS {
             return Err(BatchError::InvalidWorkerCount(worker_count));
@@ -108,8 +167,15 @@ impl ResidentConsensusEngine {
             .into_iter()
             .map(|seed| restore_seed_account(seed, &swap_market))
             .collect::<Result<Vec<_>, _>>()?;
-        let base_proposable = proposable_from_entries(&entries);
-        let forest = ResidentAccountForest::restore(worker_count, revision, entries)?;
+        let base_proposable = proposable_from_entries(&entries)?;
+        let forest = match mode {
+            SeedRestoreMode::Durable { revision } => {
+                ResidentAccountForest::restore(worker_count, revision, entries)?
+            }
+            SeedRestoreMode::OfflineImport => {
+                ResidentAccountForest::import_existing(worker_count, entries)?
+            }
+        };
         Ok(Self {
             engine_generation,
             forest,
@@ -177,7 +243,7 @@ impl ResidentConsensusEngine {
             entries.push((restored.account_id, restored.account, restored.leaf));
         }
 
-        let base_proposable = proposable_from_entries(&entries);
+        let base_proposable = proposable_from_entries(&entries)?;
         let forest = ResidentAccountForest::restore(worker_count, expected.revision, entries)?;
         if forest.len() != expected.account_count {
             return Err(BatchError::CheckpointIncomplete {
@@ -252,6 +318,72 @@ impl ResidentConsensusEngine {
     /// back to the coordinator.
     pub fn proposable_account_ids(&self) -> Result<Vec<AccountId>, BatchError> {
         Ok(self.active_proposable()?.iter().copied().collect())
+    }
+
+    /// Check due HTLC lock ids on their owner workers without materializing
+    /// Account replicas at the coordinator. The caller groups lock ids by
+    /// Account because the resident worker protocol admits one row per shard
+    /// key in a phase.
+    pub fn active_htlc_locks(
+        &mut self,
+        requests: Vec<(AccountId, Vec<String>)>,
+    ) -> Result<BTreeSet<(AccountId, String)>, BatchError> {
+        let rows = self
+            .forest
+            .read_outbound(requests, |_, account, _, lock_ids| {
+                Ok(lock_ids
+                    .into_iter()
+                    .filter(|lock_id| account.replica().state().htlc_lock(lock_id).is_some())
+                    .collect::<Vec<_>>())
+            })?;
+        Ok(rows
+            .into_iter()
+            .flat_map(|(account_id, lock_ids)| {
+                lock_ids
+                    .into_iter()
+                    .map(move |lock_id| (account_id, lock_id))
+            })
+            .collect())
+    }
+
+    /// Read canonical Account availability and owner-perspective capacities
+    /// after the inbound visit. This mirrors the narrow fields consulted by
+    /// TypeScript's `validatePreparedHtlcPayment`; it never materializes or
+    /// copies an Account replica at the Entity coordinator.
+    pub fn local_financial_views(
+        &mut self,
+        requests: Vec<(AccountId, Vec<TokenId>)>,
+    ) -> Result<Vec<(AccountId, ResidentAccountFinancialView)>, BatchError> {
+        self.forest
+            .read_outbound(requests, |_, account, _, token_ids| {
+                let active = match account
+                    .replica()
+                    .envelope()
+                    .fields()
+                    .iter()
+                    .find(|(name, _)| name == "status")
+                    .map(|(_, value)| value)
+                {
+                    None => true,
+                    Some(CanonicalValue::String(value)) => value == "active",
+                    Some(_) => false,
+                };
+                let owner_side = account.replica().owner_side();
+                let owner_out_capacity = token_ids
+                    .into_iter()
+                    .filter_map(|token_id| {
+                        account
+                            .replica()
+                            .state()
+                            .delta(token_id)
+                            .map(|delta| (token_id, delta.perspective(owner_side).out_capacity))
+                    })
+                    .collect();
+                Ok(ResidentAccountFinancialView {
+                    active,
+                    owner_out_capacity,
+                })
+            })
     }
 
     fn active_proposable(&self) -> Result<&BTreeSet<AccountId>, BatchError> {
@@ -341,12 +473,18 @@ impl ResidentConsensusEngine {
                 let mut created_checkpoint = None;
                 let mut changed = false;
                 for (row_index, row) in work.rows.into_iter().enumerate() {
+                    let authority = row.certified_board_authority.certified()?;
+                    let local_authority = row.local_certified_board_authority.certified()?;
                     let (verdict, row_changed) = apply_one(
                         account_id,
                         &mut account,
                         &worker_identity,
-                        clock,
                         row.input,
+                        xln_rscore_engine::IncomingFrameSecurityContext {
+                            clock,
+                            peer_certified_board_authority: authority,
+                            local_certified_board_authority: local_authority,
+                        },
                         &market,
                     );
                     if created && row_index == 0 && !verdict_commits_genesis(&verdict) {
@@ -374,7 +512,7 @@ impl ResidentConsensusEngine {
                     applied,
                     leaf,
                     created_checkpoint,
-                    proposable: proposable(&account),
+                    proposable: proposable(&account)?,
                 };
                 if changed {
                     Ok(ResidentAccountAction::Put {
@@ -782,7 +920,7 @@ fn apply_outbound_work(
         changed = true;
     }
     let proposal = if work.propose {
-        if proposable(&account) {
+        if proposable(&account)? {
             let outcome = propose_account_frame(
                 &mut account,
                 &context.identity,
@@ -792,10 +930,11 @@ fn apply_outbound_work(
             )
             .map_err(|error| state_error(account_id, &error))?;
             changed = true;
-            Some(proposal_row(account_id, outcome)?)
+            Some(proposal_row(account_id, outcome, &account)?)
         } else {
             Some(ProposalRow {
                 account_id,
+                outbound_input: None,
                 proposed: None,
                 dropped: Vec::new(),
                 failed_htlc_locks: Vec::new(),
@@ -811,7 +950,7 @@ fn apply_outbound_work(
     changed |= account.certify_local_dispute_after_outbound();
     let result = OutboundOutcome {
         proposal,
-        proposable: proposable(&account),
+        proposable: proposable(&account)?,
     };
     if changed {
         let leaf = leaf_root(account_id, &account)?;
@@ -839,11 +978,14 @@ fn admission_results(admits: &[(AccountId, Vec<AccountTx>)]) -> Vec<AccountAdmis
 
 fn proposable_from_entries(
     entries: &[(AccountId, AccountConsensus, [u8; 32])],
-) -> BTreeSet<AccountId> {
-    entries
-        .iter()
-        .filter_map(|(account_id, account, _)| proposable(account).then_some(*account_id))
-        .collect()
+) -> Result<BTreeSet<AccountId>, BatchError> {
+    let mut ready = BTreeSet::new();
+    for (account_id, account, _) in entries {
+        if proposable(account)? {
+            ready.insert(*account_id);
+        }
+    }
+    Ok(ready)
 }
 
 fn set_proposable(accounts: &mut BTreeSet<AccountId>, account_id: AccountId, ready: bool) {

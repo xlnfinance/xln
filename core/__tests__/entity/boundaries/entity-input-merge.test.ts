@@ -7,7 +7,6 @@ import {
 } from '../../../entity/consensus/input/merge';
 import type { EntityLeaderTimeoutVote } from '../../../entity/types';
 import type { RoutedEntityInput } from '../../../runtime/types';
-import { orderCertifiedOutputsBySequence } from '../../../entity/consensus/output/envelope';
 
 const entityId = (suffix: string): string => `0x${suffix.padStart(64, '0')}`;
 
@@ -39,7 +38,7 @@ describe('mergeEntityInputs', () => {
       entityId: entityId('2'),
       signerId: '2',
       // AccountInput is routed raw after source Entity + Runtime WAL commit;
-      // nesting it inside a consensusOutput envelope is a protocol violation.
+      // AccountInput is already authorized by Account Hankos and stays raw.
       entityTxs: [{
         type: 'accountInput',
         data: {
@@ -55,39 +54,6 @@ describe('mergeEntityInputs', () => {
     const prioritized = prioritizeProtocolEntityInputs([bulkA, accountConsensus, bulkB]);
 
     expect(prioritized).toEqual([accountConsensus, bulkA, bulkB]);
-  });
-
-  test('orders one certified source lane by sequence without moving unrelated tx slots', () => {
-    const sourceEntityId = entityId('a');
-    const targetEntityId = entityId('b');
-    const certified = (sequence: bigint) => ({
-      type: 'consensusOutput' as const,
-      data: {
-        origin: {
-          sourceEntityId,
-          lane: 'generic' as const,
-          sequence,
-          semanticHash: `0x${sequence.toString(16).padStart(64, '0')}`,
-          height: Number(sequence),
-          frameHash: `0x${'ab'.repeat(32)}`,
-          outputIndex: 0,
-        },
-        outputHanko: '0x01',
-        targetEntityId,
-        entityTxs: [{ type: 'chat', data: { text: `seq-${sequence}` } } as never],
-      },
-    });
-    const unrelated = { type: 'profile-update' as const, data: { name: 'stable-slot' } };
-
-    const ordered = orderCertifiedOutputsBySequence([
-      certified(3n),
-      unrelated as never,
-      certified(1n),
-      certified(2n),
-    ]);
-
-    expect(ordered.map(tx => tx.type === 'consensusOutput' ? tx.data.origin.sequence : 'stable'))
-      .toEqual([1n, 'stable', 2n, 3n]);
   });
 
   test('returns entity inputs in canonical order independent of arrival order', () => {
@@ -130,26 +96,15 @@ describe('mergeEntityInputs', () => {
     expect(merged[0]?.entityTxs).toEqual(original.entityTxs);
   });
 
-  test('never merges distinct certified output identities or local protocol lanes', () => {
-    const certified = (sequence: bigint): RoutedEntityInput => ({
-      ...inputFor('2'),
-      certifiedOutputIdentity: {
-        lane: 'generic',
-        sequence,
-        semanticHash: `0x${sequence.toString(16).padStart(64, '0')}`,
-      },
-    });
+  test('keeps the local protocol lane distinct from ordinary inputs', () => {
     const localProtocol: RoutedEntityInput = {
       ...inputFor('2'),
       localRuntimeProtocol: 'cross-j',
     };
 
-    const merged = mergeEntityInputs([certified(2n), localProtocol, certified(1n)]);
+    const merged = mergeEntityInputs([inputFor('2'), localProtocol]);
 
-    expect(merged).toHaveLength(3);
-    expect(merged.filter(input => input.certifiedOutputIdentity).map(
-      input => input.certifiedOutputIdentity!.sequence,
-    )).toEqual([1n, 2n]);
+    expect(merged).toHaveLength(2);
     expect(merged.some(input => input.localRuntimeProtocol === 'cross-j')).toBe(true);
   });
 

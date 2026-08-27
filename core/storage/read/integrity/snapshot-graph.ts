@@ -13,6 +13,8 @@ import {
   KEY_LIVE_ENTITY_BRANCH,
   KEY_LIVE_ENTITY_FIELD,
   KEY_LIVE_ENTITY_LEAF,
+  KEY_CERTIFIED_BOARD_NODE,
+  KEY_ACCOUNT_J_CLAIM_NODE,
   keySnapshotAccount,
   keySnapshotAccountPrefix,
   keySnapshotBook,
@@ -29,6 +31,8 @@ import {
   parseLiveEntityBranchKey,
   parseLiveEntityFieldKey,
   parseLiveEntityLeafKey,
+  parseCertifiedBoardPathNodeKey,
+  parseAccountJClaimPathNodeKey,
   parseSnapshotAccountKey,
   parseSnapshotGraphKey,
   parseSnapshotEntityKey,
@@ -40,6 +44,12 @@ import { decodeAccountGraphManifest } from '../../schema/account-layout';
 import { decodeStorageBookHeader } from '../../schema/book-graph-codec';
 import { ENTITY_COLLECTION_NAMESPACE_TAG } from '../../schema/entity/graph-codec';
 import { decodeEntityGraphManifest } from '../../schema/entity/layout';
+import {
+  validatePersistedAccountJClaimPathNode,
+  validatePersistedCertifiedBoardPathNode,
+} from '../../schema/authoritative-schema';
+import { hashCertifiedBoardNode } from '../../../jurisdiction/machine/board-registry';
+import { hashAccountJClaimNode } from '../../../account/j-claims/j-claim-accumulator';
 import type { RuntimeDbLike } from '../../types';
 
 const ownerKey = (key: Buffer): string => key.toString('hex');
@@ -90,7 +100,12 @@ const collectSnapshotOwners = async (
 const graphOwner = (
   height: number,
   liveKey: Buffer,
-): Readonly<{ key: Buffer; namespaceTag?: number; fieldTag?: number }> => {
+): Readonly<{
+  key: Buffer;
+  namespaceTag?: number;
+  fieldTag?: number;
+  auxiliaryOwnerKind?: 'entity' | 'account';
+}> => {
   switch (liveKey[0]) {
     case KEY_LIVE_ENTITY_FIELD: {
       const owner = parseLiveEntityFieldKey(liveKey);
@@ -133,8 +148,34 @@ const graphOwner = (
       const owner = parseLiveBookLeafKey(liveKey);
       return { key: keySnapshotBook(height, owner.entityId, owner.pairId) };
     }
+    case KEY_CERTIFIED_BOARD_NODE: {
+      const owner = parseCertifiedBoardPathNodeKey(liveKey);
+      return {
+        key: keySnapshotEntity(height, owner.ownerEntityId),
+        auxiliaryOwnerKind: 'entity',
+      };
+    }
+    case KEY_ACCOUNT_J_CLAIM_NODE: {
+      const owner = parseAccountJClaimPathNodeKey(liveKey);
+      return {
+        key: keySnapshotAccount(height, owner.ownerEntityId, owner.counterpartyId),
+        auxiliaryOwnerKind: 'account',
+      };
+    }
     default:
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_TAG_INVALID:${String(liveKey[0])}`);
+  }
+};
+
+const validateAuxiliaryRow = (tag: number | undefined, value: Buffer): void => {
+  if (tag === KEY_CERTIFIED_BOARD_NODE) {
+    const row = decodeValidatedBuffer(value, validatePersistedCertifiedBoardPathNode);
+    const actual = hashCertifiedBoardNode(row.node);
+    if (actual !== row.hash) throw new Error(`CERTIFIED_BOARD_PATH_NODE_CORRUPT:${row.hash}:${actual}`);
+  } else if (tag === KEY_ACCOUNT_J_CLAIM_NODE) {
+    const row = decodeValidatedBuffer(value, validatePersistedAccountJClaimPathNode);
+    const actual = hashAccountJClaimNode(row.node);
+    if (actual !== row.hash) throw new Error(`ACCOUNT_J_CLAIM_PATH_NODE_CORRUPT:${row.hash}:${actual}`);
   }
 };
 
@@ -149,6 +190,7 @@ export const inspectSnapshotGraphRows = async (
     const parsed = parseSnapshotGraphKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_GRAPH_HEIGHT_MISMATCH');
     const ownership = graphOwner(height, parsed.liveKey);
+    validateAuxiliaryRow(parsed.liveKey[0], await db.get(key));
     const owner = owners.get(ownerKey(ownership.key));
     if (!owner) {
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING:${ownership.key.toString('hex')}`);
@@ -169,6 +211,10 @@ export const inspectSnapshotGraphRows = async (
           `STORAGE_SNAPSHOT_GRAPH_ACCOUNT_NAMESPACE_UNDECLARED:` +
           `owner=${ownership.key.toString('hex')}:namespace=${ownership.namespaceTag}`,
         );
+      }
+    } else if (ownership.auxiliaryOwnerKind !== undefined) {
+      if (owner.kind !== ownership.auxiliaryOwnerKind) {
+        throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_KIND_INVALID:${ownership.key.toString('hex')}`);
       }
     } else if (owner.kind !== 'book') {
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_KIND_INVALID:${ownership.key.toString('hex')}`);

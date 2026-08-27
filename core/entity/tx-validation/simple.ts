@@ -19,13 +19,11 @@ type SpecializedEntityTxType =
   | 'accountInput'
   | 'boardHandover'
   | 'chat'
-  | 'consensusOutput'
   | 'entityCommand'
   | 'htlcPayment'
   | 'materializeCrossJurisdictionClear'
   | 'materializeCrossJurisdictionSwap'
   | 'propose'
-  | 'reissueCertifiedOutput'
   | 'runtimeOutput'
   | 'scheduledWake'
   | 'vote';

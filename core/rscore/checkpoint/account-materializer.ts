@@ -368,7 +368,7 @@ const pendingInput = (
   };
 };
 
-const h0Frame = (seed: RscoreAccountStateSeed, accountStateRoot: string): AccountFrame => ({
+const h0Frame = (accountStateRoot: string): AccountFrame => ({
   height: 0,
   timestamp: 0,
   jHeight: 0,
@@ -376,8 +376,6 @@ const h0Frame = (seed: RscoreAccountStateSeed, accountStateRoot: string): Accoun
   prevFrameHash: '',
   accountStateRoot,
   stateHash: '',
-  byLeft: seed.ownerEntityId === seed.leftEntity,
-  deltas: [],
 });
 
 const assertPriorBinding = (
@@ -631,12 +629,6 @@ export const materializeRscoreAccountReplica = (
   if (seed.ownerEntityId !== ownerEntityId) fail('OWNER_BINDING_MISMATCH');
   if (seed.signerId !== binding.expectedSignerId) fail('SIGNER_BINDING_MISMATCH');
   if (seed.accountId !== accountId) fail('SEED_ACCOUNT_BINDING_MISMATCH');
-  if (
-    consensus.pending !== undefined
-    && consensus.pending.frame.byLeft !== (ownerEntityId === seed.leftEntity)
-  ) {
-    fail('PENDING_AUTHOR_MISMATCH');
-  }
   const witnesses = localWitnessResolver(witnessPlan, prior);
   assertCurrentDisputeDraftOrder(consensus);
 
@@ -650,7 +642,7 @@ export const materializeRscoreAccountReplica = (
   }
   const currentFrame = consensus.currentFrame
     ? cloneIsolatedAccountFrame(consensus.currentFrame)
-    : h0Frame(seed, accountStateRoot);
+    : h0Frame(accountStateRoot);
   if (prior !== null) {
     assertPriorBinding(prior, ownerEntityId, accountId, seed, currentFrame);
   }

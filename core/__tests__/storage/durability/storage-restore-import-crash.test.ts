@@ -15,12 +15,6 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { readStorageHead, recoverStorageDbFromHistory } from '../../../storage';
 import type { StoragePersistenceBoundary } from '../../../storage/types';
-import {
-  createConsumptionProof,
-  getConsumptionKey,
-  verifyConsumptionProof,
-} from '../../../entity/consumption/consumption-accumulator';
-import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 
 const fixture = join(import.meta.dir, '..', '..', 'fixtures/storage/storage-restore-import-crash-child.ts');
 const namespaces: string[] = [];
@@ -76,31 +70,11 @@ describe('restored checkpoint atomic publication', () => {
           candidate.entityId === entityId && candidate.signerId === signerId
         ));
         expect(replica?.lastConsensusProgressAt).toBe(expectedHeight * 1_000);
-        expect(replica?.state.consumptionAccumulator?.count).toBe(1n);
         const oversizedAccount = replica?.state.accounts.get(`0x${'ff'.repeat(32)}`);
         expect(oversizedAccount?.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
         expect(oversizedAccount?.state.deltas.get(1)?.offdelta).toBe(1n);
         expect(oversizedAccount?.state.deltas.get(LIMITS.MAX_ACCOUNT_TOKEN_ROWS)?.offdelta)
           .toBe(BigInt(LIMITS.MAX_ACCOUNT_TOKEN_ROWS));
-        const firstIdentity = {
-          targetEntityId: entityId,
-          sourceEntityId: `0x${'22'.repeat(32)}`,
-          lane: 'generic' as const,
-        };
-        const accumulator = replica?.state.consumptionAccumulator;
-        if (!accumulator) throw new Error('restore import consumption accumulator missing');
-        const proof = createConsumptionProof(
-          getConsumptionNodeStore(restored),
-          accumulator.root,
-          getConsumptionKey(firstIdentity),
-        );
-        expect(verifyConsumptionProof(accumulator.root, getConsumptionKey(firstIdentity), proof)).toEqual({
-          status: 'member',
-          value: expect.objectContaining({
-            lastContiguousSeq: BigInt(expectedHeight),
-            count: BigInt(expectedHeight),
-          }),
-        });
         const historyHead = await readStorageHead(getRuntimeWalDb(restored));
         expect(historyHead?.latestHeight).toBe(expectedHeight);
         await recoverStorageDbFromHistory({

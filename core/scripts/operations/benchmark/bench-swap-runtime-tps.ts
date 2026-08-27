@@ -97,8 +97,6 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
     prevFrameHash: '',
     accountStateRoot: `0x${'00'.repeat(32)}`,
     stateHash: '',
-    deltas: [],
-    byLeft: true,
   },
   currentHeight: 1,
   rollbackCount: 0,

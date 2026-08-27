@@ -86,20 +86,13 @@ function assertRoutedEntityInput(
 ): asserts value is ValidatedRoutedEntityInput {
   const input = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(input, ['entityId', 'signerId'], [
-    'runtimeId', 'from', 'certifiedOutputIdentity', 'entityTxs', 'proposedFrame',
+    'runtimeId', 'from', 'entityTxs', 'proposedFrame',
     'hashPrecommitFrame', 'hashPrecommits', 'jPrefixAttestations', 'leaderTimeoutVote',
     'atomicCrossJurisdictionPair',
     ...(options.allowSourceRuntimeFrame ? ['sourceRuntimeFrame'] : []),
   ], `${code}_FIELDS`);
   for (const field of ['entityId', 'signerId', 'runtimeId', 'from']) {
     if (input[field] !== undefined) requireString(input[field], `${code}_${field.toUpperCase()}`);
-  }
-  if (input['certifiedOutputIdentity'] !== undefined) {
-    const identity = requireBoundaryRecord(input['certifiedOutputIdentity'], `${code}_OUTPUT_IDENTITY`);
-    requireExactBoundaryKeys(identity, ['lane', 'sequence', 'semanticHash'], [], `${code}_OUTPUT_IDENTITY_FIELDS`);
-    requireString(identity['lane'], `${code}_OUTPUT_IDENTITY_LANE`);
-    if (typeof identity['sequence'] !== 'bigint' || identity['sequence'] < 0n) throw new Error(`${code}_OUTPUT_IDENTITY_SEQUENCE`);
-    requireString(identity['semanticHash'], `${code}_OUTPUT_IDENTITY_HASH`);
   }
   if (input['sourceRuntimeFrame'] !== undefined) {
     const frame = requireBoundaryRecord(input['sourceRuntimeFrame'], `${code}_SOURCE_RUNTIME_FRAME`);

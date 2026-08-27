@@ -9,15 +9,19 @@
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../../../..');
 const MANIFEST = join(ROOT, 'rscore/Cargo.toml');
 const BINARY = join(ROOT, 'rscore/target/release/xln-rscore');
 const ENTITY_FIXTURE_GENERATOR = join(ROOT, 'rscore/fixtures/entity-kernel/generate.ts');
 const ENTITY_FIXTURE = join(ROOT, 'rscore/fixtures/entity-kernel/parity-v1.json');
-const SUITES = ['tests/rscore', 'core/__tests__/rscore'];
+const testFilesUnder = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
+  .flatMap(entry => entry.isDirectory()
+    ? testFilesUnder(join(directory, entry.name))
+    : entry.name.endsWith('.test.ts') ? [join(directory, entry.name)] : [])
+  .sort();
 
 const run = (command: string, args: readonly string[]): void => {
   execFileSync(command, args, { cwd: ROOT, stdio: 'inherit' });
@@ -42,4 +46,14 @@ console.log(
 );
 
 // The suites read XLN_RSCORE_REQUIRE_BINARY and throw instead of skipping.
-run('bun', ['test', ...SUITES]);
+// Bun can starve child-process stdout after the earlier differential corpus
+// has run in the same test worker; its 5s timeout then kills healthy Rust
+// children and cascades across every process test. A fresh Bun worker for the
+// process boundary is deterministic and keeps the whole pair below two seconds.
+const testFiles = [
+  ...testFilesUnder(join(ROOT, 'tests/rscore')),
+  ...testFilesUnder(join(ROOT, 'core/__tests__/rscore')),
+];
+const processSegment = `${sep}rscore${sep}process${sep}`;
+run('bun', ['test', ...testFiles.filter(file => !file.includes(processSegment))]);
+run('bun', ['test', ...testFiles.filter(file => file.includes(processSegment))]);

@@ -71,8 +71,6 @@ export const projectEntityScalarDoc = (state: EntityState): StorageEntityScalarD
   ),
   ...withDefinedProperty('jBatchState', state.jBatchState),
   ...withDefinedProperty('entityProviderActionState', state.entityProviderActionState),
-  ...withDefinedProperty('consumptionAccumulator', state.consumptionAccumulator),
-  ...withDefinedProperty('certifiedOutputSequences', state.certifiedOutputSequences),
   ...withDefinedProperty('outDebtsByToken', state.outDebtsByToken),
   ...withDefinedProperty('inDebtsByToken', state.inDebtsByToken),
   ...withDefinedProperty('swapTradingPairs', state.swapTradingPairs),
@@ -148,7 +146,6 @@ export const projectEntityReplicaCoreView = (
 
 type ReplicaMetaProjectionOptions = {
   certifiedFrameHead?: EntityReplica['certifiedFrameHead'];
-  certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
 };
 
 const buildReplicaMetaProjection = (
@@ -169,10 +166,6 @@ const buildReplicaMetaProjection = (
   ...withDefinedProperty(
     'certifiedFrameHead',
     options ? options.certifiedFrameHead : replica.certifiedFrameHead,
-  ),
-  ...withDefinedProperty(
-    'certifiedFrameAnchor',
-    options ? options.certifiedFrameAnchor : replica.certifiedFrameAnchor,
   ),
   ...withDefinedProperty('hankoWitness', replica.hankoWitness),
   ...withDefinedProperty('leaderVotes', replica.leaderVotes),

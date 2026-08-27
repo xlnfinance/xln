@@ -6,10 +6,8 @@ import {
   classifyEntityConsensusStateQuotaTransition,
   measureEntityConsensusStateBytes,
   validateEntityConsensusStateQuotaConfig,
-  type EntityConsensusStateConsumptionAdapter,
 } from '../../../../entity/consensus/state-quota';
 import { encodeCanonicalEntityConsensusState } from '../../../../entity/consensus/state-root';
-import type { ConsumptionAccumulatorState } from '../../../../entity/consumption/consumption-accumulator';
 import type { EntityState } from '../../../../entity/types';
 
 const entityId = `0x${'11'.repeat(32)}`;
@@ -83,31 +81,9 @@ test('measurement uses the canonical Entity encoding and preserves BigInt exactl
   expect(encoded).toContain(`\"BigInt\",\"${left.htlcFeesEarned.toString()}\"`);
   expect(measureEntityConsensusStateBytes(left)).toEqual({
     canonicalBytes: exactBytes,
-    consumptionTreeBytes: 0n,
     totalBytes: exactBytes,
   });
   expect(measureEntityConsensusStateBytes(right)).toEqual(measureEntityConsensusStateBytes(left));
-});
-
-test('optional accumulator adapter adds exact conceptual Patricia bytes', () => {
-  const state = baseState();
-  const accumulator: ConsumptionAccumulatorState = {
-    version: 1,
-    root: `0x${'22'.repeat(32)}`,
-    count: 2n,
-  };
-  const adapter: EntityConsensusStateConsumptionAdapter = {
-    getAccumulatorState: () => accumulator,
-  };
-  const withoutAccumulator = measureEntityConsensusStateBytes(state);
-  const withAccumulator = measureEntityConsensusStateBytes(state, adapter);
-
-  expect(withAccumulator.canonicalBytes).toBe(withoutAccumulator.canonicalBytes);
-  expect(withAccumulator.consumptionTreeBytes).toBe(364n);
-  expect(withAccumulator.totalBytes).toBe(withoutAccumulator.totalBytes + 364n);
-  expect(() => measureEntityConsensusStateBytes(state, {
-    getAccumulatorState: () => ({ count: -1n }),
-  })).toThrow('CONSUMPTION_COUNT_INVALID');
 });
 
 test('exact threshold is within while over-threshold growth is only classified as a warning', () => {

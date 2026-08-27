@@ -29,6 +29,7 @@ export type AccountSwapOfferCreated = {
 
 export type AccountCommittedFrame = {
   frame: AccountFrame;
+  proposerIsLeft: boolean;
   committedViaNewFrame: boolean;
 };
 

@@ -29,8 +29,6 @@ export const STORAGE_ENTITY_FIELD_TAG = Object.freeze({
   profile: 21,
   htlcRoutes: 22,
   htlcFeesEarned: 23,
-  consumptionAccumulator: 24,
-  certifiedOutputSequences: 25,
   outDebtsByToken: 26,
   inDebtsByToken: 27,
   lockBook: 28,

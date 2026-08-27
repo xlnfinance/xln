@@ -54,10 +54,6 @@
               <div class="metric-label">CONFIRMED COLLATERAL</div>
               <div class="metric-value" data-testid="solvency-collateral">{formatRawAmount(asset.confirmedCollateral)}</div>
             </div>
-            <div>
-              <div class="metric-label">PENDING, NOT COUNTED</div>
-              <div class="metric-value pending">{formatRawAmount(asset.pendingCollateral)}</div>
-            </div>
           </div>
           {#if asset.isValid === false && asset.delta !== null}
             <div class="delta-warning">Raw-unit delta: {formatRawAmount(asset.delta)}</div>
@@ -95,7 +91,6 @@
   header { display: flex; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
   .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
   .metric-value { margin-top: var(--space-1); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-  .pending { color: var(--accent-orange); }
   .delta-warning, .empty-state.error { margin-top: var(--space-3); color: var(--accent-red); }
   .error-text { color: var(--text-secondary); overflow-wrap: anywhere; }
 </style>

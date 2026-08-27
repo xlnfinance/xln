@@ -3,13 +3,10 @@ import { expect, test } from 'bun:test';
 import { assertAccountFrameHash, computeFrameHash } from '../../../account/consensus/frame/hash';
 import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
 import { canonicalAccountInputCommitment } from '../../../entity/consensus/frame/account-input-commitment';
-import {
-  assertCertifiedOutputSemanticIdentity,
-  getRawAccountOutputTx,
-} from '../../../entity/consensus/output/certification';
+import { materializeCommittedEntityOutputs } from '../../../entity/consensus/output/publication';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import type { AccountFrame } from '../../../types/account';
-import type { ConsensusOutputOrigin, EntityTx } from '../../../types/entity-tx';
+import type { EntityTx } from '../../../types/entity-tx';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const HASH_A = `0x${'11'.repeat(32)}`;
@@ -94,16 +91,6 @@ const entityHash = (txs: EntityTx[]): string =>
     entityContext(),
   );
 
-const genericOrigin = (semanticHash: string): ConsensusOutputOrigin => ({
-  sourceEntityId: PEER,
-  lane: 'generic',
-  sequence: 7n,
-  semanticHash,
-  height: 4,
-  frameHash: HASH_A,
-  outputIndex: 0,
-});
-
 test('Entity frame hash binds Account stateHash not nested offer bodies', async () => {
   const left = await makeFrame('offer-a');
   const right = structuredClone(left);
@@ -170,11 +157,7 @@ test('commitment encoding of 100 fat frames stays off the nested offer bytes', a
 test('AccountInput is raw-only and can never regain an outer certified envelope', async () => {
   const tx = frameInput(await makeFrame('raw-only'));
   const output = { entityId: ENTITY, signerId: '0xsigner', entityTxs: [tx] };
-  expect(getRawAccountOutputTx(PEER, output, 0)).toEqual(tx);
-  expect(() => getRawAccountOutputTx(ENTITY, output, 0)).toThrow('ACCOUNT_OUTPUT_SOURCE_MISMATCH');
-  expect(() => assertCertifiedOutputSemanticIdentity(
-    genericOrigin(HASH_B),
-    ENTITY,
-    [tx],
-  )).toThrow('CONSENSUS_OUTPUT_ACCOUNT_INPUT_FORBIDDEN');
+  expect(materializeCommittedEntityOutputs([output], PEER, {} as never, false)).toEqual([output]);
+  expect(() => materializeCommittedEntityOutputs([output], ENTITY, {} as never, false))
+    .toThrow('ACCOUNT_OUTPUT_SOURCE_MISMATCH');
 });
