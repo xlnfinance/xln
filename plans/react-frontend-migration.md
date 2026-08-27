@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, AND RECOVERY-REHEARSAL COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, AND RECOVERY-CHOICE COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -597,6 +597,19 @@ with 171 expectations. The broader affected request/session/boot/security/
 capability batch passes 103 tests with 469 expectations, both wallet and
 canonical Svelte production builds pass, and the wallet local check covers 443
 files with zero unsafe-type findings.
+
+The next wallet slice now owns framework-neutral recovery-candidate choice:
+selected-id lookup with first-candidate fallback, single-pass peer-backup
+counting, immutable file-candidate replacement ordered by Runtime height then
+creation time, and backup-before-local-before-fresh continuation precedence.
+The canonical Svelte flow retains recovery discovery, file parsing, discovery
+status persistence, local unlock, backup restore, and fresh Runtime creation.
+Eight direct tests plus the affected identity, rehearsal, import, workspace,
+and capability suites pass 80 tests with 572 expectations; both wallet and
+canonical Svelte production builds pass, and the wallet local check covers 447
+files with zero unsafe-type findings. This covers selection, empty results,
+deduplication, ordering, stable ties, continuation, immutability, and thin
+wiring.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -774,6 +787,9 @@ any mismatch. Never compile on production.
    Mnemonic recovery-rehearsal skip, begin, mismatch, match, cancel, and reset
    decisions are shared while sensitive cleanup and derivation remain with the
    concrete wallet event flow.
+   Recovery candidate selection, peer counting, immutable file-candidate merge
+   ordering, and backup/local/fresh continuation are shared while discovery,
+   storage, and Runtime effects remain concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication

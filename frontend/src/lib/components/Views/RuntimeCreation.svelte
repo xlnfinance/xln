@@ -67,6 +67,11 @@
     type WalletRecoveryRehearsalMode,
     type WalletRecoveryRehearsalState,
   } from '../../../../packages/browser/src/wallet-recovery-rehearsal';
+  import {
+    mergeWalletRecoveryCandidate,
+    resolveWalletRecoveryContinuation,
+    summarizeWalletRecoveryCandidates,
+  } from '../../../../packages/browser/src/wallet-recovery-choice';
 
   // Props
   export let embedded: boolean = false;
@@ -365,7 +370,10 @@
 
   $: savedVaults = $allRuntimes;
 
-  $: selectedRecoveryCandidate = recoveryCandidates.find((candidate) => candidate.id === selectedRecoveryCandidateId) || recoveryCandidates[0] || null;
+  $: selectedRecoveryCandidate = summarizeWalletRecoveryCandidates(
+    recoveryCandidates,
+    selectedRecoveryCandidateId,
+  ).selectedCandidate;
 
   const shortRuntimeId = (value: string): string => {
     const text = String(value || '').trim();
@@ -425,8 +433,9 @@
       recoveryFailures = discovery.failures;
       recoveryCheckedTowers = discovery.checkedTowers;
       recoveryCheckedPeers = discovery.checkedPeers;
-      recoveryPeerBackupCount = recoveryCandidates.filter((candidate) => candidate.source === 'peer').length;
-      selectedRecoveryCandidateId = recoveryCandidates[0]?.id || '';
+      const recoverySummary = summarizeWalletRecoveryCandidates(recoveryCandidates, '');
+      recoveryPeerBackupCount = recoverySummary.peerBackupCount;
+      selectedRecoveryCandidateId = recoverySummary.selectedCandidate?.id || '';
       if (recoveryCandidates.length > 0) {
         phase = 'recovery';
       }
@@ -455,12 +464,16 @@
   }
 
   async function continueAfterRecoveryDiscovery(): Promise<void> {
-    if (recoveryCandidates.length > 0) {
+    const continuation = resolveWalletRecoveryContinuation({
+      hasCandidates: recoveryCandidates.length > 0,
+      localRuntimeAvailable,
+    });
+    if (continuation === 'choose-backup') {
       phase = 'recovery';
       return;
     }
     writeCurrentRecoveryDiscoveryStatus();
-    if (localRuntimeAvailable) {
+    if (continuation === 'open-local') {
       await openLocalRuntime();
     } else {
       await createFreshRuntime();
@@ -543,13 +556,7 @@
       const candidate = await parseRuntimeRecoveryCandidateFile(mnemonic24, await file.text(), {
         sourceLabel: file.name || 'Local backup file',
       });
-      recoveryCandidates = [
-        candidate,
-        ...recoveryCandidates.filter((existing) => existing.id !== candidate.id),
-      ].sort((left, right) => {
-        if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
-        return right.createdAt - left.createdAt;
-      });
+      recoveryCandidates = mergeWalletRecoveryCandidate(recoveryCandidates, candidate);
       selectedRecoveryCandidateId = candidate.id;
     } catch (err) {
       derivationError = err instanceof Error ? err.message : String(err);

@@ -63,6 +63,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-identity-entry.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
+      .toContain('frontend/packages/browser/src/wallet-recovery-choice.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-recovery-rehearsal.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-runtime-bootstrap.ts');
@@ -80,6 +82,8 @@ describe('frontend capability inventory', () => {
       .toContain('validated deploy-version persistence, reset, and recovery decisions');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('canonical identity-mode selection, sensitive-field clearing, and keyboard navigation');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
+      .toContain('deterministic recovery candidate selection, merge ordering, and continuation');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('verified mnemonic recovery-rehearsal transitions and reset policy');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
