@@ -110,6 +110,27 @@ pub fn capacity_rows(
     ])
 }
 
+/// Exact committed replica fields used by the TypeScript shadow diagnostic.
+/// Tag 18 has owned this reply shape since wire=13. Preserve it so enabling
+/// diagnostics cannot change the process transcript or persisted fingerprint.
+pub fn account_envelope(revision: u64, envelope: &xln_rscore_engine::AccountEnvelope) -> BodyTuple {
+    body(vec![
+        integer(revision),
+        tuple(
+            envelope
+                .fields()
+                .iter()
+                .map(|(name, value)| {
+                    tuple(vec![
+                        AbiValue::Text(name.clone()),
+                        xln_rscore_batch::encode_canonical_value(value),
+                    ])
+                })
+                .collect(),
+        ),
+    ])
+}
+
 pub fn summary_page(
     revision: u64,
     rows: &[xln_rscore_batch::AccountSummaryRow],

@@ -328,9 +328,20 @@ impl ProcessSession {
     /// whose leaf disagrees can name the field instead of the hash.
     fn account_envelope(
         &self,
-        _account_id: xln_rscore_batch::AccountId,
+        account_id: xln_rscore_batch::AccountId,
     ) -> Result<(xln_rscore_abi::BodyTuple, bool), ProcessError> {
-        Err(ProcessError::AuthorityTwoCallOnly)
+        let engine = self.engine.as_ref().ok_or(ProcessError::EngineNotLoaded)?;
+        let account =
+            engine
+                .account(&account_id)
+                .ok_or(xln_rscore_batch::BatchError::AccountNotFound {
+                    input_index: 0,
+                    account_id,
+                })?;
+        Ok((
+            wire_encode::account_envelope(engine.revision(), account.envelope()),
+            false,
+        ))
     }
 
     /// One runtime frame, against a candidate this process keeps until the

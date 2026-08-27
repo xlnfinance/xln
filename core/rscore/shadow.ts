@@ -151,6 +151,16 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
     wireTuple(output, 'SHADOW_ENGINE_CANCEL_REQUEST', 2);
     return ['cancelRequest', wireText(output[1], 'SHADOW_ENGINE_CANCEL_REQUEST_ID')];
   }
+  if (tag === 6) {
+    wireTuple(output, 'SHADOW_ENGINE_ACCOUNT_SETTLED', 5);
+    return [
+      'accountSettledFinalized',
+      wireInteger(output[1], 'SHADOW_ENGINE_ACCOUNT_SETTLED_TOKEN'),
+      wireInteger(output[2], 'SHADOW_ENGINE_ACCOUNT_SETTLED_J_HEIGHT'),
+      wireText(output[3], 'SHADOW_ENGINE_ACCOUNT_SETTLED_COLLATERAL'),
+      wireText(output[4], 'SHADOW_ENGINE_ACCOUNT_SETTLED_ONDELTA'),
+    ];
+  }
   throw new Error(`SHADOW_ENGINE_OUTPUT_TAG_UNSUPPORTED:${tag}`);
 };
 
@@ -235,43 +245,123 @@ const redactSecrets = <T>(value: T): T => {
       if (rows[0] === 2 && rows[3] instanceof Uint8Array) {
         rows[3] = `redacted:${(rows[3] as Uint8Array).byteLength}`;
       }
+      // Canonical object entries are `[fieldName, taggedValue]`. Account
+      // mempool rows use this shape, so redact before a diagnostic preview is
+      // persisted or printed even when the transaction wire is nested.
+      if (rows.length === 2 && (rows[0] === 'secret' || rows[0] === 'preimage')) {
+        rows[1] = `redacted:${safeStringify(rows[1]).length}`;
+      }
       return rows;
     }
     if (node instanceof Uint8Array || node === null || typeof node !== 'object') return node;
     return Object.fromEntries(
-      Object.entries(node as Record<string, unknown>).map(([key, entry]) => [key, walk(entry)]),
+      Object.entries(node as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        key === 'secret' || key === 'preimage'
+          ? `redacted:${safeStringify(entry).length}`
+          : walk(entry),
+      ]),
     );
   };
   return walk(value) as T;
 };
 
+type ShadowValuePreview = Readonly<{
+  type: string;
+  value: string;
+  totalChars: number;
+}>;
+
 type ShadowFirstDifference = Readonly<{
   path: string;
   reason: 'value-mismatch' | 'missing-typescript' | 'missing-rust';
+  typescript: ShadowValuePreview;
+  rust: ShadowValuePreview;
 }>;
+
+const SHADOW_PREVIEW_CHARS = 320;
+const missingPreview = (): ShadowValuePreview => ({
+  type: 'missing',
+  value: '<missing>',
+  totalChars: 0,
+});
+
+const valuePreview = (value: unknown, sensitive = false): ShadowValuePreview => {
+  const redacted = sensitive
+    ? `redacted:${safeStringify(value).length}`
+    : redactSecrets(value);
+  const canonical = safeStringify(redacted);
+  const clipped = canonical.length <= SHADOW_PREVIEW_CHARS
+    ? canonical
+    : `${canonical.slice(0, 150)}…<truncated>…${canonical.slice(-150)}`;
+  return {
+    type: value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value,
+    value: clipped,
+    totalChars: canonical.length,
+  };
+};
+
+const shadowDifference = (
+  path: string,
+  reason: ShadowFirstDifference['reason'],
+  typescript: unknown,
+  rust: unknown,
+  sensitive = false,
+): ShadowFirstDifference => ({
+  path,
+  reason,
+  typescript: reason === 'missing-typescript' ? missingPreview() : valuePreview(typescript, sensitive),
+  rust: reason === 'missing-rust' ? missingPreview() : valuePreview(rust, sensitive),
+});
 
 type ShadowMismatch = Readonly<{
   detail: string;
   firstDifference: ShadowFirstDifference;
   actualOutputs?: readonly IndexedShadowOutputRow[];
   actualRoot?: string;
+  envelope?: ShadowEnvelopeMismatch;
 }>;
 
-/** Deterministic first differing path; values stay in the 0600 dump below. */
+type ShadowEnvelopeMismatch = Readonly<{
+  firstDifference: ShadowFirstDifference;
+  typescript: unknown;
+  rust: unknown;
+}>;
+
+/** Deterministic first path plus bounded, secret-redacted value previews. */
 export const findFirstShadowDifference = (
   typescript: unknown,
   rust: unknown,
   path = '$',
+  sensitive = false,
 ): ShadowFirstDifference | null => {
   if (safeStringify(typescript) === safeStringify(rust)) return null;
   if (Array.isArray(typescript) && Array.isArray(rust)) {
     const length = Math.max(typescript.length, rust.length);
     for (let index = 0; index < length; index += 1) {
+      const secretSlot = index === 3
+        && (typescript[0] === 'secret' || rust[0] === 'secret'
+          || typescript[0] === 2 || rust[0] === 2);
+      const canonicalSecretSlot = index === 1
+        && (typescript[0] === 'secret' || rust[0] === 'secret'
+          || typescript[0] === 'preimage' || rust[0] === 'preimage');
+      const childSensitive = sensitive || secretSlot || canonicalSecretSlot;
       if (index >= typescript.length) {
-        return { path: `${path}[${index}]`, reason: 'missing-typescript' };
+        return shadowDifference(
+          `${path}[${index}]`, 'missing-typescript', undefined, rust[index], childSensitive,
+        );
       }
-      if (index >= rust.length) return { path: `${path}[${index}]`, reason: 'missing-rust' };
-      const difference = findFirstShadowDifference(typescript[index], rust[index], `${path}[${index}]`);
+      if (index >= rust.length) {
+        return shadowDifference(
+          `${path}[${index}]`, 'missing-rust', typescript[index], undefined, childSensitive,
+        );
+      }
+      const difference = findFirstShadowDifference(
+        typescript[index],
+        rust[index],
+        `${path}[${index}]`,
+        childSensitive,
+      );
       if (difference !== null) return difference;
     }
   }
@@ -282,18 +372,32 @@ export const findFirstShadowDifference = (
     const right = rust as Record<string, unknown>;
     const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
     for (const key of keys) {
-      if (!(key in left)) return { path: `${path}.${key}`, reason: 'missing-typescript' };
-      if (!(key in right)) return { path: `${path}.${key}`, reason: 'missing-rust' };
-      const difference = findFirstShadowDifference(left[key], right[key], `${path}.${key}`);
+      const childSensitive = sensitive || key === 'secret' || key === 'preimage';
+      if (!(key in left)) {
+        return shadowDifference(
+          `${path}.${key}`, 'missing-typescript', undefined, right[key], childSensitive,
+        );
+      }
+      if (!(key in right)) {
+        return shadowDifference(
+          `${path}.${key}`, 'missing-rust', left[key], undefined, childSensitive,
+        );
+      }
+      const difference = findFirstShadowDifference(
+        left[key],
+        right[key],
+        `${path}.${key}`,
+        childSensitive,
+      );
       if (difference !== null) return difference;
     }
   }
-  return { path, reason: 'value-mismatch' };
+  return shadowDifference(path, 'value-mismatch', typescript, rust, sensitive);
 };
 
 const shadowFailure = (detail: string, path: string): ShadowMismatch => ({
   detail,
-  firstDifference: { path, reason: 'value-mismatch' },
+  firstDifference: shadowDifference(path, 'value-mismatch', 'accepted', detail),
 });
 
 /**
@@ -403,7 +507,12 @@ type WaveFrame = Readonly<{
  * folded and memoized by the commit that produced this frame, so reading them
  * at note time costs no extra hashing.
  */
-const tsSectionRoots = (state: AccountState): Record<string, string> => ({
+const tsSectionRoots = (state: AccountState): Readonly<{
+  deltas: string;
+  locks: string;
+  swapOffers: string;
+  rebalanceFeePolicies: string;
+}> => ({
   deltas: requirePersistentAccountStateMap(state.deltas, 'deltas').rootHash().toLowerCase(),
   locks: requirePersistentAccountStateMap(state.locks, 'locks').rootHash().toLowerCase(),
   swapOffers: requirePersistentAccountStateMap(state.swapOffers, 'swapOffers')
@@ -625,7 +734,10 @@ type ShadowReconciliationMismatch = Readonly<{
   /** Which section moved, when the full root differs. */
   deltasRoot: Readonly<{ typescript: string; rust: string }>;
   locksRoot: Readonly<{ typescript: string; rust: string }>;
+  swapOffersRoot: Readonly<{ typescript: string; rust: string }>;
+  rebalanceFeePoliciesRoot: Readonly<{ typescript: string; rust: string }>;
   ownerSide: Readonly<{ typescript: string; rust: string }>;
+  firstDifference: ShadowFirstDifference;
 }>;
 
 export type ShadowReconciliation = Readonly<{
@@ -645,6 +757,8 @@ type EngineSummaryRow = Readonly<{
   ownerSide: string;
   deltasRoot: string;
   locksRoot: string;
+  swapOffersRoot: string;
+  rebalanceFeePoliciesRoot: string;
   accountStateRoot: string;
   mempoolRoot: string;
   entityAccountLeaf: string;
@@ -663,6 +777,12 @@ const decodeEngineSummaryRow = (row: unknown): readonly [string, EngineSummaryRo
     deltasRoot: `0x${Buffer.from(wireBytes(fields[4], 'SHADOW_SUMMARY_DELTAS_ROOT', 32)).toString('hex')}`,
     locksRoot: `0x${Buffer.from(wireBytes(fields[5], 'SHADOW_SUMMARY_LOCKS_ROOT', 32)).toString('hex')}`,
     accountStateRoot: `0x${Buffer.from(wireBytes(fields[6], 'SHADOW_SUMMARY_STATE_ROOT', 32)).toString('hex')}`,
+    swapOffersRoot: `0x${Buffer.from(wireBytes(
+      fields[7], 'SHADOW_SUMMARY_SWAP_OFFERS_ROOT', 32,
+    )).toString('hex')}`,
+    rebalanceFeePoliciesRoot: `0x${Buffer.from(wireBytes(
+      fields[8], 'SHADOW_SUMMARY_REBALANCE_FEE_POLICIES_ROOT', 32,
+    )).toString('hex')}`,
     mempoolRoot: `0x${Buffer.from(wireBytes(fields[10], 'SHADOW_SUMMARY_MEMPOOL_ROOT', 32)).toString('hex')}`,
     entityAccountLeaf: `0x${Buffer.from(wireBytes(fields[9], 'SHADOW_SUMMARY_ENTITY_LEAF', 32)).toString('hex')}`,
     mempoolLength: wireInteger(fields[11], 'SHADOW_SUMMARY_MEMPOOL_LEN'),
@@ -1021,73 +1141,9 @@ export class RscoreShadowMirror {
         continue;
       }
       engineRows.delete(key);
-      const deltasRoot = requirePersistentAccountStateMap(account.state.deltas, 'deltas')
-        .rootHash().toLowerCase();
-      const locksRoot = requirePersistentAccountStateMap(account.state.locks, 'locks')
-        .rootHash().toLowerCase();
-      // The authority value: the root the last committed frame certified.
-      // Comparing the two map roots alone left identity, dispute config, the
-      // journal counters and every carried section unverified.
-      const accountStateRoot = computeAccountStateRoot(account.state).toLowerCase();
-      // And the whole replica: the leaf the Entity itself puts in its accounts
-      // map, which additionally commits the mempool, the frame bindings, the
-      // hankos and the acks.
-      // The digest the mirror recorded when it last handed this account's
-      // shell to the engine — the same instant on both sides. Recomputing it
-      // live compares the engine against an authority that kept moving after
-      // the handover (a queued tx, an ack attached post-commit) and reports a
-      // divergence that the next boundary silently repairs.
-      const entityAccountLeaf = (this.#forests.get(ownerKey)?.get(key)
-        ?? computeEntityAccountValueHash(account)).toLowerCase();
-      const ownerSide = account.state.leftEntity.trim().toLowerCase() === ownerKey ? 'left' : 'right';
-      // The mempool counts are reported for context but not matched on: they
-      // are read from the live replica, which keeps queueing work after the
-      // shell was handed over. The leaf digest above is the snapshot both
-      // sides agreed to.
-      if (engine.accountStateRoot === accountStateRoot
-        && engine.entityAccountLeaf === entityAccountLeaf
-        && engine.ownerSide === ownerSide) {
-        matched.push(key);
-        continue;
-      }
-      if (engine.accountStateRoot === accountStateRoot) {
-        // Financial state agrees and the leaf does not: the shell is what
-        // differs, so name the fields the authority projected into it.
-        try {
-          if (DIFF_DIR !== null) {
-            mkdirSync(DIFF_DIR, { recursive: true });
-            writeFileSync(
-              join(DIFF_DIR, `shell-${key.slice(2, 14)}.json`),
-              safeStringify(projectEntityAccountLeaf(account), 2),
-              { mode: 0o600 },
-            );
-          }
-        } catch { /* observer-only */ }
-        try {
-          console.error(`RSCORE_SHADOW_SHELL_MISMATCH ${key} ${safeStringify(
-            Object.fromEntries(Object.entries(projectEntityAccountLeaf(account))
-              .map(([field, value]) => [field, typeof value === 'object' && value !== null
-                ? safeStringify(value).slice(0, 200)
-                : `${typeof value}:${String(value)}`])),
-          ).slice(0, 3000)}`);
-        } catch { /* observer-only */ }
-      }
-      mismatched.push({
-        accountId: key,
-        accountStateRoot: { typescript: accountStateRoot, rust: engine.accountStateRoot },
-        entityAccountLeaf: { typescript: entityAccountLeaf, rust: engine.entityAccountLeaf },
-        mempool: {
-          typescript: String(account.mempool.length),
-          rust: String(engine.mempoolLength),
-        },
-        mempoolRoot: {
-          typescript: tsMempoolRoot(account.mempool),
-          rust: engine.mempoolRoot,
-        },
-        deltasRoot: { typescript: deltasRoot, rust: engine.deltasRoot },
-        locksRoot: { typescript: locksRoot, rust: engine.locksRoot },
-        ownerSide: { typescript: ownerSide, rust: engine.ownerSide },
-      });
+      const mismatch = await this.#reconcileAccount(ownerKey, key, account, engine);
+      if (mismatch === null) matched.push(key);
+      else mismatched.push(mismatch);
     }
     // The mirror's own tree — the digests recorded at the instants they were
     // handed over — rather than one rebuilt from replicas that kept moving.
@@ -1116,6 +1172,102 @@ export class RscoreShadowMirror {
       missingInEngine,
       extraInEngine: [...engineRows.keys()],
     };
+  }
+
+  async #reconcileAccount(
+    ownerKey: string,
+    accountKey: string,
+    account: AccountReplica,
+    engine: EngineSummaryRow,
+  ): Promise<ShadowReconciliationMismatch | null> {
+    const sections = tsSectionRoots(account.state);
+    const stateRoot = computeAccountStateRoot(account.state).toLowerCase();
+    const mempoolRoot = tsMempoolRoot(account.mempool);
+    // Use the digest captured when the shell was handed to Rust. The live TS
+    // replica may already contain the next queued tx or ACK.
+    const leaf = (this.#forests.get(ownerKey)?.get(accountKey)
+      ?? computeEntityAccountValueHash(account)).toLowerCase();
+    const side = account.state.leftEntity.trim().toLowerCase() === ownerKey ? 'left' : 'right';
+    if (engine.accountStateRoot === stateRoot
+      && engine.entityAccountLeaf === leaf
+      && engine.ownerSide === side) return null;
+
+    const differing = ([
+      ['deltasRoot', sections.deltas, engine.deltasRoot],
+      ['locksRoot', sections.locks, engine.locksRoot],
+      ['swapOffersRoot', sections.swapOffers, engine.swapOffersRoot],
+      ['rebalanceFeePoliciesRoot', sections.rebalanceFeePolicies, engine.rebalanceFeePoliciesRoot],
+      ['accountStateRoot', stateRoot, engine.accountStateRoot],
+      ['mempoolRoot', mempoolRoot, engine.mempoolRoot],
+      ['mempoolLength', String(account.mempool.length), String(engine.mempoolLength)],
+      ['entityAccountLeaf', leaf, engine.entityAccountLeaf],
+      ['ownerSide', side, engine.ownerSide],
+    ] as const).find(([, typescript, rust]) => typescript !== rust)
+      ?? ['entityAccountLeaf', leaf, engine.entityAccountLeaf] as const;
+    let firstDifference = shadowDifference(
+      `$.${differing[0]}`, 'value-mismatch', differing[1], differing[2],
+    );
+    if (engine.accountStateRoot === stateRoot) {
+      const envelope = await this.#envelopeMismatch(
+        ownerKey, accountKey, accountEnvelopeWire(account),
+      );
+      firstDifference = envelope?.firstDifference ?? firstDifference;
+      this.#writeShellMismatch(
+        ownerKey, accountKey, account, stateRoot, leaf, engine, envelope, firstDifference,
+      );
+    }
+    return {
+      accountId: accountKey,
+      accountStateRoot: { typescript: stateRoot, rust: engine.accountStateRoot },
+      entityAccountLeaf: { typescript: leaf, rust: engine.entityAccountLeaf },
+      mempool: { typescript: String(account.mempool.length), rust: String(engine.mempoolLength) },
+      mempoolRoot: { typescript: mempoolRoot, rust: engine.mempoolRoot },
+      deltasRoot: { typescript: sections.deltas, rust: engine.deltasRoot },
+      locksRoot: { typescript: sections.locks, rust: engine.locksRoot },
+      swapOffersRoot: { typescript: sections.swapOffers, rust: engine.swapOffersRoot },
+      rebalanceFeePoliciesRoot: {
+        typescript: sections.rebalanceFeePolicies,
+        rust: engine.rebalanceFeePoliciesRoot,
+      },
+      ownerSide: { typescript: side, rust: engine.ownerSide },
+      firstDifference,
+    };
+  }
+
+  #writeShellMismatch(
+    owner: string,
+    accountKey: string,
+    account: AccountReplica,
+    stateRoot: string,
+    leaf: string,
+    engine: EngineSummaryRow,
+    envelope: ShadowEnvelopeMismatch | undefined,
+    firstDifference: ShadowFirstDifference,
+  ): void {
+    try {
+      if (DIFF_DIR !== null) {
+        mkdirSync(DIFF_DIR, { recursive: true });
+        writeFileSync(join(DIFF_DIR, `shell-${accountKey.slice(2, 14)}.json`), safeStringify({
+          owner,
+          account: accountKey,
+          firstDifference,
+          roots: {
+            accountStateRoot: { typescript: stateRoot, rust: engine.accountStateRoot },
+            entityAccountLeaf: { typescript: leaf, rust: engine.entityAccountLeaf },
+          },
+          projection: redactSecrets(projectEntityAccountLeaf(account)),
+          envelope: envelope === undefined ? null : {
+            typescript: redactSecrets(envelope.typescript),
+            rust: redactSecrets(envelope.rust),
+          },
+        }, 2), { mode: 0o600 });
+      }
+    } catch { /* observer-only */ }
+    try {
+      console.error(
+        `RSCORE_SHADOW_SHELL_MISMATCH ${accountKey} ${safeStringify(firstDifference)}`,
+      );
+    } catch { /* observer-only */ }
   }
 
   /**
@@ -1464,6 +1616,9 @@ export class RscoreShadowMirror {
           report.missingInEngine.length}:extra=${report.extraInEngine.length}:forest=${
           report.forestRoot.equal}`,
         txTypes: [],
+        ...(report.mismatched[0]?.firstDifference
+          ? { firstDifference: report.mismatched[0].firstDifference }
+          : {}),
       });
     }
     try {
@@ -1647,8 +1802,11 @@ export class RscoreShadowMirror {
     // not compare equal — but build the message, which ends up in a durable
     // dump file, from redacted copies.
     if (safeStringify(actualOutputs) !== safeStringify(expectedOutputs)) {
-      const firstDifference = findFirstShadowDifference(expectedOutputs, actualOutputs, '$.outputs')
-        ?? { path: '$.outputs', reason: 'value-mismatch' as const };
+      const firstDifference = findFirstShadowDifference(
+        expectedOutputs,
+        actualOutputs,
+        '$.outputs',
+      ) ?? shadowDifference('$.outputs', 'value-mismatch', expectedOutputs, actualOutputs);
       return {
         detail: `outputs:${firstDifference.path}:${firstDifference.reason}`,
         firstDifference,
@@ -1660,9 +1818,60 @@ export class RscoreShadowMirror {
     const actual = row ? Buffer.from((row as unknown[])[1] as Uint8Array).toString('hex') : 'missing';
     return actual === frame.expectedRootHex ? null : {
       detail: `root:ts=${frame.expectedRootHex}:rust=${actual}`,
-      firstDifference: { path: '$.accountStateRoot', reason: 'value-mismatch' },
+      firstDifference: shadowDifference(
+        '$.accountStateRoot', 'value-mismatch', frame.expectedRootHex, actual,
+      ),
       actualRoot: actual,
     };
+  }
+
+  /** Exact replica-shell read, used only after a leaf mismatch. */
+  async #envelopeMismatch(
+    ownerKey: string,
+    accountKey: string,
+    expected: RscoreWireValue,
+  ): Promise<ShadowEnvelopeMismatch | undefined> {
+    try {
+      const envelope = wireTuple(expected, 'SHADOW_EXPECTED_ENVELOPE', 2);
+      const taggedFields = wireTuple(
+        envelope[0],
+        'SHADOW_EXPECTED_ENVELOPE_FIELDS',
+        2,
+      );
+      if (wireInteger(taggedFields[0], 'SHADOW_EXPECTED_ENVELOPE_FIELDS_TAG') !== 8) {
+        throw new Error('SHADOW_EXPECTED_ENVELOPE_FIELDS_TAG:object');
+      }
+      const expectedFields = wireTuple(
+        taggedFields[1],
+        'SHADOW_EXPECTED_ENVELOPE_FIELD_ROWS',
+      );
+      const client = await this.#ensureClient(ownerKey);
+      const reply = wireTuple(
+        await client.readAccountEnvelope(Buffer.from(accountKey.replace(/^0x/, ''), 'hex')),
+        'SHADOW_ACCOUNT_ENVELOPE_REPLY',
+        2,
+      );
+      wireInteger(reply[0], 'SHADOW_ACCOUNT_ENVELOPE_REVISION');
+      const actualFields = wireTuple(reply[1], 'SHADOW_ACCOUNT_ENVELOPE_FIELD_ROWS');
+      const firstDifference = findFirstShadowDifference(
+        expectedFields,
+        actualFields,
+        '$.accountEnvelope.fields',
+      );
+      return firstDifference === null ? undefined : {
+        firstDifference,
+        typescript: expectedFields,
+        rust: actualFields,
+      };
+    } catch (error) {
+      try {
+        console.error(
+          `RSCORE_SHADOW_ENVELOPE_DIFF_FAILED ${accountKey.slice(-12)}:` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        );
+      } catch { /* observer-only */ }
+      return undefined;
+    }
   }
 
   async #recordMismatch(
@@ -1676,10 +1885,32 @@ export class RscoreShadowMirror {
     const sections = await this.#diverginSections(entry.ownerKey, accountKey, frame);
     const section = Object.entries(sections ?? {}).find(([, roots]) =>
       roots.typescript !== roots.rust);
-    const firstDifference = section === undefined
+    const sectionDifference = section === undefined ? undefined : shadowDifference(
+      `$.accountState.${section[0]}Root`,
+      'value-mismatch',
+      section[1].typescript,
+      section[1].rust,
+    );
+    const ownJobs = entry.jobs.filter(job =>
+      job[1] instanceof Uint8Array && Buffer.from(job[1]).toString('hex') === accountKey);
+    const expectedEnvelope = [...ownJobs]
+      .reverse()
+      .map(job => job[5])
+      .find(value => value !== null && value !== undefined);
+    const envelope = expectedEnvelope === undefined
+      ? undefined
+      : await this.#envelopeMismatch(entry.ownerKey, accountKey, expectedEnvelope);
+    // An effect mismatch is independently consensus-visible even if the state
+    // root also moved. For a root-only mismatch, name the first bad section;
+    // for a shell mismatch, name the exact projected field.
+    const firstDifference = failure.detail.startsWith('outputs:')
       ? failure.firstDifference
-      : { path: `$.accountState.${section[0]}Root`, reason: 'value-mismatch' as const };
-    const diagnostic = { ...failure, firstDifference };
+      : sectionDifference ?? envelope?.firstDifference ?? failure.firstDifference;
+    const diagnostic: ShadowMismatch = {
+      ...failure,
+      firstDifference,
+      ...(envelope === undefined ? {} : { envelope }),
+    };
     this.#writeDiff(entry, accountKey, frame, diagnostic, sections);
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
@@ -1773,6 +2004,11 @@ export class RscoreShadowMirror {
         sections: sections ?? null,
         expectedOutputs: redactSecrets(frame.expectedOutputs),
         actualOutputs: redactSecrets(failure.actualOutputs ?? []),
+        envelope: failure.envelope === undefined ? null : {
+          firstDifference: failure.envelope.firstDifference,
+          typescript: redactSecrets(failure.envelope.typescript),
+          rust: redactSecrets(failure.envelope.rust),
+        },
         jobs: redactSecrets(ownJobs),
       }, 2), { mode: 0o600 });
     } catch { /* observer-only */ }

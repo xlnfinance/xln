@@ -14,7 +14,7 @@ mod state_value;
 use thiserror::Error;
 
 pub use account_tx::{encode_account_tx, encode_bigint, encode_delta, encode_j_claim_node};
-pub use canonical::encode_account_envelope;
+pub use canonical::{encode_account_envelope, encode_canonical_value};
 pub use nodes::{
     AccountCheckpointNamespace, EncodedAccountCheckpointNodeAddress,
     EncodedAccountCheckpointNodeMutation, EncodedAccountCheckpointNodes,

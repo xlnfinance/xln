@@ -6,12 +6,12 @@ use super::tuple;
 pub fn encode_account_envelope(value: &AccountEnvelope) -> AbiValue {
     let fields = CanonicalValue::Object(value.fields().to_vec());
     tuple(vec![
-        encode(&fields),
-        tuple(value.mempool().iter().map(encode).collect()),
+        encode_canonical_value(&fields),
+        tuple(value.mempool().iter().map(encode_canonical_value).collect()),
     ])
 }
 
-fn encode(value: &CanonicalValue) -> AbiValue {
+pub fn encode_canonical_value(value: &CanonicalValue) -> AbiValue {
     match value {
         CanonicalValue::Null => tuple(vec![AbiValue::Integer(0)]),
         CanonicalValue::Bool(flag) => tuple(vec![
@@ -31,27 +31,37 @@ fn encode(value: &CanonicalValue) -> AbiValue {
         }
         CanonicalValue::Array(values) => tuple(vec![
             AbiValue::Integer(5),
-            tuple(values.iter().map(encode).collect()),
+            tuple(values.iter().map(encode_canonical_value).collect()),
         ]),
         CanonicalValue::Map(entries) => tuple(vec![
             AbiValue::Integer(6),
             tuple(
                 entries
                     .iter()
-                    .map(|(key, value)| tuple(vec![encode(key), encode(value)]))
+                    .map(|(key, value)| {
+                        tuple(vec![
+                            encode_canonical_value(key),
+                            encode_canonical_value(value),
+                        ])
+                    })
                     .collect(),
             ),
         ]),
         CanonicalValue::Set(values) => tuple(vec![
             AbiValue::Integer(7),
-            tuple(values.iter().map(encode).collect()),
+            tuple(values.iter().map(encode_canonical_value).collect()),
         ]),
         CanonicalValue::Object(entries) => tuple(vec![
             AbiValue::Integer(8),
             tuple(
                 entries
                     .iter()
-                    .map(|(key, value)| tuple(vec![AbiValue::Text(key.clone()), encode(value)]))
+                    .map(|(key, value)| {
+                        tuple(vec![
+                            AbiValue::Text(key.clone()),
+                            encode_canonical_value(value),
+                        ])
+                    })
                     .collect(),
             ),
         ]),

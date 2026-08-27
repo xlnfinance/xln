@@ -855,8 +855,23 @@ fn capacity_batch_and_summary_page_read_committed_state() {
     };
     assert_eq!(token_two.fields()[1], AbiValue::Integer(0));
 
+    let envelope = session
+        .handle(request(
+            4,
+            OpTag::ReadAccountEnvelope,
+            vec![AbiValue::Bytes(account.to_vec())],
+        ))
+        .envelope;
+    assert_ok(envelope.clone());
+    let fields = body_fields(&envelope);
+    assert_eq!(fields[0], AbiValue::Integer(3));
+    let AbiValue::Tuple(shell) = &fields[1] else {
+        panic!("account envelope expected");
+    };
+    assert!(shell.fields().is_empty(), "default envelope has no fields");
+
     // Read-only ops must not disturb the atomic write lifecycle.
-    let prepared = session.handle(prepare(4, 5)).envelope;
+    let prepared = session.handle(prepare(5, 5)).envelope;
     assert_ok(prepared);
 }
 

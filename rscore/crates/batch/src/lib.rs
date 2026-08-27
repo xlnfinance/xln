@@ -27,7 +27,7 @@ pub use checkpoint_wire::{
     EncodedAccountCheckpointNodeMutation, EncodedAccountCheckpointNodes,
     EncodedAccountCheckpointTreeChanges, EncodedAccountJClaimChanges, EncodedAccountJClaimNodePut,
     encode_account_checkpoint_nodes, encode_account_checkpoint_rows, encode_account_envelope,
-    encode_account_tx, encode_bigint, encode_delta, encode_j_claim_node,
+    encode_account_tx, encode_bigint, encode_canonical_value, encode_delta, encode_j_claim_node,
 };
 pub use consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
