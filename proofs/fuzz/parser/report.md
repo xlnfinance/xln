@@ -83,10 +83,17 @@ fix decisions belong to the owner.
   `process/src/wire/value.rs::bigint()` uses tolerant `str::parse::<BigInt>()`
   while the encoder (`batch/src/checkpoint_wire/account_tx.rs::encode_bigint`)
   emits `to_string()`. `num-bigint` parse also accepts `+`-prefixed text.
-- Mitigation in production: the full envelope decoder re-encodes and compares
-  byte-exactly, so a peer cannot smuggle such a spelling through the transport
-  envelope. The defect is limited to the public `decode_account_tx` boundary
-  used for cross-language vectors.
+- Mitigation (уточнено аудитом c7-repro A-2): конвертный декодер перепроверяет
+  байты re-encode'ом и потому каноничен на msgpack-уровне — но он
+  **spelling-индифферентен**: Text("0850000000000") проезжает конверт насквозь
+  (Ok, re-encode == input), НЕ-минимальное написание живёт в теле. Сдерживание
+  находится на типизированной границе `decode_account_tx` → encode даёт
+  минимальную форму, поэтому в чекпоинты/рёт-энкод попадает уже нормализованный
+  BigInt. Дефект ограничен публичной `decode_account_tx` границей
+  (кросс-языковые векторы): там, где принятое значение переприходится наружу
+  текстом, round-trip не байт-точен. Исходная формулировка «peer cannot
+  smuggle through the transport envelope» была эмпирически неверна — см.
+  proofs/audits/c7-repro/report.md.
 
 ### F2 — `decode_value`/`encode_value` nesting budget off by one (low)
 
