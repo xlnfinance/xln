@@ -13,11 +13,11 @@ Post-FX-1 audit (2026-08-28): the committed corpus vector had been changed to
 `both-reject`, but `generate.ts` still regenerated `tx-policy-unsafe-version`
 as `rust-rejects`. A clean run at
 `78e07d9a92b5a022cb55a9a32519f10341148d0e` therefore failed 1/10,114. The
-generator classification is now corrected; the full 80,656-case suite passes
-on clean `e69630fca77d62f6d495143fd21d18fd95fac72f` plus this proof-only change
-(fresh Rust release build: 11.16s; all five corpus runs: 0 failures). This
-result must be pinned to the next immutable commit before it is release
-evidence.
+generator classification is now corrected in `935020a41`. The full
+80,656-case suite passes without overlay on clean immutable
+`b7e3ace82b1c296dff0f646d3bebb120a90a0637` (fresh Rust release build: 9.84s;
+all five corpus runs: 0 failures). This is coordinator reproduction evidence;
+an independent repro audit on the post-FX bytes is still required.
 
 ## Harness
 

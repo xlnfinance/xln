@@ -1,6 +1,6 @@
 # proofs/ — формальные доказательства и доказательный фаззинг
 
-Матрица повторно сверена на `b043199fee93e0e50fb12dcc4cc2b00c7e193fc2`.
+Матрица повторно сверена на `b7e3ace82b1c296dff0f646d3bebb120a90a0637`.
 Каждый evidence-report обязан указывать собственный immutable SHA, версии инструментов,
 точные команды и bounded-скоуп. Результат из dirty worktree не считается доказательством:
 повторный прогон выполняется из `git archive` заявленного SHA или другого чистого checkout.
@@ -25,7 +25,7 @@
 
 | # | Claim (что утверждаем) | Evidence (артефакт) | Статус |
 |---|---|---|---|
-| C1 | Канонические энкодеры TS↔Rust дают одинаковые байты либо одинаково отвергают вход в сгенерированном домене | `proofs/fuzz/enc-diff/report.md`: 80,656 кейсов, 0 неожиданных расхождений. Committed adversary: 74/100; заявленный c1-repro 92/100 отсутствует в audited SHA. После FX-1 основной корпус требует новую immutable фиксацию: `tx-policy-unsafe-version` теперь `both-reject`; остаются F2–F7 adversary-gap'ы | ⚠️ bounded evidence; missing repro + re-audit после фикса генератора |
+| C1 | Канонические энкодеры TS↔Rust дают одинаковые байты либо одинаково отвергают вход в сгенерированном домене | `proofs/fuzz/enc-diff/report.md`: clean post-FX `b7e3ace82`, 80,656 кейсов, 0 неожиданных расхождений. Аудиты: c1-repro `findings.md` 92/100 на историческом `dfd45cc7c`, adversary 74/100. Generator fix — `935020a41`; требуется новый independent repro на post-FX bytes; остаются F2–F7 | ⚠️ bounded evidence; post-FX re-audit открыт |
 | C2 | Hot-root равен cold-recompute после покрытых последовательностей мутаций | `core/__tests__/proofs/hot-vs-cold.test.ts` + `proofs/ts/report.md`: после hardening 900 последовательностей, 325,793 deep-проверки. Остатки: пустые `lendingIntents`/`subcontracts`/`pendingWithdrawals`/shadow maps, нет delete для pulls, settlement/dispute/external-finality, double rollback и boundary tokenIds. **c2-repro**: исходный отчёт 2026-08-27 утерян до коммита; заменён независимым re-audit `b043199fe` (**91/100**): clean-extraction `78e07d9a9` — 113,872 default / 325,793 deep, точно; гэпы — `proofs/gaps.md` | ⚠️ сильное bounded evidence, не закрыто |
 | C3 | В TLA-модели Agreement/AckDurability сохраняются; rollback-duplicate варианты нарушают разные liveness-свойства при `DeliverPartial` | `proofs/tla/report.md`: 8 TLC-прогонов; один прогон независимо повторён: 337,955 distinct states, без ошибки. Производственная достижимость `DeliverPartial` не доказана: TS и Rust публикуют переход через атомарную WAL-границу | ⚠️ модель завершена; 0/2 аудита и нужен crash-cutpoint |
 | C4 | Контрактные свойства в пределах Foundry/Halmos моделей | `proofs/solidity/report.md`: 99 pass + 2 известные fail; Halmos 5/5 независимо повторён. `jurisdictions/contracts/**`, artifacts/typechain и `frozen-core.json` не менялись относительно frozen baseline. Hardening закрыл A1–A3/A5–A7; A4 закрыт частично, A8–A12 остаются | ⚠️ воспроизводимо, scope не закрыт |
@@ -38,9 +38,9 @@
 
 ## Completion gate
 
-- Под `proofs/audits/` закоммичено **8**, а не 9 пакетов (7 исходных + c2-repro re-audit
-  `b043199fe`, заменяющий утерянный до коммита оригинал); заявленный C1-repro отсутствует.
-  Аудиты садились в git позже
+- Под `proofs/audits/` закоммичено **9** пакетов; C1-repro использует имя
+  `findings.md`, остальные — `report.md`. C2-repro `b043199fe` заменяет утерянный
+  до коммита оригинал. Аудиты садились в git позже
   пинов своих evidence (`9aa5affbe`/`3cbf807da`) — при цитировании сверять SHA отчёта,
   не только SHA evidence. Отсутствуют: TLA×2 и Kani-repro.
 - Единый реестр требований аудитов (до 100/100) — `proofs/gaps.md`; статус «программа
@@ -49,8 +49,9 @@
   crash-cutpoint для C3/BUG-05, C7 wave-2 и Kani W256 rejection/repro.
 - Итоговые числа должны быть исправлены в первичных секциях отчётов, а не только в поздних
   примечаниях, и повторены двумя независимыми аудитами на одном immutable SHA.
-- Релизный пакет требует clean SHA, English-источников, folder-width gate, `bun run check`
-  и итоговой таблицы claim → proof → adversary → repro → residual risk.
+- Релизный пакет требует clean SHA, English-источников, `bun run check` и итоговой
+  таблицы claim → proof → adversary → repro → residual risk. Folder-width уже зелёный:
+  `FOLDER_WIDTH_OK` (grandfathered debt не включает `test/foundry`).
 
 ## Точные формулировки кодек-свойств (для задач 1, 6, 7)
 
@@ -114,7 +115,7 @@ fixed-width арифметика, overflow, routing и малые reducers.
 `rollback-duplicate` (ретрансмит победившего фрейма после роллбэка):
 TS `core/account/consensus/incoming/collision.ts:198` → `return undefined` (продолжить),
 Rust `engine/src/consensus/incoming/apply.rs:707` → `rejected("ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE")`
-(строки — HEAD `b043199fe`; на TLA-пине `13f51950a` — `:196`/`:652`, см. `proofs/tla/report.md`).
+(строки — audited HEAD `b7e3ace82`; на TLA-пине `13f51950a` — `:196`/`:652`, см. `proofs/tla/report.md`).
 Модель обязана закодировать оба варианта (`TS_ROLLBACK_DUP == continue | reject`) и проверить,
 ломает ли расхождение Agreement. Окно достижимости узкое (post-rollback/pre-commit + retry);
 если достижимо — Rust-путь может подавлять нужный re-ack → liveness. Это не «расхождение

@@ -10,7 +10,7 @@
 
 | # | Требование | Статус |
 |---|---|---|
-| 1 | Re-pin: relabel seed + rebuild + повтор 4 корпусов на новом immutable SHA | WAVE-2026-08-28 частично: generator label `both-reject`; 80,656 зелёные на clean `e69630fca` + proof-only fix; генератор-фикс закоммичен `935020a41` (regen байт-идентичен корпусу, 200/0 — независимо перепроверено аудитом 2026-08-28); формальный полный повтор всех 4 корпусов на этом пине — OPEN |
+| 1 | Re-pin: relabel seed + rebuild + повтор 4 корпусов на новом immutable SHA | PARTIAL: generator fix `935020a41`; coordinator full rerun на clean immutable `b7e3ace82` = 80,656/0. Independent repro-аудит на post-FX bytes — OPEN |
 | 2 | Починка shrinker'а (уникальные id кандидатов) + калибровка ≥3 режимов саботажа | OPEN |
 | 3 | Duplicate-parity: прод-проверка в TS-энкодере ИЛИ переформулировка свойства (reference-key асимметрия) | OPEN |
 | 4 | Перечислить семейство асимметрий: сиды tokenId>65535, timeInForce>255, jHeight>2^53, hashlock/EntityId/envelope | OPEN |
@@ -19,11 +19,11 @@
 | 7 | Edge-сид: j_event с 0 событий; unknown tx field; `__proto__`; wObj-dup без драйвер-интерсептора | OPEN |
 | 8 | Coverage ledger: per-pair/per-branch счётчики | OPEN |
 
-## c1-repro (92/100; findings.md закоммичен `9aa5affbe` — позже пина evidence `dfd45cc7c`; независимый перепрогон на immutable SHA не выполнялся)
+## c1-repro (92/100; `findings.md` закоммичен `9aa5affbe`, audited subject `dfd45cc7c`)
 
 | # | Требование | Статус |
 |---|---|---|
-| 1 | Исходный прогон на грязном дереве невосстановим из git | OPEN: метод/команды/таллии есть в закоммиченном findings.md, но прогон независимым аудитором на immutable SHA не выполнялся; локальный clean-перепрогон координатора его не заменяет |
+| 1 | Исходный прогон на грязном дереве невосстановим из git | CLOSED эквивалентностью: c1-repro независимо пересобрал и повторил 80,656/0 из clean `git archive dfd45cc7c`; исходные dirty bytes всё равно не реконструируются |
 | 2 | Seed 31337 не перепрогнан | WAVE-2026-08-28: clean `e69630fca` + proof-only fix, 10,114/0; требуется независимый repro на immutable SHA |
 | 3 | Обёртка саботаж-калибровки минимизатора не закоммичена | OPEN (связано с c1-adv#2) |
 | 4–5 | Генераторные гэпы / driver-substituted both-reject | OPEN (= c1-adv #4–7, #3) |
@@ -125,6 +125,6 @@
 | C8: собственный артефакт (report/SHA/команды/кардинальность) + 2 аудита, либо вывод из матрицы | OPEN (матрица уже честно «❌ не доказано как C8» — WAVE-2026-08-28) |
 | FX-1/FX-2 манифест внутри смешанного `64b41da54` | OPEN (файлы: `core/account/tx/admission-policy.ts`, `core/account/input/peer-rejection.ts`, `rscore engine consensus/frame/hash.rs`, `consensus/replica.rs`, `error.rs`, `lib.rs`, тесты `core/__tests__/proofs/fx-admission.test.ts`, `engine/tests/fx_admission.rs`) |
 | English-источники proofs/** (`check:english-source` красный) | OPEN |
-| folder-width gate (`test/foundry` >10) | OPEN |
-| Финальный `bun run check` на чистом дереве | OPEN (сейчас красный от параллельного WIP) |
+| folder-width gate | CLOSED на audited worktree: `FOLDER_WIDTH_OK dirs=7022 sourceFiles=3738 max=10/10`; текущий grandfathered debt — `jurisdictions/contracts:16,scripts/dev:12`, не `test/foundry` |
+| Финальный `bun run check` | OPEN: 2026-08-28 остановился на `ESLINT_DEBT_CHANGED expected=341/... actual=343/...`; proof-only diff не затрагивает ESLint debt, нужен clean candidate |
 | C9/C10 (trace refinement, crash-cutpoint) | фаза 2 |
