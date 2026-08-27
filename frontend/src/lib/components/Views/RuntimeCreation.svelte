@@ -72,6 +72,10 @@
     resolveWalletRecoveryContinuation,
     summarizeWalletRecoveryCandidates,
   } from '../../../../packages/browser/src/wallet-recovery-choice';
+  import {
+    resolveWalletRuntimeOpeningPlan,
+    walletRuntimeOpeningNeedsLocalLookup,
+  } from '../../../../packages/browser/src/wallet-runtime-opening';
 
   // Props
   export let embedded: boolean = false;
@@ -494,20 +498,40 @@
     derivationError = '';
     try {
       const runtimeId = ethereumAddress;
-      const label = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+      const openingChoice = {
+        openLocal: options.openLocal === true,
+        forceFresh: options.forceFresh === true,
+        hasRecoveryCandidate: options.recoveryCandidate !== undefined,
+      };
+      const openingPlan = resolveWalletRuntimeOpeningPlan({
+        runtimeId,
+        name,
+        labelOverride,
+        seed: mnemonic24,
+        mnemonic12,
+        devicePassphrase,
+        loginType: createLoginType,
+        unlockDurationMs,
+        recoveryCandidate: options.recoveryCandidate,
+        forceFresh: openingChoice.forceFresh,
+        openLocal: openingChoice.openLocal,
+        localRuntimeExists: walletRuntimeOpeningNeedsLocalLookup(openingChoice)
+          ? vaultOperations.runtimeExists(runtimeId)
+          : false,
+      });
 
-      if (options.openLocal || (!options.forceFresh && !options.recoveryCandidate && vaultOperations.runtimeExists(runtimeId))) {
-        await vaultOperations.unlockRuntime(runtimeId, mnemonic24, unlockDurationMs);
+      if (openingPlan.action === 'unlock-local') {
+        await vaultOperations.unlockRuntime(
+          openingPlan.runtimeId,
+          openingPlan.seed,
+          openingPlan.unlockDurationMs,
+        );
       } else {
-        const runtime = await vaultOperations.createRuntime(label, mnemonic24, {
-          loginType: createLoginType,
-          requiresOnboarding: createLoginType !== 'demo',
-          mnemonic12: mnemonic12.trim().split(/\s+/).join(' ') || undefined,
-          devicePassphrase: devicePassphrase || undefined,
-          recoveryCandidate: options.recoveryCandidate,
-          skipRecoveryRestore: !options.recoveryCandidate,
-          unlockDurationMs,
-        });
+        const runtime = await vaultOperations.createRuntime(
+          openingPlan.label,
+          openingPlan.seed,
+          openingPlan.options,
+        );
         entityId = runtime.signers[0]?.entityId || entityId;
       }
       createLoginType = 'manual';

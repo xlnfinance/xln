@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, AND RECOVERY-CHOICE COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, AND RUNTIME-OPENING COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -610,6 +610,19 @@ canonical Svelte production builds pass, and the wallet local check covers 447
 files with zero unsafe-type findings. This covers selection, empty results,
 deduplication, ordering, stable ties, continuation, immutability, and thin
 wiring.
+
+The next wallet slice now owns framework-neutral Runtime opening plans:
+explicit local unlock precedence, default existing-Runtime lookup, forced-fresh
+and recovery-candidate creation, fallback labels, interoperability mnemonic
+normalization, device-passphrase presence, onboarding policy, and recovery
+restore flags. Local Runtime lookup remains short-circuited for explicit
+local, fresh, and backup actions. The canonical Svelte event flow retains
+vault reads and mutations, active signer publication, sensitive cleanup,
+navigation, diagnostics, and failure handling. Eight direct tests plus the
+affected recovery, vault protection, creation-lock, shell, bootstrap, consent,
+import, workspace, and capability suites pass 134 tests with 757 expectations;
+both wallet and canonical Svelte production builds pass, and the wallet local
+check covers 448 files with zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -790,6 +803,10 @@ any mismatch. Never compile on production.
    Recovery candidate selection, peer counting, immutable file-candidate merge
    ordering, and backup/local/fresh continuation are shared while discovery,
    storage, and Runtime effects remain concrete.
+   Runtime local-unlock and creation plans, input normalization, onboarding
+   flags, and recovery-restore intent are shared while vault mutation,
+   sensitive cleanup, navigation, diagnostics, and failure handling remain
+   concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
