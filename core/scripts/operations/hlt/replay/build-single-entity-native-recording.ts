@@ -44,6 +44,7 @@ export type SingleEntityNativeFixturePaths = Readonly<{
 export type SingleEntityNativeFixtureOptions = Readonly<{
   paymentCount?: number;
   paymentBatchSize?: number;
+  peerCount?: number;
   includeSwap?: boolean;
 }>;
 
@@ -51,7 +52,7 @@ type RuntimeApi = typeof import('../../../../runtime');
 
 type FixtureIdentities = Readonly<{
   main: ManagedEntityIdentity;
-  peer: ManagedEntityIdentity;
+  peers: readonly ManagedEntityIdentity[];
 }>;
 
 const configureProcess = (workDir: string): void => {
@@ -118,6 +119,8 @@ const onlyEntityReplica = (env: RuntimeReplica) => {
   return env.state.eReplicas.values().next().value!;
 };
 
+const entityReplicas = (env: RuntimeReplica) => [...env.state.eReplicas.values()];
+
 const enqueue = (
   runtime: RuntimeApi,
   env: RuntimeReplica,
@@ -168,30 +171,21 @@ const pump = async (
 
 const identityImports = async (runtime: RuntimeApi, identities: FixtureIdentities) => {
   const { importEntity } = runtime;
-  return [
-    importEntity({
-      entityId: identities.main.entityId,
-      signerId: identities.main.signerId,
-      entitySeed: identities.main.entitySeed,
+  const toImport = (identity: ManagedEntityIdentity) => importEntity({
+      entityId: identity.entityId,
+      signerId: identity.signerId,
+      entitySeed: identity.entitySeed,
       data: {
-        config: identities.main.consensusConfig,
+        config: identity.consensusConfig,
         isProposer: true,
-        profileName: identities.main.name,
-        position: identities.main.position,
+        profileName: identity.name,
+        position: identity.position,
       },
-    }),
-    importEntity({
-      entityId: identities.peer.entityId,
-      signerId: identities.peer.signerId,
-      entitySeed: identities.peer.entitySeed,
-      data: {
-        config: identities.peer.consensusConfig,
-        isProposer: true,
-        profileName: identities.peer.name,
-        position: identities.peer.position,
-      },
-    }),
-  ] as const;
+    });
+  return {
+    main: toImport(identities.main),
+    peers: identities.peers.map(toImport),
+  } as const;
 };
 
 const profileInput = (
@@ -221,8 +215,7 @@ const installProfiles = async (
   const { buildLocalEntityProfile } = await import('../../../../network/p2p/gossip/helper');
   const { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } =
     await import('../../../../entity/profile/profile-signing');
-  const certify = async (env: RuntimeReplica) => {
-    const replica = onlyEntityReplica(env);
+  const certify = async (env: RuntimeReplica, replica: ReturnType<typeof entityReplicas>[number]) => {
     const profile = buildLocalEntityProfile(env, replica.state, env.state.timestamp);
     const witness = replica.hankoWitness?.get(computeProfileHash(profile));
     if (!witness || witness.type !== 'profile') {
@@ -231,7 +224,9 @@ const installProfiles = async (
     profile.metadata.profileHanko = witness.hanko;
     return signProfileRuntimeRoute(env, profile, replica.signerId);
   };
-  const profiles = await Promise.all([certify(main), certify(peer)]);
+  const profiles = await Promise.all(
+    [main, peer].flatMap(env => entityReplicas(env).map(replica => certify(env, replica))),
+  );
   for (const observer of [main, peer]) {
     if (!observer.gossip.setProfiles) throw new Error('NATIVE_FIXTURE_GOSSIP_SET_PROFILES_MISSING');
     observer.gossip.setProfiles(profiles);
@@ -274,19 +269,20 @@ const setupInputs = async (
           minTradeSize: 0n,
           supportedPairs: ['1/2'],
         },
-      },
-      { type: 'extendCredit', data: { counterpartyEntityId: identities.peer.entityId, tokenId: 1, amount: credit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: identities.peer.entityId, tokenId: 2, amount: credit } }],
+      }, ...identities.peers.flatMap((peer): EntityTx[] => [
+        { type: 'extendCredit', data: { counterpartyEntityId: peer.entityId, tokenId: 1, amount: credit } },
+        { type: 'extendCredit', data: { counterpartyEntityId: peer.entityId, tokenId: 2, amount: credit } },
+      ])],
     }],
-    peer: [{
-      entityId: identities.peer.entityId,
-      signerId: identities.peer.signerId,
+    peer: identities.peers.map(peer => ({
+      entityId: peer.entityId,
+      signerId: peer.signerId,
       entityTxs: [{
         type: 'openAccount',
         data: {
           targetEntityId: identities.main.entityId,
           disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
-            { entityId: identities.peer.entityId, isHub: false, source: 'operator-config' },
+            { entityId: peer.entityId, isHub: false, source: 'operator-config' },
             { entityId: identities.main.entityId, isHub: true, source: 'operator-config' },
           ),
           rebalancePolicy: { r2cRequestSoftLimit: credit, hardLimit: credit, maxAcceptableFee: 0n },
@@ -294,7 +290,7 @@ const setupInputs = async (
       },
       { type: 'extendCredit', data: { counterpartyEntityId: identities.main.entityId, tokenId: 1, amount: credit } },
       { type: 'extendCredit', data: { counterpartyEntityId: identities.main.entityId, tokenId: 2, amount: credit } }],
-    }],
+    })),
   };
 };
 
@@ -319,20 +315,24 @@ const tailInputs = async (identities: FixtureIdentities): Promise<Readonly<{
     payment: (start, count) => ({
       entityId: identities.main.entityId,
       signerId: identities.main.signerId,
-      entityTxs: Array.from({ length: count }, (_, offset): EntityTx => ({
-        type: 'directPayment',
-        data: {
-          targetEntityId: identities.peer.entityId,
-          tokenId: 1,
-          amount: eth / 10n,
-          route: [identities.main.entityId, identities.peer.entityId],
-          deliveryMode: 'direct',
-          description: `native replay direct payment ${start + offset}`,
-        },
-      })),
+      entityTxs: Array.from({ length: count }, (_, offset): EntityTx => {
+        const paymentIndex = start + offset;
+        const target = identities.peers[paymentIndex % identities.peers.length]!;
+        return {
+          type: 'directPayment',
+          data: {
+            targetEntityId: target.entityId,
+            tokenId: 1,
+            amount: eth / 10n,
+            route: [identities.main.entityId, target.entityId],
+            deliveryMode: 'direct',
+            description: `native replay direct payment ${paymentIndex}`,
+          },
+        };
+      }),
     }),
     maker: input(identities.main, { type: 'placeSwapOffer', data: {
-      counterpartyEntityId: identities.peer.entityId,
+      counterpartyEntityId: identities.peers[0]!.entityId,
       offerId: 'native-replay-maker',
       giveTokenId: 1,
       giveAmount: eth,
@@ -341,7 +341,7 @@ const tailInputs = async (identities: FixtureIdentities): Promise<Readonly<{
       ...getStaticSwapTokenDimensions(1, 2),
       ...deriveSwapNetAuthorization(usdc, 1),
     } }),
-    taker: input(identities.peer, { type: 'placeSwapOffer', data: {
+    taker: input(identities.peers[0]!, { type: 'placeSwapOffer', data: {
       counterpartyEntityId: identities.main.entityId,
       offerId: 'native-replay-taker',
       giveTokenId: 2,
@@ -367,7 +367,9 @@ const assertTail = (
       throw new Error(`NATIVE_FIXTURE_FORBIDDEN_RUNTIME_LANE:${frame.height}`);
     }
   }
-  if (frames.at(-1)!.height >= 100) throw new Error(`NATIVE_FIXTURE_TAIL_CROSSES_SNAPSHOT:${frames.at(-1)!.height}`);
+  if (frames.at(-1)!.height >= FIXTURE_SNAPSHOT_PERIOD) {
+    throw new Error(`NATIVE_FIXTURE_TAIL_CROSSES_SNAPSHOT:${frames.at(-1)!.height}`);
+  }
 };
 
 export const buildSingleEntityNativeRecording = async (
@@ -376,12 +378,16 @@ export const buildSingleEntityNativeRecording = async (
 ): Promise<SingleEntityNativeFixturePaths> => {
   const paymentCount = options.paymentCount ?? 1;
   const paymentBatchSize = options.paymentBatchSize ?? 1;
+  const peerCount = options.peerCount ?? 1;
   const includeSwap = options.includeSwap ?? true;
   if (!Number.isSafeInteger(paymentCount) || paymentCount < 1) {
     throw new Error(`NATIVE_FIXTURE_PAYMENT_COUNT:${paymentCount}`);
   }
   if (!Number.isSafeInteger(paymentBatchSize) || paymentBatchSize < 1) {
     throw new Error(`NATIVE_FIXTURE_PAYMENT_BATCH_SIZE:${paymentBatchSize}`);
+  }
+  if (!Number.isSafeInteger(peerCount) || peerCount < 1) {
+    throw new Error(`NATIVE_FIXTURE_PEER_COUNT:${peerCount}`);
   }
   const workDir = resolve(outputDirectory);
   rmSync(workDir, { recursive: true, force: true });
@@ -398,16 +404,19 @@ export const buildSingleEntityNativeRecording = async (
     main: deriveManagedEntityIdentity({
       name: 'Native Replay Hub', seed: MAIN_SEED, signerLabel: 'owner', jurisdiction: FIXTURE_JURISDICTION,
     }),
-    peer: deriveManagedEntityIdentity({
-      name: 'Native Replay Peer', seed: PEER_SEED, signerLabel: 'owner', jurisdiction: FIXTURE_JURISDICTION,
-    }),
+    peers: Array.from({ length: peerCount }, (_, index) => deriveManagedEntityIdentity({
+      name: index === 0 ? 'Native Replay Peer' : `Native Replay Peer ${index + 1}`,
+      seed: index === 0 ? PEER_SEED : `${PEER_SEED}-${index + 1}`,
+      signerLabel: 'owner',
+      jurisdiction: FIXTURE_JURISDICTION,
+    })),
   };
   let main = createFixtureRuntime(runtime, MAIN_SEED);
   let peer = createFixtureRuntime(runtime, PEER_SEED);
   await Promise.all([bindFixtureJurisdiction(main), bindFixtureJurisdiction(peer)]);
   await Promise.all([
     registerFixtureSigner(main, identities.main),
-    registerFixtureSigner(peer, identities.peer),
+    ...identities.peers.map(identity => registerFixtureSigner(peer, identity)),
   ]);
   const mainRef = (): RuntimeReplica => main;
   const peerRef = (): RuntimeReplica => peer;
@@ -416,11 +425,11 @@ export const buildSingleEntityNativeRecording = async (
 
   try {
     const imports = await identityImports(runtime, identities);
-    enqueue(runtime, main, ++timestamp, [], [imports[0]]);
-    enqueue(runtime, peer, ++timestamp, [], [imports[1]]);
+    enqueue(runtime, main, ++timestamp, [], [imports.main]);
+    enqueue(runtime, peer, ++timestamp, [], imports.peers);
     await pump(runtime, mainRef, peerRef);
     enqueue(runtime, main, ++timestamp, [profileInput(identities.main, true)]);
-    enqueue(runtime, peer, ++timestamp, [profileInput(identities.peer, false)]);
+    enqueue(runtime, peer, ++timestamp, identities.peers.map(identity => profileInput(identity, false)));
     await pump(runtime, mainRef, peerRef);
     await installProfiles(main, peer);
 
@@ -523,9 +532,11 @@ export const buildSingleEntityNativeRecording = async (
         sections,
       };
     }).sort((left, right) => left.runtimeHeight - right.runtimeHeight);
-    const accountFrames = (await runtime.readPersistedAccountFrameHistoryRecords(
-      main, identities.main.entityId, identities.peer.entityId, 1_000, { maxRuntimeHeight: targetHeight },
-    )).filter(record => record.runtimeHeight > baseHeight).map(record => ({
+    const accountFrames = (await Promise.all(identities.peers.map(peerIdentity =>
+      runtime.readPersistedAccountFrameHistoryRecords(
+        main, identities.main.entityId, peerIdentity.entityId, 1_000, { maxRuntimeHeight: targetHeight },
+      ),
+    ))).flat().filter(record => record.runtimeHeight > baseHeight).map(record => ({
       runtimeHeight: record.runtimeHeight,
       entityId: record.entityId,
       counterpartyId: record.counterpartyId,
@@ -565,8 +576,8 @@ export const buildSingleEntityNativeRecording = async (
       createdAt: FIXED_CREATED_AT,
       source: {
         workDir,
-        users: 1,
-        workload: `single-entity-pay-${paymentCount}${includeSwap ? '-same-j-swap' : ''}`,
+        users: peerCount,
+        workload: `single-entity-${peerCount}-accounts-pay-${paymentCount}${includeSwap ? '-same-j-swap' : ''}`,
       },
       recording,
       totals: recordingApi.summarizeHltHubFrames(frames),
@@ -617,6 +628,7 @@ if (import.meta.main) {
   const paths = await buildSingleEntityNativeRecording(cliOutputDirectory(), {
     paymentCount: cliPositiveInteger('--payments', 1),
     paymentBatchSize: cliPositiveInteger('--payment-batch-size', 1),
+    peerCount: cliPositiveInteger('--peers', 1),
     includeSwap: !process.argv.includes('--no-swap'),
   });
   mkdirSync(dirname(paths.manifest), { recursive: true });

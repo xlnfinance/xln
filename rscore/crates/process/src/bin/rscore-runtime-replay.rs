@@ -33,6 +33,19 @@ fn optional_usize(args: &[String], name: &str, default: usize) -> Result<usize, 
         .ok_or_else(|| format!("RUNTIME_REPLAY_ARG_INVALID:{name}"))
 }
 
+fn optional_nonzero_usize(args: &[String], name: &str) -> Result<Option<usize>, String> {
+    let Some(index) = args.iter().position(|value| value == name) else {
+        return Ok(None);
+    };
+    args.get(index + 1)
+        .ok_or_else(|| format!("RUNTIME_REPLAY_ARG_MISSING:{name}"))?
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value > 0)
+        .map(Some)
+        .ok_or_else(|| format!("RUNTIME_REPLAY_ARG_INVALID:{name}"))
+}
+
 fn unsigned(value: Option<&Value>, path: &str) -> Result<u64, String> {
     value
         .and_then(Value::as_u64)
@@ -59,11 +72,33 @@ fn recording_range(root: &Value) -> Result<(u64, u64), String> {
     Ok((from, target))
 }
 
-fn recorded_direct_payments(root: &Value) -> Result<u64, String> {
-    unsigned(
-        root.pointer("/authorityEvidence/economicOperations/coverage/directPayments"),
-        "authorityEvidence.economicOperations.coverage.directPayments",
-    )
+fn recorded_direct_payments(root: &Value, from: u64, to: u64) -> Result<u64, String> {
+    let rows = root
+        .pointer("/authorityFrameOracle/accountFrames")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "RUNTIME_REPLAY_ACCOUNT_ORACLE_ARRAY".to_string())?;
+    let mut payments = 0_u64;
+    for (index, row) in rows.iter().enumerate() {
+        let height = unsigned(
+            row.get("runtimeHeight"),
+            &format!("authorityFrameOracle.accountFrames[{index}].runtimeHeight"),
+        )?;
+        if height < from || height > to {
+            continue;
+        }
+        let txs = row
+            .pointer("/frame/accountTxs")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("RUNTIME_REPLAY_ACCOUNT_TXS:{index}"))?;
+        for tx in txs {
+            if tx.get("type").and_then(Value::as_str) == Some("direct_payment") {
+                payments = payments
+                    .checked_add(1)
+                    .ok_or_else(|| "RUNTIME_REPLAY_PAYMENT_COUNT_OVERFLOW".to_string())?;
+            }
+        }
+    }
+    Ok(payments)
 }
 
 fn main() -> Result<(), String> {
@@ -97,8 +132,16 @@ fn main() -> Result<(), String> {
         .map_err(|error| format!("RUNTIME_REPLAY_RECORDING_READ:{error}"))?;
     let recording = serde_json::from_slice::<Value>(&recording_bytes)
         .map_err(|error| format!("RUNTIME_REPLAY_RECORDING_JSON:{error}"))?;
-    let (from, to) = recording_range(&recording)?;
-    let direct_payments = recorded_direct_payments(&recording)?;
+    let (from, recorded_to) = recording_range(&recording)?;
+    let max_frames = optional_nonzero_usize(&args, "--max-frames")?;
+    let to = max_frames.map_or(Ok(recorded_to), |count| {
+        let count =
+            u64::try_from(count).map_err(|_| "RUNTIME_REPLAY_MAX_FRAMES_OVERFLOW".to_string())?;
+        from.checked_add(count - 1)
+            .map(|height| height.min(recorded_to))
+            .ok_or_else(|| "RUNTIME_REPLAY_HEIGHT_OVERFLOW".to_string())
+    })?;
+    let direct_payments = recorded_direct_payments(&recording, from, to)?;
     let runtime_seed = std::fs::read_to_string(runtime_seed_path)
         .map_err(|error| format!("RUNTIME_REPLAY_SEED_READ:{error}"))?;
     let runtime_seed = runtime_seed.trim();

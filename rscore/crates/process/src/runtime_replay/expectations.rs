@@ -17,6 +17,14 @@ struct AccountRootRow {
     account_state_root: [u8; 32],
 }
 
+fn sort_independent_account_chains(rows: &mut [AccountRootRow]) {
+    // The TS history view is keyed per Account and therefore cannot attest a
+    // total order between different bilateral chains. Stable sorting groups
+    // those independent chains while preserving the observable ACK-before-
+    // proposal order within one Account at one Runtime height.
+    rows.sort_by_key(|row| row.counterparty_id);
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EntityRootRow {
     entity_id: [u8; 32],
@@ -283,14 +291,11 @@ impl ReplayExpectations {
         }
         let expected = usize::try_from(to - from + 1)
             .map_err(|_| "RUNTIME_REPLAY_EXPECTED_RANGE".to_string())?;
-        if self.runtime_frames.len() != expected
-            || self.entity_effects.len() != expected
-            || self.runtime_frames.first_key_value().map(|row| *row.0) != Some(from)
-            || self.runtime_frames.last_key_value().map(|row| *row.0) != Some(to)
-        {
+        let runtime_frames = self.runtime_frames.range(from..=to).count();
+        let entity_effects = self.entity_effects.range(from..=to).count();
+        if runtime_frames != expected || entity_effects != expected {
             return Err(format!(
-                "RUNTIME_REPLAY_EXPECTED_RANGE_MISMATCH:from={from}:to={to}:frames={}",
-                self.runtime_frames.len(),
+                "RUNTIME_REPLAY_EXPECTED_RANGE_MISMATCH:from={from}:to={to}:frames={runtime_frames}:effects={entity_effects}",
             ));
         }
         Ok(())
@@ -396,15 +401,22 @@ impl ReplayExpectations {
         height: u64,
         actual: &[AccountCommitEvidence],
     ) -> Result<u64, String> {
-        let actual = actual.iter().map(AccountRootRow::from).collect::<Vec<_>>();
-        let expected = self
-            .account_roots
-            .get(&height)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
+        let mut actual = actual.iter().map(AccountRootRow::from).collect::<Vec<_>>();
+        let mut expected = self.account_roots.get(&height).cloned().unwrap_or_default();
+        sort_independent_account_chains(&mut actual);
+        sort_independent_account_chains(&mut expected);
         if actual != expected {
+            let mismatch = expected
+                .iter()
+                .zip(&actual)
+                .position(|(expected, actual)| expected != actual)
+                .unwrap_or_else(|| expected.len().min(actual.len()));
             return Err(format!(
-                "RUNTIME_REPLAY_ACCOUNT_MISMATCH:{height}:expected={expected:?}:actual={actual:?}"
+                "RUNTIME_REPLAY_ACCOUNT_MISMATCH:{height}:index={mismatch}:expected={:?}:actual={:?}:counts={}:{}",
+                expected.get(mismatch),
+                actual.get(mismatch),
+                expected.len(),
+                actual.len(),
             ));
         }
         u64::try_from(actual.len()).map_err(|_| "RUNTIME_REPLAY_ACCOUNT_COUNT_OVERFLOW".to_string())
@@ -521,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn account_commit_order_is_not_sorted_or_hidden() {
+    fn independent_account_chains_have_no_invented_global_order() {
         let first = AccountCommitEvidence {
             account_id: AccountId::from_bytes([1; 32]),
             source: AccountCommitSource::AckCommit,
@@ -536,10 +548,35 @@ mod tests {
             state_hash: [5; 32],
             account_state_root: [6; 32],
         };
-        assert_ne!(
-            vec![AccountRootRow::from(&first), AccountRootRow::from(&second)],
-            vec![AccountRootRow::from(&second), AccountRootRow::from(&first)],
-        );
+        let mut left = vec![AccountRootRow::from(&first), AccountRootRow::from(&second)];
+        let mut right = vec![AccountRootRow::from(&second), AccountRootRow::from(&first)];
+        sort_independent_account_chains(&mut left);
+        sort_independent_account_chains(&mut right);
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn one_account_preserves_ack_before_peer_commit() {
+        let account_id = AccountId::from_bytes([1; 32]);
+        let ack = AccountCommitEvidence {
+            account_id,
+            source: AccountCommitSource::AckCommit,
+            frame_height: 2,
+            state_hash: [3; 32],
+            account_state_root: [4; 32],
+        };
+        let peer = AccountCommitEvidence {
+            account_id,
+            source: AccountCommitSource::PeerCommit,
+            frame_height: 3,
+            state_hash: [5; 32],
+            account_state_root: [6; 32],
+        };
+        let mut canonical = vec![AccountRootRow::from(&ack), AccountRootRow::from(&peer)];
+        let mut reversed = vec![AccountRootRow::from(&peer), AccountRootRow::from(&ack)];
+        sort_independent_account_chains(&mut canonical);
+        sort_independent_account_chains(&mut reversed);
+        assert_ne!(canonical, reversed);
     }
 
     #[test]

@@ -603,7 +603,8 @@ pub struct RuntimeOutputs {
     pub checkpoint: Option<AccountsCheckpoint>,
     /// Exact logical rows dirtied by this certified frame. Storage uses these
     /// only for history/materialization indexes; no root is reconstructed from
-    /// them. Account ids are sorted and de-duplicated at the reducer boundary.
+    /// them. Account ids preserve canonical first-touch order and are
+    /// de-duplicated at the reducer boundary.
     pub touches: RuntimeFrameTouches,
 }
 

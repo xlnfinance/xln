@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use sha3::{Digest as _, Keccak256};
 use xln_rscore_batch::{AccountId, AccountInputVerdict, EntityInboundRequest, ReceiverClock};
 use xln_rscore_entity_kernel::{
@@ -511,13 +509,7 @@ pub fn apply_runtime(
         checkpoint_projection_metadata,
         ..
     } = replica;
-    let touched_account_ids = core
-        .inbound
-        .touched
-        .iter()
-        .chain(core.outbound.touched.iter())
-        .map(|(account_id, _)| *account_id)
-        .collect::<BTreeSet<AccountId>>();
+    let touched_account_ids = core.account_touch_order;
     let account_outputs = core
         .outbound
         .proposals

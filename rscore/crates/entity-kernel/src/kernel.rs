@@ -321,14 +321,20 @@ fn validate_commit(
 }
 
 fn group_proposal_work(account_txs: Vec<TargetedAccountTx>) -> Vec<AccountProposalWork> {
-    let mut grouped: BTreeMap<String, Vec<AccountTx>> = BTreeMap::new();
+    let mut positions = BTreeMap::<String, usize>::new();
+    let mut grouped = Vec::<AccountProposalWork>::new();
     for (account_id, tx) in account_txs {
-        grouped.entry(account_id).or_default().push(tx);
+        if let Some(index) = positions.get(&account_id).copied() {
+            grouped[index].txs.push(tx);
+            continue;
+        }
+        positions.insert(account_id.clone(), grouped.len());
+        grouped.push(AccountProposalWork {
+            account_id,
+            txs: vec![tx],
+        });
     }
     grouped
-        .into_iter()
-        .map(|(account_id, txs)| AccountProposalWork { account_id, txs })
-        .collect()
 }
 
 fn append_scheduled_account_txs(

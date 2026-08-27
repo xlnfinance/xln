@@ -118,15 +118,19 @@ pub struct ResidentJEventProjection {
 }
 
 fn merge_proposal_work(target: &mut Vec<AccountProposalWork>, appended: Vec<AccountProposalWork>) {
-    let mut grouped = BTreeMap::<String, Vec<xln_rscore_engine::AccountTx>>::new();
-    for work in target.drain(..).chain(appended) {
-        grouped.entry(work.account_id).or_default().extend(work.txs);
+    let mut positions = target
+        .iter()
+        .enumerate()
+        .map(|(index, work)| (work.account_id.clone(), index))
+        .collect::<BTreeMap<_, _>>();
+    for work in appended {
+        if let Some(index) = positions.get(&work.account_id).copied() {
+            target[index].txs.extend(work.txs);
+            continue;
+        }
+        positions.insert(work.account_id.clone(), target.len());
+        target.push(work);
     }
-    target.extend(
-        grouped
-            .into_iter()
-            .map(|(account_id, txs)| AccountProposalWork { account_id, txs }),
-    );
 }
 
 /// Exact result of the fused Entity+Account transition. `inbound` and
@@ -160,6 +164,11 @@ pub struct ResidentEntityCoreResult {
     /// Exact TS empty self EntityInputs emitted by local direct/swap handlers.
     /// They are non-mutating and unsigned, but their outbox slots are real.
     pub non_mutating_wake_targets: Vec<String>,
+    /// Account leaves in canonical TS `storageChanges` first-touch order.
+    /// Worker completion order is deliberately excluded: execution may run in
+    /// parallel, while the Runtime frame hash commits deterministic input and
+    /// Entity-transition order.
+    pub account_touch_order: Vec<AccountId>,
     proposal_work: Vec<crate::AccountProposalWork>,
 }
 
@@ -681,6 +690,12 @@ pub fn apply_resident_entity_round_core(
     if let Some(wake) = request.scheduled_wake.as_ref() {
         validate_scheduled_wake(wake, &request.expected_proposer_signer_id, state.timestamp)?;
     }
+    let mut touch_candidates = request
+        .inbound
+        .rows
+        .iter()
+        .map(|row| row.account_id)
+        .collect::<Vec<_>>();
     let phase_started = Instant::now();
     let inbound = accounts.entity_inbound(request.inbound)?;
     let inbound_micros = phase_started.elapsed().as_micros();
@@ -757,6 +772,7 @@ pub fn apply_resident_entity_round_core(
     let prepare_outbound_started = Instant::now();
     for work in &kernel.proposal_work {
         let target = account_id(&work.account_id)?;
+        touch_candidates.push(target);
         admits.push((target, work.txs.clone()));
         propose.insert(target);
     }
@@ -795,6 +811,23 @@ pub fn apply_resident_entity_round_core(
     apply_failed_proposal_routes(&mut kernel.state, &outbound, &mut kernel.outputs);
     let (entity_frame_events, secondary_hashes) =
         collect_round_certification(&inbound, &outbound, kernel.local_events);
+    let actual_touches = inbound
+        .touched
+        .iter()
+        .chain(outbound.touched.iter())
+        .map(|(account_id, _)| *account_id)
+        .collect::<BTreeSet<_>>();
+    let mut seen_touches = BTreeSet::new();
+    let mut account_touch_order = touch_candidates
+        .into_iter()
+        .filter(|account_id| actual_touches.contains(account_id))
+        .filter(|account_id| seen_touches.insert(*account_id))
+        .collect::<Vec<_>>();
+    account_touch_order.extend(
+        actual_touches
+            .into_iter()
+            .filter(|account_id| seen_touches.insert(*account_id)),
+    );
     let finalize_micros = phase_started.elapsed().as_micros();
     report_resident_round_profile(
         [
@@ -818,6 +851,7 @@ pub fn apply_resident_entity_round_core(
         inbound,
         outbound,
         non_mutating_wake_targets: kernel.non_mutating_wake_targets,
+        account_touch_order,
         proposal_work: kernel.proposal_work,
     })
 }
