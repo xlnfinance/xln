@@ -328,6 +328,9 @@ type ShadowEnvelopeMismatch = Readonly<{
   rust: unknown;
 }>;
 
+const shadowDifferenceFieldRank = (field: string): number =>
+  /(?:Hash|Root|Digest)$/.test(field) ? 1 : 0;
+
 /** Deterministic first path plus bounded, secret-redacted value previews. */
 export const findFirstShadowDifference = (
   typescript: unknown,
@@ -370,7 +373,9 @@ export const findFirstShadowDifference = (
     && !(typescript instanceof Uint8Array) && !(rust instanceof Uint8Array)) {
     const left = typescript as Record<string, unknown>;
     const right = rust as Record<string, unknown>;
-    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort((a, b) =>
+      shadowDifferenceFieldRank(a) - shadowDifferenceFieldRank(b)
+      || (a < b ? -1 : a > b ? 1 : 0));
     for (const key of keys) {
       const childSensitive = sensitive || key === 'secret' || key === 'preimage';
       if (!(key in left)) {

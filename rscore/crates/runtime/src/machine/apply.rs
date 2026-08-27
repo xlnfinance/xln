@@ -229,10 +229,6 @@ fn validate_selected_context(
     Ok(())
 }
 
-fn checkpoint_due(next_height: u64, period: u64) -> bool {
-    period > 0 && next_height.is_multiple_of(period)
-}
-
 fn internal_wake(
     replica: &RuntimeReplica,
     frame: &RuntimeFrameContext,
@@ -451,6 +447,11 @@ pub fn apply_runtime(
         row.resolve_certified_boards(&replica.certified_board_registry)?;
     }
 
+    let checkpoint_due = super::materialization_due(
+        next_height,
+        replica.last_materialized_height,
+        replica.limits.checkpoint_period_frames,
+    );
     let request = ResidentEntityRequest {
         inbound: EntityInboundRequest {
             owner_entity_id: replica.entity_id,
@@ -465,7 +466,7 @@ pub fn apply_runtime(
         entity_height: next_entity_height,
         outbound_timestamp: frame.frame.timestamp,
         outbound_j_height: frame.frame.finalized_j_height,
-        checkpoint_due: checkpoint_due(next_height, replica.limits.checkpoint_period_frames),
+        checkpoint_due,
         post_accounts: false,
         scheduled_wake: frame
             .receipt
@@ -507,6 +508,7 @@ pub fn apply_runtime(
         replica_metadata,
         certified_board_registry,
         checkpoint_projection_metadata,
+        last_materialized_height,
         ..
     } = replica;
     let touched_account_ids = core.account_touch_order;
@@ -547,6 +549,11 @@ pub fn apply_runtime(
         },
     )?;
     let checkpoint = core.outbound.checkpoint;
+    let last_materialized_height = if checkpoint.is_some() {
+        next_height
+    } else {
+        last_materialized_height
+    };
     let entity_events = core.outputs;
     let entity_state_root = certified.state_root.clone();
     let entity_authority_root = certified.authority_root.clone();
@@ -588,6 +595,7 @@ pub fn apply_runtime(
         replica_metadata,
         certified_board_registry,
         checkpoint_projection_metadata,
+        last_materialized_height,
         mempool,
         scheduled_wakes,
         limits,

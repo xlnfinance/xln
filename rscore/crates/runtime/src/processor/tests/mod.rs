@@ -302,10 +302,8 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
     )
     .expect("reopen after process crash");
     let recovery = reopened.recover().expect("recover durable WAL");
-    assert!(recovery.checkpoint.is_none());
-    assert_eq!(recovery.wal_frames.len(), 1);
-    assert_eq!(recovery.wal_frames[0].height, 1);
-    assert!(!recovery.wal_frames[0].entity_contexts.rows().is_empty());
+    assert_eq!(recovery.checkpoint.as_ref().map(|row| row.height), Some(1));
+    assert!(recovery.wal_frames.is_empty());
     assert_eq!(recovery.pending_outbox.len(), 1);
     assert!(recovery.pending_outbox[0].outputs.is_empty());
     drop(reopened);
@@ -335,8 +333,14 @@ fn canonical_hash_cadence_does_not_materialize_path_nodes() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("processor");
-    processor.process(input).expect("durable canonical frame");
-    let durable = processor.read_durable_frame(1).expect("durable frame");
+    processor
+        .process(input)
+        .expect("materialized genesis frame");
+    let second_input = empty_entity_input_at(processor.replica().expect("live replica"), 2, 300);
+    processor
+        .process(second_input)
+        .expect("durable canonical-only frame");
+    let durable = processor.read_durable_frame(2).expect("durable frame");
     let frame = crate::decode_storage_payload(&durable.frame_bytes).expect("decode frame");
     assert_eq!(frame.get("materializedState"), Some(&Value::Bool(false)));
     assert!(frame.get("canonicalStateHash").is_some());
@@ -352,14 +356,15 @@ fn canonical_hash_cadence_does_not_materialize_path_nodes() {
     )
     .expect("reopen");
     let recovery = reopened.recover().expect("recover");
-    assert!(recovery.checkpoint.is_none());
+    assert_eq!(recovery.checkpoint.as_ref().map(|row| row.height), Some(1));
     assert_eq!(recovery.wal_frames.len(), 1);
+    assert_eq!(recovery.wal_frames[0].height, 2);
     drop(reopened);
     std::fs::remove_dir_all(path).expect("remove processor fixture");
 }
 
 #[test]
-fn cadence_100_persists_one_exact_account_entity_runtime_checkpoint() {
+fn cadence_100_is_measured_from_the_first_materialized_runtime_frame() {
     let path = path();
     let _ = std::fs::remove_dir_all(&path);
     let replica = processor_replica();
@@ -379,7 +384,7 @@ fn cadence_100_persists_one_exact_account_entity_runtime_checkpoint() {
         RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
     )
     .expect("processor");
-    for height in 1..=100 {
+    for height in 1..=101 {
         let input = empty_entity_input_at(
             processor.replica().expect("live replica"),
             height,
@@ -388,7 +393,7 @@ fn cadence_100_persists_one_exact_account_entity_runtime_checkpoint() {
         let report = processor.process(input).expect("durable frame");
         assert_eq!(report.durable_height, Some(height));
     }
-    assert_eq!(processor.replica().expect("live replica").state.height, 100);
+    assert_eq!(processor.replica().expect("live replica").state.height, 101);
     let expected_accounts_root = processor
         .replica()
         .expect("live replica")
@@ -405,7 +410,7 @@ fn cadence_100_persists_one_exact_account_entity_runtime_checkpoint() {
     .expect("reopen");
     let recovery = reopened.recover().expect("recover");
     let checkpoint = recovery.checkpoint.expect("checkpoint at cadence");
-    assert_eq!(checkpoint.height, 100);
+    assert_eq!(checkpoint.height, 101);
     assert!(!checkpoint.runtime_machine_leaves.is_empty());
     assert!(
         checkpoint
@@ -530,7 +535,8 @@ fn failed_socket_after_fsync_blocks_the_next_runtime_input() {
     let mut reopened = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
         .expect("reopen durable frame");
     let recovered = reopened.recover().expect("recover");
-    assert_eq!(recovered.wal_frames.len(), 1);
+    assert_eq!(recovered.checkpoint.as_ref().map(|row| row.height), Some(1));
+    assert!(recovered.wal_frames.is_empty());
     assert_eq!(recovered.pending_outbox.len(), 1);
     assert_eq!(recovered.pending_outbox[0].outputs.len(), 1);
     let decoded = recovered.pending_outbox[0]
@@ -648,13 +654,14 @@ fn fsync_precedes_real_websocket_and_local_continuation_uses_the_next_context() 
     let mut reopened = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
         .expect("reopen after two frames");
     let recovered = reopened.recover().expect("recover two frames");
+    assert_eq!(recovered.checkpoint.as_ref().map(|row| row.height), Some(1));
     assert_eq!(
         recovered
             .wal_frames
             .iter()
             .map(|frame| frame.height)
             .collect::<Vec<_>>(),
-        vec![1, 2]
+        vec![2]
     );
     assert_eq!(recovered.pending_outbox.len(), 2);
     drop(reopened);

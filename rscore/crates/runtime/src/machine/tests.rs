@@ -17,11 +17,19 @@ use xln_rscore_protocol::CanonicalValue;
 use super::{
     RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits, RuntimeMachineError,
     RuntimeMempool, RuntimeReplica, RuntimeState, RuntimeTx, ScheduledWakeIndex, apply_runtime,
-    select_runtime_frame,
+    materialization_due, select_runtime_frame,
 };
 
 const SEED: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 pub(super) const SIGNER: &str = "h1-hub";
+
+#[test]
+fn materialization_cadence_is_relative_to_the_restored_checkpoint() {
+    assert!(materialization_due(1, 0, 100));
+    assert!(!materialization_due(100, 5, 100));
+    assert!(materialization_due(105, 5, 100));
+    assert!(!materialization_due(106, 105, 100));
+}
 
 fn fixture<T, E: std::fmt::Debug>(result: Result<T, E>) -> T {
     match result {

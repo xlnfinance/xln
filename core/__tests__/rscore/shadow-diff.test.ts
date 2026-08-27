@@ -36,6 +36,16 @@ describe('rscore shadow first divergence', () => {
     expect(difference?.rust.value).not.toContain('rust-preimage');
   });
 
+  test('reports the semantic field before derived root noise', () => {
+    const difference = findFirstShadowDifference(
+      { accountStateRoot: '0xaa', status: 'active' },
+      { accountStateRoot: '0xbb', status: 'disputed' },
+      '$.account',
+    );
+
+    expect(difference?.path).toBe('$.account.status');
+  });
+
   test('decodes the finalized Account-settlement effect emitted by Rust', () => {
     const accountId = new Uint8Array(32).fill(7);
     expect(engineOutputProjection([

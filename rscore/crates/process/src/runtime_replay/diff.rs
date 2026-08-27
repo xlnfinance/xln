@@ -330,11 +330,22 @@ fn collect_differences(expected: &Value, actual: &Value, path: &str, output: &mu
     }
     match (expected, actual) {
         (Value::Object(left), Value::Object(right)) => {
-            let keys = left
+            let mut keys = left
                 .keys()
                 .chain(right.keys())
                 .cloned()
-                .collect::<BTreeSet<_>>();
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            // A frame/post-state hash is an effect of every committed field.
+            // Report the semantic preimage first so the one-line failure names
+            // `materializedState`, `runtimeInput`, etc. instead of restating
+            // the already-known top-level hash mismatch.
+            keys.sort_by(|left, right| {
+                derived_field_rank(left)
+                    .cmp(&derived_field_rank(right))
+                    .then_with(|| left.cmp(right))
+            });
             for key in keys {
                 if output.len() >= MAX_DIFFERENCES {
                     break;
@@ -383,6 +394,14 @@ fn collect_differences(expected: &Value, actual: &Value, path: &str, output: &mu
             }
         }
         _ => output.push(difference(path, "value-mismatch", expected, actual)),
+    }
+}
+
+fn derived_field_rank(field: &str) -> u8 {
+    match field {
+        "postStateHash" => 1,
+        "frameHash" => 2,
+        _ => 0,
     }
 }
 
@@ -490,6 +509,24 @@ mod tests {
         assert_eq!(
             differences[1].get("path").and_then(Value::as_str),
             Some("$.outbox[0]"),
+        );
+    }
+
+    #[test]
+    fn semantic_frame_field_is_reported_before_derived_hash_noise() {
+        let expected = json!({
+            "frame": {"frameHash":"0xaa", "materializedState":false, "postStateHash":"0xbb"}
+        });
+        let actual = json!({
+            "frame": {"frameHash":"0xcc", "materializedState":true, "postStateHash":"0xdd"}
+        });
+        let mut differences = Vec::<Value>::new();
+
+        collect_differences(&expected, &actual, "$", &mut differences);
+
+        assert_eq!(
+            differences[0].get("path").and_then(Value::as_str),
+            Some("$.frame.materializedState"),
         );
     }
 

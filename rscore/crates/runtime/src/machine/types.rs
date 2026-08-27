@@ -416,6 +416,21 @@ pub struct RuntimeLimits {
     pub canonical_hash_period_frames: u64,
 }
 
+/// Match the canonical TypeScript storage cadence: the interval is measured
+/// from the last materialized Runtime frame, not from genesis. A restored
+/// checkpoint at height 5 therefore materializes next at 105, never at 100.
+pub(crate) fn materialization_due(
+    next_height: u64,
+    last_materialized_height: u64,
+    period: u64,
+) -> bool {
+    next_height == 1
+        || (period > 0
+            && next_height
+                .checked_sub(last_materialized_height)
+                .is_some_and(|elapsed| elapsed >= period))
+}
+
 impl RuntimeLimits {
     pub const fn hlt() -> Self {
         Self {
@@ -464,6 +479,11 @@ pub struct RuntimeReplica {
     /// in-memory replica has no authority to invent carried Entity fields at
     /// checkpoint cadence.
     pub(crate) checkpoint_projection_metadata: Option<crate::EntityCheckpointProjectionMetadata>,
+    /// Durable storage cadence anchor. This is replica envelope state, not a
+    /// second consensus root; recovery initializes it from the exact
+    /// materialized Runtime checkpoint and WAL replay advances it only when a
+    /// checkpoint-bearing frame is reproduced.
+    pub(crate) last_materialized_height: u64,
     pub mempool: RuntimeMempool,
     pub scheduled_wakes: super::ScheduledWakeIndex,
     pub limits: RuntimeLimits,
@@ -528,6 +548,7 @@ impl RuntimeReplica {
             "isProposer": true,
             "mempool": [],
         });
+        let last_materialized_height = state.height;
         Ok(Self {
             state,
             durable,
@@ -539,6 +560,7 @@ impl RuntimeReplica {
             replica_metadata,
             certified_board_registry: crate::CertifiedBoardRegistry::empty(),
             checkpoint_projection_metadata: None,
+            last_materialized_height,
             mempool: RuntimeMempool::empty(),
             scheduled_wakes,
             limits,

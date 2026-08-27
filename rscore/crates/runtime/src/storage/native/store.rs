@@ -47,6 +47,11 @@ impl NativeRuntimeStore {
         let path = path.as_ref().to_path_buf();
         let options = Options {
             env: Rc::new(Box::new(DurableEnv::default())),
+            // Runtime frames are already an append-only WAL stream. Keep one
+            // checkpoint interval resident so LevelDB does not synchronously
+            // compact the same hot bytes between every few frame fsyncs.
+            write_buffer_size: 256 * 1024 * 1024,
+            max_file_size: 64 * 1024 * 1024,
             create_if_missing: true,
             error_if_exists: false,
             paranoid_checks: true,
@@ -204,7 +209,17 @@ impl NativeRuntimeStore {
         frame: &ValidatedRuntimeFrame,
         checkpoint: Option<&super::types::CheckpointGraph>,
     ) -> Result<(), NativeStorageError> {
-        if height.is_multiple_of(self.config.checkpoint_period_frames) && checkpoint.is_none() {
+        // Genesis-only WALs remain recoverable without a materialized graph;
+        // the production machine requests one at height 1. Once a durable
+        // head exists, enforce the same relative cadence as TypeScript.
+        if self.head.latest_height > 0
+            && crate::machine::materialization_due(
+                height,
+                self.head.latest_materialized_height,
+                self.config.checkpoint_period_frames,
+            )
+            && checkpoint.is_none()
+        {
             return Err(NativeStorageError::CheckpointRequired(height));
         }
         let Some(checkpoint) = checkpoint else {
