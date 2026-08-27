@@ -235,3 +235,16 @@ cargo kani --harness c6        # documented non-convergence (§3.2)
 
 Corpus: `corpus/delta-w16.jsonl` (4,096 seeded inputs; regenerate byte-identically
 by deleting the file and re-running `corpus_artifact_replays`).
+
+---
+
+## Аудит kani-adversary (добавлено координатором)
+
+83/100 (C5 82 / C6 85), отчёт: `proofs/audits/kani-adversary/report.md`.
+Зеркало побайтово честное (field/branch-exact), SHA-256 реальный, фальсификаций нет.
+Уточнения к этому отчёту: (A1) кросс-чек 200k не порождает reject-ветку — формулировка
+«acceptance + rejection field names» завышена, границы ±2^255 не сэмплировались;
+(A2) «3-мутантная калибровка» = 2 мутанта + 1 сенсор покрытия; (A4) census — 11 сайтов,
+не 12 (все ≥1-child, вывод жив); (A5) subset-order — 73 последовательности, не 60
+(перечисление полно); (A6) недостижимость zero-child опирается на контракт callback
+`map_slots`. Gap-лист (12 измерений) — в отчёте аудита.
