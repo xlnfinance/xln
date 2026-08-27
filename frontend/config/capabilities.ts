@@ -49,6 +49,7 @@ export const CAPABILITIES = [
     routes: ['/app', '/address', '/testnet'],
     currentSources: [
       'frontend/packages/browser/src/wallet-boot-lifecycle.ts',
+      'frontend/packages/browser/src/wallet-brainvault-finalization.ts',
       'frontend/packages/browser/src/wallet-brainvault-worker-resilience.ts',
       'frontend/packages/browser/src/wallet-brainvault-worker-scheduling.ts',
       'frontend/packages/browser/src/wallet-brainvault-worker-validation.ts',
@@ -73,6 +74,7 @@ export const CAPABILITIES = [
     ],
     behavior: [
       'boot and shell',
+      'deterministic browser BrainVault finalization decisions',
       'deterministic browser BrainVault worker sizing and resilience decisions',
       'deterministic browser BrainVault retry, dispatch, and worker-scaling decisions',
       'validated browser BrainVault worker messages and shard completions',

@@ -107,6 +107,11 @@
     walletBrainVaultWorkerInitFailureMessage,
   } from '../../../../packages/browser/src/wallet-brainvault-worker-resilience';
   import {
+    resolveWalletBrainVaultFinalizationCommit,
+    resolveWalletBrainVaultFinalizationShardOrder,
+    resolveWalletBrainVaultFinalizationStart,
+  } from '../../../../packages/browser/src/wallet-brainvault-finalization';
+  import {
     WALLET_AUTH_SCHEME_STORAGE_KEY,
     parseWalletBrainVaultWorkerCap,
     resolveWalletAuthScheme,
@@ -1253,15 +1258,18 @@
       dispatchNextShard(worker);
     }
 
-    // Check if all done
-    if (!finalizeInProgress && shardResults.size >= shardCount) {
-      finalizeInProgress = true;
-      try {
-        await finalizeDeriv();
-      } catch (err) {
-        finalizeInProgress = false;
-        throw err;
-      }
+    const finalization = resolveWalletBrainVaultFinalizationStart({
+      completedShardCount: shardResults.size,
+      shardCount,
+      finalizeInProgress,
+    });
+    if (finalization.status !== 'start') return;
+    finalizeInProgress = true;
+    try {
+      await finalizeDeriv();
+    } catch (err) {
+      finalizeInProgress = false;
+      throw err;
     }
   }
 
@@ -1277,19 +1285,22 @@
     };
     terminateWorkers();
 
-    // Collect results in order
     const orderedResults: Uint8Array[] = [];
-    for (let i = 0; i < run.shardCount; i++) {
-      const shard = runShardResults.get(i);
-      if (!shard) throw new Error(`Missing shard ${i}`);
-      orderedResults.push(shard);
-    }
-
     let masterKey: Uint8Array | null = null;
     let entropy: Uint8Array | null = null;
     let entropy12: Uint8Array | null = null;
     let deviceKey: Uint8Array | null = null;
     try {
+      const shardOrder = resolveWalletBrainVaultFinalizationShardOrder(
+        run.shardCount,
+        new Set(runShardResults.keys()),
+      );
+      for (const shardIndex of shardOrder) {
+        const shard = runShardResults.get(shardIndex);
+        if (!shard) throw new Error(`Missing shard ${shardIndex}`);
+        orderedResults.push(shard);
+      }
+
       masterKey = await combineShards(orderedResults, run.factor);
       if (!isCurrentRun()) return;
       wipeRunShards();
@@ -1308,7 +1319,12 @@
       const nextDevicePassphrase = bytesToHex(deviceKey);
 
       const nextEthereumAddress = await deriveEthereumAddress(nextMnemonic24);
-      if (!isCurrentRun()) return;
+      const commit = resolveWalletBrainVaultFinalizationCommit({
+        isCurrentRun: isCurrentRun(),
+        name: run.name,
+        ethereumAddress: nextEthereumAddress,
+      });
+      if (commit.status === 'cancelled') return;
       const nextEntityId = generateLazyEntityIdPreview([nextEthereumAddress], 1n);
 
       // Commit derived strings together only after every async crypto step
@@ -1323,7 +1339,7 @@
       passphrase = '';
       derivationRun = null;
 
-      if (await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`)) {
+      if (await prepareRecoveryDecisionFromCurrentSeed(commit.recoveryLabel)) {
         await continueAfterRecoveryDiscovery();
       }
     } finally {

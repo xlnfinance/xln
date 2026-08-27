@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, AND BROWSER-BRAINVAULT-WORKER-RESILIENCE COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, AND BROWSER-BRAINVAULT-FINALIZATION COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -714,6 +714,19 @@ recovery, opening, import, workspace, capability, native-custody,
 node-validation, and remote-reconnect suites pass 156 tests with 883
 expectations. Both wallet and canonical Svelte production builds pass, and the
 wallet local check covers 454 files with zero unsafe-type findings.
+
+The next wallet slice now owns deterministic browser BrainVault finalization
+policy: completion-trigger ownership, exact ascending shard membership,
+current-run atomic commit eligibility, and canonical recovery labels. The
+canonical Svelte event flow retains shard bytes, Worker termination, every
+cryptographic await, derived-secret publication, zeroization, recovery
+persistence, navigation, and user-visible state. Ordered-set failures now pass
+through the existing finalizer cleanup so collected shards are zeroized before
+the error returns. Nine direct finalization tests plus the affected onboarding,
+workspace, capability, worker, native-custody, and remote-reconnect suites pass
+195 tests with 1110 expectations across 23 files. Both wallet and canonical
+Svelte production builds pass, and the wallet local check covers 455 files with
+zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -922,6 +935,10 @@ any mismatch. Never compile on production.
    initialization-retry, and terminal-error decisions are shared while timers,
    Worker teardown and recreation, cap persistence, diagnostics, postMessage,
    secret input, and publication remain concrete.
+   Browser BrainVault completion triggering, exact shard membership, current-run
+   atomic commit, and recovery-label decisions are shared while shard bytes,
+   cryptography, zeroization, persistence, navigation, and UI publication
+   remain concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
