@@ -10,7 +10,7 @@
 
 | # | Требование | Статус |
 |---|---|---|
-| 1 | Re-pin: relabel seed + rebuild + повтор 4 корпусов на новом immutable SHA | WAVE-2026-08-28 частично: generate.ts + корпус консистентны (label `both-reject`), 80,656 зелёные на `78e07d9a9`+генератор-фикс; **пин на следующий immutable SHA — OPEN** |
+| 1 | Re-pin: relabel seed + rebuild + повтор 4 корпусов на новом immutable SHA | WAVE-2026-08-28 частично: generator label `both-reject`; 80,656 зелёные на clean `e69630fca` + proof-only fix; генератор-фикс закоммичен `935020a41` (regen байт-идентичен корпусу, 200/0 — независимо перепроверено аудитом 2026-08-28); формальный полный повтор всех 4 корпусов на этом пине — OPEN |
 | 2 | Починка shrinker'а (уникальные id кандидатов) + калибровка ≥3 режимов саботажа | OPEN |
 | 3 | Duplicate-parity: прод-проверка в TS-энкодере ИЛИ переформулировка свойства (reference-key асимметрия) | OPEN |
 | 4 | Перечислить семейство асимметрий: сиды tokenId>65535, timeInForce>255, jHeight>2^53, hashlock/EntityId/envelope | OPEN |
@@ -19,12 +19,12 @@
 | 7 | Edge-сид: j_event с 0 событий; unknown tx field; `__proto__`; wObj-dup без драйвер-интерсептора | OPEN |
 | 8 | Coverage ledger: per-pair/per-branch счётчики | OPEN |
 
-## c1-repro (92/100)
+## c1-repro (92/100; findings.md закоммичен `9aa5affbe` — позже пина evidence `dfd45cc7c`; независимый перепрогон на immutable SHA не выполнялся)
 
 | # | Требование | Статус |
 |---|---|---|
-| 1 | Исходный прогон на грязном дереве невосстановим из git | CLOSED эквивалентностью: таллии воспроизведены на пине, clean-прогон 200/0 зелёный (аудит 2026-08-28) |
-| 2 | Seed 31337 не перепрогнан | OPEN (minor) |
+| 1 | Исходный прогон на грязном дереве невосстановим из git | OPEN: метод/команды/таллии есть в закоммиченном findings.md, но прогон независимым аудитором на immutable SHA не выполнялся; локальный clean-перепрогон координатора его не заменяет |
+| 2 | Seed 31337 не перепрогнан | WAVE-2026-08-28: clean `e69630fca` + proof-only fix, 10,114/0; требуется независимый repro на immutable SHA |
 | 3 | Обёртка саботаж-калибровки минимизатора не закоммичена | OPEN (связано с c1-adv#2) |
 | 4–5 | Генераторные гэпы / driver-substituted both-reject | OPEN (= c1-adv #4–7, #3) |
 | 6 | Stale label корпуса | WAVE-2026-08-28 (корпус `d483605e2` + generate.ts волной) |
@@ -41,12 +41,21 @@
 | 12 | Воспроизводимость: коммит артефактов + чистый SHA | CLOSED `d483605e2`+`b8004d939`; re-audit чистое извлечение `78e07d9a9` — точно |
 | A9 | Witness lifecycle (прунинг, state-resolution ACK-хэши) | OPEN |
 
+## c2-repro replacement (91/100)
+
+| # | Требование | Статус |
+|---|---|---|
+| 1 | Оригинальный c2-repro 88/100 не был закоммичен и невосстановим | CLOSED только заменой: независимый re-audit `b043199fe`; потеря исходного отчёта остаётся coordinator error |
+| 2 | Fresh-seed run сверх трёх фиксированных seed'ов | OPEN |
+| 3 | Коммит, воспроизводящий исторический pre-FX-3 throw | UNRECOVERABLE: фикс посажен до первого C2 evidence commit; не использовать как воспроизводимый claim |
+| 4 | Унаследованные coverage-gap'ы C2 | OPEN (= c2-adversary #8–10, A9) |
+
 ## c4-adversary (78/100)
 
 | # | Требование | Статус |
 |---|---|---|
 | 1–3 | Debt lifecycle reach; debt-bookkeeping инварианты; реальный `invariant_debtNeverEntersValuePool` | CLOSED `aecfed195` |
-| 4 | Transformer shapes: multi-index/multi-clause/invalid arrays/fault modes/decoder path | CLOSED `aecfed195` (6 fault-модей, multi-index, decoder) |
+| 4 | Transformer shapes: multi-index/multi-clause/invalid arrays/fault modes/decoder path | PARTIAL `aecfed195`: 6 fault-модей, multi-index и decoder закрыты; multi-clause chaining и invalid allowance arrays — OPEN |
 | 5 | Асимметричные окна 50/70 + side-selection + closeDispute + invalid witness | CLOSED `aecfed195` |
 | 6 | repay-действие (clamp oracle восстанавливается после shortfall) | CLOSED `aecfed195` |
 | 7 | `check_gateZeroConcrete` закоммичен + single-clause warning | CLOSED `aecfed195` |
