@@ -98,6 +98,12 @@
     validateWalletBrainVaultShardCompletion,
   } from '../../../../packages/browser/src/wallet-brainvault-worker-validation';
   import {
+    hasPendingWalletBrainVaultShardWork,
+    resolveWalletBrainVaultShardDispatch,
+    resolveWalletBrainVaultShardRetry,
+    resolveWalletBrainVaultWorkerScale,
+  } from '../../../../packages/browser/src/wallet-brainvault-worker-scheduling';
+  import {
     WALLET_AUTH_SCHEME_STORAGE_KEY,
     parseWalletBrainVaultWorkerCap,
     resolveWalletAuthScheme,
@@ -714,19 +720,25 @@
   }
 
   function hasPendingShardWork(): boolean {
-    return retryShardQueue.length > 0 || nextShardToDispatch < shardCount;
+    return hasPendingWalletBrainVaultShardWork({
+      retryQueue: retryShardQueue,
+      nextShardToDispatch,
+      shardCount,
+    });
   }
 
   function requeueShard(shardIndex: number, message: string): boolean {
-    if (shardResults.has(shardIndex)) return true;
-    const attempts = (shardRetryCounts.get(shardIndex) ?? 0) + 1;
-    shardRetryCounts.set(shardIndex, attempts);
-    if (attempts > 3) {
-      derivationError = `BrainVault shard ${shardIndex + 1} failed repeatedly: ${message}`;
+    const retry = resolveWalletBrainVaultShardRetry(shardIndex, message, {
+      alreadyCompleted: shardResults.has(shardIndex),
+      currentAttempts: shardRetryCounts.get(shardIndex) ?? 0,
+      retryQueue: retryShardQueue,
+    });
+    if (retry.status === 'completed') return true;
+    shardRetryCounts.set(shardIndex, retry.attempts);
+    retryShardQueue = [...retry.retryQueue];
+    if (retry.status === 'failed') {
+      derivationError = retry.message;
       return false;
-    }
-    if (!retryShardQueue.includes(shardIndex)) {
-      retryShardQueue.unshift(shardIndex);
     }
     return true;
   }
@@ -1170,25 +1182,24 @@
     const run = derivationRun;
     if (!run) throw new Error('BRAINVAULT_DERIVATION_RUN_MISSING');
     if (isWorkerDraining(worker)) return;
-    while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
-      nextShardToDispatch++;
-    }
-    while (retryShardQueue.length > 0 && shardResults.has(retryShardQueue[0]!)) {
-      retryShardQueue.shift();
-    }
-    if (retryShardQueue.length === 0 && nextShardToDispatch >= shardCount) return;
-
-    const shardIndex = retryShardQueue.length > 0 ? retryShardQueue.shift()! : nextShardToDispatch++;
-    workerActiveShard.set(worker, shardIndex);
-    armWorkerShardWatchdog(worker, shardIndex);
+    const dispatch = resolveWalletBrainVaultShardDispatch({
+      retryQueue: retryShardQueue,
+      nextShardToDispatch,
+      shardCount,
+    }, shardResults);
+    retryShardQueue = [...dispatch.retryQueue];
+    nextShardToDispatch = dispatch.nextShardToDispatch;
+    if (dispatch.status === 'idle') return;
+    workerActiveShard.set(worker, dispatch.shardIndex);
+    armWorkerShardWatchdog(worker, dispatch.shardIndex);
 
     worker.postMessage({
       type: 'derive_shard',
-      id: shardIndex,
+      id: dispatch.shardIndex,
       data: {
         name: run.name,
         passphrase: run.passphrase,
-        shardIndex,
+        shardIndex: dispatch.shardIndex,
         shardCount: run.shardCount,
       }
     });
@@ -1337,24 +1348,24 @@
   // Dynamic worker scaling based on user slider
   async function adjustWorkers() {
     if (phase !== 'deriving') return;
-
-    const currentCount = activeWorkerCount;
-    const target = Math.min(effectiveTargetWorkerCount, usableWorkerCap);
-
-    if (target < currentCount) {
+    const scale = resolveWalletBrainVaultWorkerScale(
+      activeWorkerCount,
+      effectiveTargetWorkerCount,
+      usableWorkerCap,
+      hasPendingShardWork(),
+    );
+    if (scale.status === 'drain') {
       // Scale down: drain excess workers (no new shards assigned)
       const activeWorkers = workers.filter(worker => !drainingWorkers.has(worker));
-      const excess = currentCount - target;
-      const toDrain = activeWorkers.slice(-1 * excess);
+      const toDrain = activeWorkers.slice(-1 * scale.count);
       for (const worker of toDrain) {
         markWorkerDraining(worker);
       }
-    } else if (target > currentCount && hasPendingShardWork()) {
+    } else if (scale.status === 'add') {
       // Scale up: add more workers
-      const workersToAdd = target - currentCount;
       const currentTotal = workers.length;
 
-      for (let i = 0; i < workersToAdd && hasPendingShardWork(); i++) {
+      for (let i = 0; i < scale.count && hasPendingShardWork(); i++) {
         const worker = createBrainVaultWorker();
         workers.push(worker);
 
