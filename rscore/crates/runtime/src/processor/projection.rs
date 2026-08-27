@@ -106,7 +106,7 @@ pub(crate) fn project_durable_frame(
     let machine = runtime_machine(&result, pending_runtime_input.clone());
     let replay_view = replay_verifiable_view(&machine)?;
     let component_digests = component_digests(&replay_view)?;
-    let replica_meta = prepare_replica_meta(&result)?;
+    let replica_meta = prepare_replica_meta(&result, result.outputs.checkpoint.is_some())?;
     let replica_meta_digest = replica_meta.digest;
     let signer_id = replica_meta.signer_id;
 
@@ -119,7 +119,7 @@ pub(crate) fn project_durable_frame(
         prepare_entity_context_rows(&replica_id, &applied.frame.canonical_entity_context)?;
 
     let expected_previous_hash = result.replica.durable.prev_frame_hash();
-    let checkpoint = match (result.outputs.checkpoint.as_ref(), prior_checkpoint_rows) {
+    let checkpoint_changes = match (result.outputs.checkpoint.as_ref(), prior_checkpoint_rows) {
         (Some(accounts), Some(prior)) => {
             let metadata = result
                 .replica
@@ -131,34 +131,9 @@ pub(crate) fn project_durable_frame(
                 .ok_or(RuntimeFrameProjectionError::CheckpointAuthorityMissing)?;
             let account = prepare_account_checkpoint(accounts, owner, fingerprint, prior)?;
             let entity = prepare_entity_checkpoint(&result.replica, &replica_meta.entry, prior)?;
-            let (canonical, graph) = canonical_state(&result, &machine)?;
             let node_changes = merge_checkpoint_changes(account.changes, entity.changes)?;
             result.replica.checkpoint_projection_metadata = Some(entity.metadata);
-            Some((
-                CheckpointGraph {
-                    state_root: canonical.state_hash,
-                    full: false,
-                    node_changes,
-                    runtime_machine_leaves: graph
-                        .leaves
-                        .into_iter()
-                        .map(|leaf| RuntimeMachineLeafRow {
-                            path_bytes: leaf.path_bytes,
-                            value_bytes: leaf.value_bytes,
-                        })
-                        .collect(),
-                },
-                canonical,
-                RuntimeMachineGraphRoot {
-                    root_hash: graph.root_hash,
-                    leaf_count: graph.leaf_count,
-                },
-                // The canonical TS Runtime frame does not commit an
-                // implementation-specific Account-engine checkpoint handle.
-                // The path-keyed node changes already live in this Runtime
-                // checkpoint graph and are sufficient for either engine.
-                Vec::new(),
-            ))
+            Some(node_changes)
         }
         (None, None) => None,
         _ => {
@@ -167,28 +142,51 @@ pub(crate) fn project_durable_frame(
             ));
         }
     };
-    let (materialized_state, canonical_state, runtime_machine_root, account_checkpoints) =
-        match checkpoint.as_ref() {
-            Some((_, canonical, root, refs)) => (
-                true,
-                Some(canonical.clone()),
-                Some(root.clone()),
-                refs.clone(),
-            ),
-            None => (false, None, None, Vec::new()),
-        };
+    let height = result.replica.state.height;
+    let canonical_period = result.replica.limits.canonical_hash_period_frames;
+    let canonical_due = checkpoint_changes.is_some()
+        || (canonical_period > 0 && (height == 1 || height.is_multiple_of(canonical_period)));
+    let canonical_projection = canonical_due
+        .then(|| canonical_state(&result, &machine))
+        .transpose()?;
+    let canonical_state = canonical_projection
+        .as_ref()
+        .map(|(canonical, _)| canonical.clone());
+    let runtime_machine_root =
+        canonical_projection
+            .as_ref()
+            .map(|(_, graph)| RuntimeMachineGraphRoot {
+                root_hash: graph.root_hash,
+                leaf_count: graph.leaf_count,
+            });
+    let frame_graph = canonical_projection.map(|(canonical, graph)| CheckpointGraph {
+        state_root: canonical.state_hash,
+        full: false,
+        node_changes: checkpoint_changes.clone().unwrap_or_default(),
+        runtime_machine_leaves: graph
+            .leaves
+            .into_iter()
+            .map(|leaf| RuntimeMachineLeafRow {
+                path_bytes: leaf.path_bytes,
+                value_bytes: leaf.value_bytes,
+            })
+            .collect(),
+    });
     let draft = CanonicalRuntimeFrameDraft {
         height: result.replica.state.height,
         timestamp: result.replica.state.timestamp,
         prev_frame_hash: expected_previous_hash,
         replica_meta_digest,
         runtime_component_digests: component_digests,
-        materialized_state,
+        materialized_state: checkpoint_changes.is_some(),
         canonical_state,
         runtime_input,
         pending_runtime_input,
         runtime_machine_root,
-        account_authority_checkpoints: account_checkpoints,
+        // The canonical TS Runtime frame does not commit an implementation-
+        // specific Account-engine handle. Path-keyed node changes at the
+        // materialization cadence are sufficient for either engine.
+        account_authority_checkpoints: Vec::new(),
         touched_entities: result.outputs.touches.entity_ids.clone(),
         touched_accounts: result
             .outputs
@@ -202,12 +200,8 @@ pub(crate) fn project_durable_frame(
             .collect(),
         touched_book_entities: result.outputs.touches.book_entity_ids.clone(),
     };
-    let encoded = build_runtime_frame_commit(
-        draft,
-        entity_contexts,
-        bound_outputs.rows,
-        checkpoint.map(|(graph, _, _, _)| graph),
-    )?;
+    let encoded =
+        build_runtime_frame_commit(draft, entity_contexts, bound_outputs.rows, frame_graph)?;
     let commitments = super::RuntimeDurableCommitments {
         height: result.replica.state.height,
         runtime_frame_hash: encoded.frame_hash,

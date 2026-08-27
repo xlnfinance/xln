@@ -77,6 +77,7 @@ pub struct ValidatedRuntimeFrame {
     pub timestamp: u64,
     pub prev_frame_hash: Digest,
     pub frame_hash: Digest,
+    pub materialized_state: bool,
     pub output_count: usize,
     pub output_digest: Digest,
     pub canonical_state_hash: Option<Digest>,

@@ -1,4 +1,5 @@
-import { encodeBuffer, writeBatch } from '../codec/codec';
+import { encodeBuffer, encodeBufferAsIs, writeBatch } from '../codec/codec';
+import { canonicalizeBinaryPayload } from '../../protocol/serialization/binary-codec';
 import type { CertifiedBoardPatriciaNode } from '../../types/entity-board-registry';
 import type { RoutedEntityInput } from '../../runtime/types';
 import {
@@ -323,7 +324,7 @@ const publishNewHistoryBase = async (
   const touchedBookEntities = Array.from(new Set(options.docs
     .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
     .map(doc => doc.entityId))).sort();
-  const frameBase: RuntimeFrame = {
+  const frameBase = canonicalizeBinaryPayload<RuntimeFrame>({
     height: options.height,
     timestamp: options.timestamp,
     prevFrameHash: ZERO_FRAME_HASH,
@@ -340,9 +341,9 @@ const publishNewHistoryBase = async (
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts,
     touchedBookEntities,
-  };
+  }, { omitSymbolKeys: true });
   const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
-  const frameRows = prepareBoundedStorageValueRows(keyFrame(options.height), encodeBuffer(frame));
+  const frameRows = prepareBoundedStorageValueRows(keyFrame(options.height), encodeBufferAsIs(frame));
   const [activityEntry] = buildHistoryViewPuts({
     height: options.height,
     timestamp: options.timestamp,

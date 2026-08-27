@@ -379,6 +379,12 @@ fn decode_checkpoint(
     {
         limits.checkpoint_period_frames = period;
     }
+    if let Some(period) = durable_envelope
+        .runtime_config()
+        .canonical_hash_period_frames()
+    {
+        limits.canonical_hash_period_frames = period;
+    }
     Ok(DecodedRuntimeCheckpoint {
         runtime_height: source.height,
         runtime_timestamp: validated_frame.timestamp,

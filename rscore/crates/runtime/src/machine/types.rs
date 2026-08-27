@@ -413,6 +413,7 @@ pub struct RuntimeLimits {
     pub max_account_inputs_per_frame: usize,
     pub max_entity_wire_bytes_per_frame: usize,
     pub checkpoint_period_frames: u64,
+    pub canonical_hash_period_frames: u64,
 }
 
 impl RuntimeLimits {
@@ -425,6 +426,7 @@ impl RuntimeLimits {
             max_account_inputs_per_frame: 0,
             max_entity_wire_bytes_per_frame: 10_000_000,
             checkpoint_period_frames: 100,
+            canonical_hash_period_frames: 0,
         }
     }
 }

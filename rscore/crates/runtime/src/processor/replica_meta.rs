@@ -1,6 +1,7 @@
 //! Exact canonical `0x26` live Entity-replica projection.
 
 use serde_json::{Map, Number, Value};
+use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use xln_rscore_entity_kernel::{
     EntityFrame, EntityFrameEvent, HashType, ResidentEntityConsensusReplica,
@@ -24,6 +25,7 @@ pub(crate) struct PreparedReplicaMeta {
 
 pub(crate) fn prepare_replica_meta(
     result: &RuntimeApplyResult,
+    materialized: bool,
 ) -> Result<PreparedReplicaMeta, ReplicaMetaProjectionError> {
     let head = result
         .replica
@@ -66,7 +68,12 @@ pub(crate) fn prepare_replica_meta(
         meta.insert("htlcNotes".into(), tagged_map(notes));
     }
     let value = Value::Object(meta);
-    let encoded = crate::transport::msgpack::encode_framed(&value)?;
+    let committed_value = if materialized {
+        value.clone()
+    } else {
+        live_replica_meta(result, &value, &entity_id, &signer_id)?
+    };
+    let encoded = crate::transport::msgpack::encode_framed(&committed_value)?;
     let mut key = Vec::with_capacity(65);
     key.push(0x26);
     key.extend_from_slice(&parse_hex(&entity_id, 32)?);
@@ -85,6 +92,77 @@ pub(crate) fn prepare_replica_meta(
         entry,
         value,
     })
+}
+
+fn live_replica_meta(
+    result: &RuntimeApplyResult,
+    full_meta: &Value,
+    entity_id: &str,
+    signer_id: &str,
+) -> Result<Value, ReplicaMetaProjectionError> {
+    let head = full_meta
+        .get("certifiedFrameHead")
+        .ok_or(ReplicaMetaProjectionError::CertifiedFrameMissing)?;
+    let head_digest: [u8; 32] =
+        Sha256::digest(crate::transport::msgpack::encode_framed(head)?).into();
+    let frame_hash = result
+        .replica
+        .entity_consensus
+        .certified_frame_head
+        .as_ref()
+        .ok_or(ReplicaMetaProjectionError::CertifiedFrameMissing)?
+        .frame
+        .hash
+        .clone();
+    let mut value = Map::from_iter([
+        (
+            "replicaKey".into(),
+            Value::String(format!("{entity_id}:{signer_id}")),
+        ),
+        ("entityId".into(), Value::String(entity_id.into())),
+        ("signerId".into(), Value::String(signer_id.into())),
+        ("isProposer".into(), Value::Bool(true)),
+        (
+            "entityHead".into(),
+            object([
+                ("entityId", Value::String(entity_id.into())),
+                (
+                    "height",
+                    safe_number("entityHead.height", result.replica.state.entity.height)?,
+                ),
+                (
+                    "timestamp",
+                    safe_number(
+                        "entityHead.timestamp",
+                        result.replica.state.entity.timestamp,
+                    )?,
+                ),
+                ("frameHash", Value::String(frame_hash)),
+            ]),
+        ),
+        ("mempoolCount".into(), Value::Number(Number::from(0))),
+        (
+            "certifiedFrameHeadDigest".into(),
+            Value::String(hex(&head_digest)),
+        ),
+    ]);
+    let source = result
+        .replica
+        .replica_metadata
+        .as_object()
+        .ok_or_else(|| ReplicaMetaProjectionError::Envelope("OBJECT_REQUIRED".into()))?;
+    for field in [
+        "leaderVotes",
+        "pendingLeaderCertificate",
+        "jPrefixRound",
+        "jSubmitState",
+        "entityProviderActionSubmitState",
+    ] {
+        if let Some(entry) = source.get(field) {
+            value.insert(field.into(), entry.clone());
+        }
+    }
+    Ok(Value::Object(value))
 }
 
 fn notes(consensus: &ResidentEntityConsensusReplica) -> Vec<Value> {

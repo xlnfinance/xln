@@ -250,7 +250,7 @@ pub fn validate_runtime_frame(
     let frame_hash = digest_field(frame, "frameHash")?;
     digest_field(frame, "replicaMetaDigest")?;
     digest_field(frame, "postStateHash")?;
-    field(frame, "materializedState")?
+    let materialized_state = field(frame, "materializedState")?
         .as_bool()
         .ok_or(RuntimeFrameCodecError::Field("materializedState"))?;
     validate_runtime_input(field(frame, "runtimeInput")?, "runtimeInput")?;
@@ -275,6 +275,7 @@ pub fn validate_runtime_frame(
         timestamp,
         prev_frame_hash,
         frame_hash,
+        materialized_state,
         output_count,
         output_digest,
         canonical_state_hash,

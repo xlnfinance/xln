@@ -22,6 +22,7 @@ import { computeEntityConsensusSectionDigestsCold } from '../../../../entity/con
 
 const FIXED_CREATED_AT = 1_775_000_000_000;
 const FIXTURE_SNAPSHOT_PERIOD = 1_000_000;
+const FIXTURE_CHECKPOINT_PERIOD = 100;
 const MAIN_SEED = 'xln-native-replay-main-v1';
 const PEER_SEED = 'xln-native-replay-peer-v1';
 const FIXTURE_JURISDICTION: JurisdictionConfig = {
@@ -75,7 +76,7 @@ const createFixtureRuntime = (runtime: RuntimeApi, seed: string): RuntimeReplica
     storage: {
       ...env.runtimeConfig?.storage,
       enabled: true,
-      materializePeriodFrames: 1,
+      materializePeriodFrames: FIXTURE_CHECKPOINT_PERIOD,
       snapshotPeriodFrames: FIXTURE_SNAPSHOT_PERIOD,
       canonicalHashPeriodFrames: 1,
     },
@@ -439,6 +440,14 @@ export const buildSingleEntityNativeRecording = async (
     enqueue(runtime, main, ++timestamp, setup.main);
     await pump(runtime, mainRef, peerRef);
     await installProfiles(main, peer);
+
+    // Mirror a restored production Runtime starting on a fresh host: publish
+    // its complete base once into an empty namespace, then append only WAL
+    // until the configured 100-frame checkpoint cadence is due.
+    await runtime.closeRuntimeDb(main);
+    main.dbNamespace = `${main.runtimeId}-native-replay-base`;
+    await runtime.persistRestoredEnvToDB(main);
+    installDirectTransport(runtime, mainRef, peerRef);
 
     const baseHeight = main.state.height;
     const [baseFrame] = await runtime.readPersistedFrameJournals(main, {

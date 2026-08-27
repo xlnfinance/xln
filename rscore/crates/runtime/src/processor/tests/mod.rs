@@ -313,6 +313,52 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
 }
 
 #[test]
+fn canonical_hash_cadence_does_not_materialize_path_nodes() {
+    let path = path();
+    let _ = std::fs::remove_dir_all(&path);
+    let mut replica = processor_replica();
+    replica.limits.canonical_hash_period_frames = 1;
+    let input = empty_entity_input(&replica);
+    let store = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            checkpoint_period_frames: 100,
+        },
+    )
+    .expect("native store");
+    let routes = EntityRouteTable::new([]).expect("empty route table");
+    let mut processor = DurableRuntimeProcessor::new(
+        replica,
+        store,
+        routes,
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
+    )
+    .expect("processor");
+    processor.process(input).expect("durable canonical frame");
+    let durable = processor.read_durable_frame(1).expect("durable frame");
+    let frame = crate::decode_storage_payload(&durable.frame_bytes).expect("decode frame");
+    assert_eq!(frame.get("materializedState"), Some(&Value::Bool(false)));
+    assert!(frame.get("canonicalStateHash").is_some());
+    assert!(frame.get("canonicalEntityHashes").is_some());
+    assert!(frame.get("runtimeMachineRoot").is_some());
+    drop(processor);
+
+    let mut reopened = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            checkpoint_period_frames: 100,
+        },
+    )
+    .expect("reopen");
+    let recovery = reopened.recover().expect("recover");
+    assert!(recovery.checkpoint.is_none());
+    assert_eq!(recovery.wal_frames.len(), 1);
+    drop(reopened);
+    std::fs::remove_dir_all(path).expect("remove processor fixture");
+}
+
+#[test]
 fn cadence_100_persists_one_exact_account_entity_runtime_checkpoint() {
     let path = path();
     let _ = std::fs::remove_dir_all(&path);

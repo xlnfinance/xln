@@ -1,4 +1,10 @@
 //! Filesystem durability missing from rusty-leveldb's default disk writer.
+//!
+//! File contents are synced whenever LevelDB flushes a WAL, SST or MANIFEST.
+//! Directory metadata is synced once by `NativeRuntimeStore::persist_frame`
+//! after the whole LevelDB batch returns and before any output is published.
+//! Syncing the same parent after every internal create/delete/rename turns one
+//! Runtime frame into dozens of redundant disk barriers during compaction.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -45,13 +51,11 @@ impl Env for DurableEnv {
             .truncate(true)
             .write(true)
             .open(path)?;
-        sync_parent(path)?;
         Ok(Box::new(DurableWriter(file)))
     }
 
     fn open_appendable_file(&self, path: &Path) -> LevelDbResult<Box<dyn Write>> {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
-        sync_parent(path)?;
         Ok(Box::new(DurableWriter(file)))
     }
 
@@ -68,24 +72,20 @@ impl Env for DurableEnv {
     }
 
     fn delete(&self, path: &Path) -> LevelDbResult<()> {
-        self.inner.delete(path)?;
-        sync_parent(path)
+        self.inner.delete(path)
     }
 
     fn mkdir(&self, path: &Path) -> LevelDbResult<()> {
-        self.inner.mkdir(path)?;
-        sync_parent(path)
+        self.inner.mkdir(path)
     }
 
     fn rmdir(&self, path: &Path) -> LevelDbResult<()> {
-        self.inner.rmdir(path)?;
-        sync_parent(path)
+        self.inner.rmdir(path)
     }
 
     fn rename(&self, old: &Path, new: &Path) -> LevelDbResult<()> {
         sync_file(old)?;
-        self.inner.rename(old, new)?;
-        sync_parent(new)
+        self.inner.rename(old, new)
     }
 
     fn lock(&self, path: &Path) -> LevelDbResult<FileLock> {
@@ -117,11 +117,4 @@ pub(super) fn sync_database_directory(path: &Path) -> Result<(), NativeStorageEr
 
 fn sync_file(path: &Path) -> LevelDbResult<()> {
     Ok(OpenOptions::new().read(true).open(path)?.sync_all()?)
-}
-
-fn sync_parent(path: &Path) -> LevelDbResult<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    Ok(File::open(parent)?.sync_all()?)
 }

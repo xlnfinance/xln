@@ -32,6 +32,7 @@ pub struct NativeRuntimeStore {
 struct PreparedRuntimeFrame {
     frame: RuntimeFrameCommit,
     digest: [u8; 32],
+    materialized_state: bool,
     next_head: StorageHead,
 }
 
@@ -117,6 +118,7 @@ impl NativeRuntimeStore {
         self.persist_frame(PreparedRuntimeFrame {
             frame,
             digest: envelope.output_digest,
+            materialized_state: true,
             next_head,
         })
     }
@@ -177,7 +179,7 @@ impl NativeRuntimeStore {
         let bytes = committed_bytes(&frame)?;
         let mut next_head = self.head.clone();
         next_head.latest_height = frame.height;
-        if frame.checkpoint.is_some() {
+        if envelope.materialized_state {
             next_head.latest_materialized_height = frame.height;
         }
         next_head.epoch_replay_bytes = next_head
@@ -191,6 +193,7 @@ impl NativeRuntimeStore {
         Ok(PreparedRuntimeFrame {
             frame,
             digest: envelope.output_digest,
+            materialized_state: envelope.materialized_state,
             next_head,
         })
     }
@@ -210,6 +213,11 @@ impl NativeRuntimeStore {
             }
             return Ok(());
         };
+        if !frame.materialized_state && (checkpoint.full || !checkpoint.node_changes.is_empty()) {
+            return Err(NativeStorageError::Checkpoint(
+                "non-materialized-node-changes",
+            ));
+        }
         let canonical_state_hash = frame
             .canonical_state_hash
             .ok_or(NativeStorageError::RuntimeMachineRootMissing)?;
@@ -268,12 +276,15 @@ impl NativeRuntimeStore {
         }
         put_frame_rows(&mut batch, &prepared.frame)?;
         if let Some(checkpoint) = &prepared.frame.checkpoint {
-            put_checkpoint_rows(
-                &mut self.database,
-                &mut batch,
-                prepared.frame.height,
-                checkpoint,
-            )?;
+            put_runtime_machine_rows(&mut batch, prepared.frame.height, checkpoint)?;
+            if prepared.materialized_state {
+                put_checkpoint_rows(
+                    &mut self.database,
+                    &mut batch,
+                    prepared.frame.height,
+                    checkpoint,
+                )?;
+            }
         }
         batch.put(KEY_HEAD, &encode_head(&prepared.next_head)?);
         if let Err(error) = self.database.write(batch, true) {
@@ -449,16 +460,24 @@ fn put_checkpoint_rows(
             }
         }
     }
-    for leaf in &checkpoint.runtime_machine_leaves {
+    batch.put(
+        KEY_NATIVE_CHECKPOINT,
+        &encode_checkpoint(height, &checkpoint.state_root)?,
+    );
+    Ok(())
+}
+
+fn put_runtime_machine_rows(
+    batch: &mut WriteBatch,
+    height: u64,
+    graph: &super::types::CheckpointGraph,
+) -> Result<(), NativeStorageError> {
+    for leaf in &graph.runtime_machine_leaves {
         batch.put(
             &runtime_machine_leaf_key(height, &leaf.path_bytes)?,
             &leaf.value_bytes,
         );
     }
-    batch.put(
-        KEY_NATIVE_CHECKPOINT,
-        &encode_checkpoint(height, &checkpoint.state_root)?,
-    );
     Ok(())
 }
 

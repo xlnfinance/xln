@@ -304,6 +304,7 @@ pub fn replay_runtime_wal(
     let context_policy = decoded.entity_context_policy.clone();
     let restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RUNTIME_REPLAY_RESTORE:{error}"))?;
+    let checkpoint_period_frames = restored.replica.limits.checkpoint_period_frames;
 
     let routes = routes_from_wal(reader, &owner, from, to)?;
     let history = reader
@@ -317,7 +318,7 @@ pub fn replay_runtime_wal(
     let mut store = NativeRuntimeStore::open(
         native_database,
         NativeStorageConfig {
-            checkpoint_period_frames: 100,
+            checkpoint_period_frames,
         },
     )
     .map_err(|error| format!("RUNTIME_REPLAY_NATIVE_STORE:{error}"))?;

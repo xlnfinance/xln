@@ -140,6 +140,12 @@ impl RuntimeOperatorConfig {
             .and_then(|storage| storage.materialize_period_frames)
     }
 
+    pub fn canonical_hash_period_frames(&self) -> Option<u64> {
+        self.storage
+            .as_ref()
+            .and_then(|storage| storage.canonical_hash_period_frames)
+    }
+
     pub(crate) fn value(&self) -> Value {
         let mut output = Map::new();
         for (field, value) in [
