@@ -128,6 +128,80 @@ pub fn prepare_claim_tx(
     })
 }
 
+/// Minimal comparable evidence of one already-queued claim row: enough to
+/// decide clause 3 of the admission planner without borrowing the queue.
+pub(crate) struct QueuedClaimWitness {
+    pub j_height: u64,
+    pub j_block_hash: [u8; 32],
+    pub events_hash: [u8; 32],
+}
+
+/// FX-3 (proofs/fixes.md, decision D4): the one local j-claim admission
+/// verdict, shared by `AccountConsensus::admit_txs` in this engine and
+/// mirrored by TypeScript `planAccountJClaimLocalAdmission` in
+/// `core/account/j-claims/j-claim-transition.ts`.
+///
+/// A locally admitted claim carries no proofs, so committed membership is
+/// decided by building fresh witnesses against the committed accumulator
+/// roots — the store is authoritative, never the transaction. Store and
+/// decode failures stay fail-loud `Err`; a conflict is per-row data so an
+/// adversarial observation can never halt the account.
+pub(crate) enum LocalClaimPlan {
+    Admit,
+    /// Exact (jHeight, jBlockHash, eventsHash) evidence already committed or
+    /// queued: idempotent skip, never a second mempool row.
+    Duplicate,
+    /// Same jHeight, different block/event evidence: typed rejection for this
+    /// row only.
+    Conflict(ValidationRejection),
+}
+
+pub(crate) fn plan_local_claim(
+    identity: &AccountIdentity,
+    left: &JClaimAccumulator,
+    right: &JClaimAccumulator,
+    queued: &[QueuedClaimWitness],
+    tx: &JEventClaimTx,
+    store: &JClaimStore,
+) -> Result<LocalClaimPlan, StateError> {
+    let events = canonical_events(&tx.events)?;
+    let records = build_records(identity, tx, &events)?;
+    for (accumulator, expected, side) in [
+        (left, &records.0, Side::Left),
+        (right, &records.1, Side::Right),
+    ] {
+        let proof = create(store, accumulator.root, expected)?;
+        let result = inspect(accumulator.root, expected, &proof)?.result;
+        let ProofResult::Member(actual) = result else {
+            continue;
+        };
+        if same_record(&actual, expected) {
+            return Ok(LocalClaimPlan::Duplicate);
+        }
+        return Ok(LocalClaimPlan::Conflict(
+            ValidationRejection::JEventClaimConflict {
+                side,
+                j_height: expected.j_height,
+            },
+        ));
+    }
+    let events_hash = canonical_events_hash(&events)?;
+    for queued_claim in queued {
+        if queued_claim.j_height != tx.j_height {
+            continue;
+        }
+        if queued_claim.events_hash == events_hash && queued_claim.j_block_hash == tx.j_block_hash {
+            return Ok(LocalClaimPlan::Duplicate);
+        }
+        return Ok(LocalClaimPlan::Conflict(
+            ValidationRejection::JEventClaimQueuedConflict {
+                j_height: tx.j_height,
+            },
+        ));
+    }
+    Ok(LocalClaimPlan::Admit)
+}
+
 fn owned_by_side<'a>(
     left: &'a JClaimAccumulator,
     right: &'a JClaimAccumulator,

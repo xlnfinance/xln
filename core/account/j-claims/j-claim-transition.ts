@@ -3,6 +3,7 @@ import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import type {
   AccountJClaimAccumulatorState,
   AccountJClaimDomain,
+  AccountJClaimNodeStore,
   AccountJClaimProofResult,
   AccountJClaimRecord,
   AccountJClaimSide,
@@ -116,6 +117,65 @@ export const validateAccountJEventClaimAdmission = (
   return message
     ? { ok: false, message }
     : { ok: true, admission: { events, leftRecord, rightRecord, leftResult, rightResult } };
+};
+
+export type AccountJClaimLocalAdmissionPlan =
+  | Readonly<{ verdict: 'admit' }>
+  | Readonly<{ verdict: 'duplicate' }>
+  | Readonly<{ verdict: 'conflict'; message: string }>;
+
+/**
+ * FX-3 (proofs/fixes.md, decision D4): the one local j-claim admission
+ * planner, shared by enqueue admission and the proposal path (which re-runs
+ * the same conflict classification through `validateAccountJEventClaimAdmission`
+ * after regenerating proofs). A locally admitted claim carries no proofs yet,
+ * so committed membership is decided by building fresh witnesses against the
+ * committed accumulator roots — the store is authoritative, never the tx.
+ *
+ * Verdicts (admission clauses 1-3):
+ *  - `duplicate`: exact (jHeight, jBlockHash, eventsHash) already committed or
+ *    queued — idempotent skip, never a second mempool row.
+ *  - `conflict`: same jHeight with different block/event evidence — a typed
+ *    rejection for that row only. Adversarial observations must not halt the
+ *    account, so this returns data instead of throwing; store/decode failures
+ *    below still fail loud.
+ *  - `admit`: no committed or queued evidence at this height.
+ */
+export const planAccountJClaimLocalAdmission = (
+  account: AccountState,
+  queued: readonly AccountTx[],
+  tx: ClaimTx,
+  store: AccountJClaimNodeStore,
+  domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,
+): AccountJClaimLocalAdmissionPlan => {
+  const events = canonicalEvents(tx.data.events);
+  const eventsHash = canonicalJurisdictionEventsHash(events);
+  for (const side of ['left', 'right'] as const) {
+    const record = buildRecord(account, domain, side, tx.data, events);
+    const state = side === 'left' ? account.leftPendingJClaims : account.rightPendingJClaims;
+    const result = verifyAccountJClaimProof(
+      state.root,
+      record,
+      createAccountJClaimProof(store, state.root, record),
+    );
+    if (result.status !== 'member') continue;
+    if (result.record.jBlockHash === record.jBlockHash && result.record.eventsHash === record.eventsHash) {
+      return { verdict: 'duplicate' };
+    }
+    return {
+      verdict: 'conflict',
+      message: `ACCOUNT_J_CLAIM_${side.toUpperCase()}_CONFLICT:${side}:${tx.data.jHeight}`,
+    };
+  }
+  for (const queuedTx of queued) {
+    if (queuedTx.type !== 'j_event_claim' || queuedTx.data.jHeight !== tx.data.jHeight) continue;
+    const queuedHash = canonicalJurisdictionEventsHash(canonicalEvents(queuedTx.data.events));
+    const sameClaim = queuedHash === eventsHash
+      && queuedTx.data.jBlockHash.toLowerCase() === tx.data.jBlockHash.toLowerCase();
+    if (sameClaim) return { verdict: 'duplicate' };
+    return { verdict: 'conflict', message: `ACCOUNT_J_CLAIM_QUEUED_CONFLICT:${tx.data.jHeight}` };
+  }
+  return { verdict: 'admit' };
 };
 
 const pruneSide = (

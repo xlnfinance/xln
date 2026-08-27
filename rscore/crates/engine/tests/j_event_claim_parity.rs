@@ -2,10 +2,9 @@ use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountDisputeConfig, AccountDomain, AccountIdentity, AccountOutput,
     AccountRejection, AccountReplica, AccountSettledEvent, AccountState, AccountTx, AccountVerdict,
-    BoardDelays, DepositoryAddress, Disposition, EntityId, JEventClaimTx, JEventMetadata,
-    JurisdictionEvent, ProposalOutcome, SequentialAccountEngine, Side, SigningIdentity, TokenId,
-    ValidationRejection, WatchSeed, canonical_events_hash, canonical_tx_digest, prepare_claim_tx,
-    propose_account_frame,
+    DepositoryAddress, EntityId, JEventClaimTx, JEventMetadata, JurisdictionEvent,
+    SequentialAccountEngine, Side, TokenId, ValidationRejection, WatchSeed, canonical_events_hash,
+    canonical_tx_digest, prepare_claim_tx,
 };
 
 const EMPTY_PROOF_DIGEST: &str = "d877be0b440ed7bfda96495cefa57ed81331c1ac03b19b09eb27c4083cf01512";
@@ -205,26 +204,17 @@ fn exact_retry_is_idempotent_and_conflict_is_atomic() {
     );
 
     let mut account = AccountConsensus::new(pending);
-    account
+    // FX-3 (proofs/fixes.md D4): a claim conflicting with committed evidence
+    // is now rejected at admission itself — typed, per row, account unharmed —
+    // instead of entering the queue and being dropped by a later proposal.
+    let summary = account
         .admit_txs(vec![AccountTx::JEventClaim(conflict)], "jClaimConflict")
-        .expect("admit conflicting observation");
-    let signer = SigningIdentity::lazy_from_seed(
-        &format!("0x{}", "77".repeat(32)),
-        "1",
-        1,
-        1,
-        BoardDelays::default(),
-    )
-    .expect("signer");
-    let outcome = propose_account_frame(&mut account, &signer, 100, 7, &std::sync::Arc::default())
-        .expect("conflict does not abort proposal processing");
-    let ProposalOutcome::Idle { dropped } = outcome else {
-        panic!("only conflicting work should leave the proposal idle")
-    };
-    assert_eq!(dropped.len(), 1);
-    assert_eq!(dropped[0].disposition, Disposition::Removed);
+        .expect("conflicting observation is classified, never an abort");
+    assert_eq!(summary.admitted, 0);
+    assert_eq!(summary.rejections.len(), 1);
+    assert_eq!(summary.rejections[0].index, 0);
     assert!(matches!(
-        dropped[0].rejection,
+        summary.rejections[0].rejection,
         AccountRejection::Validation(ValidationRejection::JEventClaimConflict {
             side: Side::Left,
             j_height: 7,

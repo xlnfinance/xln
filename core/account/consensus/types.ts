@@ -52,6 +52,19 @@ export type HandleAccountInputRejection =
   | Readonly<{ kind: 'tx'; tx: AccountTxRejection; message: string }>
   | Readonly<{ kind: 'validation'; message: string }>;
 
+/**
+ * FX-3 (proofs/fixes.md D4): one enqueue row rejected at admission, reported
+ * as typed data on an otherwise applied input. A conflicting j-claim must not
+ * halt the account, so the input stays ok and only the offending row is
+ * excluded — the enqueue counterpart of the proposal path's
+ * `ProposalDroppedTransaction`.
+ */
+export type AccountAdmissionRejection = Readonly<{
+  index: number;
+  code: string;
+  message: string;
+}>;
+
 type AccountConsensusOkEffects = {
   events: string[];
   revealedSecrets?: Array<{ secret: string; hashlock: string }>;
@@ -65,6 +78,7 @@ type AccountConsensusOkEffects = {
 export type HandleAccountInputApplied = Readonly<AccountConsensusOkEffects & {
   ok: true;
   admittedAccountTxCount?: number;
+  admissionRejections?: readonly AccountAdmissionRejection[];
   externalFinality?: AccountDisputeFinalityResult;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   response?: AccountPeerInput;

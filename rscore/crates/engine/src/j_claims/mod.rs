@@ -16,8 +16,8 @@ pub use codec::{
 };
 pub use events::{canonical_events, canonical_events_hash};
 pub(crate) use transition::{
-    AccountJEventClaimAdmissionResult, apply_admitted_claim_transition,
-    validate_j_event_claim_admission,
+    AccountJEventClaimAdmissionResult, LocalClaimPlan, QueuedClaimWitness,
+    apply_admitted_claim_transition, plan_local_claim, validate_j_event_claim_admission,
 };
 pub use transition::{apply_claim_transition, prepare_claim_tx};
 pub use types::{

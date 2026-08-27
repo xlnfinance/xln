@@ -23,6 +23,9 @@ import {
 const accountContext = () =>
   createAccountConsensusContext(createEmptyEnv('account-local-tx-admission'));
 
+/** FX-3: local admission needs the durable j-claim node store. */
+const jClaimNodeStore = () => accountContext().jClaimNodeStore;
+
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   type: 'direct_payment',
   data: {
@@ -78,7 +81,7 @@ describe('account mempool multiplicity', () => {
   test('keeps a second authorized payment while identical bytes are pending', () => {
     const account = accountWithPending(PAYMENT);
 
-    expect(admitLocalAccountTx(account, structuredClone(PAYMENT))).toBe(true);
+    expect(admitLocalAccountTx(account, structuredClone(PAYMENT), jClaimNodeStore())).toBe(true);
     expect(account.mempool).toEqual([PAYMENT]);
     expect(account.pendingFrame?.accountTxs).toEqual([PAYMENT]);
   });
@@ -90,7 +93,7 @@ describe('account mempool multiplicity', () => {
     };
     const account = accountWithPending(lifecycle);
 
-    expect(admitLocalAccountTx(account, structuredClone(lifecycle))).toBe(false);
+    expect(admitLocalAccountTx(account, structuredClone(lifecycle), jClaimNodeStore())).toBe(false);
     expect(account.mempool).toEqual([]);
   });
 
@@ -215,7 +218,7 @@ describe('account mempool multiplicity', () => {
       () => structuredClone(PAYMENT),
     );
 
-    expect(() => admitLocalAccountTx(account, structuredClone(PAYMENT)))
+    expect(() => admitLocalAccountTx(account, structuredClone(PAYMENT), jClaimNodeStore()))
       .toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
     expect(account.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE - 1);
     expect(account.pendingFrame?.accountTxs).toHaveLength(1);

@@ -735,9 +735,12 @@ type HtlcFixedPointResult = (
     Vec<ProposalRow>,
     BTreeSet<AccountId>,
 );
-type OutboundWork = Result<
+/// FX-3: `admit_and_propose` returns each account's truthful engine admission
+/// summary so the wave verdict counts dropped rows.
+type AdmitAndProposeWork = Result<
     (
         AccountId,
+        Option<xln_rscore_engine::AccountAdmission>,
         Option<(AccountConsensus, [u8; 32])>,
         Option<ProposalRow>,
     ),
@@ -1009,7 +1012,7 @@ impl StatefulConsensusEngine {
         j_height: u64,
     ) -> Result<(Vec<AccountAdmissionResult>, Vec<ProposalRow>), BatchError> {
         let group_at = std::time::Instant::now();
-        let admissions = requests
+        let mut admissions = requests
             .iter()
             .enumerate()
             .map(|(index, (account_id, txs))| AccountAdmissionResult {
@@ -1048,7 +1051,7 @@ impl StatefulConsensusEngine {
         let identities = &self.identities;
         let swap_market = &self.swap_market;
         let work_at = std::time::Instant::now();
-        let outcomes: Vec<OutboundWork> = map_accounts(
+        let outcomes: Vec<AdmitAndProposeWork> = map_accounts(
             &self.pool,
             &self.account_shards,
             work,
@@ -1062,10 +1065,16 @@ impl StatefulConsensusEngine {
                     })?
                     .clone();
                 let mut changed = false;
+                // FX-3: keep the engine's truthful admitted count — the
+                // j-claim planner may drop duplicates/conflicts from the
+                // pre-counted batch.
+                let mut admission_summary = None;
                 if let Some(txs) = txs {
-                    account
-                        .admit_txs(txs, "rscoreConsensus:admit")
-                        .map_err(|error| state_error(account_id, &error))?;
+                    admission_summary = Some(
+                        account
+                            .admit_txs(txs, "rscoreConsensus:admit")
+                            .map_err(|error| state_error(account_id, &error))?,
+                    );
                     changed = true;
                 }
                 let proposal = if selected {
@@ -1101,7 +1110,7 @@ impl StatefulConsensusEngine {
                 } else {
                     None
                 };
-                Ok((account_id, update, proposal))
+                Ok((account_id, admission_summary, update, proposal))
             },
         );
         crate::round::phase::add(&crate::round::phase::ACCOUNT_WORK, work_at);
@@ -1109,7 +1118,16 @@ impl StatefulConsensusEngine {
         let mut entries = Vec::with_capacity(outcomes.len());
         let mut proposals = Vec::with_capacity(selected.len());
         for outcome in outcomes {
-            let (account_id, update, proposal) = outcome?;
+            let (account_id, admission_summary, update, proposal) = outcome?;
+            if let Some(summary) = admission_summary
+                && let Some(result) = admissions
+                    .iter_mut()
+                    .find(|result| result.account_id == account_id)
+            {
+                result.verdict = AccountAdmissionVerdict::Admitted {
+                    count: summary.admitted,
+                };
+            }
             if let Some((account, leaf)) = update {
                 entries.push((account_id.as_bytes().to_vec(), account, leaf));
             }
@@ -3002,9 +3020,12 @@ pub(crate) fn admit_local_txs(
             admitted.push(tx);
         }
     }
-    let count = admitted.len();
-    account.admit_txs(admitted, "rscoreConsensus:localAdmission")?;
-    Ok(count)
+    // FX-3: the engine's j-claim admission planner may drop further rows
+    // (exact duplicates or typed conflicts), so the truthful count is the
+    // engine summary's, never the pre-admission batch length.
+    account
+        .admit_txs(admitted, "rscoreConsensus:localAdmission")
+        .map(|summary| summary.admitted)
 }
 
 /// Accept only the pre-input Account genesis that the Entity itself creates.

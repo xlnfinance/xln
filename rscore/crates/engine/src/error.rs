@@ -168,6 +168,13 @@ pub enum ValidationRejection {
         side: Side,
         j_height: u64,
     },
+    /// FX-3 (proofs/fixes.md D4): the queued-claim counterpart of
+    /// [`ValidationRejection::JEventClaimConflict`] — an earlier admitted claim
+    /// at the same jHeight already disagrees on block/event evidence. Same
+    /// message shape as TypeScript `planAccountJClaimLocalAdmission`.
+    JEventClaimQueuedConflict {
+        j_height: u64,
+    },
     Htlc(HtlcRejection),
 }
 
@@ -245,6 +252,9 @@ impl ValidationRejection {
                     "ACCOUNT_J_CLAIM_{}_CONFLICT:{side}:{j_height}",
                     side.to_ascii_uppercase()
                 )
+            }
+            Self::JEventClaimQueuedConflict { j_height } => {
+                format!("ACCOUNT_J_CLAIM_QUEUED_CONFLICT:{j_height}")
             }
             Self::Htlc(reason) => reason.message(),
         }

@@ -43,8 +43,9 @@ pub use consensus::proposal::propose::{
     Disposition, DroppedTx, ProposalOutcome, ProposedFrame, propose_account_frame,
 };
 pub use consensus::replica::{
-    AccountConsensus, CommittedFrame, ConsensusSnapshot, CounterpartyDispute, DisputeDraft,
-    OutboundAck, PendingFrame, PendingFrameSnapshot, RolledBackProposal,
+    AccountAdmission, AccountConsensus, AdmissionRejection, CommittedFrame, ConsensusSnapshot,
+    CounterpartyDispute, DisputeDraft, OutboundAck, PendingFrame, PendingFrameSnapshot,
+    RolledBackProposal,
 };
 pub use consensus::signing::{
     CertifiedBoardAuthority, SigningIdentity, verify_ack_hanko_with_authority,

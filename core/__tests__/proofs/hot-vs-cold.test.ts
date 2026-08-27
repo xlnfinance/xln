@@ -259,7 +259,7 @@ class BilateralHarness {
   }
 
   /** Admit a j_event_claim whose bytes are a pure function of (jHeight, blockByte). */
-  async admitClaim(side: HarnessSide, jHeight: number, blockByte: number): Promise<void> {
+  async admitClaim(side: HarnessSide, jHeight: number, blockByte: number): Promise<Awaited<ReturnType<typeof applyAccountInput>>> {
     this.clock += STEP_MS;
     this.env.state.timestamp = this.clock;
     const shell = this.shell(side);
@@ -289,8 +289,9 @@ class BilateralHarness {
         }],
       },
     };
-    await applyAccountInput(this.context(), shell, { kind: 'enqueue', txs: [tx] }, this.security());
+    const result = await applyAccountInput(this.context(), shell, { kind: 'enqueue', txs: [tx] }, this.security());
     this.commit(side, shell);
+    return result;
   }
 
   mempoolTypes(side: HarnessSide): AccountTx['type'][] {
@@ -481,11 +482,16 @@ describe('proofs/C2 hot-vs-cold account roots', () => {
     }
   });
 
-  test('conflicting j_event_claim is removed without halting, committed roots stay hot==cold', async () => {
+  test('conflicting j_event_claim is typed rejected at admission, committed roots stay hot==cold', async () => {
     // fast-check (seed 42, run 79 / seed 31337, run 43) found that a locally
     // admitted second j_event_claim with the same jHeight but different event
-    // bytes must be a typed transaction rejection. The rejected claim is
-    // removed from the proposal window without publishing a partial frame.
+    // bytes used to be a bare propose throw (C2 finding F1). FX-3 (D4) moved
+    // the verdict to admission itself: the conflicting claim never enters the
+    // mempool and the enqueue result carries the typed rejection, so this pin
+    // asserts the typed admission verdict instead of the earlier
+    // admit-then-drop-at-propose expectation. The proposal-window drop half
+    // of D4 (stale admitted claims) is pinned by the FX-3 vector suite
+    // core/__tests__/account/j-claims/j-claim-admission-vectors.test.ts.
     const harness = new BilateralHarness();
     await harness.admitClaim('alpha', 2, 0x11);
     harness.checkAll('finding-pin step-1');
@@ -495,14 +501,26 @@ describe('proofs/C2 hot-vs-cold account roots', () => {
     harness.checkAll('finding-pin step-3');
     await harness.step({ kind: 'ack', side: 'beta' });
     harness.checkAll('finding-pin step-4');
-    await harness.admitClaim('alpha', 2, 0x2a);
+    const conflict = await harness.admitClaim('alpha', 2, 0x2a);
     harness.checkAll('finding-pin step-5');
+    // Typed admission verdict: no throw, row rejected, nothing queued. The
+    // committed member is alpha's own claim, so the conflict names alpha's
+    // side of the bilateral pair.
+    expect(conflict.ok).toBe(true);
+    expect(conflict.ok ? conflict.admittedAccountTxCount : undefined).toBe(0);
+    const alphaAccount = harness.committed('alpha');
+    const alphaSide = harness.sides.alpha.entityId === alphaAccount.state.leftEntity ? 'left' : 'right';
+    expect(conflict.ok ? conflict.admissionRejections : undefined).toEqual([{
+      index: 0,
+      code: 'ACCOUNT_TX_VALIDATION',
+      message: `ACCOUNT_J_CLAIM_${alphaSide.toUpperCase()}_CONFLICT:${alphaSide}:2`,
+    }]);
     await harness.step({
       kind: 'admit',
       side: 'alpha',
       txs: [{ kind: 'payment', tokenId: 1, amount: 1n }],
     });
-    expect(harness.mempoolTypes('alpha')).toEqual(['j_event_claim', 'direct_payment']);
+    expect(harness.mempoolTypes('alpha')).toEqual(['direct_payment']);
     await expect(harness.step({ kind: 'propose', side: 'alpha' })).resolves.toBeUndefined();
     expect(harness.mempoolTypes('alpha')).toEqual([]);
     expect(harness.pendingTxTypes('alpha')).toEqual(['direct_payment']);

@@ -18,13 +18,45 @@ use crate::error::StateError;
 use crate::input::mempool::{
     assert_mempool_admission, assert_mempool_within_limit, is_deduplicated_on_restore,
 };
+use crate::j_claims::{LocalClaimPlan, QueuedClaimWitness, plan_local_claim};
 use crate::state::account_replica_shell::AccountEnvelope;
-use crate::{AccountReplica, AccountTx};
+use crate::{AccountRejection, AccountReplica, AccountTx};
 
 fn number(value: u64) -> Result<CanonicalValue, StateError> {
     CanonicalNumber::try_from_u64(value)
         .map(CanonicalValue::Number)
         .map_err(|error| StateError::Envelope(error.to_string()))
+}
+
+fn queued_claim_witness(claim: &crate::JEventClaimTx) -> Result<QueuedClaimWitness, StateError> {
+    Ok(QueuedClaimWitness {
+        j_height: claim.j_height,
+        j_block_hash: claim.j_block_hash,
+        events_hash: crate::j_claims::canonical_events_hash(&crate::j_claims::canonical_events(
+            &claim.events,
+        )?)?,
+    })
+}
+
+/// FX-3 (proofs/fixes.md, decision D4): one enqueue row rejected at
+/// admission, reported as typed data while the rest of the batch is admitted.
+/// The enqueue counterpart of the proposal path's `DroppedTx`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdmissionRejection {
+    pub index: usize,
+    pub rejection: AccountRejection,
+}
+
+/// Summary of one local admission batch: how many rows entered the queue,
+/// how many were idempotent duplicates, and the typed rejection for each
+/// conflicting row. Malformed batches and store failures stay whole-batch
+/// `Err`; only the adversarial-evidence verdict lives here, so the account
+/// always continues.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccountAdmission {
+    pub admitted: usize,
+    pub duplicates: usize,
+    pub rejections: Vec<AdmissionRejection>,
 }
 
 /// An acknowledgement this side sent for the counterparty's frame, kept
@@ -249,11 +281,18 @@ impl AccountConsensus {
 
     /// Admit local intentions. The limit counts the proposed frame too, so an
     /// unresponsive peer cannot be used to grow the queue.
+    ///
+    /// FX-3 (proofs/fixes.md, decision D4): malformed input (unhashable kind,
+    /// out-of-range policyVersion) rejects the whole batch loudly, but a
+    /// j-claim that conflicts with committed or earlier queued evidence
+    /// rejects only its own row, as typed data — the account continues.
+    /// Parity target: `applyAccountEnqueue`'s `admissionRejections`
+    /// (core/account/input/local-tx-admission.ts).
     pub fn admit_txs(
         &mut self,
         txs: Vec<AccountTx>,
         context: &'static str,
-    ) -> Result<(), StateError> {
+    ) -> Result<AccountAdmission, StateError> {
         assert_mempool_admission(
             self.mempool.len(),
             self.pending_tx_count(),
@@ -283,8 +322,70 @@ impl AccountConsensus {
                 });
             }
         }
-        self.mempool.extend(txs);
-        Ok(())
+        let incoming_claim_heights: std::collections::BTreeSet<u64> = txs
+            .iter()
+            .filter_map(|tx| match tx {
+                AccountTx::JEventClaim(claim) => Some(claim.j_height),
+                _ => None,
+            })
+            .collect();
+        let mut summary = AccountAdmission::default();
+        let mut admitted: Vec<AccountTx> = Vec::with_capacity(txs.len());
+        if incoming_claim_heights.is_empty() {
+            summary.admitted = txs.len();
+            self.mempool.extend(txs);
+            return Ok(summary);
+        }
+        // Only queued claims at an incoming height can conflict, so the queue
+        // is canonicalized for exactly those rows. A decode failure here is a
+        // corrupt queue, not adversarial evidence: fail loud.
+        let mut queued: Vec<QueuedClaimWitness> = self
+            .mempool
+            .iter()
+            .chain(self.pending.iter().flat_map(|pending| &pending.frame.txs))
+            .filter_map(|tx| match tx {
+                AccountTx::JEventClaim(claim)
+                    if incoming_claim_heights.contains(&claim.j_height) =>
+                {
+                    Some(queued_claim_witness(claim))
+                }
+                _ => None,
+            })
+            .collect::<Result<_, _>>()?;
+        for (index, tx) in txs.into_iter().enumerate() {
+            if let AccountTx::JEventClaim(claim) = &tx {
+                let carried = self.replica.state().carried();
+                let plan = plan_local_claim(
+                    self.replica.state().identity(),
+                    &carried.left_pending_j_claims,
+                    &carried.right_pending_j_claims,
+                    &queued,
+                    claim,
+                    self.replica.state().j_claim_store(),
+                )?;
+                match plan {
+                    LocalClaimPlan::Admit => {}
+                    LocalClaimPlan::Duplicate => {
+                        summary.duplicates += 1;
+                        continue;
+                    }
+                    LocalClaimPlan::Conflict(rejection) => {
+                        summary.rejections.push(AdmissionRejection {
+                            index,
+                            rejection: AccountRejection::Validation(rejection),
+                        });
+                        continue;
+                    }
+                }
+            }
+            if let AccountTx::JEventClaim(claim) = &tx {
+                queued.push(queued_claim_witness(claim)?);
+            }
+            admitted.push(tx);
+        }
+        summary.admitted = admitted.len();
+        self.mempool.extend(admitted);
+        Ok(summary)
     }
 
     fn pending_tx_count(&self) -> usize {

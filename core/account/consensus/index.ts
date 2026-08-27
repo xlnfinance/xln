@@ -1208,7 +1208,9 @@ export async function applyAccountInput(
   // before TypeScript executes them (no-op unless recording is on).
   const recorded = noteRawAccountInput(context.accountAuthorityFrameId, account, input);
   const result = await (async (): Promise<HandleAccountInputResult> => {
-    if (input.kind === 'enqueue') return applyAccountEnqueue(account, input);
+    if (input.kind === 'enqueue') {
+      return applyAccountEnqueue(account, input, context.jClaimNodeStore);
+    }
     const envelopeError = getAccountInputEnvelopeError(account.state, input);
     if (envelopeError) {
       if (input.kind === 'external_finality') {
