@@ -372,6 +372,40 @@ fn wake_input(from: &str, next_hook: &str) -> RuntimeEntityInput {
     )
 }
 
+#[test]
+fn runtime_selection_preserves_exact_entity_input_fifo_order() -> Result<(), RuntimeMachineError> {
+    let ordinary = entity_input_marked(1, 11);
+    let empty = CanonicalValue::Object(Vec::new());
+    let account = RuntimeEntityInput::fixture_with_entity_txs(
+        serde_json::json!({ "marker": 22 }),
+        vec![CanonicalEntityTx {
+            kind: EntityTxKind::AccountInput,
+            data: empty.clone(),
+            wire_data: empty,
+        }],
+    );
+    let context = frame_at(321, 7, Vec::new()).frame;
+    let mut mempool = RuntimeMempool::empty();
+    mempool.entity_inputs.extend([ordinary, account]);
+    mempool.queued_at = Some(context.timestamp);
+
+    let selected = select_runtime_frame(&mut mempool, RuntimeLimits::hlt(), 0, context)?
+        .ok_or(RuntimeMachineError::InputCountOverflow)?;
+    assert_eq!(
+        selected
+            .entity_inputs
+            .iter()
+            .map(RuntimeEntityInput::canonical)
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            serde_json::json!({ "marker": 11 }),
+            serde_json::json!({ "marker": 22 }),
+        ]
+    );
+    Ok(())
+}
+
 /// Two `scheduledWake` bodies in one Runtime frame were computed from two
 /// different Entity frame starts. Only the first Entity height may become
 /// durable here; the rest of the queue stays in the sole Runtime FIFO in

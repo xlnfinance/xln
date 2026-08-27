@@ -141,17 +141,14 @@ fn restore_native_runtime(
     }
     for source in sources.wal {
         let finalized_j_height = restored.replica.state.finalized_j_height;
-        let mut frame = decode_concrete_runtime_wal_frame(
+        let frame = decode_concrete_runtime_wal_frame(
             &source,
             &entity_context_policy,
             finalized_j_height,
             false,
         )
         .map_err(|error| format!("RRS_NATIVE_RESTART_WAL:{}:{error}", source.height))?;
-        reconcile_runtime_input_with_resident_queue(
-            &mut frame.input,
-            restored.replica.mempool.pending_entity_inputs(),
-        );
+        reconcile_runtime_input_with_resident_queue(&frame.input, &mut restored.replica.mempool);
         restored = replay_decoded_runtime_wal(restored, vec![frame])
             .map_err(|error| format!("RRS_NATIVE_RESTART_APPLY:{}:{error}", source.height))?;
     }

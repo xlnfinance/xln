@@ -94,25 +94,25 @@ pub(super) fn metadata(raw: &Map<String, Value>) -> Map<String, Value> {
     if let Some(value) = raw.get("blockNumber").and_then(normalize_int) {
         metadata.insert("blockNumber".into(), int_value(value));
     }
-    if let Some(Value::String(text)) = raw.get("blockHash") {
-        if !text.trim().is_empty() {
-            metadata.insert("blockHash".into(), Value::String(text.clone()));
-        }
+    if let Some(Value::String(text)) = raw.get("blockHash")
+        && !text.trim().is_empty()
+    {
+        metadata.insert("blockHash".into(), Value::String(text.clone()));
     }
-    if let Some(Value::String(text)) = raw.get("transactionHash") {
-        if !text.trim().is_empty() {
-            metadata.insert("transactionHash".into(), Value::String(text.clone()));
-        }
+    if let Some(Value::String(text)) = raw.get("transactionHash")
+        && !text.trim().is_empty()
+    {
+        metadata.insert("transactionHash".into(), Value::String(text.clone()));
     }
-    if let Some(value) = raw.get("logIndex").and_then(normalize_int) {
-        if value >= 0 {
-            metadata.insert("logIndex".into(), int_value(value));
-        }
+    if let Some(value) = raw.get("logIndex").and_then(normalize_int)
+        && value >= 0
+    {
+        metadata.insert("logIndex".into(), int_value(value));
     }
-    if let Some(value) = raw.get("eventIndex").and_then(normalize_int) {
-        if value >= 0 {
-            metadata.insert("eventIndex".into(), int_value(value));
-        }
+    if let Some(value) = raw.get("eventIndex").and_then(normalize_int)
+        && value >= 0
+    {
+        metadata.insert("eventIndex".into(), int_value(value));
     }
     metadata
 }

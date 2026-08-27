@@ -98,7 +98,6 @@ pub fn select_runtime_frame(
     }
     frame.timestamp = mempool.queued_at.unwrap_or(frame.timestamp);
     let runtime_txs = mempool.runtime_txs.drain(..).collect::<Vec<_>>();
-    prioritize_protocol_inputs(&mut mempool.entity_inputs);
     let height_deferred =
         apply_entity_height_durability_barrier(&mut mempool.entity_inputs, entity_height);
     let mut selected = Vec::new();
@@ -258,25 +257,4 @@ fn apply_entity_height_durability_barrier(
     }
     *inputs = selected;
     deferred
-}
-
-/// TypeScript drains one flat queue, then stably moves Account/J protocol
-/// inputs ahead of ordinary self-wakes before applying frame caps.
-fn prioritize_protocol_inputs(inputs: &mut VecDeque<RuntimeEntityInput>) {
-    if !inputs.iter().any(RuntimeEntityInput::is_protocol)
-        || inputs.iter().all(RuntimeEntityInput::is_protocol)
-    {
-        return;
-    }
-    let mut protocol = VecDeque::new();
-    let mut ordinary = VecDeque::new();
-    while let Some(input) = inputs.pop_front() {
-        if input.is_protocol() {
-            protocol.push_back(input);
-        } else {
-            ordinary.push_back(input);
-        }
-    }
-    protocol.append(&mut ordinary);
-    *inputs = protocol;
 }

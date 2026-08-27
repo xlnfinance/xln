@@ -46,6 +46,17 @@ fn invalid(detail: impl Into<String>) -> PathCheckpointRestoreError {
     PathCheckpointRestoreError::Invalid(detail.into())
 }
 
+fn render_hex32(bytes: &[u8; 32]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(66);
+    output.push_str("0x");
+    for byte in bytes {
+        output.push(DIGITS[usize::from(byte >> 4)] as char);
+        output.push(DIGITS[usize::from(byte & 0x0f)] as char);
+    }
+    output
+}
+
 fn object<'a>(
     value: &'a Value,
     path: &str,
@@ -307,6 +318,15 @@ fn replica_metadata(
         .get("isProposer")
         .and_then(Value::as_bool)
         .ok_or_else(|| invalid("REPLICA_META_PROPOSER"))?;
+    // Storage may encode identity bytes as tagged MessagePack values. The live
+    // Runtime replica has one canonical envelope shape: lowercase hex strings.
+    // Normalize at the restore boundary instead of leaking storage encoding
+    // details into the state machine.
+    let mut normalized = meta.clone();
+    normalized.insert("entityId".into(), Value::String(render_hex32(owner)));
+    normalized.insert("signerId".into(), Value::String(signer_id.clone()));
+    normalized.insert("isProposer".into(), Value::Bool(is_proposer));
+    let value = Value::Object(normalized);
     Ok(RestoredReplicaMetadata {
         signer_id,
         is_proposer,

@@ -4,6 +4,7 @@
 //! grammar, so the same input always produces the same structured value.
 //! No clocks, no randomness, no environment reads.
 
+use sha2::Digest as _;
 use xln_rscore_abi::{AbiValue, BodyTuple};
 
 /// Deterministic byte cursor over the fuzz input.
@@ -234,10 +235,195 @@ pub fn command_body(value: AbiValue) -> BodyTuple {
 }
 
 // ---------------------------------------------------------------------------
-// Orderbook page snapshot grammar (shared by the orderbook_page target and
-// the seed generator). The seed writer below is the exact inverse of the
-// reader, so a committed fixture can be replayed byte-perfectly.
+// Valid-page grammar + page-commitment mirrors (wave-2, audit A4).
+//
+// `page_key` / `page_digest` and the two page-tree roots are crate-private in
+// entity-kernel, so acceptance in `BookState::restore` (which re-derives all
+// of them and compares against `expected_*`) was previously reachable only
+// through two committed seeds. The mirrors below re-derive the exact same
+// bytes from public snapshot data:
+//   - `page_key_mirror`      = orderbook/page.rs:175 page_key
+//   - `page_digest_mirror`   = orderbook/page.rs:134 page_digest
+//   - `page_tree_root_mirror`= PersistentRadixMap (public) over (key, digest)
+//     — radix node hashes depend only on (key, digest) pairs, so the value
+//     type is irrelevant to the root.
+//   - `book_commitment_mirror` = orderbook/commitment.rs:35
+// gen_seeds calibrates the mirrors against the committed TypeScript parity
+// fixture (expectedBidPagesRoot / expectedAskPagesRoot), so any drift between
+// mirror and production fails loudly at seed-generation time.
 // ---------------------------------------------------------------------------
+
+/// Mirror of `page.rs::price_prefix` + `page_key` (positive prices only — the
+/// valid-page grammar never generates non-positive or non-canonical keys).
+pub fn page_key_mirror(price_ticks: &BigInt, sequence: u16) -> Vec<u8> {
+    let (_, mut magnitude) = price_ticks.to_bytes_be();
+    if magnitude.is_empty() {
+        magnitude.push(0);
+    }
+    let mut key = Vec::with_capacity(3 + magnitude.len());
+    key.push(u8::try_from(magnitude.len()).expect("mirror price length"));
+    key.extend_from_slice(&magnitude);
+    key.extend_from_slice(&sequence.to_be_bytes());
+    key
+}
+
+fn mirror_framed(bytes: &[u8], output: &mut Vec<u8>) {
+    let length = u16::try_from(bytes.len()).expect("mirror field length");
+    output.extend_from_slice(&length.to_be_bytes());
+    output.extend_from_slice(bytes);
+}
+
+fn mirror_unsigned(value: &BigInt) -> Vec<u8> {
+    let (sign, mut bytes) = value.to_bytes_be();
+    assert!(sign != num_bigint::Sign::Minus, "mirror unsigned input");
+    if bytes.is_empty() {
+        bytes.push(0);
+    }
+    bytes
+}
+
+/// Mirror of `page.rs::page_digest` over one page snapshot.
+pub fn page_digest_mirror(page: &BookPricePageSnapshot) -> [u8; 32] {
+    let mut encoded = Vec::new();
+    for value in [page.head_slot, page.next_slot, page.live_count] {
+        let value = u16::try_from(value).expect("mirror page counter");
+        encoded.extend_from_slice(&value.to_be_bytes());
+    }
+    mirror_framed(&mirror_unsigned(&page.total_qty_lots), &mut encoded);
+    for entry in &page.slots {
+        match entry {
+            None => encoded.push(0),
+            Some(entry) => {
+                encoded.push(1);
+                mirror_framed(entry.order_id.as_bytes(), &mut encoded);
+                mirror_framed(entry.owner_id.as_bytes(), &mut encoded);
+                mirror_framed(&mirror_unsigned(&entry.qty_lots), &mut encoded);
+                mirror_framed(&mirror_unsigned(&BigInt::from(entry.seq)), &mut encoded);
+            }
+        }
+    }
+    sha2::Sha256::digest(encoded).into()
+}
+
+/// Mirror of `orderbook/commitment.rs::compute_book_commitment_hash` over
+/// snapshot-level inputs plus the two mirror-computed page roots.
+pub fn book_commitment_mirror(
+    bucket_width_ticks: &BigInt,
+    max_orders: usize,
+    stp_policy: u8,
+    bid_root: &str,
+    ask_root: &str,
+    next_seq: u64,
+    trade_count: u64,
+    trade_qty_sum: &BigInt,
+    last_trade_price_ticks: &BigInt,
+    last_accepted_usd_ask_price_ticks: &BigInt,
+    event_hash: &BigInt,
+) -> String {
+    let parts = [
+        "xln.orderbook.book".to_string(),
+        bucket_width_ticks.to_string(),
+        max_orders.to_string(),
+        stp_policy.to_string(),
+        bid_root.to_string(),
+        ask_root.to_string(),
+        next_seq.to_string(),
+        trade_count.to_string(),
+        trade_qty_sum.to_string(),
+        last_trade_price_ticks.to_string(),
+        last_accepted_usd_ask_price_ticks.to_string(),
+        event_hash.to_string(),
+    ];
+    let mut encoded = Vec::new();
+    for part in &parts {
+        let length = u32::try_from(part.len()).expect("mirror commitment part");
+        encoded.extend_from_slice(&length.to_be_bytes());
+        encoded.extend_from_slice(part.as_bytes());
+    }
+    let digest = sha2::Sha256::digest(encoded);
+    hex_string(&digest[..16])
+}
+
+/// Structurally valid page from fuzz bytes: occupancy bitmap with ≥ 1 live
+/// slot, invariants (`head = first occupied`, `next = last occupied + 1`,
+/// `live = popcount`, `total = Σqty`) pre-satisfied, unique order ids.
+/// Returns `None` when the caller's key set already contains the page key.
+pub fn valid_page_from_cursor(
+    cur: &mut Cursor,
+    page_index: usize,
+    seen_keys: &mut std::collections::BTreeSet<Vec<u8>>,
+) -> Option<BookPricePageSnapshot> {
+    // Price: 1..=8 magnitude bytes, first byte nonzero (canonical minimal
+    // magnitude, positive, no leading zero byte — page_price's guard).
+    let length = 1 + usize::from(cur.u8() % 8);
+    let mut magnitude = cur.take(length).to_vec();
+    magnitude.resize(length, 0);
+    if magnitude[0] == 0 {
+        magnitude[0] = 1;
+    }
+    let price = BigInt::from_bytes_be(num_bigint::Sign::Plus, &magnitude);
+    let sequence = cur.be_u64(2) as u16;
+    let key = page_key_mirror(&price, sequence);
+    if !seen_keys.insert(key) {
+        return None;
+    }
+
+    // Occupancy bitmap over the 16 slots; force at least one live slot.
+    let bitmap = cur.be_u64(2) as u16;
+    let bitmap = if bitmap == 0 { 1 } else { bitmap };
+    let occupied: Vec<usize> = (0..16).filter(|slot| bitmap & (1 << slot) != 0).collect();
+    let head_slot = occupied[0];
+    let next_slot = occupied[occupied.len() - 1] + 1;
+    let live_count = occupied.len();
+
+    let mut slots: Vec<Option<BookPricePageEntrySnapshot>> = vec![None; 16];
+    let mut total = BigInt::from(0);
+    for slot in occupied {
+        let order_id = format!("o{page_index}-{slot}");
+        let owner_id = format!("w{}", usize::from(cur.u8() % 66).max(1));
+        let qty = BigInt::from(1 + cur.be_u64(4) % 1_000_000_000);
+        let seq = cur.be_u64(4);
+        total += &qty;
+        slots[slot] = Some(BookPricePageEntrySnapshot {
+            order_id,
+            owner_id,
+            qty_lots: qty,
+            seq,
+        });
+    }
+    Some(BookPricePageSnapshot {
+        price_ticks: price,
+        page_sequence: sequence,
+        head_slot,
+        next_slot,
+        live_count,
+        total_qty_lots: total,
+        slots,
+    })
+}
+
+/// Page-tree root over snapshots: keys sorted (duplicates rejected), radix
+/// leaves carry the mirror page digests. This is the exact value
+/// `BookPricePageTree::restore` commits and `BookState::restore` compares
+/// against `expected_bid_pages_root` / `expected_ask_pages_root`.
+pub fn page_tree_root(pages: &[BookPricePageSnapshot]) -> Option<String> {
+    let mut keyed: Vec<(Vec<u8>, &BookPricePageSnapshot)> = Vec::new();
+    for page in pages {
+        let key = page_key_mirror(&page.price_ticks, page.page_sequence);
+        if keyed.iter().any(|(existing, _)| *existing == key) {
+            return None;
+        }
+        keyed.push((key, page));
+    }
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut radix = xln_rscore_protocol::PersistentRadixMap::<()>::empty();
+    for (key, page) in keyed {
+        radix = radix
+            .updated(key, (), page_digest_mirror(page))
+            .expect("mirror radix update");
+    }
+    Some(hex_string(&radix.root_hash()))
+}
 
 use num_bigint::{BigInt, Sign};
 use xln_rscore_entity_kernel::{
@@ -387,9 +573,11 @@ fn page_snapshot_seed(page: &BookPricePageSnapshot, out: &mut Vec<u8>) {
 }
 
 /// Serialize a `BookStateSnapshot` into the exact bytes
-/// `book_snapshot_from_cursor` parses back (seed-corpus writer).
+/// `book_snapshot_from_cursor` parses back (seed-corpus writer). A leading
+/// `0` byte pins the target's mode selector to the legacy arbitrary-page
+/// grammar; mode 1 (valid-root grammar) is fuzz-generated, not seeded.
 pub fn book_snapshot_seed(snapshot: &BookStateSnapshot) -> Vec<u8> {
-    let mut out = Vec::new();
+    let mut out = vec![0_u8];
     out.push(u8::try_from(snapshot.bid_pages.len().min(2)).expect("seed bid count"));
     for page in snapshot.bid_pages.iter().take(2) {
         page_snapshot_seed(page, &mut out);

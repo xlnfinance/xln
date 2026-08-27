@@ -205,20 +205,9 @@ impl RuntimeEntityInput {
 
     /// Exact already-validated Entity-frame tx projections, in wire order.
     /// Used by the entity-height durability barrier to detect a
-    /// `scheduledWake` tx and by the protocol-priority sort.
+    /// `scheduledWake` tx.
     pub(super) fn canonical_entity_txs(&self) -> &[CanonicalEntityTx] {
         &self.canonical_entity_txs
-    }
-
-    /// Stable protocol-first lane used by TypeScript before frame caps.
-    pub(super) fn is_protocol(&self) -> bool {
-        self.canonical_entity_txs.iter().any(|tx| {
-            matches!(
-                tx.kind,
-                xln_rscore_entity_kernel::EntityTxKind::AccountInput
-                    | xln_rscore_entity_kernel::EntityTxKind::JEvent
-            )
-        })
     }
 
     pub(super) fn into_parts(

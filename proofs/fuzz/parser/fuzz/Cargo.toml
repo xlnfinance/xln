@@ -10,12 +10,19 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 xln-rscore-abi = { path = "../../../../rscore/crates/abi" }
+xln-rscore-engine = { path = "../../../../rscore/crates/engine" }
 xln-rscore-hanko = { path = "../../../../rscore/crates/hanko" }
 xln-rscore-process = { path = "../../../../rscore/crates/process" }
 xln-rscore-entity-kernel = { path = "../../../../rscore/crates/entity-kernel" }
 xln-rscore-protocol = { path = "../../../../rscore/crates/protocol" }
+xln-rscore-runtime = { path = "../../../../rscore/crates/runtime" }
+hex = "0.4"
+keccak-hasher = "0.15.3"
 num-bigint = "0.4"
+rlp = "0.6.1"
 serde_json = "1.0"
+sha2 = "0.10"
+triehash = "0.8.4"
 
 [lib]
 path = "src/lib.rs"
@@ -66,6 +73,27 @@ bench = false
 [[bin]]
 name = "protocol_value"
 path = "fuzz_targets/protocol_value.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_storage_msgpack"
+path = "fuzz_targets/runtime_storage_msgpack.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_wal_input"
+path = "fuzz_targets/runtime_wal_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "j_watcher_abi"
+path = "fuzz_targets/j_watcher_abi.rs"
 test = false
 doc = false
 bench = false

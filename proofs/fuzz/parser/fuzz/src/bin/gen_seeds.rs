@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 
 use num_bigint::BigInt;
 use xln_parser_fuzz_harness::{
-    abi_value_seed, book_snapshot_from_cursor, book_snapshot_seed,
+    abi_value_seed, book_snapshot_from_cursor, book_snapshot_seed, page_tree_root,
+    book_commitment_mirror,
 };
 use xln_rscore_abi::{
     AbiValue, BodyTuple, EngineIdentity, Envelope, MessageKind, OpTag, ProtocolBinding,
@@ -287,7 +288,7 @@ fn command_seeds(target: &str, with_mode_byte: bool) {
     ])));
 
     // [mode?] [op byte] [value seed] [fingerprint 32] [identity 52] [version 2]
-    let mut build = |name: &str, op: u8, value: &[u8], fingerprint_suffix: u8| {
+    let build = |name: &str, op: u8, value: &[u8], fingerprint_suffix: u8| {
         let mut seed = Vec::new();
         if with_mode_byte {
             seed.push(1);
@@ -343,8 +344,10 @@ fn orderbook_seeds() {
     let empty = BookState::empty(10, 1);
     let snapshot = empty.snapshot().expect("empty book snapshot");
     let seed = book_snapshot_seed(&snapshot);
-    // Self-check: the seed must parse back to an acceptable snapshot.
+    // Self-check: the seed must parse back to an acceptable snapshot
+    // (leading byte = mode selector 0 → legacy grammar).
     let mut cursor = xln_parser_fuzz_harness::Cursor::new(&seed);
+    assert_eq!(cursor.u8() % 2, 0, "seed mode byte");
     let parsed = book_snapshot_from_cursor(&mut cursor);
     let restored = BookState::restore(parsed.clone()).expect("seed parses to accepted book");
     assert_eq!(
@@ -364,6 +367,7 @@ fn orderbook_seeds() {
         let fixture = fixture_book(source);
         let seed = book_snapshot_seed(&fixture);
         let mut cursor = xln_parser_fuzz_harness::Cursor::new(&seed);
+        assert_eq!(cursor.u8() % 2, 0, "fixture seed mode byte");
         let parsed = book_snapshot_from_cursor(&mut cursor);
         let restored = BookState::restore(parsed.clone()).expect("fixture book restores");
         assert_eq!(
@@ -603,14 +607,516 @@ fn protocol_seeds() {
     write_seed("protocol_value", "array-mixed", &seed);
 }
 
+// ---------------------------------------------------------------------------
+// Wave-2 targets.
+// ---------------------------------------------------------------------------
+
+/// Target 8: runtime storage msgpack — committed golden vectors from
+/// `runtime/src/codec/storage_msgpack.rs` tests, the A2 claim probes, and
+/// production-encoder outputs (`encode_storage_payload` on canonical values).
+fn runtime_storage_msgpack_seeds() {
+    // Goldens verbatim from codec/storage_msgpack.rs tests (records, maps,
+    // sets, bigints; record reuse; float normalization).
+    write_seed(
+        "runtime_storage_msgpack",
+        "golden-msgpackr-records",
+        &{
+            let mut payload = vec![0x03_u8];
+            payload.extend_from_slice(&from_hex("d4724095a66269676e74a36d6170a66f626a656374a3736574a776657273696f6ecfab54a98ceb1f0ad282a161d30000000000000001a17ad30000000000000002d4724192a161a17aa17802d4730092a161a17a01"));
+            payload
+        },
+    );
+    write_seed(
+        "runtime_storage_msgpack",
+        "golden-record-reuse",
+        &{
+            let mut payload = vec![0x03_u8];
+            payload.extend_from_slice(&from_hex("92d4724091a178014002"));
+            payload
+        },
+    );
+    let float_seed = |bits: u64| {
+        let mut payload = vec![0x03_u8, 0xcb];
+        payload.extend_from_slice(&bits.to_be_bytes());
+        payload
+    };
+    write_seed(
+        "runtime_storage_msgpack",
+        "float-exact-js-integer",
+        &float_seed(1_784_000_000_000_f64.to_bits()),
+    );
+    write_seed("runtime_storage_msgpack", "float-fractional", &float_seed(1.5_f64.to_bits()));
+
+    // A2 regression corpus: nested array32/map32 markers claiming 2,000,000
+    // entries per level, a single over-limit claim, and huge bin/text claims.
+    let mut nested_array = vec![0x03_u8];
+    for _ in 0..8 {
+        nested_array.extend_from_slice(&[0xdd, 0x00, 0x1e, 0x84, 0x80]);
+    }
+    write_seed("runtime_storage_msgpack", "a2-nested-array32-2m", &nested_array);
+    let mut nested_map = vec![0x03_u8];
+    for _ in 0..8 {
+        nested_map.extend_from_slice(&[0xdf, 0x00, 0x1e, 0x84, 0x80]);
+    }
+    write_seed("runtime_storage_msgpack", "a2-nested-map32-2m", &nested_map);
+    write_seed(
+        "runtime_storage_msgpack",
+        "a2-single-claim-over-limit",
+        &[0x03, 0xdd, 0xff, 0xff, 0xff, 0xff],
+    );
+    write_seed(
+        "runtime_storage_msgpack",
+        "a2-single-claim-2m-truncated",
+        &[0x03, 0xdd, 0x00, 0x1e, 0x84, 0x80],
+    );
+    write_seed(
+        "runtime_storage_msgpack",
+        "bin32-claim-huge",
+        &[0x03, 0xc6, 0xff, 0xff, 0xff, 0xff],
+    );
+    write_seed(
+        "runtime_storage_msgpack",
+        "text32-claim-huge",
+        &[0x03, 0xdb, 0xff, 0xff, 0xff, 0xff],
+    );
+    // Depth probe: 40 nested fixarrays (MAX_DEPTH = 256 keeps long chains of
+    // in-flight reservations alive — the designed reject envelope).
+    let mut depth = vec![0x03_u8];
+    depth.extend(vec![0x91_u8; 40]);
+    write_seed("runtime_storage_msgpack", "depth-probe-40", &depth);
+    let mut deep = vec![0x03_u8];
+    deep.extend(vec![0x91_u8; 260]);
+    write_seed("runtime_storage_msgpack", "depth-over-256", &deep);
+
+    // Production-encoder accept seeds through the canonical value layer.
+    let canonical_values = [
+        ("null", serde_json::json!(null)),
+        ("int", serde_json::json!(42)),
+        ("float", serde_json::json!(1.5)),
+        ("text", serde_json::json!("phase")),
+        ("array", serde_json::json!([1, "two", [3]])),
+        ("object", serde_json::json!({"b": 2, "a": 1})),
+        (
+            "map",
+            serde_json::json!({"__xlnType": "Map", "value": [["k", 1]]}),
+        ),
+        (
+            "bigint",
+            serde_json::json!({"__xlnType": "BigInt", "value": "12345678901234567890"}),
+        ),
+    ];
+    for (name, value) in canonical_values {
+        let canonical = xln_rscore_runtime::canonical_value_from_tagged_json(&value)
+            .unwrap_or_else(|error| panic!("canonical seed {name}: {error:?}"));
+        let bytes = xln_rscore_runtime::encode_storage_payload(&canonical)
+            .unwrap_or_else(|error| panic!("encode seed {name}: {error:?}"));
+        write_seed("runtime_storage_msgpack", &format!("value-{name}"), &bytes);
+    }
+}
+
+/// Target 9: WAL decode — framing probes over raw `0x03 || msgpackr` bytes
+/// and per-row `RuntimeEntityInput::decode` JSON shapes (the exact sub-decoder
+/// wal_input.rs drives on every entityInputs row).
+fn runtime_wal_input_seeds() {
+    // Modes 0/1 layout: [mode][policy len 2][policy][finalized 4][hub 1]
+    //   [height 4][outputs count 1][output rows ≤24 each][contexts count 1]
+    //   [contexts…][frame len 3][frame bytes]
+    let frame_probe = |policy: &[u8], frame: &[u8]| {
+        let mut seed = vec![0_u8];
+        seed.extend_from_slice(&(policy.len() as u16).to_be_bytes());
+        seed.extend_from_slice(policy);
+        seed.extend_from_slice(&[0, 0, 0, 0]);
+        seed.push(0);
+        seed.extend_from_slice(&1_u32.to_be_bytes()); // height
+        seed.push(1); // one output row
+        seed.extend_from_slice(&[0xaa; 24]); // output bytes
+        seed.push(0); // no contexts
+        seed.extend_from_slice(&(frame.len() as u32).to_be_bytes()[1..4]);
+        seed.extend_from_slice(frame);
+        seed
+    };
+    write_seed(
+        "runtime_wal_input",
+        "frame-empty-map",
+        &frame_probe(b"{}", &[0x03, 0x80]),
+    );
+    write_seed("runtime_wal_input", "frame-nil", &frame_probe(b"{}", &[0x03, 0xc0]));
+    write_seed(
+        "runtime_wal_input",
+        "frame-array",
+        &frame_probe(b"{}", &[0x03, 0x91, 0x01]),
+    );
+    let truncated = [0x03_u8, 0x81, 0xa1]; // string marker with EOF mid-value
+    write_seed(
+        "runtime_wal_input",
+        "frame-truncated",
+        &frame_probe(b"{}", &truncated),
+    );
+
+    // Mode 2 layout: [mode 2][policy len 2][policy][finalized 4][hub 1]
+    //   [json len 2][json bytes]
+    let entity_row = |policy: &[u8], json: &[u8]| {
+        let mut seed = vec![2_u8];
+        seed.extend_from_slice(&(policy.len() as u16).to_be_bytes());
+        seed.extend_from_slice(policy);
+        seed.extend_from_slice(&[0, 0, 0, 0]);
+        seed.push(0);
+        seed.extend_from_slice(&(json.len() as u16).to_be_bytes());
+        seed.extend_from_slice(json);
+        seed
+    };
+    let entity_id = format!("0x{}", "11".repeat(32));
+    let signer = format!("0x{}", "22".repeat(20));
+    // Accepted minimal shape (mirrors runtime/src/processor/tests/mod.rs).
+    let accepted = serde_json::json!({
+        "entityId": entity_id,
+        "signerId": signer,
+        "entityTxs": [],
+    });
+    write_seed(
+        "runtime_wal_input",
+        "entity-accepted-empty",
+        &entity_row(b"{}", accepted.to_string().as_bytes()),
+    );
+    // Unknown field rejection.
+    let unknown = serde_json::json!({
+        "entityId": entity_id,
+        "signerId": signer,
+        "entityTxs": [],
+        "surprise": 1,
+    });
+    write_seed(
+        "runtime_wal_input",
+        "entity-unknown-field",
+        &entity_row(b"{}", unknown.to_string().as_bytes()),
+    );
+    // Non-canonical entityId (uppercase hex) rejection.
+    let uppercase = serde_json::json!({
+        "entityId": format!("0x{}", "AB".repeat(32)),
+        "signerId": signer,
+        "entityTxs": [],
+    });
+    write_seed(
+        "runtime_wal_input",
+        "entity-uppercase-id",
+        &entity_row(b"{}", uppercase.to_string().as_bytes()),
+    );
+    // Incomplete routed-transport fields.
+    let routed = serde_json::json!({
+        "entityId": entity_id,
+        "signerId": signer,
+        "entityTxs": [],
+        "from": format!("0x{}", "33".repeat(20)),
+    });
+    write_seed(
+        "runtime_wal_input",
+        "entity-route-incomplete",
+        &entity_row(b"{}", routed.to_string().as_bytes()),
+    );
+    // accountInput-shaped tx row (drives project_entity_tx → account-input
+    // commitment over the fuzzer-controlled data).
+    let account_input_tx = serde_json::json!({
+        "entityId": entity_id,
+        "signerId": signer,
+        "entityTxs": [
+            {"type": "accountInput", "data": {"rows": []}}
+        ],
+    });
+    write_seed(
+        "runtime_wal_input",
+        "entity-account-input-tx",
+        &entity_row(b"{}", account_input_tx.to_string().as_bytes()),
+    );
+    // Unknown tx kind.
+    let unknown_tx = serde_json::json!({
+        "entityId": entity_id,
+        "signerId": signer,
+        "entityTxs": [{"type": "timeTravel", "data": {}}],
+    });
+    write_seed(
+        "runtime_wal_input",
+        "entity-unknown-tx-kind",
+        &entity_row(b"{}", unknown_tx.to_string().as_bytes()),
+    );
+}
+
+/// Target 10: j_watcher ABI — the committed fixture event (accept seed) plus
+/// adversarial `data` shapes for the offset/length ABI reader.
+fn j_watcher_abi_seeds() {
+    // Layout: [be_u64(2) data length][data][topics mode][topic 32]
+    //   [address mode][address 20][coordinates mode][index mode]
+    let layout = |data: &[u8], topics_mode: u8| {
+        let mut seed = Vec::new();
+        seed.extend_from_slice(&(data.len() as u16).to_be_bytes());
+        seed.extend_from_slice(data);
+        seed.push(topics_mode);
+        seed.extend_from_slice(&[0_u8; 32]);
+        seed.push(0);
+        seed.extend_from_slice(&[0_u8; 20]);
+        seed.push(0);
+        seed.push(0);
+        seed
+    };
+    let fixture_words = event_data_words();
+    write_seed(
+        "j_watcher_abi",
+        "fixture-accepted",
+        &layout(&words_to_bytes(&fixture_words), 0),
+    );
+    write_seed("j_watcher_abi", "data-empty", &layout(&[], 0));
+    // Root offset not a multiple of 32 → typed ABI rejection.
+    write_seed("j_watcher_abi", "offset-skew-1", &layout(&vec![0x01; 32], 0));
+    // Root offset far out of range.
+    let mut huge_offset = vec![0_u8; 32];
+    huge_offset[31] = 0x20;
+    huge_offset[0] = 0x7f;
+    write_seed("j_watcher_abi", "offset-huge", &layout(&huge_offset, 0));
+    // Settlement count huge (loop must fail fast on the first bad offset).
+    let mut count_huge = fixture_words.clone();
+    count_huge[1] = [0xff; 32];
+    write_seed(
+        "j_watcher_abi",
+        "count-huge",
+        &layout(&words_to_bytes(&count_huge), 0),
+    );
+    // Nonce above MAX_SAFE_INTEGER (typed AccountSettledNonce): the nonce
+    // word of the fixture settlement is word 6 (root-offset table at words
+    // 0-2, settlement head at words 3-6).
+    let mut nonce_unsafe = fixture_words.clone();
+    nonce_unsafe[6] = {
+        let mut word = [0_u8; 32];
+        word[24..].copy_from_slice(&0x0020_0000_0000_0000_u64.to_be_bytes());
+        word
+    };
+    write_seed(
+        "j_watcher_abi",
+        "nonce-unsafe",
+        &layout(&words_to_bytes(&nonce_unsafe), 0),
+    );
+    // Wrong topic (not AccountSettled) — the ABI reader is skipped upstream.
+    write_seed("j_watcher_abi", "topic-wrong", &layout(&words_to_bytes(&fixture_words), 2));
+    // Extra topic — topics length must be exactly 1.
+    write_seed("j_watcher_abi", "topic-extra", &layout(&words_to_bytes(&fixture_words), 3));
+}
+
+/// The 13 ABI words of the committed fixture event
+/// (`runtime/src/j_watcher/tests.rs` `EVENT_DATA`, `0x` prefix stripped).
+fn event_data_words() -> Vec<[u8; 32]> {
+    let bytes = from_hex(EVENT_DATA_HEX);
+    bytes
+        .chunks_exact(32)
+        .map(|word| word.try_into().expect("32-byte word"))
+        .collect()
+}
+
+fn words_to_bytes(words: &[[u8; 32]]) -> Vec<u8> {
+    words.iter().flat_map(|word| word.iter().copied()).collect()
+}
+
+const EVENT_DATA_HEX: &str = concat!(
+    "0000000000000000000000000000000000000000000000000000000000000020",
+    "0000000000000000000000000000000000000000000000000000000000000001",
+    "0000000000000000000000000000000000000000000000000000000000000020",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0000000000000000000000000000000000000000000000000000000000000001",
+    "0000000000000000000000000000000000000000000000000000000000000001",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "000000000000000000000000000000000000000000000000000001d1a93addc0",
+    "00000000000000000000000000000000000000000000000000000000000f4240",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+);
+
+/// Wave-2 orderbook seeds: valid-root books generated through the harness
+/// mirrors (audit A4) — multiple page layouts (holes, head ≠ 0, multi-page)
+/// that `BookState::restore` actually accepts — plus a calibration assert of
+/// the mirrors against the committed TypeScript parity fixture.
+fn orderbook_valid_seeds(fixture: Option<&BookStateSnapshot>) {
+    // Mirror calibration against production TypeScript commitments.
+    if let Some(fixture) = fixture {
+        let bid = page_tree_root(&fixture.bid_pages)
+            .expect("fixture bid pages keyed uniquely");
+        let ask = page_tree_root(&fixture.ask_pages)
+            .expect("fixture ask pages keyed uniquely");
+        assert_eq!(
+            bid, fixture.expected_bid_pages_root,
+            "A4 mirror calibration: bid root drift on parity fixture"
+        );
+        assert_eq!(
+            ask, fixture.expected_ask_pages_root,
+            "A4 mirror calibration: ask root drift on parity fixture"
+        );
+        let commitment = book_commitment_mirror(
+            &fixture.bucket_width_ticks,
+            fixture.max_orders,
+            fixture.stp_policy,
+            &bid,
+            &ask,
+            fixture.next_seq,
+            fixture.trade_count,
+            &fixture.trade_qty_sum,
+            &fixture.last_trade_price_ticks,
+            &fixture.last_accepted_usd_ask_price_ticks,
+            &fixture.event_hash,
+        );
+        assert_eq!(
+            commitment, fixture.expected_commitment_hash,
+            "A4 mirror calibration: commitment drift on parity fixture"
+        );
+    }
+
+    // Generated valid books: (name, bid page occupancy bitmaps, prices).
+    let layouts: &[(&str, &[u16], &[u64], &[u16], &[u64])] = &[
+        ("single-full-page", &[0b0000_0000_0000_0001], &[100], &[], &[]),
+        (
+            "holes-mid-page",
+            &[0b0000_0000_0101_0101],
+            &[7],
+            &[0b0000_0000_0000_0011],
+            &[9],
+        ),
+        (
+            "multi-page-same-price",
+            &[0b0000_0000_1111_1111, 0b0000_0000_0000_0011],
+            &[42, 42],
+            &[],
+            &[],
+        ),
+        (
+            "wide-price",
+            &[0b1000_0000_0000_0001],
+            &[0x0102_0304_0506_0708],
+            &[0b0100_0000_0000_0010],
+            &[1],
+        ),
+    ];
+    for (name, bid_bitmaps, bid_prices, ask_bitmaps, ask_prices) in layouts {
+        let build_pages = |bitmaps: &[u16], prices: &[u64], base: usize| {
+            bitmaps
+                .iter()
+                .enumerate()
+                .map(|(sequence, bitmap)| {
+                    let occupied: Vec<usize> =
+                        (0..16).filter(|slot| bitmap & (1 << slot) != 0).collect();
+                    let mut slots: Vec<Option<BookPricePageEntrySnapshot>> = vec![None; 16];
+                    let mut total = BigInt::from(0_u8);
+                    for (position, slot) in occupied.iter().enumerate() {
+                        let qty = BigInt::from(1_000 + position + slot);
+                        total += &qty;
+                        slots[*slot] = Some(BookPricePageEntrySnapshot {
+                            order_id: format!("o{base}p{sequence}-{slot}"),
+                            owner_id: format!("w{}", position + 1),
+                            qty_lots: qty,
+                            // Globally unique across both sides (order seqs
+                            // live in one index in BookState).
+                            seq: u64::try_from(base + sequence * 16 + position + 1).expect("seed seq"),
+                        });
+                    }
+                    BookPricePageSnapshot {
+                        price_ticks: BigInt::from(prices[sequence]),
+                        page_sequence: u16::try_from(sequence).expect("seed sequence"),
+                        head_slot: occupied[0],
+                        next_slot: occupied[occupied.len() - 1] + 1,
+                        live_count: occupied.len(),
+                        total_qty_lots: total,
+                        slots,
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let bid_pages = build_pages(bid_bitmaps, bid_prices, 0);
+        let ask_pages = build_pages(ask_bitmaps, ask_prices, 64);
+        let next_seq = bid_pages
+            .iter()
+            .chain(&ask_pages)
+            .flat_map(|page| page.slots.iter().flatten())
+            .map(|entry| entry.seq)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let order_count: usize = bid_pages
+            .iter()
+            .chain(&ask_pages)
+            .map(|page| page.live_count)
+            .sum();
+        let bid_root = page_tree_root(&bid_pages).expect("seed bid root");
+        let ask_root = page_tree_root(&ask_pages).expect("seed ask root");
+        let bucket = BigInt::from(1_u8);
+        let trade = BigInt::from(0_u8);
+        let commitment = book_commitment_mirror(
+            &bucket,
+            order_count + 1,
+            1,
+            &bid_root,
+            &ask_root,
+            next_seq,
+            0,
+            &trade,
+            &trade,
+            &trade,
+            &trade,
+        );
+        let snapshot = BookStateSnapshot {
+            bucket_width_ticks: bucket,
+            stp_policy: 1,
+            max_orders: order_count + 1,
+            next_seq,
+            trade_count: 0,
+            trade_qty_sum: trade.clone(),
+            last_trade_price_ticks: trade.clone(),
+            last_accepted_usd_ask_price_ticks: trade.clone(),
+            event_hash: trade,
+            expected_bid_pages_root: bid_root,
+            expected_ask_pages_root: ask_root,
+            expected_commitment_hash: commitment,
+            bid_pages,
+            ask_pages,
+        };
+        // The generated book must be accepted by production restore and
+        // re-snapshot byte-identically — the accept path proven at
+        // seed-generation time (regression against mirror drift).
+        let restored = BookState::restore(snapshot.clone())
+            .unwrap_or_else(|error| panic!("valid seed {name} rejected: {error:?}"));
+        assert_eq!(
+            restored.snapshot().expect("resnapshot"),
+            snapshot,
+            "valid seed {name}: restore ∘ snapshot != id"
+        );
+        let seed = book_snapshot_seed(&snapshot);
+        let mut cursor = xln_parser_fuzz_harness::Cursor::new(&seed);
+        assert_eq!(cursor.u8() % 2, 0, "valid seed mode byte");
+        let parsed = book_snapshot_from_cursor(&mut cursor);
+        let reparsed = BookState::restore(parsed.clone())
+            .unwrap_or_else(|error| panic!("valid seed {name} (legacy grammar) rejected: {error:?}"));
+        assert_eq!(
+            reparsed.snapshot().expect("resnapshot"),
+            parsed,
+            "valid seed {name} legacy grammar round trip"
+        );
+        write_seed("orderbook_page", &format!("valid-{name}"), &seed);
+    }
+}
+
 fn main() {
     hanko_seeds();
     abi_envelope_seeds();
     tx_wire_seeds();
     command_seeds("checkpoint_wire", false);
+    let parity_fixture = {
+        let path = root().join("rscore/fixtures/entity-kernel/parity-v1.json");
+        let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        let oracle: serde_json::Value = serde_json::from_str(&text).expect("parity fixture json");
+        (!oracle["bookHydration"].is_null()).then(|| fixture_book(&oracle["bookHydration"]))
+    };
     orderbook_seeds();
+    orderbook_valid_seeds(parity_fixture.as_ref());
     msgpack_seeds();
     protocol_seeds();
+    runtime_storage_msgpack_seeds();
+    runtime_wal_input_seeds();
+    j_watcher_abi_seeds();
     let targets = [
         "hanko_envelope",
         "abi_envelope",
@@ -619,6 +1125,9 @@ fn main() {
         "orderbook_page",
         "msgpack_value",
         "protocol_value",
+        "runtime_storage_msgpack",
+        "runtime_wal_input",
+        "j_watcher_abi",
     ];
     for target in targets {
         let count = fs::read_dir(seeds_dir(target))

@@ -21,8 +21,8 @@ use xln_rscore_runtime::processor::{EntityRoute, EntityRouteTable};
 use xln_rscore_runtime::restore::{
     ConcreteCheckpointConfiguration, ConcreteCheckpointSource, MigrationOrigin,
     decode_concrete_runtime_checkpoint, decode_concrete_runtime_wal_frame,
-    decode_offline_ts_import_checkpoint, reconcile_runtime_input_with_resident_queue,
-    restore_decoded_runtime_checkpoint, verify_checkpoint_source,
+    decode_offline_ts_import_checkpoint, restore_decoded_runtime_checkpoint,
+    verify_checkpoint_source,
 };
 use xln_rscore_runtime::storage::native::{
     NativeRuntimeStore, NativeStorageConfig, validate_runtime_frame,
@@ -422,15 +422,9 @@ pub fn replay_runtime_wal(
                 .checked_add(count)
                 .ok_or_else(|| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())
         })?;
-        let resident_inputs_reused = {
-            let replica = processor
-                .replica()
-                .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?;
-            reconcile_runtime_input_with_resident_queue(
-                input,
-                replica.mempool.pending_entity_inputs(),
-            )
-        };
+        let resident_inputs_reused = processor
+            .reconcile_exact_replay_input(input)
+            .map_err(|error| format!("RUNTIME_REPLAY_RECONCILE:{height}:{error}"))?;
         if resident_inputs_reused > 0 {
             eprintln!(
                 "RUNTIME_REPLAY_INPUT_RECONCILED:{height}:resident={resident_inputs_reused}:new={}",

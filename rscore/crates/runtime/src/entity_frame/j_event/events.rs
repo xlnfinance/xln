@@ -12,9 +12,11 @@ fn insert(map: &mut Map<String, Value>, name: &str, value: Value) {
     map.insert(name.into(), value);
 }
 
+type FieldDecoder = fn(&Value) -> Option<Value>;
+
 fn decode_object(
     data: &Map<String, Value>,
-    fields: &[(&str, fn(&Value) -> Option<Value>)],
+    fields: &[(&str, FieldDecoder)],
 ) -> Option<Map<String, Value>> {
     let mut decoded = Map::new();
     for (name, decode) in fields {
@@ -138,15 +140,15 @@ fn wallet_snapshot(data: &Map<String, Value>) -> Option<Value> {
     if let Some(native) = native {
         insert(&mut out, "nativeBalance", string_value(native));
     }
-    if let Some(Value::Array(balances)) = base.get("tokenBalances") {
-        if !balances.is_empty() {
-            insert(&mut out, "tokenBalances", Value::Array(balances.clone()));
-        }
+    if let Some(Value::Array(balances)) = base.get("tokenBalances")
+        && !balances.is_empty()
+    {
+        insert(&mut out, "tokenBalances", Value::Array(balances.clone()));
     }
-    if let Some(Value::Array(list)) = base.get("allowances") {
-        if !list.is_empty() {
-            insert(&mut out, "allowances", Value::Array(list.clone()));
-        }
+    if let Some(Value::Array(list)) = base.get("allowances")
+        && !list.is_empty()
+    {
+        insert(&mut out, "allowances", Value::Array(list.clone()));
     }
     Some(Value::Object(out))
 }
@@ -219,7 +221,7 @@ pub(super) fn normalize_event_data(kind: &str, data: &Map<String, Value>) -> Opt
                 .as_str()?
                 .parse::<BigInt>()
                 .ok()?;
-            (until > BigInt::from(0)).then(|| Value::Object(decoded))
+            (until > BigInt::from(0)).then_some(Value::Object(decoded))
         }
         "ReserveUpdated" => decode_object(
             data,
@@ -268,7 +270,7 @@ pub(super) fn normalize_event_data(kind: &str, data: &Map<String, Value>) -> Opt
                     ("nonce", as_int),
                 ],
             )?;
-            (decoded["nonce"].as_i64()? >= 1).then(|| Value::Object(decoded))
+            (decoded["nonce"].as_i64()? >= 1).then_some(Value::Object(decoded))
         }
         "EntityProviderActionExecuted" => {
             let mut decoded = decode_object(

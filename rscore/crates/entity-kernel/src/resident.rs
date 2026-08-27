@@ -808,19 +808,18 @@ pub fn apply_resident_entity_round_core(
     let phase_started = Instant::now();
     let mut admits = Vec::with_capacity(kernel.proposal_work.len());
     let proposable_started = Instant::now();
-    let mut propose = accounts
-        .proposable_account_ids()?
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+    let mut propose = accounts.proposable_account_ids()?;
+    let mut proposed = propose.iter().copied().collect::<BTreeSet<_>>();
     let proposable_micros = proposable_started.elapsed().as_micros();
     let prepare_outbound_started = Instant::now();
     for work in &kernel.proposal_work {
         let target = account_id(&work.account_id)?;
         touch_candidates.push(target);
         admits.push((target, work.txs.clone()));
-        propose.insert(target);
+        if proposed.insert(target) {
+            propose.push(target);
+        }
     }
-    let propose = propose.into_iter().collect::<Vec<_>>();
     let mut materialize = inbound
         .touched
         .iter()

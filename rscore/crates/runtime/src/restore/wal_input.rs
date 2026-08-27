@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::{
-    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeTx,
+    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeMempool, RuntimeTx,
     canonical_value_from_tagged_json, decode_entity_deterministic_context,
 };
 
@@ -267,24 +267,86 @@ pub fn decode_concrete_runtime_wal_frame(
     })
 }
 
-/// Remove one recorded occurrence for each identical input already resident
-/// from a locally-generated continuation. Unmatched duplicates remain real.
-pub fn reconcile_runtime_input_with_resident_queue<'a>(
-    input: &mut RuntimeInput,
-    resident: impl Iterator<Item = &'a Value>,
+/// Remove one resident occurrence for each byte-identical recorded input.
+///
+/// Exact replay must execute the recorded `RuntimeInput` in its original
+/// causal order. A locally generated continuation is therefore consumed from
+/// the RAM-only queue and replaced by its recorded occurrence at that exact
+/// position. Removing the recorded row instead would move every resident row
+/// ahead of newly recorded rows and change the Runtime frame hash.
+pub fn reconcile_runtime_input_with_resident_queue(
+    input: &RuntimeInput,
+    resident: &mut RuntimeMempool,
 ) -> usize {
-    let mut resident = resident.collect::<Vec<_>>();
     let mut reused = 0;
-    input.entity_inputs.retain(|candidate| {
+    for candidate in &input.entity_inputs {
         let Some(index) = resident
+            .entity_inputs
             .iter()
-            .position(|queued| **queued == *candidate.canonical())
+            .position(|queued| queued.canonical() == candidate.canonical())
         else {
-            return true;
+            continue;
         };
-        resident.remove(index);
+        resident.entity_inputs.remove(index);
         reused += 1;
-        false
-    });
+    }
+    if resident.is_empty() {
+        resident.queued_at = None;
+    }
     reused
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use serde_json::json;
+    use xln_rscore_entity_kernel::DeterministicContext;
+    use xln_rscore_protocol::CanonicalValue;
+
+    use super::*;
+
+    fn entity_input(signer_id: &str) -> RuntimeEntityInput {
+        RuntimeEntityInput::decode(json!({
+            "entityId": format!("0x{}", "11".repeat(32)),
+            "signerId": signer_id,
+            "entityTxs": [],
+        }))
+        .expect("fixture input")
+    }
+
+    #[test]
+    fn resident_occurrence_is_replaced_at_its_recorded_causal_position() {
+        let first = entity_input("first");
+        let resident_row = entity_input("resident");
+        let expected = vec![first.canonical().clone(), resident_row.canonical().clone()];
+        let mut input = RuntimeInput::empty_frame(
+            7,
+            0,
+            DeterministicContext::hlt_default(),
+            CanonicalValue::Object(Vec::new()),
+        );
+        input.entity_inputs = vec![first, resident_row.clone()];
+        let mut resident = RuntimeMempool {
+            runtime_txs: VecDeque::new(),
+            entity_inputs: VecDeque::from([resident_row]),
+            queued_at: Some(6),
+        };
+
+        assert_eq!(
+            reconcile_runtime_input_with_resident_queue(&input, &mut resident),
+            1
+        );
+        assert!(resident.entity_inputs.is_empty());
+        assert_eq!(resident.queued_at, None);
+        assert_eq!(
+            input
+                .entity_inputs
+                .iter()
+                .map(RuntimeEntityInput::canonical)
+                .cloned()
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
 }

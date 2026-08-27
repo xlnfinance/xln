@@ -253,7 +253,6 @@ impl PersistentRadixShardOverlay {
     pub fn work(&self) -> PersistentRadixOverlayWork {
         self.work
     }
-
 }
 
 impl<V: Clone> PersistentRadixShard<V> {

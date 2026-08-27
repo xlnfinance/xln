@@ -204,6 +204,24 @@ impl DurableRuntimeProcessor {
             .ok_or(DurableRuntimeProcessorError::Poisoned)
     }
 
+    /// Exact-replay seam: replace locally generated RAM continuations with
+    /// their byte-identical recorded occurrences without changing recorded
+    /// input order. Production live processing never calls this method.
+    pub fn reconcile_exact_replay_input(
+        &mut self,
+        input: &RuntimeInput,
+    ) -> Result<usize, DurableRuntimeProcessorError> {
+        self.ensure_healthy()?;
+        let replica = self
+            .replica
+            .as_mut()
+            .ok_or(DurableRuntimeProcessorError::Poisoned)?;
+        Ok(crate::restore::reconcile_runtime_input_with_resident_queue(
+            input,
+            &mut replica.mempool,
+        ))
+    }
+
     /// Exact bytes persisted for one frame, loaded only after a parity failure.
     /// Successful replay and production publication pay no clone or decode cost.
     pub fn read_durable_frame(

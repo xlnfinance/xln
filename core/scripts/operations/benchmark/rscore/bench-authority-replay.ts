@@ -160,6 +160,8 @@ const validateTrial = (
 const runOne = async (
   recording: string,
   binary: string,
+  runtimeSeedFile: string | null,
+  entitySignerLabel: string | null,
   workers: number,
   maxMs: number,
   completeEvidence: boolean,
@@ -190,6 +192,8 @@ const runOne = async (
     '--recording', recording,
     '--output', output,
     '--mode', 'max',
+    ...(runtimeSeedFile ? ['--runtime-seed-file', runtimeSeedFile] : []),
+    ...(entitySignerLabel ? ['--entity-signer-label', entitySignerLabel] : []),
     ...(completeEvidence ? ['--require-complete-authority-evidence'] : []),
     '--require-rust-account-authority',
   ], { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -247,6 +251,8 @@ const runOne = async (
 
 const recording = resolve(requiredArgument('recording'));
 const binary = resolve(argument('binary') ?? 'rscore/target/release/xln-rscore');
+const runtimeSeedFile = argument('runtime-seed-file');
+const entitySignerLabel = argument('entity-signer-label');
 const maxMs = Number(argument('max-ms') ?? '20000');
 const completeEvidence = process.argv.includes('--complete-evidence');
 const deepVerify = process.argv.includes('--deep-verify');
@@ -257,7 +263,16 @@ accessSync(recording, constants.R_OK);
 accessSync(binary, constants.X_OK);
 const rows: BenchRow[] = [];
 for (const workers of parseWorkers()) {
-  rows.push(await runOne(recording, binary, workers, maxMs, completeEvidence, deepVerify));
+  rows.push(await runOne(
+    recording,
+    binary,
+    runtimeSeedFile ? resolve(runtimeSeedFile) : null,
+    entitySignerLabel,
+    workers,
+    maxMs,
+    completeEvidence,
+    deepVerify,
+  ));
 }
 console.table(rows.map(row => ({
   workers: row.workers,
