@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, AND NODE-MNEMONIC-REVEAL COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, AND RUNTIME-PREFERENCE COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -651,6 +651,18 @@ Seven direct tests plus the affected identity, recovery, import, workspace,
 capability, worker, and native-custody suites pass 99 tests with 649
 expectations. Both wallet and canonical Svelte production builds pass, and the
 wallet local check covers 450 files with zero unsafe-type findings.
+
+The next wallet slice now owns deterministic Runtime preference policy: exact
+auth-scheme decoding with dark fallback, ten-minute/day/forever unlock-duration
+resolution, and positive-integer BrainVault worker-cap parsing plus the
+existing floor/minimum serialization policy. The canonical Svelte event flow
+retains concrete localStorage reads and writes, initialization timing, reactive
+state publication, and the existing scalar storage keys; no wallet secret,
+Runtime state, or browser storage handle enters the shared boundary. Six direct
+tests plus the affected identity, recovery, opening, import, workspace,
+capability, worker, and native-custody suites pass 121 tests with 726
+expectations. Both wallet and canonical Svelte production builds pass, and the
+wallet local check covers 451 files with zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -841,6 +853,9 @@ any mismatch. Never compile on production.
    Node mnemonic reveal generation ownership, captured-context validation,
    stale-result suppression, and error normalization are shared while adapter
    access, secret publication, loading, and error effects remain concrete.
+   Runtime auth-scheme, unlock-duration, and worker-cap preference policy is
+   shared while concrete localStorage access and reactive publication remain
+   in the canonical Svelte event flow.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication

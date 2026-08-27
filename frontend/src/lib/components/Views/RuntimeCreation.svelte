@@ -85,6 +85,15 @@
     walletRuntimeOpeningNeedsLocalLookup,
   } from '../../../../packages/browser/src/wallet-runtime-opening';
   import { WalletNodeMnemonicRevealCoordinator } from '../../../../packages/browser/src/wallet-node-mnemonic-reveal';
+  import {
+    WALLET_AUTH_SCHEME_STORAGE_KEY,
+    parseWalletBrainVaultWorkerCap,
+    resolveWalletAuthScheme,
+    resolveWalletUnlockDurationMs,
+    serializeWalletBrainVaultWorkerCap,
+    type WalletAuthScheme,
+    type WalletUnlockDurationChoice,
+  } from '../../../../packages/browser/src/wallet-runtime-preferences';
 
   // Props
   export let embedded: boolean = false;
@@ -147,13 +156,10 @@
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
-  let unlockDurationChoice: '10m' | '1d' | 'forever' = '10m';
-  $: unlockDurationMs = (
-    unlockDurationChoice === 'forever'
-      ? null
-      : unlockDurationChoice === '1d'
-        ? 86_400_000
-        : DEFAULT_VAULT_UNLOCK_DURATION_MS
+  let unlockDurationChoice: WalletUnlockDurationChoice = '10m';
+  $: unlockDurationMs = resolveWalletUnlockDurationMs(
+    unlockDurationChoice,
+    DEFAULT_VAULT_UNLOCK_DURATION_MS,
   ) satisfies VaultUnlockDurationMs;
 
   function selectInputMode(next: InputMode): void {
@@ -186,12 +192,10 @@
   }
 
   // Visual scheme for the standalone auth screen: 'dark' (default "vault") or 'light' (minimalist fintech skin)
-  type AuthScheme = 'dark' | 'light';
-  const AUTH_SCHEME_STORAGE_KEY = 'xln-auth-scheme';
-  let scheme: AuthScheme = 'dark';
-  function setScheme(next: AuthScheme): void {
+  let scheme: WalletAuthScheme = 'dark';
+  function setScheme(next: WalletAuthScheme): void {
     scheme = next;
-    if (typeof localStorage !== 'undefined') localStorage.setItem(AUTH_SCHEME_STORAGE_KEY, next);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(WALLET_AUTH_SCHEME_STORAGE_KEY, next);
   }
 
   // Advanced options (security work factor etc.) are collapsed by default for a minimalist screen
@@ -272,13 +276,17 @@
 
   function readPersistedWorkerCap(): number | null {
     if (typeof localStorage === 'undefined') return null;
-    const value = Number(localStorage.getItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY));
-    return Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+    return parseWalletBrainVaultWorkerCap(
+      localStorage.getItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY),
+    );
   }
 
   function persistWorkerCap(cap: number): void {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY, String(Math.max(1, Math.floor(cap))));
+    localStorage.setItem(
+      BRAINVAULT_WORKER_CAP_STORAGE_KEY,
+      serializeWalletBrainVaultWorkerCap(cap),
+    );
   }
 
   const computeMaxWorkers = () => computeBrainVaultWorkerCap({
@@ -1415,8 +1423,8 @@
     let unsubscribe: (() => void) | undefined;
 
     // Restore the saved auth scheme (dark default)
-    if (typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_SCHEME_STORAGE_KEY) === 'light') {
-      scheme = 'light';
+    if (typeof localStorage !== 'undefined') {
+      scheme = resolveWalletAuthScheme(localStorage.getItem(WALLET_AUTH_SCHEME_STORAGE_KEY));
     }
 
     // Run async init

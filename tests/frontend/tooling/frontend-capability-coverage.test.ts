@@ -77,6 +77,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-runtime-opening.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
+      .toContain('frontend/packages/browser/src/wallet-runtime-preferences.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-shell-state.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/src/lib/components/Views/RuntimeCreation.svelte');
@@ -102,6 +104,8 @@ describe('frontend capability inventory', () => {
       .toContain('validated remote consent and embedded cancellation ordering');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('deterministic local unlock and Runtime creation planning');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
+      .toContain('deterministic Runtime preference decoding and serialization');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('framework-neutral wallet shell phase precedence');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.status).toBe('in_progress');
