@@ -1,5 +1,3 @@
-import { compareStableText } from '../../../protocol/serialization';
-
 /**
  * One frame-local Account work authority.
  *
@@ -48,10 +46,9 @@ export const setProposableAccountForce = (
 /**
  * Deterministic Account work queue for one Entity frame.
  *
- * Sorting the remaining Set before every proposal made A active Accounts cost
- * O(A^2 log A). The initial frontier is sorted once. Work discovered while an
- * Account is reduced is inserted into the unread suffix, preserving exactly
- * the order produced by repeatedly sorting the remaining Set.
+ * The Map's insertion order is the accepted Account-input order. New work is
+ * appended at first touch. Parallel implementations must return each result
+ * to this same RAM position; Account ids never choose publication order.
  */
 export const createCanonicalAccountWorklist = (
   accounts: ReadonlyMap<string, boolean>,
@@ -59,7 +56,7 @@ export const createCanonicalAccountWorklist = (
   const forced = new Map(
     [...accounts].map(([accountId, force]) => [normalizeAccountId(accountId), force] as const),
   );
-  const queue = [...forced.keys()].sort(compareStableText);
+  const queue = [...forced.keys()];
   const scheduled = new Set(queue);
   let cursor = 0;
 
@@ -72,14 +69,7 @@ export const createCanonicalAccountWorklist = (
       }
       scheduled.add(key);
       forced.set(key, force);
-      let low = cursor;
-      let high = queue.length;
-      while (low < high) {
-        const middle = low + Math.floor((high - low) / 2);
-        if (compareStableText(queue[middle]!, key) <= 0) low = middle + 1;
-        else high = middle;
-      }
-      queue.splice(low, 0, key);
+      queue.push(key);
       return true;
     },
     take(): CanonicalAccountWork | undefined {

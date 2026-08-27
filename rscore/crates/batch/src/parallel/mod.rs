@@ -13,5 +13,5 @@ pub(crate) use resident::ResidentWorkerPool;
 pub(crate) use resident_forest::{
     ResidentAccountAction, ResidentAccountBatch, ResidentAccountForest,
 };
-pub use shards::{AccountShardMetric, LOGICAL_ACCOUNT_SHARDS};
+pub use shards::AccountShardMetric;
 pub(crate) use shards::{AccountShardPlan, logical_account_shard};

@@ -11,7 +11,11 @@ import {
 } from '../../jurisdiction/machine/local-history';
 import type { RuntimeReplica } from '../../runtime/types';
 import { normalizeDbNamespace } from '../runtime-dbs';
-import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import {
+  hydratePersistedEntityReplicaSnapshot,
+  restoreDurableRuntimeSnapshot,
+  type PersistedEntityReplicaSnapshot,
+} from '../wal/snapshot';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateJReplicas } from '../wal/runtime-machine-schema/j';
 import { assertCrossJLocalCohorts } from '../../runtime/delivery/topology/cross-j-topology';
@@ -138,10 +142,22 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
   for (const [index, [key, replica]] of entityEntries.entries()) {
     const context = `RecoveryCheckpoint.EntityReplica[${index}]`;
     const rawReplica = requireBoundaryRecord(replica, context);
-    const validated = validateEntityReplica({
+    for (const field of ['proposal', 'lockedFrame', 'candidate'] as const) {
+      if (Object.hasOwn(rawReplica, field)) {
+        throw new Error(`${context} contains unexpected fields: ${field}`);
+      }
+    }
+    if (Object.hasOwn(rawReplica, 'mempool')) {
+      throw new Error(`${context} contains unexpected fields: mempool`);
+    }
+    const persisted = {
       ...rawReplica,
       state: hydrateCheckpointEntityState(rawReplica['state'], `${context}.state`),
-    }, context);
+    } as PersistedEntityReplicaSnapshot;
+    const validated = validateEntityReplica(
+      hydratePersistedEntityReplicaSnapshot(persisted),
+      context,
+    );
     env.state.eReplicas.set(key, validated);
   }
   env.state.jReplicas = new Map();

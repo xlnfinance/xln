@@ -1,12 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::{AccountId, BatchError};
+use xln_rscore_protocol::PERSISTENT_RADIX_SHARD_COUNT;
 
-/// Twelve Account-key bits keep the logical partition count independent from the
-/// machine's physical core count. Reassigning a shard changes scheduling only;
-/// it can never change Account order, Patricia paths, or committed bytes.
-pub const LOGICAL_ACCOUNT_SHARDS: usize = 4096;
+use crate::{AccountId, BatchError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountShardMetric {
@@ -44,11 +41,11 @@ impl AccountShardPlan {
         if worker_count == 0 || worker_count > u16::MAX as usize {
             return Err(BatchError::InvalidWorkerCount(worker_count));
         }
-        let worker_by_shard = (0..LOGICAL_ACCOUNT_SHARDS)
+        let worker_by_shard = (0..PERSISTENT_RADIX_SHARD_COUNT)
             .map(|shard| (shard % worker_count) as u16)
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        let counters = (0..LOGICAL_ACCOUNT_SHARDS)
+        let counters = (0..PERSISTENT_RADIX_SHARD_COUNT)
             .map(|_| ShardCounters::default())
             .collect::<Vec<_>>()
             .into_boxed_slice();
@@ -62,17 +59,17 @@ impl AccountShardPlan {
         if worker_count == 0 || worker_count > u16::MAX as usize {
             return Err(BatchError::InvalidWorkerCount(worker_count));
         }
-        if shard_weights.len() != LOGICAL_ACCOUNT_SHARDS {
+        if shard_weights.len() != PERSISTENT_RADIX_SHARD_COUNT {
             return Err(BatchError::AccountsTree {
                 account_id: AccountId::from_bytes([0; 32]),
                 detail: format!(
                     "ACCOUNT_SHARD_WEIGHT_COUNT:{}:{}",
                     shard_weights.len(),
-                    LOGICAL_ACCOUNT_SHARDS
+                    PERSISTENT_RADIX_SHARD_COUNT
                 ),
             });
         }
-        let mut worker_by_shard = vec![0_u16; LOGICAL_ACCOUNT_SHARDS];
+        let mut worker_by_shard = vec![0_u16; PERSISTENT_RADIX_SHARD_COUNT];
         let mut worker_load = vec![0_u64; worker_count];
         let mut weighted = shard_weights
             .iter()
@@ -98,7 +95,7 @@ impl AccountShardPlan {
                 worker_by_shard[shard] = (shard % worker_count) as u16;
             }
         }
-        let counters = (0..LOGICAL_ACCOUNT_SHARDS)
+        let counters = (0..PERSISTENT_RADIX_SHARD_COUNT)
             .map(|_| ShardCounters::default())
             .collect::<Vec<_>>()
             .into_boxed_slice();
@@ -168,6 +165,9 @@ fn least_loaded_worker(loads: &[u64]) -> usize {
         .map_or(0, |(worker, _)| worker)
 }
 
+/// Twelve Account-key bits keep the logical partition count independent from
+/// the machine's physical core count. Reassigning a shard changes scheduling
+/// only; it can never change Account order, Patricia paths, or committed bytes.
 pub(crate) fn logical_account_shard(account_id: AccountId) -> usize {
     let bytes = account_id.as_bytes();
     (usize::from(bytes[0]) << 4) | usize::from(bytes[1] >> 4)
@@ -179,12 +179,13 @@ fn duration_nanos(elapsed: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccountShardPlan, LOGICAL_ACCOUNT_SHARDS, logical_account_shard};
+    use super::{AccountShardPlan, logical_account_shard};
     use crate::AccountId;
+    use xln_rscore_protocol::PERSISTENT_RADIX_SHARD_COUNT;
 
     #[test]
     fn first_three_nibbles_select_every_logical_shard() {
-        for expected in 0..LOGICAL_ACCOUNT_SHARDS {
+        for expected in 0..PERSISTENT_RADIX_SHARD_COUNT {
             let mut bytes = [0_u8; 32];
             bytes[0] = (expected >> 4) as u8;
             bytes[1] = ((expected & 0x0f) as u8) << 4;
@@ -198,14 +199,14 @@ mod tests {
     #[test]
     fn balanced_assignment_is_total_and_deterministic() {
         let plan = AccountShardPlan::balanced(20).expect("plan");
-        for shard in 0..LOGICAL_ACCOUNT_SHARDS {
+        for shard in 0..PERSISTENT_RADIX_SHARD_COUNT {
             assert_eq!(plan.worker(shard), shard % 20);
         }
     }
 
     #[test]
     fn weighted_assignment_balances_hot_shards_without_changing_logical_ids() {
-        let mut weights = vec![0_u64; LOGICAL_ACCOUNT_SHARDS];
+        let mut weights = vec![0_u64; PERSISTENT_RADIX_SHARD_COUNT];
         weights[7] = 9;
         weights[18] = 8;
         weights[29] = 7;

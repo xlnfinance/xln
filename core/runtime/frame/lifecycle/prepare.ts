@@ -1,7 +1,6 @@
 import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import {
   prioritizeEntityConsensusInputs,
-  prioritizeProtocolEntityInputs,
 } from '../../../entity/consensus';
 import {
   causalTraceContainsWork,
@@ -49,7 +48,6 @@ export const prepareRuntimeFrameInput = async (
   const jEventPrioritized = deps.prioritizeJEventFrame(input, mempool, timestamp);
   input.entityInputs = prioritizeEntityConsensusInputs(input.entityInputs, entityInput =>
     hasVerifiedEntityCommitPrecertificate(env, entityInput));
-  input.entityInputs = prioritizeProtocolEntityInputs(input.entityInputs);
   applyEntityHeightDurabilityBarrier(env, input, mempool, timestamp);
   deps.applyEntityTxFrameCap(input, mempool, state.maxEntityTxsPerFrame ?? 0, timestamp);
   deps.applyEntityInputFrameCap(input, mempool, state.maxEntityInputsPerFrame ?? 0, timestamp);

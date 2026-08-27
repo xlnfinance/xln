@@ -187,6 +187,10 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::ResidentRollbackMissing { .. } => "RSCORE_BATCH_RESIDENT_ROLLBACK_MISSING",
         BatchError::ResidentRollbackPhase { .. } => "RSCORE_BATCH_RESIDENT_ROLLBACK_PHASE",
         BatchError::ResidentWorkerResultCount { .. } => "RSCORE_BATCH_RESIDENT_WORKER_RESULT_COUNT",
+        BatchError::ResidentResultPosition { .. } => "RSCORE_BATCH_RESIDENT_RESULT_POSITION",
+        BatchError::ResidentResultPositionDuplicate { .. } => {
+            "RSCORE_BATCH_RESIDENT_RESULT_POSITION_DUPLICATE"
+        }
         BatchError::ResidentCheckpointAccountRemoved(_) => {
             "RSCORE_BATCH_RESIDENT_CHECKPOINT_ACCOUNT_REMOVED"
         }

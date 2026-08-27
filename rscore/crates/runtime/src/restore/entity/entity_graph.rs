@@ -279,8 +279,11 @@ fn parse_entity_manifest(
     let manifest = decode_storage_payload(root_bytes)?;
     let manifest = object(&manifest, "manifest")?;
     exact_fields(manifest, &["schemaVersion", "fields", "trees"], "manifest")?;
-    if manifest.get("schemaVersion").and_then(Value::as_u64) != Some(STORAGE_SCHEMA_VERSION) {
-        return Err(invalid("MANIFEST_VERSION"));
+    let schema_version = manifest.get("schemaVersion").and_then(Value::as_u64);
+    if schema_version != Some(STORAGE_SCHEMA_VERSION) {
+        return Err(invalid(format!(
+            "MANIFEST_VERSION:expected={STORAGE_SCHEMA_VERSION}:actual={schema_version:?}"
+        )));
     }
     let fields = manifest
         .get("fields")

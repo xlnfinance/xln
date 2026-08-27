@@ -5,6 +5,7 @@
 //! values and never a TypeScript-generated selection count.
 
 mod account_input_commitment;
+mod j_event;
 mod wire_budget;
 
 use serde_json::Value;
@@ -24,9 +25,9 @@ pub enum EntityFrameError {
 }
 
 /// Build the one trusted Entity-frame projection from the exact logical tx.
-/// Account inputs have a specialized commitment; every other supported MVP
-/// tx commits its exact tagged-storage data. J-event ranges require their own
-/// normalization and stay loud until that decoder is connected here.
+/// Account inputs have a specialized commitment; j_event ranges use the
+/// canonical J-event projection. Every other supported MVP tx commits its
+/// exact tagged-storage data.
 pub(crate) fn project_entity_tx(value: &Value) -> Result<CanonicalEntityTx, EntityFrameError> {
     let tx = value
         .as_object()
@@ -41,17 +42,14 @@ pub(crate) fn project_entity_tx(value: &Value) -> Result<CanonicalEntityTx, Enti
     let kind = EntityTxKind::parse(kind_text)
         .and_then(EntityTxKind::require_native_mvp)
         .map_err(|error| EntityFrameError::Value(error.to_string()))?;
-    if kind == EntityTxKind::JEvent {
-        return Err(EntityFrameError::Value(
-            "J_EVENT_CANONICAL_PROJECTION_NOT_CONNECTED".into(),
-        ));
-    }
     let data = tx
         .get("data")
         .ok_or_else(|| EntityFrameError::Value("FIELD:entityTx.data".into()))?;
     let wire_data = crate::canonical_value_from_tagged_json(data)?;
     let projected = if kind == EntityTxKind::AccountInput {
         account_input_commitment::account_input_commitment(data)?
+    } else if kind == EntityTxKind::JEvent {
+        j_event::canonical_j_event_data_for_frame_hash(data)?
     } else {
         data.clone()
     };

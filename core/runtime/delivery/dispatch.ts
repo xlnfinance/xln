@@ -6,7 +6,6 @@ import type {
 } from '../types';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import { compareStableText } from '../../protocol/serialization';
 import { getWallClockMs } from '../../support/time';
 import { validateDeliverableEntityInput } from '../delivery/topology/routing-validation';
 import {
@@ -20,7 +19,6 @@ import { buildUnsignedRuntimeEntityInputsEnvelope } from '../admit/entity-input-
 import {
   buildPendingNetworkOutputs,
   buildRoutingDeliveryResult,
-  compareOutputDelivery,
   enqueueP2PEntityInputsDelivery,
   groupAtomicCrossJAdmissionOutputs,
   isCrossJAdmissionSourceProposal,
@@ -69,7 +67,7 @@ const batchOutputsByTarget = (
     }
   }
 
-  return Array.from(batched.values()).sort(compareOutputDelivery);
+  return Array.from(batched.values());
 };
 
 const requireOutputRuntimeFrame = (
@@ -217,10 +215,7 @@ const buildOutputEnvelopeGroups = (
         .map(outputs => ({ outputs, atomic: false, complete: true }));
       return [...atomicUnits, ...ordinaryUnits]
         .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit }));
-    })
-    .sort((left, right) =>
-      compareStableText(left.targetRuntimeId, right.targetRuntimeId) ||
-      compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
+    });
 };
 
 /**

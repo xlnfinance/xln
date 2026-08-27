@@ -273,7 +273,7 @@ describe('runtime output routing', () => {
     expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(nextHeightSameHash));
   });
 
-  test('keeps distinct leader-timeout votes in separate deterministic route envelopes', () => {
+  test('keeps distinct leader-timeout votes in their accepted route order', () => {
     const base = {
       runtimeId: runtimeId('74'),
       entityId: entityId('75'),
@@ -286,12 +286,17 @@ describe('runtime output routing', () => {
     expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(second));
     expect(buildPendingNetworkOutputs([first, second])).toHaveLength(2);
     expect(buildPendingNetworkOutputs([second, first]).map(buildRouteOutputKey)).toEqual(
-      buildPendingNetworkOutputs([first, second]).map(buildRouteOutputKey),
+      [buildRouteOutputKey(second), buildRouteOutputKey(first)],
     );
     const deliveredForward = dispatchFrameOutputs([first, second] as DeliverableEntityInput[]);
     const deliveredReverse = dispatchFrameOutputs([second, first] as DeliverableEntityInput[]);
     expect(deliveredForward).toHaveLength(2);
-    expect(deliveredReverse.map(buildRouteOutputKey)).toEqual(deliveredForward.map(buildRouteOutputKey));
+    expect(deliveredForward.map(buildRouteOutputKey)).toEqual(
+      [buildRouteOutputKey(first), buildRouteOutputKey(second)],
+    );
+    expect(deliveredReverse.map(buildRouteOutputKey)).toEqual(
+      [buildRouteOutputKey(second), buildRouteOutputKey(first)],
+    );
   });
 
   test('accepts only exact duplicate precommit bundles and rejects arrival-order equivocation', () => {

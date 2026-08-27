@@ -60,7 +60,7 @@ import {
   type AccountJClaimNode,
 } from '../../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../../entity/account/account-j-claim-node-store';
-import { validateEntityReplicaMetadata } from '../../entity/replica/replica-validation';
+import { validateStorageReplicaMeta } from '../replica/replica-meta-validation';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
@@ -390,11 +390,10 @@ const listReplicaMetas = async (
     if (!sharedState) {
       throw new Error(`STORAGE_REPLICA_META_SHARED_STATE_REQUIRED:0x${key.toString('hex')}`);
     }
-    const validated = validateEntityReplicaMetadata(
-      { ...decoded, state: sharedState },
+    const meta = validateStorageReplicaMeta(
+      decoded,
       `StorageReplicaMeta[0x${key.toString('hex')}]`,
     );
-    const { state: _validatedState, ...meta } = validated;
     const metaEntityId = normalizeEntityId(String(meta.entityId || ''));
     const signerId = normalizeEntityId(String(meta.signerId || ''));
     if (!metaEntityId || metaEntityId !== expectedEntityId) {

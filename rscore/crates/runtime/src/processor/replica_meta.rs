@@ -46,7 +46,6 @@ pub(crate) fn prepare_replica_meta(
     meta.insert("entityId".into(), Value::String(entity_id.clone()));
     meta.insert("signerId".into(), Value::String(signer_id.clone()));
     meta.insert("isProposer".into(), Value::Bool(true));
-    meta.insert("mempool".into(), Value::Array(Vec::new()));
     meta.insert(
         "lastConsensusProgressAt".into(),
         safe_number("lastConsensusProgressAt", result.replica.state.timestamp)?,
@@ -140,7 +139,6 @@ fn live_replica_meta(
                 ("frameHash", Value::String(frame_hash)),
             ]),
         ),
-        ("mempoolCount".into(), Value::Number(Number::from(0))),
         (
             "certifiedFrameHeadDigest".into(),
             Value::String(hex(&head_digest)),

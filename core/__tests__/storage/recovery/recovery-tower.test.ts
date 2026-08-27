@@ -261,8 +261,10 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.infrastructure?.maxEntityInputsPerFrame).toBe(123);
     expect(requireEntityEncryptionPrivateKey(restoredEnv, entityId))
       .toBe(requireEntityEncryptionPrivateKey(env, entityId));
-    expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
-    expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
+    expect(env.pendingOutputs).toHaveLength(1);
+    expect(env.networkInbox).toHaveLength(1);
+    expect(restoredEnv.pendingOutputs).toEqual([]);
+    expect(restoredEnv.networkInbox).toEqual([]);
   });
 
   test('portable Entity projection preserves persistent crontab hooks', async () => {
@@ -319,11 +321,12 @@ describe('runtime recovery tower', () => {
     expect(restoredHub?.metadata.jurisdiction?.depositoryAddress).toBe(jurisdiction.depositoryAddress);
   });
 
-  test('recovery bundle preserves in-flight consensus state and compresses large checkpoints below tower body cap', async () => {
+  test('recovery bundle omits in-flight consensus work and reconstructs committed state', async () => {
     const { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction } = await buildRuntimeEnv();
     const replicaKey = `${entityId}:${runtimeId}`;
     const replica = env.state.eReplicas.get(replicaKey);
     expect(replica, 'test replica must exist').toBeTruthy();
+    const committedHeight = replica!.state.height;
     // Entity graphs are persistent values; a same-root shell is the only valid
     // test mutation workspace. structuredClone would erase private Patricia nodes.
     const bloatedState = { ...replica!.state };
@@ -395,9 +398,16 @@ describe('runtime recovery tower', () => {
     expect(serializeTaggedJson(bundle)).not.toContain(runtimeSeed);
 
     const checkpointReplica = (bundle.checkpoint!['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
-    expect(checkpointReplica?.proposal).toBeDefined();
-    expect(checkpointReplica?.lockedFrame).toBeDefined();
-    expect(checkpointReplica?.candidate).toBeDefined();
+    expect(replica!.proposal).toBeDefined();
+    expect(replica!.lockedFrame).toBeDefined();
+    expect(replica!.candidate).toBeDefined();
+    expect(checkpointReplica?.proposal).toBeUndefined();
+    expect(checkpointReplica?.lockedFrame).toBeUndefined();
+    expect(checkpointReplica?.candidate).toBeUndefined();
+    expect(checkpointReplica?.mempool).toBeUndefined();
+    const portableCore = (checkpointReplica?.state as { core?: { height?: number } } | undefined)?.core;
+    expect(portableCore?.height).toBe(committedHeight);
+    expect(portableCore?.height).not.toBe(pendingHeight);
     expect(serializeTaggedJson(bundle).length, 'test fixture must exceed the tower JSON body cap before compression').toBeGreaterThan(128 * 1024);
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
@@ -501,6 +511,12 @@ describe('runtime recovery tower', () => {
     expect(restoredPersistedHash).toBe(originalPersistedHash);
     expect(restoredEnv.state.height).toBe(env.state.height);
     expect(restoredEnv.state.eReplicas.size).toBe(env.state.eReplicas.size);
+    for (const restored of restoredEnv.state.eReplicas.values()) {
+      expect(restored.mempool).toEqual([]);
+      expect(restored.proposal).toBeUndefined();
+      expect(restored.lockedFrame).toBeUndefined();
+      expect(restored.candidate).toBeUndefined();
+    }
 
     const recording = buildRuntimeRecording([snapshotBundle, tailBundle], 10_002);
     expect(validateRuntimeRecording(recording).manifestHash).toBe(recording.manifestHash);

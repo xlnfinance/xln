@@ -24,7 +24,6 @@ import {
   accountProposalSettledBySender,
   accountProposalEvidenceRank,
   accountProposalOutputIdentity,
-  buildRouteOutputKey,
   carriesEntityCommitNotification,
   copyRoutedOutputForMerge,
   normalizeRouteText,
@@ -390,48 +389,6 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
 };
 const gossipBoardSignerMemo = new Map<string, { routeHash: string; runtimeSignature: string; signerIds: string[] }>();
 
-const outputDeliveryPriority = (output: RoutedEntityInput): number => {
-  if (output.proposedFrame) return 0;
-  if (output.leaderTimeoutVote) return 0;
-  if (output.hashPrecommits && output.hashPrecommits.size > 0) return 0;
-  const txTypes = new Set((output.entityTxs ?? []).map(tx => tx.type));
-  if ([...txTypes].some(type => type === 'j_event' || type.startsWith('dispute'))) return 0;
-  if (txTypes.has('accountInput')) return 2;
-  return 3;
-};
-
-const compareEntityFrameDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number => {
-  const leftFrame = left.proposedFrame;
-  const rightFrame = right.proposedFrame;
-  if (!leftFrame) return rightFrame ? 1 : 0;
-  if (!rightFrame) return -1;
-  return (
-    compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
-    compareStableText(left.entityId, right.entityId) ||
-    compareStableText(left.signerId, right.signerId) ||
-    leftFrame.height - rightFrame.height ||
-    compareStableText(leftFrame.hash, rightFrame.hash)
-  );
-};
-
-const compareOutputDeliveryWithKeys = (
-  left: RoutedEntityInput,
-  right: RoutedEntityInput,
-  leftRouteKey: string,
-  rightRouteKey: string,
-): number =>
-  outputDeliveryPriority(left) - outputDeliveryPriority(right) ||
-  compareEntityFrameDelivery(left, right) ||
-  compareStableText(leftRouteKey, rightRouteKey);
-
-export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number =>
-  compareOutputDeliveryWithKeys(
-    left,
-    right,
-    buildRouteOutputKey(left),
-    buildRouteOutputKey(right),
-  );
-
 export const buildPendingNetworkOutputs = (
   outputs: RoutedEntityInput[],
   graph: PreparedOutputGraph = createPreparedOutputGraph(),
@@ -456,13 +413,9 @@ export const buildPendingNetworkOutputs = (
       deduped.set(key, target);
     }
   }
-  const pending = [...deduped.values()]
-    .sort((left, right) => compareOutputDeliveryWithKeys(
-      left,
-      right,
-      graph.prepare(left).routeKey,
-      graph.prepare(right).routeKey,
-    ));
+  // Map preserves the first accepted position. Dedup merges into that slot;
+  // neither payload kind nor destination may rewrite committed outbox order.
+  const pending = [...deduped.values()];
   if (pending.length > MAX_PENDING_NETWORK_OUTPUTS) {
     throw new Error(
       `NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${pending.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`,

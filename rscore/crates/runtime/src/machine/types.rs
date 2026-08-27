@@ -610,7 +610,6 @@ impl RuntimeReplica {
             "entityId": state.entity.entity_id,
             "signerId": entity_signer.signer_id(),
             "isProposer": true,
-            "mempool": [],
         });
         let last_materialized_height = state.height;
         Ok(Self {
@@ -648,10 +647,7 @@ impl RuntimeReplica {
         let identity_matches = meta.get("entityId").and_then(Value::as_str)
             == Some(self.state.entity.entity_id.as_str())
             && meta.get("signerId").and_then(Value::as_str) == Some(self.signer_id.as_str());
-        if !identity_matches
-            || meta.get("isProposer").and_then(Value::as_bool).is_none()
-            || meta.get("mempool").and_then(Value::as_array).is_none()
-        {
+        if !identity_matches || meta.get("isProposer").and_then(Value::as_bool).is_none() {
             return Err(RuntimeMachineError::ReplicaMetadata(
                 "IDENTITY_OR_ENVELOPE_MISMATCH".into(),
             ));

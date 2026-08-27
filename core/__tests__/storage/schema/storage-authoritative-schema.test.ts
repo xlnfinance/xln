@@ -231,28 +231,19 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       .toThrow('Invalid RuntimeId');
   });
 
-  test('validates durable source Runtime-frame provenance in the outbox', () => {
-    const sourceRuntimeFrame = { height: 7, timestamp: 7000 };
-    const routedInput = {
-      runtimeId: `0x${'33'.repeat(20)}`,
-      entityId,
-      signerId: `0x${'44'.repeat(20)}`,
-      entityTxs: [],
-      sourceRuntimeFrame,
-    };
-    const validMachine = buildDurableRuntimeMachineSnapshot(
-      createEmptyEnv('runtime-machine-source-frame'),
+  test('rejects RAM transport queues as retired durable machine fields', () => {
+    const current = buildDurableRuntimeMachineSnapshot(
+      createEmptyEnv('runtime-machine-retired-queues'),
     );
-    validMachine['pendingNetworkOutputs'] = [routedInput];
-
-    expect(() => validateDurableRuntimeMachineSnapshot(validMachine, 'RUNTIME_MACHINE')).not.toThrow();
-
-    const malformedFrame = structuredClone(validMachine);
-    (malformedFrame['pendingNetworkOutputs'] as Array<Record<string, unknown>>)[0]![
-      'sourceRuntimeFrame'
-    ] = { height: -1, timestamp: 7000 };
-    expect(() => validateDurableRuntimeMachineSnapshot(malformedFrame, 'RUNTIME_MACHINE'))
-      .toThrow('RUNTIME_MACHINE_PENDINGNETWORKOUTPUTS_0_SOURCE_RUNTIME_FRAME_HEIGHT:-1');
+    expect(current['pendingOutputs']).toBeUndefined();
+    expect(current['networkInbox']).toBeUndefined();
+    expect(current['pendingNetworkOutputs']).toBeUndefined();
+    for (const field of ['pendingOutputs', 'networkInbox', 'pendingNetworkOutputs']) {
+      expect(() => validateDurableRuntimeMachineSnapshot(
+        { ...current, [field]: [] },
+        'RUNTIME_MACHINE',
+      )).toThrow('RUNTIME_MACHINE_FIELDS');
+    }
   });
 
   test('recursively rejects malformed EntityTx payloads in every nested carrier', () => {

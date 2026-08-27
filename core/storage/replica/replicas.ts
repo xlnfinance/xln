@@ -174,18 +174,6 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
           timestamp: replica.state.timestamp,
           frameHash: replica.state.prevFrameHash ?? '',
         },
-        // Ordinary WAL frames commit only bounded identities for speculative
-        // overlays. Their bodies are replay-derived and must never turn one
-        // frame hash into an O(Entity) serialization of every Account/Book.
-        mempoolCount: replica.mempool.length,
-        ...(replica.proposal ? { proposalHash: replica.proposal.hash } : {}),
-        ...(replica.lockedFrame ? { lockedFrameHash: replica.lockedFrame.hash } : {}),
-        ...(replica.candidate
-          ? {
-              candidateFrameHash: replica.candidate.frameHash,
-              candidateHeight: replica.candidate.height,
-            }
-          : {}),
         ...(certifiedFrameHeadDigest ? { certifiedFrameHeadDigest } : {}),
         ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),
         ...(replica.pendingLeaderCertificate

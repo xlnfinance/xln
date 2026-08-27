@@ -1520,7 +1520,7 @@ const applyPostEntityTxPhases = async (
   await drainPostOrderbookAccountWork(context, currentEntityState);
   const proposalAccountIds = crossJSetupPhase
     ? []
-    : [...context.proposableAccounts.keys()].sort(compareStableText);
+    : [...context.proposableAccounts.keys()];
   await context.env.accountAuthorityEntityStage
     ?.prepareEntityAccountOutbound({
       entityState: currentEntityState,

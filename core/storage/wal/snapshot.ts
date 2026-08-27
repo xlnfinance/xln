@@ -8,6 +8,7 @@ import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } fro
 import type { FrameLogEntry } from '../../types/logging';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
+import type { StorageReplicaMeta } from '../types';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -91,22 +92,20 @@ const requireFinitePosition = (
   return { ...value };
 };
 
+export type PersistedEntityReplicaSnapshot = StorageReplicaMeta & {
+  state: EntityState;
+};
+
 export const buildCanonicalEntityReplicaSnapshot = (
   replica: EntityReplica,
-  options?: { compactTransient?: boolean },
-): EntityReplica => {
-  const compactTransient = options?.compactTransient === true;
+): PersistedEntityReplicaSnapshot => {
   // This is an immutable projection, not an Entity clone. The committed state
-  // and validator metadata are persistent values; the caller encodes this
-  // field view synchronously or retains it as a root-reachable checkpoint.
+  // and certified authority are persistent values. Replica-envelope work is
+  // rebuilt from accepted Runtime WAL inputs and never enters a snapshot.
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: replica.state,
-    mempool: compactTransient ? [] : replica.mempool,
-    ...(!compactTransient && replica.proposal ? { proposal: replica.proposal } : {}),
-    ...(!compactTransient && replica.lockedFrame ? { lockedFrame: replica.lockedFrame } : {}),
-    ...(!compactTransient && replica.candidate ? { candidate: replica.candidate } : {}),
     ...(replica.certifiedFrameHead ? { certifiedFrameHead: replica.certifiedFrameHead } : {}),
     isProposer: replica.isProposer,
     ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),
@@ -125,6 +124,34 @@ export const buildCanonicalEntityReplicaSnapshot = (
     ...(replica.hankoWitness ? { hankoWitness: replica.hankoWitness } : {}),
   };
 };
+
+/** Rebuild the RAM-only Entity envelope after strict persisted-byte validation. */
+export const hydratePersistedEntityReplicaSnapshot = (
+  snapshot: PersistedEntityReplicaSnapshot,
+): EntityReplica => ({
+  entityId: snapshot.entityId,
+  signerId: snapshot.signerId,
+  state: snapshot.state,
+  mempool: [],
+  isProposer: snapshot.isProposer,
+  ...(snapshot.certifiedFrameHead ? { certifiedFrameHead: snapshot.certifiedFrameHead } : {}),
+  ...(snapshot.leaderVotes ? { leaderVotes: snapshot.leaderVotes } : {}),
+  ...(snapshot.pendingLeaderCertificate
+    ? { pendingLeaderCertificate: snapshot.pendingLeaderCertificate }
+    : {}),
+  ...(snapshot.lastConsensusProgressAt !== undefined
+    ? { lastConsensusProgressAt: snapshot.lastConsensusProgressAt }
+    : {}),
+  ...(snapshot.jHistory ? { jHistory: snapshot.jHistory } : {}),
+  ...(snapshot.jPrefixRound ? { jPrefixRound: snapshot.jPrefixRound } : {}),
+  ...(snapshot.jSubmitState ? { jSubmitState: snapshot.jSubmitState } : {}),
+  ...(snapshot.entityProviderActionSubmitState
+    ? { entityProviderActionSubmitState: snapshot.entityProviderActionSubmitState }
+    : {}),
+  ...(snapshot.htlcNotes ? { htlcNotes: snapshot.htlcNotes } : {}),
+  ...(snapshot.position ? { position: snapshot.position } : {}),
+  ...(snapshot.hankoWitness ? { hankoWitness: snapshot.hankoWitness } : {}),
+});
 
 export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   name: jr.name,
@@ -246,6 +273,7 @@ const buildDurableRuntimeStateSnapshot = (
 export const buildDurableRuntimeMachineSnapshot = (
   env: RuntimeReplica,
   options?: {
+    // WAL still passes this empty override. RAM queue bodies never enter durable snapshots.
     pendingNetworkOutputs?: RoutedEntityInput[];
     excludePersistedHistoryRecords?: boolean;
   },
@@ -261,11 +289,6 @@ export const buildDurableRuntimeMachineSnapshot = (
     ...(browserVMState ? { browserVMState } : {}),
     ...(runtimeConfig ? { runtimeConfig } : {}),
     ...(infrastructure ? { infrastructure } : {}),
-    ...(env.pendingOutputs?.length ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
-    ...(env.networkInbox?.length ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
-    ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
-      ? { pendingNetworkOutputs: projectRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
-      : {}),
     jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([key, replica]) => [
       key,
       buildDurableJReplicaSnapshot(replica),
@@ -274,17 +297,13 @@ export const buildDurableRuntimeMachineSnapshot = (
 };
 
 /**
- * WAL Runtime-machine projection. Transport bodies have their own bounded
- * flat outbox-byte commitment, so duplicating them in this Patricia graph
- * would make a valid output envelope capable of violating the graph row bound.
+ * WAL Runtime-machine projection. Transport queues stay in RAM; the committed
+ * flat outbox is RuntimeFrame.runtimeOutputs + runtimeOutputsDigest.
  */
 export const buildStorageRuntimeMachineSnapshot = (
   env: RuntimeReplica,
   options?: { excludePersistedHistoryRecords?: boolean },
-): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env, {
-  ...options,
-  pendingNetworkOutputs: [],
-});
+): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env, options);
 
 /**
  * Project the part of a durable Runtime snapshot that deterministic frame
@@ -345,19 +364,6 @@ export const buildReplayVerifiableRuntimePostStateView = (
       ? { browserVMState: projectBrowserVmPostState(env.browserVMState) }
       : {}),
     ...(infrastructure ? { infrastructure } : {}),
-    ...(env.pendingOutputs?.length
-      ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) }
-      : {}),
-    ...(env.networkInbox?.length
-      ? { networkInbox: projectRuntimeOutputs(env.networkInbox) }
-      : {}),
-    ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
-      ? {
-          pendingNetworkOutputs: projectRuntimeOutputs(
-            options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? [],
-          ),
-        }
-      : {}),
     jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([key, replica]) => [
       key,
       buildDurableJReplicaSnapshot(replica),
@@ -398,7 +404,6 @@ export const buildCanonicalRuntimeStateSnapshot = (
   env: RuntimeReplica,
   options?: {
     browserVMState?: RuntimeReplica['browserVMState'];
-    compactTransient?: boolean;
     includeCertifiedBoardNodes?: boolean;
     portableCollections?: boolean;
   },
@@ -416,14 +421,8 @@ export const buildCanonicalRuntimeStateSnapshot = (
     ...(browserVMState ? { browserVMState } : {}),
     ...(runtimeConfig ? { runtimeConfig } : {}),
     ...(infrastructure ? { infrastructure } : {}),
-    ...(env.pendingOutputs ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
-    ...(env.networkInbox ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
-    ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: projectRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
     eReplicas: Array.from(env.state.eReplicas.entries()).map(([replicaKey, replica]) => {
-      const snapshot = buildCanonicalEntityReplicaSnapshot(
-        replica,
-        options?.compactTransient ? { compactTransient: true } : undefined,
-      );
+      const snapshot = buildCanonicalEntityReplicaSnapshot(replica);
       return [
         replicaKey,
         options?.portableCollections
@@ -481,15 +480,11 @@ export const restoreDurableRuntimeSnapshot = (
     ? snapshot['infrastructure'] as NonNullable<RuntimeReplica['infrastructure']>
     : {};
   env.infrastructure = { ...retainedRuntimeState, ...restoredRuntimeState };
-  env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
-    ? snapshot['pendingOutputs'] as RoutedEntityInput[]
-    : [];
-  env.networkInbox = Array.isArray(snapshot['networkInbox'])
-    ? snapshot['networkInbox'] as RoutedEntityInput[]
-    : [];
-  env.pendingNetworkOutputs = Array.isArray(snapshot['pendingNetworkOutputs'])
-    ? snapshot['pendingNetworkOutputs'] as RoutedEntityInput[]
-    : [];
+  // Transport queues are replica-envelope RAM. Recovery republishes the
+  // committed flat outbox from RuntimeFrame.runtimeOutputs separately.
+  env.pendingOutputs = [];
+  env.networkInbox = [];
+  env.pendingNetworkOutputs = [];
   if (Array.isArray(snapshot['jReplicas'])) {
     env.state.jReplicas = new Map(snapshot['jReplicas'].map((entry) => {
       if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
@@ -517,7 +512,7 @@ export const buildCanonicalEnvSnapshot = (
     timestamp: number;
     runtimeId?: string;
     browserVMState?: RuntimeReplica['browserVMState'];
-    eReplicas: Array<[string, EntityReplica]>;
+    eReplicas: Array<[string, PersistedEntityReplicaSnapshot]>;
     jReplicas: Array<[string, JReplica]>;
   };
 
@@ -525,7 +520,9 @@ export const buildCanonicalEnvSnapshot = (
   // Decode the flat Runtime-owned replica directory explicitly. Entity and
   // Account graphs remain shared persistent values; this does not clone them.
   const eReplicas = new Map<string, EntityReplica>();
-  for (const [replicaKey, replica] of core.eReplicas) eReplicas.set(replicaKey, replica);
+  for (const [replicaKey, replica] of core.eReplicas) {
+    eReplicas.set(replicaKey, hydratePersistedEntityReplicaSnapshot(replica));
+  }
   const jReplicas = new Map<string, JReplica>();
   for (const [replicaKey, replica] of core.jReplicas) jReplicas.set(replicaKey, replica);
   // EnvSnapshot is a detached history value, never a live BrowserVM view.

@@ -33,7 +33,9 @@ pub use command::{
     decode_signed_entity_command, get_entity_command_disposition,
     normalize_entity_command_nonce_board,
 };
-pub use commitment::{compute_entity_effects_parity_digest, compute_entity_owned_sections};
+pub use commitment::{
+    collection_commitment, compute_entity_effects_parity_digest, compute_entity_owned_sections,
+};
 pub use consensus::{
     CanonicalEntityTx, CertifiedEntityFrameLink, CertifiedEntityProposal,
     CertifiedEntityTransition, ConsensusMode, ENTITY_OWNED_CONSENSUS_FIELDS, EntityAuthorityError,

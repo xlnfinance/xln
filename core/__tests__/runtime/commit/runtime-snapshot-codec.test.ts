@@ -3,11 +3,31 @@ import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv } from '../../../runtime';
 import {
   buildCanonicalEnvSnapshot,
+  buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
+  hydratePersistedEntityReplicaSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
+import { makeJSubmitDurabilityFixture } from '../../fixtures/jurisdiction/j-submit-durability-fixture';
 
 describe('runtime snapshot codec', () => {
+  test('Entity mempool never enters persisted bytes and restore rebuilds it empty', () => {
+    const { replica } = makeJSubmitDurabilityFixture();
+    replica.mempool.push({
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: replica.signerId,
+        dueAt: 1_234,
+        jobs: [],
+      },
+    });
+
+    const persisted = buildCanonicalEntityReplicaSnapshot(replica);
+    expect(Object.hasOwn(persisted, 'mempool')).toBe(false);
+    expect(hydratePersistedEntityReplicaSnapshot(persisted).mempool).toEqual([]);
+  });
+
   test('time-machine snapshots preserve complete runtime input and routed output metadata', () => {
     const env = createEmptyEnv('runtime-snapshot-complete-input');
     const runtimeInput = {
@@ -84,9 +104,9 @@ describe('runtime snapshot codec', () => {
 
     restoreDurableRuntimeSnapshot(restored, checkpoint);
 
-    expect(restored.runtimeMempool).toEqual(env.runtimeMempool);
+    expect(restored.runtimeMempool).toEqual({ runtimeTxs: [], entityInputs: [] });
     expect(restored.runtimeConfig).toEqual(env.runtimeConfig);
-    expect(restored.pendingOutputs).toEqual(env.pendingOutputs);
+    expect(restored.pendingOutputs).toEqual([]);
     // Authenticated gossip routes are a rebuildable transport cache. They are
     // deliberately excluded from the durable Runtime machine: P2P can update
     // them between frames, so persisting them would make replay depend on
@@ -102,7 +122,7 @@ describe('runtime snapshot codec', () => {
     expect('jadapter' in (restored.state.jReplicas.get('Testnet') ?? {})).toBe(false);
   });
 
-  test('durable runtime snapshot retains explicit triggers and drops scheduled-wake-only inputs', () => {
+  test('durable runtime snapshot never persists pending Runtime inputs', () => {
     const env = createEmptyEnv('durable-runtime-empty-trigger');
     const entityId = `0x${'71'.repeat(32)}`;
     const signerId = `0x${'72'.repeat(20)}`;
@@ -128,7 +148,7 @@ describe('runtime snapshot codec', () => {
     const restored = createEmptyEnv('durable-runtime-empty-trigger-restored');
     restoreDurableRuntimeSnapshot(restored, checkpoint);
 
-    expect(restored.runtimeMempool?.entityInputs).toEqual([emptyTrigger]);
+    expect(restored.runtimeMempool?.entityInputs).toEqual([]);
   });
 
   test('durable runtime snapshot rejects corrupted jurisdiction block numbers', () => {

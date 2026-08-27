@@ -125,7 +125,7 @@ fn raw_text_key(value: &str) -> Result<Vec<u8>, EntityKernelError> {
     Ok(output)
 }
 
-pub(crate) fn collection_commitment(
+pub fn collection_commitment(
     rows: impl Iterator<Item = Result<(String, CanonicalValue), EntityKernelError>>,
 ) -> Result<CanonicalValue, EntityKernelError> {
     let mut map = PersistentRadixMap::empty();

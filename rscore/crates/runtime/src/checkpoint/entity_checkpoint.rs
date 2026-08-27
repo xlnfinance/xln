@@ -4,16 +4,14 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
-use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use xln_rscore_entity_kernel::{
     CrontabState, CrontabTaskMethod, CrontabTaskParam, CrontabTaskState, EntityConsensusSection,
-    ScheduledHook, ScheduledHookKind, compute_entity_section_digest,
+    EntityKernelError, ScheduledHook, ScheduledHookKind,
+    collection_commitment as entity_collection_commitment, compute_entity_section_digest,
     is_entity_owned_consensus_field,
 };
-use xln_rscore_protocol::{
-    CanonicalNumber, CanonicalValue, PersistentRadixMap, encode_canonical_consensus_bytes,
-};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use crate::{TaggedJsonError, canonical_value_from_tagged_json};
 
@@ -136,36 +134,6 @@ fn field<'a>(value: &'a Value, name: &str, path: &str) -> Result<&'a Value, Enti
         .ok_or_else(|| EntityCheckpointError::Invalid(format!("FIELD:{path}.{name}")))
 }
 
-fn text(value: impl Into<String>) -> CanonicalValue {
-    CanonicalValue::String(value.into())
-}
-
-fn number(value: u64) -> Result<CanonicalValue, EntityCheckpointError> {
-    CanonicalNumber::try_from_u64(value)
-        .map(CanonicalValue::Number)
-        .map_err(|_| EntityCheckpointError::Invalid(format!("UNSAFE_NUMBER:{value}")))
-}
-
-fn canonical_object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
-    CanonicalValue::Object(
-        entries
-            .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect(),
-    )
-}
-
-fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len().saturating_mul(2).saturating_add(2));
-    output.push_str("0x");
-    for byte in bytes {
-        output.push(char::from(DIGITS[usize::from(byte >> 4)]));
-        output.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
-    }
-    output
-}
-
 fn tagged_map_rows<'a>(value: &'a Value, path: &str) -> Result<&'a [Value], EntityCheckpointError> {
     let tagged = object(value, path)?;
     if tagged.get("__xlnType").and_then(Value::as_str) != Some("Map") {
@@ -182,36 +150,22 @@ fn collection_commitment(
     value: &Value,
     path: &str,
 ) -> Result<CanonicalValue, EntityCheckpointError> {
-    let mut map = PersistentRadixMap::empty();
-    for row in tagged_map_rows(value, path)? {
-        let pair = row
-            .as_array()
-            .filter(|pair| pair.len() == 2)
-            .ok_or_else(|| EntityCheckpointError::Invalid(format!("MAP_ROW:{path}")))?;
-        let key = pair[0]
-            .as_str()
-            .ok_or_else(|| EntityCheckpointError::Invalid(format!("MAP_KEY:{path}")))?;
-        let key_bytes = key.as_bytes();
-        let length = u16::try_from(key_bytes.len())
-            .map_err(|_| EntityCheckpointError::Invalid(format!("MAP_KEY_LENGTH:{path}")))?;
-        let mut radix_key = Vec::with_capacity(key_bytes.len() + 2);
-        radix_key.extend_from_slice(&length.to_be_bytes());
-        radix_key.extend_from_slice(key_bytes);
-        let canonical = canonical_value_from_tagged_json(&pair[1])?;
-        let encoded = encode_canonical_consensus_bytes(&canonical)
-            .map_err(|error| EntityCheckpointError::Encoding(error.to_string()))?;
-        map = map
-            .updated(radix_key, canonical, Sha256::digest(encoded).into())
-            .map_err(|error| EntityCheckpointError::Encoding(error.to_string()))?;
-    }
-    Ok(canonical_object(vec![
-        (
-            "radix",
-            CanonicalValue::Number(CanonicalNumber::from_u32(16)),
-        ),
-        ("leafCount", number(map.len() as u64)?),
-        ("root", text(hex(&map.root_hash()))),
-    ]))
+    let rows = tagged_map_rows(value, path)?
+        .iter()
+        .map(|row| {
+            let pair = row
+                .as_array()
+                .filter(|pair| pair.len() == 2)
+                .ok_or_else(|| EntityCheckpointError::Invalid(format!("MAP_ROW:{path}")))?;
+            let key = pair[0]
+                .as_str()
+                .ok_or_else(|| EntityCheckpointError::Invalid(format!("MAP_KEY:{path}")))?;
+            let canonical = canonical_value_from_tagged_json(&pair[1])?;
+            Ok((key.to_string(), canonical))
+        })
+        .collect::<Result<Vec<_>, EntityCheckpointError>>()?;
+    entity_collection_commitment(rows.into_iter().map(Result::<_, EntityKernelError>::Ok))
+        .map_err(|error| EntityCheckpointError::Encoding(error.to_string()))
 }
 
 fn string(value: &Value, path: &str) -> Result<String, EntityCheckpointError> {

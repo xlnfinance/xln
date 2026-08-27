@@ -38,7 +38,7 @@ pub use consensus::{
     WaveProposalRequest, WaveRequest, WaveResult,
 };
 pub use error::BatchError;
-pub use parallel::{AccountShardMetric, LOGICAL_ACCOUNT_SHARDS};
+pub use parallel::AccountShardMetric;
 pub use resident_consensus::{ResidentAccountFinancialView, ResidentConsensusEngine};
 pub use round::{
     EntityAccountGenesisPolicy, EntityInboundRequest, EntityOutboundRequest, EntityRoundResult,

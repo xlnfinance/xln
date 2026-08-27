@@ -17,9 +17,11 @@ use std::time::Instant;
 
 use rayon::ThreadPool;
 use rayon::prelude::*;
-use xln_rscore_protocol::{PersistentRadixMapError, SlotOutcome, SlotWork};
+use xln_rscore_protocol::{
+    PERSISTENT_RADIX_SHARD_COUNT, PersistentRadixMapError, SlotOutcome, SlotWork,
+};
 
-use super::{AccountShardPlan, LOGICAL_ACCOUNT_SHARDS, logical_account_shard};
+use super::{AccountShardPlan, logical_account_shard};
 use crate::AccountId;
 
 /// Item counts at or below this run inline; above it the pool earns its hop.
@@ -129,7 +131,7 @@ where
     // A fixed directory is faster than one BTree allocation and comparison
     // chain per active prefix. At 4096 entries it is only 96 KiB of Vec
     // headers, reused for the whole dispatch and independent of Account size.
-    let mut shards = (0..LOGICAL_ACCOUNT_SHARDS)
+    let mut shards = (0..PERSISTENT_RADIX_SHARD_COUNT)
         .map(|_| Vec::new())
         .collect::<Vec<Vec<T>>>();
     for item in items {
@@ -164,7 +166,7 @@ where
             })
             .collect::<Vec<_>>()
     });
-    let mut rows = (0..LOGICAL_ACCOUNT_SHARDS)
+    let mut rows = (0..PERSISTENT_RADIX_SHARD_COUNT)
         .map(|_| None)
         .collect::<Vec<Option<Vec<R>>>>();
     for (shard, shard_rows) in worker_rows.into_iter().flatten() {
@@ -223,10 +225,11 @@ pub(crate) fn map_account_slots<V: Clone + Send + Sync>(
 
 #[cfg(test)]
 mod tests {
+    use super::AccountShardPlan;
     use super::map_accounts;
-    use super::{AccountShardPlan, LOGICAL_ACCOUNT_SHARDS};
     use crate::AccountId;
     use rayon::ThreadPoolBuilder;
+    use xln_rscore_protocol::PERSISTENT_RADIX_SHARD_COUNT;
 
     #[test]
     fn canonical_root_nibbles_keep_deterministic_order() {
@@ -255,7 +258,7 @@ mod tests {
 
     #[test]
     fn wide_pools_keep_three_nibble_shards_in_canonical_order() {
-        let accounts = (0_u16..LOGICAL_ACCOUNT_SHARDS as u16)
+        let accounts = (0_u16..PERSISTENT_RADIX_SHARD_COUNT as u16)
             .rev()
             .flat_map(|prefix| {
                 (0_u8..2).map(move |suffix| {
@@ -273,7 +276,7 @@ mod tests {
             .expect("test pool");
         let plan = AccountShardPlan::balanced(20).expect("plan");
         let ordered = map_accounts(&pool, &plan, accounts, |account_id| *account_id, |id| id);
-        assert_eq!(ordered.len(), LOGICAL_ACCOUNT_SHARDS * 2);
+        assert_eq!(ordered.len(), PERSISTENT_RADIX_SHARD_COUNT * 2);
         for (index, account_id) in ordered.iter().enumerate() {
             let bytes = account_id.as_bytes();
             let shard = (usize::from(bytes[0]) << 4) | usize::from(bytes[1] >> 4);
@@ -283,7 +286,7 @@ mod tests {
 
     #[test]
     fn one_two_four_eight_and_sixteen_workers_keep_exact_shard_affinity() {
-        let accounts = (0_u16..LOGICAL_ACCOUNT_SHARDS as u16)
+        let accounts = (0_u16..PERSISTENT_RADIX_SHARD_COUNT as u16)
             .map(|shard| {
                 let mut bytes = [0_u8; 32];
                 bytes[0] = (shard >> 4) as u8;
@@ -309,13 +312,16 @@ mod tests {
                     )
                 },
             );
-            assert_eq!(actual.len(), LOGICAL_ACCOUNT_SHARDS);
+            assert_eq!(actual.len(), PERSISTENT_RADIX_SHARD_COUNT);
             for (expected_shard, (account_id, worker)) in actual.iter().enumerate() {
                 assert_eq!(super::logical_account_shard(*account_id), expected_shard);
                 assert_eq!(*worker, expected_shard % workers);
             }
             let metrics = plan.metrics();
-            assert_eq!(metrics.iter().map(|row| row.work_items).sum::<u64>(), 4096);
+            assert_eq!(
+                metrics.iter().map(|row| row.work_items).sum::<u64>(),
+                PERSISTENT_RADIX_SHARD_COUNT as u64
+            );
             assert!(metrics.iter().all(|row| row.work_batches == 1));
             assert!(metrics.iter().all(|row| row.work_items == 1));
         }

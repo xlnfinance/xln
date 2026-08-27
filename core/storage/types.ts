@@ -221,11 +221,7 @@ export type StorageReplicaMeta = {
   isProposer: boolean;
   /** Validator-local presentation index rebuilt from certified Entity frames. */
   htlcNotes?: EntityReplica['htlcNotes'];
-  mempool: EntityReplica['mempool'];
   position?: EntityReplica['position'];
-  proposal?: EntityReplica['proposal'];
-  lockedFrame?: EntityReplica['lockedFrame'];
-  candidate?: EntityReplica['candidate'];
   certifiedFrameHead?: EntityReplica['certifiedFrameHead'];
   hankoWitness?: EntityReplica['hankoWitness'];
   leaderVotes?: EntityReplica['leaderVotes'];
@@ -241,7 +237,17 @@ type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
 type EntityPersistenceSplitKeys =
   | 'accounts'
   | 'orderbookExt';
-type ReplicaPersistenceSplitKeys = 'state';
+/**
+ * Replica-envelope work is RAM-only. Accepted Runtime inputs are already in
+ * the WAL, so persisting these overlays would duplicate replay authority and
+ * make an uncommitted candidate affect a durable Runtime root.
+ */
+type ReplicaPersistenceSplitKeys =
+  | 'state'
+  | 'mempool'
+  | 'proposal'
+  | 'lockedFrame'
+  | 'candidate';
 
 type PersistenceCoverage =
   | AssertNoUnclassifiedPersistenceKeys<Exclude<keyof AccountReplica, keyof StorageAccountDoc | 'state'>>

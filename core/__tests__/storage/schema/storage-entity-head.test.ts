@@ -217,6 +217,31 @@ describe('certified Entity current head', () => {
     expect(buildStorageLiveReplicaMetaCommitment(env).digest).not.toBe(before);
   });
 
+  test('durable replica metadata excludes every speculative Entity overlay', async () => {
+    const { env, signerId, genesis } = makeRuntime('storage-no-speculative-meta');
+    const h1 = await certifyNextFrame(env, signerId, genesis);
+    const replica = installReplica(env, signerId, h1.state, h1.link);
+    replica.mempool = [{ type: 'chat', data: { from: signerId, message: 'RAM only' } }];
+    const envelope = replica as unknown as Record<string, unknown>;
+    envelope['proposal'] = { hash: 'proposal-must-not-persist' };
+    envelope['lockedFrame'] = { hash: 'locked-must-not-persist' };
+    envelope['candidate'] = { frameHash: 'candidate-must-not-persist', height: 2 };
+
+    const checkpoint = decodeBuffer(
+      buildStorageReplicaMetaCommitment(env, buildRuntimeCheckpointHeadPlan(env)).entries[0]!.value,
+    ) as Record<string, unknown>;
+    for (const field of ['mempool', 'proposal', 'lockedFrame', 'candidate']) {
+      expect(Object.hasOwn(checkpoint, field)).toBe(false);
+    }
+
+    const live = decodeBuffer(
+      buildStorageLiveReplicaMetaCommitment(env).entries[0]!.value,
+    ) as Record<string, unknown>;
+    for (const field of [
+      'mempoolCount', 'proposalHash', 'lockedFrameHash', 'candidateFrameHash', 'candidateHeight',
+    ]) expect(Object.hasOwn(live, field)).toBe(false);
+  });
+
   test('rejects retired anchor-only metadata instead of recovering a carried root', async () => {
     const { env, signerId, genesis } = makeRuntime('storage-anchor-only-rejected');
     const h1 = await certifyNextFrame(env, signerId, genesis);

@@ -1,10 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  mergeEntityInputs,
-  prioritizeProtocolEntityInputs,
-} from '../../../entity/consensus/input/merge';
+import { mergeEntityInputs } from '../../../entity/consensus/input/merge';
 import type { EntityLeaderTimeoutVote } from '../../../entity/types';
 import type { RoutedEntityInput } from '../../../runtime/types';
 
@@ -32,41 +29,17 @@ const leaderVote = (voterId: string, signature: string): EntityLeaderTimeoutVote
 });
 
 describe('mergeEntityInputs', () => {
-  test('prioritizes certified account consensus ahead of bulk generic outputs', () => {
-    const bulkA = inputFor('1');
-    const accountConsensus: RoutedEntityInput = {
-      entityId: entityId('2'),
-      signerId: '2',
-      // AccountInput is routed raw after source Entity + Runtime WAL commit;
-      // AccountInput is already authorized by Account Hankos and stays raw.
-      entityTxs: [{
-        type: 'accountInput',
-        data: {
-          kind: 'ack',
-          fromEntityId: entityId('3'),
-          toEntityId: entityId('2'),
-          ack: { height: 7, frameHash: `0x${'ab'.repeat(32)}`, frameHanko: '0x01' },
-        },
-      } as never],
-    };
-    const bulkB = inputFor('4');
-
-    const prioritized = prioritizeProtocolEntityInputs([bulkA, accountConsensus, bulkB]);
-
-    expect(prioritized).toEqual([accountConsensus, bulkA, bulkB]);
-  });
-
-  test('returns entity inputs in canonical order independent of arrival order', () => {
+  test('retains accepted arrival order instead of sorting independent inputs', () => {
     const left = inputFor('1');
     const right = inputFor('2');
     const mergedForward = mergeEntityInputs([left, right]);
     const mergedReverse = mergeEntityInputs([right, left]);
 
     expect(mergedForward.map((input) => input.entityId)).toEqual([entityId('1'), entityId('2')]);
-    expect(mergedReverse.map((input) => input.entityId)).toEqual([entityId('1'), entityId('2')]);
+    expect(mergedReverse.map((input) => input.entityId)).toEqual([entityId('2'), entityId('1')]);
   });
 
-  test('keeps duplicate merge behavior while canonicalizing output order', () => {
+  test('keeps the first accepted slot when merging an exact lane duplicate', () => {
     const duplicateA = {
       ...inputFor('2'),
       entityTxs: [{ type: 'profile-update', data: { name: 'a' } } as never],
@@ -78,7 +51,7 @@ describe('mergeEntityInputs', () => {
 
     const merged = mergeEntityInputs([inputFor('3'), duplicateA, inputFor('1'), duplicateB]);
 
-    expect(merged.map((input) => input.entityId)).toEqual([entityId('1'), entityId('2'), entityId('3')]);
+    expect(merged.map((input) => input.entityId)).toEqual([entityId('3'), entityId('2'), entityId('1')]);
     expect(merged[1]?.entityTxs?.map((tx) => (tx.data as { name: string }).name)).toEqual(['a', 'b']);
   });
 
@@ -128,14 +101,14 @@ describe('mergeEntityInputs', () => {
     ]);
 
     expect(merged).toHaveLength(2);
-    expect(merged.map(input => input.from)).toEqual([fromA, fromB]);
+    expect(merged.map(input => input.from)).toEqual([fromB, fromA]);
     expect(merged.map(input => (input.entityTxs?.[0]?.data as { name: string }).name)).toEqual([
-      'from-a',
       'from-b',
+      'from-a',
     ]);
   });
 
-  test('orders distinct frame heights even when route metadata and claimed hash conflict', () => {
+  test('keeps accepted order for distinct frame heights on independent lanes', () => {
     const target = entityId('7');
     const frame = (height: number, hashByte: string) => ({
       height,
@@ -147,7 +120,7 @@ describe('mergeEntityInputs', () => {
     const older = { entityId: target, signerId: '2', from: 'z-route', proposedFrame: frame(9, '1') };
     const newer = { entityId: target, signerId: '2', from: 'a-route', proposedFrame: frame(10, '1') };
 
-    expect(mergeEntityInputs([newer, older]).map(input => input.proposedFrame?.height)).toEqual([9, 10]);
+    expect(mergeEntityInputs([newer, older]).map(input => input.proposedFrame?.height)).toEqual([10, 9]);
     expect(mergeEntityInputs([older, newer]).map(input => input.proposedFrame?.height)).toEqual([9, 10]);
   });
 
@@ -235,9 +208,11 @@ describe('mergeEntityInputs', () => {
       'validator-b',
       'validator-c',
     ]);
-    expect(reverse.map(input => input.leaderTimeoutVote?.voterId)).toEqual(
-      forward.map(input => input.leaderTimeoutVote?.voterId),
-    );
+    expect(reverse.map(input => input.leaderTimeoutVote?.voterId)).toEqual([
+      'validator-c',
+      'validator-b',
+      'validator-a',
+    ]);
   });
 
   test('rejects a same-body leader vote whose signed envelope is not an exact duplicate', () => {
@@ -275,7 +250,7 @@ describe('mergeEntityInputs', () => {
     ])).toThrow('ENTITY_INPUT_PRECOMMIT_DUPLICATE_SIGNER');
   });
 
-  test('keeps frame-bound precommit heights distinct and numerically ordered', () => {
+  test('keeps frame-bound precommit heights distinct in accepted order', () => {
     const target = entityId('b');
     const precommit = (height: number): RoutedEntityInput => ({
       entityId: target,
@@ -285,7 +260,7 @@ describe('mergeEntityInputs', () => {
     });
 
     const merged = mergeEntityInputs([100, 2, 11, 10].map(precommit));
-    expect(merged.map(input => input.hashPrecommitFrame?.height)).toEqual([2, 10, 11, 100]);
+    expect(merged.map(input => input.hashPrecommitFrame?.height)).toEqual([100, 2, 11, 10]);
   });
 
   test('uses structured logging without direct console output', () => {

@@ -25,6 +25,10 @@ pub enum BatchError {
     ResidentRollbackPhase { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_RESIDENT_WORKER_RESULT_COUNT:{actual}:expected={expected}")]
     ResidentWorkerResultCount { actual: usize, expected: usize },
+    #[error("RSCORE_BATCH_RESIDENT_RESULT_POSITION:{position}:count={count}")]
+    ResidentResultPosition { position: usize, count: usize },
+    #[error("RSCORE_BATCH_RESIDENT_RESULT_POSITION_DUPLICATE:{position}")]
+    ResidentResultPositionDuplicate { position: usize },
     #[error("RSCORE_BATCH_RESIDENT_CHECKPOINT_ACCOUNT_REMOVED:{0}")]
     ResidentCheckpointAccountRemoved(AccountId),
     #[error("RSCORE_BATCH_ACCOUNT_DUPLICATE:{0}")]

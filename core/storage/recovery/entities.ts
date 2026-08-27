@@ -106,7 +106,9 @@ const installPersistedEntityReplicas = async (
         entityId,
         signerId,
         state: replicaState,
-        mempool: requiresExactReplica ? meta!.mempool : [],
+        // Replica-envelope work is never durable. Accepted work is replayed
+        // from Runtime WAL; unaccepted work is best-effort resent by peers.
+        mempool: [],
         isProposer,
         ...(meta?.htlcNotes ? { htlcNotes: meta.htlcNotes } : {}),
         // Absence and an empty witness map are different canonical envelope
@@ -114,11 +116,6 @@ const installPersistedEntityReplicas = async (
         // consensus path creates this optional map only when it stores the
         // first locally generated witness.
         ...(meta?.hankoWitness ? { hankoWitness: meta.hankoWitness } : {}),
-        ...(meta?.proposal ? { proposal: meta.proposal } : {}),
-        ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
-        ...(meta?.candidate
-          ? { candidate: meta.candidate }
-          : {}),
         ...(meta?.certifiedFrameHead
           ? { certifiedFrameHead: meta.certifiedFrameHead }
           : {}),

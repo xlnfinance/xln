@@ -253,6 +253,7 @@ impl PersistentRadixShardOverlay {
     pub fn work(&self) -> PersistentRadixOverlayWork {
         self.work
     }
+
 }
 
 impl<V: Clone> PersistentRadixShard<V> {
@@ -503,92 +504,114 @@ impl PersistentRadixShardCoordinator {
         parent: Option<&PersistentRadixShardOverlay>,
         descriptors: Vec<PersistentRadixShardDescriptor>,
     ) -> Result<PersistentRadixShardOverlay, PersistentRadixMapError> {
-        validate_dirty_descriptors(&descriptors)?;
         if let Some(parent) = parent {
             self.validate_overlay_base(parent)?;
         }
+        let overlay = parent.cloned().unwrap_or_else(|| self.empty_overlay());
+        self.extend_sparse_overlay(overlay, descriptors)
+    }
 
-        let current = descriptors
-            .into_iter()
-            .map(|descriptor| (descriptor.index, descriptor))
-            .collect::<BTreeMap<_, _>>();
-        let dirty_descriptor_count = current.len();
-        let dirty_second = current
-            .keys()
-            .map(|index| index / 16)
-            .collect::<BTreeSet<_>>();
-        let dirty_first = current
-            .keys()
-            .map(|index| index / 256)
-            .collect::<BTreeSet<_>>();
+    /// Extend an owned overlay without cloning any accumulated sparse maps.
+    pub fn sparse_overlay_owned(
+        &self,
+        parent: PersistentRadixShardOverlay,
+        descriptors: Vec<PersistentRadixShardDescriptor>,
+    ) -> Result<PersistentRadixShardOverlay, PersistentRadixMapError> {
+        self.validate_overlay_base(&parent)?;
+        self.extend_sparse_overlay(parent, descriptors)
+    }
 
-        let mut dirty = parent.map_or_else(BTreeMap::new, |overlay| overlay.dirty.clone());
-        let mut len = parent.map_or(self.len, |overlay| overlay.len);
-        for (index, descriptor) in current {
-            let previous_len = dirty
+    fn empty_overlay(&self) -> PersistentRadixShardOverlay {
+        PersistentRadixShardOverlay {
+            base_root: self.root_hash,
+            dirty: BTreeMap::new(),
+            second_level: BTreeMap::new(),
+            root_children: BTreeMap::new(),
+            root_hash: self.root_hash,
+            len: self.len,
+            work: PersistentRadixOverlayWork::default(),
+        }
+    }
+
+    fn extend_sparse_overlay(
+        &self,
+        mut overlay: PersistentRadixShardOverlay,
+        descriptors: Vec<PersistentRadixShardDescriptor>,
+    ) -> Result<PersistentRadixShardOverlay, PersistentRadixMapError> {
+        validate_dirty_descriptors(&descriptors)?;
+        let dirty_second = descriptor_ancestors(&descriptors, 16);
+        let dirty_first = descriptor_ancestors(&descriptors, 256);
+        let descriptor_count = descriptors.len();
+        self.merge_overlay_descriptors(&mut overlay, descriptors);
+        self.fold_overlay_second(&mut overlay, &dirty_second);
+        self.fold_overlay_first(&mut overlay, &dirty_first);
+        self.finish_overlay(&mut overlay, descriptor_count, &dirty_second, &dirty_first);
+        Ok(overlay)
+    }
+
+    fn merge_overlay_descriptors(
+        &self,
+        overlay: &mut PersistentRadixShardOverlay,
+        descriptors: Vec<PersistentRadixShardDescriptor>,
+    ) {
+        for descriptor in descriptors {
+            let index = descriptor.index;
+            let previous = overlay
+                .dirty
                 .get(&index)
                 .map_or(self.shard_lens[index], PersistentRadixShardDescriptor::len);
-            len = len - previous_len + descriptor.len;
-            dirty.insert(index, descriptor);
+            overlay.len = overlay.len - previous + descriptor.len;
+            overlay.dirty.insert(index, descriptor);
         }
+    }
 
-        let mut second_level =
-            parent.map_or_else(BTreeMap::new, |overlay| overlay.second_level.clone());
-        for index in &dirty_second {
+    fn fold_overlay_second(
+        &self,
+        overlay: &mut PersistentRadixShardOverlay,
+        indexes: &BTreeSet<usize>,
+    ) {
+        for index in indexes {
             let children = ((*index * 16)..(*index * 16 + 16))
-                .filter_map(|shard| {
-                    dirty
-                        .get(&shard)
-                        .map(|descriptor| descriptor.root.clone())
-                        .unwrap_or_else(|| self.shards[shard].clone())
-                })
+                .filter_map(|shard| overlay_shard_root(self, overlay, shard))
                 .collect();
-            second_level.insert(
-                *index,
-                compressed_commitment_parent(
-                    vec![(*index / 16) as u8, (*index % 16) as u8],
-                    children,
-                ),
-            );
+            let path = vec![(*index / 16) as u8, (*index % 16) as u8];
+            overlay
+                .second_level
+                .insert(*index, compressed_commitment_parent(path, children));
         }
+    }
 
-        let mut root_children =
-            parent.map_or_else(BTreeMap::new, |overlay| overlay.root_children.clone());
-        for index in &dirty_first {
+    fn fold_overlay_first(
+        &self,
+        overlay: &mut PersistentRadixShardOverlay,
+        indexes: &BTreeSet<usize>,
+    ) {
+        for index in indexes {
             let children = ((*index * 16)..(*index * 16 + 16))
-                .filter_map(|second| {
-                    second_level
-                        .get(&second)
-                        .cloned()
-                        .unwrap_or_else(|| self.second_level[second].clone())
-                })
+                .filter_map(|second| overlay_second_root(self, overlay, second))
                 .collect();
-            root_children.insert(
+            overlay.root_children.insert(
                 *index,
                 compressed_commitment_parent(vec![*index as u8], children),
             );
         }
+    }
 
-        let children: [Option<PersistentRadixSubtreeRoot>; 16] = std::array::from_fn(|index| {
-            root_children
-                .get(&index)
-                .cloned()
-                .unwrap_or_else(|| self.root_children[index].clone())
-        });
-        Ok(PersistentRadixShardOverlay {
-            base_root: self.root_hash,
-            dirty,
-            second_level,
-            root_children,
-            root_hash: top_root_hash(&children),
-            len,
-            work: PersistentRadixOverlayWork {
-                dirty_descriptors: dirty_descriptor_count,
-                second_level_folds: dirty_second.len(),
-                first_level_folds: dirty_first.len(),
-                root_folds: usize::from(!dirty_second.is_empty()),
-            },
-        })
+    fn finish_overlay(
+        &self,
+        overlay: &mut PersistentRadixShardOverlay,
+        count: usize,
+        second: &BTreeSet<usize>,
+        first: &BTreeSet<usize>,
+    ) {
+        let children = std::array::from_fn(|index| overlay_first_root(self, overlay, index));
+        overlay.root_hash = top_root_hash(&children);
+        overlay.work = PersistentRadixOverlayWork {
+            dirty_descriptors: count,
+            second_level_folds: second.len(),
+            first_level_folds: first.len(),
+            root_folds: usize::from(!second.is_empty()),
+        };
     }
 
     /// Promote a sparse overlay into the sole base descriptor table.
@@ -655,6 +678,52 @@ impl PersistentRadixShardCoordinator {
             len,
         }
     }
+}
+
+fn descriptor_ancestors(
+    descriptors: &[PersistentRadixShardDescriptor],
+    divisor: usize,
+) -> BTreeSet<usize> {
+    descriptors
+        .iter()
+        .map(|descriptor| descriptor.index / divisor)
+        .collect()
+}
+
+fn overlay_shard_root(
+    base: &PersistentRadixShardCoordinator,
+    overlay: &PersistentRadixShardOverlay,
+    index: usize,
+) -> Option<PersistentRadixSubtreeRoot> {
+    overlay
+        .dirty
+        .get(&index)
+        .map(|descriptor| descriptor.root.clone())
+        .unwrap_or_else(|| base.shards[index].clone())
+}
+
+fn overlay_second_root(
+    base: &PersistentRadixShardCoordinator,
+    overlay: &PersistentRadixShardOverlay,
+    index: usize,
+) -> Option<PersistentRadixSubtreeRoot> {
+    overlay
+        .second_level
+        .get(&index)
+        .cloned()
+        .unwrap_or_else(|| base.second_level[index].clone())
+}
+
+fn overlay_first_root(
+    base: &PersistentRadixShardCoordinator,
+    overlay: &PersistentRadixShardOverlay,
+    index: usize,
+) -> Option<PersistentRadixSubtreeRoot> {
+    overlay
+        .root_children
+        .get(&index)
+        .cloned()
+        .unwrap_or_else(|| base.root_children[index].clone())
 }
 
 #[derive(Clone)]
@@ -984,22 +1053,21 @@ impl<V: Clone> PersistentRadixMap<V> {
     where
         V: Send + Sync,
     {
-        const SHARD_DEPTH: usize = 3;
-        const SHARD_COUNT: usize = 4096;
-
         if entries.is_empty() {
             return Ok(self.clone());
         }
         for (key, _, _) in &entries {
             let depth = validate_key_path(key)?;
-            if depth < SHARD_DEPTH {
+            if depth < PERSISTENT_RADIX_SHARD_DEPTH {
                 return Err(PersistentRadixMapError::KeyDepth {
                     actual: depth,
-                    required: SHARD_DEPTH,
+                    required: PERSISTENT_RADIX_SHARD_DEPTH,
                 });
             }
         }
-        let mut existing = (0..SHARD_COUNT).map(|_| None).collect::<Vec<_>>();
+        let mut existing = (0..PERSISTENT_RADIX_SHARD_COUNT)
+            .map(|_| None)
+            .collect::<Vec<_>>();
         if let Some(root) = self.root.as_ref() {
             let Node::Branch { path, .. } = &**root else {
                 return self.fold_updates(entries);
@@ -1007,12 +1075,15 @@ impl<V: Clone> PersistentRadixMap<V> {
             if !path.is_empty() {
                 return self.fold_updates(entries);
             }
-            collect_prefix_subtrees(root, SHARD_DEPTH, &mut existing)?;
+            collect_prefix_subtrees(root, PERSISTENT_RADIX_SHARD_DEPTH, &mut existing)?;
         }
-        let mut buckets = (0..SHARD_COUNT).map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut buckets = (0..PERSISTENT_RADIX_SHARD_COUNT)
+            .map(|_| Vec::new())
+            .collect::<Vec<_>>();
         for (key, value, digest) in entries {
             let path = path_slots(&key);
-            buckets[prefix_index(&path, SHARD_DEPTH)?].push(make_leaf(key, value, digest));
+            buckets[prefix_index(&path, PERSISTENT_RADIX_SHARD_DEPTH)?]
+                .push(make_leaf(key, value, digest));
         }
         let work = existing
             .into_iter()
@@ -1020,10 +1091,10 @@ impl<V: Clone> PersistentRadixMap<V> {
             .map(|(child, leaves)| SlotWork { child, leaves })
             .collect::<Vec<_>>();
         let updated = map_slots(work);
-        if updated.len() != SHARD_COUNT {
+        if updated.len() != PERSISTENT_RADIX_SHARD_COUNT {
             return Err(PersistentRadixMapError::SlotCount {
                 actual: updated.len(),
-                expected: SHARD_COUNT,
+                expected: PERSISTENT_RADIX_SHARD_COUNT,
             });
         }
 
@@ -1034,8 +1105,8 @@ impl<V: Clone> PersistentRadixMap<V> {
             let mut children = Vec::new();
             for _ in 0..16 {
                 let outcome = outcomes.next().ok_or(PersistentRadixMapError::SlotCount {
-                    actual: SHARD_COUNT - outcomes.len(),
-                    expected: SHARD_COUNT,
+                    actual: PERSISTENT_RADIX_SHARD_COUNT - outcomes.len(),
+                    expected: PERSISTENT_RADIX_SHARD_COUNT,
                 })??;
                 inserted += outcome.inserted;
                 if let Some(child) = outcome.child {

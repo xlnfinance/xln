@@ -6,6 +6,7 @@
 //! only verdicts, effects, proposal envelopes, and compact shard commitments
 //! cross back to the coordinator.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -18,7 +19,7 @@ use xln_rscore_engine::{
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
 use crate::consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputResult, AccountInputRow,
-    ProposalRow, UpstreamHtlcResolutionRow, apply_one, build_signing_identity,
+    FailedHtlcLockRow, ProposalRow, UpstreamHtlcResolutionRow, apply_one, build_signing_identity,
     inbound_genesis_account, leaf_root, proposable, proposal_row, restore_checkpoint_account,
     restore_seed_account, state_error, validate_genesis_seed, verdict_commits_genesis,
 };
@@ -30,6 +31,10 @@ use crate::{
     AccountId, AccountRestore, AccountSeed, BatchError, CheckpointToken, EngineGeneration,
     MAX_BATCH_WORKERS,
 };
+
+thread_local! {
+    static HTLC_FRONTIER_BARRIERS: Cell<usize> = const { Cell::new(0) };
+}
 
 #[derive(Clone)]
 struct InboundWork {
@@ -305,6 +310,14 @@ impl ResidentConsensusEngine {
 
     pub fn worker_count(&self) -> usize {
         self.forest.worker_count()
+    }
+
+    /// Integration tests compile this crate without `cfg(test)`, so the
+    /// barrier counter cannot live on the production struct. The thread-local
+    /// is RAM-only and is not part of any Account/Entity root.
+    #[doc(hidden)]
+    pub fn last_htlc_frontier_barriers() -> usize {
+        HTLC_FRONTIER_BARRIERS.with(Cell::get)
     }
 
     pub fn revision(&self) -> u64 {
@@ -591,6 +604,7 @@ impl ResidentConsensusEngine {
                 expected: root_hex(expected_owner),
             });
         }
+        reset_htlc_frontier_barriers();
         let (identity, identity_is_new) =
             self.identity_candidate(owner, !request.creates.is_empty())?;
         let original_admissions = admission_results(&request.admits);
@@ -609,7 +623,7 @@ impl ResidentConsensusEngine {
             request.timestamp,
             request.j_height,
         )?;
-        let mut proposals = proposals_from(&fast.rows);
+        let mut proposals = proposals_from(&fast.rows, &request.propose)?;
         let needs_fixed_point =
             proposals_need_htlc_followup(&proposals, &request.failed_htlc_routes);
         let mut admissions = original_admissions;
@@ -752,85 +766,50 @@ impl ResidentConsensusEngine {
             .iter()
             .map(|route| (route.hashlock, route))
             .collect::<BTreeMap<_, _>>();
-        let mut scheduled = request.propose.iter().copied().collect::<BTreeSet<_>>();
+        let (mut scheduled, mut order) = initial_htlc_worklist(&request.propose)?;
         let mut remaining = scheduled.clone();
         let mut proposals = Vec::new();
-        while let Some(account_id) = remaining.pop_first() {
+        reset_htlc_frontier_barriers();
+        while !remaining.is_empty() {
+            let frontier_ids = htlc_ready_frontier(&order, &remaining, &request.failed_htlc_routes);
+            let frontier_ids = if frontier_ids.is_empty() {
+                // TS does not reject cycles. It drains the earliest remaining
+                // worklist position, then continues. Match that break.
+                let Some(first) = order.iter().copied().find(|id| remaining.contains(id)) else {
+                    break;
+                };
+                vec![first]
+            } else {
+                frontier_ids
+            };
+            for account_id in &frontier_ids {
+                remaining.remove(account_id);
+            }
+            record_htlc_frontier_barrier();
             let batch = self.run_outbound(
                 true,
-                vec![(
-                    account_id,
-                    OutboundWork {
-                        create: None,
-                        txs: None,
-                        propose: true,
-                    },
-                )],
+                htlc_propose_work(&frontier_ids),
                 owner,
                 Arc::clone(&identity),
                 request.timestamp,
                 request.j_height,
             )?;
-            let mut proposal = batch
-                .rows
-                .into_iter()
-                .next()
-                .and_then(|(_, row)| row.proposal)
-                .ok_or(BatchError::AccountNotFound {
-                    input_index: 0,
-                    account_id,
-                })?;
-            for failed in &mut proposal.failed_htlc_locks {
-                let Some(route) = routes.get(&failed.hashlock) else {
-                    continue;
-                };
-                if route.outbound_account_id != account_id
-                    || route.outbound_lock_id != failed.lock_id
-                {
-                    return Err(BatchError::FailedHtlcRouteMismatch {
-                        hashlock: root_hex(failed.hashlock),
-                        account: root_hex(*account_id.as_bytes()),
-                        lock_id: failed.lock_id.clone(),
-                    });
-                }
-                let reason = format!("forward_failed:{}", failed.reason);
-                let tx = AccountTx::HtlcResolve(HtlcResolveTx {
-                    lock_id: route.inbound_lock_id.clone(),
-                    outcome: HtlcResolveOutcome::Error {
-                        reason: Some(reason.clone()),
-                    },
-                });
-                self.run_outbound(
-                    true,
-                    vec![(
-                        route.inbound_account_id,
-                        OutboundWork {
-                            create: None,
-                            txs: Some(vec![tx]),
-                            propose: false,
-                        },
-                    )],
-                    owner,
-                    Arc::clone(&identity),
-                    0,
-                    0,
-                )?;
-                admissions.push(AccountAdmissionResult {
-                    operation_index: admissions.len() as u64,
-                    account_id: route.inbound_account_id,
-                    verdict: AccountAdmissionVerdict::Admitted { count: 1 },
-                });
-                failed.upstream_resolution = Some(UpstreamHtlcResolutionRow {
-                    account_id: route.inbound_account_id,
-                    lock_id: route.inbound_lock_id.clone(),
-                    reason,
-                });
-                named.insert(route.inbound_account_id);
-                if scheduled.insert(route.inbound_account_id) {
-                    remaining.insert(route.inbound_account_id);
-                }
+            let followup = htlc_followup_from_proposals(
+                batch.rows,
+                &routes,
+                &mut scheduled,
+                named,
+                &mut admissions,
+                &mut proposals,
+            )?;
+            if !followup.admit.is_empty() {
+                record_htlc_frontier_barrier();
+                self.run_outbound(true, followup.admit, owner, Arc::clone(&identity), 0, 0)?;
             }
-            proposals.push(proposal);
+            for account_id in followup.newly_scheduled {
+                order.push(account_id);
+                remaining.insert(account_id);
+            }
         }
         Ok((admissions, proposals))
     }
@@ -1107,9 +1086,24 @@ fn outbound_work(request: &EntityOutboundRequest) -> Result<OutboundWorkSet, Bat
     Ok((grouped.into_iter().collect(), named))
 }
 
-fn proposals_from(rows: &[(AccountId, OutboundOutcome)]) -> Vec<ProposalRow> {
-    rows.iter()
-        .filter_map(|(_, outcome)| outcome.proposal.clone())
+fn proposals_from(
+    rows: &[(AccountId, OutboundOutcome)],
+    order: &[AccountId],
+) -> Result<Vec<ProposalRow>, BatchError> {
+    let mut by_account = rows
+        .iter()
+        .filter_map(|(account_id, outcome)| outcome.proposal.clone().map(|row| (*account_id, row)))
+        .collect::<BTreeMap<_, _>>();
+    order
+        .iter()
+        .map(|account_id| {
+            by_account
+                .remove(account_id)
+                .ok_or(BatchError::AccountNotFound {
+                    input_index: 0,
+                    account_id: *account_id,
+                })
+        })
         .collect()
 }
 
@@ -1136,6 +1130,159 @@ fn validate_routes(routes: &[FailedHtlcRoute]) -> Result<(), BatchError> {
         }
     }
     Ok(())
+}
+
+struct HtlcFollowup {
+    admit: Vec<(AccountId, OutboundWork)>,
+    newly_scheduled: Vec<AccountId>,
+}
+
+fn reset_htlc_frontier_barriers() {
+    HTLC_FRONTIER_BARRIERS.with(|count| count.set(0));
+}
+
+fn record_htlc_frontier_barrier() {
+    HTLC_FRONTIER_BARRIERS.with(|count| count.set(count.get() + 1));
+}
+
+fn initial_htlc_worklist(
+    propose: &[AccountId],
+) -> Result<(BTreeSet<AccountId>, Vec<AccountId>), BatchError> {
+    let mut scheduled = BTreeSet::new();
+    let mut order = Vec::with_capacity(propose.len());
+    for account_id in propose {
+        if !scheduled.insert(*account_id) {
+            return Err(BatchError::DuplicateAccount(*account_id));
+        }
+        order.push(*account_id);
+    }
+    Ok((scheduled, order))
+}
+
+fn htlc_propose_work(account_ids: &[AccountId]) -> Vec<(AccountId, OutboundWork)> {
+    account_ids
+        .iter()
+        .map(|account_id| {
+            (
+                *account_id,
+                OutboundWork {
+                    create: None,
+                    txs: None,
+                    propose: true,
+                },
+            )
+        })
+        .collect()
+}
+
+fn htlc_ready_frontier(
+    order: &[AccountId],
+    remaining: &BTreeSet<AccountId>,
+    routes: &[FailedHtlcRoute],
+) -> Vec<AccountId> {
+    let mut blocked = BTreeSet::new();
+    for route in routes {
+        if route.outbound_account_id == route.inbound_account_id {
+            continue;
+        }
+        if remaining.contains(&route.outbound_account_id)
+            && remaining.contains(&route.inbound_account_id)
+        {
+            blocked.insert(route.inbound_account_id);
+        }
+    }
+    order
+        .iter()
+        .copied()
+        .filter(|account_id| remaining.contains(account_id) && !blocked.contains(account_id))
+        .collect()
+}
+
+fn htlc_followup_from_proposals(
+    rows: Vec<(AccountId, OutboundOutcome)>,
+    routes: &BTreeMap<[u8; 32], &FailedHtlcRoute>,
+    scheduled: &mut BTreeSet<AccountId>,
+    named: &mut BTreeSet<AccountId>,
+    admissions: &mut Vec<AccountAdmissionResult>,
+    proposals: &mut Vec<ProposalRow>,
+) -> Result<HtlcFollowup, BatchError> {
+    let mut pending_order = Vec::new();
+    let mut pending_txs = BTreeMap::<AccountId, Vec<AccountTx>>::new();
+    let mut newly_scheduled = Vec::new();
+    for (account_id, outcome) in rows {
+        let mut proposal = outcome.proposal.ok_or(BatchError::AccountNotFound {
+            input_index: 0,
+            account_id,
+        })?;
+        for failed in &mut proposal.failed_htlc_locks {
+            let Some(route) = matched_failed_htlc_route(account_id, failed, routes)? else {
+                continue;
+            };
+            let reason = format!("forward_failed:{}", failed.reason);
+            let inbound = route.inbound_account_id;
+            if !pending_txs.contains_key(&inbound) {
+                pending_order.push(inbound);
+            }
+            pending_txs
+                .entry(inbound)
+                .or_default()
+                .push(AccountTx::HtlcResolve(HtlcResolveTx {
+                    lock_id: route.inbound_lock_id.clone(),
+                    outcome: HtlcResolveOutcome::Error {
+                        reason: Some(reason.clone()),
+                    },
+                }));
+            admissions.push(AccountAdmissionResult {
+                operation_index: admissions.len() as u64,
+                account_id: inbound,
+                verdict: AccountAdmissionVerdict::Admitted { count: 1 },
+            });
+            failed.upstream_resolution = Some(UpstreamHtlcResolutionRow {
+                account_id: inbound,
+                lock_id: route.inbound_lock_id.clone(),
+                reason,
+            });
+            named.insert(inbound);
+            if scheduled.insert(inbound) {
+                newly_scheduled.push(inbound);
+            }
+        }
+        proposals.push(proposal);
+    }
+    Ok(HtlcFollowup {
+        admit: pending_order
+            .into_iter()
+            .map(|account_id| {
+                (
+                    account_id,
+                    OutboundWork {
+                        create: None,
+                        txs: pending_txs.remove(&account_id),
+                        propose: false,
+                    },
+                )
+            })
+            .collect(),
+        newly_scheduled,
+    })
+}
+
+fn matched_failed_htlc_route<'a>(
+    account_id: AccountId,
+    failed: &FailedHtlcLockRow,
+    routes: &BTreeMap<[u8; 32], &'a FailedHtlcRoute>,
+) -> Result<Option<&'a FailedHtlcRoute>, BatchError> {
+    let Some(route) = routes.get(&failed.hashlock) else {
+        return Ok(None);
+    };
+    if route.outbound_account_id != account_id || route.outbound_lock_id != failed.lock_id {
+        return Err(BatchError::FailedHtlcRouteMismatch {
+            hashlock: root_hex(failed.hashlock),
+            account: root_hex(*account_id.as_bytes()),
+            lock_id: failed.lock_id.clone(),
+        });
+    }
+    Ok(Some(*route))
 }
 
 fn validate_operation_indices(rows: &[AccountInputRow]) -> Result<(), BatchError> {

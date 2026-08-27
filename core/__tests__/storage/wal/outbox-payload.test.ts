@@ -15,9 +15,13 @@ import {
   readRuntimeMachineGraph,
 } from '../../../storage/wal/runtime-machine-graph';
 import {
+  buildCanonicalRuntimeStateSnapshot,
   buildDurableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimePostStateView,
   buildStorageRuntimeMachineSnapshot,
+  restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
+import { validateDurableRuntimeMachineSnapshot } from '../../../storage/wal/runtime-machine-schema';
 import { createEmptyEnv } from '../../../runtime';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { keyEntityContextPayload } from '../../../storage/keys';
@@ -362,16 +366,55 @@ describe('Patricia-addressed Runtime checkpoints', () => {
     const env = createEmptyEnv('runtime-machine-bounded-outbox');
     env.pendingNetworkOutputs = [largeOutput];
 
-    expect(() => prepareRuntimeMachineGraphRows(
-      8,
-      buildDurableRuntimeMachineSnapshot(env),
-    )).toThrow('STORAGE_RUNTIME_MACHINE_PENDING_OUTPUTS_DUPLICATED');
-
-    const machine = buildStorageRuntimeMachineSnapshot(env);
+    const machine = buildDurableRuntimeMachineSnapshot(env);
     expect(machine['pendingNetworkOutputs']).toBeUndefined();
+    expect(machine['pendingOutputs']).toBeUndefined();
+    expect(machine['networkInbox']).toBeUndefined();
     expect(prepareRuntimeMachineGraphRows(8, machine).rows.every(
       row => row.value.byteLength < 10_000,
     )).toBe(true);
+    expect(buildStorageRuntimeMachineSnapshot(env)).toEqual(machine);
+  });
+
+  test('RAM transport queues cannot change durable machine/root while runtimeOutputs payload stays separate', () => {
+    const env = createEmptyEnv('runtime-machine-queue-isolation');
+    const queued = output('ram-queue-body');
+    const emptyMachine = buildDurableRuntimeMachineSnapshot(env);
+    const emptyCheckpoint = buildCanonicalRuntimeStateSnapshot(env);
+    const emptyView = buildReplayVerifiableRuntimePostStateView(env);
+    const emptyRoot = prepareRuntimeMachineGraphRows(3, emptyMachine).root;
+    const emptyOutbox = prepareRuntimeOutputRows(3, []);
+
+    env.pendingOutputs = [queued];
+    env.networkInbox = [queued];
+    env.pendingNetworkOutputs = [queued];
+
+    const queuedMachine = buildDurableRuntimeMachineSnapshot(env);
+    const queuedCheckpoint = buildCanonicalRuntimeStateSnapshot(env);
+    const queuedView = buildReplayVerifiableRuntimePostStateView(env);
+    const queuedRoot = prepareRuntimeMachineGraphRows(3, queuedMachine).root;
+    const queuedOutbox = prepareRuntimeOutputRows(3, [queued]);
+
+    expect(queuedMachine).toEqual(emptyMachine);
+    expect(queuedCheckpoint).toEqual(emptyCheckpoint);
+    expect(queuedView).toEqual(emptyView);
+    expect(queuedRoot).toEqual(emptyRoot);
+    expect(queuedMachine['pendingOutputs']).toBeUndefined();
+    expect(queuedMachine['networkInbox']).toBeUndefined();
+    expect(queuedMachine['pendingNetworkOutputs']).toBeUndefined();
+    expect(queuedOutbox.commitment.digest).not.toBe(emptyOutbox.commitment.digest);
+    expect(queuedOutbox.commitment.count).toBe(1);
+    expect(emptyOutbox.commitment.count).toBe(0);
+
+    const restored = createEmptyEnv('runtime-machine-queue-isolation-restored');
+    restoreDurableRuntimeSnapshot(restored, queuedMachine);
+    expect(restored.pendingOutputs).toEqual([]);
+    expect(restored.networkInbox).toEqual([]);
+    expect(restored.pendingNetworkOutputs).toEqual([]);
+    expect(() => validateDurableRuntimeMachineSnapshot({
+      ...queuedMachine,
+      pendingNetworkOutputs: [queued],
+    }, 'RUNTIME_MACHINE')).toThrow('RUNTIME_MACHINE_FIELDS');
   });
 
   test('restores an exact validated machine without a frame blob', async () => {

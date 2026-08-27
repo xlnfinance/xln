@@ -58,7 +58,7 @@ struct ShardSeedBatch<V> {
 
 struct ShardMutationBatch<T> {
     shard: usize,
-    entries: Vec<(AccountId, T)>,
+    entries: Vec<(usize, AccountId, T)>,
 }
 
 struct WorkerMutationBatch<T> {
@@ -71,7 +71,7 @@ struct WorkerMutationBatch<T> {
 }
 
 struct WorkerMutationReply<R> {
-    rows: Vec<(AccountId, R)>,
+    rows: Vec<(usize, AccountId, R)>,
     changed: Vec<AccountId>,
     descriptors: Vec<PersistentRadixShardDescriptor>,
     metrics: Vec<ShardPhaseMetric>,
@@ -384,7 +384,11 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         let batch = ResidentAccountBatch {
             revision: inbound_revision,
             accounts_root: inbound_top.root_hash(),
-            rows: reply.rows,
+            rows: reply
+                .rows
+                .into_iter()
+                .map(|(_, account_id, row)| (account_id, row))
+                .collect(),
         };
         self.base_revision = base_revision;
         self.inbound_top = Some(inbound_top);
@@ -474,8 +478,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         if let Some(error) = first_error {
             return Err(error);
         }
-        rows.sort_by_key(|(account_id, _)| *account_id);
-        Ok(rows)
+        restore_positioned_rows(rows)
     }
 
     /// Read one compact projection for every Account at the active head.
@@ -619,23 +622,30 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             start_revision,
             false,
         )?;
-        let parent = if continue_candidate {
-            self.candidate_top
-                .as_ref()
-                .ok_or(BatchError::EntityRoundMissing)?
+        let candidate_top = if continue_candidate {
+            let parent = self
+                .candidate_top
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            self.base_top
+                .sparse_overlay_owned(parent, reply.descriptors)
         } else {
-            self.inbound_top
+            let parent = self
+                .inbound_top
                 .as_ref()
-                .ok_or(BatchError::EntityRoundMissing)?
-        };
-        let candidate_top = self
-            .base_top
-            .sparse_overlay(Some(parent), reply.descriptors)
-            .map_err(|error| forest_error(zero_account(), error))?;
+                .ok_or(BatchError::EntityRoundMissing)?;
+            self.base_top
+                .sparse_overlay(Some(parent), reply.descriptors)
+        }
+        .map_err(|error| forest_error(zero_account(), error))?;
         let batch = ResidentAccountBatch {
             revision: candidate_revision,
             accounts_root: candidate_top.root_hash(),
-            rows: reply.rows,
+            rows: reply
+                .rows
+                .into_iter()
+                .map(|(_, account_id, row)| (account_id, row))
+                .collect(),
         };
         self.candidate_top = Some(candidate_top);
         self.candidate_revision = Some(candidate_revision);
@@ -730,18 +740,16 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
         &self,
         entries: Vec<(AccountId, T)>,
     ) -> Result<WorkerMutationBatches<T>, BatchError> {
-        let mut ordered = BTreeMap::new();
-        for (account_id, payload) in entries {
-            if ordered.insert(account_id, payload).is_some() {
+        let mut seen = BTreeSet::new();
+        let mut buckets = BTreeMap::<usize, Vec<(usize, AccountId, T)>>::new();
+        for (position, (account_id, payload)) in entries.into_iter().enumerate() {
+            if !seen.insert(account_id) {
                 return Err(BatchError::DuplicateAccount(account_id));
             }
-        }
-        let mut buckets = BTreeMap::<usize, Vec<(AccountId, T)>>::new();
-        for (account_id, payload) in ordered {
             buckets
                 .entry(logical_account_shard(account_id))
                 .or_default()
-                .push((account_id, payload));
+                .push((position, account_id, payload));
         }
         let mut workers = empty_lanes(self.workers.worker_count());
         let mut touched = BTreeSet::new();
@@ -1034,13 +1042,15 @@ where
         .get_mut(&batch.shard)
         .ok_or(BatchError::ResidentShardMissing { shard: batch.shard })?;
     let mut changed_in_shard = 0;
-    for (account_id, payload) in batch.entries {
+    for (position, account_id, payload) in batch.entries {
         let current = phase_shard(resident, mode)?
             .get(account_id.as_bytes())
             .map_err(|error| forest_error(account_id, error))?
             .cloned();
         match apply(account_id, current, payload)? {
-            ResidentAccountAction::Keep(result) => reply.rows.push((account_id, result)),
+            ResidentAccountAction::Keep(result) => {
+                reply.rows.push((position, account_id, result));
+            }
             ResidentAccountAction::Put {
                 value,
                 value_digest,
@@ -1055,7 +1065,7 @@ where
                 *phase_shard_mut(resident, mode)? = updated;
                 changed_in_shard += 1;
                 reply.changed.push(account_id);
-                reply.rows.push((account_id, result));
+                reply.rows.push((position, account_id, result));
             }
         }
     }
@@ -1122,7 +1132,7 @@ fn read_worker_batch<V, T, R, F>(
     state: &mut ResidentWorkerState<V>,
     batch: ShardMutationBatch<T>,
     read: &F,
-) -> Result<Vec<(AccountId, R)>, BatchError>
+) -> Result<Vec<(usize, AccountId, R)>, BatchError>
 where
     V: Clone,
     F: Fn(AccountId, &V, Option<&V>, T) -> Result<R, BatchError>,
@@ -1137,7 +1147,7 @@ where
         .or(resident.inbound.as_ref())
         .unwrap_or(&resident.base);
     let mut rows = Vec::with_capacity(batch.entries.len());
-    for (account_id, payload) in batch.entries {
+    for (position, account_id, payload) in batch.entries {
         let current = current_shard
             .get(account_id.as_bytes())
             .map_err(|error| forest_error(account_id, error))?
@@ -1146,7 +1156,11 @@ where
             .base
             .get(account_id.as_bytes())
             .map_err(|error| forest_error(account_id, error))?;
-        rows.push((account_id, read(account_id, current, base, payload)?));
+        rows.push((
+            position,
+            account_id,
+            read(account_id, current, base, payload)?,
+        ));
     }
     Ok(rows)
 }
@@ -1291,12 +1305,49 @@ fn collect_worker_replies<R>(
     if let Some(error) = first_error {
         return Err(error);
     }
-    combined.rows.sort_by_key(|(account_id, _)| *account_id);
+    combined.rows = order_positioned_rows(combined.rows)?;
     combined.changed.sort_unstable();
     combined
         .descriptors
         .sort_by_key(|descriptor| descriptor.index());
     Ok(combined)
+}
+
+fn order_positioned_rows<R>(
+    rows: Vec<(usize, AccountId, R)>,
+) -> Result<Vec<(usize, AccountId, R)>, BatchError> {
+    let row_count = rows.len();
+    let mut slots = (0..row_count).map(|_| None).collect::<Vec<_>>();
+    for (position, account_id, row) in rows {
+        let slot = slots
+            .get_mut(position)
+            .ok_or(BatchError::ResidentResultPosition {
+                position,
+                count: row_count,
+            })?;
+        if slot.replace((position, account_id, row)).is_some() {
+            return Err(BatchError::ResidentResultPositionDuplicate { position });
+        }
+    }
+    slots
+        .into_iter()
+        .enumerate()
+        .map(|(position, row)| {
+            row.ok_or(BatchError::ResidentResultPosition {
+                position,
+                count: row_count,
+            })
+        })
+        .collect()
+}
+
+fn restore_positioned_rows<R>(
+    rows: Vec<(usize, AccountId, R)>,
+) -> Result<Vec<(AccountId, R)>, BatchError> {
+    Ok(order_positioned_rows(rows)?
+        .into_iter()
+        .map(|(_, account_id, row)| (account_id, row))
+        .collect())
 }
 
 fn next_revision(revision: u64, changed: bool) -> Result<u64, BatchError> {
@@ -1863,6 +1914,7 @@ mod tests {
         let inbound = (0..4096)
             .step_by(7)
             .map(|shard| (account(shard, 0), (shard as u64) + 10_000))
+            .rev()
             .collect::<Vec<_>>();
         for (account_id, value) in &inbound {
             serial = serial
@@ -1872,6 +1924,7 @@ mod tests {
         let outbound = (0..4096)
             .step_by(11)
             .map(|shard| (account(shard, 0), (shard as u64) + 20_000))
+            .rev()
             .collect::<Vec<_>>();
         for (account_id, value) in &outbound {
             serial = serial
@@ -1890,13 +1943,33 @@ mod tests {
             let inbound_result = forest
                 .apply_inbound(expected_seed_root, inbound.clone(), put)
                 .expect("resident inbound");
-            assert_eq!(inbound_result.rows.len(), inbound.len());
+            assert_eq!(
+                inbound_result
+                    .rows
+                    .iter()
+                    .map(|(account_id, _)| *account_id)
+                    .collect::<Vec<_>>(),
+                inbound
+                    .iter()
+                    .map(|(account_id, _)| *account_id)
+                    .collect::<Vec<_>>()
+            );
             let outbound_result = forest
                 .apply_outbound(outbound.clone(), put)
                 .expect("resident outbound");
             assert_eq!(outbound_result.revision, 9);
             assert_eq!(outbound_result.accounts_root, expected_final_root);
-            assert_eq!(outbound_result.rows.len(), outbound.len());
+            assert_eq!(
+                outbound_result
+                    .rows
+                    .iter()
+                    .map(|(account_id, _)| *account_id)
+                    .collect::<Vec<_>>(),
+                outbound
+                    .iter()
+                    .map(|(account_id, _)| *account_id)
+                    .collect::<Vec<_>>()
+            );
         }
     }
 }

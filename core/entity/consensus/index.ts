@@ -14,7 +14,6 @@ export {
 export {
   mergeEntityInputs,
   prioritizeEntityConsensusInputs,
-  prioritizeProtocolEntityInputs,
 } from './input/merge';
 export { applyEntityInput, type EntityInputOutcome } from './input/consensus';
 export { applyEntityFrame } from './frame/application';

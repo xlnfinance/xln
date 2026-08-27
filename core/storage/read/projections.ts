@@ -151,18 +151,13 @@ type ReplicaMetaProjectionOptions = {
 const buildReplicaMetaProjection = (
   replica: EntityReplica,
   state: EntityState,
-  mempool: EntityReplica['mempool'],
   options?: ReplicaMetaProjectionOptions,
 ): StorageReplicaMeta => ({
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
   ...withDefinedProperty('htlcNotes', replica.htlcNotes),
-  mempool,
   ...withDefinedProperty('position', replica.position),
-  ...withDefinedProperty('proposal', replica.proposal),
-  ...withDefinedProperty('lockedFrame', replica.lockedFrame),
-  ...withDefinedProperty('candidate', replica.candidate),
   ...withDefinedProperty(
     'certifiedFrameHead',
     options ? options.certifiedFrameHead : replica.certifiedFrameHead,
@@ -190,7 +185,6 @@ export const projectReplicaMeta = (
   // below consumes this view synchronously, so copying the unbounded Entity
   // graph would add no isolation and would make checkpoint cost O(Entity).
   replica.state,
-  replica.mempool,
   options,
 );
 
@@ -205,7 +199,6 @@ export const encodeReplicaMeta = (
 ): Buffer => encodeBuffer(buildReplicaMetaProjection(
   replica,
   replica.state,
-  replica.mempool,
   options,
 ), { omitSymbolKeys: true });
 

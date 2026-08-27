@@ -1,14 +1,12 @@
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JPrefixAttestation, JurisdictionEventData } from '../../../types/jurisdiction-events';
 import type { EntityConsensusInput } from './types';
-import { signatureMapSize } from '../../auth/signatures';
-import { compareStableText, safeStringify } from '../../../protocol/serialization';
+import { safeStringify } from '../../../protocol/serialization';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
 import { hashEntityLeaderVoteBody } from '../leader';
 import { hashJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { getEffectiveEntityInputTxs } from '../output/envelope';
-import { accountInputAck, accountInputProposal } from '../../../account/consensus/flush';
-import { accountInputBodyDigest } from '../../../protocol/state/tx-multiset';
+import { accountInputProposal } from '../../../account/consensus/flush';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
@@ -58,67 +56,6 @@ export const prioritizeScheduledWakeTransactions = (txs: EntityTx[]): EntityTx[]
   return [wakes[0]!, ...txs.filter(tx => tx.type !== 'scheduledWake')];
 };
 
-const canonicalEntityInputSortKey = (input: EntityConsensusInput): string => safeStringify({
-  entityId: String(input.entityId || '').toLowerCase(),
-  signerId: String(input.signerId || '').toLowerCase(),
-  from: String(input.from || '').toLowerCase(),
-  runtimeId: String(input.runtimeId || '').toLowerCase(),
-  localRuntimeProtocol: input.localRuntimeProtocol ?? null,
-  proposedFrame: input.proposedFrame
-    ? {
-        height: input.proposedFrame.height,
-        hash: input.proposedFrame.hash,
-      }
-    : null,
-  hashPrecommitCount: signatureMapSize(input.hashPrecommits),
-  hashPrecommitFrame: input.hashPrecommitFrame ?? null,
-  leaderTimeoutVote: input.leaderTimeoutVote
-    ? {
-        targetHeight: input.leaderTimeoutVote.targetHeight,
-        voterId: input.leaderTimeoutVote.voterId.toLowerCase(),
-        voteHash: hashEntityLeaderVoteBody(input.leaderTimeoutVote),
-      }
-    : null,
-  jPrefixAttestations: input.jPrefixAttestations
-    ? Array.from(input.jPrefixAttestations.entries()).map(([signerId, attestation]) => ({
-        signerId: signerId.toLowerCase(),
-        targetEntityHeight: attestation.targetEntityHeight,
-        hash: jPrefixAttestationHash(attestation),
-      }))
-    : null,
-  entityTxs: (input.entityTxs ?? []).map(compactEntityTxSortKey),
-});
-
-/**
- * Tie-break identity of one tx. Account inputs are the bulk of a Hub frame;
- * the routing scalars order them cheaply and the memoized canonical body
- * digest breaks every remaining tie by content. Other tx kinds keep the
- * exact canonical form.
- */
-const compactEntityTxSortKey = (tx: EntityTx): unknown => {
-  if (tx.type !== 'accountInput') return tx;
-  const input = tx.data;
-  const proposal = accountInputProposal(input);
-  const ack = accountInputAck(input);
-  return [
-    input.kind,
-    input.fromEntityId.toLowerCase(),
-    input.toEntityId.toLowerCase(),
-    proposal
-      ? [
-          proposal.frame.height, proposal.frame.stateHash, proposal.frameHanko ?? '',
-          proposal.disputeHanko?.hash ?? '', proposal.disputeHanko?.hanko ?? '',
-          proposal.frame.prevFrameHash, proposal.frame.accountStateRoot, proposal.frame.timestamp,
-          proposal.frame.jHeight,
-        ]
-      : null,
-    ack ? [ack.height, ack.frameHash, ack.frameHanko ?? '', ack.disputeHanko?.hash ?? '', ack.disputeHanko?.hanko ?? ''] : null,
-    // Verified body digest: two envelopes claiming one hash over different
-    // bodies sort apart by content, not by a claimed scalar.
-    accountInputBodyDigest(input),
-  ];
-};
-
 type ConsensusInputOrder = Readonly<{
   targetHeight: number;
   priority: number;
@@ -126,39 +63,11 @@ type ConsensusInputOrder = Readonly<{
 
 export type EntityCommitPriorityPredicate = (input: EntityConsensusInput) => boolean;
 
-const isProtocolEntityInput = (input: EntityConsensusInput): boolean =>
-  Boolean(
-    input.proposedFrame ||
-    input.leaderTimeoutVote ||
-    input.hashPrecommits?.size ||
-    input.jPrefixAttestations?.size,
-  ) || getEffectiveEntityInputTxs(input).some(tx =>
-    tx.type === 'accountInput' || tx.type === 'j_event');
-
 const hasCrossJurisdictionSourcePullProposal = (input: EntityConsensusInput): boolean =>
   getEffectiveEntityInputTxs(input).some(tx =>
     tx.type === 'accountInput' &&
     accountInputProposal(tx.data)?.frame.accountTxs.some(accountTx =>
       accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source') === true);
-
-/**
- * Keep account/Entity/J consensus responsive when a runtime also receives a
- * bulk stream of ordinary certified outputs. The partition is stable and
- * reorders whole authenticated inputs, so it cannot alter a command or the
- * transaction order certified by its source Entity.
- */
-export const prioritizeProtocolEntityInputs = <T extends EntityConsensusInput>(
-  inputs: readonly T[],
-): T[] => {
-  const protocol: T[] = [];
-  const ordinary: T[] = [];
-  for (const input of inputs) {
-    (isProtocolEntityInput(input) ? protocol : ordinary).push(input);
-  }
-  return protocol.length > 0 && ordinary.length > 0
-    ? [...protocol, ...ordinary]
-    : [...inputs];
-};
 
 const consensusInputOrder = (
   input: EntityConsensusInput,
@@ -315,45 +224,19 @@ const isExactTransactionReplay = (
     safeStringify(existing.entityTxs ?? []) === safeStringify(incoming.entityTxs ?? []);
 };
 
-const sortMergedEntityInputs = (
+const applyCausalEntityInputOrder = (
   inputs: EntityConsensusInput[],
   hasVerifiedCommit: EntityCommitPriorityPredicate,
 ): EntityConsensusInput[] => {
-  // The full sort key is only needed to break ties, but a comparator computes
-  // it O(n log n) times; compute once per input.
-  const sortKeys = new Map<EntityConsensusInput, string>();
-  const sortKey = (input: EntityConsensusInput): string => {
-    let key = sortKeys.get(input);
-    if (key === undefined) {
-      key = canonicalEntityInputSortKey(input);
-      sortKeys.set(input, key);
-    }
-    return key;
-  };
-  return prioritizeEntityConsensusInputs([...inputs].sort((left, right) => {
-    // Entity ids are not causal clocks. A lexicographically smaller source
-    // Entity must not consume a source pull before a larger target Entity has
-    // committed the receipt that pull explicitly binds.
-    const causalOrder = Number(hasCrossJurisdictionSourcePullProposal(left)) -
-      Number(hasCrossJurisdictionSourcePullProposal(right));
-    if (causalOrder !== 0) return causalOrder;
-    const entityOrder = compareStableText(left.entityId.toLowerCase(), right.entityId.toLowerCase());
-    if (entityOrder !== 0) return entityOrder;
-    const signerOrder = compareStableText(
-      String(left.signerId || '').toLowerCase(),
-      String(right.signerId || '').toLowerCase(),
-    );
-    if (signerOrder !== 0) return signerOrder;
-    if (left.proposedFrame && right.proposedFrame && left.proposedFrame.height !== right.proposedFrame.height) {
-      return left.proposedFrame.height - right.proposedFrame.height;
-    }
-    if (
-      left.hashPrecommitFrame &&
-      right.hashPrecommitFrame &&
-      left.hashPrecommitFrame.height !== right.hashPrecommitFrame.height
-    ) return left.hashPrecommitFrame.height - right.hashPrecommitFrame.height;
-    return compareStableText(sortKey(left), sortKey(right));
-  }), hasVerifiedCommit);
+  const ready: EntityConsensusInput[] = [];
+  const sourcePullConsumers: EntityConsensusInput[] = [];
+  for (const input of inputs) {
+    (hasCrossJurisdictionSourcePullProposal(input) ? sourcePullConsumers : ready).push(input);
+  }
+  // This is the only cross-input reorder: a source Pull consumes a target ACK
+  // produced earlier in the same Runtime frame. Independent lanes retain the
+  // exact accepted input order; IDs and payload bytes never decide position.
+  return prioritizeEntityConsensusInputs([...ready, ...sourcePullConsumers], hasVerifiedCommit);
 };
 
 export const mergeEntityInputs = (
@@ -440,7 +323,7 @@ export const mergeEntityInputs = (
   }
 
   const mergedInputs = Array.from(merged.values());
-  return sortMergedEntityInputs([...mergedInputs, ...conflicts].map(input => {
+  return applyCausalEntityInputOrder([...mergedInputs, ...conflicts].map(input => {
     if (!input.entityTxs || input.entityTxs.length === 0) return input;
     return { ...input, entityTxs: prioritizeScheduledWakeTransactions(mergeJEventTxs(input.entityTxs)) };
   }), hasVerifiedCommit);

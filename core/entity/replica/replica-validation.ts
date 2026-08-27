@@ -220,6 +220,31 @@ const validateJPrefixRound = (value: unknown, context: string): void => {
   }
 };
 
+function assertEntityReplicaCoordination(
+  replica: Record<string, unknown>,
+  context: string,
+): void {
+  validateString(replica['signerId'], `${context}.signerId`);
+  if (typeof replica['isProposer'] !== 'boolean') {
+    throw new FinancialDataCorruptionError(`${context}.isProposer must be boolean`);
+  }
+  validateReplicaLineageAndWitnesses(replica, context);
+  validatePosition(replica['position'], context);
+  validateLeaderConsensus(replica, context);
+  validateHtlcNotes(replica['htlcNotes'], context);
+  validateReplicaJHistory(replica['jHistory'], context);
+  validateJPrefixRound(replica['jPrefixRound'], context);
+  if (replica['jSubmitState'] !== undefined) {
+    validateJSubmitState(replica['jSubmitState'], `${context}.jSubmitState`);
+  }
+  if (replica['entityProviderActionSubmitState'] !== undefined) {
+    validateEntityProviderActionSubmitState(
+      replica['entityProviderActionSubmitState'],
+      `${context}.entityProviderActionSubmitState`,
+    );
+  }
+}
+
 type EntityReplicaMetadata = EntityReplica;
 
 function assertEntityReplicaMetadata(
@@ -246,21 +271,7 @@ function assertEntityReplicaMetadata(
     validateProposedEntityFrame(replica['lockedFrame'], `${context}.lockedFrame`);
   }
   validateEntityCandidate(replica['candidate'], entityId, context);
-  validateReplicaLineageAndWitnesses(replica, context);
-  validatePosition(replica['position'], context);
-  validateLeaderConsensus(replica, context);
-  validateHtlcNotes(replica['htlcNotes'], context);
-  validateReplicaJHistory(replica['jHistory'], context);
-  validateJPrefixRound(replica['jPrefixRound'], context);
-  if (replica['jSubmitState'] !== undefined) {
-    validateJSubmitState(replica['jSubmitState'], `${context}.jSubmitState`);
-  }
-  if (replica['entityProviderActionSubmitState'] !== undefined) {
-    validateEntityProviderActionSubmitState(
-      replica['entityProviderActionSubmitState'],
-      `${context}.entityProviderActionSubmitState`,
-    );
-  }
+  assertEntityReplicaCoordination(replica, context);
 }
 
 function assertEntityReplica(
@@ -279,23 +290,4 @@ export const validateEntityReplica = (
   return replica;
 };
 
-/**
- * Decode durable replica coordination metadata without accepting secrets.
- *
- * Runtime signer material rederives the private encryption key after storage
- * verification. Persisting it here would turn every WAL/checkpoint copy into
- * a plaintext key backup and would make remote history export unsafe.
- */
-export const validateEntityReplicaMetadata = (
-  value: unknown,
-  context = 'EntityReplicaMetadata',
-): EntityReplicaMetadata => {
-  const replica = validateObject(value, context);
-  if (Object.hasOwn(replica, 'entityEncPrivKey')) {
-    throw new FinancialDataCorruptionError(
-      `${context}.entityEncPrivKey must not be persisted`,
-    );
-  }
-  assertEntityReplicaMetadata(replica, context);
-  return replica;
-};
+export { assertEntityReplicaCoordination };

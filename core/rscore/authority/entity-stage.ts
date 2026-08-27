@@ -395,8 +395,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     }
     this.frameOutboundPrepared = true;
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
-      .filter(accountId => request.accounts.has(accountId))
-      .toSorted();
+      .filter(accountId => request.accounts.has(accountId));
     const proposals = proposalIds.map(accountId => {
       const account = request.accountForWrite(accountId);
       if (account === undefined) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ACCOUNT_MISSING:${accountId}`);
@@ -412,7 +411,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     });
     const run = this.requireBatchProvider('executeAccountOutboundBatch');
     const materializeAccountIds = [...new Set(this.inboundRequests.map(request =>
-      normalizeEntityId(request.account.proofHeader.toEntity)))].toSorted();
+      normalizeEntityId(request.account.proofHeader.toEntity)))];
     const prepared = await run.call(this.options.provider, {
       ...this.parentOf(),
       entityState: request.entityState,

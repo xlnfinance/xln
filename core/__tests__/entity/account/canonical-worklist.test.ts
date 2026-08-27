@@ -15,47 +15,34 @@ const drain = (worklist: ReturnType<typeof createCanonicalAccountWorklist>): str
 };
 
 describe('canonical Entity Account worklist', () => {
-  test('sorts the initial frontier once and suppresses duplicates', () => {
+  test('retains first-touch order and suppresses duplicates', () => {
     const worklist = createCanonicalAccountWorklist(workMap(['c', 'a', 'b', 'a']));
-    expect(drain(worklist)).toEqual(['a', 'b', 'c']);
+    expect(drain(worklist)).toEqual(['c', 'a', 'b']);
   });
 
-  test('inserts discovered work into the unread canonical suffix', () => {
+  test('appends discovered work after the unread accepted frontier', () => {
     const worklist = createCanonicalAccountWorklist(workMap(['b', 'd']));
     expect(worklist.take()).toEqual({ accountId: 'b', force: false });
     expect(worklist.add('a')).toBe(true);
     expect(worklist.add('c')).toBe(true);
     expect(worklist.add('d')).toBe(false);
-    expect(drain(worklist)).toEqual(['a', 'c', 'd']);
+    expect(drain(worklist)).toEqual(['d', 'a', 'c']);
   });
 
-  test('drains one thousand Accounts in canonical byte order', () => {
+  test('drains one thousand Accounts in accepted order', () => {
     const ids = Array.from({ length: 1_000 }, (_, index) =>
       `account-${String(999 - index).padStart(4, '0')}`,
     );
     const worklist = createCanonicalAccountWorklist(workMap(ids));
-    expect(drain(worklist)).toEqual([...ids].sort());
+    expect(drain(worklist)).toEqual(ids);
   });
 
-  test('matches the former repeated-sort order when work is discovered mid-drain', () => {
+  test('keeps append order when work is discovered mid-drain', () => {
     const discovered = new Map<string, readonly string[]>([
       ['b', ['a', 'f']],
       ['a', ['c']],
       ['d', ['aa', 'e']],
     ]);
-    const referenceSet = new Set(['b', 'd']);
-    const referenceDone = new Set<string>();
-    const reference: string[] = [];
-    while (true) {
-      const next = [...referenceSet]
-        .filter(accountId => !referenceDone.has(accountId))
-        .sort()[0];
-      if (next === undefined) break;
-      referenceDone.add(next);
-      reference.push(next);
-      for (const accountId of discovered.get(next) ?? []) referenceSet.add(accountId);
-    }
-
     const worklist = createCanonicalAccountWorklist(workMap(['b', 'd']));
     const actual: string[] = [];
     while (true) {
@@ -64,7 +51,7 @@ describe('canonical Entity Account worklist', () => {
       actual.push(next.accountId);
       for (const accountId of discovered.get(next.accountId) ?? []) worklist.add(accountId);
     }
-    expect(actual).toEqual(reference);
+    expect(actual).toEqual(['b', 'd', 'a', 'f', 'aa', 'e', 'c']);
   });
 
   test('upgrades an unread Account to a forced Channel.ts flush', () => {
