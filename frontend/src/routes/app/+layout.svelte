@@ -62,6 +62,7 @@
     writeEmbeddedRuntimeAdapterSession,
   } from '../../../packages/browser/src/runtime-adapter-session';
   import { runWalletBootLifecycle } from '../../../packages/browser/src/wallet-boot-lifecycle';
+  import { resolveWalletShellPhase } from '../../../packages/browser/src/wallet-shell-state';
 
   let { children } = $props();
 
@@ -83,6 +84,16 @@
   let releaseActiveTabLock: (() => void) | null = null;
   const pageSearch = $derived(browser ? $page.url.search : '');
   const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
+  const walletShellPhase = $derived(resolveWalletShellPhase({
+    activeTabLockReady,
+    hasActiveTabLock,
+    hasError: Boolean($error),
+    hasPendingRemoteRuntime: pendingRemoteRuntime !== null,
+    lockTestMode,
+    scenarioPreviewMode,
+    runtimeLoading: $isLoading,
+    runtimeReady: $xlnFunctions.isReady,
+  }));
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   type DeployVersionPayload = {
     version: string;
@@ -577,7 +588,7 @@
   <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
-{#if activeTabLockReady && !hasActiveTabLock && !$error}
+{#if walletShellPhase === 'remote-runtime-consent'}
   {#if pendingRemoteRuntime}
     <div class="remote-login-screen" data-testid="remote-runtime-login-screen">
       <section class="remote-login-card">
@@ -618,27 +629,27 @@
         </div>
       </section>
     </div>
-  {:else}
-    <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
-      <h2>Inactive Tab</h2>
-      <p>This wallet tab lost the active lock to a newer tab.</p>
-      <button
-        data-testid="inactive-tab-acquire"
-        disabled={claimingActiveTabLock}
-        onclick={claimActiveTabLockInPlace}
-      >
-        {claimingActiveTabLock ? 'Claiming active lock...' : 'Take active lock'}
-      </button>
-    </div>
   {/if}
-{:else if lockTestMode && scenarioPreviewMode}
+{:else if walletShellPhase === 'inactive-tab'}
+  <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
+    <h2>Inactive Tab</h2>
+    <p>This wallet tab lost the active lock to a newer tab.</p>
+    <button
+      data-testid="inactive-tab-acquire"
+      disabled={claimingActiveTabLock}
+      onclick={claimActiveTabLockInPlace}
+    >
+      {claimingActiveTabLock ? 'Claiming active lock...' : 'Take active lock'}
+    </button>
+  </div>
+{:else if walletShellPhase === 'scenario-preview'}
   <div class="scenario-preview-banner" data-testid="scenario-preview-wallet-banner">
     Scenario preview. Runtime writes and wallet bootstrap are disabled in this view.
   </div>
   {@render children?.()}
-{:else if lockTestMode}
+{:else if walletShellPhase === 'lock-test-ready'}
   <main class="app-shell-ready app-shell-ready--empty" data-testid="app-runtime-ready"></main>
-{:else if $error}
+{:else if walletShellPhase === 'error'}
   <div class="error-screen" data-testid="app-initialization-error">
     {#if storageSchemaMismatch}
       <h2>Local runtime needs recovery</h2>
@@ -683,7 +694,7 @@
       </button>
     {/if}
   </div>
-{:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
+{:else if walletShellPhase === 'loading'}
   <div class="loading-screen" data-testid="app-loading-screen">
     <RuntimeStateCard
       title="Starting XLN"

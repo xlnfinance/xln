@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER AND DISPOSABLE IDENTITIES IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, AND SHELL STATE IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -574,6 +574,16 @@ four-app candidate assembles as
 with 351 files. The required root gate passes all 26 BrainVault checks before
 the existing contract-sync environment stops at Hardhat `HH19` under
 unsupported Node 25.
+
+The next wallet slice now owns framework-neutral shell phase derivation for
+remote Runtime consent, inactive-tab standby, scenario preview, lock-test
+readiness, initialization errors, Runtime loading, and ready content. The
+canonical Svelte `/app` shell consumes the shared precedence without changing
+its effects, UI, or route ownership; a future React shell can consume the same
+snapshot decision without mirrored effect state. Eleven direct tests cover all
+phases and precedence edges, 47 affected shell/lifecycle/capability tests pass
+with 278 expectations, both wallet and canonical Svelte production builds pass,
+and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
 
@@ -684,8 +694,9 @@ any mismatch. Never compile on production.
    query, pagination, height model, committed-height catch-up, and RuntimeView
    selection snapshots, refresh leases, snapshot transitions, detached
    projections, injected loading outcomes, and latest-wins publication
-   coordination are also shared. Latest-read Runtime query subscriptions expose
-   stable external-store snapshots while
+   coordination are also shared. Wallet shell phase precedence is shared while
+   the existing Svelte shell retains concrete lifecycle effects. Latest-read
+   Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
    remain with the canonical Svelte adapter until a complete React consumer
    exists.
