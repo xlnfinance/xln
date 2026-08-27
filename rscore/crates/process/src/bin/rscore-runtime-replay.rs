@@ -171,6 +171,7 @@ fn main() -> Result<(), String> {
     println!(
         concat!(
             "{{\"benchmark\":\"rscore-runtime-replay\",\"mode\":\"native-exact\",",
+            "\"nativeRestartVerified\":true,",
             "\"workers\":{},\"frames\":{},\"ingress\":{},\"egress\":{},",
             "\"setupMs\":{:.3},\"elapsedMs\":{:.3},\"engineMs\":{:.3},",
             "\"applyMs\":{:.3},\"projectionMs\":{:.3},\"storageMs\":{:.3},\"publicationMs\":{:.3},",

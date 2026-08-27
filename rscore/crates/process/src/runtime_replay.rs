@@ -8,7 +8,9 @@
 mod diff;
 mod evidence;
 mod expectations;
-mod wal_input;
+mod native_restart;
+
+pub use native_restart::{NativeRuntimeReady, restore_native_runtime_processor};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -20,7 +22,8 @@ use xln_rscore_engine::BoardDelays;
 use xln_rscore_runtime::processor::{EntityRoute, EntityRouteTable};
 use xln_rscore_runtime::restore::{
     ConcreteCheckpointConfiguration, ConcreteCheckpointSource, MigrationOrigin,
-    decode_concrete_runtime_checkpoint, decode_offline_ts_import_checkpoint,
+    decode_concrete_runtime_checkpoint, decode_concrete_runtime_wal_frame,
+    decode_offline_ts_import_checkpoint, reconcile_runtime_input_with_resident_queue,
     restore_decoded_runtime_checkpoint, verify_checkpoint_source,
 };
 use xln_rscore_runtime::storage::native::{
@@ -36,7 +39,6 @@ use crate::PAYMENT_PROFILE_BINDING;
 use diff::{RuntimeReplayDiffInput, write_runtime_replay_diff};
 use evidence::{assert_entity_events, entity_event_evidence, entity_history_link};
 use expectations::ReplayExpectations;
-use wal_input::{decode_wal_runtime_input, reconcile_recorded_input_with_resident_queue};
 
 pub struct RuntimeReplayMetrics {
     pub frames: u64,
@@ -151,24 +153,6 @@ fn routes_from_wal(
     .map_err(|error| format!("RUNTIME_REPLAY_ROUTES:{error}"))
 }
 
-fn one_entity_context(
-    source: &xln_rscore_runtime::restore::ConcreteWalSource,
-    height: u64,
-) -> Result<&Value, String> {
-    if source.entity_contexts.len() != 1 {
-        return Err(format!(
-            "RUNTIME_REPLAY_CONTEXT_COUNT:{height}:{}",
-            source.entity_contexts.len(),
-        ));
-    }
-    source
-        .entity_contexts
-        .values()
-        .next()
-        .map(|context| &context.value)
-        .ok_or_else(|| format!("RUNTIME_REPLAY_CONTEXT_MISSING:{height}"))
-}
-
 fn assert_source_commitments(
     height: u64,
     source: &xln_rscore_runtime::restore::ConcreteWalSource,
@@ -278,6 +262,7 @@ pub fn replay_runtime_wal(
         return Err("RUNTIME_REPLAY_ARGUMENTS".into());
     }
     assert_native_scope(recording)?;
+    let native_database = native_database.as_ref();
     let setup_started = Instant::now();
     let expectations = ReplayExpectations::from_recording(recording)?;
     expectations.assert_exact_range(from, to)?;
@@ -311,6 +296,7 @@ pub fn replay_runtime_wal(
     let checkpoint_period_frames = restored.replica.limits.checkpoint_period_frames;
 
     let routes = routes_from_wal(reader, &owner, from, to)?;
+    let restart_routes = routes.clone();
     let history = reader
         .entity_frames_by_runtime_height(from, to)
         .map_err(|error| format!("RUNTIME_REPLAY_ENTITY_HISTORY:{error}"))?;
@@ -400,13 +386,10 @@ pub fn replay_runtime_wal(
             .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
             .state
             .finalized_j_height;
-        let mut input = decode_wal_runtime_input(
-            &frame,
-            one_entity_context(&source, height)?,
-            &context_policy,
-            finalized_j_height,
-            false,
-        )?;
+        let mut decoded =
+            decode_concrete_runtime_wal_frame(&source, &context_policy, finalized_j_height, false)
+                .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))?;
+        let input = &mut decoded.input;
         let ingress = input.entity_inputs.iter().try_fold(0_u64, |total, input| {
             let count = u64::try_from(input.account_input_count())
                 .map_err(|_| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())?;
@@ -418,8 +401,8 @@ pub fn replay_runtime_wal(
             let replica = processor
                 .replica()
                 .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?;
-            reconcile_recorded_input_with_resident_queue(
-                &mut input,
+            reconcile_runtime_input_with_resident_queue(
+                input,
                 replica.mempool.pending_entity_inputs(),
             )
         };
@@ -432,7 +415,7 @@ pub fn replay_runtime_wal(
 
         let started = Instant::now();
         let report = processor
-            .process(input)
+            .process(decoded.input)
             .map_err(|error| format!("RUNTIME_REPLAY_PROCESS:{height}:{error}"))?;
         metrics.engine_elapsed += started.elapsed();
         metrics.apply_elapsed += report.timings.apply;
@@ -562,6 +545,49 @@ pub fn replay_runtime_wal(
             metrics.outbox_digests_compared,
             metrics.post_state_hashes_compared,
             metrics.runtime_roots_compared,
+        ));
+    }
+    let expected_height = processor
+        .replica()
+        .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?
+        .state
+        .height;
+    let expected_accounts_root = processor
+        .replica()
+        .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?
+        .state
+        .accounts_root;
+    let expected_lineage = processor
+        .replica()
+        .map_err(|error| format!("RUNTIME_REPLAY_FINAL_REPLICA:{error}"))?
+        .durable
+        .prev_frame_hash();
+    drop(processor);
+    let restarted = native_restart::restore_native_replay_processor(
+        native_database,
+        runtime_seed,
+        runtime_signer_label,
+        entity_signer_label,
+        workers,
+        restart_routes,
+        migration_origin,
+    )?;
+    let actual = restarted
+        .processor
+        .replica()
+        .map_err(|error| format!("RUNTIME_REPLAY_RESTART_REPLICA:{error}"))?;
+    if actual.state.height != expected_height
+        || actual.state.accounts_root != expected_accounts_root
+        || actual.durable.prev_frame_hash() != expected_lineage
+    {
+        return Err(format!(
+            "RUNTIME_REPLAY_RESTART_MISMATCH:height={}/{}:accounts={}/{}:lineage={}/{}",
+            actual.state.height,
+            expected_height,
+            hex(&actual.state.accounts_root),
+            hex(&expected_accounts_root),
+            hex(&actual.durable.prev_frame_hash()),
+            hex(&expected_lineage),
         ));
     }
     Ok(metrics)

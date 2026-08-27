@@ -67,6 +67,8 @@ pub struct DecodedRuntimeWalFrame {
     /// fake expected evidence.
     pub expected_accounts_root: Option<[u8; 32]>,
     pub expected_entity_root: [u8; 32],
+    pub expected_previous_frame_hash: [u8; 32],
+    pub expected_frame_hash: [u8; 32],
 }
 
 pub struct RestoredRuntime {
@@ -107,6 +109,8 @@ pub enum ConcreteRestoreError {
     AccountWire(#[from] AccountWireRestoreError),
     #[error("RRS_RESTORE_ENTITY_MANIFEST:{0}")]
     EntityManifest(String),
+    #[error(transparent)]
+    Envelope(#[from] crate::RuntimeDurableEnvelopeError),
 }
 
 fn hex(value: &[u8; 32]) -> String {
@@ -305,7 +309,12 @@ pub fn replay_decoded_runtime_wal(
             &applied.replica.entity_consensus.state.sections,
             frame.expected_entity_root,
         )?;
-        restored.replica = applied.replica;
+        let mut replica = applied.replica;
+        replica.durable.advance_frame_hash(
+            frame.expected_previous_frame_hash,
+            frame.expected_frame_hash,
+        )?;
+        restored.replica = replica;
     }
     Ok(restored)
 }

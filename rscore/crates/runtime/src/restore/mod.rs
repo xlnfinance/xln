@@ -23,6 +23,8 @@ mod entity_snapshot;
 #[path = "entity/entity_tree.rs"]
 mod entity_tree;
 mod model;
+#[path = "native/source.rs"]
+mod native_source;
 mod orchestrator;
 #[path = "orderbook/orderbook_accounts.rs"]
 mod orderbook_accounts;
@@ -30,13 +32,18 @@ mod orderbook_accounts;
 mod orderbook_graph;
 #[path = "orderbook/orderbook_metadata.rs"]
 mod orderbook_metadata;
+#[path = "native/path_checkpoint.rs"]
 mod path_checkpoint;
 mod source;
 mod verification;
+mod wal_input;
 
 pub use model::{
     DurableRuntimeIdentity, ExactRuntimeCheckpoint, ExactRuntimeWalFrame, RestoreBoundary,
     RestoreCommitments, RestoreDigest, RestoreHead,
+};
+pub use native_source::{
+    NativeConcreteRestoreSources, NativeRestoreSourceError, load_native_restore_sources,
 };
 pub use orchestrator::{
     ExactRestoreError, ExactRestoreTarget, RestoreStage, restore_exact_runtime,
@@ -76,4 +83,8 @@ pub use orderbook_graph::{HydratedOrderbook, OrderbookGraphRestoreError, hydrate
 pub(crate) use path_checkpoint::checkpoint_protocol_fingerprint;
 pub use path_checkpoint::{
     PathCheckpointRestoreError, RestoredReplicaMetadata, restore_path_checkpoint,
+};
+pub use wal_input::{
+    ConcreteWalDecodeError, decode_concrete_runtime_wal_frame,
+    reconcile_runtime_input_with_resident_queue,
 };

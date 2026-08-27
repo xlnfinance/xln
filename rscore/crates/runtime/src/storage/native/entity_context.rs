@@ -10,6 +10,8 @@ use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
+mod rebuild;
+
 const MAX_ENTITY_CONTEXT_PAYLOAD_BYTES: usize = 10_000;
 const REFERENCE_PAGE_SIZE: usize = 64;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
