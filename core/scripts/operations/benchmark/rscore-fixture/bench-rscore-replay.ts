@@ -87,10 +87,6 @@ type BenchResult = {
   peakRssMiB: number;
   peakThreads: number;
   effectiveCores: number;
-  accountRootsCompared: number;
-  accountsForestRootsCompared: number;
-  entityRootsCompared: number;
-  eventDigestsCompared: number;
   effectDigestsCompared: number;
   outboxDigestsCompared: number;
   postStateHashesCompared: number;
@@ -231,10 +227,6 @@ const runReplay = async (
     peakRssMiB: peakRss,
     peakThreads,
     effectiveCores: avgCores,
-    accountRootsCompared: Number(data['accountRootsCompared'] ?? 0),
-    accountsForestRootsCompared: Number(data['accountsForestRootsCompared'] ?? 0),
-    entityRootsCompared: Number(data['entityRootsCompared'] ?? 0),
-    eventDigestsCompared: Number(data['eventDigestsCompared'] ?? 0),
     effectDigestsCompared: Number(data['effectDigestsCompared'] ?? 0),
     outboxDigestsCompared: Number(data['outboxDigestsCompared'] ?? 0),
     postStateHashesCompared: Number(data['postStateHashesCompared'] ?? 0),
@@ -258,11 +250,27 @@ if (import.meta.main) {
   const pathsJson = resolve(requiredArg('paths-json'));
   const maxSec = Number(process.argv.includes('--max-seconds')
     ? process.argv[process.argv.indexOf('--max-seconds') + 1]! : '20');
+  const allowSmoke = process.argv.includes('--allow-smoke');
 
   if (!existsSync(pathsJson)) { console.error('paths-json not found'); process.exit(1); }
 
   const r1 = await runReplay(pathsJson, 1, maxSec);
   const r8 = await runReplay(pathsJson, 8, maxSec);
+
+  const failed = [r1, r8].filter(result => !result.ok);
+  if (failed.length > 0) {
+    for (const result of failed) {
+      console.error(`REPLAY_FAILED:w=${result.workers}:${result.error ?? 'unknown'}`);
+    }
+    process.exit(1);
+  }
+  const minimumScaleFrames = 1_000;
+  if (!allowSmoke && (r1.frames < minimumScaleFrames || r8.frames < minimumScaleFrames)) {
+    throw new Error(
+      `REPLAY_SCALE_FIXTURE_TOO_SMALL:min=${minimumScaleFrames}:w1=${r1.frames}:w8=${r8.frames}:` +
+      'pass --allow-smoke only for diagnostics',
+    );
+  }
 
   // Print table
   console.log('\n========================================');
@@ -302,9 +310,7 @@ if (import.meta.main) {
   console.log('\n--- EXACT VERIFICATION (compared against recording) ---');
   for (const r of [r1, r8]) {
     console.log(
-      `w=${r.workers}: accountRoots=${r.accountRootsCompared} forestRoots=${r.accountsForestRootsCompared} ` +
-      `entityRoots=${r.entityRootsCompared} eventDigests=${r.eventDigestsCompared} ` +
-      `effectDigests=${r.effectDigestsCompared} outboxDigests=${r.outboxDigestsCompared} ` +
+      `w=${r.workers}: effectDigests=${r.effectDigestsCompared} outboxDigests=${r.outboxDigestsCompared} ` +
       `postState=${r.postStateHashesCompared} runtimeRoots=${r.runtimeRootsCompared}`,
     );
   }

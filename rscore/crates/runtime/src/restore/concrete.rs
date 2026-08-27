@@ -78,6 +78,10 @@ pub struct DecodedRuntimeWalFrame {
     pub expected_entity_root: Option<[u8; 32]>,
     pub expected_previous_frame_hash: [u8; 32],
     pub expected_frame_hash: [u8; 32],
+    /// The frame's committed canonical Runtime state hash, when the frame
+    /// carries one. Exposed from the one validation pass the decode already
+    /// runs so callers never re-parse the frame to read it.
+    pub canonical_state_hash: Option<[u8; 32]>,
 }
 
 pub struct RestoredRuntime {

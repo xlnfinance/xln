@@ -32,10 +32,8 @@ pub use checkpoint_wire::{
 pub use consensus::{
     AccountAdmissionResult, AccountAdmissionVerdict, AccountInputKind, AccountInputResult,
     AccountInputRow, AccountInputVerdict, AccountPeerInput, CertifiedBoardAuthorityResolver,
-    DroppedRow, EntityProposalSelection, EntityStageContext, EntityStageReceipt, EntityStageStatus,
-    EntityWave, EntityWaveOps, FailedHtlcLockRow, PeerBoardAuthority, ProposalRow, ProposedRow,
-    StageKey, StatefulConsensusEngine, UpstreamHtlcResolutionRow, WaveOp, WaveOpsRequest,
-    WaveProposalRequest, WaveRequest, WaveResult,
+    DroppedRow, FailedHtlcLockRow, PeerBoardAuthority, ProposalRow, ProposedRow,
+    UpstreamHtlcResolutionRow,
 };
 pub use error::BatchError;
 pub use parallel::{AccountPhaseKind, AccountPhaseMetric, AccountShardMetric};

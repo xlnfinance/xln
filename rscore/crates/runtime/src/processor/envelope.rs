@@ -38,13 +38,11 @@ const J_REPLICA_OPTIONAL_FIELDS: [&str; 7] = [
     "entityProviderDeploymentBlock",
     "contracts",
 ];
-const STORAGE_CONFIG_FIELDS: [&str; 9] = [
+const STORAGE_CONFIG_FIELDS: [&str; 7] = [
     "enabled",
     "snapshotPeriodFrames",
     "retainSnapshots",
     "epochMaxBytes",
-    "historyViewMaxBytes",
-    "historyViewRetainFrames",
     "materializePeriodFrames",
     "canonicalHashPeriodFrames",
     "accountMerkleRadix",
@@ -77,8 +75,6 @@ pub(crate) struct RuntimeStorageConfig {
     snapshot_period_frames: Option<u64>,
     retain_snapshots: Option<u64>,
     epoch_max_bytes: Option<u64>,
-    history_view_max_bytes: Option<u64>,
-    history_view_retain_frames: Option<u64>,
     materialize_period_frames: Option<u64>,
     canonical_hash_period_frames: Option<u64>,
     account_merkle_radix: Option<u64>,
@@ -115,13 +111,11 @@ impl RuntimeStorageConfig {
         Value::Object(output)
     }
 
-    fn numeric_fields(&self) -> [(&'static str, Option<u64>); 8] {
+    fn numeric_fields(&self) -> [(&'static str, Option<u64>); 6] {
         [
             ("snapshotPeriodFrames", self.snapshot_period_frames),
             ("retainSnapshots", self.retain_snapshots),
             ("epochMaxBytes", self.epoch_max_bytes),
-            ("historyViewMaxBytes", self.history_view_max_bytes),
-            ("historyViewRetainFrames", self.history_view_retain_frames),
             ("materializePeriodFrames", self.materialize_period_frames),
             (
                 "canonicalHashPeriodFrames",
@@ -420,8 +414,6 @@ fn decode_storage_config(
         snapshot_period_frames: optional_safe_u64(object, "snapshotPeriodFrames")?,
         retain_snapshots: optional_safe_u64(object, "retainSnapshots")?,
         epoch_max_bytes: optional_safe_u64(object, "epochMaxBytes")?,
-        history_view_max_bytes: optional_safe_u64(object, "historyViewMaxBytes")?,
-        history_view_retain_frames: optional_safe_u64(object, "historyViewRetainFrames")?,
         materialize_period_frames: optional_safe_u64(object, "materializePeriodFrames")?,
         canonical_hash_period_frames: optional_safe_u64(object, "canonicalHashPeriodFrames")?,
         account_merkle_radix,
@@ -811,10 +803,8 @@ mod tests {
                 "snapshotPeriodFrames": 6,
                 "retainSnapshots": 7,
                 "epochMaxBytes": 8,
-                "historyViewMaxBytes": 9,
-                "historyViewRetainFrames": 10,
-                "materializePeriodFrames": 11,
-                "canonicalHashPeriodFrames": 12,
+                "materializePeriodFrames": 9,
+                "canonicalHashPeriodFrames": 10,
                 "accountMerkleRadix": 256,
             },
         });

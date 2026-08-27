@@ -26,6 +26,7 @@ mod mesh_seed;
 pub mod processor;
 mod recording;
 pub mod restore;
+pub mod rheader;
 pub mod storage;
 #[path = "codec/storage_msgpack.rs"]
 mod storage_msgpack;

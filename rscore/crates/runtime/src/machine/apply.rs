@@ -327,7 +327,7 @@ fn internal_wake(
     replica: &RuntimeReplica,
     frame: &RuntimeFrameContext,
 ) -> Result<Option<RuntimeWake>, RuntimeMachineError> {
-    let account_mempool = !replica.accounts.proposable_account_ids()?.is_empty();
+    let account_mempool = replica.accounts.has_proposable_accounts()?;
     let jobs = match &replica.state.entity.crontab {
         Some(crontab) => collect_due_scheduled_wake_jobs(
             crontab,

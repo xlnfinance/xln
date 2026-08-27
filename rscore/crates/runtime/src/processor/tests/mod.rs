@@ -31,7 +31,8 @@ use crate::storage::native::{
 };
 use crate::transport::{
     DirectOutboxPublisher, DirectOutboxPublisherConfig, DirectRoute, DirectRouteTable,
-    DirectRuntimeIngress, DirectRuntimeIngressConfig, InboundEntityInputs,
+    DirectRuntimeIngress, DirectRuntimeIngressConfig, DirectSession, InboundEntityInputs,
+    OutboundEnvelope, SessionConfig, encryption_identity,
 };
 use crate::{
     CanonicalEntityInfraMaterializer, canonical_value_from_tagged_json,
@@ -580,7 +581,7 @@ fn live_service_resends_the_durable_outbox_before_accepting_input() {
         target_entity_id,
         target_runtime_id: server.runtime_id.clone(),
         target_signer_id,
-        websocket_url: format!("ws://127.0.0.1:{}/ws", server.port),
+        websocket_url: Some(format!("ws://127.0.0.1:{}/ws", server.port)),
     }])
     .expect("startup resend route");
     let processor = DurableRuntimeProcessor::new(
@@ -613,6 +614,137 @@ fn live_service_resends_the_durable_outbox_before_accepting_input() {
     service.shutdown().expect("startup service shutdown");
     drop(service);
     std::fs::remove_dir_all(path).expect("remove startup resend fixture");
+}
+
+#[test]
+fn restart_holds_one_inbound_batch_until_inbound_only_outbox_is_publishable() {
+    let path = path();
+    let _ = std::fs::remove_dir_all(&path);
+    let user_seed = "rrs-inbound-only-user";
+    let user_signer = "user";
+    let user_runtime_id = derive_local_runtime_id(user_seed, user_signer).expect("user runtime id");
+    let target_entity_id = format!("0x{}", "ab".repeat(32));
+    let target_signer_id = format!("0x{}", "cd".repeat(20));
+    let encoded = build_runtime_frame_commit(
+        CanonicalRuntimeFrameDraft {
+            height: 1,
+            timestamp: 150,
+            prev_frame_hash: [0; 32],
+            replica_meta_digest: [0x11; 32],
+            runtime_component_digests: Vec::new(),
+            materialized_state: false,
+            canonical_state: None,
+            runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+            runtime_machine_root: None,
+            account_authority_checkpoints: Vec::new(),
+            touched_entities: Vec::new(),
+            touched_accounts: Vec::new(),
+            touched_book_entities: Vec::new(),
+        },
+        crate::storage::native::EntityContextPayloadRows::empty(),
+        vec![live_socket_output(
+            &user_runtime_id,
+            &target_entity_id,
+            &target_signer_id,
+        )],
+        None,
+    )
+    .expect("inbound-only pending frame");
+    let frame_hash = encoded.frame_hash;
+    let mut store = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
+        .expect("inbound-only store");
+    store
+        .append_frame(encoded.commit)
+        .expect("inbound-only fsync");
+    let mut replica = processor_replica();
+    replica.state.height = 1;
+    replica
+        .durable
+        .advance_frame_hash([0; 32], frame_hash)
+        .expect("inbound-only lineage");
+    let hub_entity_id = replica.state.entity.entity_id.clone();
+    let hub_signer_id = replica.signer_id.clone();
+    let routes = EntityRouteTable::new([EntityRoute {
+        target_entity_id,
+        target_runtime_id: user_runtime_id.clone(),
+        target_signer_id,
+        websocket_url: None,
+    }])
+    .expect("inbound-only route");
+    let processor = DurableRuntimeProcessor::new(
+        replica,
+        store,
+        routes,
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("inbound-only signer"),
+    )
+    .expect("inbound-only processor");
+    let ingress = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        SOURCE_SEED,
+        SOURCE_SIGNER,
+    ))
+    .expect("inbound-only ingress");
+    let mut service = ResidentRuntimeService::new(
+        processor,
+        ingress,
+        Box::new(CanonicalEntityInfraMaterializer::new(json!({
+            "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+            "swapTakerFeeBps": 0,
+            "jurisdictionId": null,
+            "pairPolicies": []
+        }))),
+    )
+    .expect("restart without dialing the user");
+    assert!(service.processor().has_pending_publication());
+    assert!(
+        service
+            .process_next(std::time::Duration::from_millis(50))
+            .expect("idle while pending")
+            .is_none()
+    );
+    assert!(service.processor().has_pending_publication());
+    let hub_runtime_id = service.runtime_id().to_owned();
+    let mut user = DirectSession::connect(SessionConfig {
+        url: &format!("ws://{}/ws", service.local_address()),
+        target_runtime_id: &hub_runtime_id,
+        source_runtime_id: &user_runtime_id,
+        source_seed: user_seed,
+        source_signer_id: user_signer,
+        identity: &encryption_identity(user_seed),
+        io_timeout: std::time::Duration::from_secs(3),
+        max_message_bytes: 32 * 1024 * 1024,
+    })
+    .expect("user reconnects");
+    user.send_envelope(&OutboundEnvelope {
+        target_runtime_id: hub_runtime_id.clone(),
+        source_height: 1,
+        source_timestamp: 123,
+        entity_id: Some(hub_entity_id.clone()),
+        transaction_count: 0,
+        value: json!({
+            "sourceRuntimeId": user_runtime_id,
+            "sourceRuntimeHeight": 1,
+            "sourceRuntimeTimestamp": 123,
+            "entityInputs": [{
+                "runtimeId": hub_runtime_id,
+                "entityId": hub_entity_id,
+                "signerId": hub_signer_id,
+                "entityTxs": [],
+            }],
+        }),
+        row_count: 1,
+    })
+    .expect("user inbound batch");
+    let report = service.process_next(std::time::Duration::from_secs(3));
+    assert!(!service.processor().has_pending_publication());
+    report.expect("held batch processed or idle after publish");
+    let reply = user.recv_envelope().expect("hub reply after reconnect");
+    assert_eq!(reply["sourceRuntimeHeight"], 1);
+    user.close();
+    service.shutdown().expect("inbound-only shutdown");
+    drop(service);
+    std::fs::remove_dir_all(path).expect("remove inbound-only fixture");
 }
 
 #[test]
@@ -809,7 +941,7 @@ fn failed_socket_after_fsync_blocks_the_next_runtime_input() {
         target_entity_id: format!("0x{}", "ff".repeat(32)),
         target_runtime_id: format!("0x{}", "55".repeat(20)),
         target_signer_id: format!("0x{}", "66".repeat(20)),
-        websocket_url: "ws://127.0.0.1:1/ws".into(),
+        websocket_url: Some("ws://127.0.0.1:1/ws".into()),
     }])
     .expect("remote route");
     let store =
@@ -880,7 +1012,7 @@ fn replay_validate_only_uses_the_same_durable_route_and_outbox_path() {
         // The explicit replay target validates this as a production route but
         // never opens it. `new()` with the same route is covered above and
         // fails after fsync when the real socket is unavailable.
-        websocket_url: "ws://127.0.0.1:1/ws".into(),
+        websocket_url: Some("ws://127.0.0.1:1/ws".into()),
     }])
     .expect("remote route");
     let store =
@@ -919,7 +1051,7 @@ fn fsync_precedes_real_websocket_and_local_continuation_uses_the_next_context() 
         target_entity_id: format!("0x{}", "ff".repeat(32)),
         target_runtime_id: server.runtime_id.clone(),
         target_signer_id: format!("0x{}", "66".repeat(20)),
-        websocket_url: format!("ws://127.0.0.1:{}/ws", server.port),
+        websocket_url: Some(format!("ws://127.0.0.1:{}/ws", server.port)),
     }])
     .expect("remote route");
     let store =

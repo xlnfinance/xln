@@ -264,6 +264,7 @@ pub fn decode_concrete_runtime_wal_frame(
         expected_entity_root: expected_entity_root(&frame)?,
         expected_previous_frame_hash: validated.prev_frame_hash,
         expected_frame_hash: validated.frame_hash,
+        canonical_state_hash: validated.canonical_state_hash,
     })
 }
 

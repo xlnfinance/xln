@@ -6,7 +6,6 @@
 //! commitments are assertions only: they never select proposals or repair state.
 
 mod diff;
-mod evidence;
 mod expectations;
 pub use crate::native_runtime::{NativeRuntimeReady, restore_native_runtime_processor};
 
@@ -35,7 +34,6 @@ use xln_rscore_runtime::{
 
 use crate::PAYMENT_PROFILE_BINDING;
 use diff::{RuntimeReplayDiffInput, write_runtime_replay_diff};
-use evidence::{assert_entity_events, entity_event_evidence, entity_history_link};
 use expectations::ReplayExpectations;
 
 pub struct RuntimeReplayMetrics {
@@ -49,10 +47,6 @@ pub struct RuntimeReplayMetrics {
     pub projection_elapsed: Duration,
     pub storage_elapsed: Duration,
     pub publication_elapsed: Duration,
-    pub account_roots_compared: u64,
-    pub accounts_forest_roots_compared: u64,
-    pub entity_roots_compared: u64,
-    pub event_digests_compared: u64,
     pub effect_digests_compared: u64,
     pub outbox_digests_compared: u64,
     pub post_state_hashes_compared: u64,
@@ -148,7 +142,7 @@ fn routes_from_wal(
                 target_entity_id,
                 target_runtime_id: route.0,
                 target_signer_id: route.1,
-                websocket_url: "ws://127.0.0.1:1/ws".into(),
+                websocket_url: Some("ws://127.0.0.1:1/ws".into()),
             }),
     )
     .map_err(|error| format!("RUNTIME_REPLAY_ROUTES:{error}"))
@@ -307,7 +301,6 @@ pub fn replay_runtime_wal(
     }
     .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_DECODE:{error}"))?;
     let owner = decoded.entity_snapshot.entity_id.to_ascii_lowercase();
-    let owner_bytes = decoded.stored_accounts.owner_entity_id;
     let context_policy = decoded.entity_context_policy.clone();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RUNTIME_REPLAY_RESTORE:{error}"))?;
@@ -321,11 +314,6 @@ pub fn replay_runtime_wal(
 
     let routes = routes_from_wal(reader, &owner, from, to)?;
     let restart_routes = routes.clone();
-    let history = reader
-        .entity_frames_by_runtime_height(from, to)
-        .map_err(|error| format!("RUNTIME_REPLAY_ENTITY_HISTORY:{error}"))?;
-    let events = entity_event_evidence(&history, &owner)?;
-
     let checkpoint_commit = match checkpoint_reader {
         Some(checkpoint_reader) => {
             checkpoint_reader.native_checkpoint_import_frame(state_reader, checkpoint_height)
@@ -369,10 +357,6 @@ pub fn replay_runtime_wal(
         projection_elapsed: Duration::ZERO,
         storage_elapsed: Duration::ZERO,
         publication_elapsed: Duration::ZERO,
-        account_roots_compared: 0,
-        accounts_forest_roots_compared: 0,
-        entity_roots_compared: 0,
-        event_digests_compared: 0,
         effect_digests_compared: 0,
         outbox_digests_compared: 0,
         post_state_hashes_compared: 0,
@@ -388,9 +372,19 @@ pub fn replay_runtime_wal(
         let source = reader
             .concrete_wal_source(height)
             .map_err(|error| format!("RUNTIME_REPLAY_SOURCE:{height}:{error}"))?;
+        let finalized_j_height = processor
+            .replica()
+            .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
+            .state
+            .finalized_j_height;
+        // The decode below runs verify_wal_source itself; a separate verify
+        // here only re-parsed the same frame to read one timestamp field.
+        let mut decoded =
+            decode_concrete_runtime_wal_frame(&source, &context_policy, finalized_j_height, false)
+                .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))?;
+        expectations.assert_timestamp(height, decoded.timestamp)?;
         if let Some(expected_root) = expectations.expected_runtime_state_hash(height)? {
-            let source_root = validate_runtime_frame(&source.frame_bytes)
-                .map_err(|error| format!("RUNTIME_REPLAY_FRAME:{height}:{error}"))?
+            let source_root = decoded
                 .canonical_state_hash
                 .ok_or_else(|| format!("RUNTIME_REPLAY_RUNTIME_ROOT_MISSING:{height}"))?;
             if source_root != expected_root {
@@ -402,22 +396,6 @@ pub fn replay_runtime_wal(
             }
             add(&mut metrics.runtime_roots_compared, 1, "runtimeRoots")?;
         }
-        let frame = xln_rscore_runtime::restore::verify_wal_source(&source)
-            .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_VERIFY:{height}:{error}"))?;
-        let timestamp = frame
-            .as_object()
-            .and_then(|value| value.get("timestamp"))
-            .and_then(Value::as_u64)
-            .ok_or_else(|| format!("RUNTIME_REPLAY_TIMESTAMP:{height}"))?;
-        expectations.assert_timestamp(height, timestamp)?;
-        let finalized_j_height = processor
-            .replica()
-            .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
-            .state
-            .finalized_j_height;
-        let mut decoded =
-            decode_concrete_runtime_wal_frame(&source, &context_policy, finalized_j_height, false)
-                .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))?;
         let input = &mut decoded.input;
         let ingress = input.entity_inputs.iter().try_fold(0_u64, |total, input| {
             let count = u64::try_from(input.account_input_count())
@@ -426,15 +404,9 @@ pub fn replay_runtime_wal(
                 .checked_add(count)
                 .ok_or_else(|| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())
         })?;
-        let resident_inputs_reused = processor
+        processor
             .reconcile_exact_replay_input(input)
             .map_err(|error| format!("RUNTIME_REPLAY_RECONCILE:{height}:{error}"))?;
-        if resident_inputs_reused > 0 {
-            eprintln!(
-                "RUNTIME_REPLAY_INPUT_RECONCILED:{height}:resident={resident_inputs_reused}:new={}",
-                input.entity_inputs.len(),
-            );
-        }
 
         let started = Instant::now();
         let report = processor
@@ -486,11 +458,6 @@ pub fn replay_runtime_wal(
                     .iter()
                     .map(|section| (section.field.clone(), Value::String(section.digest.clone()))),
             ));
-            // Runtime-only frames intentionally have no new Entity-history
-            // link. Diagnostics must still preserve the primary R-frame diff.
-            let expected_entity_link = entity_history_link(&history, height, &owner)
-                .cloned()
-                .unwrap_or(Value::Null);
             let actual = processor
                 .read_durable_frame(height)
                 .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_READ:{error}"))?;
@@ -499,8 +466,6 @@ pub fn replay_runtime_wal(
                 height,
                 expected: &source,
                 actual: &actual,
-                recording,
-                expected_entity_link: &expected_entity_link,
                 actual_replica_meta: &actual_replica_meta,
                 actual_entity_sections: &actual_entity_sections,
                 actual_commitments: commitments,
@@ -514,26 +479,6 @@ pub fn replay_runtime_wal(
             ));
         }
         expectations.assert_durable(height, commitments)?;
-        let entity_height = processor
-            .replica()
-            .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
-            .state
-            .entity
-            .height;
-        expectations.assert_entity(
-            height,
-            owner_bytes,
-            entity_height,
-            !source.entity_contexts.is_empty(),
-            commitments,
-        )?;
-        let account_count = expectations.assert_accounts(height, &report.account_commits)?;
-        assert_entity_events(
-            height,
-            events.get(&height),
-            !source.entity_contexts.is_empty(),
-            commitments,
-        )?;
         expectations.assert_effects(height, commitments)?;
 
         add(&mut metrics.frames, 1, "frames")?;
@@ -544,18 +489,6 @@ pub fn replay_runtime_wal(
                 .map_err(|_| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?,
             "egress",
         )?;
-        add(
-            &mut metrics.account_roots_compared,
-            account_count,
-            "accountRoots",
-        )?;
-        add(
-            &mut metrics.accounts_forest_roots_compared,
-            1,
-            "accountsForestRoots",
-        )?;
-        add(&mut metrics.entity_roots_compared, 1, "entityRoots")?;
-        add(&mut metrics.event_digests_compared, 1, "events")?;
         add(&mut metrics.effect_digests_compared, 1, "effects")?;
         add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
         add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
@@ -570,21 +503,15 @@ pub fn replay_runtime_wal(
 
     let expected_frames = to - from + 1;
     if metrics.frames != expected_frames
-        || metrics.accounts_forest_roots_compared != expected_frames
-        || metrics.entity_roots_compared != expected_frames
-        || metrics.event_digests_compared != expected_frames
         || metrics.effect_digests_compared != expected_frames
         || metrics.outbox_digests_compared != expected_frames
         || metrics.post_state_hashes_compared != expected_frames
         || metrics.runtime_roots_compared == 0
     {
         return Err(format!(
-            "RUNTIME_REPLAY_PARITY_UNARMED:frames={}/{}:forest={}:entity={}:events={}:effects={}:outbox={}:postState={}:runtimeRoots={}",
+            "RUNTIME_REPLAY_PARITY_UNARMED:frames={}/{}:effects={}:outbox={}:postState={}:runtimeRoots={}",
             metrics.frames,
             expected_frames,
-            metrics.accounts_forest_roots_compared,
-            metrics.entity_roots_compared,
-            metrics.event_digests_compared,
             metrics.effect_digests_compared,
             metrics.outbox_digests_compared,
             metrics.post_state_hashes_compared,

@@ -40,7 +40,6 @@ const ENTITY_CONTEXT_HTLC_ENTRY_DIGESTS: u8 = 6;
 const ENTITY_CONTEXT_HTLC_ORIGINATED_DIGESTS: u8 = 7;
 const ENTITY_CONTEXT_PEER_ASSERTION_DIGESTS: u8 = 8;
 const KEY_RUNTIME_OUTPUT_ROW: u8 = 0x13;
-const KEY_HISTORY_ENTITY_FRAME: u8 = 0x03;
 const KEY_HEAD: &[u8] = &[0x20];
 const CHUNK_BYTES: usize = 9_000;
 const MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES: usize = 10_000;
@@ -508,42 +507,6 @@ impl RuntimeWalReader {
         EntityContextPayloadRows::validate(rows)
             .map_err(NativeStorageError::EntityContext)
             .map_err(Into::into)
-    }
-
-    /// Read the certified Entity-frame history used as an independent replay
-    /// oracle. Execution never consumes these bodies; callers compare their
-    /// own frame/root after applying the Runtime input.
-    pub fn entity_frames_by_runtime_height(
-        &mut self,
-        from: u64,
-        to: u64,
-    ) -> Result<BTreeMap<u64, Vec<Value>>, RuntimeLevelDbError> {
-        let keys = self
-            .prefixed_rows(&[KEY_HISTORY_ENTITY_FRAME])?
-            .into_iter()
-            .map(|(key, _)| key)
-            .collect::<Vec<_>>();
-        let mut frames = BTreeMap::<u64, Vec<Value>>::new();
-        for key in keys {
-            if key.len() != 41 {
-                return Err(RuntimeLevelDbError::Output(format!(
-                    "ENTITY_HISTORY_KEY_LENGTH:{}",
-                    key.len()
-                )));
-            }
-            let value = self.required_bounded(&key)?;
-            let runtime_height = value
-                .as_object()
-                .and_then(|value| value.get("runtimeHeight"))
-                .and_then(Value::as_u64)
-                .ok_or_else(|| {
-                    RuntimeLevelDbError::Output("ENTITY_HISTORY_RUNTIME_HEIGHT".into())
-                })?;
-            if (from..=to).contains(&runtime_height) {
-                frames.entry(runtime_height).or_default().push(value);
-            }
-        }
-        Ok(frames)
     }
 
     fn prefixed_rows(&mut self, prefix: &[u8]) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {

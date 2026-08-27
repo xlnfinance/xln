@@ -99,16 +99,6 @@ pub enum BatchError {
         input_index: u32,
         account_id: AccountId,
     },
-    /// Two groups in one wave claiming the same owner Entity, which would give
-    /// that Entity two clocks and the wave no single answer about expiry.
-    #[error("RSCORE_BATCH_WAVE_ENTITY_DUPLICATE:{entity_id}")]
-    WaveEntityDuplicate { entity_id: String },
-    #[error("RSCORE_BATCH_WAVE_ENTITY_UNKNOWN:{entity_id}")]
-    WaveEntityUnknown { entity_id: String },
-    #[error("RSCORE_BATCH_WAVE_ENTITY_NOT_PROPOSER:{entity_id}")]
-    WaveEntityNotProposer { entity_id: String },
-    #[error("RSCORE_BATCH_WAVE_PROPOSAL_ORDER:{entity_id}")]
-    WaveProposalOrder { entity_id: String },
     /// An Entity's group naming an account owned by someone else. The account
     /// says who owns it; the group is not trusted to.
     #[error("RSCORE_BATCH_WAVE_ACCOUNT_OWNER:{account_id}:{entity_id}")]
@@ -118,10 +108,6 @@ pub enum BatchError {
     },
     #[error("RSCORE_BATCH_WAVE_CREATE_EXISTING:{0}")]
     WaveCreateExisting(AccountId),
-    #[error("RSCORE_BATCH_WAVE_CREATE_DUPLICATE:{0}")]
-    WaveCreateDuplicate(AccountId),
-    #[error("RSCORE_BATCH_WAVE_CREATE_AFTER_USE:{0}")]
-    WaveCreateAfterUse(AccountId),
     #[error("RSCORE_BATCH_WAVE_CREATE_COUNTERPARTY:{account_id}:{counterparty}")]
     WaveCreateCounterparty {
         account_id: AccountId,
@@ -147,16 +133,6 @@ pub enum BatchError {
         actual: String,
         expected: String,
     },
-    #[error("RSCORE_BATCH_WAVE_CREATE_UNUSED:{0}")]
-    WaveCreateUnused(AccountId),
-    #[error("RSCORE_BATCH_WAVE_PENDING")]
-    WavePending,
-    #[error("RSCORE_BATCH_WAVE_MISSING")]
-    WaveMissing,
-    #[error("RSCORE_BATCH_WAVE_OPEN")]
-    WaveOpen,
-    #[error("RSCORE_BATCH_WAVE_SEALED")]
-    WaveSealed,
     #[error("RSCORE_BATCH_ENTITY_ROUND_OPEN")]
     EntityRoundOpen,
     #[error("RSCORE_BATCH_ENTITY_ROUND_MISSING")]
@@ -184,43 +160,6 @@ pub enum BatchError {
         account: String,
         lock_id: String,
     },
-    #[error("RSCORE_BATCH_ENTITY_STAGE_OPEN:{0}")]
-    EntityStageOpen(crate::StageKey),
-    #[error("RSCORE_BATCH_ENTITY_STAGE_MISSING:{0}")]
-    EntityStageMissing(crate::StageKey),
-    #[error("RSCORE_BATCH_ENTITY_STAGE_KEY:{actual}:{expected}")]
-    EntityStageKey {
-        actual: crate::StageKey,
-        expected: crate::StageKey,
-    },
-    #[error("RSCORE_BATCH_ENTITY_STAGE_ORDINAL:{actual}:{expected}")]
-    EntityStageOrdinal { actual: u64, expected: u64 },
-    #[error("RSCORE_BATCH_ENTITY_STAGE_ORDINAL_OVERFLOW")]
-    EntityStageOrdinalOverflow,
-    #[error("RSCORE_BATCH_ENTITY_STAGE_REPLAY:{key}:{detail}")]
-    EntityStageReplay {
-        key: crate::StageKey,
-        detail: &'static str,
-    },
-    #[error("RSCORE_BATCH_ENTITY_STAGE_DECISION:{key}:{actual}:{expected}")]
-    EntityStageDecisionConflict {
-        key: crate::StageKey,
-        actual: crate::EntityStageStatus,
-        expected: crate::EntityStageStatus,
-    },
-    #[error("RSCORE_BATCH_ENTITY_STAGE_OWNER:{key}:{actual}:{expected}")]
-    EntityStageOwner {
-        key: crate::StageKey,
-        actual: String,
-        expected: String,
-    },
-    #[error("RSCORE_BATCH_WAVE_REVISION:{actual}:{expected}")]
-    WaveRevision { actual: u64, expected: u64 },
-    #[error("RSCORE_BATCH_WAVE_CANDIDATE:{actual}:{expected}")]
-    WaveCandidate {
-        actual: crate::CandidateId,
-        expected: crate::CandidateId,
-    },
     #[error("RSCORE_BATCH_CHECKPOINT_REVISION:{actual}:{expected}")]
     CheckpointRevision { actual: u64, expected: u64 },
     #[error("RSCORE_BATCH_CHECKPOINT_ACCOUNT_KEY:{width}")]
@@ -237,8 +176,6 @@ pub enum BatchError {
     CheckpointRoot { actual: String, expected: String },
     #[error("RSCORE_BATCH_CHECKPOINT_SIGNER_DIGEST:{actual}:{expected}")]
     CheckpointSignerDigest { actual: String, expected: String },
-    #[error("RSCORE_BATCH_CHECKPOINT_TOKEN:{actual}:{expected}")]
-    CheckpointToken { actual: String, expected: String },
     #[error("RSCORE_BATCH_SEED_RESTORE:{account_id}:{detail}")]
     SeedRestore {
         account_id: AccountId,

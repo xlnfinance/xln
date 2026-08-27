@@ -71,7 +71,12 @@ struct WorkerMutationBatch<T> {
 }
 
 struct WorkerMutationReply<R> {
-    rows: Vec<(usize, AccountId, R)>,
+    /// `(input position, account, post-phase value digest, result)`. The
+    /// digest is the exact stored leaf commitment after this phase: the Put
+    /// `value_digest` for changed rows, the resident stored digest for kept
+    /// rows. Callers may therefore materialize leaves from the same reply
+    /// without a second read visit.
+    rows: Vec<(usize, AccountId, [u8; 32], R)>,
     changed: Vec<AccountId>,
     descriptors: Vec<PersistentRadixShardDescriptor>,
     metrics: Vec<ShardPhaseMetric>,
@@ -216,7 +221,8 @@ pub(crate) enum ResidentAccountAction<V, R> {
 pub(crate) struct ResidentAccountBatch<R> {
     pub(crate) revision: u64,
     pub(crate) accounts_root: [u8; 32],
-    pub(crate) rows: Vec<(AccountId, R)>,
+    /// `(account, post-phase leaf digest, result)` in exact input order.
+    pub(crate) rows: Vec<(AccountId, [u8; 32], R)>,
 }
 
 #[derive(Debug)]
@@ -486,7 +492,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             rows: reply
                 .rows
                 .into_iter()
-                .map(|(_, account_id, row)| (account_id, row))
+                .map(|(_, account_id, digest, row)| (account_id, digest, row))
                 .collect(),
         };
         self.base_revision = base_revision;
@@ -763,7 +769,7 @@ impl<V: Clone + Send + Sync + 'static> ResidentAccountForest<V> {
             rows: reply
                 .rows
                 .into_iter()
-                .map(|(_, account_id, row)| (account_id, row))
+                .map(|(_, account_id, digest, row)| (account_id, digest, row))
                 .collect(),
         };
         self.candidate_top = Some(candidate_top);
@@ -1243,12 +1249,17 @@ where
     let mut changed_in_shard = 0;
     for (position, account_id, payload) in batch.entries {
         let current = phase_shard(resident, mode)?
-            .get(account_id.as_bytes())
-            .map_err(|error| forest_error(account_id, error))?
-            .cloned();
+            .get_with_digest(account_id.as_bytes())
+            .map_err(|error| forest_error(account_id, error))?;
+        let stored_digest = current.as_ref().map(|(_, digest)| *digest);
+        let current = current.map(|(value, _)| value.clone());
         match apply(account_id, current, payload)? {
             ResidentAccountAction::Keep(result) => {
-                reply.rows.push((position, account_id, result));
+                // A kept row must name an existing resident value; a missing
+                // value with no Put is a protocol violation, never a default.
+                let digest =
+                    stored_digest.ok_or(BatchError::CandidateAccountNotFound(account_id))?;
+                reply.rows.push((position, account_id, digest, result));
             }
             ResidentAccountAction::Put {
                 value,
@@ -1264,7 +1275,9 @@ where
                 *phase_shard_mut(resident, mode)? = updated;
                 changed_in_shard += 1;
                 reply.changed.push(account_id);
-                reply.rows.push((position, account_id, result));
+                reply
+                    .rows
+                    .push((position, account_id, value_digest, result));
             }
         }
     }
@@ -1507,7 +1520,16 @@ fn collect_worker_replies<R>(
     if let Some(error) = first_error {
         return Err(error);
     }
-    combined.rows = order_positioned_rows(combined.rows)?;
+    combined.rows = order_positioned_rows(
+        combined
+            .rows
+            .into_iter()
+            .map(|(position, account_id, digest, row)| (position, (account_id, digest, row)))
+            .collect(),
+    )?
+    .into_iter()
+    .map(|(position, (account_id, digest, row))| (position, account_id, digest, row))
+    .collect();
     combined.changed.sort_unstable();
     combined
         .descriptors
@@ -1515,19 +1537,17 @@ fn collect_worker_replies<R>(
     Ok(combined)
 }
 
-fn order_positioned_rows<R>(
-    rows: Vec<(usize, AccountId, R)>,
-) -> Result<Vec<(usize, AccountId, R)>, BatchError> {
+fn order_positioned_rows<P>(rows: Vec<(usize, P)>) -> Result<Vec<(usize, P)>, BatchError> {
     let row_count = rows.len();
     let mut slots = (0..row_count).map(|_| None).collect::<Vec<_>>();
-    for (position, account_id, row) in rows {
+    for (position, row) in rows {
         let slot = slots
             .get_mut(position)
             .ok_or(BatchError::ResidentResultPosition {
                 position,
                 count: row_count,
             })?;
-        if slot.replace((position, account_id, row)).is_some() {
+        if slot.replace((position, row)).is_some() {
             return Err(BatchError::ResidentResultPositionDuplicate { position });
         }
     }
@@ -1546,10 +1566,14 @@ fn order_positioned_rows<R>(
 fn restore_positioned_rows<R>(
     rows: Vec<(usize, AccountId, R)>,
 ) -> Result<Vec<(AccountId, R)>, BatchError> {
-    Ok(order_positioned_rows(rows)?
-        .into_iter()
-        .map(|(_, account_id, row)| (account_id, row))
-        .collect())
+    Ok(order_positioned_rows(
+        rows.into_iter()
+            .map(|(position, account_id, row)| (position, (account_id, row)))
+            .collect(),
+    )?
+    .into_iter()
+    .map(|(_, (account_id, row))| (account_id, row))
+    .collect())
 }
 
 fn next_revision(revision: u64, changed: bool) -> Result<u64, BatchError> {
@@ -1678,7 +1702,7 @@ mod tests {
             .expect("probe accepted base");
         assert!(accepted.rows.is_empty());
         assert_eq!(accepted.accounts_root, candidate.accounts_root);
-        assert_eq!(probe.rows, vec![(account(0x123, 0), 30)]);
+        assert_eq!(probe.rows, vec![(account(0x123, 0), digest(30), 30)]);
     }
 
     #[test]
@@ -1710,7 +1734,10 @@ mod tests {
         assert!(rolled_back.rows.is_empty());
         assert_eq!(rolled_back.accounts_root, base);
         assert_eq!(rolled_back.revision, 7);
-        assert_eq!(probe.rows, vec![(account(0x123, 0), 0x123 + 10)]);
+        assert_eq!(
+            probe.rows,
+            vec![(account(0x123, 0), digest(0x123 + 10), 0x123 + 10)]
+        );
     }
 
     #[test]
@@ -1787,7 +1814,7 @@ mod tests {
         let second = forest
             .apply_outbound(vec![(account(0x456, 0), 1)], propose)
             .expect("retry outbound");
-        assert_eq!(first.rows, vec![(account(0x456, 0), 21)]);
+        assert_eq!(first.rows, vec![(account(0x456, 0), digest(21), 21)]);
         assert_eq!(second.rows, first.rows);
         assert_eq!(second.accounts_root, first.accounts_root);
         assert_eq!(second.revision, first.revision);
@@ -1940,7 +1967,7 @@ mod tests {
         let continued = forest
             .apply_outbound_continue(vec![(account(0x456, 0), 40)], put)
             .expect("continue outbound");
-        assert_eq!(continued.rows, vec![(account(0x456, 0), 40)]);
+        assert_eq!(continued.rows, vec![(account(0x456, 0), digest(40), 40)]);
         assert_eq!(forest.active_overlay_dirty_len(), 2);
 
         let rows = forest
@@ -2193,7 +2220,7 @@ mod tests {
                 inbound_result
                     .rows
                     .iter()
-                    .map(|(account_id, _)| *account_id)
+                    .map(|(account_id, _, _)| *account_id)
                     .collect::<Vec<_>>(),
                 inbound
                     .iter()
@@ -2209,7 +2236,7 @@ mod tests {
                 outbound_result
                     .rows
                     .iter()
-                    .map(|(account_id, _)| *account_id)
+                    .map(|(account_id, _, _)| *account_id)
                     .collect::<Vec<_>>(),
                 outbound
                     .iter()

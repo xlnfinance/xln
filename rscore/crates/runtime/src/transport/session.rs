@@ -4,31 +4,42 @@ use serde_json::Value;
 
 use super::RuntimeTransportError;
 use super::crypto::{
-    EncryptionIdentity, SessionKeys, derive_session_keys, encrypt_session, ephemeral_identity,
-    ephemeral_public_hex, frame_mac, hello_digest, parse_public_hex, sign, static_public_hex,
+    EncryptionIdentity, SessionKeys, derive_session_keys, ephemeral_identity, ephemeral_public_hex,
+    hello_digest, parse_public_hex, sign, static_public_hex,
 };
-use super::msgpack::encode_transport;
+use super::entity_inputs_frame::{SessionCounters, SessionFrameContext, send_entity_inputs};
 use super::routing::OutboundEnvelope;
 use super::wire::{
-    Socket, object, read_value, required_text, send_value, set_timeouts, typed_array, unix_ms,
+    Socket, object, read_value, required_text, send_value, set_timeouts, unix_ms,
     verify_acknowledgement,
 };
 
-pub(super) struct DirectSession {
+#[cfg(test)]
+use super::crypto::{decrypt_session, verify_frame_mac};
+#[cfg(test)]
+use super::inbound::envelope::{exact_fields, safe_u64, text, typed_array};
+#[cfg(test)]
+use super::msgpack::decode_transport;
+#[cfg(test)]
+use super::routing::{normalize_entity_id, normalize_runtime_id};
+
+pub(crate) struct DirectSession {
     target_runtime_id: String,
     source_runtime_id: String,
     audience: String,
     challenge: String,
     encryption_public_hex: String,
+    #[cfg(test)]
+    peer_encryption_public_hex: String,
     keys: SessionKeys,
     socket: Socket,
-    message_counter: u64,
-    auth_timestamp: u64,
-    encryption_sequence: u64,
+    outbound: SessionCounters,
+    #[cfg(test)]
+    inbound: SessionCounters,
     max_message_bytes: usize,
 }
 
-pub(super) struct SessionConfig<'a> {
+pub(crate) struct SessionConfig<'a> {
     pub url: &'a str,
     pub target_runtime_id: &'a str,
     pub source_runtime_id: &'a str,
@@ -40,7 +51,7 @@ pub(super) struct SessionConfig<'a> {
 }
 
 impl DirectSession {
-    pub(super) fn connect(config: SessionConfig<'_>) -> Result<Self, RuntimeTransportError> {
+    pub(crate) fn connect(config: SessionConfig<'_>) -> Result<Self, RuntimeTransportError> {
         let (mut socket, _) = tungstenite::connect(config.url)
             .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?;
         set_timeouts(&mut socket, config.io_timeout)?;
@@ -92,15 +103,20 @@ impl DirectSession {
         send_value(&mut socket, &hello, config.max_message_bytes)?;
 
         let acknowledgement = read_value(&mut socket)?;
-        verify_acknowledgement(
+        let hello_ack_auth_timestamp = verify_acknowledgement(
             &acknowledgement,
             config.target_runtime_id,
             config.source_runtime_id,
             &audience,
             &challenge,
         )?;
+        #[cfg(not(test))]
+        let _ = hello_ack_auth_timestamp;
         let server_session_public =
             parse_public_hex(&required_text(&acknowledgement, "sessionPubKey")?)?;
+        let peer_encryption_public_hex =
+            required_text(&acknowledgement, "fromEncryptionPubKey")?.to_ascii_lowercase();
+        parse_public_hex(&peer_encryption_public_hex)?;
         let keys = derive_session_keys(&ephemeral, &server_session_public, &challenge, &audience)?;
         Ok(Self {
             target_runtime_id: config.target_runtime_id.into(),
@@ -108,83 +124,181 @@ impl DirectSession {
             audience,
             challenge,
             encryption_public_hex: static_public,
+            #[cfg(test)]
+            peer_encryption_public_hex,
             keys,
             socket,
-            message_counter: 0,
-            auth_timestamp: 0,
-            encryption_sequence: 0,
+            outbound: SessionCounters::default(),
+            #[cfg(test)]
+            inbound: SessionCounters {
+                message_counter: 0,
+                auth_timestamp: hello_ack_auth_timestamp,
+                encryption_sequence: 0,
+            },
             max_message_bytes: config.max_message_bytes,
         })
     }
 
-    pub(super) fn send_envelope(
+    pub(crate) fn send_envelope(
         &mut self,
         envelope: &OutboundEnvelope,
     ) -> Result<(), RuntimeTransportError> {
-        if envelope.target_runtime_id != self.target_runtime_id {
-            return Err(RuntimeTransportError::Route("session-target".into()));
-        }
-        self.message_counter = self
-            .message_counter
-            .checked_add(1)
-            .ok_or(RuntimeTransportError::Crypto("message-counter"))?;
-        self.auth_timestamp = self
-            .auth_timestamp
-            .checked_add(1)
-            .ok_or(RuntimeTransportError::Crypto("auth-timestamp"))?;
-        self.encryption_sequence = self
-            .encryption_sequence
-            .checked_add(1)
-            .ok_or(RuntimeTransportError::Crypto("encryption-sequence"))?;
-        let plaintext = encode_transport(&envelope.value)?;
-        let ciphertext = encrypt_session(&plaintext, &self.keys.c2s, self.encryption_sequence)?;
-        let id = format!("rrs_{}_{}", envelope.source_height, self.message_counter,);
-        let mut fields = vec![
-            ("type", Value::String("entity_inputs".into())),
-            ("id", Value::String(id)),
-            ("from", Value::String(self.source_runtime_id.clone())),
-            (
-                "fromEncryptionPubKey",
-                Value::String(self.encryption_public_hex.clone()),
-            ),
-            ("to", Value::String(self.target_runtime_id.clone())),
-            ("encSeq", Value::from(self.encryption_sequence)),
-            ("timestamp", Value::from(envelope.source_timestamp)),
-            ("payload", typed_array(ciphertext)),
-            ("encrypted", Value::Bool(true)),
-            ("txs", Value::from(envelope.transaction_count)),
-        ];
-        if let Some(entity_id) = &envelope.entity_id {
-            fields.push(("entityId", Value::String(entity_id.clone())));
-        }
-        let unsigned = object(fields);
-        let mac = frame_mac(
-            &self.keys.c2s,
-            &unsigned,
-            &self.audience,
-            &self.challenge,
-            self.auth_timestamp,
-        )?;
-        let mut signed = unsigned
-            .as_object()
-            .cloned()
-            .ok_or_else(|| RuntimeTransportError::MessagePack("frame-object".into()))?;
-        signed.insert(
-            "auth".into(),
-            object([
-                ("nonce", Value::String(self.challenge.clone())),
-                ("timestamp", Value::from(self.auth_timestamp)),
-                ("mac", Value::String(mac)),
-            ]),
-        );
-        send_value(
+        send_entity_inputs(
             &mut self.socket,
-            &Value::Object(signed),
+            envelope,
+            &mut SessionFrameContext {
+                key: &self.keys.c2s,
+                from: &self.source_runtime_id,
+                to: &self.target_runtime_id,
+                encryption_public_hex: &self.encryption_public_hex,
+                audience: &self.audience,
+                challenge: &self.challenge,
+                counters: &mut self.outbound,
+            },
             self.max_message_bytes,
         )
     }
 
-    pub(super) fn close(mut self) {
+    /// Read one canonical `entity_inputs` message on this same session.
+    /// Tests use this to prove the peer reply never opens a second TCP dial.
+    #[cfg(test)]
+    pub(crate) fn recv_envelope(&mut self) -> Result<Value, RuntimeTransportError> {
+        let value = read_value(&mut self.socket)?;
+        decode_entity_inputs(
+            value,
+            &mut SessionFrameContext {
+                key: &self.keys.s2c,
+                from: &self.target_runtime_id,
+                to: &self.source_runtime_id,
+                encryption_public_hex: &self.peer_encryption_public_hex,
+                audience: &self.audience,
+                challenge: &self.challenge,
+                counters: &mut self.inbound,
+            },
+        )
+    }
+
+    pub(crate) fn close(mut self) {
         let _ = self.socket.close(None);
     }
+}
+
+#[cfg(test)]
+const ENTITY_INPUT_FIELDS: &[&str] = &[
+    "v",
+    "type",
+    "id",
+    "from",
+    "fromEncryptionPubKey",
+    "to",
+    "encSeq",
+    "timestamp",
+    "payload",
+    "encrypted",
+    "txs",
+    "auth",
+];
+
+#[cfg(test)]
+fn decode_entity_inputs(
+    value: Value,
+    frame: &mut SessionFrameContext<'_>,
+) -> Result<Value, RuntimeTransportError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| RuntimeTransportError::Inbound("frame-object".into()))?;
+    verify_entity_inputs_header(object, frame)?;
+    let (encryption_sequence, auth_timestamp, mac) = verify_entity_inputs_auth(object, frame)?;
+    let mut unsigned = object.clone();
+    unsigned.remove("v");
+    unsigned.remove("auth");
+    verify_frame_mac(
+        frame.key,
+        &Value::Object(unsigned),
+        frame.audience,
+        frame.challenge,
+        auth_timestamp,
+        &mac,
+    )?;
+    decrypt_entity_inputs_payload(object, frame, encryption_sequence, auth_timestamp)
+}
+
+#[cfg(test)]
+fn decrypt_entity_inputs_payload(
+    object: &serde_json::Map<String, Value>,
+    frame: &mut SessionFrameContext<'_>,
+    encryption_sequence: u64,
+    auth_timestamp: u64,
+) -> Result<Value, RuntimeTransportError> {
+    let ciphertext = typed_array(
+        object
+            .get("payload")
+            .ok_or_else(|| RuntimeTransportError::Inbound("frame-payload".into()))?,
+    )?;
+    let plaintext = decrypt_session(&ciphertext, frame.key, encryption_sequence)?;
+    frame.counters.auth_timestamp = auth_timestamp;
+    frame.counters.encryption_sequence = encryption_sequence;
+    decode_transport(&plaintext)
+}
+
+#[cfg(test)]
+fn verify_entity_inputs_header(
+    object: &serde_json::Map<String, Value>,
+    frame: &SessionFrameContext<'_>,
+) -> Result<(), RuntimeTransportError> {
+    exact_fields(object, ENTITY_INPUT_FIELDS, &["entityId"], "frame")?;
+    if object.get("v").and_then(Value::as_u64) != Some(1)
+        || object.get("type").and_then(Value::as_str) != Some("entity_inputs")
+        || object.get("encrypted").and_then(Value::as_bool) != Some(true)
+    {
+        return Err(RuntimeTransportError::Inbound("frame-header".into()));
+    }
+    let from = normalize_runtime_id(text(object, "from")?)?;
+    let to = normalize_runtime_id(text(object, "to")?)?;
+    if from != frame.from || to != frame.to {
+        return Err(RuntimeTransportError::Inbound("frame-route".into()));
+    }
+    if text(object, "fromEncryptionPubKey")?.to_ascii_lowercase() != frame.encryption_public_hex {
+        return Err(RuntimeTransportError::Inbound("frame-static-key".into()));
+    }
+    if let Some(entity_id) = object.get("entityId") {
+        normalize_entity_id(
+            entity_id
+                .as_str()
+                .ok_or_else(|| RuntimeTransportError::Inbound("frame-entity-id".into()))?,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn verify_entity_inputs_auth(
+    object: &serde_json::Map<String, Value>,
+    frame: &SessionFrameContext<'_>,
+) -> Result<(u64, u64, String), RuntimeTransportError> {
+    let encryption_sequence = safe_u64(object, "encSeq")?;
+    let expected = frame
+        .counters
+        .encryption_sequence
+        .checked_add(1)
+        .ok_or_else(|| RuntimeTransportError::Inbound("enc-seq-overflow".into()))?;
+    if encryption_sequence != expected {
+        return Err(RuntimeTransportError::Inbound("enc-seq-order".into()));
+    }
+    let auth = object
+        .get("auth")
+        .and_then(Value::as_object)
+        .ok_or_else(|| RuntimeTransportError::Inbound("frame-auth".into()))?;
+    exact_fields(auth, &["nonce", "timestamp", "mac"], &[], "frame-auth")?;
+    let auth_timestamp = safe_u64(auth, "timestamp")?;
+    if auth.get("nonce").and_then(Value::as_str) != Some(frame.challenge)
+        || auth_timestamp <= frame.counters.auth_timestamp
+    {
+        return Err(RuntimeTransportError::Inbound("frame-auth-order".into()));
+    }
+    Ok((
+        encryption_sequence,
+        auth_timestamp,
+        text(auth, "mac")?.into(),
+    ))
 }

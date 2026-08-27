@@ -21,6 +21,7 @@ pub struct ResidentRuntimeService {
     materializer: Box<dyn EntityInfraMaterializer>,
     finalized_j_height: u64,
     hub_rebalance_has_pending_work: bool,
+    held_inbound: Option<InboundEntityInputs>,
 }
 
 impl ResidentRuntimeService {
@@ -38,6 +39,7 @@ impl ResidentRuntimeService {
                 ingress: ingress.runtime_id().into(),
             });
         }
+        processor.attach_inbound_sessions(ingress.sessions());
         // A crash can happen after fsync but before the best-effort socket
         // write. There is intentionally no transport receipt or delivered
         // marker: replay every durable outbox row from the checkpoint floor
@@ -50,6 +52,7 @@ impl ResidentRuntimeService {
             materializer,
             finalized_j_height,
             hub_rebalance_has_pending_work: false,
+            held_inbound: None,
         })
     }
 
@@ -86,12 +89,32 @@ impl ResidentRuntimeService {
     /// Wait for one authenticated transport batch. A timeout still checks
     /// Account mempools and deterministic scheduled wakes; if neither is due,
     /// no Runtime frame or disk write is produced.
+    ///
+    /// At most one newer inbound batch is held in RAM while an older durable
+    /// outbox row is pending. Publication of that row happens first after its
+    /// target is publishable, then the held batch is processed.
     pub fn process_next(
         &mut self,
         timeout: Duration,
     ) -> Result<Option<RuntimeProcessReport>, ResidentRuntimeServiceError> {
-        let batch = self.ingress.recv_timeout(timeout)?;
+        self.take_inbound_if_idle(timeout)?;
+        self.processor.retry_publication()?;
+        if self.processor.has_pending_publication() {
+            return Ok(None);
+        }
+        let batch = self.held_inbound.take();
         self.process_batch_at(batch, wall_clock_ms()?)
+    }
+
+    fn take_inbound_if_idle(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<(), ResidentRuntimeServiceError> {
+        if self.held_inbound.is_some() {
+            return Ok(());
+        }
+        self.held_inbound = self.ingress.recv_timeout(timeout)?;
+        Ok(())
     }
 
     /// Deterministic seam used by tests and replayed live traces. `now` is an

@@ -38,6 +38,17 @@ fn optional_usize(args: &[String], name: &str, default: usize) -> Result<usize, 
         .ok_or_else(|| format!("RRS_RUNTIME_ARG_INVALID:{name}"))
 }
 
+fn optional_url(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<String>, String> {
+    match object.get(field) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.is_empty() => Ok(Some(value.clone())),
+        _ => Err(format!("RRS_RUNTIME_ROUTE_FIELD:{field}")),
+    }
+}
+
 fn text<'a>(object: &'a serde_json::Map<String, Value>, field: &str) -> Result<&'a str, String> {
     object
         .get(field)
@@ -74,7 +85,7 @@ fn routes(path: &Path) -> Result<EntityRouteTable, String> {
             target_entity_id: text(object, "targetEntityId")?.into(),
             target_runtime_id: text(object, "targetRuntimeId")?.into(),
             target_signer_id: text(object, "targetSignerId")?.into(),
-            websocket_url: text(object, "websocketUrl")?.into(),
+            websocket_url: optional_url(object, "websocketUrl")?,
         });
     }
     EntityRouteTable::new(routes).map_err(|error| format!("RRS_RUNTIME_ROUTES:{error}"))

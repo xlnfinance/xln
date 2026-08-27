@@ -5,6 +5,7 @@ use crate::storage::native::{DurableRuntimeFrame, NativeRuntimeStore};
 
 use super::RuntimeTransportError;
 use super::crypto::{EncryptionIdentity, derive_local_runtime_id, encryption_identity};
+use super::inbound::InboundSessionTable;
 use super::routing::{
     DirectRouteTable, OutboundEnvelope, PreparedEnvelopeBatch, normalize_entity_id,
     prepare_envelopes,
@@ -90,6 +91,7 @@ pub struct DirectOutboxPublisher {
     source_runtime_id: String,
     identity: EncryptionIdentity,
     sessions: BTreeMap<String, DirectSession>,
+    inbound: InboundSessionTable,
     pending: Option<PendingPublication>,
     last_published_height: Option<u64>,
 }
@@ -112,9 +114,17 @@ impl DirectOutboxPublisher {
             source_runtime_id,
             identity,
             sessions: BTreeMap::new(),
+            inbound: InboundSessionTable::default(),
             pending: None,
             last_published_height: None,
         })
+    }
+
+    /// Bind the Hub's authenticated inbound sessions. Route selection then
+    /// prefers an open inbound session and only dials hub-to-hub peers that
+    /// never connected to us.
+    pub fn attach_inbound_sessions(&mut self, inbound: InboundSessionTable) {
+        self.inbound = inbound;
     }
 
     /// Publish only rows proven durable by the exact token returned after
@@ -178,6 +188,35 @@ impl DirectOutboxPublisher {
         store: &mut NativeRuntimeStore,
         durable: &DurableRuntimeFrame,
     ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
+        let prepared = self.decode_durable(store, durable)?;
+        for envelope in &prepared.envelopes {
+            if self.target_is_publishable(&envelope.target_runtime_id)? {
+                continue;
+            }
+            self.config.routes.url(&envelope.target_runtime_id)?;
+        }
+        Ok(prepared)
+    }
+
+    pub(crate) fn can_publish(
+        &self,
+        store: &mut NativeRuntimeStore,
+        durable: &DurableRuntimeFrame,
+    ) -> Result<bool, RuntimeTransportError> {
+        let prepared = self.decode_durable(store, durable)?;
+        for envelope in &prepared.envelopes {
+            if !self.target_is_publishable(&envelope.target_runtime_id)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn decode_durable(
+        &self,
+        store: &mut NativeRuntimeStore,
+        durable: &DurableRuntimeFrame,
+    ) -> Result<PreparedEnvelopeBatch, RuntimeTransportError> {
         let rows = store.publication_outputs(durable)?;
         let prepared = prepare_envelopes(
             &self.source_runtime_id,
@@ -194,10 +233,11 @@ impl DirectOutboxPublisher {
                 bytes: prepared.bytes,
             });
         }
-        for envelope in &prepared.envelopes {
-            self.config.routes.url(&envelope.target_runtime_id)?;
-        }
         Ok(prepared)
+    }
+
+    fn target_is_publishable(&self, target: &str) -> Result<bool, RuntimeTransportError> {
+        Ok(self.inbound.has_open(target)? || self.config.routes.contains(target))
     }
 
     fn resume_pending(&mut self) -> Result<PublicationReport, RuntimeTransportError> {
@@ -240,6 +280,12 @@ impl DirectOutboxPublisher {
     }
 
     fn publish_one(&mut self, envelope: &OutboundEnvelope) -> Result<usize, RuntimeTransportError> {
+        if self
+            .inbound
+            .publish_if_open(envelope, self.config.io_timeout)?
+        {
+            return Ok(0);
+        }
         let mut reconnects = 0;
         let mut last_error = String::new();
         for attempt in 0..=self.config.reconnect_attempts {

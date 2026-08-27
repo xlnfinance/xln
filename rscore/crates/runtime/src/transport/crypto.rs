@@ -17,7 +17,7 @@ const HELLO_DOMAIN: &str = "xln-ws-hello:v1";
 const FRAME_DOMAIN: &str = "xln-ws-frame:v1";
 const SESSION_INFO: &str = "xln-ws-session:v1";
 
-pub(super) struct EncryptionIdentity {
+pub(crate) struct EncryptionIdentity {
     pub public: [u8; 32],
 }
 
@@ -29,9 +29,10 @@ pub(super) struct EphemeralIdentity {
 #[derive(Clone)]
 pub(super) struct SessionKeys {
     pub c2s: [u8; 32],
+    pub s2c: [u8; 32],
 }
 
-pub(super) fn encryption_identity(seed: &str) -> EncryptionIdentity {
+pub(crate) fn encryption_identity(seed: &str) -> EncryptionIdentity {
     let mut material = Vec::with_capacity(ENCRYPTION_DOMAIN.len() + seed.len());
     material.extend_from_slice(ENCRYPTION_DOMAIN);
     material.extend_from_slice(seed.as_bytes());
@@ -79,7 +80,7 @@ pub(super) fn derive_session_keys(
     if c2s == s2c {
         return Err(RuntimeTransportError::Crypto("hkdf-direction"));
     }
-    Ok(SessionKeys { c2s })
+    Ok(SessionKeys { c2s, s2c })
 }
 
 pub(super) fn hello_digest(

@@ -25,6 +25,8 @@ use super::machine_snapshot::{
 use super::replica_meta::{ReplicaMetaProjectionError, prepare_replica_meta};
 use super::{EntityOutputEncodingError, EntityRouteError, EntityRouteTable};
 
+static PROFILE_PROJECTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 pub(crate) struct ProjectedRuntimeFrame {
     pub encoded: EncodedRuntimeFrame,
     pub expected_previous_hash: [u8; 32],
@@ -116,13 +118,19 @@ pub(crate) fn project_durable_frame(
         &applied.frame,
     )?;
 
+    let profile = *PROFILE_PROJECTION
+        .get_or_init(|| std::env::var("XLN_RSCORE_PROFILE_PROJECTION").as_deref() == Ok("1"));
+    let phase_started = std::time::Instant::now();
     let runtime_input = runtime_input(applied.runtime_txs, applied.entity_inputs)?;
+    let input_micros = phase_started.elapsed().as_micros();
     let machine = runtime_machine(&result);
-    let replay_view = replay_verifiable_view(&machine)?;
+    let replay_view = replay_verifiable_view(&result);
     let component_digests = component_digests(&replay_view)?;
+    let machine_micros = phase_started.elapsed().as_micros();
     let replica_meta = prepare_replica_meta(&result, result.outputs.checkpoint.is_some())?;
     let replica_meta_digest = replica_meta.digest;
     let signer_id = replica_meta.signer_id;
+    let meta_micros = phase_started.elapsed().as_micros();
 
     let replica_id = format!(
         "{}:{}",
@@ -134,6 +142,7 @@ pub(crate) fn project_durable_frame(
     } else {
         crate::storage::native::EntityContextPayloadRows::empty()
     };
+    let context_micros = phase_started.elapsed().as_micros();
 
     let expected_previous_hash = result.replica.durable.prev_frame_hash();
     let checkpoint_changes = match (result.outputs.checkpoint.as_ref(), prior_checkpoint_rows) {
@@ -212,8 +221,21 @@ pub(crate) fn project_durable_frame(
             .collect(),
         touched_book_entities: result.outputs.touches.book_entity_ids.clone(),
     };
+    let pre_encode_micros = phase_started.elapsed().as_micros();
     let encoded =
         build_runtime_frame_commit(draft, entity_contexts, bound_outputs.rows, frame_graph)?;
+    if profile {
+        let total = phase_started.elapsed().as_micros();
+        eprintln!(
+            "RSCORE_PROJECTION_PHASE h={} input={input_micros} machine={} meta={} context={} checkpoint_canonical={} encode={} total={total}",
+            result.replica.state.height,
+            machine_micros - input_micros,
+            meta_micros - machine_micros,
+            context_micros - meta_micros,
+            pre_encode_micros - context_micros,
+            total - pre_encode_micros,
+        );
+    }
     let commitments = super::RuntimeDurableCommitments {
         height: result.replica.state.height,
         runtime_frame_hash: encoded.frame_hash,
@@ -317,14 +339,19 @@ fn runtime_machine(result: &RuntimeApplyResult) -> Value {
     ])
 }
 
-fn replay_verifiable_view(machine: &Value) -> Result<Value, RuntimeFrameProjectionError> {
-    let mut value = machine
-        .as_object()
-        .cloned()
-        .ok_or(RuntimeFrameProjectionError::MachineObject)?;
-    value.remove("activeJurisdiction");
-    value.remove("runtimeConfig");
-    Ok(Value::Object(value))
+/// The replay-verifiable machine components: the full machine view minus
+/// `activeJurisdiction` and `runtimeConfig`. Built directly from the envelope
+/// instead of cloning the whole machine object and removing two fields.
+fn replay_verifiable_view(result: &RuntimeApplyResult) -> Value {
+    let envelope = &result.replica.durable;
+    object([
+        (
+            "runtimeId",
+            Value::String(envelope.runtime_id().to_string()),
+        ),
+        ("infrastructure", envelope.infrastructure().clone()),
+        ("jReplicas", envelope.j_replicas().clone()),
+    ])
 }
 
 fn component_digests(

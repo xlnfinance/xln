@@ -41,7 +41,7 @@ pub(super) fn encode_head(head: &StorageHead) -> Result<Vec<u8>, NativeStorageEr
         field("epochMaxBytes", head.epoch_max_bytes)?,
         field("accountMerkleRadix", head.account_merkle_radix)?,
         field("epochReplayBytes", head.epoch_replay_bytes)?,
-        field("retainedHistoryBytes", head.retained_history_bytes)?,
+        field("retainedWalBytes", head.retained_wal_bytes)?,
     ];
     crate::encode_storage_payload(&CanonicalValue::Object(fields)).map_err(Into::into)
 }
@@ -70,10 +70,7 @@ pub(super) fn decode_head(bytes: &[u8]) -> Result<StorageHead, NativeStorageErro
         epoch_max_bytes: unsigned(object.get("epochMaxBytes"), "epochMaxBytes")?,
         account_merkle_radix: unsigned(object.get("accountMerkleRadix"), "accountMerkleRadix")?,
         epoch_replay_bytes: unsigned(object.get("epochReplayBytes"), "epochReplayBytes")?,
-        retained_history_bytes: unsigned(
-            object.get("retainedHistoryBytes"),
-            "retainedHistoryBytes",
-        )?,
+        retained_wal_bytes: unsigned(object.get("retainedWalBytes"), "retainedWalBytes")?,
     };
     validate_head(&head)?;
     Ok(head)
@@ -105,7 +102,7 @@ pub(super) fn decode_checkpoint(bytes: &[u8]) -> Result<(u64, [u8; 32]), NativeS
 }
 
 fn validate_head(head: &StorageHead) -> Result<(), NativeStorageError> {
-    if head.schema_version != 3 {
+    if head.schema_version != 4 {
         return Err(NativeStorageError::Head("schemaVersion"));
     }
     if head.latest_materialized_height > head.latest_height

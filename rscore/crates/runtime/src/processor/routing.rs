@@ -14,7 +14,7 @@ pub struct EntityRoute {
     pub target_entity_id: String,
     pub target_runtime_id: String,
     pub target_signer_id: String,
-    pub websocket_url: String,
+    pub websocket_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,12 +93,14 @@ impl EntityRouteTable {
             {
                 return Err(EntityRouteError::Duplicate(entity_id));
             }
-            if let Some(existing) = direct.get(&runtime_id) {
-                if existing != &route.websocket_url {
-                    return Err(EntityRouteError::RuntimeConflict(runtime_id));
+            if let Some(url) = route.websocket_url {
+                if let Some(existing) = direct.get(&runtime_id) {
+                    if existing != &url {
+                        return Err(EntityRouteError::RuntimeConflict(runtime_id));
+                    }
+                } else {
+                    direct.insert(runtime_id, url);
                 }
-            } else {
-                direct.insert(runtime_id, route.websocket_url);
             }
         }
         let direct = direct
@@ -291,7 +293,7 @@ mod tests {
             target_entity_id: entity("11"),
             target_runtime_id: runtime("22"),
             target_signer_id: "peer".into(),
-            websocket_url: "ws://127.0.0.1:9000/ws".into(),
+            websocket_url: Some("ws://127.0.0.1:9000/ws".into()),
         }])
         .expect("routes")
     }
@@ -397,13 +399,13 @@ mod tests {
                 target_entity_id: entity("11"),
                 target_runtime_id: shared_runtime.clone(),
                 target_signer_id: "one".into(),
-                websocket_url: "ws://127.0.0.1:9000/ws".into(),
+                websocket_url: Some("ws://127.0.0.1:9000/ws".into()),
             },
             EntityRoute {
                 target_entity_id: entity("33"),
                 target_runtime_id: shared_runtime.clone(),
                 target_signer_id: "two".into(),
-                websocket_url: "ws://127.0.0.1:9000/ws".into(),
+                websocket_url: Some("ws://127.0.0.1:9000/ws".into()),
             },
         ]);
         assert!(shared.is_ok());
@@ -413,18 +415,44 @@ mod tests {
                 target_entity_id: entity("11"),
                 target_runtime_id: shared_runtime.clone(),
                 target_signer_id: "one".into(),
-                websocket_url: "ws://127.0.0.1:9000/ws".into(),
+                websocket_url: Some("ws://127.0.0.1:9000/ws".into()),
             },
             EntityRoute {
                 target_entity_id: entity("33"),
                 target_runtime_id: shared_runtime,
                 target_signer_id: "two".into(),
-                websocket_url: "ws://127.0.0.1:9001/ws".into(),
+                websocket_url: Some("ws://127.0.0.1:9001/ws".into()),
             },
         ]);
         assert!(matches!(
             conflict,
             Err(EntityRouteError::RuntimeConflict(_))
         ));
+    }
+
+    #[test]
+    fn inbound_only_route_binds_entity_without_a_direct_url() {
+        let table = EntityRouteTable::new([EntityRoute {
+            target_entity_id: entity("11"),
+            target_runtime_id: runtime("22"),
+            target_signer_id: "peer".into(),
+            websocket_url: None,
+        }])
+        .expect("inbound-only");
+        let encoded = table
+            .bind_and_encode(
+                vec![json!({
+                    "entityId": entity("11"),
+                    "entityTxs": [{"type":"accountInput","data":{"kind":"ack"}}],
+                })],
+                7,
+                99,
+                &entity("44"),
+                "local",
+            )
+            .expect("bind");
+        let decoded = crate::decode_storage_payload(&encoded.rows[0]).expect("decode");
+        assert_eq!(decoded["runtimeId"], runtime("22"));
+        assert!(!table.direct_routes().contains(&runtime("22")));
     }
 }

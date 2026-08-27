@@ -1,8 +1,8 @@
-//! First-divergence evidence for native replay.
+//! First-divergence evidence for native Runtime replay.
 //!
-//! The successful path never calls this module. On the first mismatch it
-//! reads the one frame already fsynced by the native store, decodes both
-//! canonical frames and their flat outboxes, and writes one bounded JSON file.
+//! Replay compares the exact Runtime WAL frame and flat outbox. It never reads
+//! Account or Entity history. Current native state is attached only after a
+//! mismatch as one-sided diagnostics.
 
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
@@ -29,8 +29,6 @@ pub struct RuntimeReplayDiffInput<'a> {
     pub height: u64,
     pub expected: &'a ConcreteWalSource,
     pub actual: &'a RecoveredWalFrame,
-    pub recording: &'a Value,
-    pub expected_entity_link: &'a Value,
     pub actual_replica_meta: &'a Value,
     pub actual_entity_sections: &'a Value,
     pub actual_commitments: &'a RuntimeDurableCommitments,
@@ -40,122 +38,67 @@ pub struct RuntimeReplayDiffInput<'a> {
 pub fn write_runtime_replay_diff(
     input: RuntimeReplayDiffInput<'_>,
 ) -> Result<RuntimeReplayDiff, String> {
-    let RuntimeReplayDiffInput {
-        directory,
-        height,
-        expected,
-        actual,
-        recording,
-        expected_entity_link,
-        actual_replica_meta,
-        actual_entity_sections,
-        actual_commitments,
-        actual_account_commits,
-    } = input;
-    let expected_frame = decode_storage_payload(&expected.frame_bytes)
-        .map_err(|error| format!("expected-frame:{error}"))?;
-    let actual_frame = decode_storage_payload(&actual.frame_bytes)
-        .map_err(|error| format!("actual-frame:{error}"))?;
-    let expected_outputs = decode_rows(&expected.outputs, "expected-output")?;
-    let actual_outputs = decode_rows(&actual.outputs, "actual-output")?;
-
-    let expected_value = Value::Object(Map::from_iter([
-        ("frame".into(), expected_frame),
-        ("outbox".into(), Value::Array(expected_outputs)),
-    ]));
-    let actual_value = Value::Object(Map::from_iter([
-        ("frame".into(), actual_frame),
-        ("outbox".into(), Value::Array(actual_outputs)),
-    ]));
+    let expected_value = replay_value(
+        &input.expected.frame_bytes,
+        &input.expected.outputs,
+        "expected",
+    )?;
+    let actual_value = replay_value(&input.actual.frame_bytes, &input.actual.outputs, "actual")?;
     let mut differences = Vec::new();
     collect_differences(&expected_value, &actual_value, "$", &mut differences);
     if differences.is_empty() {
         differences.push(difference(
             "$bytes",
             "canonical-bytes-mismatch",
-            &Value::String(bytes_digest(&expected.frame_bytes)),
-            &Value::String(bytes_digest(&actual.frame_bytes)),
+            &Value::String(bytes_digest(&input.expected.frame_bytes)),
+            &Value::String(bytes_digest(&input.actual.frame_bytes)),
         ));
     }
-    let expected_entity_frame = nested_field(expected_entity_link, &["frame"]);
-    let actual_entity_head = nested_field(actual_replica_meta, &["certifiedFrameHead"]);
-    let actual_entity_frame = actual_entity_head.and_then(|head| nested_field(head, &["frame"]));
-    let mut layer_differences = Vec::new();
-    if let (Some(expected_frame), Some(actual_frame)) = (expected_entity_frame, actual_entity_frame)
-    {
-        collect_entity_frame_differences(expected_frame, actual_frame, &mut layer_differences);
-    }
-    let expected_entity_oracle = oracle_rows(recording, "entityFrames", height);
-    let expected_account_oracle = oracle_rows(recording, "accountFrames", height);
-    let actual_commitment_value = commitment_value(actual_commitments);
-    if let Some(expected_entity) = expected_entity_oracle
-        .as_array()
-        .and_then(|rows| rows.first())
-    {
-        collect_section_differences(
-            expected_entity,
-            actual_entity_sections,
-            &mut layer_differences,
-        );
-        if let (Some(expected_frame), Some(actual_frame)) =
-            (expected_entity_frame, actual_entity_frame)
-        {
-            collect_entity_frame_derived_differences(
-                expected_frame,
-                actual_frame,
-                &mut layer_differences,
-            );
-        }
-        collect_commitment_differences(
-            expected_entity,
-            &actual_commitment_value,
-            &mut layer_differences,
-        );
-    }
-    let first = layer_differences.first().unwrap_or(&differences[0]);
-    let first_difference = compact_difference(first);
+    let first_difference = compact_difference(&differences[0]);
     let artifact = Value::Object(Map::from_iter([
-        ("height".into(), Value::from(height)),
-        ("firstDifference".into(), first.clone()),
-        ("layerDifferences".into(), Value::Array(layer_differences)),
+        ("height".into(), Value::from(input.height)),
+        ("firstDifference".into(), differences[0].clone()),
         ("differences".into(), Value::Array(differences)),
-        // The artifact is mode 0600 and exists specifically to debug the
-        // first consensus divergence. Keep the complete canonical values:
-        // truncating or redacting them turns one deterministic failure into a
-        // second reproduction cycle, especially for HTLC events/secrets.
         ("expected".into(), expected_value),
         ("actual".into(), actual_value),
         (
-            "layerDiagnostics".into(),
+            "actualDiagnostics".into(),
             Value::Object(Map::from_iter([
-                ("expectedEntityLink".into(), expected_entity_link.clone()),
                 (
-                    "actualEntityHead".into(),
-                    actual_entity_head.cloned().unwrap_or(Value::Null),
+                    "entityHead".into(),
+                    input
+                        .actual_replica_meta
+                        .get("certifiedFrameHead")
+                        .cloned()
+                        .unwrap_or(Value::Null),
                 ),
-                ("expectedEntityOracle".into(), expected_entity_oracle),
-                ("expectedAccountOracle".into(), expected_account_oracle),
                 (
-                    "actualEntitySections".into(),
-                    actual_entity_sections.clone(),
+                    "entitySections".into(),
+                    input.actual_entity_sections.clone(),
                 ),
-                ("actualCommitments".into(), actual_commitment_value),
                 (
-                    "actualAccountCommits".into(),
+                    "commitments".into(),
+                    commitment_value(input.actual_commitments),
+                ),
+                (
+                    "accountCommits".into(),
                     Value::Array(
-                        actual_account_commits
+                        input
+                            .actual_account_commits
                             .iter()
                             .map(account_commit_value)
                             .collect(),
                     ),
                 ),
-                ("actualReplicaMeta".into(), actual_replica_meta.clone()),
+                ("replicaMeta".into(), input.actual_replica_meta.clone()),
             ])),
         ),
     ]));
 
-    fs::create_dir_all(directory).map_err(|error| error.to_string())?;
-    let path = directory.join(format!("first-divergence-h{height}.json"));
+    fs::create_dir_all(input.directory).map_err(|error| error.to_string())?;
+    let path = input
+        .directory
+        .join(format!("first-divergence-h{}.json", input.height));
     let bytes = serde_json::to_vec_pretty(&artifact).map_err(|error| error.to_string())?;
     let mut file = OpenOptions::new()
         .create(true)
@@ -175,6 +118,21 @@ pub fn write_runtime_replay_diff(
         path,
         first_difference,
     })
+}
+
+fn replay_value(frame: &[u8], outputs: &[Vec<u8>], label: &str) -> Result<Value, String> {
+    let frame = decode_storage_payload(frame).map_err(|error| format!("{label}-frame:{error}"))?;
+    let outputs = outputs
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            decode_storage_payload(row).map_err(|error| format!("{label}-output:{index}:{error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Value::Object(Map::from_iter([
+        ("frame".into(), frame),
+        ("outbox".into(), Value::Array(outputs)),
+    ])))
 }
 
 fn account_commit_value(commit: &AccountCommitEvidence) -> Value {
@@ -205,57 +163,26 @@ fn account_commit_value(commit: &AccountCommitEvidence) -> Value {
     ]))
 }
 
-fn nested_field<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
-    path.iter()
-        .try_fold(value, |current, field| current.get(field))
-}
-
-fn oracle_rows(recording: &Value, field: &str, height: u64) -> Value {
-    nested_field(recording, &["authorityFrameOracle", field])
-        .and_then(Value::as_array)
-        .map(|rows| {
-            Value::Array(
-                rows.iter()
-                    .filter(|row| row.get("runtimeHeight").and_then(Value::as_u64) == Some(height))
-                    .cloned()
-                    .collect(),
-            )
-        })
-        .unwrap_or_else(|| Value::Array(Vec::new()))
-}
-
 fn commitment_value(commitments: &RuntimeDurableCommitments) -> Value {
     Value::Object(Map::from_iter([
-        (
-            "frameHash".into(),
-            Value::String(hex_digest(&commitments.certified_entity_frame_hash)),
-        ),
-        (
-            "stateRoot".into(),
-            Value::String(hex_digest(&commitments.entity_state_root)),
-        ),
-        (
-            "authorityRoot".into(),
-            Value::String(hex_digest(&commitments.entity_authority_root)),
-        ),
         (
             "accountsRoot".into(),
             Value::String(hex_digest(&commitments.accounts_root)),
         ),
         (
-            "eventCount".into(),
-            Value::from(commitments.entity_event_count),
+            "entityStateRoot".into(),
+            Value::String(hex_digest(&commitments.entity_state_root)),
         ),
         (
-            "eventDigest".into(),
-            Value::String(hex_digest(&commitments.events_parity_digest)),
+            "entityAuthorityRoot".into(),
+            Value::String(hex_digest(&commitments.entity_authority_root)),
         ),
         (
-            "effectCount".into(),
+            "entityEffectCount".into(),
             Value::from(commitments.entity_effect_count),
         ),
         (
-            "effectDigest".into(),
+            "entityEffectsDigest".into(),
             Value::String(hex_digest(&commitments.entity_effects_parity_digest)),
         ),
         (
@@ -269,114 +196,17 @@ fn commitment_value(commitments: &RuntimeDurableCommitments) -> Value {
     ]))
 }
 
-/// Compare semantic inputs before derived roots, signatures and frame hashes.
-/// This makes the first path actionable instead of reporting the first hash
-/// that necessarily changed downstream.
-fn collect_entity_frame_differences(expected: &Value, actual: &Value, output: &mut Vec<Value>) {
-    for field in [
-        "height",
-        "parentFrameHash",
-        "timestamp",
-        "txs",
-        "events",
-        "entityContext",
-        "authorityRoot",
-    ] {
-        if output.len() >= MAX_DIFFERENCES {
-            return;
-        }
-        let path = format!("$.layers.entity.frame.{field}");
-        match (expected.get(field), actual.get(field)) {
-            (Some(left), Some(right)) => collect_differences(left, right, &path, output),
-            (Some(left), None) => output.push(difference(
-                &path,
-                "missing-actual",
-                left,
-                &Value::String("<missing>".into()),
-            )),
-            (None, Some(right)) => output.push(difference(
-                &path,
-                "missing-expected",
-                &Value::String("<missing>".into()),
-                right,
-            )),
-            (None, None) => {}
-        }
-    }
-}
-
-fn collect_entity_frame_derived_differences(
-    expected: &Value,
-    actual: &Value,
-    output: &mut Vec<Value>,
-) {
-    for field in ["stateRoot", "hash"] {
-        if output.len() >= MAX_DIFFERENCES {
-            return;
-        }
-        let path = format!("$.layers.entity.frame.{field}");
-        if let (Some(left), Some(right)) = (expected.get(field), actual.get(field)) {
-            collect_differences(left, right, &path, output);
-        }
-    }
-}
-
-fn collect_section_differences(expected: &Value, actual: &Value, output: &mut Vec<Value>) {
-    let Some(rows) = expected.get("sections").and_then(Value::as_array) else {
-        return;
-    };
-    let expected = Value::Object(Map::from_iter(rows.iter().filter_map(|row| {
-        Some((
-            row.get("field")?.as_str()?.to_string(),
-            row.get("digest")?.clone(),
-        ))
-    })));
-    collect_differences(&expected, actual, "$.layers.entity.sections", output);
-}
-
-fn collect_commitment_differences(expected: &Value, actual: &Value, output: &mut Vec<Value>) {
-    for field in ["accountsRoot", "authorityRoot", "stateRoot", "frameHash"] {
-        if output.len() >= MAX_DIFFERENCES {
-            return;
-        }
-        let path = format!("$.layers.entity.commitments.{field}");
-        if let (Some(left), Some(right)) = (expected.get(field), actual.get(field)) {
-            collect_differences(left, right, &path, output);
-        }
-    }
-}
-
-fn decode_rows(rows: &[Vec<u8>], label: &str) -> Result<Vec<Value>, String> {
-    rows.iter()
-        .enumerate()
-        .map(|(index, row)| {
-            decode_storage_payload(row).map_err(|error| format!("{label}:{index}:{error}"))
-        })
-        .collect()
-}
-
 fn collect_differences(expected: &Value, actual: &Value, path: &str, output: &mut Vec<Value>) {
     if output.len() >= MAX_DIFFERENCES || expected == actual {
         return;
     }
     match (expected, actual) {
         (Value::Object(left), Value::Object(right)) => {
-            let mut keys = left
+            let keys = left
                 .keys()
                 .chain(right.keys())
                 .cloned()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-            // A frame/post-state hash is an effect of every committed field.
-            // Report the semantic preimage first so the one-line failure names
-            // `materializedState`, `runtimeInput`, etc. instead of restating
-            // the already-known top-level hash mismatch.
-            keys.sort_by(|left, right| {
-                derived_field_rank(left)
-                    .cmp(&derived_field_rank(right))
-                    .then_with(|| left.cmp(right))
-            });
+                .collect::<BTreeSet<_>>();
             for key in keys {
                 if output.len() >= MAX_DIFFERENCES {
                     break;
@@ -425,14 +255,6 @@ fn collect_differences(expected: &Value, actual: &Value, path: &str, output: &mu
             }
         }
         _ => output.push(difference(path, "value-mismatch", expected, actual)),
-    }
-}
-
-fn derived_field_rank(field: &str) -> u8 {
-    match field {
-        "postStateHash" => 1,
-        "frameHash" => 2,
-        _ => 0,
     }
 }
 
@@ -503,13 +325,7 @@ fn value_size(value: &Value) -> usize {
 }
 
 fn bytes_digest(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut output = String::with_capacity(66);
-    output.push_str("0x");
-    for byte in digest {
-        output.push_str(&format!("{byte:02x}"));
-    }
-    output
+    hex_digest(&Sha256::digest(bytes))
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -523,11 +339,11 @@ fn hex_digest(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_differences, collect_section_differences};
+    use super::collect_differences;
     use serde_json::{Value, json};
 
     #[test]
-    fn first_difference_is_deterministic_and_names_the_exact_path() {
+    fn first_difference_names_the_exact_runtime_path() {
         let expected =
             json!({"frame":{"runtimeInput":{"entityInputs":[{"kind":"a"}]}},"outbox":[]});
         let actual = json!({"frame":{"runtimeInput":{"entityInputs":[{"kind":"b"}]}},"outbox":[1]});
@@ -540,44 +356,6 @@ mod tests {
         assert_eq!(
             differences[1].get("path").and_then(Value::as_str),
             Some("$.outbox[0]"),
-        );
-    }
-
-    #[test]
-    fn semantic_frame_field_is_reported_before_derived_hash_noise() {
-        let expected = json!({
-            "frame": {"frameHash":"0xaa", "materializedState":false, "postStateHash":"0xbb"}
-        });
-        let actual = json!({
-            "frame": {"frameHash":"0xcc", "materializedState":true, "postStateHash":"0xdd"}
-        });
-        let mut differences = Vec::<Value>::new();
-
-        collect_differences(&expected, &actual, "$", &mut differences);
-
-        assert_eq!(
-            differences[0].get("path").and_then(Value::as_str),
-            Some("$.frame.materializedState"),
-        );
-    }
-
-    #[test]
-    fn entity_section_is_reported_before_derived_root_noise() {
-        let expected = json!({
-            "sections": [
-                {"field":"accounts", "digest":"0xaa"},
-                {"field":"orderbookExt", "digest":"0xbb"}
-            ]
-        });
-        let actual = json!({"accounts":"0xaa", "orderbookExt":"0xcc"});
-        let mut differences = Vec::<Value>::new();
-
-        collect_section_differences(&expected, &actual, &mut differences);
-
-        assert_eq!(differences.len(), 1);
-        assert_eq!(
-            differences[0].get("path").and_then(Value::as_str),
-            Some("$.layers.entity.sections.orderbookExt"),
         );
     }
 }

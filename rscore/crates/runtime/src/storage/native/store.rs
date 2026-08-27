@@ -28,6 +28,12 @@ pub struct NativeRuntimeStore {
     config: NativeStorageConfig,
     pub(super) head: StorageHead,
     pub(super) poisoned: bool,
+    /// RAM mirror of the logical checkpoint path-node rows. Derived state:
+    /// populated lazily from `path_node_rows` and advanced by exactly the
+    /// `node_changes` that `persist_frame` makes durable, so cadence reads
+    /// stop scanning the whole LevelDB graph. Dropped on a full checkpoint
+    /// rewrite; a restart rebuilds it from disk.
+    checkpoint_path_nodes: Option<BTreeMap<Vec<u8>, Vec<u8>>>,
 }
 
 struct PreparedRuntimeFrame {
@@ -67,6 +73,7 @@ impl NativeRuntimeStore {
             config,
             head,
             poisoned: false,
+            checkpoint_path_nodes: None,
         })
     }
 
@@ -81,7 +88,20 @@ impl NativeRuntimeStore {
         &mut self,
     ) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, NativeStorageError> {
         self.ensure_healthy()?;
-        Ok(self.path_node_rows()?.into_iter().collect())
+        if self.checkpoint_path_nodes.is_none() {
+            self.checkpoint_path_nodes = Some(self.path_node_rows()?.into_iter().collect());
+        } else {
+            #[cfg(debug_assertions)]
+            {
+                let fresh: BTreeMap<Vec<u8>, Vec<u8>> =
+                    self.path_node_rows()?.into_iter().collect();
+                assert!(
+                    self.checkpoint_path_nodes.as_ref() == Some(&fresh),
+                    "RSCORE_CHECKPOINT_PATH_NODE_CACHE_DIVERGED"
+                );
+            }
+        }
+        Ok(self.checkpoint_path_nodes.clone().expect("populated above"))
     }
 
     pub fn append_frame(
@@ -133,7 +153,7 @@ impl NativeRuntimeStore {
         next_head.latest_height = frame.height;
         next_head.latest_materialized_height = frame.height;
         next_head.epoch_replay_bytes = bytes;
-        next_head.retained_history_bytes = bytes;
+        next_head.retained_wal_bytes = bytes;
         self.persist_frame(PreparedRuntimeFrame {
             frame,
             digest: envelope.output_digest,
@@ -226,8 +246,8 @@ impl NativeRuntimeStore {
             .epoch_replay_bytes
             .checked_add(bytes)
             .ok_or(NativeStorageError::ByteCountOverflow)?;
-        next_head.retained_history_bytes = next_head
-            .retained_history_bytes
+        next_head.retained_wal_bytes = next_head
+            .retained_wal_bytes
             .checked_add(bytes)
             .ok_or(NativeStorageError::ByteCountOverflow)?;
         Ok(PreparedRuntimeFrame {
@@ -345,6 +365,27 @@ impl NativeRuntimeStore {
             self.poisoned = true;
             return Err(error);
         }
+        match prepared.frame.checkpoint.as_ref() {
+            Some(checkpoint) if checkpoint.full => {
+                // A full rewrite replaced the whole graph; reload lazily.
+                self.checkpoint_path_nodes = None;
+            }
+            Some(checkpoint) if prepared.materialized_state => {
+                if let Some(cache) = self.checkpoint_path_nodes.as_mut() {
+                    for change in &checkpoint.node_changes {
+                        match &change.value {
+                            Some(value) => {
+                                cache.insert(change.key.as_bytes().to_vec(), value.clone());
+                            }
+                            None => {
+                                cache.remove(change.key.as_bytes());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
         self.head = prepared.next_head;
         let height = prepared.frame.height;
         let output_count = prepared.frame.outputs.len();
@@ -460,11 +501,15 @@ fn validate_encoded_frame(encoded: &EncodedRuntimeFrame) -> Result<(), NativeSto
     if frame.outputs.len() > MAX_OUTPUT_ROWS {
         return Err(NativeStorageError::OutputCount(frame.outputs.len()));
     }
+    // Rows were built by this process's own frame builder and are already
+    // bound by the validated output digest checked above; size is the only
+    // durable-side constraint left. Decoding each row again here re-parsed
+    // bytes this process just constructed (the import path keeps full
+    // validation in validate_frame).
     for output in &frame.outputs {
         if output.len() > MAX_OUTPUT_BYTES {
             return Err(NativeStorageError::OutputBytes(output.len()));
         }
-        validate_storage_row(output)?;
     }
     if frame.watcher_cursor_changes.len() > 256 {
         return Err(NativeStorageError::WatcherCursorCount(

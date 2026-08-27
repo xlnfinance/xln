@@ -73,28 +73,37 @@ fn recording_range(root: &Value) -> Result<(u64, u64), String> {
 }
 
 fn recorded_direct_payments(root: &Value, from: u64, to: u64) -> Result<u64, String> {
-    let rows = root
-        .pointer("/authorityFrameOracle/accountFrames")
+    let bundles = root
+        .pointer("/recording/bundles")
         .and_then(Value::as_array)
-        .ok_or_else(|| "RUNTIME_REPLAY_ACCOUNT_ORACLE_ARRAY".to_string())?;
+        .ok_or_else(|| "RUNTIME_REPLAY_BUNDLES_ARRAY".to_string())?;
     let mut payments = 0_u64;
-    for (index, row) in rows.iter().enumerate() {
-        let height = unsigned(
-            row.get("runtimeHeight"),
-            &format!("authorityFrameOracle.accountFrames[{index}].runtimeHeight"),
-        )?;
-        if height < from || height > to {
+    for bundle in bundles {
+        let Some(frames) = bundle.get("frames").and_then(Value::as_array) else {
             continue;
-        }
-        let txs = row
-            .pointer("/frame/accountTxs")
-            .and_then(Value::as_array)
-            .ok_or_else(|| format!("RUNTIME_REPLAY_ACCOUNT_TXS:{index}"))?;
-        for tx in txs {
-            if tx.get("type").and_then(Value::as_str) == Some("direct_payment") {
-                payments = payments
-                    .checked_add(1)
-                    .ok_or_else(|| "RUNTIME_REPLAY_PAYMENT_COUNT_OVERFLOW".to_string())?;
+        };
+        for frame in frames {
+            let height = unsigned(frame.get("height"), "recording.frame.height")?;
+            if height < from || height > to {
+                continue;
+            }
+            let inputs = frame
+                .pointer("/runtimeInput/entityInputs")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("RUNTIME_REPLAY_ENTITY_INPUTS:{height}"))?;
+            for input in inputs {
+                for tx in input
+                    .get("entityTxs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if tx.get("type").and_then(Value::as_str) == Some("directPayment") {
+                        payments = payments
+                            .checked_add(1)
+                            .ok_or_else(|| "RUNTIME_REPLAY_PAYMENT_COUNT_OVERFLOW".to_string())?;
+                    }
+                }
             }
         }
     }
@@ -228,8 +237,6 @@ fn main() -> Result<(), String> {
             "\"applyMs\":{:.3},\"projectionMs\":{:.3},\"storageMs\":{:.3},\"publicationMs\":{:.3},",
             "\"directPayments\":{},\"paymentReplayPerSecond\":{:.2},",
             "\"ingressPerSecond\":{:.2},\"egressPerSecond\":{:.2},",
-            "\"accountRootsCompared\":{},\"accountsForestRootsCompared\":{},",
-            "\"entityRootsCompared\":{},\"eventDigestsCompared\":{},",
             "\"effectDigestsCompared\":{},",
             "\"outboxDigestsCompared\":{},\"postStateHashesCompared\":{},",
             "\"runtimeRootsCompared\":{},\"accountsRoot\":\"{}\",",
@@ -250,10 +257,6 @@ fn main() -> Result<(), String> {
         direct_payments as f64 / seconds,
         metrics.ingress as f64 / seconds,
         metrics.egress as f64 / seconds,
-        metrics.account_roots_compared,
-        metrics.accounts_forest_roots_compared,
-        metrics.entity_roots_compared,
-        metrics.event_digests_compared,
         metrics.effect_digests_compared,
         metrics.outbox_digests_compared,
         metrics.post_state_hashes_compared,

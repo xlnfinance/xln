@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::storage::native::RecoveredWalFrame;
 use crate::storage::native::{DurableRuntimeFrame, NativeRuntimeStore, NativeStorageError};
 use crate::transport::{
-    DirectOutboxPublisher, DirectOutboxPublisherConfig, PublicationReport, RuntimeTransportError,
-    derive_local_runtime_id,
+    DirectOutboxPublisher, DirectOutboxPublisherConfig, InboundSessionTable, PublicationReport,
+    RuntimeTransportError, derive_local_runtime_id,
 };
 use crate::{
     EntityInfraMaterializer, RuntimeApplyResult, RuntimeInput, RuntimeLiveInput,
@@ -204,6 +204,12 @@ impl DurableRuntimeProcessor {
             .ok_or(DurableRuntimeProcessorError::Poisoned)
     }
 
+    /// Prefer authenticated inbound sessions for committed outbox publication.
+    /// Hub-to-hub peers that never dialed us still use DirectOutboxPublisher.
+    pub fn attach_inbound_sessions(&mut self, sessions: InboundSessionTable) {
+        self.publisher.attach_inbound_sessions(sessions);
+    }
+
     /// Exact-replay seam: replace locally generated RAM continuations with
     /// their byte-identical recorded occurrences without changing recorded
     /// input order. Production live processing never calls this method.
@@ -337,7 +343,8 @@ impl DurableRuntimeProcessor {
     /// Resume every durable flat-outbox frame in height order after a socket
     /// failure or process restart. There is deliberately no delivery ACK or
     /// persisted delivered bit: a crash may resend, and bilateral Account
-    /// consensus de-duplicates.
+    /// consensus de-duplicates. A row whose targets are not yet publishable
+    /// stays pending until an inbound session or explicit direct URL exists.
     pub fn retry_publication(
         &mut self,
     ) -> Result<Option<RuntimeProcessReport>, DurableRuntimeProcessorError> {
@@ -347,6 +354,9 @@ impl DurableRuntimeProcessor {
         }
         let mut aggregate = RuntimeProcessReport::default();
         while !self.pending_publications.is_empty() {
+            if !self.front_is_publishable()? {
+                break;
+            }
             let report = self.publish_pending()?;
             aggregate.durable_height = report.durable_height;
             aggregate.outputs_published = aggregate
@@ -362,7 +372,21 @@ impl DurableRuntimeProcessor {
                 .checked_add(report.durable_bytes_published)
                 .ok_or(DurableRuntimeProcessorError::ReportOverflow)?;
         }
+        if aggregate.durable_height.is_none() {
+            return Ok(None);
+        }
         Ok(Some(aggregate))
+    }
+
+    pub fn has_pending_publication(&self) -> bool {
+        !self.pending_publications.is_empty()
+    }
+
+    fn front_is_publishable(&mut self) -> Result<bool, DurableRuntimeProcessorError> {
+        let Some(durable) = self.pending_publications.front() else {
+            return Ok(true);
+        };
+        Ok(self.publisher.can_publish(&mut self.store, durable)?)
     }
 
     fn publish_pending(&mut self) -> Result<RuntimeProcessReport, DurableRuntimeProcessorError> {

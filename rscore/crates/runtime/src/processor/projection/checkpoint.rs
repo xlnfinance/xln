@@ -49,12 +49,13 @@ pub(crate) fn prepare_account_checkpoint(
     );
     for account_id in &checkpoint.removed {
         let prefix = account_prefix(owner, *account_id.as_bytes());
-        for key in prior.keys().filter(|key| {
-            key.first()
-                .is_some_and(|tag| matches!(*tag, ACCOUNT_ROW_TAG | ACCOUNT_NODE_TAG))
-                && key.get(1..65) == Some(prefix.as_slice())
-        }) {
-            changes.insert(key.clone(), None);
+        for tag in [ACCOUNT_ROW_TAG, ACCOUNT_NODE_TAG] {
+            let mut tagged = Vec::with_capacity(65);
+            tagged.push(tag);
+            tagged.extend_from_slice(&prefix);
+            for (key, _) in prefix_range(prior, &tagged) {
+                changes.insert(key.clone(), None);
+            }
         }
     }
     for row in &checkpoint.accounts {
@@ -146,7 +147,7 @@ fn apply_j_claim_changes(
     let prefix = account_node_prefix(owner, account_id, J_CLAIM_NAMESPACE);
     let mut entries = BTreeMap::<[u8; 32], Value>::new();
     let mut prior_keys = Vec::new();
-    for (key, bytes) in prior.iter().filter(|(key, _)| key.starts_with(&prefix)) {
+    for (key, bytes) in prefix_range(prior, &prefix) {
         let value = crate::decode_storage_payload(bytes)?;
         let fields = json_array(&value, 2, "storedJClaim")?;
         let hash = json_bytes::<32>(&fields[0], "storedJClaim.hash")?;
@@ -187,6 +188,33 @@ fn apply_j_claim_changes(
         changes.insert(key, Some(encode_value(&row.value)?));
     }
     Ok(())
+}
+
+/// Ordered range of `map` whose keys start with `prefix`. Same rows in the
+/// same order as a full-map `starts_with` filter, without visiting the rest
+/// of the checkpoint graph for every account.
+fn prefix_range<'a>(
+    map: &'a BTreeMap<Vec<u8>, Vec<u8>>,
+    prefix: &[u8],
+) -> impl Iterator<Item = (&'a Vec<u8>, &'a Vec<u8>)> {
+    let lower = prefix.to_vec();
+    let mut upper = prefix.to_vec();
+    while upper.last() == Some(&0xff) {
+        upper.pop();
+    }
+    let bounded = match upper.last_mut() {
+        Some(last) => {
+            *last += 1;
+            true
+        }
+        None => false,
+    };
+    let range: Box<dyn Iterator<Item = _>> = if bounded {
+        Box::new(map.range(lower..upper))
+    } else {
+        Box::new(map.range(lower..))
+    };
+    range
 }
 
 fn account_meta_value(

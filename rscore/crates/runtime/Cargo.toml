@@ -13,6 +13,7 @@ hkdf = "0.12"
 hmac = "0.12"
 keccak-hasher = "0.15.3"
 num-bigint.workspace = true
+mio = { version = "1", default-features = false, features = ["os-ext", "os-poll"] }
 rlp = "0.6.1"
 ryu-js.workspace = true
 rusty-leveldb = "4.0.1"

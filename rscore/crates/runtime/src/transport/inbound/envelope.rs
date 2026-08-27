@@ -34,7 +34,7 @@ impl InboundEntityInputs {
     }
 }
 
-pub(super) fn typed_array(value: &Value) -> Result<Vec<u8>, RuntimeTransportError> {
+pub(in crate::transport) fn typed_array(value: &Value) -> Result<Vec<u8>, RuntimeTransportError> {
     let object = value
         .as_object()
         .ok_or_else(|| RuntimeTransportError::MessagePack("typed-array-object".into()))?;
@@ -166,7 +166,7 @@ pub(super) fn decode_envelope(
     })
 }
 
-pub(super) fn exact_fields(
+pub(in crate::transport) fn exact_fields(
     object: &Map<String, Value>,
     required: &[&str],
     optional: &[&str],
@@ -189,7 +189,7 @@ pub(super) fn exact_fields(
     Ok(())
 }
 
-pub(super) fn safe_u64(
+pub(in crate::transport) fn safe_u64(
     object: &Map<String, Value>,
     field: &str,
 ) -> Result<u64, RuntimeTransportError> {
@@ -200,7 +200,7 @@ pub(super) fn safe_u64(
         .ok_or_else(|| RuntimeTransportError::Inbound(format!("{field}-integer")))
 }
 
-pub(super) fn text<'a>(
+pub(in crate::transport) fn text<'a>(
     object: &'a Map<String, Value>,
     field: &str,
 ) -> Result<&'a str, RuntimeTransportError> {

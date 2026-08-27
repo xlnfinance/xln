@@ -33,7 +33,7 @@ const PATH_KEY_TAGS: &[u8] = &[
 pub struct PathNodeKey(Vec<u8>);
 
 impl PathNodeKey {
-    /// Accept only permanent owner/path namespaces. Hash-addressed history
+    /// Accept only permanent owner/path namespaces. Hash-addressed archives
     /// tags are intentionally absent: a new value replaces the old path and
     /// deletion prunes it without tracing a content DAG.
     pub fn new(bytes: Vec<u8>) -> Result<Self, NativeStorageError> {

@@ -19,7 +19,7 @@ pub(super) fn verify_acknowledgement(
     source: &str,
     audience: &str,
     challenge: &str,
-) -> Result<(), RuntimeTransportError> {
+) -> Result<u64, RuntimeTransportError> {
     if required_text(value, "type")? != "hello_ack"
         || required_text(value, "from")? != target
         || required_text(value, "to")? != source
@@ -44,7 +44,7 @@ fn verify_ack_signature(
     target: &str,
     audience: &str,
     challenge: &str,
-) -> Result<(), RuntimeTransportError> {
+) -> Result<u64, RuntimeTransportError> {
     let timestamp = auth
         .get("timestamp")
         .and_then(Value::as_u64)
@@ -61,7 +61,8 @@ fn verify_ack_signature(
     unsigned.remove("auth");
     unsigned.remove("v");
     let digest = frame_digest(&Value::Object(unsigned), audience, challenge, timestamp)?;
-    verify_peer_signature(target, &digest, signature)
+    verify_peer_signature(target, &digest, signature)?;
+    Ok(timestamp)
 }
 
 pub(super) fn send_value<S: Read + Write>(
@@ -102,6 +103,35 @@ pub(super) fn read_value<S: Read + Write>(
             }
             Message::Text(_) => return Err(RuntimeTransportError::Handshake("text-wire".into())),
             _ => {}
+        }
+    }
+}
+
+pub(super) fn try_read_value<S: Read + Write>(
+    socket: &mut WebSocket<S>,
+) -> Result<Option<Value>, RuntimeTransportError> {
+    loop {
+        match socket.read() {
+            Err(tungstenite::Error::Io(error))
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(RuntimeTransportError::WebSocket(error.to_string())),
+            Ok(Message::Binary(bytes)) => return decode_framed(&bytes).map(Some),
+            Ok(Message::Ping(bytes)) => socket
+                .send(Message::Pong(bytes))
+                .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))?,
+            Ok(Message::Close(frame)) => {
+                return Err(RuntimeTransportError::Handshake(format!(
+                    "closed:{frame:?}"
+                )));
+            }
+            Ok(Message::Text(_)) => {
+                return Err(RuntimeTransportError::Handshake("text-wire".into()));
+            }
+            Ok(_) => {}
         }
     }
 }

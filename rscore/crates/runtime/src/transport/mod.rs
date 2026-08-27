@@ -6,6 +6,7 @@
 //! escape before the WAL batch and directory fsync that minted the token.
 
 mod crypto;
+mod entity_inputs_frame;
 mod error;
 mod inbound;
 pub(crate) mod msgpack;
@@ -18,10 +19,17 @@ pub(crate) use crypto::derive_local_runtime_id;
 pub use error::RuntimeTransportError;
 pub use inbound::{
     DirectRuntimeIngress, DirectRuntimeIngressConfig, DirectRuntimeIngressMetrics,
-    InboundEntityInputs,
+    InboundEntityInputs, InboundSessionTable,
 };
 pub use publisher::{DirectOutboxPublisher, DirectOutboxPublisherConfig, PublicationReport};
 pub use routing::{DirectRoute, DirectRouteTable};
+
+#[cfg(test)]
+pub(crate) use crypto::encryption_identity;
+#[cfg(test)]
+pub(crate) use routing::OutboundEnvelope;
+#[cfg(test)]
+pub(crate) use session::{DirectSession, SessionConfig};
 
 #[cfg(test)]
 mod tests;

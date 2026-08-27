@@ -39,10 +39,14 @@ impl DirectRouteTable {
             .map(String::as_str)
             .ok_or_else(|| RuntimeTransportError::Route(format!("missing:{target}")))
     }
+
+    pub(crate) fn contains(&self, target: &str) -> bool {
+        self.0.contains_key(target)
+    }
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct OutboundEnvelope {
+pub(crate) struct OutboundEnvelope {
     pub target_runtime_id: String,
     pub source_height: u64,
     pub source_timestamp: u64,

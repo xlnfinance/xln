@@ -5,9 +5,10 @@
 //! Runtime writer; transport threads never mutate Runtime state and never send
 //! a delivery receipt.
 
-mod envelope;
+pub(in crate::transport) mod envelope;
 mod frame;
 mod listener;
+mod reply;
 mod session;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,6 +20,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 pub use envelope::InboundEntityInputs;
+pub use reply::InboundSessionTable;
 
 use super::RuntimeTransportError;
 use super::crypto::{EncryptionIdentity, derive_local_runtime_id, encryption_identity};
@@ -63,6 +65,7 @@ pub struct DirectRuntimeIngressMetrics {
     pub accepted_batches: u64,
     pub accepted_entity_inputs: u64,
     pub queue_rejections: u64,
+    pub open_sessions: u64,
 }
 
 #[derive(Default)]
@@ -92,6 +95,7 @@ pub(super) struct SharedIngress {
     stop: AtomicBool,
     active_peers: Mutex<BTreeSet<String>>,
     sockets: Mutex<BTreeMap<u64, TcpStream>>,
+    replies: InboundSessionTable,
     last_error: Mutex<Option<String>>,
     fatal_error: Mutex<Option<String>>,
     counters: IngressCounters,
@@ -134,6 +138,7 @@ impl DirectRuntimeIngress {
             stop: AtomicBool::new(false),
             active_peers: Mutex::new(BTreeSet::new()),
             sockets: Mutex::new(BTreeMap::new()),
+            replies: InboundSessionTable::default(),
             last_error: Mutex::new(None),
             fatal_error: Mutex::new(None),
             counters: IngressCounters::default(),
@@ -158,6 +163,14 @@ impl DirectRuntimeIngress {
 
     pub fn runtime_id(&self) -> &str {
         &self.runtime_id
+    }
+
+    pub fn sessions(&self) -> InboundSessionTable {
+        self.shared.replies.clone()
+    }
+
+    pub fn has_open_session(&self, runtime_id: &str) -> Result<bool, RuntimeTransportError> {
+        self.shared.replies.has_open(runtime_id)
     }
 
     pub fn recv_timeout(
@@ -186,6 +199,7 @@ impl DirectRuntimeIngress {
             accepted_batches: counters.accepted_batches.load(Ordering::Relaxed),
             accepted_entity_inputs: counters.accepted_entity_inputs.load(Ordering::Relaxed),
             queue_rejections: counters.queue_rejections.load(Ordering::Relaxed),
+            open_sessions: self.shared.replies.len().unwrap_or(0),
         }
     }
 

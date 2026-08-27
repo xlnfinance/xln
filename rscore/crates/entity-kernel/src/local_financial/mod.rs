@@ -67,6 +67,12 @@ pub(crate) fn apply_local_entity_financial_txs(
             }
         }
     }
+    // Output routing keeps exactly one trigger-only self-wake per target
+    // before anything durable exists (TS merges identically before its
+    // Runtime FIFO), so pre-merge multiplicity is unobservable. Collapse it
+    // here instead of allocating and encoding one wake object per payment.
+    let mut seen_wake_targets = std::collections::BTreeSet::new();
+    wake_targets.retain(|target| seen_wake_targets.insert(target.clone()));
     Ok(LocalFinancialResult {
         account_txs,
         outputs,

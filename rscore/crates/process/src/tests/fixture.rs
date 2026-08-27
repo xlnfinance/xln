@@ -325,7 +325,10 @@ pub fn restore_authority_accounts_with_rows(
     signer_id: &str,
     accounts: Vec<AbiValue>,
 ) -> (Envelope, Vec<AbiValue>) {
-    use xln_rscore_batch::{EngineGeneration, StatefulConsensusEngine};
+    use xln_rscore_batch::{
+        EngineGeneration, EntityInboundRequest, EntityOutboundRequest, ReceiverClock,
+        ResidentConsensusEngine,
+    };
     use xln_rscore_engine::{SwapMarketPolicy, SwapToken};
 
     let seeds = accounts
@@ -333,10 +336,11 @@ pub fn restore_authority_accounts_with_rows(
         .map(crate::wire_decode::decode_seed_account)
         .collect::<Result<Vec<_>, _>>()
         .expect("authority restore seeds");
-    let engine = StatefulConsensusEngine::restore(
+    // An offline import marks every seed dirty, so the first checkpoint
+    // export materializes exactly the durable rows these tests need.
+    let mut engine = ResidentConsensusEngine::import_existing(
         EngineGeneration::from_bytes([0x42; 8]),
         20,
-        0,
         authority_key(seed, signer_id),
         signer_id.to_string(),
         std::sync::Arc::new(SwapMarketPolicy::new(
@@ -357,7 +361,35 @@ pub fn restore_authority_accounts_with_rows(
         seeds,
     )
     .expect("authority restore engine");
-    let checkpoint = engine.checkpoint_changes().expect("authority checkpoint");
+    let owner = authority_entity(seed, signer_id);
+    engine
+        .entity_inbound(EntityInboundRequest {
+            owner_entity_id: owner,
+            expected_accounts_root: engine.accounts_root(),
+            clock: ReceiverClock {
+                entity_timestamp: 1,
+                finalized_j_height: 1,
+            },
+            rows: Vec::new(),
+            post_accounts: false,
+        })
+        .expect("authority restore inbound");
+    let checkpoint = engine
+        .entity_outbound(EntityOutboundRequest {
+            owner_entity_id: owner,
+            timestamp: 1,
+            j_height: 1,
+            creates: Vec::new(),
+            admits: Vec::new(),
+            propose: Vec::new(),
+            materialize: Vec::new(),
+            failed_htlc_routes: Vec::new(),
+            checkpoint_due: true,
+            post_accounts: false,
+        })
+        .expect("authority restore outbound")
+        .checkpoint
+        .expect("authority checkpoint");
     let incremental_rows = checkpoint
         .accounts
         .iter()

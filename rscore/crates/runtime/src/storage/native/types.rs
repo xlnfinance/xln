@@ -141,13 +141,13 @@ pub(super) struct StorageHead {
     pub epoch_max_bytes: u64,
     pub account_merkle_radix: u64,
     pub epoch_replay_bytes: u64,
-    pub retained_history_bytes: u64,
+    pub retained_wal_bytes: u64,
 }
 
 impl Default for StorageHead {
     fn default() -> Self {
         Self {
-            schema_version: 3,
+            schema_version: 4,
             latest_height: 0,
             latest_materialized_height: 0,
             latest_snapshot_height: 0,
@@ -156,7 +156,7 @@ impl Default for StorageHead {
             epoch_max_bytes: 9_007_199_254_740_991,
             account_merkle_radix: 16,
             epoch_replay_bytes: 0,
-            retained_history_bytes: 0,
+            retained_wal_bytes: 0,
         }
     }
 }

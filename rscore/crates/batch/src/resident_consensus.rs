@@ -88,6 +88,15 @@ pub struct ResidentConsensusEngine {
     base_proposable: BTreeSet<AccountId>,
     inbound_proposable: Option<BTreeSet<AccountId>>,
     candidate_proposable: Option<BTreeSet<AccountId>>,
+    /// RAM-only owner projection of every accepted Account, maintained
+    /// incrementally so checkpoint metadata never rescans resident workers.
+    /// Owners are written exactly once at genesis and never change, so the
+    /// projection follows the same accept/rollback lifecycle as the
+    /// proposable sets: pending adds merge on candidate acceptance and drop
+    /// on base rollback. Derived state: a restart rebuilds it from restore.
+    signer_owners: BTreeMap<AccountId, [u8; 32]>,
+    inbound_owner_adds: BTreeMap<AccountId, [u8; 32]>,
+    candidate_owner_adds: BTreeMap<AccountId, [u8; 32]>,
 }
 
 #[derive(Clone, Copy)]
@@ -183,6 +192,10 @@ impl ResidentConsensusEngine {
             .map(|seed| restore_seed_account(seed, &swap_market))
             .collect::<Result<Vec<_>, _>>()?;
         let base_proposable = proposable_from_entries(&entries)?;
+        let signer_owners = entries
+            .iter()
+            .map(|(account_id, account, _)| (*account_id, *account.replica().owner().as_bytes()))
+            .collect::<BTreeMap<_, _>>();
         let forest = match mode {
             SeedRestoreMode::Durable { revision } => {
                 ResidentAccountForest::restore(worker_count, revision, entries)?
@@ -202,6 +215,9 @@ impl ResidentConsensusEngine {
             base_proposable,
             inbound_proposable: None,
             candidate_proposable: None,
+            signer_owners,
+            inbound_owner_adds: BTreeMap::new(),
+            candidate_owner_adds: BTreeMap::new(),
         })
     }
 
@@ -301,6 +317,12 @@ impl ResidentConsensusEngine {
             base_proposable,
             inbound_proposable: None,
             candidate_proposable: None,
+            signer_owners: signer_rows
+                .iter()
+                .map(|(account_id, owner, _)| (*account_id, *owner))
+                .collect(),
+            inbound_owner_adds: BTreeMap::new(),
+            candidate_owner_adds: BTreeMap::new(),
         })
     }
 
@@ -347,6 +369,10 @@ impl ResidentConsensusEngine {
     /// back to the coordinator.
     pub fn proposable_account_ids(&self) -> Result<Vec<AccountId>, BatchError> {
         Ok(self.active_proposable()?.iter().copied().collect())
+    }
+
+    pub fn has_proposable_accounts(&self) -> Result<bool, BatchError> {
+        Ok(!self.active_proposable()?.is_empty())
     }
 
     /// Check due HTLC lock ids on their owner workers without materializing
@@ -435,13 +461,9 @@ impl ResidentConsensusEngine {
         let uses_candidate = self
             .forest
             .expected_uses_candidate(request.expected_accounts_root)?;
-        let selected_proposable = if uses_candidate {
-            self.candidate_proposable
-                .clone()
-                .ok_or(BatchError::EntityRoundMissing)?
-        } else {
-            self.base_proposable.clone()
-        };
+        if uses_candidate && self.candidate_proposable.is_none() {
+            return Err(BatchError::EntityRoundMissing);
+        }
         validate_operation_indices(&request.rows)?;
         let mut grouped = BTreeMap::<AccountId, Vec<AccountInputRow>>::new();
         for row in request.rows {
@@ -555,28 +577,42 @@ impl ResidentConsensusEngine {
                 }
             },
         )?;
-        let mut inbound_proposable = selected_proposable.clone();
+        // The parent named the candidate (or the base) and the workers already
+        // reconciled to it, so promotion is a move: one clone seeds the new
+        // inbound worklist instead of the previous clone-clone-move dance.
+        let mut inbound_proposable = if uses_candidate {
+            let promoted = self
+                .candidate_proposable
+                .take()
+                .ok_or(BatchError::EntityRoundMissing)?;
+            self.base_proposable = promoted.clone();
+            self.signer_owners.append(&mut self.inbound_owner_adds);
+            self.signer_owners.append(&mut self.candidate_owner_adds);
+            promoted
+        } else {
+            self.inbound_owner_adds.clear();
+            self.candidate_owner_adds.clear();
+            self.base_proposable.clone()
+        };
         let mut result = EntityRoundResult {
             revision: batch.revision,
             accounts_root: batch.accounts_root,
             ..EntityRoundResult::default()
         };
         let mut created_any = false;
-        for (account_id, outcome) in batch.rows {
+        for (account_id, _leaf, outcome) in batch.rows {
             set_proposable(&mut inbound_proposable, account_id, outcome.proposable);
             result.applied.extend(outcome.applied);
             result.touched.push((account_id, outcome.leaf));
             if let Some(created) = outcome.created_checkpoint {
                 created_any = true;
+                self.inbound_owner_adds.insert(account_id, owner);
                 result.created_accounts.push(created);
             }
         }
         result.applied.sort_by_key(|row| row.operation_index);
         if identity_is_new && created_any {
             self.identities.insert(owner, identity);
-        }
-        if uses_candidate {
-            self.base_proposable = selected_proposable;
         }
         self.inbound_proposable = Some(inbound_proposable);
         self.candidate_proposable = None;
@@ -618,8 +654,17 @@ impl ResidentConsensusEngine {
         let (fast_entries, mut named) = outbound_work(&request)?;
         validate_routes(&request.failed_htlc_routes)?;
 
+        let mut round_leafs = BTreeMap::new();
         if !create_entries.is_empty() {
-            self.run_outbound(false, create_entries, owner, Arc::clone(&identity), 0, 0)?;
+            self.run_outbound(
+                false,
+                create_entries,
+                owner,
+                Arc::clone(&identity),
+                0,
+                0,
+                &mut round_leafs,
+            )?;
         }
         let fast = self.run_outbound(
             !request.creates.is_empty(),
@@ -628,6 +673,7 @@ impl ResidentConsensusEngine {
             Arc::clone(&identity),
             request.timestamp,
             request.j_height,
+            &mut round_leafs,
         )?;
         let mut proposals = proposals_from(&fast.rows, &request.propose)?;
         let needs_fixed_point =
@@ -640,11 +686,37 @@ impl ResidentConsensusEngine {
                 &request,
                 &mut named,
                 admissions,
+                &mut round_leafs,
             )?;
             admissions = fixed.0;
             proposals = fixed.1;
         }
-        let materialized = self.materialize(named, request.post_accounts)?;
+        // Every named Account was applied by an outbound phase this round, so
+        // its exact post-round leaf is already in the worker replies. Reading
+        // the values again would repeat the same visit and the same hash;
+        // only `post_accounts` still needs full checkpoint-row encoding.
+        let materialized = if request.post_accounts {
+            self.materialize(named, true)?
+        } else {
+            named
+                .iter()
+                .map(|account_id| {
+                    round_leafs
+                        .get(account_id)
+                        .copied()
+                        .map(|leaf| {
+                            (
+                                *account_id,
+                                MaterializedAccount {
+                                    leaf,
+                                    checkpoint: None,
+                                },
+                            )
+                        })
+                        .ok_or(BatchError::CandidateAccountNotFound(*account_id))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let checkpoint = if request.checkpoint_due {
             let signer_digest = self.checkpoint_signer_digest()?;
             let account_count = self.forest.len();
@@ -708,9 +780,14 @@ impl ResidentConsensusEngine {
                 })
             })?;
         self.candidate_proposable = None;
+        self.candidate_owner_adds.clear();
         Ok(())
     }
 
+    // One internal dispatch point for every outbound wave phase; the extra
+    // round-leaf sink argument is cheaper than a context struct rebuilt per
+    // phase.
+    #[allow(clippy::too_many_arguments)]
     fn run_outbound(
         &mut self,
         continue_candidate: bool,
@@ -719,6 +796,7 @@ impl ResidentConsensusEngine {
         identity: Arc<SigningIdentity>,
         timestamp: u64,
         j_height: u64,
+        round_leafs: &mut BTreeMap<AccountId, [u8; 32]>,
     ) -> Result<crate::parallel::ResidentAccountBatch<OutboundOutcome>, BatchError> {
         let context = OutboundApplyContext {
             owner,
@@ -730,9 +808,13 @@ impl ResidentConsensusEngine {
         let apply = move |account_id, current, work: OutboundWork| {
             apply_outbound_work(account_id, current, work, &context)
         };
+        // Continuation owns the candidate set: on any error this round the
+        // caller resets to the inbound snapshot anyway, so moving instead of
+        // cloning cannot leave a live set behind. The inbound set itself must
+        // survive every retry and is therefore the only clone left.
         let mut next_proposable = if continue_candidate {
             self.candidate_proposable
-                .clone()
+                .take()
                 .or_else(|| self.inbound_proposable.clone())
                 .ok_or(BatchError::EntityRoundMissing)?
         } else {
@@ -740,13 +822,28 @@ impl ResidentConsensusEngine {
                 .clone()
                 .ok_or(BatchError::EntityRoundMissing)?
         };
+        let created_ids = entries
+            .iter()
+            .filter(|(_, work)| work.create.is_some())
+            .map(|(account_id, _)| *account_id)
+            .collect::<Vec<_>>();
         let batch = if continue_candidate {
             self.forest.apply_outbound_continue(entries, apply)?
         } else {
+            // A reset discards the previous candidate together with any
+            // Accounts only that candidate created.
+            self.candidate_owner_adds.clear();
             self.forest.apply_outbound(entries, apply)?
         };
-        for (account_id, outcome) in &batch.rows {
+        for account_id in created_ids {
+            self.candidate_owner_adds.insert(account_id, owner);
+        }
+        for (account_id, leaf, outcome) in &batch.rows {
             set_proposable(&mut next_proposable, *account_id, outcome.proposable);
+            // The worker already sealed this exact leaf while applying the
+            // phase; a later within-round phase overwrites it, so the final
+            // map entry is always the round's closing commitment.
+            round_leafs.insert(*account_id, *leaf);
         }
         self.candidate_proposable = Some(next_proposable);
         Ok(batch)
@@ -759,13 +856,30 @@ impl ResidentConsensusEngine {
         request: &EntityOutboundRequest,
         named: &mut BTreeSet<AccountId>,
         mut admissions: Vec<AccountAdmissionResult>,
+        round_leafs: &mut BTreeMap<AccountId, [u8; 32]>,
     ) -> Result<(Vec<AccountAdmissionResult>, Vec<ProposalRow>), BatchError> {
         let creates = create_work(&request.creates)?;
-        self.run_outbound(false, creates, owner, Arc::clone(&identity), 0, 0)?;
+        self.run_outbound(
+            false,
+            creates,
+            owner,
+            Arc::clone(&identity),
+            0,
+            0,
+            round_leafs,
+        )?;
 
         let admitted = admission_work(&request.admits);
         if !admitted.is_empty() {
-            self.run_outbound(true, admitted, owner, Arc::clone(&identity), 0, 0)?;
+            self.run_outbound(
+                true,
+                admitted,
+                owner,
+                Arc::clone(&identity),
+                0,
+                0,
+                round_leafs,
+            )?;
         }
         let routes = request
             .failed_htlc_routes
@@ -799,6 +913,7 @@ impl ResidentConsensusEngine {
                 Arc::clone(&identity),
                 request.timestamp,
                 request.j_height,
+                round_leafs,
             )?;
             let followup = htlc_followup_from_proposals(
                 batch.rows,
@@ -810,7 +925,15 @@ impl ResidentConsensusEngine {
             )?;
             if !followup.admit.is_empty() {
                 record_htlc_frontier_barrier();
-                self.run_outbound(true, followup.admit, owner, Arc::clone(&identity), 0, 0)?;
+                self.run_outbound(
+                    true,
+                    followup.admit,
+                    owner,
+                    Arc::clone(&identity),
+                    0,
+                    0,
+                    round_leafs,
+                )?;
             }
             for account_id in followup.newly_scheduled {
                 order.push(account_id);
@@ -863,19 +986,61 @@ impl ResidentConsensusEngine {
         Ok((identity, true))
     }
 
+    /// Checkpoint signer metadata from the incremental RAM owner projection.
+    /// The digest formula and row order are unchanged: rows are every Account
+    /// at the active head sorted by id, exactly what a full resident scan
+    /// produced. Debug builds still run that scan as an oracle.
     fn checkpoint_signer_digest(&mut self) -> Result<[u8; 32], BatchError> {
-        let owners = self
-            .forest
-            .read_all(|_, account| Ok(*account.replica().owner().as_bytes()))?;
-        if owners.len() != self.forest.len() {
+        let pending = self
+            .inbound_owner_adds
+            .iter()
+            .chain(self.candidate_owner_adds.iter())
+            .map(|(account_id, owner)| (*account_id, *owner))
+            .collect::<BTreeMap<_, _>>();
+        let total = self.signer_owners.len() + pending.len();
+        if total != self.forest.len() {
             return Err(BatchError::CheckpointIncomplete {
-                actual: owners.len(),
+                actual: total,
                 expected: self.forest.len(),
             });
         }
-        Ok(crate::checkpoint::signer_digest(owners.iter().map(
-            |(account_id, owner)| (*account_id, *owner, self.signer_id.as_ref()),
-        )))
+        let mut rows = Vec::with_capacity(total);
+        {
+            let mut base = self.signer_owners.iter().peekable();
+            let mut adds = pending.iter().peekable();
+            loop {
+                let take_base = match (base.peek(), adds.peek()) {
+                    (Some((left, _)), Some((right, _))) => left < right,
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                    (None, None) => break,
+                };
+                let (account_id, owner) = if take_base {
+                    base.next().expect("peeked base row")
+                } else {
+                    adds.next().expect("peeked pending row")
+                };
+                rows.push((*account_id, *owner));
+            }
+        }
+        let signer_id = Arc::clone(&self.signer_id);
+        let digest = crate::checkpoint::signer_digest(
+            rows.iter()
+                .map(|(account_id, owner)| (*account_id, *owner, signer_id.as_ref())),
+        );
+        #[cfg(debug_assertions)]
+        {
+            let scanned = self
+                .forest
+                .read_all(|_, account| Ok(*account.replica().owner().as_bytes()))?;
+            let oracle = crate::checkpoint::signer_digest(
+                scanned
+                    .iter()
+                    .map(|(account_id, owner)| (*account_id, *owner, signer_id.as_ref())),
+            );
+            assert_eq!(digest, oracle, "RSCORE_SIGNER_DIGEST_PROJECTION_DIVERGED");
+        }
+        Ok(digest)
     }
 }
 
@@ -1093,12 +1258,14 @@ fn outbound_work(request: &EntityOutboundRequest) -> Result<OutboundWorkSet, Bat
 }
 
 fn proposals_from(
-    rows: &[(AccountId, OutboundOutcome)],
+    rows: &[(AccountId, [u8; 32], OutboundOutcome)],
     order: &[AccountId],
 ) -> Result<Vec<ProposalRow>, BatchError> {
     let mut by_account = rows
         .iter()
-        .filter_map(|(account_id, outcome)| outcome.proposal.clone().map(|row| (*account_id, row)))
+        .filter_map(|(account_id, _, outcome)| {
+            outcome.proposal.clone().map(|row| (*account_id, row))
+        })
         .collect::<BTreeMap<_, _>>();
     order
         .iter()
@@ -1205,7 +1372,7 @@ fn htlc_ready_frontier(
 }
 
 fn htlc_followup_from_proposals(
-    rows: Vec<(AccountId, OutboundOutcome)>,
+    rows: Vec<(AccountId, [u8; 32], OutboundOutcome)>,
     routes: &BTreeMap<[u8; 32], &FailedHtlcRoute>,
     scheduled: &mut BTreeSet<AccountId>,
     named: &mut BTreeSet<AccountId>,
@@ -1215,7 +1382,7 @@ fn htlc_followup_from_proposals(
     let mut pending_order = Vec::new();
     let mut pending_txs = BTreeMap::<AccountId, Vec<AccountTx>>::new();
     let mut newly_scheduled = Vec::new();
-    for (account_id, outcome) in rows {
+    for (account_id, _leaf, outcome) in rows {
         let mut proposal = outcome.proposal.ok_or(BatchError::AccountNotFound {
             input_index: 0,
             account_id,
