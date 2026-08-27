@@ -61,6 +61,12 @@
     selectWalletIdentityMode,
     type WalletIdentityMode,
   } from '../../../../packages/browser/src/wallet-identity-entry';
+  import {
+    evaluateWalletRecoveryRehearsal,
+    resetWalletRecoveryRehearsal,
+    type WalletRecoveryRehearsalMode,
+    type WalletRecoveryRehearsalState,
+  } from '../../../../packages/browser/src/wallet-recovery-rehearsal';
 
   // Props
   export let embedded: boolean = false;
@@ -113,7 +119,7 @@
 
   type Phase = 'input' | 'deriving' | 'recovery' | 'node-ready';
   type InputMode = WalletIdentityMode;
-  type RecoveryRehearsalMode = 'mnemonic';
+  type RecoveryRehearsalMode = WalletRecoveryRehearsalMode;
   type BrainVaultDerivationRun = Readonly<{
     name: string;
     passphrase: string;
@@ -721,43 +727,49 @@
     vaultUiOperations.hideVault();
   }
 
-  function beginRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): void {
-    rehearsalMode = mode;
-    rehearsalExpectedAddress = address.toLowerCase();
-    derivationRun = null;
-    clearDerivedWalletMaterial();
-    showAdvanced = false;
-    mnemonicInput = '';
-    inputMode = mode;
-    derivationError = '';
-    phase = 'input';
+  function currentRecoveryRehearsalState(): WalletRecoveryRehearsalState {
+    return { enabled: rehearsalEnabled, mode: rehearsalMode, expectedAddress: rehearsalExpectedAddress };
+  }
+
+  function publishRecoveryRehearsalState(state: WalletRecoveryRehearsalState): void {
+    rehearsalEnabled = state.enabled;
+    rehearsalMode = state.mode;
+    rehearsalExpectedAddress = state.expectedAddress;
   }
 
   function acceptRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): boolean {
-    if (!rehearsalEnabled && rehearsalMode === null) return true;
-    if (rehearsalMode === null) {
-      beginRecoveryRehearsal(mode, address);
-      return false;
-    }
-    if (rehearsalMode !== mode || rehearsalExpectedAddress !== address.toLowerCase()) {
+    const result = evaluateWalletRecoveryRehearsal({
+      state: currentRecoveryRehearsalState(),
+      mode,
+      address,
+    });
+    if (result.status === 'skipped') return true;
+    if (result.status === 'begin') {
+      publishRecoveryRehearsalState(result.state);
       derivationRun = null;
       clearDerivedWalletMaterial();
-      derivationError = 'Recovery rehearsal did not reproduce the same wallet. Check every input and try again.';
+      showAdvanced = false;
+      mnemonicInput = '';
+      inputMode = mode;
+      derivationError = '';
       phase = 'input';
       return false;
     }
-    rehearsalMode = null;
-    rehearsalExpectedAddress = '';
-    rehearsalEnabled = false;
+    if (result.status === 'mismatch') {
+      derivationRun = null;
+      clearDerivedWalletMaterial();
+      derivationError = result.message;
+      phase = 'input';
+      return false;
+    }
+    publishRecoveryRehearsalState(result.state);
     showAdvanced = false;
     return true;
   }
 
   function cancelRecoveryRehearsal(): void {
     clearSensitiveWalletMaterial();
-    rehearsalEnabled = false;
-    rehearsalMode = null;
-    rehearsalExpectedAddress = '';
+    publishRecoveryRehearsalState(resetWalletRecoveryRehearsal());
     showAdvanced = false;
     derivationError = '';
   }
@@ -1330,9 +1342,7 @@
     derivationError = '';
     workerLimitNotice = '';
     createLoginType = 'manual';
-    rehearsalEnabled = false;
-    rehearsalMode = null;
-    rehearsalExpectedAddress = '';
+    publishRecoveryRehearsalState(resetWalletRecoveryRehearsal());
     showAdvanced = false;
     clearSensitiveWalletMaterial();
     nodeShardTimeMs = 0;

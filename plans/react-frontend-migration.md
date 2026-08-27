@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, AND IDENTITY-ENTRY COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, AND RECOVERY-REHEARSAL COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -625,6 +625,21 @@ selection and keyboard matrix. The direct, surface, and capability checks pass
 workspace, and capability batch passes 65 tests with 529 expectations. Both
 wallet and canonical Svelte production builds pass, and the wallet local check
 covers 445 files with zero unsafe-type findings.
+
+The next wallet slice now owns the mnemonic recovery-rehearsal transition
+policy: an unrequested rehearsal is skipped, a requested rehearsal captures a
+normalized public address, a mismatch remains active with an explicit retry
+error, a match clears the rehearsal, and cancellation/reset returns canonical
+idle state. The canonical Svelte event flow retains seed and derived-material
+cleanup, phase/error publication, field mutation, and all derivation and
+cryptographic effects. Seven direct tests plus the existing identity-entry and
+wallet-entry surface suites cover skip, begin, mismatch, case-insensitive
+match, option changes during an active rehearsal, reset, and thin wiring. The
+direct, identity-entry, surface, and capability checks pass 26 tests with 197
+expectations. The broader affected identity, recovery-import, workspace, and
+capability batch passes 72 tests with 548 expectations. Both wallet and
+canonical Svelte production builds pass, and the wallet local check covers 446
+files with zero unsafe-type findings.
 
 The next wallet slice now owns validated deploy-version payload decoding,
 storage, action selection, initial persistence, post-boot refresh, ephemeral
@@ -756,6 +771,9 @@ any mismatch. Never compile on production.
    Canonical Brain Vault/mnemonic identity-mode selection, sensitive-field
    clearing, and keyboard navigation decisions are also shared without moving
    derivation or cryptographic effects.
+   Mnemonic recovery-rehearsal skip, begin, mismatch, match, cancel, and reset
+   decisions are shared while sensitive cleanup and derivation remain with the
+   concrete wallet event flow.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
