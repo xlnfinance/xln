@@ -49,6 +49,7 @@ export const CAPABILITIES = [
     routes: ['/app', '/address', '/testnet'],
     currentSources: [
       'frontend/packages/browser/src/wallet-boot-lifecycle.ts',
+      'frontend/packages/browser/src/wallet-brainvault-worker-validation.ts',
       'frontend/packages/browser/src/wallet-deploy-version.ts',
       'frontend/packages/browser/src/wallet-identity-entry.ts',
       'frontend/packages/browser/src/wallet-node-brainvault-validation.ts',
@@ -70,6 +71,7 @@ export const CAPABILITIES = [
     ],
     behavior: [
       'boot and shell',
+      'validated browser BrainVault worker messages and shard completions',
       'generation-safe local and remote boot sequencing',
       'validated deploy-version persistence, reset, and recovery decisions',
       'canonical identity-mode selection, sensitive-field clearing, and keyboard navigation',

@@ -59,6 +59,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-boot-lifecycle.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
+      .toContain('frontend/packages/browser/src/wallet-brainvault-worker-validation.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-deploy-version.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-identity-entry.ts');
@@ -86,6 +88,8 @@ describe('frontend capability inventory', () => {
       .toContain('frontend/src/lib/components/Views/RuntimeCreation.svelte');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/src/routes/app/+layout.svelte');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
+      .toContain('validated browser BrainVault worker messages and shard completions');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('generation-safe local and remote boot sequencing');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)

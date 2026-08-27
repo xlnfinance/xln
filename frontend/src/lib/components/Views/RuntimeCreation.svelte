@@ -58,7 +58,6 @@
     generateBase58Secret,
     hasSupportedMnemonicWordCount,
     normalizeMnemonicPhrase,
-    normalizeBrainVaultShardTimeSample,
   } from './runtime-creation-model';
   import {
     resolveWalletIdentityModeNavigation,
@@ -91,6 +90,13 @@
     resolveWalletNodeBrainVaultAccess,
     validateWalletNodeBrainVaultProgress,
   } from '../../../../packages/browser/src/wallet-node-brainvault-validation';
+  import {
+    decodeWalletBrainVaultWorkerMessage,
+    normalizeWalletBrainVaultShardTimeSample,
+    normalizeWalletBrainVaultWorkerError,
+    type WalletBrainVaultShardCompleteMessage,
+    validateWalletBrainVaultShardCompletion,
+  } from '../../../../packages/browser/src/wallet-brainvault-worker-validation';
   import {
     WALLET_AUTH_SCHEME_STORAGE_KEY,
     parseWalletBrainVaultWorkerCap,
@@ -265,7 +271,7 @@
 
   function readPersistedShardTime(): number | null {
     if (typeof localStorage === 'undefined') return null;
-    return normalizeBrainVaultShardTimeSample(
+    return normalizeWalletBrainVaultShardTimeSample(
       Number(localStorage.getItem(BRAINVAULT_SHARD_TIME_STORAGE_KEY)),
     );
   }
@@ -707,14 +713,6 @@
     }, timeoutMs));
   }
 
-  function workerErrorMessage(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    if (err && typeof err === 'object' && 'message' in err) {
-      return String((err as { message?: unknown }).message ?? 'Worker failed');
-    }
-    return String(err || 'Worker failed');
-  }
-
   function hasPendingShardWork(): boolean {
     return retryShardQueue.length > 0 || nextShardToDispatch < shardCount;
   }
@@ -845,7 +843,7 @@
   }
 
   function handleWorkerFailure(worker: Worker, err: unknown): void {
-    const message = workerErrorMessage(err);
+    const message = normalizeWalletBrainVaultWorkerError(err);
     const shardIndex = workerActiveShard.get(worker);
     logRuntimeCreationDiagnostic('BrainVault worker failed', { shardIndex, message });
 
@@ -874,42 +872,29 @@
     opts: { onReady?: () => void; onError?: (err: unknown) => void; handleErrors?: boolean } = {}
   ): void {
     worker.onmessage = (e) => {
-      if (!e.data || typeof e.data !== 'object' || typeof e.data.type !== 'string') {
-        const error = new Error('BRAINVAULT_WORKER_MESSAGE_INVALID');
+      const message = decodeWalletBrainVaultWorkerMessage(e.data, BRAINVAULT_V1_SPEC_ID);
+      if (message.kind === 'invalid') {
+        const error = new Error(message.message);
         opts.onError?.(error);
         if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
         return;
       }
-      const { type, data } = e.data;
-
-      if (type === 'ready') {
-        if (data?.specId !== BRAINVAULT_V1_SPEC_ID) {
-          const error = new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(data?.specId)}:${BRAINVAULT_V1_SPEC_ID}`);
-          opts.onError?.(error);
-          if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
-          return;
-        }
+      if (message.kind === 'ready') {
         opts.onReady?.();
-      } else if (type === 'probe_result') {
-        const probeTime = normalizeBrainVaultShardTimeSample(data?.estimatedShardTimeMs);
-        if (probeTime !== null) {
-          estimatedShardTimeMs = probeTime;
+      } else if (message.kind === 'probe-result') {
+        if (message.measuredShardTimeMs !== null) {
+          estimatedShardTimeMs = message.measuredShardTimeMs;
         } else {
-          logRuntimeCreationDiagnostic('BrainVault worker returned invalid probe timing', data?.estimatedShardTimeMs);
+          logRuntimeCreationDiagnostic('BrainVault worker returned invalid probe timing', message.reportedShardTimeMs);
         }
-      } else if (type === 'shard_complete') {
-        void handleShardComplete(worker, data?.shardIndex, data?.resultHex, data?.elapsedMs)
-          .catch((err) => failDerivation(workerErrorMessage(err)));
-      } else if (type === 'error') {
-        const error = data?.message ?? 'Worker failed';
-        opts.onError?.(error);
-        if (opts.handleErrors !== false) {
-          handleWorkerFailure(worker, error);
-        }
+      } else if (message.kind === 'shard-complete') {
+        void handleShardComplete(worker, message)
+          .catch((err) => failDerivation(normalizeWalletBrainVaultWorkerError(err)));
       } else {
-        const error = new Error(`BRAINVAULT_WORKER_MESSAGE_UNKNOWN:${type}`);
-        opts.onError?.(error);
-        if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
+        opts.onError?.(message.error);
+        if (opts.handleErrors !== false) {
+          handleWorkerFailure(worker, message.error);
+        }
       }
     };
 
@@ -1007,7 +992,7 @@
               },
               onError: (err) => {
                 clearTimeout(timeout);
-                reject(new Error(workerErrorMessage(err)));
+                reject(new Error(normalizeWalletBrainVaultWorkerError(err)));
               },
               handleErrors: false,
             });
@@ -1025,7 +1010,7 @@
         } catch (err) {
           if (!isCurrentDerivationRun(run)) return;
           terminateWorkers();
-          const message = workerErrorMessage(err);
+          const message = normalizeWalletBrainVaultWorkerError(err);
           if (attempts < 4 && isBrainVaultWasmMemoryError(message) && initialWorkers > 1) {
             const reduced = nextBrainVaultWorkerCapAfterFailure(initialWorkers);
             if (reduced === initialWorkers) {
@@ -1056,7 +1041,7 @@
       dispatchShards();
     } catch (err) {
       if (!isCurrentDerivationRun(run)) return;
-      const message = workerErrorMessage(err);
+      const message = normalizeWalletBrainVaultWorkerError(err);
       logRuntimeCreationDiagnostic('BrainVault worker initialization failed', { message });
       terminateWorkers();
       derivationError = isBrainVaultWasmMemoryError(message)
@@ -1209,40 +1194,38 @@
     });
   }
 
-  async function handleShardComplete(worker: Worker, shardIndex: unknown, resultHex: unknown, elapsedMs: unknown) {
+  async function handleShardComplete(
+    worker: Worker,
+    message: WalletBrainVaultShardCompleteMessage,
+  ) {
     const activeShard = workerActiveShard.get(worker);
-    if (!Number.isSafeInteger(shardIndex) || Number(shardIndex) < 0 || Number(shardIndex) >= shardCount) {
-      throw new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${String(shardIndex)}`);
-    }
-    if (activeShard !== shardIndex) {
-      throw new Error(`BRAINVAULT_WORKER_SHARD_MISMATCH:${String(activeShard)}:${String(shardIndex)}`);
-    }
-    if (typeof resultHex !== 'string' || resultHex.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
-      throw new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${typeof resultHex === 'string' ? resultHex.length : typeof resultHex}`);
-    }
-    const measuredShardTimeMs = normalizeBrainVaultShardTimeSample(elapsedMs);
-    const validatedShardIndex = Number(shardIndex);
+    const completion = validateWalletBrainVaultShardCompletion(message, {
+      activeShard,
+      shardCount,
+      expectedResultHexLength: BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2,
+      alreadyCompleted: Number.isSafeInteger(message.shardIndex)
+        && shardResults.has(Number(message.shardIndex)),
+    });
     clearWorkerShardWatchdog(worker);
     workerActiveShard.delete(worker);
-    if (shardResults.has(validatedShardIndex)) {
-      throw new Error(`BRAINVAULT_WORKER_DUPLICATE_SHARD:${validatedShardIndex}`);
-    }
-
-    shardResults.set(validatedShardIndex, hexToBytes(resultHex));
+    shardResults.set(completion.shardIndex, hexToBytes(completion.resultHex));
     shardsCompleted = shardResults.size;
 
     // Timing is telemetry: invalid or extreme samples must never discard valid Argon2 output.
-    if (measuredShardTimeMs === null) {
-      logRuntimeCreationDiagnostic('BrainVault worker returned invalid shard timing', { shardIndex, elapsedMs });
+    if (completion.measuredShardTimeMs === null) {
+      logRuntimeCreationDiagnostic('BrainVault worker returned invalid shard timing', {
+        shardIndex: message.shardIndex,
+        elapsedMs: message.elapsedMs,
+      });
     } else {
-      if (measuredShardTimeMs !== elapsedMs) {
+      if (completion.measuredShardTimeMs !== message.elapsedMs) {
         logRuntimeCreationDiagnostic('BrainVault worker shard timing was clamped', {
-          shardIndex,
-          elapsedMs,
-          measuredShardTimeMs,
+          shardIndex: message.shardIndex,
+          elapsedMs: message.elapsedMs,
+          measuredShardTimeMs: completion.measuredShardTimeMs,
         });
       }
-      recordMeasuredShardTime(measuredShardTimeMs);
+      recordMeasuredShardTime(completion.measuredShardTimeMs);
     }
 
     if (isWorkerDraining(worker)) {

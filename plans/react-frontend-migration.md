@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, AND NODE-BRAINVAULT-VALIDATION COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, AND BROWSER-BRAINVAULT-WORKER-VALIDATION COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -675,6 +675,18 @@ capability, worker, native-custody, and remote-reconnect suites pass 130 tests
 with 800 expectations. Both wallet and canonical Svelte production builds
 pass, and the wallet local check covers 452 files with zero unsafe-type
 findings.
+
+The next wallet slice now owns fail-closed browser BrainVault worker protocol
+validation: message-envelope classification, exact readiness spec matching,
+probe and shard timing normalization, worker-error normalization, and shard
+index, active-worker ownership, result-length, and duplicate checks. The
+canonical Svelte event flow retains Worker creation and handlers, watchdog
+timers, retry and dispatch state, result byte decoding, secret inputs, cleanup,
+diagnostics, and UI publication. Nine direct tests plus the affected identity,
+recovery, opening, import, workspace, capability, worker, native-custody,
+node-validation, and remote-reconnect suites pass 139 tests with 831
+expectations. Both wallet and canonical Svelte production builds pass, and the
+wallet local check covers 453 files with zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -871,6 +883,10 @@ any mismatch. Never compile on production.
    Node BrainVault access, progress, result, and timing validation are shared
    while adapter calls, abort ownership, passphrase input, and result
    publication remain concrete.
+   Browser BrainVault worker message, readiness, timing, failure, and shard
+   completion validation are shared while Worker lifecycle, watchdogs,
+   dispatch, result-byte decoding, secret input, and publication remain
+   concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
