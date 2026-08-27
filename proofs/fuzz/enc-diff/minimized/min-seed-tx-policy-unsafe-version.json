@@ -1,0 +1,13 @@
+{
+  "id": "seed-tx-policy-unsafe-version",
+  "kind": "tx",
+  "class": "rust-rejects",
+  "txKind": "rebalance_policy",
+  "data": {
+    "tokenId": 7,
+    "policyVersion": "9007199254740992",
+    "baseFee": "1",
+    "liquidityFeeBps": "2",
+    "gasFee": "3"
+  }
+}
