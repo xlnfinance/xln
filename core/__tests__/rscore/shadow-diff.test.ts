@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { engineOutputProjection, findFirstShadowDifference } from '../../rscore/shadow';
+import {
+  engineOutputProjection,
+  findFirstShadowDifference,
+  findShadowEnvelopeDifference,
+} from '../../rscore/shadow';
 
 describe('rscore shadow first divergence', () => {
   test('names the first nested output field deterministically', () => {
@@ -44,6 +48,36 @@ describe('rscore shadow first divergence', () => {
     );
 
     expect(difference?.path).toBe('$.account.status');
+  });
+
+  test('decodes canonical envelope tags so the diff names the replica field', () => {
+    const difference = findShadowEnvelopeDifference(
+      [
+        ['status', [4, 'active']],
+        ['pendingFrame', [8, [['height', [2, '4']], ['txs', [5, [[8, [['type', [4, 'directPayment']]]]]]]]]],
+      ],
+      [
+        ['status', [4, 'active']],
+        ['pendingFrame', [8, [['height', [2, '4']], ['txs', [5, [[8, [['type', [4, 'htlcLock']]]]]]]]]],
+      ],
+    );
+
+    expect(difference?.firstDifference.path)
+      .toBe('$.accountEnvelope.pendingFrame.txs[0].type');
+    expect(difference?.firstDifference.typescript.value).toBe('"directPayment"');
+    expect(difference?.firstDifference.rust.value).toBe('"htlcLock"');
+  });
+
+  test('reports a missing canonical envelope field by name', () => {
+    const difference = findShadowEnvelopeDifference(
+      [['status', [4, 'active']], ['currentHeight', [2, '5']]],
+      [['status', [4, 'active']]],
+    );
+
+    expect(difference?.firstDifference).toMatchObject({
+      path: '$.accountEnvelope.currentHeight',
+      reason: 'missing-rust',
+    });
   });
 
   test('decodes the finalized Account-settlement effect emitted by Rust', () => {

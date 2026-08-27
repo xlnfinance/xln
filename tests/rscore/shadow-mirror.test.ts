@@ -5,7 +5,7 @@
  * account and the next frame reseeds it, after which comparison recovers.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyAccountTxToMutableReplica } from '../../core/account/tx/apply';
@@ -17,7 +17,7 @@ import { hashHtlcSecret } from '../../core/protocol/htlc/utils';
 import type { AccountReplica, AccountTx } from '../../core/types/account';
 import { addr, entity, makeAccount } from '../../core/__tests__/helpers/cross-j';
 import { RscoreProcessClient } from '../../core/rscore/client';
-import { RscoreShadowMirror } from '../../core/rscore/shadow';
+import { RscoreShadowMirror, type ShadowGap } from '../../core/rscore/shadow';
 import { PersistentEntityAccountMap } from '../../core/entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../core/entity/consensus/state-root';
 import type { RuntimeState } from '../../core/runtime/types';
@@ -126,6 +126,8 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
   test('register, match, diverge, reseed, recover — plus HTLC frames', async () => {
     const account = makeTsAccount();
     const mirror = makeMirror();
+    const gaps: ShadowGap[] = [];
+    mirror.onGap(gap => { gaps.push(gap); });
     let height = 0;
 
     const commitFrame = async (
@@ -236,6 +238,16 @@ describe.skipIf(!existsSync(BINARY))('rscore shadow mirror', () => {
       htlc_lock: 2,
       htlc_resolve: 2,
     });
+    const divergence = gaps.find(gap => gap.kind === 'divergence');
+    expect(divergence?.firstDifference?.path).toBe('$.accountStateRoot');
+    expect(divergence?.artifact).toBeString();
+    if (divergence?.artifact === undefined) throw new Error('SHADOW_TEST_ARTIFACT_MISSING');
+    const artifact = JSON.parse(readFileSync(divergence.artifact, 'utf8')) as {
+      account: string;
+      firstDifference: { path: string };
+    };
+    expect(artifact.account).toBe(RIGHT.slice(2));
+    expect(artifact.firstDifference.path).toBe('$.accountStateRoot');
     // Every compared frame must carry a verdict; a compared frame with no
     // outcome means a stats snapshot raced the drain loop.
     expect(stats.matches + stats.mismatches).toBe(stats.framesCompared);

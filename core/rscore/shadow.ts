@@ -14,7 +14,7 @@
  * comparison resumes from the next frame.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 
 import { createStructuredLogger } from '../support/logger';
 import { computeAccountStateRoot, computeCanonicalMerkleRoot } from '../account/commitment/state-root';
@@ -28,6 +28,7 @@ import type { AccountReplica, AccountState, AccountTx } from '../types/account';
 import { PersistentEntityAccountMap } from '../entity/state/persistent-account-map';
 import type { RuntimeState } from '../runtime/types';
 import type { RscoreProcessClient, RscoreWireValue } from './client';
+import { decodeRscoreCanonicalValue } from './canonical-wire';
 import {
   shadowOutputRows,
   accountEnvelopeWire,
@@ -228,6 +229,31 @@ const DIFF_DIR: string | null = (() => {
   return configured ?? '.logs/rscore-diffs';
 })();
 
+const reportShadowDiagnostic = (code: string, value: unknown): void => {
+  const line = `${code} ${safeStringify(value)}`;
+  try {
+    console.error(line);
+  } catch {
+    try { process.stderr.write(`${line}\n`); } catch { /* observer-only */ }
+  }
+};
+
+const writeShadowArtifact = (name: string, payload: unknown): string | undefined => {
+  if (DIFF_DIR === null) return undefined;
+  const artifact = resolve(DIFF_DIR, name);
+  try {
+    mkdirSync(DIFF_DIR, { recursive: true });
+    writeFileSync(artifact, safeStringify(payload, 2), { mode: 0o600 });
+    return artifact;
+  } catch (error) {
+    reportShadowDiagnostic('RSCORE_SHADOW_DIFF_WRITE_FAILED', {
+      artifact,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+};
+
 /**
  * HTLC preimages travel through outputs and through the htlc_resolve wire. A
  * divergence dump is a durable file, so the secret is replaced by its length:
@@ -277,6 +303,14 @@ type ShadowFirstDifference = Readonly<{
   reason: 'value-mismatch' | 'missing-typescript' | 'missing-rust';
   typescript: ShadowValuePreview;
   rust: ShadowValuePreview;
+}>;
+
+type ShadowDifferenceContext = Readonly<{
+  section?: string;
+  inputIndex?: number;
+  outputIndex?: number;
+  txType?: string;
+  outputKind?: string;
 }>;
 
 const SHADOW_PREVIEW_CHARS = 320;
@@ -400,6 +434,28 @@ export const findFirstShadowDifference = (
   return shadowDifference(path, 'value-mismatch', typescript, rust, sensitive);
 };
 
+const decodeShadowEnvelopeFields = (fields: unknown, side: string): unknown =>
+  decodeRscoreCanonicalValue([8, fields], `SHADOW_${side}_ACCOUNT_ENVELOPE`);
+
+/** Decode canonical-value tags before diffing, so paths name protocol fields. */
+export const findShadowEnvelopeDifference = (
+  typescriptFields: unknown,
+  rustFields: unknown,
+): ShadowEnvelopeMismatch | undefined => {
+  const typescript = decodeShadowEnvelopeFields(typescriptFields, 'TYPESCRIPT');
+  const rust = decodeShadowEnvelopeFields(rustFields, 'RUST');
+  const firstDifference = findFirstShadowDifference(
+    typescript,
+    rust,
+    '$.accountEnvelope',
+  );
+  return firstDifference === null ? undefined : {
+    firstDifference,
+    typescript,
+    rust,
+  };
+};
+
 const shadowFailure = (detail: string, path: string): ShadowMismatch => ({
   detail,
   firstDifference: shadowDifference(path, 'value-mismatch', 'accepted', detail),
@@ -506,6 +562,26 @@ type WaveFrame = Readonly<{
    */
   sections: Readonly<Record<string, string>>;
 }>;
+
+const shadowDifferenceContext = (
+  frame: WaveFrame,
+  failure: ShadowMismatch,
+  section?: string,
+): ShadowDifferenceContext => {
+  const outputRowIndex = /^\$\.outputs\[(\d+)\]/.exec(failure.firstDifference.path)?.[1];
+  if (outputRowIndex === undefined) return section === undefined ? {} : { section };
+  const index = Number(outputRowIndex);
+  const row = frame.expectedOutputs[index] ?? failure.actualOutputs?.[index];
+  if (row === undefined) return section === undefined ? {} : { section };
+  const [inputIndex, outputIndex, output] = row;
+  return {
+    ...(section === undefined ? {} : { section }),
+    inputIndex,
+    outputIndex,
+    ...(frame.txTypes[inputIndex] === undefined ? {} : { txType: frame.txTypes[inputIndex] }),
+    ...(typeof output[0] === 'string' ? { outputKind: output[0] } : {}),
+  };
+};
 
 /**
  * The four sections the engine commits separately. Every root is already
@@ -743,6 +819,7 @@ type ShadowReconciliationMismatch = Readonly<{
   rebalanceFeePoliciesRoot: Readonly<{ typescript: string; rust: string }>;
   ownerSide: Readonly<{ typescript: string; rust: string }>;
   firstDifference: ShadowFirstDifference;
+  artifact?: string;
 }>;
 
 export type ShadowReconciliation = Readonly<{
@@ -839,6 +916,8 @@ export type ShadowGap = Readonly<{
   /** Per-section roots, filled in for divergences so the dump names the section. */
   sections?: Readonly<Record<string, Readonly<{ typescript: string; rust: string }>>>;
   firstDifference?: ShadowFirstDifference;
+  context?: ShadowDifferenceContext;
+  artifact?: string;
 }>;
 
 export type ShadowStats = {
@@ -1212,15 +1291,21 @@ export class RscoreShadowMirror {
     let firstDifference = shadowDifference(
       `$.${differing[0]}`, 'value-mismatch', differing[1], differing[2],
     );
-    if (engine.accountStateRoot === stateRoot) {
-      const envelope = await this.#envelopeMismatch(
-        ownerKey, accountKey, accountEnvelopeWire(account),
-      );
-      firstDifference = envelope?.firstDifference ?? firstDifference;
-      this.#writeShellMismatch(
-        ownerKey, accountKey, account, stateRoot, leaf, engine, envelope, firstDifference,
-      );
-    }
+    const envelope = await this.#envelopeMismatch(
+      ownerKey, accountKey, accountEnvelopeWire(account),
+    );
+    firstDifference = envelope?.firstDifference ?? firstDifference;
+    const artifact = this.#writeReconcileMismatch(
+      ownerKey,
+      accountKey,
+      account,
+      stateRoot,
+      leaf,
+      engine,
+      sections,
+      envelope,
+      firstDifference,
+    );
     return {
       accountId: accountKey,
       accountStateRoot: { typescript: stateRoot, rust: engine.accountStateRoot },
@@ -1236,43 +1321,56 @@ export class RscoreShadowMirror {
       },
       ownerSide: { typescript: side, rust: engine.ownerSide },
       firstDifference,
+      ...(artifact === undefined ? {} : { artifact }),
     };
   }
 
-  #writeShellMismatch(
+  #writeReconcileMismatch(
     owner: string,
     accountKey: string,
     account: AccountReplica,
     stateRoot: string,
     leaf: string,
     engine: EngineSummaryRow,
+    sections: ReturnType<typeof tsSectionRoots>,
     envelope: ShadowEnvelopeMismatch | undefined,
     firstDifference: ShadowFirstDifference,
-  ): void {
-    try {
-      if (DIFF_DIR !== null) {
-        mkdirSync(DIFF_DIR, { recursive: true });
-        writeFileSync(join(DIFF_DIR, `shell-${accountKey.slice(2, 14)}.json`), safeStringify({
-          owner,
-          account: accountKey,
-          firstDifference,
-          roots: {
-            accountStateRoot: { typescript: stateRoot, rust: engine.accountStateRoot },
-            entityAccountLeaf: { typescript: leaf, rust: engine.entityAccountLeaf },
+  ): string | undefined {
+    const artifact = writeShadowArtifact(
+      `reconcile-${accountKey.slice(2, 14)}.json`,
+      {
+        owner,
+        account: accountKey,
+        firstDifference,
+        roots: {
+          accountStateRoot: { typescript: stateRoot, rust: engine.accountStateRoot },
+          entityAccountLeaf: { typescript: leaf, rust: engine.entityAccountLeaf },
+          sections: {
+            deltas: { typescript: sections.deltas, rust: engine.deltasRoot },
+            locks: { typescript: sections.locks, rust: engine.locksRoot },
+            swapOffers: { typescript: sections.swapOffers, rust: engine.swapOffersRoot },
+            rebalanceFeePolicies: {
+              typescript: sections.rebalanceFeePolicies,
+              rust: engine.rebalanceFeePoliciesRoot,
+            },
           },
-          projection: redactSecrets(projectEntityAccountLeaf(account)),
-          envelope: envelope === undefined ? null : {
-            typescript: redactSecrets(envelope.typescript),
-            rust: redactSecrets(envelope.rust),
-          },
-        }, 2), { mode: 0o600 });
-      }
-    } catch { /* observer-only */ }
-    try {
-      console.error(
-        `RSCORE_SHADOW_SHELL_MISMATCH ${accountKey} ${safeStringify(firstDifference)}`,
-      );
-    } catch { /* observer-only */ }
+        },
+        projection: redactSecrets(projectEntityAccountLeaf(account)),
+        envelope: envelope === undefined ? null : {
+          typescript: redactSecrets(envelope.typescript),
+          rust: redactSecrets(envelope.rust),
+        },
+      },
+    );
+    if (artifact !== undefined) {
+      reportShadowDiagnostic('RSCORE_SHADOW_FIRST_DIFF', {
+        owner,
+        account: accountKey,
+        firstDifference,
+        artifact,
+      });
+    }
+    return artifact;
   }
 
   /**
@@ -1624,6 +1722,9 @@ export class RscoreShadowMirror {
         ...(report.mismatched[0]?.firstDifference
           ? { firstDifference: report.mismatched[0].firstDifference }
           : {}),
+        ...(report.mismatched[0]?.artifact
+          ? { artifact: report.mismatched[0].artifact }
+          : {}),
       });
     }
     try {
@@ -1858,16 +1959,10 @@ export class RscoreShadowMirror {
       );
       wireInteger(reply[0], 'SHADOW_ACCOUNT_ENVELOPE_REVISION');
       const actualFields = wireTuple(reply[1], 'SHADOW_ACCOUNT_ENVELOPE_FIELD_ROWS');
-      const firstDifference = findFirstShadowDifference(
+      return findShadowEnvelopeDifference(
         expectedFields,
         actualFields,
-        '$.accountEnvelope.fields',
       );
-      return firstDifference === null ? undefined : {
-        firstDifference,
-        typescript: expectedFields,
-        rust: actualFields,
-      };
     } catch (error) {
       try {
         console.error(
@@ -1916,7 +2011,15 @@ export class RscoreShadowMirror {
       firstDifference,
       ...(envelope === undefined ? {} : { envelope }),
     };
-    this.#writeDiff(entry, accountKey, frame, diagnostic, sections);
+    const context = shadowDifferenceContext(frame, diagnostic, section?.[0]);
+    const artifact = this.#writeDiff(
+      entry,
+      accountKey,
+      frame,
+      diagnostic,
+      sections,
+      context,
+    );
     // Logging must never take the mirror down (scenario harnesses may turn
     // console.error into a thrown failure).
     try {
@@ -1928,6 +2031,8 @@ export class RscoreShadowMirror {
         detail: diagnostic.detail,
         firstDifference,
         sections,
+        context,
+        artifact: artifact ?? null,
       });
     } catch { /* observer-only */ }
     this.#reportGap({
@@ -1938,6 +2043,8 @@ export class RscoreShadowMirror {
       detail: diagnostic.detail,
       txTypes: frame.txTypes,
       firstDifference,
+      context,
+      ...(artifact === undefined ? {} : { artifact }),
       ...(sections ? { sections } : {}),
     });
   }
@@ -1990,20 +2097,19 @@ export class RscoreShadowMirror {
     frame: WaveFrame,
     failure: ShadowMismatch,
     sections: Record<string, { typescript: string; rust: string }> | undefined,
-  ): void {
-    if (DIFF_DIR === null) return;
-    try {
-      mkdirSync(DIFF_DIR, { recursive: true });
-      const name = `${String(this.#stats.mismatches).padStart(6, '0')}-${accountKey.slice(0, 12)}-h${frame.frameHeight}.json`;
-      const ownJobs = entry.jobs.filter(job =>
-        job[1] instanceof Uint8Array && Buffer.from(job[1]).toString('hex') === accountKey);
-      writeFileSync(join(DIFF_DIR, name), safeStringify({
+    context: ShadowDifferenceContext,
+  ): string | undefined {
+    const name = `${String(this.#stats.mismatches).padStart(6, '0')}-${accountKey.slice(0, 12)}-h${frame.frameHeight}.json`;
+    const ownJobs = entry.jobs.filter(job =>
+      job[1] instanceof Uint8Array && Buffer.from(job[1]).toString('hex') === accountKey);
+    const artifact = writeShadowArtifact(name, {
         owner: entry.ownerKey,
         account: accountKey,
         frameHeight: frame.frameHeight,
         txTypes: frame.txTypes,
         detail: failure.detail,
         firstDifference: failure.firstDifference,
+        context,
         expectedRoot: frame.expectedRootHex,
         actualRoot: failure.actualRoot ?? null,
         sections: sections ?? null,
@@ -2015,8 +2121,18 @@ export class RscoreShadowMirror {
           rust: redactSecrets(failure.envelope.rust),
         },
         jobs: redactSecrets(ownJobs),
-      }, 2), { mode: 0o600 });
-    } catch { /* observer-only */ }
+      });
+    if (artifact !== undefined) {
+      reportShadowDiagnostic('RSCORE_SHADOW_FIRST_DIFF', {
+        owner: entry.ownerKey,
+        account: accountKey,
+        frameHeight: frame.frameHeight,
+        context,
+        firstDifference: failure.firstDifference,
+        artifact,
+      });
+    }
+    return artifact;
   }
 
   /**
