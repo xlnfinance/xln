@@ -1,0 +1,36 @@
+[package]
+name = "xln-proofs-kani"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# Standalone on purpose: NOT a member of the rscore workspace. Kani 0.67 ships
+# its own rustc nightly (1.93) while rscore manifests pin rust-version 1.94 and
+# enable sha2's `asm` feature, neither of which the Kani toolchain can build.
+# The real rscore radix sources are compiled into this crate byte-identically
+# via #[path] includes (see src/lib.rs); file hashes are recorded in report.md.
+#
+# Width note: the delta mirror scales production 256/128-bit ranges down to
+# 16/8-bit ranges (factor 16) so every value fits i128/u128 with no allocation,
+# per the Kani limitation recorded in proofs/readme.md.
+
+[dependencies]
+sha2 = "0.10.9"
+thiserror = "2.0.16"
+
+[dev-dependencies]
+hex = "0.4.3"
+num-bigint = "0.4.6"
+# Pinned to the committed rscore workspace extracted by pin-rscore.sh, so
+# parallel-task working-tree WIP cannot drift the equivalence subject.
+xln-rscore-engine = { path = "pinned-rscore/rscore/crates/engine" }
+
+[lints.rust]
+# `cfg(kani)` is set by the Kani toolchain builds; register it so plain
+# `cargo check` does not warn on the harness modules.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
+[profile.release]
+# Equivalence loops run millions of BigInt operations; keep release fast.
+debug = false
