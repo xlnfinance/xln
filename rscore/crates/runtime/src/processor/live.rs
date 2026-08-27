@@ -25,7 +25,7 @@ pub struct ResidentRuntimeService {
 
 impl ResidentRuntimeService {
     pub fn new(
-        processor: DurableRuntimeProcessor,
+        mut processor: DurableRuntimeProcessor,
         ingress: DirectRuntimeIngress,
         materializer: Box<dyn EntityInfraMaterializer>,
     ) -> Result<Self, ResidentRuntimeServiceError> {
@@ -38,6 +38,12 @@ impl ResidentRuntimeService {
                 ingress: ingress.runtime_id().into(),
             });
         }
+        // A crash can happen after fsync but before the best-effort socket
+        // write. There is intentionally no transport receipt or delivered
+        // marker: replay every durable outbox row from the checkpoint floor
+        // before accepting new input and let bilateral Account consensus
+        // de-duplicate an exact resend.
+        processor.retry_publication()?;
         Ok(Self {
             processor,
             ingress,

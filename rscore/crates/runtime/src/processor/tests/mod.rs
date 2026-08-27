@@ -534,6 +534,90 @@ fn authenticated_websocket_reaches_live_reducer_fsync_and_restart() {
 }
 
 #[test]
+fn live_service_resends_the_durable_outbox_before_accepting_input() {
+    let path = path();
+    let _ = std::fs::remove_dir_all(&path);
+    let server = CanonicalWsServer::start("startup-resend");
+    let target_entity_id = format!("0x{}", "ab".repeat(32));
+    let target_signer_id = format!("0x{}", "cd".repeat(20));
+    let encoded = build_runtime_frame_commit(
+        CanonicalRuntimeFrameDraft {
+            height: 1,
+            timestamp: 150,
+            prev_frame_hash: [0; 32],
+            replica_meta_digest: [0x11; 32],
+            runtime_component_digests: Vec::new(),
+            materialized_state: false,
+            canonical_state: None,
+            runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
+            pending_runtime_input: None,
+            runtime_machine_root: None,
+            account_authority_checkpoints: Vec::new(),
+            touched_entities: Vec::new(),
+            touched_accounts: Vec::new(),
+            touched_book_entities: Vec::new(),
+        },
+        crate::storage::native::EntityContextPayloadRows::empty(),
+        vec![live_socket_output(
+            &server.runtime_id,
+            &target_entity_id,
+            &target_signer_id,
+        )],
+        None,
+    )
+    .expect("startup resend frame");
+    let frame_hash = encoded.frame_hash;
+    let mut store = NativeRuntimeStore::open(&path, NativeStorageConfig::default())
+        .expect("startup resend store");
+    store
+        .append_frame(encoded.commit)
+        .expect("startup resend fsync");
+    let mut replica = processor_replica();
+    replica.state.height = 1;
+    replica
+        .durable
+        .advance_frame_hash([0; 32], frame_hash)
+        .expect("startup resend lineage");
+    let routes = EntityRouteTable::new([EntityRoute {
+        target_entity_id,
+        target_runtime_id: server.runtime_id.clone(),
+        target_signer_id,
+        websocket_url: format!("ws://127.0.0.1:{}/ws", server.port),
+    }])
+    .expect("startup resend route");
+    let processor = DurableRuntimeProcessor::new(
+        replica,
+        store,
+        routes,
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("startup signer"),
+    )
+    .expect("startup processor");
+    let ingress = DirectRuntimeIngress::bind(DirectRuntimeIngressConfig::production(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        SOURCE_SEED,
+        SOURCE_SIGNER,
+    ))
+    .expect("startup ingress");
+    let mut service = ResidentRuntimeService::new(
+        processor,
+        ingress,
+        Box::new(CanonicalEntityInfraMaterializer::new(json!({
+            "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
+            "swapTakerFeeBps": 0,
+            "jurisdictionId": null,
+            "pairPolicies": []
+        }))),
+    )
+    .expect("startup resend before ready");
+    server.wait_for_rows(1);
+    assert_eq!(server.rows().expect("startup rows")[0]["height"], 1);
+    service.shutdown().expect("startup service shutdown");
+    drop(service);
+    std::fs::remove_dir_all(path).expect("remove startup resend fixture");
+}
+
+#[test]
 fn canonical_hash_cadence_does_not_materialize_path_nodes() {
     let path = path();
     let _ = std::fs::remove_dir_all(&path);
