@@ -1,9 +1,11 @@
 import { CandidateShell } from '../../../packages/ui/src/candidate-shell';
+import { WalletAppShell } from './app-shell';
 import { TestnetPage } from './testnet-page';
 import type { WalletPage } from './wallet-model';
 
 export function WalletApp({ page }: Readonly<{ page: WalletPage }>) {
   if (page.kind === 'testnet') return <TestnetPage />;
+  if (page.kind === 'app') return <WalletAppShell />;
   return (
     <CandidateShell
       copy={{

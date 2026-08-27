@@ -728,6 +728,17 @@ workspace, capability, worker, native-custody, and remote-reconnect suites pass
 Svelte production builds pass, and the wallet local check covers 455 files with
 zero unsafe-type findings.
 
+The React wallet now owns the `/app` overview shell. It reads the canonical
+stored Runtime adapter mode, endpoint, access, and tab-confined authority
+without exposing the capability secret; reports actual browser connectivity;
+and links only to working testnet, network-health, and documentation surfaces.
+Remote configuration without a complete admin session fails visibly instead
+of presenting command readiness. The shell is responsive at phone, laptop,
+and wide-desktop viewports, while identity and financial controls remain
+absent until their dedicated vertical increments. Focused model, route,
+metadata, storage-boundary, and listener-cleanup coverage accompanies the
+wallet typecheck, production build, and browser evidence.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte

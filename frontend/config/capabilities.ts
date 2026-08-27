@@ -136,6 +136,8 @@ export const CAPABILITIES = [
       'frontend/packages/runtime-client/src/runtime-view-selection.ts',
       'frontend/packages/runtime-client/src/runtime-view-state.ts',
       'frontend/packages/runtime-client/src/ws-url.ts',
+      'frontend/apps/wallet/src/app-shell.tsx',
+      'frontend/apps/wallet/src/app-shell-model.ts',
       'frontend/src/lib/utils/runtime/runtimeConnection.ts',
     ],
     behavior: [
@@ -157,6 +159,7 @@ export const CAPABILITIES = [
       'framework-neutral RuntimeView snapshot and height transitions',
       'explicit remote attachment consent',
       'reconnect and failure states',
+      'React-owned Runtime and authority overview shell',
     ],
     status: 'in_progress',
   },
