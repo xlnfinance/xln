@@ -29,7 +29,32 @@ fn authority() -> EntityFrameAuthority {
             threshold: 1,
             validators: vec![SIGNER.to_string()],
             shares: BTreeMap::from([(SIGNER.to_string(), 1)]),
-            jurisdiction: None,
+            jurisdiction: Some(CanonicalValue::Object(vec![
+                (
+                    "name".into(),
+                    CanonicalValue::String("native-jurisdiction".into()),
+                ),
+                (
+                    "address".into(),
+                    CanonicalValue::String("jreplica://native-jurisdiction".into()),
+                ),
+                (
+                    "chainId".into(),
+                    CanonicalValue::Number(CanonicalNumber::from_u32(31_337)),
+                ),
+                (
+                    "depositoryAddress".into(),
+                    CanonicalValue::String("0x000000000000000000000000000000000000dead".into()),
+                ),
+                (
+                    "entityProviderAddress".into(),
+                    CanonicalValue::String("0x000000000000000000000000000000000000beef".into()),
+                ),
+                (
+                    "blockTimeMs".into(),
+                    CanonicalValue::Number(CanonicalNumber::from_u32(1_000)),
+                ),
+            ])),
         },
         leader_state: EntityLeaderState {
             active_validator_id: SIGNER.to_string(),
@@ -175,14 +200,28 @@ fn storage_projection_values_reproduce_owned_consensus_digests() {
         ("entityId", &projection.entity_id),
         ("height", &projection.height),
         ("timestamp", &projection.timestamp),
-        ("config", &projection.config),
-        ("leaderState", &projection.leader_state),
         ("reserves", &projection.reserves),
         ("lastFinalizedJHeight", &projection.last_finalized_j_height),
         ("htlcFeesEarned", &projection.htlc_fees_earned),
     ] {
         assert_section(&sections, field, value);
     }
+    let (stored_config, stored_leader) = consensus
+        .state
+        .authority
+        .storage_values()
+        .expect("stored authority");
+    let (committed_config, committed_leader) = consensus
+        .state
+        .authority
+        .commitment_values()
+        .expect("committed authority");
+    assert_eq!(projection.config, stored_config);
+    assert_eq!(projection.leader_state, stored_leader);
+    assert_ne!(stored_config, committed_config);
+    assert_eq!(stored_leader, committed_leader);
+    assert_section(&sections, "config", &committed_config);
+    assert_section(&sections, "leaderState", &committed_leader);
     assert_section(
         &sections,
         "htlcRoutes",

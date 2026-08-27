@@ -89,7 +89,11 @@ impl ResidentEntityConsensusReplica {
         match &self.certified_frame_head {
             Some(head) => {
                 if head.post_authority != self.state.authority {
-                    return Err(EntityTransitionError::RestoredAuthorityMismatch);
+                    return Err(EntityTransitionError::RestoredAuthorityMismatch {
+                        state: authority_root,
+                        head: head.post_authority.root()?,
+                        detail: authority_difference(&self.state.authority, &head.post_authority),
+                    });
                 }
                 build_certified_entity_frame_link(
                     entity_id,
@@ -303,8 +307,12 @@ pub enum EntityTransitionError {
     EntityMismatch { state: String, signer: String },
     #[error("ENTITY_RESTORED_HEAD_MISSING:height={0}")]
     RestoredHeadMissing(u64),
-    #[error("ENTITY_RESTORED_AUTHORITY_MISMATCH")]
-    RestoredAuthorityMismatch,
+    #[error("ENTITY_RESTORED_AUTHORITY_MISMATCH:state={state}:head={head}:detail={detail}")]
+    RestoredAuthorityMismatch {
+        state: String,
+        head: String,
+        detail: String,
+    },
     #[error("ENTITY_TRANSITION_SECTION_DUPLICATE:{0}")]
     DuplicateSection(String),
     #[error("ENTITY_TRANSITION_OWNED_SECTION_UNEXPECTED:{0}")]
@@ -327,6 +335,30 @@ pub enum EntityTransitionError {
     HtlcNoteLimit(usize),
     #[error("ENTITY_HTLC_NOTE_SHAPE_INVALID:{0}")]
     HtlcNoteShape(&'static str),
+}
+
+fn authority_difference(left: &EntityFrameAuthority, right: &EntityFrameAuthority) -> String {
+    if left.config.mode != right.config.mode {
+        "mode".into()
+    } else if left.config.threshold != right.config.threshold {
+        "threshold".into()
+    } else if left.config.validators != right.config.validators {
+        "validators".into()
+    } else if left.config.shares != right.config.shares {
+        "shares".into()
+    } else if left.config.jurisdiction != right.config.jurisdiction {
+        format!(
+            "jurisdiction:state={:?}:head={:?}",
+            left.config.jurisdiction, right.config.jurisdiction
+        )
+    } else if left.leader_state != right.leader_state {
+        format!(
+            "leader:state={:?}:head={:?}",
+            left.leader_state, right.leader_state
+        )
+    } else {
+        "unknown".into()
+    }
 }
 
 fn insert_section(
@@ -368,7 +400,7 @@ pub fn project_entity_consensus_sections(
         }
         insert_section(&mut sections, section)?;
     }
-    let (config, leader) = authority.state_values()?;
+    let (config, leader) = authority.commitment_values()?;
     for (field, value) in [("config", config), ("leaderState", leader)] {
         insert_section(
             &mut sections,
@@ -616,7 +648,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["accounts", "config", "leaderState", "nonces",]
         );
-        let (config, leader) = authority.state_values().expect("authority values");
+        let (config, leader) = authority.commitment_values().expect("authority values");
         for (field, expected) in [
             (
                 "config",

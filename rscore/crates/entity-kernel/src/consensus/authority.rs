@@ -228,10 +228,21 @@ impl EntityFrameAuthority {
         })
     }
 
-    pub(crate) fn state_values(
+    /// Values committed by Entity state-root hashing. Display/routing-only
+    /// jurisdiction fields are deliberately projected out here, matching
+    /// `projectConsensusConfigCommitment` in TypeScript.
+    pub(crate) fn commitment_values(
         &self,
     ) -> Result<(CanonicalValue, CanonicalValue), EntityAuthorityError> {
         self.values(true)
+    }
+
+    /// Full durable Entity state. Storage must preserve this value exactly so
+    /// either TS or Rust can resume the same live replica after a restart.
+    pub(crate) fn storage_values(
+        &self,
+    ) -> Result<(CanonicalValue, CanonicalValue), EntityAuthorityError> {
+        self.values(false)
     }
 
     fn values(

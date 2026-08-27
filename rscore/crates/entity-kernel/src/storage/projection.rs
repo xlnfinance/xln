@@ -125,7 +125,7 @@ pub fn project_entity_storage(
     state: &EntityStateSlice,
     consensus: &ResidentEntityConsensusReplica,
 ) -> Result<EntityStorageProjection, EntityStorageProjectionError> {
-    let (config, leader_state) = consensus.state.authority.state_values()?;
+    let (config, leader_state) = consensus.state.authority.storage_values()?;
     let orderbook = project_orderbook_fields(state)?;
     Ok(EntityStorageProjection {
         entity_id: CanonicalValue::String(state.entity_id.clone()),
