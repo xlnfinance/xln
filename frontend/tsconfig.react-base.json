@@ -30,6 +30,7 @@
     "allowUnusedLabels": false,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "noEmit": true,
     "jsx": "react-jsx",

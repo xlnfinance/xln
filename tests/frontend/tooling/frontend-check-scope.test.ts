@@ -1,9 +1,19 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import { createLocalCheckCommands, parseLocalCheckRequest } from '../../../frontend/scripts/check';
 import { parseSurfaceSelection } from '../../../frontend/scripts/surface-selection';
 
 describe('scoped frontend checks', () => {
+  test('accepts canonical explicit TypeScript imports without emitting', () => {
+    const config = JSON.parse(readFileSync('frontend/tsconfig.react-base.json', 'utf8')) as {
+      compilerOptions?: Record<string, unknown>;
+    };
+    expect(config.compilerOptions?.['moduleResolution']).toBe('Bundler');
+    expect(config.compilerOptions?.['allowImportingTsExtensions']).toBe(true);
+    expect(config.compilerOptions?.['noEmit']).toBe(true);
+  });
+
   test('selects one surface without broad repository commands', () => {
     const request = parseLocalCheckRequest(['--surface=site', '--level=local']);
     const commands = createLocalCheckCommands(request.surfaceIds);

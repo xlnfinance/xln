@@ -117,6 +117,10 @@ describe('runtime-client remote request boundary', () => {
   test('keeps Svelte on thin adapters instead of duplicate request logic', () => {
     const connection = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
     const legacyWsUrl = readFileSync('frontend/src/lib/utils/runtime/wsUrl.ts', 'utf8');
+    const requestBoundary = readFileSync(
+      'frontend/packages/runtime-client/src/remote-runtime-request.ts',
+      'utf8',
+    );
 
     expect(connection).toContain("from '../../../../packages/runtime-client/src/remote-runtime-request'");
     expect(connection).toContain('decodeRemoteRuntimeRequest(');
@@ -124,5 +128,7 @@ describe('runtime-client remote request boundary', () => {
     expect(connection).not.toContain('const RUNTIME_PARAM_KEYS');
     expect(legacyWsUrl).toContain("from '../../../../packages/runtime-client/src/ws-url'");
     expect(legacyWsUrl).not.toContain('const normalizeLoopbackHost');
+    expect(requestBoundary).toContain("from '../../../../core/config/remote-runtime'");
+    expect(requestBoundary).not.toContain("from '../../../../core/config/constants'");
   });
 });
