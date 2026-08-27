@@ -49,6 +49,7 @@ export const CAPABILITIES = [
     routes: ['/app', '/address', '/testnet'],
     currentSources: [
       'frontend/packages/browser/src/wallet-boot-lifecycle.ts',
+      'frontend/packages/browser/src/wallet-deploy-version.ts',
       'frontend/packages/browser/src/wallet-shell-state.ts',
       'frontend/src/routes/app/+layout.svelte',
       'frontend/src/routes/app/+page.svelte',
@@ -59,6 +60,7 @@ export const CAPABILITIES = [
     behavior: [
       'boot and shell',
       'generation-safe local and remote boot sequencing',
+      'validated deploy-version persistence, reset, and recovery decisions',
       'framework-neutral wallet shell phase precedence',
       'identity selection',
       'onboarding and settings',

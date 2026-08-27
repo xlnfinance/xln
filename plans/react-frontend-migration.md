@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, AND SHELL STATE IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, AND DEPLOY-VERSION COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -583,6 +583,18 @@ its effects, UI, or route ownership; a future React shell can consume the same
 snapshot decision without mirrored effect state. Eleven direct tests cover all
 phases and precedence edges, 47 affected shell/lifecycle/capability tests pass
 with 278 expectations, both wallet and canonical Svelte production builds pass,
+and the wallet local check covers 442 files with zero unsafe-type findings.
+
+The next wallet slice now owns validated deploy-version payload decoding,
+storage, action selection, initial persistence, post-boot refresh, ephemeral
+testnet reset coordination, explicit unavailable outcomes, and fail-closed
+persistent-data recovery decisions. The canonical Svelte `/app` shell still
+owns the concrete no-cache fetch, diagnostic publication, loading/error stores,
+and destructive reset implementation through injected dependencies. Eleven
+direct tests cover payload aliases and rejection, all policy branches, fetch
+and validation failure, storage/reset propagation, refresh persistence, and
+thin Svelte wiring. Eighty affected boot/import/security/capability tests pass
+with 384 expectations, both wallet and canonical Svelte production builds pass,
 and the wallet local check covers 442 files with zero unsafe-type findings.
 
 ### WP7 — Migrate ops by flow
@@ -695,7 +707,9 @@ any mismatch. Never compile on production.
    selection snapshots, refresh leases, snapshot transitions, detached
    projections, injected loading outcomes, and latest-wins publication
    coordination are also shared. Wallet shell phase precedence is shared while
-   the existing Svelte shell retains concrete lifecycle effects. Latest-read
+   validated deploy-version persistence, reset, and recovery decisions are
+   injected through a shared browser coordinator; the existing Svelte shell
+   retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
    remain with the canonical Svelte adapter until a complete React consumer

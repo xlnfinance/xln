@@ -23,7 +23,6 @@
   import { tabOperations } from '$lib/stores/ui/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vault/vaultStore';
-  import { resolveDeployVersionAction } from '$lib/utils/deployVersionPolicy';
   import { resetEverything } from '$lib/utils/control/resetEverything';
   import { parseStorageSchemaMismatch } from '$lib/utils/recovery/storageSchemaRecovery';
   import {
@@ -62,6 +61,10 @@
     writeEmbeddedRuntimeAdapterSession,
   } from '../../../packages/browser/src/runtime-adapter-session';
   import { runWalletBootLifecycle } from '../../../packages/browser/src/wallet-boot-lifecycle';
+  import {
+    WalletDeployVersionCoordinator,
+    walletDeployVersionRecoveryMessage,
+  } from '../../../packages/browser/src/wallet-deploy-version';
   import { resolveWalletShellPhase } from '../../../packages/browser/src/wallet-shell-state';
 
   let { children } = $props();
@@ -82,6 +85,16 @@
   let claimingActiveTabLock = $state(false);
   let runtimeImportLocationInFlight = false;
   let releaseActiveTabLock: (() => void) | null = null;
+  const walletDeployVersion = browser
+    ? new WalletDeployVersionCoordinator({
+      durable: localStorage,
+      readCurrentPayload: fetchCurrentDeployVersionPayload,
+      resetEphemeralTestnet: () => resetEverything({
+        confirmed: true,
+        reason: 'deploy-version-change-testnet',
+      }),
+    })
+    : null;
   const pageSearch = $derived(browser ? $page.url.search : '');
   const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
   const walletShellPhase = $derived(resolveWalletShellPhase({
@@ -94,12 +107,6 @@
     runtimeLoading: $isLoading,
     runtimeReady: $xlnFunctions.isReady,
   }));
-  const DEPLOY_VERSION_KEY = 'xln-deploy-version';
-  type DeployVersionPayload = {
-    version: string;
-    ephemeralTestnet: boolean;
-  };
-
   function logAppShellDiagnostic(message: string, details?: unknown): void {
     errorLog.log(message, 'App Shell', details);
   }
@@ -324,7 +331,7 @@
       await bootApp();
       if (options.persistDeployVersionAfterBoot) {
         try {
-          persistDeployVersion((await fetchCurrentDeployVersion()).version);
+          await requireWalletDeployVersion().refreshStoredVersion();
         } catch (deployError) {
           logAppShellDiagnostic('Deploy version persistence failed after boot', deployError);
         }
@@ -393,31 +400,12 @@
     await refreshCurrentRuntimeProjection();
   }
 
-  function readStoredDeployVersion(): string {
-    if (!browser) return '';
-    return String(localStorage.getItem(DEPLOY_VERSION_KEY) || '').trim();
+  function requireWalletDeployVersion(): WalletDeployVersionCoordinator {
+    if (!walletDeployVersion) throw new Error('WALLET_DEPLOY_VERSION_BROWSER_REQUIRED');
+    return walletDeployVersion;
   }
 
-  function persistDeployVersion(version: string): void {
-    if (!browser || !version) return;
-    localStorage.setItem(DEPLOY_VERSION_KEY, version);
-  }
-
-  function parseDeployVersionPayload(payload: unknown): DeployVersionPayload {
-    if (!payload || typeof payload !== 'object') {
-      throw new Error('INVALID_DEPLOY_VERSION_PAYLOAD');
-    }
-
-    const root = payload as Record<string, unknown>;
-    const version = String(root['deployVersion'] || root['networkVersion'] || root['version'] || '').trim();
-    if (!version) {
-      throw new Error('MISSING_DEPLOY_VERSION');
-    }
-
-    return { version, ephemeralTestnet: root['ephemeralTestnet'] === true };
-  }
-
-  async function fetchCurrentDeployVersion(): Promise<DeployVersionPayload> {
+  async function fetchCurrentDeployVersionPayload(): Promise<unknown> {
     const response = await fetch(`/api/jurisdictions?ts=${Date.now()}`, {
       cache: 'no-store',
       headers: {
@@ -428,34 +416,24 @@
     if (!response.ok) {
       throw new Error(`DEPLOY_VERSION_FETCH_FAILED:${response.status}`);
     }
-    const payload = parseDeployVersionPayload(await response.json());
-    return payload;
+    return response.json();
   }
 
   async function ensureCurrentDeployVersion(): Promise<boolean> {
-    let current: DeployVersionPayload;
-    try {
-      current = await fetchCurrentDeployVersion();
-    } catch (error) {
-      logAppShellDiagnostic('Deploy version fetch failed', error);
+    const result = await requireWalletDeployVersion().check();
+    if (result.status === 'unavailable') {
+      logAppShellDiagnostic('Deploy version fetch failed', result.error);
       return false;
     }
-
-    const storedVersion = readStoredDeployVersion();
-    const action = resolveDeployVersionAction(storedVersion, current.version, current.ephemeralTestnet);
-    if (action === 'persist-current') {
-      persistDeployVersion(current.version);
-      return false;
+    if (result.status === 'require-recovery') {
+      error.set(walletDeployVersionRecoveryMessage(
+        result.storedVersion,
+        result.current.version,
+      ));
+      isLoading.set(false);
     }
-    if (action === 'continue') return false;
-    if (action === 'reset-ephemeral-testnet') {
-      await resetEverything({ confirmed: true, reason: 'deploy-version-change-testnet' });
-      return true;
-    }
-
-    error.set(`Deploy version changed from ${storedVersion} to ${current.version}. Review recovery coverage before resetting local data.`);
-    isLoading.set(false);
-    return true;
+    return result.status === 'reset-ephemeral-testnet'
+      || result.status === 'require-recovery';
   }
 
   $effect(() => {
@@ -550,7 +528,7 @@
         isLoading.set(false);
         error.set(null);
         try {
-          persistDeployVersion((await fetchCurrentDeployVersion()).version);
+          await requireWalletDeployVersion().refreshStoredVersion();
         } catch (error) {
           logAppShellDiagnostic('Deploy version persistence failed in lock test mode', error);
         }
@@ -558,7 +536,7 @@
       }
       await bootApp();
       try {
-        persistDeployVersion((await fetchCurrentDeployVersion()).version);
+        await requireWalletDeployVersion().refreshStoredVersion();
       } catch (error) {
         logAppShellDiagnostic('Deploy version persistence failed after app boot', error);
       }
