@@ -89,7 +89,7 @@ export const verifyRecoveryJournalFrame = (
     timePerfPhase('recovery.verify.runtimeMachine', () =>
       assertRecoveryRuntimeMachineMatches(env, expectedRuntimeMachine, height));
   }
-  const lineage = timePerfPhase('recovery.verify.lineage', () => frame.replicaMetaCheckpoint
+  const lineage = timePerfPhase('recovery.verify.lineage', () => frame.materializedState === true
     ? buildRuntimeCheckpointHeadPlan(env)
     : null);
   const commitment = timePerfPhase('recovery.verify.replicaMeta', () => lineage

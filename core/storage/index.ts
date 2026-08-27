@@ -1309,10 +1309,6 @@ const prepareStorageStateCommitments = async (
   options.onPersistenceProgress?.('canonical-hashes-built');
   checkpoint('canonicalHashes');
 
-  const replicaMetaStateMode: RuntimeFrame['replicaMetaStateMode'] =
-    checkpointedLineagePlan
-      ? 'shared-entity-state'
-      : 'live-head';
   const replicaMetaCommitment = checkpointedLineagePlan
     ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(
         options.env,
@@ -1362,7 +1358,6 @@ const prepareStorageStateCommitments = async (
     runtimeComponentDigests,
     runtimeMachine,
     runtimeStateHashes,
-    replicaMetaStateMode,
     replicaMetaCommitment,
     replicaMetaEntries,
     liveReplicaMetaKeys,
@@ -1415,7 +1410,6 @@ const buildStorageRuntimeFrame = (
   const {
     appliedRuntimeInput,
     shouldMaterialize,
-    checkpointedLineagePlan,
     durablePendingInput,
   } = prepared;
   const hasPendingInput =
@@ -1427,8 +1421,6 @@ const buildStorageRuntimeFrame = (
     timestamp: options.env.state.timestamp,
     prevFrameHash,
     replicaMetaDigest: commitments.replicaMetaCommitment.digest,
-    replicaMetaCheckpoint: checkpointedLineagePlan !== null,
-    replicaMetaStateMode: commitments.replicaMetaStateMode,
     postStateHash: computeStoragePostStateHash({
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,

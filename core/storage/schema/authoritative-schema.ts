@@ -103,8 +103,8 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   const code = 'STORAGE_FRAME_INVALID';
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
-    'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
-    'replicaMetaStateMode', 'postStateHash', 'materializedState', 'runtimeInput',
+    'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest',
+    'postStateHash', 'materializedState', 'runtimeInput',
     'runtimeOutputCount', 'runtimeOutputsDigest',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
@@ -114,17 +114,6 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
   requireStorageHash(frame['frameHash'], `${code}_FRAME_HASH`);
   requireStorageHash(frame['replicaMetaDigest'], `${code}_REPLICA_META_DIGEST`);
-  requireStorageBoolean(frame['replicaMetaCheckpoint'], `${code}_REPLICA_META_CHECKPOINT`);
-  if (
-    frame['replicaMetaStateMode'] !== 'live-head' &&
-    frame['replicaMetaStateMode'] !== 'shared-entity-state'
-  ) throw new Error(`${code}_REPLICA_META_STATE_MODE`);
-  if (frame['replicaMetaCheckpoint'] === false && frame['replicaMetaStateMode'] !== 'live-head') {
-    throw new Error(`${code}_REPLICA_META_STATE_MODE_NON_CHECKPOINT`);
-  }
-  if (frame['replicaMetaCheckpoint'] === true && frame['replicaMetaStateMode'] === 'live-head') {
-    throw new Error(`${code}_REPLICA_META_STATE_MODE_CHECKPOINT`);
-  }
   requireStorageHash(frame['postStateHash'], `${code}_POST_STATE_HASH`);
   const outputCount = requireBoundaryInteger(
     frame['runtimeOutputCount'],

@@ -48,8 +48,6 @@ describe('secondary storage error severity', () => {
       timestamp: 1_234,
       prevFrameHash: ZERO_FRAME_HASH,
       replicaMetaDigest: computeStorageReplicaMetaDigest([]),
-      replicaMetaCheckpoint: false,
-      replicaMetaStateMode: 'live-head',
       postStateHash: ZERO_FRAME_HASH,
       materializedState: false,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },

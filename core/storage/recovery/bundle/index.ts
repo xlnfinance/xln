@@ -156,15 +156,6 @@ const normalizeAndValidateBundleFields = (
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.postStateHash || ''))) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_POST_STATE_HASH_REQUIRED:height=${frameHeight}`);
       }
-      if (typeof frame.replicaMetaCheckpoint !== 'boolean') {
-        throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_CHECKPOINT_REQUIRED:height=${frameHeight}`);
-      }
-      if (
-        frame.replicaMetaStateMode !== 'live-head' &&
-        frame.replicaMetaStateMode !== 'shared-entity-state'
-      ) {
-        throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_STATE_MODE_REQUIRED:height=${frameHeight}`);
-      }
       expectedHeight += 1;
     }
     if (frames.at(-1)?.height !== runtimeHeight) {

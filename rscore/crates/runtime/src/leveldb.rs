@@ -1022,8 +1022,6 @@ mod tests {
                 timestamp: 1_000,
                 prev_frame_hash: [0; 32],
                 replica_meta_digest: [1; 32],
-                replica_meta_state_mode:
-                    crate::storage::native::ReplicaMetaStateMode::SharedEntityState,
                 runtime_component_digests: vec![],
                 materialized_state: true,
                 canonical_state: Some(crate::storage::native::CanonicalStateCommitment {
@@ -1135,7 +1133,6 @@ mod tests {
                 timestamp: 70,
                 prev_frame_hash: [0; 32],
                 replica_meta_digest: [1; 32],
-                replica_meta_state_mode: crate::storage::native::ReplicaMetaStateMode::LiveHead,
                 runtime_component_digests: vec![],
                 materialized_state: false,
                 canonical_state: None,

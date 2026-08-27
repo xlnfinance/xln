@@ -75,11 +75,6 @@ fn frame(
             timestamp: height,
             prev_frame_hash: [0; 32],
             replica_meta_digest: [0x11; 32],
-            replica_meta_state_mode: if materialized {
-                ReplicaMetaStateMode::SharedEntityState
-            } else {
-                ReplicaMetaStateMode::LiveHead
-            },
             runtime_component_digests: vec![],
             materialized_state: materialized,
             canonical_state,
@@ -184,7 +179,6 @@ fn frame_with_contexts(height: u64, contexts: EntityContextPayloadRows) -> Runti
             timestamp: height,
             prev_frame_hash: [0; 32],
             replica_meta_digest: [0x11; 32],
-            replica_meta_state_mode: ReplicaMetaStateMode::LiveHead,
             runtime_component_digests: vec![],
             materialized_state: false,
             canonical_state: None,
@@ -375,7 +369,6 @@ fn runtime_frame_bytes_and_hash_match_the_typescript_canonical_golden() {
             timestamp: 100,
             prev_frame_hash: [0; 32],
             replica_meta_digest: [0x11; 32],
-            replica_meta_state_mode: ReplicaMetaStateMode::LiveHead,
             runtime_component_digests: vec![],
             materialized_state: false,
             canonical_state: None,
@@ -394,15 +387,12 @@ fn runtime_frame_bytes_and_hash_match_the_typescript_canonical_golden() {
     .expect("canonical frame");
     assert_eq!(
         hex(&encoded.frame_hash),
-        "546f7ab9975255e355900e566265ea321c3efe961e66fb9a9a53e1f9697f154f",
+        "c170895bb8c41ae85f5d2564507d9a2fbe959006a1a67b0bffd8ee9095f10113",
     );
     let expected = decode_hex(concat!(
-        "03d472409fa6686569676874b16d6174657269616c697a65645374617465ad706f7374537461746548617368ad707265764672616d6548617368b57265706c6963614d657461436865636b706f696e74b17265706c6963614d657461446967657374b47265706c6963614d65746153746174654d6f6465ac",
-        "72756e74696d65496e707574b272756e74696d654f7574707574436f756e74b472756e74696d654f757470757473446967657374a974696d657374616d70af746f75636865644163636f756e7473b3746f7563686564426f6f6b456e746974696573af746f7563686564456e746974696573a96672616d65",
-        "4861736801c2d942307863386135626435313539633433373831343264356462613330353664393334333433363734333764663762333033333631643966626566653262343337333030d9423078303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
-        "30303030303030303030303030303030303030303030c2d942307831313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131a96c6976652d68656164d4724192ac656e74697479496e70757473aa72",
-        "756e74696d65547873909000d942307835366363333038323263383566616536613334636135626437303437613232333731663262633031303132373564633732343030313362363735333437383237cc64909090d942307835343666376162393937353235356533353539303065353636323635656133",
-        "323163336566653936316536366662396139613533653166393639376631353466",
+        "03d472409da6686569676874b16d6174657269616c697a65645374617465ad706f7374537461746548617368ad707265764672616d6548617368b17265706c6963614d657461446967657374ac72756e74696d65496e707574b272756e74696d654f7574707574436f756e74b472756e74696d654f757470757473446967657374a974696d657374616d70af746f75636865644163636f756e7473b3746f7563686564426f6f6b456e746974696573af746f7563686564456e746974696573a96672616d654861736801c2d942307863386135626435313539633433373831343264356462613330353664393334333433363734333764663762333033333631643966626566653262343337333030",
+        "d942307830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030d942307831313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131d4724192ac656e74697479496e70757473aa72756e74696d65547873909000",
+        "d942307835366363333038323263383566616536613334636135626437303437613232333731663262633031303132373564633732343030313362363735333437383237cc64909090d942307863313730383935626238633431616538356635643235363435303764396132666265393539303036613161363762306266666438656539303935663130313133",
     ));
     assert_eq!(encoded.commit.frame_bytes, expected);
     let validated = validate_runtime_frame(&encoded.commit.frame_bytes).expect("validate");
@@ -447,11 +437,10 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
     let mut account_meta_bytes = vec![0x17];
     account_meta_bytes.extend([1_u8; 32]);
     let account_meta = PathNodeKey::new(account_meta_bytes).expect("account checkpoint meta");
-    let mut account_sidecar_bytes = vec![0x18];
-    account_sidecar_bytes.extend([1_u8; 32]);
-    account_sidecar_bytes.extend([2_u8; 32]);
-    let account_sidecar =
-        PathNodeKey::new(account_sidecar_bytes).expect("account checkpoint sidecar");
+    let mut account_row_bytes = vec![0x18];
+    account_row_bytes.extend([1_u8; 32]);
+    account_row_bytes.extend([2_u8; 32]);
+    let account_row = PathNodeKey::new(account_row_bytes).expect("account checkpoint row");
     let mut account_node_bytes = vec![0x19];
     account_node_bytes.extend([1_u8; 32]);
     account_node_bytes.extend([2_u8; 32]);
@@ -481,8 +470,8 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
                             value: Some(output("account-meta")),
                         },
                         PathNodeChange {
-                            key: account_sidecar.clone(),
-                            value: Some(output("account-sidecar")),
+                            key: account_row.clone(),
+                            value: Some(output("account-row")),
                         },
                         PathNodeChange {
                             key: account_node.clone(),
@@ -516,8 +505,8 @@ fn recovery_is_latest_path_checkpoint_plus_exact_wal_tail() {
         Some(&output("account-meta"))
     );
     assert_eq!(
-        checkpoint.path_nodes.get(account_sidecar.as_bytes()),
-        Some(&output("account-sidecar"))
+        checkpoint.path_nodes.get(account_row.as_bytes()),
+        Some(&output("account-row"))
     );
     assert_eq!(
         checkpoint.path_nodes.get(account_node.as_bytes()),

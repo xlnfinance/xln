@@ -11,7 +11,7 @@ pub(super) const KEY_RUNTIME_WATCHER_CURSOR: u8 = 0x3a;
 
 const PATH_KEY_TAGS: &[u8] = &[
     0x17, // Rust Account checkpoint meta: owner.
-    0x18, // Rust Account sidecar: owner + Account.
+    0x18, // Rust Account scalar replica row: owner + Account.
     0x19, // Rust Account Patricia: owner + Account + namespace + path.
     0x21, // live Entity.
     0x22, // live Account.

@@ -131,9 +131,7 @@ pub(super) fn verified_checkpoint_frame(
     }
     let frame = decode_storage_payload(&source.frame_bytes)?;
     let object = object(&frame, "frame")?;
-    if object.get("materializedState").and_then(Value::as_bool) != Some(true)
-        || object.get("replicaMetaCheckpoint").and_then(Value::as_bool) != Some(true)
-    {
+    if object.get("materializedState").and_then(Value::as_bool) != Some(true) {
         return Err(invalid("CHECKPOINT_FRAME_NOT_MATERIALIZED"));
     }
     if object.contains_key("pendingRuntimeInput") {
@@ -272,8 +270,6 @@ mod tests {
                 timestamp: 1_000,
                 prev_frame_hash: [0; 32],
                 replica_meta_digest: [1; 32],
-                replica_meta_state_mode:
-                    crate::storage::native::ReplicaMetaStateMode::SharedEntityState,
                 runtime_component_digests: vec![],
                 materialized_state: true,
                 canonical_state: Some(crate::storage::native::CanonicalStateCommitment {

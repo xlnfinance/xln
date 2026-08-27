@@ -205,7 +205,7 @@ export const verifyStorageTailIntegrity = async (
     const actualReplicaMetaDigest = computeStorageReplicaMetaDigest(replicaMetas);
     const replicaCheckpointHeight = Math.max(1, Math.floor(Number(head.latestMaterializedHeight)));
     const replicaCheckpointRecord = await readStorageFrameRecord(db, replicaCheckpointHeight);
-    if (!replicaCheckpointRecord?.replicaMetaCheckpoint) {
+    if (replicaCheckpointRecord?.materializedState !== true) {
       throw new Error(`STORAGE_VERIFY_REPLICA_META_CHECKPOINT_MISSING:height=${replicaCheckpointHeight}`);
     }
     if (replicaCheckpointRecord.replicaMetaDigest !== actualReplicaMetaDigest) {

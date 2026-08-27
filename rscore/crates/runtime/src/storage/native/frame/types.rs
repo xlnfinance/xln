@@ -7,25 +7,6 @@ use super::super::RuntimeFrameCommit;
 
 pub type Digest = [u8; 32];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReplicaMetaStateMode {
-    LiveHead,
-    SharedEntityState,
-}
-
-impl ReplicaMetaStateMode {
-    pub(super) const fn text(self) -> &'static str {
-        match self {
-            Self::LiveHead => "live-head",
-            Self::SharedEntityState => "shared-entity-state",
-        }
-    }
-
-    pub(super) const fn is_checkpoint(self) -> bool {
-        matches!(self, Self::SharedEntityState)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeFrameEntityHash {
     pub entity_id: String,
@@ -70,7 +51,6 @@ pub struct CanonicalRuntimeFrameDraft {
     pub timestamp: u64,
     pub prev_frame_hash: Digest,
     pub replica_meta_digest: Digest,
-    pub replica_meta_state_mode: ReplicaMetaStateMode,
     pub runtime_component_digests: Vec<RuntimeComponentDigest>,
     pub materialized_state: bool,
     pub canonical_state: Option<CanonicalStateCommitment>,

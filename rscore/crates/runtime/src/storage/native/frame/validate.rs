@@ -11,14 +11,12 @@ use super::types::{
 use super::value::{encode, encode_frame_record};
 use super::{FRAME_DOMAIN, MAX_SAFE_INTEGER};
 
-const REQUIRED_FIELDS: [&str; 15] = [
+const REQUIRED_FIELDS: [&str; 13] = [
     "height",
     "timestamp",
     "prevFrameHash",
     "frameHash",
     "replicaMetaDigest",
-    "replicaMetaCheckpoint",
-    "replicaMetaStateMode",
     "postStateHash",
     "materializedState",
     "runtimeInput",
@@ -121,19 +119,6 @@ fn validate_runtime_input(
         || !input["entityInputs"].is_array()
     {
         return Err(RuntimeFrameCodecError::RuntimeInputObject(field));
-    }
-    Ok(())
-}
-
-fn validate_mode(frame: &Map<String, Value>) -> Result<(), RuntimeFrameCodecError> {
-    let checkpoint = field(frame, "replicaMetaCheckpoint")?
-        .as_bool()
-        .ok_or(RuntimeFrameCodecError::Field("replicaMetaCheckpoint"))?;
-    let mode = field(frame, "replicaMetaStateMode")?
-        .as_str()
-        .ok_or(RuntimeFrameCodecError::Field("replicaMetaStateMode"))?;
-    if (checkpoint && mode != "shared-entity-state") || (!checkpoint && mode != "live-head") {
-        return Err(RuntimeFrameCodecError::Field("replicaMetaStateMode"));
     }
     Ok(())
 }
@@ -265,7 +250,6 @@ pub fn validate_runtime_frame(
     let frame_hash = digest_field(frame, "frameHash")?;
     digest_field(frame, "replicaMetaDigest")?;
     digest_field(frame, "postStateHash")?;
-    validate_mode(frame)?;
     field(frame, "materializedState")?
         .as_bool()
         .ok_or(RuntimeFrameCodecError::Field("materializedState"))?;

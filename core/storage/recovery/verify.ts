@@ -36,7 +36,7 @@ export const verifyPersistedFrameState = (
   frame: RuntimeFrame,
 ): PersistedFrameVerification => {
   const expectedStateHash = frame.postStateHash;
-  const lineage = frame.replicaMetaCheckpoint
+  const lineage = frame.materializedState === true
     ? buildRuntimeCheckpointHeadPlan(env)
     : null;
   const replicaMetaDigest = lineage

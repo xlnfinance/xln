@@ -59,8 +59,6 @@ const prepareCommitProof = (
     timestamp: 800,
     prevFrameHash: `0x${'00'.repeat(32)}`,
     replicaMetaDigest: `0x${'22'.repeat(32)}`,
-    replicaMetaCheckpoint: false,
-    replicaMetaStateMode: 'live-head',
     postStateHash,
     materializedState: false,
     runtimeInput,

@@ -2070,7 +2070,7 @@ describe('storage frame journal retention', () => {
       getRuntimeWalDb(restoredAtTwo),
       restoredAtTwo.state.height,
     );
-    expect(materializedFrame?.replicaMetaStateMode).toBe('shared-entity-state');
+    expect(materializedFrame?.materializedState).toBe(true);
     const compactMeta = decodeBuffer<Record<string, unknown>>(
       await getRuntimeWalDb(restoredAtTwo).get(keyLiveReplicaMeta(entityId, signer)),
     );

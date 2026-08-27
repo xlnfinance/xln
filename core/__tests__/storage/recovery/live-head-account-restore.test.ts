@@ -142,8 +142,7 @@ describe('live-head restore after advertised account opens', () => {
     expect(env.state.height).toBeGreaterThan(1);
 
     const persistFrame = await readStorageFrameRecord(getRuntimeWalDb(env), env.state.height);
-    expect(persistFrame?.replicaMetaCheckpoint).toBe(false);
-    expect(persistFrame?.replicaMetaStateMode).toBe('live-head');
+    expect(persistFrame?.materializedState).toBe(false);
     const persistMeta = buildStorageLiveReplicaMetaCommitment(env);
     expect(persistMeta.digest).toBe(persistFrame?.replicaMetaDigest);
 

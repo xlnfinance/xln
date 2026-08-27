@@ -110,14 +110,6 @@ fn required_fields(
             "replicaMetaDigest".into(),
             text(format_hash(&draft.replica_meta_digest)),
         ),
-        (
-            "replicaMetaCheckpoint".into(),
-            Value::Bool(draft.replica_meta_state_mode.is_checkpoint()),
-        ),
-        (
-            "replicaMetaStateMode".into(),
-            text(draft.replica_meta_state_mode.text()),
-        ),
         ("postStateHash".into(), text(format_hash(&post_hash))),
         (
             "materializedState".into(),

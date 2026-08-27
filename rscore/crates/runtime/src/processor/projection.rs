@@ -6,8 +6,8 @@ use thiserror::Error;
 
 use crate::storage::native::{
     CanonicalRuntimeFrameDraft, CanonicalStateCommitment, CheckpointGraph, EncodedRuntimeFrame,
-    PathNodeChange, ReplicaMetaStateMode, RuntimeFrameEntityHash, RuntimeMachineGraphRoot,
-    RuntimeMachineLeafRow, TouchedAccount, build_runtime_frame_commit,
+    PathNodeChange, RuntimeFrameEntityHash, RuntimeMachineGraphRoot, RuntimeMachineLeafRow,
+    TouchedAccount, build_runtime_frame_commit,
 };
 use crate::{
     CanonicalRuntimeEntityHash, RuntimeApplyResult, RuntimeCommitmentError, RuntimeComponentDigest,
@@ -182,11 +182,6 @@ pub(crate) fn project_durable_frame(
         timestamp: result.replica.state.timestamp,
         prev_frame_hash: expected_previous_hash,
         replica_meta_digest,
-        replica_meta_state_mode: if materialized_state {
-            ReplicaMetaStateMode::SharedEntityState
-        } else {
-            ReplicaMetaStateMode::LiveHead
-        },
         runtime_component_digests: component_digests,
         materialized_state,
         canonical_state,

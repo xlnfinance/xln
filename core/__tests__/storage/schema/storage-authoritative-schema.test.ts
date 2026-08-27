@@ -34,6 +34,7 @@ import {
 import { decodeStorageBookHeader } from '../../../storage/schema/book-graph-codec';
 import { prepareRuntimeMachineGraphRows } from '../../../storage/wal/runtime-machine-graph';
 import { readStorageFramePayloads, readStorageFrameRecord } from '../../../storage/read/read';
+import { prepareRuntimeOutputRows } from '../../../storage/wal/outbox-payload';
 
 const paths: string[] = [];
 
@@ -122,8 +123,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       frameHash: hash,
       replicaMetaDigest: hash,
       postStateHash: hash,
-      replicaMetaCheckpoint: true,
-      replicaMetaStateMode: 'shared-entity-state',
       materializedState: true,
       canonicalStateHash: hash,
       canonicalEntityHashes: [],
@@ -162,8 +161,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       frameHash: hash,
       replicaMetaDigest: hash,
       postStateHash: hash,
-      replicaMetaCheckpoint: false,
-      replicaMetaStateMode: 'live-head',
       stateHash: '',
       hashMode: 'storage-merkle-v1',
       materializedState: false,
@@ -418,20 +415,21 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
     const machineGraph = prepareRuntimeMachineGraphRows(1, runtimeMachine);
     if (!machineGraph.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
+    const emptyOutputs = prepareRuntimeOutputRows(1, []).commitment;
     const frameBase: RuntimeFrame = {
       height: 1,
       timestamp: 1,
       prevFrameHash: hash,
       replicaMetaDigest: hash,
       postStateHash: hash,
-      replicaMetaCheckpoint: true,
-      replicaMetaStateMode: 'shared-entity-state',
       materializedState: true,
       canonicalStateHash: hash,
       canonicalEntityHashes: [],
       runtimeStateHash: hash,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
       runtimeMachineRoot: machineGraph.root,
+      runtimeOutputCount: emptyOutputs.count,
+      runtimeOutputsDigest: emptyOutputs.digest,
       touchedEntities: [],
       touchedAccounts: [],
       touchedBookEntities: [],

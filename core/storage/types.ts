@@ -147,11 +147,9 @@ export type RuntimeFrame = {
   frameHash?: string;
   /** Commits the exact validator-local recovery metadata published with this frame. */
   replicaMetaDigest: string;
-  replicaMetaCheckpoint: boolean;
-  replicaMetaStateMode: 'live-head' | 'shared-entity-state';
   /** Required per-frame replay commitment over Entity heads and durable Runtime state. */
   postStateHash: string;
-  materializedState?: boolean;
+  materializedState: boolean;
   /**
    * Independent canonical root computed directly from live EntityReplica data.
    * This intentionally avoids cloneEntityReplica(), project*Doc(), msgpack, and
@@ -206,8 +204,7 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'timestamp'
   | 'replicaMetaDigest'
   | 'postStateHash'
-  | 'replicaMetaCheckpoint'
-  | 'replicaMetaStateMode'
+  | 'materializedState'
   | 'runtimeInput'
   | 'pendingRuntimeInput'
   | 'runtimeOutputCount'

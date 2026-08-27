@@ -9,8 +9,8 @@ use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
 use super::super::*;
 use crate::storage::native::{
-    CanonicalRuntimeFrameDraft, NativeRuntimeStore, NativeStorageConfig, ReplicaMetaStateMode,
-    RuntimeFrameCommit, build_runtime_frame_commit,
+    CanonicalRuntimeFrameDraft, NativeRuntimeStore, NativeStorageConfig, RuntimeFrameCommit,
+    build_runtime_frame_commit,
 };
 
 static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
@@ -197,7 +197,6 @@ fn frame(height: u64, outputs: Vec<Vec<u8>>) -> RuntimeFrameCommit {
             timestamp: 123,
             prev_frame_hash: [0; 32],
             replica_meta_digest: [0x11; 32],
-            replica_meta_state_mode: ReplicaMetaStateMode::LiveHead,
             runtime_component_digests: vec![],
             materialized_state: false,
             canonical_state: None,

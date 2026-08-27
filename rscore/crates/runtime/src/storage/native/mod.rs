@@ -24,9 +24,8 @@ pub use entity_context::{
 pub(crate) use entity_context::{entity_context_height_prefix, parse_entity_context_payload_key};
 pub use frame::{
     AccountAuthorityCheckpointRef, CanonicalRuntimeFrameDraft, CanonicalStateCommitment,
-    EncodedRuntimeFrame, ReplicaMetaStateMode, RuntimeFrameCodecError, RuntimeFrameEntityHash,
-    RuntimeMachineGraphRoot, TouchedAccount, ValidatedRuntimeFrame, build_runtime_frame_commit,
-    validate_runtime_frame,
+    EncodedRuntimeFrame, RuntimeFrameCodecError, RuntimeFrameEntityHash, RuntimeMachineGraphRoot,
+    TouchedAccount, ValidatedRuntimeFrame, build_runtime_frame_commit, validate_runtime_frame,
 };
 pub use keys::PathNodeKey;
 pub(crate) use keys::valid_path_key;

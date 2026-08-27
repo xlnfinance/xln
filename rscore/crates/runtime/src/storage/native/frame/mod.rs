@@ -9,8 +9,8 @@ mod value;
 pub use encode::build_runtime_frame_commit;
 pub use types::{
     AccountAuthorityCheckpointRef, CanonicalRuntimeFrameDraft, CanonicalStateCommitment,
-    EncodedRuntimeFrame, ReplicaMetaStateMode, RuntimeFrameCodecError, RuntimeFrameEntityHash,
-    RuntimeMachineGraphRoot, TouchedAccount, ValidatedRuntimeFrame,
+    EncodedRuntimeFrame, RuntimeFrameCodecError, RuntimeFrameEntityHash, RuntimeMachineGraphRoot,
+    TouchedAccount, ValidatedRuntimeFrame,
 };
 pub use validate::validate_runtime_frame;
 

@@ -328,8 +328,6 @@ const publishNewHistoryBase = async (
     timestamp: options.timestamp,
     prevFrameHash: ZERO_FRAME_HASH,
     replicaMetaDigest,
-    replicaMetaCheckpoint: true,
-    replicaMetaStateMode: 'shared-entity-state',
     postStateHash,
     materializedState: true,
     canonicalStateHash: options.canonicalStateHash,
