@@ -43,12 +43,6 @@
   } from '@xln/core/api/runtime-adapter/types';
   import { generateLazyEntityIdPreview } from '$lib/utils/identity/lazyEntityId';
   import {
-    BRAINVAULT_WORKER_CAP_STORAGE_KEY,
-    computeBrainVaultWorkerCap,
-    isBrainVaultWasmMemoryError,
-    nextBrainVaultWorkerCapAfterFailure,
-  } from '$lib/brainvault/workers';
-  import {
     FACTOR_INFO,
     WALLET_MODE_TRADEOFFS,
     estimateBrainVaultWork,
@@ -103,6 +97,15 @@
     resolveWalletBrainVaultShardRetry,
     resolveWalletBrainVaultWorkerScale,
   } from '../../../../packages/browser/src/wallet-brainvault-worker-scheduling';
+  import {
+    BRAINVAULT_WORKER_CAP_STORAGE_KEY,
+    computeBrainVaultWorkerCap,
+    isBrainVaultWasmMemoryError,
+    resolveWalletBrainVaultMemoryReduction,
+    resolveWalletBrainVaultShardWatchdog,
+    resolveWalletBrainVaultWorkerInitRetry,
+    walletBrainVaultWorkerInitFailureMessage,
+  } from '../../../../packages/browser/src/wallet-brainvault-worker-resilience';
   import {
     WALLET_AUTH_SCHEME_STORAGE_KEY,
     parseWalletBrainVaultWorkerCap,
@@ -712,11 +715,11 @@
 
   function armWorkerShardWatchdog(worker: Worker, shardIndex: number): void {
     clearWorkerShardWatchdog(worker);
-    const timeoutMs = Math.min(600_000, Math.max(300_000, Math.ceil(estimatedShardTimeMs * 10)));
+    const watchdog = resolveWalletBrainVaultShardWatchdog(estimatedShardTimeMs, shardIndex);
     workerShardWatchdogs.set(worker, setTimeout(() => {
       if (workerActiveShard.get(worker) !== shardIndex) return;
-      handleWorkerFailure(worker, new Error(`Shard ${shardIndex + 1} timed out after ${Math.ceil(timeoutMs / 1000)}s`));
-    }, timeoutMs));
+      handleWorkerFailure(worker, new Error(watchdog.message));
+    }, watchdog.timeoutMs));
   }
 
   function hasPendingShardWork(): boolean {
@@ -744,12 +747,16 @@
   }
 
   function reduceWorkerCapAfterMemoryError(message: string): void {
-    const current = Math.max(activeWorkerCount, effectiveTargetWorkerCount, 1);
-    const reduced = nextBrainVaultWorkerCapAfterFailure(current);
-    maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+    const reduction = resolveWalletBrainVaultMemoryReduction({
+      activeWorkerCount,
+      effectiveTargetWorkerCount,
+      maxWorkers,
+      targetWorkerCount,
+    });
+    maxWorkers = reduction.maxWorkers;
     persistWorkerCap(maxWorkers);
-    targetWorkerCount = Math.max(1, Math.min(targetWorkerCount, maxWorkers));
-    workerLimitNotice = `Browser memory pressure detected. BrainVault is continuing with ${maxWorkers} worker${maxWorkers === 1 ? '' : 's'}.`;
+    targetWorkerCount = reduction.targetWorkerCount;
+    workerLimitNotice = reduction.notice;
     logRuntimeCreationDiagnostic('BrainVault worker cap reduced after Wasm memory pressure', { maxWorkers, message });
   }
 
@@ -1023,18 +1030,21 @@
           if (!isCurrentDerivationRun(run)) return;
           terminateWorkers();
           const message = normalizeWalletBrainVaultWorkerError(err);
-          if (attempts < 4 && isBrainVaultWasmMemoryError(message) && initialWorkers > 1) {
-            const reduced = nextBrainVaultWorkerCapAfterFailure(initialWorkers);
-            if (reduced === initialWorkers) {
-              throw err;
-            }
-            initialWorkers = reduced;
-            maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+          const retry = resolveWalletBrainVaultWorkerInitRetry({
+            attempts,
+            initialWorkers,
+            maxWorkers,
+            targetWorkerCount,
+            message,
+          });
+          if (retry.status === 'retry') {
+            initialWorkers = retry.initialWorkers;
+            maxWorkers = retry.maxWorkers;
             persistWorkerCap(maxWorkers);
             activeWorkerCount = initialWorkers;
-            targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
-            attempts += 1;
-            workerLimitNotice = `Browser memory pressure detected. BrainVault is retrying with ${initialWorkers} worker${initialWorkers === 1 ? '' : 's'}.`;
+            targetWorkerCount = retry.targetWorkerCount;
+            attempts = retry.attempts;
+            workerLimitNotice = retry.notice;
             logRuntimeCreationDiagnostic('BrainVault reducing workers after init failure', { workerCount: initialWorkers, message });
             continue;
           }
@@ -1056,9 +1066,7 @@
       const message = normalizeWalletBrainVaultWorkerError(err);
       logRuntimeCreationDiagnostic('BrainVault worker initialization failed', { message });
       terminateWorkers();
-      derivationError = isBrainVaultWasmMemoryError(message)
-        ? `BrainVault could not allocate browser Wasm memory. Reduce other tabs or retry with 1 worker. ${message}`
-        : `BrainVault worker initialization failed: ${message}`;
+      derivationError = walletBrainVaultWorkerInitFailureMessage(message);
       derivationRun = null;
       phase = 'input';
     }

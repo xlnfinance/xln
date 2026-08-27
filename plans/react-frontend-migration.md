@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, AND BROWSER-BRAINVAULT-WORKER-SCHEDULING COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, AND BROWSER-BRAINVAULT-WORKER-RESILIENCE COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -700,6 +700,20 @@ workspace, capability, worker, native-custody, node-validation, and
 remote-reconnect suites pass 148 tests with 860 expectations. Both wallet and
 canonical Svelte production builds pass, and the wallet local check covers 454
 files with zero unsafe-type findings.
+
+The next wallet slice now owns deterministic browser BrainVault worker sizing
+and resilience policy: conservative CPU/RAM/WebKit caps, persisted lower caps,
+Wasm-memory failure recognition, halved fallback caps, five-to-ten-minute shard
+watchdogs, live memory-pressure reduction, four-attempt initialization retry
+eligibility, and exact terminal initialization copy. The previous Svelte-only
+worker helper is removed. The canonical Svelte event flow retains timers,
+Worker teardown and recreation, cap persistence, diagnostics, phase/error
+publication, postMessage, and secret input. Eight direct resilience tests plus
+the migrated sizing test and affected scheduling, validation, identity,
+recovery, opening, import, workspace, capability, native-custody,
+node-validation, and remote-reconnect suites pass 156 tests with 883
+expectations. Both wallet and canonical Svelte production builds pass, and the
+wallet local check covers 454 files with zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -904,6 +918,10 @@ any mismatch. Never compile on production.
    are shared while retry state mutation, Worker creation and draining,
    watchdogs, postMessage, secret input, diagnostics, and publication remain
    concrete.
+   Browser BrainVault worker sizing, watchdog, memory-reduction,
+   initialization-retry, and terminal-error decisions are shared while timers,
+   Worker teardown and recreation, cap persistence, diagnostics, postMessage,
+   secret input, and publication remain concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication

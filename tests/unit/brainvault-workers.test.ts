@@ -4,7 +4,7 @@ import {
   computeBrainVaultWorkerCap,
   isBrainVaultWasmMemoryError,
   nextBrainVaultWorkerCapAfterFailure,
-} from '../../frontend/src/lib/brainvault/workers';
+} from '../../frontend/packages/browser/src/wallet-brainvault-worker-resilience';
 
 describe('BrainVault worker sizing', () => {
   test('does not map 32 CPU cores to 32 browser Wasm workers', () => {
