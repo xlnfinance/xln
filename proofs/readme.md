@@ -60,7 +60,7 @@ Pinned SHA: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78` (рабочее дере�
   idempotent; конфликт с committed/ранним mempool claim — typed reject; proposal удаляет только
   конфликтную строку с typed disposition и продолжает аккаунт, никогда голый `Error`.
   Обязательные векторы TS↔Rust: committed conflict, два конфликта в одном batch, exact
-  duplicate, stale admitted claim после incoming frame. → `proofs/fixes.md` FX-3.
+  duplicate, stale admitted claim после incoming frame. → `proofs/fixes.md` FX-3. **Hardening посажен** (`b8004d939`): все A-гэпы закрыты — 7 коллекций непустые, delete-пути, конфликты генерируются + D4-векторы закреплены, entity-overlay слой, 325,793 expects deep; новые находки BUG-13/BUG-14 (см. bugs.md). Ревизионная переоценка аудита — опционально.
 - **D5** Удаление legacy wave/shadow/worker — атомарно после exact RRS replay + crash restore
   TS↔Rust + pay/same-J HLT. Не трогать до гейтов.
 - **D6** Re-ACK — переиспользование сохранённого Hanko без новой ECDSA; current/previous-board
