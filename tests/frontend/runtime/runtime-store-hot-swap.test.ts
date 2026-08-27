@@ -130,7 +130,8 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(storeSource).not.toContain('export const xlnEnvironment = derived');
   expect(storeSource).not.toContain('export function setXlnEnvironment');
   expect(embeddedSource).toContain('const bootstrapEnvironment = writable<RuntimeReplica | null>(null);');
-  expect(derivedSource).toContain('return runtimeEntry?.env ?? null;');
+  expect(derivedSource).toContain("if (selectedRuntimeId) return $runtimes.get(selectedRuntimeId)?.env ?? null;");
+  expect(derivedSource).toContain('return $bootstrapEnvironment;');
   expect(derivedSource).not.toContain('if (runtimeEntry) return runtimeEntry.env ?? null;');
   expect(embeddedSource).toContain("import { errorLog } from '../errorLogStore';");
   expect(setEnvSource).toContain('const canPublishActiveEnv = !selectedRuntimeId || (envRuntimeId !== \'\' && envRuntimeId === selectedRuntimeId);');
@@ -260,7 +261,7 @@ test('remote runtime switch resets runtime-scoped view selection without droppin
   const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
   expect(source).toContain('shouldResetRuntimeAdapterViewSelection(previousConfig, normalizedConfig)');
   expect(source).toContain('resetRuntimeAdapterViewSelection');
-  expect(source).toContain("import { clearRuntimeQueryCache, runtimeQueryClient, type RuntimeReceiptStatus } from './runtimeQueryClient'");
+  expect(source).toContain("import { clearRuntimeQueryCache } from './runtimeQueryClient';");
   expect(source).toContain('resetRuntimeView,');
   expect(source).toContain("const previousRuntimeId = normalizeRuntimeConfigId(previousConfig.runtimeId || '')");
   expect(source).toContain("const nextRuntimeId = normalizeRuntimeConfigId(nextConfig.runtimeId || '')");
@@ -306,21 +307,21 @@ test('stale remote entity selection fails loudly without resetting to another en
   expect(source).not.toContain("refreshView('')");
 });
 
-test('remote RuntimeInput command waits for observed receipt before projection refresh', () => {
+test('remote RuntimeInput command waits for the first committed projection after acceptance', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).toContain('const waitForRemoteRuntimeProjectionAtHeight = async');
   expect(source).toContain('REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS');
   expect(source).toContain('REMOTE_RUNTIME_PROJECTION_TIMEOUT');
-  expect(source).toContain('const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);');
-  expect(source).toContain('const observedHeight = Number(observed?.observedHeight ?? accepted.height);');
-  expect(source).toContain('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);');
-  expect(source).toContain('progress.observed(Number(observed?.observedHeight ?? projectedHeight));');
-  expect(source.indexOf('const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);'))
-    .toBeLessThan(source.indexOf('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);'));
+  expect(source).toContain('const observeRemoteRuntimeCommand = async');
+  expect(source).toContain('await progress.accepted(accepted.height);');
+  expect(source).toContain('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1);');
+  expect(source).toContain('await progress.observed(projectedHeight);');
+  expect(source.indexOf('await progress.accepted(accepted.height);'))
+    .toBeLessThan(source.indexOf('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1);'));
+  expect(source).not.toContain('waitForRemoteRuntimeReceiptObserved');
   expect(source).not.toContain('waitForRemoteRuntimeCommit');
   expect(source).toContain('latestHeight = Math.max(');
   expect(source).toContain('get(runtimeView).height');
-  expect(source).toContain("if (!receiptId) throw new Error('REMOTE_RUNTIME_RECEIPT_ID_MISSING');");
 });
 
 test('remote runtime refresh ignores unchanged ticks and debounces projection reads', () => {

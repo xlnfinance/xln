@@ -519,7 +519,10 @@ test('runtime controller exposes only typed debug projection queries', () => {
   expect(controllerSource).not.toContain('send: runtimeAdapterSend');
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
   expect(appTypes).not.toContain('read: <T = unknown>');
-  expect(storeSource).toContain('runtimeQueryClient.readReceiptStatus(id)');
+  expect(storeSource).toContain('const observeRemoteRuntimeCommand = async');
+  expect(storeSource).toContain('waitForRemoteRuntimeProjectionAtHeight(accepted.height + 1)');
+  expect(storeSource).toContain('progress.observed(projectedHeight)');
+  expect(storeSource).not.toContain('runtimeQueryClient.readReceiptStatus');
   expect(storeSource).not.toContain("adapter.read<RuntimeReceiptStatus>(`receipt/");
   expect(storeSource).not.toContain("adapter.read<RemoteRuntimeReceiptStatus>(`receipt/");
   expect(queryClientSource).not.toContain('export const runtimeQueryRead');
