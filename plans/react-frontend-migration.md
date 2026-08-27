@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, AND CONSENT COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, AND IDENTITY-ENTRY COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -611,6 +611,20 @@ checks pass 25 tests with 216 expectations. The broader affected batch passes
 outdated `xlnEnvironment` source-shape assertion. Both wallet and canonical
 Svelte production builds pass, and the wallet local check covers 444 files with
 zero unsafe-type findings.
+
+The next wallet slice now owns the canonical identity-entry modes and their
+deterministic interaction policy: Brain Vault and mnemonic are the only
+choices, mode changes are input-phase and rehearsal guarded, the departing
+mode's sensitive field is cleared, password visibility is reset, and Home,
+End, and wrapping arrow navigation resolve without DOM access. The canonical
+Svelte view retains field publication, focus, and derivation effects; no
+BrainVault derivation or cryptographic logic moved into the boundary. Eleven
+direct tests plus the existing wallet-entry surface tests cover the complete
+selection and keyboard matrix. The direct, surface, and capability checks pass
+19 tests with 178 expectations. The broader affected identity, recovery-import,
+workspace, and capability batch passes 65 tests with 529 expectations. Both
+wallet and canonical Svelte production builds pass, and the wallet local check
+covers 445 files with zero unsafe-type findings.
 
 The next wallet slice now owns validated deploy-version payload decoding,
 storage, action selection, initial persistence, post-boot refresh, ephemeral
@@ -739,6 +753,9 @@ any mismatch. Never compile on production.
    import, consent, persistence, and URL cleanup ordering are shared as well.
    Remote consent validation, accepted-request persistence, activation, and
    embedded cancellation ordering are shared through injected browser effects.
+   Canonical Brain Vault/mnemonic identity-mode selection, sensitive-field
+   clearing, and keyboard navigation decisions are also shared without moving
+   derivation or cryptographic effects.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication

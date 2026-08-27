@@ -56,6 +56,11 @@
     normalizeMnemonicPhrase,
     normalizeBrainVaultShardTimeSample,
   } from './runtime-creation-model';
+  import {
+    resolveWalletIdentityModeNavigation,
+    selectWalletIdentityMode,
+    type WalletIdentityMode,
+  } from '../../../../packages/browser/src/wallet-identity-entry';
 
   // Props
   export let embedded: boolean = false;
@@ -107,7 +112,7 @@
   // ============================================================================
 
   type Phase = 'input' | 'deriving' | 'recovery' | 'node-ready';
-  type InputMode = 'brainvault' | 'mnemonic';
+  type InputMode = WalletIdentityMode;
   type RecoveryRehearsalMode = 'mnemonic';
   type BrainVaultDerivationRun = Readonly<{
     name: string;
@@ -128,14 +133,16 @@
   ) satisfies VaultUnlockDurationMs;
 
   function selectInputMode(next: InputMode): void {
-    if (phase !== 'input') return;
-    if (rehearsalMode !== null && next !== rehearsalMode) return;
-    if (next !== inputMode) {
-      if (inputMode === 'brainvault') passphrase = '';
-      if (inputMode === 'mnemonic') mnemonicInput = '';
-      showPassphrase = false;
-    }
-    inputMode = next;
+    const nextState = selectWalletIdentityMode({
+      state: { mode: inputMode, passphrase, mnemonicInput, showPassphrase },
+      phase,
+      rehearsalMode,
+      nextMode: next,
+    });
+    inputMode = nextState.mode;
+    passphrase = nextState.passphrase;
+    mnemonicInput = nextState.mnemonicInput;
+    showPassphrase = nextState.showPassphrase;
   }
 
   function focusWalletModeTab(next: InputMode): void {
@@ -144,22 +151,14 @@
   }
 
   function handleWalletModeKeydown(event: KeyboardEvent): void {
-    const enabledModes = (['brainvault', 'mnemonic'] as const).filter((mode) => (
-      rehearsalMode === null || mode === rehearsalMode
-    ));
-    const currentIndex = enabledModes.indexOf(inputMode);
-    const nextIndex = event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? enabledModes.length - 1
-        : event.key === 'ArrowRight'
-          ? (currentIndex + 1) % enabledModes.length
-          : event.key === 'ArrowLeft'
-            ? (currentIndex - 1 + enabledModes.length) % enabledModes.length
-            : -1;
-    if (nextIndex < 0) return;
+    const nextMode = resolveWalletIdentityModeNavigation({
+      currentMode: inputMode,
+      key: event.key,
+      rehearsalMode,
+    });
+    if (!nextMode) return;
     event.preventDefault();
-    focusWalletModeTab(enabledModes[nextIndex]!);
+    focusWalletModeTab(nextMode);
   }
 
   // Visual scheme for the standalone auth screen: 'dark' (default "vault") or 'light' (minimalist fintech skin)
