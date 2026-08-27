@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, AND RUNTIME-PREFERENCE COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, AND NODE-BRAINVAULT-VALIDATION COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -663,6 +663,18 @@ tests plus the affected identity, recovery, opening, import, workspace,
 capability, worker, and native-custody suites pass 121 tests with 726
 expectations. Both wallet and canonical Svelte production builds pass, and the
 wallet local check covers 451 files with zero unsafe-type findings.
+
+The next wallet slice now owns deterministic node BrainVault validation:
+connected-remote and admin-access gating, inclusive progress bounds for the
+expected shard count, exact result spec/shard matching, and the existing 70/30
+shard-time smoothing. The canonical Svelte event flow retains adapter lookup,
+the concrete derivation call and passphrase, abort ownership, progress and
+receipt publication, cleanup, and user-visible failure effects. Eight direct
+tests plus the affected identity, recovery, opening, import, workspace,
+capability, worker, native-custody, and remote-reconnect suites pass 130 tests
+with 800 expectations. Both wallet and canonical Svelte production builds
+pass, and the wallet local check covers 452 files with zero unsafe-type
+findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -856,6 +868,9 @@ any mismatch. Never compile on production.
    Runtime auth-scheme, unlock-duration, and worker-cap preference policy is
    shared while concrete localStorage access and reactive publication remain
    in the canonical Svelte event flow.
+   Node BrainVault access, progress, result, and timing validation are shared
+   while adapter calls, abort ownership, passphrase input, and result
+   publication remain concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication

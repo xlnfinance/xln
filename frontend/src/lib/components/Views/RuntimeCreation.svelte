@@ -86,6 +86,12 @@
   } from '../../../../packages/browser/src/wallet-runtime-opening';
   import { WalletNodeMnemonicRevealCoordinator } from '../../../../packages/browser/src/wallet-node-mnemonic-reveal';
   import {
+    assertWalletNodeBrainVaultResult,
+    nextWalletNodeShardTimeMs,
+    resolveWalletNodeBrainVaultAccess,
+    validateWalletNodeBrainVaultProgress,
+  } from '../../../../packages/browser/src/wallet-node-brainvault-validation';
+  import {
     WALLET_AUTH_SCHEME_STORAGE_KEY,
     parseWalletBrainVaultWorkerCap,
     resolveWalletAuthScheme,
@@ -1064,21 +1070,19 @@
   async function startNodeDerivation(run: BrainVaultDerivationRun): Promise<void> {
     invalidateNodeReveal();
     const adapter = getRuntimeControllerAdapter();
-    if (!adapter || adapter.mode !== 'remote' || adapter.status !== 'connected') {
-      failDerivation('The selected node is not connected. Reconnect it before BrainVault recovery.');
+    const access = resolveWalletNodeBrainVaultAccess(adapter);
+    if (access.status === 'blocked') {
+      failDerivation(access.message);
       return;
     }
-    if (adapter.authLevel !== 'admin') {
-      failDerivation('Admin access to the selected node is required for BrainVault recovery.');
-      return;
-    }
+    const nodeAdapter = access.adapter;
     const abort = new AbortController();
     nodeDerivationAbort = abort;
     const isCurrentNodeRun = (): boolean =>
       nodeDerivationAbort === abort && isCurrentDerivationRun(run);
     nodeShardTimeMs = 0;
     try {
-      const result = await adapter.deriveBrainVault({
+      const result = await nodeAdapter.deriveBrainVault({
         specId: BRAINVAULT_V1_SPEC_ID,
         name: run.name,
         passphrase: run.passphrase,
@@ -1090,24 +1094,21 @@
         signal: abort.signal,
         onProgress: sample => {
           if (!isCurrentNodeRun()) return;
-          if (sample.total !== run.shardCount || sample.completed < 0 || sample.completed > sample.total) {
+          const progressValidation = validateWalletNodeBrainVaultProgress(sample, run.shardCount);
+          if (!progressValidation.valid) {
             abort.abort();
-            derivationError = 'The node returned invalid BrainVault progress and was cancelled.';
+            derivationError = progressValidation.message;
             return;
           }
           shardCount = sample.total;
           shardsCompleted = sample.completed;
           activeWorkerCount = sample.workers;
-          nodeShardTimeMs = nodeShardTimeMs > 0
-            ? nodeShardTimeMs * 0.7 + sample.lastShardMs * 0.3
-            : sample.lastShardMs;
+          nodeShardTimeMs = nextWalletNodeShardTimeMs(nodeShardTimeMs, sample.lastShardMs);
         },
       });
       if (!isCurrentNodeRun()) return;
       if (abort.signal.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
-      if (result.specId !== BRAINVAULT_V1_SPEC_ID || result.shardCount !== run.shardCount) {
-        throw new Error('BRAINVAULT_NODE_RESULT_SPEC_MISMATCH');
-      }
+      assertWalletNodeBrainVaultResult(result, BRAINVAULT_V1_SPEC_ID, run.shardCount);
       nodeDerivationResult = result;
       ethereumAddress = result.ethereumAddress;
       entityId = result.entityId;

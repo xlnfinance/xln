@@ -63,6 +63,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-identity-entry.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
+      .toContain('frontend/packages/browser/src/wallet-node-brainvault-validation.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-node-mnemonic-reveal.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-recovery-choice.ts');
@@ -90,6 +92,8 @@ describe('frontend capability inventory', () => {
       .toContain('validated deploy-version persistence, reset, and recovery decisions');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('canonical identity-mode selection, sensitive-field clearing, and keyboard navigation');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
+      .toContain('deterministic node BrainVault access, progress, result, and timing validation');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('generation-safe node mnemonic reveal coordination');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
