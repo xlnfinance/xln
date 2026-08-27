@@ -19,7 +19,6 @@ import { accountInputApplied } from '../../account/consensus/result';
 import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { inboundArrivals } from '../round/inbound';
 import { safeStringify } from '../../protocol/serialization';
-import { accountHasProposableMempool } from '../../entity/consensus/account/mempool-eligibility';
 
 type AccountAuthorityExecutionMode = 'pre-ts-observe' | 'cutover';
 
@@ -397,10 +396,6 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     this.frameOutboundPrepared = true;
     const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
       .filter(accountId => request.accounts.has(accountId))
-      .filter(accountId => {
-        const account = request.accountForWrite(accountId);
-        return account !== undefined && accountHasProposableMempool(account, request.entityState);
-      })
       .toSorted();
     const proposals = proposalIds.map(accountId => {
       const account = request.accountForWrite(accountId);
@@ -645,7 +640,15 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const actualId = normalizeEntityId(request.account.proofHeader.toEntity);
     const result = this.proposalResults[this.proposalCursor];
     if (expectedId === undefined || result === undefined || expectedId !== actualId) {
-      throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${expectedId ?? 'none'}:${actualId}`);
+      throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${safeStringify({
+        cursor: this.proposalCursor,
+        expectedId: expectedId ?? null,
+        actualId,
+        preparedProposalIds: this.preparedProposalIds,
+        mempool: request.account.mempool.map(tx => tx.type),
+        currentHeight: request.account.currentHeight,
+        pendingFrame: request.account.pendingFrame?.height ?? null,
+      })}`);
     }
     this.proposalCursor += 1;
     return result;

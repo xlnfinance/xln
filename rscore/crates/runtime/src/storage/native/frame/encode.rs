@@ -76,9 +76,6 @@ fn validate_draft(draft: &CanonicalRuntimeFrameDraft) -> Result<(), RuntimeFrame
         });
     }
     validate_runtime_input(&draft.runtime_input, "runtimeInput")?;
-    if let Some(pending) = &draft.pending_runtime_input {
-        validate_runtime_input(pending, "pendingRuntimeInput")?;
-    }
     if draft.materialized_state && draft.canonical_state.is_none() {
         return Err(RuntimeFrameCodecError::MaterializedRootsRequired);
     }
@@ -161,9 +158,6 @@ fn add_optional_fields(
     }
     if let Some(value) = context_refs(entity_contexts.frame_refs())? {
         fields.insert("entityContextRefs".into(), value);
-    }
-    if let Some(value) = &draft.pending_runtime_input {
-        fields.insert("pendingRuntimeInput".into(), value.clone());
     }
     if let Some(root) = &draft.runtime_machine_root {
         fields.insert(

@@ -284,7 +284,6 @@ mod tests {
     fn path_keyed_graph_round_trips_through_the_restore_oracle() {
         let machine = json!({
             "runtimeId":"0x1111111111111111111111111111111111111111",
-            "runtimeInput":{"runtimeTxs":[],"entityInputs":[]},
             "rows":{"__xlnType":"Map","value":[["a",{"__xlnType":"BigInt","value":"1"}]]}
         });
         let graph = prepare_runtime_machine_graph(&machine).expect("graph");

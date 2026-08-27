@@ -105,7 +105,7 @@ const RSCORE_ABI_VERSION = 1;
 // 34: Account frames no longer duplicate deltas or proposer side.
 // 35: Account input rows carry full peer/local certified-board authority.
 // 36: Entity snapshots carry the bounded Entity-command nonce fence.
-export const RSCORE_PROCESS_ABI_VERSION = 36;
+export const RSCORE_PROCESS_ABI_VERSION = 37;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;

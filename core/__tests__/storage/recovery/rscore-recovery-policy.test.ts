@@ -88,7 +88,6 @@ describe('Rust exact-recovery policy', () => {
         env,
         { runtimeTxs: [], entityInputs: [] },
         [],
-        undefined,
         new Map(),
       );
     }

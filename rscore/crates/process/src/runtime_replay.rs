@@ -244,6 +244,7 @@ fn assert_checkpoint_runtime_root(source: &ConcreteCheckpointSource) -> Result<(
 #[allow(clippy::too_many_arguments)]
 pub fn replay_runtime_wal(
     reader: &mut RuntimeWalReader,
+    mut checkpoint_reader: Option<&mut RuntimeWalReader>,
     state_reader: &mut RuntimeWalReader,
     recording: &Value,
     runtime_seed: &str,
@@ -265,10 +266,26 @@ pub fn replay_runtime_wal(
     let expectations = ReplayExpectations::from_recording(recording)?;
     expectations.assert_exact_range(from, to)?;
     let checkpoint_height = from - 1;
+    let source_checkpoint_hash = migration_origin
+        .map(|_| {
+            reader
+                .concrete_wal_source(checkpoint_height)
+                .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT:{error}"))
+                .and_then(|source| {
+                    validate_runtime_frame(&source.frame_bytes)
+                        .map(|frame| frame.frame_hash)
+                        .map_err(|error| format!("RUNTIME_REPLAY_SOURCE_CHECKPOINT_FRAME:{error}"))
+                })
+        })
+        .transpose()?;
 
-    let checkpoint_source = reader
-        .concrete_checkpoint_source(state_reader, checkpoint_height)
-        .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_SOURCE:{error}"))?;
+    let checkpoint_source = match checkpoint_reader.as_deref_mut() {
+        Some(checkpoint_reader) => {
+            checkpoint_reader.concrete_checkpoint_source(state_reader, checkpoint_height)
+        }
+        None => reader.concrete_checkpoint_source(state_reader, checkpoint_height),
+    }
+    .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_SOURCE:{error}"))?;
     assert_checkpoint_runtime_root(&checkpoint_source)?;
     let configuration = ConcreteCheckpointConfiguration {
         runtime_seed: runtime_seed.to_string(),
@@ -289,8 +306,14 @@ pub fn replay_runtime_wal(
     let owner = decoded.entity_snapshot.entity_id.to_ascii_lowercase();
     let owner_bytes = decoded.stored_accounts.owner_entity_id;
     let context_policy = decoded.entity_context_policy.clone();
-    let restored = restore_decoded_runtime_checkpoint(decoded)
+    let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RUNTIME_REPLAY_RESTORE:{error}"))?;
+    if let (Some(origin), Some(source_frame_hash)) = (migration_origin, source_checkpoint_hash) {
+        restored
+            .replica
+            .durable
+            .adopt_offline_import_lineage(origin, source_frame_hash);
+    }
     let checkpoint_period_frames = restored.replica.limits.checkpoint_period_frames;
 
     let routes = routes_from_wal(reader, &owner, from, to)?;
@@ -300,9 +323,13 @@ pub fn replay_runtime_wal(
         .map_err(|error| format!("RUNTIME_REPLAY_ENTITY_HISTORY:{error}"))?;
     let events = entity_event_evidence(&history, &owner)?;
 
-    let checkpoint_commit = reader
-        .native_checkpoint_import_frame(state_reader, checkpoint_height)
-        .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_IMPORT_SOURCE:{error}"))?;
+    let checkpoint_commit = match checkpoint_reader {
+        Some(checkpoint_reader) => {
+            checkpoint_reader.native_checkpoint_import_frame(state_reader, checkpoint_height)
+        }
+        None => reader.native_checkpoint_import_frame(state_reader, checkpoint_height),
+    }
+    .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_IMPORT_SOURCE:{error}"))?;
     let mut store = NativeRuntimeStore::open(
         native_database,
         NativeStorageConfig {
@@ -461,7 +488,11 @@ pub fn replay_runtime_wal(
                     .iter()
                     .map(|section| (section.field.clone(), Value::String(section.digest.clone()))),
             ));
-            let expected_entity_link = entity_history_link(&history, height, &owner)?.clone();
+            // Runtime-only frames intentionally have no new Entity-history
+            // link. Diagnostics must still preserve the primary R-frame diff.
+            let expected_entity_link = entity_history_link(&history, height, &owner)
+                .cloned()
+                .unwrap_or(Value::Null);
             let actual = processor
                 .read_durable_frame(height)
                 .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_READ:{error}"))?;
@@ -491,9 +522,20 @@ pub fn replay_runtime_wal(
             .state
             .entity
             .height;
-        expectations.assert_entity(height, owner_bytes, entity_height, commitments)?;
+        expectations.assert_entity(
+            height,
+            owner_bytes,
+            entity_height,
+            !source.entity_contexts.is_empty(),
+            commitments,
+        )?;
         let account_count = expectations.assert_accounts(height, &report.account_commits)?;
-        assert_entity_events(height, events.get(&height), commitments)?;
+        assert_entity_events(
+            height,
+            events.get(&height),
+            !source.entity_contexts.is_empty(),
+            commitments,
+        )?;
         expectations.assert_effects(height, commitments)?;
 
         add(&mut metrics.frames, 1, "frames")?;

@@ -286,10 +286,25 @@ const snapshot = artifact.recording.bundles.find(bundle => (bundle.kind ?? 'snap
 const tail = artifact.recording.bundles.find(bundle => bundle.kind === 'journal_tail');
 if (!snapshot || !tail) throw new Error('HLT_REPLAY_RECORDING_BUNDLES_MISSING');
 const frames = [...(tail.frames ?? [])];
-const seedPath = resolve(optionalArgument('seed-file') ?? `${artifact.source.workDir}/secrets/mesh-root.seed`);
-const meshRootSeed = readFileSync(seedPath, 'utf8').trim();
-if (!meshRootSeed) throw new Error('HLT_REPLAY_MESH_ROOT_SEED_MISSING');
-const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
+const seedFileArgument = optionalArgument('seed-file');
+const runtimeSeedFileArgument = optionalArgument('runtime-seed-file');
+if (seedFileArgument && runtimeSeedFileArgument) {
+  throw new Error('HLT_REPLAY_SEED_ARGUMENTS_EXCLUSIVE');
+}
+const runtimeSeed = runtimeSeedFileArgument
+  ? (() => {
+    const directSeed = readFileSync(resolve(runtimeSeedFileArgument), 'utf8').trim();
+    if (!directSeed) throw new Error('HLT_REPLAY_RUNTIME_SEED_MISSING');
+    return directSeed;
+  })()
+  : (() => {
+    const seedPath = resolve(seedFileArgument ?? `${artifact.source.workDir}/secrets/mesh-root.seed`);
+    const meshRootSeed = readFileSync(seedPath, 'utf8').trim();
+    if (!meshRootSeed) throw new Error('HLT_REPLAY_MESH_ROOT_SEED_MISSING');
+    return deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
+  })();
+
+const entitySignerLabel = optionalArgument('entity-signer-label') ?? 'h1-hub';
 
 const prewarmRecordedHubSigners = (
   env: Awaited<ReturnType<typeof restoreEnvFromRecoveryBundles>>,
@@ -297,7 +312,7 @@ const prewarmRecordedHubSigners = (
   const requiredSignerIds = new Set(
     Array.from(env.state.eReplicas.values(), replica => replica.signerId.toLowerCase()),
   );
-  const baseLabel = 'h1-hub';
+  const baseLabel = entitySignerLabel;
   const candidateLabels = [
     baseLabel,
     ...Array.from(env.state.jReplicas.keys(), jurisdiction => `${baseLabel}:${jurisdiction}`),

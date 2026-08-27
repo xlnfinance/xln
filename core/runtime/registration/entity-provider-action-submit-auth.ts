@@ -11,15 +11,6 @@ export const markLocalEntityProviderActionRuntimeTx = <T extends RetryActionTx |
   return tx;
 };
 
-export const markRestoredEntityProviderActionRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
-  for (const runtimeTx of runtimeTxs) {
-    if (
-      runtimeTx.type === 'retryEntityProviderAction' ||
-      runtimeTx.type === 'recordEntityProviderActionSubmitResult'
-    ) markLocalEntityProviderActionRuntimeTx(runtimeTx);
-  }
-};
-
 export const assertEntityProviderActionRuntimeTxAuthorized = (
   runtimeTx: RuntimeTx,
   replay: boolean,

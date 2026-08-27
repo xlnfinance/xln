@@ -473,7 +473,7 @@ const importParticipants = async (
     } as unknown as RuntimeReplica['runtimeMempool'];
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.infrastructure?.persistencePaused !== true) {
-      await saveEnvToDB(env, runtimeInput, undefined, undefined, new Map());
+      await saveEnvToDB(env, runtimeInput, undefined, new Map());
     }
   }
 };

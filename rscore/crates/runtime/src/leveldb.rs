@@ -1033,7 +1033,6 @@ mod tests {
                     }],
                 }),
                 runtime_input: serde_json::json!({"runtimeTxs": [], "entityInputs": []}),
-                pending_runtime_input: None,
                 runtime_machine_root: Some(crate::storage::native::RuntimeMachineGraphRoot {
                     root_hash: radix.root_hash(),
                     leaf_count: 1,
@@ -1137,7 +1136,6 @@ mod tests {
                 materialized_state: false,
                 canonical_state: None,
                 runtime_input: serde_json::json!({"runtimeTxs":[],"entityInputs":[]}),
-                pending_runtime_input: None,
                 runtime_machine_root: None,
                 account_authority_checkpoints: vec![],
                 touched_entities: vec![],

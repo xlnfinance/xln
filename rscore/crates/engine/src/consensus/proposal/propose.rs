@@ -78,10 +78,6 @@ pub struct ProposedFrame {
     pub dropped: Vec<DroppedTx>,
     /// The recovery proof this proposal travels with, when it carries one.
     pub dispute: Option<crate::consensus::replica::DisputeDraft>,
-    /// This draft was already certified by the parent Entity. The exact raw
-    /// Hanko must accompany a resend; the payment/swap-only RRS profile does
-    /// not retain those bytes yet and therefore refuses this output loudly.
-    pub dispute_requires_existing_hanko: bool,
     pub events: Vec<String>,
     pub outputs: Vec<AccountOutput>,
     /// Exact outputs of each applied transaction in `frame.txs` order.
@@ -93,8 +89,6 @@ pub struct ProposedFrame {
     /// publisher sends `frame_ack` rather than `frame` in that case, and must
     /// be told so by the verdict.
     pub bundled_ack: Option<crate::consensus::replica::OutboundAck>,
-    /// Same unsupported reuse condition for the ACK half of a frame_ack.
-    pub bundled_ack_dispute_requires_existing_hanko: bool,
 }
 
 #[derive(Debug)]
@@ -287,14 +281,10 @@ pub fn propose_account_frame(
     //
     // A mirror session carries no transformer address and builds no proof: it
     // is handed each frame and told what it was.
-    let certified_dispute_before = account.certified_local_dispute().cloned();
     let proposal_dispute = match candidate.delta_transformer().copied() {
         None => None,
         Some(transformer) => account.refresh_dispute_draft(&candidate, &transformer)?,
     };
-    let dispute_requires_existing_hanko = proposal_dispute
-        .as_ref()
-        .is_some_and(|draft| certified_dispute_before.as_ref() == Some(draft));
     let transaction_count = applied.len();
     let frame = AccountFrame {
         height,
@@ -328,10 +318,6 @@ pub fn propose_account_frame(
     let bundled_ack = account
         .pending()
         .and_then(|pending| pending.bundled_ack.clone());
-    let bundled_ack_dispute_requires_existing_hanko = bundled_ack
-        .as_ref()
-        .and_then(|ack| ack.dispute.as_ref())
-        .is_some_and(|draft| certified_dispute_before.as_ref() == Some(draft));
     Ok(ProposalOutcome::Proposed(Box::new(ProposedFrame {
         frame,
         state_hash,
@@ -339,12 +325,10 @@ pub fn propose_account_frame(
         hanko,
         dropped,
         dispute: proposal_dispute,
-        dispute_requires_existing_hanko,
         events: published_events,
         outputs: published_outputs,
         outputs_by_tx: published_outputs_by_tx,
         bundled_ack,
-        bundled_ack_dispute_requires_existing_hanko,
     })))
 }
 

@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use num_bigint::BigInt;
 use xln_rscore_engine::{AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx};
+use xln_rscore_protocol::CanonicalValue;
 
 use crate::commitment::compute_commitments;
 use crate::j_events::{account_tx_kind, apply_committed_j_event_claim};
@@ -20,7 +22,10 @@ use crate::{
 
 fn ensure_supported(tx: &AccountTx) -> Result<(), EntityKernelError> {
     match tx {
-        AccountTx::SwapOffer { .. }
+        AccountTx::AddDelta { .. }
+        | AccountTx::SetCreditLimit { .. }
+        | AccountTx::RebalancePolicy { .. }
+        | AccountTx::SwapOffer { .. }
         | AccountTx::SwapResolve { .. }
         | AccountTx::SwapCancelRequest { .. }
         | AccountTx::DirectPayment { .. }
@@ -31,6 +36,95 @@ fn ensure_supported(tx: &AccountTx) -> Result<(), EntityKernelError> {
             kind: account_tx_kind(tx),
         }),
     }
+}
+
+fn hub_config_field<'a>(
+    config: &'a CanonicalValue,
+    field: &'static str,
+) -> Result<&'a CanonicalValue, EntityKernelError> {
+    let CanonicalValue::Object(entries) = config else {
+        return Err(EntityKernelError::HubRebalanceConfigInvalid {
+            detail: "OBJECT".to_string(),
+        });
+    };
+    entries
+        .iter()
+        .find_map(|(key, value)| (key == field).then_some(value))
+        .ok_or(EntityKernelError::HubRebalanceConfigInvalid {
+            detail: field.to_string(),
+        })
+}
+
+fn initial_hub_policy_txs(
+    state: &EntityStateSlice,
+    commit: &OrderedAccountCommit,
+    created_accounts: &BTreeSet<String>,
+) -> Result<Vec<AccountTx>, EntityKernelError> {
+    if !created_accounts.contains(&commit.account_id)
+        || !commit.committed_via_new_frame
+        || commit.frame_height != 1
+    {
+        return Ok(Vec::new());
+    }
+    let Some(config) = state.hub_rebalance_config.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let CanonicalValue::Number(version) = hub_config_field(config, "policyVersion")? else {
+        return Err(EntityKernelError::HubRebalanceConfigInvalid {
+            detail: "policyVersion".to_string(),
+        });
+    };
+    let policy_version = version.as_str().parse::<u64>().map_err(|_| {
+        EntityKernelError::HubRebalanceConfigInvalid {
+            detail: "policyVersion".to_string(),
+        }
+    })?;
+    if policy_version == 0 {
+        return Err(EntityKernelError::HubRebalanceConfigInvalid {
+            detail: "policyVersion".to_string(),
+        });
+    }
+    let CanonicalValue::BigInt(liquidity_fee_bps) =
+        hub_config_field(config, "rebalanceLiquidityFeeBps")?
+    else {
+        return Err(EntityKernelError::HubRebalanceConfigInvalid {
+            detail: "rebalanceLiquidityFeeBps".to_string(),
+        });
+    };
+    if liquidity_fee_bps < &BigInt::from(0) {
+        return Err(EntityKernelError::HubRebalanceConfigInvalid {
+            detail: "rebalanceLiquidityFeeBps".to_string(),
+        });
+    }
+    let token_ids = commit
+        .transitions
+        .iter()
+        .filter_map(|transition| match transition.tx {
+            AccountTx::AddDelta { token_id } => Some(token_id.get()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    token_ids
+        .into_iter()
+        .map(|token_id| {
+            let decimals = match token_id {
+                1 | 3 | 4 => 6,
+                2 | 5 => 18,
+                _ => {
+                    return Err(EntityKernelError::HubRebalanceConfigInvalid {
+                        detail: format!("TOKEN_METADATA_UNAVAILABLE:{token_id}"),
+                    });
+                }
+            };
+            Ok(AccountTx::RebalancePolicy {
+                token_id: u32::from(token_id),
+                policy_version,
+                base_fee: BigInt::from(10_u8).pow(decimals - 1),
+                liquidity_fee_bps: liquidity_fee_bps.clone(),
+                gas_fee: BigInt::from(0),
+            })
+        })
+        .collect()
 }
 
 fn require_one_output<'a>(
@@ -213,6 +307,7 @@ fn apply_commit_transitions(
     deltas: &mut Vec<SameJOutputDelta>,
     account_txs: &mut Vec<TargetedAccountTx>,
     outputs: &mut Vec<EntityKernelOutput>,
+    created_accounts: &BTreeSet<String>,
 ) -> Result<(), EntityKernelError> {
     let mut direct_forwards = Vec::new();
     let mut timed_out = Vec::new();
@@ -272,6 +367,13 @@ fn apply_commit_transitions(
                     outputs,
                 )?;
             }
+            AccountTx::AddDelta { .. }
+            | AccountTx::SetCreditLimit { .. }
+            | AccountTx::RebalancePolicy { .. } => {
+                if !transition.outputs.is_empty() {
+                    return Err(EntityKernelError::output("STATE_ONLY_TX_OUTPUTS"));
+                }
+            }
             _ => {
                 return Err(EntityKernelError::UnsupportedAccountTx {
                     kind: account_tx_kind(&transition.tx),
@@ -279,6 +381,11 @@ fn apply_commit_transitions(
             }
         }
     }
+    account_txs.extend(
+        initial_hub_policy_txs(state, commit, created_accounts)?
+            .into_iter()
+            .map(|tx| (commit.account_id.clone(), tx)),
+    );
     let mut effects = PaybookEffects {
         account_txs,
         outputs,
@@ -375,6 +482,7 @@ pub(crate) struct EntityTransitionResult {
 pub(crate) fn apply_entity_transitions(
     mut state: EntityStateSlice,
     commits: &[OrderedAccountCommit],
+    created_accounts: &BTreeSet<String>,
     local_txs: Vec<LocalEntityFinancialTx>,
     local_account_views: &BTreeMap<String, LocalAccountFinancialView>,
     context: &DeterministicContext,
@@ -401,6 +509,7 @@ pub(crate) fn apply_entity_transitions(
             &mut deltas,
             &mut account_txs,
             &mut outputs,
+            created_accounts,
         )?;
     }
     if !deltas.is_empty() && state.orderbook.is_none() {
@@ -437,8 +546,15 @@ pub fn apply_entity_kernel(
     commits: &[OrderedAccountCommit],
     context: &DeterministicContext,
 ) -> Result<EntityKernelResult, EntityKernelError> {
-    let result =
-        apply_entity_transitions(state, commits, Vec::new(), &BTreeMap::new(), context, &[])?;
+    let result = apply_entity_transitions(
+        state,
+        commits,
+        &BTreeSet::new(),
+        Vec::new(),
+        &BTreeMap::new(),
+        context,
+        &[],
+    )?;
     let commitments = compute_commitments(&result.state, &result.proposal_work, &result.outputs)?;
     Ok(EntityKernelResult {
         state: result.state,

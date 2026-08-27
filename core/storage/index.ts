@@ -106,7 +106,6 @@ import {
   getSafePendingAccountJClaimDeletes,
 } from '../entity/account/account-j-claim-node-store';
 import {
-  buildDurableRuntimeMempool,
   buildStorageRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimePostStateView,
 } from './wal/snapshot';
@@ -647,7 +646,6 @@ export type StorageFrameSaveOptions = {
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
-  pendingRuntimeInput?: RuntimeInput;
   historyRecords?: RuntimeHistoryRecord[];
   entityContexts: Map<string, import('../types/entity/infra-context').EntityInfraContext>;
   /**
@@ -985,14 +983,6 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   // time was one more O(replicas log replicas) pass per frame.
   const replicaLookup = lineagePlan.lookup;
   checkpoint('lineage');
-  // Projected and canonicalized once: post-state view, machine snapshot and
-  // the WAL frame all hash/encode this same durable pending mempool tree.
-  const durablePendingInput = canonicalizeBinaryPayload(
-    buildDurableRuntimeMempool(
-      options.pendingRuntimeInput ?? options.env.runtimeMempool,
-    ),
-    { omitSymbolKeys: true },
-  ) as RuntimeInput;
   const planningMs = options.getPerfMs() - planningStartedAt;
   const planningStages = countStorageStages('planning', planningMarks, planningMs);
   return {
@@ -1002,7 +992,6 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     walDb,
     head,
     appliedRuntimeInput: canonicalAppliedRuntimeInput,
-    durablePendingInput,
     snapshotDue,
     snapshotRequiredByBytes,
     shouldMaterialize,
@@ -1286,15 +1275,11 @@ const prepareStorageStateCommitments = async (
       // Output bodies are immutable rows. Per-frame replay authority commits
       // their ordered refs below instead of serializing the same envelopes.
       pendingNetworkOutputs: [],
-      durableRuntimeInput: prepared.durablePendingInput,
       excludePersistedHistoryRecords: true,
     }),
   );
   const runtimeMachine = shouldMaterialize || canonicalHashDue
-    ? buildStorageRuntimeMachineSnapshot(options.env, {
-        durableRuntimeInput: prepared.durablePendingInput,
-        excludePersistedHistoryRecords: true,
-      })
+    ? buildStorageRuntimeMachineSnapshot(options.env, { excludePersistedHistoryRecords: true })
     : undefined;
   checkpoint('runtimeMachine');
   const runtimeStateHashes = canonicalHashDue
@@ -1407,15 +1392,7 @@ const buildStorageRuntimeFrame = (
   runtimeMachineRoot: import('./types').RuntimeMachineGraphRoot | undefined,
   accountAuthorityCheckpoints: PreparedRscoreCheckpointStorage['refs'],
 ): RuntimeFrame => {
-  const {
-    appliedRuntimeInput,
-    shouldMaterialize,
-    durablePendingInput,
-  } = prepared;
-  const hasPendingInput =
-    durablePendingInput.runtimeTxs.length > 0 ||
-    durablePendingInput.entityInputs.length > 0 ||
-    (durablePendingInput.jInputs?.length ?? 0) > 0;
+  const { appliedRuntimeInput, shouldMaterialize } = prepared;
   return {
     height: options.env.state.height,
     timestamp: options.env.state.timestamp,
@@ -1444,7 +1421,6 @@ const buildStorageRuntimeFrame = (
     ...(entityContextRefs.size > 0
       ? { entityContextRefs: new Map(entityContextRefs) }
       : {}),
-    ...(hasPendingInput ? { pendingRuntimeInput: durablePendingInput } : {}),
     ...(runtimeMachineRoot
       ? { runtimeMachineRoot }
       : {}),

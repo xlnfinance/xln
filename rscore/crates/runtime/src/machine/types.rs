@@ -19,7 +19,14 @@ use xln_rscore_protocol::CanonicalValue;
 /// name before any owned state is touched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeTx {
-    Unsupported { kind: String },
+    AdvanceJWatcherCursor {
+        depository_address: String,
+        chain_id: u64,
+        block_number: u64,
+    },
+    Unsupported {
+        kind: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,6 +203,13 @@ impl RuntimeEntityInput {
         self.account_inputs.len()
     }
 
+    /// Exact already-validated Entity-frame tx projections, in wire order.
+    /// Used by the entity-height durability barrier to detect a
+    /// `scheduledWake` tx and by the protocol-priority sort.
+    pub(super) fn canonical_entity_txs(&self) -> &[CanonicalEntityTx] {
+        &self.canonical_entity_txs
+    }
+
     /// Stable protocol-first lane used by TypeScript before frame caps.
     pub(super) fn is_protocol(&self) -> bool {
         self.canonical_entity_txs.iter().any(|tx| {
@@ -221,6 +235,24 @@ impl RuntimeEntityInput {
             self.account_inputs,
             self.execution_steps,
         )
+    }
+
+    /// Entity-frame projections without the full decode path, for barrier
+    /// selection tests that only need lane identity and tx kinds.
+    #[cfg(test)]
+    pub(super) fn fixture_with_entity_txs(
+        canonical: Value,
+        canonical_entity_txs: Vec<CanonicalEntityTx>,
+    ) -> Self {
+        Self {
+            entity_id: super::tests::owner_bytes(),
+            signer_id: super::tests::SIGNER.to_string(),
+            canonical,
+            canonical_entity_txs,
+            account_inputs: Vec::new(),
+            execution_steps: Vec::new(),
+            canonical_wire_bytes: 1,
+        }
     }
 
     #[cfg(test)]
@@ -644,6 +676,9 @@ pub struct AppliedRuntimeFrame {
     pub runtime_txs: Vec<RuntimeTx>,
     pub entity_inputs: Vec<Value>,
     pub frame: RuntimeFrameContext,
+    /// Runtime-only frames (for example a watcher cursor advance) retain the
+    /// previous certified Entity head and carry no Entity context or events.
+    pub entity_frame_committed: bool,
 }
 
 /// Runtime-generated Entity work. This is an internal EntityInput reason, not
@@ -796,6 +831,8 @@ pub enum RuntimeMachineError {
     EntityTxInterleavingUnsupported,
     #[error("RUNTIME_ENTITY_CONTEXT_MATERIALIZATION:{0}")]
     EntityContextMaterialization(String),
+    #[error("RUNTIME_INBOUND_GENESIS_POLICY:{0}")]
+    InboundGenesisPolicy(String),
     #[error("RUNTIME_ENTITY_INPUT_ENCODING:{0}")]
     EntityInputEncoding(String),
     #[error("RUNTIME_ENTITY_HEAD_WIRE_UNFITTABLE:actual={actual}:limit={limit}")]
@@ -810,6 +847,8 @@ pub enum RuntimeMachineError {
     SyntheticEntityInputEncoding(String),
     #[error("RUNTIME_TX_UNSUPPORTED:{kind}")]
     UnsupportedRuntimeTx { kind: String },
+    #[error(transparent)]
+    DurableEnvelope(#[from] crate::RuntimeDurableEnvelopeError),
     #[error("RUNTIME_ACCOUNTS_ROOT_MISMATCH:committed={committed:?}:resident={resident:?}")]
     AccountsRootMismatch {
         committed: [u8; 32],

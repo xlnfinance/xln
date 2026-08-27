@@ -320,7 +320,7 @@ describe('real process storage crash recovery', () => {
 
         restored.state.height += 1;
         restored.state.timestamp += 1;
-        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, [], new Map());
         const committedHead = await readStorageHead(getRuntimeWalDb(restored));
         expect(committedHead?.latestHeight).toBe(3);
         const committedFrame = await readStorageFrameRecord(getRuntimeWalDb(restored), 3);
@@ -423,7 +423,7 @@ describe('real process storage crash recovery', () => {
         };
         restored.state.height += 1;
         restored.state.timestamp += 1;
-        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, [], new Map());
 
         expect((await readStorageHead(historyDb))?.latestSnapshotHeight).toBe(3);
         expect(await countSnapshotBodyKeys(historyDb, 1)).toBeGreaterThan(0);

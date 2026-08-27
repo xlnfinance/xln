@@ -372,6 +372,7 @@ impl ReplayExpectations {
         height: u64,
         entity_id: [u8; 32],
         entity_height: u64,
+        entity_frame_committed: bool,
         commitments: &RuntimeDurableCommitments,
     ) -> Result<(), String> {
         let actual = [EntityRootRow {
@@ -382,10 +383,11 @@ impl ReplayExpectations {
             authority_root: commitments.entity_authority_root,
             accounts_root: commitments.accounts_root,
         }];
-        let expected = self
-            .entity_roots
-            .get(&height)
-            .map(Vec::as_slice)
+        let expected = self.entity_roots.get(&height).map(Vec::as_slice);
+        if !entity_frame_committed && expected.is_none() {
+            return Ok(());
+        }
+        let expected = expected
             .ok_or_else(|| format!("RUNTIME_REPLAY_EXPECTED_ENTITY_FRAME_MISSING:{height}"))?;
         if actual.as_slice() == expected {
             Ok(())
@@ -526,7 +528,7 @@ mod tests {
         };
         assert!(
             expectations
-                .assert_entity(7, [0x11; 32], 3, &commitments)
+                .assert_entity(7, [0x11; 32], 3, true, &commitments)
                 .unwrap_err()
                 .contains("EXPECTED_ENTITY_FRAME_MISSING")
         );
@@ -599,7 +601,7 @@ mod tests {
         };
         assert!(
             expectations
-                .assert_entity(7, [0x11; 32], 3, &commitments)
+                .assert_entity(7, [0x11; 32], 3, true, &commitments)
                 .unwrap_err()
                 .contains("ENTITY_MISMATCH")
         );

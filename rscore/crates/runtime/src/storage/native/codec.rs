@@ -105,7 +105,7 @@ pub(super) fn decode_checkpoint(bytes: &[u8]) -> Result<(u64, [u8; 32]), NativeS
 }
 
 fn validate_head(head: &StorageHead) -> Result<(), NativeStorageError> {
-    if head.schema_version != 2 {
+    if head.schema_version != 3 {
         return Err(NativeStorageError::Head("schemaVersion"));
     }
     if head.latest_materialized_height > head.latest_height

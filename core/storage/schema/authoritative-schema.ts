@@ -108,7 +108,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     'runtimeOutputCount', 'runtimeOutputsDigest',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'pendingRuntimeInput', 'entityContextRefs'], `${code}_FIELDS`);
+  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'accountAuthorityCheckpoints', 'entityContextRefs'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -153,12 +153,6 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     frame['entityContextRefs'] = decodeEntityContextPayloadRefs(
       frame['entityContextRefs'],
       `${code}_ENTITY_CONTEXT_REFS`,
-    );
-  }
-  if (frame['pendingRuntimeInput'] !== undefined) {
-    frame['pendingRuntimeInput'] = decodeRuntimeInput(
-      frame['pendingRuntimeInput'],
-      `${code}_PENDING_RUNTIME_INPUT`,
     );
   }
   requireStringArray(frame['touchedEntities'], `${code}_TOUCHED_ENTITIES`);

@@ -27,13 +27,12 @@ const REQUIRED_FIELDS: [&str; 13] = [
     "touchedBookEntities",
 ];
 
-const OPTIONAL_FIELDS: [&str; 7] = [
+const OPTIONAL_FIELDS: [&str; 6] = [
     "canonicalStateHash",
     "canonicalEntityHashes",
     "runtimeStateHash",
     "runtimeMachineRoot",
     "accountAuthorityCheckpoints",
-    "pendingRuntimeInput",
     "entityContextRefs",
 ];
 
@@ -254,9 +253,6 @@ pub fn validate_runtime_frame(
         .as_bool()
         .ok_or(RuntimeFrameCodecError::Field("materializedState"))?;
     validate_runtime_input(field(frame, "runtimeInput")?, "runtimeInput")?;
-    if let Some(pending) = frame.get("pendingRuntimeInput") {
-        validate_runtime_input(pending, "pendingRuntimeInput")?;
-    }
     validate_canonical_roots(frame)?;
     let canonical_state_hash = frame
         .get("canonicalStateHash")

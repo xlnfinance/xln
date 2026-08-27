@@ -28,6 +28,9 @@ const buildEnv = {
   ...process.env,
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE: '1',
   XLN_RUNTIME_SNAPSHOT_EXPORT_PATH: snapshotPath,
+  // The RRS MVP owns one H1 Entity. Cross-J is separately disabled below;
+  // booting a second local Entity would silently turn this into a multi-Entity gate.
+  ...(authorityEvidence ? { XLN_MESH_PRIMARY_JURISDICTION_ONLY: '1' } : {}),
 };
 const smoke = spawnSync(process.execPath, ['core/scripts/operations/production/local-prod-smoke.ts'], {
   cwd: process.cwd(),

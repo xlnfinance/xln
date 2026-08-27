@@ -42,9 +42,6 @@ export const buildRecoveryJournalFromStorageFrame = (
   runtimeOutputCount: frame.runtimeOutputCount,
   runtimeOutputsDigest: frame.runtimeOutputsDigest,
   entityContexts: structuredClone(payloads.entityContexts),
-  ...(frame.pendingRuntimeInput
-    ? { pendingRuntimeInput: frame.pendingRuntimeInput }
-    : {}),
   ...(payloads.runtimeOutputs?.length
     ? { runtimeOutputs: payloads.runtimeOutputs }
     : {}),

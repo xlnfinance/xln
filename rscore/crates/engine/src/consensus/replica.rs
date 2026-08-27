@@ -362,19 +362,6 @@ impl AccountConsensus {
         self.last_outbound_ack.as_ref()
     }
 
-    /// The local recovery draft whose Entity certificate already exists.
-    ///
-    /// The payment/swap RRS profile may publish a fresh unsigned draft for
-    /// the parent Entity to certify in this candidate. It cannot resend an
-    /// older certified draft until the raw Hanko bytes are resident too;
-    /// exposing this exact predicate lets the Account output boundary refuse
-    /// only that unsupported reuse instead of disabling every first frame.
-    pub(crate) fn certified_local_dispute(&self) -> Option<&DisputeDraft> {
-        self.dispute
-            .as_ref()
-            .filter(|_| self.local_dispute_certified)
-    }
-
     /// Keep the counterparty's proof after the verifier proved that its exact
     /// supplied hash equals the independently rebuilt Account-bound digest.
     ///

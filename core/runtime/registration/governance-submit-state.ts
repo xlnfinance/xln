@@ -235,12 +235,6 @@ export const markLocalGovernanceResultRuntimeTx = <T extends GovernanceResultTx>
   return tx;
 };
 
-export const markRestoredGovernanceResultRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
-  for (const tx of runtimeTxs) {
-    if (tx.type === 'recordGovernanceJSubmitResult') markLocalGovernanceResultRuntimeTx(tx);
-  }
-};
-
 export const assertGovernanceResultRuntimeTxAuthorized = (tx: RuntimeTx, replay: boolean): void => {
   if (tx.type !== 'recordGovernanceJSubmitResult') return;
   if (

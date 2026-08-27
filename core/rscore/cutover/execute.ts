@@ -47,8 +47,6 @@ import {
   cutoverAck,
   cutoverAckHashes,
   cutoverEnvelope,
-  cutoverProposal,
-  cutoverProposalHashes,
 } from './outbound';
 
 const fail = (code: string, detail: Readonly<Record<string, unknown>> = {}): never => {
@@ -82,6 +80,7 @@ type MaterializedOperation = Readonly<{
 export const materializeCutoverAccount = (
   request: Pick<CutoverInputRequest, 'binding' | 'account' | 'accountId'>,
   row: RscoreAccountCheckpointRow,
+  publishPostState = true,
 ): MaterializedOperation => {
   const prior = request.account;
   const resolved = resolveRscoreWaveAccount(row, prior);
@@ -93,16 +92,19 @@ export const materializeCutoverAccount = (
     prior,
     plan,
   );
-  publishAccountOverlay(prior, materialized.account);
-  // The fold that computes the Entity root will ask for this leaf next; the
-  // engine already sealed it over the very bytes just published.
-  rememberEngineAccountLeaf(
-    request.binding.sessionOwnerEntityId,
-    request.accountId,
-    row.entityAccountLeaf,
-  );
+  if (publishPostState) {
+    publishAccountOverlay(prior, materialized.account);
+    // The fold that computes the Entity root will ask for this leaf next; the
+    // engine already sealed it over the very bytes just published.
+    rememberEngineAccountLeaf(
+      request.binding.sessionOwnerEntityId,
+      request.accountId,
+      row.entityAccountLeaf,
+    );
+  }
+  const account = publishPostState ? prior : materialized.account;
   for (const key of ['mempool', 'currentFrame', 'currentHeight', 'rollbackCount'] as const) {
-    Reflect.set(prior, key, materialized.account[key]);
+    if (publishPostState) Reflect.set(prior, key, materialized.account[key]);
   }
   for (const key of [
     'pendingFrame',
@@ -113,11 +115,12 @@ export const materializeCutoverAccount = (
     'lastRollbackFrameHash',
   ] as const) {
     const value = materialized.account[key];
+    if (!publishPostState) continue;
     if (value === undefined) Reflect.deleteProperty(prior, key);
     else Reflect.set(prior, key, value);
   }
   return {
-    account: prior,
+    account,
     hashesToSign: materialized.hashesToSign.map(entry => ({ ...entry })),
   };
 };
@@ -431,26 +434,15 @@ export const cutoverAccountProposalResult = (
     // Both halves are released with the peer's acknowledgement, never here.
     return fail('PROPOSAL_EFFECT_TIMING', { account: accountId });
   }
-  const envelope = cutoverEnvelope(priorSnapshot);
-  if (publishPostState) materializeCutoverAccount(request, row);
-  // The bundled acknowledgement was produced — and published for signing —
-  // when the frame it answers was committed. Carrying it again here would put
-  // the same hash in the Entity's manifest twice; the certificate the Entity
-  // has already collected for it travels instead.
-  const owedAck = proposal.bundledAck;
-  const heldAck = priorSnapshot.lastOutboundFrameAck;
-  const accountInput = cutoverProposal(
-    envelope,
-    proposal.frame,
-    proposal.dispute,
-    owedAck === null
-      ? null
-      // The certificates this side already collected for that acknowledgement
-      // travel with it; only a bundle the Entity has never seen is rebuilt.
-      : heldAck?.height === owedAck.height
-        ? heldAck.response.ack
-        : cutoverAck(envelope, owedAck.height, owedAck.frameHash, owedAck.dispute).ack,
-  );
+  const materialized = materializeCutoverAccount(request, row, publishPostState);
+  const accountInput = materialized.account.pendingAccountInput
+    ?? fail('PROPOSAL_ACCOUNT_INPUT_MISSING', { account: accountId });
+  const proposalHashes = new Set([
+    proposal.frame.stateHash.toLowerCase(),
+    ...(proposal.dispute === null ? [] : [proposal.dispute.hash.toLowerCase()]),
+  ]);
+  const hashesToSign = materialized.hashesToSign.filter(entry =>
+    proposalHashes.has(entry.hash.toLowerCase()));
   // Only the proposal's own line. A proposer does not publish its window's
   // transaction events: they are published where the frame commits, which for
   // the proposer's own frame is the peer's side.
@@ -466,7 +458,7 @@ export const cutoverAccountProposalResult = (
     swapOffersCreated: effects.swapOffersCreated,
     swapCancelRequests: effects.swapCancelRequests,
     swapOffersCancelled: effects.swapOffersCancelled,
-    hashesToSign: cutoverProposalHashes(accountId, proposal.frame, proposal.dispute),
+    hashesToSign,
     ...(failedHtlcLocks.length > 0 ? { failedHtlcLocks } : {}),
   });
 };

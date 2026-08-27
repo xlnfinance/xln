@@ -137,7 +137,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
             },
           }]
         : []);
-      await saveEnvToDB(env, runtimeInput, [], undefined, new Map());
+      await saveEnvToDB(env, runtimeInput, [], new Map());
     }
 
     expect(await readPersistedFrameJournal(env, 3)).not.toBeNull();
@@ -192,7 +192,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     env.state.height = 6;
     env.state.timestamp = 1_700_000_000_006;
     replaceRuntimeFrameEvents(env, []);
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
 
     expect(await readPersistedFrameJournal(env, 3)).toBeNull();
     expect(await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 3)).toBeNull();

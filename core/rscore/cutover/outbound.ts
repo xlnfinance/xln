@@ -11,12 +11,7 @@
  */
 import { copyAccountDisputeConfig, copyAccountStateDomain } from '../../protocol/state/account-input-clone';
 import type { AccountConsensusHashToSign } from '../../account/consensus/types';
-import type {
-  AccountDisputeHanko,
-  AccountFrame,
-  AccountPeerInput,
-  AccountReplica,
-} from '../../types/account';
+import type { AccountDisputeHanko, AccountPeerInput, AccountReplica } from '../../types/account';
 import type { WaveDisputeDraft } from '../wave-decode';
 
 /** The envelope every peer input repeats, as this Account already holds it. */
@@ -63,21 +58,6 @@ export const cutoverAck = (
   },
 });
 
-export const cutoverProposal = (
-  envelope: CutoverEnvelope,
-  frame: AccountFrame,
-  dispute: WaveDisputeDraft | null,
-  owedAck: Extract<AccountPeerInput, { kind: 'ack' }>['ack'] | null,
-): Extract<AccountPeerInput, { kind: 'frame' | 'frame_ack' }> => {
-  const proposal = {
-    frame,
-    ...(dispute === null ? {} : { disputeHanko: disputeDraft(dispute) }),
-  };
-  return owedAck === null
-    ? { kind: 'frame', ...envelope, proposal }
-    : { kind: 'frame_ack', ...envelope, ack: owedAck, proposal };
-};
-
 const accountPrefix = (accountId: string): string => `account:${accountId.slice(-8)}`;
 
 /** The hashes the Entity's witness pass must sign for this operation. */
@@ -94,24 +74,5 @@ export const cutoverAckHashes = (
         hash: dispute.hash,
         type: 'dispute' as const,
         context: `${accountPrefix(accountId)}:ack-dispute`,
-      }]),
-];
-
-export const cutoverProposalHashes = (
-  accountId: string,
-  frame: AccountFrame,
-  dispute: WaveDisputeDraft | null,
-): AccountConsensusHashToSign[] => [
-  {
-    hash: frame.stateHash,
-    type: 'accountFrame',
-    context: `${accountPrefix(accountId)}:frame:${frame.height}`,
-  },
-  ...(dispute === null
-    ? []
-    : [{
-        hash: dispute.hash,
-        type: 'dispute' as const,
-        context: `${accountPrefix(accountId)}:dispute`,
       }]),
 ];

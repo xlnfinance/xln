@@ -201,14 +201,6 @@ export const markLocalJSubmitRuntimeTx = <T extends RetryJSubmitTx | RecordJSubm
   return tx;
 };
 
-export const markRestoredJSubmitRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
-  for (const runtimeTx of runtimeTxs) {
-    if (runtimeTx.type === 'retryJSubmit' || runtimeTx.type === 'recordJSubmitResult') {
-      markLocalJSubmitRuntimeTx(runtimeTx);
-    }
-  }
-};
-
 export const assertJSubmitRuntimeTxAuthorized = (runtimeTx: RuntimeTx, replay: boolean): void => {
   if (runtimeTx.type !== 'retryJSubmit' && runtimeTx.type !== 'recordJSubmitResult') return;
   if (replay || (runtimeTx as RuntimeTx & { [LOCAL_J_SUBMIT_RUNTIME_TX]?: boolean })[LOCAL_J_SUBMIT_RUNTIME_TX]) return;

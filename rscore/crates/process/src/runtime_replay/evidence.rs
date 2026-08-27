@@ -74,10 +74,19 @@ pub(super) fn entity_history_link<'a>(
 pub(super) fn assert_entity_events(
     height: u64,
     expected: Option<&EntityEventEvidence>,
+    entity_frame_committed: bool,
     actual: &RuntimeDurableCommitments,
 ) -> Result<(), String> {
-    let expected =
-        expected.ok_or_else(|| format!("RUNTIME_REPLAY_ENTITY_HISTORY_MISSING:{height}"))?;
+    let empty = EntityEventEvidence {
+        count: 0,
+        digest: compute_entity_events_parity_digest(&[])
+            .map_err(|error| format!("RUNTIME_REPLAY_ENTITY_EVENTS:{height}:{error}"))?,
+    };
+    let expected = match (expected, entity_frame_committed) {
+        (Some(expected), true) => expected,
+        (None, false) => &empty,
+        _ => return Err(format!("RUNTIME_REPLAY_ENTITY_HISTORY_SHAPE:{height}")),
+    };
     if expected.count == actual.entity_event_count && expected.digest == actual.events_parity_digest
     {
         Ok(())

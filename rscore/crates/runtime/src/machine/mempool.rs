@@ -1,3 +1,9 @@
+use std::collections::VecDeque;
+
+use serde_json::Value;
+use xln_rscore_entity_kernel::EntityTxKind;
+use xln_rscore_protocol::CanonicalValue;
+
 use super::{
     AppliedRuntimeInput, RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeLimits,
     RuntimeMachineError, RuntimeMempool, RuntimeTx,
@@ -38,8 +44,11 @@ pub fn enqueue_runtime_input(
     input: &mut RuntimeInput,
     limits: RuntimeLimits,
 ) -> Result<(), RuntimeMachineError> {
-    if let Some(tx) = input.runtime_txs.first() {
-        let RuntimeTx::Unsupported { kind } = tx;
+    if let Some(RuntimeTx::Unsupported { kind }) = input
+        .runtime_txs
+        .iter()
+        .find(|tx| matches!(tx, RuntimeTx::Unsupported { .. }))
+    {
         return Err(RuntimeMachineError::UnsupportedRuntimeTx { kind: kind.clone() });
     }
     for entity_input in &input.entity_inputs {
@@ -81,6 +90,7 @@ fn cap_reached(current: usize, added: usize, cap: usize) -> Result<bool, Runtime
 pub fn select_runtime_frame(
     mempool: &mut RuntimeMempool,
     limits: RuntimeLimits,
+    entity_height: u64,
     mut frame: RuntimeFrameContext,
 ) -> Result<Option<SelectedRuntimeFrame>, RuntimeMachineError> {
     if mempool.is_empty() {
@@ -89,6 +99,8 @@ pub fn select_runtime_frame(
     frame.timestamp = mempool.queued_at.unwrap_or(frame.timestamp);
     let runtime_txs = mempool.runtime_txs.drain(..).collect::<Vec<_>>();
     prioritize_protocol_inputs(&mut mempool.entity_inputs);
+    let height_deferred =
+        apply_entity_height_durability_barrier(&mut mempool.entity_inputs, entity_height);
     let mut selected = Vec::new();
     let mut account_inputs = 0_usize;
     let mut wire_bytes = 0_usize;
@@ -140,6 +152,10 @@ pub fn select_runtime_frame(
         }
     }
 
+    // TypeScript prepends each cap overflow ahead of the already-deferred
+    // barrier tail, so the height tail keeps its position behind whatever the
+    // frame caps sent back. The single Runtime FIFO stays the only store.
+    mempool.entity_inputs.extend(height_deferred);
     if mempool.is_empty() {
         mempool.queued_at = None;
     }
@@ -156,16 +172,104 @@ pub fn select_runtime_frame(
     }))
 }
 
+/// TS `entityInputMergeKey` over the resident input domain. Entity id and
+/// signer id are fixed for this replica and normalized at decode, and a
+/// resident input carries no atomic cross-j pair, J-prefix attestation,
+/// precommit bundle or leader vote, so only the transaction-origin suffix
+/// varies: an input without `entityTxs` shares the bare lane key, otherwise
+/// the authenticated `from` provenance separates it.
+fn merge_group(input: &RuntimeEntityInput) -> Option<String> {
+    if input.canonical_entity_txs().is_empty() {
+        return None;
+    }
+    Some(
+        input
+            .canonical()
+            .get("from")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase(),
+    )
+}
+
+/// A `scheduledWake` is computed from Entity-frame-start state. Its kind fixes
+/// the transaction shape, so the retained wire data is the whole identity TS
+/// compares.
+fn scheduled_wake(input: &RuntimeEntityInput) -> Option<&CanonicalValue> {
+    input
+        .canonical_entity_txs()
+        .iter()
+        .find(|tx| tx.kind == EntityTxKind::ScheduledWake)
+        .map(|tx| &tx.wire_data)
+}
+
+/// Port of `core/runtime/mempool/entity-height-barrier.ts` for the single
+/// resident entity+signer lane: one Runtime frame may make at most one new
+/// certified Entity height durable. H and H+1 in one WAL frame would make
+/// certified lineage unreplayable, so the tail stays in the Runtime FIFO and
+/// is applied only after H is durably saved.
+///
+/// Resident admission rejects `proposedFrame` and `hashPrecommits` by field
+/// name, so no input names an exact height: every one of them is a candidate
+/// for exactly `entity_height + 1`, and the TS certificate-lane and
+/// future-height branches cannot be reached here. What does occur is a second
+/// wake: two different `scheduledWake` bodies inside one merge group were
+/// computed from two different Entity frame starts, which closes the lane and
+/// defers the whole remaining tail in arrival order.
+fn apply_entity_height_durability_barrier(
+    inputs: &mut VecDeque<RuntimeEntityInput>,
+    entity_height: u64,
+) -> VecDeque<RuntimeEntityInput> {
+    let mut deferred = VecDeque::new();
+    if entity_height.checked_add(1).is_none() {
+        return deferred;
+    }
+    let mut selected = VecDeque::with_capacity(inputs.len());
+    let mut accepted_group: Option<Option<String>> = None;
+    let mut accepted_wake: Option<CanonicalValue> = None;
+    let mut closed = false;
+    while let Some(input) = inputs.pop_front() {
+        if closed {
+            deferred.push_back(input);
+            continue;
+        }
+        let group = merge_group(&input);
+        let wake = scheduled_wake(&input);
+        match accepted_group.as_ref() {
+            None => {
+                accepted_wake = wake.cloned();
+                accepted_group = Some(group);
+            }
+            // A distinct merge group on a lane that carries no height
+            // certificate still collapses into this Entity frame.
+            Some(accepted) if *accepted != group => {}
+            Some(_) => match (wake, accepted_wake.as_ref()) {
+                (Some(wake), Some(accepted)) if wake != accepted => {
+                    closed = true;
+                    deferred.push_back(input);
+                    continue;
+                }
+                (Some(wake), None) => accepted_wake = Some(wake.clone()),
+                _ => {}
+            },
+        }
+        selected.push_back(input);
+    }
+    *inputs = selected;
+    deferred
+}
+
 /// TypeScript drains one flat queue, then stably moves Account/J protocol
 /// inputs ahead of ordinary self-wakes before applying frame caps.
-fn prioritize_protocol_inputs(inputs: &mut std::collections::VecDeque<RuntimeEntityInput>) {
+fn prioritize_protocol_inputs(inputs: &mut VecDeque<RuntimeEntityInput>) {
     if !inputs.iter().any(RuntimeEntityInput::is_protocol)
         || inputs.iter().all(RuntimeEntityInput::is_protocol)
     {
         return;
     }
-    let mut protocol = std::collections::VecDeque::new();
-    let mut ordinary = std::collections::VecDeque::new();
+    let mut protocol = VecDeque::new();
+    let mut ordinary = VecDeque::new();
     while let Some(input) = inputs.pop_front() {
         if input.is_protocol() {
             protocol.push_back(input);

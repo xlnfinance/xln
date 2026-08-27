@@ -5,10 +5,12 @@
 //! Those values remain owned by their machines and are projected exactly once
 //! when a Runtime frame is made durable.
 
-use serde_json::{Map, Number, Value};
+use num_bigint::BigInt;
+use serde_json::{Map, Number, Value, json};
 use thiserror::Error;
+use xln_rscore_protocol::CanonicalValue;
 
-use crate::{TaggedJsonError, canonical_value_from_tagged_json};
+use crate::{TaggedJsonError, canonical_value_from_tagged_json, restore::MigrationOrigin};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const INFRASTRUCTURE_FIELDS: [&str; 5] = [
@@ -211,7 +213,6 @@ impl RuntimeDurableEnvelope {
                 "jReplicas",
                 "runtimeConfig",
                 "runtimeId",
-                "runtimeInput",
             ],
             &["networkInbox", "pendingNetworkOutputs", "pendingOutputs"],
             "machine",
@@ -239,9 +240,6 @@ impl RuntimeDurableEnvelope {
         validate_infrastructure(&infrastructure)?;
         let j_replicas = required(machine_object, "jReplicas")?.clone();
         validate_j_replicas(&j_replicas)?;
-        // RuntimeInput is owned and decoded by RuntimeMempool. Validate only
-        // that this boundary did not smuggle an unrelated scalar through.
-        object(required(machine_object, "runtimeInput")?, "runtimeInput")?;
         Ok(Self {
             runtime_id,
             prev_frame_hash,
@@ -274,6 +272,54 @@ impl RuntimeDurableEnvelope {
 
     pub fn j_replicas(&self) -> &Value {
         &self.j_replicas
+    }
+
+    /// Bind a one-time offline TS snapshot to the last original Runtime frame.
+    /// The materialization frame is an import container, not a new protocol
+    /// frame; the first native WAL row must extend the existing signed chain.
+    pub fn adopt_offline_import_lineage(
+        &mut self,
+        _origin: MigrationOrigin,
+        source_frame_hash: [u8; 32],
+    ) {
+        self.prev_frame_hash = source_frame_hash;
+    }
+
+    /// Apply the same durable watcher cursor transition as TypeScript. The
+    /// previous Runtime root is intentionally not supplied: this envelope is
+    /// the owned in-memory authority and the next Runtime frame commits it.
+    pub fn advance_j_watcher_cursor(
+        &mut self,
+        depository_address: &str,
+        chain_id: u64,
+        block_number: u64,
+    ) -> Result<(), RuntimeDurableEnvelopeError> {
+        let rows = self
+            .j_replicas
+            .as_array_mut()
+            .ok_or_else(|| RuntimeDurableEnvelopeError::Array("jReplicas".into()))?;
+        let matches = matching_j_replica_indexes(rows, depository_address, chain_id)?;
+        let [index] = matches.as_slice() else {
+            return Err(if matches.is_empty() {
+                RuntimeDurableEnvelopeError::WatcherNotFound
+            } else {
+                RuntimeDurableEnvelopeError::WatcherAmbiguous
+            });
+        };
+        let replica = rows[*index][1]
+            .as_object_mut()
+            .ok_or(RuntimeDurableEnvelopeError::JReplicaRow(*index))?;
+        let current = canonical_value_from_tagged_json(required(replica, "blockNumber")?)?;
+        let CanonicalValue::BigInt(current) = current else {
+            return Err(RuntimeDurableEnvelopeError::JReplicaBlock(*index));
+        };
+        if current < BigInt::from(block_number) {
+            replica.insert(
+                "blockNumber".into(),
+                json!({"__xlnType":"BigInt","value":block_number.to_string()}),
+            );
+        }
+        Ok(())
     }
 
     /// Advance lineage only after the frame and outbox have crossed the real
@@ -488,6 +534,35 @@ fn validate_j_replicas(value: &Value) -> Result<(), RuntimeDurableEnvelopeError>
     Ok(())
 }
 
+fn matching_j_replica_indexes(
+    rows: &[Value],
+    depository_address: &str,
+    chain_id: u64,
+) -> Result<Vec<usize>, RuntimeDurableEnvelopeError> {
+    let mut matches = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let pair = row
+            .as_array()
+            .filter(|pair| pair.len() == 2)
+            .ok_or(RuntimeDurableEnvelopeError::JReplicaRow(index))?;
+        let replica = object(&pair[1], "jReplica")?;
+        let candidate_chain = optional_safe_u64(replica, "chainId")?;
+        let candidate_address = replica
+            .get("contracts")
+            .and_then(Value::as_object)
+            .and_then(|contracts| contracts.get("depository"))
+            .and_then(Value::as_str)
+            .map(str::trim);
+        if candidate_chain == Some(chain_id)
+            && candidate_address
+                .is_some_and(|address| address.eq_ignore_ascii_case(depository_address))
+        {
+            matches.push(index);
+        }
+    }
+    Ok(matches)
+}
+
 fn exact_fields(
     object: &Map<String, Value>,
     required_fields: &[&str],
@@ -657,6 +732,10 @@ pub enum RuntimeDurableEnvelopeError {
     JReplicaBlock(usize),
     #[error("RRS_RUNTIME_ENVELOPE_J_REPLICA_STATE_ROOT:{0}")]
     JReplicaStateRoot(usize),
+    #[error("J_WATCHER_JURISDICTION_NOT_FOUND:cursor-apply")]
+    WatcherNotFound,
+    #[error("J_WATCHER_JURISDICTION_AMBIGUOUS:cursor-apply")]
+    WatcherAmbiguous,
     #[error("RRS_RUNTIME_ENVELOPE_LINEAGE")]
     Lineage,
     #[error(transparent)]
@@ -693,7 +772,6 @@ mod tests {
                 "certifiedRegistrationEvidence":map(),
                 "entityEncryptionSeeds":map(),"runtimeAdapterCommandFrontiers":map()
             },
-            "runtimeInput":{"runtimeTxs":[],"entityInputs":[]},
             "jReplicas":[["Testnet",j("Testnet","1")],["Tron",j("Tron","2")]]
         })
     }

@@ -761,6 +761,11 @@ pub fn apply_resident_entity_round_core(
         .collect::<BTreeMap<_, _>>();
     let phase_started = Instant::now();
     let commits = ordered_commits(&inbound)?;
+    let created_accounts = inbound
+        .created_accounts
+        .iter()
+        .map(|created| account_text(created.account_id))
+        .collect::<BTreeSet<_>>();
     apply_committed_frame_hooks(&mut state, &commits);
     let scheduled_commands = apply_scheduled_wake(
         accounts,
@@ -774,6 +779,7 @@ pub fn apply_resident_entity_round_core(
     let mut kernel = apply_entity_transitions(
         state,
         &commits,
+        &created_accounts,
         request.local_financial_txs,
         &local_account_views,
         context,

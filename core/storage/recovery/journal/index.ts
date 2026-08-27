@@ -35,7 +35,6 @@ import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
 import type { RuntimeOutputRoutingDeps } from '../../../runtime/delivery/topology/output-routing';
 import type { PersistedFrameJournal } from '../../types';
 import {
-  authorizeRestoredRuntimeInput,
 } from '../../wal/snapshot';
 import { createStructuredLogger } from '../../../support/logger';
 import {
@@ -198,12 +197,7 @@ const replayOneFrame = async (
     const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);
     const committedEvents = readRuntimeFrameEvents(env);
     clearPendingAuditEvents(env);
-    // Production hook generation is already committed in pendingRuntimeInput.
-    // Re-generating it during replay was dead work immediately overwritten by
-    // this authoritative WAL value.
-    env.runtimeMempool = frame.pendingRuntimeInput
-      ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
-      : { runtimeTxs: [], entityInputs: [] };
+    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];
     dropPendingHistoryRecords(env, history.length);
     if (options.verify) {
@@ -222,6 +216,13 @@ const replayOneFrame = async (
     // durable, so only TS-side frame bookkeeping is released here.
     await assertAuthorityFrameSettled(env);
     await finalizeAuthorityFrameAfterWal(env);
+  } catch (error) {
+    runtimeLog.error('recovery.frame.failed', {
+      height,
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof Error && error.stack !== undefined ? { stack: error.stack } : {}),
+    });
+    throw error;
   } finally {
     // A frame that threw after Account mutation cannot keep this process: the
     // durable journal remains the sole recovery truth.

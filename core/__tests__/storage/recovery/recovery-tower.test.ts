@@ -253,7 +253,10 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.state.height).toBe(env.state.height);
     expect(restoredEnv.state.eReplicas.size).toBe(env.state.eReplicas.size);
     expect(restoredEnv.state.jReplicas.size).toBe(env.state.jReplicas.size);
-    expect(restoredEnv.runtimeMempool).toEqual(env.runtimeMempool);
+    // Ephemeral: a restored process starts with an empty input queue even
+    // though the live source env still holds unframed work.
+    expect(env.runtimeMempool?.jInputs?.length).toBeGreaterThan(0);
+    expect(restoredEnv.runtimeMempool).toEqual({ runtimeTxs: [], entityInputs: [] });
     expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restoredEnv.infrastructure?.maxEntityInputsPerFrame).toBe(123);
     expect(requireEntityEncryptionPrivateKey(restoredEnv, entityId))

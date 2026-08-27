@@ -462,7 +462,7 @@ fn decode_crontab(value: &AbiValue) -> Result<Option<CrontabState>, ProcessError
 }
 
 pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, ProcessError> {
-    let row = exact(tuple(value)?, 14, "entityStateSnapshot")?;
+    let row = exact(tuple(value)?, 15, "entityStateSnapshot")?;
     let mut reserves = BTreeMap::new();
     for value in tuple(&row[4])? {
         let entry = exact(tuple(value)?, 2, "entityReserve")?;
@@ -515,6 +515,16 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
         orderbook_metadata: decode_metadata(&row[10])?,
         expected_owned_sections,
         crontab: decode_crontab(&row[12])?,
+        hub_rebalance_config: if matches!(row[14], AbiValue::Nil) {
+            None
+        } else {
+            Some(crate::canonical::canonical_value(&row[14])?)
+        },
+        // This control-plane ABI row does not carry the jHistoryFinality
+        // anchor; only the checkpoint/WAL restore path
+        // (`entity_snapshot_from_graph`) does. Threading it into this wire
+        // shape is a separate transport change.
+        j_history_finality: None,
     })
 }
 

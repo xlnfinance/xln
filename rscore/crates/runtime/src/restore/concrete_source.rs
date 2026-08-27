@@ -134,9 +134,6 @@ pub(super) fn verified_checkpoint_frame(
     if object.get("materializedState").and_then(Value::as_bool) != Some(true) {
         return Err(invalid("CHECKPOINT_FRAME_NOT_MATERIALIZED"));
     }
-    if object.contains_key("pendingRuntimeInput") {
-        return Err(invalid("CHECKPOINT_FRAME_PENDING_RUNTIME_INPUT"));
-    }
     let (root_hash, leaf_count) = checkpoint_machine_root(object)?;
     if root_hash != source.root_hash || leaf_count != source.leaf_count {
         return Err(invalid("CHECKPOINT_FRAME_MACHINE_ROOT"));
@@ -236,7 +233,7 @@ mod tests {
         crate::encode_storage_payload(&value).expect("fixture value")
     }
 
-    fn graph_fixture_with_pending(pending: bool) -> ConcreteCheckpointSource {
+    fn graph_fixture() -> ConcreteCheckpointSource {
         let rows = vec![
             (
                 encoded(CanonicalValue::Array(Vec::new())),
@@ -281,8 +278,6 @@ mod tests {
                     }],
                 }),
                 runtime_input: serde_json::json!({"runtimeTxs": [], "entityInputs": []}),
-                pending_runtime_input: pending
-                    .then(|| serde_json::json!({"runtimeTxs": [], "entityInputs": []})),
                 runtime_machine_root: Some(crate::storage::native::RuntimeMachineGraphRoot {
                     root_hash,
                     leaf_count: rows.len() as u64,
@@ -309,10 +304,6 @@ mod tests {
         }
     }
 
-    fn graph_fixture() -> ConcreteCheckpointSource {
-        graph_fixture_with_pending(false)
-    }
-
     #[test]
     fn runtime_machine_leaves_rebuild_the_committed_root() {
         let source = graph_fixture();
@@ -330,16 +321,5 @@ mod tests {
                 RuntimeMachineGraphError::LeafCount { .. }
             ))
         ));
-    }
-
-    #[test]
-    fn pending_runtime_input_checkpoint_is_rejected_instead_of_dropped() {
-        let source = graph_fixture_with_pending(true);
-        let error = verify_checkpoint_source(&source).expect_err("pending FIFO must be explicit");
-        assert!(
-            error
-                .to_string()
-                .contains("CHECKPOINT_FRAME_PENDING_RUNTIME_INPUT")
-        );
     }
 }

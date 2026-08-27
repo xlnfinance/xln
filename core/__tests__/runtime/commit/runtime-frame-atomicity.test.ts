@@ -19,20 +19,16 @@ import {
   handleInboundP2PEntityInput,
   processRuntime,
   registerRuntimeFrameCommitCallback,
-  validateRuntimeInputAdmission,
 } from '../../../runtime';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { KEY_HEAD } from '../../../storage/keys';
 import { importEntity } from '../../../runtime/registration/entity-creation';
 import { readStorageHead } from '../../../storage';
 import {
-  authorizeRestoredRuntimeInput,
   buildCanonicalEntityReplicaSnapshot,
-  buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
-import { transitionRuntimeLifecycle } from '../../../runtime/replica/lifecycle';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../../runtime/types';
 import { enableStrictScenario } from '../../../scenarios/harness/helpers';
@@ -257,17 +253,32 @@ describe('runtime frame atomicity', () => {
     expect(env.infrastructure?.processingPromise).toBeNull();
   });
 
-  test('durable RuntimeInput restore preserves repeated board config values', () => {
+  test('restore always starts with an empty Runtime mempool, even given a snapshot carrying the retired runtimeInput key', () => {
     const { runtimeInput } = makeAliasedBoardRuntimeInput();
     const restored = createEmptyEnv(`runtime-input-clone-restore-${TEST_RUN_ID}`);
 
+    // Exercises the internal projector directly with a retired-shape snapshot
+    // object. The public storage schema separately rejects this shape loudly;
+    // here we confirm the projector itself never repopulates runtimeMempool
+    // from any snapshot field, regardless of what that field contains.
     restoreDurableRuntimeSnapshot(restored, { runtimeInput });
 
-    const imports = restored.runtimeMempool!.runtimeTxs.filter(tx => tx.type === 'importReplica');
-    expect(imports).toHaveLength(9);
-    expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
-      Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
-    );
+    expect(restored.runtimeMempool).toEqual({ runtimeTxs: [], entityInputs: [] });
+  });
+
+  test('machine snapshot bytes are identical for identical committed Runtime state regardless of ephemeral mempool contents', () => {
+    const env = createEmptyEnv(`runtime machine snapshot mempool invariance ${TEST_RUN_ID}`);
+    installJurisdiction(env);
+
+    const emptyBytes = encodeBuffer(buildDurableRuntimeMachineSnapshot(env));
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [importReplicaTx('e')],
+      entityInputs: [{ entityId: hash('e1'), signerId: address('e2'), entityTxs: [] }],
+    });
+
+    const nonemptyBytes = encodeBuffer(buildDurableRuntimeMachineSnapshot(env));
+    expect(nonemptyBytes).toEqual(emptyBytes);
   });
 
   test('binary storage decode preserves repeated board config values', () => {
@@ -400,39 +411,6 @@ describe('runtime frame atomicity', () => {
     expect(Object.getOwnPropertySymbols(persisted!.runtimeInput.runtimeTxs[0]!)).toHaveLength(0);
   });
 
-  test('durable pending input cannot launder an external tx into a local capability', async () => {
-    const env = createEmptyEnv(`runtime capability persistence ${TEST_RUN_ID}`);
-    transitionRuntimeLifecycle(env.infrastructure!, 'running');
-    const cursorTx: RuntimeTx = {
-      type: 'advanceJWatcherCursor',
-      data: {
-        depositoryAddress: jurisdiction.depositoryAddress!,
-        chainId: jurisdiction.chainId,
-        blockNumber: 1,
-      },
-    };
-    const hostile = { runtimeTxs: [cursorTx], entityInputs: [] };
-
-    expect(() => validateRuntimeInputAdmission(env, hostile))
-      .toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
-    expect(() => buildDurableRuntimeMempool(hostile))
-      .toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
-
-    const durable = buildDurableRuntimeMempool({
-      runtimeTxs: [markLocalJAuthorityRuntimeTx(cursorTx)],
-      entityInputs: [],
-    });
-    expect(Object.getOwnPropertySymbols(durable.runtimeTxs[0]!)).toHaveLength(0);
-    expect(() => buildDurableRuntimeMempool(durable))
-      .toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
-    const untrustedRestore = createEmptyEnv(`runtime untrusted capability ${TEST_RUN_ID}`);
-    untrustedRestore.scenarioMode = true;
-    restoreDurableRuntimeSnapshot(untrustedRestore, { runtimeInput: durable });
-    await expect(applyRuntimeInput(untrustedRestore, untrustedRestore.runtimeMempool!))
-      .rejects.toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
-    expect(() => buildDurableRuntimeMempool(authorizeRestoredRuntimeInput(durable))).not.toThrow();
-  });
-
   test('the single Runtime mempool remains lossless beyond former ingress thresholds', () => {
     const env = createEmptyEnv(`runtime ingress load ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
@@ -483,7 +461,6 @@ describe('runtime frame atomicity', () => {
     }
     expect(observedDetachedIngressTail).toBe(true);
     const durableWhileActive = buildDurableRuntimeMachineSnapshot(activeEnv);
-    expect((durableWhileActive.runtimeInput as RuntimeInput).runtimeTxs).toEqual([]);
     expect(() => restoreDurableRuntimeSnapshot(activeEnv, durableWhileActive))
       .toThrow('RUNTIME_SNAPSHOT_RESTORE_DURING_ACTIVE_FRAME');
 

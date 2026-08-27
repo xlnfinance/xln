@@ -44,6 +44,7 @@ const [meshSeeds, runtime, { deriveRuntimeIdFromSeed }, recordingApi, entityComm
   import('./recording'),
   import('../../../../entity/consensus/state-root'),
 ]);
+const { prewarmSignerLabels } = await import('../../../../account/crypto');
 const { deriveMeshChildSeed } = meshSeeds;
 const {
   buildRuntimeRecording,
@@ -57,7 +58,8 @@ const {
   readPersistedAccountFrameHistoryRecords,
   readPersistedEntityFrameHistory,
   readPersistedEntityFrameHistoryRecords,
-  openDetachedRuntimeRecording,
+  replayRecoveryFrameJournals,
+  restoreEnvFromRecoveryBundles,
   validateRuntimeRecoveryBundle,
 } = runtime;
 const { hashEntityProposalTxPrefix } = await import('../../../../entity/consensus/proposal/replay-oracle');
@@ -75,6 +77,11 @@ if (!meshRootSeed) throw new Error('HLT_HUB_RECORDING_MESH_ROOT_SEED_MISSING');
 const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
 const runtimeId = deriveRuntimeIdFromSeed(runtimeSeed);
 if (!runtimeId) throw new Error('HLT_HUB_RECORDING_RUNTIME_ID_MISSING');
+// Detached replay executes the same Entity consensus transitions as the live
+// H1. Its signer cache is process-local and therefore is not part of a
+// recovery bundle; restore the deterministic H1 label before replaying any
+// frame that may create J-prefix or Entity Hanko evidence.
+prewarmSignerLabels(runtimeSeed, ['h1-hub']);
 const snapshot = validateRuntimeRecoveryBundle(safeParse(readFileSync(snapshotPath, 'utf8')));
 if ((snapshot.kind ?? 'snapshot') !== 'snapshot' || snapshot.runtimeId !== runtimeId) {
   throw new Error(
@@ -120,13 +127,15 @@ try {
   env.state.height = targetHeight;
   env.state.timestamp = frames.at(-1)!.timestamp;
   const signers = [{ index: 1, address: runtimeId, name: 'H1 Runtime' }];
+  const recordingCreatedAt = frames.at(-1)!.timestamp;
   const tail = buildRuntimeRecoveryBundle(env, {
     kind: 'journal_tail',
     signers,
+    createdAt: recordingCreatedAt,
     baseCheckpoint: { height: baseHeight, hash: snapshot.checkpointHash },
     frames,
   });
-  const recording = buildRuntimeRecording([snapshot, tail]);
+  const recording = buildRuntimeRecording([snapshot, tail], recordingCreatedAt);
   const touchedEntities = new Set<string>();
   const touchedAccounts = new Map<string, { entityId: string; counterpartyId: string }>();
   for (const frame of frames) {
@@ -144,29 +153,45 @@ try {
   const entityFrameRecords = (await Promise.all([...touchedEntities].sort().map(async entityId =>
     readPersistedEntityFrameHistoryRecords(env, entityId, 1_000, { maxRuntimeHeight: targetHeight })
   ))).flat().filter(record => record.runtimeHeight > baseHeight);
-  const detached = openDetachedRuntimeRecording(recording, runtimeSeed);
+  // Rebuild the tail once. Calling readAtHeight for every Entity-frame record
+  // re-restored the same checkpoint and replayed the same WAL prefix O(n^2).
+  const recordsByHeight = new Map<number, string[]>();
+  for (const record of entityFrameRecords) {
+    const list = recordsByHeight.get(record.runtimeHeight) ?? [];
+    list.push(record.entityId);
+    recordsByHeight.set(record.runtimeHeight, list);
+  }
   const accountsRoots = new Map<string, string>();
   const entitySections = new Map<string, ReturnType<typeof entityCommitments.computeEntityConsensusSectionDigestsCold>>();
+  const replayEnv = await restoreEnvFromRecoveryBundles([snapshot], {
+    runtimeSeed,
+    runtimeId,
+    readOnly: true,
+  });
   try {
-    for (const record of entityFrameRecords) {
-      const key = `${record.runtimeHeight}:${record.entityId}`;
-      if (accountsRoots.has(key)) continue;
-      const projection = await detached.readAtHeight(record.runtimeHeight);
-      const replicas = [...projection.state.eReplicas.values()].filter(replica =>
-        replica.entityId.toLowerCase() === record.entityId.toLowerCase());
-      if (replicas.length === 0) {
-        throw new Error(`HLT_AUTHORITY_ACCOUNTS_ROOT_ENTITY_MISSING:${key}`);
+    const captureEntityAtHeight = (height: number): void => {
+      for (const entityId of recordsByHeight.get(height) ?? []) {
+        const key = `${height}:${entityId}`;
+        if (accountsRoots.has(key)) continue;
+        const replicas = [...replayEnv.state.eReplicas.values()].filter(replica =>
+          replica.entityId.toLowerCase() === entityId.toLowerCase());
+        if (replicas.length === 0) {
+          throw new Error(`HLT_AUTHORITY_ACCOUNTS_ROOT_ENTITY_MISSING:${key}`);
+        }
+        const roots = new Set(replicas.map(replica => replica.state.accounts.rootHash()));
+        if (roots.size !== 1) throw new Error(`HLT_AUTHORITY_ACCOUNTS_ROOT_REPLICA_DIVERGENCE:${key}`);
+        accountsRoots.set(key, [...roots][0]!);
+        entitySections.set(key, entityCommitments.computeEntityConsensusSectionDigestsCold(replicas[0]!.state));
       }
-      const roots = new Set(replicas.map(replica => replica.state.accounts.rootHash()));
-      if (roots.size !== 1) throw new Error(`HLT_AUTHORITY_ACCOUNTS_ROOT_REPLICA_DIVERGENCE:${key}`);
-      accountsRoots.set(key, [...roots][0]!);
-      entitySections.set(
-        key,
-        entityCommitments.computeEntityConsensusSectionDigestsCold(replicas[0]!.state),
-      );
+    };
+    captureEntityAtHeight(baseHeight);
+    for (const frame of frames) {
+      await replayRecoveryFrameJournals(replayEnv, [frame], { verify: true });
+      captureEntityAtHeight(replayEnv.state.height);
     }
   } finally {
-    await detached.close();
+    await closeRuntimeDb(replayEnv);
+    await closeInfraDb(replayEnv);
   }
   const entityFrames = entityFrameRecords.map(record => ({
     runtimeHeight: record.runtimeHeight,

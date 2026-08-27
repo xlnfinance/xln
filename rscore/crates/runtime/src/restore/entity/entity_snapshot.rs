@@ -10,7 +10,7 @@ use xln_rscore_entity_kernel::{
     HtlcRoute, LockBookEntry, compute_entity_owned_sections,
 };
 
-use crate::{EntityCheckpointError, entity_checkpoint_crontab};
+use crate::{EntityCheckpointError, canonical_value_from_tagged_json, entity_checkpoint_crontab};
 
 use super::entity_graph::HydratedEntityGraph;
 use super::orderbook_graph::HydratedOrderbook;
@@ -435,6 +435,11 @@ pub fn entity_snapshot_from_graph(
         )?,
         lock_book: locks(required(core, "lockBook", "core")?)?,
         crontab: entity_checkpoint_crontab(&wrap_core(graph.core.clone()))?,
+        hub_rebalance_config: core
+            .get("hubRebalanceConfig")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("HUB_REBALANCE_CONFIG:{error}")))?,
         orderbook: orderbook
             .as_ref()
             .map(|value| value.snapshot.clone())
@@ -442,6 +447,11 @@ pub fn entity_snapshot_from_graph(
             .transpose()
             .map_err(|error| EntitySnapshotRestoreError::Kernel(error.to_string()))?,
         orderbook_metadata: orderbook.as_ref().map(|value| value.metadata.clone()),
+        j_history_finality: core
+            .get("jHistoryFinality")
+            .map(canonical_value_from_tagged_json)
+            .transpose()
+            .map_err(|error| invalid(format!("J_HISTORY_FINALITY:{error}")))?,
     };
     let expected_owned_sections =
         compute_entity_owned_sections(&state, accounts_root, state.known_accounts.len())
@@ -458,8 +468,10 @@ pub fn entity_snapshot_from_graph(
         htlc_fees_earned: state.htlc_fees_earned,
         lock_book: state.lock_book,
         crontab: state.crontab,
+        hub_rebalance_config: state.hub_rebalance_config,
         orderbook: orderbook.map(|value| value.snapshot),
         orderbook_metadata: state.orderbook_metadata,
+        j_history_finality: state.j_history_finality,
         expected_owned_sections,
     })
 }

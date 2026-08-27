@@ -161,7 +161,7 @@ test('certified history fork aborts before authoritative HEAD advances', async (
     source: 'peerCommit',
     frame,
   });
-  await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+  await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
   expect(await getPersistedLatestHeight(env)).toBe(1);
 
   env.state.height = 2;
@@ -173,7 +173,7 @@ test('certified history fork aborts before authoritative HEAD advances', async (
     source: 'ackCommit',
     frame: { ...frame, stateHash: `0x${'ff'.repeat(32)}` },
   });
-  await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map()))
+  await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map()))
     .rejects.toThrow('STORAGE_CERTIFIED_FRAME_CONFLICT');
   expect(await getPersistedLatestHeight(env)).toBe(1);
 

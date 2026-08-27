@@ -7,7 +7,7 @@ import { ethers } from 'ethers';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
 import { buildCertifiedEntityHeadPlan } from './replica/entity-head';
 
@@ -159,14 +159,9 @@ const computeCanonicalStateHashFromRuntimeMachine = (
     runtimeMachine,
   );
 
-export const computeCanonicalStateHashFromEnv = (
-  env: RuntimeReplica,
-  runtimeInput?: RuntimeInput,
-): string =>
+export const computeCanonicalStateHashFromEnv = (env: RuntimeReplica): string =>
   computeCanonicalStateHashFromRuntimeMachine(
     env,
-    buildStorageRuntimeMachineSnapshot(env, {
-      ...(runtimeInput ? { runtimeInput } : {}),
-    }),
+    buildStorageRuntimeMachineSnapshot(env),
   );
 import { Buffer } from '../support/platform-crypto';

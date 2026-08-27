@@ -1,16 +1,12 @@
 import type { RuntimeReplica } from '../../../runtime/types';
 import {
-  decodeRuntimeInput,
-  type DecodedRuntimeInput,
-} from '../../../runtime/decode';
-import {
   decodeRoutedEntityInput,
   type ValidatedRoutedEntityInput,
 } from '../../../runtime/delivery/topology/routing-validation';
 import { toRuntimeId } from '../../../protocol/identity';
 import { validateBrowserVmState } from '../../../runtime/decode/browser';
 import { validateEntityTxs } from '../../../entity/tx-validation';
-import { validateJInputs, validateJReplicas } from './j';
+import { validateJReplicas } from './j';
 import { validateDurableRuntimeState } from './runtime-state';
 import {
   requireArray,
@@ -154,23 +150,12 @@ const validateRoutedEntityInputs = (
 ): ValidatedRoutedEntityInput[] => requireArray(value, code)
   .map((entry, index) => validateRoutedEntityInput(entry, `${code}_${index}`, options));
 
-const validateRuntimeInput = (value: unknown, code: string): DecodedRuntimeInput => {
-  const input = decodeRuntimeInput(value, code);
-  input.entityInputs.forEach((entry, index) => validateRoutedEntityInput(
-    entry,
-    `${code}_ENTITY_INPUT_${index}`,
-    { allowSourceRuntimeFrame: true },
-  ));
-  if (input.jInputs !== undefined) validateJInputs(input.jInputs, `${code}_J_INPUTS`);
-  return input;
-};
-
 export const validateDurableRuntimeMachineSnapshot = (
   value: unknown,
   code: string,
 ): Record<string, unknown> => {
   const snapshot = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(snapshot, ['runtimeInput', 'jReplicas'], [
+  requireExactBoundaryKeys(snapshot, ['jReplicas'], [
     'runtimeId', 'activeJurisdiction', 'browserVMState', 'runtimeConfig', 'infrastructure',
     'pendingOutputs', 'networkInbox', 'pendingNetworkOutputs',
   ], `${code}_FIELDS`);
@@ -181,7 +166,6 @@ export const validateDurableRuntimeMachineSnapshot = (
   if (snapshot['browserVMState'] !== undefined) validateBrowserVmState(snapshot['browserVMState'], `${code}_BROWSER_VM_STATE`);
   if (snapshot['runtimeConfig'] !== undefined) decodeRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
   if (snapshot['infrastructure'] !== undefined) validateDurableRuntimeState(snapshot['infrastructure'], `${code}_RUNTIME_STATE`);
-  validateRuntimeInput(snapshot['runtimeInput'], `${code}_RUNTIME_INPUT`);
   for (const field of ['pendingOutputs', 'networkInbox']) {
     if (snapshot[field] !== undefined) validateRoutedEntityInputs(snapshot[field], `${code}_${field.toUpperCase()}`);
   }

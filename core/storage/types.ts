@@ -163,8 +163,6 @@ export type RuntimeFrame = {
   runtimeInput: RuntimeInput;
   /** Replica-id to manifest digest; physical rows are keyed by this frame height + replica path. */
   entityContextRefs?: Map<string, EntityContextPayloadHash>;
-  /** Exact bounded input queue retained after this frame (for deferred H+1 work). */
-  pendingRuntimeInput?: RuntimeInput;
   /** Root of the exact typed Runtime checkpoint Patricia graph for this height. */
   runtimeMachineRoot?: RuntimeMachineGraphRoot;
   /** Exact Rust Account-authority restore tokens made durable by this frame. */
@@ -206,7 +204,6 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'postStateHash'
   | 'materializedState'
   | 'runtimeInput'
-  | 'pendingRuntimeInput'
   | 'runtimeOutputCount'
   | 'runtimeOutputsDigest'
   | 'runtimeStateHash'

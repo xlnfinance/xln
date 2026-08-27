@@ -245,12 +245,6 @@ const markLocalJImportResultRuntimeTx = <T extends CompleteImportJRuntimeTx>(tx:
   return tx;
 };
 
-export const markRestoredJImportResultRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
-  for (const runtimeTx of runtimeTxs) {
-    if (runtimeTx.type === 'completeImportJ') markLocalJImportResultRuntimeTx(runtimeTx);
-  }
-};
-
 export const assertJImportResultRuntimeTxAuthorized = (
   runtimeTx: RuntimeTx,
   replay: boolean,

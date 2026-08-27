@@ -144,29 +144,16 @@ fn base_component_digests(
     Ok(rows)
 }
 
-fn empty_runtime_input() -> Value {
-    Value::Object(Map::from_iter([
-        ("runtimeTxs".to_string(), Value::Array(Vec::new())),
-        ("entityInputs".to_string(), Value::Array(Vec::new())),
-    ]))
-}
-
 /// Verify one canonical WAL post-state commitment from a reconstructed
 /// Runtime-machine graph plus the frame record itself. The graph supplies
-/// stable Runtime components; the frame supplies that height's pending input,
-/// replica metadata commitment, and flat ordered-output commitment.
+/// stable Runtime components; the frame supplies replica metadata and the
+/// flat ordered-output commitment.
 pub fn verify_wal_post_state_hash(
     machine: &Value,
     frame: &Value,
 ) -> Result<RecordingPostStateCheck, RuntimeRecordingError> {
     let height = unsigned(field(frame, "height")?, "frame.height")?;
     let mut components = base_component_digests(machine)?;
-    let empty_input = empty_runtime_input();
-    let pending_input = frame.get("pendingRuntimeInput").unwrap_or(&empty_input);
-    components.push(RuntimeComponentDigest {
-        key: "runtimeInput".to_string(),
-        value_hash: digest(pending_input)?,
-    });
     components.sort_unstable_by(|left, right| left.key.cmp(&right.key));
     let actual = compute_storage_post_state_hash(&RuntimePostStateCommitment {
         height,

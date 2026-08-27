@@ -8,13 +8,6 @@ import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } fro
 import type { FrameLogEntry } from '../../types/logging';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
-import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit/j-submit-state';
-import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
-import { markRestoredJImportResultRuntimeTxs } from '../../runtime/j-submit/jurisdiction-import';
-import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/registration/entity-provider-action-submit-auth';
-import { markRestoredGovernanceResultRuntimeTxs } from '../../runtime/registration/governance-submit-state';
-import { markRestoredNumberedRegistrationTxs } from '../../runtime/registration/numbered-registration-auth';
-import { markRestoredRuntimeAdapterCommandTxs } from '../../runtime/command/frontier-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -26,7 +19,6 @@ import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
 } from '../../entity/account/account-j-claim-node-store';
-import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/tx/internal-tx-auth';
 import { decodeRuntimeConfig } from './runtime-machine-schema';
 import {
   projectEntityCoreDoc,
@@ -52,17 +44,6 @@ const projectPortableEntityState = (state: EntityState): Record<string, unknown>
     accounts,
     books,
   };
-};
-
-export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
-  markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);
-  markRestoredJAuthorityRuntimeTxs(runtimeInput.runtimeTxs);
-  markRestoredJImportResultRuntimeTxs(runtimeInput.runtimeTxs);
-  markRestoredEntityProviderActionRuntimeTxs(runtimeInput.runtimeTxs);
-  markRestoredGovernanceResultRuntimeTxs(runtimeInput.runtimeTxs);
-  markRestoredNumberedRegistrationTxs(runtimeInput.runtimeTxs);
-  markRestoredRuntimeAdapterCommandTxs(runtimeInput.runtimeTxs);
-  return runtimeInput;
 };
 
 const isZeroBytes32 = (value: Uint8Array): boolean =>
@@ -189,71 +170,6 @@ const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
   lastBlockTimestamp: 0,
 });
 
-/**
- * Scheduled wakes are derived from durable Entity crontab state. Persisting
- * one in the Runtime mempool would turn a process-local authorization marker
- * into unauthenticated bytes after reload, and could also replay an obsolete
- * wake. Persist only the non-derived work; recovery regenerates due wakes.
- */
-const withoutCapabilitySymbols = <T extends object>(value: T): T =>
-  Object.getOwnPropertySymbols(value).length === 0 ? value : { ...value };
-
-const projectDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
-  // Process-local capability Symbols authorize admission but are never durable
-  // protocol bytes. Spread copies the tx/vote envelope without those keys;
-  // nested financial payloads stay shared. WAL encode still omits any leftover
-  // nested Symbols. Derived scheduled wakes are dropped so a reload cannot
-  // persist an unauthenticated marker.
-  const source = runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
-  const { jInputs, queuedAt, timestamp, ...requiredInput } = source;
-  const entityInputs = source.entityInputs.flatMap(input => {
-    const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
-    const durableInput = {
-      ...input,
-      entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
-      ...(input.leaderTimeoutVote
-        ? { leaderTimeoutVote: withoutCapabilitySymbols(input.leaderTimeoutVote) }
-        : {}),
-    };
-    const keep =
-      originallyEmptyTrigger ||
-      durableInput.entityTxs.length > 0 ||
-      durableInput.proposedFrame !== undefined ||
-      (durableInput.hashPrecommits?.size ?? 0) > 0 ||
-      (durableInput.jPrefixAttestations?.size ?? 0) > 0;
-    return keep ? [durableInput] : [];
-  });
-  const hasWork =
-    requiredInput.runtimeTxs.length > 0 ||
-    entityInputs.length > 0 ||
-    (jInputs?.length ?? 0) > 0;
-  return {
-    ...requiredInput,
-    runtimeTxs: requiredInput.runtimeTxs.map(withoutCapabilitySymbols),
-    entityInputs,
-    ...(jInputs && jInputs.length > 0 ? { jInputs } : {}),
-    ...(hasWork && timestamp !== undefined ? { timestamp } : {}),
-    ...(hasWork && queuedAt !== undefined ? { queuedAt } : {}),
-  };
-};
-
-export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
-  const source = runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
-  assertRuntimeInputCapabilitiesAuthorized(source);
-  return projectDurableRuntimeMempool(source);
-};
-
-/**
- * One frame save projects the same pending mempool for the post-state view,
- * the machine snapshot and the frame record. Callers that already hold the
- * durable projection pass it as `durableRuntimeInput` and it is used verbatim.
- */
-const resolveDurableRuntimeMempool = (
-  env: RuntimeReplica,
-  options?: { runtimeInput?: RuntimeInput; durableRuntimeInput?: RuntimeInput },
-): RuntimeInput =>
-  options?.durableRuntimeInput ?? buildDurableRuntimeMempool(options?.runtimeInput ?? env.runtimeMempool);
-
 const projectRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput =>
   runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
 
@@ -331,8 +247,6 @@ export const buildDurableRuntimeMachineSnapshot = (
   env: RuntimeReplica,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
-    runtimeInput?: RuntimeInput;
-    durableRuntimeInput?: RuntimeInput;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
@@ -347,7 +261,6 @@ export const buildDurableRuntimeMachineSnapshot = (
     ...(browserVMState ? { browserVMState } : {}),
     ...(runtimeConfig ? { runtimeConfig } : {}),
     ...(infrastructure ? { infrastructure } : {}),
-    runtimeInput: resolveDurableRuntimeMempool(env, options),
     ...(env.pendingOutputs?.length ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox?.length ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
     ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
@@ -367,11 +280,7 @@ export const buildDurableRuntimeMachineSnapshot = (
  */
 export const buildStorageRuntimeMachineSnapshot = (
   env: RuntimeReplica,
-  options?: {
-    runtimeInput?: RuntimeInput;
-    durableRuntimeInput?: RuntimeInput;
-    excludePersistedHistoryRecords?: boolean;
-  },
+  options?: { excludePersistedHistoryRecords?: boolean },
 ): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env, {
   ...options,
   pendingNetworkOutputs: [],
@@ -399,7 +308,6 @@ export const buildReplayVerifiableRuntimeMachineSnapshot = (
   env: RuntimeReplica,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
-    runtimeInput?: RuntimeInput;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => projectReplayVerifiableRuntimeMachine(
@@ -425,8 +333,6 @@ export const buildReplayVerifiableRuntimePostStateView = (
   env: RuntimeReplica,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
-    runtimeInput?: RuntimeInput;
-    durableRuntimeInput?: RuntimeInput;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
@@ -439,7 +345,6 @@ export const buildReplayVerifiableRuntimePostStateView = (
       ? { browserVMState: projectBrowserVmPostState(env.browserVMState) }
       : {}),
     ...(infrastructure ? { infrastructure } : {}),
-    runtimeInput: resolveDurableRuntimeMempool(env, options),
     ...(env.pendingOutputs?.length
       ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) }
       : {}),
@@ -511,7 +416,6 @@ export const buildCanonicalRuntimeStateSnapshot = (
     ...(browserVMState ? { browserVMState } : {}),
     ...(runtimeConfig ? { runtimeConfig } : {}),
     ...(infrastructure ? { infrastructure } : {}),
-    runtimeInput: buildDurableRuntimeMempool(env.runtimeMempool),
     ...(env.pendingOutputs ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
     ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: projectRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
@@ -562,10 +466,9 @@ export const restoreDurableRuntimeSnapshot = (
   if (snapshot['browserVMState']) {
     env.browserVMState = snapshot['browserVMState'] as NonNullable<RuntimeReplica['browserVMState']>;
   }
-  const runtimeInput = snapshot['runtimeInput'];
-  if (runtimeInput && typeof runtimeInput === 'object') {
-    env.runtimeMempool = projectDurableRuntimeMempool(runtimeInput as RuntimeInput);
-  }
+  // Runtime mempool is replica-envelope ephemeral state: a restored process
+  // starts with an empty input queue and peers resend unframed work.
+  env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
     env.runtimeConfig = decodeRuntimeConfig(
       snapshot['runtimeConfig'],

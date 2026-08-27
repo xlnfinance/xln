@@ -405,6 +405,74 @@ describe('pre-TypeScript Account authority capability', () => {
     stage.finishEntityAccountFrame?.();
   });
 
+  test('forwarded proposalAccountIds survive stale TS mempool mirror', async () => {
+    const account = makeAccount(OWNER, PEER);
+    let outboundProposalAccountIds: string[] = [];
+    const provider: AccountAuthorityEntityStageProvider = {
+      async beginEntityStage() {
+        throw new Error('TEST_PER_OPERATION_STAGE_MUST_NOT_OPEN');
+      },
+      async executeAccountInboundBatch() {
+        return [];
+      },
+      async executeAccountOutboundBatch(batch) {
+        outboundProposalAccountIds = batch.proposals.map(
+          proposal => proposal.account.proofHeader.toEntity,
+        );
+        expect(batch.proposals).toHaveLength(1);
+        expect(outboundProposalAccountIds).toEqual([PEER]);
+        return {
+          proposals: [{
+            accountId: PEER,
+            result: proposeAccountFrameIdle({ message: 'idle:no-mempool', events: [] }),
+          }],
+          generatedAdmissions: [],
+        };
+      },
+    };
+    const stage = createAccountAuthorityEntityStage(options(provider, 'cutover'));
+    stage.bindCanonicalInput(canonicalInput());
+    const accounts = new Map([[PEER, account]]);
+    await stage.beginEntityAccountFrame?.({
+      ownerEntityId: OWNER,
+      expectedAccountsRoot: `0x${'00'.repeat(32)}`,
+      entityTxs: [],
+      accounts,
+      accountForWrite: accountId => accounts.get(accountId),
+      createInboundAccount: () => { throw new Error('TEST_CREATE_UNREACHABLE'); },
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+    });
+    await stage.prepareEntityAccountOutbound?.({
+      accounts,
+      accountForWrite: accountId => accounts.get(accountId),
+      proposalAccountIds: [PEER],
+      failedHtlcRoutes: [],
+      timestamp: 100,
+      jHeight: 7,
+    });
+
+    expect(outboundProposalAccountIds).toEqual([PEER]);
+    expect(stage.hasPreparedAccountProposal?.(PEER)).toBe(true);
+    const result = await stage.executeAccountProposal({
+      collectorFrameId: OWNER,
+      account,
+      timestamp: 100,
+      jHeight: 7,
+      entityTimestamp: 100,
+      finalizedJHeight: 7,
+      selectionIsWholeMempool: true,
+    });
+    expect(result?.ok).toBe(true);
+    expect(result?.message).toBe('idle:no-mempool');
+    expect(stage.typeScriptExecutionCounts()).toEqual({
+      applyAccountInput: 0,
+      proposeAccountFrame: 0,
+    });
+    stage.finishEntityAccountFrame?.();
+    await stage.discard();
+  });
+
   test('accepted canonical ingress binds before Account work without eager Begin', async () => {
     const fixture = createEntityProposalFixture('account-authority-canonical-ingress', 1n);
     const validator = fixture.createValidator('1');

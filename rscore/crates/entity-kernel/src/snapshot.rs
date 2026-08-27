@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use xln_rscore_engine::EntityId;
+use xln_rscore_protocol::CanonicalValue;
 
 use crate::{
     CrontabState, EntityConsensusSection, EntityKernelError, EntityReferral, EntityStateSlice,
@@ -24,8 +25,10 @@ pub struct EntityStateSnapshot {
     pub htlc_fees_earned: BigInt,
     pub lock_book: BTreeMap<String, LockBookEntry>,
     pub crontab: Option<CrontabState>,
+    pub hub_rebalance_config: Option<CanonicalValue>,
     pub orderbook: Option<OrderbookStateSnapshot>,
     pub orderbook_metadata: Option<OrderbookConsensusMetadata>,
+    pub j_history_finality: Option<CanonicalValue>,
     pub expected_owned_sections: Vec<EntityConsensusSection>,
 }
 
@@ -222,11 +225,13 @@ pub fn restore_entity_state(
         htlc_fees_earned: snapshot.htlc_fees_earned,
         lock_book: snapshot.lock_book,
         crontab: snapshot.crontab,
+        hub_rebalance_config: snapshot.hub_rebalance_config,
         orderbook: snapshot
             .orderbook
             .map(OrderbookState::restore)
             .transpose()?,
         orderbook_metadata: snapshot.orderbook_metadata,
+        j_history_finality: snapshot.j_history_finality,
     };
     let actual = compute_entity_owned_sections(&state, accounts_root, account_count)?;
     if actual != snapshot.expected_owned_sections {
@@ -252,12 +257,14 @@ pub fn capture_entity_state(
         htlc_fees_earned: state.htlc_fees_earned.clone(),
         lock_book: state.lock_book.clone(),
         crontab: state.crontab.clone(),
+        hub_rebalance_config: state.hub_rebalance_config.clone(),
         orderbook: state
             .orderbook
             .as_ref()
             .map(OrderbookState::snapshot)
             .transpose()?,
         orderbook_metadata: state.orderbook_metadata.clone(),
+        j_history_finality: state.j_history_finality.clone(),
         expected_owned_sections: compute_entity_owned_sections(
             state,
             accounts_root,

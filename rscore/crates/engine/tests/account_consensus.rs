@@ -2090,7 +2090,6 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
         panic!("expected first proposal");
     };
     let first = *first;
-    assert!(!first.dispute_requires_existing_hanko);
     let first_dispute = first.dispute.clone().expect("first recovery draft");
     assert!(left.account.certify_local_dispute_after_outbound());
 
@@ -2135,7 +2134,6 @@ fn a_parent_selected_candidate_reuses_its_certified_recovery_draft() {
         panic!("expected second proposal");
     };
     assert_eq!(second.dispute.as_ref(), Some(&first_dispute));
-    assert!(second.dispute_requires_existing_hanko);
 }
 
 /// A valid frame certificate does not bless its attached dispute witness. A

@@ -426,6 +426,9 @@ pub fn compute_entity_owned_sections(
         )?;
         values.push(("crontabState", canonical_crontab_state(crontab, hooks)?));
     }
+    if let Some(config) = &state.hub_rebalance_config {
+        values.push(("hubRebalanceConfig", config.clone()));
+    }
     match (&state.orderbook, &state.orderbook_metadata) {
         (Some(orderbook), Some(metadata)) => values.push((
             "orderbookExt",

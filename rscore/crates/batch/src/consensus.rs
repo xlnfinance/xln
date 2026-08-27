@@ -702,11 +702,6 @@ pub(crate) fn proposal_row(
             dropped: dropped_rows(account_id, &dropped)?,
         },
         ProposalOutcome::Proposed(proposed) => {
-            if proposed.dispute_requires_existing_hanko
-                || proposed.bundled_ack_dispute_requires_existing_hanko
-            {
-                return Err(BatchError::OutboundDisputeUnsupported(account_id));
-            }
             let failed_htlc_locks = failed_htlc_locks(&proposed.dropped);
             let dropped = dropped_rows(account_id, &proposed.dropped)?;
             let proposed = ProposedRow {

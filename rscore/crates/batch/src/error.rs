@@ -52,8 +52,6 @@ pub enum BatchError {
     /// canonical rule would silently propose a frozen transaction.
     #[error("PROPOSABILITY_SETTLEMENT_UNREPRESENTED")]
     ProposabilitySettlementUnrepresented,
-    #[error("RSCORE_ACCOUNT_OUTBOUND_DISPUTE_UNSUPPORTED:{0}")]
-    OutboundDisputeUnsupported(AccountId),
     #[error("RSCORE_BATCH_TRANSITION:{input_index}:{source}")]
     Transition {
         input_index: u32,

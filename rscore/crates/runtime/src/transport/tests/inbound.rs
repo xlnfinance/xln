@@ -207,7 +207,6 @@ fn frame(height: u64, outputs: Vec<Vec<u8>>) -> RuntimeFrameCommit {
             materialized_state: false,
             canonical_state: None,
             runtime_input: json!({"runtimeTxs": [], "entityInputs": []}),
-            pending_runtime_input: None,
             runtime_machine_root: None,
             account_authority_checkpoints: vec![],
             touched_entities: vec![],

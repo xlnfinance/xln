@@ -4,8 +4,8 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::{
-    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, canonical_value_from_tagged_json,
-    decode_entity_deterministic_context,
+    RuntimeEntityInput, RuntimeFrameContext, RuntimeInput, RuntimeTx,
+    canonical_value_from_tagged_json, decode_entity_deterministic_context,
 };
 
 use super::{ConcreteWalSource, DecodedRuntimeWalFrame, verify_wal_source};
@@ -100,11 +100,72 @@ fn unsupported_kind(value: &Value, lane: &str, index: usize) -> String {
         .unwrap_or_else(|| format!("{lane}[{index}]"))
 }
 
-fn expected_entity_root(frame: &Value) -> Result<[u8; 32], ConcreteWalDecodeError> {
-    let rows = array(
-        field(frame, "canonicalEntityHashes", "frame")?,
-        "frame.canonicalEntityHashes",
+fn exact_fields(
+    value: &Map<String, Value>,
+    expected: &[&str],
+    path: &str,
+) -> Result<(), ConcreteWalDecodeError> {
+    let missing = expected.iter().find(|field| !value.contains_key(**field));
+    let extra = value
+        .keys()
+        .find(|field| !expected.contains(&field.as_str()));
+    if missing.is_some() || extra.is_some() {
+        return Err(invalid(format!(
+            "FIELDS:{path}:missing={}:extra={}",
+            missing.copied().unwrap_or("none"),
+            extra.map(String::as_str).unwrap_or("none")
+        )));
+    }
+    Ok(())
+}
+
+fn address(value: &Value, path: &str) -> Result<String, ConcreteWalDecodeError> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| invalid(format!("ADDRESS:{path}")))?;
+    let body = text.strip_prefix("0x").filter(|body| body.len() == 40);
+    if !body.is_some_and(|body| body.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+        return Err(invalid(format!("ADDRESS:{path}")));
+    }
+    Ok(text.to_owned())
+}
+
+fn decode_runtime_tx(value: &Value, index: usize) -> Result<RuntimeTx, ConcreteWalDecodeError> {
+    let path = format!("runtimeTxs[{index}]");
+    let tx = object(value, &path)?;
+    exact_fields(tx, &["type", "data"], &path)?;
+    let kind = tx["type"]
+        .as_str()
+        .ok_or_else(|| invalid(format!("STRING:{path}.type")))?;
+    if kind != "advanceJWatcherCursor" {
+        return Err(invalid(format!("RUNTIME_TX_UNSUPPORTED:{index}:{kind}")));
+    }
+    let data_path = format!("{path}.data");
+    let data = object(&tx["data"], &data_path)?;
+    exact_fields(
+        data,
+        &["depositoryAddress", "chainId", "blockNumber"],
+        &data_path,
     )?;
+    let chain_id = safe_unsigned(&data["chainId"], &format!("{data_path}.chainId"))?;
+    if chain_id == 0 {
+        return Err(invalid(format!("UNSIGNED:{data_path}.chainId")));
+    }
+    Ok(RuntimeTx::AdvanceJWatcherCursor {
+        depository_address: address(
+            &data["depositoryAddress"],
+            &format!("{data_path}.depositoryAddress"),
+        )?,
+        chain_id,
+        block_number: safe_unsigned(&data["blockNumber"], &format!("{data_path}.blockNumber"))?,
+    })
+}
+
+fn expected_entity_root(frame: &Value) -> Result<Option<[u8; 32]>, ConcreteWalDecodeError> {
+    let Some(value) = object(frame, "frame")?.get("canonicalEntityHashes") else {
+        return Ok(None);
+    };
+    let rows = array(value, "frame.canonicalEntityHashes")?;
     if rows.len() != 1 {
         return Err(invalid(format!("ENTITY_HASH_COUNT:{}", rows.len())));
     }
@@ -112,6 +173,7 @@ fn expected_entity_root(frame: &Value) -> Result<[u8; 32], ConcreteWalDecodeErro
         field(&rows[0], "hash", "frame.canonicalEntityHashes[0]")?,
         "entityRoot",
     )
+    .map(Some)
 }
 
 /// Decode one authenticated frame/context pair without consulting TypeScript
@@ -133,12 +195,14 @@ pub fn decode_concrete_runtime_wal_frame(
         field(runtime_input, "runtimeTxs", "frame.runtimeInput")?,
         "runtimeTxs",
     )?;
-    if let Some((index, tx)) = runtime_txs.iter().enumerate().next() {
-        return Err(invalid(format!(
-            "RUNTIME_TX_UNSUPPORTED:{height}:{index}:{}",
-            unsupported_kind(tx, "runtimeTxs", index)
-        )));
-    }
+    let runtime_txs = runtime_txs
+        .iter()
+        .enumerate()
+        .map(|(index, tx)| {
+            decode_runtime_tx(tx, index)
+                .map_err(|error| invalid(format!("RUNTIME_TX:{height}:{index}:{error}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if let Some(j_inputs) = runtime_input_object.get("jInputs") {
         let rows = array(j_inputs, "frame.runtimeInput.jInputs")?;
         if let Some((index, input)) = rows.iter().enumerate().next() {
@@ -148,18 +212,6 @@ pub fn decode_concrete_runtime_wal_frame(
             )));
         }
     }
-    if source.entity_contexts.len() != 1 {
-        return Err(invalid(format!(
-            "ENTITY_CONTEXT_COUNT:{height}:{}",
-            source.entity_contexts.len()
-        )));
-    }
-    let context = &source
-        .entity_contexts
-        .values()
-        .next()
-        .ok_or_else(|| invalid("ENTITY_CONTEXT_MISSING"))?
-        .value;
     let entity_inputs = array(
         field(runtime_input, "entityInputs", "frame.runtimeInput")?,
         "entityInputs",
@@ -171,17 +223,34 @@ pub fn decode_concrete_runtime_wal_frame(
             .map_err(|error| invalid(format!("ENTITY_INPUT:{height}:{index}:{error}")))
     })
     .collect::<Result<Vec<_>, _>>()?;
-    let canonical_entity_context = canonical_value_from_tagged_json(context)
-        .map_err(|error| invalid(format!("ENTITY_CONTEXT_VALUE:{height}:{error}")))?;
-    let entity_context = decode_entity_deterministic_context(context_policy, context)
-        .map_err(|error| invalid(format!("ENTITY_CONTEXT:{height}:{error}")))?;
+    let entity_context_required = !entity_inputs.is_empty();
+    if source.entity_contexts.len() > 1
+        || (entity_context_required && source.entity_contexts.len() != 1)
+    {
+        return Err(invalid(format!(
+            "ENTITY_CONTEXT_COUNT:{height}:{}",
+            source.entity_contexts.len()
+        )));
+    }
+    let (entity_context, canonical_entity_context) = match source.entity_contexts.values().next() {
+        Some(context) => (
+            decode_entity_deterministic_context(context_policy, &context.value)
+                .map_err(|error| invalid(format!("ENTITY_CONTEXT:{height}:{error}")))?,
+            canonical_value_from_tagged_json(&context.value)
+                .map_err(|error| invalid(format!("ENTITY_CONTEXT_VALUE:{height}:{error}")))?,
+        ),
+        None => (
+            xln_rscore_entity_kernel::DeterministicContext::hlt_default(),
+            xln_rscore_protocol::CanonicalValue::Object(Vec::new()),
+        ),
+    };
     let validated = crate::storage::native::validate_runtime_frame(&source.frame_bytes)
         .map_err(|error| invalid(error.to_string()))?;
     Ok(DecodedRuntimeWalFrame {
         height,
         timestamp,
         input: RuntimeInput {
-            runtime_txs: Vec::new(),
+            runtime_txs,
             entity_inputs,
             frame: RuntimeFrameContext {
                 timestamp,

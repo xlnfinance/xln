@@ -201,7 +201,6 @@ fn batch_code(error: &xln_rscore_batch::BatchError) -> &'static str {
         BatchError::ProposabilitySettlementUnrepresented => {
             "PROPOSABILITY_SETTLEMENT_UNREPRESENTED"
         }
-        BatchError::OutboundDisputeUnsupported(_) => "RSCORE_ACCOUNT_OUTBOUND_DISPUTE_UNSUPPORTED",
         BatchError::Transition { .. } => "RSCORE_BATCH_TRANSITION",
         BatchError::EnginePanic { .. } => "RSCORE_BATCH_ENGINE_PANIC",
         BatchError::OutputIndexOverflow { .. } => "RSCORE_BATCH_OUTPUT_INDEX_OVERFLOW",

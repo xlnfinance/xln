@@ -7,7 +7,7 @@ import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import type { BookPricePage, BookPricePageTree } from '../../orderbook/pages/page';
 import type { AccountReplica, SwapOffer } from '../../types/account';
 import type { RscoreWireValue } from '../client';
-import { hexToWireBytes } from '../shadow-wire';
+import { canonicalValueWire, hexToWireBytes } from '../shadow-wire';
 import { compareStableText } from '../../protocol/serialization';
 import { entityCommandNoncesWire } from './command-nonce-wire';
 
@@ -24,6 +24,7 @@ const OWNED_FIELDS = new Set([
   'orderbookExt',
   'crontabState',
   'entityCommandNonces',
+  'hubRebalanceConfig',
 ]);
 
 const bytes32 = (value: string, code: string): Uint8Array =>
@@ -325,5 +326,6 @@ export const entitySnapshotWire = (state: EntityState): RscoreWireValue[] => {
     sections,
     crontabWire(state),
     entityCommandNoncesWire(state.entityCommandNonces),
+    state.hubRebalanceConfig === undefined ? null : canonicalValueWire(state.hubRebalanceConfig),
   ];
 };

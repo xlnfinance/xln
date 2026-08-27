@@ -7,7 +7,6 @@ import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
-  authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,
 } from '../wal/snapshot';
 import {
@@ -98,9 +97,8 @@ const installRestoredRuntimeFrame = async (
     frame.timestamp,
     `STORAGE_RESTORE_TIMESTAMP_INVALID:height=${targetHeight}`,
   );
-  env.runtimeMempool = frame.pendingRuntimeInput
-    ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
-    : { runtimeTxs: [], entityInputs: [] };
+  // Ephemeral replica-envelope state: never persisted, never restored.
+  env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingNetworkOutputs = payloads.runtimeOutputs ?? [];
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
   if (payloads.runtimeMachine) {

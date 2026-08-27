@@ -10,7 +10,7 @@ use xln_rscore_entity_kernel::{
 };
 
 #[test]
-fn cross_j_and_unknown_transactions_fail_loudly() {
+fn state_only_transactions_are_inert_but_cross_j_fails_loudly() {
     let mut state = EntityStateSlice::empty(support::HUB, 1);
     state.known_accounts = BTreeSet::from([MAKER.to_string()]);
     let unknown = commit(
@@ -20,14 +20,15 @@ fn cross_j_and_unknown_transactions_fail_loudly() {
         AccountTx::AddDelta { token_id: token(1) },
         Vec::new(),
     );
-    assert_eq!(
-        apply_entity_kernel(
-            state.clone(),
-            &[unknown],
-            &DeterministicContext::hlt_default()
-        ),
-        Err(EntityKernelError::UnsupportedAccountTx { kind: "add_delta" })
-    );
+    let applied = apply_entity_kernel(
+        state.clone(),
+        &[unknown],
+        &DeterministicContext::hlt_default(),
+    )
+    .expect("Account-only genesis transaction has no Entity effect");
+    assert_eq!(applied.state, state);
+    assert!(applied.outputs.is_empty());
+    assert!(applied.proposal_work.is_empty());
 
     let mut cross = commit(
         MAKER,

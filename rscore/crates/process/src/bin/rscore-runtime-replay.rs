@@ -104,8 +104,19 @@ fn recorded_direct_payments(root: &Value, from: u64, to: u64) -> Result<u64, Str
 fn main() -> Result<(), String> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let wal_path = argument(&args, "--wal")?;
+    let checkpoint_wal_path = args
+        .iter()
+        .position(|value| value == "--checkpoint-wal")
+        .map(|index| {
+            args.get(index + 1)
+                .filter(|value| !value.is_empty())
+                .cloned()
+                .ok_or_else(|| "RUNTIME_REPLAY_ARG_MISSING:--checkpoint-wal".to_string())
+        })
+        .transpose()?
+        .filter(|path| path != &wal_path);
     let state_path = argument(&args, "--state-db")?;
-    if wal_path == state_path {
+    if wal_path == state_path || checkpoint_wal_path.as_deref() == Some(state_path.as_str()) {
         return Err("RUNTIME_REPLAY_DATABASES_MUST_BE_DISTINCT".into());
     }
     let recording_path = argument(&args, "--recording")?;
@@ -151,10 +162,15 @@ fn main() -> Result<(), String> {
 
     let mut reader = RuntimeWalReader::open_owned(wal_path)
         .map_err(|error| format!("RUNTIME_REPLAY_WAL_OPEN:{error}"))?;
+    let mut checkpoint_reader = checkpoint_wal_path
+        .map(RuntimeWalReader::open_owned)
+        .transpose()
+        .map_err(|error| format!("RUNTIME_REPLAY_CHECKPOINT_WAL_OPEN:{error}"))?;
     let mut state_reader = RuntimeWalReader::open_owned(state_path)
         .map_err(|error| format!("RUNTIME_REPLAY_STATE_OPEN:{error}"))?;
     let metrics = replay_runtime_wal(
         &mut reader,
+        checkpoint_reader.as_mut(),
         &mut state_reader,
         &recording,
         runtime_seed,

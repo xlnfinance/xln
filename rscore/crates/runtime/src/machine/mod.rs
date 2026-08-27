@@ -6,6 +6,7 @@
 //! publication is deliberately outside this pure transition.
 
 mod apply;
+mod inbound_genesis;
 mod mempool;
 mod scheduled_input;
 mod scheduled_wake;

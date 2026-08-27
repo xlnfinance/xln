@@ -207,30 +207,19 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       .toThrow('RUNTIME_MACHINE_J_REPLICAS_0_VALUE_CONTRACTS_FIELDS');
   });
 
-  test('rejects malformed RuntimeTx and EntityTx payloads before restore', () => {
-    const corruptRuntimeTx = buildDurableRuntimeMachineSnapshot(
-      createEmptyEnv('runtime-machine-corrupt-runtime-tx'),
-    );
-    corruptRuntimeTx['runtimeInput'] = {
-      runtimeTxs: [{ type: 'importJ', data: 'CORRUPT' }],
-      entityInputs: [],
+  test('rejects a persisted Runtime mempool as a retired durable field', () => {
+    // The Runtime mempool is ephemeral replica-envelope state. A machine
+    // snapshot written by the retired format carried it as `runtimeInput`;
+    // that shape must fail loudly instead of restoring unframed inputs.
+    const env = createEmptyEnv('runtime-machine-retired-pending-input');
+    const current = buildDurableRuntimeMachineSnapshot(env);
+    expect(current['runtimeInput']).toBeUndefined();
+    const retired = {
+      ...current,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
     };
-    expect(() => validateDurableRuntimeMachineSnapshot(corruptRuntimeTx, 'RUNTIME_MACHINE'))
-      .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_RUNTIME_TX_0_DATA');
-
-    const corruptEntityTx = buildDurableRuntimeMachineSnapshot(
-      createEmptyEnv('runtime-machine-corrupt-entity-tx'),
-    );
-    corruptEntityTx['runtimeInput'] = {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId: `0x${'44'.repeat(20)}`,
-        entityTxs: [{ type: 'chat', data: 'CORRUPT' }],
-      }],
-    };
-    expect(() => validateDurableRuntimeMachineSnapshot(corruptEntityTx, 'RUNTIME_MACHINE'))
-      .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_ENTITY_INPUT_0_ENTITY_TX_0_DATA');
+    expect(() => validateDurableRuntimeMachineSnapshot(retired, 'RUNTIME_MACHINE'))
+      .toThrow('RUNTIME_MACHINE_FIELDS');
   });
 
   test('rejects a noncanonical RuntimeId before durable snapshot restore', () => {
@@ -242,7 +231,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       .toThrow('Invalid RuntimeId');
   });
 
-  test('validates durable source Runtime-frame provenance in outbox and committed Runtime input', () => {
+  test('validates durable source Runtime-frame provenance in the outbox', () => {
     const sourceRuntimeFrame = { height: 7, timestamp: 7000 };
     const routedInput = {
       runtimeId: `0x${'33'.repeat(20)}`,
@@ -264,19 +253,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     ] = { height: -1, timestamp: 7000 };
     expect(() => validateDurableRuntimeMachineSnapshot(malformedFrame, 'RUNTIME_MACHINE'))
       .toThrow('RUNTIME_MACHINE_PENDINGNETWORKOUTPUTS_0_SOURCE_RUNTIME_FRAME_HEIGHT:-1');
-
-    const committedIngress = buildDurableRuntimeMachineSnapshot(
-      createEmptyEnv('runtime-machine-source-frame-ingress'),
-    );
-    committedIngress['runtimeInput'] = { runtimeTxs: [], entityInputs: [routedInput] };
-    expect(() => validateDurableRuntimeMachineSnapshot(committedIngress, 'RUNTIME_MACHINE')).not.toThrow();
-
-    const malformedIngress = structuredClone(committedIngress);
-    (malformedIngress['runtimeInput'] as {
-      entityInputs: Array<{ sourceRuntimeFrame: { height: number } }>;
-    }).entityInputs[0]!.sourceRuntimeFrame.height = -1;
-    expect(() => validateDurableRuntimeMachineSnapshot(malformedIngress, 'RUNTIME_MACHINE'))
-      .toThrow('ENTITY_INPUT_SOURCE_RUNTIME_HEIGHT_INVALID:-1');
   });
 
   test('recursively rejects malformed EntityTx payloads in every nested carrier', () => {

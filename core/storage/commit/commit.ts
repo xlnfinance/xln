@@ -192,7 +192,6 @@ type PersistRuntimeEnvironmentOptions = {
   env: RuntimeReplica;
   currentFrameInput: RuntimeInput | undefined;
   currentFrameOutputs: RoutedEntityInput[] | undefined;
-  pendingRuntimeInput: RuntimeInput | undefined;
   entityContexts: Map<string, EntityInfraContext>;
   pendingHistoryRecords: ReturnType<typeof peekPendingHistoryRecords>;
   outerMarks: StorageOuterPerfMarks;
@@ -208,7 +207,6 @@ const persistRuntimeEnvironment = async (
     env,
     currentFrameInput,
     currentFrameOutputs,
-    pendingRuntimeInput,
     entityContexts,
     pendingHistoryRecords,
     outerMarks,
@@ -240,9 +238,6 @@ const persistRuntimeEnvironment = async (
         ...(currentFrameOutputs === undefined
           ? {}
           : { currentFrameOutputs }),
-        ...(pendingRuntimeInput === undefined
-          ? {}
-          : { pendingRuntimeInput }),
         onPersistenceProgress: markStorageProgress,
         onPersistenceBoundary: boundary =>
           markStorageProgress(`boundary:${boundary}`),
@@ -396,7 +391,6 @@ const saveRuntimeEnvironment = async (
   env: RuntimeReplica,
   currentFrameInput: RuntimeInput | undefined,
   currentFrameOutputs: RoutedEntityInput[] | undefined,
-  pendingRuntimeInput: RuntimeInput | undefined,
   entityContexts: Map<string, EntityInfraContext>,
   accountAuthority?: AccountAuthoritySave,
 ): Promise<RuntimeStorageSaveOutcome> => {
@@ -418,7 +412,6 @@ const saveRuntimeEnvironment = async (
       env,
       currentFrameInput,
       currentFrameOutputs,
-      pendingRuntimeInput,
       entityContexts,
       pendingHistoryRecords,
       outerMarks,
@@ -456,7 +449,6 @@ export const createRuntimeStorageCommitApi = (
     env: RuntimeReplica,
     currentFrameInput: RuntimeInput | undefined,
     currentFrameOutputs: RoutedEntityInput[] | undefined,
-    pendingRuntimeInput: RuntimeInput | undefined,
     entityContexts: Map<string, EntityInfraContext>,
     accountAuthority?: AccountAuthoritySave,
   ) =>
@@ -465,7 +457,6 @@ export const createRuntimeStorageCommitApi = (
       env,
       currentFrameInput,
       currentFrameOutputs,
-      pendingRuntimeInput,
       entityContexts,
       accountAuthority,
     ),

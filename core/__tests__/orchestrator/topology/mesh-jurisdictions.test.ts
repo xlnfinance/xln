@@ -120,6 +120,19 @@ describe('mesh jurisdiction config resolution', () => {
     });
   });
 
+  test('builds a single-Entity mesh when the explicit RRS scope disables secondary jurisdictions', () => {
+    const previous = process.env['XLN_MESH_PRIMARY_JURISDICTION_ONLY'];
+    process.env['XLN_MESH_PRIMARY_JURISDICTION_ONLY'] = '1';
+    try {
+      withJurisdictions(jurisdictionsDocument({
+        localTron: stack('Tron', '/rpc2', '0x2200000000000000000000000000000000000000', '0x2300000000000000000000000000000000000000'),
+      }), () => expect(resolveSecondaryJurisdictions('http://127.0.0.1:8545')).toEqual([]));
+    } finally {
+      if (previous === undefined) delete process.env['XLN_MESH_PRIMARY_JURISDICTION_ONLY'];
+      else process.env['XLN_MESH_PRIMARY_JURISDICTION_ONLY'] = previous;
+    }
+  });
+
   test('rejects a non-boolean primary marker instead of silently demoting it', () => {
     withJurisdictions(jurisdictionsDocument({
       base: stack(

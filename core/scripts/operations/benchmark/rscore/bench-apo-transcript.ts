@@ -347,6 +347,8 @@ const captureTranscript = async (
   recording: string,
   transcript: string,
   binary: string,
+  runtimeSeedFile: string | null,
+  entitySignerLabel: string | null,
 ): Promise<void> => {
   const proxy = fileURLToPath(new URL('./rscore-transcript-proxy.ts', import.meta.url));
   accessSync(proxy, constants.X_OK);
@@ -376,6 +378,8 @@ const captureTranscript = async (
     '--output', output,
     '--mode', 'max',
     '--require-rust-account-authority',
+    ...(runtimeSeedFile ? ['--runtime-seed-file', runtimeSeedFile] : []),
+    ...(entitySignerLabel ? ['--entity-signer-label', entitySignerLabel] : []),
   ], { cwd: process.cwd(), env, stdio: 'inherit' });
   const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null];
   if (code !== 0) throw new Error('RSCORE_APO_CAPTURE_EXIT:' + String(code) + ':' + String(signal));
@@ -403,9 +407,14 @@ const captureTranscript = async (
 const recording = resolve(requiredArgument('recording'));
 const binary = resolve(argument('binary') ?? 'rscore/target/release/xln-rscore');
 const transcript = resolve(argument('transcript') ?? recording + '.apo-transcript-v1');
+const runtimeSeedFileArgument = argument('runtime-seed-file');
+const runtimeSeedFile = runtimeSeedFileArgument ? resolve(runtimeSeedFileArgument) : null;
+const entitySignerLabel = argument('entity-signer-label');
 accessSync(recording, constants.R_OK);
 accessSync(binary, constants.X_OK);
-if (!existsSync(transcript)) await captureTranscript(recording, transcript, binary);
+if (!existsSync(transcript)) {
+  await captureTranscript(recording, transcript, binary, runtimeSeedFile, entitySignerLabel);
+}
 const pairs = parseTranscript(transcript);
 const rows: ApoBenchRow[] = [];
 for (const workers of parseWorkers()) rows.push(await runTranscript(binary, pairs, workers));

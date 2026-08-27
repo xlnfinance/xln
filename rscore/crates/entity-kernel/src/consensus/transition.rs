@@ -20,6 +20,7 @@ use super::authority::{EntityAuthorityError, EntityFrameAuthority};
 use super::frame::{
     CanonicalEntityTx, EntityFrameBody, EntityFrameError, EntityFrameEvent, HashToSign,
 };
+use super::j_prefix::{self, JPrefixError};
 use super::lineage::{
     CertifiedEntityFrameLink, EntityLineageError, build_certified_entity_frame_link,
 };
@@ -47,6 +48,7 @@ pub const ENTITY_OWNED_CONSENSUS_FIELDS: &[&str] = &[
     "htlcFeesEarned",
     "lockBook",
     "crontabState",
+    "hubRebalanceConfig",
     "orderbookExt",
     "config",
     "leaderState",
@@ -269,7 +271,12 @@ pub struct EntityTransitionCertificationRequest<'a> {
     pub txs: &'a [CanonicalEntityTx],
     pub events: &'a [EntityFrameEvent],
     pub entity_context: &'a CanonicalValue,
-    pub j_prefix_certificate: Option<&'a CanonicalValue>,
+    /// True when the validator-local J-event watcher has a semantic event
+    /// pending beyond `post_state.last_finalized_j_height` that the base-claim
+    /// J-prefix path does not (yet) cover. The base claim always applies for a
+    /// registered Entity with no pending event; a pending event fails loudly
+    /// instead of certifying a stale or wrong prefix.
+    pub j_prefix_pending_local_event: bool,
     pub post_authority: EntityFrameAuthority,
     pub secondary_hashes: Vec<HashToSign>,
     pub presigned_manifest: PresignedManifest,
@@ -297,6 +304,8 @@ pub enum EntityTransitionError {
     Frame(#[from] EntityFrameError),
     #[error(transparent)]
     Certification(#[from] EntityCertificationError),
+    #[error(transparent)]
+    JPrefix(#[from] JPrefixError),
     #[error(transparent)]
     Output(#[from] EntityOutputError),
     #[error(transparent)]
@@ -499,6 +508,14 @@ pub fn certify_entity_transition(
     let state_root = compute_entity_consensus_root(&sections)?;
     let authority_root = request.post_authority.root()?;
     let parent_hash = lineage_parent_hash(&consensus);
+    let j_prefix_certificate = j_prefix::build_required_j_prefix_certificate(
+        signer,
+        &request.post_authority,
+        request.post_state,
+        request.post_state.height,
+        parent_hash,
+        request.j_prefix_pending_local_event,
+    )?;
     let body = EntityFrameBody {
         parent_frame_hash: parent_hash,
         height: request.post_state.height,
@@ -509,7 +526,7 @@ pub fn certify_entity_transition(
         state_root: &state_root,
         authority_root: &authority_root,
         entity_context: request.entity_context,
-        j_prefix_certificate: request.j_prefix_certificate,
+        j_prefix_certificate: j_prefix_certificate.as_ref(),
     };
     let certified = certify_single_signer_entity_frame(
         signer,
@@ -716,7 +733,7 @@ mod tests {
                 txs: &[tx],
                 events: &[],
                 entity_context: &context,
-                j_prefix_certificate: None,
+                j_prefix_pending_local_event: false,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
                 presigned_manifest: PresignedManifest::new(),
@@ -762,7 +779,7 @@ mod tests {
                 txs: &[],
                 events: &[],
                 entity_context: &context,
-                j_prefix_certificate: None,
+                j_prefix_pending_local_event: false,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
                 presigned_manifest: PresignedManifest::new(),

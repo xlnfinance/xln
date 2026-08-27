@@ -8,9 +8,10 @@ use xln_rscore_engine::{
     derive_signer_key,
 };
 use xln_rscore_entity_kernel::{
-    ConsensusMode, CrontabState, DeterministicContext, EntityConsensusConfig, EntityConsensusState,
-    EntityFrameAuthority, EntityHtlcNoteIndex, EntityLeaderState, EntitySingleSigner,
-    EntityStateSlice, EntityTxKind, ResidentEntityConsensusReplica, ScheduledHook,
+    CanonicalEntityTx, ConsensusMode, CrontabState, DeterministicContext, EntityConsensusConfig,
+    EntityConsensusState, EntityFrameAuthority, EntityHtlcNoteIndex, EntityLeaderState,
+    EntitySingleSigner, EntityStateSlice, EntityTxKind, ResidentEntityConsensusReplica,
+    ScheduledHook,
 };
 use xln_rscore_protocol::CanonicalValue;
 
@@ -337,12 +338,96 @@ fn runtime_tx_only_selection_retains_its_context() -> Result<(), RuntimeMachineE
         kind: "fixture-only".to_string(),
     });
     mempool.queued_at = Some(selected_context.timestamp);
-    let selected =
-        select_runtime_frame(&mut mempool, RuntimeLimits::hlt(), selected_context.clone())?
-            .ok_or(RuntimeMachineError::InputCountOverflow)?;
+    let selected = select_runtime_frame(
+        &mut mempool,
+        RuntimeLimits::hlt(),
+        0,
+        selected_context.clone(),
+    )?
+    .ok_or(RuntimeMachineError::InputCountOverflow)?;
     assert_eq!(selected.runtime_txs.len(), 1);
     assert!(selected.entity_inputs.is_empty());
     assert_eq!(selected.frame, selected_context);
+    assert!(mempool.is_empty());
+    Ok(())
+}
+
+fn wake_input(from: &str, next_hook: &str) -> RuntimeEntityInput {
+    let canonical = serde_json::json!({
+        "entityId": hex32(owner_bytes()),
+        "signerId": SIGNER,
+        "from": from,
+    });
+    let wake = CanonicalValue::Object(vec![(
+        "nextHook".to_string(),
+        CanonicalValue::String(next_hook.to_string()),
+    )]);
+    RuntimeEntityInput::fixture_with_entity_txs(
+        canonical,
+        vec![CanonicalEntityTx {
+            kind: EntityTxKind::ScheduledWake,
+            data: wake.clone(),
+            wire_data: wake,
+        }],
+    )
+}
+
+/// Two `scheduledWake` bodies in one Runtime frame were computed from two
+/// different Entity frame starts. Only the first Entity height may become
+/// durable here; the rest of the queue stays in the sole Runtime FIFO in
+/// arrival order and is applied by the next Runtime frame.
+#[test]
+fn one_runtime_frame_makes_at_most_one_entity_height_durable() -> Result<(), RuntimeMachineError> {
+    let selected_context = frame_at(321, 7, Vec::new()).frame;
+    let mut mempool = RuntimeMempool::empty();
+    mempool.entity_inputs.push_back(wake_input("", "hook-11"));
+    mempool.entity_inputs.push_back(wake_input("", "hook-12"));
+    mempool
+        .entity_inputs
+        .push_back(wake_input("peer", "hook-12"));
+    mempool.queued_at = Some(selected_context.timestamp);
+
+    let selected = select_runtime_frame(
+        &mut mempool,
+        RuntimeLimits::hlt(),
+        4,
+        selected_context.clone(),
+    )?
+    .ok_or(RuntimeMachineError::InputCountOverflow)?;
+    assert_eq!(selected.entity_inputs.len(), 1);
+    assert_eq!(mempool.entity_inputs.len(), 2);
+    assert_eq!(mempool.queued_at, Some(selected_context.timestamp));
+
+    // Restart-equivalent: the persisted tail is the next frame's whole input,
+    // and it in turn stops at its own first new Entity height.
+    let next_context = frame_at(322, 8, Vec::new()).frame;
+    let next = select_runtime_frame(&mut mempool, RuntimeLimits::hlt(), 5, next_context)?
+        .ok_or(RuntimeMachineError::InputCountOverflow)?;
+    assert_eq!(next.entity_inputs.len(), 2);
+    assert!(mempool.is_empty());
+    assert_eq!(mempool.queued_at, None);
+    Ok(())
+}
+
+/// One wake body repeated across distinct transaction-origin merge groups is
+/// one Entity height. A plain lane carries no height certificate, so those
+/// groups still collapse into this frame.
+#[test]
+fn one_entity_height_still_merges_every_arrival_group() -> Result<(), RuntimeMachineError> {
+    let selected_context = frame_at(321, 7, Vec::new()).frame;
+    let mut mempool = RuntimeMempool::empty();
+    mempool.entity_inputs.push_back(wake_input("", "hook-11"));
+    mempool
+        .entity_inputs
+        .push_back(wake_input("peer", "hook-11"));
+    mempool
+        .entity_inputs
+        .push_back(wake_input("other", "hook-11"));
+    mempool.queued_at = Some(selected_context.timestamp);
+
+    let selected = select_runtime_frame(&mut mempool, RuntimeLimits::hlt(), 4, selected_context)?
+        .ok_or(RuntimeMachineError::InputCountOverflow)?;
+    assert_eq!(selected.entity_inputs.len(), 3);
     assert!(mempool.is_empty());
     Ok(())
 }

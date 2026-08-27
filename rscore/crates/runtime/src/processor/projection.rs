@@ -57,6 +57,7 @@ pub(crate) fn project_durable_frame(
         }
         return Ok(DurableProjection::Idle(Box::new(result.replica)));
     };
+    let entity_frame_committed = applied.entity_frame_committed;
     if result.outputs.checkpoint.is_some() && prior_checkpoint_rows.is_none() {
         // A cadence checkpoint is one indivisible graph. Persisting only its
         // RuntimeFrame would make the WAL tail unrecoverable, so fail before
@@ -68,14 +69,28 @@ pub(crate) fn project_durable_frame(
     let frame = result
         .certified_entity_frame()
         .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?;
-    assert_certified_result(&result, frame)?;
+    if entity_frame_committed {
+        assert_certified_result(&result, frame)?;
+    } else if result.outputs.entity_state_root.is_some()
+        || result.outputs.entity_authority_root.is_some()
+        || !result.outputs.entity_events.is_empty()
+        || !result.outputs.local_entity_outputs.is_empty()
+        || !result.account_commits.is_empty()
+    {
+        return Err(RuntimeFrameProjectionError::RuntimeOnlyShape);
+    }
     let certified_entity_frame_hash = parse_digest(&frame.hash)?;
     let entity_state_root = parse_digest(&frame.state_root)?;
     let entity_authority_root = parse_digest(&frame.authority_root)?;
-    let entity_event_count = u64::try_from(frame.events.len())
-        .map_err(|_| RuntimeFrameProjectionError::EventCount(frame.events.len()))?;
+    let frame_events = if entity_frame_committed {
+        frame.events.as_slice()
+    } else {
+        &[]
+    };
+    let entity_event_count = u64::try_from(frame_events.len())
+        .map_err(|_| RuntimeFrameProjectionError::EventCount(frame_events.len()))?;
     let events_parity_digest =
-        xln_rscore_entity_kernel::compute_entity_events_parity_digest(&frame.events)?;
+        xln_rscore_entity_kernel::compute_entity_events_parity_digest(frame_events)?;
     let entity_effect_count = u64::try_from(result.outputs.entity_events.len()).map_err(|_| {
         RuntimeFrameProjectionError::EntityEffectCount(result.outputs.entity_events.len())
     })?;
@@ -102,8 +117,7 @@ pub(crate) fn project_durable_frame(
     )?;
 
     let runtime_input = runtime_input(applied.runtime_txs, applied.entity_inputs)?;
-    let pending_runtime_input = pending_runtime_input(&result)?;
-    let machine = runtime_machine(&result, pending_runtime_input.clone());
+    let machine = runtime_machine(&result);
     let replay_view = replay_verifiable_view(&machine)?;
     let component_digests = component_digests(&replay_view)?;
     let replica_meta = prepare_replica_meta(&result, result.outputs.checkpoint.is_some())?;
@@ -115,8 +129,11 @@ pub(crate) fn project_durable_frame(
         result.replica.state.entity.entity_id.to_ascii_lowercase(),
         signer_id
     );
-    let entity_contexts =
-        prepare_entity_context_rows(&replica_id, &applied.frame.canonical_entity_context)?;
+    let entity_contexts = if entity_frame_committed {
+        prepare_entity_context_rows(&replica_id, &applied.frame.canonical_entity_context)?
+    } else {
+        crate::storage::native::EntityContextPayloadRows::empty()
+    };
 
     let expected_previous_hash = result.replica.durable.prev_frame_hash();
     let checkpoint_changes = match (result.outputs.checkpoint.as_ref(), prior_checkpoint_rows) {
@@ -177,7 +194,6 @@ pub(crate) fn project_durable_frame(
         materialized_state: checkpoint_changes.is_some(),
         canonical_state,
         runtime_input,
-        pending_runtime_input,
         runtime_machine_root,
         // The canonical TS Runtime frame does not commit an implementation-
         // specific Account-engine handle. Path-keyed node changes at the
@@ -246,42 +262,45 @@ fn runtime_input(
     runtime_txs: Vec<crate::RuntimeTx>,
     entity_inputs: Vec<Value>,
 ) -> Result<Value, RuntimeFrameProjectionError> {
-    if let Some(crate::RuntimeTx::Unsupported { kind }) = runtime_txs.first() {
-        return Err(RuntimeFrameProjectionError::RuntimeTx(kind.clone()));
-    }
+    let runtime_txs = encode_runtime_txs(runtime_txs.iter())?;
     Ok(object([
-        ("runtimeTxs", Value::Array(Vec::new())),
+        ("runtimeTxs", Value::Array(runtime_txs)),
         ("entityInputs", Value::Array(entity_inputs)),
     ]))
 }
 
-fn pending_runtime_input(
-    result: &RuntimeApplyResult,
-) -> Result<Option<Value>, RuntimeFrameProjectionError> {
-    if let Some(crate::RuntimeTx::Unsupported { kind }) =
-        result.replica.mempool.pending_runtime_txs().next()
-    {
-        return Err(RuntimeFrameProjectionError::RuntimeTx(kind.clone()));
-    }
-    let entity_inputs = result
-        .replica
-        .mempool
-        .pending_entity_inputs()
-        .cloned()
-        .collect::<Vec<_>>();
-    Ok((!entity_inputs.is_empty()).then(|| {
-        let mut fields = Map::from_iter([
-            ("runtimeTxs".into(), Value::Array(Vec::new())),
-            ("entityInputs".into(), Value::Array(entity_inputs)),
-        ]);
-        if let Some(queued_at) = result.replica.mempool.queued_at {
-            fields.insert("queuedAt".into(), Value::Number(queued_at.into()));
+fn encode_runtime_txs<'a>(
+    txs: impl Iterator<Item = &'a crate::RuntimeTx>,
+) -> Result<Vec<Value>, RuntimeFrameProjectionError> {
+    txs.map(|tx| match tx {
+        crate::RuntimeTx::AdvanceJWatcherCursor {
+            depository_address,
+            chain_id,
+            block_number,
+        } => Ok(object([
+            ("type", Value::String("advanceJWatcherCursor".into())),
+            (
+                "data",
+                object([
+                    (
+                        "depositoryAddress",
+                        Value::String(depository_address.clone()),
+                    ),
+                    ("chainId", Value::Number((*chain_id).into())),
+                    ("blockNumber", Value::Number((*block_number).into())),
+                ]),
+            ),
+        ])),
+        crate::RuntimeTx::Unsupported { kind } => {
+            Err(RuntimeFrameProjectionError::RuntimeTx(kind.clone()))
         }
-        Value::Object(fields)
-    }))
+    })
+    .collect()
 }
 
-fn runtime_machine(result: &RuntimeApplyResult, pending: Option<Value>) -> Value {
+/// The Runtime mempool is ephemeral replica-envelope state: it is never a
+/// durable Runtime-machine component, so no pending queue is projected here.
+fn runtime_machine(result: &RuntimeApplyResult) -> Value {
     let envelope = &result.replica.durable;
     object([
         (
@@ -294,15 +313,6 @@ fn runtime_machine(result: &RuntimeApplyResult, pending: Option<Value>) -> Value
         ),
         ("runtimeConfig", envelope.runtime_config().value()),
         ("infrastructure", envelope.infrastructure().clone()),
-        (
-            "runtimeInput",
-            pending.unwrap_or_else(|| {
-                object([
-                    ("runtimeTxs", Value::Array(Vec::new())),
-                    ("entityInputs", Value::Array(Vec::new())),
-                ])
-            }),
-        ),
         ("jReplicas", envelope.j_replicas().clone()),
     ])
 }
@@ -365,10 +375,10 @@ fn canonical_state(
 ) -> Result<(CanonicalStateCommitment, PreparedRuntimeMachineGraph), RuntimeFrameProjectionError> {
     let entity_id = result.replica.state.entity.entity_id.to_ascii_lowercase();
     let entity_root = result
-        .outputs
-        .entity_state_root
-        .as_deref()
-        .ok_or(RuntimeFrameProjectionError::CertifiedFrameMismatch)?;
+        .certified_entity_frame()
+        .ok_or(RuntimeFrameProjectionError::CertifiedFrameMissing)?
+        .state_root
+        .as_str();
     let entity_root_bytes = parse_digest(entity_root)?;
     let entity_hashes = [CanonicalRuntimeEntityHash {
         entity_id: entity_id.clone(),
@@ -460,6 +470,8 @@ pub(crate) enum RuntimeFrameProjectionError {
     CertifiedFrameMissing,
     #[error("RRS_PROCESSOR_CERTIFIED_FRAME_MISMATCH")]
     CertifiedFrameMismatch,
+    #[error("RRS_PROCESSOR_RUNTIME_ONLY_RESULT_INVALID")]
+    RuntimeOnlyShape,
     #[error("RRS_PROCESSOR_MACHINE_OBJECT")]
     MachineObject,
     #[error("RRS_PROCESSOR_DIGEST:{0}")]

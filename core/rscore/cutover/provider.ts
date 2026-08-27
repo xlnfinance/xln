@@ -199,7 +199,7 @@ const executeInboundBatch = async (
   });
 };
 
-type OutboundAdmission = Readonly<{ accountId: string; txs: readonly AccountTx[] }>;
+export type OutboundAdmission = Readonly<{ accountId: string; txs: readonly AccountTx[] }>;
 type OutboundProposal = Readonly<{
   request: AccountAuthorityProposalRequest;
   accountId: string;
@@ -261,7 +261,7 @@ const generatedResolutions = (wave: Wave): readonly GeneratedResolution[] =>
   wave.proposals.flatMap(proposal => proposal.failedHtlcLocks.flatMap(failed =>
     failed.upstreamResolution === null ? [] : [failed.upstreamResolution]));
 
-const assertOutboundAdmissions = (
+export const assertOutboundAdmissions = (
   wave: Wave,
   admits: readonly OutboundAdmission[],
   resolutions: readonly GeneratedResolution[],

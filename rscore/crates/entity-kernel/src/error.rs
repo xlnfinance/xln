@@ -34,6 +34,8 @@ pub enum EntityKernelError {
     CommitmentEncoding { detail: String },
     #[error("ENTITY_KERNEL_SNAPSHOT_INVALID:{detail}")]
     SnapshotInvalid { detail: String },
+    #[error("ENTITY_KERNEL_HUB_REBALANCE_CONFIG_INVALID:{detail}")]
+    HubRebalanceConfigInvalid { detail: String },
     #[error("CRONTAB_HUB_REBALANCE_HANDLER_MISSING")]
     HubRebalanceHandlerMissing,
 }

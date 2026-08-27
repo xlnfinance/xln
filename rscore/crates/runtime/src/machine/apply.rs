@@ -11,6 +11,7 @@ use xln_rscore_entity_kernel::{
 
 use crate::{EntityInfraMaterializeRequest, EntityInfraMaterializer};
 
+use super::inbound_genesis::attach_inbound_genesis_policies;
 use super::types::EntityExecutionStep;
 use super::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
@@ -18,6 +19,97 @@ use super::{
     RuntimeMachineError, RuntimeOutputs, RuntimeReplica, RuntimeWake, enqueue_runtime_input,
     scheduled_input::scheduled_wake_entity_input, select_runtime_frame,
 };
+
+/// Exact `getLocalJPrefixAttestableHeight`/`getValidatorJContiguousThroughHeight`
+/// port (`core/jurisdiction/machine/history/j-prefix-consensus.ts`,
+/// `core/jurisdiction/machine/local-history/index.ts`). Reads the
+/// validator-local watcher scan (`jHistory`, an opaque restored
+/// replica-envelope field, tagged `Map`s as `{ value: [[key, value], ...] }`)
+/// and returns the single highest height this validator can honestly attest
+/// this round, or `None` when TS would defer (sparse gap / no certified
+/// anchor yet). The native base-claim J-prefix path only ever signs exactly
+/// `base_height`; any other outcome — a higher contiguous height already
+/// available, a sparse pending event, missing jHistory, or a local scan that
+/// has fallen behind the finalized anchor — must fail loudly rather than
+/// silently certify a stale (or incomplete) prefix.
+fn local_j_prefix_attestable_height(
+    replica_metadata: &serde_json::Value,
+    base_height: u64,
+    has_j_history_finality: bool,
+) -> Result<Option<u64>, String> {
+    let Some(history) = replica_metadata.get("jHistory") else {
+        return Ok(None);
+    };
+    let require_u64 = |field: &str| -> Result<u64, String> {
+        history
+            .get(field)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| field.to_string())
+    };
+    let tagged_map_heights = |field: &str| -> Result<Vec<u64>, String> {
+        let entries = history
+            .get(field)
+            .and_then(|value| value.get("value"))
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| field.to_string())?;
+        entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .get(0)
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| format!("{field}_KEY"))
+            })
+            .collect()
+    };
+
+    let scanned_through_height = require_u64("scannedThroughHeight")?;
+    if scanned_through_height < base_height {
+        return Err(format!(
+            "J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:{scanned_through_height}:{base_height}"
+        ));
+    }
+    let contiguous_through_height_field = require_u64("contiguousThroughHeight")?;
+    let header_heights: std::collections::BTreeSet<u64> =
+        tagged_map_heights("blockHashes")?.into_iter().collect();
+    let mut contiguous_through_height = base_height.max(contiguous_through_height_field);
+    while contiguous_through_height < scanned_through_height {
+        let next_height = contiguous_through_height
+            .checked_add(1)
+            .ok_or_else(|| "CONTIGUOUS_THROUGH_HEIGHT_OVERFLOW".to_string())?;
+        if !header_heights.contains(&next_height) {
+            break;
+        }
+        contiguous_through_height = next_height;
+    }
+    if contiguous_through_height > base_height {
+        return Ok(Some(contiguous_through_height));
+    }
+
+    let event_block_heights = tagged_map_heights("eventBlocks")?;
+    let has_sparse_pending_event = event_block_heights
+        .iter()
+        .any(|height| *height > base_height && *height <= scanned_through_height);
+    if has_sparse_pending_event || !has_j_history_finality {
+        return Ok(None);
+    }
+    Ok(Some(base_height))
+}
+
+/// `true` unless the native base-claim path can honestly attest exactly
+/// `base_height` this round (see `local_j_prefix_attestable_height`). `true`
+/// routes to `JPrefixError::PendingLocalEventUnsupported`, refusing to
+/// certify rather than guessing.
+fn j_prefix_pending_local_event(
+    replica_metadata: &serde_json::Value,
+    base_height: u64,
+    has_j_history_finality: bool,
+) -> Result<bool, String> {
+    Ok(
+        local_j_prefix_attestable_height(replica_metadata, base_height, has_j_history_finality)?
+            != Some(base_height),
+    )
+}
 
 fn command_board(replica: &RuntimeReplica) -> Result<EntityCommandBoard, RuntimeMachineError> {
     let authority = replica
@@ -303,7 +395,12 @@ fn apply_runtime_inner(
         }
     }
     enqueue_runtime_input(&mut replica.mempool, &mut input, replica.limits)?;
-    let selected = select_runtime_frame(&mut replica.mempool, replica.limits, input.frame.clone())?;
+    let selected = select_runtime_frame(
+        &mut replica.mempool,
+        replica.limits,
+        replica.state.entity.height,
+        input.frame.clone(),
+    )?;
     let selected_context = match selected.as_ref() {
         Some(selected) => selected.frame.clone(),
         None => input.frame.clone(),
@@ -339,10 +436,7 @@ fn apply_runtime_inner(
         });
     };
     frame.receipt.wake = wake;
-    if let Some(tx) = frame.runtime_txs.first() {
-        let RuntimeTxKind::Unsupported(kind) = RuntimeTxKind::from(tx);
-        return Err(RuntimeMachineError::UnsupportedRuntimeTx { kind });
-    }
+    apply_runtime_txs(&mut replica.durable, &frame.runtime_txs)?;
 
     let resident_root = replica.accounts.accounts_root();
     if replica.state.accounts_root != resident_root {
@@ -356,6 +450,30 @@ fn apply_runtime_inner(
         .height
         .checked_add(1)
         .ok_or(RuntimeMachineError::HeightOverflow)?;
+    if frame.entity_inputs.is_empty() && frame.receipt.wake.is_none() {
+        replica.state.height = next_height;
+        replica.state.timestamp = frame.frame.timestamp;
+        replica.state.finalized_j_height = frame.frame.finalized_j_height;
+        return Ok(RuntimeApplyResult {
+            replica,
+            applied_input: Some(frame.receipt),
+            applied_frame: Some(AppliedRuntimeFrame {
+                runtime_txs: frame.runtime_txs,
+                entity_inputs: Vec::new(),
+                frame: frame.frame,
+                entity_frame_committed: false,
+            }),
+            outputs: RuntimeOutputs {
+                entity_events: Vec::new(),
+                local_entity_outputs: Vec::new(),
+                entity_state_root: None,
+                entity_authority_root: None,
+                checkpoint: None,
+                touches: RuntimeFrameTouches::default(),
+            },
+            account_commits: Vec::new(),
+        });
+    }
     let next_entity_height = replica
         .state
         .entity
@@ -467,6 +585,18 @@ fn apply_runtime_inner(
             u64::try_from(expected).map_err(|_| RuntimeMachineError::InputCountOverflow)?;
         row.resolve_certified_boards(&replica.certified_board_registry)?;
     }
+    attach_inbound_genesis_policies(
+        &mut rows,
+        &replica.state.entity.known_accounts,
+        replica
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction
+            .as_ref(),
+        replica.durable.j_replicas(),
+    )?;
 
     if let Some(materializer) = materializer {
         let materialized = materializer
@@ -548,6 +678,21 @@ fn apply_runtime_inner(
         last_materialized_height,
         ..
     } = replica;
+    // The base-claim J-prefix path (`certify_entity_transition`) builds and
+    // signs the certificate natively from `post_state.j_history_finality`; it
+    // never reads a certificate from storage. This flag only tells it whether
+    // the validator-local watcher (`jHistory`, still an opaque envelope field
+    // restored from checkpoint/WAL) can honestly attest anything beyond
+    // exactly the last finalized height this round, which the base-claim path
+    // does not cover.
+    let j_prefix_pending_local_event = j_prefix_pending_local_event(
+        &replica_metadata,
+        core.state.last_finalized_j_height,
+        core.state.j_history_finality.is_some(),
+    )
+    .map_err(|error| {
+        RuntimeMachineError::ReplicaMetadata(format!("J_PREFIX_HISTORY_DECODE:{error}"))
+    })?;
     let touched_account_ids = core.account_touch_order;
     let account_outputs = core
         .outbound
@@ -577,7 +722,7 @@ fn apply_runtime_inner(
             txs: &canonical_entity_txs,
             events: &core.entity_frame_events,
             entity_context: &frame.frame.canonical_entity_context,
-            j_prefix_certificate: None,
+            j_prefix_pending_local_event,
             post_authority,
             secondary_hashes: core.secondary_hashes.clone(),
             presigned_manifest: std::mem::take(&mut core.presigned_manifest),
@@ -641,6 +786,7 @@ fn apply_runtime_inner(
         runtime_txs: frame.runtime_txs,
         entity_inputs: canonical_entity_inputs,
         frame: frame.frame,
+        entity_frame_committed: true,
     };
     Ok(RuntimeApplyResult {
         replica,
@@ -672,16 +818,23 @@ fn render_account_id(account_id: &AccountId) -> String {
     output
 }
 
-enum RuntimeTxKind {
-    Unsupported(String),
-}
-
-impl From<&super::RuntimeTx> for RuntimeTxKind {
-    fn from(value: &super::RuntimeTx) -> Self {
-        match value {
-            super::RuntimeTx::Unsupported { kind } => Self::Unsupported(kind.clone()),
+fn apply_runtime_txs(
+    durable: &mut crate::RuntimeDurableEnvelope,
+    txs: &[super::RuntimeTx],
+) -> Result<(), RuntimeMachineError> {
+    for tx in txs {
+        match tx {
+            super::RuntimeTx::AdvanceJWatcherCursor {
+                depository_address,
+                chain_id,
+                block_number,
+            } => durable.advance_j_watcher_cursor(depository_address, *chain_id, *block_number)?,
+            super::RuntimeTx::Unsupported { kind } => {
+                return Err(RuntimeMachineError::UnsupportedRuntimeTx { kind: kind.clone() });
+            }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -753,5 +906,57 @@ mod tests {
         assert_eq!(evidence[1].source, AccountCommitSource::PeerCommit);
         assert_eq!(evidence[1].frame_height, 8);
         assert_eq!(evidence[1].account_state_root, [0x81; 32]);
+    }
+
+    use super::j_prefix_pending_local_event;
+
+    fn j_history(
+        scanned_through_height: u64,
+        contiguous_through_height: u64,
+        event_block_heights: &[u64],
+        header_heights: &[u64],
+    ) -> serde_json::Value {
+        let event_blocks: Vec<serde_json::Value> = event_block_heights
+            .iter()
+            .map(|height| serde_json::json!([height, {"jHeight": height}]))
+            .collect();
+        let block_hashes: Vec<serde_json::Value> = header_heights
+            .iter()
+            .map(|height| serde_json::json!([height, format!("0x{height}")]))
+            .collect();
+        serde_json::json!({
+            "jHistory": {
+                "scannedThroughHeight": scanned_through_height,
+                "contiguousThroughHeight": contiguous_through_height,
+                "eventBlocks": {"value": event_blocks},
+                "blockHashes": {"value": block_hashes},
+            }
+        })
+    }
+
+    #[test]
+    fn j_prefix_base_case_fully_caught_up_is_not_pending() {
+        let metadata = j_history(35, 35, &[], &[]);
+        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(false));
+    }
+
+    #[test]
+    fn j_prefix_contiguous_advance_across_empty_block_refuses_stale_base() {
+        // contiguousThroughHeight already advanced to 36 with zero events:
+        // the base-claim path must not silently certify stale height 35.
+        let metadata = j_history(36, 36, &[], &[]);
+        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(true));
+    }
+
+    #[test]
+    fn j_prefix_missing_local_history_refuses() {
+        let metadata = serde_json::json!({});
+        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(true));
+    }
+
+    #[test]
+    fn j_prefix_semantic_event_refuses() {
+        let metadata = j_history(36, 35, &[36], &[]);
+        assert_eq!(j_prefix_pending_local_event(&metadata, 35, true), Ok(true));
     }
 }

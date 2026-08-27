@@ -82,7 +82,7 @@ const lockWire = (lock: HtlcLock): RscoreWireValue[] => [
  * representation parses back to the identical double, so the engine
  * re-renders the authority's exact bytes.
  */
-const canonicalValueWire = (value: unknown, depth = 0): RscoreWireValue => {
+export const canonicalValueWire = (value: unknown, depth = 0): RscoreWireValue => {
   if (depth > 32) throw new Error('SHADOW_CANONICAL_DEPTH');
   if (value === null) return [0];
   switch (typeof value) {

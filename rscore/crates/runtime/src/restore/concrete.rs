@@ -72,7 +72,10 @@ pub struct DecodedRuntimeWalFrame {
     /// same root; callers must never feed the just-computed Rust value back as
     /// fake expected evidence.
     pub expected_accounts_root: Option<[u8; 32]>,
-    pub expected_entity_root: [u8; 32],
+    /// Runtime-only frames do not create a new Entity frame and therefore
+    /// carry no canonicalEntityHashes row. Their previous certified Entity
+    /// head remains authoritative.
+    pub expected_entity_root: Option<[u8; 32]>,
     pub expected_previous_frame_hash: [u8; 32],
     pub expected_frame_hash: [u8; 32],
 }
@@ -311,10 +314,9 @@ pub fn replay_decoded_runtime_wal(
             applied.replica.state.accounts_root,
             frame.expected_accounts_root,
         )?;
-        assert_entity_root(
-            &applied.replica.entity_consensus.state.sections,
-            frame.expected_entity_root,
-        )?;
+        if let Some(expected) = frame.expected_entity_root {
+            assert_entity_root(&applied.replica.entity_consensus.state.sections, expected)?;
+        }
         let mut replica = applied.replica;
         replica.durable.advance_frame_hash(
             frame.expected_previous_frame_hash,

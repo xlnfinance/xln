@@ -113,6 +113,11 @@ export const formatJurisdictionDisplayName = (name: string): string =>
 export const resolveSecondaryJurisdictions = (
   primaryRpc: string,
 ): ResolvedMeshJurisdictionConfig[] => {
+  const primaryOnly = String(process.env['XLN_MESH_PRIMARY_JURISDICTION_ONLY'] || '').trim();
+  if (primaryOnly && primaryOnly !== '0' && primaryOnly !== '1') {
+    throw new Error(`XLN_MESH_PRIMARY_JURISDICTION_ONLY_INVALID:${primaryOnly}`);
+  }
+  if (primaryOnly === '1') return [];
   resetMeshJurisdictionsCache();
   const data = loadJurisdictions();
   const entries: Array<[string, ResolvedMeshJurisdictionConfig]> = [];

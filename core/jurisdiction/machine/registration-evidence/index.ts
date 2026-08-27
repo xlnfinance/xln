@@ -422,18 +422,6 @@ export const markLocalJAuthorityRuntimeTx = <T extends LocalJAuthorityRuntimeTx>
   return tx;
 };
 
-export const markRestoredJAuthorityRuntimeTxs = (runtimeTxs: RuntimeTx[]): void => {
-  for (const runtimeTx of runtimeTxs) {
-    if (
-      runtimeTx.type === 'recordAuthenticatedJAuthority' ||
-      runtimeTx.type === 'observeJRange' ||
-      runtimeTx.type === 'advanceJWatcherCursor' ||
-      runtimeTx.type === 'rewindJHistory'
-    )
-      markLocalJAuthorityRuntimeTx(runtimeTx);
-  }
-};
-
 export const assertJAuthorityRuntimeTxAuthorized = (runtimeTx: RuntimeTx, replay: boolean): void => {
   if (
     runtimeTx.type !== 'recordAuthenticatedJAuthority' &&

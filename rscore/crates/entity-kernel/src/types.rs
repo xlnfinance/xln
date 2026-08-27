@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{AccountDomain, AccountOutput, AccountTx, OpaqueHtlcCiphertext};
+use xln_rscore_protocol::CanonicalValue;
 
 use crate::orderbook::{OrderbookState, PairPolicy};
 use crate::scheduler::CrontabState;
@@ -180,10 +181,19 @@ pub struct EntityStateSlice {
     pub htlc_fees_earned: BigInt,
     pub lock_book: BTreeMap<String, LockBookEntry>,
     pub crontab: Option<CrontabState>,
+    /// Exact committed hub configuration. Keeping the canonical value here
+    /// makes restore and live commitment use the same bytes while the Entity
+    /// kernel reads only the fields needed for native policy generation.
+    pub hub_rebalance_config: Option<CanonicalValue>,
     pub orderbook: Option<OrderbookState>,
     /// Exact Entity-consensus fields that surround the mutable books. They are
     /// installed once with the resident state; matching never rewrites them.
     pub orderbook_metadata: Option<OrderbookConsensusMetadata>,
+    /// Exact committed `jHistoryFinality` anchor. Never mutated by the
+    /// resident reducer (Rust does not yet own J-event finalization); carried
+    /// unchanged across transitions exactly like `hub_rebalance_config`, and
+    /// read only to build the local J-prefix base claim/certificate.
+    pub j_history_finality: Option<CanonicalValue>,
 }
 
 impl EntityStateSlice {
@@ -200,8 +210,10 @@ impl EntityStateSlice {
             htlc_fees_earned: BigInt::from(0),
             lock_book: BTreeMap::new(),
             crontab: None,
+            hub_rebalance_config: None,
             orderbook: None,
             orderbook_metadata: None,
+            j_history_finality: None,
         }
     }
 }

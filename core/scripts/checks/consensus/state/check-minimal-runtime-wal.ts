@@ -15,6 +15,7 @@ const forbiddenFrameFields = new Set([
   'entityContexts',
   'historyRecords',
   'overlayRecords',
+  'pendingRuntimeInput',
   'runtimeMachine',
   'runtimeOutputs',
 ]);

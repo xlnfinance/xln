@@ -69,22 +69,6 @@ export const prependOlderRuntimeInput = (
 };
 
 /**
- * Build the exact queue that publication will expose without publishing it.
- *
- * WAL must persist both work deferred from the current frame and arrivals
- * accepted while that frame was executing. Persisting only the live queue
- * loses deferred work on crash; publishing before WAL would expose an
- * uncommitted frame.
- */
-export const previewPublishedRuntimeInput = (
-  transaction: RuntimeFrameTransaction,
-): RuntimeInput =>
-  prependOlderRuntimeInput(
-    transaction.frameMempool,
-    requireRuntimeMempool(transaction.liveEnv),
-  );
-
-/**
  * Finish the frame by retaining deferred input before arrivals for the next
  * frame. Consensus State is already installed in-place; publish never copies
  * Runtime, Entity, or Jurisdiction maps.

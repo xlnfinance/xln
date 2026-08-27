@@ -39,7 +39,6 @@ import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from '
 import { createFrameExecutionState, type FrameExecutionState } from './intake/execution-state';
 import {
   createRuntimeFrameTransaction,
-  previewPublishedRuntimeInput,
   publishRuntimeFrameTransaction,
 } from './transaction';
 import { createRuntimeProcessProfile, type RuntimeProcessProfile } from './process-profile';
@@ -403,7 +402,6 @@ const commitRuntimeFrame = async (
       candidateEnv,
       options.appliedInput,
       candidateEnv.pendingNetworkOutputs,
-      previewPublishedRuntimeInput(frame.transaction),
       frame.entityContexts,
       ...(authorityDriverEnabled(candidateEnv)
         ? [{

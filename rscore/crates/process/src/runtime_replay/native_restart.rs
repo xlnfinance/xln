@@ -129,6 +129,16 @@ fn restore_native_runtime(
     let htlc_routing_base_fee = decoded.htlc_routing_base_fee.clone();
     let mut restored = restore_decoded_runtime_checkpoint(decoded)
         .map_err(|error| format!("RRS_NATIVE_RESTART_RESTORE:{error}"))?;
+    if let (Some(origin), Some(first)) = (migration_origin, sources.wal.first()) {
+        let source_lineage =
+            xln_rscore_runtime::storage::native::validate_runtime_frame(&first.frame_bytes)
+                .map_err(|error| format!("RRS_NATIVE_RESTART_LINEAGE_FRAME:{error}"))?
+                .prev_frame_hash;
+        restored
+            .replica
+            .durable
+            .adopt_offline_import_lineage(origin, source_lineage);
+    }
     for source in sources.wal {
         let finalized_j_height = restored.replica.state.finalized_j_height;
         let mut frame = decode_concrete_runtime_wal_frame(

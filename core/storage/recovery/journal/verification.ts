@@ -95,6 +95,19 @@ export const verifyRecoveryJournalFrame = (
   const commitment = timePerfPhase('recovery.verify.replicaMeta', () => lineage
     ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage)
     : buildStorageLiveReplicaMetaCommitment(env));
+  const debugHeight = typeof process === 'undefined'
+    ? Number.NaN
+    : Number(process.env['XLN_STORAGE_DEBUG_REPLICA_META_HEIGHT']);
+  if (debugHeight === height) {
+    console.error(`RECOVERY_REPLICA_META_DEBUG:${height}:${safeStringify({
+      digest: commitment.digest,
+      entries: inspectStorageReplicaMetaEntries(commitment.entries),
+      certifiedHeads: [...env.state.eReplicas].map(([key, replica]) => ({
+        key,
+        certifiedFrameHead: replica.certifiedFrameHead ?? null,
+      })),
+    })}`);
+  }
   if (commitment.digest !== frame.replicaMetaDigest) {
     const inputs = frame.runtimeInput.entityInputs.map(input => ({
       entityId: input.entityId,

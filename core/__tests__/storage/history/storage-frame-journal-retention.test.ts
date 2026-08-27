@@ -100,7 +100,7 @@ describe('storage frame journal retention', () => {
     env.state.height = 1;
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     return env;
   };
 
@@ -125,7 +125,7 @@ describe('storage frame journal retention', () => {
         entityProviderAddress: '0x0000000000000000000000000000000000000012',
       };
       installTestJurisdiction(env, jurisdiction);
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
       for (const signerIndex of [2, 3]) {
         const signer = deriveSignerAddressSync(seed, String(signerIndex)).toLowerCase();
         registerSignerKey(env, signer, deriveSignerKeySync(seed, String(signerIndex)));
@@ -231,7 +231,7 @@ describe('storage frame journal retention', () => {
     for (let height = 1; height <= 3; height += 1) {
       env.state.height = height;
       env.state.timestamp = 1_000 + height;
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     }
 
     const first = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
@@ -305,7 +305,7 @@ describe('storage frame journal retention', () => {
 
     env.state.height = prunedHeight + 1;
     env.state.timestamp += 1;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     const retainedHeight = env.state.height;
 
     expect(await readPersistedFrameJournal(env, prunedHeight)).toBeNull();
@@ -639,7 +639,7 @@ describe('storage frame journal retention', () => {
     try {
       await withStorageWriterLock(env, async () => {
         try {
-          await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+          await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
         } catch (error) {
           failure = error;
         }
@@ -703,7 +703,7 @@ describe('storage frame journal retention', () => {
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    const firstSave = await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    const firstSave = await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     const persistence = firstSave.persistencePerfMs;
     expect(persistence).toBeTruthy();
     expect(Object.keys(persistence?.planningStages ?? {})).toEqual(['overlay', 'lineage', 'remainder']);
@@ -739,7 +739,7 @@ describe('storage frame journal retention', () => {
     const outerStageTotal = Object.values(persistence?.outerStages ?? {})
       .reduce((sum, durationMs) => sum + durationMs, 0);
     expect(outerStageTotal).toBeLessThanOrEqual((persistence?.outerTotal ?? 0) + 0.01);
-    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map())).rejects.toThrow(
       'STORAGE_APPEND_INVARIANT_FAILED',
     );
 
@@ -760,7 +760,7 @@ describe('storage frame journal retention', () => {
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     const beforeFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
     expect(beforeFrame).toBeTruthy();
 
@@ -811,10 +811,10 @@ describe('storage frame journal retention', () => {
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
 
     env.state.height = 1;
     env.state.timestamp = 3_000;
@@ -865,7 +865,7 @@ describe('storage frame journal retention', () => {
 
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map())).rejects.toThrow(
       'STORAGE_WRITER_LOCK_HELD',
     );
 
@@ -893,7 +893,7 @@ describe('storage frame journal retention', () => {
 
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map())).rejects.toThrow(
       'STORAGE_WRITER_LOCK_HELD',
     );
 
@@ -1169,7 +1169,7 @@ describe('storage frame journal retention', () => {
       env.state.height = 1;
       env.state.timestamp = 1_000;
 
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
       const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
       expect(frame?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
       expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -1718,7 +1718,7 @@ describe('storage frame journal retention', () => {
     env.state.height = 1;
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
 
     const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
@@ -2053,7 +2053,6 @@ describe('storage frame journal retention', () => {
         restoredAtTwo,
         { runtimeTxs: [], entityInputs: [] },
         [],
-        undefined,
         new Map(),
       );
     }
@@ -2129,7 +2128,7 @@ describe('storage frame journal retention', () => {
 	      category: 'system',
 	      message: `history-view-prune-${height}`,
 	    }]);
-	    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+	    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
 	  }
 
 	  expect(await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 1)).toBeNull();
@@ -2160,7 +2159,7 @@ describe('storage frame journal retention', () => {
       category: 'system',
       message: 'durable-wal-activity',
     }]);
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], new Map());
     expect((await readHistoryViewRuntimeActivity(getRuntimeWalDb(env), 1))?.logs[0]?.message)
       .toBe('durable-wal-activity');
     await closeRuntimeDb(env);

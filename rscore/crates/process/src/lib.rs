@@ -132,7 +132,7 @@ pub fn encode_resident_entity_round(
 // 35: Account input rows carry separate full certified-board records for the
 // peer and local owner, including previous-board expiry for historical ACKs.
 // 36: Entity snapshots carry the bounded Entity-command nonce fence.
-pub const PROCESS_ABI_VERSION: u64 = 36;
+pub const PROCESS_ABI_VERSION: u64 = 37;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {

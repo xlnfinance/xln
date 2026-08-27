@@ -8,6 +8,8 @@ mod catalog;
 mod encoding;
 #[path = "frame.rs"]
 mod frame;
+#[path = "j_prefix.rs"]
+mod j_prefix;
 #[path = "lineage.rs"]
 mod lineage;
 #[path = "output.rs"]

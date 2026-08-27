@@ -65,9 +65,11 @@ const memoryDbWithHead = (head: StorageHead): RuntimeDbLike => memoryDb([[KEY_HE
 
 describe('storage schema boundary', () => {
   test('rejects retired command and incomplete-checkpoint schemas before hydrating entity state', async () => {
-    await expect(readStorageHead(memoryDbWithHead(currentHead(3)))).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=3:current=${STORAGE_SCHEMA_VERSION}`,
+    await expect(readStorageHead(memoryDbWithHead(currentHead(1)))).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`,
     );
+    // Version 2 is the retired format that persisted the Runtime mempool as
+    // `pendingRuntimeInput`; it is rejected, never migrated.
     await expect(readStorageHead(memoryDbWithHead(currentHead(2)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
@@ -77,12 +79,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(5)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=5:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(1);
+    expect(STORAGE_SCHEMA_VERSION).toBe(3);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 3,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

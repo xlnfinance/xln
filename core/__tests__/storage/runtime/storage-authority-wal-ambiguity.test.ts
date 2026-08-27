@@ -47,7 +47,6 @@ const createSavedRuntime = async (label: string): Promise<RuntimeReplica> => {
     env,
     { runtimeTxs: [], entityInputs: [] },
     [],
-    undefined,
     new Map(),
   );
   opened.push(env);
@@ -100,7 +99,6 @@ const saveSecondFrameWithAuthority = async (
       env,
       { runtimeTxs: [], entityInputs: [] },
       [],
-      undefined,
       new Map(),
       {
         prepareCheckpoint: async () => [],
@@ -134,7 +132,6 @@ describe('Rust authority at an ambiguous WAL write boundary', () => {
         env,
         { runtimeTxs: [], entityInputs: [] },
         [],
-        undefined,
         new Map(),
       );
     } catch (error) {

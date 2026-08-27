@@ -55,7 +55,6 @@ pub struct CanonicalRuntimeFrameDraft {
     pub materialized_state: bool,
     pub canonical_state: Option<CanonicalStateCommitment>,
     pub runtime_input: Value,
-    pub pending_runtime_input: Option<Value>,
     pub runtime_machine_root: Option<RuntimeMachineGraphRoot>,
     pub account_authority_checkpoints: Vec<AccountAuthorityCheckpointRef>,
     pub touched_entities: Vec<String>,

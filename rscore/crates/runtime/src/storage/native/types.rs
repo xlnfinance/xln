@@ -147,7 +147,7 @@ pub(super) struct StorageHead {
 impl Default for StorageHead {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             latest_height: 0,
             latest_materialized_height: 0,
             latest_snapshot_height: 0,

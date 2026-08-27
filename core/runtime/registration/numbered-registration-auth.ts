@@ -12,14 +12,6 @@ export const markLocalNumberedRegistrationTx = <T extends RegistrationRuntimeTx>
   return tx;
 };
 
-export const markRestoredNumberedRegistrationTxs = (runtimeTxs: RuntimeTx[]): void => {
-  for (const tx of runtimeTxs) {
-    if (tx.type === 'recordNumberedRegistrationIntent' || tx.type === 'resolveNumberedRegistrationIntent') {
-      markLocalNumberedRegistrationTx(tx);
-    }
-  }
-};
-
 export const assertNumberedRegistrationTxAuthorized = (
   tx: RuntimeTx,
   replay: boolean,

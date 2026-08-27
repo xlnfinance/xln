@@ -36,13 +36,11 @@ import {
 import { safeStringify } from '../../../protocol/serialization';
 import {
   computeCanonicalEntityHash,
-  computeCanonicalStateHashFromEnv,
 } from '../../../storage/canonical-hash';
 import type { EntityReplica, EntityState } from '../../../entity/types';
 import type { RuntimeInput } from '../../../runtime/types';
 import {
   buildCanonicalRuntimeStateSnapshot,
-  buildDurableRuntimeMempool,
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
@@ -351,33 +349,6 @@ describe('runtime scheduled wake', () => {
     );
   });
 
-  test('does not persist process-local scheduled wakes in pending Runtime input', () => {
-    const env = createEmptyEnv('scheduled-wake-durable-mempool');
-    env.state.timestamp = 10_000;
-    const id = entityId('52');
-    const proposer = signerId('53');
-    const state = makeState(id, proposer, env.state.timestamp);
-    scheduleHook(state.crontabState!, {
-      id: 'durable:regenerate',
-      triggerAt: 9_000,
-      type: 'watchdog',
-      data: {},
-    });
-    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
-    const [wakeInput] = createDueScheduledWakeInputs(env, env.state.timestamp);
-    if (!wakeInput) throw new Error('scheduled wake fixture missing');
-
-    const durable = buildDurableRuntimeMempool({
-      runtimeTxs: [],
-      entityInputs: [wakeInput],
-      queuedAt: env.state.timestamp,
-    });
-
-    expect(durable.entityInputs).toEqual([]);
-    expect(durable.queuedAt).toBeUndefined();
-    expect(state.crontabState?.hooks.has('durable:regenerate')).toBe(true);
-  });
-
   test('replays the same crontab mutation on proposer and validator state', async () => {
     const env = createEmptyEnv('scheduled-wake-replay-test');
     env.state.timestamp = 10_000;
@@ -605,38 +576,43 @@ describe('runtime scheduled wake', () => {
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
 
-  test('history records wake diagnostics while restart restore discards ephemeral wake work', () => {
+  test('scheduled wakes remain derivable from durable Entity crontab after restore, while pending wake and chat Runtime input are discarded', () => {
     const env = createEmptyEnv('scheduled-wake-snapshot-filter-test');
+    env.state.timestamp = 10_000;
     const id = entityId('77');
     const proposer = signerId('78');
-    const wake: ScheduledWakeTx = {
-      type: 'scheduledWake',
-      data: {
-        version: 1,
-        proposerSignerId: proposer,
-        dueAt: 9_000,
-        jobs: [{ kind: 'hook', id: 'snapshot:due', dueAt: 9_000 }],
-      },
-    };
+    const state = makeState(id, proposer, env.state.timestamp);
+    scheduleHook(state.crontabState!, {
+      id: 'snapshot:due',
+      triggerAt: 9_000,
+      type: 'watchdog',
+      data: {},
+    });
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+
+    const [wakeInput] = createDueScheduledWakeInputs(env, env.state.timestamp);
+    if (!wakeInput) throw new Error('scheduled wake fixture missing');
     env.runtimeMempool = {
       runtimeTxs: [],
       entityInputs: [{
-        entityId: id,
-        signerId: proposer,
-        entityTxs: [wake, { type: 'chatMessage', data: { message: 'keep', timestamp: 9_000 } }],
+        ...wakeInput,
+        entityTxs: [...wakeInput.entityTxs, { type: 'chatMessage', data: { message: 'keep', timestamp: 9_000 } }],
       }],
     };
 
+    // The checkpoint carries committed Entity state (including crontab); it
+    // never carries the ephemeral Runtime mempool.
     const snapshot = buildCanonicalRuntimeStateSnapshot(env);
-    const persistedInput = snapshot['runtimeInput'] as typeof env.runtimeMempool;
-    expect(persistedInput?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
+    expect(snapshot['runtimeInput']).toBeUndefined();
 
     const restored = createEmptyEnv('scheduled-wake-snapshot-filter-restored');
-    restored.state.height = env.state.height;
-    restored.state.timestamp = env.state.timestamp;
     restoreDurableRuntimeSnapshot(restored, snapshot);
-    expect(restored.runtimeMempool?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
-    expect(computeCanonicalStateHashFromEnv(restored)).toBe(computeCanonicalStateHashFromEnv(env));
+    expect(restored.runtimeMempool).toEqual({ runtimeTxs: [], entityInputs: [] });
+
+    // The restored process re-derives the same wake purely from durable
+    // crontab state, without any assist from the discarded mempool entry.
+    restored.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    expect(createDueScheduledWakeInputs(restored, env.state.timestamp)).toEqual([wakeInput]);
   });
 
   test('does not enqueue another wake while one is awaiting entity consensus', () => {
