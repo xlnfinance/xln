@@ -529,7 +529,6 @@ describe('remote runtime import manager utilities', () => {
       helloAudience: `xln-runtime:${peerRuntimeId}`,
       signerId: '7',
       seed: 'test test test test test test test test test test test junk',
-      maxReconnectAttempts: 1,
     });
     expect((clientOptions[0] as { encryptionKeyPair?: { publicKey?: Uint8Array; privateKey?: Uint8Array } })
       .encryptionKeyPair?.publicKey?.length).toBe(32);
@@ -659,7 +658,7 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
-    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);');
+    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = hasWalletRuntimeBootstrapInput({');
     expect(appLayout).toContain('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;');
     expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromHash()')).toBeLessThan(
       appLayout.indexOf('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;'),

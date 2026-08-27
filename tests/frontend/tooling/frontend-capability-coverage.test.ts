@@ -61,6 +61,8 @@ describe('frontend capability inventory', () => {
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-deploy-version.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
+      .toContain('frontend/packages/browser/src/wallet-runtime-bootstrap.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/packages/browser/src/wallet-shell-state.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.currentSources)
       .toContain('frontend/src/routes/app/+layout.svelte');
@@ -68,6 +70,8 @@ describe('frontend capability inventory', () => {
       .toContain('generation-safe local and remote boot sequencing');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('validated deploy-version persistence, reset, and recovery decisions');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
+      .toContain('ordered local-pairing, remote-import, and consent bootstrap');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-shell-and-identity')?.behavior)
       .toContain('framework-neutral wallet shell phase precedence');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-browser-lifecycle')?.status).toBe('in_progress');

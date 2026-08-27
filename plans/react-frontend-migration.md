@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, AND DEPLOY-VERSION COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, AND RUNTIME BOOTSTRAP COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -584,6 +584,19 @@ snapshot decision without mirrored effect state. Eleven direct tests cover all
 phases and precedence edges, 47 affected shell/lifecycle/capability tests pass
 with 278 expectations, both wallet and canonical Svelte production builds pass,
 and the wallet local check covers 442 files with zero unsafe-type findings.
+
+The next wallet slice now owns one-shot Runtime bootstrap ordering: local
+pairing, remote import, consent evaluation, accepted-request persistence, URL
+cleanup, and stop-on-failure semantics. The same coordinator handles initial
+mount and later hash import changes while the Svelte shell retains concrete
+pairing/import implementations, loading/error publication, and pending-consent
+UI state. Eight direct tests cover explicit-input detection, exact effect
+ordering, consent and accepted paths, pairing/import/persistence failures, and
+thin Svelte wiring. The direct and existing remote-import suites pass 43 tests
+with 171 expectations. The broader affected request/session/boot/security/
+capability batch passes 103 tests with 469 expectations, both wallet and
+canonical Svelte production builds pass, and the wallet local check covers 443
+files with zero unsafe-type findings.
 
 The next wallet slice now owns validated deploy-version payload decoding,
 storage, action selection, initial persistence, post-boot refresh, ephemeral
@@ -708,8 +721,9 @@ any mismatch. Never compile on production.
    projections, injected loading outcomes, and latest-wins publication
    coordination are also shared. Wallet shell phase precedence is shared while
    validated deploy-version persistence, reset, and recovery decisions are
-   injected through a shared browser coordinator; the existing Svelte shell
-   retains concrete lifecycle effects. Latest-read
+   injected through a shared browser coordinator; one-shot Runtime pairing,
+   import, consent, persistence, and URL cleanup ordering are shared as well.
+   The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
    remain with the canonical Svelte adapter until a complete React consumer
