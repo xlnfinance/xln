@@ -284,3 +284,8 @@ pub(crate) fn decode_framed(bytes: &[u8]) -> Result<Value, RuntimeTransportError
     crate::decode_storage_payload(bytes)
         .map_err(|error| RuntimeTransportError::MessagePack(error.to_string()))
 }
+
+pub(crate) fn decode_transport(bytes: &[u8]) -> Result<Value, RuntimeTransportError> {
+    crate::storage_msgpack::decode_transport_payload(bytes)
+        .map_err(|error| RuntimeTransportError::MessagePack(error.to_string()))
+}

@@ -7,6 +7,7 @@ use super::msgpack::encode_framed;
 use super::routing::prepare_envelopes;
 use super::{DirectRoute, DirectRouteTable, RuntimeTransportError};
 mod direct;
+mod inbound;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()

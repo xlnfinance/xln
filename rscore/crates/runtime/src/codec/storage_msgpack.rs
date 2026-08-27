@@ -438,6 +438,13 @@ pub fn decode_storage_payload(bytes: &[u8]) -> Result<Value, StorageMessagePackE
     if magic != STORAGE_MAGIC {
         return Err(StorageMessagePackError::Magic(magic));
     }
+    decode_transport_payload(body)
+}
+
+/// Decode exactly one unframed canonical transport value. WebSocket payload
+/// encryption wraps the MessagePack body directly; LevelDB alone prepends the
+/// storage magic byte.
+pub(crate) fn decode_transport_payload(body: &[u8]) -> Result<Value, StorageMessagePackError> {
     let mut decoder = Decoder::new(body);
     let value = decoder.value(0)?;
     if decoder.offset != body.len() {

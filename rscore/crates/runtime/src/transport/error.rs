@@ -20,6 +20,8 @@ pub enum RuntimeTransportError {
     WebSocket(String),
     #[error("RRS_TRANSPORT_HANDSHAKE:{0}")]
     Handshake(String),
+    #[error("RRS_TRANSPORT_INBOUND:{0}")]
+    Inbound(String),
     #[error("RRS_TRANSPORT_RECONNECT_EXHAUSTED:target={target}:attempts={attempts}:last={last}")]
     ReconnectExhausted {
         target: String,

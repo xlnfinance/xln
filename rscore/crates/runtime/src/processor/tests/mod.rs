@@ -25,6 +25,7 @@ use crate::machine::{
     RuntimeState,
 };
 use crate::storage::native::{NativeRuntimeStore, NativeStorageConfig};
+use crate::transport::InboundEntityInputs;
 use crate::{canonical_value_from_tagged_json, transport::derive_local_runtime_id};
 
 #[path = "test_ws.rs"]
@@ -304,6 +305,60 @@ fn one_runtime_input_is_applied_fsynced_and_recovered_once() {
     assert!(recovery.pending_outbox[0].outputs.is_empty());
     drop(reopened);
     std::fs::remove_dir_all(path).expect("remove processor fixture");
+}
+
+#[test]
+fn authenticated_ingress_batch_moves_once_into_the_durable_runtime_writer() {
+    let path = path();
+    let _ = std::fs::remove_dir_all(&path);
+    let replica = processor_replica();
+    let local_runtime_id = replica.durable.runtime_id().to_owned();
+    let remote_runtime_id =
+        derive_local_runtime_id("rrs-ingress-remote", "1").expect("remote runtime id");
+    let entity_input = RuntimeEntityInput::decode(json!({
+        "runtimeId": local_runtime_id,
+        "entityId": replica.state.entity.entity_id,
+        "signerId": replica.signer_id,
+        "entityTxs": [],
+        "from": remote_runtime_id,
+        "sourceRuntimeFrame": {"height": 7, "timestamp": 150},
+    }))
+    .expect("authenticated transport projection");
+    let frame = frame_context(&replica, 1, 200);
+    let input = InboundEntityInputs {
+        peer_runtime_id: remote_runtime_id,
+        message_id: "rrs_7_1".into(),
+        source_runtime_height: 7,
+        source_runtime_timestamp: 150,
+        ingress_timestamp: Some(151),
+        entity_tx_count: 0,
+        entity_inputs: vec![entity_input],
+    }
+    .into_runtime_input(frame);
+    let store = NativeRuntimeStore::open(
+        &path,
+        NativeStorageConfig {
+            checkpoint_period_frames: 100,
+        },
+    )
+    .expect("native store");
+    let mut processor = DurableRuntimeProcessor::new(
+        replica,
+        store,
+        EntityRouteTable::new([]).expect("empty routes"),
+        SOURCE_SEED,
+        RuntimeSignerLabel::new(SOURCE_SIGNER).expect("signer label"),
+    )
+    .expect("durable processor");
+    let report = processor.process(input).expect("fsynced Runtime frame");
+    assert_eq!(report.durable_height, Some(1));
+    assert_eq!(report.outputs_published, 0);
+    let recovered = processor
+        .read_durable_frame(1)
+        .expect("frame exists only after fsync");
+    assert_eq!(recovered.height, 1);
+    drop(processor);
+    std::fs::remove_dir_all(path).expect("remove fixture");
 }
 
 #[test]

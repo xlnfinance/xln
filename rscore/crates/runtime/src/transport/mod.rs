@@ -7,6 +7,7 @@
 
 mod crypto;
 mod error;
+mod inbound;
 pub(crate) mod msgpack;
 mod publisher;
 mod routing;
@@ -15,6 +16,10 @@ mod wire;
 
 pub(crate) use crypto::derive_local_runtime_id;
 pub use error::RuntimeTransportError;
+pub use inbound::{
+    DirectRuntimeIngress, DirectRuntimeIngressConfig, DirectRuntimeIngressMetrics,
+    InboundEntityInputs,
+};
 pub use publisher::{DirectOutboxPublisher, DirectOutboxPublisherConfig, PublicationReport};
 pub use routing::{DirectRoute, DirectRouteTable};
 

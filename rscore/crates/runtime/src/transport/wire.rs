@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -63,8 +64,8 @@ fn verify_ack_signature(
     verify_peer_signature(target, &digest, signature)
 }
 
-pub(super) fn send_value(
-    socket: &mut Socket,
+pub(super) fn send_value<S: Read + Write>(
+    socket: &mut WebSocket<S>,
     value: &Value,
     max_message_bytes: usize,
 ) -> Result<(), RuntimeTransportError> {
@@ -82,7 +83,9 @@ pub(super) fn send_value(
         .map_err(|error| RuntimeTransportError::WebSocket(error.to_string()))
 }
 
-pub(super) fn read_value(socket: &mut Socket) -> Result<Value, RuntimeTransportError> {
+pub(super) fn read_value<S: Read + Write>(
+    socket: &mut WebSocket<S>,
+) -> Result<Value, RuntimeTransportError> {
     loop {
         match socket
             .read()

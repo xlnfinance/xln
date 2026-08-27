@@ -76,6 +76,9 @@ pub(super) fn derive_session_keys(
         &mut s2c,
     )
     .map_err(|_| RuntimeTransportError::Crypto("hkdf-s2c"))?;
+    if c2s == s2c {
+        return Err(RuntimeTransportError::Crypto("hkdf-direction"));
+    }
     Ok(SessionKeys { c2s })
 }
 
@@ -131,6 +134,31 @@ pub(super) fn frame_mac(
     Ok(hex_lower(&mac.finalize().into_bytes()))
 }
 
+pub(super) fn verify_frame_mac(
+    key: &[u8; 32],
+    unsigned: &Value,
+    audience: &str,
+    challenge: &str,
+    timestamp: u64,
+    claimed: &str,
+) -> Result<(), RuntimeTransportError> {
+    let expected = frame_mac(key, unsigned, audience, challenge, timestamp)?;
+    let claimed = claimed.strip_prefix("0x").unwrap_or(claimed);
+    if claimed.len() != expected.len() {
+        return Err(RuntimeTransportError::Crypto("frame-mac"));
+    }
+    let mismatch = expected
+        .bytes()
+        .zip(claimed.bytes())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        });
+    if mismatch != 0 {
+        return Err(RuntimeTransportError::Crypto("frame-mac"));
+    }
+    Ok(())
+}
+
 pub(super) fn sign(
     seed: &str,
     signer_id: &str,
@@ -172,6 +200,23 @@ pub(super) fn encrypt_session(
     cipher
         .encrypt(Nonce::from_slice(&nonce), plaintext)
         .map_err(|_| RuntimeTransportError::Crypto("encrypt"))
+}
+
+pub(super) fn decrypt_session(
+    ciphertext: &[u8],
+    key: &[u8; 32],
+    sequence: u64,
+) -> Result<Vec<u8>, RuntimeTransportError> {
+    if sequence == 0 || sequence > 9_007_199_254_740_991 {
+        return Err(RuntimeTransportError::Crypto("sequence"));
+    }
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|_| RuntimeTransportError::Crypto("aead-key"))?;
+    let mut nonce = [0_u8; 12];
+    nonce[4..].copy_from_slice(&sequence.to_be_bytes());
+    cipher
+        .decrypt(Nonce::from_slice(&nonce), ciphertext)
+        .map_err(|_| RuntimeTransportError::Crypto("decrypt"))
 }
 
 pub(super) fn static_public_hex(identity: &EncryptionIdentity) -> String {
