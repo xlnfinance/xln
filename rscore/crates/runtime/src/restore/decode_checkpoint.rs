@@ -322,12 +322,6 @@ fn decode_checkpoint(
     let certified_board_registry = hydrate_certified_board_registry(&source.state_rows, &graph)?;
     let owner = graph.entity_id;
     let (stored_accounts, metadata) = restore_path_checkpoint(&source.state_rows, owner)?;
-    let mut checkpoint_projection_metadata = graph.projection_metadata.clone();
-    if !checkpoint_projection_metadata
-        .bind_account_authority(owner, stored_accounts.protocol_fingerprint)
-    {
-        return Err(invalid("CHECKPOINT_PROJECTION_OWNER"));
-    }
     match binding {
         AccountCheckpointBinding::SignedRuntimeFrame => {
             verify_account_checkpoint_ref(frame, &stored_accounts)?;
@@ -395,7 +389,6 @@ fn decode_checkpoint(
         entity_consensus,
         entity_signer,
         certified_board_registry,
-        checkpoint_projection_metadata,
         entity_context_policy,
         replica_metadata: metadata.value,
         expected_entity_root,

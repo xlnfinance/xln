@@ -8,26 +8,24 @@
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EntityFieldProjectionDescriptor {
-    pub tag: u8,
-    pub value_hash: [u8; 32],
-    pub byte_length: usize,
-    pub chunk_count: usize,
+pub(crate) struct EntityFieldProjectionDescriptor {
+    pub(crate) tag: u8,
+    pub(crate) value_hash: [u8; 32],
+    pub(crate) byte_length: usize,
+    pub(crate) chunk_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EntityTreeProjectionDescriptor {
-    pub namespace: String,
-    pub namespace_tag: u8,
-    pub root: [u8; 32],
-    pub leaf_count: usize,
+pub(crate) struct EntityTreeProjectionDescriptor {
+    pub(crate) namespace: String,
+    pub(crate) namespace_tag: u8,
+    pub(crate) root: [u8; 32],
+    pub(crate) leaf_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EntityCheckpointProjectionMetadata {
+pub(crate) struct EntityCheckpointProjectionMetadata {
     entity_id: [u8; 32],
-    account_owner: Option<[u8; 32]>,
-    protocol_fingerprint: Option<[u8; 32]>,
     fields: BTreeMap<u8, EntityFieldProjectionDescriptor>,
     trees: BTreeMap<u8, EntityTreeProjectionDescriptor>,
 }
@@ -40,8 +38,6 @@ impl EntityCheckpointProjectionMetadata {
     ) -> Self {
         Self {
             entity_id,
-            account_owner: None,
-            protocol_fingerprint: None,
             fields: fields.into_iter().map(|row| (row.tag, row)).collect(),
             trees: trees
                 .into_iter()
@@ -50,32 +46,15 @@ impl EntityCheckpointProjectionMetadata {
         }
     }
 
-    pub fn entity_id(&self) -> &[u8; 32] {
+    pub(crate) fn entity_id(&self) -> &[u8; 32] {
         &self.entity_id
     }
 
-    pub(crate) fn bind_account_authority(
-        &mut self,
-        owner: [u8; 32],
-        protocol_fingerprint: [u8; 32],
-    ) -> bool {
-        if owner != self.entity_id {
-            return false;
-        }
-        self.account_owner = Some(owner);
-        self.protocol_fingerprint = Some(protocol_fingerprint);
-        true
-    }
-
-    pub fn account_authority(&self) -> Option<([u8; 32], [u8; 32])> {
-        Some((self.account_owner?, self.protocol_fingerprint?))
-    }
-
-    pub fn fields(&self) -> &BTreeMap<u8, EntityFieldProjectionDescriptor> {
+    pub(crate) fn fields(&self) -> &BTreeMap<u8, EntityFieldProjectionDescriptor> {
         &self.fields
     }
 
-    pub fn trees(&self) -> &BTreeMap<u8, EntityTreeProjectionDescriptor> {
+    pub(crate) fn trees(&self) -> &BTreeMap<u8, EntityTreeProjectionDescriptor> {
         &self.trees
     }
 }

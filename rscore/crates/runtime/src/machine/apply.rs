@@ -505,9 +505,9 @@ pub fn apply_runtime(
         limits,
         entity_consensus,
         entity_signer,
+        protocol_fingerprint,
         replica_metadata,
         certified_board_registry,
-        checkpoint_projection_metadata,
         last_materialized_height,
         ..
     } = replica;
@@ -592,9 +592,9 @@ pub fn apply_runtime(
         accounts,
         entity_consensus: certified.consensus,
         entity_signer,
+        protocol_fingerprint,
         replica_metadata,
         certified_board_registry,
-        checkpoint_projection_metadata,
         last_materialized_height,
         mempool,
         scheduled_wakes,

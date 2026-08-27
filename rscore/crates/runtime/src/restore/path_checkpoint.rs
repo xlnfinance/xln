@@ -33,6 +33,15 @@ pub struct RestoredReplicaMetadata {
     pub value: Value,
 }
 
+struct DecodedAccountMeta {
+    protocol_fingerprint: [u8; 32],
+    base_revision: u64,
+    revision: u64,
+    accounts_root: [u8; 32],
+    signer_digest: [u8; 32],
+    account_count: usize,
+}
+
 fn invalid(detail: impl Into<String>) -> PathCheckpointRestoreError {
     PathCheckpointRestoreError::Invalid(detail.into())
 }
@@ -318,32 +327,17 @@ fn hex20(value: &str) -> Result<[u8; 20], PathCheckpointRestoreError> {
     Ok(output)
 }
 
-pub fn restore_path_checkpoint(
+fn account_meta(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
     owner: [u8; 32],
-) -> Result<(StoredRscoreCheckpoint, RestoredReplicaMetadata), PathCheckpointRestoreError> {
-    for key in rows.keys().filter(|key| {
-        key.first().is_some_and(|tag| {
-            [
-                ACCOUNT_META_TAG,
-                ACCOUNT_ROW_TAG,
-                ACCOUNT_NODE_TAG,
-                REPLICA_META_TAG,
-            ]
-            .contains(tag)
-        })
-    }) {
-        if key.get(1..33) != Some(owner.as_slice()) {
-            return Err(invalid("FOREIGN_OWNER_ROW"));
-        }
-    }
-    let meta_key = [vec![ACCOUNT_META_TAG], owner.to_vec()].concat();
-    let raw_meta = rows
-        .get(&meta_key)
+) -> Result<DecodedAccountMeta, PathCheckpointRestoreError> {
+    let key = [vec![ACCOUNT_META_TAG], owner.to_vec()].concat();
+    let raw = rows
+        .get(&key)
         .ok_or_else(|| invalid("ACCOUNT_META_MISSING"))?;
-    let decoded_meta = decode_storage_payload(raw_meta)?;
-    reject_uncollapsed_bounded(&decoded_meta, "accountMeta")?;
-    let meta = object(&decoded_meta, "accountMeta")?;
+    let decoded = decode_storage_payload(raw)?;
+    reject_uncollapsed_bounded(&decoded, "accountMeta")?;
+    let meta = object(&decoded, "accountMeta")?;
     exact_fields(
         meta,
         &[
@@ -373,6 +367,46 @@ pub fn restore_path_checkpoint(
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value <= MAX_ACCOUNTS)
         .ok_or_else(|| invalid("ACCOUNT_COUNT"))?;
+    Ok(DecodedAccountMeta {
+        protocol_fingerprint: hex32(&meta["protocolFingerprint"], "protocolFingerprint")?,
+        base_revision,
+        revision,
+        accounts_root: hex32(&meta["accountsRoot"], "accountsRoot")?,
+        signer_digest: hex32(&meta["signerDigest"], "signerDigest")?,
+        account_count,
+    })
+}
+
+/// The Account engine protocol binding is already a canonical checkpoint
+/// leaf. Projection reads it from that graph instead of retaining a live
+/// checkpoint-descriptor sidecar in RuntimeReplica.
+pub(crate) fn checkpoint_protocol_fingerprint(
+    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+    owner: [u8; 32],
+) -> Result<[u8; 32], PathCheckpointRestoreError> {
+    Ok(account_meta(rows, owner)?.protocol_fingerprint)
+}
+
+pub fn restore_path_checkpoint(
+    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+    owner: [u8; 32],
+) -> Result<(StoredRscoreCheckpoint, RestoredReplicaMetadata), PathCheckpointRestoreError> {
+    for key in rows.keys().filter(|key| {
+        key.first().is_some_and(|tag| {
+            [
+                ACCOUNT_META_TAG,
+                ACCOUNT_ROW_TAG,
+                ACCOUNT_NODE_TAG,
+                REPLICA_META_TAG,
+            ]
+            .contains(tag)
+        })
+    }) {
+        if key.get(1..33) != Some(owner.as_slice()) {
+            return Err(invalid("FOREIGN_OWNER_ROW"));
+        }
+    }
+    let meta = account_meta(rows, owner)?;
     let mut accounts = Vec::new();
     let mut seen = BTreeSet::new();
     for (key, bytes) in owner_rows(rows, ACCOUNT_ROW_TAG, &owner) {
@@ -409,9 +443,10 @@ pub fn restore_path_checkpoint(
         row.push(account_meta[2].clone());
         accounts.push(Value::Array(row));
     }
-    if accounts.len() != account_count {
+    if accounts.len() != meta.account_count {
         return Err(invalid(format!(
-            "ACCOUNT_COUNT:expected={account_count}:actual={}",
+            "ACCOUNT_COUNT:expected={}:actual={}",
+            meta.account_count,
             accounts.len()
         )));
     }
@@ -426,12 +461,12 @@ pub fn restore_path_checkpoint(
     }
     let checkpoint = StoredRscoreCheckpoint {
         owner_entity_id: owner,
-        protocol_fingerprint: hex32(&meta["protocolFingerprint"], "protocolFingerprint")?,
-        base_revision,
-        revision,
-        accounts_root: hex32(&meta["accountsRoot"], "accountsRoot")?,
-        signer_digest: hex32(&meta["signerDigest"], "signerDigest")?,
-        account_count,
+        protocol_fingerprint: meta.protocol_fingerprint,
+        base_revision: meta.base_revision,
+        revision: meta.revision,
+        accounts_root: meta.accounts_root,
+        signer_digest: meta.signer_digest,
+        account_count: meta.account_count,
         accounts,
     };
     Ok((checkpoint, replica_metadata(rows, &owner)?))

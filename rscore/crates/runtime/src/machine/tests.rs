@@ -150,6 +150,7 @@ pub(crate) fn replica_with_deltas(
         accounts,
         entity_consensus,
         entity_signer,
+        [0; 32],
         limits,
     )
 }

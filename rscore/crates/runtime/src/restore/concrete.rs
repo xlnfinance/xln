@@ -40,9 +40,6 @@ pub struct DecodedRuntimeCheckpoint {
     /// Exact Entity-certified peer board registry restored from path-keyed
     /// 0x2a rows and bound to `entity_snapshot.certifiedBoardState`.
     pub certified_board_registry: CertifiedBoardRegistry,
-    /// Parsed bounded 0x21 descriptors used only to project later canonical
-    /// checkpoints; canonical carried values remain in the path-keyed DB.
-    pub checkpoint_projection_metadata: crate::EntityCheckpointProjectionMetadata,
     /// Exact static Entity execution policy projected once from the
     /// authenticated checkpoint graph. WAL replay combines it only with each
     /// frame's independently authenticated prepared-context rows.
@@ -258,11 +255,11 @@ pub fn restore_decoded_runtime_checkpoint(
         accounts,
         entity_consensus,
         checkpoint.entity_signer,
+        stored.protocol_fingerprint,
         checkpoint.limits,
     )?;
     replica.install_certified_board_registry(checkpoint.certified_board_registry);
     replica.install_replica_metadata(checkpoint.replica_metadata)?;
-    replica.checkpoint_projection_metadata = Some(checkpoint.checkpoint_projection_metadata);
     Ok(RestoredRuntime { replica })
 }
 

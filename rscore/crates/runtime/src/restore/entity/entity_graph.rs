@@ -37,13 +37,17 @@ pub struct HydratedEntityGraph {
     pub core: Value,
     /// Non-E+A consensus sections carried verbatim through Runtime replay.
     pub carried_sections: Vec<EntityConsensusSection>,
-    /// Authenticated descriptors retained for exact cadence projection. No
-    /// carried field value is duplicated here.
-    pub projection_metadata: EntityCheckpointProjectionMetadata,
 }
 
 type FieldDescriptor = EntityFieldProjectionDescriptor;
 type TreeDescriptor = EntityTreeProjectionDescriptor;
+
+struct ParsedEntityManifest {
+    root_key: Vec<u8>,
+    entity_id: [u8; 32],
+    fields: Vec<FieldDescriptor>,
+    trees: Vec<TreeDescriptor>,
+}
 
 fn invalid(detail: impl Into<String>) -> EntityGraphRestoreError {
     EntityGraphRestoreError::Invalid(detail.into())
@@ -259,9 +263,9 @@ fn wrap_core(core: Value) -> Value {
     )]))
 }
 
-pub fn hydrate_entity_graph(
+fn parse_entity_manifest(
     rows: &BTreeMap<Vec<u8>, Vec<u8>>,
-) -> Result<HydratedEntityGraph, EntityGraphRestoreError> {
+) -> Result<ParsedEntityManifest, EntityGraphRestoreError> {
     let roots = rows
         .iter()
         .filter(|(key, _)| key.len() == 33 && key[0] == 0x21)
@@ -304,7 +308,36 @@ pub fn hydrate_entity_graph(
     {
         return Err(invalid("TREE_DUPLICATE"));
     }
-    let mut used = BTreeSet::from([(*root_key).clone()]);
+    Ok(ParsedEntityManifest {
+        root_key: (*root_key).clone(),
+        entity_id,
+        fields,
+        trees,
+    })
+}
+
+/// Read the authenticated projection descriptors from the one canonical
+/// path-keyed checkpoint graph. Live Runtime state must not retain a second
+/// metadata copy merely to rewrite the next checkpoint.
+pub(crate) fn entity_projection_metadata(
+    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+) -> Result<EntityCheckpointProjectionMetadata, EntityGraphRestoreError> {
+    let manifest = parse_entity_manifest(rows)?;
+    Ok(EntityCheckpointProjectionMetadata::new(
+        manifest.entity_id,
+        manifest.fields,
+        manifest.trees,
+    ))
+}
+
+pub fn hydrate_entity_graph(
+    rows: &BTreeMap<Vec<u8>, Vec<u8>>,
+) -> Result<HydratedEntityGraph, EntityGraphRestoreError> {
+    let manifest = parse_entity_manifest(rows)?;
+    let entity_id = manifest.entity_id;
+    let fields = manifest.fields;
+    let trees = manifest.trees;
+    let mut used = BTreeSet::from([manifest.root_key]);
     let mut core = Map::new();
     for descriptor in &fields {
         let name = field_name(descriptor.tag).ok_or_else(|| invalid("FIELD_TAG"))?;
@@ -342,12 +375,9 @@ pub fn hydrate_entity_graph(
     }
     let core = Value::Object(core);
     let carried_sections = carried_entity_checkpoint_sections(&wrap_core(core.clone()))?;
-    let projection_metadata =
-        EntityCheckpointProjectionMetadata::new(entity_id, fields.clone(), trees.clone());
     Ok(HydratedEntityGraph {
         entity_id,
         core,
         carried_sections,
-        projection_metadata,
     })
 }

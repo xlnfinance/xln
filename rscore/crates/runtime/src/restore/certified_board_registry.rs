@@ -573,11 +573,6 @@ mod tests {
                 }
             }),
             carried_sections: Vec::new(),
-            projection_metadata: crate::EntityCheckpointProjectionMetadata::new(
-                [0xaa; 32],
-                Vec::new(),
-                Vec::new(),
-            ),
         }
     }
 

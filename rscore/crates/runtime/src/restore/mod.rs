@@ -68,10 +68,12 @@ pub use decode_checkpoint::{
 };
 pub use entity_consensus::{EntityConsensusRestoreError, hydrate_entity_consensus};
 pub use entity_frame_head::{EntityFrameHeadRestoreError, decode_certified_entity_frame_head};
+pub(crate) use entity_graph::entity_projection_metadata;
 pub use entity_graph::{EntityGraphRestoreError, HydratedEntityGraph, hydrate_entity_graph};
 pub use entity_snapshot::{EntitySnapshotRestoreError, entity_snapshot_from_graph};
 pub use orderbook_accounts::{RestoredOrderbookAccounts, restore_orderbook_accounts};
 pub use orderbook_graph::{HydratedOrderbook, OrderbookGraphRestoreError, hydrate_orderbook_graph};
+pub(crate) use path_checkpoint::checkpoint_protocol_fingerprint;
 pub use path_checkpoint::{
     PathCheckpointRestoreError, RestoredReplicaMetadata, restore_path_checkpoint,
 };

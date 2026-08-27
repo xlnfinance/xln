@@ -471,14 +471,14 @@ pub struct RuntimeReplica {
     pub accounts: ResidentConsensusEngine,
     pub entity_consensus: ResidentEntityConsensusReplica,
     pub entity_signer: EntitySingleSigner,
+    /// Static Account ABI/protocol binding. Unlike checkpoint projection
+    /// descriptors, this is process configuration and is required even at an
+    /// empty genesis before the first path-keyed checkpoint exists.
+    pub(crate) protocol_fingerprint: [u8; 32],
     /// Exact canonical EntityReplica envelope. It is part of Runtime live
     /// state, not a parallel consensus state or an implementation sidecar.
     pub(crate) replica_metadata: Value,
     pub(crate) certified_board_registry: crate::CertifiedBoardRegistry,
-    /// Installed only by exact path-keyed checkpoint hydration. A fresh
-    /// in-memory replica has no authority to invent carried Entity fields at
-    /// checkpoint cadence.
-    pub(crate) checkpoint_projection_metadata: Option<crate::EntityCheckpointProjectionMetadata>,
     /// Durable storage cadence anchor. This is replica envelope state, not a
     /// second consensus root; recovery initializes it from the exact
     /// materialized Runtime checkpoint and WAL replay advances it only when a
@@ -506,6 +506,7 @@ impl RuntimeReplica {
         accounts: ResidentConsensusEngine,
         entity_consensus: ResidentEntityConsensusReplica,
         entity_signer: EntitySingleSigner,
+        protocol_fingerprint: [u8; 32],
         limits: RuntimeLimits,
     ) -> Result<Self, RuntimeMachineError> {
         if signer_id.is_empty() {
@@ -557,9 +558,9 @@ impl RuntimeReplica {
             accounts,
             entity_consensus,
             entity_signer,
+            protocol_fingerprint,
             replica_metadata,
             certified_board_registry: crate::CertifiedBoardRegistry::empty(),
-            checkpoint_projection_metadata: None,
             last_materialized_height,
             mempool: RuntimeMempool::empty(),
             scheduled_wakes,

@@ -137,7 +137,7 @@ fn processor_replica() -> RuntimeReplica {
     )
     .expect("entity signer");
     let runtime_id = derive_local_runtime_id(SOURCE_SEED, SOURCE_SIGNER).expect("runtime id");
-    let mut replica = RuntimeReplica::new(
+    RuntimeReplica::new(
         RuntimeState {
             height: 0,
             timestamp: 100,
@@ -151,17 +151,13 @@ fn processor_replica() -> RuntimeReplica {
         accounts,
         entity_consensus,
         entity_signer,
+        [0x44; 32],
         RuntimeLimits {
             checkpoint_period_frames: 100,
             ..RuntimeLimits::hlt()
         },
     )
-    .expect("runtime replica");
-    let mut checkpoint_metadata =
-        crate::EntityCheckpointProjectionMetadata::new(owner, Vec::new(), Vec::new());
-    assert!(checkpoint_metadata.bind_account_authority(owner, [0x44; 32]));
-    replica.checkpoint_projection_metadata = Some(checkpoint_metadata);
-    replica
+    .expect("runtime replica")
 }
 
 fn empty_entity_input(replica: &RuntimeReplica) -> RuntimeInput {

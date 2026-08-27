@@ -121,18 +121,14 @@ pub(crate) fn project_durable_frame(
     let expected_previous_hash = result.replica.durable.prev_frame_hash();
     let checkpoint_changes = match (result.outputs.checkpoint.as_ref(), prior_checkpoint_rows) {
         (Some(accounts), Some(prior)) => {
-            let metadata = result
-                .replica
-                .checkpoint_projection_metadata
-                .as_ref()
-                .ok_or(RuntimeFrameProjectionError::CheckpointMetadataMissing)?;
-            let (owner, fingerprint) = metadata
-                .account_authority()
-                .ok_or(RuntimeFrameProjectionError::CheckpointAuthorityMissing)?;
-            let account = prepare_account_checkpoint(accounts, owner, fingerprint, prior)?;
             let entity = prepare_entity_checkpoint(&result.replica, &replica_meta.entry, prior)?;
+            let account = prepare_account_checkpoint(
+                accounts,
+                result.replica.entity_id,
+                entity.protocol_fingerprint,
+                prior,
+            )?;
             let node_changes = merge_checkpoint_changes(account.changes, entity.changes)?;
-            result.replica.checkpoint_projection_metadata = Some(entity.metadata);
             Some(node_changes)
         }
         (None, None) => None,
@@ -476,10 +472,6 @@ pub(crate) enum RuntimeFrameProjectionError {
     OutputCount(usize),
     #[error("RRS_PROCESSOR_CHECKPOINT_GRAPH_UNAVAILABLE:{0}")]
     CheckpointGraphUnavailable(u64),
-    #[error("RRS_PROCESSOR_CHECKPOINT_METADATA_MISSING")]
-    CheckpointMetadataMissing,
-    #[error("RRS_PROCESSOR_CHECKPOINT_AUTHORITY_MISSING")]
-    CheckpointAuthorityMissing,
     #[error("RRS_PROCESSOR_CHECKPOINT_KEY_DUPLICATE:{0:?}")]
     CheckpointKey(Vec<u8>),
     #[error(transparent)]

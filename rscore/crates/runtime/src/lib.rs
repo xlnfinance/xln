@@ -38,7 +38,7 @@ pub use account_input_json::{
     decode_entity_account_input_row, decode_entity_account_input_rows,
 };
 pub use certified_board_registry::CertifiedBoardRegistry;
-pub use checkpoint_projection_metadata::{
+pub(crate) use checkpoint_projection_metadata::{
     EntityCheckpointProjectionMetadata, EntityFieldProjectionDescriptor,
     EntityTreeProjectionDescriptor,
 };
