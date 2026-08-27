@@ -6,6 +6,7 @@ import {
   deriveWalletIdentityMnemonicAddress,
   resolveWalletAppView,
   validateWalletIdentityDraft,
+  walletIdentityMnemonicErrorMessage,
 } from '../../../frontend/apps/wallet/src/identity-onboarding-model';
 
 const DEMOS = [{ label: 'A', name: 'A', password: 'session-secret', factor: 1, role: 'user' }] as const;
@@ -66,11 +67,14 @@ describe('React wallet identity onboarding', () => {
     )).toBe('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266');
     await expect(deriveWalletIdentityMnemonicAddress(
       'test test test test test test test test test test test test',
-    )).rejects.toThrow();
+    )).rejects.toThrow('WALLET_MNEMONIC_INVALID:');
+    expect(walletIdentityMnemonicErrorMessage(
+      new Error('WALLET_MNEMONIC_INVALID:invalid mnemonic checksum'),
+    )).toBe('Seed phrase checksum or words are invalid.');
 
     const source = readFileSync('frontend/apps/wallet/src/identity-onboarding.tsx', 'utf8');
     expect(source).toContain('await deriveWalletIdentityMnemonicAddress(draft.mnemonicInput)');
-    expect(source).toContain('Seed phrase checksum or words are invalid.');
+    expect(source).toContain('setSubmissionError(walletIdentityMnemonicErrorMessage(error))');
     expect(source.indexOf('await deriveWalletIdentityMnemonicAddress('))
       .toBeLessThan(source.indexOf('setReviewing(true)'));
   });

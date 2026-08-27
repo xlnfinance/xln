@@ -7,12 +7,20 @@ import {
   type WalletIdentityMode,
 } from '../../../packages/browser/src/wallet-identity-entry';
 import {
+  beginWalletMnemonicRecoveryRehearsal,
   createWalletIdentityDraft,
   deriveWalletIdentityMnemonicAddress,
+  evaluateWalletMnemonicRecoveryAttempt,
   validateWalletIdentityDraft,
+  walletIdentityMnemonicErrorMessage,
   walletIdentityModeLabel,
   type WalletIdentityDraft,
 } from './identity-onboarding-model';
+import { IdentityRecoveryVerified, IdentityReview } from './identity-recovery';
+import {
+  resetWalletRecoveryRehearsal,
+  type WalletRecoveryRehearsalState,
+} from '../../../packages/browser/src/wallet-recovery-rehearsal';
 import './styles/identity-onboarding.css';
 
 const FACTORS = [1, 2, 3, 4, 5] as const;
@@ -25,6 +33,11 @@ export function IdentityOnboarding() {
   const [submitted, setSubmitted] = useState(false);
   const [submissionError, setSubmissionError] = useState('');
   const [derivedAddress, setDerivedAddress] = useState('');
+  const [deriving, setDeriving] = useState(false);
+  const [recoveryVerified, setRecoveryVerified] = useState(false);
+  const [rehearsal, setRehearsal] = useState<WalletRecoveryRehearsalState>(
+    resetWalletRecoveryRehearsal,
+  );
   const tabRefs = useRef<Record<WalletIdentityMode, HTMLButtonElement | null>>({
     brainvault: null,
     mnemonic: null,
@@ -36,6 +49,8 @@ export function IdentityOnboarding() {
     setSubmissionError('');
     setDerivedAddress('');
     setReviewing(false);
+    setRecoveryVerified(false);
+    setRehearsal(resetWalletRecoveryRehearsal());
     setDraft((current) => ({
       ...current,
       ...selectWalletIdentityMode({
@@ -68,57 +83,93 @@ export function IdentityOnboarding() {
     setSubmissionError('');
     if (!validation.valid) return;
     if (draft.mode === 'mnemonic') {
+      setDeriving(true);
+      let address: string;
       try {
-        const address = await deriveWalletIdentityMnemonicAddress(draft.mnemonicInput);
-        setDerivedAddress(address);
-      } catch {
-        setSubmissionError('Seed phrase checksum or words are invalid.');
+        address = await deriveWalletIdentityMnemonicAddress(draft.mnemonicInput);
+      } catch (error: unknown) {
+        setSubmissionError(walletIdentityMnemonicErrorMessage(error));
+        setDeriving(false);
         return;
       }
+      setDeriving(false);
+      if (rehearsal.mode !== null) {
+        const attempt = evaluateWalletMnemonicRecoveryAttempt(rehearsal, address);
+        setRehearsal(attempt.state);
+        if (!attempt.matched) {
+          setSubmissionError(attempt.error);
+          return;
+        }
+        setDraft((current) => ({ ...current, mnemonicInput: '' }));
+        setDerivedAddress(address);
+        setRecoveryVerified(true);
+        return;
+      }
+      setDerivedAddress(address);
     }
     setReviewing(true);
   };
 
-  if (reviewing) {
-    return (
-      <section className="identity-review" aria-labelledby="identity-review-title">
-        <p className="wallet-shell-eyebrow">Identity input ready</p>
-        <h1 id="identity-review-title">Review recovery requirements</h1>
-        <p>No wallet has been created and no secret has left this form.</p>
-        <dl>
-          <div><dt>Method</dt><dd>{walletIdentityModeLabel(draft.mode)}</dd></div>
-          {draft.mode === 'brainvault' ? <div><dt>Vault name</dt><dd>{draft.name}</dd></div> : null}
-          {derivedAddress ? <div><dt>Public address</dt><dd>{derivedAddress}</dd></div> : null}
-          <div><dt>Recovery</dt><dd>{validation.detail}</dd></div>
-        </dl>
-        <div className="identity-review-warning">
-          <strong>{draft.mode === 'brainvault' ? 'Exact inputs are mandatory.' : 'The words control the wallet.'}</strong>
-          <span>{draft.mode === 'brainvault'
-            ? 'Name, passphrase, and work factor must match on every recovery.'
-            : 'Keep the seed offline and hidden from cameras, cloud backups, and other people.'}</span>
-        </div>
-        <button className="identity-secondary-action" onClick={() => setReviewing(false)} type="button">
-          Edit inputs
-        </button>
-      </section>
-    );
+  const beginMnemonicRecovery = (): void => {
+    if (draft.mode !== 'mnemonic' || !derivedAddress) {
+      throw new Error('WALLET_MNEMONIC_RECOVERY_REVIEW_REQUIRED');
+    }
+    setRehearsal(beginWalletMnemonicRecoveryRehearsal(derivedAddress));
+    setDraft((current) => ({ ...current, mnemonicInput: '' }));
+    setDerivedAddress('');
+    setSubmissionError('');
+    setSubmitted(false);
+    setReviewing(false);
+  };
+
+  const resetIdentity = (): void => {
+    setDraft(createWalletIdentityDraft('', DEMO_ACCOUNTS));
+    setDerivedAddress('');
+    setSubmissionError('');
+    setSubmitted(false);
+    setReviewing(false);
+    setRecoveryVerified(false);
+    setRehearsal(resetWalletRecoveryRehearsal());
+  };
+
+  if (recoveryVerified) {
+    return <IdentityRecoveryVerified address={derivedAddress} onReset={resetIdentity} />;
   }
+
+  if (reviewing) {
+    return <IdentityReview
+      address={derivedAddress}
+      draft={draft}
+      onEdit={() => setReviewing(false)}
+      onVerifyMnemonic={beginMnemonicRecovery}
+      validation={validation}
+    />;
+  }
+
+  const rehearsalActive = rehearsal.mode !== null;
 
   return (
     <section className="identity-onboarding" aria-labelledby="identity-onboarding-title">
       <header>
-        <p className="wallet-shell-eyebrow">Wallet identity</p>
-        <h1 id="identity-onboarding-title">Set up identity</h1>
-        <p>Choose how this wallet can be recovered.</p>
+        <p className="wallet-shell-eyebrow">{rehearsalActive ? 'Recovery rehearsal' : 'Wallet identity'}</p>
+        <h1 id="identity-onboarding-title">{rehearsalActive ? 'Re-enter your seed' : 'Set up identity'}</h1>
+        <p>{rehearsalActive
+          ? 'The first phrase was cleared. Only its public wallet address remains.'
+          : 'Choose how this wallet can be recovered.'}</p>
       </header>
 
-      <div className="identity-mode-tabs" role="tablist" aria-label="Wallet identity method">
+      {rehearsalActive ? (
+        <p className="identity-rehearsal-context">
+          Enter the same seed phrase again. A different valid wallet is rejected without replacing the expected address.
+        </p>
+      ) : <div className="identity-mode-tabs" role="tablist" aria-label="Wallet identity method">
         {(['brainvault', 'mnemonic'] as const).map((mode) => (
           <button
             aria-controls={`identity-panel-${mode}`}
             aria-selected={draft.mode === mode}
             id={`identity-mode-${mode}`}
             key={mode}
+            disabled={deriving}
             onClick={() => selectMode(mode)}
             onKeyDown={(event) => handleModeKey(event, mode)}
             ref={(node) => { tabRefs.current[mode] = node; }}
@@ -130,7 +181,7 @@ export function IdentityOnboarding() {
             <span>{mode === 'brainvault' ? 'Memorized recovery' : 'Physical backup'}</span>
           </button>
         ))}
-      </div>
+      </div>}
 
       <form onSubmit={(event) => { void reviewIdentity(event); }} noValidate>
         {draft.mode === 'brainvault' ? (
@@ -140,6 +191,7 @@ export function IdentityOnboarding() {
               <input
                 autoCapitalize="none"
                 autoComplete="off"
+                disabled={deriving}
                 onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
                 spellCheck={false}
                 type="text"
@@ -152,6 +204,7 @@ export function IdentityOnboarding() {
                 <input
                   autoCapitalize="none"
                   autoComplete="off"
+                  disabled={deriving}
                   onChange={(event) => setDraft((current) => ({ ...current, passphrase: event.target.value }))}
                   spellCheck={false}
                   type={draft.showPassphrase ? 'text' : 'password'}
@@ -159,6 +212,7 @@ export function IdentityOnboarding() {
                 />
                 <button
                   aria-label={draft.showPassphrase ? 'Hide passphrase' : 'Show passphrase'}
+                  disabled={deriving}
                   onClick={() => setDraft((current) => ({
                     ...current,
                     showPassphrase: !current.showPassphrase,
@@ -175,6 +229,7 @@ export function IdentityOnboarding() {
                 {FACTORS.map((factor) => (
                   <button
                     aria-pressed={draft.factor === factor}
+                    disabled={deriving}
                     key={factor}
                     onClick={() => setDraft((current) => ({ ...current, factor }))}
                     type="button"
@@ -193,6 +248,7 @@ export function IdentityOnboarding() {
               <textarea
                 autoCapitalize="none"
                 autoComplete="off"
+                disabled={deriving}
                 onChange={(event) => setDraft((current) => ({
                   ...current,
                   mnemonicInput: event.target.value,
@@ -208,13 +264,22 @@ export function IdentityOnboarding() {
         )}
 
         {submitted && (!validation.valid || submissionError) ? (
-          <ul className="identity-errors" aria-label="Identity input errors">
+          <ul className="identity-errors" aria-label="Identity input errors" aria-live="polite">
             {validation.errors.map((error) => <li key={error}>{error}</li>)}
             {submissionError ? <li>{submissionError}</li> : null}
           </ul>
         ) : null}
 
-        <button className="identity-primary-action" type="submit">Review identity inputs</button>
+        <div className={rehearsalActive ? 'identity-rehearsal-actions' : undefined}>
+          <button className="identity-primary-action" disabled={deriving} type="submit">
+            {deriving ? 'Checking phrase…' : rehearsalActive ? 'Verify recovered wallet' : 'Review identity inputs'}
+          </button>
+          {rehearsalActive ? (
+            <button className="identity-secondary-action" onClick={resetIdentity} type="button">
+              Cancel rehearsal
+            </button>
+          ) : null}
+        </div>
       </form>
     </section>
   );

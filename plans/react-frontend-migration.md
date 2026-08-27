@@ -750,6 +750,18 @@ derivation and persistence are not simulated. Focused success, invalid, demo,
 unknown-demo, routing, keyboard-policy, and secret-boundary coverage accompanies
 responsive browser evidence for entry, errors, and review.
 
+The React identity flow now owns mnemonic recovery rehearsal after its
+secret-free review. Beginning rehearsal retains only the normalized public
+address and clears the first seed; the second entry is cryptographically
+validated, a different valid wallet is rejected without replacing the expected
+address, and a match clears both seed entries before publishing a verified
+state. Cancellation resets the canonical rehearsal policy and clears the
+current input. The verified state explicitly makes no wallet-creation or
+persistence claim. Focused policy, real-address mismatch/match, error mapping,
+source-boundary, wallet typecheck, build, and responsive browser evidence cover
+the increment. Brain Vault rehearsal remains coupled to its dedicated browser
+derivation stage and is not simulated here.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte

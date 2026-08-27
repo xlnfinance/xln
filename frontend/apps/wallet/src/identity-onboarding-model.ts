@@ -9,6 +9,11 @@ import {
   hasSupportedMnemonicWordCount,
   normalizeMnemonicPhrase,
 } from '../../../src/lib/components/Views/runtime-creation-model';
+import {
+  evaluateWalletRecoveryRehearsal,
+  resetWalletRecoveryRehearsal,
+  type WalletRecoveryRehearsalState,
+} from '../../../packages/browser/src/wallet-recovery-rehearsal';
 
 export type WalletIdentityDraft = WalletIdentityEntryState & Readonly<{
   name: string;
@@ -95,5 +100,51 @@ export const deriveWalletIdentityMnemonicAddress = async (
   mnemonicInput: string,
 ): Promise<string> => {
   const { deriveEthereumAddress } = await import('../../../../brainvault/core.ts');
-  return deriveEthereumAddress(normalizeWalletIdentityMnemonic(mnemonicInput));
+  try {
+    return await deriveEthereumAddress(normalizeWalletIdentityMnemonic(mnemonicInput));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`WALLET_MNEMONIC_INVALID:${detail}`);
+  }
+};
+
+export const walletIdentityMnemonicErrorMessage = (error: unknown): string => {
+  const detail = error instanceof Error ? error.message : String(error);
+  return detail.startsWith('WALLET_MNEMONIC_INVALID:')
+    ? 'Seed phrase checksum or words are invalid.'
+    : `Mnemonic validation failed: ${detail}`;
+};
+
+export const beginWalletMnemonicRecoveryRehearsal = (
+  address: string,
+): WalletRecoveryRehearsalState => {
+  const result = evaluateWalletRecoveryRehearsal({
+    state: { ...resetWalletRecoveryRehearsal(), enabled: true },
+    mode: 'mnemonic',
+    address,
+  });
+  if (result.status !== 'begin') {
+    throw new Error(`WALLET_MNEMONIC_RECOVERY_BEGIN_INVALID:${result.status}`);
+  }
+  return result.state;
+};
+
+export type WalletMnemonicRecoveryAttempt = Readonly<{
+  matched: boolean;
+  state: WalletRecoveryRehearsalState;
+  error: string;
+}>;
+
+export const evaluateWalletMnemonicRecoveryAttempt = (
+  state: WalletRecoveryRehearsalState,
+  address: string,
+): WalletMnemonicRecoveryAttempt => {
+  const result = evaluateWalletRecoveryRehearsal({ state, mode: 'mnemonic', address });
+  if (result.status === 'mismatch') {
+    return { matched: false, state: result.state, error: result.message };
+  }
+  if (result.status !== 'matched') {
+    throw new Error(`WALLET_MNEMONIC_RECOVERY_ATTEMPT_INVALID:${result.status}`);
+  }
+  return { matched: true, state: result.state, error: '' };
 };
