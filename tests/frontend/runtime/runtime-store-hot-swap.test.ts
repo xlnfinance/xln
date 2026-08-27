@@ -706,8 +706,9 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
 
   const acceptSlice = source.slice(acceptStart, localStart);
   const localSlice = source.slice(localStart, pageChangeStart);
-  expect(acceptSlice).toContain('await activateAppAfterRuntimeChoice()');
-  expect(localSlice).toContain('await activateAppAfterRuntimeChoice()');
+  expect(acceptSlice).toContain('await walletRuntimeConsent.acceptRemote(');
+  expect(localSlice).toContain('await walletRuntimeConsent.useEmbedded()');
+  expect(source).toContain('activateRuntimeChoice: activateAppAfterRuntimeChoice');
   expect(acceptSlice).not.toContain('window.location.reload');
   expect(localSlice).not.toContain('window.location.reload');
   expect(source).not.toContain('window.location.reload');
@@ -720,8 +721,18 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
 
 test('embedded remote capability never bypasses explicit runtime consent', () => {
   const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const runtimeBootstrap = readFileSync(
+    'frontend/packages/browser/src/wallet-runtime-bootstrap.ts',
+    'utf8',
+  );
   const runtimeConnection = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
-  expect(appLayout).toContain('remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)');
+  expect(appLayout).toContain('requiresRemoteConsent: remoteRuntimeRequiresConsent');
+  expect(runtimeBootstrap).toContain(
+    'if (this.#dependencies.requiresRemoteConsent(input.remoteRequest))',
+  );
+  expect(runtimeBootstrap).toContain(
+    'this.#dependencies.publishPendingConsent(input.remoteRequest)',
+  );
   expect(runtimeConnection).toContain('export function remoteRuntimeRequiresConsent');
 
   const projectionStart = runtimeConnection.indexOf('export async function ensureProjectionRuntimeConnected');

@@ -51,7 +51,6 @@
     readRemoteRuntimeImportPayloadFromHash,
     readRemoteRuntimeImportSourceFromHash,
     readRemoteRuntimeRequestFromUrl,
-    remoteAcceptKey,
     remoteRuntimeRequiresConsent,
     stripRemoteRuntimeParamsFromHistory,
     type RemoteRuntimeRequest,
@@ -69,6 +68,7 @@
     WalletRuntimeBootstrapCoordinator,
     hasWalletRuntimeBootstrapInput,
   } from '../../../packages/browser/src/wallet-runtime-bootstrap';
+  import { WalletRuntimeConsentCoordinator } from '../../../packages/browser/src/wallet-runtime-consent';
   import { resolveWalletShellPhase } from '../../../packages/browser/src/wallet-shell-state';
 
   let { children } = $props();
@@ -108,6 +108,17 @@
     },
     persistRemoteRequest: persistRemoteRuntimeRequest,
     stripRemoteRuntimeParams,
+  });
+  const walletRuntimeConsent = new WalletRuntimeConsentCoordinator({
+    publishAuthError: (message) => {
+      remoteRuntimeAuthError = message;
+    },
+    persistRemoteRequest: persistRemoteRuntimeRequest,
+    selectEmbeddedRuntime: () => {
+      writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
+    },
+    stripRemoteRuntimeParams,
+    activateRuntimeChoice: activateAppAfterRuntimeChoice,
   });
   const pageSearch = $derived(browser ? $page.url.search : '');
   const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
@@ -381,25 +392,11 @@
   async function acceptRemoteRuntime(): Promise<void> {
     const request = pendingRemoteRuntime;
     if (!request) return;
-    const authKey = request.requiresAuthPaste ? remoteRuntimeAuthInput.trim() : request.authKey;
-    if (request.requiresAuthPaste && !authKey.startsWith('xlnra1.')) {
-      remoteRuntimeAuthError = 'Paste the capability token to connect.';
-      return;
-    }
-    remoteRuntimeAuthError = '';
-    persistRemoteRuntimeRequest({
-      ...request,
-      authKey,
-      acceptKey: remoteAcceptKey(request.wsUrl, authKey),
-    });
-    stripRemoteRuntimeParams();
-    await activateAppAfterRuntimeChoice();
+    await walletRuntimeConsent.acceptRemote(request, remoteRuntimeAuthInput);
   }
 
   async function useLocalBrowserRuntime(): Promise<void> {
-    writeEmbeddedRuntimeAdapterSession({ durable: localStorage, session: sessionStorage });
-    stripRemoteRuntimeParams();
-    await activateAppAfterRuntimeChoice();
+    await walletRuntimeConsent.useEmbedded();
   }
 
   async function changeRemotePage(kind: 'accounts' | 'books', pageIndex: number): Promise<void> {

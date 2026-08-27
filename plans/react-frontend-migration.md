@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, AND RUNTIME BOOTSTRAP COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, AND CONSENT COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -597,6 +597,20 @@ with 171 expectations. The broader affected request/session/boot/security/
 capability batch passes 103 tests with 469 expectations, both wallet and
 canonical Svelte production builds pass, and the wallet local check covers 443
 files with zero unsafe-type findings.
+
+The next wallet slice now owns remote Runtime consent decisions and effect
+ordering: capability selection and validation, accepted-request persistence,
+URL cleanup, activation, and embedded cancellation. The canonical Svelte
+shell retains concrete storage, session, history, UI-state, and Runtime boot
+effects through injected callbacks; its event handlers now delegate without
+mirroring the policy. Nine direct tests cover existing and pasted capabilities,
+invalid input, stop-on-failure boundaries, embedded cancellation, and thin
+Svelte wiring. The direct, bootstrap, capability, and focused legacy consent
+checks pass 25 tests with 216 expectations. The broader affected batch passes
+128 of 129 tests with 980 expectations; its sole failure is the pre-existing
+outdated `xlnEnvironment` source-shape assertion. Both wallet and canonical
+Svelte production builds pass, and the wallet local check covers 444 files with
+zero unsafe-type findings.
 
 The next wallet slice now owns validated deploy-version payload decoding,
 storage, action selection, initial persistence, post-boot refresh, ephemeral
@@ -723,6 +737,8 @@ any mismatch. Never compile on production.
    validated deploy-version persistence, reset, and recovery decisions are
    injected through a shared browser coordinator; one-shot Runtime pairing,
    import, consent, persistence, and URL cleanup ordering are shared as well.
+   Remote consent validation, accepted-request persistence, activation, and
+   embedded cancellation ordering are shared through injected browser effects.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
