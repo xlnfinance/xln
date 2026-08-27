@@ -37,7 +37,10 @@
     getRuntimeControllerAdapter,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
-  import type { RuntimeAdapterBrainVaultResult } from '@xln/core/api/runtime-adapter/types';
+  import type {
+    RuntimeAdapterBrainVaultRecovery,
+    RuntimeAdapterBrainVaultResult,
+  } from '@xln/core/api/runtime-adapter/types';
   import { generateLazyEntityIdPreview } from '$lib/utils/identity/lazyEntityId';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,
@@ -81,6 +84,7 @@
     resolveWalletRuntimeOpeningPlan,
     walletRuntimeOpeningNeedsLocalLookup,
   } from '../../../../packages/browser/src/wallet-runtime-opening';
+  import { WalletNodeMnemonicRevealCoordinator } from '../../../../packages/browser/src/wallet-node-mnemonic-reveal';
 
   // Props
   export let embedded: boolean = false;
@@ -209,7 +213,7 @@
   let nodeDerivationResult: RuntimeAdapterBrainVaultResult | null = null;
   let revealedNodeMnemonic = '';
   let revealingNodeMnemonic = false;
-  let nodeRevealRunToken = 0;
+  const walletNodeMnemonicReveal = new WalletNodeMnemonicRevealCoordinator<RuntimeAdapterBrainVaultRecovery>();
 
   const isCurrentDerivationRun = (run: BrainVaultDerivationRun): boolean =>
     derivationRun === run && phase === 'deriving';
@@ -733,7 +737,7 @@
   }
 
   function invalidateNodeReveal(): void {
-    nodeRevealRunToken += 1;
+    walletNodeMnemonicReveal.invalidate();
     revealedNodeMnemonic = '';
     revealingNodeMnemonic = false;
   }
@@ -1122,23 +1126,28 @@
       derivationError = 'The node is no longer connected.';
       return;
     }
-    const runToken = ++nodeRevealRunToken;
-    const isCurrentReveal = (): boolean =>
-      runToken === nodeRevealRunToken
-      && phase === 'node-ready'
-      && nodeDerivationResult === expectedResult
-      && getRuntimeControllerAdapter() === adapter;
     revealingNodeMnemonic = true;
     derivationError = '';
+    const outcome = await walletNodeMnemonicReveal.run({
+      reveal: () => adapter.revealBrainVaultMnemonic(),
+      isCurrent: () => (
+        phase === 'node-ready'
+        && nodeDerivationResult === expectedResult
+        && getRuntimeControllerAdapter() === adapter
+      ),
+    });
+    if (outcome.status === 'cancelled') {
+      if (outcome.latest) revealingNodeMnemonic = false;
+      return;
+    }
     try {
-      const recovery = await adapter.revealBrainVaultMnemonic();
-      if (!isCurrentReveal()) return;
-      revealedNodeMnemonic = recovery.mnemonic24;
-    } catch (err) {
-      if (!isCurrentReveal()) return;
-      derivationError = err instanceof Error ? err.message : String(err);
+      if (outcome.status === 'failed') {
+        derivationError = outcome.message;
+        return;
+      }
+      revealedNodeMnemonic = outcome.recovery.mnemonic24;
     } finally {
-      if (runToken === nodeRevealRunToken) revealingNodeMnemonic = false;
+      revealingNodeMnemonic = false;
     }
   }
 

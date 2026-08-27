@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, AND RECOVERY-DISCOVERY COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, AND NODE-MNEMONIC-REVEAL COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -638,6 +638,19 @@ expectations; its two failures are pre-existing stale source-shape assertions
 for the preserved-corrupt-storage diagnostic and the recovery-failure wrapper.
 Both wallet and canonical Svelte production builds pass, and the wallet local
 check covers 449 files with zero unsafe-type findings.
+
+The next wallet slice now owns generation-safe node mnemonic reveal
+coordination: only the latest overlapping success or failure is accepted,
+reset invalidates outstanding work, and captured phase, derivation-result, and
+adapter ownership must still match after the async reveal. A cancelled latest
+generation clears its own loading state, while an older cancelled generation
+cannot clear a newer request's loading state. The canonical Svelte event flow
+retains the cheap connection and node-ready guards, concrete admin adapter
+call, secret mnemonic publication, loading state, and user-visible errors.
+Seven direct tests plus the affected identity, recovery, import, workspace,
+capability, worker, and native-custody suites pass 99 tests with 649
+expectations. Both wallet and canonical Svelte production builds pass, and the
+wallet local check covers 450 files with zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -825,6 +838,9 @@ any mismatch. Never compile on production.
    Recovery discovery generation ownership, stale-result suppression, error
    normalization, and reset/unmount invalidation are shared while concrete
    discovery sources and UI, vault, and persistence effects remain concrete.
+   Node mnemonic reveal generation ownership, captured-context validation,
+   stale-result suppression, and error normalization are shared while adapter
+   access, secret publication, loading, and error effects remain concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication
