@@ -36,8 +36,8 @@ pub use output::{
     LocalEntityOutputTx,
 };
 pub use single_signer::{
-    CertifiedEntityProposal, EntityCertificationError, EntitySingleSigner,
-    build_entity_hash_manifest, certify_single_signer_entity_frame,
+    CertifiedEntityProposal, EntityCertificationError, EntitySingleSigner, PresignedManifest,
+    PresignedManifestEntry, build_entity_hash_manifest, certify_single_signer_entity_frame,
 };
 pub use transition::{
     CertifiedEntityTransition, ENTITY_OWNED_CONSENSUS_FIELDS, EntityConsensusState,

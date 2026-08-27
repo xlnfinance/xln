@@ -21,6 +21,24 @@ use super::frame::{
 
 type SignedManifest = (Vec<Vec<u8>>, Vec<Vec<u8>>);
 
+/// Signature/Hanko bytes already authored by the resident Account worker for
+/// one Account-frame digest. The constructor is crate-private so an external
+/// caller cannot smuggle unverified bytes into Entity consensus; only the
+/// Account result collector can create one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PresignedManifestEntry {
+    signature: [u8; 65],
+    hanko: Vec<u8>,
+}
+
+impl PresignedManifestEntry {
+    pub(crate) fn account(signature: [u8; 65], hanko: Vec<u8>) -> Self {
+        Self { signature, hanko }
+    }
+}
+
+pub type PresignedManifest = BTreeMap<String, PresignedManifestEntry>;
+
 #[derive(Clone)]
 pub struct EntitySingleSigner {
     signer_id: String,
@@ -75,6 +93,10 @@ pub enum EntityCertificationError {
     DuplicateHash(String),
     #[error("ENTITY_MANIFEST_SIGNING_FAILED:{0}")]
     SigningFailed(String),
+    #[error("ENTITY_PRESIGNED_MANIFEST_KIND_INVALID:{0}")]
+    PresignedKindInvalid(String),
+    #[error("ENTITY_PRESIGNED_MANIFEST_UNUSED:{0}")]
+    PresignedUnused(String),
 }
 
 fn entity_id(value: &str) -> Result<[u8; 32], EntityCertificationError> {
@@ -159,21 +181,33 @@ impl EntitySingleSigner {
     fn sign_manifest(
         &self,
         manifest: &[HashToSign],
+        mut presigned: PresignedManifest,
     ) -> Result<SignedManifest, EntityCertificationError> {
         let identity = self.signing_identity();
         let mut signatures = Vec::with_capacity(manifest.len());
         let mut hankos = Vec::with_capacity(manifest.len());
         for entry in manifest {
+            if let Some(witness) = presigned.remove(&entry.hash) {
+                if entry.kind != HashType::AccountFrame {
+                    return Err(EntityCertificationError::PresignedKindInvalid(
+                        entry.hash.clone(),
+                    ));
+                }
+                signatures.push(witness.signature.to_vec());
+                hankos.push(witness.hanko);
+                continue;
+            }
             let digest = parse_digest(&entry.hash).ok_or_else(|| {
                 EntityCertificationError::ManifestDigestInvalid(entry.hash.clone())
             })?;
-            let signature = sign_digest(&self.private_key, &digest)
-                .ok_or_else(|| EntityCertificationError::SigningFailed(entry.hash.clone()))?;
-            let hanko = identity
-                .encode_frame_hanko(&digest, &signature)
+            let (signature, hanko) = identity
+                .sign_frame_with_raw(&digest)
                 .map_err(|error| EntityCertificationError::SigningFailed(error.to_string()))?;
             signatures.push(signature.to_vec());
             hankos.push(hanko);
+        }
+        if let Some(hash) = presigned.into_keys().next() {
+            return Err(EntityCertificationError::PresignedUnused(hash));
         }
         Ok((signatures, hankos))
     }
@@ -219,6 +253,7 @@ pub fn certify_single_signer_entity_frame(
     authority: &EntityFrameAuthority,
     body: EntityFrameBody<'_>,
     secondary_hashes: Vec<HashToSign>,
+    presigned_manifest: PresignedManifest,
 ) -> Result<CertifiedEntityProposal, EntityCertificationError> {
     if !authority.is_single_signer()? {
         return Err(EntityCertificationError::SingleSignerAuthorityRequired);
@@ -245,7 +280,7 @@ pub fn certify_single_signer_entity_frame(
     let frame_hash = compute_entity_frame_hash(&body)?;
     let manifest =
         build_entity_hash_manifest(body.entity_id, body.height, &frame_hash, secondary_hashes)?;
-    let (signatures, hankos) = signer.sign_manifest(&manifest)?;
+    let (signatures, hankos) = signer.sign_manifest(&manifest, presigned_manifest)?;
     let entity_hanko = hankos
         .first()
         .cloned()
@@ -360,6 +395,7 @@ mod tests {
                 j_prefix_certificate: None,
             },
             vec![],
+            BTreeMap::new(),
         )
         .expect("certified");
         assert_eq!(result.frame.hashes_to_sign.len(), 1);
@@ -370,5 +406,69 @@ mod tests {
             .frame
             .require_certified_proof_shape()
             .expect("proof shape");
+    }
+
+    #[test]
+    fn account_worker_signature_reuse_is_byte_identical_to_entity_signing() {
+        let entity = "0x1b7a1f31158ced332b779dd6b985ff695b22358470d1cbf6fac0c6db84478d08";
+        let key: [u8; 32] =
+            hex::decode("309b1f6e8dd69428a1954d7ab5ef05460264d9885d1cee151ccb277b9f27d01e")
+                .expect("key hex")
+                .try_into()
+                .expect("key bytes");
+        let signer =
+            EntitySingleSigner::from_key(key, "h1-hub", entity, 1, 1, BoardDelays::default())
+                .expect("signer");
+        let authority = authority();
+        let authority_root = authority.root().expect("root");
+        let context = object(vec![("version", number("version", 1).expect("version"))]);
+        let txs = Vec::new();
+        let events = Vec::new();
+        let state_root = format!("0x{}", "11".repeat(32));
+        let account_hash = format!("0x{}", "33".repeat(32));
+        let secondary = vec![HashToSign {
+            hash: account_hash.clone(),
+            kind: HashType::AccountFrame,
+            context: "account:fixture:frame:1".into(),
+        }];
+        let body = || EntityFrameBody {
+            parent_frame_hash: "genesis",
+            height: 1,
+            timestamp: 1_000,
+            txs: &txs,
+            events: &events,
+            entity_id: entity,
+            state_root: &state_root,
+            authority_root: &authority_root,
+            entity_context: &context,
+            j_prefix_certificate: None,
+        };
+
+        let baseline = certify_single_signer_entity_frame(
+            &signer,
+            &authority,
+            body(),
+            secondary.clone(),
+            PresignedManifest::new(),
+        )
+        .expect("baseline");
+        let digest = parse_digest(&account_hash).expect("account hash");
+        let (signature, hanko) = signer
+            .signing_identity()
+            .sign_frame_with_raw(&digest)
+            .expect("account worker signature");
+        let reused = certify_single_signer_entity_frame(
+            &signer,
+            &authority,
+            body(),
+            secondary,
+            PresignedManifest::from([(
+                account_hash,
+                PresignedManifestEntry::account(signature, hanko),
+            )]),
+        )
+        .expect("reused");
+
+        assert_eq!(reused, baseline);
     }
 }

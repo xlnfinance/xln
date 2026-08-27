@@ -124,6 +124,9 @@ pub enum AccountInputVerdict {
     FrameCommitted {
         height: u64,
         state_hash: [u8; 32],
+        /// Raw owner signature paired with `ack_hanko`, retained only until
+        /// the parent Entity builds this Runtime frame's signature manifest.
+        ack_signature: [u8; 65],
         ack_hanko: Vec<u8>,
         outputs: Vec<AccountOutput>,
         /// Exactly what the committed transactions said they did. The Entity
@@ -131,7 +134,7 @@ pub enum AccountInputVerdict {
         /// would be signing its own guess.
         events: Vec<String>,
         rolled_back: Option<xln_rscore_engine::RolledBackProposal>,
-        committed_frame: CommittedFrameEvidence,
+        committed_frame: Box<CommittedFrameEvidence>,
         /// The recovery proof the acknowledgement this frame produced carries,
         /// so the publisher can send it without reading the account back.
         ack_dispute: Option<xln_rscore_engine::DisputeDraft>,
@@ -167,7 +170,7 @@ pub enum AccountInputVerdict {
         /// The pending frame's own events, released on the same ACK as its
         /// outputs.
         events: Vec<String>,
-        committed_frame: CommittedFrameEvidence,
+        committed_frame: Box<CommittedFrameEvidence>,
     },
     AckStale {
         height: u64,
@@ -527,6 +530,9 @@ pub struct ProposalRow {
 pub struct ProposedRow {
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
+    /// Raw owner signature paired with `hanko`, for the parent Entity's
+    /// manifest. It is ephemeral and never changes the Account wire shape.
+    pub signature: [u8; 65],
     pub hanko: Vec<u8>,
     /// The recovery proof the proposal travels with, when it carries one.
     pub dispute: Option<xln_rscore_engine::DisputeDraft>,
@@ -706,6 +712,7 @@ pub(crate) fn proposal_row(
             let proposed = ProposedRow {
                 frame: proposed.frame,
                 state_hash: proposed.state_hash,
+                signature: proposed.signature,
                 hanko: proposed.hanko,
                 dispute: proposed.dispute,
                 events: proposed.events,
@@ -2846,6 +2853,7 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
         IncomingOutcome::Committed {
             height,
             state_hash,
+            ack_signature,
             ack_hanko,
             outputs,
             events,
@@ -2855,11 +2863,12 @@ fn incoming_verdict(outcome: IncomingOutcome) -> AccountInputVerdict {
         } => AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
+            ack_signature,
             ack_hanko,
             outputs,
             events,
             rolled_back,
-            committed_frame: *committed_frame,
+            committed_frame,
             ack_dispute,
         },
         IncomingOutcome::CollisionIgnored { height, queued } => {
@@ -2909,7 +2918,7 @@ fn ack_verdict(outcome: AckOutcome) -> AccountInputVerdict {
             state_hash,
             outputs,
             events,
-            committed_frame: *committed_frame,
+            committed_frame,
         },
         AckOutcome::Stale { height } => AccountInputVerdict::AckStale { height },
         AckOutcome::Rejected { reason } => AccountInputVerdict::AckRejected { reason },

@@ -101,6 +101,9 @@ pub enum IncomingOutcome {
     Committed {
         height: u64,
         state_hash: [u8; 32],
+        /// Raw signature created together with `ack_hanko`. The parent Entity
+        /// commits it in the same manifest without repeating ECDSA signing.
+        ack_signature: [u8; 65],
         ack_hanko: Vec<u8>,
         outputs: Vec<AccountOutput>,
         /// What this frame's transactions said they did, in transaction order.
@@ -773,7 +776,7 @@ pub fn apply_incoming_frame_with_authority(
         None
     };
 
-    let ack_hanko = identity.sign_frame(&state_hash)?;
+    let (ack_signature, ack_hanko) = identity.sign_frame_with_raw(&state_hash)?;
     // Their proof of the state they just proposed was authenticated against
     // the reconstructed Solidity digest before replay, then checked against
     // this exact candidate proof body above. Only now may it be retained.
@@ -809,6 +812,7 @@ pub fn apply_incoming_frame_with_authority(
     Ok(IncomingOutcome::Committed {
         height: frame.height,
         state_hash,
+        ack_signature,
         ack_hanko,
         outputs,
         events,

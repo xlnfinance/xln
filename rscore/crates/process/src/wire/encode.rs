@@ -684,6 +684,7 @@ fn verdict(value: &xln_rscore_batch::AccountInputVerdict) -> Result<AbiValue, cr
         AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
+            ack_signature: _,
             ack_hanko,
             outputs,
             events,

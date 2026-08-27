@@ -28,8 +28,9 @@ use crate::{
     AccountProposalWork, CommittedAccountTransition, DeterministicContext, EntityFrameEvent,
     EntityKernelCommitments, EntityKernelError, EntityKernelOutput, EntityStateSlice,
     FinalizedJEventBatch, HashToSign, HashType, JurisdictionScope, LocalEntityFinancialTx,
-    OrderedAccountCommit, ScheduledHookKind, ScheduledWake, SchedulerCommand, SchedulerError,
-    apply_finalized_j_event_batches, execute_crontab,
+    OrderedAccountCommit, PresignedManifest, PresignedManifestEntry, ScheduledHookKind,
+    ScheduledWake, SchedulerCommand, SchedulerError, apply_finalized_j_event_batches,
+    execute_crontab,
 };
 
 fn profile_resident_round() -> bool {
@@ -83,6 +84,8 @@ pub enum ResidentEntityError {
     OutputFlattenMismatch { account_id: String, height: u64 },
     #[error("ENTITY_RESIDENT_CRONTAB_MISSING")]
     CrontabMissing,
+    #[error("ENTITY_RESIDENT_MANIFEST_WITNESS_DUPLICATE:{0}")]
+    ManifestWitnessDuplicate(String),
     #[error(transparent)]
     Scheduler(#[from] SchedulerError),
 }
@@ -159,6 +162,10 @@ pub struct ResidentEntityCoreResult {
     /// Exact Account-frame/dispute manifest entries the Entity signer must
     /// certify alongside its own frame.
     pub secondary_hashes: Vec<HashToSign>,
+    /// Account workers already signed Account-frame entries while updating
+    /// their resident replicas. Entity certification consumes these exact
+    /// bytes instead of serially signing every digest again.
+    pub presigned_manifest: PresignedManifest,
     pub inbound: EntityRoundResult,
     pub outbound: EntityRoundResult,
     /// Exact TS empty self EntityInputs emitted by local direct/swap handlers.
@@ -440,11 +447,14 @@ fn collect_verdict_certification(
     verdict: &AccountInputVerdict,
     events: &mut Vec<EntityFrameEvent>,
     hashes: &mut Vec<HashToSign>,
-) {
+    presigned: &mut PresignedManifest,
+) -> Result<(), ResidentEntityError> {
     match verdict {
         AccountInputVerdict::FrameCommitted {
             height,
             state_hash,
+            ack_signature,
+            ack_hanko,
             events: committed_events,
             ack_dispute,
             ..
@@ -457,11 +467,21 @@ fn collect_verdict_certification(
             events.push(EntityFrameEvent::Status {
                 message: format!("🤝 Accepted frame {height} from Entity {suffix}"),
             });
+            let hash = hex_prefixed(state_hash);
             hashes.push(HashToSign {
-                hash: hex_prefixed(state_hash),
+                hash: hash.clone(),
                 kind: HashType::AccountFrame,
                 context: account_hash_context(account_id, "ack", *height),
             });
+            if presigned
+                .insert(
+                    hash.clone(),
+                    PresignedManifestEntry::account(*ack_signature, ack_hanko.clone()),
+                )
+                .is_some()
+            {
+                return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
+            }
             if let Some(dispute) = ack_dispute {
                 hashes.push(HashToSign {
                     hash: hex_prefixed(&dispute.hash),
@@ -475,22 +495,30 @@ fn collect_verdict_certification(
             ..
         } => append_status_events(events, committed_events),
         AccountInputVerdict::FrameAckApplied { ack, frame } => {
-            collect_verdict_certification(account_id, ack, events, hashes);
-            collect_verdict_certification(account_id, frame, events, hashes);
+            collect_verdict_certification(account_id, ack, events, hashes, presigned)?;
+            collect_verdict_certification(account_id, frame, events, hashes, presigned)?;
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn collect_round_certification(
     inbound: &EntityRoundResult,
     outbound: &EntityRoundResult,
     local_events: Vec<EntityFrameEvent>,
-) -> (Vec<EntityFrameEvent>, Vec<HashToSign>) {
+) -> Result<(Vec<EntityFrameEvent>, Vec<HashToSign>, PresignedManifest), ResidentEntityError> {
     let mut events = Vec::new();
     let mut hashes = Vec::new();
+    let mut presigned = PresignedManifest::new();
     for row in &inbound.applied {
-        collect_verdict_certification(row.account_id, &row.verdict, &mut events, &mut hashes);
+        collect_verdict_certification(
+            row.account_id,
+            &row.verdict,
+            &mut events,
+            &mut hashes,
+            &mut presigned,
+        )?;
     }
     events.extend(local_events);
     for row in &outbound.proposals {
@@ -498,11 +526,21 @@ fn collect_round_certification(
             continue;
         };
         append_status_events(&mut events, &proposed.events);
+        let hash = hex_prefixed(&proposed.state_hash);
         hashes.push(HashToSign {
-            hash: hex_prefixed(&proposed.state_hash),
+            hash: hash.clone(),
             kind: HashType::AccountFrame,
             context: account_hash_context(row.account_id, "frame", proposed.frame.height),
         });
+        if presigned
+            .insert(
+                hash.clone(),
+                PresignedManifestEntry::account(proposed.signature, proposed.hanko.clone()),
+            )
+            .is_some()
+        {
+            return Err(ResidentEntityError::ManifestWitnessDuplicate(hash));
+        }
         if let Some(dispute) = &proposed.dispute {
             hashes.push(HashToSign {
                 hash: hex_prefixed(&dispute.hash),
@@ -511,7 +549,7 @@ fn collect_round_certification(
             });
         }
     }
-    (events, hashes)
+    Ok((events, hashes, presigned))
 }
 
 fn ordered_commits(
@@ -809,8 +847,8 @@ pub fn apply_resident_entity_round_core(
         &outbound.admissions,
     )?;
     apply_failed_proposal_routes(&mut kernel.state, &outbound, &mut kernel.outputs);
-    let (entity_frame_events, secondary_hashes) =
-        collect_round_certification(&inbound, &outbound, kernel.local_events);
+    let (entity_frame_events, secondary_hashes, presigned_manifest) =
+        collect_round_certification(&inbound, &outbound, kernel.local_events)?;
     let actual_touches = inbound
         .touched
         .iter()
@@ -848,6 +886,7 @@ pub fn apply_resident_entity_round_core(
         outputs: kernel.outputs,
         entity_frame_events,
         secondary_hashes,
+        presigned_manifest,
         inbound,
         outbound,
         non_mutating_wake_targets: kernel.non_mutating_wake_targets,

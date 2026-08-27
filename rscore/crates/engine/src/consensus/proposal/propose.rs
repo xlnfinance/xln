@@ -70,6 +70,10 @@ fn critical_kind(tx: &AccountTx) -> Option<&'static str> {
 pub struct ProposedFrame {
     pub frame: AccountFrame,
     pub state_hash: [u8; 32],
+    /// Raw signature created together with `hanko`. The parent Entity reuses
+    /// these exact bytes in its manifest instead of signing the same Account
+    /// digest a second time on the coordinator thread.
+    pub signature: [u8; 65],
     pub hanko: Vec<u8>,
     pub dropped: Vec<DroppedTx>,
     /// The recovery proof this proposal travels with, when it carries one.
@@ -301,7 +305,7 @@ pub fn propose_account_frame(
         account_state_root,
     };
     let state_hash = frame.hash()?;
-    let hanko = identity.sign_frame(&state_hash)?;
+    let (signature, hanko) = identity.sign_frame_with_raw(&state_hash)?;
     // TypeScript publishes only this proposal status line. Transaction
     // handler events are speculative and never enter a later ACK frame.
     let published_events = vec![format!(
@@ -331,6 +335,7 @@ pub fn propose_account_frame(
     Ok(ProposalOutcome::Proposed(Box::new(ProposedFrame {
         frame,
         state_hash,
+        signature,
         hanko,
         dropped,
         dispute: proposal_dispute,

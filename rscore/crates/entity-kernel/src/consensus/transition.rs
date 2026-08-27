@@ -27,7 +27,8 @@ use super::output::{
     EntityHankoWitness, EntityHankoWitnessMap, EntityOutputError, LocalEntityOutput,
 };
 use super::single_signer::{
-    EntityCertificationError, EntitySingleSigner, certify_single_signer_entity_frame,
+    EntityCertificationError, EntitySingleSigner, PresignedManifest,
+    certify_single_signer_entity_frame,
 };
 
 /// Entity consensus fields whose values are derived by the native Entity and
@@ -267,6 +268,7 @@ pub struct EntityTransitionCertificationRequest<'a> {
     pub j_prefix_certificate: Option<&'a CanonicalValue>,
     pub post_authority: EntityFrameAuthority,
     pub secondary_hashes: Vec<HashToSign>,
+    pub presigned_manifest: PresignedManifest,
     /// Raw Account outputs in their exact relative Entity-output order.
     pub account_outputs: Vec<xln_rscore_batch::AccountPeerInput>,
     pub non_mutating_wakes: Vec<PendingNonMutatingWake>,
@@ -482,6 +484,7 @@ pub fn certify_entity_transition(
         &request.post_authority,
         body,
         request.secondary_hashes,
+        request.presigned_manifest,
     )?;
     if certified.frame.hashes_to_sign.len() != certified.manifest_hankos.len() {
         return Err(EntityTransitionError::OutputLayout);
@@ -684,6 +687,7 @@ mod tests {
                 j_prefix_certificate: None,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
+                presigned_manifest: PresignedManifest::new(),
                 account_outputs: Vec::new(),
                 non_mutating_wakes: Vec::new(),
             },
@@ -729,6 +733,7 @@ mod tests {
                 j_prefix_certificate: None,
                 post_authority: authority,
                 secondary_hashes: Vec::new(),
+                presigned_manifest: PresignedManifest::new(),
                 account_outputs: Vec::new(),
                 non_mutating_wakes: vec![PendingNonMutatingWake {
                     output_index: 0,

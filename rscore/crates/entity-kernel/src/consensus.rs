@@ -181,8 +181,9 @@ pub use production::{
     EntityLeaderState, EntityLineageError, EntityOutputError, EntitySingleSigner,
     EntityTransitionCertificationRequest, EntityTransitionError, EntityTxCatalogError,
     EntityTxKind, EntityTxSupport, HashToSign, HashType, LocalEntityOutput, LocalEntityOutputTx,
-    PendingNonMutatingWake, ResidentEntityConsensusReplica, build_certified_entity_frame_link,
-    build_entity_hash_manifest, certify_entity_transition, certify_single_signer_entity_frame,
+    PendingNonMutatingWake, PresignedManifest, PresignedManifestEntry,
+    ResidentEntityConsensusReplica, build_certified_entity_frame_link, build_entity_hash_manifest,
+    certify_entity_transition, certify_single_signer_entity_frame,
     compute_entity_events_parity_digest, compute_entity_frame_hash,
     is_entity_owned_consensus_field, project_entity_consensus_sections,
 };

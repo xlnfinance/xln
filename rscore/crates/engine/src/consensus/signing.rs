@@ -7,8 +7,7 @@
 //! before recovery.
 
 use xln_rscore_hanko::{
-    BoardDelays, build_single_signer_hanko, encode_single_signer_hanko_from_signature,
-    verify_canonical_hanko,
+    BoardDelays, encode_single_signer_hanko_from_signature, verify_canonical_hanko,
 };
 
 use crate::error::StateError;
@@ -235,15 +234,31 @@ impl SigningIdentity {
     pub fn sign_frame(&self, digest: &[u8; 32]) -> Result<Vec<u8>, StateError> {
         #[cfg(test)]
         TEST_SIGN_FRAME_CALLS.with(|calls| calls.set(calls.get() + 1));
-        build_single_signer_hanko(
+        self.sign_frame_with_raw(digest).map(|(_, hanko)| hanko)
+    }
+
+    /// Produce the manifest signature and its Hanko in one signing operation.
+    ///
+    /// The raw signature is not caller-supplied: this method creates it from
+    /// this identity's private key and immediately wraps those exact bytes.
+    /// Therefore recovering the just-created signature back to the same key
+    /// would add a full ECDSA verification without strengthening the boundary.
+    /// Untrusted incoming Hankos still go through `verify_canonical_hanko`.
+    pub fn sign_frame_with_raw(
+        &self,
+        digest: &[u8; 32],
+    ) -> Result<([u8; 65], Vec<u8>), StateError> {
+        let signature = crate::sign_digest(&self.private_key, digest)
+            .ok_or_else(|| StateError::Signing("signature".to_string()))?;
+        let hanko = encode_single_signer_hanko_from_signature(
             &self.entity_id,
-            digest,
-            &self.private_key,
+            signature,
             self.weight,
             self.threshold,
             self.delays,
         )
-        .map_err(|error| StateError::Signing(error.to_string()))
+        .map_err(|error| StateError::Signing(error.to_string()))?;
+        Ok((signature, hanko))
     }
 
     /// Encode a raw signature already retained in an Entity manifest as this

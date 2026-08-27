@@ -12,7 +12,7 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     AccountConsensus, AccountTx, CanonicalValue, HtlcResolveOutcome, HtlcResolveTx,
-    SigningIdentity, SwapMarketPolicy, TokenId, propose_account_frame,
+    SigningIdentity, SwapMarketPolicy, TokenId, address_of_private_key, propose_account_frame,
 };
 
 use crate::checkpoint::{AccountCheckpointRows, AccountsCheckpoint, account_rows};
@@ -91,6 +91,15 @@ enum SeedRestoreMode {
 }
 
 impl ResidentConsensusEngine {
+    /// Identity shared with the parent Entity signer. Runtime verifies this
+    /// once, allowing Account-worker signatures to enter the Entity manifest
+    /// without a hot-path ECDSA recovery.
+    pub fn local_signer_binding(&self) -> Result<(&str, [u8; 20]), BatchError> {
+        let address = address_of_private_key(&self.private_key)
+            .ok_or_else(|| BatchError::Signing("address".to_string()))?;
+        Ok((&self.signer_id, address))
+    }
+
     /// Restore every Account exactly once and move it into its permanent
     /// worker-owned shard. The reconstructed forest root is the same leaf/root
     /// commitment used by `StatefulConsensusEngine`.

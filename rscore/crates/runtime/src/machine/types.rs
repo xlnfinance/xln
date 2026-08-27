@@ -514,6 +514,12 @@ impl RuntimeReplica {
         if entity_signer.entity_id_text() != state.entity.entity_id {
             return Err(RuntimeMachineError::EntityConsensusOwnerMismatch);
         }
+        let (account_signer_id, account_signer_address) = accounts.local_signer_binding()?;
+        if account_signer_id != entity_signer.signer_id()
+            || entity_signer.signer_address() != Some(account_signer_address)
+        {
+            return Err(RuntimeMachineError::AccountEntitySignerMismatch);
+        }
         entity_consensus.validate_restored(&state.entity.entity_id, state.entity.height)?;
         let scheduled_wakes = super::ScheduledWakeIndex::from_entity_state(&state.entity)?;
         let replica_metadata = serde_json::json!({
@@ -704,6 +710,8 @@ pub enum RuntimeMachineError {
     EntityConsensusOwnerMismatch,
     #[error("RUNTIME_ENTITY_CONSENSUS_SIGNER_MISMATCH:runtime={runtime}:consensus={consensus}")]
     EntityConsensusSignerMismatch { runtime: String, consensus: String },
+    #[error("RUNTIME_ACCOUNT_ENTITY_SIGNER_MISMATCH")]
+    AccountEntitySignerMismatch,
     #[error("RUNTIME_REPLICA_METADATA:{0}")]
     ReplicaMetadata(String),
     #[error("RUNTIME_ENTITY_INPUT_EMPTY_WIRE")]
