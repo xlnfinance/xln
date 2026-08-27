@@ -109,7 +109,8 @@ describe('browser wallet recovery choice', () => {
     expect(view).toContain('summarizeWalletRecoveryCandidates(');
     expect(view).toContain('resolveWalletRecoveryContinuation({');
     expect(view).toContain('mergeWalletRecoveryCandidate(recoveryCandidates, candidate)');
-    expect(view).toContain('await discoverRuntimeRecoveryCandidates(mnemonic24, {');
+    expect(view).toContain('discover: ({ seed, runtimeId }) => discoverRuntimeRecoveryCandidates(seed, {');
+    expect(view).toContain('const outcome = await walletRecoveryDiscovery.run({');
     expect(view).toContain('await parseRuntimeRecoveryCandidateFile(');
     expect(view).toContain('await openLocalRuntime()');
     expect(view).toContain('await createFreshRuntime()');

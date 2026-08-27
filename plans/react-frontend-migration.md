@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, AND RUNTIME-OPENING COORDINATION IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, AND RECOVERY-DISCOVERY COORDINATION IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -623,6 +623,21 @@ affected recovery, vault protection, creation-lock, shell, bootstrap, consent,
 import, workspace, and capability suites pass 134 tests with 757 expectations;
 both wallet and canonical Svelte production builds pass, and the wallet local
 check covers 448 files with zero unsafe-type findings.
+
+The next wallet slice now owns generation-safe recovery discovery
+coordination: each request receives a new generation, only the latest success
+or failure is accepted, and reset or unmount explicitly invalidates outstanding
+work. Stale successes and failures return cancelled without clearing the
+newest request's loading state. The canonical Svelte event flow retains seed
+and Runtime preconditions, concrete tower and peer discovery sources, local
+Runtime lookup, candidate and failure publication, phase changes, and status
+persistence. Six direct tests plus the affected identity, rehearsal, opening,
+import, workspace, vault, shell, and capability suites pass 140 tests with 782
+expectations. The broader recovery batch passes 167 of 169 tests with 913
+expectations; its two failures are pre-existing stale source-shape assertions
+for the preserved-corrupt-storage diagnostic and the recovery-failure wrapper.
+Both wallet and canonical Svelte production builds pass, and the wallet local
+check covers 449 files with zero unsafe-type findings.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
@@ -807,6 +822,9 @@ any mismatch. Never compile on production.
    flags, and recovery-restore intent are shared while vault mutation,
    sensitive cleanup, navigation, diagnostics, and failure handling remain
    concrete.
+   Recovery discovery generation ownership, stale-result suppression, error
+   normalization, and reset/unmount invalidation are shared while concrete
+   discovery sources and UI, vault, and persistence effects remain concrete.
    The existing Svelte shell retains concrete lifecycle effects. Latest-read
    Runtime query subscriptions expose stable external-store snapshots while
    concrete source wiring, core result typing, and live RuntimeView publication

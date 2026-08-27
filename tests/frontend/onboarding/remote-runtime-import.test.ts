@@ -638,7 +638,9 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
     expect(runtimeCreation).not.toContain('live-runtime-section');
     expect(runtimeCreation).not.toContain('hydrateRemoteRuntimeImportSource');
-    expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
+    expect(runtimeCreation).toContain('discover: ({ seed, runtimeId }) => discoverRuntimeRecoveryCandidates(seed, {');
+    expect(runtimeCreation).toContain('peers: buildRemoteRuntimeRecoveryPeerSources({ runtimeId })');
+    expect(runtimeCreation).toContain('const outcome = await walletRecoveryDiscovery.run({');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
     expect(runtimeCreation).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
     expect(runtimeCreation).toContain("errorLog.log(message, 'Runtime Creation', details)");
