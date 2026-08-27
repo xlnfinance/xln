@@ -475,6 +475,7 @@ pub fn replay_runtime_wal(
                 actual_replica_meta: &actual_replica_meta,
                 actual_entity_sections: &actual_entity_sections,
                 actual_commitments: commitments,
+                actual_account_commits: &report.account_commits,
             })
             .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_WRITE:{error}"))?;
             return Err(format!(

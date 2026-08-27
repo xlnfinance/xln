@@ -1,11 +1,22 @@
 //! Canonical proposer context for live resident Runtime frames.
 
+#[path = "fresh/htlc.rs"]
+mod htlc;
+
+use std::collections::BTreeSet;
+
+use num_bigint::BigInt;
 use serde_json::{Value, json};
 use thiserror::Error;
+use x25519_dalek::{PublicKey, StaticSecret};
 use xln_rscore_batch::{AccountInputKind, AccountInputRow};
 use xln_rscore_engine::AccountTx;
-use xln_rscore_entity_kernel::{DeterministicContext, LocalEntityFinancialTx};
+use xln_rscore_entity_kernel::{
+    DeterministicContext, LocalEntityFinancialTx, PreparedContextError,
+};
 use xln_rscore_protocol::CanonicalValue;
+
+use self::htlc::materialize_inbound_htlc_context;
 
 use crate::{
     EntityContextJsonError, RuntimeReplica, TaggedJsonError, canonical_value_from_tagged_json,
@@ -24,6 +35,14 @@ pub enum FreshEntityContextError {
     Lineage { state: u64, head: String },
     #[error("RRS_FRESH_CONTEXT_HTLC_INFRA_REQUIRED")]
     HtlcInfrastructureRequired,
+    #[error("RRS_FRESH_CONTEXT_HTLC_ORIGIN_REQUIRED")]
+    HtlcOriginRequired,
+    #[error("RRS_FRESH_CONTEXT_HTLC_INFRA_INVALID:{0}")]
+    HtlcInfrastructureInvalid(String),
+    #[error("RRS_FRESH_CONTEXT_HTLC_ACCOUNT_READ:{0}")]
+    HtlcAccountRead(String),
+    #[error(transparent)]
+    Htlc(#[from] PreparedContextError),
     #[error(transparent)]
     Decode(#[from] EntityContextJsonError),
     #[error(transparent)]
@@ -31,7 +50,7 @@ pub enum FreshEntityContextError {
 }
 
 pub struct EntityInfraMaterializeRequest<'a> {
-    pub replica: &'a RuntimeReplica,
+    pub replica: &'a mut RuntimeReplica,
     /// Exact Account rows remaining after Runtime FIFO and Entity wire fitting.
     pub account_inputs: &'a [AccountInputRow],
     /// Exact effective local operations after Entity-command expansion.
@@ -56,16 +75,70 @@ pub trait EntityInfraMaterializer {
     ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError>;
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InboundHtlcInfrastructure {
+    pub entity_encryption_public_key: [u8; 32],
+    pub entity_encryption_private_key: [u8; 32],
+    pub routing_fee_ppm: u32,
+    pub routing_base_fee: BigInt,
+    pub known_profile_entity_ids: BTreeSet<String>,
+    pub online_entity_ids: BTreeSet<String>,
+}
+
+impl InboundHtlcInfrastructure {
+    pub fn validate(self) -> Result<Self, FreshEntityContextError> {
+        let canonical = |value: &String| {
+            value.len() == 66
+                && value.starts_with("0x")
+                && value == &value.to_ascii_lowercase()
+                && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        };
+        let derived_public =
+            *PublicKey::from(&StaticSecret::from(self.entity_encryption_private_key)).as_bytes();
+        if derived_public != self.entity_encryption_public_key
+            || self.routing_fee_ppm > 999_999
+            || self.routing_base_fee < BigInt::from(0)
+            || self
+                .known_profile_entity_ids
+                .iter()
+                .any(|value| !canonical(value))
+            || self.online_entity_ids.iter().any(|value| !canonical(value))
+            || !self
+                .online_entity_ids
+                .is_subset(&self.known_profile_entity_ids)
+        {
+            return Err(FreshEntityContextError::HtlcInfrastructureInvalid(
+                "KEYPAIR_OR_FIELDS".into(),
+            ));
+        }
+        Ok(self)
+    }
+}
+
 /// Canonical direct-payment/same-J/J-event materializer. HTLC work is rejected
 /// until profile, liveness, encryption and onion inputs are installed here;
 /// it must never silently execute with an empty context.
 pub struct CanonicalEntityInfraMaterializer {
     policy: Value,
+    inbound_htlc: Option<InboundHtlcInfrastructure>,
 }
 
 impl CanonicalEntityInfraMaterializer {
     pub fn new(policy: Value) -> Self {
-        Self { policy }
+        Self {
+            policy,
+            inbound_htlc: None,
+        }
+    }
+
+    pub fn with_inbound_htlc(
+        policy: Value,
+        infrastructure: InboundHtlcInfrastructure,
+    ) -> Result<Self, FreshEntityContextError> {
+        Ok(Self {
+            policy,
+            inbound_htlc: Some(infrastructure.validate()?),
+        })
     }
 }
 
@@ -74,7 +147,7 @@ impl EntityInfraMaterializer for CanonicalEntityInfraMaterializer {
         &mut self,
         request: EntityInfraMaterializeRequest<'_>,
     ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
-        materialize_fresh_entity_context(&self.policy, request)
+        materialize_fresh_entity_context(&self.policy, self.inbound_htlc.as_ref(), request)
     }
 }
 
@@ -102,16 +175,31 @@ fn needs_htlc_context(request: &EntityInfraMaterializeRequest<'_>) -> bool {
             .any(|tx| matches!(tx, LocalEntityFinancialTx::HtlcPayment(_)))
 }
 
+fn needs_originated_htlc(request: &EntityInfraMaterializeRequest<'_>) -> bool {
+    request
+        .local_financial_txs
+        .iter()
+        .any(|tx| matches!(tx, LocalEntityFinancialTx::HtlcPayment(_)))
+}
+
 /// Build the exact empty-infrastructure Entity context used by TypeScript for
 /// direct payments, same-J swaps, J-events and ordinary Account ACK traffic.
 pub fn materialize_fresh_entity_context(
     policy: &Value,
-    request: EntityInfraMaterializeRequest<'_>,
+    inbound_htlc: Option<&InboundHtlcInfrastructure>,
+    mut request: EntityInfraMaterializeRequest<'_>,
 ) -> Result<MaterializedEntityInfraContext, FreshEntityContextError> {
-    if needs_htlc_context(&request) {
+    if needs_originated_htlc(&request) {
+        return Err(FreshEntityContextError::HtlcOriginRequired);
+    }
+    if needs_htlc_context(&request) && inbound_htlc.is_none() {
         return Err(FreshEntityContextError::HtlcInfrastructureRequired);
     }
-    let replica = request.replica;
+    let (entries, peer_assertions) = match inbound_htlc {
+        Some(infrastructure) => materialize_inbound_htlc_context(infrastructure, &mut request)?,
+        None => (Vec::new(), Vec::new()),
+    };
+    let replica = &request.replica;
     let height = replica
         .state
         .entity
@@ -147,11 +235,39 @@ pub fn materialize_fresh_entity_context(
         "parentFrameHash": parent_frame_hash,
         "height": height,
         "gossipProfiles": [],
-        "peerAssertions": [],
-        "htlc": { "version": 1, "entries": [], "originated": [] },
+        "peerAssertions": peer_assertions,
+        "htlc": { "version": 1, "entries": entries, "originated": [] },
     });
     Ok(MaterializedEntityInfraContext {
         execution: decode_entity_deterministic_context(policy, &canonical_json)?,
         canonical: canonical_value_from_tagged_json(&canonical_json)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbound_htlc_infrastructure_requires_the_checkpoint_keypair() {
+        let private_key = [7_u8; 32];
+        let public_key = *PublicKey::from(&StaticSecret::from(private_key)).as_bytes();
+        let valid = InboundHtlcInfrastructure {
+            entity_encryption_public_key: public_key,
+            entity_encryption_private_key: private_key,
+            routing_fee_ppm: 1,
+            routing_base_fee: BigInt::from(0),
+            known_profile_entity_ids: BTreeSet::new(),
+            online_entity_ids: BTreeSet::new(),
+        };
+        valid.clone().validate().expect("matching keypair");
+        assert!(matches!(
+            InboundHtlcInfrastructure {
+                entity_encryption_public_key: [8; 32],
+                ..valid
+            }
+            .validate(),
+            Err(FreshEntityContextError::HtlcInfrastructureInvalid(_))
+        ));
+    }
 }

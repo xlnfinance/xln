@@ -189,7 +189,7 @@ fn frame_at(
 
 #[test]
 fn fresh_context_matches_genesis_lineage_and_named_signer() -> Result<(), RuntimeMachineError> {
-    let runtime = replica(RuntimeLimits::hlt())?;
+    let mut runtime = replica(RuntimeLimits::hlt())?;
     let policy = serde_json::json!({
         "minimumTradeSize": {"__xlnType":"BigInt", "value":"0"},
         "swapTakerFeeBps": 0,
@@ -198,8 +198,9 @@ fn fresh_context_matches_genesis_lineage_and_named_signer() -> Result<(), Runtim
     });
     let context = materialize_fresh_entity_context(
         &policy,
+        None,
         EntityInfraMaterializeRequest {
-            replica: &runtime,
+            replica: &mut runtime,
             account_inputs: &[],
             local_financial_txs: &[],
             timestamp: 101,

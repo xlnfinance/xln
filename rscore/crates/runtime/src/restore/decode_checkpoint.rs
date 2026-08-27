@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use num_bigint::BigInt;
 use serde_json::{Map, Value};
 use thiserror::Error;
 use xln_rscore_crypto::{address_of_private_key, derive_signer_key};
@@ -200,6 +201,50 @@ fn decimal(value: &Value, path: &str) -> Result<u64, ConcreteCheckpointDecodeErr
         .map_err(|_| invalid(format!("DECIMAL:{path}")))
 }
 
+fn tagged_bigint(value: &Value, path: &str) -> Result<BigInt, ConcreteCheckpointDecodeError> {
+    let value = object(value, path)?;
+    exact_fields(value, &["__xlnType", "value"], path)?;
+    if value.get("__xlnType").and_then(Value::as_str) != Some("BigInt") {
+        return Err(invalid(format!("BIGINT:{path}")));
+    }
+    value
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("BIGINT:{path}")))?
+        .parse::<BigInt>()
+        .map_err(|_| invalid(format!("BIGINT:{path}")))
+}
+
+fn htlc_infrastructure_state(
+    core: &Map<String, Value>,
+) -> Result<([u8; 32], u32, BigInt), ConcreteCheckpointDecodeError> {
+    let public_key = digest(
+        core.get("entityEncryptionPublicKey")
+            .ok_or_else(|| invalid("ENTITY_ENCRYPTION_PUBLIC_KEY"))?,
+        "entityEncryptionPublicKey",
+    )?;
+    let Some(config) = core.get("hubRebalanceConfig") else {
+        return Ok((public_key, 1, BigInt::from(0)));
+    };
+    let config = object(config, "hubRebalanceConfig")?;
+    let routing_fee_ppm = config
+        .get("routingFeePPM")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value <= 999_999)
+        .ok_or_else(|| invalid("HUB_ROUTING_FEE_PPM"))?;
+    let routing_base_fee = tagged_bigint(
+        config
+            .get("baseFee")
+            .ok_or_else(|| invalid("HUB_ROUTING_BASE_FEE"))?,
+        "hubRebalanceConfig.baseFee",
+    )?;
+    if routing_base_fee < BigInt::from(0) {
+        return Err(invalid("HUB_ROUTING_BASE_FEE_NEGATIVE"));
+    }
+    Ok((public_key, routing_fee_ppm, routing_base_fee))
+}
+
 fn verify_account_checkpoint_ref(
     frame: &Map<String, Value>,
     stored: &crate::StoredRscoreCheckpoint,
@@ -338,6 +383,8 @@ fn decode_checkpoint(
         .collect::<BTreeSet<_>>();
     let restored_orderbook_accounts = restore_orderbook_accounts(&account_rows);
     let core = object(&graph.core, "entity.core")?;
+    let (entity_encryption_public_key, htlc_routing_fee_ppm, htlc_routing_base_fee) =
+        htlc_infrastructure_state(core)?;
     let active_jurisdiction = machine
         .as_object()
         .and_then(|value| value.get("activeJurisdiction"));
@@ -390,6 +437,9 @@ fn decode_checkpoint(
         entity_signer,
         certified_board_registry,
         entity_context_policy,
+        entity_encryption_public_key,
+        htlc_routing_fee_ppm,
+        htlc_routing_base_fee,
         replica_metadata: metadata.value,
         expected_entity_root,
         signer_private_key,

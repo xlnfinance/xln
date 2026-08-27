@@ -117,6 +117,13 @@ impl EntityRouteTable {
         self.direct_routes.clone()
     }
 
+    /// Entity profiles explicitly installed by the operator. The resident
+    /// Runtime uses this same deterministic set both for output routing and
+    /// for HTLC liveness assertions; no gossip lookup occurs mid-frame.
+    pub fn entity_ids(&self) -> impl Iterator<Item = &str> {
+        self.by_entity.keys().map(String::as_str)
+    }
+
     pub(crate) fn bind_and_encode(
         &self,
         outputs: Vec<Value>,

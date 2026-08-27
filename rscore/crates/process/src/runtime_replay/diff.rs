@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use xln_rscore_runtime::RuntimeDurableCommitments;
 use xln_rscore_runtime::decode_storage_payload;
 use xln_rscore_runtime::restore::ConcreteWalSource;
 use xln_rscore_runtime::storage::native::RecoveredWalFrame;
+use xln_rscore_runtime::{AccountCommitEvidence, AccountCommitSource, RuntimeDurableCommitments};
 
 const MAX_DIFFERENCES: usize = 32;
 const MAX_VALUE_CHARS: usize = 512;
@@ -34,6 +34,7 @@ pub struct RuntimeReplayDiffInput<'a> {
     pub actual_replica_meta: &'a Value,
     pub actual_entity_sections: &'a Value,
     pub actual_commitments: &'a RuntimeDurableCommitments,
+    pub actual_account_commits: &'a [AccountCommitEvidence],
 }
 
 pub fn write_runtime_replay_diff(
@@ -49,6 +50,7 @@ pub fn write_runtime_replay_diff(
         actual_replica_meta,
         actual_entity_sections,
         actual_commitments,
+        actual_account_commits,
     } = input;
     let expected_frame = decode_storage_payload(&expected.frame_bytes)
         .map_err(|error| format!("expected-frame:{error}"))?;
@@ -117,36 +119,37 @@ pub fn write_runtime_replay_diff(
         ("firstDifference".into(), first.clone()),
         ("layerDifferences".into(), Value::Array(layer_differences)),
         ("differences".into(), Value::Array(differences)),
-        ("expected".into(), redact(expected_value)),
-        ("actual".into(), redact(actual_value)),
+        // The artifact is mode 0600 and exists specifically to debug the
+        // first consensus divergence. Keep the complete canonical values:
+        // truncating or redacting them turns one deterministic failure into a
+        // second reproduction cycle, especially for HTLC events/secrets.
+        ("expected".into(), expected_value),
+        ("actual".into(), actual_value),
         (
             "layerDiagnostics".into(),
             Value::Object(Map::from_iter([
-                (
-                    "expectedEntityLink".into(),
-                    redact(expected_entity_link.clone()),
-                ),
+                ("expectedEntityLink".into(), expected_entity_link.clone()),
                 (
                     "actualEntityHead".into(),
-                    redact(actual_entity_head.cloned().unwrap_or(Value::Null)),
+                    actual_entity_head.cloned().unwrap_or(Value::Null),
                 ),
-                (
-                    "expectedEntityOracle".into(),
-                    redact(expected_entity_oracle),
-                ),
-                (
-                    "expectedAccountOracle".into(),
-                    redact(expected_account_oracle),
-                ),
+                ("expectedEntityOracle".into(), expected_entity_oracle),
+                ("expectedAccountOracle".into(), expected_account_oracle),
                 (
                     "actualEntitySections".into(),
-                    redact(actual_entity_sections.clone()),
+                    actual_entity_sections.clone(),
                 ),
                 ("actualCommitments".into(), actual_commitment_value),
                 (
-                    "actualReplicaMeta".into(),
-                    redact(actual_replica_meta.clone()),
+                    "actualAccountCommits".into(),
+                    Value::Array(
+                        actual_account_commits
+                            .iter()
+                            .map(account_commit_value)
+                            .collect(),
+                    ),
                 ),
+                ("actualReplicaMeta".into(), actual_replica_meta.clone()),
             ])),
         ),
     ]));
@@ -172,6 +175,34 @@ pub fn write_runtime_replay_diff(
         path,
         first_difference,
     })
+}
+
+fn account_commit_value(commit: &AccountCommitEvidence) -> Value {
+    Value::Object(Map::from_iter([
+        (
+            "accountId".into(),
+            Value::String(hex_digest(commit.account_id.as_bytes())),
+        ),
+        (
+            "source".into(),
+            Value::String(
+                match commit.source {
+                    AccountCommitSource::AckCommit => "ackCommit",
+                    AccountCommitSource::PeerCommit => "peerCommit",
+                }
+                .into(),
+            ),
+        ),
+        ("frameHeight".into(), Value::from(commit.frame_height)),
+        (
+            "stateHash".into(),
+            Value::String(hex_digest(&commit.state_hash)),
+        ),
+        (
+            "accountStateRoot".into(),
+            Value::String(hex_digest(&commit.account_state_root)),
+        ),
+    ]))
 }
 
 fn nested_field<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {

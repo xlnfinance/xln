@@ -7,7 +7,9 @@
 mod htlc;
 
 pub use htlc::{
-    HtlcMaterializeEnvironment, HtlcMaterializeInput, PreparedAccountView, PreparedContextError,
-    compute_htlc_envelope_context_hash, decode_onion_layer, decrypt_opaque_htlc_layer,
-    materialize_htlc_prepared_entries,
+    DecryptedHtlcLayer, DecryptedHtlcMaterializeInput, HtlcMaterializeEnvironment,
+    HtlcMaterializeInput, PreparedAccountView, PreparedContextError,
+    compute_htlc_envelope_context_hash, decode_onion_layer, decrypt_htlc_materialize_inputs,
+    decrypt_opaque_htlc_layer, materialize_decrypted_htlc_entries,
+    materialize_htlc_prepared_entries, required_htlc_account_tokens,
 };

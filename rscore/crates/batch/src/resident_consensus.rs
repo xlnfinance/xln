@@ -66,6 +66,7 @@ struct MaterializedAccount {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentAccountFinancialView {
     pub active: bool,
+    pub owner_in_capacity: BTreeMap<TokenId, BigInt>,
     pub owner_out_capacity: BTreeMap<TokenId, BigInt>,
 }
 
@@ -378,18 +379,19 @@ impl ResidentConsensusEngine {
                     Some(_) => false,
                 };
                 let owner_side = account.replica().owner_side();
-                let owner_out_capacity = token_ids
-                    .into_iter()
-                    .filter_map(|token_id| {
-                        account
-                            .replica()
-                            .state()
-                            .delta(token_id)
-                            .map(|delta| (token_id, delta.perspective(owner_side).out_capacity))
-                    })
-                    .collect();
+                let mut owner_in_capacity = BTreeMap::new();
+                let mut owner_out_capacity = BTreeMap::new();
+                for token_id in token_ids {
+                    let Some(delta) = account.replica().state().delta(token_id) else {
+                        continue;
+                    };
+                    let perspective = delta.perspective(owner_side);
+                    owner_in_capacity.insert(token_id, perspective.in_capacity);
+                    owner_out_capacity.insert(token_id, perspective.out_capacity);
+                }
                 Ok(ResidentAccountFinancialView {
                     active,
+                    owner_in_capacity,
                     owner_out_capacity,
                 })
             })

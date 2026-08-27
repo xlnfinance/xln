@@ -44,6 +44,12 @@ pub struct DecodedRuntimeCheckpoint {
     /// authenticated checkpoint graph. WAL replay combines it only with each
     /// frame's independently authenticated prepared-context rows.
     pub entity_context_policy: Value,
+    /// Exact HTLC infrastructure fields projected from the same authenticated
+    /// Entity core. The private key and liveness remain operator/network
+    /// infrastructure and are never persisted in consensus state.
+    pub entity_encryption_public_key: [u8; 32],
+    pub htlc_routing_fee_ppm: u32,
+    pub htlc_routing_base_fee: num_bigint::BigInt,
     /// Exact canonical 0x26 live EntityReplica envelope.
     pub replica_metadata: Value,
     pub expected_entity_root: [u8; 32],

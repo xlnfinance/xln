@@ -45,7 +45,22 @@ pub struct HtlcMaterializeEnvironment {
     pub last_finalized_j_height: u64,
     pub routing_fee_ppm: u32,
     pub routing_base_fee: BigInt,
-    pub accounts: BTreeMap<String, PreparedAccountView>,
+    pub accounts: BTreeMap<(String, u16), PreparedAccountView>,
+}
+
+/// One authenticated onion layer before Account-capacity policy is applied.
+/// Decryption and Account reads are deliberately split so the Runtime can
+/// collect every referenced `(nextHop, token)` and issue one worker batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecryptedHtlcMaterializeInput {
+    pub binding: HtlcPreparedBinding,
+    pub layer: DecryptedHtlcLayer,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DecryptedHtlcLayer {
+    Reject { reason: &'static str },
+    Decoded(DecodedOnionLayer),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -401,10 +416,7 @@ fn reject(binding: HtlcPreparedBinding, reason: &str) -> PreparedHtlcEntry {
     }
 }
 
-fn materialize_one(
-    input: HtlcMaterializeInput,
-    env: &HtlcMaterializeEnvironment,
-) -> Result<PreparedHtlcEntry, PreparedContextError> {
+fn validate_materialize_input(input: &HtlcMaterializeInput) -> Result<(), PreparedContextError> {
     if input.binding.amount <= BigInt::from(0)
         || input.binding.timelock <= BigInt::from(0)
         || input.binding.account_height == 0
@@ -415,107 +427,158 @@ fn materialize_one(
             detail: "ECONOMICS_OR_ENVELOPE",
         });
     }
-    let context_hash = compute_htlc_envelope_context_hash(&input.binding)?;
-    let plaintext = match decrypt_opaque_htlc_layer(
-        &input.envelope,
-        &env.entity_encryption_public_key,
-        &env.entity_encryption_private_key,
-        &context_hash,
-    ) {
-        Ok(value) => value,
-        Err(
-            PreparedContextError::AuthenticationFailed | PreparedContextError::LowOrderSharedSecret,
-        ) => {
-            return Ok(reject(input.binding, "decrypt_failed"));
+    Ok(())
+}
+
+/// Authenticate and decode the selected inbound layers without consulting
+/// Account state. Peer-controlled ciphertext failures become one rejected
+/// row; local key provisioning remains a fatal infrastructure error.
+pub fn decrypt_htlc_materialize_inputs(
+    inputs: Vec<HtlcMaterializeInput>,
+    entity_public_key: &[u8; 32],
+    entity_private_key: &[u8; 32],
+) -> Result<Vec<DecryptedHtlcMaterializeInput>, PreparedContextError> {
+    let private = StaticSecret::from(*entity_private_key);
+    if PublicKey::from(&private).as_bytes() != entity_public_key {
+        return Err(PreparedContextError::KeypairMismatch);
+    }
+    inputs
+        .into_iter()
+        .map(|input| {
+            validate_materialize_input(&input)?;
+            let context_hash = compute_htlc_envelope_context_hash(&input.binding)?;
+            let layer = match decrypt_opaque_htlc_layer(
+                &input.envelope,
+                entity_public_key,
+                entity_private_key,
+                &context_hash,
+            ) {
+                Ok(plaintext) => match decode_onion_layer(&plaintext) {
+                    Ok(layer) => DecryptedHtlcLayer::Decoded(layer),
+                    Err(PreparedContextError::OnionInvalid { .. }) => DecryptedHtlcLayer::Reject {
+                        reason: "ciphertext_invalid",
+                    },
+                    Err(error) => return Err(error),
+                },
+                Err(
+                    PreparedContextError::AuthenticationFailed
+                    | PreparedContextError::LowOrderSharedSecret,
+                ) => DecryptedHtlcLayer::Reject {
+                    reason: "decrypt_failed",
+                },
+                Err(error) => return Err(error),
+            };
+            Ok(DecryptedHtlcMaterializeInput {
+                binding: input.binding,
+                layer,
+            })
+        })
+        .collect()
+}
+
+/// Minimal Account reads required by the decrypted forward layers.
+pub fn required_htlc_account_tokens(
+    inputs: &[DecryptedHtlcMaterializeInput],
+) -> BTreeMap<String, Vec<u16>> {
+    let mut requested = BTreeMap::<String, Vec<u16>>::new();
+    for input in inputs {
+        let DecryptedHtlcLayer::Decoded(DecodedOnionLayer::Forward { next_hop, .. }) = &input.layer
+        else {
+            continue;
+        };
+        let tokens = requested.entry(next_hop.clone()).or_default();
+        if !tokens.contains(&input.binding.token_id) {
+            tokens.push(input.binding.token_id);
+            tokens.sort_unstable();
         }
-        Err(error) => return Err(error),
-    };
-    let layer = match decode_onion_layer(&plaintext) {
-        Ok(value) => value,
-        Err(PreparedContextError::OnionInvalid { .. }) => {
-            return Ok(reject(input.binding, "ciphertext_invalid"));
-        }
-        Err(error) => return Err(error),
-    };
-    match layer {
-        DecodedOnionLayer::Final {
-            secret,
-            description,
-            started_at_ms,
-        } => Ok(PreparedHtlcEntry {
-            binding: input.binding,
-            outcome: HtlcPreparedOutcome::Final {
+    }
+    requested
+}
+
+fn materialize_decrypted_one(
+    input: DecryptedHtlcMaterializeInput,
+    env: &HtlcMaterializeEnvironment,
+) -> Result<PreparedHtlcEntry, PreparedContextError> {
+    match input.layer {
+        DecryptedHtlcLayer::Reject { reason } => Ok(reject(input.binding, reason)),
+        DecryptedHtlcLayer::Decoded(layer) => match layer {
+            DecodedOnionLayer::Final {
                 secret,
                 description,
                 started_at_ms,
-            },
-        }),
-        DecodedOnionLayer::Forward {
-            next_hop,
-            inner_envelope,
-            forward_amount,
-        } => {
-            lower_hex::<32>(&next_hop, "NEXT_HOP")?;
-            let Some(account) = env.accounts.get(&next_hop) else {
-                return Ok(reject(input.binding, "next_hop_account_missing"));
-            };
-            if !account.online {
-                return Ok(reject(input.binding, "next_hop_offline"));
-            }
-            if account.out_capacity < forward_amount {
-                return Ok(reject(input.binding, "insufficient_capacity"));
-            }
-            let fee_ppm = directional_fee_ppm(env.routing_fee_ppm, account);
-            let required_fee = non_negative(&env.routing_base_fee)
-                + &input.binding.amount * BigInt::from(fee_ppm) / BigInt::from(PPM_DENOMINATOR);
-            if &input.binding.amount - &forward_amount < required_fee {
-                return Ok(reject(input.binding, "fee_below_policy"));
-            }
-            let minimum_timestamp = env
-                .entity_timestamp
-                .checked_add(MIN_FORWARD_TIMELOCK_MS)
-                .ok_or(PreparedContextError::BindingInvalid {
+            } => Ok(PreparedHtlcEntry {
+                binding: input.binding,
+                outcome: HtlcPreparedOutcome::Final {
+                    secret,
+                    description,
+                    started_at_ms,
+                },
+            }),
+            DecodedOnionLayer::Forward {
+                next_hop,
+                inner_envelope,
+                forward_amount,
+            } => {
+                lower_hex::<32>(&next_hop, "NEXT_HOP")?;
+                let Some(account) = env
+                    .accounts
+                    .get(&(next_hop.clone(), input.binding.token_id))
+                else {
+                    return Ok(reject(input.binding, "next_hop_account_missing"));
+                };
+                if !account.online {
+                    return Ok(reject(input.binding, "next_hop_offline"));
+                }
+                if account.out_capacity < forward_amount {
+                    return Ok(reject(input.binding, "insufficient_capacity"));
+                }
+                let fee_ppm = directional_fee_ppm(env.routing_fee_ppm, account);
+                let required_fee = non_negative(&env.routing_base_fee)
+                    + &input.binding.amount * BigInt::from(fee_ppm) / BigInt::from(PPM_DENOMINATOR);
+                if &input.binding.amount - &forward_amount < required_fee {
+                    return Ok(reject(input.binding, "fee_below_policy"));
+                }
+                let minimum_timestamp = env
+                    .entity_timestamp
+                    .checked_add(MIN_FORWARD_TIMELOCK_MS)
+                    .ok_or(PreparedContextError::BindingInvalid {
                     detail: "TIMESTAMP_OVERFLOW",
                 })?;
-            let minimum_timelock = minimum_timestamp.checked_add(MIN_TIMELOCK_DELTA_MS).ok_or(
-                PreparedContextError::BindingInvalid {
-                    detail: "TIMESTAMP_OVERFLOW",
-                },
-            )?;
-            let timelock_safe = input.binding.timelock > BigInt::from(minimum_timelock);
-            let reveal_safe = input.binding.reveal_before_height
-                > env
-                    .last_finalized_j_height
-                    .checked_add(MIN_REVEAL_HEIGHT_DELTA_BLOCKS)
-                    .ok_or(PreparedContextError::BindingInvalid {
-                        detail: "HEIGHT_OVERFLOW",
-                    })?;
-            if !timelock_safe || !reveal_safe {
-                return Ok(reject(input.binding, "deadline_unsafe"));
+                let minimum_timelock = minimum_timestamp.checked_add(MIN_TIMELOCK_DELTA_MS).ok_or(
+                    PreparedContextError::BindingInvalid {
+                        detail: "TIMESTAMP_OVERFLOW",
+                    },
+                )?;
+                let timelock_safe = input.binding.timelock > BigInt::from(minimum_timelock);
+                let reveal_safe = input.binding.reveal_before_height
+                    > env
+                        .last_finalized_j_height
+                        .checked_add(MIN_REVEAL_HEIGHT_DELTA_BLOCKS)
+                        .ok_or(PreparedContextError::BindingInvalid {
+                            detail: "HEIGHT_OVERFLOW",
+                        })?;
+                if !timelock_safe || !reveal_safe {
+                    return Ok(reject(input.binding, "deadline_unsafe"));
+                }
+                Ok(PreparedHtlcEntry {
+                    binding: input.binding,
+                    outcome: HtlcPreparedOutcome::Forward {
+                        next_hop_entity_id: next_hop,
+                        forward_amount,
+                        inner_envelope,
+                    },
+                })
             }
-            Ok(PreparedHtlcEntry {
-                binding: input.binding,
-                outcome: HtlcPreparedOutcome::Forward {
-                    next_hop_entity_id: next_hop,
-                    forward_amount,
-                    inner_envelope,
-                },
-            })
-        }
+        },
     }
 }
 
-/// Materialize and canonicalize all inbound onion rows. Identical duplicate
-/// deliveries collapse; contradictory facts for one `(frameHash, lockId)` are
-/// fatal exactly like the TypeScript frame-context boundary.
-pub fn materialize_htlc_prepared_entries(
-    inputs: Vec<HtlcMaterializeInput>,
+/// Apply liveness, capacity, fee and deadline policy after the Runtime has
+/// completed its single batched Account read.
+pub fn materialize_decrypted_htlc_entries(
+    inputs: Vec<DecryptedHtlcMaterializeInput>,
     env: &HtlcMaterializeEnvironment,
 ) -> Result<Vec<PreparedHtlcEntry>, PreparedContextError> {
-    let private = StaticSecret::from(env.entity_encryption_private_key);
-    if PublicKey::from(&private).as_bytes() != &env.entity_encryption_public_key {
-        return Err(PreparedContextError::KeypairMismatch);
-    }
     let mut decorated = inputs
         .into_iter()
         .map(|input| {
@@ -530,7 +593,7 @@ pub fn materialize_htlc_prepared_entries(
     let mut output = Vec::<PreparedHtlcEntry>::with_capacity(decorated.len());
     let mut previous_key: Option<String> = None;
     for (key, input) in decorated {
-        let entry = materialize_one(input, env)?;
+        let entry = materialize_decrypted_one(input, env)?;
         if previous_key.as_deref() == Some(key.as_str()) {
             let previous = output
                 .last()
@@ -544,6 +607,21 @@ pub fn materialize_htlc_prepared_entries(
         output.push(entry);
     }
     Ok(output)
+}
+
+/// Materialize and canonicalize all inbound onion rows. Identical duplicate
+/// deliveries collapse; contradictory facts for one `(frameHash, lockId)` are
+/// fatal exactly like the TypeScript frame-context boundary.
+pub fn materialize_htlc_prepared_entries(
+    inputs: Vec<HtlcMaterializeInput>,
+    env: &HtlcMaterializeEnvironment,
+) -> Result<Vec<PreparedHtlcEntry>, PreparedContextError> {
+    let decrypted = decrypt_htlc_materialize_inputs(
+        inputs,
+        &env.entity_encryption_public_key,
+        &env.entity_encryption_private_key,
+    )?;
+    materialize_decrypted_htlc_entries(decrypted, env)
 }
 
 #[cfg(test)]
@@ -640,6 +718,70 @@ mod tests {
         assert!(matches!(
             rows[0].outcome,
             HtlcPreparedOutcome::Reject { ref reason } if reason == "decrypt_failed"
+        ));
+    }
+
+    #[test]
+    fn one_peer_with_two_tokens_reads_each_token_capacity() {
+        let next_hop = format!("0x{}", "88".repeat(32));
+        let inner_envelope =
+            OpaqueHtlcCiphertext::from_packed(vec![1_u8; 48]).expect("inner envelope");
+        let rows = [7_u16, 8_u16]
+            .into_iter()
+            .map(|token_id| {
+                let mut binding = golden_binding();
+                binding.lock_id = format!("0x{:064x}", token_id);
+                binding.account_frame_hash = format!("0x{:064x}", token_id + 100);
+                binding.token_id = token_id;
+                binding.amount = BigInt::from(200);
+                DecryptedHtlcMaterializeInput {
+                    binding,
+                    layer: DecryptedHtlcLayer::Decoded(DecodedOnionLayer::Forward {
+                        next_hop: next_hop.clone(),
+                        inner_envelope: inner_envelope.clone(),
+                        forward_amount: BigInt::from(100),
+                    }),
+                }
+            })
+            .collect();
+        let accounts = BTreeMap::from([
+            (
+                (next_hop.clone(), 7),
+                PreparedAccountView {
+                    online: true,
+                    out_capacity: BigInt::from(1_000),
+                    in_capacity: BigInt::from(0),
+                },
+            ),
+            (
+                (next_hop, 8),
+                PreparedAccountView {
+                    online: true,
+                    out_capacity: BigInt::from(0),
+                    in_capacity: BigInt::from(0),
+                },
+            ),
+        ]);
+        let materialized = materialize_decrypted_htlc_entries(
+            rows,
+            &HtlcMaterializeEnvironment {
+                entity_encryption_public_key: [0; 32],
+                entity_encryption_private_key: [0; 32],
+                entity_timestamp: 1,
+                last_finalized_j_height: 1,
+                routing_fee_ppm: 1,
+                routing_base_fee: BigInt::from(0),
+                accounts,
+            },
+        )
+        .expect("materialize both tokens");
+        assert!(matches!(
+            materialized[0].outcome,
+            HtlcPreparedOutcome::Forward { .. }
+        ));
+        assert!(matches!(
+            materialized[1].outcome,
+            HtlcPreparedOutcome::Reject { ref reason } if reason == "insufficient_capacity"
         ));
     }
 }

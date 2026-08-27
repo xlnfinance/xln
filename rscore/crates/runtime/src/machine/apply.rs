@@ -471,7 +471,7 @@ fn apply_runtime_inner(
     if let Some(materializer) = materializer {
         let materialized = materializer
             .materialize(EntityInfraMaterializeRequest {
-                replica: &replica,
+                replica: &mut replica,
                 account_inputs: &rows,
                 local_financial_txs: &local_financial_txs,
                 timestamp: frame.frame.timestamp,
