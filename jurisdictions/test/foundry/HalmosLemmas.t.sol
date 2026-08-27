@@ -219,4 +219,48 @@ contract HalmosLemmas is Test {
   function check_rootRoundTrip(bytes32 base, uint8 digit) external pure {
     _lemma_rootRoundTrip(base, digit);
   }
+
+  // ═══════════════ appendix: the gas-artifact reproducer (c4-adversary A7) ═══════════════
+
+  /// @notice GAS-ARTIFACT ARTIFACT (halmos FAIL / EVM PASS, by design).
+  ///
+  /// Concrete run: delta 0 = 5+0, the clause requests Add(7) — a definite
+  /// change — with NO allowance. On a real EVM (forge, 300M gas limit) the
+  /// pipeline reverts at the Account.sol:996-1000 gate with
+  /// TransformerExecutionFailed: `reverted && !gasArtifact` holds and the
+  /// forge wrapper (`test_gateZeroConcrete_halmos`) PASSES under forge.
+  ///
+  /// Symbolic run: halmos 0.3.3 models `gasleft()` symbolically, so the
+  /// earlier `TransformerGasBudgetUnavailable` branch (Account.sol:887)
+  /// becomes feasible and `check_gateZeroConcrete` reports a counterexample
+  /// — `reverted && !gasArtifact` fails in-model even though no concrete EVM
+  /// caller with the configured 300M limit can reach that branch first in a
+  /// single-clause body. THIS IS THE JUSTIFICATION ARTIFACT for the harness's
+  /// exactly-one-selector tolerance (helpers/SettlementDeltasHarness.sol):
+  /// the tolerated revert can never mask a real gate failure on the EVM,
+  /// because on the EVM the gate fires with a DIFFERENT selector.
+  ///
+  /// WARNING (audit A7 caveat): the tolerance is valid ONLY for this
+  /// single-clause, empty-arguments harness. With >= 2 clauses a genuinely
+  /// gas-starved second clause legitimately emits
+  /// TransformerGasBudgetUnavailable at Account.sol:887, and a decoder-site
+  /// gas revert additionally exists at Account.sol:1102-1104 — do NOT
+  /// copy the tolerance into a multi-clause or non-empty-arguments harness.
+  function _gateZeroConcreteBody() internal {
+    (int256 delta0, , bool reverted, bool gasArtifact) =
+      harness.run(5, 0, 1, TransformerLivenessHarness.Mode.Add, 7, false, 0, 0);
+    assertTrue(reverted && !gasArtifact, "EVM gate must fire with a real error, not the gas artifact");
+    assertEq(delta0, 0, "no delta may be applied without an allowance");
+  }
+
+  /// @dev Halmos-collected form (check_* prefix): expected to FAIL under
+  ///      halmos (symbolic gas artifact) while passing on the EVM.
+  function check_gateZeroConcrete() external {
+    _gateZeroConcreteBody();
+  }
+
+  /// @dev Forge-side wrapper of the same property: green in the forge gate.
+  function test_gateZeroConcrete_halmos() external {
+    _gateZeroConcreteBody();
+  }
 }

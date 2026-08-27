@@ -61,6 +61,8 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
   uint256 public clampObservations; // clean finals where the oracle ran
   uint256 public activeClamps; // of those, how many actually clamped
   uint256 public starterEarlyAttempts;
+  /// @dev C4-hardening A6: repay actions that restored a token to `clean`.
+  uint256 public debtRepairs;
 
   struct DisputeGhost {
     bool active;
@@ -387,6 +389,27 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     } else {
       rejectedFinalizes++;
     }
+  }
+
+  /// @notice Debt repayment (C4-hardening, audit A6): after a shortfall
+  ///         finalize books debt, the clamp oracle's `clean` precondition is
+  ///         permanently false and observation stops. This action funds the
+  ///         debtor and drains the queue through the public enforceDebts, so
+  ///         `clean` recovers and clamp observation resumes after a shortfall.
+  function repayDebt(uint256 actorSeed, uint256 tokenSeed, uint256 amount) external {
+    uint256 a = _actor(actorSeed);
+    uint256 t = _token(tokenSeed);
+    uint256 outstanding = dep.debtOutstanding(entityOf[a], t);
+    if (outstanding == 0) return;
+    amount = bound(amount, outstanding, outstanding + 1e21);
+    vm.prank(admin);
+    try dep.mintToReserve(entityOf[a], t, amount) {
+      ghostMinted[t] += amount;
+    } catch {
+      return;
+    }
+    dep.enforceDebts(entityOf[a], t, 0); // uncapped drain
+    if (dep.debtOutstanding(entityOf[a], t) == 0) debtRepairs++;
   }
 
   /// @notice Warps exactly to a live dispute's timeout so the starter's legal

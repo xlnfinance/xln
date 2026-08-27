@@ -20,15 +20,25 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 ///   (B, A, ...) slot — the pair is never sorted because the reverse
 ///   participant must not write this slot.
 /// - SOURCE SINGLE-SHOT: first Source write must land inside its signed
-///   account window [S, S + ownerResponseSeconds]; exact retries are sticky
-///   no-ops (ratio AND revealedAt unchanged); different ratios are E12.
+///   account window [S, S+W_owner]; exact retries are sticky no-ops (ratio AND
+///   revealedAt unchanged); different ratios are E12.
 /// - TARGET MONOTONE: lower replays are E12; equal/higher publications may
 ///   refresh revealedAt; fillRatio never decreases.
+///
+/// C4-hardening wave 2 (audit A5): the windows are deliberately ASYMMETRIC
+/// (LEFT=50, RIGHT=70). HashLadderRegistry.registerReveal selects the owner
+/// window by entity order (:68-70); with symmetric windows a side-selection
+/// bug (reading the counterparty's window) is unobservable. The ghost always
+/// uses the writer's OWN side, so the over-accepting direction of any swap
+/// fires invariant 5d, and `checkWindowSides` binds the signed windows to the
+/// correct storage fields. `closeDispute` finalizes live disputes so the
+/// "dispute closed → first Source write is E12" branch executes and pairs
+/// can cycle start→reveal→close repeatedly.
 contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6;
   uint32 public constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 public constant RIGHT_RESPONSE_SECONDS = 50;
+  uint32 public constant RIGHT_RESPONSE_SECONDS = 70;
   uint256 public constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -54,18 +64,28 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   uint256 public sourceConflictingRetryAccepted; // different ratio replaced Source
   uint256 public targetLowerRetryAccepted; // lower ratio replaced Target
   uint256 public sourceOutsideWindowAccepted; // first Source write outside [S,S+W]
+  /// @dev C4-hardening A5: a registration with an invalid witness (reveals do
+  ///      not hash to the declared ratio) was accepted — the E9 branch failed.
+  uint256 public invalidWitnessAccepted;
 
   // coverage
   uint256 public registrationsAccepted;
   uint256 public registrationsRejected;
   uint256 public disputesStarted;
+  uint256 public disputesClosed;
+  uint256 public invalidWitnessAttempts;
+  uint256 public closedDisputeSourceAttempts; // first-Source tries with no live dispute
   uint256 public sourceWrites;
   uint256 public targetWrites;
 
   struct DisputeGhost {
     bool active;
+    uint256 starter; // actor index
+    uint256 counter; // actor index
     uint256 leftActor;
     uint256 rightActor;
+    bool startedByLeft; // starter is the left entity
+    bool proposerIsLeft; // initial proof author is the left entity
     uint256 startTimestamp;
     uint256 nonce;
     bytes32 proofbodyHash;
@@ -167,7 +187,8 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
 
   // ═══════════════════════════ actions ═══════════════════════════
 
-  /// @notice Opens a 50s/50s dispute so Source windows become reachable.
+  /// @notice Opens a 50s/70s (asymmetric) dispute so Source windows become
+  ///         reachable and window side-selection becomes observable.
   function openDispute(uint256 fromSeed, uint256 cpSeed, uint256 seedNoise) external {
     (uint256 from, uint256 cp) = _distinct(fromSeed, cpSeed);
     _openDispute(from, cp, seedNoise);
@@ -212,8 +233,12 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     if (_submit(from, b)) {
       disputes[pairIndex(from, cp)] = DisputeGhost({
         active: true,
+        starter: from,
+        counter: cp,
         leftActor: me < other ? from : cp,
         rightActor: me < other ? cp : from,
+        startedByLeft: me < other,
+        proposerIsLeft: proposerIsLeft,
         startTimestamp: vm.getBlockTimestamp(),
         nonce: nonce,
         proofbodyHash: pbHash,
@@ -223,6 +248,63 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
       return true;
     }
     return false;
+  }
+
+  /// @notice C4-hardening A5: finalizes a live dispute through the REAL
+  ///         processBatch finalize path (pull-free body, so the non-starter
+  ///         may accept immediately and the starter only after the timeout).
+  ///         After a close, a first Source write must hit the E12 branch.
+  function closeDispute(uint256 pairSeed, uint256 bySeed) external {
+    uint256 pi = pairSeed % PAIRS;
+    if (!disputes[pi].active) {
+      for (uint256 k = 0; k < PAIRS; k++) {
+        uint256 cand = (pi + k) % PAIRS;
+        if (disputes[cand].active) {
+          pi = cand;
+          break;
+        }
+      }
+    }
+    DisputeGhost memory g = disputes[pi];
+    if (!g.active || g.startTimestamp == 0) return;
+    if (_disputeHash(entityOf[g.leftActor], entityOf[g.rightActor]) == bytes32(0)) return;
+
+    bool byStarter = bySeed % 2 == 0;
+    uint256 caller = byStarter ? g.starter : g.counter;
+    if (byStarter && vm.getBlockTimestamp() < g.startTimestamp + DISPUTE_WINDOW_SECONDS) {
+      vm.warp(g.startTimestamp + DISPUTE_WINDOW_SECONDS);
+    }
+
+    ProofBody memory pb;
+    pb.watchSeed = g.watchSeed;
+    pb.leftResponseSeconds = LEFT_RESPONSE_SECONDS;
+    pb.rightResponseSeconds = RIGHT_RESPONSE_SECONDS;
+    pb.offdeltas = new int256[](1);
+    pb.tokenIds = new uint256[](1);
+    pb.tokenIds[0] = 1;
+    pb.transformers = new TransformerClause[](0);
+
+    bytes32 otherE = entityOf[byStarter ? g.counter : g.starter];
+    Batch memory b = XlnHanko.emptyBatch();
+    b.disputeFinalizations = new FinalDisputeProof[](1);
+    b.disputeFinalizations[0] = FinalDisputeProof({
+      counterentity: otherE,
+      initialNonce: g.nonce,
+      finalNonce: g.nonce,
+      proposerIsLeft: g.proposerIsLeft,
+      initialProofbodyHash: g.proofbodyHash,
+      finalProofbody: pb,
+      starterArguments: "",
+      otherArguments: "",
+      sig: "",
+      startedByLeft: g.startedByLeft,
+      cooperative: false
+    });
+
+    if (_submit(caller, b)) {
+      disputes[pi].active = false;
+      disputesClosed++;
+    }
   }
 
   /// @notice The core action: one hash-ladder registration through
@@ -273,6 +355,15 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
       _ladderMaterial(bucket, ratio);
     bytes32 ladder = keccak256(abi.encodePacked(fullHash, partialRoot));
 
+    // C4-hardening A5: occasionally corrupt the witness (declared fillRatio
+    // does not match the reveals) so the E9 forgery branch executes. The
+    // registration must be rejected; acceptance is an oracle violation.
+    bool corruptWitness = ratio != type(uint16).max && bucketSeed % 7 == 6;
+    if (corruptWitness) {
+      w.fillRatio = ratio == 1 ? 2 : 1;
+      invalidWitnessAttempts++;
+    }
+
     Batch memory b = XlnHanko.emptyBatch();
     b.hashLadderRegistrations = new HashLadderRegistration[](1);
     b.hashLadderRegistrations[0] = HashLadderRegistration({
@@ -287,8 +378,13 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     bool insideWindow = disputeLive
       && vm.getBlockTimestamp() >= g.startTimestamp
       && vm.getBlockTimestamp() <= g.startTimestamp + ownerWindow;
+    if (!targetRole && !disputeLive && !found) closedDisputeSourceAttempts++;
 
     if (_submit(from, b)) {
+      if (corruptWitness) {
+        invalidWitnessAccepted++;
+        return;
+      }
       registrationsAccepted++;
       if (targetRole) {
         targetWrites++;
@@ -347,6 +443,22 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   }
 
   // ═══════════════════════════ verification ═══════════════════════════
+
+  /// @dev Role-side assertion (audit A5): every live dispute stored the
+  ///      signed asymmetric windows on the CORRECT AccountInfo fields —
+  ///      leftResponseSeconds=50 on the left entity's side, 70 on the right.
+  ///      A storage-side swap fires this check even when it would be
+  ///      invisible under symmetric windows.
+  function checkWindowSides() external view returns (uint256 violations) {
+    for (uint256 pi = 0; pi < PAIRS; pi++) {
+      DisputeGhost memory g = disputes[pi];
+      if (!g.active) continue;
+      if (_disputeHash(entityOf[g.leftActor], entityOf[g.rightActor]) == bytes32(0)) continue;
+      (, , , , uint32 lrs, uint32 rrs, , , , , , , , , ) =
+        dep._accounts(XlnHanko.accountKey(entityOf[g.leftActor], entityOf[g.rightActor]));
+      if (lrs != LEFT_RESPONSE_SECONDS || rrs != RIGHT_RESPONSE_SECONDS) violations++;
+    }
+  }
 
   /// @dev Recomputes chain state for every ghost slot and its REVERSED pair.
   ///      Pure computation: the invariant functions assert on the result.

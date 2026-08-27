@@ -40,8 +40,8 @@ contract TransformerAllowanceInvariants is XlnFixture {
     selectors[2] = handler.startTransformedDispute.selector;
     selectors[3] = handler.finalizeTransformed.selector;
     selectors[4] = handler.advancePastDisputeDelay.selector;
-    selectors[5] = handler.advance.selector;
-    selectors[6] = handler.mint.selector;
+    selectors[5] = handler.repayDebt.selector;
+    selectors[6] = handler.advance.selector;
     targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
   }
 
@@ -189,6 +189,162 @@ contract TransformerAllowanceInvariants is XlnFixture {
     (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[a], entity[b]));
   }
 
+  // ═══════════════ C4-hardening wave 2 (audit A4): fault-mode disputes ═══════════════
+
+  /// @notice CONTROL (fault modes through the REAL processBatch dispute
+  ///          path): a dispute whose signed ProofBody carries a fault-mode
+  ///          clause (RevertCall; MalformedReturn/WrongLength are covered at
+  ///          the harness level in TransformerFaultModes.t.sol) can NEVER
+  ///          finalize — not by the non-starter's immediate accept, not by
+  ///          the starter after timeout — the Account stays disputed until a
+  ///          NEWER counterparty-signed pull-free state replaces it. Closing
+  ///          with that clean body must still land inside the signed clamp
+  ///          band (the fault clause never silently applied anything).
+  function test_control_faultModeDisputeOnlyClosesViaCleanCounterState() public {
+    _fundPair();
+    uint256 left = _leftActor();
+    uint256 right = _rightActor();
+    uint256 nonce = _accountNonceOf(left, right) + 1;
+    bytes32 watchSeed = keccak256("fault-mode");
+    bytes memory key = XlnHanko.accountKey(entity[left], entity[right]);
+
+    // Fault body: offdelta 100 (prev = 1000+100 = 1100), clause RevertCall
+    // requesting Add(5000) WITH allowance — the fault is the only blocker.
+    ProofBody memory faultPb;
+    faultPb.watchSeed = watchSeed;
+    faultPb.leftResponseSeconds = 50;
+    faultPb.rightResponseSeconds = 50;
+    faultPb.offdeltas = new int256[](1);
+    faultPb.offdeltas[0] = 100;
+    faultPb.tokenIds = new uint256[](1);
+    faultPb.tokenIds[0] = 1;
+    faultPb.transformers = new TransformerClause[](1);
+    Allowance[] memory faultAllowances = new Allowance[](1);
+    faultAllowances[0] = Allowance({ deltaIndex: 0, rightAllowance: 50, leftAllowance: 50 });
+    faultPb.transformers[0] = TransformerClause({
+      transformerAddress: address(transformer),
+      encodedBatch: transformer.encode(TransformerLivenessHarness.Mode.RevertCall, 0, 5_000, 1),
+      allowances: faultAllowances
+    });
+    bytes32 faultHash = keccak256(abi.encode(faultPb));
+
+    // Start by LEFT (starter), inner proof authored/signed by RIGHT.
+    bool startProposerIsLeft = false; // RIGHT authored the initial proof
+    bytes32 startH = XlnHanko.disputeProofHash(address(dep), key, nonce, startProposerIsLeft, faultHash, watchSeed);
+    Batch memory start = XlnHanko.emptyBatch();
+    start.disputeStarts = new InitialDisputeProof[](1);
+    start.disputeStarts[0] = InitialDisputeProof({
+      counterentity: entity[right],
+      nonce: nonce,
+      proposerIsLeft: startProposerIsLeft,
+      proofbodyHash: faultHash,
+      initialProofbody: faultPb,
+      watchSeed: watchSeed,
+      sig: _hanko(right, startH),
+      starterInitialArguments: "",
+      starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
+    });
+    assertTrue(_submit(left, start), "fault control: dispute start failed");
+    assertTrue(_disputeHashOf(left, right) != bytes32(0), "fault control: dispute not live");
+
+    // 1) Non-starter immediate finalize of the fault body: must revert.
+    Batch memory finFault = XlnHanko.emptyBatch();
+    finFault.disputeFinalizations = new FinalDisputeProof[](1);
+    finFault.disputeFinalizations[0] = FinalDisputeProof({
+      counterentity: entity[left],
+      initialNonce: nonce,
+      finalNonce: nonce,
+      proposerIsLeft: startProposerIsLeft,
+      initialProofbodyHash: faultHash,
+      finalProofbody: faultPb,
+      starterArguments: "",
+      otherArguments: "",
+      sig: "",
+      startedByLeft: true, // LEFT is the starter
+      cooperative: false
+    });
+    bytes memory finFaultEncoded = abi.encode(finFault);
+    uint256 rightNonce = dep.entityNonces(entity[right]) + 1;
+    bytes32 rightBatchH =
+      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), finFaultEncoded, rightNonce);
+    vm.expectRevert();
+    dep.processBatch(finFaultEncoded, _hanko(right, rightBatchH), rightNonce);
+    assertTrue(_disputeHashOf(left, right) != bytes32(0), "fault finalize must leave the dispute live");
+
+    // 2) Starter after timeout: still reverts (fault modes are permanent).
+    (, , uint256 timeout, , , , , , , , , , , , ) = dep._accounts(key);
+    vm.warp(timeout + 1);
+    uint256 leftNonce = dep.entityNonces(entity[left]) + 1;
+    bytes32 leftBatchH =
+      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), finFaultEncoded, leftNonce);
+    vm.expectRevert();
+    dep.processBatch(finFaultEncoded, _hanko(left, leftBatchH), leftNonce);
+    assertTrue(_disputeHashOf(left, right) != bytes32(0), "timeout fault finalize must leave the dispute live");
+
+    // 3) Close via a NEWER counterparty-signed clean state: authored by LEFT
+    //    (proposerIsLeft = true), signed by LEFT's Hanko, submitted by the
+    //    non-starter RIGHT. Clause Add(5000) with allowance ±50.
+    ProofBody memory cleanPb;
+    cleanPb.watchSeed = watchSeed;
+    cleanPb.leftResponseSeconds = 50;
+    cleanPb.rightResponseSeconds = 50;
+    cleanPb.offdeltas = new int256[](1);
+    cleanPb.offdeltas[0] = 100;
+    cleanPb.tokenIds = new uint256[](1);
+    cleanPb.tokenIds[0] = 1;
+    cleanPb.transformers = new TransformerClause[](1);
+    Allowance[] memory cleanAllowances = new Allowance[](1);
+    cleanAllowances[0] = Allowance({ deltaIndex: 0, rightAllowance: 50, leftAllowance: 50 });
+    cleanPb.transformers[0] = TransformerClause({
+      transformerAddress: address(transformer),
+      encodedBatch: transformer.encode(TransformerLivenessHarness.Mode.Add, 0, 5_000, 1),
+      allowances: cleanAllowances
+    });
+    bytes32 cleanHash = keccak256(abi.encode(cleanPb));
+    uint256 cleanNonce = nonce + 1;
+
+    bytes32 cleanH =
+      XlnHanko.disputeProofHash(address(dep), key, cleanNonce, true, cleanHash, watchSeed);
+    Batch memory finClean = XlnHanko.emptyBatch();
+    finClean.disputeFinalizations = new FinalDisputeProof[](1);
+    finClean.disputeFinalizations[0] = FinalDisputeProof({
+      counterentity: entity[left],
+      initialNonce: nonce,
+      finalNonce: cleanNonce,
+      proposerIsLeft: true,
+      initialProofbodyHash: faultHash,
+      finalProofbody: cleanPb,
+      starterArguments: "",
+      otherArguments: "",
+      sig: _hanko(left, cleanH),
+      startedByLeft: true,
+      cooperative: false
+    });
+    assertTrue(
+      _submit(right, finClean), "fault control: clean counter-state must close the dispute"
+    );
+    assertEq(_disputeHashOf(left, right), bytes32(0), "fault control: dispute must be closed");
+
+    // The clean close still clamps exactly: prev 1100, band [1050,1150],
+    // requested 1100+5000 -> 1150. LEFT keeps 1000 collateral + 150 shortfall
+    // from RIGHT (same economics as the wave-1 clamp control).
+    assertEq(
+      int256(int256(dep._reserves(entity[left], 1)) - 1_000),
+      1_150,
+      "clean close did not apply the clamped delta"
+    );
+    assertEq(2_000 - dep._reserves(entity[right], 1), 150, "RIGHT did not fund the shortfall");
+    // The fault clause never moved anything before reverting.
+    assertEq(handler.unallowancedChangeViolations(), 0, "fault leaked through the gate oracle");
+    assertEq(handler.clampViolations(), 0, "fault leaked through the clamp oracle");
+  }
+
+  /// @dev Account nonce helper on raw actor indexes.
+  function _accountNonceOf(uint256 a, uint256 b) internal view returns (uint256 n) {
+    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[a], entity[b]));
+  }
+
   // ═══════════════ coverage report ═══════════════
 
   function invariant_callSummary() public view {
@@ -198,6 +354,7 @@ contract TransformerAllowanceInvariants is XlnFixture {
     console.log("-- clamp observed  ", handler.clampObservations());
     console.log("-- actively clamped", handler.activeClamps());
     console.log("-- early attempts  ", handler.starterEarlyAttempts());
+    console.log("-- debt repairs     ", handler.debtRepairs());
     console.log("-- minted t1 / t3  ", handler.ghostMinted(1), handler.ghostMinted(3));
   }
 }

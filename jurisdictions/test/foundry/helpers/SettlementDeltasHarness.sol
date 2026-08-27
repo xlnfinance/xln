@@ -140,4 +140,155 @@ contract SettlementDeltasHarness {
       ladderRecords, counterparty, writer, _ladder(writer, counterparty, fullSecret), true
     );
   }
+
+  // ═══════════════ C4-hardening wave-2 extensions (fault modes, argument
+  //                 decoder, multi-index allowances) ═══════════════
+  // `run` above is deliberately left untouched: the five Halmos lemmas
+  // symbolically execute it, and any change would shift their path counts.
+
+  /// @dev Same single-delta pipeline as `run`, but forwards NON-EMPTY argument
+  ///      wrappers and a real argument decoder, reaching
+  ///      Account._decodeTransformerArgumentList (Account.sol:1096-1110).
+  ///      Returns (delta0, negativeDeltaBitmap, reverted, gasArtifact).
+  function runWithArguments(
+    int256 ondelta,
+    int256 offdelta,
+    uint256 tokenId,
+    TransformerLivenessHarness.Mode mode,
+    int256 value,
+    bool withAllowance,
+    uint256 rightAllowance,
+    uint256 leftAllowance,
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    address argumentDecoder
+  )
+    external
+    returns (int256 delta0, uint256 negativeDeltaBitmap, bool reverted, bool gasArtifact)
+  {
+    ProofBody memory pb;
+    pb.watchSeed = bytes32("halmos");
+    pb.leftResponseSeconds = 0;
+    pb.rightResponseSeconds = 0;
+    pb.offdeltas = new int256[](1);
+    pb.offdeltas[0] = offdelta;
+    pb.tokenIds = new uint256[](1);
+    pb.tokenIds[0] = tokenId;
+    pb.transformers = new TransformerClause[](1);
+    Allowance[] memory allowances = new Allowance[](withAllowance ? 1 : 0);
+    if (withAllowance) {
+      allowances[0] =
+        Allowance({ deltaIndex: 0, rightAllowance: rightAllowance, leftAllowance: leftAllowance });
+    }
+    pb.transformers[0] = TransformerClause({
+      transformerAddress: address(transformer),
+      encodedBatch: transformer.encode(mode, 0, value, tokenId),
+      allowances: allowances
+    });
+
+    bytes memory acctKey = abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(2)));
+    collaterals[acctKey][tokenId].ondelta = ondelta;
+
+    try Account.prepareSettlementDeltas(
+      collaterals,
+      acctKey,
+      pb,
+      leftArguments,
+      rightArguments,
+      0,
+      0,
+      bytes32(uint256(1)),
+      bytes32(uint256(2)),
+      argumentDecoder,
+      0,
+      0,
+      0,
+      0
+    ) returns (int[] memory deltas, uint256 bitmap) {
+      delta0 = deltas[0];
+      negativeDeltaBitmap = bitmap;
+      reverted = false;
+      gasArtifact = false;
+    } catch (bytes memory lowLevelData) {
+      reverted = true;
+      gasArtifact = lowLevelData.length == 4
+        && bytes4(lowLevelData) == IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable.selector;
+    }
+  }
+
+  /// @dev TWO-delta body (tokenIds strictly increasing per Account.sol:1054)
+  ///      with one clause targeting `deltaIndex` and the single allowance
+  ///      placed per `allowanceWhere`: 0 = no allowance, 1 = on the clause's
+  ///      own deltaIndex, 2 = ONLY on the other index — the partial-allowance
+  ///      shape the single-index wave-1 model could not express (audit A4).
+  ///      Returns (delta0, delta1, negativeDeltaBitmap, reverted, gasArtifact).
+  function runTwoDeltas(
+    int256 ondelta,
+    int256 offdelta0,
+    int256 offdelta1,
+    TransformerLivenessHarness.Mode mode,
+    int256 value,
+    uint256 deltaIndex,
+    uint256 allowanceWhere,
+    uint256 rightAllowance,
+    uint256 leftAllowance
+  )
+    external
+    returns (int256 delta0, int256 delta1, uint256 negativeDeltaBitmap, bool reverted, bool gasArtifact)
+  {
+    uint256[2] memory tokenIds = [uint256(7), uint256(9)];
+    ProofBody memory pb;
+    pb.watchSeed = bytes32("halmos");
+    pb.leftResponseSeconds = 0;
+    pb.rightResponseSeconds = 0;
+    pb.offdeltas = new int256[](2);
+    pb.offdeltas[0] = offdelta0;
+    pb.offdeltas[1] = offdelta1;
+    pb.tokenIds = new uint256[](2);
+    pb.tokenIds[0] = tokenIds[0];
+    pb.tokenIds[1] = tokenIds[1];
+    pb.transformers = new TransformerClause[](1);
+    Allowance[] memory allowances = new Allowance[](allowanceWhere == 0 ? 0 : 1);
+    if (allowanceWhere != 0) {
+      uint256 allowedIndex = allowanceWhere == 1 ? deltaIndex : 1 - deltaIndex;
+      allowances[0] =
+        Allowance({ deltaIndex: allowedIndex, rightAllowance: rightAllowance, leftAllowance: leftAllowance });
+    }
+    pb.transformers[0] = TransformerClause({
+      transformerAddress: address(transformer),
+      encodedBatch: transformer.encode(mode, deltaIndex, value, tokenIds[deltaIndex]),
+      allowances: allowances
+    });
+
+    bytes memory acctKey = abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(2)));
+    collaterals[acctKey][tokenIds[0]].ondelta = ondelta;
+    collaterals[acctKey][tokenIds[1]].ondelta = 0;
+
+    try Account.prepareSettlementDeltas(
+      collaterals,
+      acctKey,
+      pb,
+      "",
+      "",
+      0,
+      0,
+      bytes32(uint256(1)),
+      bytes32(uint256(2)),
+      address(transformer),
+      0,
+      0,
+      0,
+      0
+    ) returns (int[] memory deltas, uint256 bitmap) {
+      delta0 = deltas[0];
+      delta1 = deltas[1];
+      negativeDeltaBitmap = bitmap;
+      reverted = false;
+      gasArtifact = false;
+    } catch (bytes memory lowLevelData) {
+      reverted = true;
+      gasArtifact = lowLevelData.length == 4
+        && bytes4(lowLevelData) == IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable.selector;
+    }
+  }
 }
