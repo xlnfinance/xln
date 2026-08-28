@@ -141,6 +141,8 @@ export const CAPABILITIES = [
       'frontend/apps/wallet/src/identity-onboarding.tsx',
       'frontend/apps/wallet/src/identity-onboarding-model.ts',
       'frontend/apps/wallet/src/identity-recovery.tsx',
+      'frontend/apps/wallet/src/wallet-settings.tsx',
+      'frontend/apps/wallet/src/wallet-settings-model.ts',
       'frontend/src/lib/utils/runtime/runtimeConnection.ts',
     ],
     behavior: [
@@ -165,6 +167,7 @@ export const CAPABILITIES = [
       'React-owned Runtime and authority overview shell',
       'React-owned Brain Vault and mnemonic identity entry with secret-free review',
       'React-owned mnemonic recovery rehearsal with public-address-only matching',
+      'React-owned browser preferences for auth appearance and BrainVault worker caps',
     ],
     status: 'in_progress',
   },

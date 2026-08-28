@@ -299,14 +299,14 @@ a {
   }
 
   .wallet-shell-nav {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 0.2rem;
     margin: 0;
   }
 
   .wallet-shell-link {
-    padding: 0.65rem 0.25rem;
-    font-size: 0.72rem;
+    padding: 0.65rem 0.15rem;
+    font-size: 0.67rem;
     text-align: center;
   }
 

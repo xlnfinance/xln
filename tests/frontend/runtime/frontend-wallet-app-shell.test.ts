@@ -12,6 +12,7 @@ describe('React wallet app shell', () => {
     expect(WALLET_APP_LINKS).toEqual([
       { href: '/app', label: 'Overview', view: 'overview' },
       { href: '/app?setup=1', label: 'Identity', view: 'identity' },
+      { href: '/app?settings=1', label: 'Settings', view: 'settings' },
       { href: '/testnet', label: 'Testnet', view: null },
       { href: '/health', label: 'Network', view: null },
       { href: '/docs', label: 'Docs', view: null },

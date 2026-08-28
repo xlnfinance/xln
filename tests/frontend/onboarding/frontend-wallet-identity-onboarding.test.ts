@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import {
   createWalletIdentityDraft,
   deriveWalletIdentityMnemonicAddress,
-  resolveWalletAppView,
   validateWalletIdentityDraft,
   walletIdentityMnemonicErrorMessage,
 } from '../../../frontend/apps/wallet/src/identity-onboarding-model';
+import { resolveWalletAppView } from '../../../frontend/apps/wallet/src/app-shell-model';
 
 const DEMOS = [{ label: 'A', name: 'A', password: 'session-secret', factor: 1, role: 'user' }] as const;
 
@@ -16,6 +16,7 @@ describe('React wallet identity onboarding', () => {
     expect(resolveWalletAppView('')).toBe('overview');
     expect(resolveWalletAppView('?setup=1')).toBe('identity');
     expect(resolveWalletAppView('?demo=A')).toBe('identity');
+    expect(resolveWalletAppView('?settings=1')).toBe('settings');
   });
 
   test('creates a canonical default Brain Vault draft', () => {

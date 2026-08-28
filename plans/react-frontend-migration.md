@@ -762,6 +762,17 @@ source-boundary, wallet typecheck, build, and responsive browser evidence cover
 the increment. Brain Vault rehearsal remains coupled to its dedicated browser
 derivation stage and is not simulated here.
 
+The React `/app` shell now owns browser-local wallet preferences at
+`?settings=1`. It reads and writes the existing canonical auth-scheme and
+BrainVault worker-cap keys, applies identity appearance immediately, restores
+automatic worker selection by removing only the cap key, bounds explicit caps
+to the browser policy range, and reports storage failures without claiming a
+save. The light appearance is scoped to identity, recovery, and settings rather
+than changing financial workspace presentation. Recovery secrets, Runtime
+state, and authority remain outside the preference boundary. Focused default,
+invalid, persistence, reset, failure, route, and secret-boundary coverage
+accompanies wallet typecheck, build, and responsive dark/light browser evidence.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte

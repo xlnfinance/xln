@@ -26,11 +26,6 @@ export type WalletIdentityDraftValidation = Readonly<{
   detail: string;
 }>;
 
-export const resolveWalletAppView = (search: string): 'overview' | 'identity' => {
-  const params = new URLSearchParams(search);
-  return params.get('setup') === '1' || params.has('demo') ? 'identity' : 'overview';
-};
-
 export const createWalletIdentityDraft = (
   search: string,
   demoAccounts: readonly DemoAccount[],

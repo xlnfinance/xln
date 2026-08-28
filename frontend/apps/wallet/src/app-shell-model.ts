@@ -3,10 +3,19 @@ import type { RuntimeAdapterStorageSnapshot } from '../../../packages/browser/sr
 export const WALLET_APP_LINKS = [
   { href: '/app', label: 'Overview', view: 'overview' },
   { href: '/app?setup=1', label: 'Identity', view: 'identity' },
+  { href: '/app?settings=1', label: 'Settings', view: 'settings' },
   { href: '/testnet', label: 'Testnet', view: null },
   { href: '/health', label: 'Network', view: null },
   { href: '/docs', label: 'Docs', view: null },
 ] as const;
+
+export type WalletAppView = 'overview' | 'identity' | 'settings';
+
+export const resolveWalletAppView = (search: string): WalletAppView => {
+  const params = new URLSearchParams(search);
+  if (params.get('setup') === '1' || params.has('demo')) return 'identity';
+  return params.get('settings') === '1' ? 'settings' : 'overview';
+};
 
 export type WalletRuntimeSummary = Readonly<{
   modeLabel: 'Local Runtime' | 'Remote Runtime';
