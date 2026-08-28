@@ -11,6 +11,7 @@ import {
 import { IdentityOnboarding } from './identity-onboarding';
 import { WalletDiagnostics } from './wallet-diagnostics';
 import { WalletFinancialHealth } from './wallet-financial-health';
+import { WalletPayments } from './wallet-payments';
 import { WalletPortfolio } from './wallet-portfolio';
 import { WalletSettings } from './wallet-settings';
 import { readWalletPreferences } from './wallet-settings-model';
@@ -56,6 +57,7 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
           <a href="/app?setup=1">Set up wallet identity <span aria-hidden="true">→</span></a>
           <a href="/app?portfolio=1">Inspect assets and accounts <span aria-hidden="true">→</span></a>
           <a href="/app?health=1">Review financial health <span aria-hidden="true">→</span></a>
+          <a href="/app?payments=1">Send or receive payments <span aria-hidden="true">→</span></a>
           <a href="/app?settings=1">Adjust wallet settings <span aria-hidden="true">→</span></a>
           <a href="/app?diagnostics=1">Review wallet diagnostics <span aria-hidden="true">→</span></a>
           <a href="/testnet">Open testnet tools <span aria-hidden="true">↗</span></a>
@@ -69,7 +71,7 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
 
 export function WalletAppShell() {
   const [runtime, setRuntime] = useState(readRuntimeSummary);
-  const [view] = useState(() => resolveWalletAppView(window.location.search));
+  const [view] = useState(() => resolveWalletAppView(window.location.search, window.location.hash));
   const [authScheme, setAuthScheme] = useState<WalletAuthScheme>(() => (
     readWalletPreferences(localStorage).authScheme
   ));
@@ -119,6 +121,7 @@ export function WalletAppShell() {
           {view === 'identity' ? <IdentityOnboarding /> : null}
           {view === 'portfolio' ? <WalletPortfolio /> : null}
           {view === 'health' ? <WalletFinancialHealth /> : null}
+          {view === 'payments' ? <WalletPayments /> : null}
           {view === 'settings' ? <WalletSettings onAuthSchemeChange={setAuthScheme} /> : null}
           {view === 'diagnostics' ? <WalletDiagnostics runtime={runtime} /> : null}
           {view === 'overview' ? <WalletOverview runtime={runtime} /> : null}

@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, REACT WALLET ASSETS/ACCOUNTS, AND REACT WALLET FINANCIAL HEALTH IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, REACT WALLET ASSETS/ACCOUNTS, REACT WALLET FINANCIAL HEALTH, AND REACT WALLET PAYMENTS IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -825,6 +825,25 @@ connection failure/retry. Success has zero console errors or warnings at
 390×844, 1366×900, and 1920×1080; the unavailable endpoint emits only its two
 Strict Mode connection attempts, adds exactly one on explicit retry, and stays
 quiet afterward.
+
+The React `/app` shell now owns payments at `?payments=1` and canonical invoice
+deep links at `#pay/`: strictly decoded Runtime-owned route quotes; direct,
+trusted, instant, and async command construction through one shared helper;
+caller-owned idempotent command identity with encrypted durable journaling when
+the owner vault is unlocked and same-command memory retry otherwise; canonical
+invoice, app-link, and QR generation; plus bounded reserve transfer, collateral
+funding, collateral-withdrawal proposal, lending-offer, and borrow operations.
+Pending commands block Entity switching and duplicate submission; unknown
+outcomes stay explicit and external-wallet moves remain excluded until the
+provider boundary is live. Twenty-one focused compatibility, shell, capability,
+and payment tests pass with 217 expectations; the wallet local check covers
+497 files with zero unsafe-type findings. The production build transforms 1551
+modules and emits 308.71 kB / 92.51 kB gzip entry JavaScript plus 51.44 kB /
+8.87 kB gzip CSS; command-journal dependencies remain lazy. Real persisted-
+Runtime browser evidence covers a committed-capacity quote, one direct payment
+observed at Runtime height 12 after explicit same-identity retry, generated QR,
+and the complete Account-operation selector. Success has zero console errors
+or warnings at 390×844, 1366×900, and 1920×1080.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,

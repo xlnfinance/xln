@@ -1,0 +1,45 @@
+@media (max-width: 980px) {
+  .wallet-payment-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wallet-payment-modes label:nth-child(3) { border-top: 1px solid var(--line); }
+  .wallet-payment-modes label:nth-child(4) { border-top: 1px solid var(--line); }
+  .wallet-operation-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wallet-operation-picker button:nth-child(n + 4) { border-top: 1px solid var(--line); }
+  .wallet-operation-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 800px) {
+  .wallet-payments-context { grid-template-columns: auto minmax(0, 1fr); }
+  .wallet-payments-context > span { grid-column: 1 / 2; }
+  .wallet-payment-route dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wallet-receive-grid { grid-template-columns: 1fr; }
+  .wallet-receive-preview { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
+}
+
+@media (max-width: 620px) {
+  .wallet-payment-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .wallet-payment-tabs button { padding-inline: 0.35rem; }
+  .wallet-payments-section-heading { display: grid; gap: 0.55rem; }
+  .wallet-payments-section-heading > span { margin-left: 2rem; }
+  .wallet-payment-invoice-row > div,
+  .wallet-payment-form-grid,
+  .wallet-receive-builder,
+  .wallet-operation-form { grid-template-columns: 1fr; }
+  .wallet-payment-modes { grid-template-columns: 1fr; }
+  .wallet-payment-modes label { border-top: 1px solid var(--line); border-right: 0; }
+  .wallet-payment-modes label:first-of-type { border-top: 0; }
+  .wallet-payment-route dl { grid-template-columns: 1fr; }
+  .wallet-payment-actions { align-items: stretch; flex-direction: column; }
+  .wallet-payment-command > div,
+  .wallet-payment-command footer { align-items: flex-start; flex-direction: column; }
+  .wallet-operation-picker { grid-template-columns: 1fr; }
+  .wallet-operation-picker button { border-top: 1px solid var(--line); border-right: 0; }
+  .wallet-operation-picker button:first-child { border-top: 0; }
+  .wallet-receive-builder label:first-child,
+  .wallet-receive-builder .wallet-payment-error,
+  .wallet-receive-builder .wallet-payment-actions { grid-column: auto; }
+  .wallet-payments-unavailable > div { align-items: flex-start; flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wallet-payments { animation: none; }
+}

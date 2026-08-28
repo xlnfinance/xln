@@ -9,7 +9,9 @@ import type { WalletPortfolioMath } from './wallet-portfolio-model';
 
 export type WalletRuntimeReadDependencies = Readonly<{
   adapter: RuntimeAdapter;
-  math: WalletPortfolioMath;
+  math: WalletPortfolioMath & {
+    parseTokenAmount: (tokenId: number, amount: string) => bigint;
+  };
 }>;
 
 export const walletRuntimeReadErrorMessage = (error: unknown): string =>
@@ -17,6 +19,7 @@ export const walletRuntimeReadErrorMessage = (error: unknown): string =>
 
 const remoteRuntimeConfig = (
   snapshot: RuntimeAdapterStorageSnapshot,
+  signOwnerBinding: NonNullable<RuntimeAdapterConfig['ownerBindingSigner']>,
 ): RuntimeAdapterConfig => {
   const wsUrl = String(snapshot.wsUrl || '').trim();
   if (!wsUrl) throw new Error('Remote Runtime endpoint is missing.');
@@ -25,6 +28,7 @@ const remoteRuntimeConfig = (
     mode: 'remote',
     wsUrl,
     ...(authKey ? { authKey } : {}),
+    ownerBindingSigner: signOwnerBinding,
   };
 };
 
@@ -34,14 +38,18 @@ export const loadWalletRuntimeReadDependencies = async (
   // Install the canonical browser process surface before loading any protocol
   // module that reads it during module initialization.
   await import('../../../../core/support/process/runtime-process.ts');
-  const [remote, account, financial] = await Promise.all([
+  const [remote, account, financial, journal] = await Promise.all([
     import('../../../../core/api/runtime-adapter/remote.ts'),
     import('../../../../core/account/utils.ts'),
     import('../../../../core/account/financial-utils.ts'),
+    import('../../../src/lib/stores/commands/runtimeCommandJournalKeyring.ts'),
   ]);
   const adapter = new remote.RemoteRuntimeAdapter();
   try {
-    await adapter.connect(remoteRuntimeConfig(config));
+    await adapter.connect(remoteRuntimeConfig(config, ({ runtimeId, challenge, capability }) =>
+      journal.isRuntimeCommandJournalUnlocked(runtimeId)
+        ? journal.signRuntimeAdapterOwnerBinding(runtimeId, challenge, capability)
+        : null));
   } catch (error: unknown) {
     adapter.disconnect();
     throw error;
@@ -53,6 +61,7 @@ export const loadWalletRuntimeReadDependencies = async (
       formatTokenAmount: financial.formatTokenAmount,
       getTokenInfo: account.getTokenInfo,
       isLeftEntity: account.isLeftEntity,
+      parseTokenAmount: financial.parseTokenAmount,
     },
   };
 };

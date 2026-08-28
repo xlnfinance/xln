@@ -52,6 +52,7 @@ describe('frontend capability inventory', () => {
       'wallet-browser-lifecycle',
       'wallet-runtime-discovery',
       'wallet-finance',
+      'wallet-payments-and-markets',
       'wallet-native-and-offline',
     ].includes(id)).every(
       ({ status }) => status === 'unstarted',
@@ -196,6 +197,11 @@ describe('frontend capability inventory', () => {
       .toContain('frontend/apps/wallet/src/wallet-financial-health.tsx');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-finance')?.behavior)
       .toContain('React-owned debt, Runtime solvency evidence, Account dispute gates, and committed history');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-payments-and-markets')?.status).toBe('in_progress');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-payments-and-markets')?.currentSources)
+      .toContain('frontend/apps/wallet/src/wallet-payment-source.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-payments-and-markets')?.behavior)
+      .toContain('React-owned Runtime route quotes and idempotent payment command retry');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-native-and-offline')?.status).toBe('in_progress');
   });
 

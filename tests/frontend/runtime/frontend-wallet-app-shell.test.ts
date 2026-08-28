@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 import {
+  resolveWalletAppView,
   resolveWalletRuntimeSummary,
   WALLET_APP_LINKS,
 } from '../../../frontend/apps/wallet/src/app-shell-model';
@@ -13,6 +14,7 @@ describe('React wallet app shell', () => {
       { href: '/app', label: 'Overview', view: 'overview' },
       { href: '/app?portfolio=1', label: 'Assets', view: 'portfolio' },
       { href: '/app?health=1', label: 'Health', view: 'health' },
+      { href: '/app?payments=1', label: 'Payments', view: 'payments' },
       { href: '/app?setup=1', label: 'Identity', view: 'identity' },
       { href: '/app?settings=1', label: 'Settings', view: 'settings' },
       { href: '/app?diagnostics=1', label: 'Status', view: 'diagnostics' },
@@ -32,6 +34,11 @@ describe('React wallet app shell', () => {
       browserLabel: 'Online',
       state: 'local',
     });
+  });
+
+  test('resolves the payments query and canonical invoice deep link', () => {
+    expect(resolveWalletAppView('?payments=1')).toBe('payments');
+    expect(resolveWalletAppView('', '#pay/invoice')).toBe('payments');
   });
 
   test('requires complete tab-confined authority for a remote Runtime', () => {
