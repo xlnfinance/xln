@@ -1,0 +1,285 @@
+.wallet-portfolio {
+  animation: wallet-shell-enter 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.wallet-portfolio-heading h1 {
+  max-width: 12ch;
+  margin: 0;
+  color: #f6f7f2;
+  font-size: clamp(2.7rem, 6vw, 5.8rem);
+  font-weight: 620;
+  letter-spacing: -0.07em;
+  line-height: 0.95;
+}
+
+.wallet-portfolio-heading > p:last-child {
+  max-width: 44rem;
+  margin: 1.2rem 0 0;
+  color: #8f9699;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.wallet-portfolio-context {
+  display: grid;
+  grid-template-columns: auto minmax(13rem, 1fr) auto auto;
+  gap: 0.8rem;
+  align-items: center;
+  margin-top: clamp(2.5rem, 6vw, 4.5rem);
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-portfolio-context label,
+.wallet-portfolio-context > span {
+  color: #737a7d;
+  font: 0.64rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wallet-portfolio-context select,
+.wallet-portfolio-context button,
+.wallet-portfolio-unavailable button {
+  padding: 0.7rem 0.85rem;
+  color: #dce0d9;
+  font: 600 0.76rem/1.2 inherit;
+  background: #111314;
+  border: 1px solid #303436;
+  border-radius: 0.45rem;
+}
+
+.wallet-portfolio-context button,
+.wallet-portfolio-unavailable button {
+  cursor: pointer;
+}
+
+.wallet-portfolio-context button:hover:not(:disabled),
+.wallet-portfolio-unavailable button:hover,
+.wallet-portfolio-context button:focus-visible,
+.wallet-portfolio-unavailable button:focus-visible {
+  color: #10120f;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wallet-portfolio-context button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.wallet-portfolio-section {
+  margin-top: clamp(3rem, 7vw, 5.5rem);
+  border-top: 1px solid var(--line);
+}
+
+.wallet-portfolio-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0 1.15rem;
+}
+
+.wallet-portfolio-section-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.wallet-portfolio-section-heading p,
+.wallet-portfolio-section-heading h2 {
+  margin: 0;
+}
+
+.wallet-portfolio-section-heading p,
+.wallet-portfolio-section-heading > span {
+  color: #62686c;
+  font: 0.64rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wallet-portfolio-section-heading h2 {
+  color: #e7e9e3;
+  font-size: 1rem;
+  font-weight: 620;
+}
+
+.wallet-portfolio-assets {
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-portfolio-asset-heading,
+.wallet-portfolio-asset-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.7fr) repeat(3, minmax(10rem, 1fr));
+  gap: 1rem;
+  align-items: center;
+  min-width: 45rem;
+}
+
+.wallet-portfolio-asset-heading {
+  padding: 0.75rem 0;
+  color: #62686c;
+  font: 0.61rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.wallet-portfolio-asset-row {
+  padding: 1rem 0;
+  color: #cfd3cc;
+  font-size: 0.8rem;
+  border-top: 1px solid #1d2021;
+}
+
+.wallet-portfolio-asset-row > span {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.wallet-portfolio-asset-row strong {
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.wallet-portfolio-asset-row small {
+  color: #62686c;
+  font-size: 0.64rem;
+}
+
+.wallet-portfolio-account-list {
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-portfolio-account {
+  padding: 1.2rem 0;
+  border-top: 1px solid #1d2021;
+}
+
+.wallet-portfolio-account header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.wallet-portfolio-account header > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.wallet-portfolio-account header strong {
+  color: #e5e8e1;
+  font-size: 0.92rem;
+}
+
+.wallet-portfolio-account code,
+.wallet-portfolio-account header > span {
+  color: #666d70;
+  font: 0.64rem/1.35 "SFMono-Regular", Consolas, monospace;
+}
+
+.wallet-portfolio-account dl {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 1rem 0 0;
+}
+
+.wallet-portfolio-account dl > div {
+  min-width: 0;
+  padding-right: 0.8rem;
+}
+
+.wallet-portfolio-account dt {
+  margin-bottom: 0.45rem;
+  color: #5f6669;
+  font: 0.62rem/1.3 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.wallet-portfolio-account dd {
+  overflow: hidden;
+  margin: 0;
+  color: #bec3bc;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-portfolio-empty,
+.wallet-portfolio-account > p {
+  margin: 0;
+  padding: 1.5rem 0;
+  color: #767d80;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.wallet-portfolio-unavailable {
+  max-width: 46rem;
+  margin-top: clamp(3rem, 8vw, 7rem);
+  padding: 1.5rem 0;
+  border-top: 1px solid #71532f;
+  border-bottom: 1px solid #42351f;
+}
+
+.wallet-portfolio-unavailable h2 {
+  margin: 0;
+  color: #e7e9e3;
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  font-weight: 560;
+  letter-spacing: -0.04em;
+}
+
+.wallet-portfolio-unavailable > p:not(.wallet-shell-eyebrow) {
+  margin: 0.8rem 0 0;
+  color: #9b9f9b;
+  line-height: 1.55;
+}
+
+.wallet-portfolio-unavailable > div {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1.25rem;
+}
+
+.wallet-portfolio-unavailable a {
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+
+.wallet-portfolio-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 0;
+  color: #747b7e;
+  font-size: 0.7rem;
+}
+
+.wallet-portfolio-pagination button {
+  color: #c9cdc7;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.wallet-portfolio-pagination button:disabled {
+  color: #4e5457;
+  cursor: default;
+}
+
+.wallet-portfolio-boundary {
+  margin: 3rem 0 0;
+  padding: 1.15rem 0;
+  color: #666c6f;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  border-top: 1px solid var(--line);
+}

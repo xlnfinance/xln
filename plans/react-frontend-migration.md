@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, AND REACT WALLET DIAGNOSTICS IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, AND REACT WALLET ASSETS/ACCOUNTS IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -788,6 +788,23 @@ findings; the production artifact is 230.81 kB JavaScript / 72.18 kB gzip plus
 remote configuration, offline and blocked-storage states, explicit endpoint
 failure, refresh, and cleanup at phone, laptop, and wide-desktop viewports.
 
+The React `/app` shell now owns the first committed financial projection at
+`?portfolio=1`: bounded Entity selection, raw reserves, Account spendable and
+inbound capacity, collateral, and both bilateral credit directions. It reads
+the real remote adapter through the shared query client and latest-wins query
+observer, validates the complete RuntimeView boundary, formats known tokens
+through canonical helpers, and derives every bilateral value through
+`deriveDelta`; it sends no Runtime inputs and never substitutes sample or
+estimated values. Embedded mode remains explicitly unavailable until the React
+Runtime boot flow owns a live adapter. Focused projection, perspective,
+rejection, route, and teardown coverage accompanies wallet typecheck, build,
+and real two-Entity Runtime browser evidence at phone, laptop, and wide-desktop
+viewports with zero console errors or warnings. The focused batch passes 16
+tests with 52 expectations, and the wallet local check covers 479 files with
+zero unsafe-type findings. The production entry is 250.47 kB JavaScript /
+77.40 kB gzip plus 31.82 kB CSS / 6.09 kB gzip; the canonical adapter remains
+isolated in a route-only 722.07 kB / 223.29 kB gzip lazy chunk.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte
@@ -943,7 +960,7 @@ any mismatch. Never compile on production.
    the other wallet or ops input families.
 2. Continue WP5/WP6 with the wallet boot, shell, canonical Brain Vault and
    mnemonic identity choices, onboarding, recovery, and the flows after the
-   implemented settings and diagnostics surfaces;
+   implemented settings, diagnostics, assets, and accounts surfaces;
    keep Runtime projections in shared client adapters and do not move
    transition logic into the frontend. Remote link decoding and consent are
    ready in `packages/runtime-client`, and adapter session storage is ready in

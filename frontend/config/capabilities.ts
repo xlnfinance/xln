@@ -186,9 +186,19 @@ export const CAPABILITIES = [
     id: 'wallet-finance',
     owner: 'wallet',
     routes: ['/app', '/address'],
-    currentSources: ['frontend/src/lib/components/Entity'],
-    behavior: ['assets and accounts', 'credit and collateral', 'debt, solvency, and disputes'],
-    status: 'unstarted',
+    currentSources: [
+      'frontend/src/lib/components/Entity',
+      'frontend/apps/wallet/src/wallet-portfolio.tsx',
+      'frontend/apps/wallet/src/wallet-portfolio-model.ts',
+      'frontend/apps/wallet/src/wallet-portfolio-source.ts',
+    ],
+    behavior: [
+      'assets and accounts',
+      'credit and collateral',
+      'debt, solvency, and disputes',
+      'React-owned committed RuntimeView assets and Account capacity projection',
+    ],
+    status: 'in_progress',
   },
   {
     id: 'wallet-payments-and-markets',

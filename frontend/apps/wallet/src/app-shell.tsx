@@ -10,6 +10,7 @@ import {
 } from './app-shell-model';
 import { IdentityOnboarding } from './identity-onboarding';
 import { WalletDiagnostics } from './wallet-diagnostics';
+import { WalletPortfolio } from './wallet-portfolio';
 import { WalletSettings } from './wallet-settings';
 import { readWalletPreferences } from './wallet-settings-model';
 import './styles/app-shell.css';
@@ -52,6 +53,7 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
         </div>
         <div className="wallet-shell-action-links">
           <a href="/app?setup=1">Set up wallet identity <span aria-hidden="true">→</span></a>
+          <a href="/app?portfolio=1">Inspect assets and accounts <span aria-hidden="true">→</span></a>
           <a href="/app?settings=1">Adjust wallet settings <span aria-hidden="true">→</span></a>
           <a href="/app?diagnostics=1">Review wallet diagnostics <span aria-hidden="true">→</span></a>
           <a href="/testnet">Open testnet tools <span aria-hidden="true">↗</span></a>
@@ -113,6 +115,7 @@ export function WalletAppShell() {
 
         <div className="wallet-shell-workspace">
           {view === 'identity' ? <IdentityOnboarding /> : null}
+          {view === 'portfolio' ? <WalletPortfolio /> : null}
           {view === 'settings' ? <WalletSettings onAuthSchemeChange={setAuthScheme} /> : null}
           {view === 'diagnostics' ? <WalletDiagnostics runtime={runtime} /> : null}
           {view === 'overview' ? <WalletOverview runtime={runtime} /> : null}

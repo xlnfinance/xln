@@ -299,14 +299,25 @@ a {
   }
 
   .wallet-shell-nav {
-    grid-template-columns: repeat(7, 1fr);
+    display: flex;
     gap: 0.2rem;
     margin: 0;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+    scroll-snap-type: inline proximity;
+  }
+
+  .wallet-shell-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .wallet-shell-link {
-    padding: 0.65rem 0.15rem;
-    font-size: 0.61rem;
+    flex: 0 0 auto;
+    min-width: 4.25rem;
+    padding: 0.65rem 0.45rem;
+    font-size: 0.68rem;
+    scroll-snap-align: start;
     text-align: center;
   }
 
