@@ -152,10 +152,10 @@ export function IdentityOnboarding() {
     <section className="identity-onboarding" aria-labelledby="identity-onboarding-title">
       <header>
         <p className="wallet-shell-eyebrow">{rehearsalActive ? 'Recovery rehearsal' : 'Wallet identity'}</p>
-        <h1 id="identity-onboarding-title">{rehearsalActive ? 'Re-enter your seed' : 'Set up identity'}</h1>
+        <h1 id="identity-onboarding-title">{rehearsalActive ? 'Re-enter your seed' : 'Review identity inputs'}</h1>
         <p>{rehearsalActive
           ? 'The first phrase was cleared. Only its public wallet address remains.'
-          : 'Choose how this wallet can be recovered.'}</p>
+          : 'Rehearse recovery inputs before wallet creation. No wallet is created or persisted here.'}</p>
       </header>
 
       {rehearsalActive ? (

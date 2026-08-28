@@ -40,6 +40,14 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
         </section>
       ) : null}
 
+      {runtime.state === 'local-unavailable' ? (
+        <section className="wallet-shell-alert" aria-labelledby="wallet-local-runtime-title">
+          <p>Candidate boundary</p>
+          <h2 id="wallet-local-runtime-title">Embedded Runtime boot is not active.</h2>
+          <span>Use an authorized remote Runtime link for live financial controls.</span>
+        </section>
+      ) : null}
+
       <section className="wallet-shell-facts" aria-label="Current Runtime status">
         <dl>
           <div><dt>Runtime</dt><dd>{runtime.modeLabel}</dd></div>
@@ -51,11 +59,11 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
 
       <section className="wallet-shell-actions" aria-labelledby="wallet-actions-title">
         <div>
-          <p className="wallet-shell-eyebrow">Available now</p>
-          <h2 id="wallet-actions-title">Choose a working surface</h2>
+          <p className="wallet-shell-eyebrow">Candidate surfaces</p>
+          <h2 id="wallet-actions-title">Choose a wallet surface</h2>
         </div>
         <div className="wallet-shell-action-links">
-          <a href="/app?setup=1">Set up wallet identity <span aria-hidden="true">→</span></a>
+          <a href="/app?setup=1">Review identity and recovery <span aria-hidden="true">→</span></a>
           <a href="/app?portfolio=1">Inspect assets and accounts <span aria-hidden="true">→</span></a>
           <a href="/app?health=1">Review financial health <span aria-hidden="true">→</span></a>
           <a href="/app?payments=1">Send or receive payments <span aria-hidden="true">→</span></a>

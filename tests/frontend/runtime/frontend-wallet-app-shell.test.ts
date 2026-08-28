@@ -29,11 +29,11 @@ describe('React wallet app shell', () => {
     expect(resolveWalletRuntimeSummary({
       mode: 'embedded', wsUrl: null, access: null, sessionKey: null,
     }, true)).toEqual({
-      modeLabel: 'Local Runtime',
-      endpointLabel: 'This browser',
-      authorityLabel: 'Local control',
+      modeLabel: 'Local Runtime unavailable',
+      endpointLabel: 'Not started',
+      authorityLabel: 'Embedded boot pending',
       browserLabel: 'Online',
-      state: 'local',
+      state: 'local-unavailable',
     });
   });
 

@@ -118,7 +118,8 @@ a {
   box-shadow: 0 0 0 0.22rem rgb(163 242 122 / 11%);
 }
 
-.wallet-shell-runtime-state.is-remote-blocked > span {
+.wallet-shell-runtime-state.is-remote-blocked > span,
+.wallet-shell-runtime-state.is-local-unavailable > span {
   background: #f3b55d;
   box-shadow: 0 0 0 0.22rem rgb(243 181 93 / 11%);
 }
@@ -337,6 +338,13 @@ a {
 
   .wallet-shell-facts dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wallet-shell-facts dd {
+    overflow: visible;
+    line-height: 1.4;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .wallet-shell-alert,

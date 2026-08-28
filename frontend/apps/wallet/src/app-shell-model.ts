@@ -28,11 +28,11 @@ export const resolveWalletAppView = (search: string, hash = ''): WalletAppView =
 };
 
 export type WalletRuntimeSummary = Readonly<{
-  modeLabel: 'Local Runtime' | 'Remote Runtime';
+  modeLabel: 'Local Runtime unavailable' | 'Remote Runtime';
   endpointLabel: string;
-  authorityLabel: 'Local control' | 'Admin session' | 'Authority required';
+  authorityLabel: 'Embedded boot pending' | 'Admin session' | 'Authority required';
   browserLabel: 'Online' | 'Offline';
-  state: 'local' | 'remote-ready' | 'remote-blocked';
+  state: 'local-unavailable' | 'remote-ready' | 'remote-blocked';
 }>;
 
 export const resolveWalletRuntimeSummary = (
@@ -41,11 +41,11 @@ export const resolveWalletRuntimeSummary = (
 ): WalletRuntimeSummary => {
   if (snapshot.mode !== 'remote') {
     return {
-      modeLabel: 'Local Runtime',
-      endpointLabel: 'This browser',
-      authorityLabel: 'Local control',
+      modeLabel: 'Local Runtime unavailable',
+      endpointLabel: 'Not started',
+      authorityLabel: 'Embedded boot pending',
       browserLabel: browserOnline ? 'Online' : 'Offline',
-      state: 'local',
+      state: 'local-unavailable',
     };
   }
 

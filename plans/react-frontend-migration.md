@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, REACT WALLET ASSETS/ACCOUNTS, REACT WALLET FINANCIAL HEALTH, REACT WALLET PAYMENTS, AND REACT WALLET MARKETS/ACTIVITY IMPLEMENTED`
+**Status:** `COMPLETE WITH EXPLICIT CROSS-WP DEPENDENCIES — TESTNET LAUNCHER, SHARED WALLET LIFECYCLE BOUNDARIES, REACT /APP SHELL, IDENTITY ENTRY/REHEARSAL, SETTINGS, DIAGNOSTICS, ASSETS/ACCOUNTS, FINANCIAL HEALTH, PAYMENTS, MARKETS/ACTIVITY, AND REQUIREMENT AUDIT IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -863,6 +863,27 @@ same-identity retry, both activity filters, and logical Runtime timestamps at
 gate passes all 26 BrainVault/runtime tests with 100156 expectations before the
 existing contract-sync environment stops because Hardhat rejects Node 25.6.1.
 
+The final WP6 audit now maps all 30 named flow requirements to nine concrete
+React surfaces or an explicit cross-work-package dependency. Twenty-seven are
+implemented in WP6; embedded Runtime boot remains with WP5 until the canonical
+browser bundle builds, while irreversible wallet creation/onboarding and full
+durable recovery remain with WP9 parity. The same typed inventory keeps the
+retained `/address` route, external-wallet provider/native integration, and
+canonical cutover visibly assigned to WP9, WP8, and WP10 rather than claiming
+them as React behavior. Three focused audit tests validate every route, source,
+focused test, requirement link, deferral owner, and exact user-visible boundary
+marker with 108 expectations. The complete focused WP6 matrix passes 60 tests
+with 497 expectations; the wallet local check covers 505 files with zero
+unsafe-type findings, and the final production build emits a 342.66 kB / 99.92
+kB gzip entry plus 63.52 kB / 10.52 kB gzip CSS. The browser audit exercises
+all nine React routes, corrects false wallet-creation and local-Runtime readiness
+claims, and is visually clean at 390×844, 1366×900, and 1920×1080. Normal pages
+finish with zero console errors or warnings; diagnostics renders its expected
+`/api/jurisdictions` 502 as an explicit unavailable state. The root gate again
+passes 26 tests with 100156 expectations before the known Node 25.6.1 contract-
+sync boundary. Capability statuses remain `in_progress` or `unstarted` where
+those later work packages still own product parity.
+
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,
 URL cleanup, activation, and embedded cancellation. The canonical Svelte
@@ -1016,11 +1037,13 @@ any mismatch. Never compile on production.
    fails because `core/runtime/frame/assertions.ts` imports the non-exported
    `computeFrameHash` from `core/account/consensus/index.ts`; this does not block
    the other wallet or ops input families.
-2. Continue WP5/WP6 with the wallet boot, shell, canonical Brain Vault and
-   mnemonic identity choices, onboarding, recovery, and the flows after the
-   implemented settings, diagnostics, assets, accounts, and financial-health surfaces;
-   keep Runtime projections in shared client adapters and do not move
-   transition logic into the frontend. Remote link decoding and consent are
+2. Close the typed WP6 audit deferrals only in their owning work packages.
+   WP5 restores the canonical browser Runtime bundle; WP8 owns the external
+   provider/native boundary; WP9 owns irreversible wallet creation, full
+   durable recovery, `/address`, and retained-capability parity; WP10 owns the
+   authorized canonical cutover. Keep Runtime projections in shared client
+   adapters and do not move transition logic into the frontend. Remote link
+   decoding and consent are
    ready in `packages/runtime-client`, and adapter session storage is ready in
    `packages/browser`; wallet boot sequencing, active-tab Runtime ownership,
    Runtime selection concurrency, adapter activation, and Runtime handle

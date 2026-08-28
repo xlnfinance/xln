@@ -81,5 +81,7 @@ describe('React wallet identity onboarding', () => {
     expect(source).toContain('setSubmissionError(walletIdentityMnemonicErrorMessage(error))');
     expect(source.indexOf('await deriveWalletIdentityMnemonicAddress('))
       .toBeLessThan(source.indexOf('setReviewing(true)'));
+    expect(source).toContain('No wallet is created or persisted here.');
+    expect(source).not.toContain('Set up identity');
   });
 });

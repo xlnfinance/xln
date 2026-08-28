@@ -24,6 +24,10 @@ describe('React wallet testnet pilot', () => {
       'https://custody.xln.finance',
       '/health',
     ]);
+    const wallet = TESTNET_CARDS[0];
+    expect(wallet?.description).toContain('connected Runtime');
+    expect(wallet?.description).not.toContain('Full wallet');
+    expect(wallet?.description).not.toContain('Create a wallet');
     expect(createDemoWalletHref('A')).toBe('/app?demo=A');
     expect(createDemoWalletHref(' Alice / QA ')).toBe('/app?demo=Alice%20%2F%20QA');
     expect(() => createDemoWalletHref('   ')).toThrow('TESTNET_DEMO_LABEL_REQUIRED');
@@ -36,6 +40,8 @@ describe('React wallet testnet pilot', () => {
     expect(reactSource).toContain("from '$lib/config/demo-accounts'");
     expect(reactSource).toContain('resetBrowserRuntimeData');
     expect(reactSource).toContain('publishBrowserHardResetRequest');
+    expect(reactSource).toContain('They create no wallet');
+    expect(reactSource).not.toContain('Open disposable wallet');
     expect(svelteSource).toContain('DEMO_ACCOUNTS');
     expect(svelteSource).toContain("reason: 'testnet-tools'");
     expect(resetSource).toContain('packages/browser/src/browser-runtime-reset');

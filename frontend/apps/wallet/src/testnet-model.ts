@@ -12,12 +12,12 @@ export type TestnetCard = Readonly<{
 export const TESTNET_CARDS: readonly TestnetCard[] = [
   {
     title: 'Web Wallet',
-    description: 'Full wallet experience in your browser. Create a wallet, connect to hubs, send payments, and trade on the orderbook.',
+    description: 'React wallet candidate for identity rehearsal, connected Runtime balances, payments, and orderbook trading.',
     href: '/app',
     icon: '💳',
     badges: ['Desktop', 'Mobile'],
     cta: 'Open Wallet',
-    note: 'Extension & native apps coming soon',
+    note: 'Connect a remote Runtime for live financial controls',
   },
   {
     title: 'Custody Demo',

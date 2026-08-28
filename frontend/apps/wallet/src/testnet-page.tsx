@@ -64,14 +64,14 @@ export function TestnetPage() {
       <section className="testnet-tools" aria-labelledby="testnet-tools-heading">
         <div>
           <div className="testnet-badge">LOCAL TOOLS</div>
-          <h2 id="testnet-tools-heading">Test identities</h2>
-          <p>Disposable Brain Vault wallets for local scenarios. They use no saved production identity.</p>
+          <h2 id="testnet-tools-heading">Identity rehearsals</h2>
+          <p>Session-randomized Brain Vault inputs for local rehearsal. They create no wallet and use no saved production identity.</p>
         </div>
         <div className="testnet-demo-grid">
           {DEMO_ACCOUNTS.map((account) => (
             <a className="testnet-demo-account" href={createDemoWalletHref(account.label)} key={account.label}>
               <strong>{account.label}</strong>
-              <span>Open disposable wallet</span>
+              <span>Open identity rehearsal</span>
             </a>
           ))}
         </div>

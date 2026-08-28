@@ -71,6 +71,7 @@ export const CAPABILITIES = [
       'frontend/src/routes/address/+page.svelte',
       'frontend/src/routes/testnet/+page.svelte',
       'frontend/apps/wallet/src/testnet-page.tsx',
+      'frontend/config/wallet-flow-audit.ts',
     ],
     behavior: [
       'boot and shell',
@@ -174,6 +175,7 @@ export const CAPABILITIES = [
       'React-owned browser preferences for auth appearance and BrainVault worker caps',
       'React-owned redacted Runtime, browser-capability, and deploy-version diagnostics',
       'React-owned height-pinned financial-health reads with bounded retry and teardown',
+      'React wallet WP6 requirement audit with explicit cross-work-package deferrals',
     ],
     status: 'in_progress',
   },
