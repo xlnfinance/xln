@@ -14,6 +14,45 @@ export type WalletRuntimeReadDependencies = Readonly<{
   };
 }>;
 
+export type WalletMarketMath = Readonly<{
+  canonicalPair: (
+    tokenA: number,
+    tokenB: number,
+  ) => Readonly<{ base: number; quote: number; pairId: string }>;
+  getStaticSwapTokenDimensions: (
+    giveTokenId: number,
+    wantTokenId: number,
+  ) => Readonly<{ giveTokenDecimals: number; wantTokenDecimals: number }>;
+  prepareSwapOrderForDimensions: (
+    giveTokenId: number,
+    wantTokenId: number,
+    giveAmount: bigint,
+    wantAmount: bigint,
+    dimensions: Readonly<{ giveTokenDecimals: number; wantTokenDecimals: number }>,
+  ) => Readonly<{
+    priceTicks: bigint;
+    effectiveGive: bigint;
+    effectiveWant: bigint;
+    unspentGiveAmount: bigint;
+  }> | null;
+  deriveSwapNetAuthorization: (
+    wantAmount: bigint,
+    feeBps: number,
+  ) => Readonly<{ maxFee: bigint; minNetReceive: bigint }>;
+  buildDeterministicSwapOfferId: (input: Readonly<{
+    logicalTimestamp: number;
+    logicalHeight: number;
+    sourceEntityId: string;
+    counterpartyEntityId: string;
+    sellToken: number;
+    buyToken: number;
+    sellAmount: bigint;
+    buyAmount: bigint;
+    priceTicks: bigint;
+    routeValue: string;
+  }>) => string;
+}>;
+
 export const walletRuntimeReadErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error || 'Runtime projection read failed');
 
@@ -63,6 +102,22 @@ export const loadWalletRuntimeReadDependencies = async (
       isLeftEntity: account.isLeftEntity,
       parseTokenAmount: financial.parseTokenAmount,
     },
+  };
+};
+
+export const loadWalletMarketMath = async (): Promise<WalletMarketMath> => {
+  await import('../../../../core/support/process/runtime-process.ts');
+  const [orderbook, authorization, route] = await Promise.all([
+    import('../../../../core/orderbook/types.ts'),
+    import('../../../../core/account/swap/swap-net-authorization.ts'),
+    import('../../../../core/account/swap/swap-command-route.ts'),
+  ]);
+  return {
+    canonicalPair: orderbook.canonicalPair,
+    getStaticSwapTokenDimensions: orderbook.getStaticSwapTokenDimensions,
+    prepareSwapOrderForDimensions: orderbook.prepareSwapOrderForDimensions,
+    deriveSwapNetAuthorization: authorization.deriveSwapNetAuthorization,
+    buildDeterministicSwapOfferId: route.buildDeterministicSwapOfferId,
   };
 };
 

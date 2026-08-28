@@ -5,6 +5,7 @@ export const WALLET_APP_LINKS = [
   { href: '/app?portfolio=1', label: 'Assets', view: 'portfolio' },
   { href: '/app?health=1', label: 'Health', view: 'health' },
   { href: '/app?payments=1', label: 'Payments', view: 'payments' },
+  { href: '/app?markets=1', label: 'Markets', view: 'markets' },
   { href: '/app?setup=1', label: 'Identity', view: 'identity' },
   { href: '/app?settings=1', label: 'Settings', view: 'settings' },
   { href: '/app?diagnostics=1', label: 'Status', view: 'diagnostics' },
@@ -13,7 +14,7 @@ export const WALLET_APP_LINKS = [
   { href: '/docs', label: 'Docs', view: null },
 ] as const;
 
-export type WalletAppView = 'overview' | 'portfolio' | 'health' | 'payments' | 'identity' | 'settings' | 'diagnostics';
+export type WalletAppView = 'overview' | 'portfolio' | 'health' | 'payments' | 'markets' | 'identity' | 'settings' | 'diagnostics';
 
 export const resolveWalletAppView = (search: string, hash = ''): WalletAppView => {
   const params = new URLSearchParams(search);
@@ -21,6 +22,7 @@ export const resolveWalletAppView = (search: string, hash = ''): WalletAppView =
   if (params.get('portfolio') === '1') return 'portfolio';
   if (params.get('health') === '1') return 'health';
   if (params.get('payments') === '1' || hash.toLowerCase().startsWith('#pay/')) return 'payments';
+  if (params.get('markets') === '1') return 'markets';
   if (params.get('settings') === '1') return 'settings';
   return params.get('diagnostics') === '1' ? 'diagnostics' : 'overview';
 };

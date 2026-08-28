@@ -217,6 +217,10 @@ export const CAPABILITIES = [
       'frontend/apps/wallet/src/wallet-payments.tsx',
       'frontend/apps/wallet/src/wallet-payment-source.ts',
       'frontend/apps/wallet/src/wallet-payment-operations-model.ts',
+      'frontend/apps/wallet/src/wallet-markets.tsx',
+      'frontend/apps/wallet/src/wallet-market-source.ts',
+      'frontend/apps/wallet/src/wallet-market-model.ts',
+      'frontend/apps/wallet/src/wallet-market-command.ts',
     ],
     behavior: [
       'pay and receive',
@@ -224,6 +228,7 @@ export const CAPABILITIES = [
       'orders, routing, and settlement',
       'React-owned Runtime route quotes and idempotent payment command retry',
       'React-owned canonical invoices and bounded reserve, collateral, settlement, and lending operations',
+      'React-owned Runtime orderbooks, canonical same-j order and cancel commands, cross-j lifecycle, and persisted activity',
     ],
     status: 'in_progress',
   },

@@ -543,7 +543,7 @@ files with zero unsafe-type findings.
 
 ### WP6 — Migrate wallet by flow
 
-**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, REACT WALLET ASSETS/ACCOUNTS, REACT WALLET FINANCIAL HEALTH, AND REACT WALLET PAYMENTS IMPLEMENTED`
+**Status:** `IN PROGRESS — TESTNET LAUNCHER, DISPOSABLE IDENTITIES, SHELL STATE, DEPLOY-VERSION, RUNTIME BOOTSTRAP, CONSENT, IDENTITY-ENTRY, RECOVERY-REHEARSAL, RECOVERY-CHOICE, RUNTIME-OPENING, RECOVERY-DISCOVERY, NODE-MNEMONIC-REVEAL, RUNTIME-PREFERENCE, NODE-BRAINVAULT-VALIDATION, BROWSER-BRAINVAULT-WORKER-VALIDATION, BROWSER-BRAINVAULT-WORKER-SCHEDULING, BROWSER-BRAINVAULT-WORKER-RESILIENCE, BROWSER-BRAINVAULT-FINALIZATION COORDINATION, REACT WALLET DIAGNOSTICS, REACT WALLET ASSETS/ACCOUNTS, REACT WALLET FINANCIAL HEALTH, REACT WALLET PAYMENTS, AND REACT WALLET MARKETS/ACTIVITY IMPLEMENTED`
 
 Migrate coherent flows in roughly this order:
 
@@ -844,6 +844,24 @@ Runtime browser evidence covers a committed-capacity quote, one direct payment
 observed at Runtime height 12 after explicit same-identity retry, generated QR,
 and the complete Account-operation selector. Success has zero console errors
 or warnings at 390×844, 1366×900, and 1920×1080.
+
+The React `/app` shell now owns markets and persisted activity at `?markets=1`:
+strictly decoded compact Runtime order books, committed hub Accounts and fee
+policy, canonical pair dimensions, Account-specific spend capacity, deterministic
+same-j GTC/IOC/FOK order construction, maker-owned cancellation, cross-j lifecycle
+evidence, and paginated all/off-chain/on-chain Runtime history. Order and cancel
+commands retain one caller-owned identity across explicit retry until the Runtime
+height observes them; Entity, hub, and pair selection cannot drift while a command
+is pending. Twenty-four focused market, payment, shell, and capability tests pass
+with 240 expectations; the wallet local check covers 504 files with zero
+unsafe-type findings. The production build transforms 1562 modules and emits a
+342.14 kB / 99.85 kB gzip entry plus 63.37 kB / 10.49 kB gzip CSS; Runtime market
+dependencies remain lazy. Real persisted-Runtime browser evidence covers a
+resting ask, a bid observed after same-identity retry, cancellation observed after
+same-identity retry, both activity filters, and logical Runtime timestamps at
+390×844, 1366×900, and 1920×1080 with zero console errors or warnings. The root
+gate passes all 26 BrainVault/runtime tests with 100156 expectations before the
+existing contract-sync environment stops because Hardhat rejects Node 25.6.1.
 
 The next wallet slice now owns remote Runtime consent decisions and effect
 ordering: capability selection and validation, accepted-request persistence,

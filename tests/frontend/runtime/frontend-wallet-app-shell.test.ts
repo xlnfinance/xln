@@ -15,6 +15,7 @@ describe('React wallet app shell', () => {
       { href: '/app?portfolio=1', label: 'Assets', view: 'portfolio' },
       { href: '/app?health=1', label: 'Health', view: 'health' },
       { href: '/app?payments=1', label: 'Payments', view: 'payments' },
+      { href: '/app?markets=1', label: 'Markets', view: 'markets' },
       { href: '/app?setup=1', label: 'Identity', view: 'identity' },
       { href: '/app?settings=1', label: 'Settings', view: 'settings' },
       { href: '/app?diagnostics=1', label: 'Status', view: 'diagnostics' },
@@ -39,6 +40,10 @@ describe('React wallet app shell', () => {
   test('resolves the payments query and canonical invoice deep link', () => {
     expect(resolveWalletAppView('?payments=1')).toBe('payments');
     expect(resolveWalletAppView('', '#pay/invoice')).toBe('payments');
+  });
+
+  test('resolves the markets query', () => {
+    expect(resolveWalletAppView('?markets=1')).toBe('markets');
   });
 
   test('requires complete tab-confined authority for a remote Runtime', () => {

@@ -61,6 +61,30 @@ export type RuntimePaymentEntityTx =
         termId: RuntimePaymentLendingTerm;
         maxInterestBps: number;
       }>;
+    }>
+  | Readonly<{
+      type: 'placeSwapOffer';
+      data: Readonly<{
+        counterpartyEntityId: string;
+        offerId: string;
+        giveTokenId: number;
+        giveTokenDecimals: number;
+        giveAmount: bigint;
+        wantTokenId: number;
+        wantTokenDecimals: number;
+        wantAmount: bigint;
+        maxFee: bigint;
+        minNetReceive: bigint;
+        priceTicks: bigint;
+        timeInForce: 0 | 1 | 2;
+      }>;
+    }>
+  | Readonly<{
+      type: 'proposeCancelSwap';
+      data: Readonly<{
+        counterpartyEntityId: string;
+        offerId: string;
+      }>;
     }>;
 
 export type RuntimePaymentInput = Readonly<{

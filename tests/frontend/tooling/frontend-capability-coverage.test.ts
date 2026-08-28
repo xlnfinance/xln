@@ -202,6 +202,10 @@ describe('frontend capability inventory', () => {
       .toContain('frontend/apps/wallet/src/wallet-payment-source.ts');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-payments-and-markets')?.behavior)
       .toContain('React-owned Runtime route quotes and idempotent payment command retry');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-payments-and-markets')?.currentSources)
+      .toContain('frontend/apps/wallet/src/wallet-market-source.ts');
+    expect(CAPABILITIES.find(({ id }) => id === 'wallet-payments-and-markets')?.behavior)
+      .toContain('React-owned Runtime orderbooks, canonical same-j order and cancel commands, cross-j lifecycle, and persisted activity');
     expect(CAPABILITIES.find(({ id }) => id === 'wallet-native-and-offline')?.status).toBe('in_progress');
   });
 

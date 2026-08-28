@@ -1,0 +1,40 @@
+@media (max-width: 900px) {
+  .wallet-market-grid { grid-template-columns: 1fr; }
+  .wallet-order-ticket { padding: 1.5rem 0 0; border-top: 1px solid var(--line); border-left: 0; }
+  .wallet-open-orders article { grid-template-columns: minmax(9rem, 0.7fr) minmax(0, 1.8fr); }
+  .wallet-open-orders article > button { grid-column: 1 / -1; justify-self: start; }
+  .wallet-cross-routes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .wallet-markets-toolbar { grid-template-columns: auto minmax(0, 1fr); }
+  .wallet-markets-toolbar > span { grid-column: 1 / 2; }
+  .wallet-markets-toolbar > button { justify-self: stretch; }
+  .wallet-market-context { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+  .wallet-market-context > div { padding-bottom: 0; }
+  .wallet-orderbook header { align-items: flex-start; }
+  .wallet-orderbook header dl { display: grid; gap: 0.55rem; }
+  .wallet-orderbook-head,
+  .wallet-orderbook-side > div { grid-template-columns: 0.6fr repeat(3, 1fr); gap: 0.55rem; }
+  .wallet-open-orders article { grid-template-columns: 1fr; gap: 0.75rem; }
+  .wallet-open-orders dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wallet-open-orders article > button { grid-column: auto; width: 100%; }
+  .wallet-cross-routes { grid-template-columns: 1fr; }
+  .wallet-market-activity > header { display: grid; align-items: start; }
+  .wallet-market-activity nav { overflow-x: auto; }
+  .wallet-market-activity li { grid-template-columns: auto minmax(0, 1fr); }
+  .wallet-market-activity li div:last-child { grid-column: 2; justify-items: start; text-align: left; }
+}
+
+@media (max-width: 430px) {
+  .wallet-market-context { grid-template-columns: 1fr; }
+  .wallet-orderbook-head,
+  .wallet-orderbook-side > div { grid-template-columns: 0.55fr 1fr 1fr 0.65fr; font-size: 0.59rem; }
+  .wallet-order-ticket > label > div { grid-template-columns: minmax(0, 1fr) 5.5rem; }
+  .wallet-market-command > div,
+  .wallet-market-command footer { align-items: flex-start; flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wallet-markets { animation: none; }
+}

@@ -11,6 +11,7 @@ import {
 import { IdentityOnboarding } from './identity-onboarding';
 import { WalletDiagnostics } from './wallet-diagnostics';
 import { WalletFinancialHealth } from './wallet-financial-health';
+import { WalletMarkets } from './wallet-markets';
 import { WalletPayments } from './wallet-payments';
 import { WalletPortfolio } from './wallet-portfolio';
 import { WalletSettings } from './wallet-settings';
@@ -58,6 +59,7 @@ function WalletOverview({ runtime }: Readonly<{ runtime: WalletRuntimeSummary }>
           <a href="/app?portfolio=1">Inspect assets and accounts <span aria-hidden="true">→</span></a>
           <a href="/app?health=1">Review financial health <span aria-hidden="true">→</span></a>
           <a href="/app?payments=1">Send or receive payments <span aria-hidden="true">→</span></a>
+          <a href="/app?markets=1">Trade committed markets <span aria-hidden="true">→</span></a>
           <a href="/app?settings=1">Adjust wallet settings <span aria-hidden="true">→</span></a>
           <a href="/app?diagnostics=1">Review wallet diagnostics <span aria-hidden="true">→</span></a>
           <a href="/testnet">Open testnet tools <span aria-hidden="true">↗</span></a>
@@ -122,6 +124,7 @@ export function WalletAppShell() {
           {view === 'portfolio' ? <WalletPortfolio /> : null}
           {view === 'health' ? <WalletFinancialHealth /> : null}
           {view === 'payments' ? <WalletPayments /> : null}
+          {view === 'markets' ? <WalletMarkets /> : null}
           {view === 'settings' ? <WalletSettings onAuthSchemeChange={setAuthScheme} /> : null}
           {view === 'diagnostics' ? <WalletDiagnostics runtime={runtime} /> : null}
           {view === 'overview' ? <WalletOverview runtime={runtime} /> : null}
