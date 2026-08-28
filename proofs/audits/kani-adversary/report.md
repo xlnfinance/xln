@@ -86,7 +86,7 @@ and dropped `- rightHold` in inCapacity (`left_perspective(true)`). The third
 item is a SENSOR (`right_credit_limit >= max_credit - 2` reached), not a mutant:
 no credit-bound off-by-one implementation is ever run, so the harness never
 demonstrates it would DETECT one. Report §2.2 row says "3 seeded mutants must
-be detected … PASS" and readme C5 says "3-мутантная калибровка". The evidence
+be detected … PASS" and readme C5 says "3-mutant calibration". The evidence
 line itself quietly says "credit-bound edge reached" — not "detected".
 Additionally, both real mutants are seeded in the transcription side only; no
 mirror-side mutant calibration exists (a mirror bug is caught only insofar as
@@ -254,7 +254,7 @@ in the untested 256-bit rejection edges, not in the algebra.
   caveat (A6); inherent 4-key/2-byte boundedness is disclosed, not penalized.
 - **Single grade: 83/100** (C5+C6 combined). No fabricated or stubbed evidence;
   no proof invalidating defect; multiple evidence-text defects that must be
-  corrected before the C5/C6 rows are cited as final ("✅ доказано" should
+  corrected before the C5/C6 rows are cited as final ("✅ proven" should
   carry the A1/A2/A3/A5 qualifiers until fixed).
 
 Required corrections (owner triage): A1 (add W256 out-of-range cases or reword

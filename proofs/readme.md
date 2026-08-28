@@ -1,124 +1,148 @@
-# proofs/ — формальные доказательства и доказательный фаззинг
+# proofs/ — formal proofs and evidential fuzzing
 
-Матрица повторно сверена на `b7e3ace82b1c296dff0f646d3bebb120a90a0637`.
-Каждый evidence-report обязан указывать собственный immutable SHA, версии инструментов,
-точные команды и bounded-скоуп. Результат из dirty worktree не считается доказательством:
-повторный прогон выполняется из `git archive` заявленного SHA или другого чистого checkout.
-Машиночитаемый статус C1–C10 — `proofs/program.json`; `bun run check:proof-program`
-запрещает completion-claim без существующих evidence и двух актуальных аудитов.
+The matrix was re-verified at `b7e3ace82b1c296dff0f646d3bebb120a90a0637`.
+Every evidence report must record its own immutable SHA, tool versions, exact
+commands, and bounded scope. A result from a dirty worktree is not evidence:
+a re-run must come from `git archive` of the declared SHA or another clean
+checkout. The machine-readable C1–C10 status is `proofs/program.json`;
+`bun run check:proof-program` forbids a completion claim without existing
+evidence and two current audits.
 
-## Правила для всех задач
+## Rules for all tasks
 
-1. **Продакшн-код не меняется.** Запрещены правки `core/**`, `rscore/crates/**/src/**`,
-   `jurisdictions/contracts/**` (frozen-core). Разрешено: новые файлы в `proofs/**`,
-   новые тестовые файлы в родных тестовых директориях, devDependencies (fast-check),
-   новые standalone-крейты в `proofs/**` с path-зависимостями на rscore.
-2. **Дисциплина утверждений.** Каждый report содержит: SHA, версии инструментов, точные команды
-   запуска, bounded-допущения (диапазоны/глубины/размеры), точную формулировку доказанного
-   свойства. Запрещено слово «невозможно» для конечных моделей — только «в пределах модели X».
-3. **Векторы не пишутся руками.** Парity-корпус генерируется из одного источника и
-   коммитится как артефакт.
-4. **Калибровка.** Харнесс, не воспроизводящий известный баг, считается некалиброванным:
-   при появлении известного бага он обязан стать регрессион-кейсом своего харнесса.
-   (Владелец 2026-08-27: внешние списки B1–B8 в контексте не определены — не ждать и не выдумывать;
-   самокалибровка саботаж-тестами уже применена в C1/C2.)
+1. **Production code does not change.** Editing `core/**`,
+   `rscore/crates/**/src/**`, `jurisdictions/contracts/**` (frozen-core) is
+   forbidden. Allowed: new files under `proofs/**`, new test files in their
+   native test directories, devDependencies (fast-check), new standalone
+   crates under `proofs/**` with path dependencies on rscore.
+2. **Claim discipline.** Every report contains: SHA, tool versions, exact run
+   commands, bounded assumptions (ranges/depths/sizes), and the exact wording
+   of the proven property. The word "impossible" is forbidden for finite
+   models — only "within model X".
+3. **Vectors are never hand-written.** The parity corpus is generated from a
+   single source and committed as an artifact.
+4. **Calibration.** A harness that cannot reproduce a known bug is considered
+   uncalibrated: once a known bug appears it must become a regression case of
+   its harness. (Owner, 2026-08-27: the external B1–B8 lists are undefined in
+   context — do not wait and do not invent; self-calibration via sabotage
+   tests is already applied in C1/C2.)
 
-## Claim / Evidence матрица
+## Claim / Evidence matrix
 
-| # | Claim (что утверждаем) | Evidence (артефакт) | Статус |
+| # | Claim (what is asserted) | Evidence (artifact) | Status |
 |---|---|---|---|
-| C1 | После exact boundary-validation канонические энкодеры TS↔Rust дают одинаковые байты либо одинаково отвергают вход в сгенерированном домене | `proofs/fuzz/enc-diff/report.md`: clean post-FX `b7e3ace82`, 80,656 кейсов, 0 неожиданных расхождений. Unknown-field direct-hash divergence теперь отдельная калибровка и production-boundary reject. Аудиты: c1-repro `findings.md` 92/100 на историческом `dfd45cc7c`, adversary 74/100. Требуется новый independent repro на новых bytes | ⚠️ bounded evidence; post-FX re-audit открыт |
-| C2 | Hot-root равен cold-recompute после покрытых последовательностей мутаций | `core/__tests__/proofs/hot-vs-cold.test.ts` + `proofs/ts/report.md`: после hardening 900 последовательностей, 325,793 deep-проверки. Остатки: пустые `lendingIntents`/`subcontracts`/`pendingWithdrawals`/shadow maps, нет delete для pulls, settlement/dispute/external-finality, double rollback и boundary tokenIds. **c2-repro**: исходный отчёт 2026-08-27 утерян до коммита; заменён независимым re-audit `b043199fe` (**91/100**): clean-extraction `78e07d9a9` — 113,872 default / 325,793 deep, точно; гэпы — `proofs/gaps.md` | ⚠️ сильное bounded evidence, не закрыто |
-| C3 | В TLA-модели Agreement/AckDurability сохраняются; rollback-duplicate варианты нарушают разные liveness-свойства при `DeliverPartial` | `proofs/tla/report.md`: 8 TLC-прогонов; один прогон независимо повторён: 337,955 distinct states, без ошибки. Производственная достижимость `DeliverPartial` не доказана: TS и Rust публикуют переход через атомарную WAL-границу | ⚠️ модель завершена; 0/2 аудита и нужен crash-cutpoint |
-| C4 | Контрактные свойства в пределах Foundry/Halmos моделей | `proofs/solidity/report.md`: 99 pass + 2 известные fail; Halmos 5/5 независимо повторён. `jurisdictions/contracts/**`, artifacts/typechain и `frozen-core.json` не менялись относительно frozen baseline. Hardening закрыл A1–A3/A5–A7; A4 закрыт частично, A8–A12 остаются | ⚠️ воспроизводимо, scope не закрыт |
-| C5 | Bounded delta-mirror: арифметика и инварианты 16/8; sampled bridge к production 256/128 | `proofs/kani/report.md`: 16/16 Kani VERIFIED, 2M random + 500k walks + 15,987 boundary + 200k engine cross-check. W256 rejection-ветка фактически не достигается; калибровка — 2 мутанта + 1 coverage sensor, не 3 мутанта | ⚠️ bounded evidence; repro-аудит отсутствует |
-| C6 | Radix path-independence/round-trip/injectivity в конечной 4-key вселенной | `proofs/kani/report.md`: 24 перестановки, 73 канонических subset-порядка, 16×15 ordered root pairs; `hash_branch16([])` — ручной census 11 production call sites, не machine proof | ✅ bounded exhaustive; Kani-repro всё ещё нужен |
-| C7 | Семь parser targets в пяти крейтах не паникуют/OOM в выполненной wave-1 | `proofs/fuzz/parser/report.md`: 57.6M исполнений, 0 panic/OOM в покрытом. Оценка adversary: 61/100 для исходного «все», 84/100 для узкого scope. Runtime-декодеры, checkpoint/orderbook assertions и wave-2 long run не завершены | ⚠️ только wave-1 scope |
-| C8 | Machine-checked TS↔Rust transition equivalence | В репозитории есть parity-дайджесты и тест-векторы, но нет отдельного report с SHA, командами, cardinality, exact transition claim и двумя аудитами | ❌ не доказано как C8 |
-| C9 | Trace refinement: одна последовательность inputs → равные roots/events/effects/outbox после каждого перехода, с авто-shrink | фаза 2 (строится на генераторах задачи 1) | ожидает |
-| C10 | Crash-cutpoint: восстановление после искуственного краха на каждой границе WAL→fsync→projection→outbox ≡ побитово uninterrupted run | фаза 2; расширяет `core/__tests__/storage/recovery/recovery-outbox-equivalence.test.ts` | ожидает |
+| C1 | After exact boundary validation, the TS↔Rust canonical encoders produce identical bytes or both reject the input, within the generated domain | `proofs/fuzz/enc-diff/report.md`: clean post-FX `b7e3ace82`, 80,656 cases, 0 unexpected differences. The unknown-field direct-hash divergence is now a separate calibration and a production-boundary reject. Audits: c1-repro `findings.md` 92/100 at the historical `dfd45cc7c`, adversary 74/100. A new independent repro on the new bytes is required | ⚠️ bounded evidence; post-FX re-audit open |
+| C2 | The hot root equals the cold recomputation after the covered mutation sequences | `core/__tests__/proofs/hot-vs-cold.test.ts` + `proofs/ts/report.md`: after hardening, 900 sequences, 325,793 deep checks. Residuals: empty `lendingIntents`/`subcontracts`/`pendingWithdrawals`/shadow maps, no delete for pulls, settlement/dispute/external-finality, double rollback, and boundary tokenIds. **c2-repro**: the original 2026-08-27 report was lost before commit; replaced by the independent re-audit `b043199fe` (**91/100**): clean-extraction `78e07d9a9` — 113,872 default / 325,793 deep, exact; gaps — `proofs/gaps.md` | ⚠️ strong bounded evidence, not closed |
+| C3 | In the TLA model Agreement/AckDurability hold; the rollback-duplicate variants violate different liveness properties under `DeliverPartial` | `proofs/tla/report.md`: 8 TLC runs; independently re-run in full by the c3-repro audit (`bdb5733f3`, **93/100**): every distinct-state count exact (337,955 / 1,844×2 / 372,735×2 / 346,333). c3-adversary **89/100**: the model-vs-code encoding verified line-by-line; `DeliverPartial` stays an ASSERTED window → BUG-05 remains CONDITIONAL. Production reachability of `DeliverPartial` is not proven: TS and Rust publish the transition through one atomic WAL boundary; a crash-cutpoint witness is still required | ⚠️ model complete + audited (same-agent); crash-cutpoint open |
+| C4 | Contract properties within the Foundry/Halmos models | `proofs/solidity/report.md`: 99 pass + 2 known fails; Halmos 5/5 independently re-run. `jurisdictions/contracts/**`, artifacts/typechain, and `frozen-core.json` unchanged relative to the frozen baseline. Hardening closed A1–A3/A5–A7; A4 partially closed, A8–A12 remain | ⚠️ reproducible, scope not closed |
+| C5 | Bounded delta mirror: arithmetic and invariants at 16/8; sampled bridge to production 256/128 | `proofs/kani/report.md`: 16/16 Kani VERIFIED, 2M random + 500k walks + 15,987 boundary + 200k engine cross-check. The W256 rejection branch is effectively never reached; the calibration is 2 mutants + 1 coverage sensor, not 3 mutants. **kani-repro** (`bdb5733f3`, **93/100**): 16/16 VERIFIED (448/448 checks) + 16/16 tests re-run exactly at pin `13f51950a` | ⚠️ bounded evidence; external repro still open |
+| C6 | Radix path-independence/round-trip/injectivity in the finite 4-key universe | `proofs/kani/report.md`: 24 permutations, 73 canonical subset orders, 16×15 ordered root pairs; `hash_branch16([])` — a manual census of 11 production call sites, not a machine proof. Re-run by the kani-repro audit (lib tests green) | ✅ bounded exhaustive; external repro still open |
+| C7 | Seven parser targets across five crates do not panic/OOM in the executed wave-1 | `proofs/fuzz/parser/report.md`: 57.6M executions, 0 panic/OOM in the covered scope. Adversary grade: 61/100 for the original "all" claim, 84/100 for the narrow scope. Runtime decoders, checkpoint/orderbook assertions, and the wave-2 long run are unfinished | ⚠️ wave-1 scope only |
+| C8 | Machine-checked TS↔Rust transition equivalence | The repository has parity digests and test vectors, but no dedicated report with SHA, commands, cardinality, an exact transition claim, and two audits | ❌ not proven as C8 |
+| C9 | Trace refinement: one input sequence → equal roots/events/effects/outbox after every transition, with auto-shrink | phase 2 (built on the task-1 generators) | waiting |
+| C10 | Crash-cutpoint: recovery after an artificial crash at every WAL→fsync→projection→outbox boundary ≡ bitwise-identical to the uninterrupted run | phase 2; extends `core/__tests__/storage/recovery/recovery-outbox-equivalence.test.ts` | waiting |
 
 ## Completion gate
 
-- Под `proofs/audits/` закоммичено **9** пакетов; C1-repro использует имя
-  `findings.md`, остальные — `report.md`. C2-repro `b043199fe` заменяет утерянный
-  до коммита оригинал. Аудиты садились в git позже
-  пинов своих evidence (`9aa5affbe`/`3cbf807da`) — при цитировании сверять SHA отчёта,
-  не только SHA evidence. Отсутствуют: TLA×2 и Kani-repro.
-- Единый реестр требований аудитов (до 100/100) — `proofs/gaps.md`; статус «программа
-  завершена» требует его обнуления или явного owner-решения по каждому OPEN.
-- До статуса «программа завершена» обязательны: полноценный C8, C9/C10, production
-  crash-cutpoint для C3/BUG-05, C7 wave-2 и Kani W256 rejection/repro.
-- Итоговые числа должны быть исправлены в первичных секциях отчётов, а не только в поздних
-  примечаниях, и повторены двумя независимыми аудитами на одном immutable SHA.
-- Релизный пакет требует clean SHA, English-источников, `bun run check` и итоговой
-  таблицы claim → proof → adversary → repro → residual risk. Folder-width уже зелёный:
-  `FOLDER_WIDTH_OK` (grandfathered debt не включает `test/foundry`).
+- **12** audit packages are committed under `proofs/audits/`; C1-repro uses the
+  name `findings.md`, the rest use `report.md`. C2-repro `b043199fe` replaces
+  the original lost before commit; c3-adversary/c3-repro/kani-repro
+  (`bdb5733f3`) close the previously missing TLA×2 and Kani-repro — all three
+  performed by the same audit agent (external provider quota died 2026-08-27),
+  so an external re-run stays on the gap list. Audits landed in git later than
+  the pins of their evidence (`9aa5affbe`/`3cbf807da`) — when citing, verify
+  the report's SHA, not only the evidence SHA.
+- The unified register of audit demands (to 100/100) is `proofs/gaps.md`; the
+  "program complete" status requires it to be zeroed or an explicit owner
+  decision on every OPEN item.
+- Required before "program complete": a real C8, C9/C10, a production
+  crash-cutpoint for C3/BUG-05, C7 wave-2, and the Kani W256 rejection fix.
+- Final numbers must be corrected in the primary sections of the reports, not
+  only in late annotations, and re-run by two independent audits on one
+  immutable SHA.
+- The release package requires a clean SHA, English sources, `bun run check`,
+  and the final claim → proof → adversary → repro → residual risk table.
+  Folder-width is already green: `FOLDER_WIDTH_OK` (the grandfathered debt
+  does not include `test/foundry`).
 
-## Точные формулировки кодек-свойств (для задач 1, 6, 7)
+## Exact codec-property wordings (for tasks 1, 6, 7)
 
 - `decode(encode(x)) = normalize(x)`
 - `encode(decode(canonicalBytes)) = canonicalBytes`
-- Любой принятый wire-input обязан быть каноническим (re-encode = вход).
-- Любой rejected input не меняет состояние декодера/реплики.
+- Every accepted wire input must be canonical (re-encode = input).
+- Every rejected input leaves the decoder/replica state unchanged.
 
-Острые края генератора (обязательные seed'ы): суррогатные пары/не-BMP (cmp_utf16 vs JS `<`),
-`ryu_js` round-trip и границы JS_MAX_SAFE_INTEGER, `-0`, `1e21`, нулевой BigInt (`[0]` magnitude),
-пустые Array/Set/Map, дубли ключей (обе стороны обязаны отказаться), строки ровно 55/56 байт
-(RLP-граница).
+Generator sharp edges (mandatory seeds): surrogate pairs/non-BMP (cmp_utf16 vs
+JS `<`), the `ryu_js` round trip and the JS_MAX_SAFE_INTEGER boundaries, `-0`,
+`1e21`, the zero BigInt (`[0]` magnitude), empty Array/Set/Map, duplicate keys
+(both sides must reject), strings of exactly 55/56 bytes (the RLP boundary).
 
-## Журнал решений владельца (2026-08-27)
+## Owner decision log (2026-08-27)
 
-- **D1** `entity-kernel/commitment.rs` — канонический authoritative RRS-код; комментарий и имя
-  `with_diagnostic_commitments` исправлены на canonical. Закрыто.
-- **D2** `policyVersion` — единый диапазон обоих движков `0..Number.MAX_SAFE_INTEGER`
-  (9_007_199_254_740_991); TS и Rust отвергают большее на admission до mempool. Полный u64
-  в одном Rust — только с protocol bump. → `proofs/fixes.md` FX-1.
-- **D3** `lending_*`/`reserve_to_collateral` — вне RRS-профиля (профиль: pay/HTLC/same-J swap/
-  j-event/rebalance). Громкий admission reject в обоих направлениях, без TS fallback. → FX-2.
-- **D4** F1 j-claim — один общий validator для admission и proposal; exact duplicate —
-  idempotent; конфликт с committed/ранним mempool claim — typed reject; proposal удаляет только
-  конфликтную строку с typed disposition и продолжает аккаунт, никогда голый `Error`.
-  Обязательные векторы TS↔Rust: committed conflict, два конфликта в одном batch, exact
-  duplicate, stale admitted claim после incoming frame. → `proofs/fixes.md` FX-3. **Hardening посажен**
-  (`b8004d939`): 7 коллекций непустые, delete-пути, конфликты и D4-векторы закреплены,
-  entity-overlay слой, 325,793 deep-проверки. Остаточный скоуп перечислен в
-  `proofs/ts/report.md`; replacement C2-repro — `b043199fe`, 91/100.
-  Найдены BUG-13/BUG-14 (см. bugs.md).
-- **D5** Удаление legacy wave/shadow/worker — атомарно после exact RRS replay + crash restore
-  TS↔Rust + pay/same-J HLT. Не трогать до гейтов.
-- **D6** Re-ACK — переиспользование сохранённого Hanko без новой ECDSA; current/previous-board
-  grace; missing/corrupt cache — громкий отказ. Исправляется параллельной задачей.
-- **Freeze**: новые формальные направления не открываются; критический путь — exact RRS.
-  Текущие задачи (TLA/foundry/Kani) завершаются.
+- **D1** `entity-kernel/commitment.rs` — the canonical authoritative RRS code;
+  the comment and the name `with_diagnostic_commitments` were corrected to
+  canonical. Closed.
+- **D2** `policyVersion` — one range for both engines,
+  `0..Number.MAX_SAFE_INTEGER` (9_007_199_254_740_991); TS and Rust reject
+  anything larger at admission before the mempool. A full u64 in Rust alone —
+  only with a protocol bump. → `proofs/fixes.md` FX-1.
+- **D3** `lending_*`/`reserve_to_collateral` — outside the RRS profile
+  (profile: pay/HTLC/same-J swap/j-event/rebalance). A loud admission reject
+  in both directions, no TS fallback. → FX-2.
+- **D4** F1 j-claim — one shared validator for admission and proposal; an
+  exact duplicate is idempotent; a conflict with a committed/earlier mempool
+  claim is a typed reject; the proposal drops only the conflicting row with a
+  typed disposition and the account continues — never a bare `Error`.
+  Mandatory TS↔Rust vectors: committed conflict, two conflicts in one batch,
+  exact duplicate, stale admitted claim after an incoming frame. →
+  `proofs/fixes.md` FX-3. **Hardening landed** (`b8004d939`): 7 non-empty
+  collections, delete paths, conflicts and the D4 vectors pinned, the
+  entity-overlay layer, 325,793 deep checks. The residual scope is listed in
+  `proofs/ts/report.md`; the replacement C2-repro is `b043199fe`, 91/100.
+  BUG-13/BUG-14 were found (see bugs.md).
+- **D5** Removing the legacy wave/shadow/worker — atomically, after exact RRS
+  replay + crash restore TS↔Rust + pay/same-J HLT. Do not touch before the
+  gates.
+- **D6** Re-ACK — reusing the stored Hanko without a new ECDSA;
+  current/previous-board grace; a missing/corrupt cache is a loud refusal.
+  Being fixed by a parallel task.
+- **Freeze**: no new formal directions are opened; the critical path is exact
+  RRS. The current tasks (TLA/foundry/Kani) are being completed.
 
 
 
-1. Differential encoder fuzz (фундамент под всеми корнями) — без нового тулчейна.
-2. Hot-vs-cold свойства — без нового тулчейна.
-3. TLA+ bilateral — узкая машина, не каскад.
-4. Foundry инварианты — conservation/allowances/nonce/hanko.
-5. Kani (зеркало дельт + bounded radix) — последним из «формальных».
+1. Differential encoder fuzz (the foundation under all the roots) — no new toolchain.
+2. Hot-vs-cold properties — no new toolchain.
+3. TLA+ bilateral — a narrow machine, not the cascade.
+4. Foundry invariants — conservation/allowances/nonce/hanko.
+5. Kani (the delta mirror + bounded radix) — last of the "formal" ones.
 
-Kani-ограничение: никаких заявлений про BigInt/SHA/ECDSA/всю машину — только bounded
-fixed-width арифметика, overflow, routing и малые reducers.
+Kani restriction: no claims about BigInt/SHA/ECDSA/the whole machine — only
+bounded fixed-width arithmetic, overflow, routing, and small reducers.
 
-## Отклонено/отложено
+## Rejected/deferred
 
-- **Loom** — отклонено: loom верифицирует атомики/порядки памяти малых lock-free структур;
-  синхронизация resident-леса — Barrier+AtomicBool с простым протоколом фаз, не loom-масштаб.
-  Протокольные свойства фаз покрываются TLA+ (фаза 2, опционально).
-- **Certora** — отложено (нет лицензии); foundry-invariants даёт ~70% того же за 0 лицензий.
-- **CI-гейт** (изменение `core/account/consensus/**` или `rscore/crates/engine/src/consensus/**`
-  без зелёного TLC = красный) — предложен, включение требует решения владельца.
+- **Loom** — rejected: loom verifies atomics/memory orders of small lock-free
+  structures; the resident-forest synchronization is Barrier+AtomicBool with a
+  simple phase protocol, not loom-scale. Protocol-level phase properties are
+  covered by TLA+ (phase 2, optional).
+- **Certora** — deferred (no license); foundry-invariants gives ~70% of the
+  same for 0 licenses.
+- **CI gate** (a change to `core/account/consensus/**` or
+  `rscore/crates/engine/src/consensus/**` without a green TLC = red) —
+  proposed; enabling it requires an owner decision.
 
-## Известное расхождение для TLA-вариантов (проверено по коду)
+## Known divergence for the TLA variants (verified against the code)
 
-`rollback-duplicate` (ретрансмит победившего фрейма после роллбэка):
-TS `core/account/consensus/incoming/collision.ts:198` → `return undefined` (продолжить),
-Rust `engine/src/consensus/incoming/apply.rs:707` → `rejected("ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE")`
-(строки — audited HEAD `b7e3ace82`; на TLA-пине `13f51950a` — `:196`/`:652`, см. `proofs/tla/report.md`).
-Модель обязана закодировать оба варианта (`TS_ROLLBACK_DUP == continue | reject`) и проверить,
-ломает ли расхождение Agreement. Окно достижимости узкое (post-rollback/pre-commit + retry);
-если достижимо — Rust-путь может подавлять нужный re-ack → liveness. Это не «расхождение
-паритета», а кандидат в баги с приоритетом.
+`rollback-duplicate` (a retransmit of the winning frame after a rollback):
+TS `core/account/consensus/incoming/collision.ts:198` → `return undefined`
+(continue),
+Rust `engine/src/consensus/incoming/apply.rs:707` →
+`rejected("ACCOUNT_PEER_FRAME_ROLLBACK_DUPLICATE")`
+(lines — audited HEAD `b7e3ace82`; at the TLA pin `13f51950a` they are
+`:196`/`:652`, see `proofs/tla/report.md`).
+The model must encode both variants (`TS_ROLLBACK_DUP == continue | reject`)
+and check whether the divergence breaks Agreement. The reachability window is
+narrow (post-rollback/pre-commit + retry); if reachable, the Rust path may
+suppress a needed re-ack → liveness. This is not a "parity divergence" but a
+priority bug candidate (CONDITIONAL until the cutpoint is proven — BUG-05).

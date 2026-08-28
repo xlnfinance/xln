@@ -14,7 +14,7 @@
 
 ### A1 — "All Rust decoders" claim excludes the entire `runtime` crate (HIGH, claim-invalidating)
 
-- `proofs/readme.md:33` (C7 row): «Все парсеры: no panic/OOM …»; `proofs/fuzz/parser/report.md:3`
+- `proofs/readme.md:33` (C7 row): "All parsers: no panic/OOM …"; `proofs/fuzz/parser/report.md:3`
   restates "all Rust decoders".
 - `proofs/fuzz/parser/fuzz/Cargo.toml:12-17` links only `abi`, `hanko`, `process`,
   `entity-kernel`, `protocol`. `xln-rscore-runtime` is not a dependency; none of its decoders
@@ -57,7 +57,7 @@
   `0xdd 00 1e 84 80` (array32 claiming 2,000,000). Each level reserves 2,000,000 ×
   `size_of::<serde_json::Value>()` (32 B) = 64 MiB and stays alive while descending. 8 levels
   (41-byte input) ≈ 512 MiB; 256 levels (~1.3 KB input) ≈ 16 GiB → allocator abort. This is the
-  exact class C7's headline "budget срабатывает раньше аллокации" claims is absent, in a decoder
+  exact class C7's headline "the budget fires before allocation" claims is absent, in a decoder
   the proof never runs. Input reachability: LevelDB-persisted frames/WAL/checkpoints and the
   runtime transport socket — corruption/adversarial-file threat model, same as O1's justification
   for being reported.
@@ -77,7 +77,7 @@
 - `fuzz/fuzz_targets/orderbook_page.rs:16-18` admits it: acceptance requires page-root hashes a
   fuzzer "cannot guess". The `restore ∘ snapshot = id` assert (`:34-37`) can only fire on inputs
   deriving from `parity-fixture` / `empty-accepted` seeds (2 of 5 seeds).
-- The C7 row's "каноничность принимается только байт-в-байт" rests, for this target, on two
+- The C7 row's "canonicality is accepted only byte-for-byte" rests, for this target, on two
   committed fixtures — regression tests, not a fuzz property. Honest in the comment, but the
   headline wording overstates it.
 
@@ -207,7 +207,7 @@ F1/F2/O1/F3 severity review (audit task 5):
 
 ## 4. Grade
 
-**61/100** for C7 as claimed («Все парсеры»).
+**61/100** for C7 as claimed ("All parsers").
 
 - +34: what is covered is done well — correct canonicality directions on targets 1/2/3/6/7,
   per-execution allocation assertions with a counting allocator on 2/6, committed seed+corpus+

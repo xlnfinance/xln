@@ -1,6 +1,6 @@
 /**
- * C1 audit reproducer — boundary finding #3 (report.md «Найденные/задокументированные
- * асимметрии», п.3): TS-only tx kinds.
+ * C1 audit reproducer — boundary finding #3 (report.md "Found/documented
+  * asymmetries", item 3): TS-only tx kinds.
  *
  * Historical state (commit dfd45cc7c, the state the C1 report fuzzed):
  *   TS  `canonicalAccountTxForFrameHash` hashes ANY tx kind passthrough

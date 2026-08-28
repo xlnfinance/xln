@@ -3,12 +3,17 @@
   "programRangeStart": "dfd45cc7c20f188e3f9c032b7549d3baab52b1de",
   "evidenceAnchorSha": "b7e3ace82b1c296dff0f646d3bebb120a90a0637",
   "releaseClaimAllowed": false,
-  "requiredAuditKinds": ["adversary", "repro"],
+  "requiredAuditKinds": [
+    "adversary",
+    "repro"
+  ],
   "audits": [
     {
       "id": "c1-adversary",
       "kind": "adversary",
-      "claims": ["C1"],
+      "claims": [
+        "C1"
+      ],
       "report": "proofs/audits/c1-adversary/report.md",
       "subjectSha": "b95e7ee3b6345a296535aeb6a5d375efc1a27c88",
       "matchesEvidenceAnchor": false
@@ -16,7 +21,9 @@
     {
       "id": "c1-repro",
       "kind": "repro",
-      "claims": ["C1"],
+      "claims": [
+        "C1"
+      ],
       "report": "proofs/audits/c1-repro/findings.md",
       "subjectSha": "dfd45cc7c20f188e3f9c032b7549d3baab52b1de",
       "matchesEvidenceAnchor": false
@@ -24,7 +31,9 @@
     {
       "id": "c2-adversary",
       "kind": "adversary",
-      "claims": ["C2"],
+      "claims": [
+        "C2"
+      ],
       "report": "proofs/audits/c2-adversary/report.md",
       "subjectSha": "b95e7ee3b6345a296535aeb6a5d375efc1a27c88",
       "matchesEvidenceAnchor": false
@@ -32,7 +41,9 @@
     {
       "id": "c2-repro",
       "kind": "repro",
-      "claims": ["C2"],
+      "claims": [
+        "C2"
+      ],
       "report": "proofs/audits/c2-repro/report.md",
       "subjectSha": "78e07d9a92b5a022cb55a9a32519f10341148d0e",
       "matchesEvidenceAnchor": false
@@ -40,7 +51,9 @@
     {
       "id": "c4-adversary",
       "kind": "adversary",
-      "claims": ["C4"],
+      "claims": [
+        "C4"
+      ],
       "report": "proofs/audits/c4-adversary/report.md",
       "subjectSha": "944353c7c06c933e5de32a48857383ea407bcd60",
       "matchesEvidenceAnchor": false
@@ -48,7 +61,9 @@
     {
       "id": "c4-repro",
       "kind": "repro",
-      "claims": ["C4"],
+      "claims": [
+        "C4"
+      ],
       "report": "proofs/audits/c4-repro/report.md",
       "subjectSha": "b95e7ee3b6345a296535aeb6a5d375efc1a27c88",
       "matchesEvidenceAnchor": false
@@ -56,7 +71,10 @@
     {
       "id": "kani-adversary",
       "kind": "adversary",
-      "claims": ["C5", "C6"],
+      "claims": [
+        "C5",
+        "C6"
+      ],
       "report": "proofs/audits/kani-adversary/report.md",
       "subjectSha": "13f51950a483dc5b721c722259881fb089768368",
       "matchesEvidenceAnchor": false
@@ -64,7 +82,9 @@
     {
       "id": "c7-adversary",
       "kind": "adversary",
-      "claims": ["C7"],
+      "claims": [
+        "C7"
+      ],
       "report": "proofs/audits/c7-adversary/report.md",
       "subjectSha": "b95e7ee3b6345a296535aeb6a5d375efc1a27c88",
       "matchesEvidenceAnchor": false
@@ -72,9 +92,42 @@
     {
       "id": "c7-repro",
       "kind": "repro",
-      "claims": ["C7"],
+      "claims": [
+        "C7"
+      ],
       "report": "proofs/audits/c7-repro/report.md",
       "subjectSha": "13f51950a483dc5b721c722259881fb089768368",
+      "matchesEvidenceAnchor": false
+    },
+    {
+      "id": "c3-adversary",
+      "kind": "adversary",
+      "claims": [
+        "C3"
+      ],
+      "report": "proofs/audits/c3-adversary/report.md",
+      "subjectSha": "bdb5733f3402913eaafae0ca99c3af7e84f4479b",
+      "matchesEvidenceAnchor": false
+    },
+    {
+      "id": "c3-repro",
+      "kind": "repro",
+      "claims": [
+        "C3"
+      ],
+      "report": "proofs/audits/c3-repro/report.md",
+      "subjectSha": "bdb5733f3402913eaafae0ca99c3af7e84f4479b",
+      "matchesEvidenceAnchor": false
+    },
+    {
+      "id": "kani-repro",
+      "kind": "repro",
+      "claims": [
+        "C5",
+        "C6"
+      ],
+      "report": "proofs/audits/kani-repro/report.md",
+      "subjectSha": "bdb5733f3402913eaafae0ca99c3af7e84f4479b",
       "matchesEvidenceAnchor": false
     }
   ],
@@ -86,10 +139,20 @@
       "complete": false,
       "statement": "After exact boundary validation, TS and Rust canonical encoders agree or reject symmetrically inside the generated domain.",
       "evidenceSha": "b7e3ace82b1c296dff0f646d3bebb120a90a0637",
-      "evidence": ["proofs/fuzz/enc-diff/report.md"],
-      "auditIds": ["c1-adversary", "c1-repro"],
-      "metrics": {"cases": 80656, "unexpectedMismatches": 0},
-      "residualRisks": ["Unknown transaction fields are hash-significant in TS but dropped by the typed Rust projection; protocol resolution and post-FX independent reproduction remain open."]
+      "evidence": [
+        "proofs/fuzz/enc-diff/report.md"
+      ],
+      "auditIds": [
+        "c1-adversary",
+        "c1-repro"
+      ],
+      "metrics": {
+        "cases": 80656,
+        "unexpectedMismatches": 0
+      },
+      "residualRisks": [
+        "Unknown transaction fields are hash-significant in TS but dropped by the typed Rust projection; protocol resolution and post-FX independent reproduction remain open."
+      ]
     },
     {
       "id": "C2",
@@ -98,10 +161,21 @@
       "complete": false,
       "statement": "Hot account roots equal cold recomputation after covered mutation sequences.",
       "evidenceSha": "b8004d939b58c139c970fdd351768fba9bb74636",
-      "evidence": ["proofs/ts/report.md", "core/__tests__/proofs/hot-vs-cold.test.ts"],
-      "auditIds": ["c2-adversary", "c2-repro"],
-      "metrics": {"sequences": 900, "deepChecks": 325793},
-      "residualRisks": ["Settlement, dispute, external-finality, double-rollback and boundary-token paths remain uncovered."]
+      "evidence": [
+        "proofs/ts/report.md",
+        "core/__tests__/proofs/hot-vs-cold.test.ts"
+      ],
+      "auditIds": [
+        "c2-adversary",
+        "c2-repro"
+      ],
+      "metrics": {
+        "sequences": 900,
+        "deepChecks": 325793
+      },
+      "residualRisks": [
+        "Settlement, dispute, external-finality, double-rollback and boundary-token paths remain uncovered."
+      ]
     },
     {
       "id": "C3",
@@ -110,10 +184,21 @@
       "complete": false,
       "statement": "Agreement and AckDurability hold inside the stated TLA+ model bounds.",
       "evidenceSha": "13f51950a483dc5b721c722259881fb089768368",
-      "evidence": ["proofs/tla/report.md", "proofs/tla/BilateralAccount.tla"],
-      "auditIds": [],
-      "metrics": {"tlcRuns": 8, "independentlyRepeatedDistinctStates": 337955},
-      "residualRisks": ["No independent audits and no production crash-cutpoint mapping for DeliverPartial."]
+      "evidence": [
+        "proofs/tla/report.md",
+        "proofs/tla/BilateralAccount.tla"
+      ],
+      "auditIds": [
+        "c3-adversary",
+        "c3-repro"
+      ],
+      "metrics": {
+        "tlcRuns": 8,
+        "independentlyRepeatedDistinctStates": 337955
+      },
+      "residualRisks": [
+        "No independent audits and no production crash-cutpoint mapping for DeliverPartial."
+      ]
     },
     {
       "id": "C4",
@@ -122,10 +207,22 @@
       "complete": false,
       "statement": "Contract properties hold inside the committed Foundry and Halmos harnesses.",
       "evidenceSha": "944353c7c06c933e5de32a48857383ea407bcd60",
-      "evidence": ["proofs/solidity/report.md", "jurisdictions/test/foundry/HalmosLemmas.t.sol"],
-      "auditIds": ["c4-adversary", "c4-repro"],
-      "metrics": {"foundryPassed": 99, "knownFoundryFailures": 2, "halmosLemmas": 5},
-      "residualRisks": ["Transformer chaining, full-domain clamp, deep Hanko and entry-point coverage remain open."]
+      "evidence": [
+        "proofs/solidity/report.md",
+        "jurisdictions/test/foundry/HalmosLemmas.t.sol"
+      ],
+      "auditIds": [
+        "c4-adversary",
+        "c4-repro"
+      ],
+      "metrics": {
+        "foundryPassed": 99,
+        "knownFoundryFailures": 2,
+        "halmosLemmas": 5
+      },
+      "residualRisks": [
+        "Transformer chaining, full-domain clamp, deep Hanko and entry-point coverage remain open."
+      ]
     },
     {
       "id": "C5",
@@ -134,10 +231,20 @@
       "complete": false,
       "statement": "The fixed-width delta mirror satisfies the stated bounded arithmetic invariants.",
       "evidenceSha": "13f51950a483dc5b721c722259881fb089768368",
-      "evidence": ["proofs/kani/report.md", "proofs/kani/src/delta_proofs.rs"],
-      "auditIds": ["kani-adversary"],
-      "metrics": {"verifiedHarnesses": 16},
-      "residualRisks": ["Independent reproduction and production-width out-of-range calibration remain open."]
+      "evidence": [
+        "proofs/kani/report.md",
+        "proofs/kani/src/delta_proofs.rs"
+      ],
+      "auditIds": [
+        "kani-adversary",
+        "kani-repro"
+      ],
+      "metrics": {
+        "verifiedHarnesses": 16
+      },
+      "residualRisks": [
+        "Independent reproduction and production-width out-of-range calibration remain open."
+      ]
     },
     {
       "id": "C6",
@@ -146,10 +253,22 @@
       "complete": false,
       "statement": "Radix properties are exhaustive only in the declared four-key universe.",
       "evidenceSha": "13f51950a483dc5b721c722259881fb089768368",
-      "evidence": ["proofs/kani/report.md", "proofs/kani/src/radix_universe.rs"],
-      "auditIds": ["kani-adversary"],
-      "metrics": {"permutations": 24, "subsetOrders": 73, "orderedRootPairs": 240},
-      "residualRisks": ["Independent Kani reproduction is absent; production call-site census is manual."]
+      "evidence": [
+        "proofs/kani/report.md",
+        "proofs/kani/src/radix_universe.rs"
+      ],
+      "auditIds": [
+        "kani-adversary",
+        "kani-repro"
+      ],
+      "metrics": {
+        "permutations": 24,
+        "subsetOrders": 73,
+        "orderedRootPairs": 240
+      },
+      "residualRisks": [
+        "Independent Kani reproduction is absent; production call-site census is manual."
+      ]
     },
     {
       "id": "C7",
@@ -158,10 +277,21 @@
       "complete": false,
       "statement": "Seven parser targets did not panic or exhaust memory during the completed wave-1 runs.",
       "evidenceSha": "b95e7ee3b6345a296535aeb6a5d375efc1a27c88",
-      "evidence": ["proofs/fuzz/parser/report.md", "proofs/fuzz/parser/fuzz/Cargo.toml"],
-      "auditIds": ["c7-adversary", "c7-repro"],
-      "metrics": {"targets": 7, "executions": 57600000},
-      "residualRisks": ["Runtime decoders, assertion-strength regressions and full independent reproduction remain open."]
+      "evidence": [
+        "proofs/fuzz/parser/report.md",
+        "proofs/fuzz/parser/fuzz/Cargo.toml"
+      ],
+      "auditIds": [
+        "c7-adversary",
+        "c7-repro"
+      ],
+      "metrics": {
+        "targets": 7,
+        "executions": 57600000
+      },
+      "residualRisks": [
+        "Runtime decoders, assertion-strength regressions and full independent reproduction remain open."
+      ]
     },
     {
       "id": "C8",
@@ -172,7 +302,9 @@
       "evidence": [],
       "auditIds": [],
       "metrics": {},
-      "residualRisks": ["No dedicated immutable evidence artifact or audits exist."]
+      "residualRisks": [
+        "No dedicated immutable evidence artifact or audits exist."
+      ]
     },
     {
       "id": "C9",
@@ -183,7 +315,9 @@
       "evidence": [],
       "auditIds": [],
       "metrics": {},
-      "residualRisks": ["No trace-refinement harness or shrinker exists."]
+      "residualRisks": [
+        "No trace-refinement harness or shrinker exists."
+      ]
     },
     {
       "id": "C10",
@@ -194,7 +328,9 @@
       "evidence": [],
       "auditIds": [],
       "metrics": {},
-      "residualRisks": ["No exhaustive crash-cutpoint harness or production mapping exists."]
+      "residualRisks": [
+        "No exhaustive crash-cutpoint harness or production mapping exists."
+      ]
     }
   ]
 }

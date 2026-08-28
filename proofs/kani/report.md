@@ -1,7 +1,7 @@
 # proofs/kani — C5 (delta math mirror) + C6 (bounded radix): report
 
 All claims below are claims **within the bounded mirror / bounded universe**
-(точная формулировка у каждого пункта). No unconditional "impossible"
+(the exact wording is attached to each item). No unconditional "impossible"
 statements: finite models only, per `proofs/readme.md` rule 2.
 
 ## 0. Provenance
@@ -185,7 +185,7 @@ Root cause: `Arc<Node>` drop glue is a 5-function recursive cycle containing
 a 16-iteration array-drop loop, and sha2's compression needs loop unwind ≥
 ~70; their product explodes CBMC's symbolic execution on this
 toolchain/CPU. This matches and concretizes the readme's Kani limitation
-note ("никаких заявлений про BigInt/SHA"). The harnesses remain in the tree,
+note ("no claims about BigInt/SHA"). The harnesses remain in the tree,
 sound and ready, for a future toolchain or a Linux x86_64 runner with more
 solver headroom.
 
@@ -240,13 +240,15 @@ by deleting the file and re-running `corpus_artifact_replays`).
 
 ---
 
-## Аудит kani-adversary (добавлено координатором)
+## kani-adversary audit (folded by the coordinator)
 
-83/100 (C5 82 / C6 85), отчёт: `proofs/audits/kani-adversary/report.md`.
-Зеркало побайтово честное (field/branch-exact), SHA-256 реальный, фальсификаций нет.
-Уточнения к этому отчёту: (A1) кросс-чек 200k не порождает reject-ветку — формулировка
-«acceptance + rejection field names» завышена, границы ±2^255 не сэмплировались;
-(A2) «3-мутантная калибровка» = 2 мутанта + 1 сенсор покрытия; (A4) census — 11 сайтов,
-не 12 (все ≥1-child, вывод жив); (A5) subset-order — 73 последовательности, не 60
-(перечисление полно); (A6) недостижимость zero-child опирается на контракт callback
-`map_slots`. Gap-лист (12 измерений) — в отчёте аудита.
+83/100 (C5 82 / C6 85), report: `proofs/audits/kani-adversary/report.md`.
+The mirror is byte-honest (field/branch-exact), SHA-256 is real, no fabrications.
+Corrections to this report: (A1) the 200k cross-check never exercises the reject
+branch — the "acceptance + rejection field names" wording overstated it, and the
+±2^255 boundaries were never sampled; (A2) "3-mutant calibration" is in fact
+2 mutants + 1 coverage sensor; (A4) the census has 11 sites, not 12 (all
+≥1-child, the conclusion stands); (A5) subset-order is 73 sequences, not 60
+(the enumeration is complete); (A6) zero-child unreachability rests on the
+`map_slots` callback contract. The gap list (12 dimensions) is in the audit
+report.

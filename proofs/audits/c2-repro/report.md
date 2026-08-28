@@ -32,9 +32,9 @@ reproduce their headline numbers on a clean extraction of a committed SHA?
 
 ## Artifact-vs-report consistency
 
-- Composition of the 7 tests matches the report: regression corpus (9 корпусов +
-  coverage-полы), finding-pin F1 (post-FX-3 semantics: conflicting j_event_claim
-  removed without halting), D4-векторы, C2-H2 pin, 3 fast-check seeds.
+- Composition of the 7 tests matches the report: regression corpus (9 corpora +
+  coverage floors), finding-pin F1 (post-FX-3 semantics: conflicting j_event_claim
+  removed without halting), D4 vectors, C2-H2 pin, 3 fast-check seeds.
 - The report's post-fix note (top of `proofs/ts/report.md`) accurately describes
   the committed pin: `hot-vs-cold.test.ts` asserts typed resolution
   (propose resolves, mempool empties, surviving payment in pending), not the
@@ -57,7 +57,7 @@ reproduce their headline numbers on a clean extraction of a committed SHA?
    byte-trackable since `b8004d939`.
 2. Seed diversity is 3 fixed seeds; a fresh-seed run was not performed here
    (c1-repro's fresh-seed discipline on C1 suggests low risk).
-3. The throw-era historical pin («hot==cold до halt») exists only in prose —
+3. The throw-era historical pin ("hot==cold up to the halt") exists only in prose —
    no committed SHA reproduces the pre-FX-3 behavior (the fix landed before
    the first C2 commit reached git).
 4. Inherited coverage residuals are tracked in `proofs/gaps.md`

@@ -21,8 +21,8 @@ proven for the class that matters, by this harness, on a reproducible tree".
   state is unrecoverable: C2's own files are untracked, and the production files
   they depended on have since been modified again (422 dirty now).
 - The report's F1 section (`proofs/ts/report.md:154-166`) says the FINDING PIN
-  "пинит текущее поведение: throw" and that "до halt закоммиченные корни …
-  остаются hot==cold". The pin in the tree
+  "pins the current behavior: throw" and that "up to the halt the committed
+  roots … remain hot==cold". The pin in the tree
   (`core/__tests__/proofs/hot-vs-cold.test.ts:484-510`) asserts the **opposite**:
   `await expect(harness.step({kind:'propose',…})).resolves.toBeUndefined()`,
   mempool empties, `pendingTxTypes == ['direct_payment']` — i.e. it pins the
@@ -31,7 +31,7 @@ proven for the class that matters, by this harness, on a reproducible tree".
   There is no halt anywhere in the current pin, so the report's "hot==cold up to
   the halt" evidence no longer exists in any file.
 - On the current tree the harness does not even import (missing export in a
-  dirty production file), so "C2 ✅ готово" cannot be re-verified bit-for-bit
+  dirty production file), so "C2 ✅ ready" cannot be re-verified bit-for-bit
   against any committed SHA. Under `proofs/readme.md` rule 2 this is an
   evidence-discipline breach: the report is pinned to a tree that no longer
   exists and its central finding-pin no longer matches its own description.
@@ -58,7 +58,7 @@ Consequences:
   (`core/account/tx/handlers/j-events/finality.ts:44-64`), but the rebalance
   branch never fires because `requested` is always 0 (no rebalance tx kinds).
 - The report discloses empty-only coverage for **P8 (entity collections)** but
-  the P4 row reads "для всех 9 карт состояния и 3 конвертных" without disclosing
+  the P4 row reads "for all 9 state maps and 3 envelope ones" without disclosing
   that 11 of 12 never receive a single entry. For an empty map, hot and cold are
   equal by construction — the check has zero discriminating power there.
 
@@ -67,7 +67,7 @@ Consequences:
 - `hot-vs-cold.test.ts:345`: `blockByte = 0x11 + (op.jHeight % 5)` — the j-claim
   bytes are a pure function of jHeight, so **any two claims at the same jHeight
   are exact duplicates; a conflict is ungeneratable**. The report admits this
-  ("конфликты исключены из генератора") while simultaneously crediting
+  ("conflicts are excluded from the generator") while simultaneously crediting
   fast-check with finding F1 (seed 42 run 79) — that attribution can only be
   true of a *previous* generator revision that no longer exists. Under readme
   rule 4 (a harness that cannot reproduce a known bug is uncalibrated), the
@@ -82,8 +82,8 @@ Consequences:
 
 ### A4 — Entity-frame overlay memo layers bypassed (Medium)
 
-The report claims the Entity commit boundary is reproduced "как
-`EntityAccountCandidateMap.getForWrite/sealCandidate` в проде". Verified at the
+The report claims the Entity commit boundary is reproduced "as
+`EntityAccountCandidateMap.getForWrite/sealCandidate` in production". Verified at the
 leaf level this holds: harness `PersistentEntityAccountMap.updated()`
 (`core/entity/state/persistent-account-map.ts:162-180`) and production
 `sealCandidate()→foldDirty(seal=true)` both end in `makeRadixLeaf` with
@@ -136,13 +136,13 @@ The cold oracles are cold only at the node-cache/identity-memo level:
 
 So C2 proves *cache-invalidation correctness of node hashes and identity-keyed
 memos*, not *digest-computation correctness*. That is a fine and useful
-property, but the report's "каждый горячий корень побайтово равен своему
-холодному оракулу" overstates oracle independence; the boundary should be
+property, but the report's "every hot root is byte-equal to its
+cold oracle" overstates oracle independence; the boundary should be
 stated.
 
 ### A7 — Statistical accounting errors (Low-Medium)
 
-- "Итого 1,200 последовательностей" double counts: per seed, the 100-run pass is
+- "Total: 1,200 sequences" double counts: per seed, the 100-run pass is
   a strict prefix of the 300-run pass (fast-check is deterministic per seed;
   `numRuns` only truncates). Distinct sequences: **900**, not 1,200.
 - No coverage accounting: `deliver`/`ack` before any `propose` are silent
@@ -156,7 +156,7 @@ stated.
 ### A8 — F1 minimality claim is off by one (Low)
 
 The pin sequence is **7** ops (`admitClaim, propose, deliver, ack, admitClaim,
-admit payment, propose` — `hot-vs-cold.test.ts:489-509`), not the "6 операций"
+admit payment, propose` — `hot-vs-cold.test.ts:489-509`), not the "6 operations"
 of the report. The `admit payment` op is load-bearing: without a second valid tx
 in the mempool, a propose that drops the conflicting claim would return an empty
 proposal and the test could not discriminate "typed reject + continue" from

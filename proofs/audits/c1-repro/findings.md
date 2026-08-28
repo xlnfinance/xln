@@ -77,7 +77,7 @@ no args for the live tree.
 - `minimized/` contained `min-probe-bign-set-dup.json` + `min-probe-tokenid.json` (01:35,
   after the report commit) early in this audit; both later vanished — `run.ts:465` wipes
   `minimized/` on every run and concurrent agents run the harness. The report's
-  "minimized/ пуст" held at write time.
+  "minimized/ empty" held at write time.
 - Working tree carries heavy FX edits (incl. `core/account/consensus/frame/hash.ts`,
   `core/account/input/local-tx-admission.ts`, rscore engine files); HEAD moved during the
   audit. Faithful results above are isolated from all of this via the /tmp extract.

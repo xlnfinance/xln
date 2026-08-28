@@ -69,7 +69,7 @@ production code and wave-1 artifacts; probes were written only to `/tmp`.
   (dup check before undef-drop) while Rust drops `undef` first and accepts; TS production
   accepts. Driver and Rust normalize in different orders.
 - Production reachability today is low (account maps keyed by scalars), but the readme
-  property "дубли ключей map/set/object — обе стороны обязаны отказаться" is verified
+  property "duplicate map/set/object keys — both sides must reject" is verified
   against a test driver, not against the TS encoder, and is factually false for
   reference-typed keys on the TS side.
 
@@ -85,7 +85,7 @@ production code and wave-1 artifacts; probes were written only to `/tmp`.
   it followed. For a real divergence that reproduces only on some candidates, the shrink
   stops at round 0 (if the last candidate happens not to reproduce) or chases an
   untested candidate. Detection cannot be masked (failures always reported, exit 1), but
-  the "авто-минимизирует" capability is uncalibrated for the realistic failure mode.
+  the "auto-minimizes" capability is uncalibrated for the realistic failure mode.
 - Single sabotage mode (hex corruption) only; class-inversion and content-keyed
   divergence modes were never calibrated.
 
@@ -111,7 +111,7 @@ production code and wave-1 artifacts; probes were written only to `/tmp`.
   (cross_pull_lock/close/progress, cross_swap_fill_ack, lending_borrow/close_*/credit/repay,
   rebalance_refund, settle_transition) are never constructed. Their treatment is
   structurally identical and D3 excludes them from the RRS profile, but the evidence
-  covers 3/14 and the report's "и прочие" hides the count.
+  covers 3/14 and the report's "and others" hides the count.
 
 ### F7 — LOW: small generator blind spots
 - `j_event_claim` events always ≥1 (`generate.ts:304` `1 + rng.int(3)`) — empty-events
@@ -162,7 +162,7 @@ production code and wave-1 artifacts; probes were written only to `/tmp`.
    and a content-dependent divergence (only one field triggers) with demonstrated
    minimization to that field. Current calibration is provably blind to F4 (F3/F4).
 3. **Close the duplicate-parity semantics gap**: either (a) add duplicate detection to
-   the TS production encoder (map/set path) so "обе стороны обязаны отказаться" becomes
+   the TS production encoder (map/set path) so "both sides must reject" becomes
    a production-vs-production fact, or (b) restate the property as "Rust rejects; TS
    driver stands in for a receiving boundary that TS does not have" and document the
    reference-key accept-with-duplication asymmetry (F3).

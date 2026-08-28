@@ -1,6 +1,6 @@
 /**
- * C1 audit reproducer — boundary finding #2 (report.md «Найденные/задокументированные
- * асимметрии», п.2): `rebalance_policy.policyVersion > 2^53-1`.
+ * C1 audit reproducer — boundary finding #2 (report.md "Found/documented
+  * asymmetries", item 2): `rebalance_policy.policyVersion > 2^53-1`.
  *
  * Historical state (commit dfd45cc7c, i.e. the state the C1 report fuzzed):
  *   TS  `canonicalAccountTxForFrameHash` is a passthrough — it hashes whatever
