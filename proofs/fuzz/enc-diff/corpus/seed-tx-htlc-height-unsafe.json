@@ -1,0 +1,1 @@
+{"class":"rust-rejects","data":{"amount":"1","hashlock":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","lockId":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","revealBeforeHeight":9007199254740992,"timelock":"1","tokenId":1},"id":"seed-tx-htlc-height-unsafe","kind":"tx","txKind":"htlc_lock"}

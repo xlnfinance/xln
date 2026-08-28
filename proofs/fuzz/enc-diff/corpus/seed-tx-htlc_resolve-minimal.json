@@ -1,1 +1,1 @@
-{"id":"seed-tx-htlc_resolve-minimal","kind":"tx","class":"both-encode","txKind":"htlc_resolve","data":{"lockId":"0x80dd7da32eba0dd3cabfaf1471e6c9605b8176f22b3f062223a0217062c0a042","outcome":"error"}}
+{"class":"both-encode","data":{"lockId":"0x80dd7da32eba0dd3cabfaf1471e6c9605b8176f22b3f062223a0217062c0a042","outcome":"error"},"id":"seed-tx-htlc_resolve-minimal","kind":"tx","txKind":"htlc_resolve"}

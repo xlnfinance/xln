@@ -1,1 +1,1 @@
-{"id":"case-000132","kind":"radix-extension","class":"both-encode","path":[8,6,0,8],"childHex":"0x97b6a9bc35b4c8df99644a0768469d8092ea3e802797eb2065f961f881e87c55"}
+{"class":"both-encode","data":{"baseFee":"72438133","gasFee":"-2599699100942947997066877316","liquidityFeeBps":"-1992","policyVersion":2654292245,"tokenId":2861624546},"id":"case-000132","kind":"tx","txKind":"rebalance_policy"}

@@ -1,1 +1,1 @@
-{"id":"seed-number-123456789012345678","kind":"value","class":"rust-rejects","value":{"t":"num","v":"123456789012345678"}}
+{"class":"rust-rejects","id":"seed-number-123456789012345678","kind":"value","value":{"t":"num","v":"123456789012345678"}}

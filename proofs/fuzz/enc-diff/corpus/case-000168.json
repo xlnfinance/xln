@@ -1,1 +1,1 @@
-{"id":"case-000168","kind":"value","class":"both-encode","value":{"t":"set","v":[{"t":"null"}]}}
+{"class":"both-encode","id":"case-000168","kind":"value","value":{"t":"arr","v":[{"t":"bool","v":true},{"t":"obj","v":[["￻",{"t":"arr","v":[{"t":"bool","v":false}]}]]},{"t":"set","v":[{"t":"str","v":"￾￾�￾￾��￾�￾￾�￾￾��￾�￾￾￾￾�"}]}]}}

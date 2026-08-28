@@ -1,1 +1,1 @@
-{"id":"seed-tx-add_delta-minimal","kind":"tx","class":"both-encode","txKind":"add_delta","data":{"tokenId":0}}
+{"class":"both-encode","data":{"tokenId":0},"id":"seed-tx-add_delta-minimal","kind":"tx","txKind":"add_delta"}

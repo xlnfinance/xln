@@ -1,1 +1,1 @@
-{"id":"case-000151","kind":"value","class":"both-encode","value":{"t":"arr","v":[]}}
+{"class":"both-encode","data":{"giveAmount":"836026202374915288933374","giveTokenDecimals":4018707824,"giveTokenId":600670669,"maxFee":"222382757","minNetReceive":"-781301","offerId":"0x80e1756f459d6cca8242455de4feb38df96c65ea4c9a68a0ff3e977a70865f54","wantAmount":"-763596091369633133","wantTokenDecimals":740360685,"wantTokenId":1956477910},"id":"case-000151","kind":"tx","txKind":"swap_offer"}

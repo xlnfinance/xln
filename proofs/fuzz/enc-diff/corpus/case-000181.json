@@ -1,1 +1,1 @@
-{"id":"case-000181","kind":"tx","class":"both-encode","txKind":"rebalance_policy","data":{"tokenId":389584043,"policyVersion":9007199254740991,"baseFee":"-273443935417528","liquidityFeeBps":"-114198584111959249380914","gasFee":"-58895399"}}
+{"class":"both-encode","data":{"baseFee":"209730577875443","gasFee":"10105844","liquidityFeeBps":"216322029908243545168613585","policyVersion":1284336486,"tokenId":1944124925},"id":"case-000181","kind":"tx","txKind":"rebalance_policy"}

@@ -4,6 +4,8 @@
 Каждый evidence-report обязан указывать собственный immutable SHA, версии инструментов,
 точные команды и bounded-скоуп. Результат из dirty worktree не считается доказательством:
 повторный прогон выполняется из `git archive` заявленного SHA или другого чистого checkout.
+Машиночитаемый статус C1–C10 — `proofs/program.json`; `bun run check:proof-program`
+запрещает completion-claim без существующих evidence и двух актуальных аудитов.
 
 ## Правила для всех задач
 
@@ -25,7 +27,7 @@
 
 | # | Claim (что утверждаем) | Evidence (артефакт) | Статус |
 |---|---|---|---|
-| C1 | Канонические энкодеры TS↔Rust дают одинаковые байты либо одинаково отвергают вход в сгенерированном домене | `proofs/fuzz/enc-diff/report.md`: clean post-FX `b7e3ace82`, 80,656 кейсов, 0 неожиданных расхождений. Аудиты: c1-repro `findings.md` 92/100 на историческом `dfd45cc7c`, adversary 74/100. Generator fix — `935020a41`; требуется новый independent repro на post-FX bytes; остаются F2–F7 | ⚠️ bounded evidence; post-FX re-audit открыт |
+| C1 | После exact boundary-validation канонические энкодеры TS↔Rust дают одинаковые байты либо одинаково отвергают вход в сгенерированном домене | `proofs/fuzz/enc-diff/report.md`: clean post-FX `b7e3ace82`, 80,656 кейсов, 0 неожиданных расхождений. Unknown-field direct-hash divergence теперь отдельная калибровка и production-boundary reject. Аудиты: c1-repro `findings.md` 92/100 на историческом `dfd45cc7c`, adversary 74/100. Требуется новый independent repro на новых bytes | ⚠️ bounded evidence; post-FX re-audit открыт |
 | C2 | Hot-root равен cold-recompute после покрытых последовательностей мутаций | `core/__tests__/proofs/hot-vs-cold.test.ts` + `proofs/ts/report.md`: после hardening 900 последовательностей, 325,793 deep-проверки. Остатки: пустые `lendingIntents`/`subcontracts`/`pendingWithdrawals`/shadow maps, нет delete для pulls, settlement/dispute/external-finality, double rollback и boundary tokenIds. **c2-repro**: исходный отчёт 2026-08-27 утерян до коммита; заменён независимым re-audit `b043199fe` (**91/100**): clean-extraction `78e07d9a9` — 113,872 default / 325,793 deep, точно; гэпы — `proofs/gaps.md` | ⚠️ сильное bounded evidence, не закрыто |
 | C3 | В TLA-модели Agreement/AckDurability сохраняются; rollback-duplicate варианты нарушают разные liveness-свойства при `DeliverPartial` | `proofs/tla/report.md`: 8 TLC-прогонов; один прогон независимо повторён: 337,955 distinct states, без ошибки. Производственная достижимость `DeliverPartial` не доказана: TS и Rust публикуют переход через атомарную WAL-границу | ⚠️ модель завершена; 0/2 аудита и нужен crash-cutpoint |
 | C4 | Контрактные свойства в пределах Foundry/Halmos моделей | `proofs/solidity/report.md`: 99 pass + 2 известные fail; Halmos 5/5 независимо повторён. `jurisdictions/contracts/**`, artifacts/typechain и `frozen-core.json` не менялись относительно frozen baseline. Hardening закрыл A1–A3/A5–A7; A4 закрыт частично, A8–A12 остаются | ⚠️ воспроизводимо, scope не закрыт |

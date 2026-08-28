@@ -1,0 +1,1 @@
+{"class":"rust-rejects","data":{"amount":"1","deliveryMode":"direct","fromEntityId":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","route":[],"toEntityId":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tokenId":65536},"id":"seed-tx-tokenid-u16-overflow","kind":"tx","txKind":"direct_payment"}

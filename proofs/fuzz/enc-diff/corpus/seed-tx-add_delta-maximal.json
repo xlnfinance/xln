@@ -1,1 +1,1 @@
-{"id":"seed-tx-add_delta-maximal","kind":"tx","class":"both-encode","txKind":"add_delta","data":{"tokenId":65535}}
+{"class":"both-encode","data":{"tokenId":65535},"id":"seed-tx-add_delta-maximal","kind":"tx","txKind":"add_delta"}

@@ -1,1 +1,1 @@
-{"id":"seed-radix-extension-even","kind":"radix-extension","class":"both-encode","path":[0,1,2,3],"childHex":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"}
+{"childHex":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","class":"both-encode","id":"seed-radix-extension-even","kind":"radix-extension","path":[0,1,2,3]}

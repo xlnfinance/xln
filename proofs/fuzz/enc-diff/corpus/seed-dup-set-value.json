@@ -1,1 +1,1 @@
-{"id":"seed-dup-set-value","kind":"value","class":"both-reject","value":{"t":"set","v":[{"t":"str","v":"dup"},{"t":"str","v":"dup"}]}}
+{"class":"both-reject","id":"seed-dup-set-value","kind":"value","value":{"t":"set","v":[{"t":"str","v":"dup"},{"t":"str","v":"dup"}]}}

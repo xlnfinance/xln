@@ -1,1 +1,1 @@
-{"id":"seed-object-order-ffff-vs-10000","kind":"value","class":"both-encode","value":{"t":"obj","v":[["￿",{"t":"num","v":"0"}],["𐀀",{"t":"num","v":"1"}]]}}
+{"class":"both-encode","id":"seed-object-order-ffff-vs-10000","kind":"value","value":{"t":"obj","v":[["￿",{"t":"num","v":"0"}],["𐀀",{"t":"num","v":"1"}]]}}

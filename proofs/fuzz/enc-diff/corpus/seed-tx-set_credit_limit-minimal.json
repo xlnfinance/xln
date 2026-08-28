@@ -1,1 +1,1 @@
-{"id":"seed-tx-set_credit_limit-minimal","kind":"tx","class":"both-encode","txKind":"set_credit_limit","data":{"tokenId":0,"amount":"0"}}
+{"class":"both-encode","data":{"amount":"0","tokenId":0},"id":"seed-tx-set_credit_limit-minimal","kind":"tx","txKind":"set_credit_limit"}

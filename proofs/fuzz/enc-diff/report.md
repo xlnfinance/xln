@@ -2,9 +2,15 @@
 
 ## Claim and scope
 
-Within the generated domain below, the TypeScript and Rust canonical encoders
-produce identical bytes or both reject the input. This is bounded evidence,
-not a claim about values or decoders outside the corpus model.
+Within the validated generated domain below, the TypeScript and Rust canonical
+encoders produce identical bytes or both reject the input. This is bounded
+evidence, not a claim about values or decoders outside the corpus model.
+
+An explicit `known-divergence` calibration proves why the word “validated” is
+necessary: direct TS hashing preserves an unknown transaction field while the
+typed Rust projection drops it. The production TS boundary rejects that shape
+with `requireExactBoundaryKeys` before consensus; `run.test.ts` pins the reject.
+The harness must keep this case visible and must not count it as parity evidence.
 
 Pinned run: `80924b035f363d4ad8f4a8c08e6f39dcc7736a78`, Bun 1.3.14,
 Rust/Cargo 1.94.1, `ryu-js` 1.0.3.
@@ -25,10 +31,12 @@ an independent repro audit on the post-FX bytes is still required.
   canonical values, Account transactions, flat roots, and radix-16 nodes.
 - `enc-diff-rust/` links the production Rust protocol and engine crates and
   emits one `{file, hex|error}` result per case.
-- `run.ts` executes both implementations, classifies the result, compares
-  exact bytes, and minimizes any disagreement.
-- `corpus/` contains 200 committed seeds. Larger corpora are reproducible from
-  an explicit seed and case count.
+- `run.ts` executes both implementations, records class/kind/outcome/tx-kind
+  coverage, compares exact bytes, and minimizes any unexpected disagreement.
+- `corpus/` contains 210 committed cases: 124 sharp seeds plus 86 deterministic
+  generated cases. One seed is an explicit boundary-rejected known divergence,
+  not parity evidence. Larger corpora are reproducible from an explicit seed
+  and case count.
 
 ## Reproduction
 
@@ -58,6 +66,11 @@ rerun again covered **80,656 cases with zero failures**. Its primary
 
 The separate number run checked 50,093 finite binary64 values and found
 `String(n)` in JavaScriptCore byte-equivalent to Rust `ryu_js` formatting.
+
+The hardened 210-case corpus adds validation boundaries and emits an exact
+coverage ledger. Its immutable SHA and clean-extraction result are recorded in
+the post-hardening note below once the proof-only commit exists; it does not
+retroactively change the 80,656-case result above.
 
 Covered production pairs:
 
@@ -93,6 +106,8 @@ Rust streaming writer against the allocating encoder on every value case.
   helper can accept arbitrary bytes; production uses 32-byte digests.
 - Decoder canonicality and parser robustness belong to C7, not this harness.
 
-The minimizer was calibrated by corrupting one Rust result. It reported a byte
-difference and reduced it to an empty map in one run. There are no live
-minimized failures in the committed corpus.
+The original filename-keyed minimizer calibration was invalid. The current
+calibrator uses unique candidate IDs, preserves the original failure signature,
+and checks three content-dependent modes: byte corruption, class inversion and
+single-field divergence. There are no live unexpected minimized failures in
+the committed corpus.

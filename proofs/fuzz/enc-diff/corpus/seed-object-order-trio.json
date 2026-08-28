@@ -1,1 +1,1 @@
-{"id":"seed-object-order-trio","kind":"value","class":"both-encode","value":{"t":"obj","v":[["�",{"t":"num","v":"0"}],["￾",{"t":"num","v":"1"}],["𐀀",{"t":"num","v":"2"}],["😀",{"t":"num","v":"3"}],["a",{"t":"num","v":"4"}],["z",{"t":"num","v":"5"}]]}}
+{"class":"both-encode","id":"seed-object-order-trio","kind":"value","value":{"t":"obj","v":[["�",{"t":"num","v":"0"}],["￾",{"t":"num","v":"1"}],["𐀀",{"t":"num","v":"2"}],["😀",{"t":"num","v":"3"}],["a",{"t":"num","v":"4"}],["z",{"t":"num","v":"5"}]]}}

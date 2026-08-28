@@ -11,13 +11,13 @@
 | # | Требование | Статус |
 |---|---|---|
 | 1 | Re-pin: relabel seed + rebuild + повтор 4 корпусов на новом immutable SHA | PARTIAL: generator fix `935020a41`; coordinator full rerun на clean immutable `b7e3ace82` = 80,656/0. Independent repro-аудит на post-FX bytes — OPEN |
-| 2 | Починка shrinker'а (уникальные id кандидатов) + калибровка ≥3 режимов саботажа | OPEN |
+| 2 | Починка shrinker'а (уникальные id кандидатов) + калибровка ≥3 режимов саботажа | WAVE-2026-08-28: unique deterministic IDs, tested-slice restriction, failure-signature preservation; content-hex/class-inversion/field-divergence = 1/1 each |
 | 3 | Duplicate-parity: прод-проверка в TS-энкодере ИЛИ переформулировка свойства (reference-key асимметрия) | OPEN |
-| 4 | Перечислить семейство асимметрий: сиды tokenId>65535, timeInForce>255, jHeight>2^53, hashlock/EntityId/envelope | OPEN |
-| 5 | Flat duplicate paths: исключить из модели или контрактный tie-break + ≥21-entry проба | OPEN |
+| 4 | Перечислить семейство асимметрий: сиды tokenId>65535, timeInForce>255, jHeight>2^53, hashlock/EntityId/envelope | PARTIAL WAVE-2026-08-28: tokenId/timeInForce/jHeight/hashlock/EntityId seeds added and checked; envelope malformed cases — OPEN |
+| 5 | Flat duplicate paths: исключить из модели или контрактный tie-break + ≥21-entry проба | PARTIAL WAVE-2026-08-28: 21-entry probe passes; contractual tie-break or domain exclusion — OPEN |
 | 6 | TS-only виды: 3/14 → все 14 (или явно 3/14 в claim) | OPEN |
-| 7 | Edge-сид: j_event с 0 событий; unknown tx field; `__proto__`; wObj-dup без драйвер-интерсептора | OPEN |
-| 8 | Coverage ledger: per-pair/per-branch счётчики | OPEN |
+| 7 | Edge-сид: j_event с 0 событий; unknown tx field; `__proto__`; wObj-dup без драйвер-интерсептора | PARTIAL WAVE-2026-08-28: zero-event, unknown-field known-divergence + exact production reject, and `__proto__` added; raw wObj-dup production semantics — OPEN |
+| 8 | Coverage ledger: per-pair/per-branch счётчики | PARTIAL WAVE-2026-08-28: class/kind/TS↔Rust outcome/tx-kind ledger emitted; internal encoder branch ledger — OPEN |
 
 ## c1-repro (92/100; `findings.md` закоммичен `9aa5affbe`, audited subject `dfd45cc7c`)
 

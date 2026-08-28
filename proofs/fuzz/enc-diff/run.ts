@@ -24,17 +24,19 @@ import {
   computeRadixMerkleEdgeHash,
   computeRadixMerkleLeafHash,
 } from '../../../core/protocol/state/radix-merkle';
+import { safeStringify } from '../../../core/protocol/serialization';
 import { hexToBytes } from '../../../core/support/bytes/hex-bytes';
 
 type Wire = { t: string; v?: unknown };
-type CaseFile = {
+export type CaseFile = {
   id: string;
   kind: string;
-  class: 'both-encode' | 'both-reject' | 'rust-rejects' | 'ts-only';
+  class: 'both-encode' | 'both-reject' | 'rust-rejects' | 'ts-only' | 'known-divergence';
   [key: string]: unknown;
 };
 type TsResult = { ok: true; hex: string; counters?: Record<string, number> } | { ok: false; error: string };
 type RustResult = { file: string; result: 'ok' | 'error'; hex?: string; error?: string } & Record<string, unknown>;
+export type SabotageMode = 'none' | 'content-hex' | 'class-inversion' | 'field-divergence';
 
 const ROOT = resolve(import.meta.dir);
 const BIN_DEFAULT = resolve(ROOT, 'enc-diff-rust/target/release/enc-diff-rust');
@@ -47,6 +49,10 @@ const argValue = (name: string, fallback: string): string => {
 const corpusDir = resolve(argValue('corpus', resolve(ROOT, 'corpus')));
 const binary = resolve(argValue('binary', BIN_DEFAULT));
 const minimizedDir = resolve(argValue('minimized', resolve(ROOT, 'minimized')));
+const sabotageMode = argValue('sabotage', 'none') as SabotageMode;
+if (!['none', 'content-hex', 'class-inversion', 'field-divergence'].includes(sabotageMode)) {
+  throw new Error(`SABOTAGE_MODE_UNKNOWN:${sabotageMode}`);
+}
 
 // ── wire → JS value reconstruction ───────────────────────────────────────────
 const buildValue = (wire: Wire): unknown => {
@@ -260,10 +266,46 @@ const isFailure = (testCase: CaseFile, ts: TsResult, rust: RustResult): string |
     if (rustOk) return 'RUST_ACCEPTED_BUT_CLASS_BOTH_REJECT';
     return null;
   }
+  if (testCase.class === 'known-divergence') {
+    if (!ts.ok) return `TS_ERROR:${ts.error}`;
+    if (!rustOk) return `RUST_ERROR:${rust.error ?? 'unknown'}`;
+    return normHex(ts.hex) === normHex(rust.hex!) ? 'KNOWN_DIVERGENCE_DISAPPEARED' : null;
+  }
   // rust-rejects | ts-only: TS must encode, Rust must reject
   if (!ts.ok) return `TS_ERROR:${ts.error}`;
   if (rustOk) return `RUST_ACCEPTED_BUT_CLASS_${testCase.class.toUpperCase()}`;
   return null;
+};
+
+const rootWireEntries = (testCase: CaseFile): [string, Wire][] => {
+  if (testCase.kind !== 'value') return [];
+  const wire = testCase.value as Wire;
+  return wire.t === 'obj' ? wire.v as [string, Wire][] : [];
+};
+
+export const sabotageApplies = (mode: SabotageMode, testCase: CaseFile): boolean => {
+  if (mode === 'content-hex' && testCase.kind === 'value') {
+    const wire = testCase.value as Wire;
+    if (wire.t !== 'map') return false;
+    const keys = (wire.v as [Wire, Wire][]).map(([key]) => `${key.t}:${String(key.v)}`);
+    return keys.includes('num:1') && keys.includes('bign:1');
+  }
+  const entries = rootWireEntries(testCase);
+  if (mode === 'class-inversion') {
+    return testCase.class === 'both-reject' && entries.filter(([key]) => key === 'k').length === 2;
+  }
+  return mode === 'field-divergence'
+    && entries.some(([key, wire]) => key === 'b' && wire.t === 'num' && wire.v === '1');
+};
+
+const corruptHex = (hex: string): string => `${hex.slice(0, -1)}${hex.endsWith('0') ? '1' : '0'}`;
+
+const applySabotage = (testCase: CaseFile, rust: RustResult, mode: SabotageMode): RustResult => {
+  if (mode === 'none' || !sabotageApplies(mode, testCase)) return rust;
+  if (mode === 'class-inversion') return { ...rust, result: 'ok', hex: '0x00', error: undefined };
+  if (rust.result !== 'ok') return rust;
+  if (typeof rust.hex !== 'string') throw new Error(`RUST_OK_WITHOUT_BYTES:${mode}:${testCase.id}`);
+  return { ...rust, hex: corruptHex(rust.hex) };
 };
 
 // ── shrinker ─────────────────────────────────────────────────────────────────
@@ -376,16 +418,36 @@ const caseCandidates = (testCase: CaseFile): CaseFile[] => {
 };
 
 const SHRINK_DIR = resolve(ROOT, '.shrink');
-const shrinKCheck = (cases: CaseFile[]): Map<string, Failure | null> => {
+export const identifyShrinkCandidates = (
+  candidates: CaseFile[],
+  originId: string,
+  round: number,
+): CaseFile[] => {
+  const safeOrigin = originId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return candidates.map((candidate, index) => ({
+    ...candidate,
+    id: `${safeOrigin}-r${round.toString().padStart(2, '0')}-c${index.toString().padStart(3, '0')}`,
+  }));
+};
+
+export const failureSignature = (reason: string): string => {
+  const parts = reason.split(':');
+  return parts[0] === 'COUNTER_DIFFER' || parts[0] === 'TS_ERROR' || parts[0] === 'RUST_ERROR'
+    ? parts.slice(0, 2).join(':')
+    : parts[0]!;
+};
+
+const shrinkCheck = (cases: CaseFile[], mode: SabotageMode): Map<string, Failure | null> => {
   rmSync(SHRINK_DIR, { recursive: true, force: true });
   mkdirSync(SHRINK_DIR, { recursive: true });
-  for (const testCase of cases) writeFileSync(resolve(SHRINK_DIR, `${testCase.id}.json`), JSON.stringify(testCase));
+  for (const testCase of cases) writeFileSync(resolve(SHRINK_DIR, `${testCase.id}.json`), safeStringify(testCase));
   const rust = runRust(SHRINK_DIR);
   const failures = new Map<string, Failure | null>();
   for (const testCase of cases) {
     const file = `${testCase.id}.json`;
-    const rustResult = rust.get(file);
-    if (!rustResult) throw new Error(`shrink: rust result missing for ${file}`);
+    const rawRustResult = rust.get(file);
+    if (!rawRustResult) throw new Error(`shrink: rust result missing for ${file}`);
+    const rustResult = applySabotage(testCase, rawRustResult, mode);
     const ts = computeTs(testCase);
     const reason = isFailure(testCase, ts, rustResult);
     failures.set(file, reason
@@ -395,13 +457,21 @@ const shrinKCheck = (cases: CaseFile[]): Map<string, Failure | null> => {
   return failures;
 };
 
-const shrinkFailure = (failure: Failure): CaseFile => {
+const shrinkFailure = (failure: Failure, mode: SabotageMode): CaseFile => {
   let current = failure.case;
   for (let round = 0; round < 64; round += 1) {
-    const candidates = caseCandidates(current).filter((candidate) => candidate.class === 'both-encode');
+    const candidates = identifyShrinkCandidates(
+      caseCandidates(current).filter((candidate) => candidate.class === 'both-encode').slice(0, 96),
+      failure.case.id,
+      round,
+    );
     if (candidates.length === 0) break;
-    const batch = shrinKCheck(candidates.slice(0, 96));
-    const reproducing = candidates.find((candidate) => batch.get(`${candidate.id}.json`) !== null);
+    const batch = shrinkCheck(candidates, mode);
+    const reproducing = candidates.find((candidate) => {
+      const result = batch.get(`${candidate.id}.json`);
+      return result !== null && result !== undefined
+        && failureSignature(result.reason) === failureSignature(failure.reason);
+    });
     if (!reproducing) break;
     current = reproducing;
   }
@@ -428,13 +498,15 @@ const main = (): void => {
     cases: cases.length,
     byClass: {} as Record<string, { ok: number; failed: number }>,
     byKind: {} as Record<string, number>,
+    byOutcome: {} as Record<string, number>,
+    byTxKind: {} as Record<string, number>,
     failures: [] as Failure[],
   };
   for (const testCase of cases) {
     tally.byKind[testCase.kind] = (tally.byKind[testCase.kind] ?? 0) + 1;
     tally.byClass[testCase.class] ??= { ok: 0, failed: 0 };
-    const rustResult = rust.get(`${testCase.id}.json`);
-    if (!rustResult) {
+    const rawRustResult = rust.get(`${testCase.id}.json`);
+    if (!rawRustResult) {
       tally.byClass[testCase.class]!.failed += 1;
       tally.failures.push({
         file: testCase.id, reason: 'RUST_RESULT_MISSING', ts: { ok: false, error: 'n/a' },
@@ -442,7 +514,14 @@ const main = (): void => {
       });
       continue;
     }
+    const rustResult = applySabotage(testCase, rawRustResult, sabotageMode);
     const ts = computeTs(testCase);
+    const outcome = `${ts.ok ? 'ts-ok' : 'ts-reject'}/${rustResult.result === 'ok' ? 'rust-ok' : 'rust-reject'}`;
+    tally.byOutcome[outcome] = (tally.byOutcome[outcome] ?? 0) + 1;
+    if (testCase.kind === 'tx') {
+      const txKey = `${String(testCase.txKind)}:${testCase.class}`;
+      tally.byTxKind[txKey] = (tally.byTxKind[txKey] ?? 0) + 1;
+    }
     const reason = isFailure(testCase, ts, rustResult);
     if (reason === null) tally.byClass[testCase.class]!.ok += 1;
     else {
@@ -454,7 +533,8 @@ const main = (): void => {
   const sampleErrors: Record<string, string[]> = {};
   for (const testCase of cases) {
     if (testCase.class !== 'both-reject') continue;
-    const rustResult = rust.get(`${testCase.id}.json`);
+    const rawRustResult = rust.get(`${testCase.id}.json`);
+    const rustResult = rawRustResult ? applySabotage(testCase, rawRustResult, sabotageMode) : undefined;
     const ts = computeTs(testCase);
     const key = `${testCase.kind}`;
     (sampleErrors[key] ??= []).push(
@@ -468,10 +548,10 @@ const main = (): void => {
     mkdirSync(minimizedDir, { recursive: true });
     for (const failure of tally.failures.slice(0, 20)) {
       const minimized = failure.case.class === 'both-encode'
-        ? shrinkFailure(failure)
+        ? shrinkFailure(failure, sabotageMode)
         : failure.case;
       const id = `min-${failure.case.id}`;
-      writeFileSync(resolve(minimizedDir, `${id}.json`), JSON.stringify(minimized, null, 2));
+      writeFileSync(resolve(minimizedDir, `${id}.json`), safeStringify(minimized, 2));
       minimizedCount += 1;
       console.error(`FAIL ${failure.file}: ${failure.reason}`);
       console.error(`  ts  : ${failure.ts.ok ? `${failure.ts.hex.slice(0, 96)}${failure.ts.hex.length > 96 ? '…' : ''}` : failure.ts.error}`);
@@ -481,13 +561,16 @@ const main = (): void => {
   }
   rmSync(SHRINK_DIR, { recursive: true, force: true });
 
-  console.log(JSON.stringify({
+  console.log(safeStringify({
     corpus: corpusDir,
     cases: tally.cases,
     byClass: tally.byClass,
     byKind: tally.byKind,
+    byOutcome: tally.byOutcome,
+    byTxKind: tally.byTxKind,
     failures: tally.failures.length,
     minimized: minimizedCount,
+    sabotage: sabotageMode,
     bothRejectSamples: Object.fromEntries(
       Object.entries(sampleErrors).map(([kind, list]) => [kind, list.slice(0, 4)]),
     ),
@@ -495,4 +578,4 @@ const main = (): void => {
   process.exit(tally.failures.length > 0 ? 1 : 0);
 };
 
-main();
+if (import.meta.main) main();

@@ -1,1 +1,1 @@
-{"id":"case-000136","kind":"tx","class":"both-encode","txKind":"swap_cancel_request","data":{"offerId":"0xf80dfc2e2ea6343bf8de75de27ad76ef25ac18fcee1b2c1ec182469f4cfff4ea"}}
+{"class":"both-encode","data":{"tokenId":40367},"id":"case-000136","kind":"tx","txKind":"add_delta"}

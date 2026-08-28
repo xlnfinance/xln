@@ -1,1 +1,1 @@
-{"id":"case-000155","kind":"flat-root","class":"both-encode","namespace":"😀😀","entries":[["􍹧𞞣󹲌",{"t":"arr","v":[{"t":"bool","v":true},{"t":"null"},{"t":"str","v":"Ó¦ß¿"}]}]]}
+{"class":"both-encode","id":"case-000155","kind":"value","value":{"t":"obj","v":[["",{"t":"str","v":"🧐😀🧐😀😀🧐🧐😀"}],["99XYZ",{"t":"bool","v":true}],["񙎀󄙉",{"t":"bign","v":"435537059727178434667068343401736686290232043"}]]}}

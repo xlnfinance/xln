@@ -1,1 +1,1 @@
-{"id":"case-000183","kind":"value","class":"both-encode","value":{"t":"map","v":[]}}
+{"class":"both-encode","data":{"baseFee":"243228752810867123224470773","gasFee":"-117205470","liquidityFeeBps":"9989695527666","policyVersion":9007199254740991,"tokenId":350819975},"id":"case-000183","kind":"tx","txKind":"rebalance_policy"}

@@ -1,1 +1,1 @@
-{"id":"case-000194","kind":"value","class":"both-encode","value":{"t":"map","v":[[{"t":"str","v":"򥠳󊹶򳰋񥸉𕉚񑻕"},{"t":"bign","v":"-255"}]]}}
+{"class":"both-encode","data":{"amount":"3034956736","hashlock":"0x0dfe7b409676ddfb48b68e8d62db1981b3b7d78174138ea382c1215fc7ec0346","lockId":"0x30848d767068f923e0c0fa3531d98fe671319c17509bbc80085771253c1c39ca","revealBeforeHeight":4256215807,"timelock":"-500451278564966","tokenId":43086},"id":"case-000194","kind":"tx","txKind":"htlc_lock"}

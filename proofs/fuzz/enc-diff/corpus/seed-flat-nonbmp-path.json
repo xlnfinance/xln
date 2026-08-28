@@ -1,1 +1,1 @@
-{"id":"seed-flat-nonbmp-path","kind":"flat-root","class":"both-encode","namespace":"ns😀","entries":[["𐀀￻",{"t":"null"}],["a",{"t":"bool","v":true}]]}
+{"class":"both-encode","entries":[["𐀀￻",{"t":"null"}],["a",{"t":"bool","v":true}]],"id":"seed-flat-nonbmp-path","kind":"flat-root","namespace":"ns😀"}

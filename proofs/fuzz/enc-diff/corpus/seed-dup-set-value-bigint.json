@@ -1,1 +1,1 @@
-{"id":"seed-dup-set-value-bigint","kind":"value","class":"both-reject","value":{"t":"set","v":[{"t":"bign","v":"7"},{"t":"bign","v":"7"}]}}
+{"class":"both-reject","id":"seed-dup-set-value-bigint","kind":"value","value":{"t":"set","v":[{"t":"bign","v":"7"},{"t":"bign","v":"7"}]}}

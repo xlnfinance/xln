@@ -21,6 +21,8 @@
 import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { safeStringify } from '../../../core/protocol/serialization';
+
 // ── deterministic PRNG (splitmix64 over two 32-bit lanes) ────────────────────
 const makePrng = (seed: number) => {
   let hi = seed >>> 0;
@@ -170,7 +172,7 @@ const randomValue = (rng: Prng, depth: number): WireValue => {
     const pairs: [WireValue, WireValue][] = [];
     for (let index = 0; index < breadth; index += 1) {
       const key = randomValue(rng, 0);
-      const fingerprint = JSON.stringify(key);
+      const fingerprint = safeStringify(key);
       if (seen.has(fingerprint)) continue;
       seen.add(fingerprint);
       pairs.push([key, randomValue(rng, depth - 1)]);
@@ -182,7 +184,7 @@ const randomValue = (rng: Prng, depth: number): WireValue => {
     const members: WireValue[] = [];
     for (let index = 0; index < breadth; index += 1) {
       const member = randomValue(rng, 0);
-      const fingerprint = JSON.stringify(member);
+      const fingerprint = safeStringify(member);
       if (seen.has(fingerprint)) continue;
       seen.add(fingerprint);
       members.push(member);
@@ -209,11 +211,11 @@ const randomValue = (rng: Prng, depth: number): WireValue => {
 };
 
 // ── case model ───────────────────────────────────────────────────────────────
-type CaseClass = 'both-encode' | 'both-reject' | 'rust-rejects' | 'ts-only';
+type CaseClass = 'both-encode' | 'both-reject' | 'rust-rejects' | 'ts-only' | 'known-divergence';
 type Case = { id: string; kind: string; class: CaseClass; [key: string]: unknown };
 
 const writeCase = (dir: string, testCase: Case): void => {
-  writeFileSync(resolve(dir, `${testCase.id}.json`), JSON.stringify(testCase));
+  writeFileSync(resolve(dir, `${testCase.id}.json`), safeStringify(testCase));
 };
 
 // ── tx wire generators (mirror of core/types/account.ts AccountTx) ──────────
@@ -453,6 +455,10 @@ const seeds = (): Case[] => {
     namespace: 'test',
     entries: [['p', wNum('1')], ['p', wNum('2')]],
   });
+  push('flat-duplicate-path-21', 'flat-root', 'both-encode', {
+    namespace: 'test',
+    entries: Array.from({ length: 21 }, (_, index) => ['p', wNum(String(index))]),
+  });
   push('flat-nonbmp-path', 'flat-root', 'both-encode', {
     namespace: 'ns\u{1F600}',
     entries: [['\u{10000}\uFFFB', wNull], ['a', wBool(true)]],
@@ -524,6 +530,43 @@ const seeds = (): Case[] => {
   push('tx-policy-unsafe-version', 'tx', 'both-reject', {
     txKind: 'rebalance_policy',
     data: { tokenId: 7, policyVersion: '9007199254740992', baseFee: '1', liquidityFeeBps: '2', gasFee: '3' },
+  });
+  const entityA = '0x' + 'aa'.repeat(32);
+  const entityB = '0x' + 'bb'.repeat(32);
+  push('tx-tokenid-u16-overflow', 'tx', 'rust-rejects', {
+    txKind: 'direct_payment',
+    data: { tokenId: 65536, amount: '1', route: [], fromEntityId: entityA, toEntityId: entityB, deliveryMode: 'direct' },
+  });
+  push('tx-time-in-force-u8-overflow', 'tx', 'rust-rejects', {
+    txKind: 'swap_offer',
+    data: { offerId: entityA, giveTokenId: 1, giveTokenDecimals: 18, giveAmount: '1', wantTokenId: 2, wantTokenDecimals: 18, wantAmount: '1', maxFee: '0', minNetReceive: '1', timeInForce: 256 },
+  });
+  push('tx-htlc-height-unsafe', 'tx', 'rust-rejects', {
+    txKind: 'htlc_lock',
+    data: { lockId: entityA, hashlock: entityB, timelock: '1', revealBeforeHeight: 9007199254740992, amount: '1', tokenId: 1 },
+  });
+  push('tx-j-height-unsafe', 'tx', 'both-reject', {
+    txKind: 'j_event_claim',
+    data: { jHeight: 9007199254740992, jBlockHash: entityA, events: [] },
+  });
+  push('tx-hashlock-malformed', 'tx', 'rust-rejects', {
+    txKind: 'htlc_lock',
+    data: { lockId: entityA, hashlock: '0x12', timelock: '1', revealBeforeHeight: 1, amount: '1', tokenId: 1 },
+  });
+  push('tx-entity-id-malformed', 'tx', 'both-encode', {
+    txKind: 'direct_payment',
+    data: { tokenId: 1, amount: '1', route: [], fromEntityId: 'alice', toEntityId: entityB, deliveryMode: 'direct' },
+  });
+  push('tx-j-event-empty', 'tx', 'both-encode', {
+    txKind: 'j_event_claim',
+    data: { jHeight: 1, jBlockHash: entityA, events: [] },
+  });
+  push('tx-unknown-field', 'tx', 'known-divergence', {
+    txKind: 'add_delta',
+    data: { tokenId: 1, unknownField: 'must-not-affect-canonical-bytes' },
+  });
+  push('object-proto-key', 'value', 'both-encode', {
+    value: wObj([['__proto__', wStr('own-data-property')], ['safe', wBool(true)]]),
   });
   push('tx-lending-fund', 'tx', 'ts-only', {
     txKind: 'lending_fund',
@@ -661,7 +704,7 @@ if (numbersOnly) {
   for (let made = 0; made < count; made += 1) {
     emit({ id: '', kind: 'value', class: 'both-encode', value: wNum(String(randomFiniteDouble(rng))) });
   }
-  console.log(JSON.stringify({ out: outDir, cases: index, seed, mode: 'numbers-only' }));
+  console.log(safeStringify({ out: outDir, cases: index, seed, mode: 'numbers-only' }));
   process.exit(0);
 }
 const generators: ((rng: Prng) => Case)[] = [
@@ -675,4 +718,4 @@ const generators: ((rng: Prng) => Case)[] = [
 ];
 for (let made = 0; made < count; made += 1) emit(generators[rng.int(generators.length)]!(rng));
 
-console.log(JSON.stringify({ out: outDir, cases: index, seed, note: 'per-class tally printed by run.ts' }));
+console.log(safeStringify({ out: outDir, cases: index, seed, note: 'per-class tally printed by run.ts' }));

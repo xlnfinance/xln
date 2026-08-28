@@ -1,1 +1,1 @@
-{"id":"seed-tx-policy-unsafe-version","kind":"tx","class":"both-reject","txKind":"rebalance_policy","data":{"tokenId":7,"policyVersion":"9007199254740992","baseFee":"1","liquidityFeeBps":"2","gasFee":"3"}}
+{"class":"both-reject","data":{"baseFee":"1","gasFee":"3","liquidityFeeBps":"2","policyVersion":"9007199254740992","tokenId":7},"id":"seed-tx-policy-unsafe-version","kind":"tx","txKind":"rebalance_policy"}

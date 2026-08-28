@@ -1,1 +1,1 @@
-{"id":"case-000179","kind":"value","class":"both-encode","value":{"t":"map","v":[[{"t":"bign","v":"-632512148694155279105479879726944073668045"},{"t":"set","v":[{"t":"str","v":"​́́​́́​́́​́"},{"t":"bign","v":"211172853543670437076"},{"t":"num","v":"3766032886"}]}]]}}
+{"class":"both-encode","id":"case-000179","kind":"radix-tree","leaves":[{"keyHex":"0x33","valueHex":"0x1f5aa12a6c13420cb7f02b4785f232effc0042cf0696d4b8db2dd55d3604fcde"}]}

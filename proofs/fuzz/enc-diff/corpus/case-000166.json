@@ -1,1 +1,1 @@
-{"id":"case-000166","kind":"value","class":"both-reject","value":{"t":"num","v":"-Infinity"}}
+{"class":"both-encode","entries":[["​́",{"t":"set","v":[{"t":"str","v":"򴡦􋜊񍅵񛆅򯅷"}]}],["�￾￾��",{"t":"arr","v":[{"t":"map","v":[[{"t":"num","v":"-1.7976931348623157e+308"},{"t":"bool","v":false}],[{"t":"str","v":"ßÏåÉ²«"},{"t":"null"}],[{"t":"num","v":"8.625122948276099e-62"},{"t":"num","v":"133365"}]]},{"t":"null"},{"t":"obj","v":[["X1",{"t":"null"}]]}]}]],"id":"case-000166","kind":"flat-root","namespace":"account.frame"}

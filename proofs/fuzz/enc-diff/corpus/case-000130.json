@@ -1,1 +1,1 @@
-{"id":"case-000130","kind":"value","class":"both-encode","value":{"t":"map","v":[[{"t":"str","v":"ÞýÑÙèÁÞ³ÉÒ½äÓùÒçÅ"},{"t":"bool","v":true}],[{"t":"bool","v":true},{"t":"str","v":"￾￾￾��"}],[{"t":"str","v":"bY10.a1a/c_9Z:/X X-Y1c\u0000"},{"t":"bool","v":true}]]}}
+{"class":"both-encode","data":{"baseFee":"21240001395572","gasFee":"2404","liquidityFeeBps":"-14","policyVersion":9007199254740991,"tokenId":3050574829},"id":"case-000130","kind":"tx","txKind":"rebalance_policy"}

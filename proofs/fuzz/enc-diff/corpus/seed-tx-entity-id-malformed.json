@@ -1,0 +1,1 @@
+{"class":"both-encode","data":{"amount":"1","deliveryMode":"direct","fromEntityId":"alice","route":[],"toEntityId":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tokenId":1},"id":"seed-tx-entity-id-malformed","kind":"tx","txKind":"direct_payment"}

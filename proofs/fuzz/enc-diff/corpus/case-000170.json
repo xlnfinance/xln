@@ -1,1 +1,1 @@
-{"id":"case-000170","kind":"value","class":"both-encode","value":{"t":"arr","v":[{"t":"bool","v":true}]}}
+{"class":"both-encode","data":{"lockId":"0xa26d2d92a8d6bf62c43408d249b075181702ad64e45d2277fe03a228ac32e003","outcome":"error"},"id":"case-000170","kind":"tx","txKind":"htlc_resolve"}

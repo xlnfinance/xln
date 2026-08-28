@@ -1,1 +1,1 @@
-{"id":"case-000146","kind":"radix-leaf","class":"both-encode","keyHex":"0xaf","valueHex":"0xd1090416df45b8f34e23580517f23e181b1801bcb8462bf48224e5c6343899fa"}
+{"class":"both-encode","data":{"offerId":"0xf80dfc2e2ea6343bf8de75de27ad76ef25ac18fcee1b2c1ec182469f4cfff4ea"},"id":"case-000146","kind":"tx","txKind":"swap_cancel_request"}

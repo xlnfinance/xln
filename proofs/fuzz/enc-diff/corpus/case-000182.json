@@ -1,1 +1,1 @@
-{"id":"case-000182","kind":"tx","class":"both-encode","txKind":"add_delta","data":{"tokenId":64960}}
+{"class":"both-encode","id":"case-000182","kind":"value","value":{"t":"set","v":[{"t":"bign","v":"65536"}]}}

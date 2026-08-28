@@ -1,1 +1,1 @@
-{"id":"seed-tx-swap_cancel_request-minimal","kind":"tx","class":"both-encode","txKind":"swap_cancel_request","data":{"offerId":"0xb356082a0f0803e00eb64fb2af730f44ce597fcaf52eb0227690c47be0eb092a"}}
+{"class":"both-encode","data":{"offerId":"0xb356082a0f0803e00eb64fb2af730f44ce597fcaf52eb0227690c47be0eb092a"},"id":"seed-tx-swap_cancel_request-minimal","kind":"tx","txKind":"swap_cancel_request"}

@@ -1,1 +1,1 @@
-{"id":"case-000153","kind":"value","class":"both-reject","value":{"t":"obj","v":[["dup",{"t":"null"}],["dup",{"t":"num","v":"466496"}]]}}
+{"class":"both-encode","data":{"baseFee":"-1340","gasFee":"298381720212444137342268343","liquidityFeeBps":"-211","policyVersion":1071008036,"tokenId":4090172239},"id":"case-000153","kind":"tx","txKind":"rebalance_policy"}

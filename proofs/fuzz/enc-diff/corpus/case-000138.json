@@ -1,1 +1,1 @@
-{"id":"case-000138","kind":"value","class":"both-encode","value":{"t":"map","v":[[{"t":"bool","v":true},{"t":"obj","v":[]}],[{"t":"num","v":"-974986"},{"t":"str","v":"吶侹啑偷"}]]}}
+{"class":"both-encode","id":"case-000138","kind":"value","value":{"t":"map","v":[[{"t":"null"},{"t":"map","v":[[{"t":"bool","v":false},{"t":"obj","v":[["󛡒󸆊",{"t":"bign","v":"-10579162953764"}]]}],[{"t":"null"},{"t":"map","v":[]}]]}]]}}

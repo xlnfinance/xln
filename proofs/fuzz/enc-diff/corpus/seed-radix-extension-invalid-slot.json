@@ -1,1 +1,1 @@
-{"id":"seed-radix-extension-invalid-slot","kind":"radix-extension","class":"both-reject","path":[2,16],"childHex":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"}
+{"childHex":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","class":"both-reject","id":"seed-radix-extension-invalid-slot","kind":"radix-extension","path":[2,16]}

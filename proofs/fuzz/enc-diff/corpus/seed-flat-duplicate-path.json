@@ -1,1 +1,1 @@
-{"id":"seed-flat-duplicate-path","kind":"flat-root","class":"both-encode","namespace":"test","entries":[["p",{"t":"num","v":"1"}],["p",{"t":"num","v":"2"}]]}
+{"class":"both-encode","entries":[["p",{"t":"num","v":"1"}],["p",{"t":"num","v":"2"}]],"id":"seed-flat-duplicate-path","kind":"flat-root","namespace":"test"}

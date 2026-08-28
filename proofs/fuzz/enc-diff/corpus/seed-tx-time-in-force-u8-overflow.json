@@ -1,0 +1,1 @@
+{"class":"rust-rejects","data":{"giveAmount":"1","giveTokenDecimals":18,"giveTokenId":1,"maxFee":"0","minNetReceive":"1","offerId":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timeInForce":256,"wantAmount":"1","wantTokenDecimals":18,"wantTokenId":2},"id":"seed-tx-time-in-force-u8-overflow","kind":"tx","txKind":"swap_offer"}
