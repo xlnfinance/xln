@@ -18,10 +18,10 @@ use serde_json::{Map, Value};
 use xln_rscore_engine::BoardDelays;
 use xln_rscore_runtime::processor::{EntityRoute, EntityRouteTable};
 use xln_rscore_runtime::restore::{
-    ConcreteCheckpointConfiguration, ConcreteCheckpointSource, MigrationOrigin,
-    decode_concrete_runtime_checkpoint, decode_concrete_runtime_wal_frame,
-    decode_offline_ts_import_checkpoint, restore_decoded_runtime_checkpoint,
-    verify_checkpoint_source,
+    ConcreteCheckpointConfiguration, ConcreteCheckpointSource, ConcreteWalSource,
+    DecodedRuntimeWalFrame, MigrationOrigin, decode_concrete_runtime_checkpoint,
+    decode_concrete_runtime_wal_frame, decode_offline_ts_import_checkpoint,
+    restore_decoded_runtime_checkpoint, verify_checkpoint_source,
 };
 use xln_rscore_runtime::storage::native::{
     NativeRuntimeStore, NativeStorageConfig, validate_runtime_frame,
@@ -402,137 +402,188 @@ pub fn replay_runtime_wal(
     };
 
     let replay_started = Instant::now();
-    for height in from..=to {
-        let source = reader
-            .concrete_wal_source(height)
-            .map_err(|error| format!("RUNTIME_REPLAY_SOURCE:{height}:{error}"))?;
-        let finalized_j_height = processor
-            .replica()
-            .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
-            .state
-            .finalized_j_height;
-        // ConcreteWalSource owns the one canonical parse/validation for this
-        // read; decode and post-apply assertions borrow that sealed result.
-        let mut decoded =
-            decode_concrete_runtime_wal_frame(&source, &context_policy, finalized_j_height, false)
-                .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))?;
-        expectations.assert_timestamp(height, decoded.timestamp)?;
-        if let Some(expected_root) = expectations.expected_runtime_state_hash(height)? {
-            let source_root = decoded
-                .canonical_state_hash
-                .ok_or_else(|| format!("RUNTIME_REPLAY_RUNTIME_ROOT_MISSING:{height}"))?;
-            if source_root != expected_root {
+    // Frame N+1..N+DEPTH raw rows are read ahead on this thread (cheap
+    // LevelDB gets) while a decode thread runs the exact parse, hash and
+    // digest verification `concrete_wal_source` always ran. Nothing about
+    // what is verified changes — only which thread pays the CPU.
+    const PIPELINE_DEPTH: usize = 3;
+    let loop_result: Result<(), String> = std::thread::scope(|scope| {
+        // Both channels live inside this scope so an early error return drops
+        // them, which unblocks and terminates the decode thread before join.
+        let (raw_tx, raw_rx) =
+            std::sync::mpsc::sync_channel::<xln_rscore_runtime::RawConcreteWalRows>(PIPELINE_DEPTH);
+        let (decoded_tx, decoded_rx) = std::sync::mpsc::sync_channel::<
+            Result<(ConcreteWalSource, DecodedRuntimeWalFrame), String>,
+        >(PIPELINE_DEPTH);
+        let context_policy = &context_policy;
+        scope.spawn(move || {
+            while let Ok(raw) = raw_rx.recv() {
+                let height = raw.height();
+                let item = xln_rscore_runtime::concrete_wal_source_from_raw(raw)
+                    .map_err(|error| format!("RUNTIME_REPLAY_SOURCE:{height}:{error}"))
+                    .and_then(|source| {
+                        // The decoded frame context's finalized_j_height is a
+                        // pass-through copy; the consumer overwrites it with
+                        // the live replica value before applying.
+                        decode_concrete_runtime_wal_frame(&source, context_policy, 0, false)
+                            .map(|decoded| (source, decoded))
+                            .map_err(|error| format!("RUNTIME_REPLAY_WAL_DECODE:{height}:{error}"))
+                    });
+                if decoded_tx.send(item).is_err() {
+                    return;
+                }
+            }
+        });
+        let mut send_raw = |next_read: u64| -> Result<(), String> {
+            let raw = reader
+                .raw_concrete_wal_rows(next_read)
+                .map_err(|error| format!("RUNTIME_REPLAY_READ:{next_read}:{error}"))?;
+            raw_tx
+                .send(raw)
+                .map_err(|_| "RUNTIME_REPLAY_PIPELINE_CLOSED".to_string())
+        };
+        let mut next_read = from;
+        while next_read <= to && next_read - from < PIPELINE_DEPTH as u64 {
+            send_raw(next_read)?;
+            next_read += 1;
+        }
+        for height in from..=to {
+            let received = decoded_rx
+                .recv()
+                .map_err(|_| format!("RUNTIME_REPLAY_PIPELINE_CLOSED:{height}"))?;
+            let (source, mut decoded) = received?;
+            if next_read <= to {
+                send_raw(next_read)?;
+                next_read += 1;
+            }
+            let finalized_j_height = processor
+                .replica()
+                .map_err(|error| format!("RUNTIME_REPLAY_REPLICA:{height}:{error}"))?
+                .state
+                .finalized_j_height;
+            decoded.input.frame.finalized_j_height = finalized_j_height;
+            expectations.assert_timestamp(height, decoded.timestamp)?;
+            if let Some(expected_root) = expectations.expected_runtime_state_hash(height)? {
+                let source_root = decoded
+                    .canonical_state_hash
+                    .ok_or_else(|| format!("RUNTIME_REPLAY_RUNTIME_ROOT_MISSING:{height}"))?;
+                if source_root != expected_root {
+                    return Err(format!(
+                        "RUNTIME_REPLAY_RUNTIME_ROOT_MISMATCH:{height}:expected={}:actual={}",
+                        hex(&expected_root),
+                        hex(&source_root),
+                    ));
+                }
+                add(&mut metrics.runtime_roots_compared, 1, "runtimeRoots")?;
+            }
+            let input = &mut decoded.input;
+            add(
+                &mut metrics.direct_payments,
+                direct_payment_count(input)?,
+                "directPayments",
+            )?;
+            let ingress = input.entity_inputs.iter().try_fold(0_u64, |total, input| {
+                let count = u64::try_from(input.account_input_count())
+                    .map_err(|_| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())?;
+                total
+                    .checked_add(count)
+                    .ok_or_else(|| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())
+            })?;
+            processor
+                .reconcile_exact_replay_input(input)
+                .map_err(|error| format!("RUNTIME_REPLAY_RECONCILE:{height}:{error}"))?;
+
+            let started = Instant::now();
+            let report = processor
+                .process(decoded.input)
+                .map_err(|error| format!("RUNTIME_REPLAY_PROCESS:{height}:{error}"))?;
+            metrics.engine_elapsed += started.elapsed();
+            metrics.apply_elapsed += report.timings.apply;
+            metrics.projection_elapsed += report.timings.projection;
+            metrics.storage_elapsed += report.timings.storage;
+            metrics.publication_elapsed += report.timings.publication;
+            if report.durable_height != Some(height) {
                 return Err(format!(
-                    "RUNTIME_REPLAY_RUNTIME_ROOT_MISMATCH:{height}:expected={}:actual={}",
-                    hex(&expected_root),
-                    hex(&source_root),
+                    "RUNTIME_REPLAY_DURABLE_HEIGHT:{height}:{:?}",
+                    report.durable_height,
                 ));
             }
-            add(&mut metrics.runtime_roots_compared, 1, "runtimeRoots")?;
-        }
-        let input = &mut decoded.input;
-        add(
-            &mut metrics.direct_payments,
-            direct_payment_count(input)?,
-            "directPayments",
-        )?;
-        let ingress = input.entity_inputs.iter().try_fold(0_u64, |total, input| {
-            let count = u64::try_from(input.account_input_count())
-                .map_err(|_| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())?;
-            total
-                .checked_add(count)
-                .ok_or_else(|| "RUNTIME_REPLAY_INGRESS_OVERFLOW".to_string())
-        })?;
-        processor
-            .reconcile_exact_replay_input(input)
-            .map_err(|error| format!("RUNTIME_REPLAY_RECONCILE:{height}:{error}"))?;
-
-        let started = Instant::now();
-        let report = processor
-            .process(decoded.input)
-            .map_err(|error| format!("RUNTIME_REPLAY_PROCESS:{height}:{error}"))?;
-        metrics.engine_elapsed += started.elapsed();
-        metrics.apply_elapsed += report.timings.apply;
-        metrics.projection_elapsed += report.timings.projection;
-        metrics.storage_elapsed += report.timings.storage;
-        metrics.publication_elapsed += report.timings.publication;
-        if report.durable_height != Some(height) {
-            return Err(format!(
-                "RUNTIME_REPLAY_DURABLE_HEIGHT:{height}:{:?}",
-                report.durable_height,
-            ));
-        }
-        let commitments = report
-            .commitments
-            .as_ref()
-            .ok_or_else(|| format!("RUNTIME_REPLAY_COMMITMENTS_MISSING:{height}"))?;
-        if let Err(summary) = assert_source_commitments(height, &source, commitments) {
-            let replica = processor
-                .replica()
-                .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_REPLICA:{error}"))?;
-            let actual_sections = replica
-                .entity_consensus
-                .state
-                .sections
-                .iter()
-                .map(|section| format!("{}={}", section.field, section.digest))
-                .collect::<Vec<_>>()
-                .join(",");
-            eprintln!("RUNTIME_REPLAY_ACTUAL_ENTITY_SECTIONS:{height}:{actual_sections}");
-            eprintln!(
-                "RUNTIME_REPLAY_ACTUAL_ENTITY_COMMAND_NONCES:{height}:{:?}",
-                replica.state.entity.entity_command_nonces,
-            );
-            eprintln!(
-                "RUNTIME_REPLAY_ACTUAL_ENTITY_FRAME:{height}:hash={}:root={}",
-                hex(&commitments.certified_entity_frame_hash),
-                hex(&commitments.entity_state_root),
-            );
-            let actual_replica_meta = replica.replica_metadata().clone();
-            let actual_entity_sections = Value::Object(Map::from_iter(
-                replica
+            let commitments = report
+                .commitments
+                .as_ref()
+                .ok_or_else(|| format!("RUNTIME_REPLAY_COMMITMENTS_MISSING:{height}"))?;
+            if let Err(summary) = assert_source_commitments(height, &source, commitments) {
+                let replica = processor
+                    .replica()
+                    .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_REPLICA:{error}"))?;
+                let actual_sections = replica
                     .entity_consensus
                     .state
                     .sections
                     .iter()
-                    .map(|section| (section.field.clone(), Value::String(section.digest.clone()))),
-            ));
-            let actual = processor
-                .read_durable_frame(height)
-                .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_READ:{error}"))?;
-            let diagnostic = write_runtime_replay_diff(RuntimeReplayDiffInput {
-                directory: diff_dir,
-                height,
-                expected: &source,
-                actual: &actual,
-                actual_replica_meta: &actual_replica_meta,
-                actual_entity_sections: &actual_entity_sections,
-                actual_commitments: commitments,
-                actual_account_commits: &report.account_commits,
-            })
-            .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_WRITE:{error}"))?;
-            return Err(format!(
-                "{summary}:first={}:diff={}",
-                diagnostic.first_difference,
-                diagnostic.path.display(),
-            ));
-        }
-        expectations.assert_durable(height, commitments)?;
-        expectations.assert_effects(height, commitments)?;
+                    .map(|section| format!("{}={}", section.field, section.digest))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                eprintln!("RUNTIME_REPLAY_ACTUAL_ENTITY_SECTIONS:{height}:{actual_sections}");
+                eprintln!(
+                    "RUNTIME_REPLAY_ACTUAL_ENTITY_COMMAND_NONCES:{height}:{:?}",
+                    replica.state.entity.entity_command_nonces,
+                );
+                eprintln!(
+                    "RUNTIME_REPLAY_ACTUAL_ENTITY_FRAME:{height}:hash={}:root={}",
+                    hex(&commitments.certified_entity_frame_hash),
+                    hex(&commitments.entity_state_root),
+                );
+                let actual_replica_meta = replica.replica_metadata().clone();
+                let actual_entity_sections = Value::Object(Map::from_iter(
+                    replica
+                        .entity_consensus
+                        .state
+                        .sections
+                        .iter()
+                        .map(|section| {
+                            (section.field.clone(), Value::String(section.digest.clone()))
+                        }),
+                ));
+                let actual = processor
+                    .read_durable_frame(height)
+                    .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_READ:{error}"))?;
+                let diagnostic = write_runtime_replay_diff(RuntimeReplayDiffInput {
+                    directory: diff_dir,
+                    height,
+                    expected: &source,
+                    actual: &actual,
+                    actual_replica_meta: &actual_replica_meta,
+                    actual_entity_sections: &actual_entity_sections,
+                    actual_commitments: commitments,
+                    actual_account_commits: &report.account_commits,
+                })
+                .map_err(|error| format!("{summary}:RUNTIME_REPLAY_DIFF_WRITE:{error}"))?;
+                return Err(format!(
+                    "{summary}:first={}:diff={}",
+                    diagnostic.first_difference,
+                    diagnostic.path.display(),
+                ));
+            }
+            expectations.assert_durable(height, commitments)?;
+            expectations.assert_effects(height, commitments)?;
 
-        add(&mut metrics.frames, 1, "frames")?;
-        add(&mut metrics.ingress, ingress, "ingress")?;
-        add(
-            &mut metrics.egress,
-            u64::try_from(report.outputs_published)
-                .map_err(|_| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?,
-            "egress",
-        )?;
-        add(&mut metrics.effect_digests_compared, 1, "effects")?;
-        add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
-        add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
-        metrics.accounts_root = hex(&commitments.accounts_root);
-    }
+            add(&mut metrics.frames, 1, "frames")?;
+            add(&mut metrics.ingress, ingress, "ingress")?;
+            add(
+                &mut metrics.egress,
+                u64::try_from(report.outputs_published)
+                    .map_err(|_| "RUNTIME_REPLAY_EGRESS_OVERFLOW".to_string())?,
+                "egress",
+            )?;
+            add(&mut metrics.effect_digests_compared, 1, "effects")?;
+            add(&mut metrics.outbox_digests_compared, 1, "outbox")?;
+            add(&mut metrics.post_state_hashes_compared, 1, "postState")?;
+            metrics.accounts_root = hex(&commitments.accounts_root);
+        }
+        Ok(())
+    });
+    loop_result?;
     metrics.elapsed = replay_started.elapsed();
     metrics.account_phase_metrics = processor
         .replica()

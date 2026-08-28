@@ -64,7 +64,10 @@ pub use j_watcher::{
     FinalizedJEventBatch, FinalizedWatcherCursor, HttpJsonRpc, JClaimIngress, JReserveUpdate,
     JWatcherConfig, JWatcherError, JWatcherPoll, JsonRpc, poll_finalized_j_events,
 };
-pub use leveldb::{RuntimeLevelDbError, RuntimeWalReader, StoredRscoreCheckpoint};
+pub use leveldb::{
+    RawConcreteWalRows, RuntimeLevelDbError, RuntimeWalReader, StoredRscoreCheckpoint,
+    concrete_wal_source_from_raw,
+};
 pub use machine::{
     AccountCommitEvidence, AccountCommitSource, AppliedRuntimeFrame, AppliedRuntimeInput,
     RuntimeApplyResult, RuntimeEntityInput, RuntimeFrameContext, RuntimeFrameTouches, RuntimeInput,

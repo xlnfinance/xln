@@ -129,27 +129,49 @@ impl RuntimeWalReader {
                 "OUTPUT_COUNT_MAX:{count}"
             )));
         }
-        let mut digest = Sha256::new();
-        digest.update(OUTBOX_DIGEST_DOMAIN);
-        digest.update(
-            u32::try_from(count)
-                .map_err(|_| RuntimeLevelDbError::Output(format!("OUTPUT_COUNT:{count}")))?
-                .to_be_bytes(),
-        );
         let mut outputs = Vec::with_capacity(count);
         for index in 0..count {
-            let bytes = self.required_bounded_bytes(&row_key(height, index)?)?;
-            let length = u32::try_from(bytes.len()).map_err(|_| {
-                RuntimeLevelDbError::Output(format!("OUTPUT_BYTES_MAX:{}", bytes.len()))
-            })?;
-            digest.update(length.to_be_bytes());
-            digest.update(&bytes);
-            crate::decode_storage_payload(&bytes)?;
-            outputs.push(bytes);
+            outputs.push(self.required_bounded_bytes(&row_key(height, index)?)?);
         }
-        verify_output_digest(digest.finalize().into(), expected_digest)?;
-        Ok(outputs)
+        verified_output_bytes(count, expected_digest, outputs)
     }
+}
+
+/// Fold and verify the outbox digest over already-read rows. The digest
+/// binds count, per-row length and bytes; a consumer that needs a decoded
+/// value decodes it at use site.
+pub(crate) fn verified_output_bytes(
+    count: usize,
+    expected_digest: &str,
+    outputs: Vec<Vec<u8>>,
+) -> Result<Vec<Vec<u8>>, RuntimeLevelDbError> {
+    if count > MAX_RUNTIME_OUTPUT_ROWS {
+        return Err(RuntimeLevelDbError::Output(format!(
+            "OUTPUT_COUNT_MAX:{count}"
+        )));
+    }
+    if outputs.len() != count {
+        return Err(RuntimeLevelDbError::Output(format!(
+            "OUTPUT_COUNT:expected={count}:actual={}",
+            outputs.len()
+        )));
+    }
+    let mut digest = Sha256::new();
+    digest.update(OUTBOX_DIGEST_DOMAIN);
+    digest.update(
+        u32::try_from(count)
+            .map_err(|_| RuntimeLevelDbError::Output(format!("OUTPUT_COUNT:{count}")))?
+            .to_be_bytes(),
+    );
+    for bytes in &outputs {
+        let length = u32::try_from(bytes.len()).map_err(|_| {
+            RuntimeLevelDbError::Output(format!("OUTPUT_BYTES_MAX:{}", bytes.len()))
+        })?;
+        digest.update(length.to_be_bytes());
+        digest.update(bytes);
+    }
+    verify_output_digest(digest.finalize().into(), expected_digest)?;
+    Ok(outputs)
 }
 
 #[cfg(test)]

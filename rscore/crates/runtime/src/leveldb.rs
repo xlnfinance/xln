@@ -104,11 +104,11 @@ impl RuntimeWalReader {
         replica_id: &str,
         digest: &[u8; 32],
     ) -> Result<Value, RuntimeLevelDbError> {
-        self.entity_context_payload(
+        let database = &mut self.database;
+        entity_context_with(
+            &mut |key| Ok(database.get(key).map(|value| value.to_vec())),
             runtime_height,
             replica_id,
-            ENTITY_CONTEXT_MANIFEST,
-            0,
             digest,
         )
     }
@@ -121,129 +121,13 @@ impl RuntimeWalReader {
         replica_id: &str,
         digest: &[u8; 32],
     ) -> Result<Value, RuntimeLevelDbError> {
-        let manifest = self.entity_context(runtime_height, replica_id, digest)?;
-        require_kind(&manifest, "entityContext")?;
-        let mut context = object_field(&manifest, "header")?.clone();
-        let profiles = self.entity_context_children(
+        let database = &mut self.database;
+        entity_context_full_with(
+            &mut |key| Ok(database.get(key).map(|value| value.to_vec())),
             runtime_height,
             replica_id,
-            &manifest,
-            "profilePageDigests",
-            "gossipProfile",
-        )?;
-        let assertion_pages = self.entity_context_children(
-            runtime_height,
-            replica_id,
-            &manifest,
-            "peerAssertionPageDigests",
-            "peerAssertions",
-        )?;
-        let mut assertions = Vec::new();
-        for page in assertion_pages {
-            let rows = page
-                .as_object()
-                .and_then(|object| object.get("assertions"))
-                .and_then(Value::as_array)
-                .ok_or_else(|| RuntimeLevelDbError::Output("CONTEXT_PEER_ASSERTIONS".into()))?;
-            assertions.extend(rows.iter().cloned());
-        }
-        let entries = self.entity_context_children(
-            runtime_height,
-            replica_id,
-            &manifest,
-            "htlcEntryPageDigests",
-            "htlcEntry",
-        )?;
-        let originated = self.entity_context_children(
-            runtime_height,
-            replica_id,
-            &manifest,
-            "htlcOriginatedPageDigests",
-            "htlcOriginated",
-        )?;
-        context.insert(
-            "gossipProfiles".into(),
-            Value::Array(extract_child_values(profiles, "profile")?),
-        );
-        context.insert("peerAssertions".into(), Value::Array(assertions));
-        context.insert(
-            "htlc".into(),
-            Value::Object(serde_json::Map::from_iter([
-                ("version".into(), Value::Number(1_u64.into())),
-                (
-                    "entries".into(),
-                    Value::Array(extract_child_values(entries, "entry")?),
-                ),
-                (
-                    "originated".into(),
-                    Value::Array(extract_child_values(originated, "originated")?),
-                ),
-            ])),
-        );
-        Ok(Value::Object(context))
-    }
-
-    fn entity_context_payload(
-        &mut self,
-        runtime_height: u64,
-        replica_id: &str,
-        path_kind: u8,
-        index: u32,
-        expected_digest: &[u8; 32],
-    ) -> Result<Value, RuntimeLevelDbError> {
-        let key = entity_context_key(runtime_height, replica_id, path_kind, index)?;
-        let bytes = self.required_raw(&key)?;
-        if bytes.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES {
-            return Err(RuntimeLevelDbError::Output(format!(
-                "CONTEXT_TOO_LARGE:{}",
-                bytes.len()
-            )));
-        }
-        verify_hash(&bytes, expected_digest)?;
-        decode_storage_payload(&bytes).map_err(Into::into)
-    }
-
-    fn entity_context_children(
-        &mut self,
-        runtime_height: u64,
-        replica_id: &str,
-        manifest: &Value,
-        field_name: &str,
-        child_kind: &str,
-    ) -> Result<Vec<Value>, RuntimeLevelDbError> {
-        let pages = digest_array_field(manifest, field_name)?;
-        let (page_path_kind, child_path_kind) = entity_context_path_kinds(child_kind)?;
-        let mut children = Vec::new();
-        for (page_index, page_digest) in pages.into_iter().enumerate() {
-            let page = self.entity_context_payload(
-                runtime_height,
-                replica_id,
-                page_path_kind,
-                u32::try_from(page_index)
-                    .map_err(|_| RuntimeLevelDbError::Output("CONTEXT_PAGE_INDEX".into()))?,
-                &page_digest,
-            )?;
-            require_kind(&page, "digestPage")?;
-            if string_field(&page, "childKind")? != child_kind {
-                return Err(RuntimeLevelDbError::Output(format!(
-                    "CONTEXT_REFERENCE_KIND:expected={child_kind}"
-                )));
-            }
-            for child_digest in digest_array_field(&page, "digests")? {
-                let child_index = u32::try_from(children.len())
-                    .map_err(|_| RuntimeLevelDbError::Output("CONTEXT_CHILD_INDEX".into()))?;
-                let child = self.entity_context_payload(
-                    runtime_height,
-                    replica_id,
-                    child_path_kind,
-                    child_index,
-                    &child_digest,
-                )?;
-                require_kind(&child, child_kind)?;
-                children.push(child);
-            }
-        }
-        Ok(children)
+            digest,
+        )
     }
 
     pub fn runtime_machine(
@@ -379,37 +263,43 @@ impl RuntimeWalReader {
         &mut self,
         height: u64,
     ) -> Result<ConcreteWalSource, RuntimeLevelDbError> {
+        let raw = self.raw_concrete_wal_rows(height)?;
+        concrete_wal_source_from_raw(raw)
+    }
+
+    /// Every LevelDB row one Runtime WAL frame needs, read without any parse,
+    /// hash or digest work. `concrete_wal_source_from_raw` runs the exact
+    /// verification `concrete_wal_source` always ran, so a caller may move
+    /// that CPU-heavy half onto a decode thread while this reader stays on
+    /// its own thread.
+    pub fn raw_concrete_wal_rows(
+        &mut self,
+        height: u64,
+    ) -> Result<RawConcreteWalRows, RuntimeLevelDbError> {
         let frame_bytes = self.required_bounded_bytes(&frame_key(height))?;
-        let verified = VerifiedWalFrame::new(height, frame_bytes)?;
-        let expected_contexts = verified.context_refs().clone();
-
-        let stored_contexts = self.native_entity_context_rows(height)?;
-        let stored_refs = stored_contexts
-            .frame_refs()
-            .iter()
-            .cloned()
-            .collect::<BTreeMap<_, _>>();
-        if stored_refs != expected_contexts {
-            return Err(RuntimeLevelDbError::Output(format!(
-                "WAL_CONTEXT_SET:expected={:?}:actual={:?}",
-                expected_contexts.keys().collect::<Vec<_>>(),
-                stored_refs.keys().collect::<Vec<_>>(),
-            )));
+        let context_prefix = crate::storage::native::entity_context_height_prefix(height)
+            .map_err(|error| RuntimeLevelDbError::Output(format!("CONTEXT_PREFIX:{error:?}")))?;
+        let context_rows = self.prefixed_rows(&context_prefix)?;
+        let mut output_prefix = [0_u8; 9];
+        output_prefix[0] = KEY_RUNTIME_OUTPUT_ROW;
+        output_prefix[1..9].copy_from_slice(&height.to_be_bytes());
+        let mut output_rows = Vec::new();
+        for (index, (key, value)) in self.prefixed_rows(&output_prefix)?.into_iter().enumerate() {
+            let expected_index = u32::try_from(index)
+                .map_err(|_| RuntimeLevelDbError::Output(format!("OUTPUT_INDEX:{index}")))?;
+            if key.len() != 13 || key[9..13] != expected_index.to_be_bytes() {
+                return Err(RuntimeLevelDbError::Output(format!(
+                    "OUTPUT_ROW_ORDER:{height}:{index}"
+                )));
+            }
+            output_rows.push(value);
         }
-
-        let mut entity_contexts = BTreeMap::new();
-        for (replica_id, commitment) in expected_contexts {
-            let value = self.entity_context_full(height, &replica_id, &commitment)?;
-            entity_contexts.insert(replica_id, VerifiedEntityContext { commitment, value });
-        }
-        let outputs = self.runtime_output_bytes(
+        Ok(RawConcreteWalRows {
             height,
-            verified.validated().output_count,
-            &format!("0x{}", hex(&verified.validated().output_digest)),
-        )?;
-        verified
-            .into_source(entity_contexts, outputs)
-            .map_err(Into::into)
+            frame_bytes,
+            context_rows,
+            output_rows,
+        })
     }
 
     /// Read one complete canonical TypeScript checkpoint into the exact native
@@ -473,24 +363,8 @@ impl RuntimeWalReader {
     ) -> Result<EntityContextPayloadRows, RuntimeLevelDbError> {
         let prefix =
             entity_context_height_prefix(height).map_err(NativeStorageError::EntityContext)?;
-        let rows = self
-            .prefixed_rows(&prefix)?
-            .into_iter()
-            .map(|(key, value)| {
-                let (row_height, replica_id, kind, index) = parse_entity_context_payload_key(&key)
-                    .map_err(NativeStorageError::EntityContext)?;
-                if row_height != height {
-                    return Err(NativeStorageError::EntityContext(
-                        crate::storage::native::EntityContextPayloadError::Key,
-                    ));
-                }
-                EntityContextPayloadRow::new(replica_id, kind, index, value)
-                    .map_err(NativeStorageError::EntityContext)
-            })
-            .collect::<Result<Vec<_>, NativeStorageError>>()?;
-        EntityContextPayloadRows::validate(rows)
-            .map_err(NativeStorageError::EntityContext)
-            .map_err(Into::into)
+        let rows = self.prefixed_rows(&prefix)?;
+        entity_context_rows_from_raw(height, &rows)
     }
 
     fn prefixed_rows(&mut self, prefix: &[u8]) -> Result<Vec<RawDatabaseRow>, RuntimeLevelDbError> {
@@ -639,6 +513,251 @@ fn validate_checkpoint_state_key(key: &[u8]) -> Result<(), RuntimeLevelDbError> 
 
 fn dedicated_field_row(key: &[u8]) -> bool {
     matches!(key.first(), Some(0x24 | 0x36))
+}
+
+/// Every LevelDB row one Runtime WAL frame needs, still raw bytes. Produced
+/// by `RuntimeWalReader::raw_concrete_wal_rows`; consumed (and fully
+/// verified) by `concrete_wal_source_from_raw`, possibly on another thread.
+pub struct RawConcreteWalRows {
+    height: u64,
+    frame_bytes: Vec<u8>,
+    context_rows: Vec<RawDatabaseRow>,
+    output_rows: Vec<Vec<u8>>,
+}
+
+impl RawConcreteWalRows {
+    pub fn height(&self) -> u64 {
+        self.height
+    }
+}
+
+fn entity_context_rows_from_raw(
+    height: u64,
+    rows: &[RawDatabaseRow],
+) -> Result<EntityContextPayloadRows, RuntimeLevelDbError> {
+    let rows = rows
+        .iter()
+        .map(|(key, value)| {
+            let (row_height, replica_id, kind, index) =
+                parse_entity_context_payload_key(key).map_err(NativeStorageError::EntityContext)?;
+            if row_height != height {
+                return Err(NativeStorageError::EntityContext(
+                    crate::storage::native::EntityContextPayloadError::Key,
+                ));
+            }
+            EntityContextPayloadRow::new(replica_id, kind, index, value.clone())
+                .map_err(NativeStorageError::EntityContext)
+        })
+        .collect::<Result<Vec<_>, NativeStorageError>>()?;
+    EntityContextPayloadRows::validate(rows)
+        .map_err(NativeStorageError::EntityContext)
+        .map_err(Into::into)
+}
+
+/// The exact verification `concrete_wal_source` has always run — frame
+/// parse+hash validation, context set equality, digest-verified context
+/// assembly and the outbox digest fold — over rows already read from
+/// LevelDB. Pure CPU: safe to run on a decode thread.
+pub fn concrete_wal_source_from_raw(
+    raw: RawConcreteWalRows,
+) -> Result<ConcreteWalSource, RuntimeLevelDbError> {
+    let RawConcreteWalRows {
+        height,
+        frame_bytes,
+        context_rows,
+        output_rows,
+    } = raw;
+    let verified = VerifiedWalFrame::new(height, frame_bytes)?;
+    let expected_contexts = verified.context_refs().clone();
+
+    let stored_contexts = entity_context_rows_from_raw(height, &context_rows)?;
+    let stored_refs = stored_contexts
+        .frame_refs()
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<_, _>>();
+    if stored_refs != expected_contexts {
+        return Err(RuntimeLevelDbError::Output(format!(
+            "WAL_CONTEXT_SET:expected={:?}:actual={:?}",
+            expected_contexts.keys().collect::<Vec<_>>(),
+            stored_refs.keys().collect::<Vec<_>>(),
+        )));
+    }
+
+    let row_map = context_rows.into_iter().collect::<BTreeMap<_, _>>();
+    let mut fetch = |key: &[u8]| Ok(row_map.get(key).cloned());
+    let mut entity_contexts = BTreeMap::new();
+    for (replica_id, commitment) in expected_contexts {
+        let value = entity_context_full_with(&mut fetch, height, &replica_id, &commitment)?;
+        entity_contexts.insert(replica_id, VerifiedEntityContext { commitment, value });
+    }
+    let outputs = runtime_output::verified_output_bytes(
+        verified.validated().output_count,
+        &format!("0x{}", hex(&verified.validated().output_digest)),
+        output_rows,
+    )?;
+    verified
+        .into_source(entity_contexts, outputs)
+        .map_err(Into::into)
+}
+
+/// Exact-key row fetch backing context assembly. The reader passes a live
+/// LevelDB get; the off-thread decoder passes a lookup into rows it already
+/// holds, so the same digest-verified assembly runs on either side.
+pub(crate) type ContextRowFetch<'a> =
+    dyn FnMut(&[u8]) -> Result<Option<Vec<u8>>, RuntimeLevelDbError> + 'a;
+
+pub(crate) fn entity_context_with(
+    fetch: &mut ContextRowFetch<'_>,
+    runtime_height: u64,
+    replica_id: &str,
+    digest: &[u8; 32],
+) -> Result<Value, RuntimeLevelDbError> {
+    entity_context_payload_with(
+        fetch,
+        runtime_height,
+        replica_id,
+        ENTITY_CONTEXT_MANIFEST,
+        0,
+        digest,
+    )
+}
+
+pub(crate) fn entity_context_full_with(
+    fetch: &mut ContextRowFetch<'_>,
+    runtime_height: u64,
+    replica_id: &str,
+    digest: &[u8; 32],
+) -> Result<Value, RuntimeLevelDbError> {
+    let manifest = entity_context_with(fetch, runtime_height, replica_id, digest)?;
+    require_kind(&manifest, "entityContext")?;
+    let mut context = object_field(&manifest, "header")?.clone();
+    let profiles = entity_context_children_with(
+        fetch,
+        runtime_height,
+        replica_id,
+        &manifest,
+        "profilePageDigests",
+        "gossipProfile",
+    )?;
+    let assertion_pages = entity_context_children_with(
+        fetch,
+        runtime_height,
+        replica_id,
+        &manifest,
+        "peerAssertionPageDigests",
+        "peerAssertions",
+    )?;
+    let mut assertions = Vec::new();
+    for page in assertion_pages {
+        let rows = page
+            .as_object()
+            .and_then(|object| object.get("assertions"))
+            .and_then(Value::as_array)
+            .ok_or_else(|| RuntimeLevelDbError::Output("CONTEXT_PEER_ASSERTIONS".into()))?;
+        assertions.extend(rows.iter().cloned());
+    }
+    let entries = entity_context_children_with(
+        fetch,
+        runtime_height,
+        replica_id,
+        &manifest,
+        "htlcEntryPageDigests",
+        "htlcEntry",
+    )?;
+    let originated = entity_context_children_with(
+        fetch,
+        runtime_height,
+        replica_id,
+        &manifest,
+        "htlcOriginatedPageDigests",
+        "htlcOriginated",
+    )?;
+    context.insert(
+        "gossipProfiles".into(),
+        Value::Array(extract_child_values(profiles, "profile")?),
+    );
+    context.insert("peerAssertions".into(), Value::Array(assertions));
+    context.insert(
+        "htlc".into(),
+        Value::Object(serde_json::Map::from_iter([
+            ("version".into(), Value::Number(1_u64.into())),
+            (
+                "entries".into(),
+                Value::Array(extract_child_values(entries, "entry")?),
+            ),
+            (
+                "originated".into(),
+                Value::Array(extract_child_values(originated, "originated")?),
+            ),
+        ])),
+    );
+    Ok(Value::Object(context))
+}
+
+fn entity_context_payload_with(
+    fetch: &mut ContextRowFetch<'_>,
+    runtime_height: u64,
+    replica_id: &str,
+    path_kind: u8,
+    index: u32,
+    expected_digest: &[u8; 32],
+) -> Result<Value, RuntimeLevelDbError> {
+    let key = entity_context_key(runtime_height, replica_id, path_kind, index)?;
+    let bytes = fetch(&key)?.ok_or_else(|| RuntimeLevelDbError::Missing(hex(&key)))?;
+    if bytes.len() >= MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES {
+        return Err(RuntimeLevelDbError::Output(format!(
+            "CONTEXT_TOO_LARGE:{}",
+            bytes.len()
+        )));
+    }
+    verify_hash(&bytes, expected_digest)?;
+    decode_storage_payload(&bytes).map_err(Into::into)
+}
+
+fn entity_context_children_with(
+    fetch: &mut ContextRowFetch<'_>,
+    runtime_height: u64,
+    replica_id: &str,
+    manifest: &Value,
+    field_name: &str,
+    child_kind: &str,
+) -> Result<Vec<Value>, RuntimeLevelDbError> {
+    let pages = digest_array_field(manifest, field_name)?;
+    let (page_path_kind, child_path_kind) = entity_context_path_kinds(child_kind)?;
+    let mut children = Vec::new();
+    for (page_index, page_digest) in pages.into_iter().enumerate() {
+        let page = entity_context_payload_with(
+            fetch,
+            runtime_height,
+            replica_id,
+            page_path_kind,
+            u32::try_from(page_index)
+                .map_err(|_| RuntimeLevelDbError::Output("CONTEXT_PAGE_INDEX".into()))?,
+            &page_digest,
+        )?;
+        require_kind(&page, "digestPage")?;
+        if string_field(&page, "childKind")? != child_kind {
+            return Err(RuntimeLevelDbError::Output(format!(
+                "CONTEXT_REFERENCE_KIND:expected={child_kind}"
+            )));
+        }
+        for child_digest in digest_array_field(&page, "digests")? {
+            let child_index = u32::try_from(children.len())
+                .map_err(|_| RuntimeLevelDbError::Output("CONTEXT_CHILD_INDEX".into()))?;
+            let child = entity_context_payload_with(
+                fetch,
+                runtime_height,
+                replica_id,
+                child_path_kind,
+                child_index,
+                &child_digest,
+            )?;
+            require_kind(&child, child_kind)?;
+            children.push(child);
+        }
+    }
+    Ok(children)
 }
 
 fn entity_context_key(
